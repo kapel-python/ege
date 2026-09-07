@@ -1,0 +1,240 @@
+<!doctype html>
+<!-- driver: прогоняет сценарии и показывает нужный экран для скриншотов -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<script>
+  try {
+    if (localStorage.getItem("ege_core_theme") === "dark") {
+      document.documentElement.dataset.theme = "dark";
+    }
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+<div id="app" class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar__logo"><span class="logo-mark">EGE</span><span class="logo-text">CORE</span><span class="logo-sub">профильная математика</span></div>
+    <nav class="sidebar__nav" id="sidebarNav"></nav>
+    <div class="sidebar__footer" id="sidebarFooter"></div>
+  </aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="screen" id="screen"></main>
+  </div>
+  <nav class="bottomnav" id="bottomnav"></nav>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root" class="toast-root"></div>
+<script src="../js/data.js"></script>
+<script src="../js/state.js"></script>
+<script src="../js/app.js"></script>
+<script>
+window.__errors = [];
+window.onerror = (msg) => { window.__errors.push(String(msg)); };
+window.__setStatus = (ok) => {
+  const div = document.createElement("div");
+  div.id = "drive-status";
+  div.textContent = ok && !window.__errors.length ? "DRIVE-OK" : "DRIVE-FAIL: " + window.__errors.join(" | ");
+  document.body.appendChild(div);
+};
+window.addEventListener("DOMContentLoaded", async () => {
+  const q = new URLSearchParams(location.search);
+  const mode = q.get("mode") || "dashboard";
+
+  if (Store.loadPromise) await Store.loadPromise;
+  await Store.reset();
+  applyOnboarding("base", "g80", [{ taskId: "eq1", correct: true }, { taskId: "fn1", correct: true }, { taskId: "dv1", correct: false }, { taskId: "pl1", correct: true }, { taskId: "vc1", correct: false }]);
+  if (mode === "errors-smart") {
+    // Формируем ошибки настоящими действиями, а не подготовленным состоянием.
+    ["st7", "in6", "pl2", "dv5", "dv6", "dv3"].forEach((id) => recordAnswer(DataAPI.task(id), false, 0, 1));
+  }
+  await Store.pendingSave;
+
+  if (mode === "session") {
+    render();
+    startMission("m-dv");
+    // имитируем один неправильный ответ, чтобы показать feedback
+    setTimeout(() => {
+      const input = document.getElementById("answerInput");
+      if (input) { input.value = "999"; sessionSubmit(); }
+    }, 300);
+  } else if (mode === "session-ok") {
+    render();
+    startMission("m-dv");
+    setTimeout(() => {
+      const input = document.getElementById("answerInput");
+      if (input) { input.value = Session.task().answer; sessionSubmit(); }
+    }, 300);
+  } else if (mode === "result" || mode === "boss") {
+    render();
+    if (mode === "result") startMission("m-dv"); else startBoss("boss-algebra");
+    const answerAll = () => {
+      if (!Session.cur) return;
+      const input = document.getElementById("answerInput");
+      if (!input) return;
+      if (input.disabled) { const btn = document.querySelector("#feedbackSlot .btn"); if (btn) btn.click(); return; }
+      input.value = Session.task().answer;
+      sessionSubmit();
+    };
+    let ticks = 0;
+    const iv = setInterval(() => { answerAll(); if (++ticks > 40 || !Session.cur) clearInterval(iv); }, 150);
+  } else if (mode === "errors-smart") {
+    // умное повторение: подбор похожих заданий + закрытие исходной ошибки
+    render();
+    startErrorsReview();
+    setTimeout(() => {
+      const ids = Session.cur.taskIds.join(",");
+      const input = document.getElementById("answerInput");
+      input.value = Session.task().answer; // первое в очереди — dv5, заменяет dv3
+      sessionSubmit();
+      const origResolved = Store.state.errors.find((e) => e.taskId === "dv3").resolved;
+      window.__setStatus(ids === "dv5,dv3,dv4,pl7,in6,st7" && origResolved === true);
+    }, 300);
+  } else if (mode === "lesson") {
+    // Полный прогон: первый неверный ввод раскрывает подсказку, затем все ответы верные.
+    render();
+    Lesson.start("quad-discriminant");
+    const xpBefore = Store.state.xp;
+    let wrongTried = false;
+    const interactive = new Set(["ACTION", "VALIDATION", "INDEPENDENT_TASK"]);
+    const iv = setInterval(() => {
+      if (!Lesson.cur) {
+        clearInterval(iv);
+        const noSavedSession = !Store.state.lessonSessions["quad-discriminant"];
+        const ok = !!document.querySelector(".result-title") && Store.state.xp > xpBefore && noSavedSession;
+        window.__setStatus(ok);
+        return;
+      }
+      const step = Lesson.step();
+      if (interactive.has(step.type)) {
+        const inputs = [...document.querySelectorAll("[data-lesson-field]")];
+        if (inputs.length && !inputs[0].disabled) {
+          if (!wrongTried) {
+            inputs.forEach((input) => { input.value = "999"; input.dispatchEvent(new Event("input")); });
+            wrongTried = true;
+          } else {
+            const fields = step.fields || [{ id: "answer", answer: step.answer || DataAPI.task(step.taskId).answer }];
+            fields.forEach((field) => {
+              const input = document.querySelector(`[data-lesson-field="${field.id}"]`);
+              if (input) { input.value = field.answer; input.dispatchEvent(new Event("input")); }
+            });
+          }
+          lessonSubmit();
+        } else {
+          const btn = document.querySelector(".lesson-nav .btn--primary");
+          if (btn && !btn.disabled) btn.click();
+        }
+      } else {
+        const btn = document.querySelector(".lesson-nav .btn--primary");
+        if (btn && !btn.disabled) btn.click();
+      }
+    }, 140);
+  } else if (mode === "lesson-view") {
+    // Визуальная проверка: останавливаемся на первом FOCUS с настоящей подсветкой a.
+    render();
+    Lesson.start("quad-discriminant");
+    setTimeout(() => {
+      lessonNext();
+      const text = document.querySelector(".lesson-card--focus .lesson-body");
+      const nav = document.querySelector(".lesson-card--focus .lesson-nav");
+      const focused = document.querySelector(".lesson-card--focus .lesson-token--on");
+      const readable = text && getComputedStyle(text).opacity === "1";
+      const navClickable = nav && getComputedStyle(nav).opacity === "1" && !nav.querySelector("button").disabled;
+      window.__setStatus(!!focused && readable && navClickable);
+    }, 200);
+  } else if (mode === "lesson-state") {
+    // Назад/далее и черновик ответа переживают перерисовку и выход из урока.
+    render();
+    Lesson.start("quad-discriminant");
+    setTimeout(() => {
+      Lesson.cur.idx = 4; Lesson.persist(); screenLesson(document.getElementById("screen"));
+      const a = document.querySelector('[data-lesson-field="a"]');
+      a.value = "1"; a.dispatchEvent(new Event("input"));
+      lessonPrev(); lessonNext();
+      const draftRestored = document.querySelector('[data-lesson-field="a"]').value === "1";
+      lessonQuit();
+      Lesson.start("quad-discriminant");
+      const resumed = Lesson.cur.idx === 4 && document.querySelector('[data-lesson-field="a"]').value === "1";
+      window.__setStatus(draftRestored && resumed);
+    }, 250);
+  } else if (mode === "lesson-hints") {
+    // Ошибка открывает кнопку следующего уровня; нажатая подсказка остаётся
+    // на экране до конца задания. Решение доступно после трёх подсказок и
+    // ещё одной ошибки.
+    render();
+    Lesson.start("quad-discriminant");
+    setTimeout(() => {
+      Lesson.cur.idx = 8; Lesson.persist(); screenLesson(document.getElementById("screen"));
+      const progressBefore = skillProgress("equations");
+      const wrong = () => { const input = document.querySelector('[data-lesson-field="answer"]'); input.value = "999"; input.dispatchEvent(new Event("input")); lessonSubmit(); };
+      wrong();
+      const firstUnlocked = !document.querySelectorAll('.hint-box').length && document.getElementById("lessonHintBtn").textContent.includes("Подсказка 1");
+      lessonHint();
+      const oneHint = document.querySelectorAll('.hint-box').length === 1 && !document.getElementById("lessonHintBtn") && Lesson.stateFor().status === "active";
+      wrong(); lessonHint();
+      const twoHints = document.querySelectorAll('.hint-box').length === 2 && !document.getElementById("lessonHintBtn");
+      wrong(); lessonHint();
+      const threeHints = document.querySelectorAll('.hint-box').length === 3 && !document.getElementById("lessonHintBtn") && Lesson.stateFor().status === "active";
+      wrong();
+      const solutionAvailable = Lesson.stateFor().status === "active" && document.getElementById("lessonHintBtn").textContent.includes("Показать решение");
+      lessonHint();
+      const shown = Lesson.stateFor().status === "shown" && !!document.querySelector('.feedback--bad');
+      const error = Store.state.lessonStepErrors['quad-discriminant:discriminant'];
+      window.__setStatus(firstUnlocked && oneHint && twoHints && threeHints && solutionAvailable && shown && skillProgress("equations") === progressBefore && error && error.types['Арифметическая ошибка при вычислении дискриминанта'] === 4);
+    }, 250);
+  } else if (mode === "hints-view") {
+    // На экране остаётся последняя подсказка; глубина лестницы хранится
+    // в состоянии сессии.
+    render();
+    startMission("m-dv");
+    const wrong = () => { const input = document.getElementById("answerInput"); input.value = "999"; sessionSubmit(); };
+    setTimeout(wrong, 150);
+    setTimeout(sessionHint, 300);
+    setTimeout(wrong, 450);
+    setTimeout(() => { sessionHint(); window.__setStatus(document.querySelectorAll("#hintSlot .hint-box").length === 1 && Session.cur.hintLevel === 2); }, 600);
+  } else if (mode === "hints") {
+    // Общая лестница: ошибка открывает кнопку, а открытые подсказки остаются.
+    render();
+    startMission("m-dv");
+    const wrong = () => { const input = document.getElementById("answerInput"); input.value = "999"; sessionSubmit(); };
+    setTimeout(wrong, 150);
+    setTimeout(sessionHint, 300);
+    setTimeout(wrong, 450);
+    setTimeout(sessionHint, 600);
+    setTimeout(wrong, 750);
+    setTimeout(sessionHint, 900);
+    setTimeout(() => {
+      // После третьей подсказки ещё одна ошибка открывает показ решения.
+      wrong();
+      sessionHint();
+      const levels = document.querySelectorAll("#hintSlot .hint-box").length;
+      const finalHintLevel = Session.cur.hintLevel;
+      const shown = !!document.querySelector("#feedbackSlot .feedback--bad");
+      const inputDisabled = document.getElementById("answerInput").disabled;
+      const errRecorded = Store.state.errors.some((e) => e.taskId === Session.cur.results[0].taskId);
+      setTimeout(() => {
+        const nextBtn = document.querySelector("#feedbackSlot .btn");
+        if (nextBtn) nextBtn.click();
+        setTimeout(() => {
+          const onTask2 = Session.cur && Session.cur.idx === 1 && !document.getElementById("answerInput").disabled;
+        // В production на экране остаётся последняя подсказка, а уровень
+        // лестницы хранится в состоянии сессии.
+        window.__setStatus(levels === 1 && finalHintLevel === 3 && shown && inputDisabled && errRecorded && onTask2);
+        }, 150);
+      }, 100);
+    }, 1100);
+  } else if (mode === "skill-modal") {
+    location.hash = "#/path";
+    render();
+    setTimeout(() => { openSkillModal(q.get("skill") || "derivative"); window.__setStatus(true); }, 300);
+  } else {
+    location.hash = "#/" + mode;
+    render();
+  }
+  if (!["hints", "hints-view", "lesson", "lesson-view", "lesson-state", "lesson-hints", "skill-modal", "errors-smart"].includes(mode)) setTimeout(() => window.__setStatus(true), 1200);
+});
+</script>
+</body>
+</html>

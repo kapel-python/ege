@@ -1,0 +1,341 @@
+/* ============================================================
+   LESSON STYLES — стили для обучающей системы
+   ============================================================ */
+
+.lesson-view {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.lesson-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.lesson-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #F8FAFC;
+}
+
+.lesson-progress {
+  font-size: 14px;
+  color: #94A3B8;
+}
+
+.btn-back {
+  background: transparent;
+  border: none;
+  color: #38BDF8;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.btn-back:hover {
+  background: #38BDF822;
+}
+
+/* Прогресс-бар */
+.lesson-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #1E293B;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 30px;
+}
+
+.lesson-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38BDF8, #22D3EE);
+  transition: width 0.3s ease;
+}
+
+/* Контент урока */
+.lesson-content {
+  background: #0F172A;
+  border: 1px solid #1E293B;
+  border-radius: 12px;
+  padding: 32px;
+  margin-bottom: 24px;
+  min-height: 300px;
+}
+
+.lesson-step-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #F8FAFC;
+  margin: 0 0 16px 0;
+}
+
+.lesson-text {
+  font-size: 16px;
+  line-height: 1.6;
+  color: #CBD5E1;
+  margin-bottom: 20px;
+}
+
+.lesson-text strong {
+  color: #F8FAFC;
+  font-weight: 600;
+}
+
+/* EXPLANATION */
+.lesson-explanation {
+  animation: fadeIn 0.3s ease;
+}
+
+/* FOCUS */
+.lesson-focus {
+  animation: fadeIn 0.3s ease;
+}
+
+.lesson-board {
+  background: #111827;
+  border: 1px solid #1E293B;
+  border-radius: 8px;
+  padding: 20px;
+  font-size: 20px;
+  font-family: 'Latin Modern Math', 'STIX Two Math', 'Cambria Math', serif;
+  text-align: center;
+  margin-top: 16px;
+}
+
+.lesson-board .highlight {
+  animation: pulse 1s ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ACTION */
+.lesson-action {
+  animation: fadeIn 0.3s ease;
+}
+
+.lesson-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.lesson-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lesson-field label {
+  font-size: 14px;
+  color: #94A3B8;
+  font-weight: 500;
+}
+
+.lesson-input-area input {
+  background: #111827;
+  border: 1px solid #1E293B;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 16px;
+  color: #F8FAFC;
+  transition: border-color 0.2s;
+}
+
+.lesson-input-area input:focus {
+  outline: none;
+  border-color: #38BDF8;
+}
+
+.lesson-input-area button {
+  align-self: flex-start;
+}
+
+/* FEEDBACK */
+.lesson-feedback {
+  animation: fadeIn 0.3s ease;
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid;
+}
+
+.lesson-feedback.tone-success {
+  background: #06402B22;
+  border-color: #22C55E;
+  color: #86EFAC;
+}
+
+.lesson-feedback.tone-neutral {
+  background: #1E293B22;
+  border-color: #38BDF8;
+  color: #38BDF8;
+}
+
+/* Inline feedback */
+.lesson-feedback-inline {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  animation: slideIn 0.3s ease;
+}
+
+.lesson-feedback-inline.correct {
+  background: #06402B;
+  color: #86EFAC;
+  border: 1px solid #22C55E;
+}
+
+.lesson-feedback-inline.incorrect {
+  background: #450A0A;
+  color: #FCA5A5;
+  border: 1px solid #DC2626;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Подсказки */
+.lesson-hint-section {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.btn-hint {
+  background: transparent;
+  border: 1px solid #F59E0B;
+  color: #F59E0B;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.btn-hint:hover {
+  background: #F59E0B22;
+}
+
+.lesson-hint-box {
+  background: #1E293B;
+  border: 1px solid #F59E0B33;
+  border-left: 3px solid #F59E0B;
+  border-radius: 8px;
+  padding: 16px;
+  color: #FCD34D;
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeIn 0.3s ease;
+}
+
+.lesson-solution-box {
+  background: #1E293B;
+  border: 1px solid #38BDF833;
+  border-left: 3px solid #38BDF8;
+  border-radius: 8px;
+  padding: 16px;
+  color: #CBD5E1;
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeIn 0.3s ease;
+}
+
+.lesson-solution-box strong {
+  color: #38BDF8;
+}
+
+/* Навигация */
+.lesson-navigation {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lesson-navigation button {
+  flex: 1;
+  max-width: 200px;
+}
+
+/* Анимации */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .lesson-view {
+    padding: 16px;
+  }
+
+  .lesson-content {
+    padding: 20px;
+  }
+
+  .lesson-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .lesson-navigation {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #0B0E14;
+    border-top: 1px solid #1E293B;
+    padding: 16px;
+    z-index: 100;
+  }
+
+  .lesson-navigation button {
+    max-width: none;
+  }
+
+  .lesson-view {
+    padding-bottom: 80px;
+  }
+}
+
+/* Task card в INDEPENDENT_TASK */
+.lesson-independent .task-card {
+  background: #111827;
+  border: 1px solid #1E293B;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.lesson-independent .task-text {
+  color: #F8FAFC;
+  font-size: 16px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
