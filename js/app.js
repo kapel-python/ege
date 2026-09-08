@@ -389,7 +389,7 @@ function showLevelUp(to) {
   div.className = "levelup-overlay";
   div.innerHTML = `
     <div class="levelup-box">
-      <div class="levelup-box__label">LEVEL UP</div>
+      <div class="levelup-box__label">НОВЫЙ УРОВЕНЬ</div>
       <div class="levelup-box__level">${to}</div>
       <div style="color:var(--text-2);margin-top:8px">Новый уровень подготовки</div>
     </div>`;
@@ -400,7 +400,7 @@ function showLevelUp(to) {
 
 Store.on("levelup", ({ to }) => { showLevelUp(to); renderTopbar(); });
 Store.on("achievement", (a) => toast(`Достижение разблокировано: <b>«${a.name}»</b>`, "toast--ach", "crown"));
-Store.on("dailydone", ({ xp }) => toast(`Daily Challenge выполнен <b class="mono">+${xp} XP</b>`, "toast--xp", "zap"));
+Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача выполнена <b class="mono">+${xp} XP</b>`, "toast--xp", "zap"));
 Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", () => toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x"));
 
@@ -409,7 +409,7 @@ Store.on("persistenceerror", () => toast("Не удалось сохранить
    ============================================================ */
 
 const NAV = [
-  { route: "dashboard", label: "Dashboard", ic: "dashboard" },
+  { route: "dashboard", label: "Главная", ic: "dashboard" },
   { route: "path",      label: "Путь",      ic: "path" },
   { route: "training",  label: "Тренировка",ic: "training" },
   { route: "errors",    label: "Ошибки",    ic: "errors" },
@@ -485,7 +485,7 @@ function renderTopbar() {
   const dark = Theme.current() === "dark";
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
-      <span class="level-chip__badge">LVL ${li.level}</span>
+      <span class="level-chip__badge">УР. ${li.level}</span>
       <div>
         <div class="level-chip__bar">${progressBar(li.pct, "progress--thin")}</div>
         <div class="level-chip__xp">${li.current} / ${li.need} XP</div>
@@ -498,7 +498,7 @@ function renderTopbar() {
 }
 
 /* ============================================================
-   Screen: Dashboard
+   Screen: Главная
    ============================================================ */
 
 function screenDashboard(root) {
@@ -509,7 +509,9 @@ function screenDashboard(root) {
   const act = todayActivity();
   const openErrors = s.errors.filter((e) => !e.resolved).length;
   const d = DataAPI.daily();
-  const dailyGoal = d.target;
+  ensureDailyChallenge();
+  const dailyGoal = dailyTaskIds().length || d.target;
+  const dailyTitle = `Реши ${dailyGoal} заданий, подобранных для тебя`;
   const dailyDone = s.daily.date === todayStr() && s.daily.done;
   const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
   const activeMission = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id])
@@ -517,7 +519,7 @@ function screenDashboard(root) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Dashboard</div>
+      <div class="page-title">Главная</div>
       <div class="page-sub">${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })} · цель: ${goalLabel()}</div>
     </div>
 
@@ -526,7 +528,7 @@ function screenDashboard(root) {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
             <div class="stat-label">Уровень подготовки</div>
-            <div class="stat-num">LEVEL ${li.level}</div>
+            <div class="stat-num">УРОВЕНЬ ${li.level}</div>
           </div>
           <div style="text-align:right">
             <div class="stat-label">Опыт</div>
@@ -567,8 +569,8 @@ function screenDashboard(root) {
       </div>
       <div class="card card--hover action-card action-card--success" onclick="startDaily()">
         <div class="action-card__icon">${icon("zap")}</div>
-        <div><div class="action-card__title">Ежедневная миссия</div>
-        <div class="action-card__sub">${dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${d.target} · +${d.xp} XP`}</div></div>
+        <div><div class="action-card__title">Ежедневная задача</div>
+        <div class="action-card__sub">${dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${dailyGoal} · +${d.xp} XP`}</div></div>
       </div>
       <div class="card card--hover action-card action-card--violet" onclick="go('trials')">
         <div class="action-card__icon">${icon("crown")}</div>
@@ -587,8 +589,8 @@ function screenDashboard(root) {
             return `
             <div class="skill-row" onclick="openSkillModal('${sk.id}')">
               <div class="skill-row__name">${sk.name}</div>
-              ${progressBar(st.progress)}
-              <div class="skill-row__pct">${st.progress}%</div>
+              ${progressBar(skillProgress(sk.id))}
+              <div class="skill-row__pct">${skillProgress(sk.id)}%</div>
               <div class="skill-row__tip">
                 Решено: <b>${st.solved}</b> · точность: <b>${acc}%</b><br>
                 Статус: ${statusLabel(skillStatus(sk))}<br>
@@ -611,14 +613,14 @@ function screenDashboard(root) {
           </div>
         </div>
 
-        <div class="section-title">Daily Challenge</div>
+        <div class="section-title">Ежедневная задача</div>
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-            <div style="font-weight:600;font-size:14px">${d.title}</div>
+            <div style="font-weight:600;font-size:14px">${dailyTitle}</div>
             <span class="chip ${dailyDone ? "chip--success" : "chip--accent"}">${dailyDone ? "✓ Выполнено" : `+${d.xp} XP`}</span>
           </div>
-          <div style="margin-top:12px">${progressBar(Math.min(dailySolved / d.target, 1) * 100)}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:8px" class="mono">${Math.min(dailySolved, d.target)} / ${d.target}</div>
+          <div style="margin-top:12px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:8px" class="mono">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</div>
           <div style="margin-top:12px;display:flex;gap:6px;align-items:center">
             ${streakDots()}
           </div>
@@ -678,26 +680,26 @@ function screenPath(root) {
     const skills = DataAPI.skills().filter((s) => s.cat === cat.id).sort((a, b) => a.order - b.order);
     return `
       <div class="tree-branch">
-        <div class="tree-branch__title">${cat.name.toUpperCase()} <span>${catProgress(cat.id)}%</span></div>
+        <div class="tree-branch__title">${cat.name.toUpperCase()} <span>${catProgress(cat.id)}% освоено</span></div>
         <div class="tree-nodes">
           ${skills.map((sk) => {
             const st = Store.state.skillStats[sk.id];
             const status = skillStatus(sk);
             const locked = status === "locked";
             return `
-            <div class="tree-node tree-node--${status}" onclick="${locked ? "" : `openSkillModal('${sk.id}')`}">
+            <div class="tree-node tree-node--${status}" onclick="openSkillModal('${sk.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSkillModal('${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="tree-node__dot"></div>
               <div class="tree-node__body">
                 <div class="tree-node__name">${sk.name}
                   <span class="chip ${statusChipClass(status)}" style="font-size:10px">${statusLabel(status)}</span>
                 </div>
                 <div class="tree-node__meta">
-                  <div class="tree-node__bar">${progressBar(st.progress, "progress--thin")}</div>
-                  <span class="mono">${st.progress}%</span>
+                  <div class="tree-node__bar">${progressBar(skillProgress(sk.id), "progress--thin")}</div>
+                  <span class="mono">${skillProgress(sk.id)}%</span>
                   <span>· ${sk.ege}</span>
                 </div>
               </div>
-              ${locked ? `<div class="tree-node__lock">${icon("lock")}</div>` : `<div style="color:var(--muted)">${icon("arrow")}</div>`}
+              <div style="color:var(--muted)">${icon("arrow")}</div>
             </div>`;
           }).join("")}
         </div>
@@ -707,7 +709,7 @@ function screenPath(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Путь</div>
-      <div class="page-sub">Карта навыков ЕГЭ по профильной математике. Новые темы открываются по мере прогресса.</div>
+      <div class="page-sub">Карта навыков ЕГЭ. Процент — освоение навыка: 30% за урок и до 70% за практику (точность реальных решений).</div>
     </div>
     <div style="margin-top:28px">
       <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>профильная математика · ${overallProgress()}% освоено</small></div></div>
@@ -742,9 +744,9 @@ function openSkillModal(skillId) {
     <div style="font-size:22px;font-weight:700;margin-top:4px">${sk.name}</div>
     <div style="margin-top:6px"><span class="chip ${statusChipClass(status)}">${statusLabel(status)}</span></div>
 
-    <div style="margin:20px 0 8px">${progressBar(st.progress)}</div>
+    <div style="margin:20px 0 8px">${progressBar(skillProgress(skillId))}</div>
     <div class="grid grid--3" style="gap:10px;margin-top:16px">
-      <div><div class="mono" style="font-size:20px;font-weight:700">${st.progress}%</div><div class="stat-label">освоение</div></div>
+      <div><div class="mono" style="font-size:20px;font-weight:700">${skillProgress(skillId)}%</div><div class="stat-label">освоение навыка</div></div>
       <div><div class="mono" style="font-size:20px;font-weight:700">${st.solved}</div><div class="stat-label">решено задач</div></div>
       <div><div class="mono" style="font-size:20px;font-weight:700">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
@@ -768,9 +770,9 @@ function openSkillModal(skillId) {
     </div>` : ""}
 
     <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
-      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить" : "Урок"}: «${lessons[0].title}»</button>` : ""}
-      ${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">Миссия: «${mission.title}» ${icon("arrow")}</button>` : ""}
-      <button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Свободная практика</button>
+      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить" : "Урок"}: «${lessons[0].title}»</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
+      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">Практика: «${mission.title.replace(/^Миссия:\s*/i, "") }» ${icon("arrow")}</button>` : ""}
+      ${DataAPI.tasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Свободная практика</button>` : `<span class="stat-label">Заданий в банке пока нет.</span>`}
     </div>`);
 }
 
@@ -801,19 +803,19 @@ function screenTraining(root) {
         const done = !!Store.state.completedLessons[lesson.id];
         const session = Store.state.lessonSessions && Store.state.lessonSessions[lesson.id];
         const inProgress = !!session;
-        const progress = inProgress ? Math.round(((session.stepIndex + 1) / lesson.steps.length) * 100) : 0;
+        const progress = inProgress ? Math.round(((session.idx || 0) / lesson.steps.length) * 100) : 0;
         return `
         <div class="card card--hover lesson-card ${done ? "lesson-card--done" : ""}">
           <div class="mission-card__top">
             <div>
               <div class="mission-card__title">${icon("bulb")} ${lesson.title} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
-              <div class="mission-card__path">${sk.name} · ${lesson.steps.length} шагов</div>
+              <div class="mission-card__path">${sk.name} · ${lesson.steps.length} шагов · ${done ? "завершён" : "не пройден"}</div>
             </div>
             <div class="mission-card__reward"><span class="chip chip--accent mono">+${lesson.xp} XP</span></div>
           </div>
           ${inProgress ? `<div class="mission-card__foot">
             <div class="mission-card__bar">${progressBar(progress)}</div>
-            <span class="mono">${session.stepIndex + 1} / ${lesson.steps.length}</span>
+            <span class="mono">${Math.min((session.idx || 0) + 1, lesson.steps.length)} / ${lesson.steps.length}</span>
           </div>` : ''}
           <button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" style="align-self:flex-start" onclick="Lesson.start('${lesson.id}')">
             ${done ? "Пройти ещё раз" : inProgress ? "Продолжить" : "Начать урок"}
@@ -822,47 +824,45 @@ function screenTraining(root) {
       }).join("")}
     </div>` : ''}
 
-    <div class="section-title">Миссии</div>
+    <div class="section-title">Практика по темам</div>
     <div class="grid grid--3">
       ${missions.map((m) => {
         const sk = DataAPI.skill(m.skill);
         const done = !!Store.state.missionsDone[m.id];
         const prog = missionProgress(m);
+        const taskCount = Array.isArray(m.tasks) ? m.tasks.length : 0;
+        const freeCount = sk ? DataAPI.tasksBySkill(sk.id).length : 0;
+        const practiceCount = taskCount || freeCount;
         return `
         <div class="card card--hover mission-card ${done ? "mission-card--done" : ""}">
           <div class="mission-card__top">
             <div>
               <div class="mission-card__title">${m.title} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
-              <div class="mission-card__path">${sk.name} → ${esc(m.desc)}</div>
+              <div class="mission-card__path">${sk ? sk.name : "Тема"} · ${esc(m.desc || "Практика по теме")}</div>
             </div>
             <div class="mission-card__reward"><span class="chip chip--accent mono">+${m.xp} XP</span></div>
           </div>
           <div>${stars(m.diff)}</div>
-          <div class="mission-card__foot">
-            <div class="mission-card__bar">${progressBar((done ? m.tasks.length : prog) / m.tasks.length * 100, done ? "progress--success" : "")}</div>
-            <span class="mono">${done ? m.tasks.length : prog} / ${m.tasks.length}</span>
+          ${taskCount ? `<div class="mission-card__foot">
+            <div class="mission-card__bar">${progressBar((done ? taskCount : prog) / taskCount * 100, done ? "progress--success" : "")}</div>
+            <span class="mono">${done ? taskCount : prog} / ${taskCount}</span>
+          </div>` : `<div class="stat-label">Заданий для этого блока пока нет${freeCount ? ` · в теме доступно ${freeCount}` : ""}.</div>`}
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${taskCount ? `<button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" onclick="startMission('${m.id}')">
+              ${done ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать практику"}
+            </button>` : ""}
+            ${sk && freeCount ? `<button class="btn btn--ghost btn--sm" onclick="startSkillPractice('${sk.id}')">Свободная практика</button>` : ""}
           </div>
-          <button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" style="align-self:flex-start" onclick="startMission('${m.id}')">
-            ${done ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать миссию"}
-          </button>
         </div>`;
       }).join("")}
     </div>
-
-    <div class="section-title">Свободная практика</div>
-    <div class="grid grid--4">
-      ${DataAPI.skills().map((sk) => `
-        <div class="card card--hover" style="cursor:pointer" onclick="startSkillPractice('${sk.id}')">
-          <div style="font-weight:600;font-size:14px">${sk.name}</div>
-          <div class="stat-label" style="margin:6px 0 10px">${sk.ege} · ${DataAPI.tasksBySkill(sk.id).length} заданий</div>
-          ${progressBar(skillProgress(sk.id), "progress--thin")}
-        </div>`).join("")}
-    </div>`;
+    `;
 }
 
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) return toast("Миссия не найдена", "toast--error", "x");
+  if (!Array.isArray(m.tasks) || !m.tasks.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
   const from = Store.state.missionsDone[missionId] ? 0 : missionProgress(m);
   Session.start({
     title: `Миссия: ${m.title}`,
@@ -1150,7 +1150,7 @@ function sessionFinish(early = false) {
   const errorsClosed = S.results.filter((r) => r.correct && S.mode === "errors").length;
 
   const isBossWin = boss && correct / solved >= 0.6 && bossDefeated(boss);
-  const title = missionDone ? "MISSION COMPLETE" : boss ? (isBossWin ? "BOSS DEFEATED" : "БОСС УСТОЯЛ") : "ТРЕНИРОВКА ЗАВЕРШЕНА";
+  const title = missionDone ? "ПРАКТИКА ЗАВЕРШЕНА" : boss ? (isBossWin ? "ИСПЫТАНИЕ ПРОЙДЕНО" : "БОСС УСТОЯЛ") : "ТРЕНИРОВКА ЗАВЕРШЕНА";
 
   const checkedSkills = boss ? [...new Set(S.results.map((r) => DataAPI.skill(DataAPI.task(r.taskId).skill).name))] : null;
 
@@ -1174,7 +1174,7 @@ function sessionFinish(early = false) {
       </div>` : ""}
       ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто ошибок: <b>${errorsClosed}</b></div>` : ""}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn--primary btn--lg" onclick="go('dashboard')">На Dashboard</button>
+        <button class="btn btn--primary btn--lg" onclick="go('dashboard')">На главную</button>
         <button class="btn btn--ghost btn--lg" onclick="go('${S.mode === "boss" ? "trials" : "training"}')">${S.mode === "boss" ? "К испытаниям" : "Ещё тренировка"}</button>
       </div>
     </div>`;
@@ -1212,10 +1212,11 @@ const Lesson = {
   start(lessonId) {
     const lesson = DataAPI.lesson(lessonId);
     if (!lesson) return;
+    const sourceRoute = ["path", "training"].includes(currentRoute()) ? currentRoute() : "path";
     const saved = Store.state.lessonSessions && Store.state.lessonSessions[lessonId];
     this.cur = saved
-      ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now() }
-      : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now() };
+      ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now(), returnRoute: saved.returnRoute || sourceRoute }
+      : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: sourceRoute };
     this.persist();
     go("lesson");
     if (currentRoute() === "lesson") render();
@@ -1234,6 +1235,7 @@ const Lesson = {
     Store.state.lessonSessions[this.cur.lesson.id] = {
       idx: this.cur.idx, stepState: this.cur.stepState, xp: this.cur.xp,
       wrongAttempts: this.cur.wrongAttempts, startTs: this.cur.startTs,
+      returnRoute: this.cur.returnRoute || "path",
     };
     Store.save();
   },
@@ -1337,10 +1339,10 @@ function screenLesson(root) {
         </div>
         ${lessonBoardHtml(step, type)}
         ${interactive ? lessonActionHtml(step, state) : `<div class="lesson-static-note ${toneClass}">${type === "HINT" ? `${icon("bulb")} ` : ""}${type === "FEEDBACK" && step.tone === "success" ? `${icon("check")} ` : ""}${type === "TRANSITION" ? `${icon("arrow")} ` : ""}<span>${type === "HINT" ? "Опора для следующего шага" : type === "FEEDBACK" ? "Результат шага" : "Продолжение"}</span></div>`}
-        ${canAdvance ? `<div class="lesson-nav">
+        <div class="lesson-nav">
           ${L.idx > 0 ? `<button class="btn btn--ghost" onclick="lessonPrev()">← Назад</button>` : "<span></span>"}
-          <button class="btn btn--primary" onclick="lessonNext()">${L.idx + 1 >= total ? "Завершить урок" : "Далее →"}</button>
-        </div>` : ""}
+          ${canAdvance ? `<button class="btn btn--primary" onclick="lessonNext()">${L.idx + 1 >= total ? "Завершить урок" : "Далее →"}</button>` : "<span></span>"}
+        </div>
       </div>
     </div>`;
 
@@ -1460,9 +1462,12 @@ function lessonPrev() {
 }
 
 function lessonQuit() {
-  if (Lesson.cur) Lesson.persist();
+  if (!Lesson.cur) return go("path");
+  if (!window.confirm("Выйти из урока? Текущий ответ и прогресс будут сохранены.")) return;
+  const returnRoute = Lesson.cur.returnRoute || "path";
+  Lesson.persist();
   Lesson.cur = null;
-  go("path");
+  go(returnRoute);
 }
 
 function lessonFinish() {
@@ -1481,7 +1486,7 @@ function lessonFinish() {
       <div class="result-title">${firstCompletion ? "УРОК ПРОЙДЕН" : "УРОК ПОВТОРЁН"}</div>
       <div class="result-sub">${esc(lesson.title)}</div>
       <div class="result-xp mono">+${totalXp} XP</div>
-      <div style="color:var(--text-2)">${firstCompletion ? `Навык «${DataAPI.skill(lesson.skill).name}» усилен на +8%` : "Повторение не начисляет XP и прогресс, но сохраняет учебную практику без фарма."}</div>
+      ${firstCompletion ? (() => { const b = skillProgressBreakdown(lesson.skill); return `<div style="color:var(--text-2)">Урок «${esc(lesson.title)}» завершён. Навык «${DataAPI.skill(lesson.skill).name}»: ${b.total}% освоено (теория ${b.theory}%, практика ${b.practice}%). До полного освоения осталось ${Math.max(0, 100 - b.total)}%.</div>`; })() : `<div style="color:var(--text-2)">Урок повторён. Прогресс навыка не изменился: он растёт только за первое прохождение и реальные ответы в практике.</div>`}
       <div class="result-stats">
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${lesson.steps.length}</div><div class="stat-label">шагов</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime((Date.now() - L.startTs) / 1000)}</div><div class="stat-label">время</div></div>
@@ -1489,7 +1494,7 @@ function lessonFinish() {
       </div>
       <div class="lesson-result-note ${independent.status === "solved" ? "lesson-result-note--ok" : ""}">${independent.status === "solved" ? `${icon("check")} Самостоятельное задание решено.` : `${icon("bulb")} Самостоятельное задание сохранено для повторения.`}</div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${lesson.skill}')">Закрепить на практике</button>
+        <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${lesson.skill}')">${icon("target")} Закрепить на практике</button>
         <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
       </div>
     </div>`;
@@ -1621,6 +1626,9 @@ function startErrorsReview() {
 function screenTrials(root) {
   const s = Store.state;
   const d = DataAPI.daily();
+  ensureDailyChallenge();
+  const dailyGoal = dailyTaskIds().length || d.target;
+  const dailyTitle = `Реши ${dailyGoal} заданий, подобранных для тебя`;
   const dailyDone = s.daily.date === todayStr() && s.daily.done;
   const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
 
@@ -1632,11 +1640,11 @@ function screenTrials(root) {
 
     <div class="grid grid--2" style="margin-top:18px">
       <div class="card ${dailyDone ? "mission-card--done" : ""}">
-        <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">TODAY'S CHALLENGE</div>
-        <div style="font-size:18px;font-weight:650;margin-top:8px">${d.title}</div>
-        <div style="margin:14px 0 6px">${progressBar(Math.min(dailySolved / d.target, 1) * 100, dailyDone ? "progress--success" : "")}</div>
+        <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">ЕЖЕДНЕВНАЯ ЗАДАЧА</div>
+        <div style="font-size:18px;font-weight:650;margin-top:8px">${dailyTitle}</div>
+        <div style="margin:14px 0 6px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100, dailyDone ? "progress--success" : "")}</div>
         <div style="display:flex;align-items:center;gap:12px">
-          <span class="mono" style="font-size:13px;color:var(--text-2)">${Math.min(dailySolved, d.target)} / ${d.target}</span>
+          <span class="mono" style="font-size:13px;color:var(--text-2)">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</span>
           <span class="chip chip--accent mono">+${d.xp} XP</span>
           <button class="btn ${dailyDone ? "btn--soft" : "btn--primary"} btn--sm" style="margin-left:auto" onclick="startDaily()">
             ${dailyDone ? "Повторить" : "Решать"}
@@ -1663,7 +1671,7 @@ function screenTrials(root) {
         const cp = catProgress(b.cat);
         return `
         <div class="card boss-card ${defeated ? "boss-card--defeated" : ""}">
-          <div class="boss-label">${defeated ? "BOSS DEFEATED ✓" : unlocked ? "BOSS CHALLENGE" : "BOSS · LOCKED"}</div>
+          <div class="boss-label">${defeated ? "ИСПЫТАНИЕ ПРОЙДЕНО ✓" : unlocked ? "ИСПЫТАНИЕ" : "ИСПЫТАНИЕ · ЗАКРЫТО"}</div>
           <div class="boss-title">${b.title.replace("БОСС: ", "")}</div>
           <div style="font-size:13px;color:var(--text-2);margin-top:8px">${b.desc}</div>
           <div style="margin:14px 0 6px">${progressBar(Math.min(cp / b.unlockAt, 1) * 100, unlocked ? "progress--success" : "progress--warn")}</div>
@@ -1683,8 +1691,8 @@ function screenTrials(root) {
 function startDaily() {
   const d = DataAPI.daily();
   Session.start({
-    title: "Daily Challenge",
-    taskIds: DataAPI.tasksBySkill(d.skill).map((t) => t.id),
+    title: "Ежедневная задача",
+    taskIds: dailyTaskIds(),
     mode: "daily",
   });
 }
@@ -1863,11 +1871,11 @@ function screenProfile(root) {
     <div class="card card--glow" style="margin-top:18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap">
       <div>
         <div class="stat-label">Уровень</div>
-        <div class="stat-num">LEVEL ${li.level}</div>
+        <div class="stat-num">УРОВЕНЬ ${li.level}</div>
       </div>
       <div style="flex:1;min-width:220px">
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
-          <span>${li.current} / ${li.need} XP</span><span>до Level ${li.level + 1}</span>
+          <span>${li.current} / ${li.need} XP</span><span>до уровня ${li.level + 1}</span>
         </div>
         ${progressBar(li.pct)}
       </div>
@@ -1897,7 +1905,7 @@ function screenProfile(root) {
 
     <div class="grid grid--2" style="margin-top:34px">
       <div>
-        <div class="section-title" style="margin-top:0">Timeline прогресса</div>
+        <div class="section-title" style="margin-top:0">История прогресса</div>
         <div class="card">
           ${s.timeline.length ? `<div class="timeline">
             ${s.timeline.slice(0, 10).map((t) => `

@@ -52,9 +52,20 @@ const testBody = async () => {
   addXp(5000, "test");
   t("уровень считается из XP", levelInfo().level > 3);
   Store.reset();
-  const dailyTasks = DataAPI.tasksBySkill(DataAPI.daily().skill);
-  for (let i = 0; i < DataAPI.daily().target; i++) recordAnswer(dailyTasks[i % dailyTasks.length], true, 0, 20);
+  ensureDailyChallenge();
+  const dailyIds = dailyTaskIds();
+  t("daily выбирает задания из существующего банка", dailyIds.length === DataAPI.daily().target && dailyIds.every((id) => !!DataAPI.task(id)));
+  const outsideDaily = DataAPI.tasks().find((task) => !dailyIds.includes(task.id));
+  if (outsideDaily) recordAnswer(outsideDaily, true, 0, 20);
+  t("обычная практика не засчитывается в daily", Store.state.daily.solved === 0 && !Store.state.daily.done);
+  for (const id of dailyIds) recordAnswer(DataAPI.task(id), true, 0, 20);
   t("daily награда зависит от фактических ответов", Store.state.daily.done && Store.state.xp >= DataAPI.daily().xp);
+  t("daily не считает повтор одного задания дважды", Store.state.daily.solved === dailyIds.length);
+  const dailySnapshot = JSON.parse(JSON.stringify(Store.state));
+  dailySnapshot.daily.countedTaskIds = undefined;
+  Store.state = dailySnapshot;
+  ensureDailyChallenge();
+  t("daily восстанавливает зачтённые задания после перезагрузки", Store.state.daily.solved === dailyIds.length);
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);

@@ -11,7 +11,9 @@ ExecStart=/usr/bin/python3 -u /root/ege/server/server.py
 # The application handles SIGTERM and exits cleanly. systemd starts a fresh
 # interpreter after crashes, while an explicit `systemctl restart` replaces it
 # immediately after a code update.
-Restart=on-failure
+# Keep the service available even when the application exits cleanly after a
+# signal (server.py intentionally returns status 0 during graceful shutdown).
+Restart=always
 RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=15

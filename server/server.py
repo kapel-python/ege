@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from zoneinfo import ZoneInfo
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -448,6 +449,7 @@ CREATE TABLE IF NOT EXISTS forecast_history (
 );
 CREATE TABLE IF NOT EXISTS daily_progress (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, progress_date TEXT NOT NULL, solved INTEGER NOT NULL, done INTEGER NOT NULL,
+  task_ids_json TEXT NOT NULL DEFAULT '[]',
   PRIMARY KEY(user_id, progress_date)
 );
 CREATE TABLE IF NOT EXISTS timeline (
@@ -479,7 +481,7 @@ def timestamp_value(value):
 
 
 def today() -> str:
-    return dt.date.today().isoformat()
+    return dt.datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
 
 
 def connect() -> sqlite3.Connection:
@@ -494,6 +496,10 @@ def connect() -> sqlite3.Connection:
 def install_catalog(conn: sqlite3.Connection) -> None:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA)
+    # Existing SQLite files need the new daily selection column migrated in place.
+    daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
+    if "task_ids_json" not in daily_columns:
+        conn.execute("ALTER TABLE daily_progress ADD COLUMN task_ids_json TEXT NOT NULL DEFAULT '[]'")
     conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES ('math', 'Математика', 'Математика')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('basic', 'math', 'Базовый уровень')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('profile', 'math', 'Профильный уровень')")
@@ -579,7 +585,7 @@ def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
             "completedLessons": {}, "lessonAttempts": [], "taskAttempts": [], "diagnostics": [], "forecastHistory": [], "activity": {},
-            "timeline": [], "daily": {"date": None, "solved": 0, "done": False}, "skillStats": skills}
+            "timeline": [], "daily": {"date": None, "solved": 0, "done": False, "taskIds": []}, "dailyHistory": [], "skillStats": skills}
 
 
 def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -615,8 +621,15 @@ def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
     for r in conn.execute("SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id=?", (user_id,)): state["achievements"][r["achievement_id"]] = {"ts": timestamp_value(r["unlocked_at"])}
     for r in conn.execute("SELECT * FROM activity_history WHERE user_id=?", (user_id,)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
     state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute("SELECT * FROM forecast_history WHERE user_id=? ORDER BY snapshot_date", (user_id,))]
-    daily = conn.execute("SELECT * FROM daily_progress WHERE user_id=? ORDER BY progress_date DESC LIMIT 1", (user_id,)).fetchone()
-    if daily: state["daily"] = {"date": daily["progress_date"], "solved": daily["solved"], "done": bool(daily["done"])}
+    daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? ORDER BY progress_date DESC", (user_id,)))
+    state["dailyHistory"] = []
+    for daily in daily_rows:
+        try:
+            task_ids = json.loads(daily["task_ids_json"] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            task_ids = []
+        state["dailyHistory"].append({"date": daily["progress_date"], "solved": daily["solved"], "done": bool(daily["done"]), "taskIds": task_ids})
+    if daily_rows: state["daily"] = state["dailyHistory"][0].copy()
     state["timeline"] = [{"ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? ORDER BY id DESC LIMIT 40", (user_id,))]
     state["diagnostics"] = [{"taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? ORDER BY id DESC", (user_id,))]
     return state
@@ -637,12 +650,12 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         if skill_id in valid_skills:
             conn.execute("INSERT INTO user_progress VALUES (?,?,?,?,?,?)", (user_id, skill_id, int(value.get("progress", 0)), int(value.get("solved", 0)), int(value.get("correct", 0)), float(value.get("timeSec", 0))))
     for level, count in (s.get("hintLevels") or {}).items(): conn.execute("INSERT INTO user_hint_levels VALUES (?,?,?)", (user_id, int(level), int(count)))
-    task_ids = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
+    valid_task_ids = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
     for item in s.get("taskAttempts") or []:
-        if item.get("taskId") in task_ids:
+        if item.get("taskId") in valid_task_ids:
             conn.execute("INSERT INTO task_attempts(user_id,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id, item["taskId"], item.get("skill", ""), int(bool(item.get("correct"))), int(item.get("hintLevel", 0)), float(item.get("seconds", 0)), item.get("closesTaskId"), item.get("ts") or now_iso()))
     for item in s.get("errors") or []:
-        if item.get("taskId") in task_ids:
+        if item.get("taskId") in valid_task_ids:
             conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?)", (user_id, item["taskId"], item.get("skill", ""), item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
     lesson_ids = {r["id"] for r in conn.execute("SELECT id FROM lessons")}
     for item in s.get("lessonAttempts") or []:
@@ -663,11 +676,18 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     for achievement_id, item in (s.get("achievements") or {}).items(): conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id,achievement_id,item.get("ts") or now_iso()))
     for activity_date, value in (s.get("activity") or {}).items(): conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
     for item in s.get("forecastHistory") or []: conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
+    daily_records = {}
+    for item in s.get("dailyHistory") or []:
+        if item.get("date"): daily_records[item["date"]] = item
     daily = s.get("daily") or {}
-    if daily.get("date"): conn.execute("INSERT INTO daily_progress VALUES(?,?,?,?)", (user_id,daily["date"],int(daily.get("solved",0)),int(bool(daily.get("done")))))
+    if daily.get("date"): daily_records[daily["date"]] = daily
+    for progress_date, item in daily_records.items():
+        selected_task_ids = [str(task_id) for task_id in (item.get("taskIds") or [])]
+        conn.execute("INSERT INTO daily_progress(user_id,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?)",
+                     (user_id,progress_date,int(item.get("solved",0)),int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
     for item in s.get("timeline") or []: conn.execute("INSERT INTO timeline(user_id,created_at,text) VALUES(?,?,?)", (user_id,item.get("ts") or now_iso(),item.get("text", "")))
     for item in s.get("diagnostics") or []:
-        if item.get("taskId") in task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
+        if item.get("taskId") in valid_task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
 def validate_state(conn: sqlite3.Connection, state: dict) -> None:

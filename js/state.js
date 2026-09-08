@@ -51,7 +51,8 @@ const Store = {
       forecastHistory: [], // {date, low, high, mid}; один актуальный снимок на день
       activity: {}, // "2026-09-04" -> {solved, correct, xp}
       timeline: [], // {ts, text}
-      daily: { date: null, solved: 0, done: false },
+      daily: { date: null, solved: 0, done: false, taskIds: [] },
+      dailyHistory: [], // завершённые дни Daily; источник истории без отдельной статистики
       skillStats: skills,
     };
   },
@@ -72,8 +73,10 @@ const Store = {
       this.state.lessonAttempts = Array.isArray(parsed.lessonAttempts) ? parsed.lessonAttempts : [];
       this.state.taskAttempts = Array.isArray(parsed.taskAttempts) ? parsed.taskAttempts : [];
       this.state.diagnostics = Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [];
+      this.state.dailyHistory = Array.isArray(parsed.dailyHistory) ? parsed.dailyHistory : [];
       this.state.version = defaults.version;
       this.ready = true;
+      ensureDailyChallenge();
       return this.state;
     })();
     return this.loadPromise;
@@ -148,12 +151,14 @@ function addXp(amount, reason) {
    ============================================================ */
 
 function todayStr() {
-  const d = new Date();
+  // Daily Challenge resets at midnight Moscow time, regardless of browser TZ.
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function yesterdayStr() {
-  const d = new Date(Date.now() - 86400000);
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
+  d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
@@ -177,7 +182,32 @@ function touchStreak() {
    ============================================================ */
 
 function skillProgress(skillId) {
-  return Store.state.skillStats[skillId] ? Store.state.skillStats[skillId].progress : 0;
+  const skill = DataAPI.skill(skillId);
+  if (!skill) return 0;
+  const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
+  // Progress is mastery, not XP: theory is confirmed by a completed lesson,
+  // practice grows from real answers and their accuracy (capped at 10 tasks).
+  const theoryWeight = lessons.length ? 30 : 0;
+  const practiceWeight = 100 - theoryWeight;
+  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
+  const accuracy = stats.solved ? stats.correct / stats.solved : 0;
+  const practice = Math.min(1, stats.solved / 10) * accuracy * practiceWeight;
+  return Math.round(Math.min(100, theory + practice));
+}
+
+function skillProgressBreakdown(skillId) {
+  const skill = DataAPI.skill(skillId);
+  const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
+  const theoryWeight = lessons.length ? 30 : 0;
+  const practiceWeight = 100 - theoryWeight;
+  const accuracy = stats.solved ? stats.correct / stats.solved : 0;
+  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
+  const practice = Math.min(1, stats.solved / 10) * accuracy * practiceWeight;
+  return { total: Math.round(theory + practice), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, accuracy: Math.round(accuracy * 100) };
 }
 
 function catProgress(catId) {
@@ -186,25 +216,22 @@ function catProgress(catId) {
   return Math.round(skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length);
 }
 
-/* locked | weak | in-progress | completed | mastered */
+/* weak | in-progress | completed | mastered
+   Topics are intentionally all available. The order in the path is a visual
+   curriculum hint, not an access gate: every catalog topic can be practiced
+   independently, including topics without a lesson. */
 function skillStatus(skill) {
-  if (skill.order > 0) {
-    const prev = DataAPI.skills().find((s) => s.cat === skill.cat && s.order === skill.order - 1);
-    if (prev && skillProgress(prev.id) < 35 && skillProgress(skill.id) === 0) return "locked";
-  }
   const p = skillProgress(skill.id);
-  const solved = Store.state.skillStats[skill.id].solved;
+  const solved = (Store.state.skillStats[skill.id] || {}).solved || 0;
   if (p >= 90) return "mastered";
   if (p >= 70) return "completed";
   if (p < 35 && solved > 0) return "weak";
-  if (p < 35 && solved === 0 && skill.order > 0) return "locked";
   return "in-progress";
 }
 
 function weakestSkill() {
   let worst = null;
   for (const s of DataAPI.skills()) {
-    if (skillStatus(s) === "locked") continue;
     const p = skillProgress(s.id);
     if (!worst || p < skillProgress(worst.id)) worst = s;
   }
@@ -226,9 +253,10 @@ function strongestSkill() {
 
 function forecast() {
   const skills = DataAPI.skills();
-  const avg = skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length;
-  const acc = Store.state.totalSolved ? Store.state.totalCorrect / Store.state.totalSolved : 0.5;
-  const mid = Math.round(30 + avg * 0.45 + acc * 15);
+  const avg = skills.length ? skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length : 0;
+  // 27 is the approximate zero-preparation baseline; the remaining range is
+  // driven by demonstrated mastery rather than XP or self-assessment.
+  const mid = Math.round(27 + avg * 0.73);
   return { low: Math.max(0, mid - 3), high: Math.min(100, mid + 4), mid };
 }
 
@@ -289,6 +317,104 @@ function checkAnswer(task, input) {
     const na = numericAnswer(a), nb = numericAnswer(b);
     return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
   });
+}
+
+function dailyDateKey() { return todayStr(); }
+
+function dateKeyForTimestamp(ts) {
+  const d = new Date(Number(ts) || 0);
+  if (!Number.isFinite(d.getTime())) return "";
+  const msk = new Date(d.toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
+  return `${msk.getFullYear()}-${String(msk.getMonth() + 1).padStart(2, "0")}-${String(msk.getDate()).padStart(2, "0")}`;
+}
+
+function dailyHistory() {
+  return Array.isArray(Store.state.dailyHistory) ? Store.state.dailyHistory : [];
+}
+
+function dailyTaskIdsForDate(date) {
+  const item = dailyHistory().find((entry) => entry.date === date);
+  return item && Array.isArray(item.taskIds) ? item.taskIds : [];
+}
+
+function dailyCandidateScore(task, historyIds, now) {
+  const stats = Store.state.skillStats[task.skill] || { solved: 0, correct: 0 };
+  const attempts = Store.state.taskAttempts.filter((item) => item.taskId === task.id);
+  const recentAttempts = attempts.filter((item) => now - Number(item.ts || 0) < 14 * 86400000);
+  const recentErrors = Store.state.errors.filter((item) => item.taskId === task.id && !item.resolved).length;
+  const accuracy = stats.solved ? stats.correct / stats.solved : 0;
+  const mastery = skillProgress(task.skill);
+  const coldStart = !Store.state.totalSolved && !Store.state.taskAttempts.length && !Store.state.errors.length;
+  let score = 0;
+  score += recentErrors * 8;
+  score += Math.max(0, 1 - accuracy) * 5;
+  score += Math.max(0, 3 - Math.min(3, recentAttempts.length)) * 2;
+  // A new user gets approachable tasks; an active user gets a modest
+  // difficulty lift while weak skills and unresolved errors stay first.
+  score += coldStart ? (4 - task.diff) * 2 : task.diff * 0.6;
+  score += Math.max(0, 100 - mastery) * 0.04;
+  if (historyIds.includes(task.id)) score -= 18;
+  if (recentAttempts[0] && now - Number(recentAttempts[0].ts || 0) < 86400000) score -= 12;
+  return score;
+}
+
+function selectDailyTaskIds(date) {
+  const daily = DataAPI.daily();
+  const target = Math.max(1, Number(daily.target) || 1);
+  const pool = DataAPI.tasks().filter((task) => task && task.id && task.skill);
+  if (!pool.length) return [];
+  const historyIds = dailyHistory().flatMap((entry) => entry.taskIds || []);
+  const now = Date.now();
+  const ranked = pool.map((task) => ({ task, score: dailyCandidateScore(task, historyIds, now) }))
+    .sort((a, b) => b.score - a.score || a.task.id.localeCompare(b.task.id));
+  const selected = ranked.filter((item) => !historyIds.includes(item.task.id)).slice(0, target).map((item) => item.task.id);
+  if (selected.length < target) {
+    for (const item of ranked) {
+      if (selected.length >= target) break;
+      if (!selected.includes(item.task.id)) selected.push(item.task.id);
+    }
+  }
+  return selected;
+}
+
+function ensureDailyChallenge() {
+  if (!Store.state) return;
+  const date = dailyDateKey();
+  if (Store.state.daily && Store.state.daily.date === date && (Store.state.daily.taskIds || []).length) {
+    if (!Array.isArray(Store.state.daily.countedTaskIds)) {
+      const selected = new Set(Store.state.daily.taskIds);
+      Store.state.daily.countedTaskIds = Array.from(new Set((Store.state.taskAttempts || [])
+        .filter((attempt) => dateKeyForTimestamp(attempt.ts) === date && selected.has(attempt.taskId))
+        .map((attempt) => attempt.taskId)));
+      Store.state.daily.solved = Math.max(Number(Store.state.daily.solved) || 0, Store.state.daily.countedTaskIds.length);
+    }
+    return;
+  }
+  const existing = dailyHistory().find((entry) => entry.date === date);
+  if (existing && existing.taskIds && existing.taskIds.length) {
+    const current = Store.state.daily && Store.state.daily.date === date ? Store.state.daily : {};
+    Store.state.daily = Object.assign({ date, solved: 0, done: false, taskIds: [] }, existing, current);
+    const counted = new Set((Store.state.taskAttempts || [])
+      .filter((attempt) => dateKeyForTimestamp(attempt.ts) === date && dailyTaskIdsForDate(date).includes(attempt.taskId))
+      .map((attempt) => attempt.taskId));
+    Store.state.daily.countedTaskIds = Array.from(counted);
+    Store.state.daily.solved = Math.max(Number(Store.state.daily.solved) || 0, counted.size);
+    existing.solved = Store.state.daily.solved;
+    existing.done = !!Store.state.daily.done;
+    existing.countedTaskIds = Store.state.daily.countedTaskIds;
+    Store.state.daily.done = Store.state.daily.solved >= existing.taskIds.length;
+    return;
+  }
+  Store.state.daily = { date, solved: 0, done: false, taskIds: selectDailyTaskIds(date) };
+  Store.state.dailyHistory = dailyHistory().filter((entry) => entry.date !== date);
+  Store.state.dailyHistory.unshift(Store.state.daily);
+  Store.state.dailyHistory = Store.state.dailyHistory.slice(0, 30);
+  Store.save();
+}
+
+function dailyTaskIds() {
+  ensureDailyChallenge();
+  return Store.state.daily.taskIds || [];
 }
 
 /* ============================================================
@@ -360,17 +486,24 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     }
   }
 
-  /* daily challenge */
+  /* Daily Challenge counts only the server-backed selection for this date.
+     A regular practice answer must never accidentally complete the challenge. */
+  ensureDailyChallenge();
   const d = DataAPI.daily();
-  if (s.daily.date !== todayStr()) s.daily = { date: todayStr(), solved: 0, done: s.daily.done && s.daily.date === todayStr() };
-  if (task.skill === d.skill && !s.daily.done) {
-    s.daily.solved++;
-    if (s.daily.solved >= d.target) {
+  const selectedIds = dailyTaskIds();
+  const countedIds = s.daily.countedTaskIds || [];
+  if (!s.daily.done && selectedIds.includes(task.id) && !countedIds.includes(task.id)) {
+    s.daily.countedTaskIds = countedIds.concat(task.id);
+    s.daily.solved = s.daily.countedTaskIds.length;
+    if (s.daily.solved >= selectedIds.length) {
       s.daily.done = true;
-      addTimeline("Daily Challenge выполнен");
+      addTimeline("Ежедневная задача выполнена");
       Store.emit("dailydone", { xp: d.xp });
       addXp(d.xp, "daily");
     }
+    const historyEntry = dailyHistory().find((entry) => entry.date === s.daily.date);
+    if (historyEntry) Object.assign(historyEntry, s.daily);
+    Store.save();
   }
 
   if (xp > 0) addXp(xp, "answer");
@@ -579,6 +712,8 @@ function applyOnboarding(selfLevel, goalId, diagnosticResults) {
      искусственный прогресс. Прогресс строится только по ответам диагностики
      и последующим фактическим действиям. */
   for (const sk of DataAPI.skills()) s.skillStats[sk.id] = { progress: 0, solved: 0, correct: 0, timeSec: 0 };
+  s.daily = { date: null, solved: 0, done: false, taskIds: [] };
+  s.dailyHistory = [];
   for (const r of diagnosticResults) {
     const task = DataAPI.task(r.taskId);
     if (!task) continue;
