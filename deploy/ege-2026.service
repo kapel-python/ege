@@ -1,0 +1,29 @@
+[Unit]
+Description=EGE CORE standalone server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/root/ege
+ExecStart=/usr/bin/python3 -u /root/ege/server/server.py
+
+# The application handles SIGTERM and exits cleanly. systemd starts a fresh
+# interpreter after crashes, while an explicit `systemctl restart` replaces it
+# immediately after a code update.
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+Environment=EGE_HOST=0.0.0.0
+Environment=EGE_PORT=2026
+Environment=EGE_QUIET=1
+Environment=EGE_SUPERVISED=1
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=append:/var/log/ege-2026.log
+StandardError=append:/var/log/ege-2026.log
+
+[Install]
+WantedBy=multi-user.target

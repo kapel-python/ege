@@ -164,8 +164,7 @@ tail -50 /tmp/ege_server.log
 
 **Проблема:** Сервер не отвечает
 ```bash
-# Перезапусти сервер
-pkill -f "python.*server.py"
+# Повторный запуск сам заменит старый процесс текущим кодом
 python3 server/server.py > /tmp/ege_server.log 2>&1 &
 ```
 

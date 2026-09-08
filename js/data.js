@@ -35,11 +35,25 @@ const DataAPI = {
 
 const ApiClient = {
   async request(path, options = {}) {
-    const response = await fetch(path, {
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      ...options,
-    });
+    let response;
+    let lastError;
+    // A lesson finish can race with its final draft save. Retry transient
+    // network/5xx failures so a temporary hiccup does not lose progress.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(path, {
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+          ...options,
+        });
+        if (response.status < 500 || attempt === 2) break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 2) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+    if (!response) throw lastError || new Error("Сервер недоступен");
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `API ${response.status}`);
     return payload;

@@ -226,19 +226,76 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-/* Лёгкая типографика для уже существующих строк с математикой. Данные
-   исторически хранятся обычным текстом, поэтому не тянем отдельный тяжёлый
-   движок только ради нескольких формул. */
+/* Единственный рендерер математики проекта.
+   Новый формат данных: inline `\\(...\\)`, крупная формула `\\[...\\]`.
+   Нормализация ниже сохраняет совместимость со старыми строками каталога. */
 function mathText(value) {
-  let html = esc(value == null ? "" : value);
-  // 5^(x − 2), x^2 → обычные степени.
-  html = html.replace(/\^\(([^()\n]+)\)|\^([−-]?\d+|[a-zA-ZА-Яа-я])/g, (_m, grouped, atom) => `<sup>${grouped || atom}</sup>`);
-  // √(a + b), √100 → корень с чертой над подкоренным выражением.
-  html = html.replace(/√\(([^()\n]+)\)|√([a-zA-ZА-Яа-я0-9]+)/g, (_m, grouped, atom) => `<span class="math-root">√<span>${grouped || atom}</span></span>`);
-  // Дроби из математических фрагментов; единицы вроде «км/ч» не затрагиваем.
-  html = html.replace(/(\([^()\n]+\)|[A-Za-zπ][A-Za-z0-9₀-₉]*|\d+)\s*\/\s*(\([^()\n]+\)|[A-Za-zπ][A-Za-z0-9₀-₉]*|\d+)/g,
-    (_m, numerator, denominator) => `<span class="math-frac"><span>${numerator}</span><span>${denominator}</span></span>`);
-  return html;
+  const source = String(value == null ? "" : value).replace(/\r\n?/g, "\n");
+  const supers = { "⁰":"0", "¹":"1", "²":"2", "³":"3", "⁴":"4", "⁵":"5", "⁶":"6", "⁷":"7", "⁸":"8", "⁹":"9", "⁻":"-" };
+  const subs = { "₀":"0", "₁":"1", "₂":"2", "₃":"3", "₄":"4", "₅":"5", "₆":"6", "₇":"7", "₈":"8", "₉":"9", "₋":"-" };
+  const normalizeLegacy = (text) => {
+    // Legacy catalog strings contain bare expressions (x², √(...), log_a(x)).
+    // Collect the whole Latin/numeric/operator run before adding delimiters;
+    // wrapping individual superscripts was the source of mixed typography.
+    const convert = (raw) => raw
+      .replace(/([A-Za-zА-Яа-я0-9])⃗/g, "\\vec{$1}")
+      .replace(/([A-Za-zА-Яа-я0-9)])([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)/g, (_m, base, power) => `${base}^{${[...power].map((c) => supers[c] || c).join("")}}`)
+      .replace(/([A-Za-zА-Яа-я0-9)])([₀₁₂₃₄₅₆₇₈₉₋]+)/g, (_m, base, sub) => `${base}_{${[...sub].map((c) => subs[c] || c).join("")}}`)
+      .replace(/([A-Za-zА-Яа-я0-9)])\^\(([^()\n]+)\)/g, "$1^{$2}")
+      .replace(/([A-Za-zА-Яа-я0-9)])\^([−-]?[A-Za-zА-Яа-я0-9]+)/g, "$1^{$2}")
+      .replace(/√\(([^()\n]+)\)/g, "\\sqrt{$1}")
+      .replace(/√([A-Za-zА-Яа-я0-9]+)/g, "\\sqrt{$1}")
+      .replace(/\(([^()\n]+)\)\s*\/\s*(\d+[A-Za-z]+|\d+|[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9]*)/g, "\\frac{$1}{$2}")
+      .replace(/(\d+)\s*\/\s*(\d+)/g, "\\frac{$1}{$2}")
+      .replace(/\blog_([A-Za-z0-9.]+)\(([^()\n]+)\)/gi, "\\log_{$1}\\left($2\\right)")
+      .replace(/\blog([₀₁₂₃₄₅₆₇₈₉₋]+)\(([^()\n]+)\)/gi, (_x, base, arg) => `\\log_{${[...base].map((c) => subs[c] || c).join("")}}\\left(${arg}\\right)`)
+      .replace(/(sin|cos|tan)(?=[A-Za-z0-9(²³⁻])/gi, "\\$1")
+      .replace(/±/g, "\\pm")
+      .replace(/∠/g, "\\angle ")
+      .replace(/∥/g, "\\parallel ")
+      .replace(/Σ/g, "\\Sigma ")
+      .replace(/α/g, "\\alpha ")
+      .replace(/ε/g, "\\varepsilon ")
+      .replace(/∞/g, "\\infty ")
+      .replace(/∪/g, "\\cup ")
+      .replace(/−/g, "-");
+    const mathRun = /(?:√|[A-Za-z0-9(∠])(?:[A-Za-z0-9π∞′°'^²³⁻₀₁₂₃₄₅₆₇₈₉_()+{}\-−*/=·.,;:<>\[\]\\ ±⃗∠∥Σαε∞∪]|√)*/g;
+    return text.replace(mathRun, (run) => {
+      const trimmed = run.trim();
+      if (!trimmed || !(/[0-9=√^²³⁻₀₁₂₃₄₅₆₇₈₉∠∥Σαε∞∪⃗]|\b(?:log|sin|cos|tan)\b/i.test(trimmed))) return run;
+      const lead = run.slice(0, run.indexOf(trimmed));
+      const trail = run.slice(run.indexOf(trimmed) + trimmed.length);
+      return `${lead}\\(${convert(trimmed)}\\)${trail}`;
+    });
+  };
+  const protectExplicit = /\\\[[\s\S]*?\\\]|\\\([^\n]*?\\\)/g;
+  const normalize = (text) => {
+    let out = "", cursor = 0, match;
+    while ((match = protectExplicit.exec(text))) {
+      out += normalizeLegacy(text.slice(cursor, match.index)) + match[0];
+      cursor = match.index + match[0].length;
+    }
+    return out + normalizeLegacy(text.slice(cursor));
+  };
+  const render = (latex, display) => {
+    if (window.katex) {
+      try { return window.katex.renderToString(latex, { displayMode: display, throwOnError: false, strict: "ignore" }); } catch (_) {}
+    }
+    return `<span class="math-fallback">${esc(latex)}</span>`;
+  };
+  const normalized = normalize(source);
+  const chunks = [];
+  let cursor = 0;
+  const re = /\\\[([\s\S]*?)\\\]|\\\(([^\n]*?)\\\)/g;
+  let match;
+  while ((match = re.exec(normalized))) {
+    if (match.index > cursor) chunks.push(esc(normalized.slice(cursor, match.index)).replace(/\n/g, "<br>"));
+    chunks.push(render(match[1] || match[2], !!match[1]));
+    cursor = match.index + match[0].length;
+  }
+  if (!chunks.length) return esc(normalized).replace(/\n/g, "<br>");
+  if (cursor < normalized.length) chunks.push(esc(normalized.slice(cursor)).replace(/\n/g, "<br>"));
+  return chunks.join("");
 }
 
 function fmtTime(sec) {
@@ -607,7 +664,8 @@ function continueTraining() {
   const active = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id]);
   if (active) return startMission(active.id);
   const worst = weakestSkill();
-  const tasks = orderedTasks(DataAPI.tasksBySkill(worst ? worst.id : "equations")).slice(0, 6).map((t) => t.id);
+  const fallbackSkill = worst || DataAPI.skills()[0];
+  const tasks = orderedTasks(DataAPI.tasksBySkill(fallbackSkill ? fallbackSkill.id : "")).slice(0, 6).map((t) => t.id);
   Session.start({ title: worst ? `Тренировка: ${worst.name}` : "Тренировка", taskIds: tasks, mode: "quick" });
 }
 
@@ -804,6 +862,7 @@ function screenTraining(root) {
 
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
+  if (!m) return toast("Миссия не найдена", "toast--error", "x");
   const from = Store.state.missionsDone[missionId] ? 0 : missionProgress(m);
   Session.start({
     title: `Миссия: ${m.title}`,
@@ -1640,6 +1699,7 @@ function startMixedTrial() {
 
 function startBoss(bossId) {
   const boss = DataAPI.bosses().find((b) => b.id === bossId);
+  if (!boss) return toast("Испытание не найдено", "toast--error", "x");
   if (!bossUnlocked(boss)) return;
   const pool = DataAPI.tasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
   const taskIds = orderedTasks(pool).slice(0, boss.size).map((t) => t.id);
@@ -1952,7 +2012,7 @@ const Onboarding = {
       <div class="onboard-sub">Короткий тест из 5 заданий по разным темам — по нему построим карту навыков.</div>
       <div class="card task-card" style="margin-top:18px;padding:20px">
         <div class="task-card__tags"><span class="chip chip--accent">${t.num}</span><span class="chip">${esc(t.sub)}</span></div>
-        <div class="task-card__text" style="font-size:15px">${esc(t.text)}</div>
+        <div class="task-card__text" style="font-size:15px">${mathText(t.text)}</div>
         <div class="answer-row">
           <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="decimal">
           <button class="btn btn--primary" onclick="Onboarding.answerDiag()">Ответить</button>

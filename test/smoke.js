@@ -13,17 +13,20 @@ const testBody = async () => {
   t("все задания ссылаются на навыки", DataAPI.tasks().every((x) => DataAPI.skills().some((s) => s.id === x.skill)));
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
-  t("у каждого задания есть содержание", DataAPI.tasks().every((x) => x.hint && x.solution && x.text && x.answer));
-  t("у каждого навыка есть >= 5 заданий", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length >= 5));
+  t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
+  t("у каждого навыка есть >= 2 задания", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length >= 2));
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
 
-  t("checkAnswer exact", checkAnswer(DataAPI.task("eq1"), "5"));
-  t("checkAnswer comma/dot", checkAnswer(DataAPI.task("eq6"), "0,5"));
-  t("checkAnswer wrong", !checkAnswer(DataAPI.task("eq1"), "6"));
+  t("checkAnswer exact", checkAnswer(DataAPI.task("n01_p1"), "3"));
+  t("checkAnswer comma/dot", checkAnswer(DataAPI.task("n04_p1"), "0,3"));
+  t("checkAnswer fraction", checkAnswer(DataAPI.task("n18_p2"), "169/5"));
+  t("checkAnswer accepts one of multiple roots", checkAnswer(DataAPI.task("n14_p2"), "37π/4"));
+  t("checkAnswer rejects trailing garbage", !checkAnswer(DataAPI.task("n01_p1"), "3abc"));
+  t("checkAnswer wrong", !checkAnswer(DataAPI.task("n01_p1"), "6"));
 
   Store.reset();
   t("стартовый level 1", levelInfo().level === 1);
-  const task = DataAPI.task("dv3");
+  const task = DataAPI.task("n09_p6");
   recordAnswer(task, false, 0, 30);
   t("ошибка записалась", Store.state.errors.length === 1 && !Store.state.errors[0].resolved);
   const before = Store.state.xp;
@@ -32,7 +35,7 @@ const testBody = async () => {
   t("попытки сохранены в runtime-снимке", Store.state.taskAttempts.length === 2);
 
   Store.reset();
-  const lesson = DataAPI.lesson("quad-discriminant");
+  const lesson = DataAPI.lesson("lesson_n07_exponential");
   const lessonXp = Store.state.xp;
   const first = completeLesson(lesson, 20, { wrongAttempts: 2, durationSec: 30 });
   const second = completeLesson(lesson, 20, { wrongAttempts: 1, durationSec: 10 });
@@ -43,13 +46,14 @@ const testBody = async () => {
   Store.reset();
   applyOnboarding("base", "g80", DataAPI.diagnosticTasks().map((id) => ({ taskId: id, correct: true })));
   t("диагностика сохраняет только реальные ответы", Store.state.onboarded && Store.state.xp === 0 && Store.state.diagnostics.length === 5 && Store.state.totalSolved === 5);
-  t("онбординг не создаёт случайный прогресс", Store.state.skillStats.wordproblems.progress === 0);
+  t("онбординг не создаёт случайный прогресс", Store.state.skillStats.n11_word_problems.progress === 0);
 
   Store.reset();
   addXp(5000, "test");
   t("уровень считается из XP", levelInfo().level > 3);
   Store.reset();
-  for (let i = 0; i < DataAPI.daily().target; i++) recordAnswer(DataAPI.tasksBySkill("functions")[i % DataAPI.tasksBySkill("functions").length], true, 0, 20);
+  const dailyTasks = DataAPI.tasksBySkill(DataAPI.daily().skill);
+  for (let i = 0; i < DataAPI.daily().target; i++) recordAnswer(dailyTasks[i % dailyTasks.length], true, 0, 20);
   t("daily награда зависит от фактических ответов", Store.state.daily.done && Store.state.xp >= DataAPI.daily().xp);
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");

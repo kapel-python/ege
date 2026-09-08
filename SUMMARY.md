@@ -44,7 +44,6 @@
 http://localhost:2026
 
 # Перезапуск сервера при необходимости:
-pkill -f "python.*server.py"
 python3 server/server.py > /tmp/ege_server.log 2>&1 &
 ```
 

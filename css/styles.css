@@ -604,12 +604,12 @@ body {
 .task-card { padding: 28px; }
 .task-card__tags { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .task-card__text { font-size: 17px; line-height: 1.7; white-space: pre-line; }
-.task-card__text .math { font-family: var(--mono); font-size: 0.95em; background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
-.math-frac { display: inline-grid; grid-template-rows: auto auto; vertical-align: middle; text-align: center; line-height: 1.05; margin: 0 .12em; font-family: "Times New Roman", Cambria, serif; font-size: 1.08em; }
-.math-frac > span:first-child { border-bottom: 1px solid currentColor; padding: 0 .16em .05em; }
-.math-frac > span:last-child { padding: .05em .16em 0; }
-.math-root { display: inline-flex; align-items: flex-start; vertical-align: middle; font-family: "Times New Roman", Cambria, serif; font-size: 1.08em; line-height: 1; }
-.math-root > span { border-top: 1px solid currentColor; padding: .03em .1em 0 .08em; margin-top: .1em; }
+/* Every KaTeX fragment is emphasized consistently, including new lesson
+   surfaces added later. The rule targets only KaTeX output, never prose. */
+.katex { font-size: 1.3em; font-weight: 700; }
+.task-card__text .katex-display,
+.lesson-text .katex-display { margin: .65em 0; overflow-x: auto; overflow-y: hidden; padding: .15em 0; }
+.math-fallback { font-family: var(--mono); white-space: pre-wrap; font-size: 1.3em; font-weight: 700; }
 .task-card__text sup, .feedback__solution sup, .hint-box sup, .lesson-token sup { font-size: .72em; line-height: 0; }
 
 .answer-row { display: flex; gap: 10px; margin-top: 24px; }

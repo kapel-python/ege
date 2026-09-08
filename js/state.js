@@ -267,16 +267,28 @@ function forecastTrend(days = 14) {
    ============================================================ */
 
 function normalizeAnswer(str) {
-  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(",", ".").replace("−", "-");
+  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".").replace(/−/g, "-");
+}
+
+function numericAnswer(value) {
+  const text = normalizeAnswer(value);
+  if (/^[+-]?\d+(?:\.\d+)?\/[+-]?\d+(?:\.\d+)?$/.test(text)) {
+    const [n, d] = text.split("/").map(Number);
+    return d === 0 ? NaN : n / d;
+  }
+  return Number(text);
 }
 
 function checkAnswer(task, input) {
+  if (!task || input == null) return false;
   const a = normalizeAnswer(input);
-  const b = normalizeAnswer(task.answer);
-  if (a === b) return true;
-  const na = parseFloat(a), nb = parseFloat(b);
-  if (!isNaN(na) && !isNaN(nb)) return Math.abs(na - nb) < 1e-6;
-  return false;
+  // Some equation tasks have several valid roots separated by commas.
+  const alternatives = String(task.answer).split(/,\s+/).map(normalizeAnswer);
+  return alternatives.some((b) => {
+    if (a === b) return true;
+    const na = numericAnswer(a), nb = numericAnswer(b);
+    return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
+  });
 }
 
 /* ============================================================
@@ -511,7 +523,7 @@ function checkAchievements() {
   if (s.errorsResolved >= 10) unlockAchievement("comeback");
   if (s.streak >= 7) unlockAchievement("streak7");
   if (s.bossesDefeated.length >= 1) unlockAchievement("boss1");
-  if (catProgress("geometry") >= 80) unlockAchievement("geometry80");
+  if (catProgress("part1") >= 80) unlockAchievement("part1_master");
 }
 
 function addTimeline(text) {

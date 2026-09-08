@@ -7,19 +7,340 @@ same database on first start.
 """
 from __future__ import annotations
 
+import atexit
 import datetime as dt
+import errno
 import json
 import os
+import shutil
+import signal
 import sqlite3
+import subprocess
+import sys
+import threading
+import time
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import token_urlsafe
 from urllib.parse import urlparse
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the supported deployment target is Unix
+    fcntl = None
+
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3")))
 CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
+SCRIPT_PATH = Path(__file__).resolve()
+
+
+def runtime_pid_path() -> Path:
+    """Return the pid file path, allowing systemd and manual runs to share it."""
+    return Path(os.environ.get("EGE_PID_FILE", str(ROOT / ".ege-2026.pid")))
+
+
+def runtime_lock_path() -> Path:
+    return Path(os.environ.get("EGE_LOCK_FILE", f"{runtime_pid_path()}.lock"))
+
+
+def _pid_record(path: Path) -> dict | None:
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError, UnicodeError):
+        return None
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        # Accept a plain pid left by an older development process.
+        value = {"pid": raw.splitlines()[0]}
+    if not isinstance(value, dict):
+        return None
+    try:
+        pid = int(value.get("pid", 0))
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    return {"pid": pid, "script": value.get("script")}
+
+
+def _proc_cmdline(pid: int) -> list[str]:
+    try:
+        data = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except (FileNotFoundError, OSError):
+        return []
+    return [part.decode("utf-8", "replace") for part in data.split(b"\0") if part]
+
+
+def _same_server_process(pid: int, record: dict | None = None) -> bool:
+    """Verify a pid belongs to this script before sending it a signal."""
+    if pid <= 0 or pid == os.getpid():
+        return False
+    recorded_script = (record or {}).get("script")
+    if recorded_script:
+        try:
+            if Path(recorded_script).resolve() != SCRIPT_PATH:
+                return False
+        except OSError:
+            return False
+    args = _proc_cmdline(pid)
+    if not args:
+        return False
+    cwd = None
+    try:
+        cwd = Path(os.readlink(f"/proc/{pid}/cwd"))
+    except OSError:
+        pass
+    for arg in args[1:]:
+        if not arg or arg.startswith("-") or not arg.endswith(".py"):
+            continue
+        candidate = Path(arg)
+        if not candidate.is_absolute() and cwd is not None:
+            candidate = cwd / candidate
+        try:
+            if candidate.resolve() == SCRIPT_PATH:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _listening_socket_inodes(port: int) -> set[str]:
+    """Return socket inodes listening on a port in the current network namespace."""
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text(encoding="ascii").splitlines()[1:]
+        except (FileNotFoundError, OSError, UnicodeError):
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) < 10 or fields[3] != "0A":  # TCP_LISTEN
+                continue
+            try:
+                if int(fields[1].rsplit(":", 1)[1], 16) == port:
+                    inodes.add(fields[9])
+            except (IndexError, ValueError):
+                continue
+    return inodes
+
+
+def _process_listens_on_port(pid: int, port: int) -> bool:
+    inodes = _listening_socket_inodes(port)
+    if not inodes:
+        return False
+    try:
+        descriptors = Path(f"/proc/{pid}/fd").iterdir()
+    except OSError:
+        return False
+    for descriptor in descriptors:
+        try:
+            target = os.readlink(descriptor)
+        except OSError:
+            continue
+        if target.startswith("socket:[") and target.endswith("]") and target[8:-1] in inodes:
+            return True
+    return False
+
+
+def _server_processes(port: int) -> list[int]:
+    """Find legacy instances that predate the pid lock and own this port."""
+    try:
+        entries = list(Path("/proc").iterdir())
+    except OSError:
+        return []
+    result = []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if _same_server_process(pid) and _process_listens_on_port(pid, port):
+            result.append(pid)
+    return result
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stop_process(pid: int, timeout: float) -> None:
+    """Ask the previous process to stop, escalating only after a timeout."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _process_exists(pid):
+            return
+        time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+class ServerInstance:
+    """A filesystem lock and pid record for safe manual restarts."""
+
+    def __init__(self) -> None:
+        self.pid_path = runtime_pid_path()
+        self.lock_path = runtime_lock_path()
+        self._handle = None
+        self._released = False
+
+    @staticmethod
+    def _lock(handle, non_blocking: bool = True) -> bool:
+        if fcntl is None:
+            raise RuntimeError("file locking is unavailable on this platform")
+        flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if non_blocking else 0)
+        try:
+            fcntl.flock(handle.fileno(), flags)
+            return True
+        except OSError as exc:
+            if non_blocking and exc.errno in (errno.EACCES, errno.EAGAIN):
+                return False
+            raise
+
+    def _write_pid(self) -> None:
+        self.pid_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.pid_path.with_name(f".{self.pid_path.name}.{os.getpid()}.tmp")
+        temp_path.write_text(json.dumps({"pid": os.getpid(), "script": str(SCRIPT_PATH)}), encoding="utf-8")
+        os.replace(temp_path, self.pid_path)
+
+    def _wait_for_lock(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._lock(self._handle):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def acquire(self) -> None:
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle = self.lock_path.open("a+")
+        try:
+            if not self._lock(self._handle):
+                record = _pid_record(self.pid_path)
+                pid = record["pid"] if record else 0
+                if not record or not _same_server_process(pid, record):
+                    raise RuntimeError(
+                        f"another process owns {self.lock_path}; refusing to terminate an unknown process"
+                    )
+                timeout = float(os.environ.get("EGE_STOP_TIMEOUT", "8"))
+                print(f"Stopping previous EGE CORE process (pid {pid})", file=sys.stderr, flush=True)
+                _stop_process(pid, timeout)
+                if not self._wait_for_lock(timeout):
+                    raise RuntimeError(f"previous EGE CORE process (pid {pid}) did not release its lock")
+            self._write_pid()
+        except Exception:
+            self._handle.close()
+            self._handle = None
+            raise
+        atexit.register(self.release)
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        try:
+            record = _pid_record(self.pid_path)
+            if record and record.get("pid") == os.getpid():
+                self.pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if self._handle is not None:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                self._handle.close()
+                self._handle = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+
+
+def _running_under_supervisor() -> bool:
+    # INVOCATION_ID is supplied by systemd; EGE_SUPERVISED also makes the unit
+    # explicit and keeps this behavior predictable in other supervisors.
+    return bool(os.environ.get("INVOCATION_ID") or os.environ.get("EGE_SUPERVISED") == "1")
+
+
+def restart_active_systemd_unit() -> bool:
+    """Restart the installed unit when a manual launch targets a live service."""
+    if _running_under_supervisor() or os.environ.get("EGE_DISABLE_SYSTEMD") == "1":
+        return False
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return False
+    unit = os.environ.get("EGE_SYSTEMD_UNIT", "ege-2026.service")
+    try:
+        status = subprocess.run(
+            [systemctl, "is-active", "--quiet", unit],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if status.returncode != 0:
+        return False
+    try:
+        result = subprocess.run(
+            [systemctl, "restart", unit],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"could not restart {unit}: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"systemd refused to restart {unit}{suffix}")
+    print(f"Restart requested for active systemd unit {unit}; exiting launcher", flush=True)
+    return True
+
+
+def create_http_server(host: str, port: int) -> ThreadingHTTPServer:
+    """Bind the port, replacing only a legacy instance of this script."""
+    try:
+        return ThreadingHTTPServer((host, port), Handler)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        legacy = _server_processes(port)
+        if not legacy:
+            raise RuntimeError(
+                f"cannot bind {host}:{port}; the port is occupied by an unknown process"
+            ) from exc
+        timeout = float(os.environ.get("EGE_STOP_TIMEOUT", "8"))
+        for pid in legacy:
+            print(f"Stopping legacy EGE CORE process (pid {pid})", file=sys.stderr, flush=True)
+            _stop_process(pid, timeout)
+        time.sleep(0.1)
+        try:
+            return ThreadingHTTPServer((host, port), Handler)
+        except OSError as retry_exc:
+            raise RuntimeError(f"cannot bind {host}:{port} after stopping the old process") from retry_exc
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -163,9 +484,10 @@ def today() -> str:
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
@@ -184,13 +506,14 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         metadata = dict(task)
         for key in ("id", "skill", "sub", "num", "diff", "text", "answer", "hint", "solution"):
             metadata.pop(key, None)
-        conn.execute("""INSERT OR IGNORE INTO tasks
+        conn.execute("""INSERT INTO tasks
           (id, skill_id, topic, exam_number, difficulty, statement, answer, explanation, hint, task_type, metadata_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,topic=excluded.topic,exam_number=excluded.exam_number,difficulty=excluded.difficulty,statement=excluded.statement,answer=excluded.answer,explanation=excluded.explanation,hint=excluded.hint,task_type=excluded.task_type,metadata_json=excluded.metadata_json""", (
             task["id"], task["skill"], task["sub"], task.get("num"), task["diff"], task["text"], task["answer"],
-            task["solution"], task.get("hint"), task.get("type", "short_answer"), json.dumps(metadata, ensure_ascii=False)))
+            task["solution"], task.get("hint") or (task.get("hints") or [None])[0], task.get("type", "short_answer"), json.dumps(metadata, ensure_ascii=False)))
     for lesson in catalog["lessons"]:
-        conn.execute("INSERT OR IGNORE INTO lessons(id, skill_id, title, xp, metadata_json) VALUES (?, ?, ?, ?, ?)",
+        conn.execute("INSERT INTO lessons(id, skill_id, title, xp, metadata_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,title=excluded.title,xp=excluded.xp,metadata_json=excluded.metadata_json",
                      (lesson["id"], lesson["skill"], lesson["title"], lesson.get("xp", 0), json.dumps(lesson, ensure_ascii=False)))
     for mission in catalog["missions"]:
         conn.execute("INSERT OR IGNORE INTO missions(id, skill_id, title, description, xp, difficulty) VALUES (?, ?, ?, ?, ?, ?)",
@@ -424,10 +747,55 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    conn = connect(); install_catalog(conn); conn.close()
-    # ВАЖНО: Порт 2026 — это постоянный порт для EGE CORE (ЕГЭ-2026/2027)
-    host = os.environ.get("EGE_HOST", "0.0.0.0")
-    port = int(os.environ.get("EGE_PORT", "2026"))
-    print(f"EGE CORE listening on http://{host}:{port} (SQLite: {DB_PATH})")
-    print(f"Порт 2026 закреплён за этим проектом")
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    def run_server() -> int:
+        # A manual invocation becomes a restart request when systemd already
+        # owns the service.  The service itself is marked as supervised, so it
+        # never recursively restarts itself.
+        if restart_active_systemd_unit():
+            return 0
+
+        # ВАЖНО: Порт 2026 — это постоянный порт для EGE CORE (ЕГЭ-2026/2027)
+        host = os.environ.get("EGE_HOST", "0.0.0.0")
+        port = int(os.environ.get("EGE_PORT", "2026"))
+        with ServerInstance():
+            conn = connect()
+            try:
+                install_catalog(conn)
+            finally:
+                conn.close()
+            httpd = create_http_server(host, port)
+            httpd.daemon_threads = True
+            stopping = threading.Event()
+
+            def stop_server(signum, _frame):
+                if stopping.is_set():
+                    return
+                stopping.set()
+                print(f"EGE CORE stopping (signal {signum})", flush=True)
+                # shutdown() must run outside the serve_forever thread.
+                threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+            previous_handlers = {
+                signal.SIGINT: signal.getsignal(signal.SIGINT),
+                signal.SIGTERM: signal.getsignal(signal.SIGTERM),
+            }
+            signal.signal(signal.SIGINT, stop_server)
+            signal.signal(signal.SIGTERM, stop_server)
+            print(
+                f"EGE CORE listening on http://{host}:{port} "
+                f"(pid {os.getpid()}, code mtime {SCRIPT_PATH.stat().st_mtime_ns}, SQLite: {DB_PATH})",
+                flush=True,
+            )
+            try:
+                httpd.serve_forever(poll_interval=0.5)
+            finally:
+                httpd.server_close()
+                for sig, handler in previous_handlers.items():
+                    signal.signal(sig, handler)
+        return 0
+
+    try:
+        raise SystemExit(run_server())
+    except (RuntimeError, ValueError) as exc:
+        print(f"EGE CORE startup failed: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc
