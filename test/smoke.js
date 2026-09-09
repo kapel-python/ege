@@ -109,6 +109,28 @@ const testBody = async () => {
   ensureDailyChallenge();
   t("daily восстанавливает зачтённые задания после перезагрузки", Store.state.daily.solved === dailyIds.length);
 
+  // Некоторые задания честно помечены "рисунок обязателен, но недоступен"
+  // (visual.required без assetId) — их нельзя решить без официального
+  // источника. Они обязаны остаться в каталоге (для аудита и на случай
+  // появления картинки), но не должны попадать ученику ни в один поток
+  // выбора задания: свободную практику, daily, боссов, повторение ошибок,
+  // миссии.
+  const unsolvable = DataAPI.tasks().filter((x) => DataAPI.taskHasMissingVisual(x));
+  t("в каталоге действительно есть задания с недоступным обязательным рисунком (иначе проверка ниже бессмысленна)", unsolvable.length > 0);
+  t("practiceTasks() исключает задания без обязательного рисунка", unsolvable.every((x) => !DataAPI.practiceTasks().includes(x)));
+  t("tasksBySkill/mission не подсовывают задание без рисунка", DataAPI.skills().every((sk) =>
+    DataAPI.practiceTasksBySkill(sk.id).every((x) => !DataAPI.taskHasMissingVisual(x))));
+  t("миссии не включают задания без обязательного рисунка", DataAPI.missions()
+    .every((m) => m.tasks.every((id) => !DataAPI.taskHasMissingVisual(DataAPI.task(id)))));
+  Store.reset();
+  let dailyRerollsClean = true;
+  for (let i = 0; i < 30; i++) {
+    ensureDailyChallenge();
+    if (!dailyTaskIds().every((id) => !DataAPI.taskHasMissingVisual(DataAPI.task(id)))) dailyRerollsClean = false;
+    Store.state.daily.date = "reroll-" + i; // force a fresh pick next iteration
+  }
+  t("daily никогда не выбирает задание без обязательного рисунка (30 переигровок)", dailyRerollsClean);
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };
