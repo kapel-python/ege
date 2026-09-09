@@ -44,9 +44,15 @@ const testBody = async () => {
     && auditedTaskIds.every((id) => !!DataAPI.task(id)));
   t("ссылки заданий на visual assets разрешаются (или честно помечены как недоступные)", DataAPI.tasks()
     .every((task) => !task.visual || (task.visual.assetId ? !!DataAPI.visualAsset(task.visual.assetId) : !!task.visual.required)));
-  t("№2 подключает проверенную SVG-схему", DataAPI.task("n02_p2").visual.assetId === "n02-p2-vectors"
-    && DataAPI.visualAsset("n02-p2-vectors").taskId === "n02_p2"
-    && DataAPI.visualAsset("n02-p2-vectors").type === "geometry");
+  t("№2 подключает MathVisual-схему векторов", DataAPI.task("n02_p2").mathVisual
+    && DataAPI.task("n02_p2").mathVisual.type === "vector_diagram"
+    && !DataAPI.task("n02_p2").visual);
+  const MATHVISUAL_TYPES = ["coordinate_geometry", "vector_diagram", "function_graph", "derivative_graph",
+    "triangle", "quadrilateral", "polygon", "circle_geometry", "3d_solid", "probability_diagram", "probability_tree"];
+  t("MathVisual-задачи ссылаются на поддерживаемые типы движка и не дублируют static visual", DataAPI.tasks()
+    .filter((x) => x.mathVisual)
+    .every((x) => MATHVISUAL_TYPES.includes(x.mathVisual.type) && !x.visual
+      && (Array.isArray(x.mathVisual.objects) || Array.isArray(x.mathVisual.nodes) || x.mathVisual.type === "3d_solid")));
 
   t("checkAnswer exact", checkAnswer(DataAPI.task("n01_p1"), "3"));
   t("checkAnswer comma/dot", checkAnswer(DataAPI.task("n04_p1"), "0,3"));

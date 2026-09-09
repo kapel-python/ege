@@ -203,7 +203,7 @@
   }
 
   function buildCircle(board, registry, obj, t, i) {
-    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: obj.fill ? 0.08 : 0 });
+    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: obj.fill ? 0.08 : 0, dash: obj.dashed ? 2 : 0 });
     let el;
     if (obj.through) {
       const center = resolvePoint(obj.center, registry);
@@ -244,6 +244,9 @@
     const to = resolvePoint(obj.to, registry);
     board.create("nonreflexangle", [from, vertex, to], {
       radius: obj.radius || 0.45, strokeColor: t.muted, fillColor: "none", type: "square",
+      // angle elements auto-name themselves (Greek letters) and show that
+      // label by default -- a right-angle tick mark should never carry one.
+      name: "", withLabel: false,
     });
   }
 
@@ -371,21 +374,71 @@
     return board;
   }
 
-  /* ---------------- 3D solids (scoped: box + triangular prism) ---------------- */
+  /* ---------------- 3D solids (box, prism, regular pyramid, regular tetrahedron) ---------------- */
+
+  const SOLID_SHAPES = ["box", "prism", "pyramid", "tetrahedron"];
+
+  function solidVertices(shape, spec) {
+    if (shape === "box" || shape === "prism") {
+      const dims = spec.dimensions;
+      if (!Array.isArray(dims) || dims.some((d) => !isFiniteNum(d) || d <= 0)) {
+        throw new VisualError("3d_solid требует положительные числовые `dimensions`");
+      }
+      const [lx, ly, lz] = dims;
+      let baseCoords;
+      if (shape === "box") baseCoords = [[0, 0, 0], [lx, 0, 0], [lx, ly, 0], [0, ly, 0]];
+      else baseCoords = [[0, 0, 0], [lx, 0, 0], [0, ly, 0]]; // right-triangle base legs lx, ly
+      const topCoords = baseCoords.map(([x, y]) => [x, y, lz]);
+      return { vertices: baseCoords.concat(topCoords), baseCount: baseCoords.length, apexIndex: -1, extent: Math.max(lx, ly, lz) };
+    }
+    if (shape === "pyramid") {
+      const sides = spec.baseSides;
+      const edge = spec.baseEdge;
+      const height = spec.height;
+      if (!Number.isInteger(sides) || sides < 3) throw new VisualError("pyramid требует целое `baseSides` >= 3");
+      if (!isFiniteNum(edge) || edge <= 0) throw new VisualError("pyramid требует положительное `baseEdge`");
+      if (!isFiniteNum(height) || height <= 0) throw new VisualError("pyramid требует положительное `height`");
+      const R = edge / (2 * Math.sin(Math.PI / sides)); // circumradius of a regular N-gon with this side
+      const base = [];
+      for (let k = 0; k < sides; k++) {
+        const a = (2 * Math.PI * k) / sides;
+        base.push([R * Math.cos(a), R * Math.sin(a), 0]);
+      }
+      const apex = [0, 0, height];
+      return { vertices: base.concat([apex]), baseCount: sides, apexIndex: sides, extent: Math.max(R, height) };
+    }
+    if (shape === "tetrahedron") {
+      const edge = spec.edge;
+      if (!isFiniteNum(edge) || edge <= 0) throw new VisualError("tetrahedron требует положительное `edge`");
+      const base = [[0, 0, 0], [edge, 0, 0], [edge / 2, (edge * Math.sqrt(3)) / 2, 0]];
+      const centroid = [edge / 2, (edge * Math.sqrt(3)) / 6, 0];
+      const apexHeight = edge * Math.sqrt(2 / 3);
+      const apex = [centroid[0], centroid[1], apexHeight];
+      return { vertices: base.concat([apex]), baseCount: 3, apexIndex: 3, extent: Math.max(edge, apexHeight) };
+    }
+    throw new VisualError(`3d_solid поддерживает только ${SOLID_SHAPES.map((s) => `"${s}"`).join(", ")}, получено "${shape}"`);
+  }
+
+  function resolve3dPoint(ref, registry) {
+    if (typeof ref === "string") {
+      const p = registry[ref];
+      if (!p) throw new VisualError(`не найдена 3D-точка "${ref}"`);
+      return p;
+    }
+    if (Array.isArray(ref) && ref.length === 3 && ref.every(isFiniteNum)) return ref;
+    throw new VisualError("некорректная 3D-точка (ожидались координаты [x,y,z] или ссылка на подписанную вершину)");
+  }
 
   function render3D(container, spec, t) {
     const shape = spec.shape;
-    if (shape !== "box" && shape !== "prism") {
-      throw new VisualError(`3d_solid поддерживает только "box" и "prism", получено "${shape}"`);
+    if (SOLID_SHAPES.indexOf(shape) === -1) {
+      throw new VisualError(`3d_solid поддерживает только ${SOLID_SHAPES.map((s) => `"${s}"`).join(", ")}, получено "${shape}"`);
     }
-    const dims = spec.dimensions;
-    if (!Array.isArray(dims) || dims.some((d) => !isFiniteNum(d) || d <= 0)) {
-      throw new VisualError("3d_solid требует положительные числовые `dimensions`");
-    }
+    const { vertices, baseCount, apexIndex, extent: solidExtent } = solidVertices(shape, spec);
     // The view3d cube must actually contain the solid -- sizing it from a
-    // fixed default regardless of `dimensions` is what left large solids
-    // (e.g. a 9x6x5 box) clipped almost entirely out of view.
-    const extent = Math.max(...dims) * 1.15;
+    // fixed default regardless of dimensions/edge/height is what left large
+    // solids clipped almost entirely out of view.
+    const extent = solidExtent * 1.2;
 
     const el = document.createElement("div");
     el.id = "mv-board-" + (++boardCounter);
@@ -397,44 +450,82 @@
     });
     // Parallel (axonometric) projection reads as a normal textbook solid-
     // geometry drawing; JSXGraph's "central" (perspective) default instead
-    // produces vanishing-point distortion that made unequal box edges look
+    // produces vanishing-point distortion that made unequal edges look
     // sheared and confusing.
     const view = board.create("view3d", [[-5, -4], [9.5, 9],
-      [[0, extent], [0, extent], [0, extent]]],
+      [[-extent * 0.6, extent], [-extent * 0.6, extent], [0, extent]]],
       { projection: "parallel", depthOrder: { enabled: true },
         xPlaneRear: { visible: false }, yPlaneRear: { visible: false }, zPlaneRear: { visible: false },
-        xPlaneFront: { visible: false }, yPlaneFront: { visible: false }, zPlaneFront: { visible: false } });
+        xPlaneFront: { visible: false }, yPlaneFront: { visible: false }, zPlaneFront: { visible: false },
+        // The auto-created coordinate axes are a debugging aid, not part of a
+        // textbook solid-geometry drawing -- hide them for a clean figure.
+        xAxis: { visible: false }, yAxis: { visible: false }, zAxis: { visible: false } });
 
     const labels = Array.isArray(spec.labels) ? spec.labels : [];
-    const makePt = (coords, idx) => view.create("point3d", coords, {
-      name: labels[idx] || "", size: 2, strokeColor: t.text, fillColor: t.text,
-      withLabel: !!labels[idx], label: { fontSize: 14, strokeColor: t.text },
-    });
-    const edge = (a, b, dashed) => view.create("line3d", [a, b], {
-      straightFirst: false, straightLast: false, strokeColor: dashed ? t.muted : t.text,
+    const registry = {};
+    const makePt = (coords, idx) => {
+      const p = view.create("point3d", coords, {
+        name: labels[idx] || "", size: 2, strokeColor: t.text, fillColor: t.text,
+        withLabel: !!labels[idx], label: { fontSize: 14, strokeColor: t.text },
+      });
+      if (labels[idx]) registry[labels[idx]] = coords;
+      return p;
+    };
+    const edge = (a, b, dashed, color) => view.create("line3d", [a, b], {
+      straightFirst: false, straightLast: false, strokeColor: dashed ? t.muted : (color || t.text),
       strokeWidth: 2, dash: dashed ? 2 : 0,
     });
 
-    let base, top;
-    if (shape === "box") {
-      const [lx, ly, lz] = dims;
-      const baseCoords = [[0, 0, 0], [lx, 0, 0], [lx, ly, 0], [0, ly, 0]];
-      const topCoords = baseCoords.map(([x, y]) => [x, y, lz]);
-      base = baseCoords.map((c, idx) => makePt(c, idx));
-      top = topCoords.map((c, idx) => makePt(c, idx + 4));
+    const pts = vertices.map((c, idx) => makePt(c, idx));
+    const base = pts.slice(0, baseCount);
+    for (let k = 0; k < base.length; k++) edge(base[k], base[(k + 1) % base.length], false);
+    if (apexIndex >= 0) {
+      const apex = pts[apexIndex];
+      for (let k = 0; k < base.length; k++) edge(base[k], apex, k >= Math.ceil(base.length / 2));
+      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false } });
     } else {
-      const [lx, ly, lz] = dims; // right-triangle base legs lx, ly; prism height lz
-      const baseCoords = [[0, 0, 0], [lx, 0, 0], [0, ly, 0]];
-      const topCoords = baseCoords.map(([x, y]) => [x, y, lz]);
-      base = baseCoords.map((c, idx) => makePt(c, idx));
-      top = topCoords.map((c, idx) => makePt(c, idx + base.length));
+      const top = pts.slice(baseCount);
+      for (let k = 0; k < top.length; k++) {
+        edge(top[k], top[(k + 1) % top.length], false);
+        edge(base[k], top[k], k >= Math.ceil(base.length / 2)); // back verticals dashed, front solid
+      }
+      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false } });
     }
-    for (let k = 0; k < base.length; k++) {
-      edge(base[k], base[(k + 1) % base.length], false);
-      edge(top[k], top[(k + 1) % top.length], false);
-      edge(base[k], top[k], k >= Math.ceil(base.length / 2)); // back verticals dashed, front solid
+
+    // Additional labeled points (midpoints, section-plane vertices, ...)
+    // referenced by extraEdges/sectionPolygon below, or given as raw [x,y,z].
+    if (Array.isArray(spec.extraPoints)) {
+      for (const ep of spec.extraPoints) {
+        if (!Array.isArray(ep.coords) || ep.coords.length !== 3 || !ep.coords.every(isFiniteNum)) {
+          throw new VisualError(`extraPoints: точка "${ep.label || "?"}" имеет некорректные координаты`);
+        }
+        view.create("point3d", ep.coords, {
+          name: ep.label || "", size: 2, strokeColor: t.text, fillColor: t.text,
+          withLabel: !!ep.label, label: { fontSize: 14, strokeColor: t.text, offset: [6, 6] },
+        });
+        if (ep.label) registry[ep.label] = ep.coords;
+      }
     }
-    view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false } });
+    if (Array.isArray(spec.extraEdges)) {
+      for (const ee of spec.extraEdges) {
+        const a = resolve3dPoint(ee.from, registry);
+        const b = resolve3dPoint(ee.to, registry);
+        edge(a, b, !!ee.dashed, ee.color ? (t[ee.color] || ee.color) : t.accent);
+      }
+    }
+    if (spec.sectionPolygon && Array.isArray(spec.sectionPolygon.vertices)) {
+      const verts = spec.sectionPolygon.vertices.map((v) => resolve3dPoint(v, registry));
+      if (verts.length < 3) throw new VisualError("sectionPolygon требует минимум 3 вершины");
+      const fillColor = spec.sectionPolygon.color ? (t[spec.sectionPolygon.color] || spec.sectionPolygon.color) : t.violet;
+      view.create("polygon3d", verts, {
+        fillOpacity: spec.sectionPolygon.opacity != null ? spec.sectionPolygon.opacity : 0.16,
+        fillColor, borders: { strokeColor: fillColor, strokeWidth: 1.6, dash: 0 },
+        // Raw [x,y,z] vertices make polygon3d create its own implicit
+        // point3d for each corner -- left labeled, they duplicate (and
+        // visually collide with) the named extraPoints at the same spot.
+        vertices: { visible: false, withLabel: false },
+      });
+    }
     return board;
   }
 
