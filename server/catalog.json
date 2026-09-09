@@ -194,15 +194,15 @@
    "n13_p1": "text-only",
    "n14_p1": "text-only",
    "n14_p2": "text-only",
-   "n15_p1": "visual-required",
-   "n15_p2": "visual-required",
+   "n15_p1": "visual-provided",
+   "n15_p2": "visual-provided",
    "n16_p1": "text-only",
    "n16_p2": "text-only",
    "n17_p1": "text-only",
    "n17_p2": "text-only",
-   "n18_p1": "visual-required",
-   "n18_p2": "visual-required",
-   "n19_p1": "visual-required",
+   "n18_p1": "visual-provided",
+   "n18_p2": "visual-provided",
+   "n19_p1": "visual-provided",
    "n19_p2": "text-only",
    "n20_p1": "text-only",
    "n20_p2": "text-only"
@@ -252,51 +252,6 @@
      "n12_p2"
     ],
     "note": "Официальный график (fullpage-06.png, с. 12/36) недоступен, а описание в источнике неоднозначно."
-   },
-   {
-    "sourceId": "2027-15-01",
-    "examNumber": "№15",
-    "status": "visual-required",
-    "taskIds": [
-     "n15_p1"
-    ],
-    "note": "Чертёж пирамиды приведён в официальном решении (с. 20/36), но не воспроизведён в проекте."
-   },
-   {
-    "sourceId": "2027-15-02",
-    "examNumber": "№15",
-    "status": "visual-required",
-    "taskIds": [
-     "n15_p2"
-    ],
-    "note": "Чертёж сечения приведён в официальном решении (с. 21–22/36), но не воспроизведён в проекте."
-   },
-   {
-    "sourceId": "2027-18-01",
-    "examNumber": "№18",
-    "status": "visual-required",
-    "taskIds": [
-     "n18_p1"
-    ],
-    "note": "Чертёж приведён в официальном решении (с. 28/36), но не воспроизведён в проекте."
-   },
-   {
-    "sourceId": "2027-18-02",
-    "examNumber": "№18",
-    "status": "visual-required",
-    "taskIds": [
-     "n18_p2"
-    ],
-    "note": "Чертёж приведён в официальном решении (с. 29–30/36), но не воспроизведён в проекте."
-   },
-   {
-    "sourceId": "2027-19-01",
-    "examNumber": "№19",
-    "status": "visual-required",
-    "taskIds": [
-     "n19_p1"
-    ],
-    "note": "Чертёж приведён в официальном решении (с. 31/36), но не воспроизведён в проекте."
    }
   ]
  },
@@ -477,11 +432,69 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 1, пример 1; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n01-p1-quad",
-    "type": "geometry",
-    "alt": "Четырёхугольник ABCD с вписанной окружностью",
-    "caption": "Окружность вписана в ABCD и касается всех четырёх сторон."
+   "mathVisual": {
+    "type": "quadrilateral",
+    "objects": [
+     {
+      "type": "point",
+      "id": "A",
+      "x": 2.412,
+      "y": 4,
+      "label": "A"
+     },
+     {
+      "type": "point",
+      "id": "B",
+      "x": -4.663,
+      "y": 0.267,
+      "label": "B"
+     },
+     {
+      "type": "point",
+      "id": "C",
+      "x": -0.536,
+      "y": -2.556,
+      "label": "C"
+     },
+     {
+      "type": "point",
+      "id": "D",
+      "x": 2.412,
+      "y": -2,
+      "label": "D"
+     },
+     {
+      "type": "polygon",
+      "vertices": [
+       "A",
+       "B",
+       "C",
+       "D"
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "point",
+      "id": "O",
+      "x": 0,
+      "y": 0,
+      "hidden": true
+     },
+     {
+      "type": "circle",
+      "center": "O",
+      "radius": 2.412,
+      "color": "muted",
+      "dashed": true
+     }
+    ],
+    "boundingBox": [
+     -6.79,
+     6.12,
+     4.53,
+     -4.68
+    ],
+    "ratio": 1.048
    }
   },
   {
@@ -506,11 +519,72 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 1, пример 2; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n01-p2-midline",
-    "type": "geometry",
-    "alt": "Треугольник ABC со средней линией DE",
-    "caption": "DE — средняя линия, параллельная AB; D на AC, E на BC."
+   "mathVisual": {
+    "type": "triangle",
+    "objects": [
+     {
+      "type": "point",
+      "id": "A",
+      "x": 0,
+      "y": 0,
+      "label": "A"
+     },
+     {
+      "type": "point",
+      "id": "B",
+      "x": 8,
+      "y": 0,
+      "label": "B"
+     },
+     {
+      "type": "point",
+      "id": "C",
+      "x": 3,
+      "y": 6,
+      "label": "C"
+     },
+     {
+      "type": "polygon",
+      "vertices": [
+       "A",
+       "B",
+       "C"
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "midpoint",
+      "id": "D",
+      "of": [
+       "A",
+       "C"
+      ],
+      "label": "D"
+     },
+     {
+      "type": "midpoint",
+      "id": "E",
+      "of": [
+       "B",
+       "C"
+      ],
+      "label": "E"
+     },
+     {
+      "type": "segment",
+      "from": "D",
+      "to": "E",
+      "color": "violet",
+      "width": 2.6
+     }
+    ],
+    "boundingBox": [
+     -2.4,
+     8.4,
+     10.4,
+     -2.4
+    ],
+    "ratio": 1.185
    }
   },
   {
@@ -535,11 +609,74 @@
    "points": 1,
    "valueType": "целое число (градусы)",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 1, пример 3; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n01-p3-bisector",
-    "type": "geometry",
-    "alt": "Треугольник ABC с биссектрисой AD",
-    "caption": "AD — биссектриса угла A, D лежит на стороне BC."
+   "mathVisual": {
+    "type": "triangle",
+    "objects": [
+     {
+      "type": "point",
+      "id": "A",
+      "x": 1.562,
+      "y": 8.861,
+      "label": "A"
+     },
+     {
+      "type": "point",
+      "id": "B",
+      "x": 0,
+      "y": 0,
+      "label": "B"
+     },
+     {
+      "type": "point",
+      "id": "C",
+      "x": 8,
+      "y": 0,
+      "label": "C"
+     },
+     {
+      "type": "point",
+      "id": "D",
+      "x": 3.608,
+      "y": 0,
+      "label": "D"
+     },
+     {
+      "type": "polygon",
+      "vertices": [
+       "A",
+       "B",
+       "C"
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "segment",
+      "from": "A",
+      "to": "D",
+      "color": "violet"
+     },
+     {
+      "type": "angle_mark",
+      "vertex": "A",
+      "from": "B",
+      "to": "D",
+      "radius": 0.9
+     },
+     {
+      "type": "angle_mark",
+      "vertex": "A",
+      "from": "D",
+      "to": "C",
+      "radius": 0.9
+     }
+    ],
+    "boundingBox": [
+     -2.66,
+     11.52,
+     10.66,
+     -2.66
+    ],
+    "ratio": 0.939
    }
   },
   {
@@ -593,11 +730,52 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 2, пример 2; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n02-p2-vectors",
-    "type": "geometry",
-    "alt": "Координатная схема векторов a и b",
-    "caption": "Иллюстрация: a⃗(2;2), b⃗(2;−2) и их линейная комбинация."
+   "mathVisual": {
+    "type": "vector_diagram",
+    "objects": [
+     {
+      "type": "point",
+      "id": "O",
+      "x": 0,
+      "y": 0,
+      "hidden": true
+     },
+     {
+      "type": "point",
+      "id": "Atip",
+      "x": 2,
+      "y": 2,
+      "hidden": true
+     },
+     {
+      "type": "point",
+      "id": "Btip",
+      "x": 2,
+      "y": -2,
+      "hidden": true
+     },
+     {
+      "type": "vector",
+      "from": "O",
+      "to": "Atip",
+      "color": "accent",
+      "label": "a = (2; 2)"
+     },
+     {
+      "type": "vector",
+      "from": "O",
+      "to": "Btip",
+      "color": "warn",
+      "label": "b = (2; -2)"
+     }
+    ],
+    "boundingBox": [
+     -1,
+     3,
+     5,
+     -3
+    ],
+    "ratio": 1.0
    }
   },
   {
@@ -645,11 +823,88 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 3, пример 1; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n03-p1-prism",
-    "type": "geometry",
-    "alt": "Треугольная призма с сечением по средней линии",
-    "caption": "Плоскость через среднюю линию основания параллельна боковому ребру."
+   "mathVisual": {
+    "type": "3d_solid",
+    "shape": "prism",
+    "dimensions": [
+     8,
+     6,
+     5
+    ],
+    "labels": [
+     "A",
+     "B",
+     "C",
+     "A₁",
+     "B₁",
+     "C₁"
+    ],
+    "extraPoints": [
+     {
+      "label": "M",
+      "coords": [
+       4,
+       0,
+       0
+      ]
+     },
+     {
+      "label": "N",
+      "coords": [
+       0,
+       3,
+       0
+      ]
+     },
+     {
+      "label": "M₁",
+      "coords": [
+       4,
+       0,
+       5
+      ]
+     },
+     {
+      "label": "N₁",
+      "coords": [
+       0,
+       3,
+       5
+      ]
+     }
+    ],
+    "extraEdges": [
+     {
+      "from": "M",
+      "to": "N",
+      "color": "violet"
+     },
+     {
+      "from": "M₁",
+      "to": "N₁",
+      "color": "violet"
+     },
+     {
+      "from": "M",
+      "to": "M₁",
+      "color": "violet"
+     },
+     {
+      "from": "N",
+      "to": "N₁",
+      "color": "violet"
+     }
+    ],
+    "sectionPolygon": {
+     "vertices": [
+      "M",
+      "N",
+      "N₁",
+      "M₁"
+     ],
+     "color": "violet",
+     "opacity": 0.14
+    }
    }
   },
   {
@@ -674,11 +929,86 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 3, пример 2; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n03-p2-box",
-    "type": "geometry",
-    "alt": "Параллелепипед ABCDA1B1C1D1 с отмеченным тетраэдром ABCB1",
-    "caption": "Вершины тетраэдра: A, B, C, B1."
+   "mathVisual": {
+    "type": "3d_solid",
+    "shape": "box",
+    "dimensions": [
+     9,
+     6,
+     5
+    ],
+    "labels": [
+     "A",
+     "B",
+     "C",
+     "D",
+     "A₁",
+     "B₁",
+     "C₁",
+     "D₁"
+    ],
+    "extraEdges": [
+     {
+      "from": [
+       0,
+       0,
+       0
+      ],
+      "to": [
+       9,
+       6,
+       0
+      ],
+      "color": "danger"
+     },
+     {
+      "from": [
+       0,
+       0,
+       0
+      ],
+      "to": [
+       9,
+       0,
+       5
+      ],
+      "color": "danger"
+     },
+     {
+      "from": [
+       9,
+       6,
+       0
+      ],
+      "to": [
+       9,
+       0,
+       5
+      ],
+      "color": "danger"
+     }
+    ],
+    "sectionPolygon": {
+     "vertices": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       9,
+       6,
+       0
+      ],
+      [
+       9,
+       0,
+       5
+      ]
+     ],
+     "color": "danger",
+     "opacity": 0.12
+    }
    }
   },
   {
@@ -1255,11 +1585,37 @@
    "points": 1,
    "valueType": "конечная десятичная дробь",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 12, пример 1; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n12-p1-hyperbola",
-    "type": "graph",
-    "alt": "График гиперболы y = k/x через точку (5;1)",
-    "caption": "f(x) = k/x, ветвь в I четверти проходит через (5; 1)."
+   "mathVisual": {
+    "type": "function_graph",
+    "boundingBox": [
+     -1,
+     7,
+     11,
+     -1
+    ],
+    "objects": [
+     {
+      "type": "function",
+      "id": "f",
+      "kind": "power",
+      "params": {
+       "k": 5
+      },
+      "domain": [
+       1,
+       10
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "point",
+      "x": 5,
+      "y": 1,
+      "label": "(5; 1)",
+      "color": "violet"
+     }
+    ],
+    "ratio": 1.5
    }
   },
   {
@@ -1313,11 +1669,45 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 12, пример 3; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n12-p3-exponential",
-    "type": "graph",
-    "alt": "Убывающий график показательной функции через (0;1) и (-1;4)",
-    "caption": "f(x) = a^x, точки (0; 1) и (−1; 4) заданы условием."
+   "mathVisual": {
+    "type": "function_graph",
+    "boundingBox": [
+     -2,
+     6,
+     5,
+     -1
+    ],
+    "objects": [
+     {
+      "type": "function",
+      "id": "f",
+      "kind": "exponential",
+      "params": {
+       "a": 1,
+       "base": 0.25
+      },
+      "domain": [
+       -1.15,
+       3.5
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "point",
+      "x": 0,
+      "y": 1,
+      "label": "(0; 1)",
+      "color": "violet"
+     },
+     {
+      "type": "point",
+      "x": -1,
+      "y": 4,
+      "label": "(-1; 4)",
+      "color": "violet"
+     }
+    ],
+    "ratio": 1.0
    }
   },
   {
@@ -1414,12 +1804,65 @@
    "points": 3,
    "valueType": "выражение",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 15, пример 1; решение с. 20/36.",
-   "visual": {
-    "required": true,
-    "assetId": null,
-    "note": "Чертёж пирамиды приведён в официальном решении (с. 20/36), но не воспроизведён в проекте."
-   },
-   "selfCheck": true
+   "selfCheck": true,
+   "mathVisual": {
+    "type": "3d_solid",
+    "shape": "pyramid",
+    "baseSides": 6,
+    "baseEdge": 12,
+    "height": 12,
+    "labels": [
+     "A",
+     "B",
+     "C",
+     "D",
+     "E",
+     "F",
+     "S"
+    ],
+    "extraPoints": [
+     {
+      "label": "M",
+      "coords": [
+       6,
+       0,
+       6
+      ]
+     },
+     {
+      "label": "K",
+      "coords": [
+       -6,
+       0,
+       6
+      ]
+     }
+    ],
+    "extraEdges": [
+     {
+      "from": "M",
+      "to": "K",
+      "color": "violet",
+      "dashed": true
+     },
+     {
+      "from": "M",
+      "to": "B",
+      "color": "success"
+     },
+     {
+      "from": "M",
+      "to": "F",
+      "color": "success"
+     },
+     {
+      "from": "B",
+      "to": "F",
+      "color": "success",
+      "dashed": true
+     }
+    ]
+   }
   },
   {
    "id": "n15_p2",
@@ -1443,12 +1886,45 @@
    "points": 3,
    "valueType": "выражение",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 15, пример 2; решение с. 21–22/36.",
-   "visual": {
-    "required": true,
-    "assetId": null,
-    "note": "Чертёж сечения приведён в официальном решении (с. 21–22/36), но не воспроизведён в проекте."
-   },
-   "selfCheck": true
+   "selfCheck": true,
+   "mathVisual": {
+    "type": "3d_solid",
+    "shape": "tetrahedron",
+    "edge": 6,
+    "labels": [
+     "B",
+     "C",
+     "D",
+     "A"
+    ],
+    "extraPoints": [
+     {
+      "label": "M",
+      "coords": [
+       1,
+       0.577,
+       1.633
+      ]
+     },
+     {
+      "label": "K",
+      "coords": [
+       3,
+       4.041,
+       1.633
+      ]
+     }
+    ],
+    "sectionPolygon": {
+     "vertices": [
+      "C",
+      "M",
+      "K"
+     ],
+     "color": "violet",
+     "opacity": 0.18
+    }
+   }
   },
   {
    "id": "n16_p1",
@@ -1569,12 +2045,82 @@
    "points": 3,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 18, пример 1; решение с. 28/36.",
-   "visual": {
-    "required": true,
-    "assetId": null,
-    "note": "Чертёж приведён в официальном решении (с. 28/36), но не воспроизведён в проекте."
-   },
-   "selfCheck": true
+   "selfCheck": true,
+   "mathVisual": {
+    "type": "circle_geometry",
+    "objects": [
+     {
+      "type": "point",
+      "id": "A",
+      "x": -3,
+      "y": 0,
+      "label": "A"
+     },
+     {
+      "type": "point",
+      "id": "B",
+      "x": 0,
+      "y": 4,
+      "label": "B"
+     },
+     {
+      "type": "point",
+      "id": "C",
+      "x": 3,
+      "y": 0,
+      "label": "C"
+     },
+     {
+      "type": "polygon",
+      "vertices": [
+       "A",
+       "B",
+       "C"
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "point",
+      "id": "H",
+      "x": -0.84,
+      "y": 2.88,
+      "label": "H"
+     },
+     {
+      "type": "segment",
+      "from": "C",
+      "to": "H",
+      "color": "violet"
+     },
+     {
+      "type": "right_angle_mark",
+      "at": "H",
+      "from": "C",
+      "to": "A",
+      "radius": 0.4
+     },
+     {
+      "type": "point",
+      "id": "O",
+      "x": 0,
+      "y": 3,
+      "label": "O"
+     },
+     {
+      "type": "circle",
+      "center": "O",
+      "radius": 0.6,
+      "color": "success"
+     }
+    ],
+    "boundingBox": [
+     -4.8,
+     5.8,
+     4.8,
+     -1.8
+    ],
+    "ratio": 1.263
+   }
   },
   {
    "id": "n18_p2",
@@ -1598,12 +2144,86 @@
    "points": 3,
    "valueType": "дробь",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 18, пример 2; решение с. 29–30/36.",
-   "visual": {
-    "required": true,
-    "assetId": null,
-    "note": "Чертёж приведён в официальном решении (с. 29–30/36), но не воспроизведён в проекте."
-   },
-   "selfCheck": true
+   "selfCheck": true,
+   "mathVisual": {
+    "type": "circle_geometry",
+    "boundingBox": [
+     -16,
+     34,
+     16,
+     -3
+    ],
+    "objects": [
+     {
+      "type": "point",
+      "id": "O",
+      "x": 0,
+      "y": 0,
+      "label": "O"
+     },
+     {
+      "type": "circle",
+      "center": "O",
+      "radius": 13,
+      "color": "accent"
+     },
+     {
+      "type": "point",
+      "id": "B",
+      "x": -13,
+      "y": 0,
+      "label": "B"
+     },
+     {
+      "type": "point",
+      "id": "C",
+      "x": 13,
+      "y": 0,
+      "label": "C"
+     },
+     {
+      "type": "point",
+      "id": "A",
+      "x": 9.154,
+      "y": 9.231,
+      "label": "A"
+     },
+     {
+      "type": "point",
+      "id": "N",
+      "x": -13,
+      "y": 31.2,
+      "label": "N"
+     },
+     {
+      "type": "segment",
+      "from": "B",
+      "to": "C",
+      "color": "muted",
+      "dashed": true
+     },
+     {
+      "type": "segment",
+      "from": "N",
+      "to": "A",
+      "color": "violet"
+     },
+     {
+      "type": "segment",
+      "from": "N",
+      "to": "B",
+      "color": "violet"
+     },
+     {
+      "type": "segment",
+      "from": "N",
+      "to": "O",
+      "color": "warn",
+      "dashed": true
+     }
+    ],
+    "ratio": 0.865
+   }
   },
   {
    "id": "n19_p1",
@@ -1627,13 +2247,90 @@
    "points": 4,
    "valueType": "объединение промежутков",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 19, пример 1; решение с. 30–32/36.",
-   "visual": {
-    "required": true,
-    "assetId": null,
-    "note": "Чертёж приведён в официальном решении (с. 31/36), но не воспроизведён в проекте."
-   },
    "selfCheck": true,
-   "note": "ИСПРАВЛЕНО (повторный аудит): в условии отсутствовал знак модуля у y — было «2y−x²+4x=0» (простая парабола, не порождает описанную в решении кривую из двух «хвостов»), стало «2|y|−x²+4x=0». Подтверждено независимо: с модулем все четыре граничных значения параметра (−18, −16, 0, 2) в решении получаются точно. Источник восстановления: внешняя сверка (сборник параметрических задач ФИПИ), т.к. официальный PDF демоверсии в проекте отсутствует."
+   "note": "ИСПРАВЛЕНО (повторный аудит): в условии отсутствовал знак модуля у y — было «2y−x²+4x=0» (простая парабола, не порождает описанную в решении кривую из двух «хвостов»), стало «2|y|−x²+4x=0». Подтверждено независимо: с модулем все четыре граничных значения параметра (−18, −16, 0, 2) в решении получаются точно. Источник восстановления: внешняя сверка (сборник параметрических задач ФИПИ), т.к. официальный PDF демоверсии в проекте отсутствует.",
+   "mathVisual": {
+    "type": "function_graph",
+    "boundingBox": [
+     -3.5,
+     8,
+     7.5,
+     -8
+    ],
+    "objects": [
+     {
+      "type": "function",
+      "kind": "quadratic",
+      "params": {
+       "a": 0.5,
+       "b": -2,
+       "c": 0
+      },
+      "domain": [
+       -2,
+       0
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "function",
+      "kind": "quadratic",
+      "params": {
+       "a": 0.5,
+       "b": -2,
+       "c": 0
+      },
+      "domain": [
+       4,
+       6
+      ],
+      "color": "accent"
+     },
+     {
+      "type": "function",
+      "kind": "quadratic",
+      "params": {
+       "a": -0.5,
+       "b": 2,
+       "c": 0
+      },
+      "domain": [
+       -2,
+       0
+      ],
+      "color": "violet"
+     },
+     {
+      "type": "function",
+      "kind": "quadratic",
+      "params": {
+       "a": -0.5,
+       "b": 2,
+       "c": 0
+      },
+      "domain": [
+       4,
+       6
+      ],
+      "color": "violet"
+     },
+     {
+      "type": "point",
+      "x": 0,
+      "y": 0,
+      "label": "(0; 0)",
+      "color": "muted"
+     },
+     {
+      "type": "point",
+      "x": 4,
+      "y": 0,
+      "label": "(4; 0)",
+      "color": "muted"
+     }
+    ],
+    "ratio": 0.6875
+   }
   },
   {
    "id": "n19_p2",
