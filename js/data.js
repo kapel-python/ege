@@ -20,8 +20,20 @@ const DataAPI = {
   category(id) { return this.categories().find((item) => item.id === id); },
   tasks() { return this.catalog?.tasks || []; },
   task(id) { return this.tasks().find((item) => item.id === id); },
+  // A task whose statement depends on an official figure the project does not
+  // have (visual.required with no assetId, see visualAudit) cannot actually
+  // be solved — it must stay in the catalog for completeness/audits, but it
+  // must never be handed to a student to attempt. This is the one predicate
+  // every selection path below filters through.
+  taskHasMissingVisual(item) { return !!(item && item.visual && item.visual.required && !item.visual.assetId); },
+  practiceTasks() { return this.tasks().filter((item) => !this.taskHasMissingVisual(item)); },
   tasksBySkill(skillId) { return this.tasks().filter((item) => item.skill === skillId); },
-  missions() { return this.catalog?.missions || []; },
+  practiceTasksBySkill(skillId) { return this.practiceTasks().filter((item) => item.skill === skillId); },
+  missions() {
+    return (this.catalog?.missions || []).map((m) => (
+      Array.isArray(m.tasks) ? { ...m, tasks: m.tasks.filter((id) => !this.taskHasMissingVisual(this.task(id))) } : m
+    ));
+  },
   mission(id) { return this.missions().find((item) => item.id === id); },
   lessons() { return this.catalog?.lessons || []; },
   lesson(id) { return this.lessons().find((item) => item.id === id); },

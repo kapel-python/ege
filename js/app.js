@@ -708,7 +708,7 @@ function continueTraining() {
   if (active) return startMission(active.id);
   const worst = weakestSkill();
   const fallbackSkill = worst || DataAPI.skills()[0];
-  const tasks = orderedTasks(DataAPI.tasksBySkill(fallbackSkill ? fallbackSkill.id : "")).slice(0, 6).map((t) => t.id);
+  const tasks = orderedTasks(DataAPI.practiceTasksBySkill(fallbackSkill ? fallbackSkill.id : "")).slice(0, 6).map((t) => t.id);
   Session.start({ title: worst ? `Тренировка: ${worst.name}` : "Тренировка", taskIds: tasks, mode: "quick" });
 }
 
@@ -813,12 +813,12 @@ function openSkillModal(skillId) {
     <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
       ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить" : "Урок"}: «${lessons[0].title}»</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
       ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">Практика: «${mission.title.replace(/^Миссия:\s*/i, "") }» ${icon("arrow")}</button>` : ""}
-      ${DataAPI.tasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Свободная практика</button>` : `<span class="stat-label">Заданий в банке пока нет.</span>`}
+      ${DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Свободная практика</button>` : `<span class="stat-label">Заданий в банке пока нет.</span>`}
     </div>`);
 }
 
 function startSkillPractice(skillId) {
-  const tasks = orderedTasks(DataAPI.tasksBySkill(skillId)).map((t) => t.id);
+  const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId)).map((t) => t.id);
   if (!tasks.length) return;
   Session.start({ title: `Практика: ${DataAPI.skill(skillId).name}`, taskIds: tasks, mode: "quick" });
 }
@@ -872,7 +872,7 @@ function screenTraining(root) {
         const done = !!Store.state.missionsDone[m.id];
         const prog = missionProgress(m);
         const taskCount = Array.isArray(m.tasks) ? m.tasks.length : 0;
-        const freeCount = sk ? DataAPI.tasksBySkill(sk.id).length : 0;
+        const freeCount = sk ? DataAPI.practiceTasksBySkill(sk.id).length : 0;
         const practiceCount = taskCount || freeCount;
         return `
         <div class="card card--hover mission-card ${done ? "mission-card--done" : ""}">
@@ -989,7 +989,7 @@ function renderTask(root) {
 
         ${t.selfCheck ? sessionSelfCheckAreaHtml(t) : `
         <div class="answer-row">
-          <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="decimal">
+          <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
           <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
         </div>
         <div class="session-tools">
@@ -1314,6 +1314,14 @@ function orderedTasks(arr) {
   return arr.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
+/* A handful of answers are algebraic expressions ("2x", "6x-2", "90/v-90/(v+5)"),
+   not numbers. inputmode="decimal" hides letters on a phone's on-screen
+   keyboard, which makes those specific fields unanswerable on mobile — so the
+   numeric keypad is only a hint when the expected answer actually looks numeric. */
+function answerInputMode(answer) {
+  return /[a-zA-Zа-яёА-ЯЁ]/.test(String(answer ?? "")) ? "text" : "decimal";
+}
+
 /* ============================================================
    Interactive lesson engine — data-driven, persistent and reusable
    Supported semantic steps: EXPLANATION, FOCUS, ACTION, VALIDATION,
@@ -1427,7 +1435,7 @@ function lessonActionHtml(step, state) {
       ${fields.map((field) => `
         <label class="lesson-answer-field">
           <span>${esc(field.label || "Ответ")}</span>
-          <input class="answer-input" id="lessonInput-${esc(field.id)}" data-lesson-field="${esc(field.id)}" placeholder="${esc(field.label || "Ответ")}" autocomplete="off" inputmode="decimal" value="${esc(state.draft[field.id] || "")}" ${isDone ? "disabled" : ""}>
+          <input class="answer-input" id="lessonInput-${esc(field.id)}" data-lesson-field="${esc(field.id)}" placeholder="${esc(field.label || "Ответ")}" autocomplete="off" inputmode="${answerInputMode(field.answer)}" value="${esc(state.draft[field.id] || "")}" ${isDone ? "disabled" : ""}>
         </label>`).join("")}
       ${isDone ? "" : `<button class="btn btn--primary lesson-check-btn" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}
     </div>
@@ -1704,7 +1712,7 @@ function reviewQueueForErrors(errors) {
   errors.forEach((e) => { (groups[e.sub] = groups[e.sub] || []).push(e); });
 
   for (const group of Object.values(groups)) {
-    const pool = DataAPI.tasks().filter((t) => t.sub === group[0].sub);
+    const pool = DataAPI.practiceTasks().filter((t) => t.sub === group[0].sub);
     const assigned = [];
     const used = new Set();
     const assign = (index) => {
@@ -1831,7 +1839,7 @@ function startDaily() {
 function startMixedTrial() {
   Session.start({
     title: "Смешанное испытание",
-    taskIds: orderedTasks(DataAPI.tasks()).slice(0, 10).map((t) => t.id),
+    taskIds: orderedTasks(DataAPI.practiceTasks()).slice(0, 10).map((t) => t.id),
     mode: "quick",
   });
 }
@@ -1840,7 +1848,7 @@ function startBoss(bossId) {
   const boss = DataAPI.bosses().find((b) => b.id === bossId);
   if (!boss) return toast("Испытание не найдено", "toast--error", "x");
   if (!bossUnlocked(boss)) return;
-  const pool = DataAPI.tasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
+  const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
   const taskIds = orderedTasks(pool).slice(0, boss.size).map((t) => t.id);
   Session.start({
     title: boss.title,
@@ -1861,8 +1869,13 @@ function screenStats(root) {
   const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
   const skills = DataAPI.skills();
   const byProg = skills.slice().sort((a, b) => skillProgress(b.id) - skillProgress(a.id));
-  const strongest = byProg.slice(0, 3);
-  const weakest = byProg.slice(-3).reverse();
+  // With every skill still at 0% (a brand-new account), sort() ties resolve
+  // to catalog order — that would label skills №1-3 "strong" and №18-20
+  // "needs attention" with zero real signal behind it. Show an honest empty
+  // state instead of a ranking that looks meaningful but isn't.
+  const hasSignal = byProg.some((sk) => skillProgress(sk.id) > 0);
+  const strongest = hasSignal ? byProg.slice(0, 3) : [];
+  const weakest = hasSignal ? byProg.slice(-3).reverse() : [];
 
   root.innerHTML = `
     <div class="page-head">
@@ -1912,11 +1925,13 @@ function screenStats(root) {
       <div>
         <div class="card" style="margin-bottom:16px">
           <div style="font-weight:650;margin-bottom:10px">Сильные темы</div>
-          ${strongest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--success mono">${skillProgress(sk.id)}%</span></div>`).join("")}
+          ${hasSignal ? strongest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--success mono">${skillProgress(sk.id)}%</span></div>`).join("")
+            : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть сильные темы.</div>`}
         </div>
         <div class="card">
           <div style="font-weight:650;margin-bottom:10px">Требуют внимания</div>
-          ${weakest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--danger mono">${skillProgress(sk.id)}%</span></div>`).join("")}
+          ${hasSignal ? weakest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--danger mono">${skillProgress(sk.id)}%</span></div>`).join("")
+            : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть слабые темы.</div>`}
         </div>
       </div>
     </div>`;
@@ -2154,7 +2169,7 @@ const Onboarding = {
         <div class="task-card__text" style="font-size:15px">${mathText(t.text)}</div>
         ${taskVisualHtml(t, "diagnostic")}
         <div class="answer-row">
-          <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="decimal">
+          <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
           <button class="btn btn--primary" onclick="Onboarding.answerDiag()">Ответить</button>
         </div>
         <div id="diagFeedback"></div>

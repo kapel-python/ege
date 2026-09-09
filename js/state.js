@@ -384,7 +384,7 @@ function dailyCandidateScore(task, historyIds, now) {
 function selectDailyTaskIds(date) {
   const daily = DataAPI.daily();
   const target = Math.max(1, Number(daily.target) || 1);
-  const pool = DataAPI.tasks().filter((task) => task && task.id && task.skill);
+  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill);
   if (!pool.length) return [];
   const historyIds = dailyHistory().flatMap((entry) => entry.taskIds || []);
   const now = Date.now();
@@ -719,7 +719,12 @@ function recommendations() {
 function recommendationText() {
   const strong = strongestSkill();
   const weak = weakestSkill();
-  if (!weak || Store.state.totalSolved < 3) {
+  // strongestSkill()/weakestSkill() break ties by catalog order, so with no
+  // real differentiation yet (a fresh account, or several skills still tied
+  // at 0%) they can both resolve to the very same skill — which would read
+  // as "you're doing great at X, but X needs work". Only claim a strong vs.
+  // weak split once progress actually shows one.
+  if (!weak || !strong || Store.state.totalSolved < 3 || skillProgress(strong.id) <= skillProgress(weak.id)) {
     return "Пройди первую тренировку — система начнёт строить персональные рекомендации на основе твоих результатов.";
   }
   return `У тебя хорошо идёт тема «${strong.name}», но «${weak.name}» пока отстаёт. Сфокусируйся на ней — это даст максимальный прирост к прогнозу балла.`;
