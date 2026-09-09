@@ -353,6 +353,16 @@ function hintLevelsFor(item) {
 /* Visual material belongs to the task, so every flow can render it through
    this one helper. Missing or malformed assets stay local to the task card. */
 function taskVisualHtml(task, context = "task") {
+  // MathVisual: a declarative spec (task.mathVisual) is rendered live by
+  // js/mathvisual.js instead of pointing at a static image. This placeholder
+  // just carries the spec; mountMathVisuals() (a MutationObserver set up once
+  // at boot) fills it in once the markup below is actually in the DOM.
+  if (task && task.mathVisual) {
+    const spec = esc(JSON.stringify(task.mathVisual));
+    const ratio = Number(task.mathVisual.ratio);
+    const ratioStyle = Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
+    return '<div class="task-visual mathvisual-host" data-mathvisual="' + spec + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '></div>';
+  }
   const visual = task && task.visual;
   if (!visual) return "";
   if (!visual.assetId) {
@@ -2250,6 +2260,35 @@ function showBootError(error) {
     <button class="btn btn--primary" style="margin-top:20px" onclick="location.reload()">Повторить</button>
   </div>`;
 }
+
+/* MathVisual mount: js/mathvisual.js renders live into a DOM node, so a
+   placeholder <div data-mathvisual="..."> from taskVisualHtml() needs a pass
+   after it actually lands in the DOM (innerHTML assignment doesn't run
+   scripts). One observer on <body> covers every screen/modal without each
+   render*() call site needing its own "mount visuals now" step. */
+const MathVisualMount = {
+  init() {
+    new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) this.mountWithin(node);
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  },
+  mountWithin(node) {
+    if (node.matches && node.matches("[data-mathvisual]")) this.mount(node);
+    if (node.querySelectorAll) node.querySelectorAll("[data-mathvisual]").forEach((el) => this.mount(el));
+  },
+  mount(el) {
+    if (el.dataset.mathvisualMounted || !window.MathVisual) return;
+    el.dataset.mathvisualMounted = "1";
+    let spec = null;
+    try { spec = JSON.parse(el.dataset.mathvisual); } catch (e) { /* handled as an invalid spec below */ }
+    MathVisual.render(el, spec);
+  },
+};
+MathVisualMount.init();
 
 let bootPromise = null;
 
