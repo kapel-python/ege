@@ -535,6 +535,8 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily', ?)", (json.dumps(catalog["daily"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('goals', ?)", (json.dumps(catalog["goals"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks', ?)", (json.dumps(catalog["diagnosticTasks"], ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAssets', ?)", (json.dumps(catalog.get("visualAssets", []), ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAudit', ?)", (json.dumps(catalog.get("visualAudit", {}), ensure_ascii=False),))
     conn.commit()
 
 
@@ -560,7 +562,8 @@ def catalog_payload(conn: sqlite3.Connection) -> dict:
     config = {r["key"]: json.loads(r["value_json"]) for r in conn.execute("SELECT key, value_json FROM app_config")}
     return {"categories": categories, "skills": skills, "tasks": tasks, "lessons": lessons, "missions": missions,
             "bosses": bosses, "achievements": achievements, "daily": config["daily"], "goals": config["goals"],
-            "diagnosticTasks": config["diagnosticTasks"]}
+            "diagnosticTasks": config["diagnosticTasks"], "visualAssets": config.get("visualAssets", []),
+            "visualAudit": config.get("visualAudit", {})}
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
@@ -738,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
             file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
         if ROOT not in file_path.parents and file_path != ROOT: self.send_error(403); return
         if not file_path.is_file(): self.send_error(404); return
-        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json"}.get(file_path.suffix, "application/octet-stream")
+        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(file_path.suffix, "application/octet-stream")
         data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_PUT(self):

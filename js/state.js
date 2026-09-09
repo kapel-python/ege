@@ -309,13 +309,36 @@ function numericAnswer(value) {
 
 function checkAnswer(task, input) {
   if (!task || input == null) return false;
-  const a = normalizeAnswer(input);
-  // Some equation tasks have several valid roots separated by commas.
-  const alternatives = String(task.answer).split(/,\s+/).map(normalizeAnswer);
-  return alternatives.some((b) => {
+  const expected = String(task.answer);
+  // Equation tasks with several roots require the complete set, not one
+  // acceptable alternative. Decimal answers remain single scalar values.
+  const isMultiRoot = task.type === "extended_answer" && expected.includes(", ");
+  const expectedParts = isMultiRoot ? expected.split(/,\s+/) : [expected];
+  const inputParts = expectedParts.length > 1
+    ? String(input).trim().split(/\s*[,;]\s*/)
+    : [String(input)];
+  if (isMultiRoot && inputParts.length !== expectedParts.length) return false;
+
+  const sameValue = (left, right) => {
+    const a = normalizeAnswer(left);
+    const b = normalizeAnswer(right);
     if (a === b) return true;
     const na = numericAnswer(a), nb = numericAnswer(b);
     return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
+  };
+
+  // Order is immaterial for a set of roots. Matching each expected root once
+  // also prevents a repeated value from satisfying two different roots.
+  if (!isMultiRoot) {
+    return sameValue(expected, inputParts[0]) || expectedParts.some((part) => sameValue(part, inputParts[0]));
+  }
+
+  const unused = inputParts.slice();
+  return expectedParts.every((part) => {
+    const index = unused.findIndex((candidate) => sameValue(part, candidate));
+    if (index < 0) return false;
+    unused.splice(index, 1);
+    return true;
   });
 }
 

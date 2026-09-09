@@ -612,6 +612,47 @@ body {
 .math-fallback { font-family: var(--mono); white-space: pre-wrap; font-size: 1.3em; font-weight: 700; }
 .task-card__text sup, .feedback__solution sup, .hint-box sup, .lesson-token sup { font-size: .72em; line-height: 0; }
 
+.task-visual {
+  width: 100%;
+  max-width: 680px;
+  margin: 22px auto 4px;
+  min-width: 0;
+  aspect-ratio: var(--visual-ratio, auto);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.task-visual img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(58vh, 520px);
+  object-fit: contain;
+  margin: 0 auto;
+}
+.task-visual--svg img,
+.task-visual--graph img,
+.task-visual--geometry img { image-rendering: auto; }
+.task-visual__fallback {
+  display: none;
+  padding: 14px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.task-visual--missing,
+.task-visual--broken { min-height: 48px; }
+.task-visual--missing .task-visual__fallback,
+.task-visual--broken .task-visual__fallback { display: block; }
+.task-visual figcaption {
+  padding: 8px 12px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  border-top: 1px solid var(--border);
+}
+
 .answer-row { display: flex; gap: 10px; margin-top: 24px; }
 .answer-input {
   flex: 1;
@@ -1031,6 +1072,8 @@ body {
   .page-title { font-size: 22px; }
   .onboard-card { padding: 26px 20px; }
   .answer-row { flex-direction: column; }
+  .task-visual { max-width: 100%; margin-top: 18px; }
+  .task-visual img { max-height: 48vh; }
   .skill-row { grid-template-columns: 110px 1fr 46px; }
   .skill-row__tip { left: 0; }
 }

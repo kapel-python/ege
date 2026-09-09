@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Векторы a и b</title>
+  <desc id="desc">Координатная схема: a имеет координаты 2, 2; b имеет координаты 2, минус 2.</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+  <rect width="640" height="420" rx="10" fill="#111827"/>
+  <g stroke="#334155" stroke-width="1">
+    <path d="M80 70H570M80 140H570M80 210H570M80 280H570M80 350H570"/>
+    <path d="M80 35V385M150 35V385M220 35V385M290 35V385M360 35V385M430 35V385M500 35V385M570 35V385"/>
+  </g>
+  <g stroke="#cbd5e1" stroke-width="2">
+    <path d="M80 210H585" marker-end="url(#arrow-blue)"/>
+    <path d="M290 385V25" marker-end="url(#arrow-blue)"/>
+  </g>
+  <g fill="#cbd5e1" font-family="Arial, sans-serif" font-size="16">
+    <text x="588" y="205">x</text>
+    <text x="300" y="24">y</text>
+    <text x="299" y="232">0</text>
+    <text x="350" y="232">1</text>
+    <text x="420" y="232">2</text>
+    <text x="275" y="145">1</text>
+    <text x="268" y="75">2</text>
+    <text x="260" y="285">-1</text>
+    <text x="252" y="355">-2</text>
+  </g>
+  <path d="M290 210L430 70" fill="none" stroke="#38bdf8" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M290 210L430 350" fill="none" stroke="#f59e0b" stroke-width="5" marker-end="url(#arrow-amber)"/>
+  <circle cx="290" cy="210" r="5" fill="#f8fafc"/>
+  <circle cx="430" cy="70" r="5" fill="#38bdf8"/>
+  <circle cx="430" cy="350" r="5" fill="#f59e0b"/>
+  <g font-family="Arial, sans-serif" font-size="20" font-weight="700">
+    <text x="442" y="65" fill="#38bdf8">a = (2; 2)</text>
+    <text x="442" y="345" fill="#f59e0b">b = (2; -2)</text>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="15" fill="#94a3b8">
+    <text x="34" y="405">Координатная схема по данным условия</text>
+  </g>
+</svg>

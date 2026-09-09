@@ -350,6 +350,28 @@ function hintLevelsFor(item) {
   ];
 }
 
+/* Visual material belongs to the task, so every flow can render it through
+   this one helper. Missing or malformed assets stay local to the task card. */
+function taskVisualHtml(task, context = "task") {
+  const visual = task && task.visual;
+  if (!visual || !visual.assetId) return "";
+  const asset = DataAPI.visualAsset(visual.assetId);
+  if (!asset || !asset.src) {
+    return '<div class="task-visual task-visual--missing" role="status">Визуальный материал недоступен.</div>';
+  }
+  const type = asset.type || visual.type || "image";
+  const label = asset.alt || visual.alt || "Визуальный материал задания";
+  const ratio = Number(asset.ratio || visual.ratio);
+  const ratioStyle = Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
+  const src = esc(asset.src);
+  const caption = asset.caption || visual.caption;
+  return '<figure class="task-visual task-visual--' + esc(type) + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
+    '<img src="' + src + '" alt="' + esc(label) + '" loading="lazy" decoding="async" onerror="this.closest(\'.task-visual\').classList.add(\'task-visual--broken\');this.style.display=\'none\';">' +
+    '<div class="task-visual__fallback" role="status">Визуальный материал недоступен.</div>' +
+    (caption ? '<figcaption>' + mathText(caption) + '</figcaption>' : "") +
+    '</figure>';
+}
+
 /* ---------------- toast ---------------- */
 
 function toast(html, type = "", iconName = null) {
@@ -941,6 +963,7 @@ function renderTask(root) {
           <span class="chip timer-chip" style="margin-left:auto" id="timerChip">${icon("clock")} 00:00</span>
         </div>
         <div class="task-card__text">${mathText(t.text)}</div>
+        ${taskVisualHtml(t)}
 
         <div id="hintSlot"></div>
 
@@ -1335,7 +1358,7 @@ function screenLesson(root) {
         ${step.title ? `<div class="lesson-title">${esc(step.title)}</div>` : ""}
         <div class="lesson-body">
           <div class="task-card__text lesson-text">${mathText(step.text || "")}</div>
-          ${task ? `<div class="lesson-independent-task"><div class="stat-label">Задание из банка · ${esc(task.num)}</div><div class="task-card__text">${mathText(task.text)}</div></div>` : ""}
+          ${task ? `<div class="lesson-independent-task"><div class="stat-label">Задание из банка · ${esc(task.num)}</div><div class="task-card__text">${mathText(task.text)}</div>${taskVisualHtml(task, "lesson")}</div>` : ""}
         </div>
         ${lessonBoardHtml(step, type)}
         ${interactive ? lessonActionHtml(step, state) : `<div class="lesson-static-note ${toneClass}">${type === "HINT" ? `${icon("bulb")} ` : ""}${type === "FEEDBACK" && step.tone === "success" ? `${icon("check")} ` : ""}${type === "TRANSITION" ? `${icon("arrow")} ` : ""}<span>${type === "HINT" ? "Опора для следующего шага" : type === "FEEDBACK" ? "Результат шага" : "Продолжение"}</span></div>`}
@@ -1473,13 +1496,14 @@ function lessonQuit() {
 function lessonFinish() {
   const L = Lesson.cur;
   const lesson = L.lesson;
+  const independentStep = lesson.steps.find((step) => lessonStepType(step) === "INDEPENDENT_TASK");
+  const independent = independentStep ? (L.stepState[independentStep.id] || {}) : null;
   Lesson.clearPersist(lesson.id);
   const { firstCompletion, totalXp } = completeLesson(lesson, L.xp, {
     wrongAttempts: L.wrongAttempts,
     durationSec: (Date.now() - L.startTs) / 1000,
   });
   Lesson.cur = null;
-  const independent = L.stepState.independent || {};
 
   document.getElementById("screen").innerHTML = `
     <div class="result-wrap">
@@ -1492,7 +1516,7 @@ function lessonFinish() {
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime((Date.now() - L.startTs) / 1000)}</div><div class="stat-label">время</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${L.wrongAttempts}</div><div class="stat-label">осмысленных ошибок</div></div>
       </div>
-      <div class="lesson-result-note ${independent.status === "solved" ? "lesson-result-note--ok" : ""}">${independent.status === "solved" ? `${icon("check")} Самостоятельное задание решено.` : `${icon("bulb")} Самостоятельное задание сохранено для повторения.`}</div>
+      <div class="lesson-result-note ${independent && independent.status === "solved" ? "lesson-result-note--ok" : ""}">${!independent ? `${icon("info")} В этом уроке нет самостоятельного задания.` : independent.status === "solved" ? `${icon("check")} Самостоятельное задание решено.` : `${icon("bulb")} Самостоятельное задание сохранено для повторения.`}</div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${lesson.skill}')">${icon("target")} Закрепить на практике</button>
         <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
@@ -2021,6 +2045,7 @@ const Onboarding = {
       <div class="card task-card" style="margin-top:18px;padding:20px">
         <div class="task-card__tags"><span class="chip chip--accent">${t.num}</span><span class="chip">${esc(t.sub)}</span></div>
         <div class="task-card__text" style="font-size:15px">${mathText(t.text)}</div>
+        ${taskVisualHtml(t, "diagnostic")}
         <div class="answer-row">
           <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="decimal">
           <button class="btn btn--primary" onclick="Onboarding.answerDiag()">Ответить</button>

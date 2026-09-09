@@ -31,6 +31,9 @@ const DataAPI = {
   daily() { return this.catalog?.daily || { skill: "", target: 0, xp: 0, title: "" }; },
   goals() { return this.catalog?.goals || []; },
   diagnosticTasks() { return this.catalog?.diagnosticTasks || []; },
+  visualAssets() { return this.catalog?.visualAssets || []; },
+  visualAudit() { return this.catalog?.visualAudit || {}; },
+  visualAsset(id) { return this.visualAssets().find((asset) => asset.id === id); },
 };
 
 const ApiClient = {
