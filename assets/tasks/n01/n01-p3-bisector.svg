@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Треугольник ABC с биссектрисой AD</title>
+  <desc id="desc">Схема построена по данным углам: ∠C = 54°, ∠BAD = 23° (значит ∠BAC = 46°).</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="640" height="420" rx="10" fill="#111827"/>
+  <path d="M130.0,70.0 L426.9,70.0 L381.1,330.0 Z" fill="none" stroke="#38bdf8" stroke-width="3"/>
+  <path d="M130.0,70.0L406.2,187.3" stroke="#f59e0b" stroke-width="3"/>
+  <circle cx="130.0" cy="70.0" r="4" fill="#f8fafc"/>
+  <text x="120.0" y="54.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">A</text>
+  <circle cx="426.9" cy="70.0" r="4" fill="#f8fafc"/>
+  <text x="440.9" y="76.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">B</text>
+  <circle cx="381.1" cy="330.0" r="4" fill="#f8fafc"/>
+  <text x="375.1" y="314.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">C</text>
+  <circle cx="406.2" cy="187.3" r="4" fill="#f8fafc"/>
+  <text x="398.2" y="209.3" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">D</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация построена точно по углам 54° и 23° из условия</text>
+</svg>
