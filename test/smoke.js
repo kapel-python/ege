@@ -14,9 +14,18 @@ const testBody = async () => {
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
   t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
-  t("у каждого покрытого навыка есть >= 2 задания", DataAPI.skills()
-    .filter((s) => DataAPI.tasksBySkill(s.id).length > 0)
+  t("каталог содержит ровно 49 задач, подтверждённых ege_complete.txt", DataAPI.tasks().length === 49);
+  t("каждый из 20 номеров ЕГЭ представлен", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length > 0));
+  // №6 и №13 официально имеют только один подтверждённый образец в демоверсии
+  // 2027 (см. ege_complete.txt) — это не пробел, а честная граница источника.
+  const singleExampleSkills = new Set(["n06_random_var", "n13_financial"]);
+  t("у каждого навыка (кроме №6 и №13) есть >= 2 задания", DataAPI.skills()
+    .filter((s) => !singleExampleSkills.has(s.id))
     .every((s) => DataAPI.tasksBySkill(s.id).length >= 2));
+  t("развёрнутые задания №14-20 помечены для самопроверки", DataAPI.tasks()
+    .filter((x) => x.type === "extended_answer")
+    .every((x) => x.selfCheck === true));
+  t("каждая задача несёт свой первоисточник", DataAPI.tasks().every((x) => x.sourceId && x.status === "official-demo-2027"));
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
   const visualAssets = DataAPI.visualAssets();
   t("реестр visual assets загружен", visualAssets.length >= 4 && visualAssets.every((asset) => asset.src && asset.type && asset.alt && asset.source && asset.sourceId));
@@ -25,21 +34,29 @@ const testBody = async () => {
     && visualAssets.some((asset) => asset.src.endsWith(".png"))
     && visualAssets.some((asset) => asset.src.endsWith(".jpg")));
   t("аудит визуальных условий сохранён", DataAPI.visualAudit().defaultStatus === "text-only"
-    && DataAPI.visualAudit().taskStatuses.n13_p3 === "visual-optional"
+    && DataAPI.visualAudit().taskStatuses.n02_p2 === "visual-optional"
     && DataAPI.visualAudit().references.some((item) => item.examNumber === "№9" && item.status === "visual-required"));
+  t("заблокированные визуалы (нет официального PDF) честно помечены required без asset", DataAPI.tasks()
+    .filter((x) => x.visual && x.visual.required)
+    .every((x) => !x.visual.assetId && x.visual.note));
   const auditedTaskIds = Object.keys(DataAPI.visualAudit().taskStatuses || {});
   t("статусы визуального аудита покрывают только существующие задания", auditedTaskIds.length === DataAPI.tasks().length
     && auditedTaskIds.every((id) => !!DataAPI.task(id)));
-  t("ссылки заданий на visual assets разрешаются", DataAPI.tasks().every((task) => !task.visual || !!DataAPI.visualAsset(task.visual.assetId)));
+  t("ссылки заданий на visual assets разрешаются (или честно помечены как недоступные)", DataAPI.tasks()
+    .every((task) => !task.visual || (task.visual.assetId ? !!DataAPI.visualAsset(task.visual.assetId) : !!task.visual.required)));
   t("№2 подключает проверенную SVG-схему", DataAPI.task("n02_p2").visual.assetId === "n02-p2-vectors"
     && DataAPI.visualAsset("n02-p2-vectors").taskId === "n02_p2"
     && DataAPI.visualAsset("n02-p2-vectors").type === "geometry");
 
   t("checkAnswer exact", checkAnswer(DataAPI.task("n01_p1"), "3"));
   t("checkAnswer comma/dot", checkAnswer(DataAPI.task("n04_p1"), "0,3"));
-  t("checkAnswer fraction", checkAnswer(DataAPI.task("n13_p2"), "116/2"));
-  t("checkAnswer accepts all multiple roots", checkAnswer(DataAPI.task("n14_p2"), "37π/4, 39π/4"));
-  t("checkAnswer rejects incomplete multiple roots", !checkAnswer(DataAPI.task("n14_p2"), "37π/4"));
+  t("checkAnswer fraction (generic, not tied to a specific catalog task)", checkAnswer({ answer: "3/4" }, "6/8"));
+  // №14-20 переведены на самопроверку (см. ниже) и больше не проверяются
+  // через checkAnswer в интерфейсе; логика множественных корней остаётся
+  // общей функцией и проверяется здесь синтетическим примером.
+  const multiRootExample = { type: "extended_answer", answer: "37π/4, 39π/4" };
+  t("checkAnswer accepts all multiple roots", checkAnswer(multiRootExample, "37π/4, 39π/4"));
+  t("checkAnswer rejects incomplete multiple roots", !checkAnswer(multiRootExample, "37π/4"));
   t("checkAnswer rejects trailing garbage", !checkAnswer(DataAPI.task("n01_p1"), "3abc"));
   t("checkAnswer wrong", !checkAnswer(DataAPI.task("n01_p1"), "6"));
 
