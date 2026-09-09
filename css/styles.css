@@ -653,6 +653,24 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* MathVisual: declarative diagrams rendered live by JSXGraph (or, for
+   probability trees, plain inline SVG). Shares .task-visual's frame
+   (border/background/margin) so it sits identically to a static image;
+   only the board itself needs its own sizing and a theme-aware background
+   (jsxgraph.css hardcodes white, which would look wrong in dark mode). */
+.mathvisual-host.mathvisual-jsx { aspect-ratio: var(--visual-ratio, 1.5); }
+.mathvisual-board {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+}
+.mathvisual-board.jxgbox,
+.mathvisual-jsx .jxgbox { background-color: transparent !important; }
+.mathvisual-jsx .jxgbox svg text,
+.mathvisual-label { font-family: var(--font) !important; }
+.mathvisual-svg { padding: 10px 6px; }
+.mathvisual-svg svg text { font-family: var(--font); }
+
 .answer-row { display: flex; gap: 10px; margin-top: 24px; }
 .answer-input {
   flex: 1;

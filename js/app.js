@@ -353,8 +353,27 @@ function hintLevelsFor(item) {
 /* Visual material belongs to the task, so every flow can render it through
    this one helper. Missing or malformed assets stay local to the task card. */
 function taskVisualHtml(task, context = "task") {
+  // MathVisual: a declarative spec (task.mathVisual) is rendered live by
+  // js/mathvisual.js instead of pointing at a static image. This placeholder
+  // just carries the spec; mountMathVisuals() (a MutationObserver set up once
+  // at boot) fills it in once the markup below is actually in the DOM.
+  if (task && task.mathVisual) {
+    const spec = esc(JSON.stringify(task.mathVisual));
+    const ratio = Number(task.mathVisual.ratio);
+    const ratioStyle = Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
+    return '<div class="task-visual mathvisual-host" data-mathvisual="' + spec + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '></div>';
+  }
   const visual = task && task.visual;
-  if (!visual || !visual.assetId) return "";
+  if (!visual) return "";
+  if (!visual.assetId) {
+    // Источник прямо требует рисунок ("Рисунок: ОБЯЗАТЕЛЕН"), но официальный
+    // чертёж недоступен в этой сборке — честно показываем это, а не молчим.
+    if (!visual.required) return "";
+    return '<div class="task-visual task-visual--missing" role="status">' +
+      '<div class="task-visual__fallback" style="display:block">' +
+      'Официальный рисунок этого задания недоступен в этой сборке' +
+      (visual.note ? ': ' + esc(visual.note) : '.') + '</div></div>';
+  }
   const asset = DataAPI.visualAsset(visual.assetId);
   if (!asset || !asset.src) {
     return '<div class="task-visual task-visual--missing" role="status">Визуальный материал недоступен.</div>';
@@ -945,6 +964,7 @@ function renderTask(root) {
   const progressDone = S.offset + S.idx;
   S.hintLevel = 0;
   S.attempts = 0;
+  S.selfHintLevel = 0;
 
   root.innerHTML = `
     <div class="session-wrap">
@@ -967,6 +987,7 @@ function renderTask(root) {
 
         <div id="hintSlot"></div>
 
+        ${t.selfCheck ? sessionSelfCheckAreaHtml(t) : `
         <div class="answer-row">
           <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="decimal">
           <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
@@ -975,14 +996,21 @@ function renderTask(root) {
           <span id="hintControl"></span>
           <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
           <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">правильный ответ: +${12 + t.diff * 6} XP</span>
-        </div>
+        </div>`}
         <div id="feedbackSlot"></div>
       </div>
     </div>`;
 
-  const input = document.getElementById("answerInput");
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") sessionSubmit(); });
-  renderSessionHintControl();
+  if (t.selfCheck) {
+    // Развёрнутые задания (№14–20) не проверяются автоматически: единый
+    // текстовый ответ не отражает полноту доказательства и записи решения.
+    // Ученик решает на бумаге, сверяется с официальным решением и честно
+    // отмечает результат сам — так же, как реально проверяют часть 2 ЕГЭ.
+  } else {
+    const input = document.getElementById("answerInput");
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") sessionSubmit(); });
+    renderSessionHintControl();
+  }
 
   Session.timerInt = setInterval(() => {
     const chip = document.getElementById("timerChip");
@@ -990,12 +1018,90 @@ function renderTask(root) {
   }, 1000);
 }
 
+/* ---------------- задания части 2: самопроверка вместо авто-проверки ---------------- */
+
+function sessionSelfCheckAreaHtml() {
+  return `
+    <div class="session-tools">
+      <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="sessionSelfHint()">${icon("bulb")} Подсказка 1</button>
+      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn--primary" id="selfRevealBtn" onclick="sessionSelfReveal()">Сверить с решением</button>
+    </div>`;
+}
+
+function sessionSelfHint() {
+  const S = Session.cur;
+  const t = Session.task();
+  if (S.answered) return;
+  if (S.selfHintLevel >= 3) return;
+  S.selfHintLevel++;
+  const slot = document.getElementById("hintSlot");
+  const levels = hintLevelsFor(t);
+  slot.innerHTML = levels.slice(0, S.selfHintLevel).map((h, i) => `
+    <div class="hint-box ${i > 0 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${i + 1}.</b> ${mathText(h)}</div>`).join("");
+  const btn = document.getElementById("selfHintBtn");
+  if (btn) {
+    if (S.selfHintLevel >= 3) { btn.disabled = true; btn.textContent = "Все подсказки открыты"; }
+    else btn.innerHTML = `${icon("bulb")} Подсказка ${S.selfHintLevel + 1}`;
+  }
+}
+
+function sessionSelfReveal() {
+  const S = Session.cur;
+  const t = Session.task();
+  if (S.answered) return;
+  const btn = document.getElementById("selfRevealBtn");
+  if (btn) btn.remove();
+  document.getElementById("feedbackSlot").innerHTML = `
+    <div class="feedback">
+      <div class="feedback__solution"><b>Официальное решение.</b>\n${mathText(t.solution)}</div>
+      <div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${mathText(t.answer)}</div>
+      <div style="margin-top:14px;color:var(--text-2);font-size:13px">Сравни со своим решением на бумаге и честно отметь результат — это и есть проверка части 2.</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn--danger-soft" onclick="sessionSelfResult(false)">Не получилось</button>
+        <button class="btn btn--primary" onclick="sessionSelfResult(true)">Решил(а) верно</button>
+      </div>
+    </div>`;
+}
+
+function sessionSelfResult(correct) {
+  const S = Session.cur;
+  const t = Session.task();
+  if (S.answered) return;
+  const seconds = (Date.now() - S.taskStartTs) / 1000;
+  const hintLevel = S.selfHintLevel || 0;
+  const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
+  const xp = recordAnswer(t, correct, hintLevel, seconds, closesTaskId);
+  S.gainedXp += xp;
+  S.results.push({ taskId: t.id, correct, skipped: false, seconds, hint: hintLevel });
+  S.answered = true;
+  Session.stopTimer();
+
+  document.getElementById("feedbackSlot").innerHTML = `
+    <div class="feedback ${correct ? "feedback--ok" : "feedback--bad"}">
+      <div class="feedback__head">
+        ${icon(correct ? "check" : "x")} ${correct ? "Отмечено как решено" : "Отмечено для повторения"}
+        ${correct ? `<span class="feedback__xp">+${xp} XP</span>` : ""}
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn--primary" onclick="sessionNext()">${S.idx + 1 < S.taskIds.length ? "Далее →" : "Завершить"}</button>
+      </div>
+    </div>`;
+  renderTopbar();
+}
+
+/* Уровни помощи считаются от ошибок, а не от уже открытых подсказок:
+   0 ошибок — доступна подсказка 1; 1-я ошибка открывает подсказку 2;
+   2-я — подсказку 3; 3-я — «Показать решение». */
 function sessionAvailableHelp() {
   const S = Session.cur;
-  if (!S || S.attempts <= S.hintLevel) return null;
-  return S.hintLevel < 3
-    ? { type: "hint", level: S.hintLevel + 1 }
-    : { type: "solution" };
+  if (!S) return null;
+  const maxLevel = Math.min(3, S.attempts + 1);
+  if (S.hintLevel < maxLevel) return { type: "hint", level: S.hintLevel + 1 };
+  return S.attempts >= 3 ? { type: "solution" } : null;
 }
 
 function renderSessionHintControl() {
@@ -1280,11 +1386,12 @@ function lessonBoardHtml(step, type) {
   </div>`;
 }
 
+/* Та же лестница, что и в sessionAvailableHelp: 0 ошибок — подсказка 1
+   доступна сразу, дальше каждая ошибка открывает следующий уровень. */
 function lessonAvailableHelp(state) {
-  if (state.attempts <= state.hints) return null;
-  return state.hints < 3
-    ? { type: "hint", level: state.hints + 1 }
-    : { type: "solution" };
+  const maxLevel = Math.min(3, state.attempts + 1);
+  if (state.hints < maxLevel) return { type: "hint", level: state.hints + 1 };
+  return state.attempts >= 3 ? { type: "solution" } : null;
 }
 
 function lessonHintsHtml(step, state) {
@@ -2153,6 +2260,35 @@ function showBootError(error) {
     <button class="btn btn--primary" style="margin-top:20px" onclick="location.reload()">Повторить</button>
   </div>`;
 }
+
+/* MathVisual mount: js/mathvisual.js renders live into a DOM node, so a
+   placeholder <div data-mathvisual="..."> from taskVisualHtml() needs a pass
+   after it actually lands in the DOM (innerHTML assignment doesn't run
+   scripts). One observer on <body> covers every screen/modal without each
+   render*() call site needing its own "mount visuals now" step. */
+const MathVisualMount = {
+  init() {
+    new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) this.mountWithin(node);
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  },
+  mountWithin(node) {
+    if (node.matches && node.matches("[data-mathvisual]")) this.mount(node);
+    if (node.querySelectorAll) node.querySelectorAll("[data-mathvisual]").forEach((el) => this.mount(el));
+  },
+  mount(el) {
+    if (el.dataset.mathvisualMounted || !window.MathVisual) return;
+    el.dataset.mathvisualMounted = "1";
+    let spec = null;
+    try { spec = JSON.parse(el.dataset.mathvisual); } catch (e) { /* handled as an invalid spec below */ }
+    MathVisual.render(el, spec);
+  },
+};
+MathVisualMount.init();
 
 let bootPromise = null;
 

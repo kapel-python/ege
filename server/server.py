@@ -741,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
             file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
         if ROOT not in file_path.parents and file_path != ROOT: self.send_error(403); return
         if not file_path.is_file(): self.send_error(404); return
-        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(file_path.suffix, "application/octet-stream")
+        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf"}.get(file_path.suffix, "application/octet-stream")
         data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_PUT(self):
