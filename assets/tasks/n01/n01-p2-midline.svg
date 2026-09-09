@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Треугольник ABC со средней линией DE</title>
+  <desc id="desc">Схема: D — середина AC, E — середина BC, DE параллельна AB.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="640" height="420" rx="10" fill="#111827"/>
+  <path d="M120.0,340.0 L520.0,340.0 L330.0,70.0 Z" fill="none" stroke="#38bdf8" stroke-width="3"/>
+  <path d="M225.0,205.0L425.0,205.0" stroke="#f59e0b" stroke-width="3"/>
+  <circle cx="120.0" cy="340.0" r="4" fill="#f8fafc"/>
+  <text x="94.0" y="362.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">A</text>
+  <circle cx="520.0" cy="340.0" r="4" fill="#f8fafc"/>
+  <text x="534.0" y="362.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">B</text>
+  <circle cx="330.0" cy="70.0" r="4" fill="#f8fafc"/>
+  <text x="324.0" y="52.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">C</text>
+  <circle cx="225.0" cy="205.0" r="4" fill="#f8fafc"/>
+  <text x="195.0" y="209.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">D</text>
+  <circle cx="425.0" cy="205.0" r="4" fill="#f8fafc"/>
+  <text x="439.0" y="209.0" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">E</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация: DE — средняя линия, DE ∥ AB</text>
+</svg>
