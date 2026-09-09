@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MathVisual — демонстрационные визуалы</title>
+<link rel="stylesheet" href="../vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../vendor/jsxgraph/jsxgraph.css">
+<link rel="stylesheet" href="../css/styles.css">
+<style>
+  body { padding: 24px; max-width: 1000px; margin: 0 auto; }
+  .demo-item { margin-bottom: 40px; }
+  .demo-item h2 { font-size: 16px; margin-bottom: 4px; }
+  .demo-item .id { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .demo-item .task-visual { max-width: 480px; }
+</style>
+</head>
+<body>
+<h1>MathVisual — 9 демонстрационных визуалов</h1>
+<p style="color:var(--muted)">Каждый визуал строится из JSON-описания движком <code>js/mathvisual.js</code>, без отдельного JS-файла на задачу.</p>
+<div id="demos"></div>
+
+<script src="../vendor/jsxgraph/jsxgraphcore.js"></script>
+<script src="../js/mathvisual.js"></script>
+<script>
+const DEMOS = [
+  {
+    id: "demo-1-coordinate-points",
+    title: "1. Координатные точки + отрезок",
+    spec: {
+      type: "coordinate_geometry",
+      objects: [
+        { type: "point", id: "A", x: 2, y: 2, label: "A" },
+        { type: "point", id: "B", x: -2, y: 2, label: "B" },
+        { type: "segment", from: "A", to: "B" },
+      ],
+    },
+  },
+  {
+    id: "demo-2-vector",
+    title: "2. Вектор",
+    spec: {
+      type: "vector_diagram",
+      objects: [
+        { type: "point", id: "O", x: 0, y: 0, label: "O", hidden: true },
+        { type: "point", id: "V", x: 3, y: 2, label: "", hidden: true },
+        { type: "vector", from: "O", to: "V", label: "a⃗(3; 2)" },
+      ],
+    },
+  },
+  {
+    id: "demo-3-function-graph",
+    title: "3. График функции (квадратичная)",
+    spec: {
+      type: "function_graph",
+      boundingBox: [-2, 10, 6, -6],
+      objects: [
+        { type: "function", id: "f", kind: "quadratic", params: { a: 1, b: -4, c: 0 }, domain: [-1.5, 5.5] },
+        { type: "marked_point", on: "f", x: 4, label: "(4; 0)" },
+      ],
+    },
+  },
+  {
+    id: "demo-4-derivative-graph",
+    title: "4. График производной / касательная",
+    spec: {
+      type: "derivative_graph",
+      boundingBox: [-1, 6, 4, -1],
+      objects: [
+        { type: "function", id: "f", kind: "quadratic", params: { a: 1, b: 0, c: 0 }, domain: [-0.5, 3] },
+        { type: "marked_point", id: "P", on: "f", x: 1.5, label: "x0" },
+        { type: "tangent", on: "f", x: 1.5 },
+      ],
+    },
+  },
+  {
+    id: "demo-5-triangle-altitude-median",
+    title: "5. Треугольник с высотой и медианой",
+    spec: {
+      type: "triangle",
+      boundingBox: [-1, 6, 8, -1],
+      objects: [
+        { type: "point", id: "A", x: 0, y: 0, label: "A" },
+        { type: "point", id: "B", x: 6, y: 0, label: "B" },
+        { type: "point", id: "C", x: 2, y: 5, label: "C" },
+        { type: "polygon", vertices: ["A", "B", "C"], color: "accent" },
+        { type: "perpendicular_foot", id: "H", from: "C", to: ["A", "B"], label: "H" },
+        { type: "altitude", from: "C", to: "H", color: "danger", dashed: true },
+        { type: "midpoint", id: "M", of: ["A", "B"], label: "M" },
+        { type: "median", from: "C", to: "M", color: "violet", dashed: true },
+        { type: "right_angle_mark", at: "H", from: "C", to: "B" },
+      ],
+    },
+  },
+  {
+    id: "demo-6-circle-chord-tangent",
+    title: "6. Окружность с хордой и касательной",
+    spec: {
+      type: "circle_geometry",
+      boundingBox: [-5, 5, 5, -5],
+      objects: [
+        { type: "point", id: "O", x: 0, y: 0, label: "O", hidden: true },
+        { type: "circle", center: "O", radius: 3 },
+        { type: "point", id: "A", x: -3, y: 0, label: "A" },
+        { type: "point", id: "B", x: 1.5, y: 2.598, label: "B" },
+        { type: "segment", from: "A", to: "B", color: "accent" },
+        { type: "point", id: "T", x: 3, y: 0, label: "T" },
+        { type: "line", from: "T", to: [3, 4], color: "danger", dashed: true },
+      ],
+    },
+  },
+  {
+    id: "demo-7-quadrilateral",
+    title: "7. Четырёхугольник (трапеция)",
+    spec: {
+      type: "quadrilateral",
+      boundingBox: [-1, 5, 8, -1],
+      objects: [
+        { type: "point", id: "A", x: 0, y: 0, label: "A" },
+        { type: "point", id: "B", x: 6, y: 0, label: "B" },
+        { type: "point", id: "C", x: 4, y: 3, label: "C" },
+        { type: "point", id: "D", x: 1, y: 3, label: "D" },
+        { type: "polygon", vertices: ["A", "B", "C", "D"], color: "accent" },
+      ],
+    },
+  },
+  {
+    id: "demo-8-3d-solid",
+    title: "8. 3D-фигура (параллелепипед)",
+    spec: {
+      type: "3d_solid",
+      shape: "box",
+      dimensions: [9, 6, 5],
+      labels: ["A", "B", "C", "D", "A1", "B1", "C1", "D1"],
+    },
+  },
+  {
+    id: "demo-9-probability-tree",
+    title: "9. Дерево вероятностей",
+    spec: {
+      type: "probability_diagram",
+      nodes: [
+        { id: "root", label: "start" },
+        { id: "defective", parent: "root", label: "брак 0,2", probability: "0,2" },
+        { id: "ok", parent: "root", label: "исправна 0,8", probability: "0,8" },
+        { id: "def-rej", parent: "defective", label: "забракован", probability: "0,95" },
+        { id: "def-pass", parent: "defective", label: "пропущен", probability: "0,05" },
+        { id: "ok-rej", parent: "ok", label: "забракован", probability: "0,05" },
+        { id: "ok-pass", parent: "ok", label: "пропущен", probability: "0,95" },
+      ],
+    },
+  },
+];
+
+const root = document.getElementById("demos");
+const results = [];
+for (const demo of DEMOS) {
+  const wrap = document.createElement("div");
+  wrap.className = "demo-item";
+  wrap.innerHTML = `<h2>${demo.title}</h2><div class="id">${demo.id} · type: ${demo.spec.type}</div>`;
+  const host = document.createElement("div");
+  host.id = demo.id;
+  wrap.appendChild(host);
+  root.appendChild(wrap);
+  const result = MathVisual.render(host, demo.spec);
+  results.push({ id: demo.id, ...result });
+}
+window.__mathVisualDemoResults = results;
+</script>
+</body>
+</html>
