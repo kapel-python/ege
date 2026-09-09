@@ -282,6 +282,19 @@ body {
 .progress--success .progress__fill { background: linear-gradient(90deg, #2bb886, var(--success)); }
 .progress--warn .progress__fill { background: linear-gradient(90deg, #e0a545, var(--warn)); }
 .progress--thin { height: 4px; }
+.progress--gauge { position: relative; }
+.progress--gauge .progress__fill {
+  background: linear-gradient(90deg, var(--danger), var(--warn) 55%, var(--success));
+  background-size: 260% 100%;
+}
+.progress--gauge .progress__fill::after { display: none; }
+.progress--gauge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(90deg, var(--bg) 0 1px, transparent 1px 20%);
+}
 
 .stars { color: var(--warn); letter-spacing: 2px; font-size: 12px; }
 .stars .off { color: var(--surface-3); }

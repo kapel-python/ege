@@ -735,7 +735,7 @@ function screenPath(root) {
                   <span class="chip ${statusChipClass(status)}" style="font-size:10px">${statusLabel(status)}</span>
                 </div>
                 <div class="tree-node__meta">
-                  <div class="tree-node__bar">${progressBar(skillProgress(sk.id), "progress--thin")}</div>
+                  <div class="tree-node__bar">${progressBar(skillProgress(sk.id), "progress--thin progress--gauge")}</div>
                   <span class="mono">${skillProgress(sk.id)}%</span>
                   <span>· ${sk.ege}</span>
                 </div>
