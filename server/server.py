@@ -751,6 +751,110 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         if item.get("taskId") in valid_task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
+def _daily_xp(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT value_json FROM app_config WHERE key='daily'").fetchone()
+    if not row: return 0
+    return int(json.loads(row["value_json"]).get("xp", 0))
+
+
+def derive_stats(conn: sqlite3.Connection, state: dict) -> dict:
+    """Recompute the XP-bearing counters from the submitted, catalog-backed
+    event data instead of trusting the plain numbers the client sends for
+    them (xp/totalSolved/... are otherwise ordinary JSON fields in the PUT
+    body — nothing else in the payload constrains them, so they can be set
+    to anything, e.g. from the browser console). Mirrors the client's own
+    xp formula (see recordAnswer in js/state.js) but only pays out "answer"
+    xp once per task, so resubmitting an already-solved task for XP has no
+    effect here even if the client-side guard is bypassed."""
+    tasks = {r["id"]: r["difficulty"] for r in conn.execute("SELECT id, difficulty FROM tasks")}
+    lessons_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM lessons")}
+    missions_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM missions")}
+    bosses_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM bosses")}
+    daily_xp = _daily_xp(conn)
+
+    attempts = sorted(
+        (a for a in (state.get("taskAttempts") or []) if a.get("taskId") in tasks),
+        key=lambda a: a.get("ts") or 0,
+    )
+
+    xp = 0
+    total_solved = 0
+    total_correct = 0
+    hints_used = 0
+    correct_series = 0
+    best_series = 0
+    solved_once = set()  # первая верная попытка по задаче приносит XP, повторные — нет
+
+    for a in attempts:
+        total_solved += 1
+        hint_level = int(a.get("hintLevel") or 0)
+        if hint_level > 0:
+            hints_used += 1
+        is_correct = bool(a.get("correct")) and hint_level < 3
+        if is_correct:
+            total_correct += 1
+            correct_series += 1
+            best_series = max(best_series, correct_series)
+            task_id = a.get("taskId")
+            if task_id not in solved_once:
+                diff = tasks.get(task_id, 0)
+                xp += (5 + diff * 2) if hint_level >= 2 else (8 if hint_level == 1 else 12) + diff * 6
+                solved_once.add(task_id)
+        else:
+            correct_series = 0
+
+    errors_resolved = 0
+    for e in state.get("errors") or []:
+        if e.get("resolved") and e.get("taskId") in tasks:
+            errors_resolved += 1
+            xp += 15
+
+    dates_done = {
+        entry.get("date")
+        for entry in (list(state.get("dailyHistory") or []) + [state.get("daily") or {}])
+        if entry.get("done") and entry.get("date")
+    }
+    xp += daily_xp * len(dates_done)
+
+    lessons_counted = set()
+    for item in state.get("lessonAttempts") or []:
+        lesson_id = item.get("lessonId")
+        if item.get("firstCompletion") and lesson_id in lessons_xp and lesson_id not in lessons_counted:
+            xp += lessons_xp[lesson_id]
+            lessons_counted.add(lesson_id)
+
+    for mission_id in (state.get("missionsDone") or {}).keys():
+        xp += missions_xp.get(mission_id, 0)
+
+    for boss_id in set(state.get("bossesDefeated") or []):
+        xp += bosses_xp.get(boss_id, 0)
+
+    return {
+        "xp": xp, "totalSolved": total_solved, "totalCorrect": total_correct,
+        "hintsUsed": hints_used, "correctSeries": correct_series, "bestSeries": best_series,
+        "errorsResolved": errors_resolved,
+    }
+
+
+def apply_derived_stats(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
+    """Overwrite the client-sent xp/totals in `state` with server-derived ones.
+    Cumulative counters are clamped to never drop below what is already
+    persisted, so a client that only synced a recent, size-capped slice of
+    its full history (taskAttempts is capped at 5000 entries client-side)
+    never regresses a long-time user's real, previously-saved totals."""
+    derived = derive_stats(conn, state)
+    prev = conn.execute(
+        "SELECT xp, total_solved, total_correct, hints_used, best_series, errors_resolved FROM user_stats WHERE user_id=?",
+        (user_id,),
+    ).fetchone()
+    for key, col in (
+        ("xp", "xp"), ("totalSolved", "total_solved"), ("totalCorrect", "total_correct"),
+        ("hintsUsed", "hints_used"), ("bestSeries", "best_series"), ("errorsResolved", "errors_resolved"),
+    ):
+        state[key] = max(derived[key], prev[col] if prev else 0)
+    state["correctSeries"] = derived["correctSeries"]
+
+
 def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     if not isinstance(state, dict): raise ValueError("state must be an object")
     name = state.get("name")
@@ -812,7 +916,10 @@ class Handler(BaseHTTPRequestHandler):
             user_id, token = user_for(conn, self)
             payload = self.read_json()
             validate_state(conn, payload)
-            conn.execute("BEGIN"); write_state(conn, user_id, payload); conn.commit()
+            conn.execute("BEGIN")
+            apply_derived_stats(conn, user_id, payload)
+            write_state(conn, user_id, payload)
+            conn.commit()
             self.send_json({"ok": True}, token=token)
         except (ValueError, KeyError, sqlite3.Error, json.JSONDecodeError) as exc:
             conn.rollback(); self.send_json({"error": f"State was not saved: {exc}"}, 400)

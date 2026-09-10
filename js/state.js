@@ -515,6 +515,11 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
   if (hintLevel >= 3) correct = false; // посмотрел ответ = не решил сам
   touchStreak();
 
+  // Задание уже решалось верно раньше: за XP «решение задания» больше не
+  // платим (иначе один и тот же ответ можно сдавать повторно бесконечно),
+  // но если это закрывает открытую ошибку — тот бонус отдельный (см. ниже).
+  const alreadyMastered = correct && s.taskAttempts.some((a) => a.taskId === task.id && a.correct);
+
   s.taskAttempts.unshift({
     taskId: task.id,
     skill: task.skill,
@@ -547,7 +552,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     act.correct++;
     s.correctSeries++;
     s.bestSeries = Math.max(s.bestSeries, s.correctSeries);
-    xp = hintLevel >= 2 ? 5 + task.diff * 2 : (hintLevel === 1 ? 8 : 12) + task.diff * 6;
+    xp = alreadyMastered ? 0 : (hintLevel >= 2 ? 5 + task.diff * 2 : (hintLevel === 1 ? 8 : 12) + task.diff * 6);
     st.progress = Math.min(100, st.progress + (st.progress < 60 ? 5 : 3));
 
     /* закрытие ошибки: по этому заданию или по исходному заданию,
