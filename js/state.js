@@ -230,11 +230,48 @@ function skillStatus(skill) {
   return "in-progress";
 }
 
-function weakestSkill() {
+function openErrorCount(skillId) {
+  return Store.state.errors.reduce((n, e) => n + (!e.resolved && e.skill === skillId ? 1 : 0), 0);
+}
+
+/* Задания в taskAttempts лежат в порядке unshift (новые первыми), поэтому
+   цикл можно остановить на первой же записи старше окна. */
+function recentlyPracticedSkillIds(withinMs) {
+  const cutoff = Date.now() - withinMs;
+  const ids = new Set();
+  for (const a of Store.state.taskAttempts) {
+    if (Number(a.ts || 0) < cutoff) break;
+    ids.add(a.skill);
+  }
+  return ids;
+}
+
+/* opts.avoidRecentMs: не выбирать навык, который активно тренировали только
+   что — иначе «слабый навык» может зациклиться на бессмысленном повторе
+   темы, которую ученик и так только что прорешал (см. recommendations()).
+   Если после исключения недавних навыков не осталось кандидатов (например,
+   ученик только что прошёл смешанное испытание по всем темам), возвращаемся
+   к полному списку, а не отдаём null. */
+function weakestSkill(opts = {}) {
+  const skills = DataAPI.skills();
+  if (!skills.length) return null;
+  const recent = opts.avoidRecentMs ? recentlyPracticedSkillIds(opts.avoidRecentMs) : null;
+  const pool = recent ? skills.filter((s) => !recent.has(s.id)) : skills;
+  const candidates = pool.length ? pool : skills;
   let worst = null;
-  for (const s of DataAPI.skills()) {
-    const p = skillProgress(s.id);
-    if (!worst || p < skillProgress(worst.id)) worst = s;
+  for (const s of candidates) {
+    if (!worst) { worst = s; continue; }
+    const a = skillProgress(s.id), b = skillProgress(worst.id);
+    if (a < b) { worst = s; continue; }
+    if (a > b) continue;
+    // Равный прогресс: предпочитаем навык, по которому уже есть реальный
+    // сигнал (ошибки, попытки), а не просто первый в каталоге — иначе на
+    // старте (всё 0%) «слабейшим» всегда становится случайный первый навык.
+    const aErr = openErrorCount(s.id), bErr = openErrorCount(worst.id);
+    if (aErr !== bErr) { if (aErr > bErr) worst = s; continue; }
+    const aSolved = (Store.state.skillStats[s.id] || {}).solved || 0;
+    const bSolved = (Store.state.skillStats[worst.id] || {}).solved || 0;
+    if (aSolved > bSolved) worst = s;
   }
   return worst;
 }
@@ -244,6 +281,20 @@ function strongestSkill() {
   for (const s of DataAPI.skills()) {
     const p = skillProgress(s.id);
     if (!best || p > skillProgress(best.id)) best = s;
+  }
+  return best;
+}
+
+/* Последний незавершённый урок (по времени начала) — самое дешёвое
+   следующее действие: доучить то, что уже начато, а не открывать новое. */
+function mostRecentOpenLesson() {
+  const sessions = Store.state.lessonSessions || {};
+  let best = null;
+  for (const lessonId of Object.keys(sessions)) {
+    const lesson = DataAPI.lesson(lessonId);
+    if (!lesson) continue; // урок мог быть удалён из каталога после обновления
+    const session = sessions[lessonId];
+    if (!best || Number(session.startTs || 0) > Number(best.session.startTs || 0)) best = { lessonId, session, lesson };
   }
   return best;
 }
@@ -408,7 +459,7 @@ function ensureDailyChallenge() {
     if (!Array.isArray(Store.state.daily.countedTaskIds)) {
       const selected = new Set(Store.state.daily.taskIds);
       Store.state.daily.countedTaskIds = Array.from(new Set((Store.state.taskAttempts || [])
-        .filter((attempt) => dateKeyForTimestamp(attempt.ts) === date && selected.has(attempt.taskId))
+        .filter((attempt) => attempt.correct && dateKeyForTimestamp(attempt.ts) === date && selected.has(attempt.taskId))
         .map((attempt) => attempt.taskId)));
       Store.state.daily.solved = Math.max(Number(Store.state.daily.solved) || 0, Store.state.daily.countedTaskIds.length);
     }
@@ -419,7 +470,7 @@ function ensureDailyChallenge() {
     const current = Store.state.daily && Store.state.daily.date === date ? Store.state.daily : {};
     Store.state.daily = Object.assign({ date, solved: 0, done: false, taskIds: [] }, existing, current);
     const counted = new Set((Store.state.taskAttempts || [])
-      .filter((attempt) => dateKeyForTimestamp(attempt.ts) === date && dailyTaskIdsForDate(date).includes(attempt.taskId))
+      .filter((attempt) => attempt.correct && dateKeyForTimestamp(attempt.ts) === date && dailyTaskIdsForDate(date).includes(attempt.taskId))
       .map((attempt) => attempt.taskId));
     Store.state.daily.countedTaskIds = Array.from(counted);
     Store.state.daily.solved = Math.max(Number(Store.state.daily.solved) || 0, counted.size);
@@ -511,12 +562,15 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
   }
 
   /* Daily Challenge counts only the server-backed selection for this date.
-     A regular practice answer must never accidentally complete the challenge. */
+     A regular practice answer must never accidentally complete the challenge.
+     It must also only count a task that was actually solved: recordAnswer is
+     also called with correct=false for a skip or a shown answer, and those
+     must not silently "complete" the challenge and pay out its XP. */
   ensureDailyChallenge();
   const d = DataAPI.daily();
   const selectedIds = dailyTaskIds();
   const countedIds = s.daily.countedTaskIds || [];
-  if (!s.daily.done && selectedIds.includes(task.id) && !countedIds.includes(task.id)) {
+  if (correct && !s.daily.done && selectedIds.includes(task.id) && !countedIds.includes(task.id)) {
     s.daily.countedTaskIds = countedIds.concat(task.id);
     s.daily.solved = s.daily.countedTaskIds.length;
     if (s.daily.solved >= selectedIds.length) {
@@ -674,8 +728,12 @@ function unlockAchievement(id) {
 
 function checkAchievements() {
   const s = Store.state;
-  if (s.totalSolved >= 1) unlockAchievement("first-solve");
-  if (s.totalSolved >= 100) unlockAchievement("hundred");
+  // totalSolved counts every attempt (correct, wrong or skipped — see
+  // recordAnswer); these two badges are literally named "solve the first/
+  // 100th task" and must only fire on answers actually gotten right, the
+  // same bar XP and the Daily Challenge already use.
+  if (s.totalCorrect >= 1) unlockAchievement("first-solve");
+  if (s.totalCorrect >= 100) unlockAchievement("hundred");
   if (s.correctSeries >= 20) unlockAchievement("series20");
   if (s.errorsResolved >= 10) unlockAchievement("comeback");
   if (s.streak >= 7) unlockAchievement("streak7");
@@ -690,28 +748,50 @@ function addTimeline(text) {
 
 /* ============================================================
    Рекомендации (rule-based)
+
+   Приоритет одного «что делать дальше» построен по стоимости и полезности
+   действия, а не по произвольному порядку проверок:
+   1) доучить начатый урок — уже открытый контекст, дешевле всего закончить;
+   2) накопленные открытые ошибки — конкретный, проверенный сигнал слабости;
+   3) самый слабый навык — но не тот, что только что интенсивно тренировали
+      (иначе рекомендация зацикливается на бессмысленном повторе);
+   4) испытания — босс, если открыт, иначе Daily Challenge, если не закрыт.
+   Каждый навык встречается в списке не больше одного раза за вызов.
    ============================================================ */
 
 function recommendations() {
+  const s = Store.state;
   const recs = [];
-  const worst = weakestSkill();
-  const openErrors = Store.state.errors.filter((e) => !e.resolved);
+  const mentionedSkills = new Set();
 
+  const openLesson = mostRecentOpenLesson();
+  if (openLesson) {
+    recs.push({ text: `Доучить урок «${openLesson.lesson.title}» — начат, но не завершён`, route: "#/training", icon: "bulb" });
+    mentionedSkills.add(openLesson.lesson.skill);
+  }
+
+  const openErrors = s.errors.filter((e) => !e.resolved);
   if (openErrors.length >= 3) {
     recs.push({ text: `Повторить слабые места — открыто ${openErrors.length} ошибок`, route: "#/errors", icon: "rotate" });
   }
-  if (worst) {
-    const mission = DataAPI.missions().find((m) => m.skill === worst.id && !Store.state.missionsDone[m.id]);
+
+  // 45 минут — окно «только что тренировал это», после которого повтор той
+  // же темы снова становится осмысленной рекомендацией, а не залипанием.
+  const worst = weakestSkill({ avoidRecentMs: 45 * 60 * 1000 });
+  if (worst && !mentionedSkills.has(worst.id)) {
+    const untouched = !((s.skillStats[worst.id] || {}).solved);
+    const mission = DataAPI.missions().find((m) => m.skill === worst.id && !s.missionsDone[m.id]);
     if (mission) {
-      recs.push({ text: `Миссия «${mission.title}» — прокачать тему «${worst.name}»`, route: "#/training", icon: "target" });
+      recs.push({ text: `Миссия «${mission.title}» — ${untouched ? "начать" : "прокачать"} тему «${worst.name}»`, route: "#/training", icon: "target" });
     } else {
-      recs.push({ text: `Тренировка по теме «${worst.name}» — самый слабый навык`, route: "#/training", icon: "target" });
+      recs.push({ text: untouched ? `Начать тему «${worst.name}»` : `Тренировка по теме «${worst.name}» — самый слабый навык`, route: "#/training", icon: "target" });
     }
   }
+
   const readyBoss = DataAPI.bosses().find((b) => bossUnlocked(b) && !bossDefeated(b));
   if (readyBoss) {
     recs.push({ text: `Доступен ${readyBoss.title} — проверь себя`, route: "#/trials", icon: "crown" });
-  } else if (!Store.state.daily.done) {
+  } else if (!s.daily.done) {
     recs.push({ text: "Закрыть Daily Challenge до конца дня", route: "#/trials", icon: "zap" });
   }
   return recs.slice(0, 3);
