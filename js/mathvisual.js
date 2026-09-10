@@ -125,17 +125,28 @@
 
     if (boundingbox.some((v) => !isFiniteNum(v))) throw new VisualError("некорректная область координат");
 
+    // Interactivity policy is per figure kind, not a blanket "camera is
+    // always free": a flat geometric figure (triangle/quadrilateral/polygon/
+    // circle_geometry -- illustrating a fixed set of measurements) gets no
+    // camera control at all, not even zoom, since there is nothing useful to
+    // frame differently. A coordinate/graph-style board (`spec.axis` is the
+    // exact flag TEMPLATES already uses to mark coordinate_geometry,
+    // vector_diagram, function_graph, derivative_graph) is read by scale, so
+    // it gets zoom in/out and nothing more -- no pan, no rotate (it has none
+    // to give). 3D solids don't go through this function at all; their own
+    // board in render3D() is the one place rotate is offered.
+    const allowZoom = !!spec.axis;
+
     const board = JXG.JSXGraph.initBoard(el.id, {
       boundingbox,
       keepAspectRatio: spec.keepAspectRatio !== false,
       axis: false,
       showNavigation: false,
       showCopyright: false,
-      // View-only camera controls: pan/zoom change what the user sees, never
-      // the figure itself -- every math object below is built `fixed: true`,
-      // so there is nothing on the board a drag can move but the camera.
-      pan: { enabled: true, needShift: true },
-      zoom: { enabled: true, wheel: true, pinch: true, needShift: false },
+      // Every math object below is built `fixed: true`, so even where zoom
+      // is on, there is nothing a drag can move but the camera.
+      pan: { enabled: false },
+      zoom: { enabled: allowZoom, wheel: true, pinch: true, needShift: false },
       resize: { enabled: true, throttle: 80 },
       renderer: "svg",
     });
