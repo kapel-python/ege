@@ -2030,11 +2030,15 @@ function screenProfile(root) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Профиль</div>
+      <div class="page-title">${s.name ? esc(s.name) : "Профиль"}</div>
       <div class="page-sub">Твой путь в цифрах.</div>
     </div>
 
     <div class="card card--glow" style="margin-top:18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap">
+      ${s.name ? `<div>
+        <div class="stat-label">Имя</div>
+        <div class="stat-num">${esc(s.name)}</div>
+      </div>` : ""}
       <div>
         <div class="stat-label">Уровень</div>
         <div class="stat-num">УРОВЕНЬ ${li.level}</div>
@@ -2110,10 +2114,13 @@ function resetProgress() {
    Onboarding — первый запуск
    ============================================================ */
 
+const NAME_MAX_LENGTH = 60;
+
 const Onboarding = {
   step: 0,
   selfLevel: null,
   goal: null,
+  name: null,
   diagIdx: 0,
   diagResults: [],
   diagAnswered: false,
@@ -2136,14 +2143,14 @@ const Onboarding = {
   render() {
     const el = document.getElementById("onboard-overlay");
     if (!el) return;
-    const steps = 5;
+    const steps = 6;
     el.innerHTML = `
       <div class="onboard-card">
         <div class="onboard-steps">${Array.from({ length: steps }, (_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
         <div id="onboard-body"></div>
       </div>`;
     const body = el.querySelector("#onboard-body");
-    [this.stepWelcome, this.stepLevel, this.stepGoal, this.stepDiagnostic, this.stepResult][this.step].call(this, body);
+    [this.stepWelcome, this.stepLevel, this.stepGoal, this.stepDiagnostic, this.stepResult, this.stepName][this.step].call(this, body);
   },
 
   stepWelcome(body) {
@@ -2236,8 +2243,22 @@ const Onboarding = {
         Первый маршрут: миссия <b style="color:var(--text)">«${esc(firstMission.title)}»</b> — она откроет дерево навыков и даст стартовый XP.
       </div>
       <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn--primary btn--lg" onclick="Onboarding.finish()">Начать подготовку ${icon("arrow")}</button>
+        <button class="btn btn--primary btn--lg" onclick="Onboarding.next()">Начать подготовку ${icon("arrow")}</button>
       </div>`;
+  },
+
+  stepName(body) {
+    body.innerHTML = `
+      <div class="onboard-title">Как тебя зовут?</div>
+      <div class="onboard-sub">Так к тебе будут обращаться в профиле.</div>
+      <div style="margin-top:22px">
+        <input class="answer-input" id="nameInput" style="width:100%;box-sizing:border-box" placeholder="Имя" autocomplete="given-name" maxlength="${NAME_MAX_LENGTH}" value="${esc(this.name || "")}">
+      </div>
+      <div id="nameError" class="onboard-sub" style="color:var(--danger);display:none;margin-top:8px"></div>
+      <div style="margin-top:24px"><button class="btn btn--primary btn--lg" onclick="Onboarding.submitName()">Завершить ${icon("arrow")}</button></div>`;
+    const input = body.querySelector("#nameInput");
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") Onboarding.submitName(); });
+    input.focus();
   },
 
   pickLevel(v) { this.selfLevel = v; this.next(); },
@@ -2273,10 +2294,25 @@ const Onboarding = {
     this.render();
   },
 
+  submitName() {
+    const input = document.getElementById("nameInput");
+    const errorEl = document.getElementById("nameError");
+    const value = input.value.trim().replace(/\s+/g, " ");
+    if (!value || value.length > NAME_MAX_LENGTH) {
+      errorEl.textContent = value ? `Имя должно быть короче ${NAME_MAX_LENGTH} символов.` : "Введи имя, чтобы завершить регистрацию.";
+      errorEl.style.display = "block";
+      input.classList.add("answer-input--wrong");
+      setTimeout(() => input.classList.remove("answer-input--wrong"), 400);
+      return;
+    }
+    this.name = value;
+    this.finish();
+  },
+
   finish() {
-    applyOnboarding(this.selfLevel || "base", this.goal || "g60", this.diagResults);
+    applyOnboarding(this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
     this.hide();
-    toast("Профиль создан. Вперёд — первая миссия ждёт.", "toast--xp", "flag");
+    toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
     render();
   },
 };

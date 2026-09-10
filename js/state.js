@@ -24,6 +24,7 @@ const Store = {
       onboarded: false,
       goal: null,
       selfLevel: null,
+      name: null,
       xp: 0,
       streak: 0,
       lastActiveDate: null,
@@ -734,7 +735,7 @@ function recommendationText() {
    Онбординг / диагностика
    ============================================================ */
 
-function applyOnboarding(selfLevel, goalId, diagnosticResults) {
+function applyOnboarding(selfLevel, goalId, diagnosticResults, name) {
   const s = Store.state;
   /* Самооценка сохраняется как настройка профиля, но не превращается в
      искусственный прогресс. Прогресс строится только по ответам диагностики
@@ -761,6 +762,8 @@ function applyOnboarding(selfLevel, goalId, diagnosticResults) {
   s.taskAttempts = s.taskAttempts.slice(0, 5000);
   s.selfLevel = selfLevel;
   s.goal = goalId;
+  const cleanedName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  s.name = cleanedName || null;
   s.onboarded = true;
   s.xp = 0;
   recordForecastSnapshot();
