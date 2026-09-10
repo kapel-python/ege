@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3")))
 CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
 SCRIPT_PATH = Path(__file__).resolve()
+MAX_NAME_LENGTH = 60
 
 
 def runtime_pid_path() -> Path:
@@ -351,7 +352,8 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL,
   onboarded INTEGER NOT NULL DEFAULT 0,
   self_level TEXT,
-  goal_id TEXT
+  goal_id TEXT,
+  name TEXT
 );
 CREATE TABLE IF NOT EXISTS subjects (id TEXT PRIMARY KEY, name TEXT NOT NULL, short TEXT);
 CREATE TABLE IF NOT EXISTS math_levels (id TEXT PRIMARY KEY, subject_id TEXT NOT NULL REFERENCES subjects(id), name TEXT NOT NULL);
@@ -484,6 +486,14 @@ def today() -> str:
     return dt.datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
 
 
+def sanitize_name(value) -> str | None:
+    """Collapse whitespace and cap length; anything unusable becomes NULL."""
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split())
+    return cleaned[:MAX_NAME_LENGTH] or None
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
@@ -500,6 +510,11 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
     if "task_ids_json" not in daily_columns:
         conn.execute("ALTER TABLE daily_progress ADD COLUMN task_ids_json TEXT NOT NULL DEFAULT '[]'")
+    # Existing accounts predate the display-name step; they keep a NULL name
+    # until the user sets one, rather than being forced through onboarding again.
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "name" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
     conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES ('math', 'Математика', 'Математика')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('basic', 'math', 'Базовый уровень')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('profile', 'math', 'Профильный уровень')")
@@ -583,7 +598,7 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
 
 def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
     skills = {r["id"]: {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0} for r in conn.execute("SELECT id FROM skills")}
-    return {"version": 4, "onboarded": False, "goal": None, "selfLevel": None, "xp": 0, "streak": 0, "lastActiveDate": None,
+    return {"version": 4, "onboarded": False, "goal": None, "selfLevel": None, "name": None, "xp": 0, "streak": 0, "lastActiveDate": None,
             "totalSolved": 0, "totalCorrect": 0, "totalTimeSec": 0, "hintsUsed": 0, "hintLevels": {"1": 0, "2": 0, "3": 0},
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
@@ -593,10 +608,10 @@ def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
 
 def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
     state = default_state(conn, user_id)
-    user = conn.execute("SELECT onboarded, self_level, goal_id FROM users WHERE id=?", (user_id,)).fetchone()
+    user = conn.execute("SELECT onboarded, self_level, goal_id, name FROM users WHERE id=?", (user_id,)).fetchone()
     stats = conn.execute("SELECT * FROM user_stats WHERE user_id=?", (user_id,)).fetchone()
     if user:
-        state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"]})
+        state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"], "name": user["name"]})
     if stats:
         state.update({"xp": stats["xp"], "streak": stats["streak"], "lastActiveDate": stats["last_active_date"], "totalSolved": stats["total_solved"],
                       "totalCorrect": stats["total_correct"], "totalTimeSec": stats["total_time_sec"], "hintsUsed": stats["hints_used"],
@@ -642,7 +657,8 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     # The API accepts only a state snapshot produced by the application logic;
     # all durable collections are written to their normalized tables in one transaction.
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills")}
-    conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=? WHERE id=?", (int(bool(state.get("onboarded"))), state.get("selfLevel"), state.get("goal"), user_id))
+    conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=? WHERE id=?",
+                 (int(bool(state.get("onboarded"))), state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), user_id))
     s = state
     conn.execute("""INSERT INTO user_stats(user_id,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=excluded.best_series,errors_resolved=excluded.errors_resolved""",
@@ -695,6 +711,9 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
 
 def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     if not isinstance(state, dict): raise ValueError("state must be an object")
+    name = state.get("name")
+    if name is not None and not isinstance(name, str): raise ValueError("invalid name")
+    if isinstance(name, str) and len(name.strip()) > MAX_NAME_LENGTH: raise ValueError("name too long")
     for key in ("xp", "streak", "totalSolved", "totalCorrect", "totalTimeSec", "hintsUsed", "correctSeries", "bestSeries", "errorsResolved"):
         value = state.get(key, 0)
         if not isinstance(value, (int, float)) or value < 0: raise ValueError(f"invalid {key}")
