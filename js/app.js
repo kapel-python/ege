@@ -243,6 +243,14 @@ function mathText(value) {
       .replace(/([A-Za-zА-Яа-я0-9)])([₀₁₂₃₄₅₆₇₈₉₋]+)/g, (_m, base, sub) => `${base}_{${[...sub].map((c) => subs[c] || c).join("")}}`)
       .replace(/([A-Za-zА-Яа-я0-9)])\^\(([^()\n]+)\)/g, "$1^{$2}")
       .replace(/([A-Za-zА-Яа-я0-9)])\^([−-]?[A-Za-zА-Яа-я0-9]+)/g, "$1^{$2}")
+      // A bare multi-letter subscript (S_CDE, S_ABF, S_MAK, ...) reaches this
+      // point unbraced -- LaTeX/KaTeX subscripts only the first character
+      // after `_` unless braced, so "S_CDE" rendered as "S" with a small "C"
+      // followed by a normal-size "DE" instead of the whole label small.
+      // Single-letter subscripts (x_B) already scope correctly and are left
+      // alone; Cyrillic subscripts are handled earlier (need `\text{}`, not
+      // just braces, since raw Cyrillic is invalid KaTeX math-mode content).
+      .replace(/([A-Za-zА-Яа-я0-9)])_([A-Za-z0-9]{2,})/g, "$1_{$2}")
       .replace(/√\(([^()\n]+)\)/g, "\\sqrt{$1}")
       .replace(/√([A-Za-zА-Яа-я0-9]+)/g, "\\sqrt{$1}")
       .replace(/\(([^()\n]+)\)\s*\/\s*(\d+[A-Za-z]+|\d+|[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9]*)/g, "\\frac{$1}{$2}")
@@ -269,10 +277,22 @@ function mathText(value) {
     });
   };
   const protectExplicit = /\\\[[\s\S]*?\\\]|\\\([^\n]*?\\\)/g;
+  // A bare "letter_кириллица" subscript (S_бок, V_шара, P_осн, ...) is
+  // common in catalog solution text but the legacy math-run detector above
+  // never offers it to convert(): its continuation charset is Latin/digit
+  // only, so the run stops dead at the underscore, "S_" alone doesn't look
+  // like math (no digit/symbol), and "бок" never starts a run either --
+  // the whole thing falls through as literal, unrendered text. Cyrillic is
+  // also invalid raw KaTeX math-mode content (it errors), so this needs an
+  // explicit `\text{}`-wrapped span of its own, generated inline here and
+  // protected the same way an already-explicit \(...\) block is below.
+  const bareCyrillicSubscript = /([A-Za-zА-Яа-я0-9)])_([а-яёА-ЯЁ]+(?:\.[а-яёА-ЯЁ]+)*)/g;
+  const protectPattern = new RegExp(`${protectExplicit.source}|${bareCyrillicSubscript.source}`, "g");
   const normalize = (text) => {
     let out = "", cursor = 0, match;
-    while ((match = protectExplicit.exec(text))) {
-      out += normalizeLegacy(text.slice(cursor, match.index)) + match[0];
+    while ((match = protectPattern.exec(text))) {
+      out += normalizeLegacy(text.slice(cursor, match.index));
+      out += match[1] != null ? `\\(${match[1]}_{\\text{${match[2]}}}\\)` : match[0];
       cursor = match.index + match[0].length;
     }
     return out + normalizeLegacy(text.slice(cursor));
