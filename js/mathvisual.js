@@ -23,6 +23,30 @@
 (function (global) {
   "use strict";
 
+  // ---------------------------------------------------------------
+  // Engine-wide interaction lock.
+  //
+  // The rule for every MathVisual diagram: the camera may move, the
+  // figure never does. Every builder below already creates its own
+  // points/lines/circles/polygons with `fixed: true`, but JSXGraph's
+  // 3D module also manufactures its own internal helper points behind
+  // the scenes (e.g. a 2D projection point per point3d per edge, used
+  // only to draw a line3d on the underlying SVG board) that never go
+  // through any of those builders and so never get their own `fixed`.
+  // Patching the *type defaults* here -- once, before any board exists
+  // -- closes that class of loophole centrally instead of chasing it
+  // call site by call site, and also protects any future object type
+  // this module doesn't build yet. `view3d` itself is deliberately left
+  // alone: it is the camera, and rotate/zoom is exactly the interaction
+  // this file wants to keep.
+  if (typeof JXG !== "undefined" && JXG.Options) {
+    const LOCKED_TYPES = ["point", "point3d", "line", "line3d", "circle", "sphere3d",
+      "polygon", "polygon3d", "curve", "angle", "nonreflexangle", "glider"];
+    for (const key of LOCKED_TYPES) {
+      if (JXG.Options[key]) JXG.Options[key].fixed = true;
+    }
+  }
+
   let boardCounter = 0;
 
   function theme() {
@@ -70,6 +94,12 @@
 
   /* ---------------- shared 2D board helpers ---------------- */
 
+  // Raw [x, y] pairs passed straight to board.create() make JSXGraph
+  // manufacture implicit endpoint points -- those default to draggable
+  // regardless of the line/segment's own `fixed`, so every implicit
+  // endpoint anywhere in this module is locked explicitly via point1/point2.
+  const LOCKED_ENDPOINT = { fixed: true, highlight: false, visible: false, withLabel: false, name: "" };
+
   function autoBoundingBox(points, padRatio) {
     if (!points.length) return [-5, 5, 5, -5];
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -101,8 +131,11 @@
       axis: false,
       showNavigation: false,
       showCopyright: false,
-      pan: { enabled: false },
-      zoom: { enabled: false },
+      // View-only camera controls: pan/zoom change what the user sees, never
+      // the figure itself -- every math object below is built `fixed: true`,
+      // so there is nothing on the board a drag can move but the camera.
+      pan: { enabled: true, needShift: true },
+      zoom: { enabled: true, wheel: true, pinch: true, needShift: false },
       resize: { enabled: true, throttle: 80 },
       renderer: "svg",
     });
@@ -112,7 +145,13 @@
       board.create("grid", [], { strokeColor: t.grid, strokeWidth: 1, strokeOpacity: 1 });
     }
     if (spec.axis) {
-      const axisAttr = { strokeColor: t.muted, strokeWidth: 1.4, ticks: { strokeColor: t.muted, majorHeight: 6, minorTicks: 0, label: { strokeColor: t.muted, fontSize: 12 } } };
+      // Same raw-coordinate trap as everywhere else: axis's own [0,0]/[1,0]
+      // endpoints must not become implicit free (draggable) points.
+      const axisAttr = {
+        strokeColor: t.muted, strokeWidth: 1.4, fixed: true, highlight: false,
+        point1: LOCKED_ENDPOINT, point2: LOCKED_ENDPOINT,
+        ticks: { strokeColor: t.muted, majorHeight: 6, minorTicks: 0, label: { strokeColor: t.muted, fontSize: 12 } },
+      };
       board.create("axis", [[0, 0], [1, 0]], axisAttr);
       board.create("axis", [[0, 0], [0, 1]], axisAttr);
     }
@@ -120,15 +159,25 @@
   }
 
   /* Resolve a point-like reference: an id string (looked up in the registry),
-     a [x, y] pair, or a JSXGraph element already created. */
-  function resolvePoint(ref, registry) {
+     a [x, y] pair, or a JSXGraph element already created.
+
+     A raw [x, y] pair must NEVER be handed straight to board.create() for a
+     segment/circle/polygon/etc. -- JSXGraph silently manufactures an implicit
+     free point for it, and a free point is draggable by default, i.e. it is
+     a back door around every `fixed: true` on the declared points. Instead
+     we create that point ourselves, locked down the same way buildPoint()
+     locks down a declared one. */
+  function resolvePoint(ref, registry, board) {
     if (ref == null) throw new VisualError("отсутствует ссылка на точку");
     if (typeof ref === "string") {
       const found = registry[ref];
       if (!found) throw new VisualError(`неизвестная точка "${ref}"`);
       return found;
     }
-    if (Array.isArray(ref) && ref.length === 2 && isFiniteNum(ref[0]) && isFiniteNum(ref[1])) return ref;
+    if (Array.isArray(ref) && ref.length === 2 && isFiniteNum(ref[0]) && isFiniteNum(ref[1])) {
+      if (!board) throw new VisualError("некорректная точка");
+      return board.create("point", ref, { fixed: true, highlight: false, visible: false, withLabel: false, name: "" });
+    }
     if (ref && typeof ref === "object" && typeof ref.X === "function") return ref;
     throw new VisualError("некорректная точка");
   }
@@ -159,7 +208,7 @@
   }
 
   function buildMidpoint(board, registry, obj, t) {
-    const [a, b] = (obj.of || []).map((r) => resolvePoint(r, registry));
+    const [a, b] = (obj.of || []).map((r) => resolvePoint(r, registry, board));
     if (!a || !b) throw new VisualError("midpoint требует двух точек в `of`");
     const p = board.create("midpoint", [a, b], {
       name: obj.label != null ? obj.label : (obj.id || ""), size: obj.size || 3, strokeColor: t.text,
@@ -172,10 +221,10 @@
 
   function buildFoot(board, registry, obj, t) {
     // perpendicular foot from `from` onto the line through `to[0]`-`to[1]`
-    const from = resolvePoint(obj.from, registry);
-    const [b1, b2] = (obj.to || []).map((r) => resolvePoint(r, registry));
+    const from = resolvePoint(obj.from, registry, board);
+    const [b1, b2] = (obj.to || []).map((r) => resolvePoint(r, registry, board));
     if (!from || !b1 || !b2) throw new VisualError("perpendicular_foot требует `from` и `to: [id, id]`");
-    const line = board.create("line", [b1, b2], { visible: false });
+    const line = board.create("line", [b1, b2], { visible: false, fixed: true, highlight: false });
     const foot = board.create("orthogonalprojection", [from, line], {
       name: obj.label != null ? obj.label : (obj.id || ""), size: 2, strokeColor: t.muted, fillColor: t.muted,
       fixed: true, highlight: false, withLabel: !!obj.label, label: { fontSize: 13, strokeColor: t.muted },
@@ -185,9 +234,9 @@
   }
 
   function buildSegmentLike(board, registry, obj, t, i, kind) {
-    const from = resolvePoint(obj.from, registry);
-    const to = resolvePoint(obj.to, registry);
-    const style = styleFor(t, obj, i, { strokeWidth: obj.width || 2.4, dash: obj.dashed ? 2 : 0 });
+    const from = resolvePoint(obj.from, registry, board);
+    const to = resolvePoint(obj.to, registry, board);
+    const style = styleFor(t, obj, i, { strokeWidth: obj.width || 2.4, dash: obj.dashed ? 2 : 0, fixed: true, highlight: false });
     const jxType = kind === "ray" ? "arrow" : kind === "line" ? "line" : kind === "vector" ? "arrow" : "segment";
     const attrs = Object.assign({}, style);
     if (kind === "line") { attrs.straightFirst = true; attrs.straightLast = true; }
@@ -203,14 +252,14 @@
   }
 
   function buildCircle(board, registry, obj, t, i) {
-    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: obj.fill ? 0.08 : 0, dash: obj.dashed ? 2 : 0 });
+    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: obj.fill ? 0.08 : 0, dash: obj.dashed ? 2 : 0, fixed: true, highlight: false });
     let el;
     if (obj.through) {
-      const center = resolvePoint(obj.center, registry);
-      const through = resolvePoint(obj.through, registry);
+      const center = resolvePoint(obj.center, registry, board);
+      const through = resolvePoint(obj.through, registry, board);
       el = board.create("circle", [center, through], style);
     } else if (isFiniteNum(obj.radius)) {
-      const center = resolvePoint(obj.center, registry);
+      const center = resolvePoint(obj.center, registry, board);
       el = board.create("circle", [center, obj.radius], style);
     } else {
       throw new VisualError("circle требует `radius` или `through`");
@@ -220,33 +269,46 @@
   }
 
   function buildPolygon(board, registry, obj, t, i) {
-    const vertices = (obj.vertices || []).map((r) => resolvePoint(r, registry));
+    const vertices = (obj.vertices || []).map((r) => resolvePoint(r, registry, board));
     if (vertices.length < 3) throw new VisualError("polygon требует минимум 3 вершины");
-    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: obj.fill === false ? 0 : 0.06, vertices: { visible: false } });
+    const style = styleFor(t, obj, i, {
+      strokeWidth: 2.2, fillOpacity: obj.fill === false ? 0 : 0.06,
+      // The polygon body itself must not be draggable (dragging the fill
+      // normally translates all its vertices at once), on top of every
+      // vertex already being individually fixed.
+      fixed: true, highlight: false, hasInnerPoints: false,
+      vertices: { visible: false, fixed: true },
+      borders: { fixed: true, highlight: false },
+    });
     const el = board.create("polygon", vertices, style);
     if (obj.id) registry[obj.id] = el;
     return el;
   }
 
   function buildAngleMark(board, registry, obj, t) {
-    const vertex = resolvePoint(obj.vertex, registry);
-    const from = resolvePoint(obj.from, registry);
-    const to = resolvePoint(obj.to, registry);
+    const vertex = resolvePoint(obj.vertex, registry, board);
+    const from = resolvePoint(obj.from, registry, board);
+    const to = resolvePoint(obj.to, registry, board);
     board.create("angle", [from, vertex, to], {
       radius: obj.radius || 0.6, strokeColor: t.muted, fillColor: t.muted, fillOpacity: 0.12,
       name: obj.label || "", withLabel: !!obj.label, label: { fontSize: 13, strokeColor: t.text },
+      // The arc has its own draggable radius point by default -- dragging it
+      // only changes the mark's drawn size, but that is still an edit to the
+      // figure, so it stays locked like every other object.
+      fixed: true, highlight: false, radiuspoint: { visible: false, fixed: true },
     });
   }
 
   function buildRightAngleMark(board, registry, obj, t) {
-    const vertex = resolvePoint(obj.at, registry);
-    const from = resolvePoint(obj.from, registry);
-    const to = resolvePoint(obj.to, registry);
+    const vertex = resolvePoint(obj.at, registry, board);
+    const from = resolvePoint(obj.from, registry, board);
+    const to = resolvePoint(obj.to, registry, board);
     board.create("nonreflexangle", [from, vertex, to], {
       radius: obj.radius || 0.45, strokeColor: t.muted, fillColor: "none", type: "square",
       // angle elements auto-name themselves (Greek letters) and show that
       // label by default -- a right-angle tick mark should never carry one.
       name: "", withLabel: false,
+      fixed: true, highlight: false, radiuspoint: { visible: false, fixed: true },
     });
   }
 
@@ -278,7 +340,7 @@
     const domain = Array.isArray(obj.domain) ? obj.domain : undefined;
     // A function graph is a curve, not a fillable region -- fillOpacity must
     // be explicit 0, otherwise JSXGraph shades the whole area under it.
-    const style = styleFor(t, obj, i, { strokeWidth: 2.6, fillOpacity: 0, fillColor: "none" });
+    const style = styleFor(t, obj, i, { strokeWidth: 2.6, fillOpacity: 0, fillColor: "none", fixed: true, highlight: false });
     const args = domain ? [fn, domain[0], domain[1]] : [fn];
     const el = board.create("functiongraph", args, style);
     if (obj.id) registry[obj.id] = { fn, el };
@@ -302,18 +364,22 @@
     const of = registry[obj.on];
     if (!of || !of.fn) throw new VisualError(`tangent ссылается на неизвестную функцию "${obj.on}"`);
     const glider = board.create("glider", [obj.x, of.fn(obj.x), of.el], { visible: false, fixed: true });
-    board.create("tangent", [glider], { strokeColor: t.muted, strokeWidth: 2, dash: 1 });
+    board.create("tangent", [glider], { strokeColor: t.muted, strokeWidth: 2, dash: 1, fixed: true, highlight: false });
   }
 
   function buildAsymptote(board, obj, t) {
-    if (obj.axis === "x") board.create("line", [[0, obj.value || 0], [1, obj.value || 0]], { strokeColor: t.muted, dash: 2, strokeWidth: 1.4, fixed: true });
-    else board.create("line", [[obj.value || 0, 0], [obj.value || 0, 1]], { strokeColor: t.muted, dash: 2, strokeWidth: 1.4, fixed: true });
+    const attrs = { strokeColor: t.muted, dash: 2, strokeWidth: 1.4, fixed: true, highlight: false, point1: LOCKED_ENDPOINT, point2: LOCKED_ENDPOINT };
+    if (obj.axis === "x") board.create("line", [[0, obj.value || 0], [1, obj.value || 0]], attrs);
+    else board.create("line", [[obj.value || 0, 0], [obj.value || 0, 1]], attrs);
   }
 
   function buildInterval(board, obj, t) {
     if (!isFiniteNum(obj.from) || !isFiniteNum(obj.to)) throw new VisualError("interval требует числовых `from`/`to`");
     const y = obj.y || 0;
-    board.create("segment", [[obj.from, y], [obj.to, y]], { strokeColor: colorFor(t, 2), strokeWidth: 4 });
+    board.create("segment", [[obj.from, y], [obj.to, y]], {
+      strokeColor: colorFor(t, 2), strokeWidth: 4, fixed: true, highlight: false,
+      point1: LOCKED_ENDPOINT, point2: LOCKED_ENDPOINT,
+    });
     for (const [x, open] of [[obj.from, obj.openFrom], [obj.to, obj.openTo]]) {
       board.create("point", [x, y], { size: 3, strokeColor: colorFor(t, 2), fillColor: open ? "#fff" : colorFor(t, 2), fixed: true, highlight: false, withLabel: false });
     }
@@ -419,13 +485,21 @@
     throw new VisualError(`3d_solid поддерживает только ${SOLID_SHAPES.map((s) => `"${s}"`).join(", ")}, получено "${shape}"`);
   }
 
-  function resolve3dPoint(ref, registry) {
+  // Same rule as the 2D resolvePoint(): never hand a raw [x, y, z] triple to
+  // view.create() -- JSXGraph would manufacture an implicit, draggable-by-
+  // default point3d for it. `registry` must hold the real point3d elements
+  // (not their coordinates) so a labeled reference reuses the same locked
+  // point instead of spawning a second, free one at the same spot.
+  function resolve3dPoint(ref, registry, view) {
     if (typeof ref === "string") {
       const p = registry[ref];
       if (!p) throw new VisualError(`не найдена 3D-точка "${ref}"`);
       return p;
     }
-    if (Array.isArray(ref) && ref.length === 3 && ref.every(isFiniteNum)) return ref;
+    if (Array.isArray(ref) && ref.length === 3 && ref.every(isFiniteNum)) {
+      if (!view) throw new VisualError("некорректная 3D-точка");
+      return view.create("point3d", ref, { fixed: true, highlight: false, visible: false, withLabel: false, name: "" });
+    }
     throw new VisualError("некорректная 3D-точка (ожидались координаты [x,y,z] или ссылка на подписанную вершину)");
   }
 
@@ -446,7 +520,13 @@
     container.appendChild(el);
     const board = JXG.JSXGraph.initBoard(el.id, {
       boundingbox: [-6, 6, 6, -6], axis: false, showNavigation: false, showCopyright: false,
-      pan: { enabled: false }, zoom: { enabled: false }, resize: { enabled: true, throttle: 80 },
+      // Rotating the solid (az/el drag on the view3d itself, enabled by
+      // default below) and zooming are the only view-only controls that make
+      // sense for a 3D figure -- board pan would fight the same plain-drag
+      // gesture used for rotation, so it stays off; zoom (wheel/pinch) does
+      // not conflict and is enabled.
+      pan: { enabled: false }, zoom: { enabled: true, wheel: true, pinch: true, needShift: false },
+      resize: { enabled: true, throttle: 80 },
     });
     // Parallel (axonometric) projection reads as a normal textbook solid-
     // geometry drawing; JSXGraph's "central" (perspective) default instead
@@ -467,13 +547,16 @@
       const p = view.create("point3d", coords, {
         name: labels[idx] || "", size: 2, strokeColor: t.text, fillColor: t.text,
         withLabel: !!labels[idx], label: { fontSize: 14, strokeColor: t.text },
+        // Vertices are the figure's math, not a control -- only camera
+        // rotate/zoom on the view itself may change how the solid looks.
+        fixed: true, highlight: false,
       });
-      if (labels[idx]) registry[labels[idx]] = coords;
+      if (labels[idx]) registry[labels[idx]] = p;
       return p;
     };
     const edge = (a, b, dashed, color) => view.create("line3d", [a, b], {
       straightFirst: false, straightLast: false, strokeColor: dashed ? t.muted : (color || t.text),
-      strokeWidth: 2, dash: dashed ? 2 : 0,
+      strokeWidth: 2, dash: dashed ? 2 : 0, fixed: true, highlight: false,
     });
 
     const pts = vertices.map((c, idx) => makePt(c, idx));
@@ -482,14 +565,14 @@
     if (apexIndex >= 0) {
       const apex = pts[apexIndex];
       for (let k = 0; k < base.length; k++) edge(base[k], apex, k >= Math.ceil(base.length / 2));
-      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false } });
+      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false }, fixed: true, highlight: false });
     } else {
       const top = pts.slice(baseCount);
       for (let k = 0; k < top.length; k++) {
         edge(top[k], top[(k + 1) % top.length], false);
         edge(base[k], top[k], k >= Math.ceil(base.length / 2)); // back verticals dashed, front solid
       }
-      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false } });
+      view.create("polygon3d", base, { fillOpacity: 0.06, fillColor: t.accent, borders: { visible: false }, fixed: true, highlight: false });
     }
 
     // Additional labeled points (midpoints, section-plane vertices, ...)
@@ -499,27 +582,29 @@
         if (!Array.isArray(ep.coords) || ep.coords.length !== 3 || !ep.coords.every(isFiniteNum)) {
           throw new VisualError(`extraPoints: точка "${ep.label || "?"}" имеет некорректные координаты`);
         }
-        view.create("point3d", ep.coords, {
+        const p = view.create("point3d", ep.coords, {
           name: ep.label || "", size: 2, strokeColor: t.text, fillColor: t.text,
           withLabel: !!ep.label, label: { fontSize: 14, strokeColor: t.text, offset: [6, 6] },
+          fixed: true, highlight: false,
         });
-        if (ep.label) registry[ep.label] = ep.coords;
+        if (ep.label) registry[ep.label] = p;
       }
     }
     if (Array.isArray(spec.extraEdges)) {
       for (const ee of spec.extraEdges) {
-        const a = resolve3dPoint(ee.from, registry);
-        const b = resolve3dPoint(ee.to, registry);
+        const a = resolve3dPoint(ee.from, registry, view);
+        const b = resolve3dPoint(ee.to, registry, view);
         edge(a, b, !!ee.dashed, ee.color ? (t[ee.color] || ee.color) : t.accent);
       }
     }
     if (spec.sectionPolygon && Array.isArray(spec.sectionPolygon.vertices)) {
-      const verts = spec.sectionPolygon.vertices.map((v) => resolve3dPoint(v, registry));
+      const verts = spec.sectionPolygon.vertices.map((v) => resolve3dPoint(v, registry, view));
       if (verts.length < 3) throw new VisualError("sectionPolygon требует минимум 3 вершины");
       const fillColor = spec.sectionPolygon.color ? (t[spec.sectionPolygon.color] || spec.sectionPolygon.color) : t.violet;
       view.create("polygon3d", verts, {
         fillOpacity: spec.sectionPolygon.opacity != null ? spec.sectionPolygon.opacity : 0.16,
         fillColor, borders: { strokeColor: fillColor, strokeWidth: 1.6, dash: 0 },
+        fixed: true, highlight: false,
         // Raw [x,y,z] vertices make polygon3d create its own implicit
         // point3d for each corner -- left labeled, they duplicate (and
         // visually collide with) the named extraPoints at the same spot.
