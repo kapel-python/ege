@@ -131,6 +131,99 @@ const testBody = async () => {
   }
   t("daily никогда не выбирает задание без обязательного рисунка (30 переигровок)", dailyRerollsClean);
 
+  // ---------------------------------------------------------------
+  // Аудит алгоритмов: регрессионные тесты для найденных и исправленных
+  // ошибок бизнес-логики (см. отчёт аудита).
+  // ---------------------------------------------------------------
+
+  // Daily Challenge должен засчитывать только реально решённые задания:
+  // пропуск/показ ответа/неверный ответ не должны "закрывать" челлендж.
+  Store.reset();
+  ensureDailyChallenge();
+  {
+    const ids = dailyTaskIds();
+    for (const id of ids) recordAnswer(DataAPI.task(id), false, 0, 5); // все "не решены"
+    t("daily НЕ засчитывает неверные/пропущенные ответы", Store.state.daily.solved === 0 && !Store.state.daily.done);
+    const before = Store.state.xp;
+    for (const id of ids) recordAnswer(DataAPI.task(id), true, 0, 20); // теперь решаем верно
+    t("daily засчитывается только после реально верных ответов", Store.state.daily.done && Store.state.daily.solved === ids.length && Store.state.xp > before);
+  }
+
+  // Та же проверка для восстановления daily.countedTaskIds из истории попыток
+  // (ветка ensureDailyChallenge, которая работает при загрузке/перезаходе).
+  Store.reset();
+  ensureDailyChallenge();
+  {
+    const ids = dailyTaskIds();
+    for (const id of ids) recordAnswer(DataAPI.task(id), false, 0, 5);
+    const snapshot = JSON.parse(JSON.stringify(Store.state));
+    snapshot.daily.countedTaskIds = undefined;
+    Store.state = snapshot;
+    ensureDailyChallenge();
+    t("восстановление daily после перезагрузки не засчитывает неверные попытки", Store.state.daily.solved === 0 && !Store.state.daily.done);
+  }
+
+  // Достижения "первое решение" / "сотня" обещают решённые (верные) задания,
+  // а не просто попытки — не должны открываться от одних ошибок/пропусков.
+  Store.reset();
+  {
+    const t1 = DataAPI.task("n11_p1");
+    recordAnswer(t1, false, 0, 10);
+    recordAnswer(t1, false, 0, 10);
+    t("«Первый шаг» не открывается от неверных попыток", !achievementUnlocked("first-solve"));
+    recordAnswer(t1, true, 0, 10);
+    t("«Первый шаг» открывается после реально верного ответа", achievementUnlocked("first-solve"));
+  }
+
+  // Миссия не должна засчитываться (и платить XP) за пробег с массовыми
+  // пропусками/ошибками — только за реальную работу (порог как у боссов).
+  Store.reset();
+  {
+    const mission = DataAPI.missions().find((m) => Array.isArray(m.tasks) && m.tasks.length >= 2);
+    const beforeXp = Store.state.xp;
+    for (const id of mission.tasks) recordAnswer(DataAPI.task(id), false, 0, 5);
+    t("миссия не отмечена завершённой без верных ответов", !Store.state.missionsDone[mission.id]);
+    t("XP миссии не начислен без верных ответов", Store.state.xp === beforeXp);
+  }
+
+  // weakestSkill({avoidRecentMs}) не должен зацикливаться на теме, которую
+  // ученик только что интенсивно тренировал — иначе рекомендация бессмысленна.
+  Store.reset();
+  {
+    const skills = DataAPI.skills();
+    for (const s of skills) Store.state.skillStats[s.id] = { progress: 0, solved: 10, correct: 9, timeSec: 100 };
+    const justDrilled = skills[Math.min(2, skills.length - 1)].id;
+    Store.state.skillStats[justDrilled] = { progress: 0, solved: 8, correct: 1, timeSec: 100 };
+    const now = Date.now();
+    Store.state.taskAttempts = Array.from({ length: 5 }, (_, i) => ({ taskId: `synthetic_${i}`, skill: justDrilled, correct: i === 0, hintLevel: 0, seconds: 10, ts: now - i * 1000 }));
+    t("weakestSkill() без опций возвращает объективно худший навык", weakestSkill().id === justDrilled);
+    t("weakestSkill({avoidRecentMs}) не возвращает только что натренированный навык", weakestSkill({ avoidRecentMs: 45 * 60 * 1000 }).id !== justDrilled);
+  }
+
+  // recommendations(): незавершённый урок — высший приоритет, и тема этого
+  // урока не должна дублироваться отдельной рекомендацией "слабый навык".
+  Store.reset();
+  {
+    const lesson = DataAPI.lessons()[0];
+    Store.state.lessonSessions = { [lesson.id]: { idx: 1, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: "training" } };
+    const recs = recommendations();
+    t("recommendations() ставит незавершённый урок первым пунктом", recs[0] && recs[0].text.includes(lesson.title));
+    t("recommendations() не дублирует навык урока отдельной рекомендацией", recs.filter((r) => r.text.includes(lesson.title)).length === 1);
+  }
+
+  // mostRecentOpenLesson игнорирует сессии уроков, которых больше нет в
+  // каталоге (например, после обновления контента), и не падает.
+  Store.reset();
+  {
+    Store.state.lessonSessions = { "lesson-does-not-exist": { idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: "path" } };
+    t("mostRecentOpenLesson() не падает на осиротевшей сессии", mostRecentOpenLesson() === null);
+  }
+
+  // Ключ активности (для графика "14 дней" в app.js) обязан совпадать с
+  // ключом, под которым recordAnswer/todayActivity() реально пишут данные —
+  // иначе график молча теряет/смещает данные для пользователей не из MSK.
+  t("dateKeyForTimestamp(now) совпадает с todayStr() (инвариант графика активности)", dateKeyForTimestamp(Date.now()) === todayStr());
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };

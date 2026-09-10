@@ -575,8 +575,9 @@ function screenDashboard(root) {
   const dailyTitle = `Реши ${dailyGoal} заданий, подобранных для тебя`;
   const dailyDone = s.daily.date === todayStr() && s.daily.done;
   const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
-  const activeMission = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id])
-    || DataAPI.missions().find((m) => !s.missionsDone[m.id]);
+  const openLesson = mostRecentOpenLesson();
+  const activeMission = !openLesson && (DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id])
+    || DataAPI.missions().find((m) => !s.missionsDone[m.id]));
 
   root.innerHTML = `
     <div class="page-head">
@@ -621,7 +622,7 @@ function screenDashboard(root) {
       <div class="card card--hover action-card" onclick="continueTraining()">
         <div class="action-card__icon">${icon("training")}</div>
         <div><div class="action-card__title">Продолжить тренировку</div>
-        <div class="action-card__sub">${activeMission ? `Миссия «${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Свободная практика"}</div></div>
+        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)}/${openLesson.lesson.steps.length}` : activeMission ? `Миссия «${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Свободная практика"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--warn" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}">
         <div class="action-card__icon">${icon("rotate")}</div>
@@ -724,6 +725,10 @@ function statusLabel(st) {
 
 function continueTraining() {
   const s = Store.state;
+  // Незавершённый урок — самое дешёвое следующее действие: доучить то, что
+  // уже открыто, а не начинать новую сессию по свободной практике.
+  const openLesson = mostRecentOpenLesson();
+  if (openLesson) return Lesson.start(openLesson.lessonId);
   const active = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id]);
   if (active) return startMission(active.id);
   const worst = weakestSkill();
@@ -892,6 +897,10 @@ function screenTraining(root) {
         const done = !!Store.state.missionsDone[m.id];
         const prog = missionProgress(m);
         const taskCount = Array.isArray(m.tasks) ? m.tasks.length : 0;
+        // Finished the task list without clearing the completion bar (see
+        // sessionFinish): startMission() restarts it from scratch, so the
+        // button should say so instead of a misleading "Продолжить".
+        const exhausted = !done && taskCount > 0 && prog >= taskCount;
         const freeCount = sk ? DataAPI.practiceTasksBySkill(sk.id).length : 0;
         const practiceCount = taskCount || freeCount;
         return `
@@ -910,7 +919,7 @@ function screenTraining(root) {
           </div>` : `<div class="stat-label">Заданий для этого блока пока нет${freeCount ? ` · в теме доступно ${freeCount}` : ""}.</div>`}
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${taskCount ? `<button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" onclick="startMission('${m.id}')">
-              ${done ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать практику"}
+              ${done || exhausted ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать практику"}
             </button>` : ""}
             ${sk && freeCount ? `<button class="btn btn--ghost btn--sm" onclick="startSkillPractice('${sk.id}')">Свободная практика</button>` : ""}
           </div>
@@ -924,7 +933,11 @@ function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) return toast("Миссия не найдена", "toast--error", "x");
   if (!Array.isArray(m.tasks) || !m.tasks.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
-  const from = Store.state.missionsDone[missionId] ? 0 : missionProgress(m);
+  // A mission can reach the end of its task list without being marked done
+  // (the completion bar wasn't met — see sessionFinish). Resuming "from"
+  // that point would slice an empty task list, so treat it the same as a
+  // fresh restart instead of silently handing Session.start nothing to do.
+  const from = (Store.state.missionsDone[missionId] || missionProgress(m) >= m.tasks.length) ? 0 : missionProgress(m);
   Session.start({
     title: `Миссия: ${m.title}`,
     taskIds: m.tasks.slice(from),
@@ -1284,8 +1297,13 @@ function sessionFinish(early = false) {
 
   if (S.mode === "mission" && !early) {
     mission = DataAPI.mission(S.missionId);
-    missionDone = true;
-    completeMission(mission);
+    // Reaching the end of a mission by skipping or guessing through every
+    // task must not pay the same completion reward as actually working the
+    // practice set — the same bar boss battles already hold themselves to.
+    if (mission && correct / solved >= 0.6) {
+      missionDone = true;
+      completeMission(mission);
+    }
   }
   if (S.mode === "boss" && !early) {
     boss = DataAPI.bosses().find((b) => b.id === S.bossId);
@@ -1733,6 +1751,12 @@ function reviewQueueForErrors(errors) {
 
   for (const group of Object.values(groups)) {
     const pool = DataAPI.practiceTasks().filter((t) => t.sub === group[0].sub);
+    // A subtopic can end up with fewer practiceable tasks than open errors in
+    // it (the catalog changed since the error was recorded: the task lost its
+    // required visual, or was removed entirely). That must not sink the whole
+    // review session for every other subtopic — skip only this group's errors
+    // when there is truly nothing left to present for it.
+    if (!pool.length) continue;
     const assigned = [];
     const used = new Set();
     const assign = (index) => {
@@ -1748,12 +1772,21 @@ function reviewQueueForErrors(errors) {
       }
       return false;
     };
-    if (!assign(0)) return null;
-    group.forEach((error, i) => {
-      const task = assigned[i];
-      taskIds.push(task.id);
-      if (task.id !== error.taskId) errorMap[task.id] = error.taskId;
-    });
+    if (assign(0)) {
+      group.forEach((error, i) => {
+        const task = assigned[i];
+        taskIds.push(task.id);
+        if (task.id !== error.taskId) errorMap[task.id] = error.taskId;
+      });
+    } else {
+      // Fewer distinct tasks than errors for this subtopic: reuse pool tasks
+      // (a repeat of the same problem) rather than dropping the group.
+      group.forEach((error, i) => {
+        const task = pool[i % pool.length];
+        taskIds.push(task.id);
+        if (task.id !== error.taskId) errorMap[task.id] = error.taskId;
+      });
+    }
   }
   return { taskIds, errorMap };
 }
@@ -1958,11 +1991,14 @@ function screenStats(root) {
 }
 
 function last14Days() {
+  // Activity is recorded under Moscow-date keys (todayActivity()/todayStr()),
+  // regardless of the viewer's own timezone. Keying this chart off the local
+  // browser date would silently miss or misplace a day's data for anyone not
+  // in that timezone, so the same Moscow-date conversion is used here.
   const days = [];
   for (let i = 13; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    days.push({ key, label: `${d.getDate()}`, solved: (Store.state.activity[key] || {}).solved || 0 });
+    const key = dateKeyForTimestamp(Date.now() - i * 86400000);
+    days.push({ key, label: key.slice(8), solved: (Store.state.activity[key] || {}).solved || 0 });
   }
   return days;
 }
