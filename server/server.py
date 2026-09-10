@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from secrets import token_urlsafe
+from secrets import choice, token_urlsafe
 from urllib.parse import urlparse
 
 try:
@@ -36,6 +36,12 @@ DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3"
 CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
+# Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
+# internal `users.id` primary key. Never exposed as a way to look up or spoof
+# the internal id; it only ever maps forward, account_id -> user, in the DB.
+ACCOUNT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+ACCOUNT_ID_LENGTH = 6
+ACCOUNT_ID_MAX_ATTEMPTS = 25
 
 
 def runtime_pid_path() -> Path:
@@ -349,6 +355,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_token TEXT NOT NULL UNIQUE,
+  account_id TEXT UNIQUE,
   created_at TEXT NOT NULL,
   onboarded INTEGER NOT NULL DEFAULT 0,
   self_level TEXT,
@@ -494,6 +501,31 @@ def sanitize_name(value) -> str | None:
     return cleaned[:MAX_NAME_LENGTH] or None
 
 
+def generate_account_id() -> str:
+    return "".join(choice(ACCOUNT_ID_ALPHABET) for _ in range(ACCOUNT_ID_LENGTH))
+
+
+def assign_account_id(conn: sqlite3.Connection, user_id: int) -> str:
+    """Generate and store a unique public Account ID for an existing user row.
+
+    Collisions are only possible against the unique index, never silently
+    accepted: on a clash the statement is rejected and a fresh id is tried.
+    """
+    for _ in range(ACCOUNT_ID_MAX_ATTEMPTS):
+        candidate = generate_account_id()
+        try:
+            conn.execute("UPDATE users SET account_id=? WHERE id=?", (candidate, user_id))
+            return candidate
+        except sqlite3.IntegrityError:
+            continue
+    raise RuntimeError("could not allocate a unique account id")
+
+
+def account_id_for(conn: sqlite3.Connection, user_id: int) -> str | None:
+    row = conn.execute("SELECT account_id FROM users WHERE id=?", (user_id,)).fetchone()
+    return row["account_id"] if row else None
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
@@ -515,6 +547,15 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     if "name" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    # Existing accounts predate the account_id column; ALTER TABLE cannot add a
+    # UNIQUE column in place, so the constraint is added as a separate unique
+    # index and every account missing an id gets one assigned right away
+    # (not lazily), so the column is effectively always populated.
+    if "account_id" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN account_id TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id)")
+    for row in conn.execute("SELECT id FROM users WHERE account_id IS NULL"):
+        assign_account_id(conn, row["id"])
     conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES ('math', 'Математика', 'Математика')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('basic', 'math', 'Базовый уровень')")
     conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('profile', 'math', 'Профильный уровень')")
@@ -591,6 +632,7 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
     new_token = token_urlsafe(32)
     cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (new_token, now_iso()))
     user_id = cur.lastrowid
+    assign_account_id(conn, user_id)
     conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (user_id,))
     conn.commit()
     return user_id, new_token
@@ -749,7 +791,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
-                if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn), "state": read_state(conn, user_id)}, token=token); return
+                if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':

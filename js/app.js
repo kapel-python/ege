@@ -29,6 +29,7 @@ const ICONS = {
   layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
   "eye-off": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.5 5.2A9.5 9.5 0 0 1 12 5c5 0 8.5 4.5 10 7-.4.7-1.2 1.8-2.3 2.9M6.6 6.6C4.1 8.1 2.6 10.4 2 12c1.5 2.5 5 7 10 7 1.6 0 3-.5 4.3-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
 };
 
 function icon(name) {
@@ -423,6 +424,43 @@ function toast(html, type = "", iconName = null) {
     el.classList.add("out");
     setTimeout(() => el.remove(), 350);
   }, 3400);
+}
+
+/* ---------------- account id copy ---------------- */
+
+function copyAccountId(btn) {
+  const id = btn.dataset.accountId || "";
+  if (!id) return;
+  const wrap = btn.closest(".account-id-wrap");
+  const feedback = wrap ? wrap.querySelector(".account-id__feedback") : null;
+  const iconEl = btn.querySelector(".account-id__icon");
+  const announce = () => {
+    if (iconEl) iconEl.innerHTML = icon("check");
+    btn.classList.add("account-id--copied");
+    if (feedback) feedback.classList.add("is-visible");
+    clearTimeout(btn._copyResetTimer);
+    btn._copyResetTimer = setTimeout(() => {
+      if (iconEl) iconEl.innerHTML = icon("copy");
+      btn.classList.remove("account-id--copied");
+      if (feedback) feedback.classList.remove("is-visible");
+    }, 1800);
+  };
+  const legacyCopy = () => {
+    const ta = document.createElement("textarea");
+    ta.value = id;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, id.length);
+    try { document.execCommand("copy"); announce(); } catch (e) { /* clipboard unavailable in this browser */ }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(id).then(announce).catch(legacyCopy);
+  } else {
+    legacyCopy();
+  }
 }
 
 /* ---------------- modal ---------------- */
@@ -2063,36 +2101,49 @@ function screenProfile(root) {
   const li = levelInfo();
   const acc = s.totalSolved ? Math.round((s.totalCorrect / s.totalSolved) * 100) : 0;
   const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
+  const accountId = Store.accountId || "";
+  const initial = s.name ? esc(s.name.trim().slice(0, 1).toUpperCase()) : "";
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">${s.name ? esc(s.name) : "Профиль"}</div>
+      <div class="page-title">Профиль</div>
       <div class="page-sub">Твой путь в цифрах.</div>
     </div>
 
-    <div class="card card--glow" style="margin-top:18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap">
-      ${s.name ? `<div>
-        <div class="stat-label">Имя</div>
-        <div class="stat-num">${esc(s.name)}</div>
-      </div>` : ""}
-      <div>
-        <div class="stat-label">Уровень</div>
-        <div class="stat-num">УРОВЕНЬ ${li.level}</div>
+    <div class="card card--glow profile-card">
+      <div class="profile-card__identity">
+        <div class="avatar" aria-hidden="true">${initial || icon("profile")}</div>
+        <div class="profile-card__who">
+          <div class="profile-card__name">${s.name ? esc(s.name) : "Без имени"}</div>
+          <div class="account-id-wrap">
+            <button class="account-id" type="button" data-account-id="${accountId}" onclick="copyAccountId(this)" aria-label="Скопировать ID аккаунта" ${accountId ? "" : "disabled"}>
+              <span class="account-id__text">
+                <span class="account-id__label">ID аккаунта</span>
+                <span class="account-id__value mono">${accountId ? esc(accountId) : "—"}</span>
+              </span>
+              <span class="account-id__icon" aria-hidden="true">${icon("copy")}</span>
+            </button>
+            <span class="account-id__feedback" role="status">${icon("check")} ID скопирован</span>
+          </div>
+        </div>
+        <div class="streak-chip profile-card__streak">${icon("flame")} ${s.streak} дн</div>
       </div>
-      <div style="flex:1;min-width:220px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
-          <span>${li.current} / ${li.need} XP</span><span>до уровня ${li.level + 1}</span>
+
+      <div class="profile-card__progress">
+        <div class="profile-card__level">
+          <span class="level-chip__badge">Уровень ${li.level}</span>
+          <span class="profile-card__xp mono">${li.current} / ${li.need} XP</span>
+          <span class="profile-card__next">до уровня ${li.level + 1}</span>
         </div>
         ${progressBar(li.pct)}
       </div>
-      <div class="streak-chip">${icon("flame")} ${s.streak} дн</div>
     </div>
 
-    <div class="grid grid--4" style="margin-top:16px">
-      <div class="card"><div class="stat-num mono">${s.totalSolved}</div><div class="stat-label">решено задач</div></div>
-      <div class="card"><div class="stat-num mono">${acc}%</div><div class="stat-label">точность</div></div>
-      <div class="card"><div class="stat-num mono">${avgTime ? fmtTime(avgTime) : "—"}</div><div class="stat-label">среднее время</div></div>
-      <div class="card"><div class="stat-num mono">${s.bestSeries}</div><div class="stat-label">лучшая серия без ошибок</div></div>
+    <div class="grid grid--4 stat-grid">
+      <div class="card stat-card"><div class="action-card__icon">${icon("check")}</div><div><div class="stat-num mono">${s.totalSolved}</div><div class="stat-label">решено задач</div></div></div>
+      <div class="card stat-card"><div class="action-card__icon">${icon("target")}</div><div><div class="stat-num mono">${acc}%</div><div class="stat-label">точность</div></div></div>
+      <div class="card stat-card"><div class="action-card__icon">${icon("clock")}</div><div><div class="stat-num mono">${avgTime ? fmtTime(avgTime) : "—"}</div><div class="stat-label">среднее время</div></div></div>
+      <div class="card stat-card"><div class="action-card__icon">${icon("flame")}</div><div><div class="stat-num mono">${s.bestSeries}</div><div class="stat-label">лучшая серия без ошибок</div></div></div>
     </div>
 
     <div class="section-title">Достижения</div>

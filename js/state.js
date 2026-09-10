@@ -6,6 +6,11 @@
 
 const Store = {
   state: null,
+  // Server-generated public Account ID (see server.py assign_account_id).
+  // Deliberately kept outside `state`: state is the exact snapshot that
+  // round-trips through PUT /api/state, and the id must never be something
+  // the client can send back and have written.
+  accountId: null,
   listeners: {},
   pendingSave: Promise.resolve(),
   loadPromise: null,
@@ -62,6 +67,7 @@ const Store = {
     this.loadPromise = (async () => {
       const payload = await ApiClient.get("/api/bootstrap");
       DataAPI.load(payload.catalog);
+      this.accountId = payload.accountId || null;
       const defaults = this.defaultState();
       const parsed = payload.state || {};
       this.state = Object.assign(defaults, parsed);
@@ -99,10 +105,15 @@ const Store = {
 
   reset() {
     this.state = this.defaultState();
+    this.accountId = null;
     if (!this.ready) return Promise.resolve();
     this.pendingSave = this.pendingSave
       .catch(() => {})
       .then(() => ApiClient.delete("/api/state"))
+      // The DELETE removes the whole account row server-side; re-bootstrap so
+      // the next request issues a fresh session with its own new Account ID,
+      // instead of leaving the UI holding a stale, now-deleted one.
+      .then(() => this.load())
       .catch((error) => {
         this.persistenceError = error;
         this.emit("persistenceerror", error);
