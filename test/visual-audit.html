@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MathVisual — аудит задач</title>
+  <script>if (new URLSearchParams(location.search).get("theme") === "dark") document.documentElement.dataset.theme = "dark";</script>
+  <link rel="stylesheet" href="../vendor/jsxgraph/jsxgraph.css">
+  <link rel="stylesheet" href="../css/styles.css">
+  <style>
+    body { padding: 24px; background: var(--bg); color: var(--text); }
+    main { max-width: 760px; margin: auto; }
+    article { margin: 32px 0; }
+    h2 { font-size: 18px; }
+  </style>
+</head>
+<body>
+  <main><h1>Аудит математических визуализаций</h1><div id="items"></div></main>
+  <script src="../vendor/jsxgraph/jsxgraphcore.js"></script>
+  <script src="../js/mathvisual.js"></script>
+  <script>
+    (async () => {
+      const catalog = await fetch(`../server/catalog.json?visual-audit=${Date.now()}`, { cache: "no-store" }).then((r) => r.json());
+      const items = document.getElementById("items");
+      const visualTasks = catalog.tasks.filter((task) => task.mathVisual || (task.visual && task.visual.assetId));
+      const results = [];
+      for (const task of visualTasks) {
+        const article = document.createElement("article");
+        article.innerHTML = `<h2>${task.id} · ${task.sub}</h2>`;
+        const host = document.createElement("div");
+        if (Number.isFinite(Number(task.mathVisual && task.mathVisual.ratio)) && Number(task.mathVisual.ratio) > 0) {
+          host.style.setProperty("--visual-ratio", String(task.mathVisual.ratio));
+        }
+        article.appendChild(host);
+        items.appendChild(article);
+        if (task.mathVisual) {
+          const result = MathVisual.render(host, task.mathVisual);
+          results.push({ id: task.id, ok: result.ok });
+        } else {
+          host.className = "task-visual";
+          host.innerHTML = `<img src="../${task.visual.assetId && catalog.visualAssets.find((a) => a.id === task.visual.assetId).src}" alt="${task.visual.alt || task.sub}">`;
+          results.push({ id: task.id, ok: true });
+        }
+      }
+      window.__visualAuditResults = results;
+      document.documentElement.dataset.visualAuditReady = "true";
+    })();
+  </script>
+</body>
+</html>
