@@ -10,6 +10,8 @@ from __future__ import annotations
 import atexit
 import datetime as dt
 import errno
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -42,6 +44,111 @@ MAX_NAME_LENGTH = 60
 ACCOUNT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 ACCOUNT_ID_LENGTH = 6
 ACCOUNT_ID_MAX_ATTEMPTS = 25
+
+# ---------------------------------------------------------------------------
+# Admin access
+#
+# The admin password is never stored or transmitted in plaintext: the server
+# keeps only a PBKDF2-SHA256 hash (override via EGE_ADMIN_PASSWORD_HASH).
+# A successful login creates a server-side admin session row bound to the
+# internal users.id of the *current* account; the browser receives only a
+# random opaque token in an HttpOnly cookie. Verification on every admin API
+# call re-resolves the user from the normal ege_session cookie and requires a
+# matching, unexpired admin_sessions row — so a cookie copied from another
+# account grants nothing, and deleting the account cascades away its admin
+# sessions. This is deliberately separate from the user session system:
+# holding an ege_session never implies admin rights.
+# ---------------------------------------------------------------------------
+ADMIN_PASSWORD_HASH = os.environ.get(
+    "EGE_ADMIN_PASSWORD_HASH",
+    "pbkdf2_sha256$210000$242cb1880b2d6030889b3de36a87baa4$7c5cd007d7f3345e97fb8e2abf42f9b4e85327f7f6049cd8542b1cfa5e70f968",
+)
+ADMIN_COOKIE_NAME = "ege_admin"
+ADMIN_SESSION_DAYS = 30
+ADMIN_SESSION_MAX_AGE = ADMIN_SESSION_DAYS * 86400
+# Brute-force guard for the password endpoint: per client IP, in memory.
+ADMIN_LOGIN_MAX_FAILURES = 10
+ADMIN_LOGIN_WINDOW_SEC = 15 * 60
+_admin_login_failures: dict[str, list[float]] = {}
+_admin_login_lock = threading.Lock()
+SERVER_STARTED_AT = dt.datetime.now(dt.timezone.utc)
+
+
+def verify_admin_password(candidate: str) -> bool:
+    """Constant-time check of the plaintext against the stored PBKDF2 hash."""
+    try:
+        algo, iterations, salt_hex, hash_hex = ADMIN_PASSWORD_HASH.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def admin_login_allowed(ip: str) -> bool:
+    now = time.time()
+    with _admin_login_lock:
+        recent = [t for t in _admin_login_failures.get(ip, []) if now - t < ADMIN_LOGIN_WINDOW_SEC]
+        _admin_login_failures[ip] = recent
+        return len(recent) < ADMIN_LOGIN_MAX_FAILURES
+
+
+def admin_login_failed(ip: str) -> None:
+    with _admin_login_lock:
+        _admin_login_failures.setdefault(ip, []).append(time.time())
+
+
+def admin_login_success(ip: str) -> None:
+    with _admin_login_lock:
+        _admin_login_failures.pop(ip, None)
+
+
+def create_admin_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, int]:
+    """One live admin session per account: a re-login refreshes, not stacks."""
+    conn.execute("DELETE FROM admin_sessions WHERE user_id=?", (user_id,))
+    token = token_urlsafe(32)
+    expires_at = int(time.time() * 1000) + ADMIN_SESSION_MAX_AGE * 1000
+    conn.execute(
+        "INSERT INTO admin_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
+        (user_id, token, now_iso(), expires_at),
+    )
+    conn.commit()
+    return token, expires_at
+
+
+def existing_user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> int | None:
+    """Resolve the user from the ege_session cookie WITHOUT creating an
+    account. Admin endpoints must not mint anonymous users for unauthenticated
+    probes — unlike /api/bootstrap, where account creation is the normal flow."""
+    token_value = cookie_value(handler, "ege_session")
+    if not token_value:
+        return None
+    row = conn.execute("SELECT id FROM users WHERE session_token=?", (token_value,)).fetchone()
+    return row["id"] if row else None
+
+
+def admin_session_user(conn: sqlite3.Connection, user_id: int, admin_token: str | None) -> dict | None:
+    """Return the live admin session for this exact user, or None."""
+    if not admin_token:
+        return None
+    row = conn.execute(
+        "SELECT id, expires_at FROM admin_sessions WHERE user_id=? AND token=?",
+        (user_id, admin_token),
+    ).fetchone()
+    if not row:
+        return None
+    if int(row["expires_at"]) <= int(time.time() * 1000):
+        conn.execute("DELETE FROM admin_sessions WHERE id=?", (row["id"],))
+        conn.commit()
+        return None
+    return {"id": row["id"], "expiresAt": int(row["expires_at"])}
+
+
+def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str | None:
+    jar = cookies.SimpleCookie(handler.headers.get("Cookie", ""))
+    morsel = jar.get(name)
+    return morsel.value if morsel else None
 
 
 def runtime_pid_path() -> Path:
@@ -471,6 +578,21 @@ CREATE TABLE IF NOT EXISTS user_xp_adjustments (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, amount INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
   id INTEGER PRIMARY KEY AUTOINCREMENT
 );
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_user_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  target_user_id INTEGER,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
 """
 
 
@@ -769,6 +891,393 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         if item.get("taskId") in valid_task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
+def level_from_xp(xp: int) -> dict:
+    """Mirror of the client's xpForLevel formula (400 + 120·(n−1) per level)."""
+    remaining = max(0, int(xp))
+    level = 1
+    need = 400 + 120 * (level - 1)
+    while remaining >= need:
+        remaining -= need
+        level += 1
+        need = 400 + 120 * (level - 1)
+    return {"level": level, "intoLevel": remaining, "need": need, "xp": max(0, int(xp))}
+
+
+def admin_overview(conn: sqlite3.Connection) -> dict:
+    def one(sql, *args):
+        return conn.execute(sql, args).fetchone()
+    today_msk = today()
+    yesterday_msk = (dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=1)).date().isoformat()
+
+    users_total = one("SELECT COUNT(*) AS c FROM users")["c"]
+    onboarded = one("SELECT COUNT(*) AS c FROM users WHERE onboarded=1")["c"]
+    named = one("SELECT COUNT(*) AS c FROM users WHERE name IS NOT NULL AND name != ''")["c"]
+    created = [r["created_at"] for r in conn.execute("SELECT created_at FROM users")]
+    day_ms = 86400000
+    now_ms = int(time.time() * 1000)
+    def registered_since(ms: int) -> int:
+        n = 0
+        for c in created:
+            try:
+                if int(c) >= ms:
+                    n += 1
+            except (TypeError, ValueError):
+                continue
+        return n
+    new_today = registered_since(now_ms - day_ms)
+    new_week = registered_since(now_ms - 7 * day_ms)
+
+    active_today = one("SELECT COUNT(DISTINCT user_id) AS c FROM activity_history WHERE activity_date=?", today_msk)["c"]
+    active_week_row = conn.execute(
+        "SELECT COUNT(DISTINCT user_id) AS c FROM activity_history WHERE activity_date >= ?",
+        ((dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=6)).date().isoformat(),),
+    ).fetchone()
+    active_week = active_week_row["c"]
+    active_ever = one("SELECT COUNT(*) AS c FROM user_stats WHERE total_solved > 0")["c"]
+
+    stats = one("""SELECT COALESCE(SUM(xp),0) AS xp, COALESCE(SUM(total_solved),0) AS solved,
+                   COALESCE(SUM(total_correct),0) AS correct, COALESCE(SUM(total_time_sec),0) AS time_sec,
+                   COALESCE(SUM(hints_used),0) AS hints, COALESCE(MAX(streak),0) AS best_streak,
+                   COALESCE(AVG(NULLIF(xp,0)),0) AS avg_xp FROM user_stats""")
+    # created_at хранится строкой миллисекундных меток одинаковой длины,
+    # поэтому лексикографическое сравнение корректно.
+    attempts_today = one("SELECT COUNT(*) AS c FROM task_attempts WHERE created_at >= ?", str(now_ms - day_ms))["c"]
+    open_errors = one("SELECT COUNT(*) AS c FROM user_errors WHERE resolved=0")["c"]
+    completed_lessons = one("SELECT COUNT(*) AS c FROM completed_lessons")["c"]
+    lessons_total = one("SELECT COUNT(*) AS c FROM lessons")["c"]
+    missions_done = one("SELECT COUNT(*) AS c FROM user_missions WHERE completed_at IS NOT NULL")["c"]
+    bosses_defeated = one("SELECT COUNT(*) AS c FROM user_bosses")["c"]
+
+    # Activity for the last 14 Moscow days: solved/correct/xp per date.
+    start_date = (dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=13)).date()
+    activity_rows = {r["activity_date"]: dict(r) for r in conn.execute(
+        "SELECT activity_date, SUM(solved) AS solved, SUM(correct) AS correct, SUM(xp) AS xp, COUNT(DISTINCT user_id) AS users "
+        "FROM activity_history WHERE activity_date >= ? GROUP BY activity_date", (start_date.isoformat(),))}
+    activity = []
+    for i in range(14):
+        d = (start_date + dt.timedelta(days=i)).isoformat()
+        row = activity_rows.get(d)
+        activity.append({"date": d, "solved": row["solved"] if row else 0, "correct": row["correct"] if row else 0,
+                         "xp": row["xp"] if row else 0, "users": row["users"] if row else 0})
+
+    # XP leaders (top 5) — real accounts only.
+    leaders = []
+    for r in conn.execute("""SELECT u.id, u.account_id, u.name, s.xp, s.total_solved, s.total_correct, s.streak
+                             FROM user_stats s JOIN users u ON u.id = s.user_id
+                             WHERE s.total_solved > 0 ORDER BY s.xp DESC LIMIT 5"""):
+        leaders.append({"id": r["id"], "accountId": r["account_id"], "name": r["name"], "xp": r["xp"],
+                        "level": level_from_xp(r["xp"])["level"], "solved": r["total_solved"],
+                        "correct": r["total_correct"], "streak": r["streak"]})
+
+    # Per-skill aggregate mastery across all users who touched the skill.
+    skills = []
+    for r in conn.execute("""SELECT sk.id, sk.name, sk.topic_id, t.name AS topic_name,
+                                    COUNT(up.user_id) AS users, COALESCE(SUM(up.solved),0) AS solved,
+                                    COALESCE(SUM(up.correct),0) AS correct, COALESCE(AVG(NULLIF(up.progress,0)),0) AS avg_progress
+                             FROM skills sk
+                             LEFT JOIN topics t ON t.id = sk.topic_id
+                             LEFT JOIN user_progress up ON up.skill_id = sk.id
+                             GROUP BY sk.id ORDER BY sk.display_order"""):
+        skills.append({"id": r["id"], "name": r["name"], "topic": r["topic_name"], "users": r["users"],
+                       "solved": r["solved"], "correct": r["correct"], "avgProgress": round(r["avg_progress"], 1)})
+
+    catalog = {
+        "tasks": one("SELECT COUNT(*) AS c FROM tasks")["c"],
+        "lessons": lessons_total,
+        "missions": one("SELECT COUNT(*) AS c FROM missions")["c"],
+        "bosses": one("SELECT COUNT(*) AS c FROM bosses")["c"],
+        "skills": one("SELECT COUNT(*) AS c FROM skills")["c"],
+        "achievements": one("SELECT COUNT(*) AS c FROM achievements")["c"],
+    }
+
+    solved = stats["solved"] or 0
+    system = {
+        "serverTime": now_iso(),
+        "startedAt": int(SERVER_STARTED_AT.timestamp() * 1000),
+        "uptimeSec": int(time.time() - SERVER_STARTED_AT.timestamp()),
+        "python": sys.version.split()[0],
+        "dbPath": str(DB_PATH),
+        "dbSizeBytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "schemaVersion": one("PRAGMA user_version")["user_version"] if one("PRAGMA user_version") else 0,
+        "adminSessions": one("SELECT COUNT(*) AS c FROM admin_sessions WHERE expires_at > ?", int(time.time() * 1000))["c"],
+        "xpAdjustments": one("SELECT COUNT(*) AS c FROM user_xp_adjustments")["c"],
+    }
+
+    return {
+        "users": {"total": users_total, "onboarded": onboarded, "named": named, "newToday": new_today,
+                  "newWeek": new_week, "activeToday": active_today, "activeWeek": active_week,
+                  "activeEver": active_ever, "avgXp": round(stats["avg_xp"], 1), "bestStreak": stats["best_streak"]},
+        "learning": {"xpTotal": stats["xp"], "solvedTotal": solved, "correctTotal": stats["correct"],
+                     "accuracy": round(100 * stats["correct"] / solved, 1) if solved else None,
+                     "timeSecTotal": round(stats["time_sec"]), "hintsUsed": stats["hints"],
+                     "attemptsToday": attempts_today, "openErrors": open_errors,
+                     "completedLessons": completed_lessons, "missionsDone": missions_done,
+                     "bossesDefeated": bosses_defeated},
+        "activity": activity,
+        "leaders": leaders,
+        "skills": skills,
+        "catalog": catalog,
+        "system": system,
+    }
+
+
+def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
+    rows = conn.execute("""SELECT u.id, u.account_id, u.name, u.created_at, u.onboarded, u.self_level, u.goal_id,
+                                  COALESCE(s.xp,0) AS xp, COALESCE(s.streak,0) AS streak, s.last_active_date,
+                                  COALESCE(s.total_solved,0) AS total_solved, COALESCE(s.total_correct,0) AS total_correct
+                           FROM users u LEFT JOIN user_stats s ON s.user_id = u.id
+                           ORDER BY u.id""").fetchall()
+    result = []
+    q = (query or "").strip().lower()
+    for r in rows:
+        item = {
+            "id": r["id"], "accountId": r["account_id"], "name": r["name"],
+            "createdAt": timestamp_value(r["created_at"]), "onboarded": bool(r["onboarded"]),
+            "selfLevel": r["self_level"], "goal": r["goal_id"],
+            "xp": r["xp"], "level": level_from_xp(r["xp"])["level"], "streak": r["streak"],
+            "lastActiveDate": r["last_active_date"], "solved": r["total_solved"], "correct": r["total_correct"],
+        }
+        if q:
+            haystack = " ".join(str(x) for x in (item["accountId"], item["name"], item["id"], item["selfLevel"], item["goal"]) if x).lower()
+            if q not in haystack:
+                continue
+        result.append(item)
+    return result
+
+
+def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        return None
+    stats = conn.execute("SELECT * FROM user_stats WHERE user_id=?", (user_id,)).fetchone()
+    xp = stats["xp"] if stats else 0
+    detail = {
+        "id": user["id"], "accountId": user["account_id"], "name": user["name"],
+        "createdAt": timestamp_value(user["created_at"]), "onboarded": bool(user["onboarded"]),
+        "selfLevel": user["self_level"], "goal": user["goal_id"],
+        "stats": {
+            "xp": xp, "level": level_from_xp(xp), "streak": stats["streak"] if stats else 0,
+            "lastActiveDate": stats["last_active_date"] if stats else None,
+            "totalSolved": stats["total_solved"] if stats else 0,
+            "totalCorrect": stats["total_correct"] if stats else 0,
+            "accuracy": round(100 * stats["total_correct"] / stats["total_solved"], 1) if stats and stats["total_solved"] else None,
+            "totalTimeSec": round(stats["total_time_sec"]) if stats else 0,
+            "hintsUsed": stats["hints_used"] if stats else 0,
+            "correctSeries": stats["correct_series"] if stats else 0,
+            "bestSeries": stats["best_series"] if stats else 0,
+            "errorsResolved": stats["errors_resolved"] if stats else 0,
+        },
+        "counts": {
+            "skillsTouched": conn.execute("SELECT COUNT(*) AS c FROM user_progress WHERE user_id=? AND solved>0", (user_id,)).fetchone()["c"],
+            "skillsTotal": conn.execute("SELECT COUNT(*) AS c FROM skills").fetchone()["c"],
+            "lessonsCompleted": conn.execute("SELECT COUNT(*) AS c FROM completed_lessons WHERE user_id=?", (user_id,)).fetchone()["c"],
+            "lessonsTotal": conn.execute("SELECT COUNT(*) AS c FROM lessons").fetchone()["c"],
+            "missionsDone": conn.execute("SELECT COUNT(*) AS c FROM user_missions WHERE user_id=? AND completed_at IS NOT NULL", (user_id,)).fetchone()["c"],
+            "bossesDefeated": conn.execute("SELECT COUNT(*) AS c FROM user_bosses WHERE user_id=?", (user_id,)).fetchone()["c"],
+            "achievements": conn.execute("SELECT COUNT(*) AS c FROM user_achievements WHERE user_id=?", (user_id,)).fetchone()["c"],
+            "openErrors": conn.execute("SELECT COUNT(*) AS c FROM user_errors WHERE user_id=? AND resolved=0", (user_id,)).fetchone()["c"],
+            "attempts": conn.execute("SELECT COUNT(*) AS c FROM task_attempts WHERE user_id=?", (user_id,)).fetchone()["c"],
+        },
+        "xpAdjustments": [{"amount": r["amount"], "reason": r["reason"], "ts": timestamp_value(r["created_at"])}
+                          for r in conn.execute("SELECT * FROM user_xp_adjustments WHERE user_id=? ORDER BY id DESC", (user_id,))],
+        "skills": [],
+        "errors": [],
+        "timeline": [],
+        "recentAttempts": [],
+        "activity": [],
+        "achievements": [],
+        "adminSessions": conn.execute(
+            "SELECT COUNT(*) AS c FROM admin_sessions WHERE user_id=? AND expires_at > ?",
+            (user_id, int(time.time() * 1000))).fetchone()["c"],
+    }
+    for r in conn.execute("""SELECT up.skill_id, up.progress, up.solved, up.correct, up.time_sec, sk.name, t.name AS topic
+                             FROM user_progress up JOIN skills sk ON sk.id=up.skill_id LEFT JOIN topics t ON t.id=sk.topic_id
+                             WHERE up.user_id=? AND (up.solved>0 OR up.progress>0) ORDER BY up.progress DESC, up.solved DESC""", (user_id,)):
+        detail["skills"].append({"id": r["skill_id"], "name": r["name"], "topic": r["topic"], "progress": r["progress"],
+                                 "solved": r["solved"], "correct": r["correct"], "timeSec": round(r["time_sec"])})
+    task_titles = {r["id"]: r["exam_number"] for r in conn.execute("SELECT id, exam_number FROM tasks")}
+    for r in conn.execute("""SELECT e.id, e.task_id, e.skill_id, e.topic, e.created_at, e.resolved, sk.name AS skill_name
+                             FROM user_errors e LEFT JOIN skills sk ON sk.id=e.skill_id
+                             WHERE e.user_id=? ORDER BY e.id DESC LIMIT 100""", (user_id,)):
+        detail["errors"].append({"id": r["id"], "taskId": r["task_id"], "examNumber": task_titles.get(r["task_id"]),
+                                 "skill": r["skill_name"] or r["skill_id"], "topic": r["topic"],
+                                 "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
+    for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? ORDER BY id DESC LIMIT 40", (user_id,)):
+        detail["timeline"].append({"ts": timestamp_value(r["created_at"]), "text": r["text"]})
+    skill_names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM skills")}
+    for r in conn.execute("""SELECT a.task_id, a.skill_id, a.correct, a.hint_level, a.seconds, a.created_at
+                             FROM task_attempts a WHERE a.user_id=? ORDER BY a.id DESC LIMIT 50""", (user_id,)):
+        detail["recentAttempts"].append({"taskId": r["task_id"], "examNumber": task_titles.get(r["task_id"]),
+                                         "skill": skill_names.get(r["skill_id"], r["skill_id"]),
+                                         "correct": bool(r["correct"]), "hintLevel": r["hint_level"],
+                                         "seconds": round(r["seconds"]), "ts": timestamp_value(r["created_at"])})
+    for r in conn.execute("SELECT activity_date, solved, correct, xp FROM activity_history WHERE user_id=? ORDER BY activity_date DESC LIMIT 60", (user_id,)):
+        detail["activity"].append({"date": r["activity_date"], "solved": r["solved"], "correct": r["correct"], "xp": r["xp"]})
+    for r in conn.execute("""SELECT ua.achievement_id, ua.unlocked_at, a.name, a.icon, a.description
+                             FROM user_achievements ua LEFT JOIN achievements a ON a.id=ua.achievement_id
+                             WHERE ua.user_id=? ORDER BY ua.unlocked_at DESC""", (user_id,)):
+        detail["achievements"].append({"id": r["achievement_id"], "name": r["name"], "icon": r["icon"],
+                                       "description": r["description"], "ts": timestamp_value(r["unlocked_at"])})
+    return detail
+
+
+def resolve_admin_target(conn: sqlite3.Connection, ref: str) -> int | None:
+    """Resolve an admin API user reference: the public Account ID or the
+    internal numeric id. Anything else is None (never a partial match)."""
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    row = conn.execute("SELECT id FROM users WHERE account_id=?", (ref,)).fetchone()
+    if row:
+        return row["id"]
+    if ref.isdigit():
+        row = conn.execute("SELECT id FROM users WHERE id=?", (int(ref),)).fetchone()
+        if row:
+            return row["id"]
+    return None
+
+
+SELF_LEVELS = {"zero", "base", "confident"}
+
+
+def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
+    """Edit the profile fields an admin may legitimately correct. Only
+    name/selfLevel/goal are accepted; keys absent from the payload are kept."""
+    user = conn.execute("SELECT name, self_level, goal_id FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        raise KeyError("user not found")
+    name, self_level, goal = user["name"], user["self_level"], user["goal_id"]
+    if "name" in payload:
+        raw = payload["name"]
+        if raw is not None and not isinstance(raw, str):
+            raise ValueError("name must be a string or null")
+        name = sanitize_name(raw) if raw is not None else None
+    if "selfLevel" in payload:
+        value = payload["selfLevel"]
+        if value is not None and value not in SELF_LEVELS:
+            raise ValueError("selfLevel must be one of: zero, base, confident (or null)")
+        self_level = value
+    if "goal" in payload:
+        value = payload["goal"]
+        if value is not None:
+            valid = conn.execute("SELECT value_json FROM app_config WHERE key='goals'").fetchone()
+            goal_ids = {g["id"] for g in json.loads(valid["value_json"])} if valid else set()
+            if value not in goal_ids:
+                raise ValueError(f"unknown goal: {value}")
+        goal = value
+    conn.execute("UPDATE users SET name=?, self_level=?, goal_id=? WHERE id=?", (name, self_level, goal, user_id))
+    conn.commit()
+    return {"id": user_id, "name": name, "selfLevel": self_level, "goal": goal}
+
+
+def admin_grant_xp(conn: sqlite3.Connection, user_id: int, amount: int, reason: str) -> dict:
+    """Manual XP correction through the same append-only audit log the client's
+    grantXp uses: derive_stats always adds these rows to the derived XP, and a
+    client sync can never wipe them. Negative amounts deduct."""
+    amount = int(amount)
+    if not -100000 <= amount <= 100000 or amount == 0:
+        raise ValueError("amount must be a non-zero integer within ±100000")
+    reason = " ".join(str(reason or "").split())[:200] or "admin"
+    conn.execute("BEGIN")
+    conn.execute("INSERT INTO user_xp_adjustments(user_id, amount, reason, created_at) VALUES (?,?,?,?)",
+                 (user_id, amount, f"admin: {reason}", now_iso()))
+    stats = conn.execute("SELECT xp FROM user_stats WHERE user_id=?", (user_id,)).fetchone()
+    new_xp = max(0, (stats["xp"] if stats else 0) + amount)
+    conn.execute("""INSERT INTO user_stats(user_id, xp) VALUES(?,?)
+                    ON CONFLICT(user_id) DO UPDATE SET xp=excluded.xp""", (user_id, new_xp))
+    conn.execute("INSERT INTO timeline(user_id, created_at, text) VALUES (?,?,?)",
+                 (user_id, now_iso(), f"Админ-корректировка XP: {amount:+d} ({reason})"))
+    conn.commit()
+    return {"xp": new_xp, "level": level_from_xp(new_xp), "amount": amount, "reason": reason}
+
+
+def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
+    """Targeted resets. Each clears only the named state; 'all-progress'
+    wipes learning history but keeps the account row itself."""
+    if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+        raise KeyError("user not found")
+    groups = {
+        "streak": {
+            "tables": [],
+            "stats": "UPDATE user_stats SET streak=0, correct_series=0 WHERE user_id=?",
+            "label": "Серия дней сброшена",
+        },
+        "errors": {
+            "tables": ["user_errors", "lesson_step_errors", "lesson_error_history"],
+            "stats": "UPDATE user_stats SET errors_resolved=0 WHERE user_id=?",
+            "label": "Ошибки и история ошибок очищены",
+        },
+        "daily": {
+            "tables": ["daily_progress"],
+            "stats": None,
+            "label": "Ежедневная подборка сброшена",
+        },
+        "forecast": {
+            "tables": ["forecast_history"],
+            "stats": None,
+            "label": "История прогноза очищена",
+        },
+        "all-progress": {
+            "tables": ["user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts",
+                       "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons",
+                       "user_missions", "user_bosses", "user_achievements", "activity_history",
+                       "forecast_history", "daily_progress", "timeline", "diagnostics"],
+            "stats": "UPDATE user_stats SET xp=0, streak=0, last_active_date=NULL, total_solved=0, total_correct=0, total_time_sec=0, hints_used=0, correct_series=0, best_series=0, errors_resolved=0 WHERE user_id=?",
+            "label": "Весь прогресс сброшен",
+        },
+    }
+    if target not in groups:
+        raise ValueError(f"unknown reset target: {target}")
+    group = groups[target]
+    conn.execute("BEGIN")
+    for table in group["tables"]:
+        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    if group["stats"]:
+        conn.execute(group["stats"], (user_id,))
+    if target == "all-progress":
+        # XP is derived from events plus the adjustment log; wiping events
+        # while leaving grants would resurrect XP from nothing.
+        conn.execute("DELETE FROM user_xp_adjustments WHERE user_id=?", (user_id,))
+        conn.execute("UPDATE users SET onboarded=0, self_level=NULL, goal_id=NULL WHERE id=?", (user_id,))
+        conn.execute("INSERT INTO timeline(user_id, created_at, text) VALUES (?,?,?)",
+                     (user_id, now_iso(), "Админ сбросил весь прогресс аккаунта"))
+    conn.commit()
+    return {"ok": True, "target": target, "message": group["label"]}
+
+
+def admin_delete_user(conn: sqlite3.Connection, user_id: int, actor_id: int) -> dict:
+    if user_id == actor_id:
+        raise ValueError("cannot delete the account that holds this admin session")
+    user = conn.execute("SELECT account_id FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        raise KeyError("user not found")
+    conn.execute("BEGIN")
+    # ON DELETE CASCADE clears stats, progress, attempts and admin sessions.
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.execute("INSERT INTO admin_audit(actor_user_id, action, target_user_id, detail, created_at) VALUES (?,?,?,?,?)",
+                 (actor_id, "delete-user", user_id, user["account_id"] or "", now_iso()))
+    conn.commit()
+    return {"ok": True, "deleted": user_id, "accountId": user["account_id"]}
+
+
+def admin_audit(conn: sqlite3.Connection, actor_id: int, action: str, target_id: int | None, detail: str = "") -> None:
+    conn.execute("INSERT INTO admin_audit(actor_user_id, action, target_user_id, detail, created_at) VALUES (?,?,?,?,?)",
+                 (actor_id, action, target_id, detail[:200], now_iso()))
+    conn.commit()
+
+
+def admin_audit_list(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("""SELECT a.id, a.actor_user_id, a.action, a.target_user_id, a.detail, a.created_at,
+                                  u1.account_id AS actor_account, u2.account_id AS target_account
+                           FROM admin_audit a
+                           LEFT JOIN users u1 ON u1.id = a.actor_user_id
+                           LEFT JOIN users u2 ON u2.id = a.target_user_id
+                           ORDER BY a.id DESC LIMIT 200""").fetchall()
+    return [{"id": r["id"], "actorId": r["actor_user_id"], "actorAccount": r["actor_account"],
+             "action": r["action"], "targetId": r["target_user_id"], "targetAccount": r["target_account"],
+             "detail": r["detail"], "ts": timestamp_value(r["created_at"])} for r in rows]
+
+
 def _daily_xp(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT value_json FROM app_config WHERE key='daily'").fetchone()
     if not row: return 0
@@ -911,20 +1420,178 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
 class Handler(BaseHTTPRequestHandler):
     server_version = "EGECore/1.0"
 
-    def send_json(self, payload: dict, status: int = 200, token: str | None = None):
+    def send_json(self, payload: dict, status: int = 200, token: str | None = None, admin_cookie: str | None = None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         if token: self.send_header("Set-Cookie", f"ege_session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000")
+        if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers(); self.wfile.write(data)
 
     def read_json(self):
         length = int(self.headers.get("Content-Length", "0")); return json.loads(self.rfile.read(length) or b"{}")
 
+    # ------------------------------------------------------------------
+    # Admin session middleware
+    #
+    # Every /api/admin/* call goes through this: the *user* is resolved from
+    # the regular ege_session cookie (creating an anonymous account if the
+    # browser has none — same as any other endpoint), and admin rights require
+    # a live admin_sessions row matching BOTH that user id AND the opaque
+    # ege_admin cookie token. Consequences: a stolen/copied ege_admin cookie
+    # presented by another account resolves to a different user id and fails;
+    # deleting an account cascades its admin sessions; logout clears the row
+    # and the cookie. Frontend state is never consulted for authorization.
+    # ------------------------------------------------------------------
+    def admin_cookie_attrs(self, value: str | None, max_age: int) -> str:
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        if value is None:
+            return f"{ADMIN_COOKIE_NAME}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
+        return f"{ADMIN_COOKIE_NAME}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={max_age}{secure}"
+
+    def require_admin(self, conn: sqlite3.Connection) -> tuple[int, dict] | None:
+        """Return (user_id, session) when the caller holds a live admin
+        session; otherwise send 401 and return None. Probes never create an
+        account: admin rights exist only for an already-signed-in user."""
+        user_id = existing_user_for(conn, self)
+        if user_id is None:
+            self.send_json({"error": "No admin session", "login": True}, 401)
+            return None
+        session = admin_session_user(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))
+        if not session:
+            self.send_json({"error": "No admin session", "login": True}, 401)
+            return None
+        return user_id, session
+
+    def handle_admin_login(self, conn: sqlite3.Connection) -> None:
+        ip = self.client_address[0] if self.client_address else "?"
+        if not admin_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        password = payload.get("password")
+        if not isinstance(password, str) or not password:
+            self.send_json({"error": "Введите пароль"}, 400)
+            return
+        if not verify_admin_password(password):
+            admin_login_failed(ip)
+            self.send_json({"error": "Неверный пароль"}, 401)
+            return
+        admin_login_success(ip)
+        user_id, token = user_for(conn, self)
+        admin_token, expires_at = create_admin_session(conn, user_id)
+        admin_audit(conn, user_id, "admin-login", user_id)
+        self.send_json(
+            {"ok": True, "expiresAt": expires_at, "user": {"id": user_id, "accountId": account_id_for(conn, user_id), "name": conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()["name"]}},
+            token=token,
+            admin_cookie=self.admin_cookie_attrs(admin_token, ADMIN_SESSION_MAX_AGE),
+        )
+
+    def handle_admin_logout(self, conn: sqlite3.Connection) -> None:
+        # Logout must work even with an invalid cookie: clear what we can,
+        # and never create an account just to log out.
+        user_id = existing_user_for(conn, self)
+        admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
+        if user_id is not None and admin_token:
+            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?", (user_id, admin_token))
+            conn.commit()
+            admin_audit(conn, user_id, "admin-logout", user_id)
+        self.send_json({"ok": True}, admin_cookie=self.admin_cookie_attrs(None, 0))
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/api/admin/login" or path == "/api/admin/logout":
+            conn = connect()
+            try:
+                if path == "/api/admin/login": self.handle_admin_login(conn)
+                else: self.handle_admin_logout(conn)
+            except (ValueError, KeyError, sqlite3.Error) as exc:
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path.startswith("/api/admin/users/"):
+            # POST /api/admin/users/<ref>/<action>
+            parts = path.split("/")
+            if len(parts) == 6 and parts[5] in ("xp", "reset", "delete"):
+                conn = connect()
+                try:
+                    auth = self.require_admin(conn)
+                    if not auth: return
+                    actor_id, _ = auth
+                    target_id = resolve_admin_target(conn, parts[4])
+                    if target_id is None:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    try:
+                        payload = self.read_json()
+                    except (json.JSONDecodeError, ValueError):
+                        self.send_json({"error": "Некорректный JSON"}, 400); return
+                    action = parts[5]
+                    if action == "xp":
+                        result = admin_grant_xp(conn, target_id, payload.get("amount", 0), payload.get("reason", ""))
+                        admin_audit(conn, actor_id, "grant-xp", target_id, f"{result['amount']:+d} {result['reason']}")
+                    elif action == "reset":
+                        result = admin_reset(conn, target_id, str(payload.get("target", "")))
+                        admin_audit(conn, actor_id, "reset", target_id, result["target"])
+                    else:
+                        result = admin_delete_user(conn, target_id, actor_id)
+                    self.send_json(result)
+                except (ValueError, KeyError, sqlite3.Error) as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    status = 404 if isinstance(exc, KeyError) else 400
+                    self.send_json({"error": str(exc)}, status)
+                finally: conn.close()
+                return
+        self.send_json({"error": "Not found"}, 404)
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/admin"):
+            conn = connect()
+            try:
+                if path == "/api/admin/session":
+                    # Status probe for the /admin page: never creates an
+                    # account or a session, only reports a live one.
+                    user_id = existing_user_for(conn, self)
+                    session = admin_session_user(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME)) if user_id is not None else None
+                    if session:
+                        user = conn.execute("SELECT name, account_id FROM users WHERE id=?", (user_id,)).fetchone()
+                        self.send_json({"admin": True, "expiresAt": session["expiresAt"],
+                                        "user": {"id": user_id, "accountId": user["account_id"], "name": user["name"]}})
+                    else:
+                        self.send_json({"admin": False}, 401)
+                    return
+                auth = self.require_admin(conn)
+                if not auth: return
+                user_id, _ = auth
+                parsed = urlparse(self.path)
+                if path == "/api/admin/overview":
+                    self.send_json(admin_overview(conn)); return
+                if path == "/api/admin/users":
+                    from urllib.parse import parse_qs
+                    query = parse_qs(parsed.query).get("q", [None])[0]
+                    self.send_json({"users": admin_users_list(conn, query)}); return
+                if path == "/api/admin/audit":
+                    self.send_json({"entries": admin_audit_list(conn)}); return
+                parts = path.split("/")
+                if len(parts) == 5 and parts[3] == "users":
+                    target_id = resolve_admin_target(conn, parts[4])
+                    if target_id is None:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    detail = admin_user_detail(conn, target_id)
+                    if detail is None:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    self.send_json({"user": detail}); return
+                self.send_json({"error": "Not found"}, 404); return
+            except (ValueError, KeyError, sqlite3.Error) as exc:
+                self.send_json({"error": f"Request failed: {exc}"}, 500)
+            finally: conn.close()
         if path.startswith("/api/"):
             conn = connect()
             try:
@@ -936,6 +1603,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "main.html"
         elif path == '/dashboard':
             file_path = ROOT / "index.html"
+        elif path == '/admin':
+            file_path = ROOT / "admin.html"
         else:
             file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
         if ROOT not in file_path.parents and file_path != ROOT: self.send_error(403); return
@@ -944,7 +1613,35 @@ class Handler(BaseHTTPRequestHandler):
         data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_PUT(self):
-        if urlparse(self.path).path != "/api/state": self.send_json({"error": "Not found"}, 404); return
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/users/"):
+            # PUT /api/admin/users/<ref>/profile
+            parts = path.split("/")
+            if len(parts) == 6 and parts[5] == "profile":
+                conn = connect()
+                try:
+                    auth = self.require_admin(conn)
+                    if not auth: return
+                    actor_id, _ = auth
+                    target_id = resolve_admin_target(conn, parts[4])
+                    if target_id is None:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    try:
+                        payload = self.read_json()
+                    except (json.JSONDecodeError, ValueError):
+                        self.send_json({"error": "Некорректный JSON"}, 400); return
+                    result = admin_update_profile(conn, target_id, payload)
+                    admin_audit(conn, actor_id, "update-profile", target_id, json.dumps({k: v for k, v in payload.items() if k in ("name", "selfLevel", "goal")}, ensure_ascii=False))
+                    self.send_json(result)
+                except (ValueError, KeyError, sqlite3.Error) as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    status = 404 if isinstance(exc, KeyError) else 400
+                    self.send_json({"error": str(exc)}, status)
+                finally: conn.close()
+                return
+            self.send_json({"error": "Not found"}, 404); return
+        if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
         conn = connect()
         try:
             user_id, token = user_for(conn, self)
@@ -960,7 +1657,17 @@ class Handler(BaseHTTPRequestHandler):
         finally: conn.close()
 
     def do_DELETE(self):
-        if urlparse(self.path).path != "/api/state": self.send_json({"error": "Not found"}, 404); return
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin"):
+            # No DELETE admin endpoints exist; require the session anyway so
+            # probing returns 401, not a misleading 404/405 difference.
+            conn = connect()
+            try:
+                if not self.require_admin(conn): return
+                self.send_json({"error": "Not found"}, 404)
+            finally: conn.close()
+            return
+        if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
         conn = connect()
         try:
             user_id, token = user_for(conn, self); conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
