@@ -53,6 +53,13 @@ const testBody = async () => {
     .filter((x) => x.mathVisual)
     .every((x) => MATHVISUAL_TYPES.includes(x.mathVisual.type) && !x.visual
       && (Array.isArray(x.mathVisual.objects) || Array.isArray(x.mathVisual.nodes) || x.mathVisual.type === "3d_solid")));
+  const parameterGraph = DataAPI.task("n19_p1").mathVisual;
+  const parameterDomains = parameterGraph.objects.filter((o) => o.type === "function").map((o) => o.domain);
+  t("№19 показывает все видимые ветви графика системы, без обрыва внутри окна", JSON.stringify(parameterDomains) === JSON.stringify([
+    [-3.5, 0], [4, 7.5], [-3.5, 0], [4, 7.5],
+  ]));
+  const tangentCircle = DataAPI.task("n18_p2").mathVisual;
+  t("№18.2 не обрезает окружность рамкой рисунка", tangentCircle.boundingBox[3] <= -13);
 
   t("checkAnswer exact", checkAnswer(DataAPI.task("n01_p1"), "3"));
   t("checkAnswer comma/dot", checkAnswer(DataAPI.task("n04_p1"), "0,3"));
