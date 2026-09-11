@@ -143,6 +143,7 @@
       axis: false,
       showNavigation: false,
       showCopyright: false,
+      showInfobox: false, // координатная табличка при нажатии/удержании точки — лишний артефакт на статичной фигуре
       // Every math object below is built `fixed: true`, so even where zoom
       // is on, there is nothing a drag can move but the camera.
       pan: { enabled: false },
@@ -530,7 +531,7 @@
     el.className = "mathvisual-board";
     container.appendChild(el);
     const board = JXG.JSXGraph.initBoard(el.id, {
-      boundingbox: [-6, 6, 6, -6], axis: false, showNavigation: false, showCopyright: false,
+      boundingbox: [-6, 6, 6, -6], axis: false, showNavigation: false, showCopyright: false, showInfobox: false,
       // Rotating the solid (az/el drag on the view3d itself, enabled by
       // default below) and zooming are the only view-only controls that make
       // sense for a 3D figure -- board pan would fight the same plain-drag
