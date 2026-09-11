@@ -144,6 +144,7 @@ const AICONS = {
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22c4.4 0 7-2.8 7-6.5 0-3-2-5.5-3.5-7C14 7 13 5.5 13 3c-3 2-5 5-5 8-1-.5-1.8-1.5-2-3-1.5 1.6-3 4-3 6.5C3 19.2 7.6 22 12 22z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>',
 };
 
 function aicon(name) {
@@ -467,39 +468,52 @@ async function screenUsers() {
     document.getElementById("userCount").textContent = `${filtered.length} из ${users.length}`;
     const wrap = document.getElementById("usersTable");
     wrap.innerHTML = filtered.length ? `
-      <div class="a-table-wrap"><table class="a-table">
-        <thead><tr>
-          <th>Account</th><th>Имя</th><th class="num">Ур.</th><th class="num">XP</th>
-          <th class="num">Решено</th><th class="num">Точность</th><th class="num">Серия</th>
-          <th>Регистрация</th><th>Активность</th>
-        </tr></thead>
-        <tbody>
-          ${filtered.map((p) => `
-            <tr class="clickable" data-id="${p.id}">
-              <td class="acct-cell">${esc(p.accountId || "—")}</td>
-              <td>${p.name ? esc(p.name) : `<span style="color:var(--muted)">без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}</td>
-              <td class="num">${p.level}</td>
-              <td class="num">${fmtNum(p.xp)}</td>
-              <td class="num">${fmtNum(p.solved)}</td>
-              <td class="num">${p.solved ? Math.round((p.correct / p.solved) * 100) + "%" : "—"}</td>
-              <td class="num">${p.streak || "—"}</td>
-              <td>${fmtDate(p.createdAt)}</td>
-              <td>${p.lastActiveDate ? fmtShortDate(p.lastActiveDate) : `<span style="color:var(--muted)">нет</span>`}</td>
-            </tr>`).join("")}
-        </tbody>
-      </table></div>` : `
+      <div class="a-user-grid">
+        ${filtered.map((p) => {
+          const initial = (p.name || p.accountId || "?").trim().charAt(0).toUpperCase();
+          const acc = Math.round((p.correct / p.solved) * 100);
+          return `
+          <div class="a-user-card clickable" data-id="${p.id}">
+            <div class="a-user-card__top">
+              <div class="a-avatar a-avatar--sm">${esc(initial)}</div>
+              <div class="a-user-card__id">
+                <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}</div>
+                <div class="a-user-card__acct mono">${esc(p.accountId || "—")}</div>
+              </div>
+              <div class="a-user-card__lvl"><b>${p.level}</b><span>уровень</span></div>
+            </div>
+            <div class="a-user-card__stats">
+              <div class="a-user-card__stat"><b>${fmtNum(p.xp)}</b><span>XP</span></div>
+              <div class="a-user-card__stat"><b>${fmtNum(p.solved)}</b><span>решено</span></div>
+              <div class="a-user-card__stat"><b>${p.solved ? acc + "%" : "—"}</b><span>точность</span></div>
+              <div class="a-user-card__stat"><b>${p.streak || "—"}</b><span>серия</span></div>
+            </div>
+            <div class="a-user-card__foot">
+              <span>${fmtDate(p.createdAt)}</span>
+              <span class="a-user-card__active">${p.lastActiveDate ? "активен " + fmtShortDate(p.lastActiveDate) : "не активен"}</span>
+              ${p.id === A.session.user.id ? "" : `
+              <button class="a-icon-btn a-icon-btn--danger" data-del="${p.id}" title="Удалить аккаунт">${aicon("trash")}</button>`}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>` : `
       <div class="a-card"><div class="a-empty">
         <div class="a-empty__icon">${aicon("search")}</div>
         <div class="a-empty__title">Ничего не найдено</div>
         <div class="a-empty__sub">Попробуйте Account ID (например, «a7k29x»), имя или числовой id</div>
       </div></div>`;
-    wrap.querySelectorAll("tr[data-id]").forEach((tr) => {
-      tr.onclick = () => navigate(`/users/${encodeURIComponent(filtered.find((p) => String(p.id) === tr.dataset.id)?.accountId || tr.dataset.id)}`);
+    wrap.querySelectorAll(".a-user-card[data-id]").forEach((card) => {
+      card.onclick = () => navigate(`/users/${encodeURIComponent(filtered.find((p) => String(p.id) === card.dataset.id)?.accountId || card.dataset.id)}`);
+    });
+    wrap.querySelectorAll("[data-del]").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        openDeleteUserModal(filtered.find((p) => String(p.id) === btn.dataset.del));
+      };
     });
   };
   input.oninput = drawList;
   drawList();
-  input.focus();
 }
 
 /* ---------------- Карточка пользователя ---------------- */
@@ -653,6 +667,46 @@ async function screenUser(ref) {
 }
 
 /* ---------------- действия над пользователем ---------------- */
+
+/* Модальное окно удаления аккаунта. Работает и с детальной карточкой
+   (p.stats.*), и с элементом списка (p.solved/p.xp) — формат подсказки
+   берём из того, что есть. */
+function openDeleteUserModal(p) {
+  const ref = p.accountId || String(p.id);
+  const solved = p.stats ? p.stats.totalSolved : p.solved;
+  const xp = p.stats ? p.stats.xp : p.xp;
+  openModal(`
+    <div class="a-modal__title" style="color:var(--danger)">Удалить аккаунт ${esc(p.accountId || "")}?</div>
+    <div class="a-modal__desc">Будут удалены сам аккаунт и ВСЕ его данные: ${fmtNum(solved)} решений, ${fmtNum(xp)} XP, уроки, ошибки, достижения, admin-сессии. Действие необратимо.</div>
+    <div class="a-modal__form">
+      <div class="a-modal__warn"><b>Подтверждение:</b> введите Account ID <span class="mono">${esc(p.accountId || "")}</span></div>
+      <input class="a-input mono" id="fDel" placeholder="${esc(p.accountId || "")}" autocomplete="off">
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--danger-soft" id="mDo">Удалить навсегда</button>
+    </div>`, (modal) => {
+    modal.classList.add("a-modal--danger");
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mDo").onclick = async () => {
+      if (modal.querySelector("#fDel").value.trim() !== (p.accountId || "")) {
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">Account ID не совпадает</div>`;
+        return;
+      }
+      try {
+        await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/delete`, {});
+        closeModal();
+        toast("Аккаунт удалён");
+        A.usersCache = null;
+        if (parseHash().name === "users" && !parseHash().param) render(); else navigate("/users");
+      } catch (e) {
+        if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
 
 function openModal(html, onMount) {
   closeModal();
@@ -834,39 +888,7 @@ function bindUserActions(p) {
 
   const deleteBtn = document.getElementById("deleteBtn");
   if (deleteBtn && !deleteBtn.disabled) {
-    deleteBtn.onclick = () => {
-      openModal(`
-        <div class="a-modal__title" style="color:var(--danger)">Удалить аккаунт ${esc(p.accountId || "")}?</div>
-        <div class="a-modal__desc">Будут удалены сам аккаунт и ВСЕ его данные: ${fmtNum(p.stats.totalSolved)} решений, ${fmtNum(p.stats.xp)} XP, уроки, ошибки, достижения, admin-сессии. Действие необратимо.</div>
-        <div class="a-modal__form">
-          <div class="a-modal__warn"><b>Подтверждение:</b> введите Account ID <span class="mono">${esc(p.accountId || "")}</span></div>
-          <input class="a-input mono" id="fDel" placeholder="${esc(p.accountId || "")}" autocomplete="off">
-          <div id="mErr"></div>
-        </div>
-        <div class="a-modal__actions">
-          <button class="btn btn--soft" id="mCancel">Отмена</button>
-          <button class="btn btn--danger-soft" id="mDo">Удалить навсегда</button>
-        </div>`, (modal) => {
-        modal.classList.add("a-modal--danger");
-        modal.querySelector("#mCancel").onclick = closeModal;
-        modal.querySelector("#mDo").onclick = async () => {
-          if (modal.querySelector("#fDel").value.trim() !== (p.accountId || "")) {
-            modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">Account ID не совпадает</div>`;
-            return;
-          }
-          try {
-            await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/delete`, {});
-            closeModal();
-            toast("Аккаунт удалён");
-            A.usersCache = null;
-            navigate("/users");
-          } catch (e) {
-            if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
-            modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
-          }
-        };
-      });
-    };
+    deleteBtn.onclick = () => openDeleteUserModal(p);
   }
 }
 
