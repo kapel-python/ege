@@ -467,6 +467,10 @@ CREATE TABLE IF NOT EXISTS timeline (
 CREATE TABLE IF NOT EXISTS diagnostics (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id), correct INTEGER NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_xp_adjustments (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, amount INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+);
 """
 
 
@@ -644,7 +648,8 @@ def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
             "totalSolved": 0, "totalCorrect": 0, "totalTimeSec": 0, "hintsUsed": 0, "hintLevels": {"1": 0, "2": 0, "3": 0},
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
-            "completedLessons": {}, "lessonAttempts": [], "taskAttempts": [], "diagnostics": [], "forecastHistory": [], "activity": {},
+            "completedLessons": {}, "lessonAttempts": [], "taskAttempts": [], "diagnostics": [], "forecastHistory": [],
+            "xpAdjustments": [], "activity": {},
             "timeline": [], "daily": {"date": None, "solved": 0, "done": False, "taskIds": []}, "dailyHistory": [], "skillStats": skills}
 
 
@@ -681,6 +686,7 @@ def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
     for r in conn.execute("SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id=?", (user_id,)): state["achievements"][r["achievement_id"]] = {"ts": timestamp_value(r["unlocked_at"])}
     for r in conn.execute("SELECT * FROM activity_history WHERE user_id=?", (user_id,)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
     state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute("SELECT * FROM forecast_history WHERE user_id=? ORDER BY snapshot_date", (user_id,))]
+    state["xpAdjustments"] = [{"amount": r["amount"], "reason": r["reason"], "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM user_xp_adjustments WHERE user_id=? ORDER BY id", (user_id,))]
     daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? ORDER BY progress_date DESC", (user_id,)))
     state["dailyHistory"] = []
     for daily in daily_rows:
@@ -737,6 +743,18 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     for achievement_id, item in (s.get("achievements") or {}).items(): conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id,achievement_id,item.get("ts") or now_iso()))
     for activity_date, value in (s.get("activity") or {}).items(): conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
     for item in s.get("forecastHistory") or []: conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
+    # Adjustments are an append-only audit log: rows already persisted (e.g.
+    # granted straight in the DB by an admin) must survive a sync from a
+    # client whose snapshot predates them, so unlike every other collection
+    # this table is never wiped — new entries are deduped against (amount,
+    # reason, created_at) and only missing ones are inserted.
+    existing = {str(r["amount"]) + "|" + r["reason"] + "|" + str(timestamp_value(r["created_at"]))
+                for r in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,))}
+    for item in s.get("xpAdjustments") or []:
+        amount, reason, ts = int(item.get("amount", 0)), str(item.get("reason", ""))[:200], item.get("ts") or now_iso()
+        key = f"{amount}|{reason}|{timestamp_value(ts)}"
+        if key not in existing:
+            conn.execute("INSERT INTO user_xp_adjustments(user_id,amount,reason,created_at) VALUES(?,?,?,?)", (user_id, amount, reason, ts))
     daily_records = {}
     for item in s.get("dailyHistory") or []:
         if item.get("date"): daily_records[item["date"]] = item
@@ -757,7 +775,7 @@ def _daily_xp(conn: sqlite3.Connection) -> int:
     return int(json.loads(row["value_json"]).get("xp", 0))
 
 
-def derive_stats(conn: sqlite3.Connection, state: dict) -> dict:
+def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = None) -> dict:
     """Recompute the XP-bearing counters from the submitted, catalog-backed
     event data instead of trusting the plain numbers the client sends for
     them (xp/totalSolved/... are otherwise ordinary JSON fields in the PUT
@@ -829,6 +847,19 @@ def derive_stats(conn: sqlite3.Connection, state: dict) -> dict:
     for boss_id in set(state.get("bossesDefeated") or []):
         xp += bosses_xp.get(boss_id, 0)
 
+    # Manual XP adjustments (grantXp / admin grants). The submitted snapshot
+    # may predate rows written straight into the DB, so the persisted log is
+    # the authority and the payload only contributes entries missing there.
+    seen_adj = set()
+    if user_id is not None:
+        for amount, reason, created_at in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,)):
+            xp += int(amount)
+            seen_adj.add(f"{int(amount)}|{reason}|{timestamp_value(created_at)}")
+    for a in state.get("xpAdjustments") or []:
+        key = f"{int(a.get('amount', 0))}|{str(a.get('reason', ''))[:200]}|{timestamp_value(a.get('ts') or now_iso())}"
+        if key not in seen_adj:
+            xp += int(a.get("amount", 0))
+
     return {
         "xp": xp, "totalSolved": total_solved, "totalCorrect": total_correct,
         "hintsUsed": hints_used, "correctSeries": correct_series, "bestSeries": best_series,
@@ -842,7 +873,7 @@ def apply_derived_stats(conn: sqlite3.Connection, user_id: int, state: dict) -> 
     persisted, so a client that only synced a recent, size-capped slice of
     its full history (taskAttempts is capped at 5000 entries client-side)
     never regresses a long-time user's real, previously-saved totals."""
-    derived = derive_stats(conn, state)
+    derived = derive_stats(conn, state, user_id)
     prev = conn.execute(
         "SELECT xp, total_solved, total_correct, hints_used, best_series, errors_resolved FROM user_stats WHERE user_id=?",
         (user_id,),
@@ -872,6 +903,9 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     for item in state.get("taskAttempts") or []:
         if item.get("taskId") not in valid_tasks or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
     if not isinstance(state.get("errors", []), list): raise ValueError("errors must be an array")
+    if not isinstance(state.get("xpAdjustments", []), list): raise ValueError("xpAdjustments must be an array")
+    for adj in state.get("xpAdjustments") or []:
+        if not isinstance(adj, dict) or not isinstance(adj.get("amount", 0), (int, float)): raise ValueError("invalid xp adjustment")
 
 
 class Handler(BaseHTTPRequestHandler):
