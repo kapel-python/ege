@@ -1367,10 +1367,12 @@ function sessionFinish(early = false) {
 
   if (S.mode === "mission" && !early) {
     mission = DataAPI.mission(S.missionId);
-    // Reaching the end of a mission by skipping or guessing through every
-    // task must not pay the same completion reward as actually working the
-    // practice set — the same bar boss battles already hold themselves to.
-    if (mission && correct / solved >= 0.6) {
+    // Практика платит за прохождение: дошёл до конца полного списка заданий
+    // миссии — награда выдана. Точность уже отражена в XP за ответы, а бар
+    // точности здесь ломал возобновление: accuracy считалась только по
+    // последнему срезу и обнуляла награду за полностью пройденную миссию.
+    // Испытания (боссы) бары точности по-прежнему требуют.
+    if (mission && (S.offset || 0) + S.results.length >= (S.total || mission.tasks.length)) {
       missionDone = true;
       completeMission(mission);
     }
