@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>seed</title>
+<script>
+(async () => {
+  const b = await fetch("/api/bootstrap").then((r) => r.json());
+  const state = b.state || {};
+  state.onboarded = true;
+  state.name = "Проверка";
+  state.goal = "g80";
+  state.selfLevel = "base";
+  state.errors = [
+    { taskId: "n02_p1", skill: "n02_vectors", sub: "Координаты вектора", ts: Date.now() - 3600e3, resolved: false },
+    { taskId: "n02_p2", skill: "n02_vectors", sub: "Скалярное произведение", ts: Date.now() - 3700e3, resolved: false },
+  ];
+  state.skillStats = state.skillStats || {};
+  state.skillStats.n02_vectors = { progress: 5, solved: 4, correct: 1, timeSec: 120 };
+  await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
+  location.replace("/dashboard#/dashboard");
+})();
+</script>

@@ -2,3 +2,4 @@ server/*.sqlite3
 .ege-2026.pid*
 __pycache__/
 *.pyc
+/ege.sqlite3
