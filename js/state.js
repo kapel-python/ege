@@ -287,15 +287,6 @@ function weakestSkill(opts = {}) {
   return worst;
 }
 
-function strongestSkill() {
-  let best = null;
-  for (const s of DataAPI.skills()) {
-    const p = skillProgress(s.id);
-    if (!best || p > skillProgress(best.id)) best = s;
-  }
-  return best;
-}
-
 /* Последний незавершённый урок (по времени начала) — самое дешёвое
    следующее действие: доучить то, что уже начато, а не открывать новое. */
 function mostRecentOpenLesson() {
@@ -308,6 +299,15 @@ function mostRecentOpenLesson() {
     if (!best || Number(session.startTs || 0) > Number(best.session.startTs || 0)) best = { lessonId, session, lesson };
   }
   return best;
+}
+
+/* Склонение числительных: plural(n, "день", "дня", "дней").
+   Живёт здесь, а не в app.js: чистая логика, нужна и движку рекомендаций. */
+function plural(n, one, few, many) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
 }
 
 /* ============================================================
@@ -775,56 +775,344 @@ function addTimeline(text) {
    Каждый навык встречается в списке не больше одного раза за вызов.
    ============================================================ */
 
-function recommendations() {
-  const s = Store.state;
-  const recs = [];
-  const mentionedSkills = new Set();
+/* ============================================================
+   Движок «лучший следующий шаг»
 
+   Чистая функция от серверного снимка состояния: каждый вызов заново
+   оценивает все доступные действия по сигналам знаний (освоение навыка,
+   точность, открытые ошибки, состояние уроков, давность и плотность
+   практики, готовность боссов, прогресс Daily) и возвращает ранжированный
+   список кандидатов. Фиксированной последовательности нет: после каждого
+   ответа состояние меняется, и лучший шаг пересчитывается заново.
+
+   Анти-зацикливание: у каждого навыка считается «утомление» — много
+   попыток за последний час при низком освоении резко снижает ценность
+   дальнейшей практики по теме и переключает стратегию: сначала теория,
+   затем повторение ошибок, затем смена фокуса на другой навык.
+
+   Кандидат — плоский дескриптор {action, payload, text, reason, icon,
+   route, score}; исполнение действия — задача UI (app.js), чтобы движок
+   оставался чистой логикой, тестируемой без DOM.
+   ============================================================ */
+
+/* Склонение числительных: plural(5, "день", "дня", "дней"). Живёт здесь,
+   а не в app.js, потому что движок следующего шага использует его при
+   построении текстов и должен оставаться тестируемым без DOM. */
+function plural(n, one, few, many) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
+const NEXTSTEP_FATIGUE_WINDOW_MS = 60 * 60 * 1000; // окно «недавняя практика»
+const NEXTSTEP_FATIGUE_TASKS = 6;                  // столько попыток за час — тема перетренирована
+const NEXTSTEP_RECENT_MS = 25 * 60 * 1000;         // свежая сессия по теме
+
+/* Сигналы по одному навыку: прогресс, точность, ошибки, уроки, давность
+   и плотность практики. Всё считается из фактической истории ответов. */
+function skillSnapshot(skillId) {
+  const s = Store.state;
+  const stats = s.skillStats[skillId] || { solved: 0, correct: 0, timeSec: 0 };
+  const now = Date.now();
+  const cutoff = now - NEXTSTEP_FATIGUE_WINDOW_MS;
+  let recent = 0, recentCorrect = 0, lastTs = 0;
+  for (const a of s.taskAttempts) {
+    if (a.skill !== skillId) continue;
+    const ts = Number(a.ts) || 0;
+    if (ts > lastTs) lastTs = ts;
+    if (ts >= cutoff) { recent++; if (a.correct) recentCorrect++; }
+  }
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  const lesson = lessons[0] || null;
+  const lessonDone = lessons.length > 0 && lessons.every((l) => !!s.completedLessons[l.id]);
+  const solved = stats.solved || 0;
+  const diagnosticMisses = (s.diagnostics || []).filter((d) => {
+    const task = DataAPI.task(d.taskId);
+    return task && task.skill === skillId && !d.correct;
+  }).length;
+  return {
+    progress: skillProgress(skillId),
+    solved,
+    accuracy: solved ? stats.correct / solved : null,
+    recent,
+    recentAccuracy: recent ? recentCorrect / recent : null,
+    fatigued: recent >= NEXTSTEP_FATIGUE_TASKS,
+    ageMs: lastTs ? now - lastTs : Infinity,
+    openErrors: openErrorCount(skillId),
+    stepErrors: lessonStepErrorsBySkill(skillId).length,
+    lesson,
+    lessonDone,
+    lessonOpen: lessons.some((l) => s.lessonSessions && s.lessonSessions[l.id]),
+    diagnosticMisses,
+    mission: DataAPI.missions().find((m) => m.skill === skillId && Array.isArray(m.tasks) && m.tasks.length) || null,
+  };
+}
+
+/* Самый слабый навык из pool: ниже прогресс, при равенстве — больше
+   открытых ошибок, больше промахов диагностики, больше решено. */
+function weakestOf(pool) {
+  let worst = null;
+  for (const sk of pool) {
+    if (!worst) { worst = sk; continue; }
+    const a = skillSnapshot(sk.id), b = skillSnapshot(worst.id);
+    if (a.progress !== b.progress) { if (a.progress < b.progress) worst = sk; continue; }
+    if (a.openErrors !== b.openErrors) { if (a.openErrors > b.openErrors) worst = sk; continue; }
+    if (a.diagnosticMisses !== b.diagnosticMisses) { if (a.diagnosticMisses > b.diagnosticMisses) worst = sk; continue; }
+    if (a.solved !== b.solved) { if (a.solved > b.solved) worst = sk; }
+  }
+  return worst;
+}
+
+function nextStepCandidates() {
+  const s = Store.state;
+  const cands = [];
+  const mentioned = new Set(); // навык уже представлен кандидатом — не дублируем
+  const push = (cand) => cands.push(cand);
+
+  /* 1. Доучить начатый урок: уже открытый контекст, самое дешёвое
+     завершение. Всегда первый приоритет, пока урок не закрыт. */
   const openLesson = mostRecentOpenLesson();
   if (openLesson) {
-    recs.push({ text: `Доучить урок «${openLesson.lesson.title}» — начат, но не завершён`, route: "#/training", icon: "bulb" });
-    mentionedSkills.add(openLesson.lesson.skill);
+    mentioned.add(openLesson.lesson.skill);
+    push({
+      action: "finish-lesson",
+      payload: { lessonId: openLesson.lessonId },
+      route: "#/training", icon: "bulb",
+      text: `Продолжить урок «${openLesson.lesson.title}»`,
+      reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)} из ${openLesson.lesson.steps.length} — закончить начатое дешевле всего.`,
+      score: 92,
+    });
   }
 
+  /* Снимки по всем навыкам — основа остальных кандидатов. */
+  const snaps = {};
+  for (const sk of DataAPI.skills()) snaps[sk.id] = skillSnapshot(sk.id);
+  const mentionedSkills = () => Object.keys(snaps).filter((id) => mentioned.has(id));
+
+  /* 2. Повторение слабых мест: накопленные открытые ошибки — самый
+     конкретный сигнал пробела. Свежие ошибки «на горячую» не гоняем по
+     кругу: если их навык только что интенсивно тренировался и всё равно
+     проседает, полезнее вернуться к теории (кандидат ниже). */
   const openErrors = s.errors.filter((e) => !e.resolved);
-  if (openErrors.length >= 3) {
-    recs.push({ text: `Повторить слабые места — открыто ${openErrors.length} ошибок`, route: "#/errors", icon: "rotate" });
+  if (openErrors.length) {
+    const now = Date.now();
+    const freshErrors = openErrors.filter((e) => now - Number(e.ts || 0) < 10 * 60 * 1000);
+    const topErrorSkill = openErrors.reduce((best, e) => {
+      const count = openErrors.filter((x) => x.skill === e.skill).length;
+      return !best || count > best.count ? { skill: e.skill, count } : best;
+    }, null);
+    const hotLoop = topErrorSkill && snaps[topErrorSkill.skill]
+      && freshErrors.length >= 2 && snaps[topErrorSkill.skill].fatigued;
+    let score = 52 + Math.min(openErrors.length, 6) * 6 + (openErrors.length >= 3 ? 6 : 0);
+    if (hotLoop) score -= 30;
+    push({
+      action: "errors-review",
+      payload: {},
+      route: "#/errors", icon: "rotate",
+      text: `Повторить слабые места — открыто ${openErrors.length} ${plural(openErrors.length, "ошибка", "ошибки", "ошибок")}`,
+      reason: openErrors.length >= 3
+        ? `Накопилось несколько нерешённых ошибок — их повторение даст больше, чем новая тема.`
+        : `Открытая ошибка со временем забывается — закрой её, пока контекст свежий.`,
+      score,
+    });
   }
 
-  // 45 минут — окно «только что тренировал это», после которого повтор той
-  // же темы снова становится осмысленной рекомендацией, а не залипанием.
-  const worst = weakestSkill({ avoidRecentMs: 45 * 60 * 1000 });
-  if (worst && !mentionedSkills.has(worst.id)) {
-    const untouched = !((s.skillStats[worst.id] || {}).solved);
-    const mission = DataAPI.missions().find((m) => m.skill === worst.id && !s.missionsDone[m.id]);
-    if (mission) {
-      recs.push({ text: `Миссия «${mission.title}» — ${untouched ? "начать" : "прокачать"} тему «${worst.name}»`, route: "#/training", icon: "target" });
-    } else {
-      recs.push({ text: untouched ? `Начать тему «${worst.name}»` : `Тренировка по теме «${worst.name}» — самый слабый навык`, route: "#/training", icon: "target" });
+  /* 3. Урок по слабому навыку: теория важнее повторной зубрёжки, когда
+     точность просела, тема не тронута или уже перетренирована. Пройденный
+     урок тоже предлагаем — если навык после него так и не пошёл. */
+  {
+    const pool = DataAPI.skills().filter((sk) => {
+      const snap = snaps[sk.id];
+      if (!snap.lesson || mentioned.has(sk.id)) return false;
+      if (!snap.lessonDone) return true;
+      return snap.progress < 45 && snap.accuracy !== null && snap.accuracy < 0.5;
+    });
+    const weakTheory = pool.filter((sk) => {
+      const snap = snaps[sk.id];
+      return (snap.solved === 0 && snap.progress < 35)
+        || (snap.accuracy !== null && snap.accuracy < 0.5 && snap.progress < 60)
+        || (snap.fatigued && snap.recentAccuracy !== null && snap.recentAccuracy < 0.5)
+        || (snap.lessonDone && snap.progress < 45 && snap.accuracy !== null && snap.accuracy < 0.5);
+      /* Доказанный пробел (открытые ошибки, низкая точность) важнее
+         «чистого нуля»: тему, в которой ученик уже споткнулся, закрывать
+         раньше, чем просто первую нетронутую в каталоге. */
+    }).sort((a, b) => {
+      const sa = snaps[a.id], sb = snaps[b.id];
+      if (sa.openErrors !== sb.openErrors) return sb.openErrors - sa.openErrors;
+      const aa = sa.accuracy === null ? 2 : sa.accuracy;
+      const ab = sb.accuracy === null ? 2 : sb.accuracy;
+      if (aa !== ab) return aa - ab;
+      return sa.progress - sb.progress;
+    })[0] || null;
+    if (weakTheory) {
+      const snap = snaps[weakTheory.id];
+      mentioned.add(weakTheory.id);
+      const untouched = snap.solved === 0;
+      const repeatAfterFail = snap.lessonDone;
+      push({
+        action: "lesson",
+        payload: { lessonId: snap.lesson.id },
+        route: "#/training", icon: "bulb",
+        text: repeatAfterFail
+          ? `Повторить урок «${snap.lesson.title}» — тема «${weakTheory.name}» так и не пошла`
+          : `${untouched ? "Начать" : "Вернуться к"} уроку «${snap.lesson.title}» — тема «${weakTheory.name}»`,
+        reason: repeatAfterFail
+          ? `Урок по «${weakTheory.name}» пройден, но точность всё ещё ниже 50% — повтори объяснение, прежде чем решать дальше.`
+          : snap.fatigued
+            ? `По теме «${weakTheory.name}» много попыток без результата — сейчас полезнее разобраться в теории, чем решать дальше.`
+            : snap.accuracy !== null && snap.accuracy < 0.5
+              ? `Точность по «${weakTheory.name}» ниже 50% — сначала урок, практика после теории закрепится лучше.`
+              : `Тема «${weakTheory.name}» пока не тронута — начинать её лучше с объяснения, а не сразу с заданий.`,
+        score: snap.fatigued ? 82 : (repeatAfterFail ? 74 : (untouched ? 68 : 78)),
+      });
     }
   }
 
-  const readyBoss = DataAPI.bosses().find((b) => bossUnlocked(b) && !bossDefeated(b));
-  if (readyBoss) {
-    recs.push({ text: `Доступен ${readyBoss.title} — проверь себя`, route: "#/trials", icon: "crown" });
-  } else if (!s.daily.done) {
-    recs.push({ text: "Закрыть Daily Challenge до конца дня", route: "#/trials", icon: "zap" });
+  /* 4. Тренировка по самому слабому навыку (миссия): растёт при низком
+     освоении и незакрытой миссии, падает при свежей практике и утомлении.
+     Незавершённая миссия — бонус: дешевле закончить начатое. */
+  {
+    const pool = DataAPI.skills().filter((sk) => {
+      const snap = snaps[sk.id];
+      return snap.mission && !mentioned.has(sk.id) && snap.progress < 90;
+    });
+    const target = weakestOf(pool);
+    if (target) {
+      const snap = snaps[target.id];
+      mentioned.add(target.id);
+      const prog = snap.mission ? missionProgress(snap.mission) : 0;
+      const started = snap.mission && prog > 0 && prog < snap.mission.tasks.length;
+      let score = 56 + (100 - snap.progress) * 0.3;
+      if (started) score += 14;
+      /* Свежая практика: если последние попытки были безрезультатными —
+         решать ту же тему подряд бессмысленно (полный штраф); если
+         закрепление шло хорошо — повтор сразу просто менее ценен (мягкий). */
+      if (snap.ageMs < NEXTSTEP_RECENT_MS) {
+        score -= (snap.recentAccuracy !== null && snap.recentAccuracy < 0.5) ? 22 : 10;
+      }
+      if (snap.recentAccuracy !== null && snap.recentAccuracy < 0.4 && snap.lessonDone) score -= 12;
+      if (snap.fatigued) score -= 35;
+      /* Закрепление свежего: урок пройден совсем недавно — короткая
+         тренировка сразу после теории закрепляет её лучше всего. */
+      const lessonTs = snap.lesson && s.completedLessons[snap.lesson.id] ? Number(s.completedLessons[snap.lesson.id].ts) || 0 : 0;
+      const justLearned = lessonTs && Date.now() - lessonTs < 2 * 3600 * 1000;
+      if (justLearned && !snap.fatigued) score += 12;
+      /* Теория раньше практики: по теме с непройденным уроком, которую
+         ученик ещё не трогал или которая даётся с ошибками, сначала урок —
+         иначе «потренируйся» вытесняет «изучи» у новичка. */
+      const lessonFirst = !!snap.lesson && !snap.lessonDone && !started
+        && (snap.solved === 0 || (snap.accuracy !== null && snap.accuracy < 0.5));
+      if (lessonFirst) score -= 20;
+      push({
+        action: "practice",
+        payload: { missionId: snap.mission.id, skillId: target.id },
+        route: "#/training", icon: "target",
+        text: started
+          ? `Продолжить тренировку по теме «${target.name}» — ${prog}/${snap.mission.tasks.length}`
+          : `Потренироваться в теме «${target.name}» — самое слабое место`,
+        reason: started
+          ? `Тренировка по «${target.name}» уже начата — закончить её сейчас проще всего.`
+          : snap.fatigued
+            ? `Тема «${target.name}» сейчас перетренирована — короткая пауза вернёт эффективность.`
+            : lessonFirst
+              ? `«${target.name}» — слабое место, но по ней есть непройденный урок: сначала разберись в теории, практика пойдёт лучше.`
+              : `«${target.name}» — самый отстающий навык (${snap.progress}%), и его давно не тренировали.`,
+        score,
+      });
+    }
   }
-  return recs.slice(0, 3);
+
+  /* 5. Босс открытой ветки: проверка готовности. Кап держит босса ниже
+     работы над пробелами: пока есть навык < 45%, сначала устранение
+     пробела, босс — потом. */
+  {
+    const minProgress = Math.min(...DataAPI.skills().map((sk) => snaps[sk.id].progress));
+    let bestBoss = null, bestBossScore = 0;
+    for (const b of DataAPI.bosses()) {
+      if (!bossUnlocked(b) || bossDefeated(b)) continue;
+      const cp = catProgress(b.cat);
+      let score = Math.min(65, 50 + Math.max(0, cp - b.unlockAt) * 0.8);
+      if (minProgress < 45) score -= 20;
+      if (score > bestBossScore) { bestBossScore = score; bestBoss = b; }
+    }
+    if (bestBoss) {
+      push({
+        action: "boss",
+        payload: { bossId: bestBoss.id },
+        route: "#/trials", icon: "crown",
+        text: `Пройти ${bestBoss.title.replace("БОСС: ", "")}`,
+        reason: `Ветка «${DataAPI.category(bestBoss.cat).name}» прокачана до ${catProgress(bestBoss.cat)}% — босс покажет, держится ли результат на смешанных заданиях.`,
+        score: bestBossScore,
+      });
+    }
+  }
+
+  /* 6. Ежедневная подборка: стимул держать ритм, ниже работы над пробелами. */
+  ensureDailyChallenge();
+  if (!s.daily.done) {
+    const goal = dailyTaskIds().length || 1;
+    const partial = Math.min(s.daily.solved || 0, goal) > 0;
+    push({
+      action: "daily",
+      payload: {},
+      route: "#/trials", icon: "zap",
+      text: partial ? `Закончить ежедневную подборку — ${Math.min(s.daily.solved, goal)}/${goal}` : "Решить ежедневную подборку",
+      reason: partial
+        ? `Подборка почти закрыта — один заход, и день засчитан.`
+        : `Короткая подборка из ${goal} заданий поддержит ритм и серию дней.`,
+      score: partial ? 52 : 40,
+    });
+  }
+
+  /* 7. Новая тема по карте: когда слабых мест нет (всё ≥ 45%), следующий
+     полезный шаг — расширять охват. Тема берётся по порядку следования
+     в карте внутри своей ветки — это и есть учебный маршрут «мягкой»
+     зависимости между навыками. */
+  {
+    const minProgress = Math.min(...DataAPI.skills().map((sk) => snaps[sk.id].progress));
+    const catOrder = {};
+    DataAPI.categories().forEach((c, i) => { catOrder[c.id] = i; });
+    const nextTopic = DataAPI.skills()
+      .filter((sk) => snaps[sk.id].lesson && !snaps[sk.id].lessonDone && !snaps[sk.id].lessonOpen && !mentioned.has(sk.id))
+      .sort((a, b) => (catOrder[a.cat] - catOrder[b.cat]) || (a.order - b.order))[0];
+    if (nextTopic && minProgress >= 45) {
+      const snap = snaps[nextTopic.id];
+      mentioned.add(nextTopic.id);
+      push({
+        action: "lesson",
+        payload: { lessonId: snap.lesson.id },
+        route: "#/path", icon: "path",
+        text: `Открыть новую тему — урок «${snap.lesson.title}»`,
+        reason: `Текущие темы в хорошем состоянии — следующий рост даст новый навык по карте.`,
+        score: 56,
+      });
+    }
+  }
+
+  /* 8. Смешанное испытание — запасной вариант, когда закрывать нечего:
+     поддержание общей формы вместо бессмысленного повтора. */
+  if (DataAPI.practiceTasks().length >= 5) {
+    push({
+      action: "mixed",
+      payload: {},
+      route: "#/trials", icon: "trials",
+      text: "Пройти смешанное испытание",
+      reason: `Слабых мест нет — проверка общей формы на заданиях из разных тем не даст застояться.`,
+      score: 30,
+    });
+  }
+
+  const priority = { "finish-lesson": 0, "lesson": 1, "errors-review": 2, "practice": 3, "boss": 4, "daily": 5, "mixed": 6 };
+  return cands.sort((a, b) => b.score - a.score || priority[a.action] - priority[b.action]);
 }
 
-function recommendationText() {
-  const strong = strongestSkill();
-  const weak = weakestSkill();
-  // strongestSkill()/weakestSkill() break ties by catalog order, so with no
-  // real differentiation yet (a fresh account, or several skills still tied
-  // at 0%) they can both resolve to the very same skill — which would read
-  // as "you're doing great at X, but X needs work". Only claim a strong vs.
-  // weak split once progress actually shows one.
-  if (!weak || !strong || Store.state.totalSolved < 3 || skillProgress(strong.id) <= skillProgress(weak.id)) {
-    return "Пройди первую тренировку — система начнёт строить персональные рекомендации на основе твоих результатов.";
-  }
-  return `У тебя хорошо идёт тема «${strong.name}», но «${weak.name}» пока отстаёт. Сфокусируйся на ней — это даст максимальный прирост к прогнозу балла.`;
+/* Лучший текущий шаг — голова ранжированного списка. Пересчитывается
+   после каждого изменения состояния, поэтому следующий шаг никогда не
+   зашит заранее: алгоритм заново оценивает ситуацию. */
+function bestNextStep() {
+  const cands = nextStepCandidates();
+  return cands.length ? cands[0] : null;
 }
 
 /* ============================================================

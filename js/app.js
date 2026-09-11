@@ -610,18 +610,49 @@ function screenDashboard(root) {
   const d = DataAPI.daily();
   ensureDailyChallenge();
   const dailyGoal = dailyTaskIds().length || d.target;
-  const dailyTitle = `Реши ${dailyGoal} заданий, подобранных для тебя`;
   const dailyDone = s.daily.date === todayStr() && s.daily.done;
   const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
   const openLesson = mostRecentOpenLesson();
   const activeMission = !openLesson && (DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id])
     || DataAPI.missions().find((m) => !s.missionsDone[m.id]));
 
+  /* Главный навигатор обучения: кандидаты пересчитываются при каждом
+     рендере, поэтому после любого результата блок показывает актуальный
+     лучший шаг. Альтернативы показываем открыто — пользователь свободен. */
+  const steps = nextStepCandidates();
+  const step = steps[0] || null;
+  const alts = steps.slice(1, 3);
+
+  const weakSpots = DataAPI.skills()
+    .map((sk) => ({ sk, prog: skillProgress(sk.id), errs: openErrorCount(sk.id) }))
+    .filter((x) => x.prog < 70 || x.errs > 0)
+    .sort((a, b) => (a.prog - b.prog) || (b.errs - a.errs))
+    .slice(0, 4);
+
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Главная</div>
       <div class="page-sub">${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })} · цель: ${goalLabel()}</div>
     </div>
+
+    ${step ? `
+    <div class="card nextstep">
+      <div class="nextstep__head">
+        <span class="nextstep__label">${icon("zap")} Что делать сейчас</span>
+        <span class="nextstep__freedom">Это совет, а не приказ — все разделы открыты, выбирай любой</span>
+      </div>
+      <div class="nextstep__title">${esc(step.text)}</div>
+      <div class="nextstep__reason">${esc(step.reason)}</div>
+      <div class="nextstep__actions">
+        <button class="btn btn--primary btn--lg" onclick="runNextStep(0)">Начать ${icon("arrow")}</button>
+        <div class="nextstep__alts">
+          ${alts.map((a, i) => `
+            <button class="btn btn--ghost btn--sm" onclick="runNextStep(${i + 1})" title="${esc(a.reason)}">
+              ${icon(a.icon)}<span>${esc(a.text)}</span>
+            </button>`).join("")}
+        </div>
+      </div>
+    </div>` : ""}
 
     <div class="hero">
       <div class="card card--glow">
@@ -655,12 +686,12 @@ function screenDashboard(root) {
       </div>
     </div>
 
-    <div class="section-title">Сегодня</div>
+    <div class="section-title">Быстрый доступ</div>
     <div class="action-cards">
       <div class="card card--hover action-card" onclick="continueTraining()">
         <div class="action-card__icon">${icon("training")}</div>
-        <div><div class="action-card__title">Продолжить тренировку</div>
-        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)}/${openLesson.lesson.steps.length}` : activeMission ? `Миссия «${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Свободная практика"}</div></div>
+        <div><div class="action-card__title">Продолжить обучение</div>
+        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)}/${openLesson.lesson.steps.length}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Текущая тема по рекомендации"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--warn" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}">
         <div class="action-card__icon">${icon("rotate")}</div>
@@ -674,8 +705,8 @@ function screenDashboard(root) {
       </div>
       <div class="card card--hover action-card action-card--violet" onclick="go('trials')">
         <div class="action-card__icon">${icon("crown")}</div>
-        <div><div class="action-card__title">Смешанное испытание</div>
-        <div class="action-card__sub">10 смешанных заданий на время</div></div>
+        <div><div class="action-card__title">Испытания</div>
+        <div class="action-card__sub">Боссы и смешанная проверка формы</div></div>
       </div>
     </div>
 
@@ -702,53 +733,45 @@ function screenDashboard(root) {
       </div>
 
       <div>
-        <div class="section-title" style="margin-top:0">Что делать дальше</div>
+        <div class="section-title" style="margin-top:0">Требуют внимания</div>
         <div class="card">
-          <div style="font-size:14px;color:var(--text-2);line-height:1.65">${recommendationText()}</div>
-          <div class="reco-list">
-            ${recommendations().map((r) => `
-              <div class="reco-item" onclick="go('${r.route.replace("#/", "")}')">
-                <span class="reco-item__arrow">→</span><span>${esc(r.text)}</span>
-              </div>`).join("")}
-          </div>
-        </div>
-
-        <div class="section-title">Ежедневная задача</div>
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-            <div style="font-weight:600;font-size:14px">${dailyTitle}</div>
-            <span class="chip ${dailyDone ? "chip--success" : "chip--accent"}">${dailyDone ? "✓ Выполнено" : `+${d.xp} XP`}</span>
-          </div>
-          <div style="margin-top:12px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100)}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:8px" class="mono">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</div>
-          <div style="margin-top:12px;display:flex;gap:6px;align-items:center">
-            ${streakDots()}
-          </div>
+          ${weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
+            <div class="skill-row" onclick="openSkillModal('${sk.id}')">
+              <div class="skill-row__name">${sk.name}</div>
+              ${progressBar(prog)}
+              <div class="skill-row__pct">${prog}%</div>
+              <div class="skill-row__tip">
+                ${errs ? `Открыто ошибок: <b>${errs}</b><br>` : "Ошибок нет — просто мало освоено<br>"}
+                Нажми, чтобы открыть тему
+              </div>
+            </div>`).join("")
+          : `<div class="empty">Слабых мест нет — все навыки в хорошем состоянии. Поддерживай форму испытаниями.</div>`}
         </div>
       </div>
     </div>`;
 }
 
+/* Исполнитель шага из умного блока: кандидаты пересчитываются в момент
+   нажатия, а не берутся с прошлого рендера — действие всегда соответствует
+   актуальному состоянию знаний. */
+function runNextStep(index = 0) {
+  const c = nextStepCandidates()[index];
+  if (!c) return;
+  switch (c.action) {
+    case "finish-lesson":
+    case "lesson": Lesson.start(c.payload.lessonId); break;
+    case "errors-review": startErrorsReview(); break;
+    case "practice": startMission(c.payload.missionId); break;
+    case "boss": startBoss(c.payload.bossId); break;
+    case "daily": startDaily(); break;
+    case "mixed": startMixedTrial(); break;
+    default: go(c.route ? c.route.replace("#/", "") : "dashboard");
+  }
+}
+
 function goalLabel() {
   const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
   return g ? g.label : "не выбрана";
-}
-
-function plural(n, one, few, many) {
-  const mod10 = n % 10, mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
-  return many;
-}
-
-function streakDots() {
-  const n = Math.min(Store.state.streak, 14);
-  let dots = "";
-  for (let i = 1; i <= n; i++) {
-    dots += `<span title="День ${i}" style="width:18px;height:18px;border-radius:6px;display:inline-grid;place-items:center;font-size:10px;font-weight:700;background:${i === n ? "var(--warn)" : "var(--warn-soft)"};color:${i === n ? "#1a1206" : "var(--warn)"}">${i}</span>`;
-  }
-  if (!n) dots = `<span style="color:var(--muted);font-size:12px">Реши первое задание сегодня, чтобы начать серию</span>`;
-  return dots + `<span style="color:var(--muted);font-size:12px;margin-left:6px">→ серия ${Store.state.streak} дн</span>`;
 }
 
 function statusLabel(st) {
@@ -769,7 +792,11 @@ function continueTraining() {
   if (openLesson) return Lesson.start(openLesson.lessonId);
   const active = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id]);
   if (active) return startMission(active.id);
+  // Единый поток тренировки — через миссию темы (награда и прогресс),
+  // свободная практика отдельной сущностью больше не представлена.
   const worst = weakestSkill();
+  const mission = worst && DataAPI.missions().find((m) => m.skill === worst.id && Array.isArray(m.tasks) && m.tasks.length);
+  if (mission) return startMission(mission.id);
   const fallbackSkill = worst || DataAPI.skills()[0];
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(fallbackSkill ? fallbackSkill.id : "")).slice(0, 6).map((t) => t.id);
   Session.start({ title: worst ? `Тренировка: ${worst.name}` : "Тренировка", taskIds: tasks, mode: "quick" });
@@ -813,7 +840,7 @@ function screenPath(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Путь</div>
-      <div class="page-sub">Карта навыков ЕГЭ. Процент — освоение навыка: 30% за урок и до 70% за практику (точность реальных решений).</div>
+      <div class="page-sub">Карта всех тем ЕГЭ и твой прогресс по каждой. Нажми на тему — увидишь урок, тренировку и типичные ошибки.</div>
     </div>
     <div style="margin-top:28px">
       <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>профильная математика · ${overallProgress()}% освоено</small></div></div>
@@ -875,19 +902,26 @@ function openSkillModal(skillId) {
 
     <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
       ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить" : "Урок"}: «${lessons[0].title}»</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
-      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">Практика: «${mission.title.replace(/^Миссия:\s*/i, "") }» ${icon("arrow")}</button>` : ""}
-      ${DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Свободная практика</button>` : `<span class="stat-label">Заданий в банке пока нет.</span>`}
+      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">${icon("target")} Тренировка: ${sk.name} · ${mission.tasks.length} заданий</button>` : ""}
+      ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Тренировка по теме</button>` : ""}
+      ${!mission && !DataAPI.practiceTasksBySkill(skillId).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
     </div>`);
 }
 
+/* Единая точка входа в практику по теме: набор заданий темы и есть миссия,
+   поэтому идём через неё (прогресс, награда, продолжение с места остановки).
+   Прямой запуск списком остаётся только как запасной вариант для тем без
+   миссии. */
 function startSkillPractice(skillId) {
+  const mission = DataAPI.missions().find((m) => m.skill === skillId && Array.isArray(m.tasks) && m.tasks.length);
+  if (mission) return startMission(mission.id);
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId)).map((t) => t.id);
   if (!tasks.length) return;
-  Session.start({ title: `Практика: ${DataAPI.skill(skillId).name}`, taskIds: tasks, mode: "quick" });
+  Session.start({ title: `Тренировка: ${DataAPI.skill(skillId).name}`, taskIds: tasks, mode: "quick" });
 }
 
 /* ============================================================
-   Screen: Тренировка (миссии)
+   Screen: Тренировка (уроки + тренировки по темам)
    ============================================================ */
 
 function screenTraining(root) {
@@ -896,11 +930,11 @@ function screenTraining(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Тренировка</div>
-      <div class="page-sub">Уроки — это пошаговое обучение с нуля. Миссии — сфокусированные блоки заданий по конкретным навыкам.</div>
+      <div class="page-sub">Здесь проходит обучение: уроки разбирают тему с нуля по шагам, тренировки закрепляют её на заданиях ЕГЭ.</div>
     </div>
 
     ${lessons.length > 0 ? `
-    <div class="section-title">Уроки — обучение с нуля</div>
+    <div class="section-title">Уроки — сначала разобраться</div>
     <div class="grid grid--3">
       ${lessons.map((lesson) => {
         const sk = DataAPI.skill(lesson.skill);
@@ -928,7 +962,7 @@ function screenTraining(root) {
       }).join("")}
     </div>` : ''}
 
-    <div class="section-title">Практика по темам</div>
+    <div class="section-title">Тренировки по темам — потом закрепить</div>
     <div class="grid grid--3">
       ${missions.map((m) => {
         const sk = DataAPI.skill(m.skill);
@@ -940,13 +974,12 @@ function screenTraining(root) {
         // button should say so instead of a misleading "Продолжить".
         const exhausted = !done && taskCount > 0 && prog >= taskCount;
         const freeCount = sk ? DataAPI.practiceTasksBySkill(sk.id).length : 0;
-        const practiceCount = taskCount || freeCount;
         return `
         <div class="card card--hover mission-card ${done ? "mission-card--done" : ""}">
           <div class="mission-card__top">
             <div>
               <div class="mission-card__title">${m.title} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
-              <div class="mission-card__path">${sk ? sk.name : "Тема"} · ${esc(m.desc || "Практика по теме")}</div>
+              <div class="mission-card__path">${sk ? sk.name : "Тема"} · ${esc(m.desc || "Закрепление темы на заданиях")}</div>
             </div>
             <div class="mission-card__reward"><span class="chip chip--accent mono">+${m.xp} XP</span></div>
           </div>
@@ -957,9 +990,8 @@ function screenTraining(root) {
           </div>` : `<div class="stat-label">Заданий для этого блока пока нет${freeCount ? ` · в теме доступно ${freeCount}` : ""}.</div>`}
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${taskCount ? `<button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" onclick="startMission('${m.id}')">
-              ${done || exhausted ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать практику"}
+              ${done || exhausted ? "Пройти ещё раз" : prog > 0 ? "Продолжить" : "Начать тренировку"}
             </button>` : ""}
-            ${sk && freeCount ? `<button class="btn btn--ghost btn--sm" onclick="startSkillPractice('${sk.id}')">Свободная практика</button>` : ""}
           </div>
         </div>`;
       }).join("")}
@@ -1865,7 +1897,7 @@ function screenTrials(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Испытания</div>
-      <div class="page-sub">Проверки на прочность: ежедневные челленджи и боссы по веткам навыков.</div>
+      <div class="page-sub">Проверки на прочность: ежедневная подборка, смешанное испытание и боссы по веткам навыков.</div>
     </div>
 
     <div class="grid grid--2" style="margin-top:18px">
@@ -1884,8 +1916,8 @@ function screenTrials(root) {
 
       <div class="card">
         <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">СМЕШАННОЕ ИСПЫТАНИЕ</div>
-        <div style="font-size:18px;font-weight:650;margin-top:8px">10 смешанных заданий</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:6px">Все темы, все уровни сложности. Проверка общей формы без привязки к миссии.</div>
+        <div style="font-size:18px;font-weight:650;margin-top:8px">10 заданий из разных тем</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">По одному заданию от каждой темы по кругу — проверка общей формы, а не отдельного навыка.</div>
         <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
           <span class="chip">${stars(3)}</span>
           <button class="btn btn--primary btn--sm" style="margin-left:auto" onclick="startMixedTrial()">Начать</button>
@@ -1918,6 +1950,23 @@ function screenTrials(root) {
     </div>`;
 }
 
+/* Сбор по-настоящему «смешанного» набора: по кругу берём по заданию от
+   каждой темы, чтобы набор покрывал разные навыки. Простой slice(0, N) по
+   сортировке id давал бы только самые «младшие» номера ЕГЭ (№1–№4). */
+function mixedSampleTaskIds(pool, count) {
+  const bySkill = {};
+  for (const t of orderedTasks(pool)) (bySkill[t.skill] = bySkill[t.skill] || []).push(t);
+  const order = DataAPI.skills().map((sk) => sk.id).filter((id) => bySkill[id]);
+  const picked = [];
+  for (let round = 0; picked.length < count && round < 10; round++) {
+    for (const sid of order) {
+      if (picked.length >= count) break;
+      if (bySkill[sid][round]) picked.push(bySkill[sid][round]);
+    }
+  }
+  return picked.map((t) => t.id);
+}
+
 function startDaily() {
   const d = DataAPI.daily();
   Session.start({
@@ -1930,7 +1979,7 @@ function startDaily() {
 function startMixedTrial() {
   Session.start({
     title: "Смешанное испытание",
-    taskIds: orderedTasks(DataAPI.practiceTasks()).slice(0, 10).map((t) => t.id),
+    taskIds: mixedSampleTaskIds(DataAPI.practiceTasks(), 10),
     mode: "quick",
   });
 }
@@ -1940,10 +1989,9 @@ function startBoss(bossId) {
   if (!boss) return toast("Испытание не найдено", "toast--error", "x");
   if (!bossUnlocked(boss)) return;
   const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
-  const taskIds = orderedTasks(pool).slice(0, boss.size).map((t) => t.id);
   Session.start({
     title: boss.title,
-    taskIds,
+    taskIds: mixedSampleTaskIds(pool, boss.size),
     mode: "boss",
     bossId: boss.id,
     hideTopic: true,
@@ -2305,8 +2353,6 @@ const Onboarding = {
     if (this.selfLevel === "confident" && strong.length === 0) strong.push("Базовые навыки");
     if (weak.length === 0) weak.push("Пока не выявлены");
 
-    const firstMission = DataAPI.missions()[0] || { title: "Старт", desc: "" };
-
     body.innerHTML = `
       <div class="onboard-title" style="font-size:22px">Твой стартовый профиль</div>
       <div class="card" style="margin-top:18px">
@@ -2327,7 +2373,7 @@ const Onboarding = {
         </div>
       </div>
       <div class="onboard-sub" style="margin-top:16px">
-        Первый маршрут: миссия <b style="color:var(--text)">«${esc(firstMission.title)}»</b> — она откроет дерево навыков и даст стартовый XP.
+        На главной странице блок <b style="color:var(--text)">«Что делать сейчас»</b> будет подсказывать лучший следующий шаг — урок, тренировку или повторение ошибок — и пересчитывать его после каждого результата.
       </div>
       <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn--primary btn--lg" onclick="Onboarding.next()">Начать подготовку ${icon("arrow")}</button>

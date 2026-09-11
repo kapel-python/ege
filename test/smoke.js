@@ -207,15 +207,15 @@ const testBody = async () => {
     t("weakestSkill({avoidRecentMs}) не возвращает только что натренированный навык", weakestSkill({ avoidRecentMs: 45 * 60 * 1000 }).id !== justDrilled);
   }
 
-  // recommendations(): незавершённый урок — высший приоритет, и тема этого
+  // nextStepCandidates(): незавершённый урок — высший приоритет, и тема этого
   // урока не должна дублироваться отдельной рекомендацией "слабый навык".
   Store.reset();
   {
     const lesson = DataAPI.lessons()[0];
     Store.state.lessonSessions = { [lesson.id]: { idx: 1, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: "training" } };
-    const recs = recommendations();
-    t("recommendations() ставит незавершённый урок первым пунктом", recs[0] && recs[0].text.includes(lesson.title));
-    t("recommendations() не дублирует навык урока отдельной рекомендацией", recs.filter((r) => r.text.includes(lesson.title)).length === 1);
+    const recs = nextStepCandidates();
+    t("nextStepCandidates() ставит незавершённый урок первым пунктом", recs[0] && recs[0].action === "finish-lesson" && recs[0].text.includes(lesson.title));
+    t("nextStepCandidates() не дублирует навык урока отдельной рекомендацией", recs.filter((r) => r.text.includes(lesson.title)).length === 1);
   }
 
   // mostRecentOpenLesson игнорирует сессии уроков, которых больше нет в
