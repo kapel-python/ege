@@ -55,6 +55,7 @@ const Store = {
       taskAttempts: [], // фактическая история ответов по заданиям
       diagnostics: [], // результаты диагностик пользователя
       forecastHistory: [], // {date, low, high, mid}; один актуальный снимок на день
+      xpAdjustments: [], // ручные начисления опыта {amount, reason, ts}; сервер хранит их отдельным журналом и всегда добавляет к деривированному XP
       activity: {}, // "2026-09-04" -> {solved, correct, xp}
       timeline: [], // {ts, text}
       daily: { date: null, solved: 0, done: false, taskIds: [] },
@@ -156,6 +157,18 @@ function addXp(amount, reason) {
     Store.emit("levelup", { from: before, to: after });
   }
   Store.emit("xp", { amount, reason });
+}
+
+/* Ручное начисление опыта. Без этой записи сервер на синке пересчитал бы
+   XP из событий и отбросил голый addXp — корректировка попадает в
+   xpAdjustments, журнал которых сервер хранит отдельно и всегда добавляет
+   к выводному XP. Доступна из консоли: grantXp(500, "тест"). */
+function grantXp(amount, reason = "manual") {
+  amount = Math.round(Number(amount));
+  if (!Number.isFinite(amount) || amount === 0) return;
+  Store.state.xpAdjustments = Store.state.xpAdjustments || [];
+  Store.state.xpAdjustments.push({ amount, reason: String(reason || "manual").slice(0, 200), ts: Date.now() });
+  addXp(amount, "adjustment");
 }
 
 /* ============================================================
