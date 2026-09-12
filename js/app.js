@@ -30,6 +30,7 @@ const ICONS = {
   "eye-off": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.5 5.2A9.5 9.5 0 0 1 12 5c5 0 8.5 4.5 10 7-.4.7-1.2 1.8-2.3 2.9M6.6 6.6C4.1 8.1 2.6 10.4 2 12c1.5 2.5 5 7 10 7 1.6 0 3-.5 4.3-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
+  help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.3"/><circle cx="12.1" cy="16.7" r="0.5" fill="currentColor" stroke="none"/></svg>',
 };
 
 function icon(name) {
@@ -480,6 +481,91 @@ function closeModal() {
   document.getElementById("modal-root").innerHTML = "";
 }
 
+/* ---------------- контекстные подсказки ----------------
+   Единая система объяснений элементов интерфейса.
+   Два типа точек входа:
+   - helpDot(key): маленькая иконка "?" рядом с элементом;
+   - кликабельный существующий блок (streak-chip): onclick + CSS-класс.
+   Тексты опираются только на реальную логику из js/state.js. */
+
+const HELP = {
+  xp: {
+    title: "Опыт и уровни",
+    body: `
+      <p><b>XP</b> — очки за учёбу. Платят за каждую попытку (<b>6 + 2 за звезду сложности</b>) — даже за неверный ответ, практика никогда не даёт ноль.</p>
+      <p>Верный ответ добавляет бонус <b>10 + 5 за звезду</b>. Подсказки его уменьшают, а повтор уже решённого задания приносит только минимум за попытку.</p>
+      <p>Дополнительно: <b>+15</b> за закрытую ошибку, награды уроков и миссий, <b>+50</b> за каждый новый уровень. Шкала «текущий / нужно» показывает прогресс до следующего уровня.</p>`,
+  },
+  streak: {
+    title: "Серия дней",
+    body: `
+      <p>Серия — сколько <b>дней подряд</b> ты занимаешься. День считается по московскому времени.</p>
+      <p>Достаточно <b>решить хотя бы одно задание</b> или пройти урок — засчитывается сам факт занятия, даже с ошибками.</p>
+      <p>Пропустил день — серия начинается заново с единицы.</p>`,
+  },
+  nextstep: {
+    title: "Что делать сейчас",
+    body: `
+      <p>Это <b>совет, а не приказ</b>: движок каждый раз заново оценивает ситуацию и предлагает лучший следующий шаг — незаконченный урок, повторение ошибок, тренировку отстающей темы, босса или ежедневную подборку.</p>
+      <p>Рядом с главной кнопкой — пара запасных вариантов. Все разделы при этом всегда открыты: выбирай любой.</p>`,
+  },
+  forecast: {
+    title: "Прогноз результата ЕГЭ",
+    body: `
+      <p>Оценка твоего балла в виде диапазона. Считается <b>только из освоения тем</b>: старт около 27 баллов, дальше растёт вместе с мастерством.</p>
+      <p>Это <b>ориентир, а не официальный прогноз</b>. Он двигается лишь от реальных решений, а история оценок копится по дням в «Статистике».</p>`,
+  },
+  skills: {
+    title: "Навыки",
+    body: `
+      <p>Процент освоения темы: до <b>30%</b> даёт пройденный урок, остальное — решённые задания и точность.</p>
+      <p>Статусы: ниже <b>35%</b> с попытками — слабое место, от <b>70%</b> — пройден, от <b>90%</b> — освоен.</p>
+      <p>Нажми на тему — увидишь урок, тренировку и типичные ошибки.</p>`,
+  },
+  path: {
+    title: "Путь",
+    body: `
+      <p>Карта всех тем ЕГЭ и твой прогресс по каждой.</p>
+      <p>Порядок тем — <b>подсказка маршрута, а не замок</b>: все темы открыты сразу, идти можно в любом порядке.</p>
+      <p>Нажми на тему — откроются урок, тренировка и типичные ошибки.</p>`,
+  },
+  training: {
+    title: "Тренировка",
+    body: `
+      <p><b>Уроки</b> разбирают тему по шагам с нуля. Первое прохождение даёт XP (база + шаги), повтор — только закрепление, без награды.</p>
+      <p><b>Тренировки по темам</b> закрепляют навык на заданиях ЕГЭ: дойди до конца списка — получишь награду миссии. Точность уже учтена в XP за ответы.</p>
+      <p>Незаконченное всегда можно продолжить с того же места.</p>`,
+  },
+  errors: {
+    title: "Ошибки",
+    body: `
+      <p>Сюда попадает <b>каждая ошибка</b> из практики — с привязкой к теме. Это список пробелов, а не приговор.</p>
+      <p>Кнопка «Повторить слабые места» собирает похожие задания. <b>Верный ответ закрывает ошибку и даёт +15 XP.</b></p>`,
+  },
+  trials: {
+    title: "Испытания",
+    body: `
+      <p><b>Ежедневная задача</b> — короткая персональная подборка на день. За выполнение — награда XP, повтор — без награды.</p>
+      <p><b>Боссы</b> открываются, когда прогресс ветки дойдёт до порога на карточке. Темы заданий скрыты, для победы нужно <b>от 60% верных ответов</b>. Победа даёт XP и усиливает навыки ветки.</p>`,
+  },
+};
+
+function openHelp(key) {
+  const h = HELP[key];
+  if (!h) return;
+  openModal(`
+    <div class="stat-label">Подсказка</div>
+    <div style="font-size:20px;font-weight:700;margin-top:4px">${h.title}</div>
+    <div class="help-body">${h.body}</div>
+    <div style="margin-top:22px;display:flex;justify-content:flex-end">
+      <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
+    </div>`);
+}
+
+function helpDot(key) {
+  return `<button class="help-dot" type="button" onclick="event.stopPropagation();openHelp('${key}')" aria-label="Что это означает?" title="Что это означает?">${icon("help")}</button>`;
+}
+
 /* ---------------- level up ---------------- */
 
 function showLevelUp(to) {
@@ -593,7 +679,7 @@ function renderTopbar() {
     <div class="topbar__spacer"></div>
     <div class="chip hide-mobile">Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b></div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
-    <div class="streak-chip" title="Серия дней подряд">${icon("flame")} ${Store.state.streak} дн</div>`;
+    <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
 }
 
 /* ============================================================
@@ -638,7 +724,7 @@ function screenDashboard(root) {
     ${step ? `
     <div class="card nextstep">
       <div class="nextstep__head">
-        <span class="nextstep__label">${icon("zap")} Что делать сейчас</span>
+        <span class="nextstep__label">${icon("zap")} Что делать сейчас ${helpDot("nextstep")}</span>
         <span class="nextstep__freedom">Это совет, а не приказ — все разделы открыты, выбирай любой</span>
       </div>
       <div class="nextstep__title">${esc(step.text)}</div>
@@ -662,14 +748,14 @@ function screenDashboard(root) {
             <div class="stat-num">УРОВЕНЬ ${li.level}</div>
           </div>
           <div style="text-align:right">
-            <div class="stat-label">Опыт</div>
+            <div class="stat-label">Опыт ${helpDot("xp")}</div>
             <div class="mono" style="font-size:17px;font-weight:700">${li.current} <span style="color:var(--muted)">/ ${li.need} XP</span></div>
           </div>
         </div>
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
         <div style="display:flex;gap:18px;margin-top:18px;flex-wrap:wrap">
           <div>
-            <div class="streak-chip">${icon("flame")} ${s.streak} ${plural(s.streak, "день", "дня", "дней")} подряд</div>
+            <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${s.streak} ${plural(s.streak, "день", "дня", "дней")} подряд</div>
           </div>
           <div style="align-self:center;font-size:13px;color:var(--text-2)">
             Сегодня: <b class="mono">${Math.min(act.solved, dailyGoal)} / ${dailyGoal}</b> заданий
@@ -679,7 +765,7 @@ function screenDashboard(root) {
       </div>
 
       <div class="card forecast-card">
-        <div class="stat-label">Прогноз результата ЕГЭ</div>
+        <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
         <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
         <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный и не ML-прогноз.</div>
@@ -712,7 +798,7 @@ function screenDashboard(root) {
 
     <div class="grid grid--2" style="margin-top:34px">
       <div>
-        <div class="section-title" style="margin-top:0">Навыки</div>
+        <div class="section-title" style="margin-top:0">Навыки ${helpDot("skills")}</div>
         <div class="card" style="padding:10px 8px">
           ${DataAPI.skills().map((sk) => {
             const st = s.skillStats[sk.id];
@@ -839,7 +925,7 @@ function screenPath(root) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Путь</div>
+      <div class="page-title">Путь ${helpDot("path")}</div>
       <div class="page-sub">Карта всех тем ЕГЭ и твой прогресс по каждой. Нажми на тему — увидишь урок, тренировку и типичные ошибки.</div>
     </div>
     <div style="margin-top:28px">
@@ -929,7 +1015,7 @@ function screenTraining(root) {
   const lessons = DataAPI.lessons();
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Тренировка</div>
+      <div class="page-title">Тренировка ${helpDot("training")}</div>
       <div class="page-sub">Здесь проходит обучение: уроки разбирают тему с нуля по шагам, тренировки закрепляют её на заданиях ЕГЭ.</div>
     </div>
 
@@ -1796,7 +1882,7 @@ function screenErrors(root) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Ошибки</div>
+      <div class="page-title">Ошибки ${helpDot("errors")}</div>
       <div class="page-sub">Каждая ошибка — это точка роста. Повторяй слабые места, пока они не закроются.</div>
     </div>
 
@@ -1929,7 +2015,7 @@ function screenTrials(root) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">Испытания</div>
+      <div class="page-title">Испытания ${helpDot("trials")}</div>
       <div class="page-sub">Проверки на прочность: ежедневная подборка, смешанное испытание и боссы по веткам навыков.</div>
     </div>
 
