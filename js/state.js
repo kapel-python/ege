@@ -227,7 +227,7 @@ function addXp(amount, reason) {
     // Разовый бонус за каждый достигнутый уровень. Начисляем рекурсивно,
     // чтобы несколько подряд повышений тоже дали бонус за каждый уровень.
     for (let lv = before + 1; lv <= after; lv++) {
-      addTimeline(`Новый уровень — уровень ${lv}`);
+      addTimeline(`Новый уровень — Level ${lv}`);
       Store.state.xp += XP_LEVEL_MILESTONE;
       todayActivity().xp += XP_LEVEL_MILESTONE;
     }

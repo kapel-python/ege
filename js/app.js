@@ -809,7 +809,7 @@ function renderTopbar() {
   const dark = Theme.current() === "dark";
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
-      <span class="level-chip__badge">Уровень ${li.level}</span>
+      <span class="level-chip__badge">УР. ${li.level}</span>
       <div>
         <div class="level-chip__bar">${progressBar(li.pct, "progress--thin")}</div>
         <div class="level-chip__xp">${li.current} / ${li.need} XP</div>
