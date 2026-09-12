@@ -44,6 +44,24 @@ MAX_NAME_LENGTH = 60
 ACCOUNT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 ACCOUNT_ID_LENGTH = 6
 ACCOUNT_ID_MAX_ATTEMPTS = 25
+# Static-file allowlist guardrails: anything under these top-level directories,
+# any dot-prefixed path and these file types are never served over HTTP. The DB
+# file alone (session tokens!) makes this a hard requirement, not a nicety.
+BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test"}
+BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
+MAX_BODY_BYTES = 5 * 1024 * 1024
+# Server-side caps for client-controlled collections. The client caps these
+# itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
+# with headroom, so a crafted payload can't turn one PUT into a DB write storm.
+MAX_COUNTER_VALUE = 10**9
+MAX_TASK_ATTEMPTS = 20000
+MAX_ERRORS = 5000
+MAX_TIMELINE = 200
+MAX_LESSON_ATTEMPTS = 5000
+MAX_LESSON_ERROR_HISTORY = 1000
+MAX_DIAGNOSTICS = 2000
+MAX_DAILY_HISTORY = 400
+MAX_BOSSES = 500
 
 # ---------------------------------------------------------------------------
 # Admin access
@@ -865,18 +883,12 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     for achievement_id, item in (s.get("achievements") or {}).items(): conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id,achievement_id,item.get("ts") or now_iso()))
     for activity_date, value in (s.get("activity") or {}).items(): conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
     for item in s.get("forecastHistory") or []: conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
-    # Adjustments are an append-only audit log: rows already persisted (e.g.
-    # granted straight in the DB by an admin) must survive a sync from a
-    # client whose snapshot predates them, so unlike every other collection
-    # this table is never wiped — new entries are deduped against (amount,
-    # reason, created_at) and only missing ones are inserted.
-    existing = {str(r["amount"]) + "|" + r["reason"] + "|" + str(timestamp_value(r["created_at"]))
-                for r in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,))}
-    for item in s.get("xpAdjustments") or []:
-        amount, reason, ts = int(item.get("amount", 0)), str(item.get("reason", ""))[:200], item.get("ts") or now_iso()
-        key = f"{amount}|{reason}|{timestamp_value(ts)}"
-        if key not in existing:
-            conn.execute("INSERT INTO user_xp_adjustments(user_id,amount,reason,created_at) VALUES(?,?,?,?)", (user_id, amount, reason, ts))
+    # XP adjustments are an append-only audit log that derives straight into
+    # XP, so the sync path must NEVER mint new rows — a client could otherwise
+    # award itself arbitrary XP with {"amount": N}. The only writer is
+    # admin_grant_xp (and direct DB work); a state payload can at most echo
+    # back rows the server already holds.
+    #
     daily_records = {}
     for item in s.get("dailyHistory") or []:
         if item.get("date"): daily_records[item["date"]] = item
@@ -1356,18 +1368,12 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     for boss_id in set(state.get("bossesDefeated") or []):
         xp += bosses_xp.get(boss_id, 0)
 
-    # Manual XP adjustments (grantXp / admin grants). The submitted snapshot
-    # may predate rows written straight into the DB, so the persisted log is
-    # the authority and the payload only contributes entries missing there.
-    seen_adj = set()
+    # Manual XP adjustments (admin grants). The persisted log is the ONLY
+    # source: write_state refuses to insert new rows from a client payload,
+    # so anything the payload claims here is untrusted and ignored.
     if user_id is not None:
         for amount, reason, created_at in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,)):
             xp += int(amount)
-            seen_adj.add(f"{int(amount)}|{reason}|{timestamp_value(created_at)}")
-    for a in state.get("xpAdjustments") or []:
-        key = f"{int(a.get('amount', 0))}|{str(a.get('reason', ''))[:200]}|{timestamp_value(a.get('ts') or now_iso())}"
-        if key not in seen_adj:
-            xp += int(a.get("amount", 0))
 
     return {
         "xp": xp, "totalSolved": total_solved, "totalCorrect": total_correct,
@@ -1402,15 +1408,31 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     if isinstance(name, str) and len(name.strip()) > MAX_NAME_LENGTH: raise ValueError("name too long")
     for key in ("xp", "streak", "totalSolved", "totalCorrect", "totalTimeSec", "hintsUsed", "correctSeries", "bestSeries", "errorsResolved"):
         value = state.get(key, 0)
-        if not isinstance(value, (int, float)) or value < 0: raise ValueError(f"invalid {key}")
+        if not isinstance(value, (int, float)) or not isinstance(value, int) and value != int(value): raise ValueError(f"invalid {key}")
+        if not 0 <= value <= MAX_COUNTER_VALUE: raise ValueError(f"invalid {key}")
     if state.get("totalCorrect", 0) > state.get("totalSolved", 0): raise ValueError("correct answers exceed attempts")
+    # Unbounded client-controlled collections are a DB-bloat vector: a single
+    # PUT can otherwise write millions of rows that then load on every
+    # bootstrap. The app itself caps these client-side; the caps below are
+    # generous headroom over those client caps, not tighter semantics.
+    for key, cap in (("taskAttempts", MAX_TASK_ATTEMPTS), ("errors", MAX_ERRORS), ("timeline", MAX_TIMELINE),
+                     ("lessonAttempts", MAX_LESSON_ATTEMPTS), ("lessonErrorHistory", MAX_LESSON_ERROR_HISTORY),
+                     ("diagnostics", MAX_DIAGNOSTICS), ("dailyHistory", MAX_DAILY_HISTORY)):
+        value = state.get(key, [])
+        if not isinstance(value, list): raise ValueError(f"{key} must be an array")
+        if len(value) > cap: raise ValueError(f"{key} too large")
+    for key in ("skillStats", "lessonStepErrors", "lessonSessions", "completedLessons", "missionProgress",
+                "missionsDone", "achievements", "activity", "hintLevels"):
+        if state.get(key) is not None and not isinstance(state.get(key), dict): raise ValueError(f"{key} must be an object")
+    if not isinstance(state.get("bossesDefeated", []), list): raise ValueError("bossesDefeated must be an array")
+    if len(state.get("bossesDefeated") or []) > MAX_BOSSES: raise ValueError("bossesDefeated too large")
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills")}
     for skill_id, value in (state.get("skillStats") or {}).items():
         if skill_id not in valid_skills: raise ValueError(f"unknown skill: {skill_id}")
         if not isinstance(value, dict) or not 0 <= float(value.get("progress", 0)) <= 100: raise ValueError(f"invalid progress: {skill_id}")
     valid_tasks = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
     for item in state.get("taskAttempts") or []:
-        if item.get("taskId") not in valid_tasks or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
+        if not isinstance(item, dict) or item.get("taskId") not in valid_tasks or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
     if not isinstance(state.get("errors", []), list): raise ValueError("errors must be an array")
     if not isinstance(state.get("xpAdjustments", []), list): raise ValueError("xpAdjustments must be an array")
     for adj in state.get("xpAdjustments") or []:
@@ -1425,13 +1447,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_security_headers()
         if token: self.send_header("Set-Cookie", f"ege_session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000")
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers(); self.wfile.write(data)
 
+    def send_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def read_json(self):
-        length = int(self.headers.get("Content-Length", "0")); return json.loads(self.rfile.read(length) or b"{}")
+        # A client can declare an absurd Content-Length and make a handler
+        # thread block on a body that never arrives; refuse oversized or
+        # malformed bodies outright (state snapshots are far below this cap).
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            raise ValueError("invalid Content-Length")
+        if length > MAX_BODY_BYTES:
+            raise ValueError("request body too large")
+        if length < 0:
+            raise ValueError("invalid Content-Length")
+        return json.loads(self.rfile.read(length) or b"{}")
 
     # ------------------------------------------------------------------
     # Admin session middleware
@@ -1607,10 +1646,21 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "admin.html"
         else:
             file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
-        if ROOT not in file_path.parents and file_path != ROOT: self.send_error(403); return
+        # Static hosting must never leak the server tree: the SQLite file holds
+        # every live session token, .git exposes history/remotes, and server/
+        # contains the backend itself. Only the public web surface is served.
+        try:
+            rel = file_path.relative_to(ROOT)
+        except ValueError:
+            self.send_error(403); return
+        suffix = file_path.suffix.lower()
+        if suffix in BLOCKED_STATIC_SUFFIXES:
+            self.send_error(404); return
+        if any(part.startswith(".") or part in BLOCKED_STATIC_DIRS for part in rel.parts[:-1]) or (rel.parts and rel.parts[-1].startswith(".")):
+            self.send_error(404); return
         if not file_path.is_file(): self.send_error(404); return
         content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf"}.get(file_path.suffix, "application/octet-stream")
-        data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", "no-cache"); self.send_security_headers(); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_PUT(self):
         path = urlparse(self.path).path
