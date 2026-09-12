@@ -639,7 +639,13 @@ const Vendor = {
     el.rel = "stylesheet";
     el.href = href;
     el.dataset.vendorHref = href;
-    document.head.appendChild(el);
+    // Вендорный CSS встаёт ДО наших стилей — как было в index.html до
+    // ленивой загрузки. Иначе его shorthand (.katex{font:normal ...} в
+    // katex.min.css) оказывается позже нашего (.katex{font-weight:700})
+    // при равной специфичности и цифры теряют жирность.
+    const anchor = document.querySelector('link[rel="stylesheet"]:not([data-vendor-href])');
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor);
+    else document.head.appendChild(el);
   },
 
   ensureMath() {
