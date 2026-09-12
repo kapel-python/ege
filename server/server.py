@@ -49,7 +49,7 @@ ACCOUNT_ID_MAX_ATTEMPTS = 25
 # file alone (session tokens!) makes this a hard requirement, not a nicety.
 BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test"}
 BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
-MAX_BODY_BYTES = 5 * 1024 * 1024
+MAX_BODY_BYTES = 10 * 1024 * 1024
 # Server-side caps for client-controlled collections. The client caps these
 # itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
 # with headroom, so a crafted payload can't turn one PUT into a DB write storm.
