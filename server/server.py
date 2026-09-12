@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import datetime as dt
 import errno
+import gzip
 import hashlib
 import hmac
 import json
@@ -676,7 +677,38 @@ def connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 10000")
+    ensure_user_indexes(conn)
     return conn
+
+
+# Все таблицы прогресса читаются/пишутся строго по user_id (read_state делает
+# ~15 SELECT ... WHERE user_id=? на каждый bootstrap, write_state — массовые
+# DELETE ... WHERE user_id=? на каждый save). Без индексов это full scan
+# каждой таблицы на каждый запрос — главная серверная причина медленных
+# bootstrap/save у активных пользователей. IF NOT EXISTS делает вызов дешёвым.
+USER_ID_INDEXES = (
+    ("user_stats", "user_stats"), ("user_progress", "user_progress"),
+    ("user_hint_levels", "user_hint_levels"), ("user_errors", "user_errors"),
+    ("task_attempts", "task_attempts"), ("lesson_attempts", "lesson_attempts"),
+    ("lesson_step_errors", "lesson_step_errors"),
+    ("lesson_error_history", "lesson_error_history"),
+    ("lesson_sessions", "lesson_sessions"),
+    ("completed_lessons", "completed_lessons"),
+    ("user_missions", "user_missions"), ("user_bosses", "user_bosses"),
+    ("user_achievements", "user_achievements"),
+    ("activity_history", "activity_history"),
+    ("forecast_history", "forecast_history"),
+    ("daily_progress", "daily_progress"), ("timeline", "timeline"),
+    ("diagnostics", "diagnostics"), ("user_xp_adjustments", "user_xp_adjustments"),
+)
+
+
+def ensure_user_indexes(conn: sqlite3.Connection) -> None:
+    for suffix, table in USER_ID_INDEXES:
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{suffix}_user_id ON {table}(user_id)")
+        except sqlite3.Error:
+            pass
 
 
 def install_catalog(conn: sqlite3.Connection) -> None:
@@ -738,6 +770,8 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAssets', ?)", (json.dumps(catalog.get("visualAssets", []), ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAudit', ?)", (json.dumps(catalog.get("visualAudit", {}), ensure_ascii=False),))
     conn.commit()
+    _CATALOG_CACHE["generation"] += 1
+    invalidate_catalog_cache()
 
 
 def task_has_missing_visual(item: dict) -> bool:
@@ -748,42 +782,34 @@ def task_has_missing_visual(item: dict) -> bool:
     return bool(vis and vis.get("required") and not vis.get("assetId"))
 
 
-def catalog_payload(conn: sqlite3.Connection) -> dict:
+def _build_catalog_payload(conn: sqlite3.Connection) -> dict:
     categories = [dict(r) for r in conn.execute("SELECT id, name, short FROM topics ORDER BY rowid")]
     skills = [{"id": r["id"], "name": r["name"], "cat": r["topic_id"], "order": r["display_order"], "ege": r["ege"]}
               for r in conn.execute("SELECT id, name, topic_id, display_order, ege FROM skills ORDER BY topic_id, display_order")]
     tasks = []
+    blocked_ids = set()
     for r in conn.execute("SELECT * FROM tasks ORDER BY id"):
+        meta = json.loads(r["metadata_json"] or "{}")
         item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"], "diff": r["difficulty"],
                 "text": r["statement"], "answer": r["answer"], "hint": r["hint"], "solution": r["explanation"]}
-        item.update(json.loads(r["metadata_json"] or "{}"))
+        item.update(meta)
         # Нерешаемые задачи (обязательный рисунок отсутствует) не отдаются
         # обычному пользователю вообще — ни в каталоге, ни косвенно. Админ
         # получает их отдельным /api/admin/blocked-tasks.
         if task_has_missing_visual(item):
+            blocked_ids.add(r["id"])
             continue
         tasks.append(item)
     lessons = [json.loads(r["metadata_json"]) for r in conn.execute("SELECT metadata_json FROM lessons ORDER BY id")]
-    # Предварительно соберём множество blocked id, чтобы так же отфильтровать
-    # задачи внутри миссий (иначе миссия №9 стала бы пустой карточкой с
-    # несуществующими id). Клиент дополнительно фильтрует, но сервер не
-    # должен вообще отдавать нерешаемые id.
-    blocked_ids = set()
-    for r in conn.execute("SELECT id, metadata_json FROM tasks"):
-        item = json.loads(r["metadata_json"] or "{}")
-        item["visual"] = item.get("visual")
-        # fallback: если metadata не содержит visual, берём из основного поля? Но visual хранится только в metadata
-        if task_has_missing_visual(item):
-            blocked_ids.add(r["id"])
-        # Также проверяем statement-side visual через payload-совместимость:
-        # сверим через tasks.statement визуал? Нет, visual только в metadata.
-        # Поэтому дополнительно перебираем tasks как в payload выше (уже отфильтрованы).
-        # Упрощённо: blocked_ids уже определён через визуал-предикат выше, но
-        # для надёжности пересчитаем тем же путём, что и tasks выше.
+    # Один запрос вместо N+1 (по одному SELECT на миссию): каталог собирается
+    # на каждый bootstrap, и лишний round-trip в SQLite на миссию — чистое
+    # время ожидания безо всякой пользы.
+    mission_task_rows: dict[str, list] = {}
+    for x in conn.execute("SELECT mission_id, task_id FROM mission_tasks ORDER BY mission_id, display_order"):
+        mission_task_rows.setdefault(x["mission_id"], []).append(x["task_id"])
     missions = []
     for r in conn.execute("SELECT * FROM missions ORDER BY id"):
-        tasks_for_mission = [x["task_id"] for x in conn.execute("SELECT task_id FROM mission_tasks WHERE mission_id=? ORDER BY display_order", (r["id"],))
-                             if x["task_id"] not in blocked_ids]
+        tasks_for_mission = [tid for tid in mission_task_rows.get(r["id"], []) if tid not in blocked_ids]
         missions.append({"id": r["id"], "title": r["title"], "desc": r["description"], "skill": r["skill_id"], "tasks": tasks_for_mission, "xp": r["xp"], "diff": r["difficulty"]})
     bosses = [{"id": r["id"], "title": r["title"], "cat": r["topic_id"], "desc": r["description"], "size": r["task_count"], "xp": r["xp"], "unlockAt": r["unlock_at"]}
               for r in conn.execute("SELECT * FROM bosses ORDER BY id")]
@@ -794,6 +820,70 @@ def catalog_payload(conn: sqlite3.Connection) -> dict:
             "bosses": bosses, "achievements": achievements, "daily": config["daily"], "goals": config["goals"],
             "diagnosticTasks": config["diagnosticTasks"], "visualAssets": config.get("visualAssets", []),
             "visualAudit": config.get("visualAudit", {})}
+
+
+# Кэш каталога в памяти процесса: полный payload собирается из SQLite на
+# каждый bootstrap (~20 SQL-запросов), хотя меняется только при
+# install_catalog (старт сервера). Ключ — mtime catalog.json + generation,
+# который растёт при каждом install_catalog в этом процессе.
+_CATALOG_CACHE: dict = {"key": None, "full": None, "generation": 0}
+
+
+def _catalog_cache_key() -> tuple:
+    try:
+        mtime = CATALOG_PATH.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    return (mtime, _CATALOG_CACHE["generation"])
+
+
+def catalog_payload(conn: sqlite3.Connection) -> dict:
+    """Полный каталог (совместимость: /api/bootstrap и тесты). Кэшируется."""
+    key = _catalog_cache_key()
+    if _CATALOG_CACHE["key"] != key or _CATALOG_CACHE["full"] is None:
+        _CATALOG_CACHE["full"] = _build_catalog_payload(conn)
+        _CATALOG_CACHE["key"] = key
+    return _CATALOG_CACHE["full"]
+
+
+def invalidate_catalog_cache() -> None:
+    _CATALOG_CACHE["key"] = None
+    _CATALOG_CACHE["full"] = None
+
+
+def catalog_summary_payload(conn: sqlite3.Connection) -> dict:
+    """Лёгкий каталог для первой отрисовки (~20 КБ вместо ~280 КБ).
+
+    Задачи — только заглушки id/skill (счётчики и выборки по теме работают,
+    тексты/ответы/разборы не грузятся). Уроки — мета без шагов.
+    Тяжёлые visualAssets/visualAudit едут вместе с полными задачами.
+    """
+    full = catalog_payload(conn)
+    return {
+        "categories": full["categories"], "skills": full["skills"],
+        "missions": full["missions"], "bosses": full["bosses"],
+        "achievements": full["achievements"], "daily": full["daily"],
+        "goals": full["goals"], "diagnosticTasks": full["diagnosticTasks"],
+        "tasks": [{"id": t["id"], "skill": t["skill"], "sub": t.get("sub"),
+                   "num": t.get("num"), "diff": t.get("diff"), "_stub": True}
+                  for t in full["tasks"]],
+        "lessons": [{"id": le["id"], "skill": le["skill"], "title": le["title"],
+                     "xp": le.get("xp", 0),
+                     "stepsCount": len(le.get("steps") or []), "_meta": True}
+                    for le in full["lessons"]],
+    }
+
+
+def catalog_tasks_payload(conn: sqlite3.Connection) -> dict:
+    """Полные задачи + визуальные ассеты (ленивая подгрузка)."""
+    full = catalog_payload(conn)
+    return {"tasks": full["tasks"], "visualAssets": full["visualAssets"],
+            "visualAudit": full["visualAudit"]}
+
+
+def catalog_lessons_payload(conn: sqlite3.Connection) -> dict:
+    """Полные уроки с шагами (ленивая подгрузка)."""
+    return {"lessons": catalog_payload(conn)["lessons"]}
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
@@ -1592,12 +1682,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, payload: dict, status: int = 200, token: str | None = None, admin_cookie: str | None = None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        # Каталог и состояние — самый тяжёлый JSON (~280 КБ): gzip сжимает
+        # его в ~4 раза. Клиенты без Accept-Encoding получают как раньше.
+        encoding = None
+        accept = self.headers.get("Accept-Encoding", "") or ""
+        if len(data) > 1024 and "gzip" in accept.lower():
+            data = gzip.compress(data, compresslevel=5)
+            encoding = "gzip"
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_security_headers()
         if token: self.send_header("Set-Cookie", f"ege_session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000")
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
+        if encoding: self.send_header("Content-Encoding", encoding)
+        self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers(); self.wfile.write(data)
 
@@ -1786,6 +1885,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 user_id, token = user_for(conn, self)
                 if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
+                # Лёгкий bootstrap для первой отрисовки: каталог без текстов
+                # заданий и шагов уроков (~20 КБ вместо ~280 КБ). Полные данные
+                # догружаются через /api/catalog-tasks и /api/catalog-lessons.
+                if path == "/api/bootstrap-lite": self.send_json({"catalog": catalog_summary_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
+                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn), token=token); return
+                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn), token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':
@@ -1810,7 +1915,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404); return
         if not file_path.is_file(): self.send_error(404); return
         content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf"}.get(file_path.suffix, "application/octet-stream")
-        data = file_path.read_bytes(); self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", "no-cache"); self.send_security_headers(); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        data = file_path.read_bytes()
+        # ETag по хешу содержимого: повторные заходы отдают 304 без тела.
+        # Раньше стоял безусловный no-cache без валидатора — каждый reload
+        # заново качал ~1.5 МБ JS (jsxgraph 947 КБ + katex 269 КБ + app 141 КБ).
+        etag = f'"{hashlib.sha1(data).hexdigest()[:27]}"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304); self.send_header("ETag", etag); self.end_headers(); return
+        # Вендорные библиотеки и шрифты меняются почти никогда — долгий кэш.
+        # HTML — всегда свежий. Остальное (наш js/css/svg) — час + ETag.
+        if suffix in (".html",):
+            cache_control = "no-cache"
+        elif rel.parts and rel.parts[0] in ("vendor", "assets"):
+            cache_control = "public, max-age=31536000, immutable"
+        else:
+            cache_control = "public, max-age=3600"
+        accept = self.headers.get("Accept-Encoding", "") or ""
+        encoding = None
+        # Текстовую статику жмём: jsxgraph 969 КБ -> ~250 КБ, app.js в ~4 раза.
+        if len(data) > 1024 and "gzip" in accept.lower() and suffix in (".js", ".css", ".html", ".json", ".svg", ".ttf"):
+            data = gzip.compress(data, compresslevel=5)
+            encoding = "gzip"
+        self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
+        if encoding: self.send_header("Content-Encoding", encoding)
+        self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_PUT(self):
         path = urlparse(self.path).path

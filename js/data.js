@@ -5,12 +5,47 @@
 
 const DataAPI = {
   catalog: null,
+  _tasksFull: false,
+  _lessonsFull: false,
 
   load(catalog) {
     if (!catalog || !Array.isArray(catalog.tasks) || !Array.isArray(catalog.skills)) {
       throw new Error("Backend returned an invalid catalog");
     }
     this.catalog = catalog;
+    // Лёгкий bootstrap привозит заглушки задач (_stub) и мета уроков (_meta)
+    // без текстов и шагов — считаем детали загруженными, только если их нет.
+    this._tasksFull = !catalog.tasks.some((t) => t._stub);
+    this._lessonsFull = !catalog.lessons.some((l) => l._meta);
+    if (!Array.isArray(catalog.visualAssets)) catalog.visualAssets = [];
+    if (!catalog.visualAudit) catalog.visualAudit = {};
+  },
+
+  // Ленивая догрузка полных задач/уроков поверх summary-каталога.
+  // Существующие селекторы продолжают работать — меняется только содержимое.
+  loadDetails({ tasks, lessons, visualAssets, visualAudit }) {
+    if (!this.catalog) throw new Error("Catalog is not loaded");
+    if (Array.isArray(tasks) && tasks.length) {
+      this.catalog.tasks = tasks;
+      this._tasksFull = true;
+    }
+    if (Array.isArray(lessons) && lessons.length) {
+      this.catalog.lessons = lessons;
+      this._lessonsFull = true;
+    }
+    if (Array.isArray(visualAssets)) this.catalog.visualAssets = visualAssets;
+    if (visualAudit) this.catalog.visualAudit = visualAudit;
+  },
+
+  detailsReady() { return !!this.catalog && this._tasksFull && this._lessonsFull; },
+  tasksReady() { return !!this.catalog && this._tasksFull; },
+  lessonsReady() { return !!this.catalog && this._lessonsFull; },
+
+  // Число шагов урока: у мета-заглушки шагов нет, только stepsCount.
+  lessonStepsCount(lesson) {
+    if (!lesson) return 0;
+    if (Array.isArray(lesson.steps)) return lesson.steps.length;
+    return Number(lesson.stepsCount) || 0;
   },
 
   ready() { return !!this.catalog; },

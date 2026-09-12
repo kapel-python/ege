@@ -612,7 +612,61 @@ function currentRoute() {
   return h.split("/")[0] || "dashboard";
 }
 
-function render() {
+/* Ленивая загрузка тяжёлой математики: katex (269 КБ) + jsxgraph (947 КБ) +
+   mathvisual нужны только экранам с заданиями/уроками, а не первому экрану.
+   Грузятся один раз по требованию, дальше — мгновенно из кэша. */
+const NEEDS_DETAILS = new Set(["session", "lesson", "errors", "trials"]);
+
+const Vendor = {
+  _mathPromise: null,
+
+  loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[data-vendor-src="${src}"]`)) { resolve(); return; }
+      const el = document.createElement("script");
+      el.src = src;
+      el.defer = true;
+      el.dataset.vendorSrc = src;
+      el.onload = () => resolve();
+      el.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
+      document.head.appendChild(el);
+    });
+  },
+
+  ensureCss(href) {
+    if (document.querySelector(`link[data-vendor-href="${href}"]`)) return;
+    const el = document.createElement("link");
+    el.rel = "stylesheet";
+    el.href = href;
+    el.dataset.vendorHref = href;
+    document.head.appendChild(el);
+  },
+
+  ensureMath() {
+    if (window.katex && window.MathVisual && typeof JXG !== "undefined") return Promise.resolve();
+    if (this._mathPromise) return this._mathPromise;
+    this._mathPromise = (async () => {
+      // katex и jsxgraph независимы — параллельно; mathvisual после jsxgraph,
+      // чтобы применился его стартовый патч JXG-опций, как при обычном порядке.
+      await Promise.all([
+        window.katex ? null : this.loadScript("vendor/katex/katex.min.js"),
+        (typeof JXG !== "undefined") ? null : this.loadScript("vendor/jsxgraph/jsxgraphcore.js"),
+      ]);
+      this.ensureCss("vendor/katex/katex.min.css");
+      this.ensureCss("vendor/jsxgraph/jsxgraph.css");
+      if (!window.MathVisual) await this.loadScript("js/mathvisual.js");
+      // Экрану, который ждал библиотеку, уже есть DOM с плейсхолдерами —
+      // монтируем их сразу, наблюдатель MutationObserver подхватит будущие.
+      try { MathVisualMount.mountWithin(document.body); } catch (_) {}
+    }).call(this).catch((error) => { this._mathPromise = null; throw error; });
+    return this._mathPromise;
+  },
+};
+
+let renderSeq = 0;
+
+async function render() {
+  if (!Store.ready || !Store.state) return;
   if (!Store.state.onboarded) { Onboarding.show(); return; }
   Onboarding.hide();
   const route = currentRoute();
@@ -620,6 +674,27 @@ function render() {
   renderBottomNav(route);
   renderTopbar();
   const screen = document.getElementById("screen");
+  const my = ++renderSeq;
+  if (NEEDS_DETAILS.has(route)) {
+    // Экран с заданиями: ждём полные тексты и математические библиотеки.
+    // Пока грузится — скелетон вместо пустоты; ушедшую навигацию не трогаем.
+    screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center;color:var(--text-2)">Загрузка заданий…</div>`;
+    try {
+      await Store.ensureDetails();
+    } catch (error) {
+      if (my !== renderSeq) return;
+      screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center">Не удалось загрузить задания.<br><button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button></div>`;
+      return;
+    }
+    // Без katex/jsxgraph экран всё равно отрисуется (plain-формулы и
+    // заглушки диаграмм, как раньше без вендора) — просто предупредим.
+    try {
+      await Vendor.ensureMath();
+    } catch (error) {
+      try { toast("Математические библиотеки не загрузились — формулы показаны текстом", "toast--error", "x"); } catch (_) {}
+    }
+    if (my !== renderSeq || currentRoute() !== route) return;
+  }
   const fn = {
     dashboard: screenDashboard,
     path: screenPath,
@@ -779,7 +854,7 @@ function screenDashboard(root) {
       <div class="card card--hover action-card" onclick="continueTraining()">
         <div class="action-card__icon">${icon("training")}</div>
         <div><div class="action-card__title">Продолжить обучение</div>
-        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)}/${openLesson.lesson.steps.length}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Текущая тема по рекомендации"}</div></div>
+        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))}/${DataAPI.lessonStepsCount(openLesson.lesson)}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Текущая тема по рекомендации"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--warn" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}">
         <div class="action-card__icon">${icon("rotate")}</div>
@@ -1029,19 +1104,20 @@ function screenTraining(root) {
         const done = !!Store.state.completedLessons[lesson.id];
         const session = Store.state.lessonSessions && Store.state.lessonSessions[lesson.id];
         const inProgress = !!session;
-        const progress = inProgress ? Math.round(((session.idx || 0) / lesson.steps.length) * 100) : 0;
+        const stepsTotal = DataAPI.lessonStepsCount(lesson);
+        const progress = inProgress && stepsTotal ? Math.round(((session.idx || 0) / stepsTotal) * 100) : 0;
         return `
         <div class="card card--hover lesson-card ${done ? "lesson-card--done" : ""}">
           <div class="mission-card__top">
             <div>
               <div class="mission-card__title">${icon("bulb")} ${lesson.title} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
-              <div class="mission-card__path">${sk.name} · ${lesson.steps.length} шагов · ${done ? "завершён" : "не пройден"}</div>
+              <div class="mission-card__path">${sk.name} · ${stepsTotal} шагов · ${done ? "завершён" : "не пройден"}</div>
             </div>
             <div class="mission-card__reward"><span class="chip chip--accent mono">+${lesson.xp} XP</span></div>
           </div>
           ${inProgress ? `<div class="mission-card__foot">
             <div class="mission-card__bar">${progressBar(progress)}</div>
-            <span class="mono">${Math.min((session.idx || 0) + 1, lesson.steps.length)} / ${lesson.steps.length}</span>
+            <span class="mono">${stepsTotal ? Math.min((session.idx || 0) + 1, stepsTotal) : ""} / ${stepsTotal}</span>
           </div>` : ''}
           <button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" style="align-self:flex-start" onclick="Lesson.start('${lesson.id}')">
             ${done ? "Пройти ещё раз" : inProgress ? "Продолжить" : "Начать урок"}
@@ -1571,9 +1647,11 @@ function lessonTask(step) { return step.taskId ? DataAPI.task(step.taskId) : nul
 const Lesson = {
   cur: null,
 
-  start(lessonId) {
+  async start(lessonId) {
+    // Шаги урока живут в ленивой половине каталога — дожидаемся их до чтения.
+    try { await Store.ensureDetails(); } catch (_) { toast("Не удалось загрузить урок. Проверь соединение.", "toast--error", "x"); return; }
     const lesson = DataAPI.lesson(lessonId);
-    if (!lesson) return;
+    if (!lesson || !Array.isArray(lesson.steps)) return;
     const sourceRoute = ["path", "training"].includes(currentRoute()) ? currentRoute() : "path";
     const saved = Store.state.lessonSessions && Store.state.lessonSessions[lessonId];
     this.cur = saved
