@@ -66,7 +66,15 @@ const Store = {
 
   async load() {
     this.loadPromise = (async () => {
-      const payload = await ApiClient.get("/api/bootstrap");
+      // Двухступенчатая загрузка: сначала лёгкий summary-каталог (~30 КБ)
+      // + состояние, чтобы первая отрисовка была быстрой; тяжёлые тексты
+      // заданий и шаги уроков (~250 КБ) догружаются лениво через ensureDetails.
+      let payload;
+      try {
+        payload = await ApiClient.get("/api/bootstrap-lite");
+      } catch (_) {
+        payload = await ApiClient.get("/api/bootstrap");
+      }
       DataAPI.load(payload.catalog);
       this.accountId = payload.accountId || null;
       const defaults = this.defaultState();
@@ -85,9 +93,42 @@ const Store = {
       this.state.version = defaults.version;
       this.ready = true;
       ensureDailyChallenge();
+      // Фоновая догрузка деталей, пока пользователь смотрит первый экран:
+      // переход в тренировку/урок потом откроется мгновенно. Ошибки здесь
+      // не показываем — экраны сами дождутся деталей через ensureDetails.
+      if (!DataAPI.detailsReady()) {
+        const prefetch = () => this.ensureDetails().catch(() => {});
+        try {
+          if (typeof requestIdleCallback === "function") requestIdleCallback(prefetch, { timeout: 4000 });
+          else setTimeout(prefetch, 1200);
+        } catch (_) { /* ignore — детали подгрузятся по требованию */ }
+      }
       return this.state;
     })();
     return this.loadPromise;
+  },
+
+  // Полный каталог задач и уроков. Один полёт на сессию: параллельные
+  // вызовы делят общий промис; после успеха бросаем событие catalogready,
+  // чтобы лёгкие экраны обновили счётчики. Ошибка сбрасывает промис,
+  // чтобы следующая навигация попробовала снова.
+  ensureDetails() {
+    if (DataAPI.detailsReady()) return Promise.resolve();
+    if (this.detailsPromise) return this.detailsPromise;
+    this.detailsPromise = (async () => {
+      const [tasksPayload, lessonsPayload] = await Promise.all([
+        ApiClient.get("/api/catalog-tasks"),
+        ApiClient.get("/api/catalog-lessons"),
+      ]);
+      DataAPI.loadDetails({
+        tasks: tasksPayload.tasks,
+        lessons: lessonsPayload.lessons,
+        visualAssets: tasksPayload.visualAssets,
+        visualAudit: tasksPayload.visualAudit,
+      });
+      this.emit("catalogready");
+    })().catch((error) => { this.detailsPromise = null; throw error; });
+    return this.detailsPromise;
   },
 
   save() {
@@ -938,7 +979,7 @@ function nextStepCandidates() {
       payload: { lessonId: openLesson.lessonId },
       route: "#/training", icon: "bulb",
       text: `Продолжить урок «${openLesson.lesson.title}»`,
-      reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, openLesson.lesson.steps.length)} из ${openLesson.lesson.steps.length} — закончить начатое дешевле всего.`,
+      reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))} из ${DataAPI.lessonStepsCount(openLesson.lesson)} — закончить начатое дешевле всего.`,
       score: 92,
     });
   }
