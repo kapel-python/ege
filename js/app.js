@@ -721,25 +721,6 @@ function screenDashboard(root) {
       <div class="page-sub">${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })} · цель: ${goalLabel()}</div>
     </div>
 
-    ${step ? `
-    <div class="card nextstep">
-      <div class="nextstep__head">
-        <span class="nextstep__label">${icon("zap")} Что делать сейчас ${helpDot("nextstep")}</span>
-        <span class="nextstep__freedom">Это совет, а не приказ — все разделы открыты, выбирай любой</span>
-      </div>
-      <div class="nextstep__title">${esc(step.text)}</div>
-      <div class="nextstep__reason">${esc(step.reason)}</div>
-      <div class="nextstep__actions">
-        <button class="btn btn--primary btn--lg" onclick="runNextStep(0)">Начать ${icon("arrow")}</button>
-        <div class="nextstep__alts">
-          ${alts.map((a, i) => `
-            <button class="btn btn--ghost btn--sm" onclick="runNextStep(${i + 1})" title="${esc(a.reason)}">
-              ${icon(a.icon)}<span>${esc(a.text)}</span>
-            </button>`).join("")}
-        </div>
-      </div>
-    </div>` : ""}
-
     <div class="hero">
       <div class="card card--glow">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
@@ -771,6 +752,25 @@ function screenDashboard(root) {
         <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный и не ML-прогноз.</div>
       </div>
     </div>
+
+    ${step ? `
+    <div class="card nextstep">
+      <div class="nextstep__head">
+        <span class="nextstep__label">${icon("zap")} Что делать сейчас ${helpDot("nextstep")}</span>
+        <span class="nextstep__freedom">Это совет, а не приказ — все разделы открыты, выбирай любой</span>
+      </div>
+      <div class="nextstep__title">${esc(step.text)}</div>
+      <div class="nextstep__reason">${esc(step.reason)}</div>
+      <div class="nextstep__actions">
+        <button class="btn btn--primary btn--lg" onclick="runNextStep(0)">Начать ${icon("arrow")}</button>
+        <div class="nextstep__alts">
+          ${alts.map((a, i) => `
+            <button class="btn btn--ghost btn--sm" onclick="runNextStep(${i + 1})" title="${esc(a.reason)}">
+              ${icon(a.icon)}<span>${esc(a.text)}</span>
+            </button>`).join("")}
+        </div>
+      </div>
+    </div>` : ""}
 
     <div class="section-title">Быстрый доступ</div>
     <div class="action-cards">
