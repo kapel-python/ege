@@ -135,6 +135,7 @@ function toast(message, kind = "ok") {
 const AICONS = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c0-3.4 3-5.6 6.5-5.6s6.5 2.2 6.5 5.6"/><circle cx="17.5" cy="9" r="2.6"/><path d="M16.8 14.6c2.9.3 4.7 2.2 4.7 4.9"/></svg>',
+  blocked: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8M16 8L8 16"/><path d="M12 8v8M8 12h8" stroke-width="1.5"/></svg>',
   audit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>',
@@ -166,6 +167,7 @@ function navigate(path) { location.hash = path; }
 const SECTIONS = [
   { id: "dashboard", title: "Обзор", icon: "dashboard" },
   { id: "users", title: "Пользователи", icon: "users" },
+  { id: "blocked", title: "Заблокированные", icon: "blocked" },
   { id: "audit", title: "Журнал действий", icon: "audit" },
 ];
 
@@ -939,6 +941,42 @@ async function screenAudit() {
 
 /* ---------------- корневой рендер ---------------- */
 
+async function screenBlocked() {
+  let data;
+  try { data = await AdminApi.get("/api/admin/blocked-tasks"); } catch (e) {
+    if (e.unauthorized) { A.session = null; renderLogin(e.message); return; }
+    renderShell("blocked", `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Ошибка</div><div class="a-empty__sub">${esc(e.message)}</div></div></div>`);
+    return;
+  }
+  const tasks = data.tasks || [];
+  if (!tasks.length) {
+    renderShell("blocked", `<div class="a-card"><div class="a-empty"><div class="a-empty__icon">${aicon("check")}</div><div class="a-empty__title">Заблокированных задач нет</div><div class="a-empty__sub">Все задачи имеют полный комплект данных для решения</div></div></div>`);
+    return;
+  }
+  const rows = tasks.map((t) => `
+    <div class="a-card" style="margin-bottom:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="a-pill">${esc(t.num)} · ${esc(t.id)}</span>
+        <span class="a-pill a-pill--muted">${esc(t.skill)} · ${esc(t.skillName)}</span>
+        <span class="a-pill a-pill--warn">${esc(t.reason || "требуется рисунок")}</span>
+      </div>
+      <div style="margin:8px 0;font-size:13px;color:var(--text-2)">${esc(t.sub)} — ${esc(t.topic)}</div>
+      <div style="font-size:12px;color:var(--muted)">Источник: ${esc(t.source)} · ${esc(t.sourceId)} ${t.missions && t.missions.length ? `· миссии: ${esc(t.missions.join(", "))}` : ""}</div>
+      <div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
+        <span>Условие: ${t.hasText ? "✓" : "✗"}</span>
+        <span>Ответ: ${t.hasAnswer ? "✓ " + esc(t.answer) : "✗"}</span>
+        <span>Решение: ${t.hasSolution ? "✓" : "✗"}</span>
+        <span>Рисунок: ${t.hasVisual ? "✓" : "✗ требуется"}</span>
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--muted)">Отсутствует: ${esc((t.fieldsMissing||[]).join(", "))} · ${esc(t.restorable||"")}</div>
+      <div style="margin-top:6px;font-size:12px;background:var(--bg-soft);padding:6px 8px;border-radius:6px">${esc(t.templateHint||"")}</div>
+      <div style="margin-top:6px;font-size:12px"><b>Восстановимость:</b> ${t.canRestore ? "можно восстановить" : "нельзя без внешних данных"}${t.needsManual ? " · нужна ручная проверка" : ""}</div>
+    </div>`).join("");
+  renderShell("blocked", `
+    <div class="a-card" style="margin-bottom:12px"><b>Заблокировано: ${tasks.length}</b> — задачи с обязательным отсутствующим рисунком, не выдаются обычным пользователям, видны только здесь.</div>
+    ${rows}`);
+}
+
 async function render() {
   if (!A.session) { renderLogin(); return; }
   const route = parseHash();
@@ -947,6 +985,8 @@ async function render() {
     else await screenUsers();
   } else if (route.name === "audit") {
     await screenAudit();
+  } else if (route.name === "blocked") {
+    await screenBlocked();
   } else {
     await screenDashboard();
   }

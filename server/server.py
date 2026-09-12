@@ -740,6 +740,14 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def task_has_missing_visual(item: dict) -> bool:
+    """Задание требует обязательный официальный рисунок, которого нет в сборке.
+    Такое задание физически нерешаемо — оно остаётся в каталоге для аудита,
+    но никогда не выдаётся обычному пользователю (зеркало DataAPI.taskHasMissingVisual)."""
+    vis = item.get("visual")
+    return bool(vis and vis.get("required") and not vis.get("assetId"))
+
+
 def catalog_payload(conn: sqlite3.Connection) -> dict:
     categories = [dict(r) for r in conn.execute("SELECT id, name, short FROM topics ORDER BY rowid")]
     skills = [{"id": r["id"], "name": r["name"], "cat": r["topic_id"], "order": r["display_order"], "ege": r["ege"]}
@@ -749,11 +757,33 @@ def catalog_payload(conn: sqlite3.Connection) -> dict:
         item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"], "diff": r["difficulty"],
                 "text": r["statement"], "answer": r["answer"], "hint": r["hint"], "solution": r["explanation"]}
         item.update(json.loads(r["metadata_json"] or "{}"))
+        # Нерешаемые задачи (обязательный рисунок отсутствует) не отдаются
+        # обычному пользователю вообще — ни в каталоге, ни косвенно. Админ
+        # получает их отдельным /api/admin/blocked-tasks.
+        if task_has_missing_visual(item):
+            continue
         tasks.append(item)
     lessons = [json.loads(r["metadata_json"]) for r in conn.execute("SELECT metadata_json FROM lessons ORDER BY id")]
+    # Предварительно соберём множество blocked id, чтобы так же отфильтровать
+    # задачи внутри миссий (иначе миссия №9 стала бы пустой карточкой с
+    # несуществующими id). Клиент дополнительно фильтрует, но сервер не
+    # должен вообще отдавать нерешаемые id.
+    blocked_ids = set()
+    for r in conn.execute("SELECT id, metadata_json FROM tasks"):
+        item = json.loads(r["metadata_json"] or "{}")
+        item["visual"] = item.get("visual")
+        # fallback: если metadata не содержит visual, берём из основного поля? Но visual хранится только в metadata
+        if task_has_missing_visual(item):
+            blocked_ids.add(r["id"])
+        # Также проверяем statement-side visual через payload-совместимость:
+        # сверим через tasks.statement визуал? Нет, visual только в metadata.
+        # Поэтому дополнительно перебираем tasks как в payload выше (уже отфильтрованы).
+        # Упрощённо: blocked_ids уже определён через визуал-предикат выше, но
+        # для надёжности пересчитаем тем же путём, что и tasks выше.
     missions = []
     for r in conn.execute("SELECT * FROM missions ORDER BY id"):
-        tasks_for_mission = [x["task_id"] for x in conn.execute("SELECT task_id FROM mission_tasks WHERE mission_id=? ORDER BY display_order", (r["id"],))]
+        tasks_for_mission = [x["task_id"] for x in conn.execute("SELECT task_id FROM mission_tasks WHERE mission_id=? ORDER BY display_order", (r["id"],))
+                             if x["task_id"] not in blocked_ids]
         missions.append({"id": r["id"], "title": r["title"], "desc": r["description"], "skill": r["skill_id"], "tasks": tasks_for_mission, "xp": r["xp"], "diff": r["difficulty"]})
     bosses = [{"id": r["id"], "title": r["title"], "cat": r["topic_id"], "desc": r["description"], "size": r["task_count"], "xp": r["xp"], "unlockAt": r["unlock_at"]}
               for r in conn.execute("SELECT * FROM bosses ORDER BY id")]
@@ -903,6 +933,35 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         if item.get("taskId") in valid_task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
+# ---------------------------------------------------------------------------
+# Единая формула XP за практику (зеркало js/state.js attemptXp).
+# Попытка (посещение задания) платит минимум всегда, верный ответ — бонус.
+# ---------------------------------------------------------------------------
+XP_ATTEMPT_BASE = 6
+XP_ATTEMPT_PER_DIFF = 2
+XP_CORRECT_BASE = 10
+XP_CORRECT_PER_DIFF = 5
+XP_ERROR_RESOLVED = 15
+XP_LEVEL_MILESTONE = 50
+
+
+def attempt_xp(diff: int, correct: bool, hint_level: int, already_mastered: bool) -> int:
+    """XP за одну попытку по заданию. Всегда > 0: минимум платится за сам факт
+    попытки, чтобы завершённая практика никогда не давала +0 XP."""
+    diff = max(1, min(5, int(diff)))
+    total = XP_ATTEMPT_BASE + diff * XP_ATTEMPT_PER_DIFF
+    if not correct or hint_level >= 3:
+        return total
+    if already_mastered:
+        return total
+    bonus = XP_CORRECT_BASE + diff * XP_CORRECT_PER_DIFF
+    if hint_level == 1:
+        bonus = round(bonus * 0.6)
+    elif hint_level >= 2:
+        bonus = round(bonus * 0.3)
+    return total + bonus
+
+
 def level_from_xp(xp: int) -> dict:
     """Mirror of the client's xpForLevel formula (400 + 120·(n−1) per level)."""
     remaining = max(0, int(xp))
@@ -913,6 +972,58 @@ def level_from_xp(xp: int) -> dict:
         level += 1
         need = 400 + 120 * (level - 1)
     return {"level": level, "intoLevel": remaining, "need": need, "xp": max(0, int(xp))}
+
+
+def _levels_crossed(xp_from: int, xp_to: int) -> int:
+    """Сколько уровневых порогов пересечено при росте XP из xp_from в xp_to.
+    Нужно для milestone-бонусов в derive_stats."""
+    if xp_to <= xp_from:
+        return 0
+    return level_from_xp(xp_to)["level"] - level_from_xp(xp_from)["level"]
+
+
+def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
+    """Полный аудит физически нерешаемых задач: визуал required без assetId.
+    Возвращает только admin-эндпоинт; обычный /api/bootstrap их скрывает."""
+    # Собираем сырые записи из каталога (SQLite-catalog уже установлен)
+    tasks = []
+    for r in conn.execute("SELECT * FROM tasks ORDER BY id"):
+        item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"],
+                "diff": r["difficulty"], "text": r["statement"], "answer": r["answer"],
+                "hint": r["hint"], "solution": r["explanation"]}
+        item.update(json.loads(r["metadata_json"] or "{}"))
+        if not task_has_missing_visual(item):
+            continue
+        skill = conn.execute("SELECT name, topic_id FROM skills WHERE id=?", (item["skill"],)).fetchone()
+        topic = conn.execute("SELECT name FROM topics WHERE id=?", (skill["topic_id"],)).fetchone() if skill else None
+        # где встречается эта задача
+        missions_for_task = [mr["mission_id"] for mr in conn.execute(
+            "SELECT mission_id FROM mission_tasks WHERE task_id=?", (item["id"],))]
+        # схема/шаблон восстановления
+        is_lesson = bool(conn.execute("SELECT 1 FROM lessons WHERE metadata_json LIKE ?", (f"%{item['id']}%",)).fetchone())
+        # есть ли визуал/рисунок
+        has_text = bool((item.get("text") or "").strip())
+        has_answer = bool((item.get("answer") or "").strip())
+        has_solution = bool((item.get("solution") or "").strip())
+        visual = item.get("visual") or {}
+        reason = visual.get("note") or "Официальный рисунок обязателен, но отсутствует в сборке."
+        # восстановимость: без официального рисунка — нельзя
+        restorable = "нельзя восстановить без официальных данных"  # визуал required без asset — всегда так
+        tasks.append({
+            "id": item["id"], "num": item["num"], "diff": item["diff"],
+            "skill": item["skill"], "skillName": skill["name"] if skill else item["skill"],
+            "topic": topic["name"] if topic else "", "sub": item["sub"],
+            "text": item["text"][:500], "answer": item["answer"], "hasText": has_text,
+            "hasAnswer": has_answer, "hasSolution": has_solution, "hasVisual": False,
+            "visualNote": visual.get("note", ""), "requiredVisual": True,
+            "missions": missions_for_task, "inLesson": is_lesson,
+            "source": item.get("source", ""), "sourceId": item.get("sourceId", ""),
+            "reason": reason, "fieldsMissing": ["официальный рисунок"],
+            "restorable": restorable,
+            "templateHint": "Обязательные поля: text, answer, solution, sub, num, diff, skill, source/sourceId. Для восстановления нужен официальный рисунок с координатами/формой кривой.",
+            "canRestore": False, "needsManual": True,
+        })
+    return tasks
 
 
 def admin_overview(conn: sqlite3.Connection) -> dict:
@@ -1322,7 +1433,7 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     hints_used = 0
     correct_series = 0
     best_series = 0
-    solved_once = set()  # первая верная попытка по задаче приносит XP, повторные — нет
+    solved_once = set()  # полный бонус за верное решение — один раз; повтор даёт только минимум попытки
 
     for a in attempts:
         total_solved += 1
@@ -1330,15 +1441,15 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
         if hint_level > 0:
             hints_used += 1
         is_correct = bool(a.get("correct")) and hint_level < 3
+        task_id = a.get("taskId")
+        already_mastered = task_id in solved_once
+        # Попытка платит минимум всегда — практика никогда не даёт +0 XP.
+        xp += attempt_xp(tasks.get(task_id, 1), is_correct, hint_level, already_mastered)
         if is_correct:
             total_correct += 1
             correct_series += 1
             best_series = max(best_series, correct_series)
-            task_id = a.get("taskId")
-            if task_id not in solved_once:
-                diff = tasks.get(task_id, 0)
-                xp += (5 + diff * 2) if hint_level >= 2 else (8 if hint_level == 1 else 12) + diff * 6
-                solved_once.add(task_id)
+            solved_once.add(task_id)
         else:
             correct_series = 0
 
@@ -1346,7 +1457,7 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     for e in state.get("errors") or []:
         if e.get("resolved") and e.get("taskId") in tasks:
             errors_resolved += 1
-            xp += 15
+            xp += XP_ERROR_RESOLVED
 
     dates_done = {
         entry.get("date")
@@ -1355,12 +1466,25 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     }
     xp += daily_xp * len(dates_done)
 
-    lessons_counted = set()
+    # Анти-фарм по урокам считаем по completedLessons (PK user_id+lesson_id,
+    # физически не может содержать дубль), а не по флагу firstCompletion в
+    # lessonAttempts — его можно подделать повторной отправкой payload.
+    completed_lessons = set((state.get("completedLessons") or {}).keys())
+    for lesson_id in completed_lessons:
+        if lesson_id in lessons_xp:
+            xp += lessons_xp[lesson_id]
+    # XP за шаги уроков: берём из первой попытки с firstCompletion, но только
+    # если урок реально завершён по completedLessons. Повторные попытки шагов
+    # не платят (они дают xp=0 на клиенте, и здесь мы тоже не добавляем).
+    steps_counted = set()
     for item in state.get("lessonAttempts") or []:
         lesson_id = item.get("lessonId")
-        if item.get("firstCompletion") and lesson_id in lessons_xp and lesson_id not in lessons_counted:
-            xp += lessons_xp[lesson_id]
-            lessons_counted.add(lesson_id)
+        if (item.get("firstCompletion") and lesson_id in completed_lessons
+                and lesson_id not in steps_counted):
+            steps_xp = int(item.get("xp", 0)) - int(lessons_xp.get(lesson_id, 0))
+            if steps_xp > 0:
+                xp += steps_xp
+            steps_counted.add(lesson_id)
 
     for mission_id in (state.get("missionsDone") or {}).keys():
         xp += missions_xp.get(mission_id, 0)
@@ -1374,6 +1498,19 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     if user_id is not None:
         for amount, reason, created_at in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,)):
             xp += int(amount)
+
+    # Milestone-бонус за каждый достигнутый уровень. Бонус входит в итоговый XP,
+    # поэтому после добавления уровень может подняться ещё на шаг — ищем
+    # неподвижную точку: xp = pure + (level(xp)-1)*50 (не более ~5 итераций).
+    pure = xp
+    xp_with_bonus = pure
+    for _ in range(10):
+        lv = level_from_xp(xp_with_bonus)["level"]
+        cand = pure + (lv - 1) * XP_LEVEL_MILESTONE
+        if cand == xp_with_bonus:
+            break
+        xp_with_bonus = cand
+    xp = xp_with_bonus
 
     return {
         "xp": xp, "totalSolved": total_solved, "totalCorrect": total_correct,
@@ -1618,6 +1755,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"users": admin_users_list(conn, query)}); return
                 if path == "/api/admin/audit":
                     self.send_json({"entries": admin_audit_list(conn)}); return
+                if path == "/api/admin/blocked-tasks":
+                    self.send_json({"tasks": admin_blocked_tasks(conn)}); return
                 parts = path.split("/")
                 if len(parts) == 5 and parts[3] == "users":
                     target_id = resolve_admin_target(conn, parts[4])

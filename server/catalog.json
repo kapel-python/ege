@@ -2411,7 +2411,7 @@
    "id": "lesson_n01_opisannye",
    "skill": "n01_planimetry",
    "title": "Описанные четырёхугольники",
-   "xp": 50,
+   "xp": 150,
    "steps": [
     {
      "id": "s1",
@@ -2519,7 +2519,7 @@
    "id": "lesson_n02_vectors",
    "skill": "n02_vectors",
    "title": "Операции с векторами",
-   "xp": 50,
+   "xp": 150,
    "steps": [
     {
      "id": "s1",
@@ -2619,7 +2619,7 @@
    "id": "lesson_n04_probability",
    "skill": "n04_probability",
    "title": "Классическая вероятность",
-   "xp": 50,
+   "xp": 130,
    "steps": [
     {
      "id": "s1",
@@ -2693,7 +2693,7 @@
    "id": "lesson_n07_exponential",
    "skill": "n07_equations",
    "title": "Показательные уравнения",
-   "xp": 50,
+   "xp": 150,
    "steps": [
     {
      "id": "s1",
@@ -2778,7 +2778,7 @@
    "id": "lesson_n03_stereometry",
    "skill": "n03_stereometry",
    "title": "Объёмы и площади в стереометрии",
-   "xp": 50,
+   "xp": 140,
    "steps": [
     {
      "id": "s1",
@@ -2857,7 +2857,7 @@
    "id": "lesson_n05_prob_theorems",
    "skill": "n05_prob_theorems",
    "title": "Независимые события",
-   "xp": 50,
+   "xp": 140,
    "steps": [
     {
      "id": "s1",
@@ -2937,7 +2937,7 @@
    "id": "lesson_n06_expected_value",
    "skill": "n06_random_var",
    "title": "Математическое ожидание",
-   "xp": 50,
+   "xp": 120,
    "steps": [
     {
      "id": "s1",
@@ -3010,7 +3010,7 @@
    "id": "lesson_n08_logarithms",
    "skill": "n08_expressions",
    "title": "Свойства логарифмов",
-   "xp": 50,
+   "xp": 140,
    "steps": [
     {
      "id": "s1",
@@ -3090,7 +3090,7 @@
    "id": "lesson_n09_derivative",
    "skill": "n09_derivative",
    "title": "Производная функции",
-   "xp": 50,
+   "xp": 150,
    "steps": [
     {
      "id": "s1",
@@ -3175,7 +3175,7 @@
    "id": "lesson_n10_applied",
    "skill": "n10_applied",
    "title": "Прикладные задачи с формулами",
-   "xp": 50,
+   "xp": 110,
    "steps": [
     {
      "id": "s1",
@@ -3220,7 +3220,7 @@
    "id": "lesson_n11_word_problems",
    "skill": "n11_word_problems",
    "title": "Задачи на движение",
-   "xp": 50,
+   "xp": 130,
    "steps": [
     {
      "id": "s1",
@@ -3299,7 +3299,7 @@
    "id": "lesson_n12_functions",
    "skill": "n12_functions",
    "title": "Чтение графиков функций",
-   "xp": 50,
+   "xp": 120,
    "steps": [
     {
      "id": "s1",

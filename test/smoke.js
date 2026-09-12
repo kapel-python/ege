@@ -190,7 +190,10 @@ const testBody = async () => {
     const beforeXp = Store.state.xp;
     for (const id of mission.tasks) recordAnswer(DataAPI.task(id), false, 0, 5);
     t("миссия не отмечена завершённой без верных ответов", !Store.state.missionsDone[mission.id]);
-    t("XP миссии не начислен без верных ответов", Store.state.xp === beforeXp);
+    // Практика теперь всегда даёт минимум за попытку, даже при неверном ответе
+    // — проверяем, что бонус миссии не начислен, а XP вырос ровно на попытку.
+    const attemptSum = mission.tasks.reduce((s, id) => s + (6 + (DataAPI.task(id).diff || 1) * 2), 0);
+    t("XP миссии не начислен без верных ответов (только минимум за попытки)", Store.state.xp === beforeXp + attemptSum && !Store.state.missionsDone[mission.id]);
   }
 
   // weakestSkill({avoidRecentMs}) не должен зацикливаться на теме, которую

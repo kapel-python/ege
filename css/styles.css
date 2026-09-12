@@ -894,6 +894,22 @@ body {
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 30px var(--accent-glow);
 }
+.result-breakdown {
+  margin: 10px auto 4px;
+  max-width: 380px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.result-breakdown__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.result-breakdown__row:last-child { border-bottom: none; }
+.result-breakdown__row b { color: var(--accent); }
 .result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 26px 0; }
 
 /* ---------- missions ---------- */

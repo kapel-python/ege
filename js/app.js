@@ -1098,7 +1098,7 @@ function renderTask(root) {
         <div class="session-tools">
           <span id="hintControl"></span>
           <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
-          <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">правильный ответ: +${12 + t.diff * 6} XP</span>
+          <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
         </div>`}
         <div id="feedbackSlot"></div>
       </div>
@@ -1179,6 +1179,9 @@ function sessionSelfResult(correct) {
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
   const xp = recordAnswer(t, correct, hintLevel, seconds, closesTaskId);
   S.gainedXp += xp;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
+  S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
+  S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
   S.results.push({ taskId: t.id, correct, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
   Session.stopTimer();
@@ -1241,7 +1244,9 @@ function sessionShowAnswer() {
   S.hintLevel = 3;
   S.hintsUsed++;
   const seconds = (Date.now() - S.taskStartTs) / 1000;
-  recordAnswer(t, false, 3, seconds);
+  const xpShown = recordAnswer(t, false, 3, seconds);
+  S.gainedXp += xpShown;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
   S.answered = true;
   Session.stopTimer();
@@ -1271,8 +1276,11 @@ function sessionShowAnswer() {
 function renderHintXpNote(t, hintLevel) {
   const el = document.getElementById("xpNote");
   if (!el) return;
-  const xp = hintLevel >= 2 ? 5 + t.diff * 2 : (hintLevel === 1 ? 8 : 12) + t.diff * 6;
-  el.textContent = hintLevel === 0 ? `правильный ответ: +${xp} XP` : `сейчас за верный ответ: +${xp} XP`;
+  const full = attemptXp(t, true, hintLevel, false);
+  const attempt = attemptXp(t, false, hintLevel, false);
+  el.textContent = hintLevel === 0
+    ? `верный ответ: +${full.total} XP · попытка: +${attempt.total} XP`
+    : `сейчас за верный: +${full.total} XP · попытка: +${attempt.total} XP`;
 }
 
 function sessionSubmit() {
@@ -1304,6 +1312,9 @@ function sessionSubmit() {
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
   const xp = recordAnswer(t, true, hintLevel, seconds, closesTaskId);
   S.gainedXp += xp;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
+  S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
+  S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
   S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
   Session.stopTimer();
@@ -1331,7 +1342,9 @@ function sessionSkip() {
   if (S.answered) return;
   const t = Session.task();
   const seconds = (Date.now() - S.taskStartTs) / 1000;
-  recordAnswer(t, false, S.hintLevel || 0, seconds);
+  const xpSkip = recordAnswer(t, false, S.hintLevel || 0, seconds);
+  S.gainedXp += xpSkip;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: true, seconds, hint: S.hintLevel || 0 });
   sessionNext();
 }
@@ -1395,12 +1408,26 @@ function sessionFinish(early = false) {
 
   Session.cur = null;
 
+  const attemptSum = S.attemptXpSum || 0;
+  const bonusSum = S.correctBonusSum || 0;
+  const errSum = S.errorResolvedSum || 0;
+  const missionXp = missionDone && mission ? mission.xp : 0;
+  const repeatNote = S.results.length && bonusSum === 0 && correct > 0
+    ? `<div style="color:var(--muted);font-size:13px;margin-top:4px">Все задания уже были решены раньше — начислен только минимум за попытки.</div>` : "";
+
   document.getElementById("screen").innerHTML = `
     <div class="result-wrap">
       <div class="result-title ${boss && !isBossWin ? "result-title--danger" : ""}">${title}</div>
       <div class="result-sub">${early ? "Сессия завершена досрочно — прогресс учтён." : esc(S.title)}</div>
-      <div class="result-xp mono">+${S.gainedXp} XP</div>
+      <div class="result-xp mono">+${S.gainedXp + missionXp} XP</div>
+      <div class="result-breakdown">
+        <div class="result-breakdown__row"><span>За выполнение заданий</span><b class="mono">+${attemptSum} XP</b></div>
+        ${bonusSum ? `<div class="result-breakdown__row"><span>За правильные ответы</span><b class="mono">+${bonusSum} XP</b></div>` : ""}
+        ${errSum ? `<div class="result-breakdown__row"><span>За закрытие ошибок</span><b class="mono">+${errSum} XP</b></div>` : ""}
+        ${missionXp ? `<div class="result-breakdown__row"><span>Бонус миссии</span><b class="mono">+${missionXp} XP</b></div>` : ""}
+      </div>
       ${missionDone && mission ? `<div style="color:var(--text-2)">Навык «${DataAPI.skill(mission.skill).name}» усилен · награда миссии +${mission.xp} XP</div>` : ""}
+      ${repeatNote}
       ${boss && isBossWin ? `<div style="color:var(--success)">Навыки ветки «${DataAPI.category(boss.cat).name}» повышены на +6%</div>` : ""}
       <div class="result-stats">
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${correct}/${solved}</div><div class="stat-label">правильно</div></div>
@@ -1724,7 +1751,7 @@ function lessonFinish() {
   const independentStep = lesson.steps.find((step) => lessonStepType(step) === "INDEPENDENT_TASK");
   const independent = independentStep ? (L.stepState[independentStep.id] || {}) : null;
   Lesson.clearPersist(lesson.id);
-  const { firstCompletion, totalXp } = completeLesson(lesson, L.xp, {
+  const { firstCompletion, totalXp, baseXp, stepsXp } = completeLesson(lesson, L.xp, {
     wrongAttempts: L.wrongAttempts,
     durationSec: (Date.now() - L.startTs) / 1000,
   });
@@ -1735,6 +1762,10 @@ function lessonFinish() {
       <div class="result-title">${firstCompletion ? "УРОК ПРОЙДЕН" : "УРОК ПОВТОРЁН"}</div>
       <div class="result-sub">${esc(lesson.title)}</div>
       <div class="result-xp mono">+${totalXp} XP</div>
+      ${firstCompletion ? `<div class="result-breakdown">
+        <div class="result-breakdown__row"><span>За завершение урока</span><b class="mono">+${baseXp} XP</b></div>
+        ${stepsXp ? `<div class="result-breakdown__row"><span>За шаги и ответы</span><b class="mono">+${stepsXp} XP</b></div>` : ""}
+      </div>` : `<div style="color:var(--text-2)">Урок уже был пройден ранее — повтор не даёт базовой награды ещё раз.</div>`}
       ${firstCompletion ? (() => { const b = skillProgressBreakdown(lesson.skill); return `<div style="color:var(--text-2)">Урок «${esc(lesson.title)}» завершён. Навык «${DataAPI.skill(lesson.skill).name}»: ${b.total}% освоено (теория ${b.theory}%, практика ${b.practice}%). До полного освоения осталось ${Math.max(0, 100 - b.total)}%.</div>`; })() : `<div style="color:var(--text-2)">Урок повторён. Прогресс навыка не изменился: он растёт только за первое прохождение и реальные ответы в практике.</div>`}
       <div class="result-stats">
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${lesson.steps.length}</div><div class="stat-label">шагов</div></div>
