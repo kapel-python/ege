@@ -280,6 +280,26 @@
     return el;
   }
 
+  function buildEllipse(board, registry, obj, t, i) {
+    // Цилиндры и другие тела вращения в боковой проекции: контур эллипса
+    // параметрической кривой (JSXGraph `curve`), без свободных точек.
+    if (!Array.isArray(obj.center) || obj.center.length !== 2 || !obj.center.every(isFiniteNum)) {
+      throw new VisualError("ellipse требует числовой центр");
+    }
+    if (!isFiniteNum(obj.rx) || obj.rx <= 0 || !isFiniteNum(obj.ry) || obj.ry <= 0) {
+      throw new VisualError("ellipse требует положительные rx и ry");
+    }
+    const [cx, cy] = obj.center;
+    const style = styleFor(t, obj, i, { strokeWidth: 2.2, fillOpacity: 0, fillColor: "none", dash: obj.dashed ? 2 : 0, fixed: true, highlight: false });
+    const el = board.create("curve", [
+      (tt) => cx + obj.rx * Math.cos(tt),
+      (tt) => cy + obj.ry * Math.sin(tt),
+      0, Math.PI * 2,
+    ], style);
+    if (obj.id) registry[obj.id] = el;
+    return el;
+  }
+
   function buildPolygon(board, registry, obj, t, i) {
     const vertices = (obj.vertices || []).map((r) => resolvePoint(r, registry, board));
     if (vertices.length < 3) throw new VisualError("polygon требует минимум 3 вершины");
@@ -411,6 +431,7 @@
       case "line": return buildSegmentLike(board, registry, obj, t, i, "line");
       case "vector": return buildSegmentLike(board, registry, obj, t, i, "vector");
       case "circle": return buildCircle(board, registry, obj, t, i);
+      case "ellipse": return buildEllipse(board, registry, obj, t, i);
       case "polygon": return buildPolygon(board, registry, obj, t, i);
       case "angle_mark": return buildAngleMark(board, registry, obj, t);
       case "right_angle_mark": return buildRightAngleMark(board, registry, obj, t);

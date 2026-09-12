@@ -102,19 +102,6 @@
    "description": "Локальная SVG-реконструкция для задания n03_p2 на основе данных, явно указанных в условии."
   },
   {
-   "id": "n03-p3-cylinder-ball",
-   "src": "assets/tasks/n03/n03-p3-cylinder-ball.svg",
-   "type": "geometry",
-   "alt": "Цилиндр, описанный около шара",
-   "width": 640,
-   "ratio": 1.5238,
-   "source": "reconstructed: exact tangency relation (cylinder height = sphere diameter)",
-   "sourceId": "ege_complete.txt:n03_p3",
-   "sourceUrl": null,
-   "taskId": "n03_p3",
-   "description": "Локальная SVG-реконструкция для задания n03_p3 на основе данных, явно указанных в условии."
-  },
-  {
    "id": "n12-p1-hyperbola",
    "src": "assets/tasks/n12/n12-p1-hyperbola.svg",
    "type": "graph",
@@ -1033,11 +1020,20 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Демоверсия ЕГЭ-2027 проф., задание 3, пример 3; ключ с. 17/36.",
-   "visual": {
-    "assetId": "n03-p3-cylinder-ball",
-    "type": "geometry",
-    "alt": "Цилиндр, описанный около шара",
-    "caption": "Шар касается обоих оснований и боковой поверхности цилиндра."
+   "mathVisual": {
+    "type": "circle_geometry",
+    "objects": [
+     {"type": "ellipse", "center": [0, 1.5], "rx": 1.5, "ry": 0.35, "color": "accent"},
+     {"type": "ellipse", "center": [0, -1.5], "rx": 1.5, "ry": 0.35, "color": "accent"},
+     {"type": "segment", "from": [-1.5, -1.5], "to": [-1.5, 1.5], "color": "accent"},
+     {"type": "segment", "from": [1.5, 1.5], "to": [1.5, -1.5], "color": "accent"},
+     {"type": "point", "id": "O", "x": 0, "y": 0, "label": "O"},
+     {"type": "circle", "center": "O", "radius": 1.5, "color": "warn"},
+     {"type": "label", "x": 1.65, "y": 0.25, "text": "R"},
+     {"type": "label", "x": -2.55, "y": -2.35, "text": "шар касается оснований и боковой поверхности"}
+    ],
+    "boundingBox": [-2.9, 2.7, 2.9, -2.7],
+    "ratio": 1.074
    }
   },
   {
@@ -3131,7 +3127,7 @@
      "fields": [
       {
        "id": "ans",
-       "label": "f'(x) (например: 6x-2)",
+       "label": "f'(x)",
        "answer": "6x-2"
       }
      ],

@@ -605,17 +605,35 @@ const NAV = [
   { route: "profile",   label: "Профиль",   ic: "profile" },
 ];
 
-function go(route) { location.hash = `#/${route}`; }
+function go(route, param) {
+  const h = "#/" + route + (param ? "/" + encodeURIComponent(param) : "");
+  // Тот же адрес повторно — просто перерисовать (возврат в уже открытый урок/сессию).
+  if (location.hash === h) render();
+  else location.hash = h;
+}
 
 function currentRoute() {
   const h = location.hash.replace(/^#\//, "");
   return h.split("/")[0] || "dashboard";
 }
 
+/* Параметр глубокого маршрута: #/lesson/<id>, #/practice/<missionId>,
+   #/boss/<bossId>, #/skill/<skillId>. После перезагрузки страницы
+   пользователь возвращается ровно туда, где был. */
+function routeParam() {
+  const h = location.hash.replace(/^#\//, "");
+  const i = h.indexOf("/");
+  return i < 0 ? "" : decodeURIComponent(h.slice(i + 1));
+}
+
 /* Ленивая загрузка тяжёлой математики: katex (269 КБ) + jsxgraph (947 КБ) +
    mathvisual нужны только экранам с заданиями/уроками, а не первому экрану.
    Грузятся один раз по требованию, дальше — мгновенно из кэша. */
-const NEEDS_DETAILS = new Set(["session", "lesson", "errors", "trials"]);
+const NEEDS_DETAILS = new Set(["session", "practice", "boss", "daily", "review", "lesson", "errors", "trials"]);
+
+/* Маршруты с живой сессией: перезагрузка восстанавливает место, а не
+   сбрасывает на список. */
+const SESSION_ROUTES = new Set(["session", "practice", "boss", "daily", "review"]);
 
 const Vendor = {
   _mathPromise: null,
@@ -660,7 +678,7 @@ const Vendor = {
       ]);
       this.ensureCss("vendor/katex/katex.min.css");
       this.ensureCss("vendor/jsxgraph/jsxgraph.css");
-      if (!window.MathVisual) await this.loadScript("js/mathvisual.js");
+      if (!window.MathVisual) await this.loadScript("js/mathvisual.js?v=2");
       // Экрану, который ждал библиотеку, уже есть DOM с плейсхолдерами —
       // монтируем их сразу, наблюдатель MutationObserver подхватит будущие.
       try { MathVisualMount.mountWithin(document.body); } catch (_) {}
@@ -670,14 +688,26 @@ const Vendor = {
 };
 
 let renderSeq = 0;
+let lastHash = "";
 
 async function render() {
   if (!Store.ready || !Store.state) return;
   if (!Store.state.onboarded) { Onboarding.show(); return; }
   Onboarding.hide();
+  // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
+  // меняет и потому не страдает; окно навыка для #/skill открывает конец render).
+  if (location.hash !== lastHash) {
+    lastHash = location.hash;
+    try { closeModal(); } catch (_) {}
+  }
   const route = currentRoute();
-  renderSidebar(route);
-  renderBottomNav(route);
+  const param = routeParam();
+  // Подсветка в меню: глубокий маршрут относится к своему разделу.
+  const navRoute = route === "practice" ? "training"
+    : route === "boss" || route === "daily" || route === "review" ? "trials"
+    : route === "skill" || route === "lesson" ? "path" : route;
+  renderSidebar(navRoute);
+  renderBottomNav(navRoute);
   renderTopbar();
   const screen = document.getElementById("screen");
   const my = ++renderSeq;
@@ -701,11 +731,33 @@ async function render() {
     }
     if (my !== renderSeq || currentRoute() !== route) return;
   }
+  // Глубокие маршруты: восстановить место вместо сброса на список.
+  if (route === "lesson") {
+    if (!(await ensureLessonForRoute(param))) {
+      if (my !== renderSeq) return;
+      go("path"); return;
+    }
+    if (my !== renderSeq || currentRoute() !== route) return;
+  }
+  if (SESSION_ROUTES.has(route)) {
+    if (!Session.cur || !sessionMatchesRoute(Session.cur, route, param)) {
+      if (!restoreSessionFromStorage(route, param) && !freshSessionForRoute(route, param)) {
+        if (my !== renderSeq) return;
+        go("training"); return;
+      }
+    }
+    if (my !== renderSeq || currentRoute() !== route) return;
+  }
   const fn = {
     dashboard: screenDashboard,
     path: screenPath,
+    skill: screenPath,
     training: screenTraining,
     session: screenSession,
+    practice: screenSession,
+    boss: screenSession,
+    daily: screenSession,
+    review: screenSession,
     lesson: screenLesson,
     errors: screenErrors,
     trials: screenTrials,
@@ -717,6 +769,10 @@ async function render() {
   void screen.offsetWidth;
   screen.style.animation = "";
   fn(screen);
+  // Глубокая ссылка на навык: карта + открытое окно темы.
+  if (route === "skill" && param && DataAPI.skill(param)) {
+    try { openSkillModal(param); } catch (_) {}
+  }
   window.scrollTo(0, 0);
 }
 
@@ -753,7 +809,7 @@ function renderTopbar() {
   const dark = Theme.current() === "dark";
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
-      <span class="level-chip__badge">УР. ${li.level}</span>
+      <span class="level-chip__badge">Уровень ${li.level}</span>
       <div>
         <div class="level-chip__bar">${progressBar(li.pct, "progress--thin")}</div>
         <div class="level-chip__xp">${li.current} / ${li.need} XP</div>
@@ -832,7 +888,7 @@ function screenDashboard(root) {
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
         <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
-        <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный и не ML-прогноз.</div>
+        <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный прогноз, а просто ориентир.</div>
       </div>
     </div>
 
@@ -887,7 +943,7 @@ function screenDashboard(root) {
             const st = s.skillStats[sk.id];
             const acc = st.solved ? Math.round((st.correct / st.solved) * 100) : 0;
             return `
-            <div class="skill-row" onclick="openSkillModal('${sk.id}')">
+            <div class="skill-row" onclick="go('skill', '${sk.id}')">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(skillProgress(sk.id))}
               <div class="skill-row__pct">${skillProgress(sk.id)}%</div>
@@ -905,7 +961,7 @@ function screenDashboard(root) {
         <div class="section-title" style="margin-top:0">Требуют внимания</div>
         <div class="card">
           ${weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
-            <div class="skill-row" onclick="openSkillModal('${sk.id}')">
+            <div class="skill-row" onclick="go('skill', '${sk.id}')">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(prog)}
               <div class="skill-row__pct">${prog}%</div>
@@ -987,7 +1043,7 @@ function screenPath(root) {
             const status = skillStatus(sk);
             const locked = status === "locked";
             return `
-            <div class="tree-node tree-node--${status}" onclick="openSkillModal('${sk.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSkillModal('${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
+            <div class="tree-node tree-node--${status}" onclick="go('skill', '${sk.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="tree-node__dot"></div>
               <div class="tree-node__body">
                 <div class="tree-node__name">${sk.name}
@@ -1213,14 +1269,114 @@ const Session = {
       attempts: 0,
       gainedXp: 0,
     };
-    go("session");
-    if (currentRoute() === "session") render();
+    // Глубокий маршрут сессии: перезагрузка возвращает в ту же практику/босса.
+    const r = mode === "mission" ? ["practice", missionId]
+      : mode === "boss" ? ["boss", bossId]
+      : mode === "daily" ? ["daily"]
+      : mode === "errors" ? ["review"] : ["session"];
+    go(r[0], r[1]);
+    persistSession();
   },
 
   task() { return DataAPI.task(this.cur.taskIds[this.cur.idx]); },
 
   stopTimer() { if (this.timerInt) { clearInterval(this.timerInt); this.timerInt = null; } },
 };
+
+/* Глубокие маршруты сессий: место внутри практики/босса/повторения
+   переживает перезагрузку. Позиция дублируется в localStorage (мгновенно,
+   без сервера); миссия дополнительно опирается на missionProgress. */
+function persistSession() {
+  try {
+    const S = Session.cur;
+    if (!S) { localStorage.removeItem("ege_core_session"); return; }
+    localStorage.setItem("ege_core_session", JSON.stringify({
+      title: S.title, taskIds: S.taskIds, mode: S.mode,
+      missionId: S.missionId, bossId: S.bossId, xpReward: S.xpReward,
+      offset: S.offset, total: S.total, idx: S.idx, errorMap: S.errorMap,
+    }));
+  } catch (_) {}
+}
+
+function sessionMatchesRoute(S, route, param) {
+  if (!S) return false;
+  if (route === "practice") return S.mode === "mission" && S.missionId === param;
+  if (route === "boss") return S.mode === "boss" && S.bossId === param;
+  if (route === "daily") return S.mode === "daily";
+  if (route === "review") return S.mode === "errors";
+  if (route === "session") return true;
+  return false;
+}
+
+function restoreSessionFromStorage(route, param) {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem("ege_core_session") || "null"); } catch (_) { return false; }
+  if (!d || !Array.isArray(d.taskIds) || !d.taskIds.length) return false;
+  if (route !== "session" && !sessionMatchesRoute(d, route, param)) return false;
+  const ids = d.taskIds.filter((id) => DataAPI.task(id));
+  if (!ids.length) return false;
+  Session.cur = {
+    title: String(d.title || "Тренировка"), taskIds: ids, mode: d.mode,
+    missionId: d.missionId || null, bossId: d.bossId || null, xpReward: d.xpReward || 0,
+    offset: d.offset || 0, total: d.total || ids.length,
+    hideTopic: d.mode === "boss", errorMap: d.errorMap || null,
+    idx: Math.min(Math.max(d.idx || 0, 0), ids.length - 1),
+    results: [], hintsUsed: 0, startTs: Date.now(), taskStartTs: Date.now(),
+    answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+  };
+  return true;
+}
+
+/* Чистый старт сессии для глубокого маршрута, когда восстанавливать
+   нечего (первый заход или wiped storage). Зеркалит startMission/startBoss/
+   startDaily/startErrorsReview, но без навигации — вызывающий render()
+   уже находится на нужном адресе. */
+function freshSessionForRoute(route, param) {
+  if (route === "practice") {
+    const m = DataAPI.mission(param);
+    if (!m || !Array.isArray(m.tasks) || !m.tasks.length) return false;
+    const from = (Store.state.missionsDone[param] || missionProgress(m) >= m.tasks.length) ? 0 : missionProgress(m);
+    Session.cur = {
+      title: `Миссия: ${m.title}`, taskIds: m.tasks.slice(from), mode: "mission",
+      missionId: param, bossId: null, xpReward: m.xp, offset: from, total: m.tasks.length,
+      hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    };
+  } else if (route === "boss") {
+    const boss = DataAPI.bosses().find((b) => b.id === param);
+    if (!boss || !bossUnlocked(boss)) return false;
+    const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
+    Session.cur = {
+      title: boss.title, taskIds: mixedSampleTaskIds(pool, boss.size), mode: "boss",
+      missionId: null, bossId: boss.id, xpReward: 0, offset: 0, total: boss.size,
+      hideTopic: true, errorMap: null, idx: 0, results: [], hintsUsed: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    };
+    if (!Session.cur.taskIds.length) { Session.cur = null; return false; }
+  } else if (route === "daily") {
+    Session.cur = {
+      title: "Ежедневная задача", taskIds: dailyTaskIds(), mode: "daily",
+      missionId: null, bossId: null, xpReward: 0, offset: 0, total: null,
+      hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    };
+    Session.cur.total = Session.cur.taskIds.length;
+    if (!Session.cur.taskIds.length) { Session.cur = null; return false; }
+  } else if (route === "review") {
+    const q = buildErrorsReviewSession();
+    if (!q) return false;
+    Session.cur = {
+      title: q.title, taskIds: q.taskIds, mode: "errors",
+      missionId: null, bossId: null, xpReward: 0, offset: 0, total: q.taskIds.length,
+      hideTopic: false, errorMap: q.errorMap, idx: 0, results: [], hintsUsed: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    };
+  } else {
+    return false;
+  }
+  persistSession();
+  return true;
+}
 
 function screenSession(root) {
   const S = Session.cur;
@@ -1265,6 +1421,7 @@ function renderTask(root) {
           <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
           <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
         </div>
+        ${answerFormatCaption(t.answer, t.valueType)}
         <div class="session-tools">
           <span id="hintControl"></span>
           <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
@@ -1526,6 +1683,7 @@ function sessionNext() {
     Store.state.missionProgress[S.missionId] = (S.offset || 0) + S.idx;
     Store.save();
   }
+  persistSession();
   if (S.idx >= S.taskIds.length) return sessionFinish();
   S.answered = false;
   S.taskStartTs = Date.now();
@@ -1536,6 +1694,7 @@ function sessionQuit() {
   Session.stopTimer();
   if (Session.cur && Session.cur.results.length > 0) return sessionFinish(true);
   Session.cur = null;
+  persistSession();
   go("training");
 }
 
@@ -1577,6 +1736,10 @@ function sessionFinish(early = false) {
   const checkedSkills = boss ? [...new Set(S.results.map((r) => DataAPI.skill(DataAPI.task(r.taskId).skill).name))] : null;
 
   Session.cur = null;
+  persistSession();
+  // Экран результата — не сессия: подменяем адрес без перерисовки, чтобы
+  // перезагрузка вела в список, а не перезапускала тренировку.
+  try { history.replaceState(null, "", "#/" + (S.mode === "boss" ? "trials" : "training")); } catch (_) {}
 
   const attemptSum = S.attemptXpSum || 0;
   const bonusSum = S.correctBonusSum || 0;
@@ -1629,6 +1792,26 @@ function answerInputMode(answer) {
   return /[a-zA-Zа-яёА-ЯЁ]/.test(String(answer ?? "")) ? "text" : "decimal";
 }
 
+/* Подсказка ожидаемого формата ответа — чтобы ученик всегда понимал,
+   что вводить: целое, дробь или выражение. valueType из каталога
+   приоритетнее, иначе выводим формат по виду самого ответа. */
+function answerFormatHint(answer, valueType) {
+  const vt = String(valueType || "");
+  if (/целое/.test(vt)) return /градус/.test(vt) ? "целое число (в градусах)" : "целое число";
+  if (/дробь/.test(vt)) return "десятичная дробь (запятая или точка)";
+  if (/единиц/.test(vt)) return "число с единицей измерения";
+  const a = String(answer ?? "").trim().replace(/\s+/g, "");
+  if (/^[+-]?\d+$/.test(a)) return "целое число";
+  if (/^[+-]?[\d.,]+$/.test(a) || /^[+-]?[\d.,]+\/[+-]?[\d.,]+$/.test(a)) return "десятичная дробь (запятая или точка)";
+  if (/[a-zA-Zа-яёА-ЯЁπ√∞]/.test(a)) return "выражение";
+  return "";
+}
+
+function answerFormatCaption(answer, valueType) {
+  const hint = answerFormatHint(answer, valueType);
+  return hint ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hint)}</div>` : "";
+}
+
 /* ============================================================
    Interactive lesson engine — data-driven, persistent and reusable
    Supported semantic steps: EXPLANATION, FOCUS, ACTION, VALIDATION,
@@ -1641,6 +1824,19 @@ function lessonStepType(step) {
   // Compatibility with the first declarative lesson format.
   return ({ explain: "EXPLANATION", focus: "FOCUS", input: "ACTION", summary: "FEEDBACK" }[step.type] || step.type || "EXPLANATION").toUpperCase();
 }
+
+/* Подписи типов шагов — только по-русски. Внутренние коды (FOCUS, ACTION, …)
+   в интерфейсе не показываем. */
+const LESSON_STEP_LABELS = {
+  EXPLANATION: "Объяснение",
+  FOCUS: "Главное",
+  ACTION: "Задание",
+  VALIDATION: "Проверка",
+  FEEDBACK: "Итог шага",
+  HINT: "Подсказка",
+  TRANSITION: "Переход",
+  INDEPENDENT_TASK: "Самостоятельная работа",
+};
 
 function lessonFields(step) {
   if (Array.isArray(step.fields) && step.fields.length) return step.fields;
@@ -1664,7 +1860,7 @@ const Lesson = {
       ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now(), returnRoute: saved.returnRoute || sourceRoute }
       : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: sourceRoute };
     this.persist();
-    go("lesson");
+    go("lesson", lesson.id);
     if (currentRoute() === "lesson") render();
   },
 
@@ -1691,6 +1887,23 @@ const Lesson = {
     Store.save();
   },
 };
+
+/* Восстановление урока для глубокого маршрута #/lesson/<id>:
+   незаконченный шаг лежит в lessonSessions (уже на сервере), иначе старт
+   с начала. Используется и первым заходом, и перезагрузкой страницы. */
+async function ensureLessonForRoute(param) {
+  const id = param || (Lesson.cur && Lesson.cur.lesson.id) || "";
+  if (id && Lesson.cur && Lesson.cur.lesson.id === id) return true;
+  try { await Store.ensureDetails(); } catch (_) { return false; }
+  const lesson = DataAPI.lesson(id);
+  if (!lesson || !Array.isArray(lesson.steps)) return false;
+  const saved = Store.state.lessonSessions && Store.state.lessonSessions[id];
+  Lesson.cur = saved
+    ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now(), returnRoute: saved.returnRoute || "path" }
+    : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: "path" };
+  Lesson.persist();
+  return true;
+}
 
 function lessonBoardHtml(step, type) {
   if (!step.board) return "";
@@ -1748,6 +1961,7 @@ function lessonActionHtml(step, state) {
         </label>`).join("")}
       ${isDone ? "" : `<button class="btn btn--primary lesson-check-btn" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}
     </div>
+    ${isDone ? "" : (() => { const hints = [...new Set(fields.map((f) => answerFormatHint(f.answer)).filter(Boolean))]; return hints.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hints.join(" · "))}</div>` : ""; })()}
     ${isDone ? "" : `<div class="session-tools lesson-tools">
       ${help ? `<button class="btn btn--ghost btn--sm" id="lessonHintBtn" onclick="lessonHint()">${icon("bulb")} ${help.type === "solution" ? "Показать решение" : `Подсказка ${help.level}`}</button>` : ""}
       <span>${help ? "Подсказка останется на экране до конца задания" : "Следующая подсказка откроется после ошибки"}</span>
@@ -1778,7 +1992,7 @@ function screenLesson(root) {
       <div class="lesson-progress-meta"><span>${type === "INDEPENDENT_TASK" ? "самостоятельный шаг" : "пошаговое обучение"}</span><span>${Math.round((L.idx / total) * 100)}%</span></div>
       ${progressBar((L.idx / total) * 100)}
       <div class="card task-card lesson-card ${type === "FOCUS" ? "lesson-card--focus" : ""}">
-        <div class="lesson-step-label">${esc(type.replaceAll("_", " "))}</div>
+        <div class="lesson-step-label">${esc(LESSON_STEP_LABELS[type] || "Шаг")}</div>
         ${step.title ? `<div class="lesson-title">${esc(step.title)}</div>` : ""}
         <div class="lesson-body">
           <div class="task-card__text lesson-text">${mathText(step.text || "")}</div>
@@ -1928,6 +2142,9 @@ function lessonFinish() {
     durationSec: (Date.now() - L.startTs) / 1000,
   });
   Lesson.cur = null;
+  // Экран результата — не урок: подменяем адрес без перерисовки, чтобы
+  // перезагрузка вела в раздел, а не переоткрывала урок.
+  try { history.replaceState(null, "", "#/" + (L.returnRoute || "path")); } catch (_) {}
 
   document.getElementById("screen").innerHTML = `
     <div class="result-wrap">
@@ -2066,9 +2283,9 @@ function reviewQueueForErrors(errors) {
   return { taskIds, errorMap };
 }
 
-function startErrorsReview() {
+function buildErrorsReviewSession() {
   const open = Store.state.errors.filter((e) => !e.resolved);
-  if (!open.length) return toast("Открытых ошибок нет", "", "check");
+  if (!open.length) return null;
 
   /* Частые подтемы идут раньше. Внутри подтемы каждый вопрос уникален:
      это исключает дубли и даёт второе, похожее задание, когда оно есть. */
@@ -2076,14 +2293,22 @@ function startErrorsReview() {
   open.forEach((e) => { subFreq[e.sub] = (subFreq[e.sub] || 0) + 1; });
   const sorted = open.slice().sort((a, b) => subFreq[b.sub] - subFreq[a.sub]);
   const queue = reviewQueueForErrors(sorted);
-  if (!queue || !queue.taskIds.length) return toast("Не удалось собрать повторение", "", "x");
-
-  Session.start({
+  if (!queue || !queue.taskIds.length) return null;
+  return {
     title: "Повторение слабых мест",
     taskIds: queue.taskIds,
     mode: "errors",
     errorMap: queue.errorMap,
-  });
+  };
+}
+
+function startErrorsReview() {
+  const open = Store.state.errors.filter((e) => !e.resolved);
+  if (!open.length) return toast("Открытых ошибок нет", "", "check");
+  const q = buildErrorsReviewSession();
+  if (!q) return toast("Не удалось собрать повторение", "", "x");
+
+  Session.start(q);
 }
 
 /* ============================================================
@@ -2539,6 +2764,7 @@ const Onboarding = {
           <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
           <button class="btn btn--primary" onclick="Onboarding.answerDiag()">Ответить</button>
         </div>
+        ${answerFormatCaption(t.answer, t.valueType)}
         <div id="diagFeedback"></div>
       </div>`;
     const input = body.querySelector("#diagInput");
@@ -2664,7 +2890,7 @@ function showBootError(error) {
   document.getElementById("topbar").innerHTML = "";
   screen.innerHTML = `<div class="card" style="max-width:640px;margin:64px auto;text-align:center">
     <div class="page-title">Сервер недоступен</div>
-    <div style="margin-top:12px;color:var(--text-2);line-height:1.6">Данные аккаунта не загружены. Запусти backend и обнови страницу.</div>
+    <div style="margin-top:12px;color:var(--text-2);line-height:1.6">Данные аккаунта не загружены. Проверь соединение с сервером и обнови страницу.</div>
     <div class="mono" style="margin-top:12px;color:var(--muted);font-size:12px">${esc(error.message || error)}</div>
     <button class="btn btn--primary" style="margin-top:20px" onclick="location.reload()">Повторить</button>
   </div>`;
