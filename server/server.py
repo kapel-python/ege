@@ -1569,7 +1569,14 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
         if not isinstance(value, dict) or not 0 <= float(value.get("progress", 0)) <= 100: raise ValueError(f"invalid progress: {skill_id}")
     valid_tasks = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
     for item in state.get("taskAttempts") or []:
-        if not isinstance(item, dict) or item.get("taskId") not in valid_tasks or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
+        if not isinstance(item, dict) or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
+        # taskId может ссылаться на удалённую/заблокированную задачу из старой
+        # истории — не отклоняем весь PUT, просто игнорируем её при подсчёте XP
+        # и не пишем в БД (write_state фильтрует так же). Строгая проверка
+        # ломала сохранение уроков у пользователей с legacy-историей.
+        if item.get("taskId") not in valid_tasks:
+            continue
+        # skill уже проверен выше; taskId — lenient
     if not isinstance(state.get("errors", []), list): raise ValueError("errors must be an array")
     if not isinstance(state.get("xpAdjustments", []), list): raise ValueError("xpAdjustments must be an array")
     for adj in state.get("xpAdjustments") or []:
