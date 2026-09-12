@@ -1543,10 +1543,14 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     name = state.get("name")
     if name is not None and not isinstance(name, str): raise ValueError("invalid name")
     if isinstance(name, str) and len(name.strip()) > MAX_NAME_LENGTH: raise ValueError("name too long")
-    for key in ("xp", "streak", "totalSolved", "totalCorrect", "totalTimeSec", "hintsUsed", "correctSeries", "bestSeries", "errorsResolved"):
+    for key in ("xp", "streak", "totalSolved", "totalCorrect", "hintsUsed", "correctSeries", "bestSeries", "errorsResolved"):
         value = state.get(key, 0)
         if not isinstance(value, (int, float)) or not isinstance(value, int) and value != int(value): raise ValueError(f"invalid {key}")
         if not 0 <= value <= MAX_COUNTER_VALUE: raise ValueError(f"invalid {key}")
+    # totalTimeSec — единственное дробное поле (сумма секунд с долями), остальные — целые счётчики
+    tv = state.get("totalTimeSec", 0)
+    if not isinstance(tv, (int, float)): raise ValueError("invalid totalTimeSec")
+    if not 0 <= float(tv) <= MAX_COUNTER_VALUE: raise ValueError("invalid totalTimeSec")
     if state.get("totalCorrect", 0) > state.get("totalSolved", 0): raise ValueError("correct answers exceed attempts")
     # Unbounded client-controlled collections are a DB-bloat vector: a single
     # PUT can otherwise write millions of rows that then load on every
