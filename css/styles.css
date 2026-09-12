@@ -693,6 +693,10 @@ body {
 /* Every KaTeX fragment is emphasized consistently, including new lesson
    surfaces added later. The rule targets only KaTeX output, never prose. */
 .katex { font-size: 1.3em; font-weight: 700; }
+/* Специфичность выше вендорной (.katex{font:normal} из katex.min.css):
+   жирность цифр не зависит от порядка подключения стилей. */
+.task-card__text .katex, .lesson-text .katex, .feedback__solution .katex,
+.hint-box .katex, .lesson-token .katex { font-weight: 700; }
 .task-card__text .katex-display,
 .lesson-text .katex-display { margin: .65em 0; overflow-x: auto; overflow-y: hidden; padding: .15em 0; }
 .math-fallback { font-family: var(--mono); white-space: pre-wrap; font-size: 1.3em; font-weight: 700; }
