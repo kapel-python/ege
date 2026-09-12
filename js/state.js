@@ -134,6 +134,36 @@ const Store = {
 
 function xpForLevel(n) { return 400 + 120 * (n - 1); }
 
+/* ============================================================
+   ЕДИНАЯ формула XP за практику (зеркалится в server.py derive_stats).
+   Разделены сущности:
+   - попытка (посещение задания): минимум, не зависит от результата;
+   - верный ответ: бонус, зависит от сложности и уровня подсказки;
+   - закрытие ошибки: +15 за факт;
+   - milestone за уровень: разовый бонус при переходе.
+   Сложность задания — целое 1..5 из каталога.
+   ============================================================ */
+const XP_ATTEMPT_BASE = 6;         // минимум за любую попытку
+const XP_ATTEMPT_PER_DIFF = 2;     // +2 за каждую звезду сложности
+const XP_CORRECT_BASE = 10;        // базовый бонус за верный ответ
+const XP_CORRECT_PER_DIFF = 5;     // +5 за звезду
+const XP_ERROR_RESOLVED = 15;      // закрытие ранее допущенной ошибки
+const XP_LEVEL_MILESTONE = 50;     // разовый бонус за достижение нового уровня
+
+// Полный XP за попытку по заданию с учётом подсказки и повтора.
+// alreadyMastered: задание уже было решено верно раньше.
+// hintLevel: 0 — сам, 1 — подсказка, 2 — разбор, 3 — показан ответ (не верно).
+function attemptXp(task, correct, hintLevel, alreadyMastered) {
+  const diff = Math.max(1, Math.min(5, Number(task && task.diff) || 1));
+  const attempt = XP_ATTEMPT_BASE + diff * XP_ATTEMPT_PER_DIFF;
+  if (!correct || hintLevel >= 3) return { attempt, correctBonus: 0, total: attempt };
+  if (alreadyMastered) return { attempt, correctBonus: 0, total: attempt }; // повтор: только за посещение
+  let bonus = XP_CORRECT_BASE + diff * XP_CORRECT_PER_DIFF;
+  if (hintLevel === 1) bonus = Math.round(bonus * 0.6);      // подсказка снижает бонус
+  else if (hintLevel >= 2) bonus = Math.round(bonus * 0.3);  // разбор — сильнее
+  return { attempt, correctBonus: bonus, total: attempt + bonus };
+}
+
 function levelInfo() {
   let xp = Store.state.xp;
   let level = 1;
@@ -153,8 +183,15 @@ function addXp(amount, reason) {
   todayActivity().xp += amount;
   Store.save();
   if (after > before) {
-    addTimeline(`Новый уровень — Level ${after}`);
-    Store.emit("levelup", { from: before, to: after });
+    // Разовый бонус за каждый достигнутый уровень. Начисляем рекурсивно,
+    // чтобы несколько подряд повышений тоже дали бонус за каждый уровень.
+    for (let lv = before + 1; lv <= after; lv++) {
+      addTimeline(`Новый уровень — Level ${lv}`);
+      Store.state.xp += XP_LEVEL_MILESTONE;
+      todayActivity().xp += XP_LEVEL_MILESTONE;
+    }
+    Store.save();
+    Store.emit("levelup", { from: before, to: after, milestone: XP_LEVEL_MILESTONE * (after - before) });
   }
   Store.emit("xp", { amount, reason });
 }
@@ -552,13 +589,16 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
   act.solved++;
 
   let xp = 0;
+  let xpBreakdown = { attempt: 0, correctBonus: 0, errorResolved: 0 };
   if (correct) {
     s.totalCorrect++;
     st.correct++;
     act.correct++;
     s.correctSeries++;
     s.bestSeries = Math.max(s.bestSeries, s.correctSeries);
-    xp = alreadyMastered ? 0 : (hintLevel >= 2 ? 5 + task.diff * 2 : (hintLevel === 1 ? 8 : 12) + task.diff * 6);
+    const parts = attemptXp(task, true, hintLevel, alreadyMastered);
+    xp = parts.total;
+    xpBreakdown = { attempt: parts.attempt, correctBonus: parts.correctBonus, errorResolved: 0 };
     st.progress = Math.min(100, st.progress + (st.progress < 60 ? 5 : 3));
 
     /* закрытие ошибки: по этому заданию или по исходному заданию,
@@ -571,11 +611,15 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     if (err) {
       err.resolved = true;
       s.errorsResolved++;
-      xp += 15;
+      xp += XP_ERROR_RESOLVED;
+      xpBreakdown.errorResolved += XP_ERROR_RESOLVED;
       addTimeline(`Закрыта ошибка: ${task.sub}`);
     }
   } else {
     s.correctSeries = 0;
+    // За сам факт попытки платим минимум — практика никогда не даёт +0 XP.
+    xp = attemptXp(task, false, hintLevel, false).total;
+    xpBreakdown = { attempt: xp, correctBonus: 0, errorResolved: 0 };
     // Неверный ответ остаётся сигналом для повторения, но не отнимает уже
     // заработанный прогресс: ошибка — нормальная часть обучения.
     if (!s.errors.some((e) => e.taskId === task.id && !e.resolved)) {
@@ -612,7 +656,9 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
   recordForecastSnapshot();
   Store.save();
   checkAchievements();
-  Store.emit("answer", { task, correct, xp });
+  Store.emit("answer", { task, correct, xp, xpBreakdown });
+  // Разбивка доступна сессии синхронно, без подписки на событие.
+  Store._lastXpBreakdown = xpBreakdown;
   return xp;
 }
 
@@ -666,10 +712,16 @@ function completeLesson(lesson, inputXp, result = {}) {
     s.lessonAttempts = s.lessonAttempts.slice(0, 1000);
     addTimeline(`Урок повторён: «${lesson.title}»`);
     Store.save();
-    return { firstCompletion, totalXp: 0 };
+    return { firstCompletion, totalXp: 0, baseXp: 0, stepsXp: 0 };
   }
 
-  const totalXp = lesson.xp + inputXp;
+  // Награда за урок = базовая за тему (из каталога) + XP за шаги. Флаг
+  // firstCompletion в lessonAttempts больше не несёт нагрузки анти-фарма:
+  // сервер derive_stats считает по completedLessons, которое нельзя
+  // подделать повторной отправкой (PK user_id+lesson_id).
+  const baseXp = lesson.xp;
+  const stepsXp = inputXp;
+  const totalXp = baseXp + stepsXp;
   s.completedLessons[lesson.id] = { ts: Date.now() };
   s.lessonAttempts.unshift({
     lessonId: lesson.id,
@@ -688,7 +740,7 @@ function completeLesson(lesson, inputXp, result = {}) {
   addTimeline(`Урок пройден: «${lesson.title}»`);
   Store.save();
   checkAchievements();
-  return { firstCompletion, totalXp };
+  return { firstCompletion, totalXp, baseXp, stepsXp };
 }
 
 /* ============================================================
