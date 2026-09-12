@@ -227,7 +227,7 @@ function addXp(amount, reason) {
     // Разовый бонус за каждый достигнутый уровень. Начисляем рекурсивно,
     // чтобы несколько подряд повышений тоже дали бонус за каждый уровень.
     for (let lv = before + 1; lv <= after; lv++) {
-      addTimeline(`Новый уровень — Level ${lv}`);
+      addTimeline(`Новый уровень — уровень ${lv}`);
       Store.state.xp += XP_LEVEL_MILESTONE;
       todayActivity().xp += XP_LEVEL_MILESTONE;
     }
@@ -811,7 +811,7 @@ function bossDefeated(boss) {
 function defeatBoss(boss) {
   if (!bossDefeated(boss)) {
     Store.state.bossesDefeated.push(boss.id);
-    addTimeline(`Босс повержен: ${boss.title}`);
+    addTimeline(`Босс повержен: ${boss.title.replace("БОСС: ", "")}`);
     addXp(boss.xp, "boss");
     /* рывок навыков ветки */
     for (const s of DataAPI.skills().filter((x) => x.cat === boss.cat)) {
