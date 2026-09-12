@@ -159,17 +159,10 @@ function addXp(amount, reason) {
   Store.emit("xp", { amount, reason });
 }
 
-/* Ручное начисление опыта. Без этой записи сервер на синке пересчитал бы
-   XP из событий и отбросил голый addXp — корректировка попадает в
-   xpAdjustments, журнал которых сервер хранит отдельно и всегда добавляет
-   к выводному XP. Доступна из консоли: grantXp(500, "тест"). */
-function grantXp(amount, reason = "manual") {
-  amount = Math.round(Number(amount));
-  if (!Number.isFinite(amount) || amount === 0) return;
-  Store.state.xpAdjustments = Store.state.xpAdjustments || [];
-  Store.state.xpAdjustments.push({ amount, reason: String(reason || "manual").slice(0, 200), ts: Date.now() });
-  addXp(amount, "adjustment");
-}
+/* Журнал XP-корректировок ведёт только сервер (admin grant). Раньше клиент
+   мог добавить сюда запись, и сервер доверял ей при пересчёте XP — это был
+   прямой обход защиты от накрутки. Теперь сервер игнорирует payload-записи,
+   поэтому клиентская функция самоназначения XP удалена. */
 
 /* ============================================================
    Даты / streak / активность
