@@ -538,8 +538,8 @@ const HELP = {
   skills: {
     title: "Навыки",
     body: `
-      <p>Процент показывает, насколько хорошо ты знаешь тему. Часть даёт пройденный урок, остальное — решённые задания и правильные ответы.</p>
-      <p>Подписи простые: слабое место — тему надо подтянуть, пройден — хороший результат, освоен — тема выучена отлично.</p>
+      <p>Процент показывает, насколько хорошо ты знаешь тему: <b>40</b> даёт пройденный урок (теория), <b>60</b> — решённые задания и точность ответов (практика). Если урока по теме нет, все 100 набираются практикой.</p>
+      <p>Подписи простые: не начата — тему ещё не трогал, слабое место — надо подтянуть, пройден (от 70%) — хороший результат, освоен (от 90%) — тема выучена отлично. Точность считается за всё время, поэтому старые ошибки приходится перекрывать серией верных ответов.</p>
       <p>Нажми на тему — там урок, тренировка и твои ошибки.</p>`,
   },
   path: {
@@ -1206,6 +1206,28 @@ function openSkillModal(skillId) {
       <div><div class="mono" style="font-size:20px;font-weight:700">${st.solved}</div><div class="stat-label">решено задач</div></div>
       <div><div class="mono" style="font-size:20px;font-weight:700">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
+    ${(() => {
+      const b = skillProgressBreakdown(skillId);
+      const thMax = b.lessonTotal ? 40 : 0;
+      const prMax = b.lessonTotal ? 60 : 100;
+      const split = b.lessonTotal
+        ? 'теория <b>' + b.theory + '</b> из 40 · практика <b>' + b.practice + '</b> из 60'
+        : 'урока по теме нет — весь прогресс из практики: <b>' + b.practice + '</b> из 100';
+      let hint;
+      if (b.total >= 90) hint = 'Тема освоена — так держать.';
+      else if (b.lessonTotal && b.lessonDone < b.lessonTotal) hint = 'Пройди урок — это сразу +40 к освоению.';
+      else {
+        let k = -1;
+        for (let i = 1; i <= 50; i++) {
+          const s2 = b.solved + i, c2 = b.correct + i;
+          if (b.theory + Math.min(1, s2 / 10) * (c2 / s2) * prMax >= 90) { k = i; break; }
+        }
+        hint = k > 0
+          ? 'До «освоена» (90%): примерно ' + k + ' ' + plural(k, 'верный ответ', 'верных ответа', 'верных ответов') + ' подряд.'
+          : 'Точность сильно просела из-за старых ошибок — понадобится длинная серия верных ответов, чтобы её выправить.';
+      }
+      return '<div style="margin-top:12px;font-size:13px;color:var(--muted)">Из чего складывается: ' + split + '.<br>' + hint + '</div>';
+    })()}
 
     <div style="margin-top:20px">
       <div class="stat-label" style="margin-bottom:8px">Типичные ошибки</div>

@@ -283,9 +283,10 @@ function skillProgress(skillId) {
   const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
   const lessons = DataAPI.lessonsBySkill(skillId);
   const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
-  // Progress is mastery, not XP: theory is confirmed by a completed lesson,
-  // practice grows from real answers and their accuracy (capped at 10 tasks).
-  const theoryWeight = lessons.length ? 30 : 0;
+  // Progress is mastery, not XP: theory is confirmed by a completed lesson
+  // (40), practice grows from real answers and their accuracy (60, volume
+  // capped at 10 answers). Topics without a lesson score 100 from practice.
+  const theoryWeight = lessons.length ? 40 : 0;
   const practiceWeight = 100 - theoryWeight;
   const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
   const accuracy = stats.solved ? stats.correct / stats.solved : 0;
@@ -298,12 +299,12 @@ function skillProgressBreakdown(skillId) {
   const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
   const lessons = DataAPI.lessonsBySkill(skillId);
   const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
-  const theoryWeight = lessons.length ? 30 : 0;
+  const theoryWeight = lessons.length ? 40 : 0;
   const practiceWeight = 100 - theoryWeight;
   const accuracy = stats.solved ? stats.correct / stats.solved : 0;
   const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
   const practice = Math.min(1, stats.solved / 10) * accuracy * practiceWeight;
-  return { total: Math.round(theory + practice), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, accuracy: Math.round(accuracy * 100) };
+  return { total: Math.round(theory + practice), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, correct: stats.correct, accuracy: Math.round(accuracy * 100) };
 }
 
 function catProgress(catId) {
@@ -312,7 +313,7 @@ function catProgress(catId) {
   return Math.round(skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length);
 }
 
-/* weak | in-progress | completed | mastered
+/* not-started | weak | in-progress | completed | mastered
    Topics are intentionally all available. The order in the path is a visual
    curriculum hint, not an access gate: every catalog topic can be practiced
    independently, including topics without a lesson. */
