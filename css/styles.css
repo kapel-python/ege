@@ -430,6 +430,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .forecast-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.forecast-gain { font-size: 13px; color: var(--text-2); margin-top: 8px; }
 
 .action-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .action-card {

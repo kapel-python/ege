@@ -531,9 +531,9 @@ const HELP = {
   forecast: {
     title: "Прогноз результата ЕГЭ",
     body: `
-      <p>Примерная оценка твоего балла на ЕГЭ. Чем лучше освоены темы, тем выше прогноз.</p>
-      <p>Это просто ориентир, а не точное предсказание. Растёт он, когда проходишь уроки и правильно решаешь задания.</p>
-      <p>Как оценка менялась по дням, видно в «Статистике».</p>`,
+      <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в тестовые баллы по шкале этого года.</p>
+      <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина вилки показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
+      <p>Это просто ориентир, а не точное предсказание. Как оценка менялась по дням, видно в «Статистике».</p>`,
   },
   skills: {
     title: "Навыки",
@@ -880,6 +880,8 @@ function screenDashboard(root) {
   const steps = nextStepCandidates();
   const step = steps[0] || null;
   const alts = steps.slice(1, 3);
+  const topGainRaw = forecastTopGains(1)[0] || null;
+  const topGain = topGainRaw ? { gain: topGainRaw.gain, shortName: topGainRaw.name.replace(/^№\d+\s*[—–-]\s*/, "") } : null;
 
   const weakSpots = DataAPI.skills()
     .map((sk) => ({ sk, prog: skillProgress(sk.id), errs: openErrorCount(sk.id) }))
@@ -921,6 +923,7 @@ function screenDashboard(root) {
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
         <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
+        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b></div>` : ""}
         <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный прогноз, а просто ориентир.</div>
       </div>
     </div>

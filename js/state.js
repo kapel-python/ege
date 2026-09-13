@@ -402,16 +402,148 @@ function plural(n, one, few, many) {
 }
 
 /* ============================================================
-   Прогноз балла по фактическому прогрессу и истории ответов
+   Прогноз балла по фактическому прогрессу и истории ответов.
+   Честная цепочка: освоение тем → взвешенное среднее → первичные
+   баллы (0–32) → тестовая шкала ЕГЭ-2026. Никакого «базового»
+   минимума за ноль знаний и никакой фиксированной вилки.
    ============================================================ */
 
+/* Вес навыка = его цена в первичных баллах ЕГЭ-2026: часть 1 — по 1,
+   часть 2 — по спецификации ФИПИ (13:2, 14:3, 15:2, 16:2, 17:3,
+   18:4, 19:4; задание 19 покрывают два навыка — параметр и числа,
+   по 2 каждый). Сумма всех весов = 32. */
+const SKILL_EGE_WEIGHTS = {
+  n01_planimetry: 1, n02_vectors: 1, n03_stereometry: 1, n04_probability: 1,
+  n05_prob_theorems: 1, n06_random_var: 1, n07_equations: 1, n08_expressions: 1,
+  n09_derivative: 1, n10_applied: 1, n11_word_problems: 1, n12_functions: 1,
+  n14_trig_eq: 2, n15_stereometry: 3, n13_financial: 2, n18_planimetry: 2,
+  n16_inequality: 3, n17_optimization: 4, n19_parameter: 2, n20_numbers: 2,
+};
+const TOTAL_EGE_PRIMARY = 32;
+
+/* Шкала перевода первичных баллов в тестовые (ЕГЭ-2026, профиль).
+   Значения 2, 16, 19 в опубликованной шкале пропущены — взяты
+   линейной интерполяцией между соседями (помечены *). */
+const PRIMARY_TO_TEST = [
+  0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
+  80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
+];
+
+/* Затухание старых попыток: вес = exp(-возраст_дней / 45).
+   Период полураспада ~31 день: ответ месяц назад весит вдвое меньше
+   сегодняшнего, ответ двухмесячной давности — вчетверо. */
+const FORECAST_DECAY_DAYS = 45;
+/* Полное доверие практике — от 12 свежих попыток; дальше насыщение:
+   10 лёгких подряд уже не дают «мастера», нужен объём посвежее. */
+const FORECAST_FULL_VOLUME = 12;
+
+function skillEgeWeight(skillId) {
+  if (Object.prototype.hasOwnProperty.call(SKILL_EGE_WEIGHTS, skillId)) return SKILL_EGE_WEIGHTS[skillId];
+  const skill = DataAPI.skill(skillId);
+  if (!skill) return 0;
+  return skill.cat === "part2" ? 2 : 1; // новый навык без веса: осторожная оценка
+}
+
+/* Освоение темы глазами прогноза: та же шкала 0–100, что у
+   skillProgress (40 теория + 60 практика), но практика считается по
+   затухающим по давности попыткам, а не за всё время. Если живых
+   попыток нет (старые аккаунты, тестовые фикстуры) — откат к
+   суммарной статистике, чтобы не показывать ноль там, где работа была. */
+function forecastSkillMastery(skillId, now) {
+  const skill = DataAPI.skill(skillId);
+  if (!skill) return 0;
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
+  const theoryWeight = lessons.length ? 40 : 0;
+  const practiceWeight = 100 - theoryWeight;
+  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
+
+  const ts = Number(now) || Date.now();
+  let vol = 0, good = 0, seen = false;
+  for (const a of Store.state.taskAttempts) {
+    if (!a || a.skill !== skillId) continue;
+    seen = true;
+    const ageDays = Math.max(0, (ts - (Number(a.ts) || 0)) / 86400000);
+    const w = Math.exp(-ageDays / FORECAST_DECAY_DAYS);
+    vol += w;
+    if (a.correct) good += w;
+  }
+  let accuracy, volume;
+  if (seen) {
+    accuracy = vol > 0 ? good / vol : 0;
+    volume = vol;
+  } else {
+    const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
+    accuracy = stats.solved ? stats.correct / stats.solved : 0;
+    volume = stats.solved || 0;
+  }
+  const factor = Math.min(1, volume / FORECAST_FULL_VOLUME);
+  const practice = factor * accuracy * practiceWeight;
+  return Math.round(Math.min(100, theory + practice));
+}
+
 function forecast() {
-  const skills = DataAPI.skills();
-  const avg = skills.length ? skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length : 0;
-  // 27 is the approximate zero-preparation baseline; the remaining range is
-  // driven by demonstrated mastery rather than XP or self-assessment.
-  const mid = Math.round(27 + avg * 0.73);
-  return { low: Math.max(0, mid - 3), high: Math.min(100, mid + 4), mid };
+  const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+  if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0 };
+  const now = Date.now();
+  let wSum = 0, wMastery = 0, covered = 0;
+  const masteryById = {};
+  for (const s of skills) {
+    const w = skillEgeWeight(s.id);
+    const m = forecastSkillMastery(s.id, now);
+    masteryById[s.id] = m;
+    wSum += w;
+    wMastery += w * m;
+    const lessons = DataAPI.lessonsBySkill(s.id);
+    const hasLesson = lessons.some((l) => !!Store.state.completedLessons[l.id]);
+    if (hasLesson || masteryById[s.id] >= 25) covered++;
+  }
+  const mastery = wSum ? wMastery / wSum : 0;
+  const primary = (mastery / 100) * TOTAL_EGE_PRIMARY;
+  const mid = PRIMARY_TO_TEST[Math.max(0, Math.min(32, Math.round(primary)))] ?? 0;
+  /* Живая вилка: мало данных — широко (±12), всё покрыто — узко (±3). */
+  const hw = 12 - Math.round((9 * covered) / skills.length);
+  return {
+    low: Math.max(0, mid - hw),
+    high: Math.min(100, mid + hw),
+    mid,
+    primary: Math.round(primary * 10) / 10,
+    mastery: Math.round(mastery * 10) / 10,
+    hw,
+  };
+}
+
+/* «Что даст +N»: какой прирост тестового балла принесёт полное
+   закрытие каждой темы. Считается через ту же цепочку
+   (взвешенное среднее → первичные → шкала), поэтому вес второй
+   части честно выше, чем первой. */
+function forecastTopGains(n = 3) {
+  const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+  if (!skills.length) return [];
+  const now = Date.now();
+  const base = forecast();
+  let wSum = 0, wMastery = 0;
+  const masteryById = {};
+  for (const s of skills) {
+    const w = skillEgeWeight(s.id);
+    const m = forecastSkillMastery(s.id, now);
+    masteryById[s.id] = m;
+    wSum += w;
+    wMastery += w * m;
+  }
+  if (!wSum) return [];
+  const gains = [];
+  for (const s of skills) {
+    const m = masteryById[s.id];
+    if (m >= 100) continue;
+    const w = skillEgeWeight(s.id);
+    const mastery = (wMastery + w * (100 - m)) / wSum;
+    const primary = (mastery / 100) * TOTAL_EGE_PRIMARY;
+    const test = PRIMARY_TO_TEST[Math.max(0, Math.min(32, Math.round(primary)))] ?? 0;
+    const gain = test - base.mid;
+    if (gain > 0) gains.push({ skillId: s.id, name: s.name, gain });
+  }
+  return gains.sort((a, b) => b.gain - a.gain).slice(0, Math.max(0, n));
 }
 
 /* Снимок обновляется в течение текущего дня, а дни прошлого остаются
