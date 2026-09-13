@@ -733,7 +733,7 @@ async function render() {
   if (NEEDS_DETAILS.has(route)) {
     // Экран с заданиями: ждём полные тексты и математические библиотеки.
     // Пока грузится — скелетон вместо пустоты; ушедшую навигацию не трогаем.
-    screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center;color:var(--text-2)">Загрузка заданий…</div>`;
+    screen.innerHTML = loaderHTML("Тянем задания и формулы…");
     try {
       await Store.ensureDetails();
     } catch (error) {
@@ -2915,6 +2915,42 @@ const Onboarding = {
 };
 
 /* ============================================================
+   Универсальный лоадер (boot + ожидание деталей каталога).
+   Лендинг (main.html) — отдельный файл, его не касается.
+   ============================================================ */
+
+const LOADER_LOGO = '<svg viewBox="0 0 44 44" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="20" cy="23" r="12" style="stroke:var(--accent)" stroke-width="3.6" stroke-linecap="round" stroke-dasharray="64 14" transform="rotate(-45 20 23)"/><circle cx="20" cy="23" r="6.8" style="stroke:var(--success)" stroke-width="2.6"/><circle cx="20" cy="23" r="2.3" style="fill:var(--violet)"/><path d="M34 8v6M31 11h6" style="stroke:var(--success)" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="33" r="1.6" style="fill:var(--accent)" opacity=".8"/><circle cx="33.5" cy="30.5" r="1.3" style="fill:var(--violet)" opacity=".7"/></svg>';
+
+function loaderHTML(sub) {
+  return `<div class="card ege-loader">
+    <div class="ege-loader__orbit"><div class="ege-loader__core">${LOADER_LOGO}</div></div>
+    <div class="ege-loader__brand">EGE <span>CORE</span></div>
+    <div class="ege-loader__title">Загружаем</div>
+    <div class="ege-loader__sub" data-loader-sub>${esc(sub || "Открываем страницу…")}</div>
+    <div class="ege-loader__bar"><i></i></div>
+    <div class="ege-loader__tip">Совет: <b>15 минут в день</b> держат стрик 🔥</div>
+  </div>`;
+}
+
+/* Смена подписей, пока висит boot-экран. Останавливается при отрисовке
+   первого экрана или при показе ошибки. */
+const BOOT_MSGS = ["Открываем страницу…", "Тянем каталог заданий…", "Считаем XP и уровень…", "Почти готово…"];
+let bootMsgTimer = null;
+function startBootMsgs() {
+  stopBootMsgs();
+  let k = 0;
+  bootMsgTimer = setInterval(() => {
+    k = (k + 1) % BOOT_MSGS.length;
+    const el = document.querySelector("[data-loader-sub]");
+    if (el) el.textContent = BOOT_MSGS[k];
+    else stopBootMsgs();
+  }, 1600);
+}
+function stopBootMsgs() {
+  if (bootMsgTimer) { clearInterval(bootMsgTimer); bootMsgTimer = null; }
+}
+
+/* ============================================================
    Boot
    ============================================================ */
 
@@ -2963,12 +2999,15 @@ let bootPromise = null;
 function bootstrapApp() {
   if (bootPromise) return bootPromise;
   const screen = document.getElementById("screen");
-  screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center;color:var(--text-2)">Загрузка данных аккаунта…</div>`;
+  screen.innerHTML = loaderHTML("Открываем страницу…");
+  startBootMsgs();
   bootPromise = (async () => {
     try {
       await Store.load();
+      stopBootMsgs();
       render();
     } catch (error) {
+      stopBootMsgs();
       showBootError(error);
     }
   })();
