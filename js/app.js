@@ -1266,13 +1266,22 @@ function screenTraining(root) {
         const session = Store.state.lessonSessions && Store.state.lessonSessions[lesson.id];
         const inProgress = !!session;
         const stepsTotal = DataAPI.lessonStepsCount(lesson);
+        const stepNow = stepsTotal ? Math.min((session.idx || 0) + 1, stepsTotal) : 0;
         const progress = inProgress && stepsTotal ? Math.round(((session.idx || 0) / stepsTotal) * 100) : 0;
+        const statusText = inProgress && !done
+          ? 'в процессе · шаг ' + stepNow + ' из ' + stepsTotal
+          : inProgress && done
+            ? 'завершён · повтор: шаг ' + stepNow + ' из ' + stepsTotal
+            : done ? 'завершён' : 'не начат';
+        const btnLabel = inProgress
+          ? 'Продолжить · шаг ' + stepNow + ' из ' + stepsTotal
+          : done ? 'Пройти ещё раз' : 'Начать урок';
         return `
         <div class="card card--hover lesson-card ${done ? "lesson-card--done" : ""}">
           <div class="mission-card__top">
             <div>
-              <div class="mission-card__title">${icon("bulb")} ${lesson.title} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
-              <div class="mission-card__path">${sk.name} · ${stepsTotal} шагов · ${done ? "завершён" : "не пройден"}</div>
+              <div class="mission-card__title">${icon("bulb")} ${lesson.title} ${inProgress ? '<span class="chip chip--warn" style="margin-left:6px">в процессе</span>' : done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
+              <div class="mission-card__path">${sk.name} · ${stepsTotal} шагов · ${statusText}</div>
             </div>
             <div class="mission-card__reward"><span class="chip chip--accent mono">+${lesson.xp} XP</span></div>
           </div>
@@ -1280,8 +1289,8 @@ function screenTraining(root) {
             <div class="mission-card__bar">${progressBar(progress)}</div>
             <span class="mono">${stepsTotal ? Math.min((session.idx || 0) + 1, stepsTotal) : ""} / ${stepsTotal}</span>
           </div>` : ''}
-          <button class="btn ${done ? "btn--soft" : "btn--primary"} btn--sm" style="align-self:flex-start" onclick="Lesson.start('${lesson.id}')">
-            ${done ? "Пройти ещё раз" : inProgress ? "Продолжить" : "Начать урок"}
+          <button class="btn ${inProgress || !done ? "btn--primary" : "btn--soft"} btn--sm" style="align-self:flex-start" onclick="Lesson.start('${lesson.id}')">
+            ${btnLabel}
           </button>
         </div>`;
       }).join("")}
