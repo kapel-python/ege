@@ -342,7 +342,7 @@ function activityChart(activity, selectedDate = null) {
     const tip = `${fmtShortDate(d.date)}: ${d.solved} решено, ${d.correct} верно, ${d.users} ${plural(d.users, "активный", "активных", "активных")}, +${d.xp} XP`;
     bars += `<g>
       <rect class="bar-hit${has ? " bar-hit--active" : " bar-hit--empty"}" x="${PAD_L + i * step}" y="${PAD_T}" width="${step}" height="${plotH}"
-        data-date="${esc(d.date)}" data-tip="${esc(tip)}"${has ? ` tabindex="0" role="button" aria-label="${esc(tip)}. Показать подробности"` : ` aria-hidden="true"`}></rect>
+        data-date="${esc(d.date)}" data-tip="${esc(tip)}"${has ? "" : ` aria-hidden="true"`}></rect>
       <rect class="bar${has ? "" : " bar--empty"}${selected ? " bar--selected" : ""}" x="${x}" y="${Math.min(y, PAD_T + plotH)}" width="${barW}" height="${Math.max(h, has ? 2 : 0)}" rx="4"></rect>
       ${label}
     </g>`;
@@ -415,7 +415,8 @@ function bindChartTooltip(container, activity) {
     rect.addEventListener("mouseleave", () => { tip.style.display = "none"; });
   });
   /* Выбор дня: реагируют ТОЛЬКО столбцы с данными. Пустые дни
-     (bar-hit--empty) клик и клавиатуру игнорируют полностью. */
+     (bar-hit--empty) клик игнорируют полностью. Без tabindex: клик по
+     столбцу не ставит фокус, никакой обводки не появляется. */
   const select = (rect) => {
     if (!rect || !rect.classList.contains("bar-hit--active")) return;
     const date = rect.dataset.date;
@@ -435,9 +436,6 @@ function bindChartTooltip(container, activity) {
   };
   box.querySelectorAll(".bar-hit--active").forEach((rect) => {
     rect.addEventListener("click", () => select(rect));
-    rect.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); select(rect); }
-    });
   });
 }
 
