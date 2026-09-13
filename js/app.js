@@ -343,10 +343,53 @@ function relTime(ts) {
   return `${d} дн назад`;
 }
 
+const RU_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+/* Дата вида YYYY-MM-DD → «10 сентября». Невалидный ввод — как есть. */
+function ruDateGenitive(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+  if (!m) return String(dateStr || "");
+  const month = RU_MONTHS_GEN[Number(m[2]) - 1];
+  if (!month) return String(dateStr || "");
+  return `${Number(m[3])} ${month}`;
+}
+
 function forecastTrendLabel(trend) {
   if (!trend) return "Динамика появится после второго дня подготовки";
-  if (trend.delta === 0) return `Без изменений с ${trend.fromDate.split("-").reverse().slice(0, 2).join(".")}`;
-  return `${trend.delta > 0 ? "▲" : "▼"} ${trend.delta > 0 ? "+" : ""}${trend.delta} с ${trend.fromDate.split("-").reverse().slice(0, 2).join(".")}`;
+  const when = ruDateGenitive(trend.fromDate);
+  if (trend.delta === 0) return `Без изменений с ${when}`;
+  return `${trend.delta > 0 ? "▲" : "▼"} ${trend.delta > 0 ? "+" : ""}${trend.delta} с ${when}`;
+}
+
+/* Покрытие прогноза: сколько уроков пройдено и по скольким темам
+   у алгоритма уже есть данные (урок или практика). Полное покрытие —
+   все уроки закрыты и все темы с весом покрыты. */
+function forecastCoverage() {
+  const lessons = DataAPI.lessons();
+  const done = lessons.filter((l) => !!Store.state.completedLessons[l.id]).length;
+  const lessonPct = lessons.length ? Math.round((done / lessons.length) * 100) : 100;
+  const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+  const now = Date.now();
+  let covered = 0;
+  for (const s of skills) {
+    const hasLesson = DataAPI.lessonsBySkill(s.id).some((l) => !!Store.state.completedLessons[l.id]);
+    if (hasLesson || forecastSkillMastery(s.id, now) >= 25) covered++;
+  }
+  return {
+    lessonPct, doneLessons: done, totalLessons: lessons.length,
+    covered, totalSkills: skills.length,
+    full: lessonPct === 100 && covered === skills.length,
+  };
+}
+
+function forecastNoteHTML() {
+  const c = forecastCoverage();
+  if (c.full) return "Прогноз на основе всех пройденных уроков — оценка относительно точная. Это ориентир, а не официальный балл.";
+  const lessonsBit = c.totalLessons
+    ? `пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons})`
+    : `покрыто ${c.covered} из ${c.totalSkills} тем`;
+  const topicsBit = c.totalLessons ? `, тем с данными — ${c.covered} из ${c.totalSkills}` : "";
+  return `Точность пока ограничена: ${lessonsBit}${topicsBit}. Проходи уроки и практику — прогноз станет точнее. Это ориентир, а не официальный балл.`;
 }
 
 function stars(n) {
@@ -533,7 +576,7 @@ const HELP = {
     body: `
       <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в тестовые баллы по шкале этого года.</p>
       <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина вилки показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
-      <p>Это просто ориентир, а не точное предсказание. Как оценка менялась по дням, видно в «Статистике».</p>`,
+      <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, вилка шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`,
   },
   skills: {
     title: "Навыки",
@@ -921,10 +964,10 @@ function screenDashboard(root) {
 
       <div class="card forecast-card">
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
-        <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
+        <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">тестовых</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
-        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b></div>` : ""}
-        <div class="forecast-note">Оценка по текущему прогрессу навыков и точности; это не официальный прогноз, а просто ориентир.</div>
+        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b> баллов</div>` : ""}
+        <div class="forecast-note">${forecastNoteHTML()}</div>
       </div>
     </div>
 
