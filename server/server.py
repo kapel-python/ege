@@ -63,6 +63,9 @@ MAX_LESSON_ERROR_HISTORY = 1000
 MAX_DIAGNOSTICS = 2000
 MAX_DAILY_HISTORY = 400
 MAX_BOSSES = 500
+MAX_FORECAST_HISTORY = 500
+MAX_ACTIVITY_DAYS = 2000
+MAX_STATE_DICT = 2000
 
 # ---------------------------------------------------------------------------
 # Admin access
@@ -80,7 +83,7 @@ MAX_BOSSES = 500
 # ---------------------------------------------------------------------------
 ADMIN_PASSWORD_HASH = os.environ.get(
     "EGE_ADMIN_PASSWORD_HASH",
-    "pbkdf2_sha256$210000$242cb1880b2d6030889b3de36a87baa4$7c5cd007d7f3345e97fb8e2abf42f9b4e85327f7f6049cd8542b1cfa5e70f968",
+    "pbkdf2_sha256$210000$d62672720c4435dca4e871f93f755150$9c469aa944cb085df27d8db37ac332f9073d22b6a7abc63f8e1d541f99c1ad5d",
 )
 ADMIN_COOKIE_NAME = "ege_admin"
 ADMIN_SESSION_DAYS = 30
@@ -988,6 +991,10 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     for item in s.get("lessonAttempts") or []:
         if item.get("lessonId") in lesson_ids: conn.execute("INSERT INTO lesson_attempts(user_id,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),int(item.get("xp",0)),int(item.get("wrongAttempts",0)),float(item.get("durationSec",0)),item.get("ts") or now_iso()))
     for key, item in (s.get("lessonStepErrors") or {}).items():
+        # Битый ключ без ":" раньше ронял весь PUT через ValueError — одно
+        # поле ломало любое сохранение. Пропускаем мусор молча.
+        if not isinstance(key, str) or ":" not in key or not isinstance(item, dict):
+            continue
         lesson_id, step_id = key.split(":", 1)
         if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_step_errors VALUES(?,?,?,?,?,?,?)", (user_id,lesson_id,step_id,item.get("skill", ""),int(item.get("count",0)),item.get("ts") or now_iso(),json.dumps(item.get("types",{}),ensure_ascii=False)))
     for item in s.get("lessonErrorHistory") or []:
@@ -999,8 +1006,16 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     mission_ids = {r["id"] for r in conn.execute("SELECT id FROM missions")}
     for mission_id, progress in (s.get("missionProgress") or {}).items():
         if mission_id in mission_ids: conn.execute("INSERT INTO user_missions(user_id,mission_id,progress,completed_at) VALUES(?,?,?,?)", (user_id,mission_id,int(progress or 0),(s.get("missionsDone") or {}).get(mission_id,{}).get("ts")))
-    for boss_id in s.get("bossesDefeated") or []: conn.execute("INSERT INTO user_bosses VALUES(?,?,?)", (user_id,boss_id,now_iso()))
-    for achievement_id, item in (s.get("achievements") or {}).items(): conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id,achievement_id,item.get("ts") or now_iso()))
+    boss_ids = {r["id"] for r in conn.execute("SELECT id FROM bosses")}
+    # dict.fromkeys убирает дубли (иначе UNIQUE constraint роняет весь PUT),
+    # неизвестные id отбрасываем (иначе FOREIGN KEY роняет весь PUT).
+    for boss_id in dict.fromkeys(s.get("bossesDefeated") or []):
+        if boss_id in boss_ids:
+            conn.execute("INSERT INTO user_bosses VALUES(?,?,?)", (user_id, boss_id, now_iso()))
+    achievement_ids = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
+    for achievement_id, item in (s.get("achievements") or {}).items():
+        if achievement_id in achievement_ids:
+            conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id, achievement_id, item.get("ts") or now_iso()))
     for activity_date, value in (s.get("activity") or {}).items(): conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
     for item in s.get("forecastHistory") or []: conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
     # XP adjustments are an append-only audit log that derives straight into
@@ -1497,6 +1512,32 @@ def _daily_xp(conn: sqlite3.Connection) -> int:
     return int(json.loads(row["value_json"]).get("xp", 0))
 
 
+def _msk_date_key(ts) -> str | None:
+    """Московская дата (YYYY-MM-DD) для миллисекундной метки — зеркало
+    dateKeyForTimestamp из js/state.js. Нечисловые метки дают None."""
+    try:
+        ms = int(ts)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return dt.datetime.fromtimestamp(ms / 1000, tz=ZoneInfo("Europe/Moscow")).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _lesson_steps_caps(conn: sqlite3.Connection) -> dict:
+    """Легитимный максимум XP за шаги каждого урока = сумма step.xp из
+    каталога. Присланный сверху steps_xp обрезается этим потолком."""
+    caps = {}
+    for r in conn.execute("SELECT id, metadata_json FROM lessons"):
+        try:
+            steps = json.loads(r["metadata_json"] or "{}").get("steps") or []
+            caps[r["id"]] = sum(int(st.get("xp") or 0) for st in steps if isinstance(st, dict))
+        except (ValueError, TypeError):
+            caps[r["id"]] = 0
+    return caps
+
+
 def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = None) -> dict:
     """Recompute the XP-bearing counters from the submitted, catalog-backed
     event data instead of trusting the plain numbers the client sends for
@@ -1544,16 +1585,39 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
             correct_series = 0
 
     errors_resolved = 0
+    # Бонус за закрытую ошибку платится один раз на задание и только если оно
+    # реально решено верно (есть correct-попытка в истории). Иначе флаг
+    # resolved:true в payload рисует +15 XP из ничего за каждую запись.
+    counted_err_tasks = set()
     for e in state.get("errors") or []:
-        if e.get("resolved") and e.get("taskId") in tasks:
+        task_id = e.get("taskId")
+        if (e.get("resolved") and task_id in tasks and task_id in solved_once
+                and task_id not in counted_err_tasks):
+            counted_err_tasks.add(task_id)
             errors_resolved += 1
             xp += XP_ERROR_RESOLVED
 
-    dates_done = {
-        entry.get("date")
-        for entry in (list(state.get("dailyHistory") or []) + [state.get("daily") or {}])
-        if entry.get("done") and entry.get("date")
-    }
+    # Daily-бонус платится только за дни, где решение подтверждено историей
+    # попыток: distinct correct-попыток по taskIds этого дня (московская дата)
+    # не меньше длины подборки — зеркало ensureDailyChallenge/recordAnswer
+    # (done = solved >= taskIds.length). Голый флаг done:true без попыток
+    # раньше давал +daily_xp за каждую выдуманную дату.
+    correct_by_date: dict[str, set] = {}
+    for a in attempts:
+        if bool(a.get("correct")) and int(a.get("hintLevel") or 0) < 3:
+            d = _msk_date_key(a.get("ts"))
+            if d:
+                correct_by_date.setdefault(d, set()).add(a.get("taskId"))
+    dates_done = set()
+    for entry in (list(state.get("dailyHistory") or []) + [state.get("daily") or {}]):
+        if not (entry.get("done") and entry.get("date")):
+            continue
+        task_ids = entry.get("taskIds") or []
+        if not task_ids:
+            continue
+        solved = len(set(task_ids) & correct_by_date.get(entry["date"], set()))
+        if solved >= len(task_ids):
+            dates_done.add(entry["date"])
     xp += daily_xp * len(dates_done)
 
     # Анти-фарм по урокам считаем по completedLessons (PK user_id+lesson_id,
@@ -1564,16 +1628,21 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
         if lesson_id in lessons_xp:
             xp += lessons_xp[lesson_id]
     # XP за шаги уроков: берём из первой попытки с firstCompletion, но только
-    # если урок реально завершён по completedLessons. Повторные попытки шагов
-    # не платят (они дают xp=0 на клиенте, и здесь мы тоже не добавляем).
+    # если урок реально завершён по completedLessons. Сумма обрезана потолком
+    # из каталога (сумма step.xp) — присланный сверху steps_xp без потолка
+    # рисовал произвольный XP. Повторные попытки шагов не платят.
+    steps_caps = _lesson_steps_caps(conn)
     steps_counted = set()
     for item in state.get("lessonAttempts") or []:
         lesson_id = item.get("lessonId")
         if (item.get("firstCompletion") and lesson_id in completed_lessons
                 and lesson_id not in steps_counted):
-            steps_xp = int(item.get("xp", 0)) - int(lessons_xp.get(lesson_id, 0))
-            if steps_xp > 0:
-                xp += steps_xp
+            try:
+                steps_xp = int(item.get("xp", 0)) - int(lessons_xp.get(lesson_id, 0))
+            except (TypeError, ValueError):
+                steps_xp = 0
+            steps_xp = max(0, min(steps_xp, steps_caps.get(lesson_id, 0)))
+            xp += steps_xp
             steps_counted.add(lesson_id)
 
     for mission_id in (state.get("missionsDone") or {}).keys():
@@ -1648,13 +1717,17 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     # generous headroom over those client caps, not tighter semantics.
     for key, cap in (("taskAttempts", MAX_TASK_ATTEMPTS), ("errors", MAX_ERRORS), ("timeline", MAX_TIMELINE),
                      ("lessonAttempts", MAX_LESSON_ATTEMPTS), ("lessonErrorHistory", MAX_LESSON_ERROR_HISTORY),
-                     ("diagnostics", MAX_DIAGNOSTICS), ("dailyHistory", MAX_DAILY_HISTORY)):
+                     ("diagnostics", MAX_DIAGNOSTICS), ("dailyHistory", MAX_DAILY_HISTORY),
+                     ("forecastHistory", MAX_FORECAST_HISTORY)):
         value = state.get(key, [])
         if not isinstance(value, list): raise ValueError(f"{key} must be an array")
         if len(value) > cap: raise ValueError(f"{key} too large")
     for key in ("skillStats", "lessonStepErrors", "lessonSessions", "completedLessons", "missionProgress",
                 "missionsDone", "achievements", "activity", "hintLevels"):
         if state.get(key) is not None and not isinstance(state.get(key), dict): raise ValueError(f"{key} must be an object")
+        if isinstance(state.get(key), dict) and len(state[key]) > MAX_STATE_DICT: raise ValueError(f"{key} too large")
+    if isinstance(state.get("activity"), dict) and len(state["activity"]) > MAX_ACTIVITY_DAYS:
+        raise ValueError("activity too large")
     if not isinstance(state.get("bossesDefeated", []), list): raise ValueError("bossesDefeated must be an array")
     if len(state.get("bossesDefeated") or []) > MAX_BOSSES: raise ValueError("bossesDefeated too large")
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills")}
