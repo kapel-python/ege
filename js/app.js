@@ -2128,6 +2128,14 @@ function lessonFields(step) {
 
 function lessonTask(step) { return step.taskId ? DataAPI.task(step.taskId) : null; }
 
+/* Текст шага и текст задания из банка — один и тот же: второй показ лишний.
+   Такое бывает, когда текст шага слово в слово повторяет bank text. */
+function lessonStepTextDup(step, task) {
+  if (!task || !step.text || !task.text) return false;
+  const norm = (s) => String(s).replace(/\s+/g, "").toLowerCase();
+  return norm(step.text) === norm(task.text);
+}
+
 const Lesson = {
   cur: null,
 
@@ -2277,7 +2285,7 @@ function screenLesson(root) {
         <div class="lesson-step-label">${esc(LESSON_STEP_LABELS[type] || "Шаг")}</div>
         ${step.title ? `<div class="lesson-title">${esc(step.title)}</div>` : ""}
         <div class="lesson-body">
-          <div class="task-card__text lesson-text">${mathText(step.text || "")}</div>
+          ${lessonStepTextDup(step, task) ? "" : `<div class="task-card__text lesson-text">${mathText(step.text || "")}</div>`}
           ${task ? `<div class="lesson-independent-task"><div class="stat-label">Задание из банка · ${esc(task.num)}</div><div class="task-card__text">${mathText(task.text)}</div>${taskVisualHtml(task, "lesson")}</div>` : ""}
         </div>
         ${lessonBoardHtml(step, type)}
