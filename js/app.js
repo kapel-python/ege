@@ -964,7 +964,7 @@ function screenDashboard(root) {
 
       <div class="card forecast-card">
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
-        <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">тестовых</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
+        <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">вторичных</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
         ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b> баллов</div>` : ""}
         <div class="forecast-note">${forecastNoteHTML()}</div>
