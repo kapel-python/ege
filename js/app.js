@@ -890,7 +890,7 @@ function screenDashboard(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Главная</div>
-      <div class="page-sub">${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })} · цель: ${goalLabel()}</div>
+      <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось ${egeCountdownLabel()}</div>
     </div>
 
     <div class="hero">
@@ -1030,6 +1030,62 @@ function runNextStep(index = 0) {
 function goalLabel() {
   const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
   return g ? g.label : "не выбрана";
+}
+
+/* Дата профильной математики в основной период — 8 июня.
+   Если в этом году экзамен уже прошёл, считаем до 8 июня следующего года. */
+function egeExamDate(from) {
+  const base = from ? new Date(from) : new Date();
+  base.setHours(0, 0, 0, 0);
+  let exam = new Date(base.getFullYear(), 5, 8);
+  if (base > exam) exam = new Date(base.getFullYear() + 1, 5, 8);
+  return exam;
+}
+
+function egeMonthExact(n) {
+  return `${n} ${plural(n, "месяц", "месяца", "месяцев")}`;
+}
+
+/* Форма после «чуть больше / чуть меньше»: эти слова требуют
+   родительного падежа — «месяца» (1) или «месяцев» (2+). */
+function egeMonthGenitive(n) {
+  return n === 1 ? "месяца" : `${n} месяцев`;
+}
+
+/* Человеческий остаток до ЕГЭ на русском: дни → недели → месяцы.
+   Покрывает «1 месяц», «2 месяца», «5 месяцев», «полгода»,
+   «полтора месяца», «чуть меньше месяца», «почти месяц»,
+   «чуть больше месяца», «почти N …», «чуть больше N …». */
+function egeCountdownLabel(now) {
+  const today = now ? new Date(now) : new Date();
+  today.setHours(0, 0, 0, 0);
+  const exam = egeExamDate(today);
+  const d = Math.round((exam - today) / 86400000);
+  if (d <= 0) return "сегодня";
+  if (d === 1) return "1 день";
+  if (d < 7) return `${d} ${plural(d, "день", "дня", "дней")}`;
+  if (d === 7) return "1 неделя";
+  if (d <= 10) return "чуть больше недели";
+  if (d <= 13) return "почти 2 недели";
+  if (d === 14) return "2 недели";
+  if (d <= 17) return "чуть больше 2 недель";
+  if (d <= 20) return "почти 3 недели";
+  if (d <= 23) return "3 недели";
+  if (d <= 26) return "чуть меньше месяца";
+  if (d <= 30) return "почти месяц";
+  if (d <= 37) return "1 месяц";
+  if (d <= 48) return "чуть больше месяца";
+  if (d <= 56) return "полтора месяца";
+  if (d <= 66) return "почти 2 месяца";
+  if (d >= 350) return "почти год";
+  if (d >= 168 && d <= 198) return "полгода";
+  const mExact = d / 30.44;
+  const r = Math.max(2, Math.round(mExact));
+  if (r >= 12) return "почти год";
+  const delta = mExact - r;
+  if (Math.abs(delta) <= 0.18) return egeMonthExact(r);
+  if (delta > 0.18) return `чуть больше ${egeMonthGenitive(r)}`;
+  return `почти ${egeMonthExact(r)}`;
 }
 
 function statusLabel(st) {
