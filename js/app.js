@@ -1266,7 +1266,7 @@ function screenTraining(root) {
         const session = Store.state.lessonSessions && Store.state.lessonSessions[lesson.id];
         const inProgress = !!session;
         const stepsTotal = DataAPI.lessonStepsCount(lesson);
-        const stepNow = stepsTotal ? Math.min((session.idx || 0) + 1, stepsTotal) : 0;
+        const stepNow = inProgress && stepsTotal ? Math.min(((session.idx || 0)) + 1, stepsTotal) : 0;
         const progress = inProgress && stepsTotal ? Math.round(((session.idx || 0) / stepsTotal) * 100) : 0;
         const statusText = inProgress && !done
           ? 'в процессе · шаг ' + stepNow + ' из ' + stepsTotal
