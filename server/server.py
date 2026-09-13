@@ -83,7 +83,7 @@ MAX_STATE_DICT = 2000
 # ---------------------------------------------------------------------------
 ADMIN_PASSWORD_HASH = os.environ.get(
     "EGE_ADMIN_PASSWORD_HASH",
-    "pbkdf2_sha256$210000$d62672720c4435dca4e871f93f755150$9c469aa944cb085df27d8db37ac332f9073d22b6a7abc63f8e1d541f99c1ad5d",
+    "pbkdf2_sha256$210000$<redacted-dev-salt>$<redacted-dev-hash>",
 )
 ADMIN_COOKIE_NAME = "ege_admin"
 ADMIN_SESSION_DAYS = 30

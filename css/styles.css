@@ -79,6 +79,18 @@ body {
 
 ::selection { background: var(--accent-soft); }
 
+/* Единое видимое кольцо фокуса для клавиатурной навигации. Объявлено до
+   компонентных стилей, чтобы локальные override (например, answer-input со
+   своей тенью фокуса) побеждали при равной специфичности. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.answer-input:focus-visible { outline: none; }
+.mathvisual-board *:focus-visible,
+.mathvisual-svg *:focus-visible { outline: none; }
+
 /* ---------- layout shell ---------- */
 
 .app { display: flex; min-height: 100vh; }
@@ -171,6 +183,8 @@ body {
   position: sticky;
   top: 0;
   z-index: 20;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 .topbar__spacer { flex: 1; }
 
@@ -749,6 +763,23 @@ body {
    only the board itself needs its own sizing and a theme-aware background
    (jsxgraph.css hardcodes white, which would look wrong in dark mode). */
 .mathvisual-host.mathvisual-jsx { aspect-ratio: var(--visual-ratio, 1.5); }
+/* Пока движок не смонтировал диаграмму (первый заход ждёт ~1.2 МБ vendor),
+   хост — пустая рамка. Скелетон показывает, что содержимое грузится,
+   вместо «сломанного» серого прямоугольника. */
+.mathvisual-host { position: relative; }
+.mathvisual-host[data-mathvisual]:not([data-mathvisual-mounted])::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--soft-hover) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: visualShimmer 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes visualShimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
 .mathvisual-board {
   width: 100%;
   height: 100%;

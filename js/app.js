@@ -419,6 +419,7 @@ function toast(html, type = "", iconName = null) {
   const root = document.getElementById("toast-root");
   const el = document.createElement("div");
   el.className = `toast ${type}`;
+  el.setAttribute("role", "status");
   el.innerHTML = `${iconName ? icon(iconName) : ""}<div>${html}</div>`;
   root.appendChild(el);
   setTimeout(() => {
@@ -466,19 +467,36 @@ function copyAccountId(btn) {
 
 /* ---------------- modal ---------------- */
 
+let modalPrevFocus = null;
+
 function openModal(html) {
   const root = document.getElementById("modal-root");
+  modalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   root.innerHTML = `
     <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
-      <div class="modal-wrap"><div class="modal">
-        <button class="modal__close" onclick="closeModal()">${icon("x")}</button>
+      <div class="modal-wrap"><div class="modal" role="dialog" aria-modal="true">
+        <button class="modal__close" onclick="closeModal()" aria-label="Закрыть окно">${icon("x")}</button>
         ${html}
       </div></div>
     </div>`;
+  document.addEventListener("keydown", modalEscHandler);
+  const modal = root.querySelector(".modal");
+  if (modal) { modal.setAttribute("tabindex", "-1"); modal.focus({ preventScroll: true }); }
+}
+
+function modalEscHandler(e) {
+  if (e.key === "Escape") closeModal();
 }
 
 function closeModal() {
-  document.getElementById("modal-root").innerHTML = "";
+  const root = document.getElementById("modal-root");
+  if (!root.innerHTML) return;
+  root.innerHTML = "";
+  document.removeEventListener("keydown", modalEscHandler);
+  if (modalPrevFocus && modalPrevFocus.isConnected) {
+    modalPrevFocus.focus({ preventScroll: true });
+  }
+  modalPrevFocus = null;
 }
 
 /* ---------------- контекстные подсказки ----------------
@@ -709,6 +727,7 @@ async function render() {
   renderSidebar(navRoute);
   renderBottomNav(navRoute);
   renderTopbar();
+  updateDocumentTitle(route);
   const screen = document.getElementById("screen");
   const my = ++renderSeq;
   if (NEEDS_DETAILS.has(route)) {
@@ -777,6 +796,20 @@ async function render() {
 }
 
 window.addEventListener("hashchange", render);
+
+/* Заголовок вкладки повторяет текущий раздел — удобно ориентироваться,
+   когда открыто несколько вкладок или вкладка свёрнута. */
+const ROUTE_TITLES = {
+  dashboard: "Главная", path: "Путь", skill: "Тема", training: "Тренировка",
+  session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
+  daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
+  errors: "Ошибки", trials: "Испытания", stats: "Статистика", profile: "Профиль",
+};
+
+function updateDocumentTitle(route) {
+  const label = ROUTE_TITLES[route] || ROUTE_TITLES.dashboard;
+  document.title = `${label} — EGE CORE`;
+}
 
 /* ============================================================
    Chrome: sidebar / bottomnav / topbar
@@ -913,22 +946,22 @@ function screenDashboard(root) {
 
     <div class="section-title">Быстрый доступ</div>
     <div class="action-cards">
-      <div class="card card--hover action-card" onclick="continueTraining()">
+      <div class="card card--hover action-card" role="button" tabindex="0" onclick="continueTraining()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();continueTraining()}" aria-label="Продолжить обучение">
         <div class="action-card__icon">${icon("training")}</div>
         <div><div class="action-card__title">Продолжить обучение</div>
         <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))}/${DataAPI.lessonStepsCount(openLesson.lesson)}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Текущая тема по рекомендации"}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--warn" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}">
+      <div class="card card--hover action-card action-card--warn" role="button" tabindex="0" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openErrors ? "startErrorsReview()" : "go('errors')"}}" aria-label="Повторить ошибки">
         <div class="action-card__icon">${icon("rotate")}</div>
         <div><div class="action-card__title">Повторить ошибки</div>
         <div class="action-card__sub">${openErrors ? `Открыто ошибок: ${openErrors}` : "Все ошибки закрыты"}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--success" onclick="startDaily()">
+      <div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="startDaily()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();startDaily()}" aria-label="Ежедневная задача">
         <div class="action-card__icon">${icon("zap")}</div>
         <div><div class="action-card__title">Ежедневная задача</div>
         <div class="action-card__sub">${dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${dailyGoal} · +${d.xp} XP`}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--violet" onclick="go('trials')">
+      <div class="card card--hover action-card action-card--violet" role="button" tabindex="0" onclick="go('trials')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('trials')}" aria-label="Испытания">
         <div class="action-card__icon">${icon("crown")}</div>
         <div><div class="action-card__title">Испытания</div>
         <div class="action-card__sub">Боссы и смешанная проверка формы</div></div>
@@ -943,7 +976,7 @@ function screenDashboard(root) {
             const st = s.skillStats[sk.id];
             const acc = st.solved ? Math.round((st.correct / st.solved) * 100) : 0;
             return `
-            <div class="skill-row" onclick="go('skill', '${sk.id}')">
+            <div class="skill-row" role="button" tabindex="0" onclick="go('skill', '${sk.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(skillProgress(sk.id))}
               <div class="skill-row__pct">${skillProgress(sk.id)}%</div>
@@ -961,7 +994,7 @@ function screenDashboard(root) {
         <div class="section-title" style="margin-top:0">Требуют внимания</div>
         <div class="card">
           ${weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
-            <div class="skill-row" onclick="go('skill', '${sk.id}')">
+            <div class="skill-row" role="button" tabindex="0" onclick="go('skill', '${sk.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(prog)}
               <div class="skill-row__pct">${prog}%</div>
