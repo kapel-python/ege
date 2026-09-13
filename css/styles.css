@@ -268,6 +268,8 @@ body {
   background: var(--surface-3);
   color: var(--text-2);
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .chip--accent { background: var(--accent-soft); color: var(--accent); }
 .chip--success { background: var(--success-soft); color: var(--success-ink); }
@@ -960,7 +962,7 @@ body {
 .mission-card__top > :first-child { min-width: 0; }
 .mission-card__title { font-weight: 650; font-size: 15px; }
 .mission-card__path { font-size: 12px; color: var(--muted); }
-.mission-card__reward { margin-left: auto; }
+.mission-card__reward { margin-left: auto; flex-shrink: 0; }
 .mission-card__foot { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
 .mission-card__bar { flex: 1; }
 .mission-card--done { border-color: rgba(61, 220, 151, 0.3); }
