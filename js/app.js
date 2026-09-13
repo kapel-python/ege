@@ -3177,7 +3177,6 @@ function loaderHTML(sub) {
     <div class="ege-loader__title">Загружаем</div>
     <div class="ege-loader__sub" data-loader-sub>${esc(sub || "Открываем страницу…")}</div>
     <div class="ege-loader__bar"><i></i></div>
-    <div class="ege-loader__tip">Совет: <b>15 минут в день</b> держат стрик 🔥</div>
   </div>`;
 }
 
