@@ -1428,6 +1428,32 @@ body {
 }
 .lesson-result-note--ok { color: var(--success-ink); background: var(--success-soft); border-color: rgba(61,220,151,.24); }
 
+/* ============================================================
+   Универсальная загрузка (boot + ожидание деталей каталога).
+   Только var(--…)-токены — работает в обеих темах.
+   ============================================================ */
+.ege-loader { max-width: 340px; margin: 64px auto; text-align: center; padding-top: 34px; padding-bottom: 26px; }
+.ege-loader__orbit { width: 96px; height: 96px; margin: 0 auto 18px; position: relative; display: grid; place-items: center; }
+.ege-loader__orbit::before, .ege-loader__orbit::after { content: ""; position: absolute; border-radius: 50%; border: 3px solid transparent; }
+.ege-loader__orbit::before { inset: 0; border-top-color: var(--accent); border-right-color: var(--accent); animation: ege-spin 1s linear infinite; }
+.ege-loader__orbit::after { inset: 12px; border-top-color: var(--success); opacity: .75; animation: ege-spin 1.9s linear infinite reverse; }
+@keyframes ege-spin { to { transform: rotate(360deg); } }
+.ege-loader__core { width: 54px; height: 54px; border-radius: 17px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 8px 28px var(--accent-glow); animation: ege-pulse 1.7s ease-in-out infinite; }
+@keyframes ege-pulse { 50% { transform: scale(1.07); } }
+.ege-loader__core svg { animation: ege-svgspin 7s linear infinite; filter: drop-shadow(0 0 6px var(--accent-glow)); }
+@keyframes ege-svgspin { to { transform: rotate(360deg); } }
+.ege-loader__brand { font-size: 13px; font-weight: 800; letter-spacing: .22em; color: var(--text-2); }
+.ege-loader__brand span { color: var(--accent); }
+.ege-loader__title { margin-top: 8px; font-size: 16px; font-weight: 800; }
+.ege-loader__title::after { content: ""; animation: ege-dots 1.2s steps(4) infinite; }
+@keyframes ege-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+.ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted); font-family: var(--mono); min-height: 19px; }
+.ege-loader__bar { margin: 14px auto 0; height: 6px; max-width: 240px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.ege-loader__bar > i { display: block; height: 100%; width: 30%; border-radius: 99px; background: linear-gradient(90deg, var(--success), var(--accent)); animation: ege-slide 1.4s ease-in-out infinite; }
+@keyframes ege-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.ege-loader__tip { margin-top: 12px; font-size: 11.5px; color: var(--muted); }
+.ege-loader__tip b { color: var(--text-2); }
+
 @media (max-width: 620px) {
   .lesson-card { padding: 21px 17px; }
   .lesson-answer-grid, .lesson-answer-grid--multiple { grid-template-columns: 1fr; }
