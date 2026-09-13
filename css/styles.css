@@ -908,7 +908,8 @@ body {
   font-weight: 700;
   box-shadow: 0 0 16px var(--accent-glow);
 }
-.lesson-token--dim { opacity: 0.28; }
+/* Приглушённые токены остаются читаемыми (это требование механизма Focus,
+   а не отдельных уроков): нижний порог непрозрачности, без фильтров. */
 
 /* ---------- result screens ---------- */
 
@@ -1408,7 +1409,7 @@ body {
   to { transform: none; }
 }
 .lesson-token { transition: opacity .3s ease, background .3s ease, color .3s ease, box-shadow .3s ease, transform .3s ease; }
-.lesson-token--dim { opacity: .18; filter: saturate(.45); }
+.lesson-token--dim { opacity: .65; }
 .lesson-answer-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 24px; }
 .lesson-answer-grid--multiple { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
 .lesson-answer-field { display: block; min-width: 0; }

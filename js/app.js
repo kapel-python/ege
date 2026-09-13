@@ -233,18 +233,95 @@ function esc(s) {
    Нормализация ниже сохраняет совместимость со старыми строками каталога. */
 function mathText(value) {
   const source = String(value == null ? "" : value).replace(/\r\n?/g, "\n");
-  const supers = { "⁰":"0", "¹":"1", "²":"2", "³":"3", "⁴":"4", "⁵":"5", "⁶":"6", "⁷":"7", "⁸":"8", "⁹":"9", "⁻":"-" };
-  const subs = { "₀":"0", "₁":"1", "₂":"2", "₃":"3", "₄":"4", "₅":"5", "₆":"6", "₇":"7", "₈":"8", "₉":"9", "₋":"-" };
+  const supers = { "⁰":"0", "¹":"1", "²":"2", "³":"3", "⁴":"4", "⁵":"5", "⁶":"6", "⁷":"7", "⁸":"8", "⁹":"9", "⁻":"-", "ⁿ":"n" };
+  const subs = { "₀":"0", "₁":"1", "₂":"2", "₃":"3", "₄":"4", "₅":"5", "₆":"6", "₇":"7", "₈":"8", "₉":"9", "₋":"-", "ₙ":"n" };
+  // Сбалансированные скобки: `2^(log_2(log_2(x)))` и `log_2(log_2(x))`
+  // нельзя разобрать классом [^()]+ — сканируем до парной закрывающей.
+  const closeParen = (text, openIdx) => {
+    let depth = 0;
+    for (let i = openIdx; i < text.length; i++) {
+      const c = text[i];
+      if (c === "(") depth++;
+      else if (c === ")") { depth--; if (!depth) return i; }
+      else if (c === "\n") return -1;
+    }
+    return -1;
+  };
+  // Все формы логарифма одним проходом слева направо. Обязательно ДО
+  // правил степеней/подстрочников ниже: те превратили бы `log₂(8)`
+  // в `log_{2}(8)` (курсивный «log» вместо прямого) и `log_2x` в `log_{2x}`.
+  // Понимает: log_2(x), log_a(b), log_10(x), log₀.₆(x), log_2x, log_4²x,
+  // вложенные log_2(log_2(x)) — аргумент разбирается рекурсивно.
+  const convertLog = (text) => {
+    const re = /(^|[^A-Za-z])log(?:_(\d+(?:\.\d+)?|[A-Za-z])([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]*)|_?((?:[₀₁₂₃₄₅₆₇₈₉₋]+(?:\.[₀₁₂₃₄₅₆₇₈₉₋]+)?))((?:[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)?))?/gi;
+    let out = "", cursor = 0, m;
+    while ((m = re.exec(text))) {
+      const after = m.index + m[0].length;
+      const next = text[after] || "";
+      const asciiBase = m[2], asciiPow = m[3], uniBase = m[4], uniPow = m[5];
+      // `log` внутри слова (catalog, dialog, logarithm) — не наша конструкция.
+      if (!asciiBase && !uniBase && /[A-Za-z0-9_]/.test(next)) {
+        out += text.slice(cursor, m.index + m[0].length);
+        cursor = m.index + m[0].length;
+        continue;
+      }
+      let base = "";
+      if (asciiBase) base = asciiBase;
+      else if (uniBase) base = [...uniBase].map((c) => (c === "." ? "." : (subs[c] || c))).join("");
+      let pow = "";
+      if (asciiPow || uniPow) pow = [...(asciiPow || uniPow)].map((c) => supers[c] || c).join("");
+      // Аргумент в скобках (пробел между log и скобкой допускаем).
+      let j = after;
+      while (text[j] === " ") j++;
+      let cmd;
+      if (!base && !pow && next !== "(" && text[j] !== "(") {
+        cmd = "\\log "; // голое упоминание `log` в тексте — прямой шрифт
+        out += text.slice(cursor, m.index) + m[1] + cmd;
+        cursor = after;
+        continue;
+      }
+      cmd = `\\log${base ? `_{${base}}` : ""}${pow ? `^{${pow}}` : ""}`;
+      if (text[j] === "(") {
+        const end = closeParen(text, j);
+        if (end < 0) {
+          out += text.slice(cursor, m.index) + m[1] + cmd + text.slice(after, j + 1);
+          cursor = j + 1;
+          continue;
+        }
+        cmd += `\\left(${convertLog(text.slice(j + 1, end))}\\right)`;
+        out += text.slice(cursor, m.index) + m[1] + cmd;
+        cursor = end + 1;
+      } else {
+        out += text.slice(cursor, m.index) + m[1] + cmd + " ";
+        cursor = after;
+      }
+    }
+    return out + text.slice(cursor);
+  };
+  // Остаток `основание^(...)` со скобками внутри (простой случай [^()]+
+  // разобран ниже основной цепочкой): 2^(\log_{2}\left(9\right)).
+  const convertCaret = (text) => {
+    let out = text, guard = 0;
+    for (;;) {
+      const m = /([A-Za-zА-Яа-я0-9)}\]])\^\(/.exec(out);
+      if (!m || guard++ > 20) break;
+      const openIdx = m.index + m[0].length - 1;
+      const end = closeParen(out, openIdx);
+      if (end < 0) break;
+      out = `${out.slice(0, m.index)}${m[1]}^{${out.slice(openIdx + 1, end)}}${out.slice(end + 1)}`;
+    }
+    return out;
+  };
   const normalizeLegacy = (text) => {
     // Legacy catalog strings contain bare expressions (x², √(...), log_a(x)).
     // Collect the whole Latin/numeric/operator run before adding delimiters;
     // wrapping individual superscripts was the source of mixed typography.
-    const convert = (raw) => raw
+    const convert = (raw) => convertCaret(convertLog(raw)
       .replace(/([A-Za-zА-Яа-я0-9])⃗/g, "\\vec{$1}")
-      .replace(/([A-Za-zА-Яа-я0-9)])([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)/g, (_m, base, power) => `${base}^{${[...power].map((c) => supers[c] || c).join("")}}`)
-      .replace(/([A-Za-zА-Яа-я0-9)])([₀₁₂₃₄₅₆₇₈₉₋]+)/g, (_m, base, sub) => `${base}_{${[...sub].map((c) => subs[c] || c).join("")}}`)
-      .replace(/([A-Za-zА-Яа-я0-9)])\^\(([^()\n]+)\)/g, "$1^{$2}")
-      .replace(/([A-Za-zА-Яа-я0-9)])\^([−-]?[A-Za-zА-Яа-я0-9]+)/g, "$1^{$2}")
+      .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])([⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻]+)/g, (_m, base, power) => `${base}^{${[...power].map((c) => supers[c] || c).join("")}}`)
+      .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])([₀₁₂₃₄₅₆₇₈₉₋ₙ]+)/g, (_m, base, sub) => `${base}_{${[...sub].map((c) => subs[c] || c).join("")}}`)
+      .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])\^\(([^()\n]+)\)/g, "$1^{$2}")
+      .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])\^([−-]?[A-Za-zА-Яа-я0-9]+)/g, "$1^{$2}")
       // A bare multi-letter subscript (S_CDE, S_ABF, S_MAK, ...) reaches this
       // point unbraced -- LaTeX/KaTeX subscripts only the first character
       // after `_` unless braced, so "S_CDE" rendered as "S" with a small "C"
@@ -259,7 +336,7 @@ function mathText(value) {
       .replace(/(\d+)\s*\/\s*(\d+)/g, "\\frac{$1}{$2}")
       .replace(/\blog_([A-Za-z0-9.]+)\(([^()\n]+)\)/gi, "\\log_{$1}\\left($2\\right)")
       .replace(/\blog([₀₁₂₃₄₅₆₇₈₉₋]+)\(([^()\n]+)\)/gi, (_x, base, arg) => `\\log_{${[...base].map((c) => subs[c] || c).join("")}}\\left(${arg}\\right)`)
-      .replace(/(sin|cos|tan)(?=[A-Za-z0-9(²³⁻])/gi, "\\$1")
+      .replace(/(^|[^A-Za-z\\])(sin|cos|tan)(?=[A-Za-z0-9_(^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻])/gi, "$1\\$2 ")
       .replace(/±/g, "\\pm")
       .replace(/∠/g, "\\angle ")
       .replace(/∥/g, "\\parallel ")
@@ -268,11 +345,31 @@ function mathText(value) {
       .replace(/ε/g, "\\varepsilon ")
       .replace(/∞/g, "\\infty ")
       .replace(/∪/g, "\\cup ")
-      .replace(/−/g, "-");
-    const mathRun = /(?:√|[A-Za-z0-9(∠])(?:[A-Za-z0-9π∞′°'^²³⁻₀₁₂₃₄₅₆₇₈₉_()+{}\-−*/=·.,;:<>\[\]\\ ±⃗∠∥Σαε∞∪]|√)*/g;
+      .replace(/∩/g, "\\cap ")
+      .replace(/⊥/g, "\\perp ")
+      .replace(/∈/g, "\\in ")
+      .replace(/≠/g, "\\ne ")
+      .replace(/≤/g, "\\le ")
+      .replace(/≥/g, "\\ge ")
+      .replace(/≈/g, "\\approx ")
+      .replace(/⇒/g, "\\Rightarrow ")
+      .replace(/⟺/g, "\\iff ")
+      .replace(/→/g, "\\to ")
+      .replace(/×/g, "\\times ")
+      .replace(/·/g, "\\cdot ")
+      .replace(/%/g, "\\%")
+      .replace(/π/g, "\\pi ")
+      .replace(/θ/g, "\\theta ")
+      .replace(/τ/g, "\\tau ")
+      .replace(/ω/g, "\\omega ")
+      .replace(/Δ/g, "\\Delta ")
+      .replace(/⌊/g, "\\lfloor ")
+      .replace(/⌋/g, "\\rfloor ")
+      .replace(/−/g, "-"));
+    const mathRun = /(?:√|[A-Za-z0-9(∠\-−π∞θτωΔ|])(?:[A-Za-z0-9π∞θτωΔ′°'^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ_()+{}\-−*/=·×.,;:<>|\[%√\]\\ ±⃗∠∥Σαε∞∪∩⊥≈→⇒⟺≤≥≠∈⌊⌋]|√)*/g;
     return text.replace(mathRun, (run) => {
       const trimmed = run.trim();
-      if (!trimmed || !(/[0-9=√^²³⁻₀₁₂₃₄₅₆₇₈₉∠∥Σαε∞∪⃗]|\b(?:log|sin|cos|tan)\b/i.test(trimmed))) return run;
+      if (!trimmed || !(/[0-9=√^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ∠∥Σαε∞∪⃗×·≈→⇒⟺≤≥≠∈∩⊥|%θτωΔ⌊⌋]|\b(?:log|sin|cos|tan)\b/i.test(trimmed))) return run;
       const lead = run.slice(0, run.indexOf(trimmed));
       const trail = run.slice(run.indexOf(trimmed) + trimmed.length);
       return `${lead}\\(${convert(trimmed)}\\)${trail}`;
