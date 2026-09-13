@@ -249,6 +249,7 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   border-radius: var(--radius);
   padding: 14px 16px;
   cursor: pointer;
+  min-width: 0;
   transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 .a-user-card:hover {
@@ -396,8 +397,9 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .admin-topbar { padding: 11px 14px; }
   .a-user-head__actions { margin-left: 0; width: 100%; }
   .a-toolbar .a-input { max-width: none; flex: 1; }
-  .a-user-grid { grid-template-columns: 1fr; gap: 10px; }
+  .a-user-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .a-user-card { padding: 12px 14px; }
+  .a-user-card__foot { flex-wrap: wrap; row-gap: 6px; }
 
   .admin-bottomnav {
     display: flex;
