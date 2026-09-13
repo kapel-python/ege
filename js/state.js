@@ -1032,14 +1032,15 @@ function nextStepCandidates() {
       const snap = snaps[sk.id];
       if (!snap.lesson || mentioned.has(sk.id)) return false;
       if (!snap.lessonDone) return true;
-      return snap.progress < 45 && snap.accuracy !== null && snap.accuracy < 0.5;
+      // Пол пройденного урока — 40 теории, зазор 15 очков практики поверх.
+      return snap.progress < 55 && snap.accuracy !== null && snap.accuracy < 0.5;
     });
     const weakTheory = pool.filter((sk) => {
       const snap = snaps[sk.id];
       return (snap.solved === 0 && snap.progress < 35)
         || (snap.accuracy !== null && snap.accuracy < 0.5 && snap.progress < 60)
         || (snap.fatigued && snap.recentAccuracy !== null && snap.recentAccuracy < 0.5)
-        || (snap.lessonDone && snap.progress < 45 && snap.accuracy !== null && snap.accuracy < 0.5);
+        || (snap.lessonDone && snap.progress < 55 && snap.accuracy !== null && snap.accuracy < 0.5);
       /* Доказанный пробел (открытые ошибки, низкая точность) важнее
          «чистого нуля»: тему, в которой ученик уже споткнулся, закрывать
          раньше, чем просто первую нетронутую в каталоге. */
