@@ -48,7 +48,7 @@ ACCOUNT_ID_MAX_ATTEMPTS = 25
 # Static-file allowlist guardrails: anything under these top-level directories,
 # any dot-prefixed path and these file types are never served over HTTP. The DB
 # file alone (session tokens!) makes this a hard requirement, not a nicety.
-BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test"}
+BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui"}
 BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
 MAX_BODY_BYTES = 10 * 1024 * 1024
 # Server-side caps for client-controlled collections. The client caps these
@@ -63,6 +63,7 @@ MAX_LESSON_ERROR_HISTORY = 1000
 MAX_DIAGNOSTICS = 2000
 MAX_DAILY_HISTORY = 400
 MAX_BOSSES = 500
+MAX_TIMELINE_TEXT = 1000
 MAX_FORECAST_HISTORY = 500
 MAX_ACTIVITY_DAYS = 2000
 MAX_STATE_DICT = 2000
@@ -977,47 +978,128 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     for table in ("user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts", "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons", "user_missions", "user_bosses", "user_achievements", "activity_history", "forecast_history", "daily_progress", "timeline", "diagnostics"):
         conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
     for skill_id, value in (s.get("skillStats") or {}).items():
-        if skill_id in valid_skills:
-            conn.execute("INSERT INTO user_progress VALUES (?,?,?,?,?,?)", (user_id, skill_id, int(value.get("progress", 0)), int(value.get("solved", 0)), int(value.get("correct", 0)), float(value.get("timeSec", 0))))
-    for level, count in (s.get("hintLevels") or {}).items(): conn.execute("INSERT INTO user_hint_levels VALUES (?,?,?)", (user_id, int(level), int(count)))
+        # Одна битая запись раньше роняла весь PUT (int("abc") -> ValueError,
+        # float(None) -> TypeError, который вообще не ловился в do_PUT):
+        # пропускаем мусор, остальное сохраняем.
+        if skill_id not in valid_skills or not isinstance(value, dict):
+            continue
+        try:
+            progress = int(value.get("progress", 0))
+            solved = int(value.get("solved", 0))
+            correct = int(value.get("correct", 0))
+            time_sec = float(value.get("timeSec", 0))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= progress <= 100 or solved < 0 or correct < 0 or time_sec < 0:
+            continue
+        conn.execute("INSERT INTO user_progress VALUES (?,?,?,?,?,?)", (user_id, skill_id, progress, solved, correct, time_sec))
+    for level, count in (s.get("hintLevels") or {}).items():
+        try:
+            conn.execute("INSERT INTO user_hint_levels VALUES (?,?,?)", (user_id, int(level), int(count)))
+        except (TypeError, ValueError):
+            continue
     valid_task_ids = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
     for item in s.get("taskAttempts") or []:
-        if item.get("taskId") in valid_task_ids:
-            conn.execute("INSERT INTO task_attempts(user_id,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id, item["taskId"], item.get("skill", ""), int(bool(item.get("correct"))), int(item.get("hintLevel", 0)), float(item.get("seconds", 0)), item.get("closesTaskId"), item.get("ts") or now_iso()))
+        # task_attempts.skill_id и user_errors.skill_id — FK на skills: чужой
+        # skill ронял весь PUT через IntegrityError, числовой мусор — через
+        # ValueError. Одну запись скипаем, остальные сохраняем.
+        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
+            continue
+        try:
+            hint_level = int(item.get("hintLevel", 0))
+            seconds = float(item.get("seconds", 0))
+        except (TypeError, ValueError):
+            continue
+        closes = item.get("closesTaskId")
+        if closes is not None and not isinstance(closes, str):
+            closes = None
+        conn.execute("INSERT INTO task_attempts(user_id,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id, item["taskId"], item["skill"], int(bool(item.get("correct"))), hint_level, seconds, closes, item.get("ts") or now_iso()))
     for item in s.get("errors") or []:
-        if item.get("taskId") in valid_task_ids:
-            conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?)", (user_id, item["taskId"], item.get("skill", ""), item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
+        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
+            continue
+        conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?)", (user_id, item["taskId"], item["skill"], item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
     lesson_ids = {r["id"] for r in conn.execute("SELECT id FROM lessons")}
     for item in s.get("lessonAttempts") or []:
-        if item.get("lessonId") in lesson_ids: conn.execute("INSERT INTO lesson_attempts(user_id,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),int(item.get("xp",0)),int(item.get("wrongAttempts",0)),float(item.get("durationSec",0)),item.get("ts") or now_iso()))
+        if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids:
+            continue
+        try:
+            xp_v = int(item.get("xp", 0))
+            wrong_v = int(item.get("wrongAttempts", 0))
+            dur_v = float(item.get("durationSec", 0))
+        except (TypeError, ValueError):
+            continue
+        conn.execute("INSERT INTO lesson_attempts(user_id,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),xp_v,wrong_v,dur_v,item.get("ts") or now_iso()))
     for key, item in (s.get("lessonStepErrors") or {}).items():
         # Битый ключ без ":" раньше ронял весь PUT через ValueError — одно
         # поле ломало любое сохранение. Пропускаем мусор молча.
         if not isinstance(key, str) or ":" not in key or not isinstance(item, dict):
             continue
         lesson_id, step_id = key.split(":", 1)
-        if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_step_errors VALUES(?,?,?,?,?,?,?)", (user_id,lesson_id,step_id,item.get("skill", ""),int(item.get("count",0)),item.get("ts") or now_iso(),json.dumps(item.get("types",{}),ensure_ascii=False)))
+        if lesson_id not in lesson_ids or item.get("skill") not in valid_skills:
+            continue
+        try:
+            count_v = int(item.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        try:
+            types_json = json.dumps(item.get("types", {}), ensure_ascii=False)
+        except (TypeError, ValueError):
+            types_json = "{}"
+        conn.execute("INSERT INTO lesson_step_errors VALUES(?,?,?,?,?,?,?)", (user_id,lesson_id,step_id,item["skill"],count_v,item.get("ts") or now_iso(),types_json))
     for item in s.get("lessonErrorHistory") or []:
-        if item.get("lessonId") in lesson_ids: conn.execute("INSERT INTO lesson_error_history(user_id,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?)", (user_id,item["lessonId"],item["stepId"],item.get("skill", ""),item.get("type", ""),item.get("ts") or now_iso()))
+        # lesson_error_history.skill_id — FK на skills (проверено: чужой skill
+        # ронял весь PUT). stepId обязан быть строкой (NOT NULL без дефолта).
+        if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids or item.get("skill") not in valid_skills:
+            continue
+        conn.execute("INSERT INTO lesson_error_history(user_id,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?)", (user_id,item["lessonId"],item.get("stepId") or "",item["skill"],item.get("type", ""),item.get("ts") or now_iso()))
     for lesson_id, item in (s.get("lessonSessions") or {}).items():
         if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_sessions VALUES(?,?,?)", (user_id,lesson_id,json.dumps(item,ensure_ascii=False)))
     for lesson_id, item in (s.get("completedLessons") or {}).items():
         if lesson_id in lesson_ids: conn.execute("INSERT INTO completed_lessons VALUES(?,?,?)", (user_id,lesson_id,item.get("ts") or now_iso()))
     mission_ids = {r["id"] for r in conn.execute("SELECT id FROM missions")}
+    missions_done_map = s.get("missionsDone") if isinstance(s.get("missionsDone"), dict) else {}
     for mission_id, progress in (s.get("missionProgress") or {}).items():
-        if mission_id in mission_ids: conn.execute("INSERT INTO user_missions(user_id,mission_id,progress,completed_at) VALUES(?,?,?,?)", (user_id,mission_id,int(progress or 0),(s.get("missionsDone") or {}).get(mission_id,{}).get("ts")))
+        if mission_id not in mission_ids:
+            continue
+        try:
+            progress_v = int(progress or 0)
+        except (TypeError, ValueError):
+            continue
+        done_entry = missions_done_map.get(mission_id)
+        done_ts = done_entry.get("ts") if isinstance(done_entry, dict) else None
+        conn.execute("INSERT INTO user_missions(user_id,mission_id,progress,completed_at) VALUES(?,?,?,?)", (user_id,mission_id,progress_v,done_ts))
     boss_ids = {r["id"] for r in conn.execute("SELECT id FROM bosses")}
-    # dict.fromkeys убирает дубли (иначе UNIQUE constraint роняет весь PUT),
-    # неизвестные id отбрасываем (иначе FOREIGN KEY роняет весь PUT).
-    for boss_id in dict.fromkeys(s.get("bossesDefeated") or []):
-        if boss_id in boss_ids:
-            conn.execute("INSERT INTO user_bosses VALUES(?,?,?)", (user_id, boss_id, now_iso()))
+    # Дубли/мусор раньше роняли весь PUT (UNIQUE / FOREIGN KEY / TypeError на
+    # нехешируемых типах): дедуплицируем безопасно, чужое отбрасываем.
+    seen_bosses = set()
+    for boss_id in (s.get("bossesDefeated") or []):
+        if not isinstance(boss_id, str) or boss_id in seen_bosses or boss_id not in boss_ids:
+            continue
+        seen_bosses.add(boss_id)
+        conn.execute("INSERT INTO user_bosses VALUES(?,?,?)", (user_id, boss_id, now_iso()))
     achievement_ids = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
-    for achievement_id, item in (s.get("achievements") or {}).items():
-        if achievement_id in achievement_ids:
-            conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id, achievement_id, item.get("ts") or now_iso()))
-    for activity_date, value in (s.get("activity") or {}).items(): conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
-    for item in s.get("forecastHistory") or []: conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
+    achievements_map = s.get("achievements") if isinstance(s.get("achievements"), dict) else {}
+    for achievement_id, item in achievements_map.items():
+        if achievement_id not in achievement_ids:
+            continue
+        # Значение-не-словарь раньше роняло PUT через AttributeError, который
+        # даже не ловился в do_PUT (обрыв соединения без JSON-ошибки).
+        ts = item.get("ts") if isinstance(item, dict) else None
+        conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id, achievement_id, ts or now_iso()))
+    for activity_date, value in (s.get("activity") or {}).items():
+        if not isinstance(activity_date, str) or not isinstance(value, dict):
+            continue
+        try:
+            conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
+        except (TypeError, ValueError):
+            continue
+    for item in s.get("forecastHistory") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
+        except (TypeError, ValueError, KeyError):
+            continue
     # XP adjustments are an append-only audit log that derives straight into
     # XP, so the sync path must NEVER mint new rows — a client could otherwise
     # award itself arbitrary XP with {"amount": N}. The only writer is
@@ -1026,16 +1108,31 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
     #
     daily_records = {}
     for item in s.get("dailyHistory") or []:
-        if item.get("date"): daily_records[item["date"]] = item
-    daily = s.get("daily") or {}
+        if isinstance(item, dict) and item.get("date"): daily_records[item["date"]] = item
+    daily = s.get("daily") if isinstance(s.get("daily"), dict) else {}
     if daily.get("date"): daily_records[daily["date"]] = daily
     for progress_date, item in daily_records.items():
-        selected_task_ids = [str(task_id) for task_id in (item.get("taskIds") or [])]
+        task_ids = item.get("taskIds")
+        selected_task_ids = [str(task_id) for task_id in task_ids] if isinstance(task_ids, list) else []
+        try:
+            solved_v = int(item.get("solved", 0))
+        except (TypeError, ValueError):
+            solved_v = 0
         conn.execute("INSERT INTO daily_progress(user_id,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?)",
-                     (user_id,progress_date,int(item.get("solved",0)),int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
-    for item in s.get("timeline") or []: conn.execute("INSERT INTO timeline(user_id,created_at,text) VALUES(?,?,?)", (user_id,item.get("ts") or now_iso(),item.get("text", "")))
+                     (user_id,progress_date,solved_v,int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
+    for item in s.get("timeline") or []:
+        # Текст записи был без потолка (проверено: 200 КБ пишется в БД и затем
+        # грузится на каждый bootstrap): режем до MAX_TIMELINE_TEXT.
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text", "")
+        if not isinstance(text, str):
+            text = str(text)
+        conn.execute("INSERT INTO timeline(user_id,created_at,text) VALUES(?,?,?)", (user_id,item.get("ts") or now_iso(),text[:MAX_TIMELINE_TEXT]))
     for item in s.get("diagnostics") or []:
-        if item.get("taskId") in valid_task_ids: conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
+        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids:
+            continue
+        conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
 # ---------------------------------------------------------------------------
@@ -1553,9 +1650,17 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     bosses_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM bosses")}
     daily_xp = _daily_xp(conn)
 
+    def _attempt_sort_key(a) -> int:
+        # Смешанные типы ts (строка + число) раньше роняли сортировку через
+        # TypeError вне except-блоков do_PUT — save обрывался без JSON-ошибки.
+        try:
+            return int(a.get("ts") or 0)
+        except (TypeError, ValueError, AttributeError):
+            return 0
+
     attempts = sorted(
-        (a for a in (state.get("taskAttempts") or []) if a.get("taskId") in tasks),
-        key=lambda a: a.get("ts") or 0,
+        (a for a in (state.get("taskAttempts") or []) if isinstance(a, dict) and a.get("taskId") in tasks),
+        key=_attempt_sort_key,
     )
 
     xp = 0
@@ -1567,8 +1672,13 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     solved_once = set()  # полный бонус за верное решение — один раз; повтор даёт только минимум попытки
 
     for a in attempts:
+        # Числовой мусор в одной попытке (hintLevel="abc") раньше ронял весь
+        # derive через ValueError — запись скипается, как в write_state.
+        try:
+            hint_level = int(a.get("hintLevel") or 0)
+        except (TypeError, ValueError):
+            continue
         total_solved += 1
-        hint_level = int(a.get("hintLevel") or 0)
         if hint_level > 0:
             hints_used += 1
         is_correct = bool(a.get("correct")) and hint_level < 3
@@ -1590,6 +1700,8 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     # resolved:true в payload рисует +15 XP из ничего за каждую запись.
     counted_err_tasks = set()
     for e in state.get("errors") or []:
+        if not isinstance(e, dict):
+            continue
         task_id = e.get("taskId")
         if (e.get("resolved") and task_id in tasks and task_id in solved_once
                 and task_id not in counted_err_tasks):
@@ -1604,16 +1716,22 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     # раньше давал +daily_xp за каждую выдуманную дату.
     correct_by_date: dict[str, set] = {}
     for a in attempts:
-        if bool(a.get("correct")) and int(a.get("hintLevel") or 0) < 3:
+        try:
+            _hl = int(a.get("hintLevel") or 0)
+        except (TypeError, ValueError):
+            continue
+        if bool(a.get("correct")) and _hl < 3:
             d = _msk_date_key(a.get("ts"))
             if d:
                 correct_by_date.setdefault(d, set()).add(a.get("taskId"))
     dates_done = set()
     for entry in (list(state.get("dailyHistory") or []) + [state.get("daily") or {}]):
+        if not isinstance(entry, dict):
+            continue
         if not (entry.get("done") and entry.get("date")):
             continue
-        task_ids = entry.get("taskIds") or []
-        if not task_ids:
+        task_ids = entry.get("taskIds")
+        if not isinstance(task_ids, list) or not task_ids:
             continue
         solved = len(set(task_ids) & correct_by_date.get(entry["date"], set()))
         if solved >= len(task_ids):
@@ -1634,6 +1752,8 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     steps_caps = _lesson_steps_caps(conn)
     steps_counted = set()
     for item in state.get("lessonAttempts") or []:
+        if not isinstance(item, dict):
+            continue
         lesson_id = item.get("lessonId")
         if (item.get("firstCompletion") and lesson_id in completed_lessons
                 and lesson_id not in steps_counted):
@@ -1645,10 +1765,17 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
             xp += steps_xp
             steps_counted.add(lesson_id)
 
-    for mission_id in (state.get("missionsDone") or {}).keys():
+    missions_done = state.get("missionsDone") if isinstance(state.get("missionsDone"), dict) else {}
+    for mission_id in missions_done.keys():
         xp += missions_xp.get(mission_id, 0)
 
-    for boss_id in set(state.get("bossesDefeated") or []):
+    # Нехешируемый мусор в списке раньше ронял set() через TypeError вне
+    # except-блоков do_PUT. Итерируем безопасно, чужое игнорим.
+    seen_boss_ids = set()
+    for boss_id in (state.get("bossesDefeated") or []):
+        if not isinstance(boss_id, str) or boss_id in seen_boss_ids:
+            continue
+        seen_boss_ids.add(boss_id)
         xp += bosses_xp.get(boss_id, 0)
 
     # Manual XP adjustments (admin grants). The persisted log is the ONLY
@@ -1731,12 +1858,17 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     if not isinstance(state.get("bossesDefeated", []), list): raise ValueError("bossesDefeated must be an array")
     if len(state.get("bossesDefeated") or []) > MAX_BOSSES: raise ValueError("bossesDefeated too large")
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills")}
-    for skill_id, value in (state.get("skillStats") or {}).items():
-        if skill_id not in valid_skills: raise ValueError(f"unknown skill: {skill_id}")
-        if not isinstance(value, dict) or not 0 <= float(value.get("progress", 0)) <= 100: raise ValueError(f"invalid progress: {skill_id}")
+    # skillStats позаписно не валидируем: битые значения отбрасывает
+    # write_state, а отклонение всего PUT из-за одной записи — тот самый
+    # класс багов «ломают сохранение» (см. taskAttempts ниже).
     valid_tasks = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
     for item in state.get("taskAttempts") or []:
-        if not isinstance(item, dict) or item.get("skill") not in valid_skills: raise ValueError("invalid task attempt")
+        # Одна битая попытка из тысяч раньше отклоняла весь PUT целиком —
+        # теперь такие записи пропускаются (write_state/derive фильтруют так же).
+        if not isinstance(item, dict):
+            continue
+        if item.get("skill") not in valid_skills:
+            continue
         # taskId может ссылаться на удалённую/заблокированную задачу из старой
         # истории — не отклоняем весь PUT, просто игнорируем её при подсчёте XP
         # и не пишем в БД (write_state фильтрует так же). Строгая проверка
@@ -1956,14 +2088,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             conn = connect()
             try:
+                # Read-only срезы каталога не заводят аккаунт: каждая такая
+                # выдача раньше писала строку в users (спам-аккаунты раздувают
+                # БД, а rows без активности висят навсегда).
+                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn)); return
+                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn)); return
                 user_id, token = user_for(conn, self)
                 if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
                 # Лёгкий bootstrap для первой отрисовки: каталог без текстов
                 # заданий и шагов уроков (~20 КБ вместо ~280 КБ). Полные данные
                 # догружаются через /api/catalog-tasks и /api/catalog-lessons.
                 if path == "/api/bootstrap-lite": self.send_json({"catalog": catalog_summary_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
-                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn), token=token); return
-                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn), token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':
@@ -2054,7 +2189,10 @@ class Handler(BaseHTTPRequestHandler):
             write_state(conn, user_id, payload)
             conn.commit()
             self.send_json({"ok": True}, token=token)
-        except (ValueError, KeyError, sqlite3.Error, json.JSONDecodeError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+            # TypeError/AttributeError сюда добавили осознанно: раньше битая
+            # запись (float(None), item.get на строке) обрывала соединение без
+            # JSON-ошибки — клиент видел «Не удалось сохранить» без причины.
             conn.rollback(); self.send_json({"error": f"State was not saved: {exc}"}, 400)
         finally: conn.close()
 
