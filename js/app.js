@@ -332,8 +332,8 @@ function mathText(value) {
       .replace(/([A-Za-zА-Яа-я0-9)])_([A-Za-z0-9]{2,})/g, "$1_{$2}")
       .replace(/√\(([^()\n]+)\)/g, "\\sqrt{$1}")
       .replace(/√([A-Za-zА-Яа-я0-9]+)/g, "\\sqrt{$1}")
-      .replace(/\(([^()\n]+)\)\s*\/\s*(\d+[A-Za-z]+|\d+|[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9]*)/g, "\\frac{$1}{$2}")
-      .replace(/(\d+)\s*\/\s*(\d+)/g, "\\frac{$1}{$2}")
+      .replace(/\(([^()\n]+)\)\s*\/\s*(\d+(?:\.\d+)?[A-Za-z]+|\d+(?:\.\d+)?|[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9]*)/g, "\\frac{$1}{$2}")
+      .replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, "\\frac{$1}{$2}")
       .replace(/\blog_([A-Za-z0-9.]+)\(([^()\n]+)\)/gi, "\\log_{$1}\\left($2\\right)")
       .replace(/\blog([₀₁₂₃₄₅₆₇₈₉₋]+)\(([^()\n]+)\)/gi, (_x, base, arg) => `\\log_{${[...base].map((c) => subs[c] || c).join("")}}\\left(${arg}\\right)`)
       .replace(/(^|[^A-Za-z\\])(sin|cos|tan)(?=[A-Za-z0-9_(^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻])/gi, "$1\\$2 ")
@@ -367,12 +367,23 @@ function mathText(value) {
       .replace(/⌋/g, "\\rfloor ")
       .replace(/−/g, "-"));
     const mathRun = /(?:√|[A-Za-z0-9(∠\-−π∞θτωΔ|])(?:[A-Za-z0-9π∞θτωΔ′°'^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ_()+{}\-−*/=·×.,;:<>|\[%√\]\\ ±⃗∠∥Σαε∞∪∩⊥≈→⇒⟺≤≥≠∈⌊⌋]|√)*/g;
-    return text.replace(mathRun, (run) => {
-      const trimmed = run.trim();
+    return text.replace(mathRun, (run, offset, full) => {
+      let trimmed = run.trim();
       if (!trimmed || !(/[0-9=√^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ∠∥Σαε∞∪⃗×·≈→⇒⟺≤≥≠∈∩⊥|%θτωΔ⌊⌋]|\b(?:log|sin|cos|tan)\b/i.test(trimmed))) return run;
       const lead = run.slice(0, run.indexOf(trimmed));
-      const trail = run.slice(run.indexOf(trimmed) + trimmed.length);
-      return `${lead}\\(${convert(trimmed)}\\)${trail}`;
+      let trail = run.slice(run.indexOf(trimmed) + trimmed.length);
+      // Точка в конце предложения (…+ 1). Сейчас она заглатывается внутрь
+      // формулы и рисуется жирным внутри KaTeX — как на скриншоте
+      // «X × (1.2² + 1.2 + 1).» Выносим её в обычный текст.
+      let dot = "";
+      if (trimmed.length > 1 && trimmed.endsWith(".")) {
+        const next = (full && full[offset + run.length]) || "";
+        if (next === "" || next === "\n" || /\s/.test(next) || /[А-Яа-яЁё]/.test(next)) {
+          trimmed = trimmed.slice(0, -1);
+          dot = ".";
+        }
+      }
+      return `${lead}\\(${convert(trimmed)}\\)${dot}${trail}`;
     });
   };
   const protectExplicit = /\\\[[\s\S]*?\\\]|\\\([^\n]*?\\\)/g;
