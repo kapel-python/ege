@@ -305,12 +305,13 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-chart { width: 100%; height: auto; display: block; }
 .a-chart .grid-line { stroke: var(--border); stroke-width: 1; }
 .a-chart .axis-label { fill: var(--muted); font-size: 10px; font-family: var(--font); }
-.a-chart .bar { fill: var(--accent); transition: opacity 0.12s; }
+.a-chart .bar { fill: var(--accent); transition: opacity 0.12s; pointer-events: none; }
+.a-chart .bar-label { pointer-events: none; }
 .a-chart .bar--empty { fill: var(--surface-3); stroke: var(--border); stroke-width: 1; }
 .a-chart .bar--selected { stroke: var(--text-2); stroke-width: 2; }
 .a-chart .bar-hit { fill: transparent; }
 .a-chart .bar-hit--active { cursor: pointer; }
-.a-chart .bar-hit--active:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.a-chart .bar-hit--active, .a-chart .bar-hit--empty { outline: none; }
 .a-chart .bar-hit--empty { cursor: default; }
 .a-chart .bar-hit--active:hover + .bar, .a-chart g:hover .bar--selected { opacity: 0.82; }
 .a-chart .bar-label { fill: var(--text-2); font-size: 10px; font-family: var(--mono); }
