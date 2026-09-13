@@ -385,11 +385,8 @@ function forecastCoverage() {
 function forecastNoteHTML() {
   const c = forecastCoverage();
   if (c.full) return "Прогноз на основе всех пройденных уроков — оценка относительно точная. Это ориентир, а не официальный балл.";
-  const lessonsBit = c.totalLessons
-    ? `пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons})`
-    : `покрыто ${c.covered} из ${c.totalSkills} тем`;
-  const topicsBit = c.totalLessons ? `, тем с данными — ${c.covered} из ${c.totalSkills}` : "";
-  return `Точность пока ограничена: ${lessonsBit}${topicsBit}. Проходи уроки и практику — прогноз станет точнее. Это ориентир, а не официальный балл.`;
+  if (!c.totalLessons) return "Прогноз может быть точнее: данных пока мало. Чтобы прогноз стал точнее — проходи уроки и практику";
+  return `Прогноз может быть точнее: у тебя пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}). Чтобы прогноз стал точнее — проходи уроки и практику`;
 }
 
 function stars(n) {
