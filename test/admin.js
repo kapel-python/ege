@@ -3,7 +3,8 @@
    привязку к аккаунту, действия, журнал. Запуск: node test/admin.js
    (сервер должен слушать BASE, по умолчанию http://127.0.0.1:2026). */
 const BASE = process.env.EGE_TEST_BASE || "http://127.0.0.1:2026";
-const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD || "Tema2009!";
+const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD;
+if (!PASSWORD) { console.error("EGE_TEST_ADMIN_PASSWORD is required (no default password in repo)"); process.exit(2); }
 
 let fails = 0;
 const t = (name, cond, extra = "") => {

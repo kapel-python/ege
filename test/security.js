@@ -34,7 +34,8 @@ async function json(res) { try { return await res.json(); } catch { return {}; }
 
 const test = async () => {
   const createdAccounts = [];
-  const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD || "Tema2009!";
+  const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD;
+  if (!PASSWORD) { console.error("EGE_TEST_ADMIN_PASSWORD is required (no default password in repo)"); process.exit(2); }
 
   // Админ-сессия для самоочистки созданных аккаунтов в конце.
   const admin = jar();
