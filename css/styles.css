@@ -673,8 +673,11 @@ body {
   background: var(--surface-3);
   border: 2px solid var(--border-strong);
 }
+.tree-node--not-started .tree-node__dot { background: var(--surface-3); border-color: var(--border-strong); }
 .tree-node--in-progress .tree-node__dot { border-color: var(--accent); box-shadow: 0 0 10px var(--accent-glow); animation: pulse 2s infinite; }
-.tree-node--completed .tree-node__dot { background: var(--accent); border-color: var(--accent); }
+.tree-node--completed { border-color: rgba(61, 220, 151, 0.35); }
+.tree-node--completed .tree-node__dot { background: var(--success); border-color: var(--success); }
+.tree-node--mastered { border-color: rgba(61, 220, 151, 0.35); }
 .tree-node--mastered .tree-node__dot { background: var(--success); border-color: var(--success); box-shadow: 0 0 10px rgba(61, 220, 151, 0.4); }
 .tree-node--weak .tree-node__dot { background: var(--danger); border-color: var(--danger); }
 

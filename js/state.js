@@ -322,6 +322,12 @@ function skillStatus(skill) {
   if (p >= 90) return "mastered";
   if (p >= 70) return "completed";
   if (p < 35 && solved > 0) return "weak";
+  // Тему вообще не трогали: ни ответов, ни закрытого урока, ни открытого —
+  // это не "слабое место" и не "в процессе", а честное "не начата".
+  const lessons = DataAPI.lessonsBySkill(skill.id);
+  const touchedLesson = lessons.some((l) => Store.state.completedLessons[l.id]
+    || (Store.state.lessonSessions && Store.state.lessonSessions[l.id]));
+  if (solved === 0 && !touchedLesson) return "not-started";
   return "in-progress";
 }
 

@@ -1101,6 +1101,7 @@ function egeCountdownLabel(now) {
 function statusLabel(st) {
   return {
     "locked": "заблокирован",
+    "not-started": "не начата",
     "weak": "слабое место",
     "in-progress": "в процессе",
     "completed": "пройден",
@@ -1179,7 +1180,7 @@ function overallProgress() {
 }
 
 function statusChipClass(st) {
-  return { "locked": "", "weak": "chip--danger", "in-progress": "chip--accent", "completed": "chip--accent", "mastered": "chip--success" }[st];
+  return { "locked": "", "not-started": "", "weak": "chip--danger", "in-progress": "chip--accent", "completed": "chip--success", "mastered": "chip--success" }[st];
 }
 
 function openSkillModal(skillId) {
