@@ -1228,7 +1228,7 @@ def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
     return tasks
 
 
-def admin_overview(conn: sqlite3.Connection) -> dict:
+def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     def one(sql, *args):
         return conn.execute(sql, args).fetchone()
     today_msk = today()
@@ -1273,13 +1273,20 @@ def admin_overview(conn: sqlite3.Connection) -> dict:
     missions_done = one("SELECT COUNT(*) AS c FROM user_missions WHERE completed_at IS NOT NULL")["c"]
     bosses_defeated = one("SELECT COUNT(*) AS c FROM user_bosses")["c"]
 
-    # Activity for the last 14 Moscow days: solved/correct/xp per date.
-    start_date = (dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=13)).date()
+    # Activity for the last `days` Moscow days (allowed: 1/7/14/30, default 14):
+    # solved/correct/xp/users per date.
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 14
+    if days not in (1, 7, 14, 30):
+        days = 14
+    start_date = (dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=days - 1)).date()
     activity_rows = {r["activity_date"]: dict(r) for r in conn.execute(
         "SELECT activity_date, SUM(solved) AS solved, SUM(correct) AS correct, SUM(xp) AS xp, COUNT(DISTINCT user_id) AS users "
         "FROM activity_history WHERE activity_date >= ? GROUP BY activity_date", (start_date.isoformat(),))}
     activity = []
-    for i in range(14):
+    for i in range(days):
         d = (start_date + dt.timedelta(days=i)).isoformat()
         row = activity_rows.get(d)
         activity.append({"date": d, "solved": row["solved"] if row else 0, "correct": row["correct"] if row else 0,
@@ -2063,7 +2070,9 @@ class Handler(BaseHTTPRequestHandler):
                 user_id, _ = auth
                 parsed = urlparse(self.path)
                 if path == "/api/admin/overview":
-                    self.send_json(admin_overview(conn)); return
+                    from urllib.parse import parse_qs
+                    days = parse_qs(parsed.query).get("days", [None])[0]
+                    self.send_json(admin_overview(conn, days if days is not None else 14)); return
                 if path == "/api/admin/users":
                     from urllib.parse import parse_qs
                     query = parse_qs(parsed.query).get("q", [None])[0]

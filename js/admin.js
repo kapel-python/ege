@@ -15,7 +15,36 @@ const A = {
   toastRoot: document.getElementById("admin-toast-root"),
   session: null, // {user: {id, accountId, name}, expiresAt} — из GET /api/admin/session
   usersCache: null,
+  activitySelected: null, // ISO-дата выбранного столбца графика активности
+  activityDays: (() => {
+    try {
+      const v = Number(localStorage.getItem("ege_admin_activity_days"));
+      if ([1, 7, 14, 30].includes(v)) return v;
+    } catch (e) {}
+    return 14;
+  })(),
 };
+
+/* Периоды графика активности. Значение — число московских суток. */
+const ACTIVITY_PERIODS = [
+  { days: 1, label: "24 ч" },
+  { days: 7, label: "7 дней" },
+  { days: 14, label: "14 дней" },
+  { days: 30, label: "30 дней" },
+];
+
+function activityDays() {
+  return [1, 7, 14, 30].includes(Number(A.activityDays)) ? Number(A.activityDays) : 14;
+}
+
+function activityPeriodTitle(days) {
+  return days === 1 ? "Активность за 24 часа" : `Активность за ${days} ${plural(days, "день", "дня", "дней")}`;
+}
+
+/* День считается «с данными», только если есть хоть какая-то активность. */
+function activityHasData(d) {
+  return !!d && (Number(d.solved) > 0 || Number(d.correct) > 0 || Number(d.users) > 0 || Number(d.xp) > 0);
+}
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => (
@@ -288,26 +317,33 @@ function statTile(label, value, sub = "") {
   return `<div class="a-stat"><div class="a-stat__label">${esc(label)}</div><div class="a-stat__value">${value}</div>${sub ? `<div class="a-stat__sub">${sub}</div>` : ""}</div>`;
 }
 
-function activityChart(activity) {
-  /* Столбцы решённых заданий по дням (14 дней). Одна метрика — один цвет
-     (accent), значения на крайних столбцах + tooltip; сетка hairline. */
+function activityChart(activity, selectedDate = null) {
+  /* Столбцы решённых заданий по дням. Одна метрика — один цвет (accent),
+     значения на крайних столбцах + tooltip; сетка hairline.
+     Кликабельны только дни с данными (activityHasData): пустые столбцы
+     рисуются приглушёнными и никак не реагируют на нажатие. */
   const W = 640, H = 190, PAD_L = 34, PAD_R = 8, PAD_T = 16, PAD_B = 26;
   const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
   const maxV = Math.max(1, ...activity.map((d) => d.solved));
-  const step = plotW / activity.length;
-  const barW = Math.min(24, step - 8);
+  const step = plotW / Math.max(1, activity.length);
+  const barW = Math.min(activity.length === 1 ? 120 : 24, Math.max(4, step - 8));
   const ticks = [0, Math.round(maxV / 2), maxV];
+  // Подписи оси X: чем длиннее период, тем реже (иначе сливаются).
+  const stride = activity.length <= 7 ? 1 : activity.length <= 14 ? 2 : 5;
   let bars = "";
   activity.forEach((d, i) => {
+    const has = activityHasData(d);
+    const selected = selectedDate != null && d.date === selectedDate;
     const h = Math.round((d.solved / maxV) * plotH);
     const x = PAD_L + i * step + (step - barW) / 2;
     const y = PAD_T + plotH - h;
     const label = d.solved > 0 && (i === activity.length - 1 || d.solved === maxV)
       ? `<text class="bar-label" x="${x + barW / 2}" y="${y - 5}" text-anchor="middle">${d.solved}</text>` : "";
+    const tip = `${fmtShortDate(d.date)}: ${d.solved} решено, ${d.correct} верно, ${d.users} ${plural(d.users, "активный", "активных", "активных")}, +${d.xp} XP`;
     bars += `<g>
-      <rect class="bar-hit" x="${PAD_L + i * step}" y="${PAD_T}" width="${step}" height="${plotH}"
-        data-tip="${fmtShortDate(d.date)}: ${d.solved} решено, ${d.correct} верно, ${d.users} ${plural(d.users, "активный", "активных", "активных")}, +${d.xp} XP"></rect>
-      <rect class="bar" x="${x}" y="${y}" width="${barW}" height="${h}" rx="4"></rect>
+      <rect class="bar-hit${has ? " bar-hit--active" : " bar-hit--empty"}" x="${PAD_L + i * step}" y="${PAD_T}" width="${step}" height="${plotH}"
+        data-date="${esc(d.date)}" data-tip="${esc(tip)}"${has ? ` tabindex="0" role="button" aria-label="${esc(tip)}. Показать подробности"` : ` aria-hidden="true"`}></rect>
+      <rect class="bar${has ? "" : " bar--empty"}${selected ? " bar--selected" : ""}" x="${x}" y="${Math.min(y, PAD_T + plotH)}" width="${barW}" height="${Math.max(h, has ? 2 : 0)}" rx="4"></rect>
       ${label}
     </g>`;
   });
@@ -317,17 +353,51 @@ function activityChart(activity) {
       <text class="axis-label" x="${PAD_L - 6}" y="${y + 3}" text-anchor="end">${t}</text>`;
   }).join("");
   const xLabels = activity
-    .map((d, i) => (i % 2 === 1 ? `<text class="axis-label" x="${PAD_L + i * step + step / 2}" y="${H - 8}" text-anchor="middle">${fmtShortDate(d.date)}</text>` : ""))
+    .map((d, i) => (i % stride === 1 || activity.length === 1 ? `<text class="axis-label" x="${PAD_L + i * step + step / 2}" y="${H - 8}" text-anchor="middle">${esc(fmtShortDate(d.date))}</text>` : ""))
     .join("");
+  const periodWord = activity.length === 1 ? "24 часа" : `${activity.length} ${plural(activity.length, "день", "дня", "дней")}`;
   return `<div class="a-chart-box">
-    <svg class="a-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Решённые задания по дням за 14 дней">
+    <svg class="a-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Решённые задания по дням за ${periodWord}">
       ${grid}${bars}${xLabels}
     </svg>
     <div class="a-chart-tooltip" id="chartTip"></div>
   </div>`;
 }
 
-function bindChartTooltip(container) {
+/* Мини-блок с подробностями выбранного дня: 4 плитки
+   (решено / точность / активных / XP). Пустым дням соответствует
+   подсказка-приглашение, а не нулевые плитки. */
+function chartDetailHTML(d) {
+  if (!activityHasData(d)) {
+    return `<div class="a-detail-hint">Нажмите на столбец с данными, чтобы увидеть подробности дня</div>`;
+  }
+  const acc = d.solved > 0 ? Math.round((d.correct / d.solved) * 100) : null;
+  const tile = (label, value, sub) => `<div class="a-detail-tile"><div class="a-detail-tile__label">${label}</div><div class="a-detail-tile__value">${value}</div><div class="a-detail-tile__sub">${sub}</div></div>`;
+  return `<div class="a-detail__head"><span>Подробности · ${fmtShortDate(d.date)}</span><button class="a-detail__close" id="chartDetailClose" aria-label="Закрыть подробности">✕</button></div>
+  <div class="a-detail-grid">
+    ${tile("Решено", fmtNum(d.solved), `верно: ${fmtNum(d.correct)}`)}
+    ${tile("Точность", acc == null ? "—" : `${acc}%`, d.solved ? `${fmtNum(d.correct)} из ${fmtNum(d.solved)}` : "попыток нет")}
+    ${tile("Активных", fmtNum(d.users), plural(d.users, "ученик", "ученика", "учеников"))}
+    ${tile("XP", `+${fmtNum(d.xp)}`, "начислено за день")}
+  </div>`;
+}
+
+function paintChartDetail(container, date, activity) {
+  const slot = container.querySelector("#chartDetail");
+  if (!slot) return;
+  const d = (activity || []).find((x) => x.date === date);
+  slot.innerHTML = chartDetailHTML(activityHasData(d) ? d : null);
+  const close = slot.querySelector("#chartDetailClose");
+  if (close) {
+    close.onclick = () => {
+      A.activitySelected = null;
+      container.querySelectorAll(".a-chart .bar--selected").forEach((b) => b.classList.remove("bar--selected"));
+      slot.innerHTML = chartDetailHTML(null);
+    };
+  }
+}
+
+function bindChartTooltip(container, activity) {
   const tip = container.querySelector("#chartTip");
   const box = container.querySelector(".a-chart-box");
   if (!tip || !box) return;
@@ -344,13 +414,40 @@ function bindChartTooltip(container) {
     });
     rect.addEventListener("mouseleave", () => { tip.style.display = "none"; });
   });
+  /* Выбор дня: реагируют ТОЛЬКО столбцы с данными. Пустые дни
+     (bar-hit--empty) клик и клавиатуру игнорируют полностью. */
+  const select = (rect) => {
+    if (!rect || !rect.classList.contains("bar-hit--active")) return;
+    const date = rect.dataset.date;
+    tip.style.display = "none";
+    if (A.activitySelected === date) {
+      A.activitySelected = null;
+      box.querySelectorAll(".bar--selected").forEach((b) => b.classList.remove("bar--selected"));
+      paintChartDetail(container, null, activity);
+      return;
+    }
+    A.activitySelected = date;
+    box.querySelectorAll(".bar--selected").forEach((b) => b.classList.remove("bar--selected"));
+    const idx = Array.from(box.querySelectorAll(".bar-hit")).indexOf(rect);
+    const bar = box.querySelectorAll(".bar")[idx];
+    if (bar) bar.classList.add("bar--selected");
+    paintChartDetail(container, date, activity);
+  };
+  box.querySelectorAll(".bar-hit--active").forEach((rect) => {
+    rect.addEventListener("click", () => select(rect));
+    rect.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); select(rect); }
+    });
+  });
 }
 
 async function screenDashboard() {
   renderShell("dashboard", `<div class="a-skeleton" style="height:90px"></div><div class="a-skeleton" style="height:280px;margin-top:16px"></div>`);
+  const days = activityDays();
+  A.activitySelected = null;
   let data;
   try {
-    data = await AdminApi.get("/api/admin/overview");
+    data = await AdminApi.get(`/api/admin/overview?days=${days}`);
   } catch (e) {
     if (e.unauthorized) { A.session = null; renderLogin(); return; }
     renderShell("dashboard", `<div class="a-error-banner">Не удалось загрузить обзор: ${esc(e.message)}<button class="btn btn--soft btn--sm" onclick="render()">Повторить</button></div>`);
@@ -373,12 +470,16 @@ async function screenDashboard() {
       ${statTile("Открытые ошибки", fmtNum(l.openErrors), `подсказок использовано: ${fmtNum(l.hintsUsed)}`)}
     </div>
     <div class="a-grid-main" style="margin-top:16px">
-      <div class="a-card">
-        <div class="a-card__head">
-          <span class="a-card__title">Активность за 14 дней</span>
-          <span class="a-card__sub">решённые задания по дням (МСК)</span>
+      <div class="a-card" id="activityCard">
+        <div class="a-card__head a-card__head--wrap">
+          <span class="a-card__title" id="activityTitle">${esc(activityPeriodTitle(days))}</span>
+          <span class="a-seg" role="group" aria-label="Период активности">
+            ${ACTIVITY_PERIODS.map((p) => `<button class="a-seg__btn${p.days === days ? " a-seg__btn--active" : ""}" data-days="${p.days}" aria-pressed="${p.days === days ? "true" : "false"}">${p.label}</button>`).join("")}
+          </span>
         </div>
-        ${activityChart(data.activity)}
+        <div class="a-card__sub" id="activitySummary"></div>
+        <div id="activityChartWrap"></div>
+        <div class="a-detail" id="chartDetail"></div>
       </div>
       <div class="a-card">
         <div class="a-card__head"><span class="a-card__title">Лидеры по XP</span></div>
@@ -434,10 +535,61 @@ async function screenDashboard() {
     </div>`;
   renderShell("dashboard", screen);
   const screenEl = document.getElementById("adminScreen");
-  bindChartTooltip(screenEl);
+  const card = screenEl.querySelector("#activityCard");
+  paintActivityCard(card, data.activity);
+  card.querySelectorAll(".a-seg__btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const next = Number(btn.dataset.days);
+      if (![1, 7, 14, 30].includes(next) || next === activityDays()) return;
+      A.activityDays = next;
+      try { localStorage.setItem("ege_admin_activity_days", String(next)); } catch (e) {}
+      A.activitySelected = null;
+      card.querySelectorAll(".a-seg__btn").forEach((b) => {
+        const on = Number(b.dataset.days) === next;
+        b.classList.toggle("a-seg__btn--active", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      card.querySelector("#activityTitle").textContent = activityPeriodTitle(next);
+      await refreshActivityCard(card);
+    };
+  });
   screenEl.querySelectorAll("[data-goto]").forEach((el) => {
     el.onclick = () => { location.hash = el.dataset.goto; };
   });
+}
+
+/* Перерисовка графика + сводки + мини-блока без перезагрузки всего дашборда. */
+function paintActivityCard(card, activity) {
+  if (!card) return;
+  const days = activityDays();
+  const wrap = card.querySelector("#activityChartWrap");
+  const summary = card.querySelector("#activitySummary");
+  const totSolved = activity.reduce((n, d) => n + Number(d.solved || 0), 0);
+  const totXp = activity.reduce((n, d) => n + Number(d.xp || 0), 0);
+  const activeDays = activity.filter(activityHasData).length;
+  summary.textContent = days === 1
+    ? (activeDays ? `Итого за 24 часа: ${fmtNum(totSolved)} решено · +${fmtNum(totXp)} XP (МСК)` : "За последние 24 часа активности не было (МСК)")
+    : `Итого: ${fmtNum(totSolved)} решено · +${fmtNum(totXp)} XP · ${activeDays} ${plural(activeDays, "день", "дня", "дней")} с активностью (МСК)`;
+  wrap.innerHTML = activityChart(activity, A.activitySelected);
+  paintChartDetail(card, A.activitySelected, activity);
+  bindChartTooltip(card, activity);
+}
+
+async function refreshActivityCard(card) {
+  const wrap = card.querySelector("#activityChartWrap");
+  wrap.innerHTML = `<div class="a-skeleton" style="height:190px"></div>`;
+  card.querySelector("#activitySummary").textContent = "Загрузка…";
+  paintChartDetail(card, null, []);
+  try {
+    const data = await AdminApi.get(`/api/admin/overview?days=${activityDays()}`);
+    paintActivityCard(card, data.activity);
+  } catch (e) {
+    if (e.unauthorized) { A.session = null; renderLogin(); return; }
+    wrap.innerHTML = `<div class="a-error-banner">Не удалось загрузить активность: ${esc(e.message)}<button class="btn btn--soft btn--sm" id="activityRetry">Повторить</button></div>`;
+    card.querySelector("#activitySummary").textContent = "";
+    const retry = wrap.querySelector("#activityRetry");
+    if (retry) retry.onclick = () => refreshActivityCard(card);
+  }
 }
 
 /* ---------------- Пользователи ---------------- */
