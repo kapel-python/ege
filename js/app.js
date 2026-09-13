@@ -1033,13 +1033,23 @@ function goalLabel() {
 }
 
 /* Дата профильной математики в основной период — 8 июня.
-   Если в этом году экзамен уже прошёл, считаем до 8 июня следующего года. */
+   Если в этом году экзамен уже прошёл, считаем до 8 июня следующего года.
+   Все расчёты — по московскому календарю (Europe/Moscow), а не по
+   локальному часовому поясу браузера. */
+function moscowDayParts(date) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Moscow", day: "numeric", month: "numeric", year: "numeric",
+  }).formatToParts(date || new Date());
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  return { y: get("year"), m: get("month"), d: get("day") };
+}
+
 function egeExamDate(from) {
-  const base = from ? new Date(from) : new Date();
-  base.setHours(0, 0, 0, 0);
-  let exam = new Date(base.getFullYear(), 5, 8);
-  if (base > exam) exam = new Date(base.getFullYear() + 1, 5, 8);
-  return exam;
+  const t = moscowDayParts(from || new Date());
+  const todayKey = Date.UTC(t.y, t.m - 1, t.d);
+  let examKey = Date.UTC(t.y, 5, 8);
+  if (todayKey > examKey) examKey = Date.UTC(t.y + 1, 5, 8);
+  return new Date(examKey);
 }
 
 function egeMonthExact(n) {
@@ -1057,10 +1067,10 @@ function egeMonthGenitive(n) {
    «полтора месяца», «чуть меньше месяца», «почти месяц»,
    «чуть больше месяца», «почти N …», «чуть больше N …». */
 function egeCountdownLabel(now) {
-  const today = now ? new Date(now) : new Date();
-  today.setHours(0, 0, 0, 0);
-  const exam = egeExamDate(today);
-  const d = Math.round((exam - today) / 86400000);
+  const t = moscowDayParts(now || new Date());
+  const todayKey = Date.UTC(t.y, t.m - 1, t.d);
+  const examKey = egeExamDate(now || new Date()).getTime();
+  const d = Math.round((examKey - todayKey) / 86400000);
   if (d <= 0) return "сегодня";
   if (d === 1) return "1 день";
   if (d < 7) return `${d} ${plural(d, "день", "дня", "дней")}`;
