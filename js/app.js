@@ -1115,7 +1115,9 @@ function screenDashboard(root) {
   const step = steps[0] || null;
   const alts = steps.slice(1, 3);
   const topGainRaw = forecastTopGains(1)[0] || null;
-  const topGain = topGainRaw ? { gain: topGainRaw.gain, shortName: topGainRaw.name.replace(/^№\d+\s*[—–-]\s*/, "") } : null;
+  const topGain = topGainRaw ? { gain: topGainRaw.gain, skillId: topGainRaw.skillId, shortName: topGainRaw.name.replace(/^№\d+\s*[—–-]\s*/, "") } : null;
+  const cov = forecastCoverage();
+  const goal = forecastGoalNum();
 
   const weakSpots = DataAPI.skills()
     .map((sk) => ({ sk, prog: skillProgress(sk.id), errs: openErrorCount(sk.id) }))
@@ -1148,13 +1150,32 @@ function screenDashboard(root) {
         <div style="margin-top:12px;max-width:340px">${progressBar(Math.min(act.solved / dailyGoal, 1) * 100, "progress--thin progress--success")}</div>
       </div>
 
-      <div class="card forecast-card">
+      <div class="card forecast-card forecast-hero">
+        ${f.empty ? `
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
-        ${f.empty ? `<div style="margin-top:8px;color:var(--text-2);font-size:14px;line-height:1.55">Прогноз появится, когда выйдут материалы предмета: пока считать не по чему.</div>`
-        : `<div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">вторичных</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
-        <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
-        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b> баллов</div>` : ""}`}
-        <div class="forecast-note">${f.empty ? "" : forecastNoteHTML()}</div>
+        <div class="forecast-empty">
+          <div class="forecast-empty__icon">${icon("stats")}</div>
+          <div class="forecast-empty__title">Прогноз появится позже</div>
+          <div class="forecast-empty__text">Пока считать не по чему: проходи уроки и практику — после первых шагов здесь будет твоя вилка баллов и шкала до цели.</div>
+          <button class="btn btn--primary btn--sm" onclick="go('path')">Открыть путь</button>
+        </div>` : `
+        <div class="forecast-hero__top">
+          <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
+          <span class="forecast-trend ${trend && trend.delta > 0 ? "forecast-trend--up" : trend && trend.delta < 0 ? "forecast-trend--down" : ""}">${forecastTrendLabel(trend)}</span>
+        </div>
+        <div class="forecast-mid">${f.mid}<small>баллов</small></div>
+        <div class="forecast-range">вилка <b class="mono">${f.low}–${f.high}</b>${goal != null ? (f.mid >= goal ? ` · цель ${goal}+ достигнута` : ` · до цели ${goal}+ осталось <b class="mono">${goal - f.mid}</b>`) : ""}</div>
+        <div class="forecast-scale" role="img" aria-label="Шкала прогноза: ${f.mid} из 100${goal != null ? `, цель ${goal}` : ""}">
+          <div class="forecast-scale__fill" style="width:${Math.min(100, Math.max(0, f.mid))}%"></div>
+          ${goal != null ? `<div class="forecast-scale__goal" style="left:calc(${Math.min(100, Math.max(0, goal))}% - 1px)"></div>` : ""}
+        </div>
+        <div class="forecast-scale__labels"><span>0</span>${goal != null ? `<span class="goal">цель ${goal}</span>` : `<span>50</span>`}<span>100</span></div>
+        ${topGain ? `<button class="forecast-gain-btn" onclick="go('skill', '${topGain.skillId}')" title="Открыть тему">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b><span class="go">→</span></button>` : ""}
+        ${cov.totalLessons ? `<div class="forecast-cover">
+          <div class="forecast-cover__row"><span>Уроки: ${cov.doneLessons} из ${cov.totalLessons}</span><span>Темы с данными: ${cov.covered} из ${cov.totalSkills}</span></div>
+          ${progressBar(cov.lessonPct, "progress--thin")}
+        </div>` : ""}
+        <div class="forecast-note">${forecastNoteHTML()}</div>`}
       </div>
     </div>
 
@@ -1266,6 +1287,14 @@ function runNextStep(index = 0) {
 function goalLabel() {
   const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
   return g ? g.label : "не выбрана";
+}
+
+/* Число цели для шкалы прогноза: из «80+ баллов» достаём 80.
+   Нет цели — нет метки, шкала остаётся чистой. */
+function forecastGoalNum() {
+  const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
+  const m = g && String(g.label).match(/\d+/);
+  return m ? Number(m[0]) : null;
 }
 
 /* Дата профильной математики в основной период — 8 июня.
