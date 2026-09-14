@@ -1054,7 +1054,7 @@ function renderSidebar(active) {
 }
 
 function renderBottomNav(active) {
-  const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "stats", "profile"].includes(n.route));
+  const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
   document.getElementById("bottomnav").innerHTML = items.map((n) => `
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
 }
