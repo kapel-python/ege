@@ -978,7 +978,7 @@ function renderSidebar(active) {
 }
 
 function renderBottomNav(active) {
-  const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
+  const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "stats", "profile"].includes(n.route));
   document.getElementById("bottomnav").innerHTML = items.map((n) => `
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
 }
@@ -2864,6 +2864,40 @@ function forecastChart() {
    Screen: Профиль + достижения
    ============================================================ */
 
+function profileStatsTeaser(s, acc) {
+  let f = null;
+  try { f = forecast(); } catch (_) { f = null; }
+  let days = [];
+  try { days = last14Days(); } catch (_) { days = []; }
+  const max = Math.max(1, ...days.map((d) => d.solved || 0));
+  const bars = days.map((d, i) => {
+    const pct = Math.max(6, Math.round(((d.solved || 0) / max) * 100));
+    const today = i === days.length - 1;
+    return `<div class="stats-teaser__bar${today ? " stats-teaser__bar--today" : ""}" style="height:${pct}%" title="${d.label}: ${d.solved || 0}"></div>`;
+  }).join("");
+  return `
+    <div class="card card--glow stats-teaser">
+      <div class="stats-teaser__head">
+        <div class="stats-teaser__icon">${icon("stats")}</div>
+        <div>
+          <div class="stats-teaser__title">Статистика</div>
+          <div class="stats-teaser__sub">Активность, точность и прогноз — полная аналитика в один тап</div>
+        </div>
+      </div>
+      <div class="stats-teaser__metrics">
+        <div class="stats-teaser__metric"><b class="mono">${s.totalSolved}</b><span>решено</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${acc}%</b><span>точность</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${s.xp}</b><span>всего XP</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${f ? `${f.low}–${f.high}` : "—"}</b><span>прогноз</span></div>
+      </div>
+      <div class="stats-teaser__bars" aria-hidden="true">${bars}</div>
+      <div class="stats-teaser__bars-label"><span>Активность · 14 дней</span><span>Сегодня справа · темнее</span></div>
+      <div class="stats-teaser__foot">
+        <button class="btn btn--primary" type="button" onclick="go('stats')" aria-label="Открыть полную статистику">Открыть статистику ${icon("arrow")}</button>
+      </div>
+    </div>`;
+}
+
 function screenProfile(root) {
   const s = Store.state;
   const li = levelInfo();
@@ -2913,6 +2947,8 @@ function screenProfile(root) {
       <div class="card stat-card"><div class="action-card__icon">${icon("clock")}</div><div><div class="stat-num mono">${avgTime ? fmtTime(avgTime) : "—"}</div><div class="stat-label">среднее время</div></div></div>
       <div class="card stat-card"><div class="action-card__icon">${icon("flame")}</div><div><div class="stat-num mono">${s.bestSeries}</div><div class="stat-label">лучшая серия без ошибок</div></div></div>
     </div>
+
+    ${profileStatsTeaser(s, acc)}
 
     <div class="section-title">Достижения</div>
     <div class="badge-grid">

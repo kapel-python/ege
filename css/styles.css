@@ -1108,6 +1108,25 @@ body {
 .stat-card { display: flex; align-items: center; gap: 14px; }
 .stat-card .action-card__icon { flex: 0 0 34px; }
 
+/* ---------- profile stats teaser ---------- */
+.stats-teaser { margin-top: 16px; padding: 22px 24px; }
+.stats-teaser__head { display: flex; align-items: center; gap: 14px; }
+.stats-teaser__icon { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(154, 123, 255, 0.14); color: var(--violet); }
+.stats-teaser__icon svg { width: 20px; height: 20px; }
+.stats-teaser__title { font-size: 16px; font-weight: 700; }
+.stats-teaser__sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.stats-teaser__metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+.stats-teaser__metric { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.stats-teaser__metric b { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.stats-teaser__metric span { font-size: 11.5px; color: var(--muted); }
+.stats-teaser__bars { display: flex; align-items: flex-end; gap: 5px; height: 56px; margin-top: 16px; padding: 10px 12px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+.stats-teaser__bar { flex: 1; border-radius: 4px 4px 2px 2px; background: rgba(109, 124, 255, 0.35); min-height: 4px; }
+.stats-teaser__bar--today { background: var(--accent); }
+.stats-teaser__bars-label { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+.stats-teaser__foot { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.stats-teaser__foot .btn { display: inline-flex; align-items: center; gap: 8px; }
+.stats-teaser__foot .btn svg { width: 15px; height: 15px; }
+
 /* ---------- profile timeline ---------- */
 
 .timeline { position: relative; padding-left: 26px; }
@@ -1351,6 +1370,9 @@ body {
   .page-title { font-size: 22px; }
   .profile-card { padding: 20px; }
   .profile-card__streak { margin-left: 0; }
+  .stats-teaser { padding: 18px; }
+  .stats-teaser__metrics { grid-template-columns: repeat(2, 1fr); }
+  .stats-teaser__foot .btn { flex: 1; justify-content: center; }
   .account-id-wrap { margin-top: 9px; }
   .onboard-card { padding: 26px 20px; }
   .answer-row { flex-direction: column; }
