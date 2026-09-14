@@ -1520,11 +1520,12 @@ body {
 .skill-modal__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .skill-modal__stat-num { font-family: var(--mono, monospace); font-size: 20px; font-weight: 700; }
 .skill-modal__actions { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
-/* Чипы внутри модалки обязаны переноситься: white-space:nowrap из .chip
-   растягивал окно по горизонтали на телефоне (длинный текст — во всю строку). */
+/* Чипы внутри модалки обязаны переноситься: white-space:nowrap + flex-shrink:0
+   из .chip растягивали окно по горизонтали на телефоне (длинный текст — во всю строку). */
 .modal { overflow-x: hidden; }
-.modal .chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.modal .chip { white-space: normal; flex-shrink: 1; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
 .modal .error-subtopics { min-width: 0; }
+.modal .error-subtopics > * { min-width: 0; }
 
 /* ---------- контекстные подсказки ---------- */
 
