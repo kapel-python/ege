@@ -1532,9 +1532,9 @@ function openSkillModal(skillId) {
     </div>` : ""}
 
     <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
-      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить" : "Урок"}: «${lessons[0].title}»</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
-      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">${icon("target")} Тренировка: ${sk.name} · ${mission.tasks.length} заданий</button>` : ""}
-      ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Тренировка по теме</button>` : ""}
+      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
+      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">${icon("target")} Практика</button>` : ""}
+      ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Практика</button>` : ""}
       ${!mission && !DataAPI.practiceTasksBySkill(skillId).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
     </div>`);
 }
