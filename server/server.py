@@ -1314,11 +1314,14 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
                  (user_id, subject, profile_onboarded, state.get("selfLevel"), state.get("goal")))
     if subject == DEFAULT_SUBJECT:
         # Зеркало в users.* ради совместимости прямых чтений БД.
-        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=?, current_subject=? WHERE id=?",
-                     (profile_onboarded, state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), subject, user_id))
+        # current_subject здесь НЕ пишем: предмет переключает только
+        # POST /api/subject (set_current_subject), иначе stale-снапшот
+        # из другой вкладки молча откатывает выбор пользователя.
+        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=? WHERE id=?",
+                     (profile_onboarded, state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), user_id))
     else:
-        conn.execute("UPDATE users SET name=?, current_subject=? WHERE id=?",
-                     (sanitize_name(state.get("name")), subject, user_id))
+        conn.execute("UPDATE users SET name=? WHERE id=?",
+                     (sanitize_name(state.get("name")), user_id))
     s = state
     conn.execute("""INSERT INTO user_stats(user_id,subject,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,subject) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=excluded.best_series,errors_resolved=excluded.errors_resolved""",
