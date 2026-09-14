@@ -659,7 +659,7 @@ function closeModal() {
    Один механизм на все окна: тянем модалку вниз — она едет за
    пальцем/мышью и закрывается, если отпустить после порога
    (четверть высоты окна, 90–150px) или быстрым броском вниз.
-   Жест работает только от верхней части окна (верхние 40% высоты
+   Жест работает от верхней части окна (верхние 60% высоты
    или ручка) и только когда контент не проскроллен — иначе жест
    остаётся обычным скроллом. Слушатели висят глобально один раз,
    поэтому покрывают каждое окно из openModal без правок вызовов. */
@@ -707,7 +707,7 @@ window.addEventListener("pointermove", (e) => {
   if (!s.dragging) {
     if (d < 10) { if (d < -12) s.pid = null; return; }
     if (m.scrollTop > 8) { s.pid = null; return; } // контент проскроллен — это скролл
-    if (!s.fromGrab && s.startTop > Math.max(140, m.offsetHeight * 0.4)) { s.pid = null; return; } // жест только от верха
+    if (!s.fromGrab && s.startTop > Math.max(200, m.offsetHeight * 0.6)) { s.pid = null; return; } // жест от верха
     s.dragging = true;
     m.classList.add("modal--drag");
   }
