@@ -74,8 +74,11 @@ const Store = {
       // Двухступенчатая загрузка: сначала лёгкий summary-каталог (~30 КБ)
       // + состояние, чтобы первая отрисовка была быстрой; тяжёлые тексты
       // заданий и шаги уроков (~250 КБ) догружаются лениво через ensureDetails.
-      const wanted = subject || this.subject || "profile_math";
-      const qs = `?subject=${encodeURIComponent(wanted)}`;
+      // Без явного subject запрос идёт без ?subject — сервер отдаёт
+      // current_subject пользователя, поэтому выбранный предмет переживает
+      // перезагрузку. Явный subject — только для точечной загрузки
+      // (онбординг-фолбэк), он тоже подхватывается через _applyBootstrap.
+      const qs = subject ? `?subject=${encodeURIComponent(subject)}` : "";
       let payload;
       try {
         payload = await ApiClient.get("/api/bootstrap-lite" + qs);
