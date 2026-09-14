@@ -3114,7 +3114,7 @@ function screenProfile(root) {
 function resetProgress() {
   openModal(`
     <div style="font-size:18px;font-weight:700">Сбросить весь прогресс?</div>
-    <div style="color:var(--muted);font-size:14px;margin-top:10px">XP, уровни, ошибки, достижения и статистика будут удалены безвозвратно. Онбординг начнётся заново.</div>
+    <div style="color:var(--muted);font-size:14px;margin-top:10px">XP, уровни, ошибки, достижения и статистика будут удалены безвозвратно во всех предметах. Аккаунт получит новый ID. Онбординг начнётся заново.</div>
     <div style="display:flex;gap:10px;margin-top:22px;justify-content:flex-end">
       <button class="btn btn--ghost" onclick="closeModal()">Отмена</button>
       <button class="btn btn--danger-soft" onclick="Store.reset();closeModal();location.hash='#/dashboard';render()">Сбросить</button>
