@@ -3,6 +3,10 @@
    привязку к аккаунту, действия, журнал. Запуск: node test/admin.js
    (сервер должен слушать BASE, по умолчанию http://127.0.0.1:2026). */
 const BASE = process.env.EGE_TEST_BASE || "http://127.0.0.1:2026";
+// Прямой доступ к БД обязан идти в тот же файл, что читает сервер
+// (сервер берёт его из EGE_DB_PATH). Хардкод пути сюда раньше писал
+// UPDATE admin_sessions в чужую БД, и «истёкшая» сессия не истекала.
+const DB_PATH = process.env.EGE_DB_PATH || "/root/ege/server/ege.sqlite3";
 const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD;
 if (!PASSWORD) { console.error("EGE_TEST_ADMIN_PASSWORD is required (no default password in repo)"); process.exit(2); }
 
@@ -122,7 +126,7 @@ const test = async () => {
     t("обзор содержит реальные агрегаты", overview.users && overview.users.total >= 1 && Array.isArray(overview.activity) && overview.activity.length === 14);
     const { execFileSync } = await import("node:child_process");
     const dbTasks = Number(execFileSync("python3", ["-c",
-      "import sqlite3;print(sqlite3.connect('/root/ege/server/ege.sqlite3').execute('SELECT COUNT(*) FROM tasks').fetchone()[0])",
+      `import sqlite3;print(sqlite3.connect(${JSON.stringify(DB_PATH)}).execute('SELECT COUNT(*) FROM tasks').fetchone()[0])`,
     ], { encoding: "utf8" }).trim());
     t("обзор: счётчик задач совпадает с БД", overview.catalog.tasks === dbTasks, `${overview.catalog.tasks} vs ${dbTasks}`);
     t("системный блок: аптайм и размер БД", overview.system.uptimeSec >= 0 && overview.system.dbSizeBytes > 0);
@@ -151,7 +155,7 @@ const test = async () => {
     const token = j2.get("ege_admin");
     exec2("python3", ["-c",
       "import sqlite3, sys\n" +
-      "con = sqlite3.connect('/root/ege/server/ege.sqlite3')\n" +
+      `con = sqlite3.connect(${JSON.stringify(DB_PATH)})\n` +
       "con.execute('UPDATE admin_sessions SET expires_at = 1 WHERE token = ?', (sys.argv[1],))\n" +
       "con.commit()", token]);
     res = await req("/api/admin/overview", { cookies: j2.header() });
