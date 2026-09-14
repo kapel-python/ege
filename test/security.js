@@ -55,7 +55,7 @@ const test = async () => {
       "/server/ege.sqlite3", "/server/server.py", "/server/catalog.json",
       "/.git/config", "/.git/HEAD", "/.gitignore",
       "/deploy/ege-2026.service", "/test/admin.js",
-      "/ege_complete.txt", "/ege_complete_sources.md", "/README.md", "/AGENTS.md",
+      "/README.md", "/AGENTS.md",
       "/.ege-2026.pid",
     ];
     for (const p of blocked) {

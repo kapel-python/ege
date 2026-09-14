@@ -14,10 +14,10 @@ const testBody = async () => {
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
   t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
-  t("каталог содержит ровно 49 задач, подтверждённых ege_complete.txt", DataAPI.tasks().length === 49);
+  t("каталог содержит ровно 49 задач", DataAPI.tasks().length === 49);
   t("каждый из 20 номеров ЕГЭ представлен", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length > 0));
   // №6 и №13 официально имеют только один подтверждённый образец в демоверсии
-  // 2027 (см. ege_complete.txt) — это не пробел, а честная граница источника.
+  // 2027 — это не пробел, а честная граница источника.
   const singleExampleSkills = new Set(["n06_random_var", "n13_financial"]);
   t("у каждого навыка (кроме №6 и №13) есть >= 2 задания", DataAPI.skills()
     .filter((s) => !singleExampleSkills.has(s.id))
