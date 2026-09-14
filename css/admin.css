@@ -1,5 +1,5 @@
 /* ============================================================
-   EGE CORE — Admin panel
+   ege easy — Admin panel
    Отдельный профессиональный интерфейс управления поверх общей
    дизайн-системы (токены из styles.css). Не копирует Dashboard:
    плотные таблицы, рабочие карточки, сайдбар с разделами.
@@ -23,6 +23,7 @@
 }
 .admin-logo { padding: 0 10px 20px; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px; }
 .admin-logo .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+.admin-logo--easy { align-items: center; }
 .admin-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .admin-nav .nav-section { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; padding: 14px 12px 6px; }
 .admin-sidebar__footer { border-top: 1px solid var(--border); padding: 12px 10px 0; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 8px; }
@@ -78,7 +79,8 @@
   box-shadow: 0 24px 70px var(--shadow);
   animation: modalIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.admin-login__mark { font-weight: 800; letter-spacing: 0.04em; font-size: 18px; color: var(--accent); }
+.admin-login__mark { font-weight: 700; letter-spacing: -0.01em; font-size: 18px; text-transform: lowercase; color: var(--text); }
+.admin-login__mark em { font-style: normal; color: var(--success-ink); }
 .admin-login__title { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; margin-top: 14px; }
 .admin-login__sub { color: var(--muted); font-size: 13.5px; margin-top: 6px; line-height: 1.6; }
 .admin-login__form { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; }

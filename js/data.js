@@ -1,4 +1,4 @@
-/* EGE CORE — client data service.
+/* ege easy — client data service.
    The catalog is loaded from the backend. This module only keeps a short-lived
    read cache so rendering code can use the existing synchronous selectors; the
    source of truth is SQLite behind /api/bootstrap. */
