@@ -531,7 +531,14 @@ function taskVisualHtml(task, context = "task") {
     const spec = esc(JSON.stringify(task.mathVisual));
     const ratio = Number(task.mathVisual.ratio);
     const ratioStyle = Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
-    return '<div class="task-visual mathvisual-host" data-mathvisual="' + spec + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '></div>';
+    // Плейсхолдер живёт без содержимого, пока Vendor.ensureMath() не подтянет
+    // ~1,2 МБ вендора и MathVisualMount не смонтирует диаграмму. Пустой div
+    // с рамкой выглядел как «блок без рисунка» (особенно в светлой теме) и
+    // оставался таким навсегда, если вендор не загрузился. Поэтому внутри
+    // сразу лежит видимый текст-заглушка: до монтирования — «загружается»,
+    // после успешного рендера движок заменяет innerHTML доской.
+    return '<div class="task-visual mathvisual-host" data-mathvisual="' + spec + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
+      '<div class="task-visual__fallback" style="display:block" role="status">Рисунок загружается…</div></div>';
   }
   const visual = task && task.visual;
   if (!visual) return "";
@@ -879,6 +886,7 @@ async function render() {
   updateDocumentTitle(route);
   const screen = document.getElementById("screen");
   const my = ++renderSeq;
+  let mathFailed = false;
   if (NEEDS_DETAILS.has(route)) {
     // Экран с заданиями: ждём полные тексты и математические библиотеки.
     // Пока грузится — скелетон вместо пустоты; ушедшую навигацию не трогаем.
@@ -895,6 +903,7 @@ async function render() {
     try {
       await Vendor.ensureMath();
     } catch (error) {
+      mathFailed = true;
       try { toast("Математические библиотеки не загрузились — формулы показаны текстом", "toast--error", "x"); } catch (_) {}
     }
     if (my !== renderSeq || currentRoute() !== route) return;
@@ -948,6 +957,16 @@ async function render() {
   void screen.offsetWidth;
   screen.style.animation = "";
   fn(screen);
+  // ensureMath внутри ждал вендор ДО отрисовки контента, а его внутренний
+  // mountWithin ловил только уже существующие плейсхолдеры. Домонтируем то,
+  // что только что отрисовал fn(); при упавшем вендоре превращаем
+  // несмонтированное в читаемый текст вместо пустых блоков.
+  try {
+    if (typeof MathVisualMount !== "undefined") {
+      MathVisualMount.mountWithin(document.body);
+      if (mathFailed) MathVisualMount.failUnmounted(screen);
+    }
+  } catch (_) {}
   // Глубокая ссылка на навык: карта + открытое окно темы.
   if (route === "skill" && param && DataAPI.skill(param)) {
     try { openSkillModal(param); } catch (_) {}
@@ -3442,6 +3461,20 @@ const MathVisualMount = {
     let spec = null;
     try { spec = JSON.parse(el.dataset.mathvisual); } catch (e) { /* handled as an invalid spec below */ }
     MathVisual.render(el, spec);
+  },
+  /* Вендор не загрузился (офлайн/медленная сеть): наблюдатель пропускает
+     хосты навсегда, т.к. window.MathVisual так и не появляется. Превращаем
+     несмонтированное в читаемый текст вместо вечного пустого блока.
+     Следующая навигация перерисует плейсхолдеры и повторит загрузку
+     (ensureMath сбрасывает промис после ошибки). */
+  failUnmounted(root) {
+    const scope = root || document;
+    if (!scope.querySelectorAll) return;
+    scope.querySelectorAll("[data-mathvisual]:not([data-mathvisual-mounted])").forEach((el) => {
+      el.dataset.mathvisualMounted = "1";
+      el.classList.add("task-visual--missing");
+      el.innerHTML = '<div class="task-visual__fallback" style="display:block" role="status">Не удалось загрузить рисунок — проверь соединение и обнови страницу.</div>';
+    });
   },
 };
 MathVisualMount.init();
