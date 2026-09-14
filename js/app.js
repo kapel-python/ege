@@ -661,10 +661,14 @@ function closeModal() {
    (четверть высоты окна, 90–150px) или быстрым броском вниз.
    Жест работает от верхней части окна (верхние 60% высоты
    или ручка) и только когда контент не проскроллен — иначе жест
-   остаётся обычным скроллом. Слушатели висят глобально один раз,
-   поэтому покрывают каждое окно из openModal без правок вызовов. */
+   остаётся обычным скроллом. Мышь едет через pointer-события,
+   палец — через touch-события с preventDefault: без него браузер
+   одновременно крутит внутренний скролл и обрывает жест через
+   pointercancel — отсюда дёрганье на телефонах. Слушатели висят
+   глобально один раз, поэтому покрывают каждое окно из openModal
+   без правок вызовов. */
 
-const modalSwipe = { modal: null, pid: null, startY: 0, startTop: 0, lastY: 0, lastT: 0, vy: 0, dy: 0, shown: 0, dragging: false, fromGrab: false };
+const modalSwipe = { modal: null, pid: null, tid: null, startY: 0, startTop: 0, lastY: 0, lastT: 0, vy: 0, dy: 0, shown: 0, dragging: false, fromGrab: false };
 
 function modalSwipeThreshold(m) {
   const h = (m && m.offsetHeight) || 420;
@@ -677,27 +681,22 @@ function modalSwipeSuppressClick() {
   setTimeout(() => window.removeEventListener("click", stop, true), 350);
 }
 
-document.addEventListener("pointerdown", (e) => {
-  const t = e.target;
-  const modal = t && t.closest ? t.closest("#modal-root .modal") : null;
-  if (!modal) return;
-  if (e.pointerType === "mouse" && e.button !== 0) return;
-  if (t === modal && e.offsetX > modal.clientWidth) return; // тащат скроллбар, не окно
-  const s = modalSwipe;
-  s.modal = modal; s.pid = e.pointerId;
-  s.startY = s.lastY = e.clientY; s.lastT = performance.now();
-  s.vy = 0; s.dy = 0; s.shown = 0; s.dragging = false;
-  s.fromGrab = !!(t.closest && t.closest(".modal__grab"));
-  try { s.startTop = e.clientY - modal.getBoundingClientRect().top; } catch (_) { s.startTop = 0; }
-}, { passive: true });
+function modalSwipeTop(m) {
+  try { return m.getBoundingClientRect().top; } catch (_) { return 0; }
+}
 
-window.addEventListener("pointermove", (e) => {
+function modalSwipeBegin(modal, y, fromGrab) {
   const s = modalSwipe;
-  if (s.pid === null || e.pointerId !== s.pid) return;
-  const m = s.modal;
-  if (!m || !m.isConnected) { s.pid = null; return; }
+  s.modal = modal;
+  s.startY = s.lastY = y; s.lastT = performance.now();
+  s.vy = 0; s.dy = 0; s.shown = 0; s.dragging = false;
+  s.fromGrab = fromGrab;
+  try { s.startTop = y - modalSwipeTop(modal); } catch (_) { s.startTop = 0; }
+}
+
+function modalSwipeMove(m, y) {
+  const s = modalSwipe;
   const now = performance.now();
-  const y = e.clientY;
   if (now > s.lastT) {
     const v = (y - s.lastY) / Math.max(1, now - s.lastT);
     s.vy = s.vy * 0.6 + v * 0.4;
@@ -705,9 +704,9 @@ window.addEventListener("pointermove", (e) => {
   }
   const d = y - s.startY;
   if (!s.dragging) {
-    if (d < 10) { if (d < -12) s.pid = null; return; }
-    if (m.scrollTop > 8) { s.pid = null; return; } // контент проскроллен — это скролл
-    if (!s.fromGrab && s.startTop > Math.max(200, m.offsetHeight * 0.6)) { s.pid = null; return; } // жест от верха
+    if (d < 10) return false;
+    if (m.scrollTop > 8) return false; // контент проскроллен — это скролл
+    if (!s.fromGrab && s.startTop > Math.max(200, m.offsetHeight * 0.6)) return false; // жест от верха
     s.dragging = true;
     m.classList.add("modal--drag");
   }
@@ -717,14 +716,14 @@ window.addEventListener("pointermove", (e) => {
   m.style.transform = `translateY(${s.shown}px)`;
   const bd = m.closest ? m.closest(".modal-backdrop") : null;
   if (bd) bd.style.opacity = String(Math.max(0.2, 1 - s.shown / (m.offsetHeight * 1.3)));
-}, { passive: true });
+  return true;
+}
 
-function modalSwipeEnd(e) {
+function modalSwipeFinish() {
   const s = modalSwipe;
-  if (s.pid === null || (e && e.pointerId !== undefined && e.pointerId !== s.pid)) return;
   const m = s.modal;
   const wasDrag = s.dragging, shown = s.shown, vy = s.vy;
-  s.pid = null; s.dragging = false; s.dy = 0; s.shown = 0;
+  s.pid = null; s.tid = null; s.modal = null; s.dragging = false; s.dy = 0; s.shown = 0;
   if (!m || !m.isConnected || !wasDrag) return;
   m.classList.remove("modal--drag");
   const bd = m.closest ? m.closest(".modal-backdrop") : null;
@@ -742,8 +741,83 @@ function modalSwipeEnd(e) {
     setTimeout(() => m.classList.remove("modal--snap"), 300);
   }
 }
-window.addEventListener("pointerup", modalSwipeEnd, { passive: true });
-window.addEventListener("pointercancel", modalSwipeEnd, { passive: true });
+
+/* Мышь (ПК): pointer-событий хватает, скролл-конфликта нет. */
+document.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "mouse") return;
+  if (e.button !== 0) return;
+  const t = e.target;
+  const modal = t && t.closest ? t.closest("#modal-root .modal") : null;
+  if (!modal) return;
+  if (t === modal && e.offsetX > modal.clientWidth) return; // тащат скроллбар, не окно
+  modalSwipe.pid = e.pointerId;
+  modalSwipeBegin(modal, e.clientY, !!(t.closest && t.closest(".modal__grab")));
+}, { passive: true });
+
+window.addEventListener("pointermove", (e) => {
+  const s = modalSwipe;
+  if (e.pointerType !== "mouse") return;
+  if (s.pid === null || e.pointerId !== s.pid) return;
+  if (!s.modal || !s.modal.isConnected) { s.pid = null; return; }
+  const d = e.clientY - s.startY;
+  if (!s.dragging && d < -12) { s.pid = null; return; } // потянули вверх — не наш жест
+  modalSwipeMove(s.modal, e.clientY);
+}, { passive: true });
+
+function modalSwipeMouseEnd(e) {
+  if (e.pointerType !== undefined && e.pointerType !== "mouse") return;
+  if (e.pointerId !== undefined && e.pointerId !== modalSwipe.pid) return;
+  modalSwipeFinish();
+}
+window.addEventListener("pointerup", modalSwipeMouseEnd, { passive: true });
+window.addEventListener("pointercancel", modalSwipeMouseEnd, { passive: true });
+
+/* Палец (телефон): отдельные touch-события. move — непассивный, чтобы
+   preventDefault гасил нативный скролл, пока окно едет за пальцем. */
+document.addEventListener("touchstart", (e) => {
+  if (modalSwipe.tid !== null) return;
+  const tc = e.changedTouches && e.changedTouches[0];
+  if (!tc) return;
+  const t = e.target;
+  const modal = t && t.closest ? t.closest("#modal-root .modal") : null;
+  if (!modal) return;
+  modalSwipe.tid = tc.identifier;
+  modalSwipeBegin(modal, tc.clientY, !!(t.closest && t.closest(".modal__grab")));
+}, { passive: true });
+
+document.addEventListener("touchmove", (e) => {
+  const s = modalSwipe;
+  if (s.tid === null || !s.modal || !s.modal.isConnected) return;
+  let tc = null;
+  const list = e.changedTouches || e.touches;
+  for (let i = 0; i < (list ? list.length : 0); i++) {
+    if (list[i].identifier === s.tid) { tc = list[i]; break; }
+  }
+  if (!tc) return;
+  const d = tc.clientY - s.startY;
+  if (!s.dragging) {
+    if (d < 10) { if (d < -12) { s.tid = null; s.modal = null; } return; }
+    if (s.modal.scrollTop > 8) { s.tid = null; s.modal = null; return; }
+    if (!s.fromGrab && s.startTop > Math.max(200, s.modal.offsetHeight * 0.6)) { s.tid = null; s.modal = null; return; }
+  }
+  if (e.cancelable) e.preventDefault(); // давим нативный скролл — окно едет ровно за пальцем
+  modalSwipeMove(s.modal, tc.clientY);
+}, { passive: false });
+
+document.addEventListener("touchend", (e) => {
+  if (modalSwipe.tid === null) return;
+  const list = e.changedTouches || [];
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].identifier === modalSwipe.tid) { modalSwipeFinish(); return; }
+  }
+}, { passive: true });
+document.addEventListener("touchcancel", (e) => {
+  if (modalSwipe.tid === null) return;
+  const list = e.changedTouches || [];
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].identifier === modalSwipe.tid) { modalSwipeFinish(); return; }
+  }
+}, { passive: true });
 
 /* ---------------- контекстные подсказки ----------------
    Единая система объяснений элементов интерфейса.
