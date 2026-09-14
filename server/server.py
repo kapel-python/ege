@@ -1346,7 +1346,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
             conn.execute("INSERT INTO user_hint_levels(user_id,subject,level,used_count) VALUES (?,?,?,?)", (user_id, subject, int(level), int(count)))
         except (TypeError, ValueError):
             continue
-    valid_task_ids = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
+    valid_task_ids = {r["id"] for r in conn.execute("SELECT t.id AS id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,))}
     for item in s.get("taskAttempts") or []:
         # task_attempts.skill_id и user_errors.skill_id — FK на skills: чужой
         # skill ронял весь PUT через IntegrityError, числовой мусор — через
@@ -1366,7 +1366,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
         if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
             continue
         conn.execute("INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?,?)", (user_id, subject, item["taskId"], item["skill"], item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
-    lesson_ids = {r["id"] for r in conn.execute("SELECT id FROM lessons")}
+    lesson_ids = {r["id"] for r in conn.execute("SELECT l.id AS id FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (subject,))}
     for item in s.get("lessonAttempts") or []:
         if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids:
             continue
@@ -1404,7 +1404,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
         if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?)", (user_id,subject,lesson_id,json.dumps(item,ensure_ascii=False)))
     for lesson_id, item in (s.get("completedLessons") or {}).items():
         if lesson_id in lesson_ids: conn.execute("INSERT INTO completed_lessons(user_id,subject,lesson_id,completed_at) VALUES(?,?,?,?)", (user_id,subject,lesson_id,item.get("ts") or now_iso()))
-    mission_ids = {r["id"] for r in conn.execute("SELECT id FROM missions")}
+    mission_ids = {r["id"] for r in conn.execute("SELECT m.id AS id FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (subject,))}
     missions_done_map = s.get("missionsDone") if isinstance(s.get("missionsDone"), dict) else {}
     for mission_id, progress in (s.get("missionProgress") or {}).items():
         if mission_id not in mission_ids:
@@ -1416,7 +1416,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
         done_entry = missions_done_map.get(mission_id)
         done_ts = done_entry.get("ts") if isinstance(done_entry, dict) else None
         conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?)", (user_id,subject,mission_id,progress_v,done_ts))
-    boss_ids = {r["id"] for r in conn.execute("SELECT id FROM bosses")}
+    boss_ids = {r["id"] for r in conn.execute("SELECT b.id AS id FROM bosses b JOIN topics t ON t.id=b.topic_id WHERE t.subject=?", (subject,))}
     # Дубли/мусор раньше роняли весь PUT (UNIQUE / FOREIGN KEY / TypeError на
     # нехешируемых типах): дедуплицируем безопасно, чужое отбрасываем.
     seen_bosses = set()
@@ -2005,11 +2005,18 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     xp formula (see recordAnswer in js/state.js) but only pays out "answer"
     xp once per task, so resubmitting an already-solved task for XP has no
     effect here even if the client-side guard is bypassed."""
-    tasks = {r["id"]: r["difficulty"] for r in conn.execute("SELECT id, difficulty FROM tasks")}
-    lessons_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM lessons")}
-    missions_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM missions")}
-    bosses_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM bosses")}
-    derive_subject = state.get("subject") if isinstance(state, dict) else None
+    derive_subject = resolve_subject(state.get("subject") if isinstance(state, dict) else None)
+    # Все XP-источники - строго в рамках предмета снапшота: чужие id
+    # (например, уроки профиля в снапшоте базы) не платят.
+    subj_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (derive_subject,))}
+    tasks = {r["id"]: r["difficulty"] for r in conn.execute(
+        "SELECT t.id AS id, t.difficulty AS difficulty FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (derive_subject,))}
+    lessons_xp = {r["id"]: r["xp"] for r in conn.execute(
+        "SELECT l.id AS id, l.xp AS xp FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (derive_subject,))}
+    missions_xp = {r["id"]: r["xp"] for r in conn.execute(
+        "SELECT m.id AS id, m.xp AS xp FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (derive_subject,))}
+    bosses_xp = {r["id"]: r["xp"] for r in conn.execute(
+        "SELECT b.id AS id, b.xp AS xp FROM bosses b JOIN topics t ON t.id=b.topic_id WHERE t.subject=?", (derive_subject,))}
     daily_xp = _daily_xp(conn, derive_subject)
 
     def _attempt_sort_key(a) -> int:
@@ -2143,8 +2150,9 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     # Manual XP adjustments (admin grants). The persisted log is the ONLY
     # source: write_state refuses to insert new rows from a client payload,
     # so anything the payload claims here is untrusted and ignored.
+    # Гранты - тоже в разрезе предмета: иначе награда профиля удвоится в базе.
     if user_id is not None:
-        for amount, reason, created_at in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=?", (user_id,)):
+        for amount, reason, created_at in conn.execute("SELECT amount, reason, created_at FROM user_xp_adjustments WHERE user_id=? AND subject=?", (user_id, derive_subject)):
             xp += int(amount)
 
     # Milestone-бонус за каждый достигнутый уровень. Бонус входит в итоговый XP,
@@ -2489,11 +2497,14 @@ class Handler(BaseHTTPRequestHandler):
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
                     self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
-                if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn, req_subject), "state": read_state(conn, user_id, req_subject), "accountId": account_id_for(conn, user_id)}, token=token); return
-                # Лёгкий bootstrap для первой отрисовки: каталог без текстов
-                # заданий и шагов уроков (~20 КБ вместо ~280 КБ). Полные данные
-                # догружаются через /api/catalog-tasks и /api/catalog-lessons.
-                if path == "/api/bootstrap-lite": self.send_json({"catalog": catalog_summary_payload(conn, req_subject), "state": read_state(conn, user_id, req_subject), "accountId": account_id_for(conn, user_id)}, token=token); return
+                # Каталог и состояние всегда одного предмета: без ?subject -
+                # current_subject пользователя (переживает перезагрузку),
+                # с ?subject - явно запрошенный. Разводить их нельзя: иначе
+                # клиент получит чужие задания с чужим прогрессом.
+                if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
+                    eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
+                    catalog = catalog_summary_payload(conn, eff) if path == "/api/bootstrap-lite" else catalog_payload(conn, eff)
+                    self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id)}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':
