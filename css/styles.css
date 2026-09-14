@@ -1682,8 +1682,8 @@ body {
   /* Модалка темы — bottom-sheet: во всю ширину, кнопки в столбик на всю ширину */
   .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal-wrap { justify-content: stretch; }
-  .modal__grab { display: flex; justify-content: center; padding: 4px 0 8px; cursor: grab; touch-action: none; }
-  .modal__grab span { width: 44px; height: 5px; border-radius: 3px; background: var(--border-strong); }
+  .modal__grab { display: flex; justify-content: center; padding: 12px 0 10px; margin: -8px 0 0; cursor: grab; touch-action: none; }
+  .modal__grab span { width: 48px; height: 5px; border-radius: 3px; background: var(--border-strong); }
   .modal {
     max-width: none;
     border-radius: 20px 20px 0 0;
