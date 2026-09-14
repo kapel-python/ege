@@ -7,6 +7,9 @@ const DataAPI = {
   catalog: null,
   _tasksFull: false,
   _lessonsFull: false,
+  _subjects: null,
+  _subject: null,
+  _forecast: null,
 
   load(catalog) {
     if (!catalog || !Array.isArray(catalog.tasks) || !Array.isArray(catalog.skills)) {
@@ -19,6 +22,12 @@ const DataAPI = {
     this._lessonsFull = !catalog.lessons.some((l) => l._meta);
     if (!Array.isArray(catalog.visualAssets)) catalog.visualAssets = [];
     if (!catalog.visualAudit) catalog.visualAudit = {};
+    // Предметы: старые пейлоады (тесты) их не несут — дефолт профиля.
+    this._subjects = Array.isArray(catalog.subjects) && catalog.subjects.length ? catalog.subjects : [
+      { id: "profile_math", title: "Профильная математика", short: "Профиль", status: "ready", forecast: null },
+    ];
+    this._subject = catalog.subject || "profile_math";
+    this._forecast = catalog.forecast || null;
   },
 
   // Ленивая догрузка полных задач/уроков поверх summary-каталога.
@@ -81,6 +90,14 @@ const DataAPI = {
   visualAssets() { return this.catalog?.visualAssets || []; },
   visualAudit() { return this.catalog?.visualAudit || {}; },
   visualAsset(id) { return this.visualAssets().find((asset) => asset.id === id); },
+  // --- Мультипредметность: предмет — свойство каталога, а не ветвление в коде.
+  subjects() { return this._subjects || []; },
+  currentSubject() { return this._subject || "profile_math"; },
+  subjectInfo(id) { return this.subjects().find((s) => s.id === (id || this.currentSubject())) || null; },
+  forecastConfig() { return this._forecast || null; },
+  // Пустой предмет: существует, контент ещё не подключён — экраны показывают
+  // заглушку «Материалы пока готовятся», а не ошибку.
+  isSubjectEmpty() { return this.ready() && this.skills().length === 0; },
 };
 
 const ApiClient = {

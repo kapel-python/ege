@@ -69,6 +69,84 @@ MAX_ACTIVITY_DAYS = 2000
 MAX_STATE_DICT = 2000
 
 # ---------------------------------------------------------------------------
+# Multi-subject model.
+#
+# Предмет — сущность первого класса: весь пользовательский прогресс, каталог
+# и прогнозы разрешаются строго в рамках одного subject. Новый предмет
+# добавляется одной записью в SUBJECTS + контентом в каталоге (навыки/задания
+# с subject=<id>), без ветвлений вида `if basic_math` по коду: все системы
+# читают конфиг через subject_config()/resolve_subject(), а не хардкод.
+# ---------------------------------------------------------------------------
+DEFAULT_SUBJECT = "profile_math"
+
+# Веса навыков в первичных баллах ЕГЭ-2026 (профиль) и шкала перевода в
+# тестовые — конфиг прогноза профильной математики. Лежит здесь (а не только
+# в js), чтобы subjects-пейлоад отдавал его клиентам из одного места.
+SKILL_EGE_WEIGHTS_PROFILE = {
+    "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
+    "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
+    "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
+    "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
+    "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2,
+}
+TOTAL_EGE_PRIMARY_PROFILE = 32
+PRIMARY_TO_TEST_PROFILE = [
+    0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
+    80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
+]
+
+SUBJECTS: dict[str, dict] = {
+    "profile_math": {
+        "id": "profile_math",
+        "title": "Профильная математика",
+        "short": "Профиль",
+        # ready: полный цикл (каталог, диагностика, прогноз). empty: предмет
+        # существует, контент ещё не подключён — UI показывает заглушку.
+        "status": "ready",
+        "forecast": {
+            "weights": SKILL_EGE_WEIGHTS_PROFILE,
+            "total": TOTAL_EGE_PRIMARY_PROFILE,
+            "scale": PRIMARY_TO_TEST_PROFILE,
+        },
+    },
+    "basic_math": {
+        "id": "basic_math",
+        "title": "Базовая математика",
+        "short": "База",
+        "status": "empty",
+        # Контента пока нет: уроки/задания подключатся отдельным файлом.
+        # Прогноз появится вместе с весами шкалы базы.
+        "forecast": None,
+    },
+}
+SUBJECT_IDS = tuple(SUBJECTS.keys())
+
+
+def subject_ids() -> tuple:
+    """Все известные id предметов (порядок = порядок показа в UI)."""
+    return SUBJECT_IDS
+
+
+def is_known_subject(value) -> bool:
+    return isinstance(value, str) and value in SUBJECTS
+
+
+def resolve_subject(value) -> str:
+    """Неизвестный/пустой subject -> DEFAULT_SUBJECT. Никогда не бросает."""
+    if is_known_subject(value):
+        return value
+    return DEFAULT_SUBJECT
+
+
+def subjects_payload() -> list:
+    """Публичное описание предметов для каталога/онбординга."""
+    return [
+        {"id": sid, "title": SUBJECTS[sid]["title"], "short": SUBJECTS[sid]["short"],
+         "status": SUBJECTS[sid]["status"], "forecast": SUBJECTS[sid]["forecast"]}
+        for sid in SUBJECT_IDS
+    ]
+
+# ---------------------------------------------------------------------------
 # Admin access
 #
 # The admin password is never stored or transmitted in plaintext: the server
@@ -715,9 +793,154 @@ def ensure_user_indexes(conn: sqlite3.Connection) -> None:
             pass
 
 
+# ---------------------------------------------------------------------------
+# Multi-subject storage migration.
+#
+# Каждый предмет живёт в своих строках: все пользовательские таблицы несут
+# колонку subject ('profile_math' по умолчанию — существующие данные
+# автоматически относятся к профилю, ничего не переезжает и не теряется).
+# Таблицы, чей PRIMARY KEY раньше был только (user_id[, ...]) без учёта
+# предмета (user_stats, user_hint_levels, activity_history, forecast_history,
+# daily_progress), пересоздаются с subject в ключе — иначе вторая строка
+# предмета упёрлась бы в конфликт. Остальные таблицы ключ уже разносят по
+# id каталога (skill/task/lesson), уникальным в рамках предмета, поэтому им
+# достаточно обычной колонки + индекса.
+# Профиль внутри предмета (onboarded/self_level/goal) хранит user_subjects;
+# колонки users.* остаются и дублируют профиль предмета profile_math ради
+# совместимости прямых чтений БД. Имя (name) — глобальное свойство
+# пользователя, в user_subjects не дублируется.
+# ---------------------------------------------------------------------------
+SUBJECT_SIMPLE_TABLES = (
+    "user_progress", "task_attempts", "user_errors", "lesson_attempts",
+    "lesson_step_errors", "lesson_error_history", "lesson_sessions",
+    "completed_lessons", "user_missions", "user_bosses", "user_achievements",
+    "timeline", "diagnostics", "user_xp_adjustments",
+)
+
+# table -> (new DDL, columns to copy from the old table in order)
+_SUBJECT_PK_REBUILDS = {
+    "user_stats": (
+        """CREATE TABLE user_stats_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          xp INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
+          last_active_date TEXT, total_solved INTEGER NOT NULL DEFAULT 0,
+          total_correct INTEGER NOT NULL DEFAULT 0,
+          total_time_sec REAL NOT NULL DEFAULT 0, hints_used INTEGER NOT NULL DEFAULT 0,
+          correct_series INTEGER NOT NULL DEFAULT 0,
+          best_series INTEGER NOT NULL DEFAULT 0, errors_resolved INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(user_id, subject))""",
+        ("user_id", "xp", "streak", "last_active_date", "total_solved",
+         "total_correct", "total_time_sec", "hints_used", "correct_series",
+         "best_series", "errors_resolved"),
+    ),
+    "user_hint_levels": (
+        """CREATE TABLE user_hint_levels_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          level INTEGER NOT NULL, used_count INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(user_id, subject, level))""",
+        ("user_id", "level", "used_count"),
+    ),
+    "activity_history": (
+        """CREATE TABLE activity_history_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          activity_date TEXT NOT NULL, solved INTEGER NOT NULL,
+          correct INTEGER NOT NULL, xp INTEGER NOT NULL,
+          PRIMARY KEY(user_id, subject, activity_date))""",
+        ("user_id", "activity_date", "solved", "correct", "xp"),
+    ),
+    "forecast_history": (
+        """CREATE TABLE forecast_history_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          snapshot_date TEXT NOT NULL, low INTEGER NOT NULL,
+          high INTEGER NOT NULL, mid INTEGER NOT NULL,
+          PRIMARY KEY(user_id, subject, snapshot_date))""",
+        ("user_id", "snapshot_date", "low", "high", "mid"),
+    ),
+    "daily_progress": (
+        """CREATE TABLE daily_progress_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          progress_date TEXT NOT NULL, solved INTEGER NOT NULL,
+          done INTEGER NOT NULL, task_ids_json TEXT NOT NULL DEFAULT '[]',
+          PRIMARY KEY(user_id, subject, progress_date))""",
+        ("user_id", "progress_date", "solved", "done", "task_ids_json"),
+    ),
+}
+
+_SUBJECT_SCHEMA_DONE: set[str] = set()
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set:
+    try:
+        return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    except sqlite3.Error:
+        return set()
+
+
+def _db_key(conn: sqlite3.Connection) -> str:
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        return row["file"] or ":memory:" if row else ":memory:"
+    except sqlite3.Error:
+        return ":memory:"
+
+
+def ensure_subject_schema(conn: sqlite3.Connection) -> None:
+    """Идемпотентная миграция под мультипредметность. Дешёвая при повторе."""
+    key = _db_key(conn)
+    if key in _SUBJECT_SCHEMA_DONE:
+        return
+    conn.executescript(SCHEMA)
+    # Каталог: предметная принадлежность навыков и категорий. Старые строки —
+    # профиль по умолчанию; у базовой математики своих строк пока нет.
+    for table in ("skills", "topics"):
+        if "subject" not in _table_columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'")
+    # Пользователь: текущий предмет + пер-профильные предметные профили.
+    if "current_subject" not in _table_columns(conn, "users"):
+        conn.execute(f"ALTER TABLE users ADD COLUMN current_subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'")
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_subjects (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subject TEXT NOT NULL, onboarded INTEGER NOT NULL DEFAULT 0,
+      self_level TEXT, goal_id TEXT,
+      PRIMARY KEY(user_id, subject))""")
+    # Backfill: существующие аккаунты уже прошли онбординг профиля.
+    conn.execute(f"""INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)
+      SELECT id, '{DEFAULT_SUBJECT}', onboarded, self_level, goal_id FROM users""")
+    # Таблицы с точным ключом по предмету — пересоздание с subject в PK.
+    for table, (ddl, cols) in _SUBJECT_PK_REBUILDS.items():
+        columns = _table_columns(conn, table)
+        if "subject" in columns:
+            continue
+        copy_cols = [c for c in cols if c in columns]
+        conn.execute(ddl)
+        if copy_cols:
+            # Явная вставка: user_id + дефолтный subject + остальные колонки.
+            rest = ", ".join(copy_cols[1:])
+            conn.execute(f"INSERT OR IGNORE INTO {table}_new (user_id, subject, {rest}) "
+                         f"SELECT user_id, '{DEFAULT_SUBJECT}', {rest} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+    # Остальные пользовательские таблицы — обычная колонка + индекс.
+    for table in SUBJECT_SIMPLE_TABLES:
+        if "subject" not in _table_columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'")
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_subject ON {table}(user_id, subject)")
+        except sqlite3.Error:
+            pass
+    conn.commit()
+    _SUBJECT_SCHEMA_DONE.add(key)
+
+
 def install_catalog(conn: sqlite3.Connection) -> None:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA)
+    ensure_subject_schema(conn)
     # Existing SQLite files need the new daily selection column migrated in place.
     daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
     if "task_ids_json" not in daily_columns:
@@ -771,6 +994,14 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily', ?)", (json.dumps(catalog["daily"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('goals', ?)", (json.dumps(catalog["goals"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks', ?)", (json.dumps(catalog["diagnosticTasks"], ensure_ascii=False),))
+    # Предметные копии конфигов: новый предмет подключается своими ключами
+    # `daily:<subject>` / `diagnosticTasks:<subject>`, legacy-ключи остаются
+    # фолбэком. Пустым предметам контент не выдумываем — кладём честное пусто.
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:profile_math', ?)", (json.dumps(catalog["daily"], ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('goals:profile_math', ?)", (json.dumps(catalog["goals"], ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:profile_math', ?)", (json.dumps(catalog["diagnosticTasks"], ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:basic_math', ?)", (json.dumps(_empty_daily(), ensure_ascii=False),))
+    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:basic_math', ?)", (json.dumps([], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAssets', ?)", (json.dumps(catalog.get("visualAssets", []), ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAudit', ?)", (json.dumps(catalog.get("visualAudit", {}), ensure_ascii=False),))
     conn.commit()
@@ -786,13 +1017,36 @@ def task_has_missing_visual(item: dict) -> bool:
     return bool(vis and vis.get("required") and not vis.get("assetId"))
 
 
-def _build_catalog_payload(conn: sqlite3.Connection) -> dict:
-    categories = [dict(r) for r in conn.execute("SELECT id, name, short FROM topics ORDER BY rowid")]
+def _subject_config(conn: sqlite3.Connection, key: str, subject: str, default, allow_legacy: bool = True):
+    """Конфиг предмета: сначала `key:subject`, затем legacy `key` (если разрешён)."""
+    row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (f"{key}:{subject}",)).fetchone()
+    if row:
+        return json.loads(row["value_json"])
+    if allow_legacy:
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (key,)).fetchone()
+        if row:
+            return json.loads(row["value_json"])
+    return default
+
+
+def _empty_daily() -> dict:
+    return {"skill": "", "target": 0, "xp": 0, "title": ""}
+
+
+def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
+    subject = resolve_subject(subject)
+    skill_rows = list(conn.execute(
+        "SELECT id, name, topic_id, display_order, ege FROM skills WHERE subject=? ORDER BY topic_id, display_order",
+        (subject,)))
+    skill_subject = {r["id"]: subject for r in skill_rows}
     skills = [{"id": r["id"], "name": r["name"], "cat": r["topic_id"], "order": r["display_order"], "ege": r["ege"]}
-              for r in conn.execute("SELECT id, name, topic_id, display_order, ege FROM skills ORDER BY topic_id, display_order")]
+              for r in skill_rows]
+    categories = [dict(r) for r in conn.execute("SELECT id, name, short FROM topics WHERE subject=? ORDER BY rowid", (subject,))]
     tasks = []
     blocked_ids = set()
     for r in conn.execute("SELECT * FROM tasks ORDER BY id"):
+        if skill_subject.get(r["skill_id"]) != subject:
+            continue
         meta = json.loads(r["metadata_json"] or "{}")
         item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"], "diff": r["difficulty"],
                 "text": r["statement"], "answer": r["answer"], "hint": r["hint"], "solution": r["explanation"]}
@@ -804,33 +1058,45 @@ def _build_catalog_payload(conn: sqlite3.Connection) -> dict:
             blocked_ids.add(r["id"])
             continue
         tasks.append(item)
-    lessons = [json.loads(r["metadata_json"]) for r in conn.execute("SELECT metadata_json FROM lessons ORDER BY id")]
+    lesson_rows = list(conn.execute("SELECT skill_id, metadata_json FROM lessons ORDER BY id"))
+    lessons = [json.loads(r["metadata_json"]) for r in lesson_rows
+               if skill_subject.get(r["skill_id"]) == subject]
     # Один запрос вместо N+1 (по одному SELECT на миссию): каталог собирается
     # на каждый bootstrap, и лишний round-trip в SQLite на миссию — чистое
     # время ожидания безо всякой пользы.
     mission_task_rows: dict[str, list] = {}
     for x in conn.execute("SELECT mission_id, task_id FROM mission_tasks ORDER BY mission_id, display_order"):
         mission_task_rows.setdefault(x["mission_id"], []).append(x["task_id"])
+    topic_ids = {c["id"] for c in categories}
     missions = []
     for r in conn.execute("SELECT * FROM missions ORDER BY id"):
+        if skill_subject.get(r["skill_id"]) != subject:
+            continue
         tasks_for_mission = [tid for tid in mission_task_rows.get(r["id"], []) if tid not in blocked_ids]
         missions.append({"id": r["id"], "title": r["title"], "desc": r["description"], "skill": r["skill_id"], "tasks": tasks_for_mission, "xp": r["xp"], "diff": r["difficulty"]})
     bosses = [{"id": r["id"], "title": r["title"], "cat": r["topic_id"], "desc": r["description"], "size": r["task_count"], "xp": r["xp"], "unlockAt": r["unlock_at"]}
-              for r in conn.execute("SELECT * FROM bosses ORDER BY id")]
+              for r in conn.execute("SELECT * FROM bosses ORDER BY id") if r["topic_id"] in topic_ids]
     achievements = [{"id": r["id"], "name": r["name"], "desc": r["description"], "icon": r["icon"]}
                     for r in conn.execute("SELECT * FROM achievements ORDER BY rowid")]
+    daily = _subject_config(conn, "daily", subject, _empty_daily())
+    # Цели — шкала конкретного предмета: чужие баллы не подсовываем.
+    # Legacy-фолбэк оставлен только профилю (его ключи писались до предметов).
+    goals = _subject_config(conn, "goals", subject, [], subject == DEFAULT_SUBJECT)
+    diagnostics = _subject_config(conn, "diagnosticTasks", subject, [])
     config = {r["key"]: json.loads(r["value_json"]) for r in conn.execute("SELECT key, value_json FROM app_config")}
-    return {"categories": categories, "skills": skills, "tasks": tasks, "lessons": lessons, "missions": missions,
-            "bosses": bosses, "achievements": achievements, "daily": config["daily"], "goals": config["goals"],
-            "diagnosticTasks": config["diagnosticTasks"], "visualAssets": config.get("visualAssets", []),
+    return {"subjects": subjects_payload(), "subject": subject, "forecast": SUBJECTS[subject]["forecast"],
+            "categories": categories, "skills": skills, "tasks": tasks, "lessons": lessons, "missions": missions,
+            "bosses": bosses, "achievements": achievements, "daily": daily, "goals": goals,
+            "diagnosticTasks": diagnostics, "visualAssets": config.get("visualAssets", []),
             "visualAudit": config.get("visualAudit", {})}
 
 
 # Кэш каталога в памяти процесса: полный payload собирается из SQLite на
 # каждый bootstrap (~20 SQL-запросов), хотя меняется только при
 # install_catalog (старт сервера). Ключ — mtime catalog.json + generation,
-# который растёт при каждом install_catalog в этом процессе.
-_CATALOG_CACHE: dict = {"key": None, "full": None, "generation": 0}
+# который растёт при каждом install_catalog в этом процессе. Пейлоады лежат
+# отдельно на предмет — предметы не пересекаются по данным.
+_CATALOG_CACHE: dict = {"key": None, "payloads": {}, "generation": 0}
 
 
 def _catalog_cache_key() -> tuple:
@@ -841,29 +1107,35 @@ def _catalog_cache_key() -> tuple:
     return (mtime, _CATALOG_CACHE["generation"])
 
 
-def catalog_payload(conn: sqlite3.Connection) -> dict:
-    """Полный каталог (совместимость: /api/bootstrap и тесты). Кэшируется."""
+def catalog_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
+    """Полный каталог предмета (совместимость: /api/bootstrap и тесты). Кэшируется."""
+    subject = resolve_subject(subject)
     key = _catalog_cache_key()
-    if _CATALOG_CACHE["key"] != key or _CATALOG_CACHE["full"] is None:
-        _CATALOG_CACHE["full"] = _build_catalog_payload(conn)
+    if _CATALOG_CACHE["key"] != key:
         _CATALOG_CACHE["key"] = key
-    return _CATALOG_CACHE["full"]
+        _CATALOG_CACHE["payloads"] = {}
+    cached = _CATALOG_CACHE["payloads"].get(subject)
+    if cached is None:
+        cached = _build_catalog_payload(conn, subject)
+        _CATALOG_CACHE["payloads"][subject] = cached
+    return cached
 
 
 def invalidate_catalog_cache() -> None:
     _CATALOG_CACHE["key"] = None
-    _CATALOG_CACHE["full"] = None
+    _CATALOG_CACHE["payloads"] = {}
 
 
-def catalog_summary_payload(conn: sqlite3.Connection) -> dict:
+def catalog_summary_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
     """Лёгкий каталог для первой отрисовки (~20 КБ вместо ~280 КБ).
 
     Задачи — только заглушки id/skill (счётчики и выборки по теме работают,
     тексты/ответы/разборы не грузятся). Уроки — мета без шагов.
     Тяжёлые visualAssets/visualAudit едут вместе с полными задачами.
     """
-    full = catalog_payload(conn)
+    full = catalog_payload(conn, subject)
     return {
+        "subjects": full["subjects"], "subject": full["subject"], "forecast": full["forecast"],
         "categories": full["categories"], "skills": full["skills"],
         "missions": full["missions"], "bosses": full["bosses"],
         "achievements": full["achievements"], "daily": full["daily"],
@@ -878,37 +1150,87 @@ def catalog_summary_payload(conn: sqlite3.Connection) -> dict:
     }
 
 
-def catalog_tasks_payload(conn: sqlite3.Connection) -> dict:
+def catalog_tasks_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
     """Полные задачи + визуальные ассеты (ленивая подгрузка)."""
-    full = catalog_payload(conn)
+    full = catalog_payload(conn, subject)
     return {"tasks": full["tasks"], "visualAssets": full["visualAssets"],
             "visualAudit": full["visualAudit"]}
 
 
-def catalog_lessons_payload(conn: sqlite3.Connection) -> dict:
+def catalog_lessons_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
     """Полные уроки с шагами (ленивая подгрузка)."""
-    return {"lessons": catalog_payload(conn)["lessons"]}
+    return {"lessons": catalog_payload(conn, subject)["lessons"]}
+
+
+def current_subject_for(conn: sqlite3.Connection, user_id: int) -> str:
+    """Текущий предмет пользователя. Неизвестное значение чинится в дефолт."""
+    cols = _table_columns(conn, "users")
+    if "current_subject" not in cols:
+        return DEFAULT_SUBJECT
+    row = conn.execute("SELECT current_subject FROM users WHERE id=?", (user_id,)).fetchone()
+    return resolve_subject(row["current_subject"] if row else None)
+
+
+def ensure_subject_rows(conn: sqlite3.Connection, user_id: int, subject: str) -> None:
+    """Лениво заводит пер-предметные строки: профиль и счётчики."""
+    subject = resolve_subject(subject)
+    cols = _table_columns(conn, "users")
+    if "current_subject" in cols:
+        cur = conn.execute("SELECT current_subject FROM users WHERE id=?", (user_id,)).fetchone()
+        if not cur or not is_known_subject(cur["current_subject"]):
+            conn.execute("UPDATE users SET current_subject=? WHERE id=?", (subject, user_id))
+    row = conn.execute("SELECT onboarded FROM users WHERE id=?", (user_id,)).fetchone()
+    if row:
+        if subject == DEFAULT_SUBJECT:
+            # Существующие аккаунты уже прошли онбординг профиля — переносим.
+            conn.execute(
+                "INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)"
+                " SELECT id, ?, onboarded, self_level, goal_id FROM users WHERE id=?",
+                (subject, user_id))
+        else:
+            # Новый предмет всегда начинается с чистого профиля, даже если
+            # в users.onboarded уже стоит флаг другого предмета.
+            conn.execute(
+                "INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)"
+                " VALUES (?, ?, 0, NULL, NULL)",
+                (user_id, subject))
+    conn.execute("INSERT OR IGNORE INTO user_stats(user_id, subject) VALUES (?, ?)", (user_id, subject))
+
+
+def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
+    if not is_known_subject(subject):
+        raise ValueError("unknown subject")
+    ensure_subject_schema(conn)
+    conn.execute("UPDATE users SET current_subject=? WHERE id=?", (subject, user_id))
+    ensure_subject_rows(conn, user_id, subject)
+    conn.commit()
+    return subject
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
+    ensure_subject_schema(conn)
     jar = cookies.SimpleCookie(handler.headers.get("Cookie", ""))
     token = jar.get("ege_session")
     token_value = token.value if token else None
     row = conn.execute("SELECT id FROM users WHERE session_token=?", (token_value,)).fetchone() if token_value else None
     if row:
+        ensure_subject_rows(conn, row["id"], current_subject_for(conn, row["id"]))
+        conn.commit()
         return row["id"], None
     new_token = token_urlsafe(32)
     cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (new_token, now_iso()))
     user_id = cur.lastrowid
     assign_account_id(conn, user_id)
     conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (user_id,))
+    ensure_subject_rows(conn, user_id, DEFAULT_SUBJECT)
     conn.commit()
     return user_id, new_token
 
 
-def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
-    skills = {r["id"]: {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0} for r in conn.execute("SELECT id FROM skills")}
-    return {"version": 4, "onboarded": False, "goal": None, "selfLevel": None, "name": None, "xp": 0, "streak": 0, "lastActiveDate": None,
+def default_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
+    subject = resolve_subject(subject)
+    skills = {r["id"]: {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0} for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
+    return {"version": 4, "subject": subject, "onboarded": False, "goal": None, "selfLevel": None, "name": None, "xp": 0, "streak": 0, "lastActiveDate": None,
             "totalSolved": 0, "totalCorrect": 0, "totalTimeSec": 0, "hintsUsed": 0, "hintLevels": {"1": 0, "2": 0, "3": 0},
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
@@ -917,41 +1239,50 @@ def default_state(conn: sqlite3.Connection, user_id: int) -> dict:
             "timeline": [], "daily": {"date": None, "solved": 0, "done": False, "taskIds": []}, "dailyHistory": [], "skillStats": skills}
 
 
-def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
-    state = default_state(conn, user_id)
+def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
+    ensure_subject_schema(conn)
+    subject = resolve_subject(subject if is_known_subject(subject) else current_subject_for(conn, user_id))
+    ensure_subject_rows(conn, user_id, subject)
+    state = default_state(conn, user_id, subject)
+    state["subject"] = subject
     user = conn.execute("SELECT onboarded, self_level, goal_id, name FROM users WHERE id=?", (user_id,)).fetchone()
-    stats = conn.execute("SELECT * FROM user_stats WHERE user_id=?", (user_id,)).fetchone()
+    prof = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+    if prof is not None:
+        state.update({"onboarded": bool(prof["onboarded"]), "selfLevel": prof["self_level"], "goal": prof["goal_id"]})
+    elif user:
+        state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"]})
     if user:
-        state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"], "name": user["name"]})
+        state["name"] = user["name"]
+    stats = conn.execute("SELECT * FROM user_stats WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
     if stats:
         state.update({"xp": stats["xp"], "streak": stats["streak"], "lastActiveDate": stats["last_active_date"], "totalSolved": stats["total_solved"],
                       "totalCorrect": stats["total_correct"], "totalTimeSec": stats["total_time_sec"], "hintsUsed": stats["hints_used"],
                       "correctSeries": stats["correct_series"], "bestSeries": stats["best_series"], "errorsResolved": stats["errors_resolved"]})
     state["hintLevels"] = {str(i): 0 for i in range(1, 4)}
-    for r in conn.execute("SELECT level, used_count FROM user_hint_levels WHERE user_id=?", (user_id,)): state["hintLevels"][str(r["level"])] = r["used_count"]
-    for r in conn.execute("SELECT * FROM user_progress WHERE user_id=?", (user_id,)):
+    for r in conn.execute("SELECT level, used_count FROM user_hint_levels WHERE user_id=? AND subject=?", (user_id, subject)): state["hintLevels"][str(r["level"])] = r["used_count"]
+    for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
         state["skillStats"][r["skill_id"]] = {"progress": r["progress"], "solved": r["solved"], "correct": r["correct"], "timeSec": r["time_sec"]}
-    for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? ORDER BY id DESC", (user_id,)):
+    for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject)):
         state["errors"].append({"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
-    for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? ORDER BY id DESC LIMIT 5000", (user_id,)):
+    for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 5000", (user_id, subject)):
         state["taskAttempts"].append({"taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"], "ts": timestamp_value(r["created_at"])})
-    for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=?", (user_id,)):
+    for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=?", (user_id, subject)):
         state["lessonStepErrors"][f'{r["lesson_id"]}:{r["step_id"]}'] = {"count": r["count"], "skill": r["skill_id"], "ts": timestamp_value(r["last_at"]), "types": json.loads(r["types_json"])}
-    for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at FROM lesson_error_history WHERE user_id=? ORDER BY id DESC LIMIT 200", (user_id,)):
+    for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at FROM lesson_error_history WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 200", (user_id, subject)):
         state["lessonErrorHistory"].append({"lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
-    for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=?", (user_id,)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
-    for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=?", (user_id,)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
-    for r in conn.execute("SELECT * FROM lesson_attempts WHERE user_id=? ORDER BY id DESC LIMIT 1000", (user_id,)):
+    for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=? AND subject=?", (user_id, subject)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
+    for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=? AND subject=?", (user_id, subject)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
+    for r in conn.execute("SELECT * FROM lesson_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 1000", (user_id, subject)):
         state["lessonAttempts"].append({"lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
-    for r in conn.execute("SELECT * FROM user_missions WHERE user_id=?", (user_id,)):
+    for r in conn.execute("SELECT * FROM user_missions WHERE user_id=? AND subject=?", (user_id, subject)):
         state["missionProgress"][r["mission_id"]] = r["progress"]
         if r["completed_at"]: state["missionsDone"][r["mission_id"]] = {"ts": timestamp_value(r["completed_at"])}
-    state["bossesDefeated"] = [r["boss_id"] for r in conn.execute("SELECT boss_id FROM user_bosses WHERE user_id=?", (user_id,))]
-    for r in conn.execute("SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id=?", (user_id,)): state["achievements"][r["achievement_id"]] = {"ts": timestamp_value(r["unlocked_at"])}
-    for r in conn.execute("SELECT * FROM activity_history WHERE user_id=?", (user_id,)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
-    state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute("SELECT * FROM forecast_history WHERE user_id=? ORDER BY snapshot_date", (user_id,))]
-    state["xpAdjustments"] = [{"amount": r["amount"], "reason": r["reason"], "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM user_xp_adjustments WHERE user_id=? ORDER BY id", (user_id,))]
-    daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? ORDER BY progress_date DESC", (user_id,)))
+    state["bossesDefeated"] = [r["boss_id"] for r in conn.execute("SELECT boss_id FROM user_bosses WHERE user_id=? AND subject=?", (user_id, subject))]
+    for r in conn.execute("SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id=? AND subject=?", (user_id, subject)): state["achievements"][r["achievement_id"]] = {"ts": timestamp_value(r["unlocked_at"])}
+    for r in conn.execute("SELECT * FROM activity_history WHERE user_id=? AND subject=?", (user_id, subject)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
+    state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute("SELECT * FROM forecast_history WHERE user_id=? AND subject=? ORDER BY snapshot_date", (user_id, subject))]
+    state["xpAdjustments"] = [{"amount": r["amount"], "reason": r["reason"], "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM user_xp_adjustments WHERE user_id=? AND subject=? ORDER BY id", (user_id, subject))]
+    daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? AND subject=? ORDER BY progress_date DESC", (user_id, subject)))
     state["dailyHistory"] = []
     for daily in daily_rows:
         try:
@@ -960,23 +1291,40 @@ def read_state(conn: sqlite3.Connection, user_id: int) -> dict:
             task_ids = []
         state["dailyHistory"].append({"date": daily["progress_date"], "solved": daily["solved"], "done": bool(daily["done"]), "taskIds": task_ids})
     if daily_rows: state["daily"] = state["dailyHistory"][0].copy()
-    state["timeline"] = [{"ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? ORDER BY id DESC LIMIT 40", (user_id,))]
-    state["diagnostics"] = [{"taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? ORDER BY id DESC", (user_id,))]
+    state["timeline"] = [{"ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 40", (user_id, subject))]
+    state["diagnostics"] = [{"taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject))]
     return state
 
 
-def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
+def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: str | None = None) -> None:
     # The API accepts only a state snapshot produced by the application logic;
     # all durable collections are written to their normalized tables in one transaction.
-    valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills")}
-    conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=? WHERE id=?",
-                 (int(bool(state.get("onboarded"))), state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), user_id))
+    # Снапшот всегда принадлежит одному предмету: пишем и чистим только его
+    # строки (WHERE user_id AND subject), соседние предметы не трогаем.
+    ensure_subject_schema(conn)
+    if subject is None:
+        subject = state.get("subject") if isinstance(state, dict) else None
+    subject = resolve_subject(subject if is_known_subject(subject) else current_subject_for(conn, user_id))
+    ensure_subject_rows(conn, user_id, subject)
+    # Навыки предмета: чужие skill_id в этот предмет не пишем.
+    valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
+    profile_onboarded = int(bool(state.get("onboarded")))
+    conn.execute("INSERT INTO user_subjects(user_id, subject, onboarded, self_level, goal_id) VALUES(?,?,?,?,?)"
+                 " ON CONFLICT(user_id, subject) DO UPDATE SET onboarded=excluded.onboarded, self_level=excluded.self_level, goal_id=excluded.goal_id",
+                 (user_id, subject, profile_onboarded, state.get("selfLevel"), state.get("goal")))
+    if subject == DEFAULT_SUBJECT:
+        # Зеркало в users.* ради совместимости прямых чтений БД.
+        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=?, current_subject=? WHERE id=?",
+                     (profile_onboarded, state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), subject, user_id))
+    else:
+        conn.execute("UPDATE users SET name=?, current_subject=? WHERE id=?",
+                     (sanitize_name(state.get("name")), subject, user_id))
     s = state
-    conn.execute("""INSERT INTO user_stats(user_id,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=excluded.best_series,errors_resolved=excluded.errors_resolved""",
-                 (user_id, int(s.get("xp", 0)), int(s.get("streak", 0)), s.get("lastActiveDate"), int(s.get("totalSolved", 0)), int(s.get("totalCorrect", 0)), float(s.get("totalTimeSec", 0)), int(s.get("hintsUsed", 0)), int(s.get("correctSeries", 0)), int(s.get("bestSeries", 0)), int(s.get("errorsResolved", 0))))
+    conn.execute("""INSERT INTO user_stats(user_id,subject,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,subject) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=excluded.best_series,errors_resolved=excluded.errors_resolved""",
+                 (user_id, subject, int(s.get("xp", 0)), int(s.get("streak", 0)), s.get("lastActiveDate"), int(s.get("totalSolved", 0)), int(s.get("totalCorrect", 0)), float(s.get("totalTimeSec", 0)), int(s.get("hintsUsed", 0)), int(s.get("correctSeries", 0)), int(s.get("bestSeries", 0)), int(s.get("errorsResolved", 0))))
     for table in ("user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts", "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons", "user_missions", "user_bosses", "user_achievements", "activity_history", "forecast_history", "daily_progress", "timeline", "diagnostics"):
-        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+        conn.execute(f"DELETE FROM {table} WHERE user_id=? AND subject=?", (user_id, subject))
     for skill_id, value in (s.get("skillStats") or {}).items():
         # Одна битая запись раньше роняла весь PUT (int("abc") -> ValueError,
         # float(None) -> TypeError, который вообще не ловился в do_PUT):
@@ -992,10 +1340,10 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
             continue
         if not 0 <= progress <= 100 or solved < 0 or correct < 0 or time_sec < 0:
             continue
-        conn.execute("INSERT INTO user_progress VALUES (?,?,?,?,?,?)", (user_id, skill_id, progress, solved, correct, time_sec))
+        conn.execute("INSERT INTO user_progress(user_id,subject,skill_id,progress,solved,correct,time_sec) VALUES (?,?,?,?,?,?,?)", (user_id, subject, skill_id, progress, solved, correct, time_sec))
     for level, count in (s.get("hintLevels") or {}).items():
         try:
-            conn.execute("INSERT INTO user_hint_levels VALUES (?,?,?)", (user_id, int(level), int(count)))
+            conn.execute("INSERT INTO user_hint_levels(user_id,subject,level,used_count) VALUES (?,?,?,?)", (user_id, subject, int(level), int(count)))
         except (TypeError, ValueError):
             continue
     valid_task_ids = {r["id"] for r in conn.execute("SELECT id FROM tasks")}
@@ -1013,11 +1361,11 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         closes = item.get("closesTaskId")
         if closes is not None and not isinstance(closes, str):
             closes = None
-        conn.execute("INSERT INTO task_attempts(user_id,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id, item["taskId"], item["skill"], int(bool(item.get("correct"))), hint_level, seconds, closes, item.get("ts") or now_iso()))
+        conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id, subject, item["taskId"], item["skill"], int(bool(item.get("correct"))), hint_level, seconds, closes, item.get("ts") or now_iso()))
     for item in s.get("errors") or []:
         if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
             continue
-        conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?)", (user_id, item["taskId"], item["skill"], item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
+        conn.execute("INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?,?)", (user_id, subject, item["taskId"], item["skill"], item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
     lesson_ids = {r["id"] for r in conn.execute("SELECT id FROM lessons")}
     for item in s.get("lessonAttempts") or []:
         if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids:
@@ -1028,7 +1376,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
             dur_v = float(item.get("durationSec", 0))
         except (TypeError, ValueError):
             continue
-        conn.execute("INSERT INTO lesson_attempts(user_id,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?)", (user_id,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),xp_v,wrong_v,dur_v,item.get("ts") or now_iso()))
+        conn.execute("INSERT INTO lesson_attempts(user_id,subject,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id,subject,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),xp_v,wrong_v,dur_v,item.get("ts") or now_iso()))
     for key, item in (s.get("lessonStepErrors") or {}).items():
         # Битый ключ без ":" раньше ронял весь PUT через ValueError — одно
         # поле ломало любое сохранение. Пропускаем мусор молча.
@@ -1045,17 +1393,17 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
             types_json = json.dumps(item.get("types", {}), ensure_ascii=False)
         except (TypeError, ValueError):
             types_json = "{}"
-        conn.execute("INSERT INTO lesson_step_errors VALUES(?,?,?,?,?,?,?)", (user_id,lesson_id,step_id,item["skill"],count_v,item.get("ts") or now_iso(),types_json))
+        conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?)", (user_id,subject,lesson_id,step_id,item["skill"],count_v,item.get("ts") or now_iso(),types_json))
     for item in s.get("lessonErrorHistory") or []:
         # lesson_error_history.skill_id — FK на skills (проверено: чужой skill
         # ронял весь PUT). stepId обязан быть строкой (NOT NULL без дефолта).
         if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids or item.get("skill") not in valid_skills:
             continue
-        conn.execute("INSERT INTO lesson_error_history(user_id,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?)", (user_id,item["lessonId"],item.get("stepId") or "",item["skill"],item.get("type", ""),item.get("ts") or now_iso()))
+        conn.execute("INSERT INTO lesson_error_history(user_id,subject,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?,?)", (user_id,subject,item["lessonId"],item.get("stepId") or "",item["skill"],item.get("type", ""),item.get("ts") or now_iso()))
     for lesson_id, item in (s.get("lessonSessions") or {}).items():
-        if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_sessions VALUES(?,?,?)", (user_id,lesson_id,json.dumps(item,ensure_ascii=False)))
+        if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?)", (user_id,subject,lesson_id,json.dumps(item,ensure_ascii=False)))
     for lesson_id, item in (s.get("completedLessons") or {}).items():
-        if lesson_id in lesson_ids: conn.execute("INSERT INTO completed_lessons VALUES(?,?,?)", (user_id,lesson_id,item.get("ts") or now_iso()))
+        if lesson_id in lesson_ids: conn.execute("INSERT INTO completed_lessons(user_id,subject,lesson_id,completed_at) VALUES(?,?,?,?)", (user_id,subject,lesson_id,item.get("ts") or now_iso()))
     mission_ids = {r["id"] for r in conn.execute("SELECT id FROM missions")}
     missions_done_map = s.get("missionsDone") if isinstance(s.get("missionsDone"), dict) else {}
     for mission_id, progress in (s.get("missionProgress") or {}).items():
@@ -1067,7 +1415,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
             continue
         done_entry = missions_done_map.get(mission_id)
         done_ts = done_entry.get("ts") if isinstance(done_entry, dict) else None
-        conn.execute("INSERT INTO user_missions(user_id,mission_id,progress,completed_at) VALUES(?,?,?,?)", (user_id,mission_id,progress_v,done_ts))
+        conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?)", (user_id,subject,mission_id,progress_v,done_ts))
     boss_ids = {r["id"] for r in conn.execute("SELECT id FROM bosses")}
     # Дубли/мусор раньше роняли весь PUT (UNIQUE / FOREIGN KEY / TypeError на
     # нехешируемых типах): дедуплицируем безопасно, чужое отбрасываем.
@@ -1076,7 +1424,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         if not isinstance(boss_id, str) or boss_id in seen_bosses or boss_id not in boss_ids:
             continue
         seen_bosses.add(boss_id)
-        conn.execute("INSERT INTO user_bosses VALUES(?,?,?)", (user_id, boss_id, now_iso()))
+        conn.execute("INSERT INTO user_bosses(user_id,subject,boss_id,defeated_at) VALUES(?,?,?,?)", (user_id, subject, boss_id, now_iso()))
     achievement_ids = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
     achievements_map = s.get("achievements") if isinstance(s.get("achievements"), dict) else {}
     for achievement_id, item in achievements_map.items():
@@ -1085,19 +1433,19 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         # Значение-не-словарь раньше роняло PUT через AttributeError, который
         # даже не ловился в do_PUT (обрыв соединения без JSON-ошибки).
         ts = item.get("ts") if isinstance(item, dict) else None
-        conn.execute("INSERT INTO user_achievements VALUES(?,?,?)", (user_id, achievement_id, ts or now_iso()))
+        conn.execute("INSERT INTO user_achievements(user_id,subject,achievement_id,unlocked_at) VALUES(?,?,?,?)", (user_id, subject, achievement_id, ts or now_iso()))
     for activity_date, value in (s.get("activity") or {}).items():
         if not isinstance(activity_date, str) or not isinstance(value, dict):
             continue
         try:
-            conn.execute("INSERT INTO activity_history VALUES(?,?,?,?,?)", (user_id,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
+            conn.execute("INSERT INTO activity_history(user_id,subject,activity_date,solved,correct,xp) VALUES(?,?,?,?,?,?)", (user_id,subject,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
         except (TypeError, ValueError):
             continue
     for item in s.get("forecastHistory") or []:
         if not isinstance(item, dict):
             continue
         try:
-            conn.execute("INSERT INTO forecast_history VALUES(?,?,?,?,?)", (user_id,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
+            conn.execute("INSERT INTO forecast_history(user_id,subject,snapshot_date,low,high,mid) VALUES(?,?,?,?,?,?)", (user_id,subject,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
         except (TypeError, ValueError, KeyError):
             continue
     # XP adjustments are an append-only audit log that derives straight into
@@ -1118,8 +1466,8 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
             solved_v = int(item.get("solved", 0))
         except (TypeError, ValueError):
             solved_v = 0
-        conn.execute("INSERT INTO daily_progress(user_id,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?)",
-                     (user_id,progress_date,solved_v,int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
+        conn.execute("INSERT INTO daily_progress(user_id,subject,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?,?)",
+                     (user_id,subject,progress_date,solved_v,int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
     for item in s.get("timeline") or []:
         # Текст записи был без потолка (проверено: 200 КБ пишется в БД и затем
         # грузится на каждый bootstrap): режем до MAX_TIMELINE_TEXT.
@@ -1128,11 +1476,11 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
         text = item.get("text", "")
         if not isinstance(text, str):
             text = str(text)
-        conn.execute("INSERT INTO timeline(user_id,created_at,text) VALUES(?,?,?)", (user_id,item.get("ts") or now_iso(),text[:MAX_TIMELINE_TEXT]))
+        conn.execute("INSERT INTO timeline(user_id,subject,created_at,text) VALUES(?,?,?,?)", (user_id,subject,item.get("ts") or now_iso(),text[:MAX_TIMELINE_TEXT]))
     for item in s.get("diagnostics") or []:
         if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids:
             continue
-        conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at) VALUES(?,?,?,?)", (user_id,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
+        conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at) VALUES(?,?,?,?,?)", (user_id,subject,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
 
 
 # ---------------------------------------------------------------------------
@@ -1511,14 +1859,15 @@ def admin_grant_xp(conn: sqlite3.Connection, user_id: int, amount: int, reason: 
         raise ValueError("amount must be a non-zero integer within ±100000")
     reason = " ".join(str(reason or "").split())[:200] or "admin"
     conn.execute("BEGIN")
-    conn.execute("INSERT INTO user_xp_adjustments(user_id, amount, reason, created_at) VALUES (?,?,?,?)",
-                 (user_id, amount, f"admin: {reason}", now_iso()))
-    stats = conn.execute("SELECT xp FROM user_stats WHERE user_id=?", (user_id,)).fetchone()
+    grant_subject = current_subject_for(conn, user_id)
+    conn.execute("INSERT INTO user_xp_adjustments(user_id, subject, amount, reason, created_at) VALUES (?,?,?,?,?)",
+                 (user_id, grant_subject, amount, f"admin: {reason}", now_iso()))
+    stats = conn.execute("SELECT xp FROM user_stats WHERE user_id=? AND subject=?", (user_id, grant_subject)).fetchone()
     new_xp = max(0, (stats["xp"] if stats else 0) + amount)
-    conn.execute("""INSERT INTO user_stats(user_id, xp) VALUES(?,?)
-                    ON CONFLICT(user_id) DO UPDATE SET xp=excluded.xp""", (user_id, new_xp))
-    conn.execute("INSERT INTO timeline(user_id, created_at, text) VALUES (?,?,?)",
-                 (user_id, now_iso(), f"Админ-корректировка XP: {amount:+d} ({reason})"))
+    conn.execute("""INSERT INTO user_stats(user_id, subject, xp) VALUES(?,?,?)
+                    ON CONFLICT(user_id, subject) DO UPDATE SET xp=excluded.xp""", (user_id, grant_subject, new_xp))
+    conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
+                 (user_id, grant_subject, now_iso(), f"Админ-корректировка XP: {amount:+d} ({reason})"))
     conn.commit()
     return {"xp": new_xp, "level": level_from_xp(new_xp), "amount": amount, "reason": reason}
 
@@ -1571,8 +1920,9 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         # while leaving grants would resurrect XP from nothing.
         conn.execute("DELETE FROM user_xp_adjustments WHERE user_id=?", (user_id,))
         conn.execute("UPDATE users SET onboarded=0, self_level=NULL, goal_id=NULL WHERE id=?", (user_id,))
-        conn.execute("INSERT INTO timeline(user_id, created_at, text) VALUES (?,?,?)",
-                     (user_id, now_iso(), "Админ сбросил весь прогресс аккаунта"))
+        conn.execute("DELETE FROM user_subjects WHERE user_id=?", (user_id,))
+        conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
+                     (user_id, current_subject_for(conn, user_id), now_iso(), "Админ сбросил весь прогресс аккаунта"))
     conn.commit()
     return {"ok": True, "target": target, "message": group["label"]}
 
@@ -1610,7 +1960,11 @@ def admin_audit_list(conn: sqlite3.Connection) -> list[dict]:
              "detail": r["detail"], "ts": timestamp_value(r["created_at"])} for r in rows]
 
 
-def _daily_xp(conn: sqlite3.Connection) -> int:
+def _daily_xp(conn: sqlite3.Connection, subject: str | None = None) -> int:
+    subject = resolve_subject(subject)
+    row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (f"daily:{subject}",)).fetchone()
+    if row:
+        return int(json.loads(row["value_json"]).get("xp", 0))
     row = conn.execute("SELECT value_json FROM app_config WHERE key='daily'").fetchone()
     if not row: return 0
     return int(json.loads(row["value_json"]).get("xp", 0))
@@ -1655,7 +2009,8 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     lessons_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM lessons")}
     missions_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM missions")}
     bosses_xp = {r["id"]: r["xp"] for r in conn.execute("SELECT id, xp FROM bosses")}
-    daily_xp = _daily_xp(conn)
+    derive_subject = state.get("subject") if isinstance(state, dict) else None
+    daily_xp = _daily_xp(conn, derive_subject)
 
     def _attempt_sort_key(a) -> int:
         # Смешанные типы ts (строка + число) раньше роняли сортировку через
@@ -1819,9 +2174,10 @@ def apply_derived_stats(conn: sqlite3.Connection, user_id: int, state: dict) -> 
     its full history (taskAttempts is capped at 5000 entries client-side)
     never regresses a long-time user's real, previously-saved totals."""
     derived = derive_stats(conn, state, user_id)
+    clamp_subject = resolve_subject(state.get("subject") if isinstance(state, dict) else None)
     prev = conn.execute(
-        "SELECT xp, total_solved, total_correct, hints_used, best_series, errors_resolved FROM user_stats WHERE user_id=?",
-        (user_id,),
+        "SELECT xp, total_solved, total_correct, hints_used, best_series, errors_resolved FROM user_stats WHERE user_id=? AND subject=?",
+        (user_id, clamp_subject),
     ).fetchone()
     for key, col in (
         ("xp", "xp"), ("totalSolved", "total_solved"), ("totalCorrect", "total_correct"),
@@ -1833,6 +2189,7 @@ def apply_derived_stats(conn: sqlite3.Connection, user_id: int, state: dict) -> 
 
 def validate_state(conn: sqlite3.Connection, state: dict) -> None:
     if not isinstance(state, dict): raise ValueError("state must be an object")
+    if state.get("subject") is not None and not is_known_subject(state.get("subject")): raise ValueError("unknown subject")
     name = state.get("name")
     if name is not None and not isinstance(name, str): raise ValueError("invalid name")
     if isinstance(name, str) and len(name.strip()) > MAX_NAME_LENGTH: raise ValueError("name too long")
@@ -2046,6 +2403,30 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": str(exc)}, status)
                 finally: conn.close()
                 return
+        if path == "/api/subject":
+            # Переключение текущего предмета. Возвращает каталог и состояние
+            # нового предмета — клиент просто перерисовывается, ничего не мержит.
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                wanted = payload.get("subject")
+                if not is_known_subject(wanted):
+                    self.send_json({"error": "Неизвестный предмет"}, 400); return
+                subject = set_current_subject(conn, user_id, wanted)
+                self.send_json({"ok": True, "subject": subject,
+                                "catalog": catalog_payload(conn, subject),
+                                "state": read_state(conn, user_id, subject),
+                                "accountId": account_id_for(conn, user_id)}, token=token)
+            except (ValueError, KeyError, sqlite3.Error) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         self.send_json({"error": "Not found"}, 404)
 
     def do_GET(self):
@@ -2097,17 +2478,22 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             conn = connect()
             try:
+                from urllib.parse import parse_qs
+                query = parse_qs(urlparse(self.path).query)
+                req_subject = query.get("subject", [None])[0]
                 # Read-only срезы каталога не заводят аккаунт: каждая такая
                 # выдача раньше писала строку в users (спам-аккаунты раздувают
                 # БД, а rows без активности висят навсегда).
-                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn)); return
-                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn)); return
+                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn, req_subject)); return
+                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn, req_subject)); return
                 user_id, token = user_for(conn, self)
-                if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
+                if path == "/api/subjects":
+                    self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
+                if path == "/api/bootstrap": self.send_json({"catalog": catalog_payload(conn, req_subject), "state": read_state(conn, user_id, req_subject), "accountId": account_id_for(conn, user_id)}, token=token); return
                 # Лёгкий bootstrap для первой отрисовки: каталог без текстов
                 # заданий и шагов уроков (~20 КБ вместо ~280 КБ). Полные данные
                 # догружаются через /api/catalog-tasks и /api/catalog-lessons.
-                if path == "/api/bootstrap-lite": self.send_json({"catalog": catalog_summary_payload(conn), "state": read_state(conn, user_id), "accountId": account_id_for(conn, user_id)}, token=token); return
+                if path == "/api/bootstrap-lite": self.send_json({"catalog": catalog_summary_payload(conn, req_subject), "state": read_state(conn, user_id, req_subject), "accountId": account_id_for(conn, user_id)}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':

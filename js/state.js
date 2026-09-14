@@ -6,6 +6,10 @@
 
 const Store = {
   state: null,
+  // Текущий предмет: часть снапшота (state.subject) и зеркало здесь для
+  // запросов. Весь прогресс, каталог и прогнозы — строго в его рамках.
+  subject: "profile_math",
+  subjects: [],
   // Server-generated public Account ID (see server.py assign_account_id).
   // Deliberately kept outside `state`: state is the exact snapshot that
   // round-trips through PUT /api/state, and the id must never be something
@@ -26,6 +30,7 @@ const Store = {
     }
     return {
       version: 4,
+      subject: Store.subject || (typeof DataAPI !== "undefined" && DataAPI.currentSubject && DataAPI.currentSubject()) || "profile_math",
       onboarded: false,
       goal: null,
       selfLevel: null,
@@ -64,22 +69,38 @@ const Store = {
     };
   },
 
-  async load() {
+  async load(subject) {
     this.loadPromise = (async () => {
       // Двухступенчатая загрузка: сначала лёгкий summary-каталог (~30 КБ)
       // + состояние, чтобы первая отрисовка была быстрой; тяжёлые тексты
       // заданий и шаги уроков (~250 КБ) догружаются лениво через ensureDetails.
+      const wanted = subject || this.subject || "profile_math";
+      const qs = `?subject=${encodeURIComponent(wanted)}`;
       let payload;
       try {
-        payload = await ApiClient.get("/api/bootstrap-lite");
+        payload = await ApiClient.get("/api/bootstrap-lite" + qs);
       } catch (_) {
-        payload = await ApiClient.get("/api/bootstrap");
+        payload = await ApiClient.get("/api/bootstrap" + qs);
       }
+      this._applyBootstrap(payload);
+      return this.state;
+    })();
+    return this.loadPromise;
+  },
+
+  // Общий разбор bootstrap-пейлоада: и первичная загрузка, и ответ
+  // POST /api/subject. Состояние одного предмета полностью заменяется
+  // состоянием другого — никакого мержа, иначе данные смешаются.
+  _applyBootstrap(payload) {
       DataAPI.load(payload.catalog);
       this.accountId = payload.accountId || null;
+      this.subject = (payload.state && payload.state.subject) || payload.catalog.subject || "profile_math";
+      this.subjects = DataAPI.subjects();
+      this.detailsPromise = null;
       const defaults = this.defaultState();
       const parsed = payload.state || {};
       this.state = Object.assign(defaults, parsed);
+      this.state.subject = this.subject;
       this.state.skillStats = Object.assign(defaults.skillStats, parsed.skillStats || {});
       this.state.hintLevels = Object.assign(defaults.hintLevels, parsed.hintLevels || {});
       this.state.completedLessons = Object.assign({}, parsed.completedLessons || {});
@@ -104,8 +125,6 @@ const Store = {
         } catch (_) { /* ignore — детали подгрузятся по требованию */ }
       }
       return this.state;
-    })();
-    return this.loadPromise;
   },
 
   // Полный каталог задач и уроков. Один полёт на сессию: параллельные
@@ -115,10 +134,11 @@ const Store = {
   ensureDetails() {
     if (DataAPI.detailsReady()) return Promise.resolve();
     if (this.detailsPromise) return this.detailsPromise;
+    const qs = `?subject=${encodeURIComponent(this.subject || "profile_math")}`;
     this.detailsPromise = (async () => {
       const [tasksPayload, lessonsPayload] = await Promise.all([
-        ApiClient.get("/api/catalog-tasks"),
-        ApiClient.get("/api/catalog-lessons"),
+        ApiClient.get("/api/catalog-tasks" + qs),
+        ApiClient.get("/api/catalog-lessons" + qs),
       ]);
       DataAPI.loadDetails({
         tasks: tasksPayload.tasks,
@@ -134,6 +154,8 @@ const Store = {
   save() {
     if (!this.state || !this.ready) return Promise.resolve();
     const snapshot = JSON.parse(JSON.stringify(this.state));
+    // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
+    snapshot.subject = this.subject || snapshot.subject || "profile_math";
     this.pendingSave = this.pendingSave
       .catch(() => {})
       .then(() => ApiClient.put("/api/state", snapshot))
@@ -143,6 +165,19 @@ const Store = {
         this.emit("persistenceerror", error);
       });
     return this.pendingSave;
+  },
+
+  // Переключение предмета: сервер возвращает каталог + состояние нового
+  // предмета, клиент полностью заменяет текущие (без мержа) и перерисовывается.
+  // Несохранённые изменения текущего предмета сначала дописываем.
+  async switchSubject(subjectId) {
+    if (!subjectId || subjectId === this.subject) return this.state;
+    await this.save();
+    await this.pendingSave.catch(() => {});
+    const payload = await ApiClient.post("/api/subject", { subject: subjectId });
+    this._applyBootstrap(payload);
+    this.emit("subjectchange", this.subject);
+    return this.state;
   },
 
   reset() {
@@ -438,10 +473,36 @@ const FORECAST_DECAY_DAYS = 45;
 const FORECAST_FULL_VOLUME = 12;
 
 function skillEgeWeight(skillId) {
-  if (Object.prototype.hasOwnProperty.call(SKILL_EGE_WEIGHTS, skillId)) return SKILL_EGE_WEIGHTS[skillId];
+  // Веса — конфиг текущего предмета (каталог: forecast.weights). Фолбэк —
+  // встроенные константы профиля, чтобы старые пейлоады и тесты без
+  // конфига считали как раньше.
+  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
+  const weights = (cfg && cfg.weights) || SKILL_EGE_WEIGHTS;
+  if (Object.prototype.hasOwnProperty.call(weights, skillId)) return weights[skillId];
   const skill = DataAPI.skill(skillId);
   if (!skill) return 0;
   return skill.cat === "part2" ? 2 : 1; // новый навык без веса: осторожная оценка
+}
+
+function forecastScale() {
+  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
+  if (cfg && Array.isArray(cfg.scale) && cfg.scale.length) return cfg.scale;
+  return PRIMARY_TO_TEST;
+}
+
+function forecastTotal() {
+  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
+  if (cfg && Number(cfg.total) > 0) return Number(cfg.total);
+  return TOTAL_EGE_PRIMARY;
+}
+
+function forecastConfigAvailable() {
+  // Пустой предмет (база без контента): прогноза нет — экраны показывают
+  // заглушку вместо нулей. Во всех остальных случаях считаем: по конфигу
+  // предмета из каталога, а для legacy-пейлоадов без конфига (тесты) —
+  // по встроенным константам профиля.
+  if (typeof DataAPI !== "undefined" && DataAPI.isSubjectEmpty && DataAPI.isSubjectEmpty()) return false;
+  return true;
 }
 
 /* Освоение темы глазами прогноза: та же шкала 0–100, что у
@@ -483,8 +544,10 @@ function forecastSkillMastery(skillId, now) {
 }
 
 function forecast() {
+  if (!forecastConfigAvailable()) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
+  const scale = forecastScale(), total = forecastTotal();
   const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
-  if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0 };
+  if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
   const now = Date.now();
   let wSum = 0, wMastery = 0, covered = 0;
   const masteryById = {};
@@ -499,8 +562,8 @@ function forecast() {
     if (hasLesson || masteryById[s.id] >= 25) covered++;
   }
   const mastery = wSum ? wMastery / wSum : 0;
-  const primary = (mastery / 100) * TOTAL_EGE_PRIMARY;
-  const mid = PRIMARY_TO_TEST[Math.max(0, Math.min(32, Math.round(primary)))] ?? 0;
+  const primary = (mastery / 100) * total;
+  const mid = scale[Math.max(0, Math.min(scale.length - 1, Math.round(primary)))] ?? 0;
   /* Живая вилка: мало данных — широко (±12), всё покрыто — узко (±3). */
   const hw = 12 - Math.round((9 * covered) / skills.length);
   return {
@@ -518,6 +581,8 @@ function forecast() {
    (взвешенное среднее → первичные → шкала), поэтому вес второй
    части честно выше, чем первой. */
 function forecastTopGains(n = 3) {
+  if (!forecastConfigAvailable()) return [];
+  const scale = forecastScale(), total = forecastTotal();
   const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
   if (!skills.length) return [];
   const now = Date.now();
@@ -538,8 +603,8 @@ function forecastTopGains(n = 3) {
     if (m >= 100) continue;
     const w = skillEgeWeight(s.id);
     const mastery = (wMastery + w * (100 - m)) / wSum;
-    const primary = (mastery / 100) * TOTAL_EGE_PRIMARY;
-    const test = PRIMARY_TO_TEST[Math.max(0, Math.min(32, Math.round(primary)))] ?? 0;
+    const primary = (mastery / 100) * total;
+    const test = scale[Math.max(0, Math.min(scale.length - 1, Math.round(primary)))] ?? 0;
     const gain = test - base.mid;
     if (gain > 0) gains.push({ skillId: s.id, name: s.name, gain });
   }
@@ -1103,6 +1168,8 @@ function weakestOf(pool) {
 }
 
 function nextStepCandidates() {
+  // Пустой предмет: рекомендовать нечего — экран показывает заглушку.
+  if (typeof DataAPI !== "undefined" && DataAPI.isSubjectEmpty && DataAPI.isSubjectEmpty()) return [];
   const s = Store.state;
   const cands = [];
   const mentioned = new Set(); // навык уже представлен кандидатом — не дублируем
@@ -1358,8 +1425,14 @@ function bestNextStep() {
    Онбординг / диагностика
    ============================================================ */
 
-function applyOnboarding(selfLevel, goalId, diagnosticResults, name) {
+function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   const s = Store.state;
+  /* Предмет — первая характеристика профиля; уровень — отдельная
+     характеристика внутри предмета, а не его заменитель. */
+  const subj = (subject && typeof DataAPI !== "undefined" && DataAPI.subjectInfo && DataAPI.subjectInfo(subject))
+    ? subject : "profile_math";
+  Store.subject = subj;
+  s.subject = subj;
   /* Самооценка сохраняется как настройка профиля, но не превращается в
      искусственный прогресс. Прогресс строится только по ответам диагностики
      и последующим фактическим действиям. */
@@ -1389,8 +1462,15 @@ function applyOnboarding(selfLevel, goalId, diagnosticResults, name) {
   s.name = cleanedName || null;
   s.onboarded = true;
   s.xp = 0;
-  recordForecastSnapshot();
-  addTimeline("Пройдена диагностика, профиль навыков построен");
+  const subjInfo = (typeof DataAPI !== "undefined" && DataAPI.subjectInfo && DataAPI.subjectInfo(subj)) || null;
+  const subjReady = !subjInfo || subjInfo.status === "ready";
+  if (subjReady) {
+    recordForecastSnapshot();
+    addTimeline("Пройдена диагностика, профиль навыков построен");
+  } else {
+    // Пустой предмет: диагностики и прогноза нет — только факт выбора.
+    addTimeline(`Выбран предмет «${subjInfo.title}»: материалы готовятся`);
+  }
   Store.save();
-  checkAchievements();
+  if (subjReady) checkAchievements();
 }

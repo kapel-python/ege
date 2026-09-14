@@ -45,7 +45,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   if (Store.loadPromise) await Store.loadPromise;
   await Store.reset();
-  applyOnboarding("base", "g80", [{ taskId: "eq1", correct: true }, { taskId: "fn1", correct: true }, { taskId: "dv1", correct: false }, { taskId: "pl1", correct: true }, { taskId: "vc1", correct: false }]);
+  applyOnboarding("profile_math", "base", "g80", [{ taskId: "eq1", correct: true }, { taskId: "fn1", correct: true }, { taskId: "dv1", correct: false }, { taskId: "pl1", correct: true }, { taskId: "vc1", correct: false }]);
   if (mode === "errors-smart") {
     // Формируем ошибки настоящими действиями, а не подготовленным состоянием.
     ["st7", "in6", "pl2", "dv5", "dv6", "dv3"].forEach((id) => recordAnswer(DataAPI.task(id), false, 0, 1));

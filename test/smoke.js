@@ -93,7 +93,7 @@ const testBody = async () => {
   t("история урока сохранена", Store.state.lessonAttempts.length === 2);
 
   Store.reset();
-  applyOnboarding("base", "g80", DataAPI.diagnosticTasks().map((id) => ({ taskId: id, correct: true })));
+  applyOnboarding("profile_math", "base", "g80", DataAPI.diagnosticTasks().map((id) => ({ taskId: id, correct: true })));
   t("диагностика сохраняет только реальные ответы", Store.state.onboarded && Store.state.xp === 0 && Store.state.diagnostics.length === 5 && Store.state.totalSolved === 5);
   t("онбординг не создаёт случайный прогресс", Store.state.skillStats.n11_word_problems.progress === 0);
 

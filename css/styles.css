@@ -1486,3 +1486,17 @@ body {
   .lesson-tools > span { display: none; }
   .lesson-title { font-size: 18px; }
 }
+
+/* Переключатель предмета (топбар, профиль, пустые состояния). */
+.subject-select {
+  background: var(--bg-soft, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 170px;
+}
+.subject-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
