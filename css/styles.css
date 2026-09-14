@@ -1514,6 +1514,12 @@ body {
 }
 .modal__close:hover { color: var(--text); background: var(--surface-3); }
 .modal-wrap { position: relative; width: 100%; display: flex; justify-content: center; }
+/* Ручка свайпа: видна только на телефоне, где модалка — bottom-sheet. */
+.modal__grab { display: none; }
+.modal--drag { transition: none !important; will-change: transform; user-select: none; -webkit-user-select: none; cursor: grabbing; }
+.modal--drag .modal__grab { cursor: grabbing; }
+.modal--snap { transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.25, 1); }
+.modal--dismiss { transition: transform 0.18s ease-in, opacity 0.18s ease-in; opacity: 0; pointer-events: none; }
 
 /* ---------- skill modal (окно темы в Пути) ---------- */
 .skill-modal__title { font-size: 22px; font-weight: 700; margin-top: 4px; padding-right: 36px; overflow-wrap: anywhere; }
@@ -1676,6 +1682,8 @@ body {
   /* Модалка темы — bottom-sheet: во всю ширину, кнопки в столбик на всю ширину */
   .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal-wrap { justify-content: stretch; }
+  .modal__grab { display: flex; justify-content: center; padding: 4px 0 8px; cursor: grab; touch-action: none; }
+  .modal__grab span { width: 44px; height: 5px; border-radius: 3px; background: var(--border-strong); }
   .modal {
     max-width: none;
     border-radius: 20px 20px 0 0;
