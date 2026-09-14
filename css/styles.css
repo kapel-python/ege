@@ -656,6 +656,10 @@ body {
 }
 .forecast-scale__labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .forecast-scale__labels .goal { color: var(--warn-ink); font-weight: 700; }
+.forecast-scale__labels--goal { position: relative; }
+.forecast-scale__labels--goal .goal { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
+.forecast-scale__labels--goal .goal--left { transform: none; }
+.forecast-scale__labels--goal .goal--right { transform: translateX(-100%); }
 .forecast-gain-btn {
   margin-top: 14px;
   width: 100%;

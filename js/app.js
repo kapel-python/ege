@@ -1353,7 +1353,7 @@ function screenDashboard(root) {
           <div class="forecast-scale__fill" style="width:${Math.min(100, Math.max(0, f.mid))}%"></div>
           ${goal != null ? `<div class="forecast-scale__goal" style="left:calc(${Math.min(100, Math.max(0, goal))}% - 1px)"></div>` : ""}
         </div>
-        <div class="forecast-scale__labels"><span>0</span>${goal != null ? `<span class="goal">цель ${goal}</span>` : `<span>50</span>`}<span>100</span></div>
+        <div class="forecast-scale__labels${goal != null ? " forecast-scale__labels--goal" : ""}"><span>0</span>${goal != null ? (() => { const gc = Math.min(100, Math.max(0, goal)); const ga = gc <= 12 ? "left" : gc >= 88 ? "right" : "center"; return `<span>100</span><span class="goal goal--${ga}" style="left:${gc}%">цель ${goal}</span>`; })() : `<span>50</span><span>100</span>`}</div>
         ${topGain ? `<button class="forecast-gain-btn" onclick="go('skill', '${topGain.skillId}')" title="Открыть тему">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b><span class="go">→</span></button>` : ""}
         ${cov.totalLessons ? `<div class="forecast-cover">
           <div class="forecast-cover__row"><span>Уроки: ${cov.doneLessons} из ${cov.totalLessons}</span><span>Темы с данными: ${cov.covered} из ${cov.totalSkills}</span></div>
