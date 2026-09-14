@@ -630,6 +630,7 @@ function openModal(html) {
   root.innerHTML = `
     <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
       <div class="modal-wrap"><div class="modal" role="dialog" aria-modal="true">
+        <div class="modal__grab" aria-hidden="true"><span></span></div>
         <button class="modal__close" onclick="closeModal()" aria-label="Закрыть окно">${icon("x")}</button>
         ${html}
       </div></div>
@@ -653,6 +654,96 @@ function closeModal() {
   }
   modalPrevFocus = null;
 }
+
+/* ---------------- modal swipe-to-close ----------------
+   Один механизм на все окна: тянем модалку вниз — она едет за
+   пальцем/мышью и закрывается, если отпустить после порога
+   (четверть высоты окна, 90–150px) или быстрым броском вниз.
+   Жест работает только от верхней части окна (верхние 40% высоты
+   или ручка) и только когда контент не проскроллен — иначе жест
+   остаётся обычным скроллом. Слушатели висят глобально один раз,
+   поэтому покрывают каждое окно из openModal без правок вызовов. */
+
+const modalSwipe = { modal: null, pid: null, startY: 0, startTop: 0, lastY: 0, lastT: 0, vy: 0, dy: 0, shown: 0, dragging: false, fromGrab: false };
+
+function modalSwipeThreshold(m) {
+  const h = (m && m.offsetHeight) || 420;
+  return Math.min(Math.max(h * 0.24, 90), 150);
+}
+
+function modalSwipeSuppressClick() {
+  const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+  window.addEventListener("click", stop, true);
+  setTimeout(() => window.removeEventListener("click", stop, true), 350);
+}
+
+document.addEventListener("pointerdown", (e) => {
+  const t = e.target;
+  const modal = t && t.closest ? t.closest("#modal-root .modal") : null;
+  if (!modal) return;
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  if (t === modal && e.offsetX > modal.clientWidth) return; // тащат скроллбар, не окно
+  const s = modalSwipe;
+  s.modal = modal; s.pid = e.pointerId;
+  s.startY = s.lastY = e.clientY; s.lastT = performance.now();
+  s.vy = 0; s.dy = 0; s.shown = 0; s.dragging = false;
+  s.fromGrab = !!(t.closest && t.closest(".modal__grab"));
+  try { s.startTop = e.clientY - modal.getBoundingClientRect().top; } catch (_) { s.startTop = 0; }
+}, { passive: true });
+
+window.addEventListener("pointermove", (e) => {
+  const s = modalSwipe;
+  if (s.pid === null || e.pointerId !== s.pid) return;
+  const m = s.modal;
+  if (!m || !m.isConnected) { s.pid = null; return; }
+  const now = performance.now();
+  const y = e.clientY;
+  if (now > s.lastT) {
+    const v = (y - s.lastY) / Math.max(1, now - s.lastT);
+    s.vy = s.vy * 0.6 + v * 0.4;
+    s.lastY = y; s.lastT = now;
+  }
+  const d = y - s.startY;
+  if (!s.dragging) {
+    if (d < 10) { if (d < -12) s.pid = null; return; }
+    if (m.scrollTop > 8) { s.pid = null; return; } // контент проскроллен — это скролл
+    if (!s.fromGrab && s.startTop > Math.max(140, m.offsetHeight * 0.4)) { s.pid = null; return; } // жест только от верха
+    s.dragging = true;
+    m.classList.add("modal--drag");
+  }
+  s.dy = Math.max(0, d);
+  const th = modalSwipeThreshold(m);
+  s.shown = s.dy <= th ? s.dy : th + (s.dy - th) * 0.55; // мягкое сопротивление за порогом
+  m.style.transform = `translateY(${s.shown}px)`;
+  const bd = m.closest ? m.closest(".modal-backdrop") : null;
+  if (bd) bd.style.opacity = String(Math.max(0.2, 1 - s.shown / (m.offsetHeight * 1.3)));
+}, { passive: true });
+
+function modalSwipeEnd(e) {
+  const s = modalSwipe;
+  if (s.pid === null || (e && e.pointerId !== undefined && e.pointerId !== s.pid)) return;
+  const m = s.modal;
+  const wasDrag = s.dragging, shown = s.shown, vy = s.vy;
+  s.pid = null; s.dragging = false; s.dy = 0; s.shown = 0;
+  if (!m || !m.isConnected || !wasDrag) return;
+  m.classList.remove("modal--drag");
+  const bd = m.closest ? m.closest(".modal-backdrop") : null;
+  if (shown >= modalSwipeThreshold(m) || (vy > 0.55 && shown > 48)) {
+    modalSwipeSuppressClick(); // гасим клик, долетевший после броска
+    m.classList.add("modal--dismiss");
+    m.style.transform = `translateY(${(m.offsetHeight || 420) + 60}px)`;
+    if (bd) { bd.style.transition = "opacity .18s ease-in"; bd.style.opacity = "0"; }
+    setTimeout(closeModal, 190);
+  } else {
+    if (shown > 24) modalSwipeSuppressClick();
+    m.classList.add("modal--snap");
+    m.style.transform = "";
+    if (bd) bd.style.opacity = "";
+    setTimeout(() => m.classList.remove("modal--snap"), 300);
+  }
+}
+window.addEventListener("pointerup", modalSwipeEnd, { passive: true });
+window.addEventListener("pointercancel", modalSwipeEnd, { passive: true });
 
 /* ---------------- контекстные подсказки ----------------
    Единая система объяснений элементов интерфейса.
