@@ -1073,7 +1073,6 @@ function renderTopbar() {
       </div>
     </div>
     <div class="topbar__spacer"></div>
-    ${subjectSwitcherHTML()}
     <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b>`}</div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
     <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
@@ -3022,15 +3021,6 @@ function screenProfile(root) {
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
-      <div class="stat-label">Предмет</div>
-      <div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap">
-        ${subjectSwitcherHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
-        <span style="font-size:13px;color:var(--muted)">Прогресс, ошибки, статистика и прогноз хранятся отдельно по каждому предмету.</span>
-      </div>
-      ${DataAPI.isSubjectEmpty() ? `<div style="margin-top:10px;font-size:14px;color:var(--text-2)">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
-    </div>
-
     <div class="grid grid--4 stat-grid">
       <div class="card stat-card"><div class="action-card__icon">${icon("check")}</div><div><div class="stat-num mono">${s.totalSolved}</div><div class="stat-label">решено задач</div></div></div>
       <div class="card stat-card"><div class="action-card__icon">${icon("target")}</div><div><div class="stat-num mono">${acc}%</div><div class="stat-label">точность</div></div></div>
@@ -3073,6 +3063,12 @@ function screenProfile(root) {
           <div style="font-size:13px;color:var(--muted);line-height:1.6">
             Прогресс и результаты сохраняются на сервере в SQLite для этого аккаунта.
           </div>
+          <div class="stat-label" style="margin-top:16px">Предмет</div>
+          <div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap">
+            ${subjectSwitcherHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
+            <span style="font-size:13px;color:var(--muted)">Прогресс, ошибки, статистика и прогноз хранятся отдельно по каждому предмету.</span>
+          </div>
+          ${DataAPI.isSubjectEmpty() ? `<div style="margin-top:10px;font-size:14px;color:var(--text-2)">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
           <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
             <button class="btn btn--danger-soft btn--sm" onclick="resetProgress()">Сбросить прогресс</button>
           </div>
