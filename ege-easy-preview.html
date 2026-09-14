@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EGE EASY — превью логотипа</title>
+<style>
+:root {
+  --bg: #e9edf4; --bg-2: #dfe5ef; --surface: #ffffff; --surface-2: #f0f3f8;
+  --border: rgba(30, 41, 59, 0.13); --text: #1b2233; --text-2: #4a5872; --muted: #57647e;
+  --accent: #6d7cff; --accent-soft: rgba(109, 124, 255, 0.16);
+  --violet: #9a7bff; --accent-ink: #4a5be0;
+  --easy: #22c07a; --easy-soft: rgba(34, 192, 122, 0.14);
+  --font: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; }
+body { font-family: var(--font); background: var(--bg-2); color: var(--text); padding: 32px 20px 60px; }
+.page { max-width: 980px; margin: 0 auto; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
+.lead { color: var(--text-2); font-size: 14px; margin-bottom: 24px; max-width: 660px; line-height: 1.55; }
+.variant { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 22px; margin-bottom: 18px; }
+.variant h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+.variant p.desc { font-size: 13px; color: var(--text-2); margin-bottom: 16px; line-height: 1.5; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+.mock { border-radius: 16px; padding: 28px 22px; border: 1px solid var(--border); }
+.mock.light { background: #f4f6fa; }
+.mock.dark { background: #0d1017; border-color: rgba(255,255,255,0.08); }
+.mock .tag { font-family: var(--mono); font-size: 11px; opacity: 0.55; margin-bottom: 20px; }
+.mock.dark .tag { color: #6d7488; opacity: 1; }
+/* --- ref --- */
+.ref-logo { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px; }
+.ref-logo .logo-mark { font-weight: 800; letter-spacing: 0.04em; font-size: 17px; color: var(--accent-ink); }
+.ref-logo .logo-text { font-weight: 800; letter-spacing: 0.14em; font-size: 13px; color: var(--text); }
+.ref-logo .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.mock.dark .ref-logo .logo-mark { color: #a5b0ff; }
+.mock.dark .ref-logo .logo-text { color: #e9ebf3; }
+.mock.dark .ref-logo .logo-sub { color: #6d7488; }
+/* --- E1: мягкая таблетка, строчные --- */
+.e1 { display: flex; align-items: center; gap: 13px; }
+.e1-badge { width: 44px; height: 44px; border-radius: 50%; flex: 0 0 44px;
+  background: linear-gradient(135deg, #22c07a 0%, #6d7cff 130%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 20px -8px rgba(34, 192, 122, 0.6); }
+.e1-badge svg { width: 24px; height: 24px; }
+.e1-name { font-weight: 700; font-size: 21px; letter-spacing: -0.01em; text-transform: lowercase; line-height: 1.05; }
+.mock.light .e1-name { color: #1b2233; }
+.mock.dark .e1-name { color: #e9ebf3; }
+.e1-name .w2 { color: var(--easy); }
+.e1-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.mock.dark .e1-sub { color: #6d7488; }
+/* --- E2: слово с улыбкой-дугой --- */
+.e2-name { font-weight: 700; font-size: 25px; letter-spacing: -0.015em; text-transform: lowercase; line-height: 1; display: inline-block; }
+.mock.light .e2-name { color: #1b2233; }
+.mock.dark .e2-name { color: #e9ebf3; }
+.e2-name .w2 { color: var(--easy); }
+.e2-smile { display: block; margin-top: 2px; }
+.e2-sub { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.mock.dark .e2-sub { color: #6d7488; }
+/* --- E3: круглая галочка + чип --- */
+.e3 { display: flex; align-items: center; gap: 12px; }
+.e3-badge { width: 42px; height: 42px; border-radius: 16px; flex: 0 0 42px;
+  background: var(--easy-soft); border: 1.5px solid rgba(34,192,122,0.4);
+  display: flex; align-items: center; justify-content: center; }
+.e3-name { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; text-transform: lowercase; }
+.mock.light .e3-name { color: #1b2233; }
+.mock.dark .e3-name { color: #e9ebf3; }
+.e3-name .w2 { color: var(--easy); }
+.e3-chip { font-size: 11px; font-weight: 700; color: #0d7a48; background: rgba(34,192,122,0.16);
+  border-radius: 20px; padding: 3px 10px; margin-left: 4px; }
+.mock.dark .e3-chip { color: #86efac; background: rgba(34,192,122,0.18); }
+.e3-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.mock.dark .e3-sub { color: #6d7488; }
+.fav-row { display: flex; gap: 18px; align-items: center; margin-top: 16px; }
+.fav { display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.fav-box { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.note { font-size: 13px; color: var(--text-2); background: var(--surface); border: 1px dashed var(--border);
+  border-radius: 14px; padding: 16px 18px; margin-top: 8px; line-height: 1.55; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>ege easy — превью фирменного знака</h1>
+  <p class="lead">Другой характер, чем у PIK EGE: вместо острого «пика» — мягкость и лёгкость. Строчные буквы, круглые формы, зелёный акцент «всё получается», спокойный вес шрифта. Три варианта на светлом и тёмном фоне.</p>
+
+  <div class="variant">
+    <h2>Вариант 0 — текущий EGE CORE (для сравнения)</h2>
+    <p class="desc">Жёсткий стиль: капс, острые углы, разреженные буквы, фиолетовый акцент. Точка отсчёта — дальше всё наоборот.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light · sidebar</div>
+        <div class="ref-logo"><span class="logo-mark">EGE</span><span class="logo-text">CORE</span><span class="logo-sub">профильная математика</span></div>
+      </div>
+      <div class="mock dark"><div class="tag">dark · sidebar</div>
+        <div class="ref-logo"><span class="logo-mark">EGE</span><span class="logo-text">CORE</span><span class="logo-sub">профильная математика</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 1 — мягкая таблетка ★ рекомендую</h2>
+    <p class="desc">Круглый бейдж с пером-галочкой (лёгкий росчерк), название строчными, «easy» — зелёным. Нет ни одного острого угла: всё круглое, как у дружелюбных сервисов.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div class="e1">
+          <div class="e1-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div><div class="e1-name">ege <span class="w2">easy</span></div><div class="e1-sub">математика без стресса</div></div>
+        </div>
+      </div>
+      <div class="mock dark"><div class="tag">dark</div>
+        <div class="e1">
+          <div class="e1-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div><div class="e1-name">ege <span class="w2">easy</span></div><div class="e1-sub">математика без стресса</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fav-row">
+      <div class="fav"><div class="fav-box" style="background:linear-gradient(135deg,#22c07a,#6d7cff)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>favicon V1</div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 2 — слово с улыбкой</h2>
+    <p class="desc">Только текст, без значка: строчное «ege easy» и дуга-улыбка под ним. Самый лёгкий и дешёвый вариант — но в фавиконе не живёт, там останется просто «ee».</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div><div class="e2-name">ege <span class="w2">easy</span><svg class="e2-smile" width="118" height="12" viewBox="0 0 118 12" fill="none"><path d="M4 3 Q 59 14 114 3" stroke="#22c07a" stroke-width="3" stroke-linecap="round"/></svg></div><div class="e2-sub">понятно · по шагам · до 100</div></div>
+      </div>
+      <div class="mock dark"><div class="tag">dark</div>
+        <div><div class="e2-name">ege <span class="w2">easy</span><svg class="e2-smile" width="118" height="12" viewBox="0 0 118 12" fill="none"><path d="M4 3 Q 59 14 114 3" stroke="#22c07a" stroke-width="3" stroke-linecap="round"/></svg></div><div class="e2-sub">понятно · по шагам · до 100</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 3 — галочка в мягком квадрате</h2>
+    <p class="desc">Компромисс: значок есть (галочка «получилось»), но не залит цветом, а лежит на мягкой зелёной подложке. Спокойнее первого варианта, строже второго.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div class="e3">
+          <div class="e3-badge"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#22c07a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div><div class="e3-name">ege <span class="w2">easy</span><span class="e3-chip">легко</span></div><div class="e3-sub">профильная математика</div></div>
+        </div>
+      </div>
+      <div class="mock dark"><div class="tag">dark</div>
+        <div class="e3">
+          <div class="e3-badge"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#22c07a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div><div class="e3-name">ege <span class="w2">easy</span><span class="e3-chip">легко</span></div><div class="e3-sub">профильная математика</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">Отличия от PIK EGE сознательные: строчные вместо капса, круг вместо квадрата, зелёный вместо фиолетового градиента, вес 700 вместо 800, подпись «без стресса» вместо «пик формы». Если выбираешь <b>вариант 1</b> — скажи, перенесу его в сайт.</div>
+</div>
+</body>
+</html>

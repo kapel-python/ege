@@ -1,5 +1,5 @@
 /* ============================================================
-   EGE CORE — UI / router / screens
+   ege easy — UI / router / screens
    ============================================================ */
 
 /* ---------------- SVG icons ---------------- */
@@ -143,27 +143,36 @@ mainHTML.innerHTML = `<!DOCTYPE html>
     min-width:0;
     flex:1 1 auto;
   }
-  .logo-mark{
-    height:34px;
-    padding:0 10px;
-    border-radius:10px;
-    background:var(--indigo-dim);
-    color:var(--indigo);
-    display:flex;align-items:center;justify-content:center;
+  .logo-easy{
+    display:flex;
+    align-items:center;
+    gap:10px;
     font-weight:700;
-    font-size:12px;
-    letter-spacing:0.02em;
+    font-size:17px;
+    letter-spacing:-0.01em;
+    text-transform:lowercase;
     flex-shrink:0;
   }
+  .logo-easy .easy-badge{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    background:linear-gradient(135deg,#22c07a 0%,#6d70f2 130%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 6px 16px -6px rgba(34,192,122,0.55);
+    flex-shrink:0;
+  }
+  .logo-easy .easy-badge svg{width:18px;height:18px;}
+  .logo-easy em{font-style:normal;color:var(--green);}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="header">
     <div class="header-inner">
-      <div class="logo">
-        <span class="logo-mark">EGE</span>
-        <span>Подготовка к ЕГЭ</span>
+      <div class="logo logo-easy">
+        <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>ege <em>easy</em></span>
       </div>
     </div>
   </header>
@@ -179,7 +188,7 @@ dashboardHTML.innerHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EGE CORE — подготовка к профильной математике</title>
+<title>ege easy — подготовка к профильной математике</title>
 <meta name="description" content="Платформа подготовки к ЕГЭ по профильной математике с системой прогресса: уровни, XP, миссии, навыки, боссы.">
 <script>
   /* Apply the saved choice before styles are painted, so navigation and reloads
@@ -197,9 +206,10 @@ dashboardHTML.innerHTML = `<!doctype html>
 <body>
 <div id="app" class="app">
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar__logo">
-      <span class="logo-mark">EGE</span><span class="logo-text">CORE</span>
-      <span class="logo-sub">профильная математика</span>
+    <div class="sidebar__logo sidebar__logo--easy">
+      <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="easy-name">ege <em>easy</em></span>
+      <span class="logo-sub">математика без стресса</span>
     </div>
     <nav class="sidebar__nav" id="sidebarNav"></nav>
     <div class="sidebar__footer" id="sidebarFooter"></div>
@@ -1152,7 +1162,7 @@ const ROUTE_TITLES = {
 
 function updateDocumentTitle(route) {
   const label = ROUTE_TITLES[route] || ROUTE_TITLES.dashboard;
-  document.title = `${label} — EGE CORE`;
+  document.title = `${label} — ege easy`;
 }
 
 /* ============================================================
@@ -3373,7 +3383,7 @@ const Onboarding = {
 
   stepWelcome(body) {
     body.innerHTML = `
-      <div class="onboard-title">Добро пожаловать в EGE CORE</div>
+      <div class="onboard-title">Добро пожаловать в ege easy</div>
       <div class="onboard-sub">
         Это система подготовки к ЕГЭ, построенная как игра прогресса:
         уровни, XP, миссии, навыки и босс-испытания. Без мишуры — только задания и измеримый рост.<br><br>
@@ -3577,7 +3587,7 @@ const LOADER_LOGO = '<svg viewBox="0 0 44 44" width="32" height="32" fill="none"
 function loaderHTML(sub) {
   return `<div class="card ege-loader">
     <div class="ege-loader__orbit"><div class="ege-loader__core">${LOADER_LOGO}</div></div>
-    <div class="ege-loader__brand">EGE <span>CORE</span></div>
+    <div class="ege-loader__brand">ege <span>easy</span></div>
     <div class="ege-loader__title">Загружаем</div>
     <div class="ege-loader__sub" data-loader-sub>${esc(sub || "Открываем страницу…")}</div>
     <div class="ege-loader__bar"><i></i></div>

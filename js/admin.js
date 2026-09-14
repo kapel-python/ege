@@ -1,5 +1,5 @@
 /* ============================================================
-   EGE CORE — Admin panel
+   ege easy — Admin panel
    Отдельный интерфейс управления. Все данные — только из
    /api/admin/*; авторизация — подписанная серверная admin-сессия
    в HttpOnly cookie (js не видит и не хранит её). Любой ответ 401
@@ -206,8 +206,9 @@ function renderShell(activeSection, screenHTML) {
   A.root.innerHTML = `
     <div class="admin-app">
       <aside class="admin-sidebar">
-        <div class="admin-logo">
-          <span class="logo-mark">EGE</span><span class="logo-text">CORE</span>
+        <div class="admin-logo admin-logo--easy">
+          <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="easy-name">ege <em>easy</em></span>
           <span class="logo-sub">admin panel</span>
         </div>
         <nav class="admin-nav">
@@ -260,7 +261,7 @@ function renderLogin(error = "") {
   A.root.innerHTML = `
     <div class="admin-login">
       <div class="admin-login__card">
-        <span class="admin-login__mark">EGE CORE</span>
+        <span class="admin-login__mark">ege <em>easy</em></span>
         <div class="admin-login__title">Админ-панель</div>
         <div class="admin-login__sub">Закрытый раздел управления платформой. Введите админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к вашему аккаунту.</div>
         <form class="admin-login__form" id="loginForm">

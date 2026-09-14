@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Подготовка к ЕГЭ по профильной математике</title>
+<title>ege easy — подготовка к ЕГЭ по профильной математике</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236d7cff'/%3E%3Ctext x='16' y='22' font-family='Arial,Helvetica,sans-serif' font-size='15' font-weight='700' fill='%23fff' text-anchor='middle'%3EEG%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322c07a'/%3E%3Cstop offset='1' stop-color='%236d7cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='16' fill='url(%23g)'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -88,24 +88,27 @@
     min-width:0;
     flex:1 1 auto;
   }
-  .logo-mark{
-    height:34px;
-    padding:0 10px;
-    border-radius:10px;
-    background:var(--indigo-dim);
-    color:var(--indigo);
-    display:flex;align-items:center;justify-content:center;
+  .logo-easy{
+    display:flex;
+    align-items:center;
+    gap:10px;
     font-weight:700;
-    font-size:12px;
-    letter-spacing:0.02em;
+    font-size:17px;
+    letter-spacing:-0.01em;
+    text-transform:lowercase;
     flex-shrink:0;
   }
-  .logo-text{
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-    min-width:0;
+  .logo-easy .easy-badge{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    background:linear-gradient(135deg,#22c07a 0%,#6d70f2 130%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 6px 16px -6px rgba(34,192,122,0.55);
+    flex-shrink:0;
   }
+  .logo-easy .easy-badge svg{width:18px;height:18px;}
+  .logo-easy em{font-style:normal;color:var(--green);}
   .header-nav{
     display:flex;
     align-items:center;
@@ -421,7 +424,8 @@
   @media (max-width:400px){
     .wrap{padding-left:16px;padding-right:16px;}
     .logo{font-size:14px;}
-    .logo-mark{height:30px;padding:0 8px;font-size:11px;}
+    .logo-easy{font-size:15px;}
+    .logo-easy .easy-badge{width:30px;height:30px;}
     .feature-card{padding:18px;}
     .section{padding:32px 0;}
     .cta-card{padding:30px 16px;}
@@ -437,9 +441,9 @@
 
 <header>
   <div class="wrap header-inner">
-    <div class="logo">
-      <span class="logo-mark">ЕГЭ</span>
-      <span class="logo-text">Подготовка к ЕГЭ</span>
+    <div class="logo logo-easy">
+      <span class="easy-badge"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span>ege <em>easy</em></span>
     </div>
     <div class="header-nav">
       <a class="header-link" href="#subjects">Что внутри</a>
@@ -656,7 +660,7 @@
 
 <footer>
   <div class="wrap footer-inner">
-    <span>Подготовка к ЕГЭ</span>
+    <span>ege easy</span>
     <span id="year"></span>
   </div>
 </footer>

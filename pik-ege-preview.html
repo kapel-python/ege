@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PIK EGE — превью логотипа</title>
+<style>
+:root {
+  --bg: #e9edf4; --bg-2: #dfe5ef; --surface: #ffffff; --surface-2: #f0f3f8;
+  --border: rgba(30, 41, 59, 0.13); --text: #1b2233; --text-2: #4a5872; --muted: #57647e;
+  --accent: #6d7cff; --accent-soft: rgba(109, 124, 255, 0.16); --accent-glow: rgba(109, 124, 255, 0.35);
+  --violet: #9a7bff; --accent-ink: #4a5be0;
+  --font: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+}
+.dark {
+  --bg: #0a0c11; --bg-2: #0d1017; --surface: #12161f; --surface-2: #161b27;
+  --border: rgba(255, 255, 255, 0.07); --text: #e9ebf3; --text-2: #aab1c4; --muted: #6d7488;
+  --accent-ink: #a5b0ff;
+}
+* { box-sizing: border-box; margin: 0; }
+body { font-family: var(--font); background: var(--bg-2); color: var(--text); padding: 32px 20px 60px; }
+.page { max-width: 980px; margin: 0 auto; }
+h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+.lead { color: var(--text-2); font-size: 14px; margin-bottom: 24px; max-width: 640px; }
+.variant { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+.variant h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+.variant p.desc { font-size: 13px; color: var(--text-2); margin-bottom: 16px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+.mock { border-radius: 14px; padding: 26px 22px; border: 1px solid var(--border); }
+.mock.light { background: #f4f6fa; }
+.mock.dark { background: #0d1017; border-color: rgba(255,255,255,0.08); }
+.mock .tag { font-family: var(--mono); font-size: 11px; opacity: 0.55; margin-bottom: 18px; }
+/* --- current EGE CORE reference --- */
+.ref-logo { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px; }
+.ref-logo .logo-mark { font-weight: 800; letter-spacing: 0.04em; font-size: 17px; color: var(--accent-ink); }
+.ref-logo .logo-text { font-weight: 800; letter-spacing: 0.14em; font-size: 13px; color: var(--text); }
+.ref-logo .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.mock.dark .ref-logo .logo-mark { color: #a5b0ff; }
+.mock.dark .ref-logo .logo-text { color: #e9ebf3; }
+.mock.dark .ref-logo .logo-sub { color: #6d7488; }
+/* --- V1: badge + peak --- */
+.v1 { display: flex; align-items: center; gap: 12px; }
+.v1-badge { width: 40px; height: 40px; border-radius: 12px; flex: 0 0 40px;
+  background: linear-gradient(135deg, #6d7cff 0%, #9a7bff 100%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 6px 18px -6px rgba(109, 124, 255, 0.55); }
+.v1-badge svg { width: 22px; height: 22px; }
+.v1-name { font-weight: 800; font-size: 19px; letter-spacing: 0.03em; line-height: 1.1; }
+.v1-name b { color: var(--accent-ink); }
+.mock.dark .v1-name b { color: #a5b0ff; }
+.mock.light .v1-name { color: #1b2233; }
+.mock.dark .v1-name { color: #e9ebf3; }
+.v1-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.mock.dark .v1-sub { color: #6d7488; }
+/* --- V2: text with peak caret --- */
+.v2-name { font-weight: 800; font-size: 24px; letter-spacing: 0.02em; line-height: 1; }
+.mock.light .v2-name { color: #1b2233; }
+.mock.dark .v2-name { color: #e9ebf3; }
+.v2-name .peak-i { position: relative; color: var(--accent-ink); }
+.mock.dark .v2-name .peak-i { color: #a5b0ff; }
+.v2-name .peak-i::after { content: ""; position: absolute; left: 50%; top: -9px; transform: translateX(-50%);
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid #9a7bff; }
+.v2-sub { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); margin-top: 6px; font-weight: 600; }
+.mock.dark .v2-sub { color: #6d7488; }
+/* --- V3: badge + 100 chip --- */
+.v3 { display: flex; align-items: center; gap: 12px; }
+.v3-badge { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 40px;
+  background: #1b2233; display: flex; align-items: center; justify-content: center; }
+.mock.dark .v3-badge { background: #e9ebf3; }
+.v3-badge svg { width: 20px; height: 20px; }
+.v3-name { font-weight: 800; font-size: 19px; letter-spacing: 0.03em; }
+.mock.light .v3-name { color: #1b2233; }
+.mock.dark .v3-name { color: #e9ebf3; }
+.v3-chip { font-family: var(--mono); font-size: 11px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #6d7cff, #9a7bff); border-radius: 20px; padding: 2px 9px; margin-left: 2px; }
+/* --- favicon row --- */
+.fav-row { display: flex; gap: 18px; align-items: center; margin-top: 16px; }
+.fav { display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.fav-box { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 11px; color: #fff; }
+.note { font-size: 13px; color: var(--text-2); background: var(--surface); border: 1px dashed var(--border);
+  border-radius: 14px; padding: 16px 18px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>PIK EGE — превью фирменного знака</h1>
+  <p class="lead">Три варианта рядом с текущим EGE CORE. Каждый показан на светлом и тёмном фоне. Скажи номер варианта — перенесу его в сайт.</p>
+
+  <div class="variant">
+    <h2>Вариант 0 — текущий EGE CORE (для сравнения)</h2>
+    <p class="desc">Текстовый логотип из сайдбара: цветная марка + разреженный текст + подпись.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light · sidebar</div>
+        <div class="ref-logo"><span class="logo-mark">EGE</span><span class="logo-text">CORE</span><span class="logo-sub">профильная математика</span></div>
+      </div>
+      <div class="mock dark"><div class="tag" style="color:#6d7488">dark · sidebar</div>
+        <div class="ref-logo"><span class="logo-mark">EGE</span><span class="logo-text">CORE</span><span class="logo-sub">профильная математика</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 1 — значок «пик» + PIK EGE ★ рекомендую</h2>
+    <p class="desc">Квадратный бейдж с градиентом и горой-пиком внутри. Узнаваем в фавиконе, читается в мелком размере, градиент уже в палитре сайта.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div class="v1">
+          <div class="v1-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M3 19L10 7l4 6 2.5-3.5L21 19H3z" fill="#fff"/><circle cx="17.5" cy="5.5" r="1.6" fill="#fff" opacity="0.85"/></svg></div>
+          <div><div class="v1-name"><b>PIK</b> EGE</div><div class="v1-sub">профильная математика · пик формы</div></div>
+        </div>
+      </div>
+      <div class="mock dark"><div class="tag" style="color:#6d7488">dark</div>
+        <div class="v1">
+          <div class="v1-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M3 19L10 7l4 6 2.5-3.5L21 19H3z" fill="#fff"/><circle cx="17.5" cy="5.5" r="1.6" fill="#fff" opacity="0.85"/></svg></div>
+          <div><div class="v1-name"><b>PIK</b> EGE</div><div class="v1-sub">профильная математика · пик формы</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fav-row">
+      <div class="fav"><div class="fav-box" style="background:linear-gradient(135deg,#6d7cff,#9a7bff)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 19L10 7l4 6 2.5-3.5L21 19H3z" fill="#fff"/></svg></div>favicon V1</div>
+      <div class="fav"><div class="fav-box" style="background:linear-gradient(135deg,#6d7cff,#9a7bff)">▲</div>favicon-упрощение</div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 2 — текстовый, пик над «i»</h2>
+    <p class="desc">Тот же текстовый приём, что сейчас, но с характером: точка над i заменена пиком-стрелкой. Дёшево внедряется, но в фавиконе не работает — там только «PE».</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div><div class="v2-name">P<span class="peak-i">I</span>K EGE</div><div class="v2-sub">пик формы · математика</div></div>
+      </div>
+      <div class="mock dark"><div class="tag" style="color:#6d7488">dark</div>
+        <div><div class="v2-name">P<span class="peak-i">I</span>K EGE</div><div class="v2-sub">пик формы · математика</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant">
+    <h2>Вариант 3 — круглый знак + чип «100»</h2>
+    <p class="desc">Круг со стрелкой вверх (рост баллов) + плашка с целью «100». Прямо говорит про результат, но выглядит спортивнее и менее строго.</p>
+    <div class="row">
+      <div class="mock light"><div class="tag">light</div>
+        <div class="v3">
+          <div class="v3-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V6M6 11l6-6 6 5" stroke="#6d7cff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="v3-name">PIK EGE <span class="v3-chip">100</span></div>
+        </div>
+      </div>
+      <div class="mock dark"><div class="tag" style="color:#6d7488">dark</div>
+        <div class="v3">
+          <div class="v3-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V6M6 11l6-6 6 5" stroke="#6d7cff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="v3-name">PIK EGE <span class="v3-chip">100</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">Моё мнение: <b>вариант 1</b> — единственный из трёх, который одинаково хорошо живёт в сайдбаре, на телефоне и во вкладке браузера. Вариант 2 — запасной, если хочешь сохранить нынешний текстовый стиль один в один.</div>
+</div>
+</body>
+</html>
