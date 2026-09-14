@@ -1490,6 +1490,9 @@ function openSkillModal(skillId) {
       <div><div class="skill-modal__stat-num">${st.solved}</div><div class="stat-label">решено задач</div></div>
       <div><div class="skill-modal__stat-num">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
+    <details class="skill-modal__details" data-skill-details>
+      <summary>Подробнее</summary>
+      <div class="skill-modal__details-body">
     ${(() => {
       const b = skillProgressBreakdown(skillId);
       const thMax = b.lessonTotal ? 40 : 0;
@@ -1530,6 +1533,8 @@ function openSkillModal(skillId) {
       }).join("")}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:6px">Перепройди урок — верный ответ на этом шаге снимет отметку.</div>
     </div>` : ""}
+      </div>
+    </details>
 
     <div class="skill-modal__actions">
       ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
@@ -1537,6 +1542,14 @@ function openSkillModal(skillId) {
       ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Практика</button>` : ""}
       ${!mission && !DataAPI.practiceTasksBySkill(skillId).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
     </div>`);
+  // Десктоп: подробности раскрыты как раньше. Телефон: спойлер закрыт,
+  // окно влезает в экран целиком без прокрутки.
+  try {
+    if (window.matchMedia && window.matchMedia("(min-width: 769px)").matches) {
+      const d = document.querySelector('[data-skill-details]');
+      if (d) d.open = true;
+    }
+  } catch (_) {}
 }
 
 /* Единая точка входа в практику по теме: набор заданий темы и есть миссия,
