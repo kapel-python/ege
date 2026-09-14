@@ -2547,13 +2547,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304); self.send_header("ETag", etag); self.end_headers(); return
         # Вендорные библиотеки и шрифты меняются почти никогда — долгий кэш.
-        # HTML — всегда свежий. Остальное (наш js/css/svg) — час + ETag.
+        # HTML — всегда свежий. Наш js/css: revalidate через ETag (304 без тела,
+        # если не менялся) — правки видны сразу после обычного reload, ручной
+        # бамп ?v= в HTML больше не нужен для корректности.
         if suffix in (".html",):
             cache_control = "no-cache"
         elif rel.parts and rel.parts[0] in ("vendor", "assets"):
             cache_control = "public, max-age=31536000, immutable"
         else:
-            cache_control = "public, max-age=3600"
+            cache_control = "no-cache"
         accept = self.headers.get("Accept-Encoding", "") or ""
         encoding = None
         # Текстовую статику жмём: jsxgraph 969 КБ -> ~250 КБ, app.js в ~4 раза.
