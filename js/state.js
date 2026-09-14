@@ -575,7 +575,7 @@ function forecast() {
   const mastery = wSum ? wMastery / wSum : 0;
   const primary = (mastery / 100) * total;
   const mid = scale[Math.max(0, Math.min(scale.length - 1, Math.round(primary)))] ?? 0;
-  /* Живая вилка: мало данных — широко (±12), всё покрыто — узко (±3). */
+  /* Живой диапазон: мало данных — широко (±12), всё покрыто — узко (±3). */
   const hw = 12 - Math.round((9 * covered) / skills.length);
   return {
     low: Math.max(0, mid - hw),

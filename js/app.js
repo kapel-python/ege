@@ -688,8 +688,8 @@ const HELP = {
     title: "Прогноз результата ЕГЭ",
     body: `
       <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в тестовые баллы по шкале этого года.</p>
-      <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина вилки показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
-      <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, вилка шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`,
+      <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина диапазона показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
+      <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, диапазон шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`,
   },
   skills: {
     title: "Навыки",
@@ -1175,7 +1175,7 @@ function screenDashboard(root) {
         <div class="forecast-empty">
           <div class="forecast-empty__icon">${icon("stats")}</div>
           <div class="forecast-empty__title">Прогноз появится позже</div>
-          <div class="forecast-empty__text">Пока считать не по чему: проходи уроки и практику — после первых шагов здесь будет твоя вилка баллов и шкала до цели.</div>
+          <div class="forecast-empty__text">Пока считать не по чему: проходи уроки и практику — после первых шагов здесь будет твой диапазон баллов и шкала до цели.</div>
           <button class="btn btn--primary btn--sm" onclick="go('path')">Открыть путь</button>
         </div>` : `
         <div class="forecast-hero__top">
@@ -1183,7 +1183,7 @@ function screenDashboard(root) {
           <span class="forecast-trend ${trend && trend.delta > 0 ? "forecast-trend--up" : trend && trend.delta < 0 ? "forecast-trend--down" : ""}">${forecastTrendLabel(trend)}</span>
         </div>
         <div class="forecast-mid">${f.mid}<small>баллов</small></div>
-        <div class="forecast-range">вилка <b class="mono">${f.low}–${f.high}</b>${goal != null ? (f.mid >= goal ? ` · цель ${goal}+ достигнута` : ` · до цели ${goal}+ осталось <b class="mono">${goal - f.mid}</b>`) : ""}</div>
+        <div class="forecast-range">диапазон <b class="mono">${f.low}–${f.high}</b>${goal != null ? (f.mid >= goal ? ` · цель ${goal}+ достигнута` : ` · до цели ${goal}+ осталось <b class="mono">${goal - f.mid}</b>`) : ""}</div>
         <div class="forecast-scale" role="img" aria-label="Шкала прогноза: ${f.mid} из 100${goal != null ? `, цель ${goal}` : ""}">
           <div class="forecast-scale__fill" style="width:${Math.min(100, Math.max(0, f.mid))}%"></div>
           ${goal != null ? `<div class="forecast-scale__goal" style="left:calc(${Math.min(100, Math.max(0, goal))}% - 1px)"></div>` : ""}
