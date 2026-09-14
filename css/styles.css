@@ -1491,7 +1491,11 @@ body {
   padding: 28px;
   animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   max-height: 86vh;
+  max-height: 86dvh;
   overflow-y: auto;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 @keyframes modalIn {
   from { opacity: 0; transform: translateY(14px) scale(0.98); }
@@ -1510,6 +1514,12 @@ body {
 }
 .modal__close:hover { color: var(--text); background: var(--surface-3); }
 .modal-wrap { position: relative; width: 100%; display: flex; justify-content: center; }
+
+/* ---------- skill modal (окно темы в Пути) ---------- */
+.skill-modal__title { font-size: 22px; font-weight: 700; margin-top: 4px; padding-right: 36px; }
+.skill-modal__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.skill-modal__stat-num { font-family: var(--mono, monospace); font-size: 20px; font-weight: 700; }
+.skill-modal__actions { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* ---------- контекстные подсказки ---------- */
 
@@ -1656,6 +1666,26 @@ body {
   .task-visual img { max-height: 48vh; }
   .skill-row { grid-template-columns: 110px 1fr 46px; }
   .skill-row__tip { left: 0; }
+
+  /* Модалка темы — bottom-sheet: во всю ширину, кнопки в столбик на всю ширину */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal-wrap { justify-content: stretch; }
+  .modal {
+    max-width: none;
+    border-radius: 20px 20px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    max-height: 92vh;
+    max-height: 92dvh;
+  }
+  .modal__close { top: 10px; right: 10px; padding: 12px; min-width: 44px; min-height: 44px; }
+  .skill-modal__title { font-size: 19px; }
+  .skill-modal__stats { gap: 8px; }
+  .skill-modal__stat-num { font-size: 18px; }
+  .skill-modal__actions { flex-direction: column; align-items: stretch; }
+  .skill-modal__actions .btn { width: 100%; min-height: 48px; font-size: 15px; white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {

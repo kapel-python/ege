@@ -1481,14 +1481,14 @@ function openSkillModal(skillId) {
 
   openModal(`
     <div class="stat-label">${DataAPI.category(sk.cat).name} · ${sk.ege}</div>
-    <div style="font-size:22px;font-weight:700;margin-top:4px">${sk.name}</div>
+    <div class="skill-modal__title">${sk.name}</div>
     <div style="margin-top:6px"><span class="chip ${statusChipClass(status)}">${statusLabel(status)}</span></div>
 
     <div style="margin:20px 0 8px">${progressBar(skillProgress(skillId))}</div>
-    <div class="grid grid--3" style="gap:10px;margin-top:16px">
-      <div><div class="mono" style="font-size:20px;font-weight:700">${skillProgress(skillId)}%</div><div class="stat-label">освоение навыка</div></div>
-      <div><div class="mono" style="font-size:20px;font-weight:700">${st.solved}</div><div class="stat-label">решено задач</div></div>
-      <div><div class="mono" style="font-size:20px;font-weight:700">${acc}%</div><div class="stat-label">правильных</div></div>
+    <div class="skill-modal__stats">
+      <div><div class="skill-modal__stat-num">${skillProgress(skillId)}%</div><div class="stat-label">освоение навыка</div></div>
+      <div><div class="skill-modal__stat-num">${st.solved}</div><div class="stat-label">решено задач</div></div>
+      <div><div class="skill-modal__stat-num">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
     ${(() => {
       const b = skillProgressBreakdown(skillId);
@@ -1531,7 +1531,7 @@ function openSkillModal(skillId) {
       <div style="font-size:12px;color:var(--muted);margin-top:6px">Перепройди урок — верный ответ на этом шаге снимет отметку.</div>
     </div>` : ""}
 
-    <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
+    <div class="skill-modal__actions">
       ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
       ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">${icon("target")} Практика</button>` : ""}
       ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Практика</button>` : ""}
