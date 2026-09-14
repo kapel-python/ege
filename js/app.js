@@ -667,7 +667,8 @@ const HELP = {
     body: `
       <p>Серия — это сколько <b>дней подряд</b> ты занимаешься.</p>
       <p>Чтобы день засчитался, достаточно позаниматься: решить задание или пройти урок. Ошибаться можно — главное, что позанимался.</p>
-      <p>Пропустил день — серия начнётся заново.</p>`,
+      <p>Пропустил день — серия начнётся заново.</p>
+      <p>Огонёк растёт вместе с серией: от <b>7 дней</b> он красный, а от <b>31 дня</b> — фиолетовый, и искр становится больше.</p>`,
   },
   nextstep: {
     title: "Что делать сейчас",
@@ -1059,6 +1060,15 @@ function renderBottomNav(active) {
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
 }
 
+/* Уровень огня серии: 0–6 дней — обычный, 7–30 — красный, 31+ — фиолетовый.
+   Один класс для шапки, главной и профиля — цвета и сила искр заданы в CSS. */
+function streakTier(days) {
+  const d = Number(days) || 0;
+  if (d >= 31) return "streak-chip--inferno";
+  if (d >= 7) return "streak-chip--hot";
+  return "";
+}
+
 function renderTopbar() {
   if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; return; }
   const li = levelInfo();
@@ -1075,7 +1085,7 @@ function renderTopbar() {
     <div class="topbar__spacer"></div>
     <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b>`}</div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
-    <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
+    <div class="streak-chip streak-chip--clickable ${streakTier(Store.state.streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
 }
 
 /* ============================================================
@@ -1134,7 +1144,7 @@ function screenDashboard(root) {
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
         <div style="display:flex;gap:18px;margin-top:18px;flex-wrap:wrap">
           <div>
-            <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${s.streak} ${plural(s.streak, "день", "дня", "дней")} подряд</div>
+            <div class="streak-chip streak-chip--clickable ${streakTier(s.streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${s.streak} ${plural(s.streak, "день", "дня", "дней")} подряд</div>
           </div>
           <div style="align-self:center;font-size:13px;color:var(--text-2)">
             Сегодня: <b class="mono">${Math.min(act.solved, dailyGoal)} / ${dailyGoal}</b> заданий
@@ -3008,7 +3018,7 @@ function screenProfile(root) {
             <span class="account-id__feedback" role="status">${icon("check")} ID скопирован</span>
           </div>
         </div>
-        <div class="streak-chip profile-card__streak">${icon("flame")} ${s.streak} дн</div>
+        <div class="streak-chip profile-card__streak ${streakTier(s.streak)}">${icon("flame")} ${s.streak} дн</div>
       </div>
 
       <div class="profile-card__progress">
