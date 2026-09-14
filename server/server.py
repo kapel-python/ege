@@ -2273,7 +2273,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_security_headers()
-        if token: self.send_header("Set-Cookie", f"ege_session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000")
+        if token: self.send_header("Set-Cookie", self.session_cookie_attrs(token))
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
@@ -2303,14 +2303,21 @@ class Handler(BaseHTTPRequestHandler):
     # Admin session middleware
     #
     # Every /api/admin/* call goes through this: the *user* is resolved from
-    # the regular ege_session cookie (creating an anonymous account if the
-    # browser has none — same as any other endpoint), and admin rights require
+    # the regular ege_session cookie WITHOUT creating an account
+    # (existing_user_for returns None for unknown cookies — unlike user_for,
+    # which mints an anonymous account on public endpoints), and admin rights
     # a live admin_sessions row matching BOTH that user id AND the opaque
     # ege_admin cookie token. Consequences: a stolen/copied ege_admin cookie
     # presented by another account resolves to a different user id and fails;
     # deleting an account cascades its admin sessions; logout clears the row
     # and the cookie. Frontend state is never consulted for authorization.
     # ------------------------------------------------------------------
+    def session_cookie_attrs(self, value: str) -> str:
+        # Тот же Secure-механизм, что у admin cookie: по HTTP ничего не
+        # меняется, под HTTPS токен сессии перестаёт летать открытым текстом.
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return f"ege_session={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000{secure}"
+
     def admin_cookie_attrs(self, value: str | None, max_age: int) -> str:
         secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
         if value is None:
