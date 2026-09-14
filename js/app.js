@@ -1490,9 +1490,6 @@ function openSkillModal(skillId) {
       <div><div class="skill-modal__stat-num">${st.solved}</div><div class="stat-label">решено задач</div></div>
       <div><div class="skill-modal__stat-num">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
-    <details class="skill-modal__details" data-skill-details>
-      <summary>Подробнее</summary>
-      <div class="skill-modal__details-body">
     ${(() => {
       const b = skillProgressBreakdown(skillId);
       const thMax = b.lessonTotal ? 40 : 0;
@@ -1525,16 +1522,13 @@ function openSkillModal(skillId) {
     <div style="margin-top:16px">
       <div class="stat-label" style="margin-bottom:8px">Сложные шаги в уроках</div>
       <div class="error-subtopics">${lessonErrs.map((e) => {
-        const [lessonId, stepId] = e.key.split(":");
-        const lesson = DataAPI.lesson(lessonId);
         const types = Object.keys(e.types || {});
-        const label = types.length ? types[0] : `шаг ${stepId}`;
-        return `<span class="chip chip--warn" title="${esc(types.join("; "))}">урок «${lesson ? esc(lesson.title) : lessonId}» · ${esc(label)}${e.count > 1 ? ` ×${e.count}` : ""}</span>`;
+        const label = humanLessonError(types.length ? types[0] : null);
+        const times = e.count > 1 ? ` · ${e.count} ${plural(e.count, "раз", "раза", "раз")}` : "";
+        return `<span class="chip chip--warn">${esc(label)}${times}</span>`;
       }).join("")}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:6px">Перепройди урок — верный ответ на этом шаге снимет отметку.</div>
     </div>` : ""}
-      </div>
-    </details>
 
     <div class="skill-modal__actions">
       ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
@@ -1542,14 +1536,23 @@ function openSkillModal(skillId) {
       ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Практика</button>` : ""}
       ${!mission && !DataAPI.practiceTasksBySkill(skillId).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
     </div>`);
-  // Десктоп: подробности раскрыты как раньше. Телефон: спойлер закрыт,
-  // окно влезает в экран целиком без прокрутки.
-  try {
-    if (window.matchMedia && window.matchMedia("(min-width: 769px)").matches) {
-      const d = document.querySelector('[data-skill-details]');
-      if (d) d.open = true;
-    }
-  } catch (_) {}
+}
+
+/* Человеческая подпись ошибки шага урока для модалки темы.
+   В каталоге ~100 технических errorType («Ошибка в вычислении…»,
+   «Арифметическая ошибка…», «Забыли разделить на 3»…) — приводим их
+   к виду «Ты ошибся …» там, где это грамматически безопасно, остальное
+   показываем как есть (они уже простым языком). Название урока в чип
+   не тянем: оно длинное и уже есть в кнопке «Пройти урок». */
+function humanLessonError(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return "Ты ошибся в учебном шаге";
+  // \b с кириллицей в JS не работает (\w — только ASCII), поэтому граница — (?=\s).
+  let m = t.match(/^Ошибка\s+(в|во|при|с|со|на|по|о|об)(?=\s)(.*)$/i);
+  if (m) return `Ты ошибся ${m[1].toLowerCase()}${m[2]}`;
+  m = t.match(/^(Арифметическая|Комплексная)\s+ошибка\s+(.*)$/i);
+  if (m) return `Ты допустил ${/^комплексная/i.test(m[1]) ? "комплексную" : "арифметическую"} ошибку ${m[2]}`;
+  return t;
 }
 
 /* Единая точка входа в практику по теме: набор заданий темы и есть миссия,
