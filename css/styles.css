@@ -20,6 +20,12 @@
   --accent-soft: rgba(109, 124, 255, 0.14);
   --accent-glow: rgba(109, 124, 255, 0.35);
   --violet: #9a7bff;
+  /* Текст акцентным цветом: чистый --accent (3.51) и --violet (3.16) на
+     белом не дотягивают до AA 4.5 — для текста используем ink-варианты. */
+  --accent-ink: #4a5be0;
+  --violet-ink: #7c3aed;
+  --btn-primary-bg: #4a5be0;
+  --btn-primary-hover: #3f51e0;
   --success: #3ddc97;
   --success-soft: rgba(61, 220, 151, 0.12);
   --success-ink: #147a4c;
@@ -58,6 +64,11 @@
   --text: #e9ebf3;
   --text-2: #aab1c4;
   --muted: #6d7488;
+  /* Светлые ink-варианты для тёмного фона (8.8+ на --surface). */
+  --accent-ink: #a5b0ff;
+  --violet-ink: #c4b5fd;
+  --btn-primary-bg: #6d7cff;
+  --btn-primary-hover: #7d8aff;
   --success-ink: #86efac;
   --danger-ink: #fca5a5;
   --warn-ink: #fcd34d;
@@ -131,7 +142,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.04em;
   font-size: 17px;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .logo-text { font-weight: 800; letter-spacing: 0.14em; font-size: 13px; color: var(--text); }
 .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
@@ -251,10 +262,10 @@ body {
 }
 .btn:active { transform: scale(0.98); }
 .btn--primary {
-  background: var(--accent);
+  background: var(--btn-primary-bg);
   color: #fff;
 }
-.btn--primary:hover { background: #7d8aff; box-shadow: 0 0 20px var(--accent-glow); }
+.btn--primary:hover { background: var(--btn-primary-hover); box-shadow: 0 0 20px var(--accent-glow); }
 .btn--ghost {
   background: transparent;
   border-color: var(--border-strong);
@@ -283,7 +294,7 @@ body {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.chip--accent { background: var(--accent-soft); color: var(--accent); }
+.chip--accent { background: var(--accent-soft); color: var(--accent-ink); }
 .chip--success { background: var(--success-soft); color: var(--success-ink); }
 .chip--danger { background: var(--danger-soft); color: var(--danger-ink); }
 .chip--warn { background: var(--warn-soft); color: var(--warn-ink); }
@@ -382,7 +393,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   border: 1px solid rgba(109, 124, 255, 0.3);
   padding: 4px 10px;
   border-radius: 8px;
@@ -604,12 +615,12 @@ body {
   display: grid;
   place-items: center;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .action-card__icon svg { width: 17px; height: 17px; }
 .action-card--warn .action-card__icon { background: var(--warn-soft); color: var(--warn-ink); }
 .action-card--success .action-card__icon { background: var(--success-soft); color: var(--success-ink); }
-.action-card--violet .action-card__icon { background: rgba(154, 123, 255, 0.14); color: var(--violet); }
+.action-card--violet .action-card__icon { background: rgba(154, 123, 255, 0.14); color: var(--violet-ink); }
 .action-card__title { font-weight: 600; font-size: 14px; }
 .action-card__sub { font-size: 12px; color: var(--muted); }
 
@@ -660,7 +671,7 @@ body {
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .reco-item:hover { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
-.reco-item__arrow { color: var(--accent); font-weight: 700; }
+.reco-item__arrow { color: var(--accent-ink); font-weight: 700; }
 
 /* ---------- «Что делать сейчас» — главный навигатор обучения ---------- */
 
@@ -690,7 +701,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .nextstep__label svg { width: 14px; height: 14px; }
 .nextstep__freedom { font-size: 12px; color: var(--muted); }
@@ -1012,7 +1023,7 @@ body {
 .feedback__head { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
 .feedback--ok .feedback__head { color: var(--success-ink); }
 .feedback--bad .feedback__head { color: var(--danger-ink); }
-.feedback__xp { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.feedback__xp { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .feedback__solution { margin-top: 12px; font-size: 14px; color: var(--text-2); line-height: 1.65; white-space: pre-line; }
 .feedback__solution b { color: var(--text); }
 
@@ -1061,7 +1072,7 @@ body {
 }
 .lesson-token--on {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 700;
   box-shadow: 0 0 16px var(--accent-glow);
 }
@@ -1094,7 +1105,7 @@ body {
 .result-xp {
   font-size: 44px;
   font-weight: 800;
-  color: var(--accent);
+  color: var(--accent-ink);
   margin: 22px 0 4px;
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 30px var(--accent-glow);
@@ -1114,7 +1125,7 @@ body {
   border-bottom: 1px dashed var(--border);
 }
 .result-breakdown__row:last-child { border-bottom: none; }
-.result-breakdown__row b { color: var(--accent); }
+.result-breakdown__row b { color: var(--accent-ink); }
 .result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 26px 0; }
 
 /* ---------- missions ---------- */
@@ -1187,7 +1198,7 @@ body {
 .badge-card:not(.badge-card--locked) .badge-icon {
   background: linear-gradient(135deg, var(--accent-soft), rgba(154, 123, 255, 0.16));
   border-color: rgba(109, 124, 255, 0.4);
-  color: var(--accent);
+  color: var(--accent-ink);
   box-shadow: 0 0 24px rgba(109, 124, 255, 0.15);
 }
 .badge-icon svg { width: 26px; height: 26px; }
@@ -1208,7 +1219,7 @@ body {
   place-items: center;
   background: linear-gradient(135deg, var(--accent-soft), rgba(154, 123, 255, 0.16));
   border: 1px solid rgba(109, 124, 255, 0.3);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 21px;
   font-weight: 700;
 }
@@ -1239,7 +1250,7 @@ body {
 .account-id__value { font-size: 13px; font-weight: 650; color: var(--text); letter-spacing: 0.02em; }
 .account-id__icon { display: grid; place-items: center; color: var(--muted); transition: color 0.15s; }
 .account-id__icon svg { width: 14px; height: 14px; }
-.account-id:hover .account-id__icon { color: var(--accent); }
+.account-id:hover .account-id__icon { color: var(--accent-ink); }
 .account-id--copied .account-id__icon { color: var(--success-ink); }
 .account-id__feedback {
   display: inline-flex;
@@ -1268,7 +1279,7 @@ body {
 /* ---------- profile stats teaser ---------- */
 .stats-teaser { margin-top: 16px; padding: 22px 24px; }
 .stats-teaser__head { display: flex; align-items: center; gap: 14px; }
-.stats-teaser__icon { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(154, 123, 255, 0.14); color: var(--violet); }
+.stats-teaser__icon { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(154, 123, 255, 0.14); color: var(--violet-ink); }
 .stats-teaser__icon svg { width: 20px; height: 20px; }
 .stats-teaser__title { font-size: 16px; font-weight: 700; }
 .stats-teaser__sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
@@ -1517,7 +1528,7 @@ body {
     border-radius: 10px;
   }
   .bottomnav a svg { width: 20px; height: 20px; }
-  .bottomnav a.active { color: var(--accent); }
+  .bottomnav a.active { color: var(--accent-ink); }
 
   .tree-branches { grid-template-columns: 1fr; }
   .tree-branches::before { display: none; }
@@ -1556,7 +1567,7 @@ body {
 }
 .lesson-card { overflow: hidden; }
 .lesson-step-label {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .09em;
@@ -1629,7 +1640,7 @@ body {
 .ege-loader__core svg { animation: ege-svgspin 7s linear infinite; filter: drop-shadow(0 0 6px var(--accent-glow)); }
 @keyframes ege-svgspin { to { transform: rotate(360deg); } }
 .ege-loader__brand { font-size: 13px; font-weight: 800; letter-spacing: .22em; color: var(--text-2); }
-.ege-loader__brand span { color: var(--accent); }
+.ege-loader__brand span { color: var(--accent-ink); }
 .ege-loader__title { margin-top: 8px; font-size: 16px; font-weight: 800; }
 .ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted); font-family: var(--mono); min-height: 19px; }
 .ege-loader__bar { margin: 14px auto 0; height: 6px; max-width: 240px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
