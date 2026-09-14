@@ -388,27 +388,62 @@ body {
   background: var(--warn-soft);
   padding: 6px 12px;
   border-radius: 10px;
+  position: relative;
+  overflow: visible;
   animation: streak-breathe 2.4s ease-in-out infinite;
+}
+/* Искры: две частицы над пламенем, каждая с двойником через box-shadow */
+.streak-chip::before,
+.streak-chip::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--warn-ink);
+  box-shadow: 5px 3px 0 -0.5px var(--warn-ink);
+  opacity: 0;
+  pointer-events: none;
+  animation: spark-rise 1.7s ease-out infinite;
+}
+.streak-chip::after {
+  left: 20px;
+  width: 2px;
+  height: 2px;
+  animation-delay: 0.85s;
 }
 .streak-chip svg {
   width: 14px;
   height: 14px;
-  transform-origin: 50% 85%;
-  animation: flame-flick 1.6s ease-in-out infinite;
-  filter: drop-shadow(0 0 4px var(--warn-ink)) drop-shadow(0 0 9px var(--warn-soft));
+  transform-origin: 50% 90%;
+  animation:
+    flame-sway 1.3s ease-in-out infinite,
+    flame-glow 0.9s ease-in-out infinite alternate;
 }
-@keyframes flame-flick {
-  0%, 100% { transform: scale(1) rotate(-2deg); opacity: 1; }
-  25% { transform: scale(1.12, 1.2) rotate(2deg); opacity: 0.92; }
-  50% { transform: scale(0.94, 1.06) rotate(-1deg); opacity: 1; }
-  75% { transform: scale(1.07, 1.14) rotate(1deg); opacity: 0.95; }
+@keyframes flame-sway {
+  0%, 100% { transform: translateX(0) skewX(0deg) scaleY(1); }
+  25% { transform: translateX(-1px) skewX(-7deg) scaleY(1.04); }
+  50% { transform: translateX(0.8px) skewX(5deg) scaleY(0.98); }
+  75% { transform: translateX(-0.5px) skewX(-3deg) scaleY(1.06); }
+}
+@keyframes flame-glow {
+  from { filter: drop-shadow(0 0 3px var(--warn-ink)) drop-shadow(0 0 7px var(--warn-soft)); opacity: 1; }
+  to { filter: drop-shadow(0 0 5px var(--warn-ink)) drop-shadow(0 0 12px var(--warn-soft)); opacity: 0.93; }
+}
+@keyframes spark-rise {
+  0% { transform: translate(0, 0) scale(1); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(3px, -20px) scale(0.25); opacity: 0; }
 }
 @keyframes streak-breathe {
   0%, 100% { box-shadow: 0 0 0 0 var(--warn-soft); }
   50% { box-shadow: 0 0 14px 0 var(--warn-soft); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .streak-chip, .streak-chip svg { animation: none; }
+  .streak-chip, .streak-chip svg, .streak-chip::before, .streak-chip::after { animation: none; }
+  .streak-chip::before, .streak-chip::after { display: none; }
 }
 
 .theme-toggle {
