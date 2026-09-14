@@ -174,7 +174,15 @@ const Store = {
   // предмета, клиент полностью заменяет текущие (без мержа) и перерисовывается.
   // Несохранённые изменения текущего предмета сначала дописываем.
   async switchSubject(subjectId) {
-    if (!subjectId || subjectId === this.subject) return this.state;
+    if (!subjectId) return this.state;
+    // Единственная истина о загруженном каталоге — DataAPI.currentSubject().
+    // Store.subject мутирует раньше (applyOnboarding ставит его до смены),
+    // поэтому сравнение только с ним тихо пропускает POST и оставляет
+    // старый каталог на экране («возвращает старый профиль»). No-op —
+    // только когда предмет уже и в состоянии, и в каталоге.
+    const catalogSubject = (typeof DataAPI !== "undefined" && DataAPI.currentSubject)
+      ? DataAPI.currentSubject() : null;
+    if (subjectId === this.subject && (!catalogSubject || subjectId === catalogSubject)) return this.state;
     await this.save();
     await this.pendingSave.catch(() => {});
     const payload = await ApiClient.post("/api/subject", { subject: subjectId });
