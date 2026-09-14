@@ -1142,13 +1142,8 @@ function screenDashboard(root) {
           </div>
         </div>
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
-        <div style="display:flex;gap:18px;margin-top:18px;flex-wrap:wrap">
-          <div>
-            <div class="streak-chip streak-chip--clickable ${streakTier(s.streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${s.streak} ${plural(s.streak, "день", "дня", "дней")} подряд</div>
-          </div>
-          <div style="align-self:center;font-size:13px;color:var(--text-2)">
-            Сегодня: <b class="mono">${Math.min(act.solved, dailyGoal)} / ${dailyGoal}</b> заданий
-          </div>
+        <div style="margin-top:18px;font-size:13px;color:var(--text-2)">
+          Сегодня: <b class="mono">${Math.min(act.solved, dailyGoal)} / ${dailyGoal}</b> заданий
         </div>
         <div style="margin-top:12px;max-width:340px">${progressBar(Math.min(act.solved / dailyGoal, 1) * 100, "progress--thin progress--success")}</div>
       </div>
