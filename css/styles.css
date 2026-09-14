@@ -1516,10 +1516,31 @@ body {
 .modal-wrap { position: relative; width: 100%; display: flex; justify-content: center; }
 
 /* ---------- skill modal (окно темы в Пути) ---------- */
-.skill-modal__title { font-size: 22px; font-weight: 700; margin-top: 4px; padding-right: 36px; }
+.skill-modal__title { font-size: 22px; font-weight: 700; margin-top: 4px; padding-right: 36px; overflow-wrap: anywhere; }
 .skill-modal__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .skill-modal__stat-num { font-family: var(--mono, monospace); font-size: 20px; font-weight: 700; }
 .skill-modal__actions { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
+/* Чипы внутри модалки обязаны переноситься: white-space:nowrap из .chip
+   растягивал окно по горизонтали на телефоне (длинный текст — во всю строку). */
+.modal { overflow-x: hidden; }
+.modal .chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.modal .error-subtopics { min-width: 0; }
+.skill-modal__details { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 4px; }
+.skill-modal__details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 10px 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  list-style: none;
+}
+.skill-modal__details > summary::-webkit-details-marker { display: none; }
+.skill-modal__details > summary::after { content: "›"; margin-left: 6px; transform: rotate(90deg); transition: transform .15s; }
+.skill-modal__details[open] > summary::after { transform: rotate(-90deg); }
+.skill-modal__details-body { min-width: 0; }
 
 /* ---------- контекстные подсказки ---------- */
 
@@ -1684,8 +1705,11 @@ body {
   .skill-modal__title { font-size: 19px; }
   .skill-modal__stats { gap: 8px; }
   .skill-modal__stat-num { font-size: 18px; }
-  .skill-modal__actions { flex-direction: column; align-items: stretch; }
+  .skill-modal__actions { flex-direction: column; align-items: stretch; margin-top: 16px; }
   .skill-modal__actions .btn { width: 100%; min-height: 48px; font-size: 15px; white-space: normal; }
+  .skill-modal__details { margin-top: 12px; }
+  .skill-modal__details .error-subtopics { gap: 6px; margin-top: 8px; }
+  .skill-modal__details .chip { font-size: 11px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
