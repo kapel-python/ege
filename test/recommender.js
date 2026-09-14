@@ -39,7 +39,7 @@ const testBody = async () => {
 
   /* ---------- 1. Новый пользователь (после диагностики) ---------- */
   Store.reset();
-  applyOnboarding("base", "g60", DataAPI.diagnosticTasks().map((id) => ({ taskId: id, correct: true })));
+  applyOnboarding("profile_math", "base", "g60", DataAPI.diagnosticTasks().map((id) => ({ taskId: id, correct: true })));
   {
     const best = bestNextStep();
     t("новичку: лучший шаг — урок (теория раньше практики)", best && best.action === "lesson" && !!best.payload.lessonId);

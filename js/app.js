@@ -931,6 +931,17 @@ async function render() {
     stats: screenStats,
     profile: screenProfile,
   }[route] || screenDashboard;
+  // Пустой предмет: контентным маршрутам нечего показать — честная заглушка
+  // вместо пустых экранов или данных чужого предмета.
+  if (DataAPI.isSubjectEmpty() && EMPTY_SUBJECT_ROUTES.has(route)) {
+    screen.innerHTML = "";
+    screen.style.animation = "none";
+    void screen.offsetWidth;
+    screen.style.animation = "";
+    screenEmptySubject(screen);
+    window.scrollTo(0, 0);
+    return;
+  }
   screen.innerHTML = "";
   screen.style.animation = "none";
   void screen.offsetWidth;
@@ -960,6 +971,71 @@ function updateDocumentTitle(route) {
 }
 
 /* ============================================================
+   Предметы: переключатель и пустое состояние.
+   Вся предметная логика читается из каталога (DataAPI.subjects()),
+   ветвлений под конкретные предметы в коде нет.
+   ============================================================ */
+
+// Маршруты, которым нужен контент каталога: в пустом предмете вместо них
+// показываем заглушку «Материалы пока готовятся».
+const EMPTY_SUBJECT_ROUTES = new Set([
+  "path", "skill", "training", "session", "practice", "boss", "daily",
+  "review", "lesson", "errors", "trials", "stats",
+]);
+
+function subjectSwitcherHTML() {
+  const subjects = DataAPI.subjects();
+  if (subjects.length < 2) return "";
+  const cur = DataAPI.currentSubject();
+  return `<select class="subject-select" onchange="switchSubjectFromUI(this)" aria-label="Выбрать предмет">`
+    + subjects.map((s) => `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(s.short || s.title)}${s.status === "ready" ? "" : " · скоро"}</option>`).join("")
+    + `</select>`;
+}
+
+async function switchSubjectFromUI(sel) {
+  const id = typeof sel === "string" ? sel : (sel && sel.value);
+  if (!id || id === DataAPI.currentSubject()) return;
+  try {
+    toast("Переключаем предмет…", "", "hourglass");
+    // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
+    try { Session.cur = null; } catch (_) {}
+    try { Lesson.cur = null; } catch (_) {}
+    try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+    await Store.switchSubject(id);
+    if (!Store.state.onboarded) { render(); return; }
+    if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
+    render();
+  } catch (error) {
+    try { toast("Не удалось переключить предмет", "toast--error", "x"); } catch (_) {}
+    render();
+  }
+}
+
+function subjectEmptyHTML() {
+  const info = DataAPI.subjectInfo() || { title: "Этот предмет" };
+  return `<div class="card" style="max-width:560px;margin:48px auto;text-align:center;padding:32px 24px">
+    <div style="font-size:15px;font-weight:700">Материалы пока готовятся</div>
+    <div style="margin-top:10px;color:var(--text-2);font-size:14px;line-height:1.55">
+      Раздел «${esc(info.title)}» уже заведён, и твой прогресс будет храниться отдельно.
+      Уроки, задания и прогноз появятся здесь, когда выйдет контентный пакет, — ничего настраивать не нужно.
+    </div>
+    <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="btn btn--primary" onclick="go('dashboard')">На главную</button>
+      ${subjectSwitcherHTML() ? `<span style="align-self:center;font-size:13px;color:var(--muted)">или выбери предмет:</span>${subjectSwitcherHTML()}` : ""}
+    </div>
+  </div>`;
+}
+
+function screenEmptySubject(root) {
+  root.innerHTML = `
+    <div class="page-head">
+      <div class="page-title">${esc((DataAPI.subjectInfo() || {}).title || "Предмет")}</div>
+      <div class="page-sub">отдельный прогресс • контент скоро выйдет</div>
+    </div>
+    ${subjectEmptyHTML()}`;
+}
+
+/* ============================================================
    Chrome: sidebar / bottomnav / topbar
    ============================================================ */
 
@@ -973,7 +1049,7 @@ function renderSidebar(active) {
     </a>`).join("");
   const f = forecast();
   document.getElementById("sidebarFooter").innerHTML = `
-    Прогноз: <b class="mono" style="color:var(--text-2)">${f.low}–${f.high}</b> баллов<br>
+    Прогноз: <b class="mono" style="color:var(--text-2)">${f.empty ? "скоро" : `${f.low}–${f.high}`}</b> баллов<br>
     <span style="font-size:11px">данные сохраняются в SQLite</span>`;
 }
 
@@ -997,7 +1073,8 @@ function renderTopbar() {
       </div>
     </div>
     <div class="topbar__spacer"></div>
-    <div class="chip hide-mobile">Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b></div>
+    ${subjectSwitcherHTML()}
+    <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b>`}</div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
     <div class="streak-chip streak-chip--clickable" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
 }
@@ -1015,7 +1092,7 @@ function screenDashboard(root) {
   const openErrors = s.errors.filter((e) => !e.resolved).length;
   const d = DataAPI.daily();
   ensureDailyChallenge();
-  const dailyGoal = dailyTaskIds().length || d.target;
+  const dailyGoal = dailyTaskIds().length || d.target || 1;
   const dailyDone = s.daily.date === todayStr() && s.daily.done;
   const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
   const openLesson = mostRecentOpenLesson();
@@ -1069,14 +1146,17 @@ function screenDashboard(root) {
 
       <div class="card forecast-card">
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
-        <div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">вторичных</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
+        ${f.empty ? `<div style="margin-top:8px;color:var(--text-2);font-size:14px;line-height:1.55">Прогноз появится, когда выйдут материалы предмета: пока считать не по чему.</div>`
+        : `<div class="forecast-value">${f.low}–${f.high} <span style="font-size:18px;color:var(--success-ink);font-weight:700">вторичных</span> <span style="font-size:18px;color:var(--muted);font-weight:600">баллов</span></div>
         <div class="delta-up" style="${trend && trend.delta < 0 ? "color:var(--danger)" : ""}">${forecastTrendLabel(trend)}</div>
-        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b> баллов</div>` : ""}
-        <div class="forecast-note">${forecastNoteHTML()}</div>
+        ${topGain ? `<div class="forecast-gain">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b> баллов</div>` : ""}`}
+        <div class="forecast-note">${f.empty ? "" : forecastNoteHTML()}</div>
       </div>
     </div>
 
-    ${step ? `
+    ${DataAPI.isSubjectEmpty() ? subjectEmptyHTML() : ""}
+
+    ${!DataAPI.isSubjectEmpty() && step ? `
     <div class="card nextstep">
       <div class="nextstep__head">
         <span class="nextstep__label">${icon("zap")} Что делать сейчас ${helpDot("nextstep")}</span>
@@ -1144,7 +1224,8 @@ function screenDashboard(root) {
       <div>
         <div class="section-title" style="margin-top:0">Требуют внимания</div>
         <div class="card">
-          ${weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
+          ${DataAPI.isSubjectEmpty() ? `<div class="empty">Навыков пока нет — они появятся вместе с материалами предмета.</div>`
+          : weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
             <div class="skill-row" role="button" tabindex="0" onclick="go('skill', '${sk.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(prog)}
@@ -2888,7 +2969,7 @@ function profileStatsTeaser(s, acc) {
         <div class="stats-teaser__metric"><b class="mono">${s.totalSolved}</b><span>решено</span></div>
         <div class="stats-teaser__metric"><b class="mono">${acc}%</b><span>точность</span></div>
         <div class="stats-teaser__metric"><b class="mono">${s.xp}</b><span>всего XP</span></div>
-        <div class="stats-teaser__metric"><b class="mono">${f ? `${f.low}–${f.high}` : "—"}</b><span>прогноз</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${f && !f.empty ? `${f.low}–${f.high}` : "—"}</b><span>прогноз</span></div>
       </div>
       <div class="stats-teaser__bars" aria-hidden="true">${bars}</div>
       <div class="stats-teaser__bars-label"><span>Активность · 14 дней</span><span>Сегодня справа · темнее</span></div>
@@ -2939,6 +3020,15 @@ function screenProfile(root) {
         </div>
         ${progressBar(li.pct)}
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="stat-label">Предмет</div>
+      <div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        ${subjectSwitcherHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
+        <span style="font-size:13px;color:var(--muted)">Прогресс, ошибки, статистика и прогноз хранятся отдельно по каждому предмету.</span>
+      </div>
+      ${DataAPI.isSubjectEmpty() ? `<div style="margin-top:10px;font-size:14px;color:var(--text-2)">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
     </div>
 
     <div class="grid grid--4 stat-grid">
@@ -3009,12 +3099,19 @@ const NAME_MAX_LENGTH = 60;
 
 const Onboarding = {
   step: 0,
+  subject: null,
   selfLevel: null,
   goal: null,
   name: null,
   diagIdx: 0,
   diagResults: [],
   diagAnswered: false,
+
+  // Шаги: приветствие → предмет → уровень → цель → диагностика → итог → имя.
+  // Пустой предмет (контент готовится) идёт коротким путём: предмет → имя.
+  STEPS() {
+    return ["stepWelcome", "stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
+  },
 
   show() {
     if (document.getElementById("onboard-overlay")) return;
@@ -3034,25 +3131,47 @@ const Onboarding = {
   render() {
     const el = document.getElementById("onboard-overlay");
     if (!el) return;
-    const steps = 6;
+    const names = this.STEPS();
     el.innerHTML = `
       <div class="onboard-card">
-        <div class="onboard-steps">${Array.from({ length: steps }, (_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
+        <div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
         <div id="onboard-body"></div>
       </div>`;
     const body = el.querySelector("#onboard-body");
-    [this.stepWelcome, this.stepLevel, this.stepGoal, this.stepDiagnostic, this.stepResult, this.stepName][this.step].call(this, body);
+    this[names[this.step]].call(this, body);
   },
 
   stepWelcome(body) {
     body.innerHTML = `
       <div class="onboard-title">Добро пожаловать в EGE CORE</div>
       <div class="onboard-sub">
-        Это система подготовки к профильной математике, построенная как игра прогресса:
-        уровни, XP, миссии, навыки и босс-испытания. Без мишуры — только математика и измеримый рост.<br><br>
-        Сейчас мы за 2 минуты построим твой стартовый профиль: определим уровень, цель и сильные стороны.
+        Это система подготовки к ЕГЭ, построенная как игра прогресса:
+        уровни, XP, миссии, навыки и босс-испытания. Без мишуры — только задания и измеримый рост.<br><br>
+        Сейчас мы за 2 минуты построим твой стартовый профиль: выберем предмет, определим уровень, цель и сильные стороны.
       </div>
       <div style="margin-top:28px"><button class="btn btn--primary btn--lg" onclick="Onboarding.next()">Начать ${icon("arrow")}</button></div>`;
+  },
+
+  // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
+  // предмета и не должен его определять.
+  stepSubject(body) {
+    const subjects = DataAPI.subjects();
+    body.innerHTML = `
+      <div class="onboard-title">Какой предмет готовим?</div>
+      <div class="onboard-sub">Прогресс, статистика и прогноз ведутся отдельно по каждому предмету.</div>
+      <div class="choice-list">
+        ${subjects.map((s) => `<button class="choice-item" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(s.title)}</b><span>${s.status === "ready" ? "Полный курс: уроки, тренировки, прогноз" : "Материалы пока готовятся — можно занять место"}</span></button>`).join("")}
+      </div>`;
+  },
+
+  pickSubject(v) {
+    this.subject = v;
+    const info = DataAPI.subjectInfo(v);
+    const ready = info && info.status === "ready" && DataAPI.diagnosticTasks().length;
+    // Пустой предмет: уровень/цель/диагностика бессмысленны без контента —
+    // сразу к имени, профиль предмета заведётся пустым.
+    this.step = ready ? 2 : 6;
+    this.render();
   },
 
   stepLevel(body) {
@@ -3174,12 +3293,12 @@ const Onboarding = {
 
   nextDiag() {
     this.diagIdx++;
-    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 4; this.render(); }
+    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 5; this.render(); }
     else this.render();
   },
 
   next() {
-    if (this.step === 3) return;
+    if (this.step === 4) return;
     this.step++;
     this.render();
   },
@@ -3200,10 +3319,21 @@ const Onboarding = {
   },
 
   finish() {
-    applyOnboarding(this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
+    const subj = this.subject || DataAPI.currentSubject() || "profile_math";
+    applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
     this.hide();
-    toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
-    render();
+    // Выбран другой предмет, чем в загруженном каталоге (например, база):
+    // переключаемся — сервер отдаст его каталог и пустое состояние.
+    const after = () => {
+      toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
+      render();
+    };
+    if (subj !== DataAPI.currentSubject()) {
+      Store.switchSubject(subj).then(after).catch(() => { Store.load(subj).then(after).catch(after); });
+    } else {
+      Store.save().catch(() => {});
+      after();
+    }
   },
 };
 
