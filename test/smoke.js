@@ -234,6 +234,41 @@ const testBody = async () => {
   // иначе график молча теряет/смещает данные для пользователей не из MSK.
   t("dateKeyForTimestamp(now) совпадает с todayStr() (инвариант графика активности)", dateKeyForTimestamp(Date.now()) === todayStr());
 
+  // Кросс-таб синк: save оставляет маяк, чужой свежий маяк тянет reload,
+  // во время тренировки обновление откладывается (иначе сессия пишет в
+  // чужой снапшот, а stale-вкладка перетирает сервер).
+  Store.ready = true;
+  Store.state = Store.defaultState();
+  Store.subject = "profile_math";
+  Store.lastSyncTs = 0;
+  Store.pendingExternalUpdate = false;
+  {
+    const __ls = {};
+    global.localStorage = {
+      getItem: (k) => (k in __ls ? __ls[k] : null),
+      setItem: (k, v) => { __ls[k] = String(v); },
+      removeItem: (k) => { delete __ls[k]; },
+    };
+    ApiClient.put = async () => ({ ok: true });
+    await Store.save();
+    const ping = JSON.parse(__ls[Store.pingKey("profile_math")] || "null");
+    t("save оставляет маяк для соседних вкладок", !!ping && ping.subject === "profile_math" && ping.ts === Store.lastSyncTs && Store.lastSyncTs > 0);
+    t("свой маяк не требует обновления", Store.shouldRefreshForPing(ping) === false);
+    t("старый маяк не требует обновления", Store.shouldRefreshForPing({ subject: "profile_math", ts: Store.lastSyncTs - 1 }) === false);
+    t("маяк чужого предмета игнорируется", Store.shouldRefreshForPing({ subject: "basic_math", ts: Date.now() + 60000 }) === false);
+    t("битый маяк игнорируется", Store.shouldRefreshForPing(null) === false && Store.shouldRefreshForPing("x") === false);
+    let loadCalls = 0;
+    Store.load = async () => { loadCalls++; Store.lastSyncTs = Date.now() + 120000; return Store.state; };
+    __ls[Store.pingKey("profile_math")] = JSON.stringify({ subject: "profile_math", ts: Store.lastSyncTs + 60000 });
+    t("свежий чужой маяк перезагружает состояние", (await Store.checkExternalUpdate()) === "reloaded" && loadCalls === 1 && !Store.pendingExternalUpdate);
+    t("без нового маяка перезагрузки нет", (await Store.checkExternalUpdate()) === "none" && loadCalls === 1);
+    global.Session = { cur: { title: "Тренировка" } };
+    __ls[Store.pingKey("profile_math")] = JSON.stringify({ subject: "profile_math", ts: Store.lastSyncTs + 60000 });
+    t("во время тренировки обновление откладывается", (await Store.checkExternalUpdate()) === "deferred" && Store.pendingExternalUpdate && loadCalls === 1);
+    delete global.Session;
+    delete global.localStorage;
+  }
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };

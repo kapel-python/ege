@@ -175,6 +175,52 @@ const test = async () => {
     t("50MB Content-Length отклонён без ожидания тела", refused);
   }
 
+  /* ---- 8. Закрытие ошибки через другое задание (умное повторение) ----
+     reviewQueueForErrors подбирает ДРУГОЕ задание той же подтемы, связь —
+     errorMap/closesTaskId, клиент закрывает ИСХОДНУЮ ошибку в recordAnswer.
+     derive_stats обязан засчитать такое закрытие (+15 XP ровно), а голый
+     resolved-флаг без верной попытки — по-прежнему ноль (анти-фарм). */
+  {
+    const mk = async () => {
+      const j = jar();
+      let res = await req("/api/bootstrap", { cookies: j.header() });
+      j.absorb(res);
+      const boot = await json(res);
+      createdAccounts.push(boot.accountId);
+      return { j, boot };
+    };
+    const attemptsReview = [
+      { taskId: "n01_p1", skill: "n01_planimetry", correct: false, hintLevel: 0, seconds: 10, ts: 1699999900000 },
+      { taskId: "n01_p2", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 20, closesTaskId: "n01_p1", ts: 1700000000000 },
+    ];
+    const a = await mk();
+    let res = await req("/api/state", { method: "PUT", body: { ...a.boot.state,
+      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1700000000000, resolved: true }],
+      taskAttempts: attemptsReview }, cookies: a.j.header() });
+    t("PUT с review-закрытием принят", res.status === 200, `got ${res.status}`);
+    res = await req("/api/bootstrap", { cookies: a.j.header() });
+    const afterA = (await json(res)).state;
+    t("review-закрытие засчитано в счётчик", afterA.errorsResolved === 1, `errorsResolved=${afterA.errorsResolved}`);
+    t("закрытая через повторение ошибка видна в «Закрытых»", (afterA.errors || []).some((e) => e.taskId === "n01_p1" && e.resolved));
+    // Тот же пробег без closesTaskId: ошибка не закрыта — разница ровно +15 XP.
+    const b = await mk();
+    const attemptsPlain = attemptsReview.map((x) => ({ ...x, closesTaskId: null }));
+    res = await req("/api/state", { method: "PUT", body: { ...b.boot.state,
+      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1700000000000, resolved: false }],
+      taskAttempts: attemptsPlain }, cookies: b.j.header() });
+    res = await req("/api/bootstrap", { cookies: b.j.header() });
+    const afterB = (await json(res)).state;
+    t("review-закрытие оплачено ровно +15 XP", afterA.xp === afterB.xp + 15, `a.xp=${afterA.xp} b.xp=${afterB.xp}`);
+    // Голый resolved-флаг без попыток — ноль (анти-фарм цел).
+    const c = await mk();
+    res = await req("/api/state", { method: "PUT", body: { ...c.boot.state,
+      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1, resolved: true }],
+      taskAttempts: [] }, cookies: c.j.header() });
+    res = await req("/api/bootstrap", { cookies: c.j.header() });
+    const afterC = (await json(res)).state;
+    t("голый resolved-флаг без попыток не платит", afterC.errorsResolved === 0 && afterC.xp === 0, `resolved=${afterC.errorsResolved} xp=${afterC.xp}`);
+  }
+
   // Самоочистка тестовых аккаунтов.
   {
     let removed = 0;
