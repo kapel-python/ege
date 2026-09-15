@@ -74,6 +74,14 @@ function makeTab(label) {
   await pause(15);
   t("дельта вторичной вкладки не откатывает свежий профиль лидера", leader.state.name === "свежее имя лидера");
   t("дельта вторичной вкладки сохраняет её черновик урока", !!leader.state.lessonSessions.lesson_n07_exponential);
+  // Быстрые действия в двух вторичных вкладках не должны создавать параллельный
+  // PUT: главный writer ставит их в очередь и объединяет оба события.
+  follower.state.taskAttempts = [...follower.state.taskAttempts, { taskId: "n01_p2", skill: "n01_planimetry", correct: true, ts: 2 }];
+  secondFollower.state.taskAttempts = [...secondFollower.state.taskAttempts, { taskId: "n01_p3", skill: "n01_planimetry", correct: true, ts: 3 }];
+  await Promise.all([follower.save(), secondFollower.save()]);
+  await pause(15);
+  t("быстрые сохранения вторичных вкладок обработаны последовательным лидером", leader.saved === 4);
+  t("очередь лидера сохранила оба быстрых события", leader.state.taskAttempts.some((x) => x.taskId === "n01_p2") && leader.state.taskAttempts.some((x) => x.taskId === "n01_p3"));
   leader.releaseTabLeadership();
   await pause(30);
   follower._tryBecomeTabLeader();
