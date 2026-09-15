@@ -3692,12 +3692,15 @@ function bootstrapApp() {
   bootPromise = (async () => {
     try {
       await Store.load();
+      await Store.initTabLeader();
       stopBootMsgs();
       // Кросс-таб синк: соседняя вкладка после каждого save оставляет маяк.
       // Увидели более свежий маяк (событие storage, возврат во вкладку) —
       // перечитываем состояние с сервера, иначе stale-вкладка показывает
       // вчерашний снапшот и первым же действием перетирает сервер.
       try {
+        window.addEventListener("beforeunload", () => Store.releaseTabLeadership());
+        window.addEventListener("pagehide", () => Store.releaseTabLeadership());
         window.addEventListener("storage", (e) => {
           if (e && typeof e.key === "string" && e.key.indexOf("ege_core_state_ping:") === 0) {
             Store.checkExternalUpdate().catch(() => {});

@@ -29,6 +29,20 @@ const Store = {
   // Последний подтверждённый серверный снимок нужен, чтобы при 409 отличить
   // собственные новые изменения от старых полей полного снапшота.
   lastSyncedState: null,
+  // Один писатель на origin: navigator.locks держит право лидерства, а
+  // BroadcastChannel переносит save-запросы и подтверждённые снимки.
+  tabId: `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  tabChannel: null,
+  tabChannelName: null,
+  tabLockName: null,
+  tabLeaderReady: false,
+  isTabLeader: false,
+  leaderTabId: null,
+  leaderSeenAt: 0,
+  leaderLockRelease: null,
+  leaderAcquireInFlight: false,
+  leaderHeartbeatTimer: null,
+  leaderRequests: {},
 
   /* ------- persistence ------- */
 
@@ -167,6 +181,223 @@ const Store = {
     return this.detailsPromise;
   },
 
+  // Межвкладочный координатор. Он не содержит бизнес-логики: все экраны по-
+  // прежнему вызывают Store.save(), а выбор единственного писателя происходит
+  // здесь. При отсутствии Locks/BroadcastChannel сохранение остаётся рабочим
+  // через OCC, а не ломается на старом браузере.
+  initTabLeader() {
+    if (this.tabLeaderReady) return Promise.resolve();
+    this.tabLeaderReady = true;
+    if (typeof BroadcastChannel !== "function" || typeof navigator === "undefined" || !navigator.locks) {
+      // Graceful fallback: CAS remains the authority where browser primitives
+      // are unavailable (older WebViews/private modes).
+      this.isTabLeader = true;
+      this.leaderTabId = this.tabId;
+      return Promise.resolve();
+    }
+    const scope = encodeURIComponent(this.accountId || "pending-account");
+    this.tabChannelName = `ege-core-state-leader-v1:${scope}`;
+    this.tabLockName = `ege-core-state-leader-v1:${scope}`;
+    this.tabChannel = new BroadcastChannel(this.tabChannelName);
+    this.tabChannel.onmessage = (event) => this._handleTabMessage(event && event.data);
+    // Не объявляемся лидером до успешного захвата lock: иначе две одновременно
+    // открытые вкладки кратко увидят друг друга «главными».
+    this._tryBecomeTabLeader();
+    this.leaderHeartbeatTimer = setInterval(() => {
+      if (this.isTabLeader) this._announceLeaderStatus();
+      else if (!this.leaderSeenAt || Date.now() - this.leaderSeenAt > 2500) this._tryBecomeTabLeader();
+    }, 700);
+    return Promise.resolve();
+  },
+
+  _postTabMessage(message) {
+    try { if (this.tabChannel) this.tabChannel.postMessage({ ...message, from: this.tabId }); } catch (_) {}
+  },
+
+  _announceLeaderStatus() {
+    this._postTabMessage({ type: "leader-heartbeat", leader: this.tabId });
+  },
+
+  _tryBecomeTabLeader() {
+    if (this.isTabLeader || this.leaderAcquireInFlight || !this.tabChannel) return;
+    this.leaderAcquireInFlight = true;
+    navigator.locks.request(this.tabLockName || "ege-core-state-leader-v1", { ifAvailable: true }, async (lock) => {
+      this.leaderAcquireInFlight = false;
+      if (!lock) return;
+      this.isTabLeader = true;
+      this.leaderTabId = this.tabId;
+      this.leaderSeenAt = Date.now();
+      this._announceLeaderStatus();
+      this.emit("tableader", { leader: true });
+      await new Promise((resolve) => { this.leaderLockRelease = resolve; });
+      this.leaderLockRelease = null;
+      this.isTabLeader = false;
+      if (this.leaderTabId === this.tabId) this.leaderTabId = null;
+    }).catch(() => { this.leaderAcquireInFlight = false; });
+  },
+
+  releaseTabLeadership() {
+    if (this.leaderHeartbeatTimer) clearInterval(this.leaderHeartbeatTimer);
+    this.leaderHeartbeatTimer = null;
+    if (this.leaderLockRelease) this.leaderLockRelease();
+    try { if (this.tabChannel) this.tabChannel.close(); } catch (_) {}
+    this.tabChannel = null;
+  },
+
+  _applyLeaderState(nextState) {
+    if (!nextState || typeof nextState !== "object" || nextState.subject !== this.subject) return;
+    const busy = (typeof Session !== "undefined" && Session && Session.cur)
+      || (typeof Lesson !== "undefined" && Lesson && Lesson.cur);
+    this.state = busy ? this.mergeConflictState(nextState, this.state || {}) : JSON.parse(JSON.stringify(nextState));
+    this.lastSyncedState = JSON.parse(JSON.stringify(nextState));
+    this.lastSyncTs = Date.now();
+    if (busy) this.pendingExternalUpdate = true;
+    else this.emit("externalupdate");
+  },
+
+  async _handleLeaderSave(message) {
+    if (!this.isTabLeader || !message || !message.snapshot) return;
+    try {
+      const incoming = message.snapshot;
+      if (incoming.subject !== this.subject) throw new Error("Другой предмет уже выбран в главной вкладке");
+      const merged = this.mergeConflictState(this.state || {}, incoming);
+      // Leader owns the canonical in-memory snapshot as well as the only PUT.
+      this.state = merged;
+      const result = await this._saveSnapshot(merged);
+      const confirmed = JSON.parse(JSON.stringify(this.state || merged));
+      this._postTabMessage({ type: "state-saved", state: confirmed, result });
+      this._postTabMessage({ type: "save-result", requestId: message.requestId, ok: true, result, state: confirmed });
+    } catch (error) {
+      this._postTabMessage({ type: "save-result", requestId: message.requestId, ok: false,
+        error: { message: (error && error.message) || "Не удалось сохранить данные", status: error && error.status } });
+    }
+  },
+
+  async _handleLeaderAction(message) {
+    if (!this.isTabLeader || !message || !message.action) return;
+    try {
+      let payload;
+      if (message.action === "switch-subject") {
+        payload = await ApiClient.post("/api/subject", { subject: message.subject });
+        this._applyBootstrap(payload);
+      } else if (message.action === "reset") {
+        await ApiClient.delete("/api/state");
+        await this.load();
+        payload = { state: this.state, accountId: this.accountId };
+      } else {
+        throw new Error("Неизвестное действие вкладки");
+      }
+      this._postTabMessage({ type: "action-result", requestId: message.requestId, ok: true, action: message.action, payload });
+      if (message.action === "switch-subject") {
+        this._postTabMessage({ type: "subject-switched", payload });
+      }
+    } catch (error) {
+      this._postTabMessage({ type: "action-result", requestId: message.requestId, ok: false,
+        error: { message: (error && error.message) || "Не удалось выполнить действие", status: error && error.status } });
+    }
+  },
+
+  requestLeaderAction(action, data = {}) {
+    if (this.isTabLeader || !this.tabChannel) {
+      if (action === "switch-subject") return ApiClient.post("/api/subject", { subject: data.subject });
+      if (action === "reset") return ApiClient.delete("/api/state");
+      return Promise.reject(new Error("Неизвестное действие вкладки"));
+    }
+    const requestId = `${this.tabId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!this.leaderRequests[requestId]) return;
+        delete this.leaderRequests[requestId];
+        this._tryBecomeTabLeader();
+        reject(new Error("Главная вкладка недоступна: попробуй ещё раз"));
+      }, 5000);
+      this.leaderRequests[requestId] = {
+        resolve: (result) => { clearTimeout(timeout); resolve(result); },
+        reject: (error) => { clearTimeout(timeout); reject(error); },
+      };
+      this._postTabMessage({ type: "leader-query" });
+      this._postTabMessage({ type: "action-request", requestId, action, ...data });
+    });
+  },
+
+  _handleTabMessage(message) {
+    if (!message || message.from === this.tabId) return;
+    if (message.type === "leader-heartbeat") {
+      this.leaderTabId = message.leader || message.from;
+      this.leaderSeenAt = Date.now();
+      return;
+    }
+    if (message.type === "leader-query") {
+      if (this.isTabLeader) this._announceLeaderStatus();
+      return;
+    }
+    if (message.type === "save-request") {
+      this._handleLeaderSave(message);
+      return;
+    }
+    if (message.type === "action-request") {
+      this._handleLeaderAction(message);
+      return;
+    }
+    if (message.type === "subject-switched" && message.payload) {
+      // Смена предмета — это не обычный state-saved: нужен и новый каталог.
+      this._applyBootstrap(message.payload);
+      this.emit("subjectchange", this.subject);
+      return;
+    }
+    if (message.type === "state-saved") {
+      this._applyLeaderState(message.state);
+      return;
+    }
+    if (message.type === "action-result" && message.requestId && this.leaderRequests[message.requestId]) {
+      const pending = this.leaderRequests[message.requestId];
+      delete this.leaderRequests[message.requestId];
+      if (message.ok) {
+        if (message.action === "switch-subject" && message.payload) this._applyBootstrap(message.payload);
+        if (message.action === "reset" && message.payload && message.payload.state) {
+          this.state = JSON.parse(JSON.stringify(message.payload.state));
+          this.accountId = message.payload.accountId || null;
+        }
+        pending.resolve(message.payload || {});
+      }
+      else {
+        const error = Object.assign(new Error(message.error && message.error.message || "Не удалось выполнить действие"), message.error || {});
+        pending.reject(error);
+      }
+      return;
+    }
+    if (message.type === "save-result" && message.requestId && this.leaderRequests[message.requestId]) {
+      const pending = this.leaderRequests[message.requestId];
+      delete this.leaderRequests[message.requestId];
+      if (message.ok) {
+        this._applyLeaderState(message.state);
+        pending.resolve(message.result || {});
+      } else {
+        const error = Object.assign(new Error(message.error && message.error.message || "Не удалось сохранить данные"), message.error || {});
+        pending.reject(error);
+      }
+    }
+  },
+
+  requestLeaderSave(snapshot) {
+    if (this.isTabLeader || !this.tabChannel) return this._saveSnapshot(snapshot);
+    const requestId = `${this.tabId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!this.leaderRequests[requestId]) return;
+        delete this.leaderRequests[requestId];
+        this._tryBecomeTabLeader();
+        reject(new Error("Главная вкладка недоступна: попробуй сохранить ещё раз"));
+      }, 5000);
+      this.leaderRequests[requestId] = {
+        resolve: (result) => { clearTimeout(timeout); resolve(result); },
+        reject: (error) => { clearTimeout(timeout); reject(error); },
+      };
+      this._postTabMessage({ type: "leader-query" });
+      this._postTabMessage({ type: "save-request", requestId, snapshot });
+    });
+  },
+
   // Слияние после 409: серверный снимок — база. Добавляем только данные,
   // которые безопасно объединяются по смыслу: неизменяемые события и факты
   // завершения. Профиль, активные сессии и агрегаты остаются свежими с сервера.
@@ -239,7 +470,7 @@ const Store = {
         const snapshot = JSON.parse(JSON.stringify(this.state));
         // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
         snapshot.subject = this.subject || snapshot.subject || "profile_math";
-        return this._saveSnapshot(snapshot);
+        return this.requestLeaderSave(snapshot);
       })
       .then(() => { this.persistenceError = null; this._noteOwnSave(); })
       .catch((error) => {
@@ -314,8 +545,8 @@ const Store = {
     if (subjectId === this.subject && (!catalogSubject || subjectId === catalogSubject)) return this.state;
     await this.save();
     await this.pendingSave.catch(() => {});
-    const payload = await ApiClient.post("/api/subject", { subject: subjectId });
-    this._applyBootstrap(payload);
+    const payload = await this.requestLeaderAction("switch-subject", { subject: subjectId });
+    if (this.isTabLeader || !this.tabChannel) this._applyBootstrap(payload);
     this.emit("subjectchange", this.subject);
     return this.state;
   },
@@ -326,7 +557,7 @@ const Store = {
     if (!this.ready) return Promise.resolve();
     this.pendingSave = this.pendingSave
       .catch(() => {})
-      .then(() => ApiClient.delete("/api/state"))
+      .then(() => this.requestLeaderAction("reset"))
       // The DELETE removes the whole account row server-side; re-bootstrap so
       // the next request issues a fresh session with its own new Account ID,
       // instead of leaving the UI holding a stale, now-deleted one.
