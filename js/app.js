@@ -939,6 +939,7 @@ Store.on("achievement", (a) => toast(`Достижение разблокиро�
 Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача выполнена <b class="mono">+${xp} XP</b>`, "toast--xp", "zap"));
 Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", () => toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x"));
+Store.on("stateconflict", () => toast("Данные из другой вкладки объединены с текущими.", "", "rotate"));
 Store.on("externalupdate", () => { try { render(); } catch (_) {} });
 Store.on("externalupdate-pending", () => toast("В другой вкладке есть новые данные — подтянем их, когда закончишь тренировку", "", "rotate"));
 

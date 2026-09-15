@@ -26,6 +26,9 @@ const Store = {
   // старого снапшота из памяти (иначе stale-вкладка ещё и перетрёт сервер).
   lastSyncTs: 0,
   pendingExternalUpdate: false,
+  // Последний подтверждённый серверный снимок нужен, чтобы при 409 отличить
+  // собственные новые изменения от старых полей полного снапшота.
+  lastSyncedState: null,
 
   /* ------- persistence ------- */
 
@@ -36,6 +39,7 @@ const Store = {
     }
     return {
       version: 4,
+      stateVersion: 1,
       subject: Store.subject || (typeof DataAPI !== "undefined" && DataAPI.currentSubject && DataAPI.currentSubject()) || "profile_math",
       onboarded: false,
       goal: null,
@@ -121,6 +125,7 @@ const Store = {
       this.state.diagnostics = Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [];
       this.state.dailyHistory = Array.isArray(parsed.dailyHistory) ? parsed.dailyHistory : [];
       this.state.version = defaults.version;
+      this.lastSyncedState = JSON.parse(JSON.stringify(this.state));
       this.ready = true;
       this.lastSyncTs = Date.now();
       this.pendingExternalUpdate = false;
@@ -162,14 +167,80 @@ const Store = {
     return this.detailsPromise;
   },
 
+  // Слияние после 409: серверный снимок — база. Добавляем только данные,
+  // которые безопасно объединяются по смыслу: неизменяемые события и факты
+  // завершения. Профиль, активные сессии и агрегаты остаются свежими с сервера.
+  mergeConflictState(fresh, local) {
+    const merged = JSON.parse(JSON.stringify(fresh || {}));
+    const unique = (items) => {
+      const seen = new Set();
+      return (items || []).filter((item) => {
+        const key = JSON.stringify(item);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    for (const key of ["taskAttempts", "lessonAttempts", "errors", "lessonErrorHistory", "diagnostics", "dailyHistory", "timeline"]) {
+      merged[key] = unique([...(fresh[key] || []), ...(local[key] || [])]);
+    }
+    for (const key of ["completedLessons", "missionsDone", "achievements"]) {
+      merged[key] = Object.assign({}, fresh[key] || {}, local[key] || {});
+    }
+    merged.missionProgress = Object.assign({}, fresh.missionProgress || {});
+    for (const [id, progress] of Object.entries(local.missionProgress || {})) {
+      merged.missionProgress[id] = Math.max(Number(merged.missionProgress[id]) || 0, Number(progress) || 0);
+    }
+    merged.bossesDefeated = unique([...(fresh.bossesDefeated || []), ...(local.bossesDefeated || [])]);
+    merged.stateVersion = fresh.stateVersion;
+    merged.subject = fresh.subject;
+    return merged;
+  },
+
+  async _saveSnapshot(snapshot) {
+    snapshot.expectedVersion = snapshot.stateVersion;
+    try {
+      const result = await ApiClient.put("/api/state", snapshot);
+      const nextVersion = result && result.stateVersion;
+      if (Number.isInteger(nextVersion) && nextVersion > 0 && this.state && this.subject === snapshot.subject) {
+        this.state.stateVersion = nextVersion;
+        snapshot.stateVersion = nextVersion;
+      }
+      this.lastSyncedState = JSON.parse(JSON.stringify(snapshot));
+      return result;
+    } catch (error) {
+      if (!error || error.status !== 409) throw error;
+      // Reload first: no stale field is allowed to overwrite the state that
+      // caused the conflict. Then merge only append/fact collections and retry
+      // once against the version just read. Keep the live state too: a user may
+      // have made another action while the conflicting request was in flight.
+      const liveAtConflict = JSON.parse(JSON.stringify(this.state || {}));
+      await this.load(snapshot.subject);
+      const fresh = this.state;
+      const rebased = this.mergeConflictState(this.mergeConflictState(fresh, snapshot), liveAtConflict);
+      const result = await ApiClient.put("/api/state", {
+        ...rebased,
+        expectedVersion: rebased.stateVersion,
+      });
+      const nextVersion = result && result.stateVersion;
+      if (Number.isInteger(nextVersion) && nextVersion > 0) rebased.stateVersion = nextVersion;
+      this.state = rebased;
+      this.lastSyncedState = JSON.parse(JSON.stringify(rebased));
+      this.emit("stateconflict", { merged: true });
+      return result;
+    }
+  },
+
   save() {
     if (!this.state || !this.ready) return Promise.resolve();
-    const snapshot = JSON.parse(JSON.stringify(this.state));
-    // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
-    snapshot.subject = this.subject || snapshot.subject || "profile_math";
     this.pendingSave = this.pendingSave
       .catch(() => {})
-      .then(() => ApiClient.put("/api/state", snapshot))
+      .then(() => {
+        const snapshot = JSON.parse(JSON.stringify(this.state));
+        // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
+        snapshot.subject = this.subject || snapshot.subject || "profile_math";
+        return this._saveSnapshot(snapshot);
+      })
       .then(() => { this.persistenceError = null; this._noteOwnSave(); })
       .catch((error) => {
         this.persistenceError = error;

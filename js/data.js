@@ -122,7 +122,12 @@ const ApiClient = {
     }
     if (!response) throw lastError || new Error("Сервер недоступен");
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `API ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(payload.error || `API ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
     return payload;
   },
   get(path) { return this.request(path); },

@@ -753,6 +753,15 @@ def account_id_for(conn: sqlite3.Connection, user_id: int) -> str | None:
     return row["account_id"] if row else None
 
 
+class StateConflictError(Exception):
+    """A state snapshot was based on an older per-subject version."""
+
+    def __init__(self, expected_version: int, current_version: int):
+        self.expected_version = expected_version
+        self.current_version = current_version
+        super().__init__(f"state version conflict: expected {expected_version}, current {current_version}")
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
@@ -906,7 +915,7 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS user_subjects (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       subject TEXT NOT NULL, onboarded INTEGER NOT NULL DEFAULT 0,
-      self_level TEXT, goal_id TEXT,
+      self_level TEXT, goal_id TEXT, state_version INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY(user_id, subject))""")
     # Backfill: существующие аккаунты уже прошли онбординг профиля.
     conn.execute(f"""INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)
@@ -931,6 +940,12 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'")
         try:
             conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_subject ON {table}(user_id, subject)")
+        except sqlite3.Error:
+            pass
+    # OCC: добавляем state_version в user_subjects для защиты от stale writes
+    if "state_version" not in _table_columns(conn, "user_subjects"):
+        try:
+            conn.execute("ALTER TABLE user_subjects ADD COLUMN state_version INTEGER NOT NULL DEFAULT 1")
         except sqlite3.Error:
             pass
     conn.commit()
@@ -1230,7 +1245,7 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
 def default_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
     subject = resolve_subject(subject)
     skills = {r["id"]: {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0} for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
-    return {"version": 4, "subject": subject, "onboarded": False, "goal": None, "selfLevel": None, "name": None, "xp": 0, "streak": 0, "lastActiveDate": None,
+    return {"version": 4, "subject": subject, "stateVersion": 1, "onboarded": False, "goal": None, "selfLevel": None, "name": None, "xp": 0, "streak": 0, "lastActiveDate": None,
             "totalSolved": 0, "totalCorrect": 0, "totalTimeSec": 0, "hintsUsed": 0, "hintLevels": {"1": 0, "2": 0, "3": 0},
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
@@ -1246,9 +1261,9 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
     state = default_state(conn, user_id, subject)
     state["subject"] = subject
     user = conn.execute("SELECT onboarded, self_level, goal_id, name FROM users WHERE id=?", (user_id,)).fetchone()
-    prof = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+    prof = conn.execute("SELECT onboarded, self_level, goal_id, state_version FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
     if prof is not None:
-        state.update({"onboarded": bool(prof["onboarded"]), "selfLevel": prof["self_level"], "goal": prof["goal_id"]})
+        state.update({"onboarded": bool(prof["onboarded"]), "selfLevel": prof["self_level"], "goal": prof["goal_id"], "stateVersion": prof["state_version"]})
     elif user:
         state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"]})
     if user:
@@ -1296,7 +1311,41 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
     return state
 
 
-def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: str | None = None) -> None:
+def bump_state_versions(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> None:
+    """Invalidate client snapshots after trusted out-of-band state mutations."""
+    if subject is None:
+        conn.execute("UPDATE user_subjects SET state_version=state_version+1 WHERE user_id=?", (user_id,))
+    else:
+        ensure_subject_rows(conn, user_id, subject)
+        conn.execute("UPDATE user_subjects SET state_version=state_version+1 WHERE user_id=? AND subject=?", (user_id, subject))
+
+
+def claim_state_version(conn: sqlite3.Connection, user_id: int, subject: str, expected_version: int | None) -> int:
+    """Atomically reserve the next version before a full state rewrite."""
+    if not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1:
+        raise ValueError("expectedVersion must be a positive integer")
+    changed = conn.execute(
+        "UPDATE user_subjects SET state_version=state_version+1 "
+        "WHERE user_id=? AND subject=? AND state_version=?",
+        (user_id, subject, expected_version),
+    ).rowcount
+    if changed != 1:
+        row = conn.execute(
+            "SELECT state_version FROM user_subjects WHERE user_id=? AND subject=?",
+            (user_id, subject),
+        ).fetchone()
+        raise StateConflictError(expected_version, int(row["state_version"]) if row else 1)
+    return expected_version + 1
+
+
+def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: str | None = None, expected_version: int | None = None, version_claimed: bool = False) -> int:
+    """Write one subject snapshot after its version was atomically claimed.
+
+    `expected_version` is mandatory for the public state API. The conditional
+    UPDATE happens before any destructive table rewrite and inside the caller's
+    transaction; therefore a stale snapshot cannot delete newer rows.
+    Returns the version assigned to this write.
+    """
     # The API accepts only a state snapshot produced by the application logic;
     # all durable collections are written to their normalized tables in one transaction.
     # Снапшот всегда принадлежит одному предмету: пишем и чистим только его
@@ -1306,12 +1355,19 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
         subject = state.get("subject") if isinstance(state, dict) else None
     subject = resolve_subject(subject if is_known_subject(subject) else current_subject_for(conn, user_id))
     ensure_subject_rows(conn, user_id, subject)
+    if not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1:
+        raise ValueError("expectedVersion must be a positive integer")
+    next_version = expected_version + 1
+    if not version_claimed:
+        next_version = claim_state_version(conn, user_id, subject, expected_version)
+
     # Навыки предмета: чужие skill_id в этот предмет не пишем.
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
     profile_onboarded = int(bool(state.get("onboarded")))
-    conn.execute("INSERT INTO user_subjects(user_id, subject, onboarded, self_level, goal_id) VALUES(?,?,?,?,?)"
-                 " ON CONFLICT(user_id, subject) DO UPDATE SET onboarded=excluded.onboarded, self_level=excluded.self_level, goal_id=excluded.goal_id",
-                 (user_id, subject, profile_onboarded, state.get("selfLevel"), state.get("goal")))
+    conn.execute(
+        "UPDATE user_subjects SET onboarded=?, self_level=?, goal_id=? WHERE user_id=? AND subject=?",
+        (profile_onboarded, state.get("selfLevel"), state.get("goal"), user_id, subject),
+    )
     if subject == DEFAULT_SUBJECT:
         # Зеркало в users.* ради совместимости прямых чтений БД.
         # current_subject здесь НЕ пишем: предмет переключает только
@@ -1484,6 +1540,7 @@ def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: st
         if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids:
             continue
         conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at) VALUES(?,?,?,?,?)", (user_id,subject,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
+    return next_version
 
 
 # ---------------------------------------------------------------------------
@@ -1849,6 +1906,7 @@ def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) 
                 raise ValueError(f"unknown goal: {value}")
         goal = value
     conn.execute("UPDATE users SET name=?, self_level=?, goal_id=? WHERE id=?", (name, self_level, goal, user_id))
+    bump_state_versions(conn, user_id, DEFAULT_SUBJECT)
     conn.commit()
     return {"id": user_id, "name": name, "selfLevel": self_level, "goal": goal}
 
@@ -1871,6 +1929,7 @@ def admin_grant_xp(conn: sqlite3.Connection, user_id: int, amount: int, reason: 
                     ON CONFLICT(user_id, subject) DO UPDATE SET xp=excluded.xp""", (user_id, grant_subject, new_xp))
     conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
                  (user_id, grant_subject, now_iso(), f"Админ-корректировка XP: {amount:+d} ({reason})"))
+    bump_state_versions(conn, user_id, grant_subject)
     conn.commit()
     return {"xp": new_xp, "level": level_from_xp(new_xp), "amount": amount, "reason": reason}
 
@@ -1920,12 +1979,15 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         conn.execute(group["stats"], (user_id,))
     if target == "all-progress":
         # XP is derived from events plus the adjustment log; wiping events
-        # while leaving grants would resurrect XP from nothing.
+        # while leaving grants would resurrect XP from nothing. Keep per-subject
+        # rows and advance their versions: recreating them at version 1 could
+        # let a very old version-1 tab write after a reset.
         conn.execute("DELETE FROM user_xp_adjustments WHERE user_id=?", (user_id,))
         conn.execute("UPDATE users SET onboarded=0, self_level=NULL, goal_id=NULL WHERE id=?", (user_id,))
-        conn.execute("DELETE FROM user_subjects WHERE user_id=?", (user_id,))
+        conn.execute("UPDATE user_subjects SET onboarded=0, self_level=NULL, goal_id=NULL WHERE user_id=?", (user_id,))
         conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
                      (user_id, current_subject_for(conn, user_id), now_iso(), "Админ сбросил весь прогресс аккаунта"))
+    bump_state_versions(conn, user_id)
     conn.commit()
     return {"ok": True, "target": target, "message": group["label"]}
 
@@ -2618,11 +2680,24 @@ class Handler(BaseHTTPRequestHandler):
             user_id, token = user_for(conn, self)
             payload = self.read_json()
             validate_state(conn, payload)
-            conn.execute("BEGIN")
+            expected_version = payload.get("expectedVersion", payload.get("expected_version"))
+            # BEGIN IMMEDIATE serializes competing writers before the CAS UPDATE.
+            # No state table is touched until claim_state_version reserves the
+            # exact version read by this client.
+            conn.execute("BEGIN IMMEDIATE")
+            subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+            ensure_subject_rows(conn, user_id, subject)
+            next_version = claim_state_version(conn, user_id, subject, expected_version)
+            # Derived totals are authoritative and must be written in this same
+            # transaction together with the claimed version and all event rows.
             apply_derived_stats(conn, user_id, payload)
-            write_state(conn, user_id, payload)
+            write_state(conn, user_id, payload, subject=subject, expected_version=expected_version, version_claimed=True)
             conn.commit()
-            self.send_json({"ok": True}, token=token)
+            self.send_json({"ok": True, "stateVersion": next_version}, token=token)
+        except StateConflictError as exc:
+            conn.rollback()
+            self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
+                            "currentVersion": exc.current_version}, 409, token=token)
         except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
             # TypeError/AttributeError сюда добавили осознанно: раньше битая
             # запись (float(None), item.get на строке) обрывала соединение без

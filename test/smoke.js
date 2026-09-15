@@ -269,6 +269,35 @@ const testBody = async () => {
     delete global.localStorage;
   }
 
+  // OCC на клиенте: 409 не теряет локальную попытку. Store получает свежую
+  // версию, объединяет append-only события и повторяет PUT ровно один раз.
+  {
+    Store.ready = true;
+    Store.subject = "profile_math";
+    Store.state = Store.defaultState();
+    Store.state.stateVersion = 1;
+    Store.state.taskAttempts = [{ taskId: "local", skill: "n01_planimetry", correct: true, ts: 2 }];
+    let calls = 0;
+    let reloaded = false;
+    ApiClient.put = async (_path, body) => {
+      calls++;
+      if (calls === 1) throw Object.assign(new Error("State conflict"), { status: 409 });
+      t("повтор PUT использует свежую версию", body.expectedVersion === 2);
+      t("merge сохраняет локальную попытку", body.taskAttempts.some((a) => a.taskId === "local"));
+      t("merge сохраняет новую попытку другой вкладки", body.taskAttempts.some((a) => a.taskId === "remote"));
+      return { ok: true, stateVersion: 3 };
+    };
+    Store.load = async () => {
+      reloaded = true;
+      Store.state = Store.defaultState();
+      Store.state.stateVersion = 2;
+      Store.state.taskAttempts = [{ taskId: "remote", skill: "n01_planimetry", correct: true, ts: 1 }];
+      return Store.state;
+    };
+    await Store.save();
+    t("409 вызывает reload и один безопасный повтор", reloaded && calls === 2 && Store.state.stateVersion === 3);
+  }
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };
