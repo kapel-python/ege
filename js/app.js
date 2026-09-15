@@ -2510,6 +2510,7 @@ const Lesson = {
 
   clearPersist(lessonId) {
     if (Store.state.lessonSessions) delete Store.state.lessonSessions[lessonId];
+    if (!Store.deletedLessonSessions.includes(lessonId)) Store.deletedLessonSessions.push(lessonId);
     Store.save();
   },
 };

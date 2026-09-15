@@ -44,6 +44,7 @@ const Store = {
   leaderHeartbeatTimer: null,
   leaderRequests: {},
   leaderSaveQueue: Promise.resolve(),
+  deletedLessonSessions: [],
 
   /* ------- persistence ------- */
 
@@ -497,7 +498,15 @@ const Store = {
     for (const key of ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory"]) {
       if (changed(key)) domains[key] = snapshot[key];
     }
+    if (Array.isArray(snapshot.deletedLessonSessions) && snapshot.deletedLessonSessions.length) {
+      domains.deletedLessonSessions = snapshot.deletedLessonSessions;
+    }
     if (Object.keys(domains).length) await request("patch", "/api/state-domains", { domains });
+    if (Array.isArray(snapshot.deletedLessonSessions)) {
+      const deleted = new Set(snapshot.deletedLessonSessions);
+      this.deletedLessonSessions = this.deletedLessonSessions.filter((lessonId) => !deleted.has(lessonId));
+      delete snapshot.deletedLessonSessions;
+    }
     this.lastSyncedState = JSON.parse(JSON.stringify(snapshot));
     return { ok: true, stateVersion: version };
   },
@@ -526,6 +535,7 @@ const Store = {
         const snapshot = JSON.parse(JSON.stringify(this.state));
         // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
         snapshot.subject = this.subject || snapshot.subject || "profile_math";
+        snapshot.deletedLessonSessions = [...this.deletedLessonSessions];
         return this.requestLeaderSave(snapshot);
       })
       .then(() => { this.persistenceError = null; this._noteOwnSave(); })
