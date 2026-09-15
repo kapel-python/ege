@@ -1575,6 +1575,14 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
                 except (TypeError, ValueError): continue
                 conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,lesson_id,step_id) DO UPDATE SET count=MAX(lesson_step_errors.count,excluded.count), last_at=MAX(lesson_step_errors.last_at,excluded.last_at), types_json=excluded.types_json", (user_id, subject, lesson_id, step_id, item["skill"], count, str(item.get("ts") or now_iso()), json.dumps(item.get("types") or {}, ensure_ascii=False)))
         changed.append("lessonStepErrors")
+    if "deletedLessonStepErrors" in domains and isinstance(domains["deletedLessonStepErrors"], list):
+        for key in domains["deletedLessonStepErrors"]:
+            if not isinstance(key, str) or ":" not in key:
+                continue
+            lesson_id, step_id = key.split(":", 1)
+            if lesson_id in lesson_ids:
+                conn.execute("DELETE FROM lesson_step_errors WHERE user_id=? AND subject=? AND lesson_id=? AND step_id=?", (user_id, subject, lesson_id, step_id))
+        changed.append("deletedLessonStepErrors")
     if "lessonSessions" in domains and isinstance(domains["lessonSessions"], dict):
         for lesson_id, value in domains["lessonSessions"].items():
             if lesson_id in lesson_ids and isinstance(value, dict):

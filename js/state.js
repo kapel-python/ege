@@ -45,6 +45,7 @@ const Store = {
   leaderRequests: {},
   leaderSaveQueue: Promise.resolve(),
   deletedLessonSessions: [],
+  deletedLessonStepErrors: [],
 
   /* ------- persistence ------- */
 
@@ -501,11 +502,19 @@ const Store = {
     if (Array.isArray(snapshot.deletedLessonSessions) && snapshot.deletedLessonSessions.length) {
       domains.deletedLessonSessions = snapshot.deletedLessonSessions;
     }
+    if (Array.isArray(snapshot.deletedLessonStepErrors) && snapshot.deletedLessonStepErrors.length) {
+      domains.deletedLessonStepErrors = snapshot.deletedLessonStepErrors;
+    }
     if (Object.keys(domains).length) await request("patch", "/api/state-domains", { domains });
     if (Array.isArray(snapshot.deletedLessonSessions)) {
       const deleted = new Set(snapshot.deletedLessonSessions);
       this.deletedLessonSessions = this.deletedLessonSessions.filter((lessonId) => !deleted.has(lessonId));
       delete snapshot.deletedLessonSessions;
+    }
+    if (Array.isArray(snapshot.deletedLessonStepErrors)) {
+      const deleted = new Set(snapshot.deletedLessonStepErrors);
+      this.deletedLessonStepErrors = this.deletedLessonStepErrors.filter((key) => !deleted.has(key));
+      delete snapshot.deletedLessonStepErrors;
     }
     this.lastSyncedState = JSON.parse(JSON.stringify(snapshot));
     return { ok: true, stateVersion: version };
@@ -536,6 +545,7 @@ const Store = {
         // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
         snapshot.subject = this.subject || snapshot.subject || "profile_math";
         snapshot.deletedLessonSessions = [...this.deletedLessonSessions];
+        snapshot.deletedLessonStepErrors = [...this.deletedLessonStepErrors];
         return this.requestLeaderSave(snapshot);
       })
       .then(() => { this.persistenceError = null; this._noteOwnSave(); })
@@ -1366,7 +1376,9 @@ function recordLessonStepError(lessonId, stepId, skillId, errorType = "Неут�
 }
 
 function clearLessonStepError(lessonId, stepId) {
-  delete Store.state.lessonStepErrors[`${lessonId}:${stepId}`];
+  const key = `${lessonId}:${stepId}`;
+  delete Store.state.lessonStepErrors[key];
+  if (!Store.deletedLessonStepErrors.includes(key)) Store.deletedLessonStepErrors.push(key);
   Store.save();
 }
 
