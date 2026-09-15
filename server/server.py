@@ -2068,14 +2068,30 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
 
     errors_resolved = 0
     # Бонус за закрытую ошибку платится один раз на задание и только если оно
-    # реально решено верно (есть correct-попытка в истории). Иначе флаг
-    # resolved:true в payload рисует +15 XP из ничего за каждую запись.
+    # реально подтверждено верным решением. Подтверждение — это correct-попытка
+    # либо по самому заданию, либо (умное повторение: reviewQueueForErrors
+    # подбирает ДРУГОЕ задание той же подтемы, связь — errorMap/closesTaskId,
+    # клиент закрывает исходную ошибку в recordAnswer) верная попытка с
+    # closesTaskId исходного задания. Иначе флаг resolved:true в payload
+    # рисует +15 XP из ничего за каждую запись.
+    closed_via_review = set()
+    for a in attempts:
+        if not isinstance(a, dict):
+            continue
+        try:
+            _hl = int(a.get("hintLevel") or 0)
+        except (TypeError, ValueError):
+            continue
+        closes = a.get("closesTaskId")
+        if bool(a.get("correct")) and _hl < 3 and isinstance(closes, str) and closes in tasks:
+            closed_via_review.add(closes)
     counted_err_tasks = set()
     for e in state.get("errors") or []:
         if not isinstance(e, dict):
             continue
         task_id = e.get("taskId")
-        if (e.get("resolved") and task_id in tasks and task_id in solved_once
+        if (e.get("resolved") and task_id in tasks
+                and (task_id in solved_once or task_id in closed_via_review)
                 and task_id not in counted_err_tasks):
             counted_err_tasks.add(task_id)
             errors_resolved += 1

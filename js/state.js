@@ -20,6 +20,12 @@ const Store = {
   loadPromise: null,
   ready: false,
   persistenceError: null,
+  // Момент последней сверки с сервером (load или собственный save).
+  // Другая вкладка после каждого save пишет маяк в localStorage; увидев
+  // более свежий маяк, подтягиваем состояние с сервера вместо показа
+  // старого снапшота из памяти (иначе stale-вкладка ещё и перетрёт сервер).
+  lastSyncTs: 0,
+  pendingExternalUpdate: false,
 
   /* ------- persistence ------- */
 
@@ -116,6 +122,8 @@ const Store = {
       this.state.dailyHistory = Array.isArray(parsed.dailyHistory) ? parsed.dailyHistory : [];
       this.state.version = defaults.version;
       this.ready = true;
+      this.lastSyncTs = Date.now();
+      this.pendingExternalUpdate = false;
       ensureDailyChallenge();
       // Фоновая догрузка деталей, пока пользователь смотрит первый экран:
       // переход в тренировку/урок потом откроется мгновенно. Ошибки здесь
@@ -162,12 +170,62 @@ const Store = {
     this.pendingSave = this.pendingSave
       .catch(() => {})
       .then(() => ApiClient.put("/api/state", snapshot))
-      .then(() => { this.persistenceError = null; })
+      .then(() => { this.persistenceError = null; this._noteOwnSave(); })
       .catch((error) => {
         this.persistenceError = error;
         this.emit("persistenceerror", error);
       });
     return this.pendingSave;
+  },
+
+  // Ключ маяка свой на предмет: вкладки разных предметов друг другу не указ.
+  pingKey(subject) { return "ege_core_state_ping:" + (subject || "profile_math"); },
+
+  // Успешно сохранились: фиксируем момент и будим соседние вкладки.
+  // Только localStorage (без DOM/window) — безопасно для node-тестов.
+  _noteOwnSave() {
+    this.lastSyncTs = Date.now();
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(this.pingKey(this.subject),
+          JSON.stringify({ subject: this.subject || "profile_math", ts: this.lastSyncTs }));
+      }
+    } catch (_) {}
+  },
+
+  // Чистое решение «чужой ли маяк новее нас» — без чтения хранилищ,
+  // покрывается node-тестом напрямую.
+  shouldRefreshForPing(ping) {
+    if (!ping || typeof ping !== "object") return false;
+    if (ping.subject !== (this.subject || "profile_math")) return false;
+    return (Number(ping.ts) || 0) > (this.lastSyncTs || 0);
+  },
+
+  // Другая вкладка сохранилась: подтягиваем свежее состояние с сервера.
+  // Во время активной тренировки/урока состояние не подменяем из-под
+  // сессии — откладываем до следующей навигации (см. render в app.js),
+  // иначе ответы текущей сессии ушли бы в чужой снапшот.
+  // Возвращает "reloaded" | "deferred" | "none".
+  async checkExternalUpdate() {
+    if (!this.ready || !this.state) return "none";
+    let ping = null;
+    try {
+      if (typeof localStorage === "undefined") return "none";
+      const raw = localStorage.getItem(this.pingKey(this.subject));
+      ping = raw ? JSON.parse(raw) : null;
+    } catch (_) { return "none"; }
+    if (!this.shouldRefreshForPing(ping)) return "none";
+    const busy = (typeof Session !== "undefined" && Session && Session.cur)
+      || (typeof Lesson !== "undefined" && Lesson && Lesson.cur);
+    if (busy) {
+      this.pendingExternalUpdate = true;
+      try { this.emit("externalupdate-pending"); } catch (_) {}
+      return "deferred";
+    }
+    await this.load();
+    this.pendingExternalUpdate = false;
+    try { this.emit("externalupdate"); } catch (_) {}
+    return "reloaded";
   },
 
   // Переключение предмета: сервер возвращает каталог + состояние нового

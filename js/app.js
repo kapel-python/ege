@@ -939,6 +939,8 @@ Store.on("achievement", (a) => toast(`Достижение разблокиро�
 Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача выполнена <b class="mono">+${xp} XP</b>`, "toast--xp", "zap"));
 Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", () => toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x"));
+Store.on("externalupdate", () => { try { render(); } catch (_) {} });
+Store.on("externalupdate-pending", () => toast("В другой вкладке есть новые данные — подтянем их, когда закончишь тренировку", "", "rotate"));
 
 /* ============================================================
    Router
@@ -1041,6 +1043,15 @@ let lastHash = "";
 
 async function render() {
   if (!Store.ready || !Store.state) return;
+  // Отложённое обновление из соседней вкладки: тренировка/урок уже закрыты
+  // (иначе checkExternalUpdate не откладывал бы), подтягиваем свежее
+  // состояние с сервера до отрисовки — экран никогда не рисует stale-снапшот.
+  if (Store.pendingExternalUpdate && !(typeof Session !== "undefined" && Session && Session.cur)
+      && !(typeof Lesson !== "undefined" && Lesson && Lesson.cur)) {
+    Store.pendingExternalUpdate = false;
+    try { await Store.load(); } catch (_) {}
+    if (!Store.ready || !Store.state) return;
+  }
   if (!Store.state.onboarded) { Onboarding.show(); return; }
   Onboarding.hide();
   // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
@@ -3681,6 +3692,21 @@ function bootstrapApp() {
     try {
       await Store.load();
       stopBootMsgs();
+      // Кросс-таб синк: соседняя вкладка после каждого save оставляет маяк.
+      // Увидели более свежий маяк (событие storage, возврат во вкладку) —
+      // перечитываем состояние с сервера, иначе stale-вкладка показывает
+      // вчерашний снапшот и первым же действием перетирает сервер.
+      try {
+        window.addEventListener("storage", (e) => {
+          if (e && typeof e.key === "string" && e.key.indexOf("ege_core_state_ping:") === 0) {
+            Store.checkExternalUpdate().catch(() => {});
+          }
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (!document.hidden) Store.checkExternalUpdate().catch(() => {});
+        });
+        window.addEventListener("focus", () => { Store.checkExternalUpdate().catch(() => {}); });
+      } catch (_) {}
       render();
     } catch (error) {
       stopBootMsgs();
