@@ -251,7 +251,12 @@ const testBody = async () => {
     };
     ApiClient.post = async () => ({ ok: true, stateVersion: 1 });
     ApiClient.patch = async () => ({ ok: true, stateVersion: 1 });
+    ApiClient.put = async () => { throw new Error("legacy PUT must not be called"); };
+    Store.state.taskAttempts = [{ taskId: "n01_p1", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 1, ts: 1 }];
+    let domainPath = null;
+    ApiClient.post = async (path) => { domainPath = path; return { ok: true, stateVersion: 2 }; };
     await Store.save();
+    t("save использует доменный attempts endpoint, не legacy PUT", domainPath === "/api/events/attempts");
     const ping = JSON.parse(__ls[Store.pingKey("profile_math")] || "null");
     t("save оставляет маяк для соседних вкладок", !!ping && ping.subject === "profile_math" && ping.ts === Store.lastSyncTs && Store.lastSyncTs > 0);
     t("свой маяк не требует обновления", Store.shouldRefreshForPing(ping) === false);
