@@ -1580,6 +1580,11 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
             if lesson_id in lesson_ids and isinstance(value, dict):
                 conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?) ON CONFLICT(user_id,lesson_id) DO UPDATE SET session_json=excluded.session_json", (user_id, subject, lesson_id, json.dumps(value, ensure_ascii=False)))
         changed.append("lessonSessions")
+    if "deletedLessonSessions" in domains and isinstance(domains["deletedLessonSessions"], list):
+        for lesson_id in domains["deletedLessonSessions"]:
+            if isinstance(lesson_id, str) and lesson_id in lesson_ids:
+                conn.execute("DELETE FROM lesson_sessions WHERE user_id=? AND subject=? AND lesson_id=?", (user_id, subject, lesson_id))
+        changed.append("deletedLessonSessions")
     if "completedLessons" in domains and isinstance(domains["completedLessons"], dict):
         for lesson_id, value in domains["completedLessons"].items():
             if lesson_id in lesson_ids:

@@ -132,6 +132,11 @@ def main():
                 "settings": {"name": "Доменный ученик", "selfLevel": "base"},
             })
             assert status == 200, (status, settings)
+            status, session_deleted = request(opener, base, "/api/state-domains", "PATCH", {
+                "subject": subject, "expectedVersion": settings["stateVersion"],
+                "domains": {"deletedLessonSessions": ["lesson_n07_exponential"]},
+            })
+            assert status == 200, (status, session_deleted)
             conn = server.connect()
             try:
                 count = conn.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0]
@@ -141,7 +146,7 @@ def main():
             status, after = request(opener, base, "/api/bootstrap")
             state = after["state"]
             assert state["name"] == "Доменный ученик" and state["selfLevel"] == "base", state
-            assert state["lessonSessions"].get("lesson_n07_exponential", {}).get("idx") == 1, state["lessonSessions"]
+            assert "lesson_n07_exponential" not in state["lessonSessions"], state["lessonSessions"]
             assert "lesson_n07_exponential" in state["completedLessons"], state["completedLessons"]
             assert state["missionProgress"].get("m-n01_planimetry") == 3 and "m-n01_planimetry" in state["missionsDone"], state["missionProgress"]
             assert any(item["lessonId"] == "lesson_n07_exponential" for item in state["lessonAttempts"]), state["lessonAttempts"]
