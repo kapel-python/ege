@@ -43,6 +43,7 @@ const Store = {
   leaderAcquireInFlight: false,
   leaderHeartbeatTimer: null,
   leaderRequests: {},
+  leaderSaveQueue: Promise.resolve(),
 
   /* ------- persistence ------- */
 
@@ -255,8 +256,15 @@ const Store = {
     else this.emit("externalupdate");
   },
 
-  async _handleLeaderSave(message) {
+  _handleLeaderSave(message) {
     if (!this.isTabLeader || !message || !message.snapshot) return;
+    this.leaderSaveQueue = this.leaderSaveQueue
+      .catch(() => {})
+      .then(() => this._processLeaderSave(message));
+    return this.leaderSaveQueue;
+  },
+
+  async _processLeaderSave(message) {
     try {
       const incoming = message.snapshot;
       if (incoming.subject !== this.subject) throw new Error("Другой предмет уже выбран в главной вкладке");
