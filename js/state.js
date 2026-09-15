@@ -260,7 +260,7 @@ const Store = {
     try {
       const incoming = message.snapshot;
       if (incoming.subject !== this.subject) throw new Error("Другой предмет уже выбран в главной вкладке");
-      const merged = this.mergeConflictState(this.state || {}, incoming);
+      const merged = this.mergeLeaderState(this.state || {}, incoming, message.baseState || {});
       // Leader owns the canonical in-memory snapshot as well as the only PUT.
       this.state = merged;
       const result = await this._saveSnapshot(merged);
@@ -394,7 +394,8 @@ const Store = {
         reject: (error) => { clearTimeout(timeout); reject(error); },
       };
       this._postTabMessage({ type: "leader-query" });
-      this._postTabMessage({ type: "save-request", requestId, snapshot });
+      this._postTabMessage({ type: "save-request", requestId, snapshot,
+        baseState: JSON.parse(JSON.stringify(this.lastSyncedState || {})) });
     });
   },
 
@@ -425,6 +426,19 @@ const Store = {
     merged.bossesDefeated = unique([...(fresh.bossesDefeated || []), ...(local.bossesDefeated || [])]);
     merged.stateVersion = fresh.stateVersion;
     merged.subject = fresh.subject;
+    return merged;
+  },
+
+  // Для живой главной вкладки можно применить больше, чем при 409: у нас есть
+  // базовый снимок вторичной вкладки, поэтому переносим только поля, которые
+  // она действительно изменила после последней синхронизации, не её старые
+  // значения. Это сохраняет профиль и черновик урока без full-overwrite.
+  mergeLeaderState(fresh, local, base) {
+    const merged = this.mergeConflictState(fresh || {}, local || {});
+    const changed = (key) => JSON.stringify((local || {})[key]) !== JSON.stringify((base || {})[key]);
+    for (const key of ["name", "onboarded", "goal", "selfLevel", "lastActiveDate", "daily", "lessonSessions", "lessonStepErrors", "skillStats", "hintLevels", "activity", "forecastHistory"]) {
+      if (changed(key)) merged[key] = JSON.parse(JSON.stringify(local[key]));
+    }
     return merged;
   },
 

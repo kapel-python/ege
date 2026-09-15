@@ -65,6 +65,15 @@ function makeTab(label) {
   t("сохранение вторичной вкладки выполнил только лидер", leader.saved === 1 && !follower.saved);
   t("подтверждённое состояние дошло до вторичной вкладки", follower.state.taskAttempts.some((x) => x.taskId === "n01_p1"));
   t("подтверждённое состояние дошло до третьей вкладки", secondFollower.state.taskAttempts.some((x) => x.taskId === "n01_p1"));
+  // Главная вкладка меняет профиль после последней синхронизации follower;
+  // его следующий save не должен откатить это старым снапшотом.
+  leader.state.name = "свежее имя лидера";
+  follower.lastSyncedState = JSON.parse(JSON.stringify(follower.state));
+  follower.state.lessonSessions = { lesson_n07_exponential: { idx: 1 } };
+  await follower.save();
+  await pause(15);
+  t("дельта вторичной вкладки не откатывает свежий профиль лидера", leader.state.name === "свежее имя лидера");
+  t("дельта вторичной вкладки сохраняет её черновик урока", !!leader.state.lessonSessions.lesson_n07_exponential);
   leader.releaseTabLeadership();
   await pause(30);
   follower._tryBecomeTabLeader();
