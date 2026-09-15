@@ -450,35 +450,69 @@ const Store = {
     return merged;
   },
 
-  async _saveSnapshot(snapshot) {
-    snapshot.expectedVersion = snapshot.stateVersion;
-    try {
-      const result = await ApiClient.put("/api/state", snapshot);
-      const nextVersion = result && result.stateVersion;
-      if (Number.isInteger(nextVersion) && nextVersion > 0 && this.state && this.subject === snapshot.subject) {
-        this.state.stateVersion = nextVersion;
-        snapshot.stateVersion = nextVersion;
-      }
-      this.lastSyncedState = JSON.parse(JSON.stringify(snapshot));
+  async _saveDomains(snapshot) {
+    const base = this.lastSyncedState || {};
+    const subject = snapshot.subject;
+    let version = snapshot.stateVersion;
+    const request = async (method, path, body) => {
+      const payload = { subject, expectedVersion: version, ...body };
+      const result = await ApiClient[method](path, payload);
+      if (!Number.isInteger(result.stateVersion) || result.stateVersion < 1) throw new Error("Сервер не вернул версию состояния");
+      version = result.stateVersion;
+      snapshot.stateVersion = version;
+      if (this.state && this.subject === subject) this.state.stateVersion = version;
       return result;
+    };
+    const changed = (key) => JSON.stringify(snapshot[key]) !== JSON.stringify(base[key]);
+    const newItems = (key) => (snapshot[key] || []).filter((item) => !new Set((base[key] || []).map((old) => JSON.stringify(old))).has(JSON.stringify(item)));
+
+    const attempts = newItems("taskAttempts");
+    if (attempts.length) await request("post", "/api/events/attempts", { events: attempts });
+    const timeline = newItems("timeline");
+    if (timeline.length) await request("post", "/api/events/timeline", { events: timeline });
+    for (const [skillId, progress] of Object.entries(snapshot.skillStats || {})) {
+      if (JSON.stringify(progress) !== JSON.stringify((base.skillStats || {})[skillId])) {
+        await request("patch", `/api/progress/${encodeURIComponent(skillId)}`, { progress });
+      }
+    }
+    const baseErrors = base.errors || [];
+    for (const error of snapshot.errors || []) {
+      const old = baseErrors.find((item) => item.id === error.id || (!item.id && item.taskId === error.taskId && item.ts === error.ts));
+      if (!old) {
+        const result = await request("post", "/api/errors", { error });
+        if (!error.id && result.error && result.error.id) {
+          error.id = result.error.id;
+          const live = (this.state && this.state.errors || []).find((item) => !item.id && item.taskId === error.taskId && item.ts === error.ts);
+          if (live) live.id = result.error.id;
+        }
+      } else if (error.id && !!old.resolved !== !!error.resolved) {
+        await request("patch", `/api/errors/${encodeURIComponent(error.id)}`, { resolved: !!error.resolved });
+      }
+    }
+    const settings = {};
+    const settingKeys = ["name", "onboarded", "goal", "selfLevel"];
+    for (const key of settingKeys) if (changed(key)) settings[key] = snapshot[key];
+    if (Object.keys(settings).length) await request("patch", "/api/settings", { settings });
+    const domains = {};
+    for (const key of ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory"]) {
+      if (changed(key)) domains[key] = snapshot[key];
+    }
+    if (Object.keys(domains).length) await request("patch", "/api/state-domains", { domains });
+    this.lastSyncedState = JSON.parse(JSON.stringify(snapshot));
+    return { ok: true, stateVersion: version };
+  },
+
+  async _saveSnapshot(snapshot) {
+    try {
+      return await this._saveDomains(snapshot);
     } catch (error) {
       if (!error || error.status !== 409) throw error;
-      // Reload first: no stale field is allowed to overwrite the state that
-      // caused the conflict. Then merge only append/fact collections and retry
-      // once against the version just read. Keep the live state too: a user may
-      // have made another action while the conflicting request was in flight.
       const liveAtConflict = JSON.parse(JSON.stringify(this.state || {}));
       await this.load(snapshot.subject);
       const fresh = this.state;
       const rebased = this.mergeConflictState(this.mergeConflictState(fresh, snapshot), liveAtConflict);
-      const result = await ApiClient.put("/api/state", {
-        ...rebased,
-        expectedVersion: rebased.stateVersion,
-      });
-      const nextVersion = result && result.stateVersion;
-      if (Number.isInteger(nextVersion) && nextVersion > 0) rebased.stateVersion = nextVersion;
+      const result = await this._saveDomains(rebased);
       this.state = rebased;
-      this.lastSyncedState = JSON.parse(JSON.stringify(rebased));
       this.emit("stateconflict", { merged: true });
       return result;
     }

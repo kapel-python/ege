@@ -131,6 +131,7 @@ const ApiClient = {
     return payload;
   },
   get(path) { return this.request(path); },
+  patch(path, body) { return this.request(path, { method: "PATCH", body: JSON.stringify(body) }); },
   put(path, body) { return this.request(path, { method: "PUT", body: JSON.stringify(body) }); },
   post(path, body) { return this.request(path, { method: "POST", body: JSON.stringify(body) }); },
   delete(path) { return this.request(path, { method: "DELETE" }); },

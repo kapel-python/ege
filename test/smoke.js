@@ -249,7 +249,8 @@ const testBody = async () => {
       setItem: (k, v) => { __ls[k] = String(v); },
       removeItem: (k) => { delete __ls[k]; },
     };
-    ApiClient.put = async () => ({ ok: true });
+    ApiClient.post = async () => ({ ok: true, stateVersion: 1 });
+    ApiClient.patch = async () => ({ ok: true, stateVersion: 1 });
     await Store.save();
     const ping = JSON.parse(__ls[Store.pingKey("profile_math")] || "null");
     t("save оставляет маяк для соседних вкладок", !!ping && ping.subject === "profile_math" && ping.ts === Store.lastSyncTs && Store.lastSyncTs > 0);
@@ -279,14 +280,15 @@ const testBody = async () => {
     Store.state.taskAttempts = [{ taskId: "local", skill: "n01_planimetry", correct: true, ts: 2 }];
     let calls = 0;
     let reloaded = false;
-    ApiClient.put = async (_path, body) => {
+    ApiClient.post = async (_path, body) => {
       calls++;
       if (calls === 1) throw Object.assign(new Error("State conflict"), { status: 409 });
-      t("повтор PUT использует свежую версию", body.expectedVersion === 2);
-      t("merge сохраняет локальную попытку", body.taskAttempts.some((a) => a.taskId === "local"));
-      t("merge сохраняет новую попытку другой вкладки", body.taskAttempts.some((a) => a.taskId === "remote"));
+      t("повтор доменного запроса использует свежую версию", body.expectedVersion === 2);
+      t("merge сохраняет локальную попытку", body.events.some((a) => a.taskId === "local"));
+      t("merge сохраняет новую попытку другой вкладки", body.events.some((a) => a.taskId === "remote"));
       return { ok: true, stateVersion: 3 };
     };
+    ApiClient.patch = async () => ({ ok: true, stateVersion: 3 });
     Store.load = async () => {
       reloaded = true;
       Store.state = Store.defaultState();

@@ -79,25 +79,23 @@ const test = async () => {
     t("X-Frame-Options: DENY", res.headers.get("x-frame-options") === "DENY");
   }
 
-  /* ---- 3. Клиент не может начислить себе XP через xpAdjustments ----
-     Источник High-находки: write_state принимал новые строки журнала из
-     payload, и derive_stats добавлял их к XP. */
+  /* ---- 3. Полный снимок состояния отключён ----
+     Прогресс больше не может удалить и пересобрать все таблицы одним PUT.
+     Поддельные поля XP не имеют отдельного endpoint'а и не попадают в БД. */
   {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
     j.absorb(res);
     const boot = await json(res);
     createdAccounts.push(boot.accountId);
-    const state = { ...boot.state, xpAdjustments: [{ amount: 777777, reason: "cheat", ts: 1 }] };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
-    t("PUT с поддельным xpAdjustments принят без падения", res.status === 200, `got ${res.status}`);
+    res = await req("/api/state", { method: "PUT", body: { ...boot.state, xpAdjustments: [{ amount: 777777, reason: "cheat", ts: 1 }] }, cookies: j.header() });
+    t("полный PUT состояния отключён", res.status === 410, `got ${res.status}`);
     res = await req("/api/bootstrap", { cookies: j.header() });
     const after = (await json(res)).state;
-    t("XP не вырос от поддельной корректировки", after.xp === 0, `xp=${after.xp}`);
-    t("поддельная запись не сохранилась в журнал", (after.xpAdjustments || []).length === 0);
+    t("поддельная корректировка XP не попала в журнал", (after.xpAdjustments || []).length === 0 && after.xp === 0, `xp=${after.xp}`);
   }
 
-  /* ---- 4. Admin-грант по-прежнему работает и переживает клиентский sync ---- */
+  /* ---- 4. Admin-грант переживает старый клиентский снимок ---- */
   {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
@@ -106,80 +104,56 @@ const test = async () => {
     createdAccounts.push(boot.accountId);
     res = await req(`/api/admin/users/${boot.accountId}/xp`, { method: "POST", body: { amount: 50, reason: "security-test" }, cookies: admin.header() });
     t("admin grant +50", res.status === 200 && (await json(res)).xp === 50, `got ${res.status}`);
-    // Клиент со старым снимком (без гранта) синкается — грант не должен стереться.
+    // Старый клиент не может отправить snapshot и стереть grant.
     res = await req("/api/state", { method: "PUT", body: boot.state, cookies: j.header() });
     res = await req("/api/bootstrap", { cookies: j.header() });
     const after = (await json(res)).state;
-    t("admin-грант пережил sync устаревшего снимка", after.xp === 50, `xp=${after.xp}`);
+    t("admin-грант пережил устаревший snapshot", res.status === 200 && after.xp === 50, `xp=${after.xp}`);
     t("журнал виден клиенту", (after.xpAdjustments || []).some((a) => a.amount === 50));
   }
 
-  /* ---- 5. Счётчики clamp'ятся к реальным событиям ---- */
+  /* ---- 5. Домен attempts не доверяет агрегатам клиента ---- */
   {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
     j.absorb(res);
     const boot = await json(res);
     createdAccounts.push(boot.accountId);
-    const state = { ...boot.state, xp: 10 ** 9, totalSolved: 10 ** 6, totalCorrect: 10 ** 6, streak: 3650 };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
+    res = await req("/api/events/attempts", { method: "POST", body: {
+      subject: boot.state.subject, expectedVersion: boot.state.stateVersion,
+      // XP/totals здесь намеренно отсутствуют: событие определяет сервер.
+      events: [{ taskId: "n01_p1", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 1, ts: 1700000000000 }],
+    }, cookies: j.header() });
+    t("attempt event принят", res.status === 200, `got ${res.status}`);
     res = await req("/api/bootstrap", { cookies: j.header() });
     const after = (await json(res)).state;
-    t("накрученные xp/totalSolved отброшены сервером", after.xp === 0 && after.totalSolved === 0, `xp=${after.xp} solved=${after.totalSolved}`);
-    t("накрученный streak сохранился (косметический, не валютный)", after.streak === 3650, `streak=${after.streak}`);
+    t("агрегаты вычислены из события, не из клиента", after.totalSolved === 1 && after.xp > 0, `xp=${after.xp} solved=${after.totalSolved}`);
   }
 
-  /* ---- 6. Валидация границ и объёмов ---- */
-  {
-    const j = jar();
-    let res = await req("/api/bootstrap", { cookies: j.header() });
-    j.absorb(res);
-    const boot = await json(res);
-    createdAccounts.push(boot.accountId);
-
-    let state = { ...boot.state, streak: -1 };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
-    t("отрицательный streak: 400", res.status === 400, `got ${res.status}`);
-
-    state = { ...boot.state, totalCorrect: 5, totalSolved: 1 };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
-    t("correct > solved: 400", res.status === 400, `got ${res.status}`);
-
-    state = { ...boot.state, timeline: Array.from({ length: 500 }, () => ({ ts: 1, text: "x" })) };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
-    t("timeline сверх лимита: 400", res.status === 400, `got ${res.status}`);
-
-    state = { ...boot.state, taskAttempts: Array.from({ length: 25000 }, (_, i) => ({ taskId: "n01_p1", skill: "n01_planimetry", correct: i % 2 === 0, hintLevel: 0, seconds: 1, ts: i })) };
-    res = await req("/api/state", { method: "PUT", body: state, cookies: j.header() });
-    t("taskAttempts сверх лимита: 400", res.status === 400, `got ${res.status}`);
-  }
-
-  /* ---- 7. Огромный Content-Length не вешает worker ---- */
+  /* ---- 6. Огромный Content-Length не вешает worker ---- */
   {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     let refused = false;
     try {
-      const res = await fetch(BASE + "/api/state", {
-        method: "PUT",
+      const res = await fetch(BASE + "/api/events/attempts", {
+        method: "POST",
         headers: { "Content-Type": "application/json", "Content-Length": String(50 * 1024 * 1024) },
         body: "x",
         signal: controller.signal,
       });
       refused = res.status === 400;
     } catch {
-      refused = true; // сервер закрыл соединение, не дожидаясь 50 МБ
+      refused = true;
     } finally {
       clearTimeout(timer);
     }
     t("50MB Content-Length отклонён без ожидания тела", refused);
   }
 
-  /* ---- 8. Закрытие ошибки через другое задание (умное повторение) ----
-     reviewQueueForErrors подбирает ДРУГОЕ задание той же подтемы, связь —
-     errorMap/closesTaskId, клиент закрывает ИСХОДНУЮ ошибку в recordAnswer.
-     derive_stats обязан засчитать такое закрытие (+15 XP ровно), а голый
-     resolved-флаг без верной попытки — по-прежнему ноль (анти-фарм). */
+  /* ---- 7. Закрытие ошибки через другое задание (умное повторение) ----
+     Связь закрытия хранится в append-only attempt.closesTaskId; resolved —
+     отдельный PATCH конкретной сущности, без перезаписи истории. */
   {
     const mk = async () => {
       const j = jar();
@@ -189,36 +163,42 @@ const test = async () => {
       createdAccounts.push(boot.accountId);
       return { j, boot };
     };
-    const attemptsReview = [
-      { taskId: "n01_p1", skill: "n01_planimetry", correct: false, hintLevel: 0, seconds: 10, ts: 1699999900000 },
-      { taskId: "n01_p2", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 20, closesTaskId: "n01_p1", ts: 1700000000000 },
-    ];
+    const saveReview = async (account, closeViaReview) => {
+      let version = account.boot.state.stateVersion;
+      const subject = account.boot.state.subject;
+      let res = await req("/api/errors", { method: "POST", body: {
+        subject, expectedVersion: version,
+        error: { taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1699999800000 },
+      }, cookies: account.j.header() });
+      const made = await json(res);
+      if (res.status !== 200) return { res, made };
+      version = made.stateVersion;
+      const attempts = [
+        { taskId: "n01_p1", skill: "n01_planimetry", correct: false, hintLevel: 0, seconds: 10, ts: 1699999900000 },
+        { taskId: "n01_p2", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 20,
+          closesTaskId: closeViaReview ? "n01_p1" : null, ts: 1700000000000 },
+      ];
+      res = await req("/api/events/attempts", { method: "POST", body: { subject, expectedVersion: version, events: attempts }, cookies: account.j.header() });
+      const attemptsSaved = await json(res);
+      if (res.status !== 200) return { res, made: attemptsSaved };
+      version = attemptsSaved.stateVersion;
+      if (closeViaReview) {
+        res = await req(`/api/errors/${made.error.id}`, { method: "PATCH", body: { subject, expectedVersion: version, resolved: true }, cookies: account.j.header() });
+      }
+      return { res, made };
+    };
     const a = await mk();
-    let res = await req("/api/state", { method: "PUT", body: { ...a.boot.state,
-      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1700000000000, resolved: true }],
-      taskAttempts: attemptsReview }, cookies: a.j.header() });
-    t("PUT с review-закрытием принят", res.status === 200, `got ${res.status}`);
-    res = await req("/api/bootstrap", { cookies: a.j.header() });
+    let saved = await saveReview(a, true);
+    t("review-домены сохранены", saved.res.status === 200, `got ${saved.res.status}`);
+    let res = await req("/api/bootstrap", { cookies: a.j.header() });
     const afterA = (await json(res)).state;
     t("review-закрытие засчитано в счётчик", afterA.errorsResolved === 1, `errorsResolved=${afterA.errorsResolved}`);
     t("закрытая через повторение ошибка видна в «Закрытых»", (afterA.errors || []).some((e) => e.taskId === "n01_p1" && e.resolved));
-    // Тот же пробег без closesTaskId: ошибка не закрыта — разница ровно +15 XP.
     const b = await mk();
-    const attemptsPlain = attemptsReview.map((x) => ({ ...x, closesTaskId: null }));
-    res = await req("/api/state", { method: "PUT", body: { ...b.boot.state,
-      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1700000000000, resolved: false }],
-      taskAttempts: attemptsPlain }, cookies: b.j.header() });
+    saved = await saveReview(b, false);
     res = await req("/api/bootstrap", { cookies: b.j.header() });
     const afterB = (await json(res)).state;
     t("review-закрытие оплачено ровно +15 XP", afterA.xp === afterB.xp + 15, `a.xp=${afterA.xp} b.xp=${afterB.xp}`);
-    // Голый resolved-флаг без попыток — ноль (анти-фарм цел).
-    const c = await mk();
-    res = await req("/api/state", { method: "PUT", body: { ...c.boot.state,
-      errors: [{ taskId: "n01_p1", skill: "n01_planimetry", sub: "t", ts: 1, resolved: true }],
-      taskAttempts: [] }, cookies: c.j.header() });
-    res = await req("/api/bootstrap", { cookies: c.j.header() });
-    const afterC = (await json(res)).state;
-    t("голый resolved-флаг без попыток не платит", afterC.errorsResolved === 0 && afterC.xp === 0, `resolved=${afterC.errorsResolved} xp=${afterC.xp}`);
   }
 
   // Самоочистка тестовых аккаунтов.

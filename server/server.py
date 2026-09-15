@@ -660,6 +660,14 @@ CREATE TABLE IF NOT EXISTS activity_history (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, activity_date TEXT NOT NULL, solved INTEGER NOT NULL, correct INTEGER NOT NULL, xp INTEGER NOT NULL,
   PRIMARY KEY(user_id, activity_date)
 );
+CREATE TABLE IF NOT EXISTS activity_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject TEXT NOT NULL DEFAULT 'profile_math',
+  activity_date TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0,
+  correct INTEGER NOT NULL DEFAULT 0, xp INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS forecast_history (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, snapshot_date TEXT NOT NULL, low INTEGER NOT NULL, high INTEGER NOT NULL, mid INTEGER NOT NULL,
   PRIMARY KEY(user_id, snapshot_date)
@@ -787,7 +795,7 @@ USER_ID_INDEXES = (
     ("completed_lessons", "completed_lessons"),
     ("user_missions", "user_missions"), ("user_bosses", "user_bosses"),
     ("user_achievements", "user_achievements"),
-    ("activity_history", "activity_history"),
+    ("activity_history", "activity_history"), ("activity_events", "activity_events"),
     ("forecast_history", "forecast_history"),
     ("daily_progress", "daily_progress"), ("timeline", "timeline"),
     ("diagnostics", "diagnostics"), ("user_xp_adjustments", "user_xp_adjustments"),
@@ -942,6 +950,20 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_subject ON {table}(user_id, subject)")
         except sqlite3.Error:
             pass
+    # Activity is now event-sourced. Existing daily aggregates are preserved
+    # and backfilled once as seed events, so no historical graph disappears.
+    conn.execute("""CREATE TABLE IF NOT EXISTS activity_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subject TEXT NOT NULL DEFAULT 'profile_math', activity_date TEXT NOT NULL,
+      solved INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0,
+      xp INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, event_key TEXT NOT NULL DEFAULT '')""")
+    if "event_key" not in _table_columns(conn, "activity_events"):
+        conn.execute("ALTER TABLE activity_events ADD COLUMN event_key TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_events_user_subject_key ON activity_events(user_id, subject, event_key)")
+    conn.execute("""INSERT OR IGNORE INTO activity_events(user_id, subject, activity_date, solved, correct, xp, created_at, event_key)
+      SELECT h.user_id, h.subject, h.activity_date, h.solved, h.correct, h.xp, h.activity_date || ':legacy', 'legacy:' || h.activity_date
+      FROM activity_history h""")
     # OCC: добавляем state_version в user_subjects для защиты от stale writes
     if "state_version" not in _table_columns(conn, "user_subjects"):
         try:
@@ -1338,209 +1360,289 @@ def claim_state_version(conn: sqlite3.Connection, user_id: int, subject: str, ex
     return expected_version + 1
 
 
-def write_state(conn: sqlite3.Connection, user_id: int, state: dict, subject: str | None = None, expected_version: int | None = None, version_claimed: bool = False) -> int:
-    """Write one subject snapshot after its version was atomically claimed.
-
-    `expected_version` is mandatory for the public state API. The conditional
-    UPDATE happens before any destructive table rewrite and inside the caller's
-    transaction; therefore a stale snapshot cannot delete newer rows.
-    Returns the version assigned to this write.
-    """
-    # The API accepts only a state snapshot produced by the application logic;
-    # all durable collections are written to their normalized tables in one transaction.
-    # Снапшот всегда принадлежит одному предмету: пишем и чистим только его
-    # строки (WHERE user_id AND subject), соседние предметы не трогаем.
-    ensure_subject_schema(conn)
-    if subject is None:
-        subject = state.get("subject") if isinstance(state, dict) else None
-    subject = resolve_subject(subject if is_known_subject(subject) else current_subject_for(conn, user_id))
-    ensure_subject_rows(conn, user_id, subject)
-    if not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1:
-        raise ValueError("expectedVersion must be a positive integer")
-    next_version = expected_version + 1
-    if not version_claimed:
-        next_version = claim_state_version(conn, user_id, subject, expected_version)
-
-    # Навыки предмета: чужие skill_id в этот предмет не пишем.
+def append_attempt_events(conn: sqlite3.Connection, user_id: int, subject: str, events: list) -> int:
+    """Append immutable task attempts; duplicate client events are idempotent."""
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
-    profile_onboarded = int(bool(state.get("onboarded")))
-    conn.execute(
-        "UPDATE user_subjects SET onboarded=?, self_level=?, goal_id=? WHERE user_id=? AND subject=?",
-        (profile_onboarded, state.get("selfLevel"), state.get("goal"), user_id, subject),
-    )
-    if subject == DEFAULT_SUBJECT:
-        # Зеркало в users.* ради совместимости прямых чтений БД.
-        # current_subject здесь НЕ пишем: предмет переключает только
-        # POST /api/subject (set_current_subject), иначе stale-снапшот
-        # из другой вкладки молча откатывает выбор пользователя.
-        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=?, name=? WHERE id=?",
-                     (profile_onboarded, state.get("selfLevel"), state.get("goal"), sanitize_name(state.get("name")), user_id))
-    else:
-        conn.execute("UPDATE users SET name=? WHERE id=?",
-                     (sanitize_name(state.get("name")), user_id))
-    s = state
+    valid_tasks = {r["id"] for r in conn.execute(
+        "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,)
+    )}
+    inserted = 0
+    for event in events:
+        if not isinstance(event, dict) or event.get("taskId") not in valid_tasks or event.get("skill") not in valid_skills:
+            continue
+        try:
+            hint = int(event.get("hintLevel", 0))
+            seconds = float(event.get("seconds", 0))
+            created = str(event.get("ts") or now_iso())
+        except (TypeError, ValueError):
+            continue
+        closes = event.get("closesTaskId") if isinstance(event.get("closesTaskId"), str) else None
+        # Natural immutable-event key: the same client timestamp + semantic
+        # fields must not become a second attempt on a retry.
+        exists = conn.execute(
+            "SELECT 1 FROM task_attempts WHERE user_id=? AND subject=? AND task_id=? AND skill_id=? "
+            "AND correct=? AND hint_level=? AND seconds=? AND COALESCE(closes_task_id,'')=COALESCE(?, '') AND created_at=? LIMIT 1",
+            (user_id, subject, event["taskId"], event["skill"], int(bool(event.get("correct"))), hint, seconds, closes, created),
+        ).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            "INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (user_id, subject, event["taskId"], event["skill"], int(bool(event.get("correct"))), hint, seconds, closes, created),
+        )
+        inserted += 1
+    return inserted
+
+
+def append_timeline_events(conn: sqlite3.Connection, user_id: int, subject: str, events: list) -> int:
+    """Append immutable timeline entries; retries are idempotent."""
+    inserted = 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        text = event.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        created = str(event.get("ts") or now_iso())
+        text = text[:MAX_TIMELINE_TEXT]
+        if conn.execute("SELECT 1 FROM timeline WHERE user_id=? AND subject=? AND created_at=? AND text=? LIMIT 1", (user_id, subject, created, text)).fetchone():
+            continue
+        conn.execute("INSERT INTO timeline(user_id,subject,created_at,text) VALUES(?,?,?,?)", (user_id, subject, created, text))
+        inserted += 1
+    return inserted
+
+
+def refresh_derived_stats(conn: sqlite3.Connection, user_id: int, subject: str) -> None:
+    """Recompute trusted aggregates from durable domain records after a write."""
+    state = read_state(conn, user_id, subject)
+    derived = derive_stats(conn, state, user_id)
+    prev = conn.execute("SELECT streak, last_active_date FROM user_stats WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
     conn.execute("""INSERT INTO user_stats(user_id,subject,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,subject) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=excluded.best_series,errors_resolved=excluded.errors_resolved""",
-                 (user_id, subject, int(s.get("xp", 0)), int(s.get("streak", 0)), s.get("lastActiveDate"), int(s.get("totalSolved", 0)), int(s.get("totalCorrect", 0)), float(s.get("totalTimeSec", 0)), int(s.get("hintsUsed", 0)), int(s.get("correctSeries", 0)), int(s.get("bestSeries", 0)), int(s.get("errorsResolved", 0))))
-    for table in ("user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts", "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons", "user_missions", "user_bosses", "user_achievements", "activity_history", "forecast_history", "daily_progress", "timeline", "diagnostics"):
-        conn.execute(f"DELETE FROM {table} WHERE user_id=? AND subject=?", (user_id, subject))
-    for skill_id, value in (s.get("skillStats") or {}).items():
-        # Одна битая запись раньше роняла весь PUT (int("abc") -> ValueError,
-        # float(None) -> TypeError, который вообще не ловился в do_PUT):
-        # пропускаем мусор, остальное сохраняем.
-        if skill_id not in valid_skills or not isinstance(value, dict):
-            continue
-        try:
-            progress = int(value.get("progress", 0))
-            solved = int(value.get("solved", 0))
-            correct = int(value.get("correct", 0))
-            time_sec = float(value.get("timeSec", 0))
-        except (TypeError, ValueError):
-            continue
-        if not 0 <= progress <= 100 or solved < 0 or correct < 0 or time_sec < 0:
-            continue
-        conn.execute("INSERT INTO user_progress(user_id,subject,skill_id,progress,solved,correct,time_sec) VALUES (?,?,?,?,?,?,?)", (user_id, subject, skill_id, progress, solved, correct, time_sec))
-    for level, count in (s.get("hintLevels") or {}).items():
-        try:
-            conn.execute("INSERT INTO user_hint_levels(user_id,subject,level,used_count) VALUES (?,?,?,?)", (user_id, subject, int(level), int(count)))
-        except (TypeError, ValueError):
-            continue
-    valid_task_ids = {r["id"] for r in conn.execute("SELECT t.id AS id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,))}
-    for item in s.get("taskAttempts") or []:
-        # task_attempts.skill_id и user_errors.skill_id — FK на skills: чужой
-        # skill ронял весь PUT через IntegrityError, числовой мусор — через
-        # ValueError. Одну запись скипаем, остальные сохраняем.
-        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
-            continue
-        try:
-            hint_level = int(item.get("hintLevel", 0))
-            seconds = float(item.get("seconds", 0))
-        except (TypeError, ValueError):
-            continue
-        closes = item.get("closesTaskId")
-        if closes is not None and not isinstance(closes, str):
-            closes = None
-        conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id, subject, item["taskId"], item["skill"], int(bool(item.get("correct"))), hint_level, seconds, closes, item.get("ts") or now_iso()))
-    for item in s.get("errors") or []:
-        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids or item.get("skill") not in valid_skills:
-            continue
-        conn.execute("INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?,?)", (user_id, subject, item["taskId"], item["skill"], item.get("sub", ""), item.get("ts") or now_iso(), int(bool(item.get("resolved")))))
-    lesson_ids = {r["id"] for r in conn.execute("SELECT l.id AS id FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (subject,))}
-    for item in s.get("lessonAttempts") or []:
-        if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids:
-            continue
-        try:
-            xp_v = int(item.get("xp", 0))
-            wrong_v = int(item.get("wrongAttempts", 0))
-            dur_v = float(item.get("durationSec", 0))
-        except (TypeError, ValueError):
-            continue
-        conn.execute("INSERT INTO lesson_attempts(user_id,subject,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id,subject,item["lessonId"],int(bool(item.get("completed", True))),int(bool(item.get("firstCompletion"))),xp_v,wrong_v,dur_v,item.get("ts") or now_iso()))
-    for key, item in (s.get("lessonStepErrors") or {}).items():
-        # Битый ключ без ":" раньше ронял весь PUT через ValueError — одно
-        # поле ломало любое сохранение. Пропускаем мусор молча.
-        if not isinstance(key, str) or ":" not in key or not isinstance(item, dict):
-            continue
-        lesson_id, step_id = key.split(":", 1)
-        if lesson_id not in lesson_ids or item.get("skill") not in valid_skills:
-            continue
-        try:
-            count_v = int(item.get("count", 0))
-        except (TypeError, ValueError):
-            continue
-        try:
-            types_json = json.dumps(item.get("types", {}), ensure_ascii=False)
-        except (TypeError, ValueError):
-            types_json = "{}"
-        conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?)", (user_id,subject,lesson_id,step_id,item["skill"],count_v,item.get("ts") or now_iso(),types_json))
-    for item in s.get("lessonErrorHistory") or []:
-        # lesson_error_history.skill_id — FK на skills (проверено: чужой skill
-        # ронял весь PUT). stepId обязан быть строкой (NOT NULL без дефолта).
-        if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids or item.get("skill") not in valid_skills:
-            continue
-        conn.execute("INSERT INTO lesson_error_history(user_id,subject,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?,?)", (user_id,subject,item["lessonId"],item.get("stepId") or "",item["skill"],item.get("type", ""),item.get("ts") or now_iso()))
-    for lesson_id, item in (s.get("lessonSessions") or {}).items():
-        if lesson_id in lesson_ids: conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?)", (user_id,subject,lesson_id,json.dumps(item,ensure_ascii=False)))
-    for lesson_id, item in (s.get("completedLessons") or {}).items():
-        if lesson_id in lesson_ids: conn.execute("INSERT INTO completed_lessons(user_id,subject,lesson_id,completed_at) VALUES(?,?,?,?)", (user_id,subject,lesson_id,item.get("ts") or now_iso()))
-    mission_ids = {r["id"] for r in conn.execute("SELECT m.id AS id FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (subject,))}
-    missions_done_map = s.get("missionsDone") if isinstance(s.get("missionsDone"), dict) else {}
-    for mission_id, progress in (s.get("missionProgress") or {}).items():
-        if mission_id not in mission_ids:
-            continue
-        try:
-            progress_v = int(progress or 0)
-        except (TypeError, ValueError):
-            continue
-        done_entry = missions_done_map.get(mission_id)
-        done_ts = done_entry.get("ts") if isinstance(done_entry, dict) else None
-        conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?)", (user_id,subject,mission_id,progress_v,done_ts))
-    boss_ids = {r["id"] for r in conn.execute("SELECT b.id AS id FROM bosses b JOIN topics t ON t.id=b.topic_id WHERE t.subject=?", (subject,))}
-    # Дубли/мусор раньше роняли весь PUT (UNIQUE / FOREIGN KEY / TypeError на
-    # нехешируемых типах): дедуплицируем безопасно, чужое отбрасываем.
-    seen_bosses = set()
-    for boss_id in (s.get("bossesDefeated") or []):
-        if not isinstance(boss_id, str) or boss_id in seen_bosses or boss_id not in boss_ids:
-            continue
-        seen_bosses.add(boss_id)
-        conn.execute("INSERT INTO user_bosses(user_id,subject,boss_id,defeated_at) VALUES(?,?,?,?)", (user_id, subject, boss_id, now_iso()))
-    achievement_ids = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
-    achievements_map = s.get("achievements") if isinstance(s.get("achievements"), dict) else {}
-    for achievement_id, item in achievements_map.items():
-        if achievement_id not in achievement_ids:
-            continue
-        # Значение-не-словарь раньше роняло PUT через AttributeError, который
-        # даже не ловился в do_PUT (обрыв соединения без JSON-ошибки).
-        ts = item.get("ts") if isinstance(item, dict) else None
-        conn.execute("INSERT INTO user_achievements(user_id,subject,achievement_id,unlocked_at) VALUES(?,?,?,?)", (user_id, subject, achievement_id, ts or now_iso()))
-    for activity_date, value in (s.get("activity") or {}).items():
-        if not isinstance(activity_date, str) or not isinstance(value, dict):
-            continue
-        try:
-            conn.execute("INSERT INTO activity_history(user_id,subject,activity_date,solved,correct,xp) VALUES(?,?,?,?,?,?)", (user_id,subject,activity_date,int(value.get("solved",0)),int(value.get("correct",0)),int(value.get("xp",0))))
-        except (TypeError, ValueError):
-            continue
-    for item in s.get("forecastHistory") or []:
-        if not isinstance(item, dict):
-            continue
-        try:
-            conn.execute("INSERT INTO forecast_history(user_id,subject,snapshot_date,low,high,mid) VALUES(?,?,?,?,?,?)", (user_id,subject,item["date"],int(item["low"]),int(item["high"]),int(item["mid"])))
-        except (TypeError, ValueError, KeyError):
-            continue
-    # XP adjustments are an append-only audit log that derives straight into
-    # XP, so the sync path must NEVER mint new rows — a client could otherwise
-    # award itself arbitrary XP with {"amount": N}. The only writer is
-    # admin_grant_xp (and direct DB work); a state payload can at most echo
-    # back rows the server already holds.
-    #
-    daily_records = {}
-    for item in s.get("dailyHistory") or []:
-        if isinstance(item, dict) and item.get("date"): daily_records[item["date"]] = item
-    daily = s.get("daily") if isinstance(s.get("daily"), dict) else {}
-    if daily.get("date"): daily_records[daily["date"]] = daily
-    for progress_date, item in daily_records.items():
-        task_ids = item.get("taskIds")
-        selected_task_ids = [str(task_id) for task_id in task_ids] if isinstance(task_ids, list) else []
-        try:
-            solved_v = int(item.get("solved", 0))
-        except (TypeError, ValueError):
-            solved_v = 0
-        conn.execute("INSERT INTO daily_progress(user_id,subject,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?,?)",
-                     (user_id,subject,progress_date,solved_v,int(bool(item.get("done"))),json.dumps(selected_task_ids,ensure_ascii=False)))
-    for item in s.get("timeline") or []:
-        # Текст записи был без потолка (проверено: 200 КБ пишется в БД и затем
-        # грузится на каждый bootstrap): режем до MAX_TIMELINE_TEXT.
-        if not isinstance(item, dict):
-            continue
-        text = item.get("text", "")
-        if not isinstance(text, str):
-            text = str(text)
-        conn.execute("INSERT INTO timeline(user_id,subject,created_at,text) VALUES(?,?,?,?)", (user_id,subject,item.get("ts") or now_iso(),text[:MAX_TIMELINE_TEXT]))
-    for item in s.get("diagnostics") or []:
-        if not isinstance(item, dict) or item.get("taskId") not in valid_task_ids:
-            continue
-        conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at) VALUES(?,?,?,?,?)", (user_id,subject,item["taskId"],int(bool(item.get("correct"))),item.get("ts") or now_iso()))
-    return next_version
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(user_id,subject) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=MAX(user_stats.best_series,excluded.best_series),errors_resolved=excluded.errors_resolved""",
+                 (user_id, subject, int(derived["xp"]), int(prev["streak"] if prev else 0), prev["last_active_date"] if prev else None, int(derived["totalSolved"]), int(derived["totalCorrect"]), float(sum(float(a.get("seconds") or 0) for a in state.get("taskAttempts") or [] if isinstance(a, dict))), int(derived["hintsUsed"]), int(derived["correctSeries"]), int(derived["bestSeries"]), int(derived["errorsResolved"])))
+
+
+def domain_write(conn: sqlite3.Connection, user_id: int, payload: dict, operation) -> tuple[str, int, object]:
+    """CAS boundary shared by independently persisted user-state domains."""
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
+    subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+    expected = payload.get("expectedVersion", payload.get("expected_version"))
+    conn.execute("BEGIN IMMEDIATE")
+    ensure_subject_rows(conn, user_id, subject)
+    next_version = claim_state_version(conn, user_id, subject, expected)
+    result = operation(subject)
+    refresh_derived_stats(conn, user_id, subject)
+    conn.commit()
+    return subject, next_version, result
+
+
+def patch_skill_progress(conn: sqlite3.Connection, user_id: int, subject: str, skill_id: str, value: dict) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("progress must be an object")
+    skill = conn.execute("SELECT id FROM skills WHERE id=? AND subject=?", (skill_id, subject)).fetchone()
+    if not skill:
+        raise ValueError("unknown skill")
+    try:
+        progress = int(value.get("progress", 0))
+        solved = int(value.get("solved", 0))
+        correct = int(value.get("correct", 0))
+        time_sec = float(value.get("timeSec", 0))
+    except (TypeError, ValueError):
+        raise ValueError("invalid progress values")
+    if not 0 <= progress <= 100 or solved < 0 or correct < 0 or correct > solved or time_sec < 0:
+        raise ValueError("invalid progress values")
+    conn.execute(
+        "INSERT INTO user_progress(user_id,subject,skill_id,progress,solved,correct,time_sec) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id,skill_id) DO UPDATE SET progress=MAX(user_progress.progress,excluded.progress), "
+        "solved=MAX(user_progress.solved,excluded.solved), correct=MAX(user_progress.correct,excluded.correct), "
+        "time_sec=MAX(user_progress.time_sec,excluded.time_sec)",
+        (user_id, subject, skill_id, progress, solved, correct, time_sec),
+    )
+    return {"skill": skill_id, "progress": progress, "solved": solved, "correct": correct, "timeSec": time_sec}
+
+
+def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("error must be an object")
+    task_id, skill_id = value.get("taskId"), value.get("skill")
+    valid = conn.execute(
+        "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE t.id=? AND s.id=? AND s.subject=?",
+        (task_id, skill_id, subject),
+    ).fetchone()
+    if not valid:
+        raise ValueError("unknown task or skill")
+    created = str(value.get("ts") or now_iso())
+    topic = str(value.get("sub") or "")[:200]
+    existing = conn.execute(
+        "SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors "
+        "WHERE user_id=? AND subject=? AND task_id=? AND skill_id=? AND created_at=? LIMIT 1",
+        (user_id, subject, task_id, skill_id, created),
+    ).fetchone()
+    if existing:
+        row = existing
+    else:
+        cur = conn.execute(
+            "INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?,0)",
+            (user_id, subject, task_id, skill_id, topic, created),
+        )
+        row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors WHERE id=?", (cur.lastrowid,)).fetchone()
+    return {"id": row["id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
+            "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
+
+
+def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, error_id: int, resolved: object) -> dict:
+    if not isinstance(resolved, bool):
+        raise ValueError("resolved must be boolean")
+    changed = conn.execute("UPDATE user_errors SET resolved=? WHERE id=? AND user_id=? AND subject=?", (int(resolved), error_id, user_id, subject)).rowcount
+    if changed != 1:
+        raise KeyError("error not found")
+    row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors WHERE id=?", (error_id,)).fetchone()
+    return {"id": row["id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
+            "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
+
+
+def patch_settings(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("settings must be an object")
+    current = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+    onboarded = int(bool(value["onboarded"])) if "onboarded" in value else int(current["onboarded"])
+    self_level = value.get("selfLevel", current["self_level"])
+    goal = value.get("goal", current["goal_id"])
+    name_value = value.get("name") if "name" in value else conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()["name"]
+    if self_level is not None and self_level not in SELF_LEVELS:
+        raise ValueError("invalid selfLevel")
+    if goal is not None:
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (f"goals:{subject}",)).fetchone()
+        if row is None and subject == DEFAULT_SUBJECT:
+            row = conn.execute("SELECT value_json FROM app_config WHERE key='goals'").fetchone()
+        goal_ids = {g.get("id") for g in json.loads(row["value_json"])} if row else set()
+        if goal not in goal_ids:
+            raise ValueError("unknown goal")
+    conn.execute("UPDATE user_subjects SET onboarded=?, self_level=?, goal_id=? WHERE user_id=? AND subject=?", (onboarded, self_level, goal, user_id, subject))
+    conn.execute("UPDATE users SET name=? WHERE id=?", (sanitize_name(name_value), user_id))
+    if subject == DEFAULT_SUBJECT:
+        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=? WHERE id=?", (onboarded, self_level, goal, user_id))
+    return {"onboarded": bool(onboarded), "selfLevel": self_level, "goal": goal, "name": sanitize_name(name_value)}
+
+
+def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, domains: dict) -> dict:
+    """Upsert mutable state domains without touching immutable event history."""
+    if not isinstance(domains, dict):
+        raise ValueError("domains must be an object")
+    valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
+    lesson_ids = {r["id"] for r in conn.execute("SELECT l.id FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (subject,))}
+    mission_ids = {r["id"] for r in conn.execute("SELECT m.id FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (subject,))}
+    changed = []
+    if "lessonAttempts" in domains and isinstance(domains["lessonAttempts"], list):
+        for item in domains["lessonAttempts"]:
+            if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids:
+                continue
+            try:
+                xp = int(item.get("xp", 0)); wrong = int(item.get("wrongAttempts", 0)); duration = float(item.get("durationSec", 0)); created = str(item.get("ts") or now_iso())
+            except (TypeError, ValueError):
+                continue
+            exists = conn.execute("SELECT 1 FROM lesson_attempts WHERE user_id=? AND subject=? AND lesson_id=? AND created_at=? LIMIT 1", (user_id, subject, item["lessonId"], created)).fetchone()
+            if not exists:
+                conn.execute("INSERT INTO lesson_attempts(user_id,subject,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id, subject, item["lessonId"], int(bool(item.get("completed", True))), int(bool(item.get("firstCompletion"))), xp, wrong, duration, created))
+        changed.append("lessonAttempts")
+    if "lessonErrorHistory" in domains and isinstance(domains["lessonErrorHistory"], list):
+        for item in domains["lessonErrorHistory"]:
+            if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids or item.get("skill") not in valid_skills:
+                continue
+            created = str(item.get("ts") or now_iso())
+            exists = conn.execute("SELECT 1 FROM lesson_error_history WHERE user_id=? AND subject=? AND lesson_id=? AND step_id=? AND error_type=? AND created_at=? LIMIT 1", (user_id, subject, item["lessonId"], str(item.get("stepId") or ""), str(item.get("type") or ""), created)).fetchone()
+            if not exists:
+                conn.execute("INSERT INTO lesson_error_history(user_id,subject,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?,?)", (user_id, subject, item["lessonId"], str(item.get("stepId") or ""), item["skill"], str(item.get("type") or ""), created))
+        changed.append("lessonErrorHistory")
+    if "diagnostics" in domains and isinstance(domains["diagnostics"], list):
+        valid_tasks = {r["id"] for r in conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,))}
+        for item in domains["diagnostics"]:
+            if not isinstance(item, dict) or item.get("taskId") not in valid_tasks:
+                continue
+            created = str(item.get("ts") or now_iso())
+            if not conn.execute("SELECT 1 FROM diagnostics WHERE user_id=? AND subject=? AND task_id=? AND created_at=? LIMIT 1", (user_id, subject, item["taskId"], created)).fetchone():
+                conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at) VALUES(?,?,?,?,?)", (user_id, subject, item["taskId"], int(bool(item.get("correct"))), created))
+        changed.append("diagnostics")
+    if "lessonStepErrors" in domains and isinstance(domains["lessonStepErrors"], dict):
+        for key, item in domains["lessonStepErrors"].items():
+            if not isinstance(key, str) or ":" not in key or not isinstance(item, dict):
+                continue
+            lesson_id, step_id = key.split(":", 1)
+            if lesson_id in lesson_ids and item.get("skill") in valid_skills:
+                try: count = int(item.get("count", 0))
+                except (TypeError, ValueError): continue
+                conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,lesson_id,step_id) DO UPDATE SET count=MAX(lesson_step_errors.count,excluded.count), last_at=MAX(lesson_step_errors.last_at,excluded.last_at), types_json=excluded.types_json", (user_id, subject, lesson_id, step_id, item["skill"], count, str(item.get("ts") or now_iso()), json.dumps(item.get("types") or {}, ensure_ascii=False)))
+        changed.append("lessonStepErrors")
+    if "lessonSessions" in domains and isinstance(domains["lessonSessions"], dict):
+        for lesson_id, value in domains["lessonSessions"].items():
+            if lesson_id in lesson_ids and isinstance(value, dict):
+                conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?) ON CONFLICT(user_id,lesson_id) DO UPDATE SET session_json=excluded.session_json", (user_id, subject, lesson_id, json.dumps(value, ensure_ascii=False)))
+        changed.append("lessonSessions")
+    if "completedLessons" in domains and isinstance(domains["completedLessons"], dict):
+        for lesson_id, value in domains["completedLessons"].items():
+            if lesson_id in lesson_ids:
+                ts = value.get("ts") if isinstance(value, dict) else None
+                conn.execute("INSERT OR IGNORE INTO completed_lessons(user_id,subject,lesson_id,completed_at) VALUES(?,?,?,?)", (user_id, subject, lesson_id, ts or now_iso()))
+        changed.append("completedLessons")
+    if "missionProgress" in domains and isinstance(domains["missionProgress"], dict):
+        done = domains.get("missionsDone") if isinstance(domains.get("missionsDone"), dict) else {}
+        for mission_id, value in domains["missionProgress"].items():
+            if mission_id not in mission_ids:
+                continue
+            try: progress = int(value)
+            except (TypeError, ValueError): continue
+            existing = conn.execute("SELECT progress, completed_at FROM user_missions WHERE user_id=? AND subject=? AND mission_id=?", (user_id, subject, mission_id)).fetchone()
+            prior = int(existing["progress"]) if existing else 0
+            entry = done.get(mission_id)
+            completed = entry.get("ts") if isinstance(entry, dict) else (existing["completed_at"] if existing else None)
+            conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,mission_id) DO UPDATE SET progress=MAX(user_missions.progress,excluded.progress), completed_at=COALESCE(user_missions.completed_at,excluded.completed_at)", (user_id, subject, mission_id, max(prior, progress), completed))
+        changed.append("missionProgress")
+    if "achievements" in domains and isinstance(domains["achievements"], dict):
+        valid = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
+        for achievement_id, value in domains["achievements"].items():
+            if achievement_id in valid:
+                ts = value.get("ts") if isinstance(value, dict) else None
+                conn.execute("INSERT OR IGNORE INTO user_achievements(user_id,subject,achievement_id,unlocked_at) VALUES(?,?,?,?)", (user_id, subject, achievement_id, ts or now_iso()))
+        changed.append("achievements")
+    if "bossesDefeated" in domains and isinstance(domains["bossesDefeated"], list):
+        valid = {r["id"] for r in conn.execute("SELECT b.id FROM bosses b JOIN topics t ON t.id=b.topic_id WHERE t.subject=?", (subject,))}
+        for boss_id in domains["bossesDefeated"]:
+            if isinstance(boss_id, str) and boss_id in valid:
+                conn.execute("INSERT OR IGNORE INTO user_bosses(user_id,subject,boss_id,defeated_at) VALUES(?,?,?,?)", (user_id, subject, boss_id, now_iso()))
+        changed.append("bossesDefeated")
+    if "daily" in domains and isinstance(domains["daily"], dict):
+        daily = domains["daily"]
+        if isinstance(daily.get("date"), str):
+            ids = daily.get("taskIds") if isinstance(daily.get("taskIds"), list) else []
+            conn.execute("INSERT INTO daily_progress(user_id,subject,progress_date,solved,done,task_ids_json) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,subject,progress_date) DO UPDATE SET solved=MAX(daily_progress.solved,excluded.solved), done=MAX(daily_progress.done,excluded.done), task_ids_json=CASE WHEN daily_progress.task_ids_json='[]' THEN excluded.task_ids_json ELSE daily_progress.task_ids_json END", (user_id, subject, daily["date"], int(daily.get("solved", 0)), int(bool(daily.get("done"))), json.dumps(ids, ensure_ascii=False)))
+        changed.append("daily")
+    if "activity" in domains and isinstance(domains["activity"], dict):
+        for day, value in domains["activity"].items():
+            if not isinstance(day, str) or not isinstance(value, dict):
+                continue
+            try:
+                solved = int(value.get("solved", 0)); correct = int(value.get("correct", 0)); xp = int(value.get("xp", 0))
+            except (TypeError, ValueError):
+                continue
+            prior = conn.execute("SELECT solved, correct, xp FROM activity_history WHERE user_id=? AND subject=? AND activity_date=?", (user_id, subject, day)).fetchone()
+            old_solved, old_correct, old_xp = (int(prior["solved"]), int(prior["correct"]), int(prior["xp"])) if prior else (0, 0, 0)
+            delta = (max(0, solved - old_solved), max(0, correct - old_correct), max(0, xp - old_xp))
+            if any(delta):
+                key = f"activity:{day}:{solved}:{correct}:{xp}"
+                conn.execute("INSERT OR IGNORE INTO activity_events(user_id,subject,activity_date,solved,correct,xp,created_at,event_key) VALUES(?,?,?,?,?,?,?,?)", (user_id, subject, day, *delta, now_iso(), key))
+            conn.execute("INSERT INTO activity_history(user_id,subject,activity_date,solved,correct,xp) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,subject,activity_date) DO UPDATE SET solved=MAX(activity_history.solved,excluded.solved), correct=MAX(activity_history.correct,excluded.correct), xp=MAX(activity_history.xp,excluded.xp)", (user_id, subject, day, solved, correct, xp))
+        changed.append("activity")
+    if "forecastHistory" in domains and isinstance(domains["forecastHistory"], list):
+        for item in domains["forecastHistory"]:
+            if not isinstance(item, dict) or not isinstance(item.get("date"), str):
+                continue
+            try: low, high, mid = int(item["low"]), int(item["high"]), int(item["mid"])
+            except (KeyError, TypeError, ValueError): continue
+            conn.execute("INSERT INTO forecast_history(user_id,subject,snapshot_date,low,high,mid) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,subject,snapshot_date) DO UPDATE SET low=excluded.low,high=excluded.high,mid=excluded.mid", (user_id, subject, item["date"], low, high, mid))
+        changed.append("forecastHistory")
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -2499,6 +2601,49 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": str(exc)}, status)
                 finally: conn.close()
                 return
+        if path == "/api/errors":
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                payload = self.read_json()
+                subject, version, error = domain_write(conn, user_id, payload,
+                    lambda sub: create_error(conn, user_id, sub, payload.get("error")))
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "error": error}, token=token)
+            except StateConflictError as exc:
+                conn.rollback()
+                self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
+                                "currentVersion": exc.current_version}, 409)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+                conn.rollback(); self.send_json({"error": f"Error was not saved: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path.startswith("/api/events/"):
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                payload = self.read_json()
+                events = payload.get("events") if isinstance(payload, dict) else None
+                if not isinstance(events, list):
+                    raise ValueError("events must be an array")
+                if len(events) > MAX_TASK_ATTEMPTS:
+                    raise ValueError("too many events")
+                if path == "/api/events/attempts":
+                    subject, version, inserted = domain_write(conn, user_id, payload,
+                        lambda sub: append_attempt_events(conn, user_id, sub, events))
+                elif path == "/api/events/timeline":
+                    subject, version, inserted = domain_write(conn, user_id, payload,
+                        lambda sub: append_timeline_events(conn, user_id, sub, events))
+                else:
+                    self.send_json({"error": "Not found"}, 404); return
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "inserted": inserted}, token=token)
+            except StateConflictError as exc:
+                conn.rollback()
+                self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
+                                "currentVersion": exc.current_version}, 409)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+                conn.rollback(); self.send_json({"error": f"Events were not saved: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path == "/api/subject":
             # Переключение текущего предмета. Возвращает каталог и состояние
             # нового предмета — клиент просто перерисовывается, ничего не мержит.
@@ -2645,6 +2790,46 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        conn = connect()
+        try:
+            user_id, token = user_for(conn, self)
+            payload = self.read_json()
+            if path.startswith("/api/progress/"):
+                skill_id = path.rsplit("/", 1)[-1]
+                subject, version, progress = domain_write(conn, user_id, payload,
+                    lambda sub: patch_skill_progress(conn, user_id, sub, skill_id, payload.get("progress")))
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "progress": progress}, token=token)
+                return
+            if path == "/api/state-domains":
+                subject, version, changed = domain_write(conn, user_id, payload,
+                    lambda sub: patch_state_domains(conn, user_id, sub, payload.get("domains")))
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "changed": changed}, token=token)
+                return
+            if path == "/api/settings":
+                subject, version, settings = domain_write(conn, user_id, payload,
+                    lambda sub: patch_settings(conn, user_id, sub, payload.get("settings")))
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "settings": settings}, token=token)
+                return
+            if path.startswith("/api/errors/"):
+                try:
+                    error_id = int(path.rsplit("/", 1)[-1])
+                except ValueError:
+                    raise ValueError("invalid error id")
+                subject, version, error = domain_write(conn, user_id, payload,
+                    lambda sub: patch_error_resolved(conn, user_id, sub, error_id, payload.get("resolved")))
+                self.send_json({"ok": True, "subject": subject, "stateVersion": version, "error": error}, token=token)
+                return
+            self.send_json({"error": "Not found"}, 404)
+        except StateConflictError as exc:
+            conn.rollback()
+            self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
+                            "currentVersion": exc.current_version}, 409)
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+            conn.rollback(); self.send_json({"error": f"Patch was not saved: {exc}"}, 400)
+        finally: conn.close()
+
     def do_PUT(self):
         path = urlparse(self.path).path
         if path.startswith("/api/admin/users/"):
@@ -2674,36 +2859,11 @@ class Handler(BaseHTTPRequestHandler):
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
-        if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
-        conn = connect()
-        try:
-            user_id, token = user_for(conn, self)
-            payload = self.read_json()
-            validate_state(conn, payload)
-            expected_version = payload.get("expectedVersion", payload.get("expected_version"))
-            # BEGIN IMMEDIATE serializes competing writers before the CAS UPDATE.
-            # No state table is touched until claim_state_version reserves the
-            # exact version read by this client.
-            conn.execute("BEGIN IMMEDIATE")
-            subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
-            ensure_subject_rows(conn, user_id, subject)
-            next_version = claim_state_version(conn, user_id, subject, expected_version)
-            # Derived totals are authoritative and must be written in this same
-            # transaction together with the claimed version and all event rows.
-            apply_derived_stats(conn, user_id, payload)
-            write_state(conn, user_id, payload, subject=subject, expected_version=expected_version, version_claimed=True)
-            conn.commit()
-            self.send_json({"ok": True, "stateVersion": next_version}, token=token)
-        except StateConflictError as exc:
-            conn.rollback()
-            self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
-                            "currentVersion": exc.current_version}, 409, token=token)
-        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
-            # TypeError/AttributeError сюда добавили осознанно: раньше битая
-            # запись (float(None), item.get на строке) обрывала соединение без
-            # JSON-ошибки — клиент видел «Не удалось сохранить» без причины.
-            conn.rollback(); self.send_json({"error": f"State was not saved: {exc}"}, 400)
-        finally: conn.close()
+        if path == "/api/state":
+            # Полные снапшоты были источником DELETE+INSERT всех таблиц и
+            # могли терять чужую историю. Клиент использует доменные endpoints:
+            # events/*, progress/*, errors/*, settings и state-domains.
+            self.send_json({"error": "Full state snapshots are retired; use domain endpoints"}, 410); return
 
     def do_DELETE(self):
         path = urlparse(self.path).path

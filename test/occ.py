@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""OCC regression: two stale clients cannot overwrite each other.
+"""OCC regression for independent state domains.
 
-Runs against a temporary SQLite file and an in-process HTTP server. It proves:
-- GET/bootstrap returns stateVersion;
-- the first PUT advances it;
-- a stale PUT gets 409 and changes no state;
-- a fresh subsequent PUT advances the version again.
+Two tabs read one version. The first appends an attempt, the stale second write
+gets 409 without altering history, then a fresh write advances the version.
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
-import shutil
 import tempfile
 import threading
 import urllib.error
@@ -34,14 +30,14 @@ def load_server(db_path: Path):
     return module
 
 
-def client(base: str):
+def client():
     jar = CookieJar()
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar)), jar
 
 
-def request(opener, base: str, path: str, body=None):
+def request(opener, base: str, path: str, method="GET", body=None):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(base + path, data=data, method="PUT" if body is not None else "GET")
+    req = urllib.request.Request(base + path, data=data, method=method)
     if body is not None:
         req.add_header("Content-Type", "application/json")
     try:
@@ -51,61 +47,61 @@ def request(opener, base: str, path: str, body=None):
         return exc.code, json.loads(exc.read() or b"{}")
 
 
+def attempt(task_id: str, correct: bool, ts: int):
+    return {"taskId": task_id, "skill": "n01_planimetry", "correct": correct,
+            "hintLevel": 0, "seconds": 10, "ts": ts}
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-occ-") as tmp:
-        db_path = Path(tmp) / "ege.sqlite3"
-        server = load_server(db_path)
+        server = load_server(Path(tmp) / "ege.sqlite3")
         conn = server.connect()
         try:
             server.install_catalog(conn)
         finally:
             conn.close()
         httpd = server.create_http_server("127.0.0.1", 0)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:
-            tab_a, jar_a = client(base)
+            tab_a, jar_a = client()
             status, boot = request(tab_a, base, "/api/bootstrap")
             assert status == 200, (status, boot)
             state_a = boot["state"]
             assert state_a["stateVersion"] == 1, state_a
 
-            # A second tab carries the same account cookie and therefore reads
-            # the same version, just as a real duplicate browser tab would.
-            tab_b, jar_b = client(base)
+            tab_b, jar_b = client()
             for cookie in jar_a:
                 jar_b.set_cookie(cookie)
             status, boot_b = request(tab_b, base, "/api/bootstrap")
             assert status == 200 and boot_b["state"]["stateVersion"] == 1, (status, boot_b)
             state_b = boot_b["state"]
 
-            state_a["name"] = "fresh tab"
-            state_a["expectedVersion"] = state_a["stateVersion"]
-            status, saved_a = request(tab_a, base, "/api/state", state_a)
+            status, saved_a = request(tab_a, base, "/api/events/attempts", "POST", {
+                "subject": state_a["subject"], "expectedVersion": state_a["stateVersion"],
+                "events": [attempt("n01_p1", True, 1700000000000)],
+            })
             assert status == 200 and saved_a["stateVersion"] == 2, (status, saved_a)
 
-            # This stale snapshot must not overwrite the new name, even though
-            # it contains a different profile value and the full old snapshot.
-            state_b["name"] = "stale tab"
-            state_b["expectedVersion"] = state_b["stateVersion"]
-            status, conflict = request(tab_b, base, "/api/state", state_b)
+            status, conflict = request(tab_b, base, "/api/events/attempts", "POST", {
+                "subject": state_b["subject"], "expectedVersion": state_b["stateVersion"],
+                "events": [attempt("n01_p2", False, 1700000001000)],
+            })
             assert status == 409, (status, conflict)
             assert conflict["expectedVersion"] == 1 and conflict["currentVersion"] == 2, conflict
 
             status, after_conflict = request(tab_a, base, "/api/bootstrap")
             assert status == 200, (status, after_conflict)
-            assert after_conflict["state"]["name"] == "fresh tab", after_conflict["state"]
+            ids = [item["taskId"] for item in after_conflict["state"]["taskAttempts"]]
+            assert ids == ["n01_p1"], ids
             assert after_conflict["state"]["stateVersion"] == 2, after_conflict["state"]
 
-            # Fast sequential saves based on the newly returned version succeed
-            # and the version remains monotonic.
-            fresh = after_conflict["state"]
-            fresh["name"] = "second fresh write"
-            fresh["expectedVersion"] = fresh["stateVersion"]
-            status, saved_b = request(tab_a, base, "/api/state", fresh)
+            status, saved_b = request(tab_a, base, "/api/events/attempts", "POST", {
+                "subject": state_a["subject"], "expectedVersion": 2,
+                "events": [attempt("n01_p2", False, 1700000001000)],
+            })
             assert status == 200 and saved_b["stateVersion"] == 3, (status, saved_b)
-            print("OCC HTTP regression OK: stale PUT=409, data preserved, version 1→2→3")
+            print("OCC domain regression OK: stale event=409, history preserved, version 1→2→3")
         finally:
             httpd.shutdown()
             httpd.server_close()
