@@ -116,6 +116,22 @@ def main():
             activity_body["expectedVersion"] = activity["stateVersion"]
             status, activity_replay = request(opener, base, "/api/state-domains", "PATCH", activity_body)
             assert status == 200, (status, activity_replay)
+            # Lesson, open lesson draft and mission are independent mutable
+            # domains. Their patch must not rewrite append-only history.
+            lesson_body = {"subject": subject, "expectedVersion": activity_replay["stateVersion"], "domains": {
+                "lessonSessions": {"lesson_n07_exponential": {"idx": 1, "stepState": {}, "xp": 10}},
+                "lessonAttempts": [{"lessonId": "lesson_n07_exponential", "completed": True, "firstCompletion": True, "xp": 120, "wrongAttempts": 0, "durationSec": 30, "ts": 1700000005000}],
+                "completedLessons": {"lesson_n07_exponential": {"ts": 1700000005000}},
+                "missionProgress": {"m-n01_planimetry": 3},
+                "missionsDone": {"m-n01_planimetry": {"ts": 1700000006000}},
+            }}
+            status, lesson_patch = request(opener, base, "/api/state-domains", "PATCH", lesson_body)
+            assert status == 200, (status, lesson_patch)
+            status, settings = request(opener, base, "/api/settings", "PATCH", {
+                "subject": subject, "expectedVersion": lesson_patch["stateVersion"],
+                "settings": {"name": "Доменный ученик", "selfLevel": "base"},
+            })
+            assert status == 200, (status, settings)
             conn = server.connect()
             try:
                 count = conn.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0]
@@ -124,6 +140,11 @@ def main():
                 conn.close()
             status, after = request(opener, base, "/api/bootstrap")
             state = after["state"]
+            assert state["name"] == "Доменный ученик" and state["selfLevel"] == "base", state
+            assert state["lessonSessions"].get("lesson_n07_exponential", {}).get("idx") == 1, state["lessonSessions"]
+            assert "lesson_n07_exponential" in state["completedLessons"], state["completedLessons"]
+            assert state["missionProgress"].get("m-n01_planimetry") == 3 and "m-n01_planimetry" in state["missionsDone"], state["missionProgress"]
+            assert any(item["lessonId"] == "lesson_n07_exponential" for item in state["lessonAttempts"]), state["lessonAttempts"]
             assert state["skillStats"]["n01_planimetry"]["progress"] == 37, state["skillStats"]
             assert any(item["id"] == error_create["error"]["id"] and item["resolved"] for item in state["errors"]), state["errors"]
             assert {"n01_p1", "n01_p2"}.issubset({item["taskId"] for item in state["taskAttempts"]}), state["taskAttempts"]
