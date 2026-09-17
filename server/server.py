@@ -610,51 +610,51 @@ CREATE TABLE IF NOT EXISTS user_stats (
 );
 CREATE TABLE IF NOT EXISTS user_hint_levels (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, level INTEGER NOT NULL, used_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, level));
 CREATE TABLE IF NOT EXISTS user_progress (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, skill_id TEXT NOT NULL REFERENCES skills(id),
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', skill_id TEXT NOT NULL REFERENCES skills(id),
   progress INTEGER NOT NULL DEFAULT 0, solved INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, time_sec REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY(user_id, skill_id)
+  PRIMARY KEY(user_id, subject, skill_id)
 );
 CREATE TABLE IF NOT EXISTS task_attempts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id),
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id),
   skill_id TEXT NOT NULL REFERENCES skills(id), correct INTEGER NOT NULL, hint_level INTEGER NOT NULL, seconds REAL NOT NULL,
-  closes_task_id TEXT, created_at TEXT NOT NULL
+  closes_task_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS user_errors (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id),
-  skill_id TEXT NOT NULL REFERENCES skills(id), topic TEXT NOT NULL, created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id),
+  skill_id TEXT NOT NULL REFERENCES skills(id), topic TEXT NOT NULL, created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS lesson_attempts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lesson_id TEXT NOT NULL REFERENCES lessons(id),
-  completed INTEGER NOT NULL, first_completion INTEGER NOT NULL, xp INTEGER NOT NULL, wrong_attempts INTEGER NOT NULL, duration_sec REAL NOT NULL, created_at TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id),
+  completed INTEGER NOT NULL, first_completion INTEGER NOT NULL, xp INTEGER NOT NULL, wrong_attempts INTEGER NOT NULL, duration_sec REAL NOT NULL, created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS lesson_step_errors (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lesson_id TEXT NOT NULL REFERENCES lessons(id), step_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id), step_id TEXT NOT NULL,
   skill_id TEXT NOT NULL REFERENCES skills(id), count INTEGER NOT NULL, last_at TEXT NOT NULL, types_json TEXT NOT NULL,
-  PRIMARY KEY(user_id, lesson_id, step_id)
+  PRIMARY KEY(user_id, subject, lesson_id, step_id)
 );
 CREATE TABLE IF NOT EXISTS lesson_error_history (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lesson_id TEXT NOT NULL REFERENCES lessons(id),
-  step_id TEXT NOT NULL, skill_id TEXT NOT NULL REFERENCES skills(id), error_type TEXT NOT NULL, created_at TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id),
+  step_id TEXT NOT NULL, skill_id TEXT NOT NULL REFERENCES skills(id), error_type TEXT NOT NULL, created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS lesson_sessions (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lesson_id TEXT NOT NULL REFERENCES lessons(id),
-  session_json TEXT NOT NULL, PRIMARY KEY(user_id, lesson_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id),
+  session_json TEXT NOT NULL, PRIMARY KEY(user_id, subject, lesson_id)
 );
 CREATE TABLE IF NOT EXISTS completed_lessons (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lesson_id TEXT NOT NULL REFERENCES lessons(id), completed_at TEXT NOT NULL,
-  PRIMARY KEY(user_id, lesson_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id), completed_at TEXT NOT NULL,
+  PRIMARY KEY(user_id, subject, lesson_id)
 );
 CREATE TABLE IF NOT EXISTS user_missions (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, mission_id TEXT NOT NULL REFERENCES missions(id), progress INTEGER NOT NULL DEFAULT 0,
-  completed_at TEXT, PRIMARY KEY(user_id, mission_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', mission_id TEXT NOT NULL REFERENCES missions(id), progress INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT, PRIMARY KEY(user_id, subject, mission_id)
 );
 CREATE TABLE IF NOT EXISTS user_bosses (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, boss_id TEXT NOT NULL REFERENCES bosses(id), defeated_at TEXT NOT NULL,
-  PRIMARY KEY(user_id, boss_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', boss_id TEXT NOT NULL REFERENCES bosses(id), defeated_at TEXT NOT NULL,
+  PRIMARY KEY(user_id, subject, boss_id)
 );
 CREATE TABLE IF NOT EXISTS user_achievements (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, achievement_id TEXT NOT NULL REFERENCES achievements(id), unlocked_at TEXT NOT NULL,
-  PRIMARY KEY(user_id, achievement_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', achievement_id TEXT NOT NULL REFERENCES achievements(id), unlocked_at TEXT NOT NULL,
+  PRIMARY KEY(user_id, subject, achievement_id)
 );
 CREATE TABLE IF NOT EXISTS activity_history (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, activity_date TEXT NOT NULL, solved INTEGER NOT NULL, correct INTEGER NOT NULL, xp INTEGER NOT NULL,
@@ -678,10 +678,10 @@ CREATE TABLE IF NOT EXISTS daily_progress (
   PRIMARY KEY(user_id, progress_date)
 );
 CREATE TABLE IF NOT EXISTS timeline (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TEXT NOT NULL, text TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', created_at TEXT NOT NULL, text TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS diagnostics (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id), correct INTEGER NOT NULL, created_at TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id), correct INTEGER NOT NULL, created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS user_xp_adjustments (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, amount INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
@@ -891,6 +891,269 @@ _SUBJECT_PK_REBUILDS = {
 _SUBJECT_SCHEMA_DONE: set[str] = set()
 
 
+def _table_sql(conn: sqlite3.Connection, table: str) -> str:
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        return row["sql"] if row and row["sql"] else ""
+    except sqlite3.Error:
+        return ""
+
+
+def _pk_has_subject(conn: sqlite3.Connection, table: str) -> bool:
+    """True, когда PRIMARY KEY таблицы уже включает subject.
+
+    Старые БД получили колонку subject через ALTER TABLE, но ключ остался
+    (user_id, X): вторая запись предмета упёрлась бы в конфликт и затёрла бы
+    первую. Проверяем именно DDL ключа, а не наличие колонки.
+    """
+    sql = _table_sql(conn, table).replace('"', "").replace("`", "").replace("[", "").replace("]", "")
+    low = " ".join(sql.split()).lower()
+    return "primary key(user_id, subject" in low or "primary key (user_id, subject" in low
+
+
+# Пересоздание мутабельных таблиц с subject в PRIMARY KEY. Данные сохраняются
+# (INSERT OR IGNORE из старой таблицы, subject по умолчанию — профиль).
+_MUTABLE_PK_REBUILDS = {
+    "user_progress": (
+        """CREATE TABLE user_progress_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          skill_id TEXT NOT NULL REFERENCES skills(id),
+          progress INTEGER NOT NULL DEFAULT 0, solved INTEGER NOT NULL DEFAULT 0,
+          correct INTEGER NOT NULL DEFAULT 0, time_sec REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY(user_id, subject, skill_id))""",
+        ("user_id", "subject", "skill_id", "progress", "solved", "correct", "time_sec"),
+    ),
+    "lesson_step_errors": (
+        """CREATE TABLE lesson_step_errors_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          lesson_id TEXT NOT NULL REFERENCES lessons(id), step_id TEXT NOT NULL,
+          skill_id TEXT NOT NULL REFERENCES skills(id), count INTEGER NOT NULL,
+          last_at TEXT NOT NULL, types_json TEXT NOT NULL,
+          PRIMARY KEY(user_id, subject, lesson_id, step_id))""",
+        ("user_id", "subject", "lesson_id", "step_id", "skill_id", "count", "last_at", "types_json"),
+    ),
+    "lesson_sessions": (
+        """CREATE TABLE lesson_sessions_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          lesson_id TEXT NOT NULL REFERENCES lessons(id),
+          session_json TEXT NOT NULL, PRIMARY KEY(user_id, subject, lesson_id))""",
+        ("user_id", "subject", "lesson_id", "session_json"),
+    ),
+    "completed_lessons": (
+        """CREATE TABLE completed_lessons_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          lesson_id TEXT NOT NULL REFERENCES lessons(id), completed_at TEXT NOT NULL,
+          PRIMARY KEY(user_id, subject, lesson_id))""",
+        ("user_id", "subject", "lesson_id", "completed_at"),
+    ),
+    "user_missions": (
+        """CREATE TABLE user_missions_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          mission_id TEXT NOT NULL REFERENCES missions(id), progress INTEGER NOT NULL DEFAULT 0,
+          completed_at TEXT, PRIMARY KEY(user_id, subject, mission_id))""",
+        ("user_id", "subject", "mission_id", "progress", "completed_at"),
+    ),
+    "user_bosses": (
+        """CREATE TABLE user_bosses_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          boss_id TEXT NOT NULL REFERENCES bosses(id), defeated_at TEXT NOT NULL,
+          PRIMARY KEY(user_id, subject, boss_id))""",
+        ("user_id", "subject", "boss_id", "defeated_at"),
+    ),
+    "user_achievements": (
+        """CREATE TABLE user_achievements_new (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL DEFAULT 'profile_math',
+          achievement_id TEXT NOT NULL REFERENCES achievements(id), unlocked_at TEXT NOT NULL,
+          PRIMARY KEY(user_id, subject, achievement_id))""",
+        ("user_id", "subject", "achievement_id", "unlocked_at"),
+    ),
+}
+
+# Append-сущности с client-generated ID: один стабильный ключ на запись.
+# Повторная отправка того же PUT/PATCH (даблклик, ретрай, таймаут) делает
+# upsert по (user_id, subject, client_id), а не вставку новой строки.
+IDEMPOTENT_APPEND_TABLES = (
+    "task_attempts", "timeline", "lesson_attempts",
+    "lesson_error_history", "diagnostics", "user_errors",
+)
+_IDEMPOTENT_UNIQUE_INDEX = {
+    "task_attempts": "idx_task_attempts_user_subject_client",
+    "timeline": "idx_timeline_user_subject_client",
+    "lesson_attempts": "idx_lesson_attempts_user_subject_client",
+    "lesson_error_history": "idx_lesson_error_history_user_subject_client",
+    "diagnostics": "idx_diagnostics_user_subject_client",
+    "user_errors": "idx_user_errors_user_subject_client",
+}
+
+
+def _stable_client_id(value) -> str | None:
+    """Стабильный client-generated ID из payload, если клиент его прислал.
+
+    Генерируется ОДИН раз на клиенте в момент создания сущности и
+    переиспользуется при ретраях — никогда не генерируется заново на каждое
+    сохранение. Сервер случайных ID не выдумывает.
+    """
+    if not isinstance(value, dict):
+        return None
+    for key in ("id", "clientId", "client_id"):
+        candidate = value.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            # Целочисленные server-side id ошибок (AUTOINCREMENT) — не путать
+            # со строковыми UUID клиента.
+            text = candidate.strip()
+            if key == "id" and text.isdigit():
+                continue
+            return text[:128]
+    return None
+
+
+def _fallback_client_id(kind: str, parts: list) -> str:
+    """Детерминированный ключ для legacy-payload без stable ID.
+
+    Совпадает с прежней SELECT-дедупликацией по естественным полям, поэтому
+    повтор старого клиента без UUID даёт тот же ключ и не плодит дубликаты.
+    """
+    safe = ["" if p is None else str(p) for p in parts]
+    return ("natural:" + kind + ":" + "|".join(safe))[:512]
+
+
+def _ensure_mutable_subject_pks(conn: sqlite3.Connection) -> None:
+    # Пересоздание таблиц временно отключает FK-проверки: копируемые строки
+    # заведомо приняты действующим сервером, а legacy-мусор (прогресс по
+    # удалённому навыку) не должен ронять миграцию и терять остальные данные.
+    # PRAGMA foreign_keys вне транзакции only: сначала фиксируем накопленное
+    # (все шаги идемпотентны — частичная миграция безопасно продолжается).
+    try:
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("PRAGMA foreign_keys=OFF")
+    except sqlite3.Error:
+        pass
+    try:
+        for table, (ddl, cols) in _MUTABLE_PK_REBUILDS.items():
+            columns = _table_columns(conn, table)
+            if not columns:
+                continue
+            if "subject" in columns and _pk_has_subject(conn, table):
+                continue
+            has_subject = "subject" in columns
+            conn.execute(ddl)
+            copy_cols = [c for c in cols if c in columns]
+            if has_subject and set(copy_cols) >= set(cols):
+                names = ", ".join(cols)
+                conn.execute(f"INSERT OR IGNORE INTO {table}_new ({names}) SELECT {names} FROM {table}")
+            else:
+                # Старая таблица без subject: все строки относятся к профилю.
+                rest_old = [c for c in cols if c != "subject" and c in columns]
+                if rest_old:
+                    names_new = ["user_id", "subject"] + [c for c in rest_old if c != "user_id"]
+                    select = ["user_id", f"'{DEFAULT_SUBJECT}'"] + [c for c in rest_old if c != "user_id"]
+                    conn.execute(f"INSERT OR IGNORE INTO {table}_new ({', '.join(names_new)}) "
+                                 f"SELECT {', '.join(select)} FROM {table}")
+            conn.execute(f"DROP TABLE {table}")
+            conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+            try:
+                conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_subject ON {table}(user_id, subject)")
+            except sqlite3.Error:
+                pass
+    finally:
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+        except sqlite3.Error:
+            pass
+
+
+def _backfill_append_client_ids(conn: sqlite3.Connection) -> None:
+    """Выдаёт существующим строкам детерминированные client_id и вешает UNIQUE.
+
+    Не теряет данные: каждая строка получает ключ от своих естественных полей
+    (та же семантика, что у прежних SELECT-проверок); коллизии готовых
+    дублей разруливаются суффиксом #<id>. Новые вставки идут через
+    INSERT ... ON CONFLICT(user_id, subject, client_id) DO NOTHING — повторы
+    безопасны даже при гонке, без DELETE+INSERT.
+    """
+    for table in IDEMPOTENT_APPEND_TABLES:
+        columns = _table_columns(conn, table)
+        if not columns:
+            continue
+        if "subject" not in columns:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'")
+            except sqlite3.Error:
+                pass
+            columns = _table_columns(conn, table)
+        if "client_id" not in columns:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN client_id TEXT NOT NULL DEFAULT ''")
+            except sqlite3.Error:
+                pass
+            columns = _table_columns(conn, table)
+        if table == "task_attempts" and "closes_task_id" in columns:
+            try:
+                conn.execute("UPDATE task_attempts SET closes_task_id='' WHERE closes_task_id IS NULL")
+            except sqlite3.Error:
+                pass
+        # Backfill пустых client_id детерминированными ключами.
+        try:
+            rows = list(conn.execute(f"SELECT * FROM {table} WHERE client_id='' OR client_id IS NULL"))
+        except sqlite3.Error:
+            continue
+        seen: set[tuple] = set()
+        try:
+            existing = {tuple(r) for r in conn.execute(
+                f"SELECT user_id, subject, client_id FROM {table} WHERE client_id!=''")}
+        except sqlite3.Error:
+            existing = set()
+        for row in rows:
+            row = dict(row)
+            uid, subj = row.get("user_id"), row.get("subject") or DEFAULT_SUBJECT
+            if table == "task_attempts":
+                try:
+                    seconds_norm = str(float(row.get("seconds") or 0))
+                except (TypeError, ValueError):
+                    seconds_norm = "0.0"
+                fallback = _fallback_client_id("attempt", [
+                    row.get("task_id"), row.get("skill_id"), row.get("correct"),
+                    row.get("hint_level"), seconds_norm,
+                    row.get("closes_task_id") or "", row.get("created_at")])
+            elif table == "timeline":
+                fallback = _fallback_client_id("timeline", [row.get("created_at"), row.get("text")])
+            elif table == "lesson_attempts":
+                fallback = _fallback_client_id("lesson_attempt", [row.get("lesson_id"), row.get("created_at")])
+            elif table == "lesson_error_history":
+                fallback = _fallback_client_id("lesson_error", [
+                    row.get("lesson_id"), row.get("step_id"),
+                    row.get("error_type"), row.get("created_at")])
+            elif table == "diagnostics":
+                fallback = _fallback_client_id("diagnostic", [row.get("task_id"), row.get("created_at")])
+            else:  # user_errors
+                fallback = _fallback_client_id("error", [
+                    row.get("task_id"), row.get("skill_id"), row.get("created_at")])
+            candidate = fallback
+            if (uid, subj, candidate) in existing or (uid, subj, candidate) in seen:
+                candidate = f"{fallback}#{row.get('id')}"
+            seen.add((uid, subj, candidate))
+            try:
+                conn.execute(f"UPDATE {table} SET client_id=? WHERE id=?", (candidate, row.get("id")))
+            except sqlite3.Error:
+                pass
+        index = _IDEMPOTENT_UNIQUE_INDEX[table]
+        try:
+            conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {table}(user_id, subject, client_id)")
+        except sqlite3.Error:
+            pass
+
+
 def _table_columns(conn: sqlite3.Connection, table: str) -> set:
     try:
         return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -970,6 +1233,11 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE user_subjects ADD COLUMN state_version INTEGER NOT NULL DEFAULT 1")
         except sqlite3.Error:
             pass
+    # Системная идемпотентность: subject в PK мутабельных таблиц + стабильные
+    # client_id с UNIQUE для append-сущностей. Миграции идемпотентны, данные
+    # сохраняются (пересоздание через INSERT OR IGNORE, backfill ключей).
+    _ensure_mutable_subject_pks(conn)
+    _backfill_append_client_ids(conn)
     conn.commit()
     _SUBJECT_SCHEMA_DONE.add(key)
 
@@ -1300,17 +1568,19 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
     for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
         state["skillStats"][r["skill_id"]] = {"progress": r["progress"], "solved": r["solved"], "correct": r["correct"], "timeSec": r["time_sec"]}
     for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject)):
-        state["errors"].append({"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
+        state["errors"].append({"id": r["id"], "clientId": r["client_id"] if "client_id" in r.keys() else None, "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
     for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 5000", (user_id, subject)):
-        state["taskAttempts"].append({"taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"], "ts": timestamp_value(r["created_at"])})
+        keys = r.keys()
+        state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=?", (user_id, subject)):
         state["lessonStepErrors"][f'{r["lesson_id"]}:{r["step_id"]}'] = {"count": r["count"], "skill": r["skill_id"], "ts": timestamp_value(r["last_at"]), "types": json.loads(r["types_json"])}
-    for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at FROM lesson_error_history WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 200", (user_id, subject)):
-        state["lessonErrorHistory"].append({"lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
+    for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at, client_id FROM lesson_error_history WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 200", (user_id, subject)):
+        state["lessonErrorHistory"].append({"id": r["client_id"] or None, "lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=? AND subject=?", (user_id, subject)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
     for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=? AND subject=?", (user_id, subject)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
     for r in conn.execute("SELECT * FROM lesson_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 1000", (user_id, subject)):
-        state["lessonAttempts"].append({"lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
+        keys = r.keys()
+        state["lessonAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT * FROM user_missions WHERE user_id=? AND subject=?", (user_id, subject)):
         state["missionProgress"][r["mission_id"]] = r["progress"]
         if r["completed_at"]: state["missionsDone"][r["mission_id"]] = {"ts": timestamp_value(r["completed_at"])}
@@ -1328,8 +1598,8 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
             task_ids = []
         state["dailyHistory"].append({"date": daily["progress_date"], "solved": daily["solved"], "done": bool(daily["done"]), "taskIds": task_ids})
     if daily_rows: state["daily"] = state["dailyHistory"][0].copy()
-    state["timeline"] = [{"ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 40", (user_id, subject))]
-    state["diagnostics"] = [{"taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject))]
+    state["timeline"] = [{"id": r["client_id"] if "client_id" in r.keys() and r["client_id"] else None, "ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text, client_id FROM timeline WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 40", (user_id, subject))]
+    state["diagnostics"] = [{"id": r["client_id"] if "client_id" in r.keys() and r["client_id"] else None, "taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject))]
     return state
 
 
@@ -1361,7 +1631,16 @@ def claim_state_version(conn: sqlite3.Connection, user_id: int, subject: str, ex
 
 
 def append_attempt_events(conn: sqlite3.Connection, user_id: int, subject: str, events: list) -> int:
-    """Append immutable task attempts; duplicate client events are idempotent."""
+    """Append immutable task attempts; duplicate client events are idempotent.
+
+    Каждая попытка несёт стабильный client-generated ID (поле id/clientId,
+    генерируется один раз на клиенте при создании). Повторная отправка того же
+    PUT/POST делает upsert по (user_id, subject, client_id), а не новую строку:
+    одинаковый ID = та же запись. Legacy-payload без ID получает
+    детерминированный ключ от естественных полей (та же семантика, что раньше
+    давал SELECT), поэтому ретрай не плодит дубликаты и при гонке — UNIQUE на
+    уровне БД, а не проверка-then-вставка.
+    """
     valid_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))}
     valid_tasks = {r["id"] for r in conn.execute(
         "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,)
@@ -1376,26 +1655,28 @@ def append_attempt_events(conn: sqlite3.Connection, user_id: int, subject: str, 
             created = str(event.get("ts") or now_iso())
         except (TypeError, ValueError):
             continue
-        closes = event.get("closesTaskId") if isinstance(event.get("closesTaskId"), str) else None
-        # Natural immutable-event key: the same client timestamp + semantic
-        # fields must not become a second attempt on a retry.
-        exists = conn.execute(
-            "SELECT 1 FROM task_attempts WHERE user_id=? AND subject=? AND task_id=? AND skill_id=? "
-            "AND correct=? AND hint_level=? AND seconds=? AND COALESCE(closes_task_id,'')=COALESCE(?, '') AND created_at=? LIMIT 1",
-            (user_id, subject, event["taskId"], event["skill"], int(bool(event.get("correct"))), hint, seconds, closes, created),
-        ).fetchone()
-        if exists:
-            continue
-        conn.execute(
-            "INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (user_id, subject, event["taskId"], event["skill"], int(bool(event.get("correct"))), hint, seconds, closes, created),
+        closes_raw = event.get("closesTaskId")
+        closes = closes_raw if isinstance(closes_raw, str) else ""
+        correct = int(bool(event.get("correct")))
+        try:
+            seconds_norm = str(float(seconds))
+        except (TypeError, ValueError):
+            seconds_norm = "0.0"
+        client_id = _stable_client_id(event) or _fallback_client_id("attempt", [
+            event["taskId"], event["skill"], correct, hint, seconds_norm, closes, created])
+        cur = conn.execute(
+            "INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at,client_id)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+            (user_id, subject, event["taskId"], event["skill"], correct, hint, seconds, closes, created, client_id),
         )
-        inserted += 1
+        if cur.rowcount:
+            inserted += 1
     return inserted
 
 
 def append_timeline_events(conn: sqlite3.Connection, user_id: int, subject: str, events: list) -> int:
-    """Append immutable timeline entries; retries are idempotent."""
+    """Append immutable timeline entries; retries are idempotent (upsert по client_id)."""
     inserted = 0
     for event in events:
         if not isinstance(event, dict):
@@ -1405,10 +1686,13 @@ def append_timeline_events(conn: sqlite3.Connection, user_id: int, subject: str,
             continue
         created = str(event.get("ts") or now_iso())
         text = text[:MAX_TIMELINE_TEXT]
-        if conn.execute("SELECT 1 FROM timeline WHERE user_id=? AND subject=? AND created_at=? AND text=? LIMIT 1", (user_id, subject, created, text)).fetchone():
-            continue
-        conn.execute("INSERT INTO timeline(user_id,subject,created_at,text) VALUES(?,?,?,?)", (user_id, subject, created, text))
-        inserted += 1
+        client_id = _stable_client_id(event) or _fallback_client_id("timeline", [created, text])
+        cur = conn.execute(
+            "INSERT INTO timeline(user_id,subject,created_at,text,client_id) VALUES(?,?,?,?,?)"
+            " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+            (user_id, subject, created, text, client_id))
+        if cur.rowcount:
+            inserted += 1
     return inserted
 
 
@@ -1455,7 +1739,7 @@ def patch_skill_progress(conn: sqlite3.Connection, user_id: int, subject: str, s
         raise ValueError("invalid progress values")
     conn.execute(
         "INSERT INTO user_progress(user_id,subject,skill_id,progress,solved,correct,time_sec) VALUES(?,?,?,?,?,?,?) "
-        "ON CONFLICT(user_id,skill_id) DO UPDATE SET progress=MAX(user_progress.progress,excluded.progress), "
+        "ON CONFLICT(user_id,subject,skill_id) DO UPDATE SET progress=MAX(user_progress.progress,excluded.progress), "
         "solved=MAX(user_progress.solved,excluded.solved), correct=MAX(user_progress.correct,excluded.correct), "
         "time_sec=MAX(user_progress.time_sec,excluded.time_sec)",
         (user_id, subject, skill_id, progress, solved, correct, time_sec),
@@ -1464,6 +1748,12 @@ def patch_skill_progress(conn: sqlite3.Connection, user_id: int, subject: str, s
 
 
 def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
+    """Создать ошибку как сущность со стабильным client-generated ID.
+
+    Одинаковый clientId = та же запись (upsert, не дубль). Повтор POST после
+    таймаута/даблклика возвращает ту же строку. Legacy без clientId — ключ от
+    естественных полей (taskId+skill+ts), как раньше.
+    """
     if not isinstance(value, dict):
         raise ValueError("error must be an object")
     task_id, skill_id = value.get("taskId"), value.get("skill")
@@ -1475,31 +1765,48 @@ def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: di
         raise ValueError("unknown task or skill")
     created = str(value.get("ts") or now_iso())
     topic = str(value.get("sub") or "")[:200]
-    existing = conn.execute(
-        "SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors "
-        "WHERE user_id=? AND subject=? AND task_id=? AND skill_id=? AND created_at=? LIMIT 1",
-        (user_id, subject, task_id, skill_id, created),
+    client_id = _stable_client_id(value) or _fallback_client_id("error", [task_id, skill_id, created])
+    conn.execute(
+        "INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved,client_id)"
+        " VALUES(?,?,?,?,?,?,0,?)"
+        " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+        (user_id, subject, task_id, skill_id, topic, created, client_id),
+    )
+    row = conn.execute(
+        "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors "
+        "WHERE user_id=? AND subject=? AND client_id=? LIMIT 1",
+        (user_id, subject, client_id),
     ).fetchone()
-    if existing:
-        row = existing
-    else:
-        cur = conn.execute(
-            "INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved) VALUES(?,?,?,?,?,?,0)",
-            (user_id, subject, task_id, skill_id, topic, created),
-        )
-        row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors WHERE id=?", (cur.lastrowid,)).fetchone()
-    return {"id": row["id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
+    return {"id": row["id"], "clientId": row["client_id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
             "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
 
 
-def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, error_id: int, resolved: object) -> dict:
+def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, error_id, resolved: object) -> dict:
+    """Идемпотентное обновление флага resolved по стабильному ID.
+
+    error_id — server-side integer id либо client-generated UUID (clientId):
+    одинаковый ID обновляет ту же запись. Повтор PATCH с тем же значением —
+    тот же результат (UPDATE идемпотентен сам по себе).
+    """
     if not isinstance(resolved, bool):
         raise ValueError("resolved must be boolean")
-    changed = conn.execute("UPDATE user_errors SET resolved=? WHERE id=? AND user_id=? AND subject=?", (int(resolved), error_id, user_id, subject)).rowcount
-    if changed != 1:
+    row = None
+    try:
+        numeric = int(error_id)
+        is_numeric = str(error_id).strip().isdigit()
+    except (TypeError, ValueError):
+        numeric, is_numeric = None, False
+    if is_numeric:
+        changed = conn.execute("UPDATE user_errors SET resolved=? WHERE id=? AND user_id=? AND subject=?", (int(resolved), numeric, user_id, subject)).rowcount
+        if changed == 1:
+            row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors WHERE id=?", (numeric,)).fetchone()
+    if row is None and isinstance(error_id, str) and error_id.strip():
+        changed = conn.execute("UPDATE user_errors SET resolved=? WHERE client_id=? AND user_id=? AND subject=?", (int(resolved), error_id.strip()[:128], user_id, subject)).rowcount
+        if changed == 1:
+            row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors WHERE client_id=? AND user_id=? AND subject=?", (error_id.strip()[:128], user_id, subject)).fetchone()
+    if row is None:
         raise KeyError("error not found")
-    row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved FROM user_errors WHERE id=?", (error_id,)).fetchone()
-    return {"id": row["id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
+    return {"id": row["id"], "clientId": row["client_id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
             "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
 
 
@@ -1549,18 +1856,21 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
                 xp = int(item.get("xp", 0)); wrong = int(item.get("wrongAttempts", 0)); duration = float(item.get("durationSec", 0)); created = str(item.get("ts") or now_iso())
             except (TypeError, ValueError):
                 continue
-            exists = conn.execute("SELECT 1 FROM lesson_attempts WHERE user_id=? AND subject=? AND lesson_id=? AND created_at=? LIMIT 1", (user_id, subject, item["lessonId"], created)).fetchone()
-            if not exists:
-                conn.execute("INSERT INTO lesson_attempts(user_id,subject,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (user_id, subject, item["lessonId"], int(bool(item.get("completed", True))), int(bool(item.get("firstCompletion"))), xp, wrong, duration, created))
+            client_id = _stable_client_id(item) or _fallback_client_id("lesson_attempt", [item["lessonId"], created])
+            conn.execute("INSERT INTO lesson_attempts(user_id,subject,lesson_id,completed,first_completion,xp,wrong_attempts,duration_sec,created_at,client_id) VALUES(?,?,?,?,?,?,?,?,?,?)"
+                         " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+                         (user_id, subject, item["lessonId"], int(bool(item.get("completed", True))), int(bool(item.get("firstCompletion"))), xp, wrong, duration, created, client_id))
         changed.append("lessonAttempts")
     if "lessonErrorHistory" in domains and isinstance(domains["lessonErrorHistory"], list):
         for item in domains["lessonErrorHistory"]:
             if not isinstance(item, dict) or item.get("lessonId") not in lesson_ids or item.get("skill") not in valid_skills:
                 continue
             created = str(item.get("ts") or now_iso())
-            exists = conn.execute("SELECT 1 FROM lesson_error_history WHERE user_id=? AND subject=? AND lesson_id=? AND step_id=? AND error_type=? AND created_at=? LIMIT 1", (user_id, subject, item["lessonId"], str(item.get("stepId") or ""), str(item.get("type") or ""), created)).fetchone()
-            if not exists:
-                conn.execute("INSERT INTO lesson_error_history(user_id,subject,lesson_id,step_id,skill_id,error_type,created_at) VALUES(?,?,?,?,?,?,?)", (user_id, subject, item["lessonId"], str(item.get("stepId") or ""), item["skill"], str(item.get("type") or ""), created))
+            step_id, error_type = str(item.get("stepId") or ""), str(item.get("type") or "")
+            client_id = _stable_client_id(item) or _fallback_client_id("lesson_error", [item["lessonId"], step_id, error_type, created])
+            conn.execute("INSERT INTO lesson_error_history(user_id,subject,lesson_id,step_id,skill_id,error_type,created_at,client_id) VALUES(?,?,?,?,?,?,?,?)"
+                         " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+                         (user_id, subject, item["lessonId"], step_id, item["skill"], error_type, created, client_id))
         changed.append("lessonErrorHistory")
     if "diagnostics" in domains and isinstance(domains["diagnostics"], list):
         valid_tasks = {r["id"] for r in conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (subject,))}
@@ -1568,8 +1878,10 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
             if not isinstance(item, dict) or item.get("taskId") not in valid_tasks:
                 continue
             created = str(item.get("ts") or now_iso())
-            if not conn.execute("SELECT 1 FROM diagnostics WHERE user_id=? AND subject=? AND task_id=? AND created_at=? LIMIT 1", (user_id, subject, item["taskId"], created)).fetchone():
-                conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at) VALUES(?,?,?,?,?)", (user_id, subject, item["taskId"], int(bool(item.get("correct"))), created))
+            client_id = _stable_client_id(item) or _fallback_client_id("diagnostic", [item["taskId"], created])
+            conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at,client_id) VALUES(?,?,?,?,?,?)"
+                         " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+                         (user_id, subject, item["taskId"], int(bool(item.get("correct"))), created, client_id))
         changed.append("diagnostics")
     if "lessonStepErrors" in domains and isinstance(domains["lessonStepErrors"], dict):
         for key, item in domains["lessonStepErrors"].items():
@@ -1579,7 +1891,7 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
             if lesson_id in lesson_ids and item.get("skill") in valid_skills:
                 try: count = int(item.get("count", 0))
                 except (TypeError, ValueError): continue
-                conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,lesson_id,step_id) DO UPDATE SET count=MAX(lesson_step_errors.count,excluded.count), last_at=MAX(lesson_step_errors.last_at,excluded.last_at), types_json=excluded.types_json", (user_id, subject, lesson_id, step_id, item["skill"], count, str(item.get("ts") or now_iso()), json.dumps(item.get("types") or {}, ensure_ascii=False)))
+                conn.execute("INSERT INTO lesson_step_errors(user_id,subject,lesson_id,step_id,skill_id,count,last_at,types_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,subject,lesson_id,step_id) DO UPDATE SET count=MAX(lesson_step_errors.count,excluded.count), last_at=MAX(lesson_step_errors.last_at,excluded.last_at), types_json=excluded.types_json", (user_id, subject, lesson_id, step_id, item["skill"], count, str(item.get("ts") or now_iso()), json.dumps(item.get("types") or {}, ensure_ascii=False)))
         changed.append("lessonStepErrors")
     if "deletedLessonStepErrors" in domains and isinstance(domains["deletedLessonStepErrors"], list):
         for key in domains["deletedLessonStepErrors"]:
@@ -1592,7 +1904,7 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
     if "lessonSessions" in domains and isinstance(domains["lessonSessions"], dict):
         for lesson_id, value in domains["lessonSessions"].items():
             if lesson_id in lesson_ids and isinstance(value, dict):
-                conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?) ON CONFLICT(user_id,lesson_id) DO UPDATE SET session_json=excluded.session_json", (user_id, subject, lesson_id, json.dumps(value, ensure_ascii=False)))
+                conn.execute("INSERT INTO lesson_sessions(user_id,subject,lesson_id,session_json) VALUES(?,?,?,?) ON CONFLICT(user_id,subject,lesson_id) DO UPDATE SET session_json=excluded.session_json", (user_id, subject, lesson_id, json.dumps(value, ensure_ascii=False)))
         changed.append("lessonSessions")
     if "deletedLessonSessions" in domains and isinstance(domains["deletedLessonSessions"], list):
         for lesson_id in domains["deletedLessonSessions"]:
@@ -1616,7 +1928,7 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
             prior = int(existing["progress"]) if existing else 0
             entry = done.get(mission_id)
             completed = entry.get("ts") if isinstance(entry, dict) else (existing["completed_at"] if existing else None)
-            conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,mission_id) DO UPDATE SET progress=MAX(user_missions.progress,excluded.progress), completed_at=COALESCE(user_missions.completed_at,excluded.completed_at)", (user_id, subject, mission_id, max(prior, progress), completed))
+            conn.execute("INSERT INTO user_missions(user_id,subject,mission_id,progress,completed_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,subject,mission_id) DO UPDATE SET progress=MAX(user_missions.progress,excluded.progress), completed_at=COALESCE(user_missions.completed_at,excluded.completed_at)", (user_id, subject, mission_id, max(prior, progress), completed))
         changed.append("missionProgress")
     if "achievements" in domains and isinstance(domains["achievements"], dict):
         valid = {r["id"] for r in conn.execute("SELECT id FROM achievements")}
@@ -1661,6 +1973,21 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
             except (KeyError, TypeError, ValueError): continue
             conn.execute("INSERT INTO forecast_history(user_id,subject,snapshot_date,low,high,mid) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,subject,snapshot_date) DO UPDATE SET low=excluded.low,high=excluded.high,mid=excluded.mid", (user_id, subject, item["date"], low, high, mid))
         changed.append("forecastHistory")
+    if "hintLevels" in domains and isinstance(domains["hintLevels"], dict):
+        # Уровни помощи — монотонный счётчик использований (как progress):
+        # одинаковый payload = тот же результат (MAX), ретрай безопасен.
+        for level_key, used in domains["hintLevels"].items():
+            try:
+                level = int(level_key)
+                used_count = int(used)
+            except (TypeError, ValueError):
+                continue
+            if level < 1 or used_count < 0 or used_count > MAX_COUNTER_VALUE:
+                continue
+            conn.execute("INSERT INTO user_hint_levels(user_id,subject,level,used_count) VALUES(?,?,?,?)"
+                         " ON CONFLICT(user_id,subject,level) DO UPDATE SET used_count=MAX(user_hint_levels.used_count,excluded.used_count)",
+                         (user_id, subject, level, used_count))
+        changed.append("hintLevels")
     return changed
 
 
@@ -2874,12 +3201,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "subject": subject, "stateVersion": version, "settings": settings}, token=token)
                 return
             if path.startswith("/api/errors/"):
+                error_id = path.rsplit("/", 1)[-1]
+                if not error_id:
+                    raise ValueError("invalid error id")
+                # Стабильный ID: integer server id либо client-generated UUID.
                 try:
-                    error_id = int(path.rsplit("/", 1)[-1])
-                except ValueError:
+                    error_key = int(error_id) if error_id.strip().isdigit() else error_id.strip()[:128]
+                except (TypeError, ValueError, AttributeError):
                     raise ValueError("invalid error id")
                 subject, version, error = domain_write(conn, user_id, payload,
-                    lambda sub: patch_error_resolved(conn, user_id, sub, error_id, payload.get("resolved")))
+                    lambda sub: patch_error_resolved(conn, user_id, sub, error_key, payload.get("resolved")))
                 self.send_json({"ok": True, "subject": subject, "stateVersion": version, "error": error}, token=token)
                 return
             self.send_json({"error": "Not found"}, 404)
