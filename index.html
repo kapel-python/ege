@@ -3,13 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>ege easy — подготовка к профильной математике</title>
 <meta name="description" content="Платформа подготовки к ЕГЭ по профильной математике с системой прогресса: уровни, XP, миссии, навыки, боссы.">
 <script>
-  /* Apply the saved choice before styles are painted, so navigation and reloads
-     never briefly show the opposite theme. */
+  /* Saved choice wins; on the first visit (no saved value) follow the device
+     theme, so the onboarding/diagnostic screens never force light mode.
+     Runs before styles paint to avoid a theme flash. */
   try {
-    if (localStorage.getItem("ege_core_theme") === "dark") {
+    var savedTheme = localStorage.getItem("ege_core_theme");
+    if (savedTheme === "dark") {
+      document.documentElement.dataset.theme = "dark";
+    } else if (!savedTheme && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
       document.documentElement.dataset.theme = "dark";
     }
   } catch (e) {}
