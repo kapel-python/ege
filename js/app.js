@@ -3396,6 +3396,23 @@ const Onboarding = {
       </div>`;
     const body = el.querySelector("#onboard-body");
     this[names[this.step]].call(this, body);
+    // Диагностика рисует задания через taskVisualHtml → data-mathvisual,
+    // но общий render() возвращается раньше NEEDS_DETAILS-гейта и никогда не
+    // зовёт Vendor.ensureMath() для онбординга. Без этого window.MathVisual
+    // не появляется, MathVisualMount.mount() пропускает хосты и плейсхолдер
+    // навсегда остаётся на «Рисунок загружается…». Подтягиваем вендор здесь;
+    // ensureMath сам домонтирует уже нарисованное, наблюдатель подхватит
+    // следующие шаги, при офлайне показываем читаемую ошибку вместо вечного
+    // спиннера.
+    if (names[this.step] === "stepDiagnostic") {
+      try {
+        Vendor.ensureMath().then(() => {
+          try { MathVisualMount.mountWithin(el); } catch (_) {}
+        }).catch(() => {
+          try { MathVisualMount.failUnmounted(el); } catch (_) {}
+        });
+      } catch (_) {}
+    }
   },
 
   stepWelcome(body) {
