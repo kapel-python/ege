@@ -3573,20 +3573,29 @@ const Onboarding = {
 
   finish() {
     const subj = this.subject || DataAPI.currentSubject() || "profile_math";
-    applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
     this.hide();
-    // Выбран другой предмет, чем в загруженном каталоге (например, база):
-    // переключаемся — сервер отдаст его каталог и пустое состояние.
     const after = () => {
       toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
       render();
     };
+    // Порядок обязателен: сначала переключаем предмет (сервер отдаёт каталог и
+    // состояние нового предмета вместе с ЕГО версией), и только потом
+    // применяем регистрацию и сохраняем. Обратный порядок штамповал снапшот
+    // базовой математики версией профиля (144 против 1) — сервер отвечал 409,
+    // восстановление после конфликта теряло профиль, и экран регистрации
+    // возвращался.
     if (subj !== DataAPI.currentSubject()) {
-      Store.switchSubject(subj).then(after).catch(() => { Store.load(subj).then(after).catch(after); });
-    } else {
-      Store.save().catch(() => {});
-      after();
+      Store.switchSubject(subj)
+        .then(() => { applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name); })
+        .catch(() => Store.load(subj).then(() => {
+          applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
+        }))
+        .then(after)
+        .catch(after);
+      return;
     }
+    applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
+    after();
   },
 };
 

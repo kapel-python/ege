@@ -8,7 +8,7 @@
 
 ## Commands
 - install: `pip install flask` (if needed for server deps)
-- test: `node test/smoke.js` и `node test/recommender.js` (сценарии движка «лучший следующий шаг») или `python3 -m py_compile server/server.py`
+- test: `node test/smoke.js` и `node test/recommender.js` (сценарии движка «лучший следующий шаг»), `python3 test/onboard-subject.py` (регистрация во втором предмете), `python3 test/domain-state.py`, `python3 test/occ.py` или `python3 -m py_compile server/server.py`
 - lint: `python3 -m py_compile server/server.py`
 
 ## How to change code

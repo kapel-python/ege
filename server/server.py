@@ -1514,11 +1514,17 @@ def patch_settings(conn: sqlite3.Connection, user_id: int, subject: str, value: 
     if self_level is not None and self_level not in SELF_LEVELS:
         raise ValueError("invalid selfLevel")
     if goal is not None:
-        row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (f"goals:{subject}",)).fetchone()
-        if row is None and subject == DEFAULT_SUBJECT:
-            row = conn.execute("SELECT value_json FROM app_config WHERE key='goals'").fetchone()
-        goal_ids = {g.get("id") for g in json.loads(row["value_json"])} if row else set()
-        if goal not in goal_ids:
+        # Список целей строго предмета регистрации: у пустого предмета своих
+        # целей нет вообще, и подсунутый клиентом профильный g60 раньше падал
+        # сюда 400-й ошибкой сразу после переключения предмета. Единственный
+        # резолвер конфига — _subject_config (тот же путь, что у каталога).
+        goal_ids = {g.get("id") for g in _subject_config(conn, "goals", subject, [], subject == DEFAULT_SUBJECT) or []}
+        if not goal_ids:
+            # У предмета нет шкалы целей (контент готовится) — хранить нечего и
+            # отклонять всю настройку из-за необязательного ориентира нельзя:
+            # иначе регистрация на таком предмете не сохраняется вовсе.
+            goal = None
+        elif goal not in goal_ids:
             raise ValueError("unknown goal")
     conn.execute("UPDATE user_subjects SET onboarded=?, self_level=?, goal_id=? WHERE user_id=? AND subject=?", (onboarded, self_level, goal, user_id, subject))
     conn.execute("UPDATE users SET name=? WHERE id=?", (sanitize_name(name_value), user_id))
@@ -1705,6 +1711,47 @@ def _levels_crossed(xp_from: int, xp_to: int) -> int:
     if xp_to <= xp_from:
         return 0
     return level_from_xp(xp_to)["level"] - level_from_xp(xp_from)["level"]
+
+
+def _derive_skill_progress_value(solved: int, correct: int, lesson_done: int, lesson_total: int) -> int:
+    """Мастерство навыка 0–100: теория 40 + практика 60. Единственное место
+    формулы — зеркало клиентского skillProgress() для отображения; персистентная
+    истина хранится в user_progress и считается только здесь, клиент свои
+    +5/+3/+8/+6/+22 больше не присылает и не хранит."""
+    try:
+        solved = max(0, int(solved)); correct = max(0, int(correct))
+        lesson_done = max(0, int(lesson_done)); lesson_total = max(0, int(lesson_total))
+    except (TypeError, ValueError):
+        return 0
+    theory_weight = 40 if lesson_total else 0
+    practice_weight = 100 - theory_weight
+    theory = (lesson_done / lesson_total) * theory_weight if lesson_total else 0
+    accuracy = (correct / solved) if solved else 0
+    practice = min(1, solved / 10) * accuracy * practice_weight
+    return int(round(min(100, theory + practice)))
+
+
+def _derive_streak(activity_dates: set, today_str: str | None = None) -> tuple[int, str | None]:
+    """Серия подряд идущих дней с активностью + последняя активная дата.
+    Считается только здесь из derived-дат активности; клиент streak не шлёт."""
+    if not activity_dates:
+        return 0, None
+    days = sorted(d for d in activity_dates if isinstance(d, str) and len(d) == 10)
+    if not days:
+        return 0, None
+    last = days[-1]
+    streak = 1
+    for i in range(len(days) - 2, -1, -1):
+        try:
+            cur = dt.date.fromisoformat(days[i + 1])
+            prev = dt.date.fromisoformat(days[i])
+        except ValueError:
+            break
+        if (cur - prev).days == 1:
+            streak += 1
+        else:
+            break
+    return streak, last
 
 
 def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
@@ -2015,8 +2062,9 @@ def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) 
     if "goal" in payload:
         value = payload["goal"]
         if value is not None:
-            valid = conn.execute("SELECT value_json FROM app_config WHERE key='goals'").fetchone()
-            goal_ids = {g["id"] for g in json.loads(valid["value_json"])} if valid else set()
+            # Правка админом идёт в профиль основного предмета — цели берём
+            # через тот же резолвер конфига, без третьей копии SQL.
+            goal_ids = {g.get("id") for g in _subject_config(conn, "goals", DEFAULT_SUBJECT, [], True) or []}
             if value not in goal_ids:
                 raise ValueError(f"unknown goal: {value}")
         goal = value
