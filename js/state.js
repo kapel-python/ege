@@ -4,6 +4,34 @@
    читает вычисляемые геттеры и подписывается на события.
    ============================================================ */
 
+/* Системная идемпотентность: каждая мутабельная сущность несёт стабильный
+   client-generated ID (UUID). ID генерируется ОДИН раз в момент создания
+   сущности и переиспользуется при ретраях/даблкликах — никогда не
+   генерируется заново на каждое сохранение. Одинаковый ID = обновление той
+   же записи на сервере (upsert по (user_id, subject, client_id)), а не новая
+   строка. Мутабельные словари (skillStats, lessonSessions, ...) стабильно
+   keyed естественными ID каталога (skill/lesson/mission/...); append-истории
+   (taskAttempts, errors, timeline, ...) — этим UUID. */
+function newEntityId() {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  } catch (_) {}
+  return `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/* Стабильный ключ дедупликации: строковый client ID в приоритете, иначе —
+   полное содержимое (legacy-записи без ID, серверный fallback). */
+function entityKey(item) {
+  if (item && typeof item === "object") {
+    for (const key of ["id", "clientId"]) {
+      const value = item[key];
+      if (typeof value === "string" && value) return `id:${value}`;
+    }
+    if (typeof item.id === "number" && Number.isFinite(item.id)) return `row:${item.id}`;
+  }
+  try { return `json:${JSON.stringify(item)}`; } catch (_) { return `json:${String(item)}`; }
+}
+
 const Store = {
   state: null,
   // Текущий предмет: часть снапшота (state.subject) и зеркало здесь для
@@ -412,12 +440,15 @@ const Store = {
   // Слияние после 409: серверный снимок — база. Добавляем только данные,
   // которые безопасно объединяются по смыслу: неизменяемые события и факты
   // завершения. Профиль, активные сессии и агрегаты остаются свежими с сервера.
+  // Дедуп — по стабильному client ID (entityKey), поэтому повторная отправка
+  // одного и того же события после ретрая/даблклика не удваивается ни в
+  // памяти, ни на сервере (там — upsert по client_id + CAS-версия).
   mergeConflictState(fresh, local) {
     const merged = JSON.parse(JSON.stringify(fresh || {}));
     const unique = (items) => {
       const seen = new Set();
       return (items || []).filter((item) => {
-        const key = JSON.stringify(item);
+        const key = (typeof entityKey === "function") ? entityKey(item) : JSON.stringify(item);
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -475,7 +506,13 @@ const Store = {
       return result;
     };
     const changed = (key) => JSON.stringify(snapshot[key]) !== JSON.stringify(base[key]);
-    const newItems = (key) => (snapshot[key] || []).filter((item) => !new Set((base[key] || []).map((old) => JSON.stringify(old))).has(JSON.stringify(item)));
+    // Новые события — по стабильному ID: повтор snapshot после ретрая не
+    // шлёт уже подтверждённое (CAS-база lastSyncedState обновляется только
+    // после успеха, tab-leader сериализует PUT одной очередью).
+    const newItems = (key) => {
+      const seen = new Set((base[key] || []).map((old) => entityKey(old)));
+      return (snapshot[key] || []).filter((item) => !seen.has(entityKey(item)));
+    };
 
     const attempts = newItems("taskAttempts");
     if (attempts.length) await request("post", "/api/events/attempts", { events: attempts });
@@ -487,17 +524,46 @@ const Store = {
       }
     }
     const baseErrors = base.errors || [];
+    const sameError = (a, b) => {
+      if (!a || !b) return false;
+      // Стабильный client ID в приоритете (строковый UUID), затем server id.
+      for (const key of ["clientId", "id"]) {
+        const va = a[key], vb = b[key];
+        if (typeof va === "string" && va && va === vb) return true;
+        if (typeof va === "number" && va === vb) return true;
+      }
+      // Legacy без ID: естественный ключ, как раньше.
+      return a.taskId === b.taskId && a.ts === b.ts && !a.id && !b.id && !a.clientId && !b.clientId;
+    };
     for (const error of snapshot.errors || []) {
-      const old = baseErrors.find((item) => item.id === error.id || (!item.id && item.taskId === error.taskId && item.ts === error.ts));
+      const old = baseErrors.find((item) => sameError(item, error));
       if (!old) {
         const result = await request("post", "/api/errors", { error });
-        if (!error.id && result.error && result.error.id) {
-          error.id = result.error.id;
-          const live = (this.state && this.state.errors || []).find((item) => !item.id && item.taskId === error.taskId && item.ts === error.ts);
-          if (live) live.id = result.error.id;
+        if (result.error) {
+          if (result.error.id && !error.id) error.id = result.error.id;
+          if (result.error.clientId && !error.clientId) error.clientId = result.error.clientId;
+          const live = (this.state && this.state.errors || []).find((item) => sameError(item, error) && !item.id);
+          if (live) {
+            if (error.id) live.id = error.id;
+            if (error.clientId) live.clientId = error.clientId;
+          }
+          const liveByClient = (this.state && this.state.errors || []).find((item) => item.clientId && item.clientId === error.clientId);
+          if (liveByClient && error.id) liveByClient.id = error.id;
+          // Ошибка создана и тут же закрыта до первого save (даблклик/
+          // быстрый верный ответ): POST создаёт строку resolved=0, поэтому
+          // сразу доводим флаг тем же стабильным ID — иначе resolved потеряется.
+          if (!!error.resolved && !result.error.resolved) {
+            const key = error.id || error.clientId;
+            if (key) await request("patch", `/api/errors/${encodeURIComponent(key)}`, { resolved: true });
+          }
         }
-      } else if (error.id && !!old.resolved !== !!error.resolved) {
-        await request("patch", `/api/errors/${encodeURIComponent(error.id)}`, { resolved: !!error.resolved });
+      } else {
+        // PATCH — идемпотентен: тот же resolved даёт тот же результат.
+        // Адресуем стабильным ID: server id, иначе client UUID (сервер умеет оба).
+        const key = error.id || error.clientId;
+        if (key && !!old.resolved !== !!error.resolved) {
+          await request("patch", `/api/errors/${encodeURIComponent(key)}`, { resolved: !!error.resolved });
+        }
       }
     }
     const settings = {};
@@ -505,7 +571,7 @@ const Store = {
     for (const key of settingKeys) if (changed(key)) settings[key] = snapshot[key];
     if (Object.keys(settings).length) await request("patch", "/api/settings", { settings });
     const domains = {};
-    for (const key of ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory"]) {
+    for (const key of ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory", "hintLevels"]) {
       if (changed(key)) domains[key] = snapshot[key];
     }
     if (Array.isArray(snapshot.deletedLessonSessions) && snapshot.deletedLessonSessions.length) {
@@ -1265,6 +1331,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
   const alreadyMastered = correct && s.taskAttempts.some((a) => a.taskId === task.id && a.correct);
 
   s.taskAttempts.unshift({
+    id: newEntityId(),
     taskId: task.id,
     skill: task.skill,
     correct: !!correct,
@@ -1324,7 +1391,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     // Неверный ответ остаётся сигналом для повторения, но не отнимает уже
     // заработанный прогресс: ошибка — нормальная часть обучения.
     if (!s.errors.some((e) => e.taskId === task.id && !e.resolved)) {
-      s.errors.unshift({ taskId: task.id, skill: task.skill, sub: task.sub, ts: Date.now(), resolved: false });
+      s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: task.skill, sub: task.sub, ts: Date.now(), resolved: false });
     }
   }
 
@@ -1377,7 +1444,7 @@ function recordLessonStepError(lessonId, stepId, skillId, errorType = "Неут�
   cur.types[errorType] = (cur.types[errorType] || 0) + 1;
   s.lessonStepErrors[key] = cur;
   // Это история существующего механизма ошибок, а не отдельная система оценки.
-  s.lessonErrorHistory.unshift({ lessonId, stepId, skill: skillId, type: errorType, ts: cur.ts });
+  s.lessonErrorHistory.unshift({ id: newEntityId(), lessonId, stepId, skill: skillId, type: errorType, ts: cur.ts });
   s.lessonErrorHistory = s.lessonErrorHistory.slice(0, 200);
   // Ошибка нужна для персонального повторения, а не как штраф к прогрессу.
   recordForecastSnapshot();
@@ -1404,6 +1471,7 @@ function completeLesson(lesson, inputXp, result = {}) {
 
   if (!firstCompletion) {
     s.lessonAttempts.unshift({
+      id: newEntityId(),
       lessonId: lesson.id,
       completed: true,
       firstCompletion: false,
@@ -1427,6 +1495,7 @@ function completeLesson(lesson, inputXp, result = {}) {
   const totalXp = baseXp + stepsXp;
   s.completedLessons[lesson.id] = { ts: Date.now() };
   s.lessonAttempts.unshift({
+    id: newEntityId(),
     lessonId: lesson.id,
     completed: true,
     firstCompletion: true,
@@ -1519,7 +1588,7 @@ function checkAchievements() {
 }
 
 function addTimeline(text) {
-  Store.state.timeline.unshift({ ts: Date.now(), text });
+  Store.state.timeline.unshift({ id: newEntityId(), ts: Date.now(), text });
   if (Store.state.timeline.length > 40) Store.state.timeline.length = 40;
 }
 
@@ -1907,8 +1976,8 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
     if (r.correct) st.correct++;
     s.totalSolved++;
     if (r.correct) s.totalCorrect++;
-    s.taskAttempts.unshift({ taskId: task.id, skill: task.skill, correct: !!r.correct, hintLevel: 0, seconds: 0, closesTaskId: null, ts: diagnosticTs });
-    s.diagnostics.unshift({ taskId: task.id, correct: !!r.correct, ts: diagnosticTs });
+    s.taskAttempts.unshift({ id: newEntityId(), taskId: task.id, skill: task.skill, correct: !!r.correct, hintLevel: 0, seconds: 0, closesTaskId: null, ts: diagnosticTs });
+    s.diagnostics.unshift({ id: newEntityId(), taskId: task.id, correct: !!r.correct, ts: diagnosticTs });
     const activity = todayActivity();
     activity.solved++;
     if (r.correct) activity.correct++;
