@@ -436,6 +436,15 @@ const Store = {
     merged.bossesDefeated = unique([...(fresh.bossesDefeated || []), ...(local.bossesDefeated || [])]);
     merged.stateVersion = fresh.stateVersion;
     merged.subject = fresh.subject;
+    // Регистрация одноразово создаёт профиль: если локальный снимок его уже
+    // создал, а серверный (ещё не получивший запись) нет — свежий серверный
+    // снимок не должен откатывать профиль в «не зарегистрирован». Иначе после
+    // конфликта экран снова просит пройти регистрацию, а имя/цель теряются.
+    if (local && local.onboarded && !merged.onboarded) {
+      for (const key of ["onboarded", "name", "selfLevel", "goal", "lastActiveDate"]) {
+        if (key in local) merged[key] = local[key];
+      }
+    }
     return merged;
   },
 
@@ -1906,7 +1915,10 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   }
   s.taskAttempts = s.taskAttempts.slice(0, 5000);
   s.selfLevel = selfLevel;
-  s.goal = goalId;
+  // Ориентир по баллам храним только там, где для предмета есть шкала целей:
+  // иначе сервер отклоняет всю настройку и регистрация не сохраняется.
+  const goalsAvailable = (typeof DataAPI !== "undefined" && DataAPI.goals) ? DataAPI.goals().length > 0 : false;
+  s.goal = goalsAvailable ? goalId : null;
   const cleanedName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
   s.name = cleanedName || null;
   s.onboarded = true;
