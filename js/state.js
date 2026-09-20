@@ -876,10 +876,14 @@ function catProgress(catId) {
    independently, including topics without a lesson. */
 function skillStatus(skill) {
   const p = skillProgress(skill.id);
-  const solved = (Store.state.skillStats[skill.id] || {}).solved || 0;
+  const stats = Store.state.skillStats[skill.id] || { solved: 0, correct: 0 };
+  const solved = stats.solved || 0;
   if (p >= 90) return "mastered";
   if (p >= 70) return "completed";
-  if (p < 35 && solved > 0) return "weak";
+  /* «Слабое место» — низкий прогресс при плохой точности. Тема, по которой
+     мало, но стабильно верных ответов (в т.ч. одна верная диагностика) —
+     просто «в процессе», а не проблема. */
+  if (p < 35 && solved > 0 && stats.correct / solved < 0.6) return "weak";
   // Тему вообще не трогали: ни ответов, ни закрытого урока, ни открытого —
   // это не "слабое место" и не "в процессе", а честное "не начата".
   const lessons = DataAPI.lessonsBySkill(skill.id);
@@ -891,6 +895,18 @@ function skillStatus(skill) {
 
 function openErrorCount(skillId) {
   return Store.state.errors.reduce((n, e) => n + (!e.resolved && e.skill === skillId ? 1 : 0), 0);
+}
+
+/* «Требует внимания» — только реальные проблемы: открытые ошибки или плохая
+   точность по теме, с которой уже работали. Тема, по которой ответы
+   стабильно верные (в т.ч. одна верная диагностика), и тема, которую вообще
+   не трогали, — не слабые места: низкий процент освоения сам по себе
+   проблемой не является, это просто «ещё мало занимались». */
+function skillNeedsAttention(skillId) {
+  if (openErrorCount(skillId) > 0) return true;
+  const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
+  if (!stats.solved) return false;
+  return stats.correct / stats.solved < 0.6;
 }
 
 /* Задания в taskAttempts лежат в порядке unshift (новые первыми), поэтому
@@ -993,6 +1009,15 @@ const FORECAST_DECAY_DAYS = 45;
 /* Полное доверие практике — от 12 свежих попыток; дальше насыщение:
    10 лёгких подряд уже не дают «мастера», нужен объём посвежее. */
 const FORECAST_FULL_VOLUME = 12;
+/* Диагностический ответ — холодный экзаменационный образец: без подсказок,
+   тренировочного контекста и повторов. Один верный диагностический ответ
+   несёт больше свидетельства, чем рутинная попытка, поэтому в объёме прогноза
+   засчитывается с этим весом. Без этого вклад диагностики (~1 попытка на
+   навык против насыщения 12) тонул в округлении, и прогноз после онбординга
+   с любыми верными ответами показывал 0 баллов. Диагностическая попытка
+   опознаётся по паре taskId+ts из домена diagnostics — практика по тому же
+   заданию ей не засчитывается. */
+const FORECAST_DIAGNOSTIC_WEIGHT = 2;
 
 function skillEgeWeight(skillId) {
   // Веса — конфиг текущего предмета (каталог: forecast.weights). Фолбэк —
@@ -1042,14 +1067,19 @@ function forecastSkillMastery(skillId, now) {
   const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
 
   const ts = Number(now) || Date.now();
+  const diagKeys = new Set();
+  for (const d of Store.state.diagnostics || []) {
+    if (d && d.taskId) diagKeys.add(`${d.taskId}|${Number(d.ts) || 0}`);
+  }
   let vol = 0, good = 0, seen = false;
   for (const a of Store.state.taskAttempts) {
     if (!a || a.skill !== skillId) continue;
     seen = true;
     const ageDays = Math.max(0, (ts - (Number(a.ts) || 0)) / 86400000);
     const w = Math.exp(-ageDays / FORECAST_DECAY_DAYS);
-    vol += w;
-    if (a.correct) good += w;
+    const dw = diagKeys.has(`${a.taskId}|${Number(a.ts) || 0}`) ? FORECAST_DIAGNOSTIC_WEIGHT : 1;
+    vol += dw * w;
+    if (a.correct) good += dw * w;
   }
   let accuracy, volume;
   if (seen) {
@@ -1071,6 +1101,7 @@ function forecast() {
   const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
   if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
   const now = Date.now();
+  const attemptedSkills = new Set((Store.state.taskAttempts || []).map((a) => a && a.skill));
   let wSum = 0, wMastery = 0, covered = 0;
   const masteryById = {};
   for (const s of skills) {
@@ -1081,7 +1112,7 @@ function forecast() {
     wMastery += w * m;
     const lessons = DataAPI.lessonsBySkill(s.id);
     const hasLesson = lessons.some((l) => !!Store.state.completedLessons[l.id]);
-    if (hasLesson || masteryById[s.id] >= 25) covered++;
+    if (hasLesson || masteryById[s.id] >= 25 || attemptedSkills.has(s.id)) covered++;
   }
   const mastery = wSum ? wMastery / wSum : 0;
   const primary = (mastery / 100) * total;
@@ -1367,7 +1398,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     const parts = attemptXp(task, true, hintLevel, alreadyMastered);
     xp = parts.total;
     xpBreakdown = { attempt: parts.attempt, correctBonus: parts.correctBonus, errorResolved: 0 };
-    st.progress = Math.min(100, st.progress + (st.progress < 60 ? 5 : 3));
+    st.progress = skillProgress(task.skill);
 
     /* закрытие ошибки: по этому заданию или по исходному заданию,
        которое оно заменяет в повторении (умное повторение) */
@@ -1507,7 +1538,7 @@ function completeLesson(lesson, inputXp, result = {}) {
   s.lessonAttempts = s.lessonAttempts.slice(0, 1000);
   addXp(totalXp, "lesson");
   const st = s.skillStats[lesson.skill];
-  st.progress = Math.min(100, st.progress + 8);
+  st.progress = skillProgress(lesson.skill);
   recordForecastSnapshot();
   addTimeline(`Урок пройден: «${lesson.title}»`);
   Store.save();
@@ -1547,7 +1578,7 @@ function defeatBoss(boss) {
     /* рывок навыков ветки */
     for (const s of DataAPI.skills().filter((x) => x.cat === boss.cat)) {
       const st = Store.state.skillStats[s.id];
-      st.progress = Math.min(100, st.progress + 6);
+      st.progress = skillProgress(s.id);
     }
     recordForecastSnapshot();
     Store.save();
@@ -1971,9 +2002,12 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
     if (!task) continue;
     const st = s.skillStats[task.skill];
     const diagnosticTs = Date.now();
-    st.progress = Math.max(0, Math.min(100, r.correct ? st.progress + 22 : Math.max(5, st.progress - 10)));
     st.solved++;
     if (r.correct) st.correct++;
+    /* Единый источник прогресса: legacy-поле progress дублирует
+       skillProgress, чтобы админка показывала то же число, что и приложение.
+       Вручную ничего не насчитывается и не штрафуется. */
+    st.progress = skillProgress(task.skill);
     s.totalSolved++;
     if (r.correct) s.totalCorrect++;
     s.taskAttempts.unshift({ id: newEntityId(), taskId: task.id, skill: task.skill, correct: !!r.correct, hintLevel: 0, seconds: 0, closesTaskId: null, ts: diagnosticTs });
