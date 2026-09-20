@@ -875,7 +875,7 @@ const HELP = {
     title: "Навыки",
     body: `
       <p>Процент показывает, насколько хорошо ты знаешь тему: <b>40</b> даёт пройденный урок (теория), <b>60</b> — решённые задания и точность ответов (практика). Если урока по теме нет, все 100 набираются практикой.</p>
-      <p>Подписи простые: не начата — тему ещё не трогал, слабое место — надо подтянуть, пройден (от 70%) — хороший результат, освоен (от 90%) — тема выучена отлично. Точность считается за всё время, поэтому старые ошибки приходится перекрывать серией верных ответов.</p>
+      <p>Подписи простые: не начата — тему ещё не трогал, слабое место — по теме есть попытки, но точность ответов низкая, пройден (от 70%) — хороший результат, освоен (от 90%) — тема выучена отлично. Мало занимался, но отвечал верно — это «в процессе», а не слабое место. Точность считается за всё время, поэтому старые ошибки приходится перекрывать серией верных ответов.</p>
       <p>Нажми на тему — там урок, тренировка и твои ошибки.</p>`,
   },
   path: {
@@ -1334,9 +1334,13 @@ function screenDashboard(root) {
   const cov = forecastCoverage();
   const goal = forecastGoalNum();
 
+  /* Блок «Требуют внимания» показывает только реальные проблемы: открытые
+     ошибки и темы с плохой точностью. Темы, которые просто ещё не тронуты
+     (0%), или темы со стабильно верными ответами, но маленьким объёмом —
+     не слабые места. */
   const weakSpots = DataAPI.skills()
+    .filter((sk) => skillNeedsAttention(sk.id))
     .map((sk) => ({ sk, prog: skillProgress(sk.id), errs: openErrorCount(sk.id) }))
-    .filter((x) => x.prog < 70 || x.errs > 0)
     .sort((a, b) => (a.prog - b.prog) || (b.errs - a.errs))
     .slice(0, 4);
 
@@ -3080,7 +3084,12 @@ function screenStats(root) {
   // state instead of a ranking that looks meaningful but isn't.
   const hasSignal = byProg.some((sk) => skillProgress(sk.id) > 0);
   const strongest = hasSignal ? byProg.slice(0, 3) : [];
-  const weakest = hasSignal ? byProg.slice(-3).reverse() : [];
+  // «Требуют внимания» — только реальные проблемы (ошибки / плохая точность),
+  // а не темы с нулевым прогрессом: иначе свежий аккаунт после диагностики
+  // получал бы здесь случайные нетронутые темы под видом слабых мест.
+  const weakest = skills.filter((sk) => skillNeedsAttention(sk.id))
+    .sort((a, b) => skillProgress(a.id) - skillProgress(b.id))
+    .slice(0, 3);
 
   root.innerHTML = `
     <div class="page-head">
@@ -3135,7 +3144,8 @@ function screenStats(root) {
         </div>
         <div class="card">
           <div style="font-weight:650;margin-bottom:10px">Требуют внимания</div>
-          ${hasSignal ? weakest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--danger mono">${skillProgress(sk.id)}%</span></div>`).join("")
+          ${weakest.length ? weakest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--danger mono">${skillProgress(sk.id)}%</span></div>`).join("")
+            : hasSignal ? `<div class="stat-label">Слабых мест нет — все темы в хорошем состоянии.</div>`
             : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть слабые темы.</div>`}
         </div>
       </div>
@@ -3390,11 +3400,29 @@ const Onboarding = {
     if (el) el.remove();
   },
 
+  // Переключение темы прямо с экрана регистрации: текущий шаг не
+  // перерисовываем, чтобы не потерять введённый ответ/имя — обновляем
+  // только иконку самой кнопки.
+  toggleTheme() {
+    Theme.toggle();
+    const btn = document.querySelector("#onboard-overlay .onboard-theme");
+    if (!btn) return;
+    const dark = Theme.current() === "dark";
+    const label = dark ? "Включить светлую тему" : "Включить тёмную тему";
+    btn.innerHTML = icon(dark ? "sun" : "moon");
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-pressed", dark ? "true" : "false");
+    btn.title = label;
+  },
+
   render() {
     const el = document.getElementById("onboard-overlay");
     if (!el) return;
     const names = this.STEPS();
+    const dark = Theme.current() === "dark";
+    const themeLabel = dark ? "Включить светлую тему" : "Включить тёмную тему";
     el.innerHTML = `
+      <button class="btn btn--ghost theme-toggle onboard-theme" type="button" onclick="Onboarding.toggleTheme()" aria-label="${themeLabel}" aria-pressed="${dark}" title="${themeLabel}">${icon(dark ? "sun" : "moon")}</button>
       <div class="onboard-card">
         <div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
         <div id="onboard-body"></div>
@@ -3498,7 +3526,7 @@ const Onboarding = {
   stepResult(body) {
     const total = this.diagResults.length;
     const correct = this.diagResults.filter((r) => r.correct).length;
-    const startLevel = Math.round(20 + (correct / Math.max(total, 1)) * 60);
+    const startLevel = Math.round((correct / Math.max(total, 1)) * 100);
 
     const strong = [], weak = [];
     for (const r of this.diagResults) {
@@ -3506,7 +3534,6 @@ const Onboarding = {
       (r.correct ? strong : weak).push(name);
     }
     if (this.selfLevel === "confident" && strong.length === 0) strong.push("Базовые навыки");
-    if (weak.length === 0) weak.push("Пока не выявлены");
 
     body.innerHTML = `
       <div class="onboard-title" style="font-size:22px">Твой стартовый профиль</div>
@@ -3523,7 +3550,9 @@ const Onboarding = {
           </div>
           <div>
             <div class="stat-label" style="margin-bottom:8px">Требуют внимания</div>
-            <div class="error-subtopics">${weak.map((n) => `<span class="chip chip--danger">${n}</span>`).join("")}</div>
+            ${weak.length
+              ? `<div class="error-subtopics">${weak.map((n) => `<span class="chip chip--danger">${n}</span>`).join("")}</div>`
+              : `<div class="onboard-sub" style="margin:0">Не выявлены — все ответы верные.</div>`}
           </div>
         </div>
       </div>

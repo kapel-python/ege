@@ -1452,6 +1452,14 @@ body {
   animation: screenIn 0.35s ease;
   margin: auto;
 }
+/* Переключатель темы на экране регистрации: в углу оверлея, поверх всего
+   (топбар с основной кнопкой темы перекрыт оверлеем). */
+.onboard-theme {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+}
 .onboard-steps { display: flex; gap: 6px; margin-bottom: 28px; }
 .onboard-steps i { flex: 1; height: 3px; border-radius: 3px; background: var(--surface-3); transition: background 0.3s; }
 .onboard-steps i.on { background: var(--accent); }
