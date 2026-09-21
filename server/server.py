@@ -3123,12 +3123,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
             return
         name = sanitize_name(payload.get("name"))
-        conn.execute(
-            "UPDATE users SET email=?, password_hash=?, registered_at=?, name=COALESCE(?, name) WHERE id=?",
-            (email, hash_password(password), now_iso(), name, user_id),
-        )
-        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id)
-        conn.commit()
+        # Гард email IS NULL в самом UPDATE: при конкурентной регистрации
+        # второй запрос уже не сматчит строку (первый закоммитил) и честно
+        # получит 409 вместо мнимого 200 с перезаписанным чужим результатом.
+        try:
+            cur = conn.execute(
+                "UPDATE users SET email=?, password_hash=?, registered_at=?, name=COALESCE(?, name) "
+                "WHERE id=? AND email IS NULL",
+                (email, hash_password(password), now_iso(), name, user_id),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
+                return
+            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id)
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # Гонка двух разных гостей за один email: unique-индекс отверг
+            # вторую запись — честный 409 вместо 500.
+            conn.rollback()
+            auth_login_failed(ip)
+            self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
+            return
         auth_login_success(ip)
         self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)}, token=new_token)
 
