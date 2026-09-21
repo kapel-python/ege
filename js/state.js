@@ -43,6 +43,10 @@ const Store = {
   // round-trips through PUT /api/state, and the id must never be something
   // the client can send back and have written.
   accountId: null,
+  // Auth-срез текущего аккаунта из bootstrap: гость или зарегистрированный
+  // пользователь (registered + email). Только для отображения в UI — никаких
+  // решений на его основе, идентичность всегда определяется сервером по куке.
+  auth: { registered: false, email: null },
   listeners: {},
   pendingSave: Promise.resolve(),
   loadPromise: null,
@@ -152,6 +156,10 @@ const Store = {
   _applyBootstrap(payload) {
       DataAPI.load(payload.catalog);
       this.accountId = payload.accountId || null;
+      const auth = payload.auth;
+      this.auth = auth && typeof auth === "object"
+        ? { registered: !!auth.registered, email: auth.email || null }
+        : { registered: false, email: null };
       this.subject = (payload.state && payload.state.subject) || payload.catalog.subject || "profile_math";
       this.subjects = DataAPI.subjects();
       this.detailsPromise = null;
@@ -718,6 +726,26 @@ const Store = {
         this.emit("persistenceerror", error);
       });
     return this.pendingSave;
+  },
+
+  // После register/login/logout сервер перевыпускает сессию (или минтит
+  // нового гостя) — перечитываем bootstrap: обычный load подтянет новый
+  // аккаунт целиком, вручную ничего мержить не нужно. Сменившийся accountId
+  // требует переинициализации tab-leader: канал и лок имеют scope от
+  // accountId, иначе вкладки нового аккаунта встали бы в чужой координатор.
+  async refreshAfterAuth() {
+    const prevAccount = this.accountId;
+    await this.load();
+    if (this.accountId !== prevAccount && this.tabLeaderReady) {
+      this.releaseTabLeadership();
+      this.tabLeaderReady = false;
+      this.isTabLeader = false;
+      this.leaderTabId = null;
+      this.leaderSeenAt = 0;
+      await this.initTabLeader();
+    }
+    this.emit("authchanged");
+    return this.accountId !== prevAccount;
   },
 
   /* ------- events ------- */

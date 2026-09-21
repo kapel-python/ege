@@ -136,3 +136,20 @@ const ApiClient = {
   post(path, body) { return this.request(path, { method: "POST", body: JSON.stringify(body) }); },
   delete(path) { return this.request(path, { method: "DELETE" }); },
 };
+
+/* Аккаунты: регистрация/вход/выход. Пароль живёт только в теле запроса —
+   токен сессии держит HttpOnly-кука, JS его не видит и ничего не хранит. */
+const AuthAPI = {
+  register(name, email, password) {
+    return ApiClient.post("/api/auth/register", { name, email, password });
+  },
+  login(email, password) {
+    return ApiClient.post("/api/auth/login", { email, password });
+  },
+  logout() {
+    return ApiClient.post("/api/auth/logout", {});
+  },
+  session() {
+    return ApiClient.get("/api/auth/session");
+  },
+};

@@ -1835,3 +1835,101 @@ body {
   max-width: 170px;
 }
 .subject-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ============================================================
+   Аккаунт: статус в профиле, экраны входа/регистрации
+   ============================================================ */
+.auth-status { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.auth-status__email { font-size:13px; color:var(--text-2); }
+
+.auth-screen { display:flex; justify-content:center; padding:24px 0 48px; }
+.auth-card { max-width:440px; width:100%; padding:28px; }
+.auth-card__title { font-size:22px; font-weight:800; letter-spacing:-.01em; }
+.auth-card__sub { font-size:13px; color:var(--muted); line-height:1.6; margin-top:8px; }
+.auth-form { display:flex; flex-direction:column; gap:14px; margin-top:20px; }
+.auth-field { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--text-2); font-weight:600; }
+.auth-form__error { display:none; font-size:13px; color:var(--danger); line-height:1.5; }
+.auth-form__error.is-visible { display:block; }
+.auth-note { font-size:12px; color:var(--muted); line-height:1.6; margin-top:14px; border-top:1px solid var(--border); padding-top:12px; }
+.auth-note a, .auth-switch a { color:var(--accent); font-weight:600; text-decoration:none; cursor:pointer; }
+.auth-switch { font-size:13px; color:var(--muted); margin-top:16px; text-align:center; }
+
+/* ============================================================
+   Профиль: карточка «Данные» в стиле настроек
+   ============================================================ */
+.settings-card { padding: 4px 0; overflow: hidden; }
+.settings-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.settings-row + .settings-row { border-top: 1px solid var(--border); }
+.settings-row__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 18px;
+  color: var(--accent);
+}
+.settings-row__body { flex: 1; min-width: 0; }
+.settings-row__title { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+.settings-row__sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin-top: 3px;
+}
+.settings-row__control { margin-top: 10px; }
+
+/* Выход — полноценная danger-строка: вся строка кликабельна, красная иконка
+   и заголовок, при наведении — мягкий красный фон. */
+.settings-row--danger { cursor: pointer; border-radius: 0; }
+.settings-row--danger .settings-row__icon,
+.settings-row--danger .settings-row__title { color: var(--danger); }
+.settings-row--danger:hover { background: var(--danger-soft); }
+.settings-row--danger .settings-row__body { display: flex; flex-direction: column; }
+
+/* ============================================================
+   Профиль: пилюли выбора предмета + сетка метрик 3×2
+   ============================================================ */
+.subject-picker { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.subject-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.subject-pill:hover { border-color: var(--accent); color: var(--text); }
+.subject-pill--active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.subject-pill--soon { opacity: .75; }
+.subject-pill__badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.subject-pill--active .subject-pill__badge { background: var(--accent-ring); color: var(--accent-ink); }
+
+.stats-teaser__metrics--6 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 640px) {
+  .stats-teaser__metrics--6 { grid-template-columns: repeat(2, 1fr); }
+}
