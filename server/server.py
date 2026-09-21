@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from secrets import choice, token_urlsafe
+from secrets import choice, token_hex, token_urlsafe
 from urllib.parse import urlparse
 
 try:
@@ -174,6 +174,173 @@ _admin_login_failures: dict[str, list[float]] = {}
 _admin_login_lock = threading.Lock()
 SERVER_STARTED_AT = dt.datetime.now(dt.timezone.utc)
 
+# ---------------------------------------------------------------------------
+# User accounts (registration / login)
+#
+# The anonymous "guest" profile IS a users row: public endpoints resolve the
+# caller from the ege_session cookie via user_for() and mint a row on first
+# visit. Registering therefore does NOT create a new user — it attaches an
+# email + password hash to the CURRENT row, so every piece of learning data
+# (stats, progress, attempts, streak, achievements) stays put, keyed by the
+# same users.id. Login re-binds the browser session row to an existing
+# account; logout deletes that session row server-side and clears the cookie,
+# so a stale token afterwards resolves to a fresh guest, never to an account.
+# Sessions live in user_sessions (many per account, one per device), with a
+# server-side expiry; the cookie only ever carries an opaque random token.
+# ---------------------------------------------------------------------------
+AUTH_SESSION_DAYS = 365
+AUTH_SESSION_MAX_AGE = AUTH_SESSION_DAYS * 86400
+AUTH_PASSWORD_MIN_LENGTH = 8
+AUTH_PASSWORD_MAX_LENGTH = 72
+AUTH_LOGIN_MAX_FAILURES = 10
+AUTH_LOGIN_WINDOW_SEC = 15 * 60
+_auth_login_failures: dict[str, list[float]] = {}
+_auth_login_lock = threading.Lock()
+AUTH_SCHEMA_DONE: set[str] = set()
+
+
+def normalize_email(value) -> str | None:
+    """Lowercased/stripped email or None when unusable. Never raises."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lower()
+    if not cleaned or len(cleaned) > 254 or "@" not in cleaned:
+        return None
+    local, _, domain = cleaned.rpartition("@")
+    if not local or not domain or "." not in domain or " " in cleaned:
+        return None
+    return cleaned
+
+
+def hash_password(password: str) -> str:
+    """PBKDF2-SHA256 with a per-password salt; only this ever touches the DB."""
+    salt = token_hex(16)
+    iterations = 210000
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${dk.hex()}"
+
+
+def verify_password(candidate: str, stored: str | None) -> bool:
+    """Constant-time check of a plaintext against a stored PBKDF2 hash."""
+    if not stored or not isinstance(candidate, str):
+        return False
+    try:
+        algo, iterations, salt_hex, hash_hex = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def auth_login_allowed(ip: str) -> bool:
+    now = time.time()
+    with _auth_login_lock:
+        recent = [t for t in _auth_login_failures.get(ip, []) if now - t < AUTH_LOGIN_WINDOW_SEC]
+        _auth_login_failures[ip] = recent
+        return len(recent) < AUTH_LOGIN_MAX_FAILURES
+
+
+def auth_login_failed(ip: str) -> None:
+    with _auth_login_lock:
+        _auth_login_failures.setdefault(ip, []).append(time.time())
+
+
+def auth_login_success(ip: str) -> None:
+    with _auth_login_lock:
+        _auth_login_failures.pop(ip, None)
+
+
+def ensure_auth_schema(conn: sqlite3.Connection) -> None:
+    """Идемпотентная миграция под аккаунты: email/password_hash у users и
+    отдельная таблица серверных сессий (несколько на аккаунт — по одной на
+    устройство/браузер). Старые session_token переносятся в user_sessions,
+    чтобы существующие гостевые профили пережили апгрейд без потери данных."""
+    key = _db_key(conn)
+    if key in AUTH_SCHEMA_DONE:
+        return
+    conn.executescript(SCHEMA)
+    if "email" not in _table_columns(conn, "users"):
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "password_hash" not in _table_columns(conn, "users"):
+        conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+    if "registered_at" not in _table_columns(conn, "users"):
+        conn.execute("ALTER TABLE users ADD COLUMN registered_at TEXT")
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at INTEGER NOT NULL)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
+    # UNIQUE допускает множество NULL: незарегистрированные гости не мешают.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+    expiry = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
+    conn.execute(
+        "INSERT INTO user_sessions(user_id, token, created_at, expires_at) "
+        "SELECT id, session_token, created_at, ? FROM users "
+        "WHERE session_token IS NOT NULL AND NOT EXISTS "
+        "(SELECT 1 FROM user_sessions WHERE token = users.session_token)",
+        (expiry,))
+    conn.commit()
+    AUTH_SCHEMA_DONE.add(key)
+
+
+def session_row_for(conn: sqlite3.Connection, token: str | None):
+    """Живая сессия по токену или None. Просроченная удаляется лениво."""
+    if not token:
+        return None
+    row = conn.execute(
+        "SELECT us.id AS session_pk, us.expires_at, u.id AS user_id "
+        "FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.token = ?",
+        (token,)).fetchone()
+    if not row:
+        return None
+    if int(row["expires_at"]) <= int(time.time() * 1000):
+        conn.execute("DELETE FROM user_sessions WHERE id=?", (row["session_pk"],))
+        conn.commit()
+        return None
+    return row
+
+
+def create_user_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, int]:
+    token = token_urlsafe(32)
+    expires_at = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
+    conn.execute(
+        "INSERT INTO user_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
+        (user_id, token, now_iso(), expires_at),
+    )
+    return token, expires_at
+
+
+def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id: int) -> tuple[str, int]:
+    """Login/register: инвалидирует текущий токен и выдаёт новый, привязанный к
+    тому же (register) или целевому (login) аккаунту. Старый токен после этого
+    неизвестен серверу — повторная отправка старой куки минтит нового гостя."""
+    if old_token:
+        conn.execute("DELETE FROM user_sessions WHERE token=?", (old_token,))
+    return create_user_session(conn, user_id)
+
+
+def auth_user_payload(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """Публичный профиль аккаунта для auth-эндпоинтов. registered = есть хеш."""
+    row = conn.execute(
+        "SELECT name, account_id, email, password_hash FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    return {"name": row["name"], "accountId": row["account_id"], "email": row["email"],
+            "registered": bool(row["password_hash"])}
+
+
+def auth_state_payload(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Auth-срез для bootstrap: фронт рисует «Гостевой профиль» или email."""
+    row = conn.execute(
+        "SELECT email, password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+    registered = bool(row and row["password_hash"])
+    return {"registered": registered, "email": row["email"] if registered else None}
+
 
 def verify_admin_password(candidate: str) -> bool:
     """Constant-time check of the plaintext against the stored PBKDF2 hash."""
@@ -222,11 +389,9 @@ def existing_user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler)
     """Resolve the user from the ege_session cookie WITHOUT creating an
     account. Admin endpoints must not mint anonymous users for unauthenticated
     probes — unlike /api/bootstrap, where account creation is the normal flow."""
-    token_value = cookie_value(handler, "ege_session")
-    if not token_value:
-        return None
-    row = conn.execute("SELECT id FROM users WHERE session_token=?", (token_value,)).fetchone()
-    return row["id"] if row else None
+    ensure_auth_schema(conn)
+    row = session_row_for(conn, cookie_value(handler, "ege_session"))
+    return row["user_id"] if row else None
 
 
 def admin_session_user(conn: sqlite3.Connection, user_id: int, admin_token: str | None) -> dict | None:
@@ -1514,20 +1679,22 @@ def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) ->
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
     ensure_subject_schema(conn)
-    jar = cookies.SimpleCookie(handler.headers.get("Cookie", ""))
-    token = jar.get("ege_session")
-    token_value = token.value if token else None
-    row = conn.execute("SELECT id FROM users WHERE session_token=?", (token_value,)).fetchone() if token_value else None
+    ensure_auth_schema(conn)
+    token_value = cookie_value(handler, "ege_session")
+    row = session_row_for(conn, token_value)
     if row:
-        ensure_subject_rows(conn, row["id"], current_subject_for(conn, row["id"]))
+        ensure_subject_rows(conn, row["user_id"], current_subject_for(conn, row["user_id"]))
         conn.commit()
-        return row["id"], None
-    new_token = token_urlsafe(32)
-    cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (new_token, now_iso()))
+        return row["user_id"], None
+    cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (token_urlsafe(32), now_iso()))
     user_id = cur.lastrowid
     assign_account_id(conn, user_id)
     conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (user_id,))
     ensure_subject_rows(conn, user_id, DEFAULT_SUBJECT)
+    # users.session_token — legacy-колонка; пишем туда же стартовый токен,
+    # чтобы бэкфилл ensure_auth_schema не поднимал её обратно как новую сессию.
+    new_token, _ = create_user_session(conn, user_id)
+    conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, user_id))
     conn.commit()
     return user_id, new_token
 
@@ -2828,7 +2995,7 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
 class Handler(BaseHTTPRequestHandler):
     server_version = "EGECore/1.0"
 
-    def send_json(self, payload: dict, status: int = 200, token: str | None = None, admin_cookie: str | None = None):
+    def send_json(self, payload: dict, status: int = 200, token: str | None = None, admin_cookie: str | None = None, clear_session: bool = False):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         # Каталог и состояние — самый тяжёлый JSON (~280 КБ): gzip сжимает
         # его в ~4 раза. Клиенты без Accept-Encoding получают как раньше.
@@ -2842,6 +3009,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_security_headers()
         if token: self.send_header("Set-Cookie", self.session_cookie_attrs(token))
+        elif clear_session: self.send_header("Set-Cookie", self.session_cookie_clear_attrs())
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
@@ -2884,7 +3052,12 @@ class Handler(BaseHTTPRequestHandler):
         # Тот же Secure-механизм, что у admin cookie: по HTTP ничего не
         # меняется, под HTTPS токен сессии перестаёт летать открытым текстом.
         secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
-        return f"ege_session={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000{secure}"
+        return f"ege_session={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={AUTH_SESSION_MAX_AGE}{secure}"
+
+    def session_cookie_clear_attrs(self) -> str:
+        """Logout: выкидываем токен и из браузера, и из серверной таблицы."""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return f"ege_session=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
 
     def admin_cookie_attrs(self, value: str | None, max_age: int) -> str:
         secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
@@ -2905,6 +3078,100 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "No admin session", "login": True}, 401)
             return None
         return user_id, session
+
+    # ------------------------------------------------------------------
+    # User accounts: register / login / logout
+    #
+    # Register attaches an email + password hash to the CURRENT guest row
+    # (user_for), so all learning data survives — same users.id. Login
+    # re-binds the browser's session row to the account identified by email;
+    # the abandoned guest row stays orphaned in the DB, exactly like a lost
+    # cookie today, and is never merged. Logout deletes the session row and
+    # clears the cookie; afterwards the old token resolves to nothing and any
+    # request mints a fresh guest — auto-login cannot resurrect the account.
+    # Identity always comes from the server-side session; the frontend never
+    # supplies a user id and never sees the password.
+    # ------------------------------------------------------------------
+    def handle_auth_register(self, conn: sqlite3.Connection) -> None:
+        ip = self.client_address[0] if self.client_address else "?"
+        if not auth_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        email = normalize_email(payload.get("email"))
+        if not email:
+            self.send_json({"error": "Введите корректный email"}, 400)
+            return
+        password = payload.get("password")
+        if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
+            self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
+            return
+        user_id, _ = user_for(conn, self)  # текущий гость; привязываем именно его
+        current = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+        if current and current["email"]:
+            self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
+            return
+        if conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
+            auth_login_failed(ip)
+            self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
+            return
+        name = sanitize_name(payload.get("name"))
+        conn.execute(
+            "UPDATE users SET email=?, password_hash=?, registered_at=?, name=COALESCE(?, name) WHERE id=?",
+            (email, hash_password(password), now_iso(), name, user_id),
+        )
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id)
+        conn.commit()
+        auth_login_success(ip)
+        self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)}, token=new_token)
+
+    def handle_auth_login(self, conn: sqlite3.Connection) -> None:
+        ip = self.client_address[0] if self.client_address else "?"
+        if not auth_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        email = normalize_email(payload.get("email"))
+        password = payload.get("password")
+        if not email or not isinstance(password, str) or not password:
+            self.send_json({"error": "Введите email и пароль"}, 400)
+            return
+        row = conn.execute("SELECT id, password_hash FROM users WHERE email=?", (email,)).fetchone()
+        if not row or not verify_password(password, row["password_hash"]):
+            # Одинаковый текст для несуществующего email и неверного пароля:
+            # не подсвечиваем, какие адреса зарегистрированы.
+            auth_login_failed(ip)
+            self.send_json({"error": "Неверный email или пароль"}, 401)
+            return
+        account_id = row["id"]
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id)
+        conn.commit()
+        auth_login_success(ip)
+        self.send_json({"ok": True, "user": auth_user_payload(conn, account_id)}, token=new_token)
+
+    def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
+        # Logout must work even with an invalid/absent cookie: drop whatever
+        # session row this token had and clear the cookie. Never mint a user.
+        ensure_auth_schema(conn)
+        token = cookie_value(self, "ege_session")
+        if token:
+            conn.execute("DELETE FROM user_sessions WHERE token=?", (token,))
+            conn.commit()
+        self.send_json({"ok": True}, clear_session=True)
 
     def handle_admin_login(self, conn: sqlite3.Connection) -> None:
         ip = self.client_address[0] if self.client_address else "?"
@@ -2947,6 +3214,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout"):
+            conn = connect()
+            try:
+                if path == "/api/auth/register": self.handle_auth_register(conn)
+                elif path == "/api/auth/login": self.handle_auth_login(conn)
+                else: self.handle_auth_logout(conn)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path == "/api/admin/login" or path == "/api/admin/logout":
             conn = connect()
             try:
@@ -3115,6 +3394,10 @@ class Handler(BaseHTTPRequestHandler):
                 # БД, а rows без активности висят навсегда).
                 if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn, req_subject)); return
                 if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn, req_subject)); return
+                # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
+                if path == "/api/auth/session":
+                    auth_uid = existing_user_for(conn, self)
+                    self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None}); return
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
                     self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
@@ -3125,7 +3408,8 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     catalog = catalog_summary_payload(conn, eff) if path == "/api/bootstrap-lite" else catalog_payload(conn, eff)
-                    self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id)}, token=token); return
+                    self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id),
+                                    "auth": auth_state_payload(conn, user_id)}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             finally: conn.close()
         if path == '/':

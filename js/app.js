@@ -31,6 +31,8 @@ const ICONS = {
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.3"/><circle cx="12.1" cy="16.7" r="0.5" fill="currentColor" stroke="none"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4.5"/></svg>',
+  logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>',
 };
 
 function icon(name) {
@@ -38,9 +40,9 @@ function icon(name) {
   return (ICONS[name] || ICONS.target).replace("<svg ", '<svg width="1em" height="1em" style="vertical-align:-0.15em" ');
 }
 
-/* Theme is deliberately independent from progress state: resetProgress must
-   not erase a visual preference, and one shared HTML attribute styles every
-   route, modal and future component through the existing CSS tokens. */
+/* Theme is deliberately independent from progress state: wiping progress
+   must not erase a visual preference, and one shared HTML attribute styles
+   every route, modal and future component through the existing CSS tokens. */
 const Theme = {
   key: "ege_core_theme",
   current() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; },
@@ -1062,7 +1064,10 @@ async function render() {
     try { await Store.load(); } catch (_) {}
     if (!Store.ready || !Store.state) return;
   }
-  if (!Store.state.onboarded) { Onboarding.show(); return; }
+  const route = currentRoute();
+  // Экраны входа/регистрации доступны и до онбординга: после logout свежий
+  // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
+  if (!Store.state.onboarded && route !== "login" && route !== "register") { Onboarding.show(); return; }
   Onboarding.hide();
   // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
   // меняет и потому не страдает; окно навыка для #/skill открывает конец render).
@@ -1070,7 +1075,6 @@ async function render() {
     lastHash = location.hash;
     try { closeModal(); } catch (_) {}
   }
-  const route = currentRoute();
   const param = routeParam();
   // Подсветка в меню: глубокий маршрут относится к своему разделу.
   const navRoute = route === "practice" ? "training"
@@ -1136,6 +1140,8 @@ async function render() {
     trials: screenTrials,
     stats: screenStats,
     profile: screenProfile,
+    login: screenLogin,
+    register: screenRegister,
   }[route] || screenDashboard;
   // Пустой предмет: контентным маршрутам нечего показать — честная заглушка
   // вместо пустых экранов или данных чужого предмета.
@@ -1179,6 +1185,7 @@ const ROUTE_TITLES = {
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
   errors: "Ошибки", trials: "Испытания", stats: "Статистика", profile: "Профиль",
+  login: "Вход", register: "Регистрация",
 };
 
 function updateDocumentTitle(route) {
@@ -1206,6 +1213,25 @@ function subjectSwitcherHTML() {
   return `<select class="subject-select" onchange="switchSubjectFromUI(this)" aria-label="Выбрать предмет">`
     + subjects.map((s) => `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(s.short || s.title)}${s.status === "ready" ? "" : " · скоро"}</option>`).join("")
     + `</select>`;
+}
+
+/* Пилюли предметов для профиля вместо нативного селекта: оба предмета
+   видны сразу, у недоступного — бейдж «скоро». */
+function subjectPickerHTML() {
+  const subjects = DataAPI.subjects();
+  if (subjects.length < 2) return "";
+  const cur = DataAPI.currentSubject();
+  return `<div class="subject-picker" role="group" aria-label="Выбрать предмет">`
+    + subjects.map((s) => {
+        const active = s.id === cur;
+        const ready = s.status === "ready";
+        return `<button type="button" class="subject-pill${active ? " subject-pill--active" : ""}${ready ? "" : " subject-pill--soon"}"
+          onclick="switchSubjectFromUI('${esc(s.id)}')" aria-pressed="${active}">
+          <span class="subject-pill__name">${esc(s.short || s.title)}</span>
+          ${ready ? "" : `<span class="subject-pill__badge">скоро</span>`}
+        </button>`;
+      }).join("")
+    + `</div>`;
 }
 
 async function switchSubjectFromUI(sel) {
@@ -3220,7 +3246,7 @@ function forecastChart() {
    Screen: Профиль + достижения
    ============================================================ */
 
-function profileStatsTeaser(s, acc) {
+function profileStatsTeaser(s, acc, avgTime) {
   let f = null;
   try { f = forecast(); } catch (_) { f = null; }
   let days = [];
@@ -3231,6 +3257,8 @@ function profileStatsTeaser(s, acc) {
     const today = i === days.length - 1;
     return `<div class="stats-teaser__bar${today ? " stats-teaser__bar--today" : ""}" style="height:${pct}%" title="${d.label}: ${d.solved || 0}"></div>`;
   }).join("");
+  // Один блок вместо пары «стат-грид + тизер»: те же данные без повторов
+  // (решено/точность раньше дублировались в обоих).
   return `
     <div class="card card--glow stats-teaser">
       <div class="stats-teaser__head">
@@ -3240,11 +3268,13 @@ function profileStatsTeaser(s, acc) {
           <div class="stats-teaser__sub">Активность, точность и прогноз — полная аналитика в один тап</div>
         </div>
       </div>
-      <div class="stats-teaser__metrics">
+      <div class="stats-teaser__metrics stats-teaser__metrics--6">
         <div class="stats-teaser__metric"><b class="mono">${s.totalSolved}</b><span>решено</span></div>
         <div class="stats-teaser__metric"><b class="mono">${acc}%</b><span>точность</span></div>
         <div class="stats-teaser__metric"><b class="mono">${s.xp}</b><span>всего XP</span></div>
         <div class="stats-teaser__metric"><b class="mono">${f && !f.empty ? `${f.low}–${f.high}` : "—"}</b><span>прогноз</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${s.bestSeries}</b><span>лучшая серия</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${avgTime ? fmtTime(avgTime) : "—"}</b><span>среднее время</span></div>
       </div>
       <div class="stats-teaser__bars" aria-hidden="true">${bars}</div>
       <div class="stats-teaser__bars-label"><span>Активность · 14 дней</span><span>Сегодня справа · темнее</span></div>
@@ -3297,14 +3327,7 @@ function screenProfile(root) {
       </div>
     </div>
 
-    <div class="grid grid--4 stat-grid">
-      <div class="card stat-card"><div class="action-card__icon">${icon("check")}</div><div><div class="stat-num mono">${s.totalSolved}</div><div class="stat-label">решено задач</div></div></div>
-      <div class="card stat-card"><div class="action-card__icon">${icon("target")}</div><div><div class="stat-num mono">${acc}%</div><div class="stat-label">точность</div></div></div>
-      <div class="card stat-card"><div class="action-card__icon">${icon("clock")}</div><div><div class="stat-num mono">${avgTime ? fmtTime(avgTime) : "—"}</div><div class="stat-label">среднее время</div></div></div>
-      <div class="card stat-card"><div class="action-card__icon">${icon("flame")}</div><div><div class="stat-num mono">${s.bestSeries}</div><div class="stat-label">лучшая серия без ошибок</div></div></div>
-    </div>
-
-    ${profileStatsTeaser(s, acc)}
+    ${profileStatsTeaser(s, acc, avgTime)}
 
     <div class="section-title">Достижения</div>
     <div class="badge-grid">
@@ -3335,32 +3358,195 @@ function screenProfile(root) {
       </div>
       <div>
         <div class="section-title" style="margin-top:0">Данные</div>
-        <div class="card">
-          <div style="font-size:13px;color:var(--muted);line-height:1.6">
-            Прогресс и результаты сохраняются на сервере в SQLite для этого аккаунта.
+        <div class="card settings-card">
+          <div class="settings-row">
+            <div class="settings-row__icon" aria-hidden="true">${icon("shield")}</div>
+            <div class="settings-row__body">
+              <div class="settings-row__title">Аккаунт</div>
+              ${accountAuthHTML()}
+            </div>
           </div>
-          <div class="stat-label" style="margin-top:16px">Предмет</div>
-          <div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap">
-            ${subjectSwitcherHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
-            <span style="font-size:13px;color:var(--muted)">Прогресс, ошибки, статистика и прогноз хранятся отдельно по каждому предмету.</span>
+          <div class="settings-row">
+            <div class="settings-row__icon" aria-hidden="true">${icon("layers")}</div>
+            <div class="settings-row__body">
+              <div class="settings-row__title">Предмет</div>
+              <div class="settings-row__sub">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету.</div>
+              <div class="settings-row__control">
+                ${subjectPickerHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
+              </div>
+              ${DataAPI.isSubjectEmpty() ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
+            </div>
           </div>
-          ${DataAPI.isSubjectEmpty() ? `<div style="margin-top:10px;font-size:14px;color:var(--text-2)">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
-          <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
-            <button class="btn btn--danger-soft btn--sm" onclick="resetProgress()">Сбросить прогресс</button>
+          <div class="settings-row">
+            <div class="settings-row__icon" aria-hidden="true">${icon("check")}</div>
+            <div class="settings-row__body">
+              <div class="settings-row__title">Сохранение</div>
+              <div class="settings-row__sub">Прогресс и результаты автоматически сохраняются на сервере после каждого действия — ничего нажимать не нужно.</div>
+            </div>
           </div>
+          ${Store.auth && Store.auth.registered ? `
+          <button class="settings-row settings-row--danger" type="button" onclick="logoutAccount()">
+            <span class="settings-row__icon" aria-hidden="true">${icon("logout")}</span>
+            <span class="settings-row__body">
+              <span class="settings-row__title">Выйти из аккаунта</span>
+              <span class="settings-row__sub">Прогресс не удалится и вернётся при следующем входе по email и паролю.</span>
+            </span>
+          </button>` : ""}
         </div>
       </div>
     </div>`;
 }
 
-function resetProgress() {
-  openModal(`
-    <div style="font-size:18px;font-weight:700">Сбросить весь прогресс?</div>
-    <div style="color:var(--muted);font-size:14px;margin-top:10px">XP, уровни, ошибки, достижения и статистика будут удалены безвозвратно во всех предметах. Аккаунт получит новый ID. Онбординг начнётся заново.</div>
-    <div style="display:flex;gap:10px;margin-top:22px;justify-content:flex-end">
-      <button class="btn btn--ghost" onclick="closeModal()">Отмена</button>
-      <button class="btn btn--danger-soft" onclick="Store.reset();closeModal();location.hash='#/dashboard';render()">Сбросить</button>
-    </div>`);
+/* ============================================================
+   Аккаунт: статус в профиле, вход/регистрация/выход
+   Гость пользуется сайтом без регистрации; auth — добровольная
+   привязка текущего профиля, чтобы не зависеть от куки на одном
+   устройстве. Идентичность всегда решает сервер по сессии.
+   ============================================================ */
+
+function accountAuthHTML() {
+  const auth = Store.auth || { registered: false, email: null };
+  if (auth.registered) {
+    return `
+      <div class="auth-status" style="margin-top:8px">
+        <span class="chip chip--success">${icon("check")} привязан</span>
+        <span class="auth-status__email mono">${esc(auth.email || "")}</span>
+      </div>
+      <div class="settings-row__sub" style="margin-top:6px">Вход автоматический: сессия привязана к этому аккаунту, прогресс доступен с любого устройства.</div>`;
+  }
+  return `
+    <div class="settings-row__sub">Гостевой профиль — прогресс привязан к этому устройству.</div>
+    <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn--primary btn--sm" onclick="go('register')">Войти или зарегистрироваться</button>
+    </div>`;
+}
+
+function authScreenShell(title, sub, body) {
+  return `
+    <div class="auth-screen">
+      <div class="card card--glow auth-card">
+        <div class="auth-card__title">${title}</div>
+        <div class="auth-card__sub">${sub}</div>
+        ${body}
+      </div>
+    </div>`;
+}
+
+function screenLogin(root) {
+  if (Store.auth && Store.auth.registered) {
+    root.innerHTML = authScreenShell("Вы уже вошли",
+      `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
+      `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+         <button class="btn btn--primary" onclick="go('profile')">В профиль</button>
+       </div>`);
+    return;
+  }
+  root.innerHTML = authScreenShell("Вход",
+    "Войди в существующий аккаунт — весь прогресс и настройки вернутся.",
+    `
+    <form class="auth-form" onsubmit="submitLogin(event)">
+      <label class="auth-field"><span>Email</span>
+        <input class="answer-input" type="email" name="email" autocomplete="email" required>
+      </label>
+      <label class="auth-field"><span>Пароль</span>
+        <input class="answer-input" type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <div class="auth-form__error" id="auth-error" role="alert"></div>
+      <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Войти</button>
+    </form>
+    <div class="auth-note">Гостевой прогресс на этом устройстве не переносится в существующий аккаунт.
+      Чтобы сохранить его, <a href="#/register" onclick="go('register');return false">зарегистрируйтесь</a>.</div>
+    <div class="auth-switch">Нет аккаунта? <a href="#/register" onclick="go('register');return false">Зарегистрироваться</a></div>`);
+  const first = root.querySelector("input[name=email]");
+  if (first) first.focus();
+}
+
+function screenRegister(root) {
+  if (Store.auth && Store.auth.registered) {
+    root.innerHTML = authScreenShell("Аккаунт уже создан",
+      `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
+      `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+         <button class="btn btn--primary" onclick="go('profile')">В профиль</button>
+       </div>`);
+    return;
+  }
+  root.innerHTML = authScreenShell("Регистрация",
+    "Текущий гостевой профиль целиком переедет в аккаунт: XP, уровень, прогресс, ошибки и достижения.",
+    `
+    <form class="auth-form" onsubmit="submitRegister(event)">
+      <label class="auth-field"><span>Имя</span>
+        <input class="answer-input" type="text" name="name" autocomplete="name" maxlength="${NAME_MAX_LENGTH}" required>
+      </label>
+      <label class="auth-field"><span>Email</span>
+        <input class="answer-input" type="email" name="email" autocomplete="email" required>
+      </label>
+      <label class="auth-field"><span>Пароль (минимум 8 символов)</span>
+        <input class="answer-input" type="password" name="password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <div class="auth-form__error" id="auth-error" role="alert"></div>
+      <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Создать аккаунт</button>
+    </form>
+    <div class="auth-switch">Уже есть аккаунт? <a href="#/login" onclick="go('login');return false">Войти</a></div>`);
+  const first = root.querySelector("input[name=name]");
+  if (first) first.focus();
+}
+
+function authFormFail(message) {
+  const box = document.getElementById("auth-error");
+  if (box) { box.textContent = message; box.classList.add("is-visible"); }
+  const btn = document.getElementById("auth-submit");
+  if (btn) btn.disabled = false;
+}
+
+function authFormBusy() {
+  const box = document.getElementById("auth-error");
+  if (box) { box.textContent = ""; box.classList.remove("is-visible"); }
+  const btn = document.getElementById("auth-submit");
+  if (btn) btn.disabled = true;
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  authFormBusy();
+  const form = event.target;
+  try {
+    await AuthAPI.login(form.email.value.trim(), form.password.value);
+    await Store.refreshAfterAuth();
+    toast("Вы вошли в аккаунт", "", "check");
+    go("profile");
+  } catch (error) {
+    authFormFail((error && error.message) || "Не удалось войти. Попробуй ещё раз.");
+  }
+}
+
+async function submitRegister(event) {
+  event.preventDefault();
+  authFormBusy();
+  const form = event.target;
+  const password = form.password.value;
+  if (password.length < 8) { authFormFail("Пароль — минимум 8 символов"); return; }
+  try {
+    await AuthAPI.register(form.name.value.trim(), form.email.value.trim(), password);
+    await Store.refreshAfterAuth();
+    toast("Аккаунт создан — весь прогресс сохранён", "", "check");
+    go("profile");
+  } catch (error) {
+    authFormFail((error && error.message) || "Не удалось создать аккаунт. Попробуй ещё раз.");
+  }
+}
+
+async function logoutAccount() {
+  try {
+    await AuthAPI.logout();
+  } catch (firstError) {
+    try { await AuthAPI.logout(); } catch (secondError) {
+      toast("Не удалось выйти: проверь соединение и попробуй снова", "toast--error", "x");
+      return;
+    }
+  }
+  await Store.refreshAfterAuth();
+  toast("Вы вышли из аккаунта. Прогресс аккаунта сохранён на сервере.", "", "check");
+  go("login");
 }
 
 /* ============================================================
