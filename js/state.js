@@ -608,8 +608,18 @@ const Store = {
       return await this._saveDomains(snapshot);
     } catch (error) {
       if (!error || error.status !== 409) throw error;
+      const prevAccount = this.accountId;
       const liveAtConflict = JSON.parse(JSON.stringify(this.state || {}));
       await this.load(snapshot.subject);
+      // Смена аккаунта посреди сейва (logout/login в другой вкладке этого
+      // браузера): локальный снапшот принадлежит прежнему аккаунту — мержить
+      // его в новый нельзя, иначе события/ошибки/достижения/XP старого
+      // аккаунта физически запишутся в новый. Серверный снимок уже свежий —
+      // принимаем его как есть, без мержа и без повторной отправки.
+      if (this.accountId !== prevAccount) {
+        this.emit("stateconflict", { accountChanged: true });
+        return { ok: true, stateVersion: this.state.stateVersion, accountChanged: true };
+      }
       const fresh = this.state;
       const rebased = this.mergeConflictState(this.mergeConflictState(fresh, snapshot), liveAtConflict);
       const result = await this._saveDomains(rebased);
