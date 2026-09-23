@@ -1950,6 +1950,280 @@ def catalog_lessons_payload(conn: sqlite3.Connection, subject: str | None = None
     return {"lessons": catalog_payload(conn, subject)["lessons"]}
 
 
+def _plural_ru(count: int, one: str, few: str, many: str) -> str:
+    """Русская плюрализация для счётчиков публичного статуса. Никогда не бросает."""
+    try:
+        n = abs(int(count))
+    except (TypeError, ValueError):
+        n = 0
+    last_two = n % 100
+    last = n % 10
+    if last == 1 and last_two != 11:
+        return one
+    if 2 <= last <= 4 and not 12 <= last_two <= 14:
+        return few
+    return many
+
+
+def _status_file_mtime_ms(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime * 1000)
+    except OSError:
+        return 0
+
+
+def _build_public_status(conn: sqlite3.Connection) -> dict:
+    """Честный публичный срез для страницы /status.
+
+    Только SELECT, без заведения аккаунта и миграций: недоступная таблица —
+    это «сервис недоступен», а не повод что-то чинить за пользователя.
+    Наружу уходят лишь имена предметов/тем и счётчики каталога — никаких
+    текстов заданий, ответов, пользовательских данных, путей или env.
+    """
+    now_ms = int(time.time() * 1000)
+    try:
+        conn.execute("SELECT 1").fetchone()
+        db_ok = True
+    except sqlite3.Error:
+        db_ok = False
+    try:
+        # Только факт доступности хранилища сессий — без подсчёта чужих сессий.
+        conn.execute("SELECT 1 FROM user_sessions LIMIT 1").fetchone()
+        auth_ok = True
+    except sqlite3.Error:
+        auth_ok = False
+
+    subjects: list[dict] = []
+    total_skills = total_tasks = total_lessons = total_missions = total_bosses = 0
+    diagnostics_any = False
+    for sid in SUBJECT_IDS:
+        info = SUBJECTS[sid]
+        try:
+            skill_rows = list(conn.execute(
+                "SELECT id, name, topic_id, ege FROM skills WHERE subject=? ORDER BY display_order", (sid,)))
+        except sqlite3.Error:
+            skill_rows = []
+        try:
+            categories = [dict(id=r["id"], name=r["name"], short=r["short"])
+                          for r in conn.execute("SELECT id, name, short FROM topics WHERE subject=? ORDER BY rowid", (sid,))]
+        except sqlite3.Error:
+            categories = []
+        cat_ids = {c["id"] for c in categories}
+        # Доступные задания = все минус нерешаемые без официального рисунка
+        # (тот же предикат, что прячет их от учеников в каталоге).
+        available_by_skill: dict[str, int] = {}
+        blocked_by_skill: dict[str, int] = {}
+        visuals_by_skill: dict[str, int] = {}
+        skill_ids = {r["id"] for r in skill_rows}
+        try:
+            task_rows = list(conn.execute(
+                "SELECT t.id, t.skill_id, t.metadata_json FROM tasks t "
+                "JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (sid,)))
+        except sqlite3.Error:
+            task_rows = []
+        diag_task_ids: set[str] = set()
+        try:
+            diag_list = _subject_config(conn, "diagnosticTasks", sid, [], sid == DEFAULT_SUBJECT)
+            if isinstance(diag_list, list):
+                diag_task_ids = {str(x) for x in diag_list if isinstance(x, str)}
+        except (sqlite3.Error, ValueError, TypeError):
+            diag_task_ids = set()
+        task_skill: dict[str, str] = {}
+        subj_tasks = subj_blocked = subj_visuals = 0
+        for tr in task_rows:
+            try:
+                meta = json.loads(tr["metadata_json"] or "{}")
+            except (ValueError, TypeError):
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            item = {"id": tr["id"]}
+            item.update(meta)
+            task_skill[str(tr["id"])] = str(tr["skill_id"])
+            if task_has_missing_visual(item):
+                blocked_by_skill[str(tr["skill_id"])] = blocked_by_skill.get(str(tr["skill_id"]), 0) + 1
+                subj_blocked += 1
+                continue
+            available_by_skill[str(tr["skill_id"])] = available_by_skill.get(str(tr["skill_id"]), 0) + 1
+            subj_tasks += 1
+            if meta.get("mathVisual"):
+                visuals_by_skill[str(tr["skill_id"])] = visuals_by_skill.get(str(tr["skill_id"]), 0) + 1
+                subj_visuals += 1
+        diag_skills = {task_skill[tid] for tid in diag_task_ids if tid in task_skill}
+        if diag_task_ids:
+            diagnostics_any = True
+        try:
+            lesson_rows = list(conn.execute(
+                "SELECT l.skill_id AS skill_id, l.metadata_json AS metadata_json FROM lessons l "
+                "JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (sid,)))
+        except sqlite3.Error:
+            lesson_rows = []
+        lesson_by_skill: dict[str, dict] = {}
+        for lr in lesson_rows:
+            try:
+                lesson_meta = json.loads(lr["metadata_json"] or "{}")
+            except (ValueError, TypeError):
+                lesson_meta = {}
+            steps = lesson_meta.get("steps") if isinstance(lesson_meta, dict) else None
+            lesson_by_skill[str(lr["skill_id"])] = {
+                "title": lesson_meta.get("title") if isinstance(lesson_meta, dict) else None,
+                "steps": len(steps) if isinstance(steps, list) else 0,
+            }
+        try:
+            mission_rows = list(conn.execute(
+                "SELECT m.skill_id AS skill_id FROM missions m "
+                "JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (sid,)))
+        except sqlite3.Error:
+            mission_rows = []
+        missions_by_skill: dict[str, int] = {}
+        for mr in mission_rows:
+            missions_by_skill[str(mr["skill_id"])] = missions_by_skill.get(str(mr["skill_id"]), 0) + 1
+        subj_missions = len(mission_rows)
+        subj_bosses = 0
+        try:
+            for br in conn.execute("SELECT topic_id FROM bosses"):
+                if br["topic_id"] in cat_ids:
+                    subj_bosses += 1
+        except sqlite3.Error:
+            subj_bosses = 0
+        skills: list[dict] = []
+        for sr in skill_rows:
+            skid = str(sr["id"])
+            tasks_n = available_by_skill.get(skid, 0)
+            lesson = lesson_by_skill.get(skid)
+            if tasks_n > 0:
+                skill_status = "available"
+            elif lesson:
+                # Теория есть, а практика временно недоступна (например, все
+                # задания темы ждут официальный рисунок) — показываем честно.
+                skill_status = "limited"
+            else:
+                skill_status = "empty"
+            skills.append({
+                "id": skid,
+                "name": sr["name"],
+                "ege": sr["ege"],
+                "category": sr["topic_id"],
+                "status": skill_status,
+                "tasks": tasks_n,
+                "blockedTasks": blocked_by_skill.get(skid, 0),
+                "lesson": bool(lesson),
+                "lessonTitle": (lesson or {}).get("title"),
+                "lessonSteps": (lesson or {}).get("steps", 0),
+                "practice": tasks_n > 0,
+                "missions": missions_by_skill.get(skid, 0),
+                "visuals": visuals_by_skill.get(skid, 0),
+                "inDiagnostics": skid in diag_skills,
+            })
+        subj_lessons = len(lesson_rows)
+        if info.get("status") != "ready" or not skills:
+            subject_status = "empty"
+        elif all(s["status"] == "available" for s in skills):
+            subject_status = "available"
+        elif subj_tasks > 0:
+            subject_status = "partial"
+        else:
+            subject_status = "empty"
+        for c in categories:
+            c["skills"] = sum(1 for s in skills if s["category"] == c["id"])
+        subjects.append({
+            "id": sid,
+            "title": info.get("title", sid),
+            "short": info.get("short", sid),
+            "status": subject_status,
+            "features": dict(info.get("features", {})),
+            "categories": categories,
+            "skills": skills,
+            "counts": {
+                "skills": len(skills),
+                "tasks": subj_tasks,
+                "blockedTasks": subj_blocked,
+                "lessons": subj_lessons,
+                "missions": subj_missions,
+                "bosses": subj_bosses,
+                "diagnostics": len(diag_task_ids),
+                "visuals": subj_visuals,
+            },
+        })
+        total_skills += len(skills)
+        total_tasks += subj_tasks
+        total_lessons += subj_lessons
+        total_missions += subj_missions
+        total_bosses += subj_bosses
+    content_updated = max(_status_file_mtime_ms(CATALOG_PATH), _status_file_mtime_ms(CATALOG_BASIC_PATH))
+    services = [
+        {"id": "api", "label": "API", "ok": True, "detail": "Отвечает"},
+        {"id": "database", "label": "База данных", "ok": db_ok,
+         "detail": "Доступна" if db_ok else "Не удалось проверить"},
+        {"id": "auth", "label": "Авторизация", "ok": auth_ok,
+         "detail": "Доступна" if auth_ok else "Не удалось проверить"},
+        {"id": "tasks", "label": "Задания", "ok": db_ok and total_tasks > 0,
+         "detail": f"Доступно: {total_tasks} {_plural_ru(total_tasks, 'задание', 'задания', 'заданий')}"
+                   if db_ok and total_tasks > 0 else "Не удалось проверить"},
+        {"id": "lessons", "label": "Уроки", "ok": db_ok and total_lessons > 0,
+         "detail": f"{total_lessons} {_plural_ru(total_lessons, 'урок', 'урока', 'уроков')}"
+                   if db_ok and total_lessons > 0 else "Не удалось проверить"},
+        {"id": "diagnostics", "label": "Диагностика", "ok": db_ok and diagnostics_any,
+         "detail": "Доступна" if db_ok and diagnostics_any else "Не удалось проверить"},
+    ]
+    overall = "ok" if all(s["ok"] for s in services) else "degraded"
+    return {
+        "ok": overall == "ok",
+        "now": now_ms,
+        "overall": overall,
+        "services": services,
+        "subjects": subjects,
+        "totals": {"subjects": len(subjects), "skills": total_skills, "tasks": total_tasks,
+                   "lessons": total_lessons, "missions": total_missions, "bosses": total_bosses},
+        "contentUpdatedAt": content_updated or None,
+    }
+
+
+def public_status_payload(conn: sqlite3.Connection) -> dict:
+    """Обёртка без исключений: статус-страница показывает деградацию, а не 500."""
+    try:
+        return _build_public_status(conn)
+    except Exception:
+        return {
+            "ok": False, "now": int(time.time() * 1000), "overall": "unknown",
+            "services": [
+                {"id": "api", "label": "API", "ok": True, "detail": "Отвечает"},
+                {"id": "database", "label": "База данных", "ok": False, "detail": "Не удалось проверить"},
+            ],
+            "subjects": [],
+            "totals": {"subjects": 0, "skills": 0, "tasks": 0, "lessons": 0, "missions": 0, "bosses": 0},
+            "contentUpdatedAt": None,
+        }
+
+
+# Мягкий антиспам для публичного /api/status: лимит щедрый (60 запросов в
+# минуту с IP), обычный пользователь — даже с частым ручным обновлением —
+# его никогда не заметит. Превышение отдаёт 429 с Retry-After, а не данные:
+# страница при этом показывает уже загруженное, а не ошибку. Тот же in-memory
+# паттерн скользящего окна, что у login-guard выше.
+STATUS_RATE_MAX = 60
+STATUS_RATE_WINDOW_SEC = 60.0
+_status_hits: dict[str, list[float]] = {}
+_status_lock = threading.Lock()
+
+
+def status_rate_ok(ip: str) -> bool:
+    """True, если с IP ещё можно отдавать статус. Никогда не бросает."""
+    try:
+        now = time.time()
+        key = str(ip or "?")
+        with _status_lock:
+            recent = [t for t in _status_hits.get(key, []) if now - t < STATUS_RATE_WINDOW_SEC]
+            if len(recent) >= STATUS_RATE_MAX:
+                _status_hits[key] = recent
+                return False
+            recent.append(now)
+            _status_hits[key] = recent
+            return True
+    except Exception:
+        return True
+
+
 def current_subject_for(conn: sqlite3.Connection, user_id: int) -> str:
     """Текущий предмет пользователя. Неизвестное значение чинится в дефолт."""
     cols = _table_columns(conn, "users")
@@ -3859,6 +4133,25 @@ class Handler(BaseHTTPRequestHandler):
                 # БД, а rows без активности висят навсегда).
                 if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn, req_subject)); return
                 if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn, req_subject)); return
+                # Публичный срез для страницы /status: аккаунт не заводится,
+                # ничего не пишется — только безопасные счётчики каталога.
+                # Мягкий лимит 60/мин с IP: живые пользователи его не замечают,
+                # а спам отсекается честным 429 (страница покажет уже
+                # загруженные данные, а не ошибку).
+                if path == "/api/status":
+                    ip = self.client_address[0] if self.client_address else "?"
+                    if not status_rate_ok(ip):
+                        body = json.dumps({"error": "Слишком много запросов. Попробуй через несколько секунд.",
+                                           "retryAfter": 10}, ensure_ascii=False).encode("utf-8")
+                        self.send_response(429)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("X-Robots-Tag", "noindex, nofollow")
+                        self.send_security_headers()
+                        self.send_header("Retry-After", "10")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers(); self.wfile.write(body); return
+                    self.send_json(public_status_payload(conn)); return
                 # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
@@ -3892,6 +4185,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "index.html"
         elif path == '/admin':
             file_path = ROOT / "admin.html"
+        elif path == '/status':
+            file_path = ROOT / "status.html"
         elif path == "/sitemap.xml":
             # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
             # а домен зависит от деплоя — берём его из хоста запроса
@@ -3955,7 +4250,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
         # Приватные зоны не индексируются: дублируем meta robots HTTP-заголовком,
         # чтобы и прямые запросы /index.html и /admin.html были закрыты.
-        if path in ("/dashboard", "/admin") or file_path.name in ("index.html", "admin.html"):
+        if path in ("/dashboard", "/admin") or file_path.name in ("index.html", "admin.html", "status.html"):
             self.send_header("X-Robots-Tag", "noindex, nofollow")
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
