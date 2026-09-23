@@ -94,6 +94,13 @@ const DataAPI = {
   subjects() { return this._subjects || []; },
   currentSubject() { return this._subject || "profile_math"; },
   subjectInfo(id) { return this.subjects().find((s) => s.id === (id || this.currentSubject())) || null; },
+  // Состав курса предмета из subjects-пейлоада (уроки/практика/прогноз).
+  // Старые пейлоады без features (тесты) считаются полным курсом профиля.
+  subjectFeatures(id) {
+    const info = this.subjectInfo(id);
+    if (info && info.features && typeof info.features === "object") return info.features;
+    return { lessons: true, practice: true, forecast: true };
+  },
   forecastConfig() { return this._forecast || null; },
   // Пустой предмет: существует, контент ещё не подключён — экраны показывают
   // заглушку «Материалы пока готовятся», а не ошибку.
@@ -143,13 +150,28 @@ const AuthAPI = {
   register(name, email, password) {
     return ApiClient.post("/api/auth/register", { name, email, password });
   },
-  login(email, password) {
-    return ApiClient.post("/api/auth/login", { email, password });
+  // subject опционален: вход с явным предметом атомарно применяет его к
+  // сессии (Login → выбор предмета за один запрос). Без него сервер ничего
+  // не меняет — клиент доводит выбор через POST /api/subject.
+  login(email, password, subject) {
+    const body = { email, password };
+    if (subject) body.subject = subject;
+    return ApiClient.post("/api/auth/login", body);
   },
   logout() {
     return ApiClient.post("/api/auth/logout", {});
   },
   session() {
     return ApiClient.get("/api/auth/session");
+  },
+  /* Устройства: список активных серверных сессий аккаунта и отзыв одной.
+     Сырой User-Agent нигде не показываем — сервер отдаёт только готовые
+     название/тип. Отзыв текущей сессии эквивалентен logout (сервер чистит
+     куку), остальные сессии при этом не трогаем. */
+  devices() {
+    return ApiClient.get("/api/auth/devices");
+  },
+  revokeDevice(id) {
+    return ApiClient.delete("/api/auth/devices/" + encodeURIComponent(id));
   },
 };

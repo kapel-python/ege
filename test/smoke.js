@@ -14,7 +14,7 @@ const testBody = async () => {
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
   t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
-  t("каталог содержит ровно 49 задач", DataAPI.tasks().length === 49);
+  t("каталог содержит ровно 80 задач", DataAPI.tasks().length === 80);
   t("каждый из 20 номеров ЕГЭ представлен", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length > 0));
   // №6 и №13 официально имеют только один подтверждённый образец в демоверсии
   // 2027 — это не пробел, а честная граница источника.
@@ -25,7 +25,7 @@ const testBody = async () => {
   t("развёрнутые задания №14-20 помечены для самопроверки", DataAPI.tasks()
     .filter((x) => x.type === "extended_answer")
     .every((x) => x.selfCheck === true));
-  t("каждая задача несёт свой первоисточник", DataAPI.tasks().every((x) => x.sourceId && x.status === "official-demo-2027"));
+  t("каждая задача несёт свой первоисточник", DataAPI.tasks().every((x) => x.sourceId && ["official-demo-2025", "official-demo-2026", "official-demo-2027", "official-openbank"].includes(x.status)));
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
   const visualAssets = DataAPI.visualAssets();
   t("реестр visual assets загружен", visualAssets.length >= 4 && visualAssets.every((asset) => asset.src && asset.type && asset.alt && asset.source && asset.sourceId));

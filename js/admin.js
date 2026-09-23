@@ -112,7 +112,7 @@ function plural(n, one, few, many) {
   return many;
 }
 
-const GOAL_LABELS = { g60: "60+ баллов", g80: "80+ баллов", g95: "95+ баллов" };
+const GOAL_LABELS = { g60: "60+ баллов", g80: "80+ баллов", g95: "95+ баллов", g3: "Оценка 3 (база)", g4: "Оценка 4 (база)", g5: "Оценка 5 (база)" };
 const LEVEL_LABELS = { zero: "С нуля", base: "Базовый", confident: "Уверенный" };
 
 /* ---------------- API ---------------- */

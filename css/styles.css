@@ -27,9 +27,13 @@
   --violet-ink: #7c3aed;
   --btn-primary-bg: #4a5be0;
   --btn-primary-hover: #3f51e0;
-  --success: #3ddc97;
-  --success-soft: rgba(61, 220, 151, 0.12);
-  --success-ink: #147a4c;
+  --success: #10b981;
+  --success-soft: rgba(22, 163, 74, 0.14);
+  --success-ink: #15803d;
+  /* Яркий бренд-зелёный только для крупных слов («easy» в логотипах):
+     на белом он сочнее (3.3 — ок для крупного bold-текста), а мелкий
+     функциональный текст остаётся на читаемом --success-ink. */
+  --brand-green: #16a34a;
   --danger: #ff6b6b;
   --danger-soft: rgba(255, 107, 107, 0.12);
   --danger-ink: #cf3333;
@@ -78,6 +82,10 @@
   --btn-primary-bg: #6d7cff;
   --btn-primary-hover: #7d8aff;
   --success-ink: #86efac;
+  --brand-green: #86efac;
+  /* Пиним мятные заливки тёмной темы: в светлой --success стал сочнее (#10b981). */
+  --success: #3ddc97;
+  --success-soft: rgba(61, 220, 151, 0.12);
   --danger-ink: #fca5a5;
   --warn-ink: #fcd34d;
   --streak-viol: #c4b5fd;
@@ -158,7 +166,7 @@ body {
 }
 .easy-badge svg { width: 18px; height: 18px; }
 .easy-name { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: var(--text); text-transform: lowercase; white-space: nowrap; }
-.easy-name em { font-style: normal; color: var(--success-ink); }
+.easy-name em { font-style: normal; color: var(--brand-green); }
 .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 
 .sidebar__nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
@@ -240,6 +248,15 @@ body {
 }
 
 .bottomnav { display: none; }
+
+/* Пикер предмета после входа: хром заблокирован до явного выбора —
+   сайдбар приглушён (ссылки заменены спанами в JS), нижнее меню
+   полностью скрыто, шапка некликабельна. */
+.app.chrome-locked #sidebarNav,
+.app.chrome-locked #topbar { pointer-events: none; }
+.app.chrome-locked #sidebarNav { opacity: 0.45; filter: saturate(0.6); }
+.app.chrome-locked #bottomnav { display: none !important; }
+.nav-item.is-disabled { cursor: not-allowed; }
 
 /* ---------- generic components ---------- */
 
@@ -640,7 +657,7 @@ body {
 .forecast-mid small { font-size: 17px; font-weight: 600; letter-spacing: 0; color: var(--muted); margin-left: 8px; }
 .forecast-range { margin-top: 6px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .forecast-range b { color: var(--accent-ink); }
-.forecast-scale { position: relative; height: 8px; border-radius: 99px; background: var(--surface-3); margin-top: 16px; }
+.forecast-scale { position: relative; height: 8px; border-radius: 99px; background: var(--surface-3); margin-top: 0; }
 .forecast-scale__fill {
   position: absolute;
   left: 0;
@@ -655,11 +672,16 @@ body {
   bottom: -5px;
   width: 3px;
   border-radius: 2px;
-  background: var(--warn-ink);
+  background: var(--violet-ink);
 }
+/* В тёмной теме цель остаётся жёлтой (там она яркая), в светлой —
+   фиолетовая в цвет конца шкалы: жёлтый на белом не читается. */
+:root[data-theme="dark"] .forecast-scale__goal { background: var(--warn-ink); }
 .forecast-scale__labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.forecast-scale__labels .goal { color: var(--warn-ink); font-weight: 700; }
-.forecast-scale__labels--goal { position: relative; }
+.forecast-scale__labels .goal { color: var(--violet-ink); font-weight: 700; }
+:root[data-theme="dark"] .forecast-scale__labels .goal { color: var(--warn-ink); }
+.forecast-scale__labels--top { margin: 14px 0 6px; }
+.forecast-scale__labels--goal { position: relative; display: block; min-height: 17px; }
 .forecast-scale__labels--goal .goal { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
 .forecast-scale__labels--goal .goal--left { transform: none; }
 .forecast-scale__labels--goal .goal--right { transform: translateX(-100%); }
@@ -1073,6 +1095,15 @@ body {
   width: 100%;
   height: 100%;
   min-height: 220px;
+  /* Статичная иллюстрация: вертикальный свайп, начатый на рисунке, обязан
+     скроллить страницу. JSXGraph ставит touch-action:none инлайном на
+     контейнер доски при подключении pointer-обработчиков — перебиваем
+     !important (второй слой поверх el.style.touchAction="pan-y" в
+     js/mathvisual.js). Жесты доски (pan/zoom/pinch/rotate/drag) выключены
+     и на уровне опций initBoard, а pointer-events:none гарантирует, что
+     ни touch, ни мышь вообще не уходят в обработчики движка. */
+  touch-action: pan-y !important;
+  pointer-events: none;
   /* Удержание пальца/кнопки на фигуре не должно давать браузерную подсветку
      (жирный квадрат/заливку контура элемента), выделение текста и callout. */
   -webkit-tap-highlight-color: transparent;
@@ -1081,6 +1112,9 @@ body {
   -webkit-user-select: none;
 }
 .mathvisual-svg {
+  /* В SVG-дереве своих обработчиков жестов нет, но фиксируем то же
+     поведение скролла, что и у JSXGraph-досок. */
+  touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   user-select: none;
@@ -1465,6 +1499,20 @@ body {
 .onboard-steps i.on { background: var(--accent); }
 .onboard-title { font-size: 26px; font-weight: 750; letter-spacing: -0.02em; }
 .onboard-sub { color: var(--muted); margin-top: 8px; font-size: 14px; line-height: 1.6; }
+/* Вход из онбординга: вышедший из аккаунта возвращается к своей
+   учётке без прохождения диагностики заново. */
+.onboard-auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13.5px;
+}
 .choice-list { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
 .choice-item {
   text-align: left;
@@ -1535,6 +1583,82 @@ body {
 .modal--drag .modal__grab { cursor: grabbing; }
 .modal--snap { transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.25, 1); }
 .modal--dismiss { transition: transform 0.18s ease-in, opacity 0.18s ease-in; opacity: 0; pointer-events: none; }
+
+/* ---------- device dialog: центрированное окно с блюром ----------
+   В отличие от bottom-sheet модалки остаётся строго по центру и на
+   телефоне: отдельный бэкдроп с блюром, без ручки свайпа. */
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+.dlg {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: 24px;
+  max-height: 86vh;
+  max-height: 86dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  box-shadow: 0 24px 64px var(--shadow);
+  animation: dlgIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+@keyframes dlgIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.dlg__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+.dlg__close:hover { color: var(--text); background: var(--surface-3); }
+.dlg__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.dlg-device { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.dlg-device__icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.dlg-device__icon svg { width: 26px; height: 26px; }
+.dlg-device__name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.dlg-kv { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
+.dlg-kv__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; }
+.dlg-kv__row > span:first-child { color: var(--muted); flex-shrink: 0; }
+.dlg-kv__row > span:last-child { text-align: right; overflow-wrap: anywhere; }
+.dlg__text { font-size: 14px; line-height: 1.6; color: var(--text-2, var(--text)); margin-top: 14px; }
+.dlg__actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.dlg .chip { white-space: normal; flex-shrink: 1; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+/* Строка устройства кликабельна целиком — ведёт в инфо-диалог. */
+.settings-row--action { cursor: pointer; border-radius: 0; }
+.settings-row--action:hover { background: var(--soft-hover); }
 
 /* ---------- skill modal (окно темы в Пути) ---------- */
 .skill-modal__title { font-size: 22px; font-weight: 700; margin-top: 4px; padding-right: 36px; overflow-wrap: anywhere; }
@@ -1807,7 +1931,7 @@ body {
 .ege-loader__core svg { animation: ege-svgspin 7s linear infinite; filter: drop-shadow(0 0 6px var(--accent-glow)); }
 @keyframes ege-svgspin { to { transform: rotate(360deg); } }
 .ege-loader__brand { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; text-transform: lowercase; color: var(--text-2); }
-.ege-loader__brand span { color: var(--success-ink); }
+.ege-loader__brand span { color: var(--brand-green); }
 .ege-loader__title { margin-top: 8px; font-size: 16px; font-weight: 800; }
 .ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted); font-family: var(--mono); min-height: 19px; }
 .ege-loader__bar { margin: 14px auto 0; height: 6px; max-width: 240px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
@@ -1928,6 +2052,86 @@ body {
   color: var(--muted);
 }
 .subject-pill--active .subject-pill__badge { background: var(--accent-ring); color: var(--accent-ink); }
+
+/* Кнопка текущего предмета в профиле: открывает диалог выбора. */
+.subject-current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease;
+}
+.subject-current:hover { border-color: var(--accent); background: var(--accent-soft); }
+.subject-current__icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  color: var(--accent);
+}
+.subject-current__icon svg { width: 20px; height: 20px; }
+.subject-current__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.subject-current__name { font-size: 14px; font-weight: 750; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.subject-current__sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.subject-current__chev { flex-shrink: 0; font-size: 22px; line-height: 1; color: var(--muted); }
+
+/* Карточки предметов в диалоге выбора (та же dlg-модалка). */
+.subj-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.subj-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease;
+}
+.subj-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.subj-card--active { border-color: var(--accent); background: var(--accent-soft); }
+.subj-card__badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.subj-card__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.subj-card__name { font-size: 14.5px; font-weight: 750; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.subj-card__sub { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.subj-card__soon {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.subj-card__check { flex-shrink: 0; font-size: 17px; color: var(--muted); }
+.subj-card--active .subj-card__check { color: var(--accent); }
 
 .stats-teaser__metrics--6 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 640px) {

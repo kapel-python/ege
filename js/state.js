@@ -109,7 +109,7 @@ const Store = {
       missionsDone: {},
       missionProgress: {},
       achievements: {},
-      errors: [], // {taskId, skill, sub, ts, resolved}
+      errors: [], // {taskId, skill, sub, ts, resolved, kind: 'major'|'minor'}
       // Открытые ошибки в шагах урока; история хранит типы уже исправленных ошибок.
       lessonStepErrors: {}, // "lessonId:stepId" -> {count, skill, ts, types}
       lessonErrorHistory: [], // {lessonId, stepId, skill, type, ts}
@@ -157,9 +157,13 @@ const Store = {
       DataAPI.load(payload.catalog);
       this.accountId = payload.accountId || null;
       const auth = payload.auth;
+      // Нет auth в пейлоаде (например, старый ответ POST /api/subject) —
+      // не сбрасываем известную сессию в гостя: профиль покажет «Войти»,
+      // хотя аккаунт авторизован. Сброс происходит только по явному
+      // auth из ответа сервера.
       this.auth = auth && typeof auth === "object"
         ? { registered: !!auth.registered, email: auth.email || null }
-        : { registered: false, email: null };
+        : (this.auth || { registered: false, email: null });
       this.subject = (payload.state && payload.state.subject) || payload.catalog.subject || "profile_math";
       this.subjects = DataAPI.subjects();
       this.detailsPromise = null;
@@ -543,34 +547,52 @@ const Store = {
       // Legacy без ID: естественный ключ, как раньше.
       return a.taskId === b.taskId && a.ts === b.ts && !a.id && !b.id && !a.clientId && !b.clientId;
     };
+    // PATCH существующих — строго раньше POST новых: закрытие/апгрейд
+    // обязаны лечь в БД до вставки новой ошибки по тому же заданию, иначе
+    // серверный upsert по task_id склеит их в одну строку и мини-ошибка
+    // после «провал → неидеальное решение» потеряется.
     for (const error of snapshot.errors || []) {
       const old = baseErrors.find((item) => sameError(item, error));
-      if (!old) {
-        const result = await request("post", "/api/errors", { error });
-        if (result.error) {
-          if (result.error.id && !error.id) error.id = result.error.id;
-          if (result.error.clientId && !error.clientId) error.clientId = result.error.clientId;
-          const live = (this.state && this.state.errors || []).find((item) => sameError(item, error) && !item.id);
-          if (live) {
-            if (error.id) live.id = error.id;
-            if (error.clientId) live.clientId = error.clientId;
-          }
-          const liveByClient = (this.state && this.state.errors || []).find((item) => item.clientId && item.clientId === error.clientId);
-          if (liveByClient && error.id) liveByClient.id = error.id;
-          // Ошибка создана и тут же закрыта до первого save (даблклик/
-          // быстрый верный ответ): POST создаёт строку resolved=0, поэтому
-          // сразу доводим флаг тем же стабильным ID — иначе resolved потеряется.
-          if (!!error.resolved && !result.error.resolved) {
-            const key = error.id || error.clientId;
-            if (key) await request("patch", `/api/errors/${encodeURIComponent(key)}`, { resolved: true });
-          }
+      if (!old) continue;
+      // PATCH — идемпотентен: тот же resolved/kind даёт тот же результат.
+      // Адресуем стабильным ID: server id, иначе client UUID (сервер умеет оба).
+      const key = error.id || error.clientId;
+      if (!key) continue;
+      const patch = {};
+      if (!!old.resolved !== !!error.resolved) patch.resolved = !!error.resolved;
+      if ((old.kind || "major") !== (error.kind || "major")) patch.kind = error.kind || "major";
+      if (Object.keys(patch).length) {
+        await request("patch", `/api/errors/${encodeURIComponent(key)}`, patch);
+      }
+    }
+    // POST новых — уже закрытые первыми: пара «провал → быстрый верный
+    // ответ в одном сейве» обязана вставиться в этом порядке, иначе upsert
+    // по task_id вернёт открытой строке чужой ID и resolved разойдётся
+    // между клиентом и сервером.
+    const newErrors = (snapshot.errors || []).filter((error) => !baseErrors.find((item) => sameError(item, error)));
+    const orderedNew = [...newErrors.filter((e) => !!e.resolved), ...newErrors.filter((e) => !e.resolved)];
+    for (const error of orderedNew) {
+      const sentClientId = error.clientId;
+      const result = await request("post", "/api/errors", { error });
+      if (result.error) {
+        if (result.error.id && !error.id) error.id = result.error.id;
+        if (result.error.clientId && !error.clientId) error.clientId = result.error.clientId;
+        if (result.error.kind) error.kind = result.error.kind;
+        const live = (this.state && this.state.errors || []).find((item) => (sameError(item, error) || (sentClientId && item.clientId === sentClientId)) && !item.id);
+        if (live) {
+          if (error.id) live.id = error.id;
+          if (error.clientId) live.clientId = error.clientId;
+          if (error.kind) live.kind = error.kind;
         }
-      } else {
-        // PATCH — идемпотентен: тот же resolved даёт тот же результат.
-        // Адресуем стабильным ID: server id, иначе client UUID (сервер умеет оба).
-        const key = error.id || error.clientId;
-        if (key && !!old.resolved !== !!error.resolved) {
-          await request("patch", `/api/errors/${encodeURIComponent(key)}`, { resolved: !!error.resolved });
+        const liveByClient = (this.state && this.state.errors || []).find((item) => item.clientId && item.clientId === error.clientId);
+        if (liveByClient && error.id) liveByClient.id = error.id;
+        if (liveByClient && error.kind) liveByClient.kind = error.kind;
+        // Ошибка создана и тут же закрыта до первого save (даблклик/
+        // быстрый верный ответ): POST создаёт строку resolved=0, поэтому
+        // сразу доводим флаг тем же стабильным ID — иначе resolved потеряется.
+        if (!!error.resolved && !result.error.resolved) {
+          const key = error.id || error.clientId;
+          if (key) await request("patch", `/api/errors/${encodeURIComponent(key)}`, { resolved: true });
         }
       }
     }
@@ -639,9 +661,23 @@ const Store = {
         snapshot.subject = this.subject || snapshot.subject || "profile_math";
         snapshot.deletedLessonSessions = [...this.deletedLessonSessions];
         snapshot.deletedLessonStepErrors = [...this.deletedLessonStepErrors];
-        return this.requestLeaderSave(snapshot);
+        // Нечего писать — пропускаем сеть целиком. lastSyncedState обновляется
+        // после каждого успеха и каждой загрузки, поэтому совпадение снимков
+        // означает, что сервер уже в том же состоянии. Главный выигрыш — смена
+        // предмета без новых ответов: switchSubject ждёт save() до самого
+        // POST /api/subject, а цепочка доменных записей — это пачка
+        // последовательных round-trip'ов (попытки, каждый навык, настройки…).
+        if (!snapshot.deletedLessonSessions.length) delete snapshot.deletedLessonSessions;
+        if (!snapshot.deletedLessonStepErrors.length) delete snapshot.deletedLessonStepErrors;
+        if (this.lastSyncedState
+            && !this.deletedLessonSessions.length
+            && !this.deletedLessonStepErrors.length
+            && JSON.stringify(snapshot) === JSON.stringify(this.lastSyncedState)) {
+          return false;
+        }
+        return this.requestLeaderSave(snapshot).then(() => true);
       })
-      .then(() => { this.persistenceError = null; this._noteOwnSave(); })
+      .then((saved) => { this.persistenceError = null; if (saved) this._noteOwnSave(); })
       .catch((error) => {
         this.persistenceError = error;
         this.emit("persistenceerror", error);
@@ -699,9 +735,11 @@ const Store = {
     return "reloaded";
   },
 
-  // Переключение предмета: сервер возвращает каталог + состояние нового
-  // предмета, клиент полностью заменяет текущие (без мержа) и перерисовывается.
-  // Несохранённые изменения текущего предмета сначала дописываем.
+  // Переключение предмета: сервер возвращает лёгкий каталог (summary) +
+  // состояние нового предмета, клиент полностью заменяет текущие (без мержа)
+  // и перерисовывается. Детали (тексты заданий, шаги уроков) догружаются
+  // лениво через ensureDetails. Несохранённые изменения текущего предмета
+  // сначала дописываем.
   async switchSubject(subjectId) {
     if (!subjectId) return this.state;
     // Единственная истина о загруженном каталоге — DataAPI.currentSubject().
@@ -785,6 +823,26 @@ const XP_CORRECT_BASE = 10;        // базовый бонус за верны�
 const XP_CORRECT_PER_DIFF = 5;     // +5 за звезду
 const XP_ERROR_RESOLVED = 15;      // закрытие ранее допущенной ошибки
 const XP_LEVEL_MILESTONE = 50;     // разовый бонус за достижение нового уровня
+
+const MINOR_SLOW_SEC = 180; // единый порог с PRACTICE_LONG_SECONDS: дольше — мини-ошибка «время»
+
+// Вид ошибки: 'major' — задание реально не решено (неверный ответ, пропуск,
+// просмотр решения), 'minor' — решено, но неидеально. Записи без kind
+// (старые данные, чужая вкладка, сервер до миграции) — всегда major.
+function errorKindOf(e) {
+  return e && e.kind === "minor" ? "minor" : "major";
+}
+
+// Неидеальное решение — кандидат в мини-ошибки. Единый источник истины с
+// practiceAttemptQuality(): те же сигналы (подсказки, неверные попытки,
+// время) и тот же порог времени. quality < 1 <=> imperfect != null.
+function imperfectReason(task, hintLevel, wrongAttempts, seconds) {
+  if ((Number(hintLevel) || 0) > 0) return "hint";
+  if ((Number(wrongAttempts) || 0) > 0) return "attempts";
+  const sec = Number(seconds) || 0;
+  if (Number.isFinite(sec) && sec > PRACTICE_LONG_SECONDS) return "time";
+  return null;
+}
 
 // Полный XP за попытку по заданию с учётом подсказки и повтора.
 // alreadyMastered: задание уже было решено верно раньше.
@@ -872,20 +930,121 @@ function touchStreak() {
    Навыки
    ============================================================ */
 
+/* Освоение темы: теория (макс. 40) + практика (макс. 60).
+   Теория: завершённый урок даёт полную долю; открытый, но незавершённый —
+   пропорциональную (пройденные шаги / все шаги). Повторное открытие уже
+   пройденного урока ничего не добавляет, сумма обрезана весом 40.
+   Практика: у каждого доступного задания темы равная доля (60/N, где N —
+   число решаемых заданий банка). Доля засчитывается сразу, как только
+   задание решено верно, — многократное прохождение не требуется. Качество
+   решения снижает долю (подсказки, долгое выполнение), но одна небольшая
+   ошибка не обнуляет прогресс. Зачёт идемпотентен: лучшее решение каждого
+   задания учитывается один раз, повторы сверх 60 не дают. */
+
+/* Качество одного решения 0..1: только верный ответ без показанного решения
+   даёт долю. Одна подсказка — небольшая скидка, разбор — заметная, неверные
+   попытки до верного ответа — лёгкая скидка, долгое выполнение (>3 мин на
+   задание) — лёгкий штраф. Неверный ответ и пропуск доли не дают (задание
+   просто остаётся незакрытым, а не «минусует»). Единый источник истины для
+   практики и мини-ошибок: quality < 1 <=> imperfectReason() != null. */
+const PRACTICE_HINT1_QUALITY = 0.7;  // верный ответ с одной подсказкой
+const PRACTICE_HINT2_QUALITY = 0.4;  // верный ответ с разбором (2 уровень)
+const PRACTICE_ATTEMPTS_FACTOR = 0.85; // верный ответ после неверных попыток
+const PRACTICE_LONG_SECONDS = 180;   // дольше — признак затруднений (3 мин)
+const PRACTICE_LONG_FACTOR = 0.9;    // умеренный штраф за долгое выполнение
+
+function practiceAttemptQuality(attempt) {
+  if (!attempt || !attempt.correct) return 0;
+  const hintLevel = Number(attempt.hintLevel) || 0;
+  if (hintLevel >= 3) return 0; // показанный ответ засчитывается как нерешение
+  let quality = hintLevel >= 2 ? PRACTICE_HINT2_QUALITY
+    : hintLevel === 1 ? PRACTICE_HINT1_QUALITY : 1;
+  if ((Number(attempt.wrongAttempts) || 0) > 0) quality *= PRACTICE_ATTEMPTS_FACTOR;
+  const seconds = Number(attempt.seconds) || 0;
+  if (seconds > PRACTICE_LONG_SECONDS) quality *= PRACTICE_LONG_FACTOR;
+  return quality;
+}
+
+/* Полный банк практики навыка (реально решаемые задания, без требующих
+   отсутствующего официального рисунка), стабильный порядок по id. Одно место,
+   откуда сессии берут состав практики, — поэтому показ всегда полный. */
+function practiceTaskIdsForSkill(skillId) {
+  return DataAPI.practiceTasksBySkill(skillId).slice()
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .map((task) => task.id);
+}
+
+/* Состав тренировки по миссии — все задания её темы, а не урезанная тройка
+   из каталога. Старые записи missionProgress остаются валидны: задания
+   каталога идут префиксом полного списка в том же порядке, поэтому позиция
+   продолжения указывает на первое ещё не виденное задание. */
+function missionPracticeIds(mission) {
+  if (!mission) return [];
+  const full = practiceTaskIdsForSkill(mission.skill);
+  if (full.length) return full;
+  return Array.isArray(mission.tasks) ? mission.tasks.slice() : [];
+}
+
+function missionPracticeCount(mission) {
+  return missionPracticeIds(mission).length;
+}
+
+/* Теория 0..40: сумма долей уроков (завершён — 1, открыт — шаги/всего). */
+function skillTheoryProgress(skillId) {
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  if (!lessons.length) return 0;
+  let done = 0;
+  for (const lesson of lessons) {
+    if (Store.state.completedLessons[lesson.id]) { done += 1; continue; }
+    const session = Store.state.lessonSessions && Store.state.lessonSessions[lesson.id];
+    if (!session) continue;
+    const total = DataAPI.lessonStepsCount(lesson);
+    if (total > 0) done += Math.min(1, Math.max(0, (Number(session.idx) || 0) / total));
+  }
+  return Math.min(40, (done / lessons.length) * 40);
+}
+
+/* Практика: сумма лучших качеств по заданиям банка / N * вес. Без истории
+   попыток — оценка по сводным счётчикам (тот же смысл: покрытие × точность),
+   чтобы старые данные и внешние источники не давали ноль там, где работа была. */
+function skillPracticeDetail(skillId) {
+  const lessons = DataAPI.lessonsBySkill(skillId);
+  const practiceWeight = lessons.length ? 60 : 100;
+  const bank = DataAPI.practiceTasksBySkill(skillId);
+  const bankSize = bank.length;
+  if (!bankSize) return { value: 0, weight: practiceWeight, bankSize: 0, distinctSolved: 0, qualitySum: 0 };
+  const inBank = new Set(bank.map((task) => task.id));
+  const best = new Map();
+  let hasHistory = false;
+  for (const attempt of Store.state.taskAttempts || []) {
+    if (!attempt || attempt.skill !== skillId) continue;
+    hasHistory = true;
+    if (!inBank.has(attempt.taskId)) continue;
+    const quality = practiceAttemptQuality(attempt);
+    if (quality > (best.get(attempt.taskId) || 0)) best.set(attempt.taskId, quality);
+  }
+  if (!hasHistory) {
+    const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
+    const accuracy = stats.solved ? stats.correct / stats.solved : 0;
+    const value = Math.min(1, stats.solved / bankSize) * accuracy * practiceWeight;
+    return { value, weight: practiceWeight, bankSize, distinctSolved: 0, qualitySum: 0 };
+  }
+  let qualitySum = 0;
+  for (const quality of best.values()) qualitySum += quality;
+  const distinctSolved = best.size;
+  const value = Math.min(practiceWeight, (qualitySum / bankSize) * practiceWeight);
+  return { value, weight: practiceWeight, bankSize, distinctSolved, qualitySum };
+}
+
+function skillPracticeProgress(skillId) {
+  return skillPracticeDetail(skillId).value;
+}
+
 function skillProgress(skillId) {
   const skill = DataAPI.skill(skillId);
   if (!skill) return 0;
-  const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
-  const lessons = DataAPI.lessonsBySkill(skillId);
-  const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
-  // Progress is mastery, not XP: theory is confirmed by a completed lesson
-  // (40), practice grows from real answers and their accuracy (60, volume
-  // capped at 10 answers). Topics without a lesson score 100 from practice.
-  const theoryWeight = lessons.length ? 40 : 0;
-  const practiceWeight = 100 - theoryWeight;
-  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
-  const accuracy = stats.solved ? stats.correct / stats.solved : 0;
-  const practice = Math.min(1, stats.solved / 10) * accuracy * practiceWeight;
+  const theory = skillTheoryProgress(skillId);
+  const practice = skillPracticeProgress(skillId);
   return Math.round(Math.min(100, theory + practice));
 }
 
@@ -894,12 +1053,25 @@ function skillProgressBreakdown(skillId) {
   const stats = Store.state.skillStats[skillId] || { solved: 0, correct: 0 };
   const lessons = DataAPI.lessonsBySkill(skillId);
   const lessonDone = lessons.filter((lesson) => !!Store.state.completedLessons[lesson.id]).length;
-  const theoryWeight = lessons.length ? 40 : 0;
-  const practiceWeight = 100 - theoryWeight;
   const accuracy = stats.solved ? stats.correct / stats.solved : 0;
-  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
-  const practice = Math.min(1, stats.solved / 10) * accuracy * practiceWeight;
-  return { total: Math.round(theory + practice), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, correct: stats.correct, accuracy: Math.round(accuracy * 100) };
+  const theory = skillTheoryProgress(skillId);
+  const practice = skillPracticeProgress(skillId);
+  return { total: Math.round(Math.min(100, theory + practice)), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, correct: stats.correct, accuracy: Math.round(accuracy * 100) };
+}
+
+/* Сколько ещё верных решений нужно до целевого освоения (дефолт 90):
+   -1 — одними новыми решениями не дотянуть (осталось мало незакрытых
+   заданий — нужен повтор с лучшим качеством). Считается по той же формуле
+   60/N, поэтому честно для любого размера банка. */
+function practiceSolvesToTarget(skillId, target = 90) {
+  const detail = skillPracticeDetail(skillId);
+  const need = target - skillTheoryProgress(skillId) - detail.value;
+  if (need <= 0) return 0;
+  if (!detail.bankSize) return -1;
+  const perTask = detail.weight / detail.bankSize;
+  const remaining = Math.max(0, detail.bankSize - detail.distinctSolved);
+  if (remaining * perTask < need) return -1;
+  return Math.ceil(need / perTask);
 }
 
 function catProgress(catId) {
@@ -908,11 +1080,20 @@ function catProgress(catId) {
   return Math.round(skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length);
 }
 
+/* ВРЕМЕННО закрытые темы: весь доступный банк навыка требует официальных
+   рисунков, которых нет в сборке (нечем показать пользователю).
+   База №7 (графики функций) и №9 (план на клетчатой бумаге) полностью
+   состоят из таких заданий — их практика вернётся вместе с чертежами.
+   Уроки этих тем доступны: они учат методу на собственных примерах.
+   Чтобы вернуть тему — убери её ID из множества. */
+const TEMP_LOCKED_SKILLS = new Set(["n09_derivative", "b07_functions", "b09_grid"]);
+
 /* not-started | weak | in-progress | completed | mastered
    Topics are intentionally all available. The order in the path is a visual
    curriculum hint, not an access gate: every catalog topic can be practiced
    independently, including topics without a lesson. */
 function skillStatus(skill) {
+  if (skill && TEMP_LOCKED_SKILLS.has(skill.id)) return "locked";
   const p = skillProgress(skill.id);
   const stats = Store.state.skillStats[skill.id] || { solved: 0, correct: 0 };
   const solved = stats.solved || 0;
@@ -973,6 +1154,7 @@ function weakestSkill(opts = {}) {
   const candidates = pool.length ? pool : skills;
   let worst = null;
   for (const s of candidates) {
+    if (TEMP_LOCKED_SKILLS.has(s.id)) continue;
     if (!worst) { worst = s; continue; }
     const a = skillProgress(s.id), b = skillProgress(worst.id);
     if (a < b) { worst = s; continue; }
@@ -1159,7 +1341,9 @@ function forecast() {
   const hw = 12 - Math.round((9 * covered) / skills.length);
   return {
     low: Math.max(0, mid - hw),
-    high: Math.min(100, mid + hw),
+    // Потолок диапазона — максимум шкалы предмета (профиль: 100, база: 21),
+    // иначе сильному ученику базы показало бы «18–24» при максимуме 21.
+    high: Math.min(scale[scale.length - 1] ?? 100, mid + hw),
     mid,
     primary: Math.round(primary * 10) / 10,
     mastery: Math.round(mastery * 10) / 10,
@@ -1252,6 +1436,10 @@ function numericAnswer(value) {
 function checkAnswer(task, input) {
   if (!task || input == null) return false;
   const expected = String(task.answer);
+  // Задачи с несколькими верными вариантами (например, «запишите какой-нибудь
+  // один набор»): поле accept перечисляет все допустимые ответы из условия.
+  // Без него поведение прежнее — задания профиля его не несут.
+  const candidates = [expected, ...((Array.isArray(task.accept) ? task.accept : []).map(String))];
   // Equation tasks with several roots require the complete set, not one
   // acceptable alternative. Decimal answers remain single scalar values.
   const isMultiRoot = task.type === "extended_answer" && expected.includes(", ");
@@ -1272,7 +1460,7 @@ function checkAnswer(task, input) {
   // Order is immaterial for a set of roots. Matching each expected root once
   // also prevents a repeated value from satisfying two different roots.
   if (!isMultiRoot) {
-    return sameValue(expected, inputParts[0]) || expectedParts.some((part) => sameValue(part, inputParts[0]));
+    return candidates.some((cand) => sameValue(cand, inputParts[0]));
   }
 
   const unused = inputParts.slice();
@@ -1386,11 +1574,18 @@ function dailyTaskIds() {
    Запись результата ответа — центральная точка игровой логики
    hintLevel: 0 — без помощи, 1 — подсказка, 2 — разбор,
    3 — ответ показан (задание считается нерешённым)
+   wrongAttempts — неверные попытки до верного ответа в этой сессии
+   (счётчик Session.attempts); 0 по умолчанию для старых вызовов.
+   Верное, но неидеальное решение (подсказка/попытки/время) фиксируется
+   мини-ошибкой (kind 'minor', upsert по task_id — без дублей), а чистое
+   повторное решение закрывает её обычным путём. Полная ошибка (major)
+   закрывается любым верным ответом, как раньше.
    ============================================================ */
 
-function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
+function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts) {
   const s = Store.state;
   hintLevel = Number(hintLevel) || 0;
+  wrongAttempts = Number(wrongAttempts) || 0;
   if (hintLevel >= 3) correct = false; // посмотрел ответ = не решил сам
   touchStreak();
 
@@ -1405,6 +1600,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     skill: task.skill,
     correct: !!correct,
     hintLevel,
+    wrongAttempts: correct ? wrongAttempts : 0,
     seconds: Number(seconds) || 0,
     closesTaskId: closesTaskId || null,
     ts: Date.now(),
@@ -1443,14 +1639,26 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     /* В умном повторении приоритет у исходной ошибки. Это важно, когда
        похожее задание само тоже было в списке ошибок: один ответ должен
        закрыть именно тот пункт, для которого он был подобран. */
+    /* Полная ошибка закрывается любым верным ответом (как раньше), а
+       мини-ошибка — только качественным: неидеальное решение оставляет её
+       открытой до чистого прохода. */
+    const imperfect = imperfectReason(task, hintLevel, wrongAttempts, seconds);
     const err = (closesTaskId ? s.errors.find((e) => e.taskId === closesTaskId && !e.resolved) : null)
       || s.errors.find((e) => e.taskId === task.id && !e.resolved);
-    if (err) {
+    if (err && (errorKindOf(err) === "major" || !imperfect)) {
       err.resolved = true;
       s.errorsResolved++;
       xp += XP_ERROR_RESOLVED;
       xpBreakdown.errorResolved += XP_ERROR_RESOLVED;
       addTimeline(`Закрыта ошибка: ${task.sub}`);
+    } else if (err) {
+      err.ts = Date.now();
+    }
+    // Решено, но неидеально — мини-ошибка. Upsert по task_id: если открытая
+    // запись уже есть, дубль не создаём. Качественное повторное решение
+    // закроет её обычным путём выше.
+    if (imperfect && !s.errors.some((e) => e.taskId === task.id && !e.resolved)) {
+      s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: task.skill, sub: task.sub, ts: Date.now(), resolved: false, kind: "minor" });
     }
   } else {
     s.correctSeries = 0;
@@ -1459,8 +1667,14 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId) {
     xpBreakdown = { attempt: xp, correctBonus: 0, errorResolved: 0 };
     // Неверный ответ остаётся сигналом для повторения, но не отнимает уже
     // заработанный прогресс: ошибка — нормальная часть обучения.
-    if (!s.errors.some((e) => e.taskId === task.id && !e.resolved)) {
-      s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: task.skill, sub: task.sub, ts: Date.now(), resolved: false });
+    // Upsert по task_id: повторный провал не плодит дубли одного задания, а
+    // открытая мини-ошибка апгрейдится до полной.
+    const open = s.errors.find((e) => e.taskId === task.id && !e.resolved);
+    if (!open) {
+      s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: task.skill, sub: task.sub, ts: Date.now(), resolved: false, kind: "major" });
+    } else if (errorKindOf(open) === "minor") {
+      open.kind = "major";
+      open.ts = Date.now();
     }
   }
 
@@ -1653,7 +1867,16 @@ function checkAchievements() {
   if (s.errorsResolved >= 10) unlockAchievement("comeback");
   if (s.streak >= 7) unlockAchievement("streak7");
   if (s.bossesDefeated.length >= 1) unlockAchievement("boss1");
-  if (catProgress("part1") >= 80) unlockAchievement("part1_master");
+  // Бейдж освоения программы привязан к структуре предмета: у профиля это
+  // первая часть (12 навыков с кратким ответом), у базы частей нет — там
+  // считается среднее освоение всех 21 навыков. Чужой бейдж в чужом предмете
+  // никогда не открывается (структуры не пересекаются).
+  if (Store.subject === "basic_math") {
+    const all = DataAPI.skills();
+    if (all.length && Math.round(all.reduce((a, sk) => a + skillProgress(sk.id), 0) / all.length) >= 80) {
+      unlockAchievement("basic_master");
+    }
+  } else if (catProgress("part1") >= 80) unlockAchievement("part1_master");
 }
 
 function addTimeline(text) {
@@ -1884,7 +2107,8 @@ function nextStepCandidates() {
       const snap = snaps[target.id];
       mentioned.add(target.id);
       const prog = snap.mission ? missionProgress(snap.mission) : 0;
-      const started = snap.mission && prog > 0 && prog < snap.mission.tasks.length;
+      const missionTotal = snap.mission ? missionPracticeCount(snap.mission) : 0;
+      const started = snap.mission && prog > 0 && missionTotal > 0 && prog < missionTotal;
       let score = 56 + (100 - snap.progress) * 0.3;
       if (started) score += 14;
       /* Свежая практика: если последние попытки были безрезультатными —
@@ -1911,7 +2135,7 @@ function nextStepCandidates() {
         payload: { missionId: snap.mission.id, skillId: target.id },
         route: "#/training", icon: "target",
         text: started
-          ? `Продолжить тренировку по теме «${target.name}» — ${prog}/${snap.mission.tasks.length}`
+          ? `Продолжить тренировку по теме «${target.name}» — ${prog}/${missionTotal}`
           : `Потренироваться в теме «${target.name}» — самое слабое место`,
         reason: started
           ? `Тренировка по «${target.name}» уже начата — закончить её сейчас проще всего.`

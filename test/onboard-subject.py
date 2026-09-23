@@ -8,9 +8,10 @@
 
 Тест проверяет оба конца контракта:
 1. снапшот предмета с ЧУЖОЙ версией отклоняется (409) — OCC жива;
-2. регистрация с СВОЕЙ версией сохраняется целиком (onboarded/имя/уровень);
-3. у предмета без шкалы целей ориентир необязателен и нормализуется в null,
-   а не валит всю настройку 400-й ошибкой.
+2. регистрация с СВОЕЙ версией сохраняется целиком (onboarded/имя/уровень/цель);
+3. у базы своя шкала целей (g3/g4/g5 — оценки): валидная цель сохраняется,
+   а чужая (профильная g60) отклоняется 400-й — шкалу предмета не обойти.
+   Пустого предмета без шкалы больше нет: контент базы подключён.
 """
 from __future__ import annotations
 
@@ -93,17 +94,23 @@ def main():
             assert status == 409, (status, conflict)
             assert conflict.get("currentVersion") == own_version, conflict
 
-            # 2) Своя версия предмета — регистрация сохраняется целиком.
+            # 2) Своя версия предмета — регистрация сохраняется целиком,
+            # цель — из шкалы базы (g3/g4/g5), а не профиля.
             status, saved = request(opener, base, "/api/settings", "PATCH", {
                 "subject": "basic_math", "expectedVersion": own_version,
-                "settings": {"onboarded": True, "name": "Артём", "selfLevel": "base", "goal": "g60"},
+                "settings": {"onboarded": True, "name": "Артём", "selfLevel": "base", "goal": "g4"},
             })
             assert status == 200, (status, saved)
             assert saved["settings"]["onboarded"] is True, saved
             assert saved["settings"]["name"] == "Артём", saved
             assert saved["settings"]["selfLevel"] == "base", saved
-            # 3) У базы нет шкалы целей: ориентир необязателен и не валит запись.
-            assert saved["settings"]["goal"] is None, saved
+            # 3) Шкала базы enforced: чужая (профильная) цель отклоняется 400-й.
+            assert saved["settings"]["goal"] == "g4", saved
+            status, alien = request(opener, base, "/api/settings", "PATCH", {
+                "subject": "basic_math", "expectedVersion": saved["stateVersion"],
+                "settings": {"goal": "g60"},
+            })
+            assert status == 400, (status, alien)
 
             status, after = request(opener, base, "/api/bootstrap")
             assert status == 200, (status, after)

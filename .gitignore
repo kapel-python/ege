@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 /ege.sqlite3
 /hermes-webui/
+.claude/settings.local.json
