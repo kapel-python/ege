@@ -993,9 +993,9 @@
     "type": "3d_solid",
     "shape": "prism",
     "dimensions": [
-     8,
-     6,
-     5
+     5,
+     4,
+     6
     ],
     "labels": [
      "A",
@@ -1009,7 +1009,7 @@
      {
       "label": "M",
       "coords": [
-       4,
+       2.5,
        0,
        0
       ]
@@ -1018,24 +1018,24 @@
       "label": "N",
       "coords": [
        0,
-       3,
+       2,
        0
       ]
      },
      {
       "label": "M₁",
       "coords": [
-       4,
+       2.5,
        0,
-       5
+       6
       ]
      },
      {
       "label": "N₁",
       "coords": [
        0,
-       3,
-       5
+       2,
+       6
       ]
      }
     ],
@@ -1202,14 +1202,17 @@
    "mathVisual": {
     "type": "circle_geometry",
     "objects": [
-     {"type": "ellipse", "center": [0, 1.5], "rx": 1.5, "ry": 0.35, "color": "accent"},
-     {"type": "ellipse", "center": [0, -1.5], "rx": 1.5, "ry": 0.35, "color": "accent"},
+     {"type": "ellipse", "center": [0, 1.5], "rx": 1.5, "ry": 0.32, "color": "accent"},
+     {"type": "ellipse", "center": [0, -1.5], "rx": 1.5, "ry": 0.32, "color": "accent"},
      {"type": "segment", "from": [-1.5, -1.5], "to": [-1.5, 1.5], "color": "accent"},
      {"type": "segment", "from": [1.5, 1.5], "to": [1.5, -1.5], "color": "accent"},
      {"type": "point", "id": "O", "x": 0, "y": 0, "label": "O"},
      {"type": "circle", "center": "O", "radius": 1.5, "color": "warn"},
-     {"type": "label", "x": 1.65, "y": 0.25, "text": "R"},
-     {"type": "label", "x": -2.55, "y": -2.35, "text": "шар касается оснований и боковой поверхности"}
+     {"type": "segment", "from": "O", "to": [1.5, 0], "color": "warn"},
+     {"type": "point", "id": "T1", "x": 0, "y": 1.5, "label": false},
+     {"type": "point", "id": "T2", "x": 0, "y": -1.5, "label": false},
+     {"type": "label", "x": 0.62, "y": 0.32, "text": "R"},
+     {"type": "label", "x": -2.6, "y": -2.3, "text": "шар касается оснований и боковой поверхности"}
     ],
     "boundingBox": [-2.9, 2.7, 2.9, -2.7],
     "ratio": 1.074
