@@ -41,12 +41,14 @@
 <meta name="color-scheme" content="light dark">
 <script>
   /* Тема лендинга: сначала сохранённый выбор (общий с приложением ключ),
-     иначе — тема устройства. Синхронно в <head>, до отрисовки, без мигания. */
+     иначе — тема устройства. Синхронно в <head>, до отрисовки, без мигания.
+     Ручного переключения на лендинге нет: полностью автоматический режим
+     "сохранённая тема сайта → если нет → системная тема устройства". */
   (function(){
     try{
       var saved=null;
       try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
-      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');
+      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
       document.documentElement.setAttribute('data-theme',theme);
     }catch(e){}
   })();
@@ -376,12 +378,13 @@
 
   .header-inner{
     display:grid;
-    grid-template-columns:auto 1fr;
+    grid-template-columns:auto minmax(0,1fr);
     align-items:center;
-    gap:clamp(16px,3vw,32px);
+    gap:clamp(12px,3vw,32px);
+    min-width:0;
     /* только вертикальный отступ: горизонтальный берём у .wrap,
        иначе шапка стоит левее общей сетки контента */
-    padding-block:clamp(14px,2vw,18px);
+    padding-block:clamp(12px,2vw,18px);
   }
 
   .logo{
@@ -392,6 +395,9 @@
     font-weight:700;
     font-size:clamp(16px,2.2vw,19px);
     letter-spacing:-0.02em;
+    white-space:nowrap;
+    flex-shrink:0;
+    min-width:0;
   }
 
   .logo-badge{
@@ -430,6 +436,10 @@
     z-index:1;
   }
 
+  .logo-text{
+    white-space:nowrap;
+  }
+
   .logo-text em{
     font-style:normal;
     color:var(--brand);
@@ -438,8 +448,10 @@
   .header-nav{
     display:flex;
     align-items:center;
-    gap:clamp(20px,3vw,32px);
+    gap:clamp(12px,3vw,32px);
     justify-self:end;
+    min-width:0;
+    flex-shrink:0;
   }
 
   .header-link{
@@ -509,34 +521,6 @@
     color:var(--text);
     box-shadow:0 0 0 1px var(--ghost-ring-hover) inset;
     transform:translateY(-2px);
-  }
-
-  .theme-btn{
-    width:44px;
-    height:44px;
-    padding:0;
-    flex:0 0 44px;
-    border-radius:50%;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    background:transparent;
-    color:var(--text-dim);
-    border:none;
-    cursor:pointer;
-    box-shadow:0 0 0 1px var(--ghost-ring) inset;
-    transition:transform 0.3s var(--ease-out),box-shadow 0.3s var(--ease-out),color 0.2s ease;
-  }
-
-  .theme-btn:hover{
-    color:var(--text);
-    box-shadow:0 0 0 1px var(--ghost-ring-hover) inset;
-    transform:translateY(-2px);
-  }
-
-  .theme-btn svg{
-    width:18px;
-    height:18px;
   }
 
   /* ===== HERO ===== */
@@ -932,6 +916,17 @@
     .hero-visual{grid-template-columns:1fr;}
   }
 
+  /* Компактная шапка: бренд «ege easy» всегда в одну строку,
+     кнопка CTA уменьшается, горизонтального overflow нет. */
+  @media (max-width:480px){
+    .header-inner{gap:12px;padding-block:12px;}
+    .logo{gap:8px;font-size:16px;}
+    .logo-badge{width:32px;height:32px;}
+    .logo-badge svg{width:16px;height:16px;}
+    .header-nav{gap:12px;}
+    .header-nav .btn{padding:10px 16px;font-size:13px;}
+  }
+
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
     *,*::before,*::after{
@@ -988,9 +983,6 @@
       <a class="header-link" href="#subjects">Предметы</a>
       <a class="header-link" href="#features">Возможности</a>
       <a class="header-link" href="#how">Как работает</a>
-      <button class="theme-btn" id="themeBtn" type="button" onclick="toggleLandingTheme()" aria-label="Включить тёмную тему" aria-pressed="false" title="Включить тёмную тему">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>
-      </button>
       <a class="btn btn-primary" href="/dashboard">Начать подготовку</a>
     </nav>
   </div>
@@ -1261,33 +1253,10 @@
 <script>
   document.getElementById('year').textContent = '© ' + new Date().getFullYear();
 
-  /* ===== Переключатель темы (общий с приложением ключ ege_core_theme) ===== */
-  var THEME_SUN = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
-  var THEME_MOON = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>';
-
-  function landingTheme() {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  }
-
-  function paintThemeBtn() {
-    var b = document.getElementById('themeBtn');
-    if (!b) return;
-    var dark = landingTheme() === 'dark';
-    b.innerHTML = dark ? THEME_SUN : THEME_MOON;
-    var label = dark ? 'Включить светлую тему' : 'Включить тёмную тему';
-    b.setAttribute('aria-label', label);
-    b.setAttribute('aria-pressed', dark ? 'true' : 'false');
-    b.title = label;
-  }
-
-  function toggleLandingTheme() {
-    var next = landingTheme() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('ege_core_theme', next); } catch (e) {}
-    paintThemeBtn();
-  }
-
-  paintThemeBtn();
+  /* Тема лендинга полностью автоматическая (см. скрипт в <head>):
+     сохранённая тема сайта (общий ключ ege_core_theme) → иначе системная.
+     Ручного переключателя на лендинге нет; в приложении (js/app.js Theme)
+     ручное переключение сохраняется как раньше. */
 
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const liteAnim = document.documentElement.classList.contains('lite-anim');
