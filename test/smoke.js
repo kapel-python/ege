@@ -103,6 +103,18 @@ const testBody = async () => {
   t("онбординг не создаёт случайный прогресс", Store.state.skillStats.n11_word_problems.progress === 0);
 
   Store.reset();
+  Store.state.totalSolved = 7;
+  Store.state.totalCorrect = 5;
+  Store.state.skillStats.n11_word_problems = { progress: 42, solved: 3, correct: 2, timeSec: 90 };
+  Store.state.diagnostics = [{ taskId: "synthetic", correct: true, ts: 1 }];
+  completeOnboardingWithoutTest("profile_math", "Анна");
+  t("пропуск теста завершает профиль без сброса прогресса",
+    Store.state.onboarded && Store.state.name === "Анна"
+      && Store.state.totalSolved === 7 && Store.state.totalCorrect === 5
+      && Store.state.skillStats.n11_word_problems.progress === 42
+      && Store.state.diagnostics.length === 1);
+
+  Store.reset();
   addXp(5000, "test");
   t("уровень считается из XP", levelInfo().level > 3);
   Store.reset();

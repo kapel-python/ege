@@ -4263,26 +4263,56 @@ const Onboarding = {
   diagAnswered: false,
   _picking: false,
   // Предмет, явно выбранный пользователем через профиль/пикер входа перед
-  // показом онбординга нового предмета. show() стартует сразу с вопросов,
-  // не переспрашивая предмет. Дублируется в sessionStorage на случай
-  // перезагрузки посреди онбординга.
+  // показом онбординга нового предмета. После предложения теста show()
+  // начинает с уровня, не переспрашивая предмет. Дублируется в sessionStorage
+  // на случай перезагрузки посреди онбординга.
   presetSubject: null,
   // Предмет-шаг пропущен (старт с вопросов после явного выбора): кнопка
   // «Назад» на уровне скрыта — возвращаться некуда.
   subjectSkipped: false,
+  // mode="subject" — сначала выбираем предмет, mode="offer" — предлагаем
+  // тест, mode="diagnostic" — пользователь согласился, mode="skip" — отказался
+  // и сейчас вводит имя.
+  mode: "subject",
+  // Откуда показан онбординг. login/subject/login-register — промежуточные
+  // экраны, после них возвращаемся на дашборд, а не зацикливаем пикер.
+  returnRoute: "dashboard",
+  returnParam: "",
 
-  // Шаги: предмет → уровень → цель → диагностика → итог → имя.
-  // Пустой предмет (контент готовится) идёт коротким путём: предмет → имя.
+  // Нумерованные шаги после выбора предмета: уровень → цель → диагностика →
+  // итог → имя. Предложение пройти или пропустить тест идёт между предметом
+  // и уровнем. Пустой предмет идёт коротким путём: предмет → имя.
   STEPS() {
     return ["stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
+  },
+
+  captureReturnRoute() {
+    let route = "dashboard";
+    let param = "";
+    try {
+      const current = currentRoute();
+      // Экран выбора предмета после входа — не конечная страница: возврат туда
+      // снова заставил бы выбирать предмет повторно.
+      if (current && !["login", "register", "subject"].includes(current)) {
+        route = current;
+        param = routeParam();
+      }
+    } catch (_) {}
+    this.returnRoute = route || "dashboard";
+    this.returnParam = param || "";
+  },
+
+  returnToPrevious() {
+    go(this.returnRoute, this.returnParam || undefined);
   },
 
   show() {
     if (document.getElementById("onboard-overlay")) return;
     // Явный выбор предмета перед онбордингом (переключение через профиль
-    // или пикер входа): предмет уже выбран, переспрашивать его не нужно —
-    // сразу к вопросам. Флаг живёт в памяти + дублируется в sessionStorage
-    // на случай перезагрузки посреди онбординга.
+    // или пикер входа): предмет уже выбран. Сначала показываем предложение
+    // теста, а при согласии сразу переходим к уровню, не переспрашивая предмет.
+    // Флаг живёт в памяти + дублируется в sessionStorage на случай
+    // перезагрузки посреди онбординга.
     let preset = this.presetSubject;
     this.presetSubject = null;
     if (!preset) {
@@ -4311,6 +4341,10 @@ const Onboarding = {
     this.step = 0;
     this.subject = null;
     this.subjectSkipped = false;
+    // Без явно выбранного предмета сначала спрашиваем его. При явном
+    // выборе из профиля/пикера входа сразу показываем предложение теста.
+    this.mode = preset ? "offer" : "subject";
+    this.captureReturnRoute();
     let current = null;
     try { current = (typeof DataAPI !== "undefined" && DataAPI.currentSubject) ? DataAPI.currentSubject() : null; } catch (_) {}
     if (preset && current && preset === current) {
@@ -4330,7 +4364,10 @@ const Onboarding = {
           this.finish();
           return;
         } else {
+          // У выбранного предмета ещё нет вопросов: предлагать пустой тест
+          // бессмысленно, сразу спрашиваем обязательное имя.
           this.step = 5;
+          this.mode = "diagnostic";
         }
       }
     }
@@ -4365,18 +4402,20 @@ const Onboarding = {
     const el = document.getElementById("onboard-overlay");
     if (!el) return;
     const names = this.STEPS();
+    const offering = this.mode === "offer";
+    const method = offering ? "stepOffer" : names[this.step];
     const dark = Theme.current() === "dark";
     const themeLabel = dark ? "Включить светлую тему" : "Включить тёмную тему";
     // Вышедший из аккаунта, но попавший в онбординг: вход/регистрация
-    // доступны без прохождения — ссылка внизу карточки, но только на первых
-    // двух шагах (предмет, уровень): дальше она отвлекает от вопросов.
+    // доступны без прохождения. На предложении теста и первых двух шагах
+    // показываем ссылку, дальше она отвлекает от вопросов.
     // У привязанного аккаунта её нет.
-    let showAuth = this.step <= 1;
+    let showAuth = offering || this.step <= 1;
     try { showAuth = showAuth && !(Store.auth && Store.auth.registered); } catch (_) {}
     el.innerHTML = `
       <button class="btn btn--ghost theme-toggle onboard-theme" type="button" onclick="Onboarding.toggleTheme()" aria-label="${themeLabel}" aria-pressed="${dark}" title="${themeLabel}">${icon(dark ? "sun" : "moon")}</button>
       <div class="onboard-card">
-        <div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
+        ${offering ? "" : `<div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>`}
         <div id="onboard-body"></div>
         ${showAuth ? `<div class="onboard-auth"><span>Уже есть аккаунт?</span><button class="btn btn--primary btn--sm" type="button" onclick="go('login')">Войти или зарегистрироваться</button></div>` : ""}
       </div>`;
@@ -4384,7 +4423,7 @@ const Onboarding = {
     // Смена предмета привозит лёгкий каталог: тексты заданий диагностики
     // догружаются лениво через ensureDetails. Вопросы без них не показываем —
     // лоадер вместо пустой карточки; итог тоже ждёт детали.
-    if ((names[this.step] === "stepDiagnostic" || names[this.step] === "stepResult")
+    if (!offering && (method === "stepDiagnostic" || method === "stepResult")
         && typeof DataAPI !== "undefined" && !DataAPI.detailsReady()
         && typeof Store !== "undefined" && Store.ensureDetails) {
       body.innerHTML = loaderHTML("Готовим задания…");
@@ -4397,7 +4436,7 @@ const Onboarding = {
       });
       return;
     }
-    this[names[this.step]].call(this, body);
+    this[method].call(this, body);
     // Диагностика рисует задания через taskVisualHtml → data-mathvisual,
     // но общий render() возвращается раньше NEEDS_DETAILS-гейта и никогда не
     // зовёт Vendor.ensureMath() для онбординга. Без этого window.MathVisual
@@ -4406,7 +4445,7 @@ const Onboarding = {
     // ensureMath сам домонтирует уже нарисованное, наблюдатель подхватит
     // следующие шаги, при офлайне показываем читаемую ошибку вместо вечного
     // спиннера.
-    if (names[this.step] === "stepDiagnostic") {
+    if (method === "stepDiagnostic") {
       try {
         Vendor.ensureMath().then(() => {
           try { MathVisualMount.mountWithin(el); } catch (_) {}
@@ -4415,6 +4454,39 @@ const Onboarding = {
         });
       } catch (_) {}
     }
+  },
+
+  // После выбора предмета показываем отдельный выбор: тест полезен для
+  // стартовой карты, но не является обязательным.
+  stepOffer(body) {
+    const count = DataAPI.diagnosticTasks().length;
+    body.innerHTML = `
+      <div class="onboard-title">Хочешь пройти небольшой тест?</div>
+      <div class="onboard-sub">Всего ${count} ${plural(count, "вопрос", "вопроса", "вопросов")} по разным темам. Он поможет определить начальный уровень и точнее настроить рекомендации. Но ответы не обязательны: уроки, тренировки и статистика доступны в любом случае.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px">
+        <button class="btn btn--primary btn--lg" type="button" onclick="Onboarding.acceptTest()">Пройти тест ${icon("arrow")}</button>
+        <button class="btn btn--ghost btn--lg" type="button" onclick="Onboarding.skipTest()">Пропустить</button>
+      </div>`;
+  },
+
+  acceptTest() {
+    this.mode = "diagnostic";
+    this.render();
+  },
+
+  skipTest() {
+    this.mode = "skip";
+    if (this.name) { this.finishSkipped(); return; }
+    this.step = 5;
+    this.render();
+  },
+
+  finishSkipped() {
+    const finalName = this.name || (Store.state && Store.state.name) || null;
+    this.hide();
+    try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
+    completeOnboardingWithoutTest(DataAPI.currentSubject() || Store.subject || "profile_math", finalName);
+    this.returnToPrevious();
   },
 
   // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
@@ -4450,8 +4522,17 @@ const Onboarding = {
       // Пустой предмет: уровень/цель/диагностика бессмысленны без контента —
       // сразу к имени, профиль предмета заведётся пустым. Имя едино для
       // аккаунта: если уже указано — не показываем шаг имени, а завершаем.
-      this.step = ready ? 1 : 5;
-      if (!ready && this.name) { this.finish(); return; }
+      if (!ready) {
+        this.step = 5;
+        if (this.name) { this.finish(); return; }
+        this.mode = "diagnostic";
+        this.render();
+        return;
+      }
+      // Сначала пользователь выбирает предмет, и только потом решает, нужен
+      // ли ему короткий тест. После согласия начинается прежний flow с уровня.
+      this.step = 1;
+      this.mode = "offer";
       this.render();
     });
   },
@@ -4639,7 +4720,12 @@ const Onboarding = {
       return;
     }
     if (this.step === 5) {
-      this.step = this.diagResults.length ? 4 : 0;
+      if (this.mode === "skip") {
+        this.mode = "offer";
+        this.step = 0;
+      } else {
+        this.step = this.diagResults.length ? 4 : 0;
+      }
       this.render();
       return;
     }
@@ -4682,7 +4768,8 @@ const Onboarding = {
       return;
     }
     this.name = value;
-    this.finish();
+    if (this.mode === "skip") this.finishSkipped();
+    else this.finish();
   },
 
   finish() {
@@ -4695,7 +4782,7 @@ const Onboarding = {
     try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
     const after = () => {
       toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
-      render();
+      this.returnToPrevious();
     };
     // Порядок обязателен: сначала переключаем предмет (сервер отдаёт каталог и
     // состояние нового предмета вместе с ЕГО версией), и только потом

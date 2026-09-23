@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 
 const src = fs.readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8");
+const stateSrc = fs.readFileSync(path.join(__dirname, "..", "js", "state.js"), "utf8");
 let fails = 0;
 const t = (name, cond, extra = "") => {
   console.log((cond ? "ok  " : "FAIL") + " " + name + (cond ? "" : " — " + extra));
@@ -50,14 +51,23 @@ const EXPECTED = ["stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "ste
 t("STEPS: ровно 6 шагов", steps.length === 6, JSON.stringify(steps));
 t("STEPS: первый шаг — stepSubject", steps[0] === "stepSubject", JSON.stringify(steps));
 t("STEPS: точный порядок без welcome", JSON.stringify(steps) === JSON.stringify(EXPECTED), JSON.stringify(steps));
-t("нет метода stepWelcome", !/stepWelcome\s*\(/.test(src), "stepWelcome вернулся");
+t("есть отдельный экран предложения теста", /stepOffer\s*\(body\)/.test(src));
+t("без явного предмета сначала открывается выбор предмета", /this\.mode\s*=\s*preset\s*\?\s*"offer"\s*:\s*"subject"/.test(src));
+t("после выбора предмета открывается предложение теста", /this\.mode\s*=\s*"offer"/.test(src));
+t("на предложении есть действия пройти и пропустить", /Пройти тест/.test(src) && /Пропустить/.test(src) && /skipTest\s*\(/.test(src));
+t("пропуск без имени ведёт к шагу имени", /skipTest\s*\(\)\s*\{[\s\S]*?this\.mode\s*=\s*"skip"[\s\S]*?this\.step\s*=\s*5/.test(src));
+t("пропуск завершается отдельной функцией без диагностики", /finishSkipped\s*\(\)[\s\S]*?completeOnboardingWithoutTest/.test(src));
+t("после завершения сохраняется маршрут возврата", /captureReturnRoute\s*\(\)/.test(src) && /returnToPrevious\s*\(\)/.test(src));
+t("функция пропуска не обнуляет накопленные данные", /function completeOnboardingWithoutTest[\s\S]*?s\.onboarded\s*=\s*true/.test(stateSrc));
 
 /* ---------- 2. Переходы (статика) ---------- */
 const pickBody = fnBody(src, "pickSubject(v) {");
 t("pickSubject найден", !!pickBody);
-t("pickSubject: готовый предмет -> шаг 1, пустой -> шаг 5",
-  !!pickBody && /this\.step\s*=\s*ready\s*\?\s*1\s*:\s*5/.test(pickBody),
-  (pickBody || "").slice(0, 200));
+t("pickSubject: готовый предмет -> шаг 1 и предложение теста, пустой -> шаг 5",
+  !!pickBody && /this\.step\s*=\s*1/.test(pickBody)
+    && /this\.mode\s*=\s*"offer"/.test(pickBody)
+    && /this\.step\s*=\s*5/.test(pickBody),
+  (pickBody || "").slice(0, 260));
 const nextDiagBody = fnBody(src, "nextDiag() {");
 t("nextDiag найден", !!nextDiagBody);
 t("nextDiag: счётчик растёт", !!nextDiagBody && /this\.diagIdx\+\+/.test(nextDiagBody));
@@ -86,7 +96,7 @@ t("next: обычный инкремент шага", !!nextBody && /this\.step\
      остался без браузера и без ожидания микрозадач. */
   const storeStub = { switchSubject: () => ({ catch() { return this; }, then(fn) { fn(); return this; } }) };
   const makeOb = (api) => new Function("DataAPI", "Store",
-    `"use strict"; return ({ step: 0, diagIdx: 0, subject: null, name: null, render(){}, finish(){}, ` +
+    `"use strict"; return ({ step: 0, mode: "subject", diagIdx: 0, subject: null, name: null, render(){}, finish(){}, ` +
     `STEPS() {${bSteps}}, pickSubject(v) {${bPick}}, ` +
     `nextDiag() {${bNextDiag}}, next() {${bNext}} });`)(api, storeStub);
   const readyAPI = {
@@ -104,7 +114,8 @@ t("next: обычный инкремент шага", !!nextBody && /this\.step\
     JSON.stringify(ob.STEPS()) === JSON.stringify(EXPECTED), JSON.stringify(ob.STEPS()));
   ob = makeOb(readyAPI);
   ob.pickSubject("math");
-  t("pickSubject живой: готовый предмет -> шаг 1", ob.step === 1, `step=${ob.step}`);
+  t("pickSubject живой: готовый предмет -> шаг 1 и предложение теста",
+    ob.step === 1 && ob.mode === "offer", `step=${ob.step} mode=${ob.mode}`);
   ob = makeOb(emptyAPI);
   ob.pickSubject("chem");
   t("pickSubject живой: пустой предмет -> шаг 5 (имя)", ob.step === 5, `step=${ob.step}`);

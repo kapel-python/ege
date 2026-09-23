@@ -2300,3 +2300,19 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   Store.save();
   if (subjReady) checkAchievements();
 }
+
+/* Пользователь отказался от стартового теста. Это завершает обязательный
+   экран для ТЕКУЩЕГО предмета, но не выдумывает ответы и не обнуляет уже
+   накопленные данные. Имя остаётся общим для аккаунта, а selfLevel/goal
+   можно определить позже или оставить пустыми. */
+function completeOnboardingWithoutTest(subject, name) {
+  const s = Store.state;
+  const subj = (subject && typeof DataAPI !== "undefined" && DataAPI.subjectInfo && DataAPI.subjectInfo(subject))
+    ? subject : "profile_math";
+  Store.subject = subj;
+  s.subject = subj;
+  const cleanedName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  if (cleanedName) s.name = cleanedName;
+  s.onboarded = true;
+  Store.save();
+}
