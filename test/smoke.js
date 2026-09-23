@@ -35,7 +35,12 @@ const testBody = async () => {
     && visualAssets.some((asset) => asset.src.endsWith(".jpg")));
   t("аудит визуальных условий сохранён", DataAPI.visualAudit().defaultStatus === "text-only"
     && DataAPI.visualAudit().taskStatuses.n02_p2 === "visual-optional"
-    && DataAPI.visualAudit().references.some((item) => item.examNumber === "№9" && item.status === "visual-required"));
+    && ["n02_p1", "n09_p1", "n09_p2", "n09_p3", "n12_p2"].every((id) => DataAPI.visualAudit().taskStatuses[id] === "visual-provided")
+    && ["2027-02-01", "2027-09-01", "2027-09-02", "2027-09-03", "2027-12-02"].every((sid) =>
+      DataAPI.visualAudit().references.some((item) => item.sourceId === sid && item.status === "visual-provided"))
+    && DataAPI.visualAudit().references.every((item) => item.status !== "visual-required"));
+  t("восстановленные №2/№9/№12 несут MathVisual-диаграммы вместо required-визуала", ["n02_p1", "n09_p1", "n09_p2", "n09_p3", "n12_p2"]
+    .every((id) => { const task = DataAPI.task(id); return task && task.mathVisual && task.mathVisual.type && !task.visual; }));
   t("заблокированные визуалы (нет официального PDF) честно помечены required без asset", DataAPI.tasks()
     .filter((x) => x.visual && x.visual.required)
     .every((x) => !x.visual.assetId && x.visual.note));
@@ -116,14 +121,16 @@ const testBody = async () => {
   ensureDailyChallenge();
   t("daily восстанавливает зачтённые задания после перезагрузки", Store.state.daily.solved === dailyIds.length);
 
-  // Некоторые задания честно помечены "рисунок обязателен, но недоступен"
-  // (visual.required без assetId) — их нельзя решить без официального
-  // источника. Они обязаны остаться в каталоге (для аудита и на случай
-  // появления картинки), но не должны попадать ученику ни в один поток
-  // выбора задания: свободную практику, daily, боссов, повторение ошибок,
-  // миссии.
+  // Все пять профильных заданий с обязательным рисунком (№2/№9/№12,
+  // демо-2027) восстановлены диаграммами MathVisual: в каталоге профиля
+  // больше нет visual.required без assetId. Механизм блокировки при этом
+  // обязан продолжать работать — он покрыт синтетической проверкой ниже,
+  // а потоки выбора не должны отдавать такое задание, вздумай оно появиться.
   const unsolvable = DataAPI.tasks().filter((x) => DataAPI.taskHasMissingVisual(x));
-  t("в каталоге действительно есть задания с недоступным обязательным рисунком (иначе проверка ниже бессмысленна)", unsolvable.length > 0);
+  t("в каталоге профиля не осталось заданий с недоступным обязательным рисунком", unsolvable.length === 0);
+  t("механизм блокировки жив: required без assetId распознаётся", DataAPI.taskHasMissingVisual({ visual: { required: true } }) === true
+    && DataAPI.taskHasMissingVisual({ visual: { required: true, assetId: "x" } }) === false
+    && DataAPI.taskHasMissingVisual({}) === false);
   t("practiceTasks() исключает задания без обязательного рисунка", unsolvable.every((x) => !DataAPI.practiceTasks().includes(x)));
   t("tasksBySkill/mission не подсовывают задание без рисунка", DataAPI.skills().every((sk) =>
     DataAPI.practiceTasksBySkill(sk.id).every((x) => !DataAPI.taskHasMissingVisual(x))));
