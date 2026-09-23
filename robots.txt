@@ -1,0 +1,22 @@
+# ege easy — правила обхода для поисковых роботов.
+# Индексируется только публичный лендинг (/). Приложение (/dashboard),
+# админка и API — приватные зоны, им в индексе делать нечего.
+
+User-agent: *
+Allow: /$
+Allow: /assets/
+Allow: /css/
+Allow: /js/
+Allow: /vendor/
+Allow: /favicon.svg
+Allow: /site.webmanifest
+Disallow: /dashboard
+Disallow: /index.html
+Disallow: /admin
+Disallow: /admin.html
+Disallow: /api/
+Disallow: /*?*
+
+# Карта сайта отдаётся динамически (/sitemap.xml) с абсолютными URL
+# (домен — из хоста запроса, переопределяется через EGE_PUBLIC_URL).
+Sitemap: https://egeeasy.ru/sitemap.xml

@@ -33,6 +33,10 @@ const ICONS = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.3"/><circle cx="12.1" cy="16.7" r="0.5" fill="currentColor" stroke="none"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4.5"/></svg>',
   logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+  tablet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+  laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
+  desktop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
 };
 
 function icon(name) {
@@ -191,8 +195,8 @@ dashboardHTML.innerHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>ege easy — подготовка к профильной математике</title>
-<meta name="description" content="Платформа подготовки к ЕГЭ по профильной математике с системой прогресса: уровни, XP, миссии, навыки, боссы.">
+<title>ege easy — подготовка к ЕГЭ по математике</title>
+<meta name="description" content="Платформа подготовки к ЕГЭ по математике (профиль и база) с системой прогресса: уровни, XP, миссии, навыки, боссы.">
 <script>
   /* Saved choice wins; on the first visit (no saved value) follow the device
      theme, so the onboarding/diagnostic screens never force light mode.
@@ -231,6 +235,7 @@ dashboardHTML.innerHTML = `<!doctype html>
 </div>
 
 <div id="modal-root"></div>
+<div id="device-modal-root"></div>
 <div id="toast-root" class="toast-root"></div>
 
 <script src="js/data.js"></script>
@@ -876,7 +881,7 @@ const HELP = {
   skills: {
     title: "Навыки",
     body: `
-      <p>Процент показывает, насколько хорошо ты знаешь тему: <b>40</b> даёт пройденный урок (теория), <b>60</b> — решённые задания и точность ответов (практика). Если урока по теме нет, все 100 набираются практикой.</p>
+      <p>Процент показывает, насколько хорошо ты знаешь тему: <b>40</b> даёт пройденный урок (теория, начатый урок даёт часть пропорционально пройденным шагам), <b>60</b> — решённые задания (практика): у каждого задания темы равная доля, она засчитывается сразу после верного ответа. Подсказки, разбор и показ решения снижают долю задания, а повторы сверх неё не дают.</p>
       <p>Подписи простые: не начата — тему ещё не трогал, слабое место — по теме есть попытки, но точность ответов низкая, пройден (от 70%) — хороший результат, освоен (от 90%) — тема выучена отлично. Мало занимался, но отвечал верно — это «в процессе», а не слабое место. Точность считается за всё время, поэтому старые ошибки приходится перекрывать серией верных ответов.</p>
       <p>Нажми на тему — там урок, тренировка и твои ошибки.</p>`,
   },
@@ -908,7 +913,35 @@ const HELP = {
   },
 };
 
+/* Текст подсказки прогноза зависит от шкалы предмета: у профиля баллы
+   переводятся из первичных в стобалльные (вторая часть весит больше),
+   у базы каждое задание — 1 балл из 21, итог — оценка 2–5. */
+function forecastHelpHTML() {
+  const max = (typeof forecastTotal === "function") ? forecastTotal() : 100;
+  const common = `
+      <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина диапазона показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
+      <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, диапазон шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`;
+  if (max !== 100) {
+    return `
+      <p>Примерный итог базового ЕГЭ: каждое из 21 заданий даёт 1 балл, поэтому прогноз показывает, сколько заданий ты решишь (7+ баллов — оценка «3», 12+ — «4», 17+ — «5»). Все темы весят одинаково.</p>`
+      + common;
+  }
+  return `
+      <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в тестовые баллы по шкале этого года.</p>`
+    + common;
+}
+
 function openHelp(key) {
+  if (key === "forecast" && typeof forecastHelpHTML === "function") {
+    openModal(`
+    <div class="stat-label">Подсказка</div>
+    <div style="font-size:20px;font-weight:700;margin-top:4px">Прогноз результата ЕГЭ</div>
+    <div class="help-body">${forecastHelpHTML()}</div>
+    <div style="margin-top:22px;display:flex;justify-content:flex-end">
+      <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
+    </div>`);
+    return;
+  }
   const h = HELP[key];
   if (!h) return;
   openModal(`
@@ -964,7 +997,20 @@ const NAV = [
   { route: "profile",   label: "Профиль",   ic: "profile" },
 ];
 
+function isSubjectChoiceLocked() {
+  try { return !!pendingSubjectChoice; } catch (_) { return false; }
+}
+
 function go(route, param) {
+  // Пикер «Какой предмет открываем?» после входа: хром (сайдбар/топбар/
+  // нижняя навигация) заблокирован, а программные переходы наружу
+  // возвращаем на subject — иначе можно уйти в профиль и т.д. до выбора.
+  try {
+    if (isSubjectChoiceLocked() && route !== "subject" && route !== "login" && route !== "register") {
+      route = "subject";
+      param = undefined;
+    }
+  } catch (_) {}
   const h = "#/" + route + (param ? "/" + encodeURIComponent(param) : "");
   // Тот же адрес повторно — просто перерисовать (возврат в уже открытый урок/сессию).
   if (location.hash === h) render();
@@ -1065,6 +1111,10 @@ async function render() {
     if (!Store.ready || !Store.state) return;
   }
   const route = currentRoute();
+  // После входа предмет не угадываем по current_subject: пока пользователь
+  // явно не выбрал предмет, любой раздел уводит на экран выбора (кроме
+  // login/register — туда ведёт сам flow входа/выхода).
+  if (pendingSubjectChoice && route !== "subject" && route !== "login" && route !== "register") { go("subject"); return; }
   // Экраны входа/регистрации доступны и до онбординга: после logout свежий
   // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
   if (!Store.state.onboarded && route !== "login" && route !== "register") { Onboarding.show(); return; }
@@ -1074,6 +1124,7 @@ async function render() {
   if (location.hash !== lastHash) {
     lastHash = location.hash;
     try { closeModal(); } catch (_) {}
+    try { closeDeviceModal(); } catch (_) {}
   }
   const param = routeParam();
   // Подсветка в меню: глубокий маршрут относится к своему разделу.
@@ -1142,6 +1193,7 @@ async function render() {
     profile: screenProfile,
     login: screenLogin,
     register: screenRegister,
+    subject: screenLoginSubject,
   }[route] || screenDashboard;
   // Пустой предмет: контентным маршрутам нечего показать — честная заглушка
   // вместо пустых экранов или данных чужого предмета.
@@ -1170,8 +1222,12 @@ async function render() {
     }
   } catch (_) {}
   // Глубокая ссылка на навык: карта + открытое окно темы.
+  // Временно закрытая тема — то же окно «недоступна», а не обычное.
   if (route === "skill" && param && DataAPI.skill(param)) {
-    try { openSkillModal(param); } catch (_) {}
+    try {
+      if (typeof TEMP_LOCKED_SKILLS !== "undefined" && TEMP_LOCKED_SKILLS.has(param)) openLockedSkillModal(param);
+      else openSkillModal(param);
+    } catch (_) {}
   }
   window.scrollTo(0, 0);
 }
@@ -1185,7 +1241,7 @@ const ROUTE_TITLES = {
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
   errors: "Ошибки", trials: "Испытания", stats: "Статистика", profile: "Профиль",
-  login: "Вход", register: "Регистрация",
+  login: "Вход", register: "Регистрация", subject: "Выбор предмета",
 };
 
 function updateDocumentTitle(route) {
@@ -1234,20 +1290,130 @@ function subjectPickerHTML() {
     + `</div>`;
 }
 
+/* Одна кнопка с текущим предметом в профиле: открывает диалог выбора
+   на той же dlg-системе, что и остальные подтверждения. Пилюли
+   subjectPickerHTML оставлены для совместимости. */
+function subjectCurrentButtonHTML() {
+  const subjects = DataAPI.subjects();
+  const info = DataAPI.subjectInfo() || {};
+  const title = info.title || "Предмет";
+  if (subjects.length < 2) return `<b>${esc(title)}</b>`;
+  const sub = subjectCourseLabel(info);
+  return `<button type="button" class="subject-current" onclick="askSubjectDialog()" aria-haspopup="dialog">
+    <span class="subject-current__icon" aria-hidden="true">${icon("layers")}</span>
+    <span class="subject-current__body">
+      <span class="subject-current__name">${esc(title)}</span>
+      ${sub ? `<span class="subject-current__sub">${esc(sub)}</span>` : ""}
+    </span>
+    <span class="subject-current__chev" aria-hidden="true">›</span>
+  </button>`;
+}
+
+/* Диалог выбора предмета: та же структура модалки (device-modal-root +
+   .dlg-backdrop/.dlg), но со списком красивых карточек предметов. */
+function askSubjectDialog() {
+  const root = deviceModalRoot();
+  const subjects = DataAPI.subjects();
+  if (!root || subjects.length < 2) return;
+  const cur = DataAPI.currentSubject();
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
+  const cards = subjects.map((s) => {
+    const active = s.id === cur;
+    const ready = s.status === "ready";
+    return `<button type="button" class="subj-card${active ? " subj-card--active" : ""}"
+        onclick="chooseSubjectFromDialog('${esc(s.id)}')"${active ? ` aria-current="true"` : ""}>
+      <span class="subj-card__badge">${esc(s.short || s.title)}</span>
+      <span class="subj-card__body">
+        <span class="subj-card__name">${esc(s.title)}</span>
+        <span class="subj-card__sub">${esc(subjectCourseLabel(s))}${ready ? "" : ` · <span class="subj-card__soon">скоро</span>`}</span>
+      </span>
+      <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
+    </button>`;
+  }).join("");
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Выбор предмета">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Предмет</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("layers")}</div>
+          <div class="dlg-device__name">Какой предмет открываем?</div>
+        </div>
+        <div class="dlg__text">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету — переключение ничего не стирает.</div>
+        <div class="subj-list">${cards}</div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Закрыть</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+function chooseSubjectFromDialog(id) {
+  if (!id || subjectSwitching) return;
+  try {
+    if (id === DataAPI.currentSubject()) { closeDeviceModal(); return; }
+  } catch (_) {}
+  switchSubjectFromUI(id);
+}
+
+/* Честная подпись состава курса для выбора предмета: собирается из features
+   предмета (уроки/практика/прогноз), а не из захардкоженной строки. Полный
+   набор — «Полный курс», иначе перечисляем только то, что реально есть. */
+function subjectCourseLabel(s) {
+  if (!s) return "";
+  if (s.status !== "ready") return "Материалы пока готовятся — можно занять место";
+  const f = (typeof DataAPI !== "undefined" && DataAPI.subjectFeatures)
+    ? DataAPI.subjectFeatures(s.id) : { lessons: true, practice: true, forecast: true };
+  const parts = [];
+  if (f.lessons) parts.push("уроки");
+  if (f.practice) parts.push("тренировки");
+  if (f.forecast) parts.push("прогноз");
+  if (parts.length >= 3) return "Полный курс: уроки, тренировки, прогноз";
+  if (!parts.length) return "Материалы пока готовятся — можно занять место";
+  const titled = parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(", ");
+  return `${titled} — без лишнего`;
+}
+
 async function switchSubjectFromUI(sel) {
   const id = typeof sel === "string" ? sel : (sel && sel.value);
-  if (!id || id === DataAPI.currentSubject()) return;
+  if (!id || id === DataAPI.currentSubject() || subjectSwitching) return;
+  subjectSwitching = true;
   try {
     toast("Переключаем предмет…", "", "hourglass");
+    // Мгновенный отклик: лоадер на экране сразу, а не после ответа сети —
+    // иначе клик выглядит зависшим, пока летят save + POST /api/subject.
+    try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
     try { Session.cur = null; } catch (_) {}
     try { Lesson.cur = null; } catch (_) {}
     try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+    // Смена адреса закрывает модалки только при смене хэша (см. render) —
+    // на том же адресе окно прежнего предмета пережило бы переключение.
+    try { closeModal(); } catch (_) {}
+    try { closeDeviceModal(); } catch (_) {}
     await Store.switchSubject(id);
+    subjectSwitching = false;
+    // Предмет выбран явно через профиль: онбординг нового предмета не должен
+    // переспрашивать предмет — show() стартует сразу с вопросов.
+    try {
+      if (typeof Onboarding !== "undefined" && Onboarding) {
+        Onboarding.presetSubject = id;
+        try { sessionStorage.setItem("ege_onboard_preset_subject", id); } catch (_) {}
+      }
+    } catch (_) {}
     if (!Store.state.onboarded) { render(); return; }
     if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
     render();
   } catch (error) {
+    subjectSwitching = false;
     try { toast("Не удалось переключить предмет", "toast--error", "x"); } catch (_) {}
     render();
   }
@@ -1282,7 +1448,20 @@ function screenEmptySubject(root) {
    ============================================================ */
 
 function renderSidebar(active) {
+  const locked = isSubjectChoiceLocked();
+  try { document.getElementById("app").classList.toggle("chrome-locked", locked); } catch (_) {}
   const nav = document.getElementById("sidebarNav");
+  if (locked) {
+    nav.setAttribute("aria-disabled", "true");
+    nav.innerHTML = NAV.map((n) => `
+      <span class="nav-item is-disabled" aria-disabled="true" tabindex="-1" title="Сначала выбери предмет">
+        ${icon(n.ic)}<span>${n.label}</span>
+      </span>`).join("");
+    document.getElementById("sidebarFooter").innerHTML = `
+      <span style="font-size:12px">Сначала выбери предмет…</span>`;
+    return;
+  }
+  nav.removeAttribute("aria-disabled");
   const openErrors = Store.state.errors.filter((e) => !e.resolved).length;
   nav.innerHTML = NAV.map((n) => `
     <a class="nav-item ${n.route === active ? "active" : ""}" href="#/${n.route}">
@@ -1296,6 +1475,20 @@ function renderSidebar(active) {
 }
 
 function renderBottomNav(active) {
+  const locked = isSubjectChoiceLocked();
+  const bottom = document.getElementById("bottomnav");
+  if (locked) {
+    // Нижнее меню на этапе выбора предмета скрываем полностью:
+    // disabled-ссылки без стилей `.bottomnav a` выглядели «сырыми».
+    bottom.setAttribute("aria-disabled", "true");
+    bottom.setAttribute("hidden", "");
+    bottom.style.display = "none";
+    bottom.innerHTML = "";
+    return;
+  }
+  bottom.removeAttribute("aria-disabled");
+  bottom.removeAttribute("hidden");
+  bottom.style.display = "";
   const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
   document.getElementById("bottomnav").innerHTML = items.map((n) => `
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
@@ -1311,6 +1504,13 @@ function streakTier(days) {
 }
 
 function renderTopbar() {
+  if (isSubjectChoiceLocked()) {
+    document.getElementById("topbar").innerHTML = `
+      <div class="topbar__spacer"></div>
+      <span class="chip">Сначала выбери предмет…</span>
+      <div class="topbar__spacer"></div>`;
+    return;
+  }
   if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; return; }
   const li = levelInfo();
   const f = forecast();
@@ -1410,11 +1610,13 @@ function screenDashboard(root) {
         </div>
         <div class="forecast-mid">${f.mid}<small>баллов</small></div>
         <div class="forecast-range">диапазон <b class="mono">${f.low}–${f.high}</b>${goal != null ? (f.mid >= goal ? ` · цель ${goal}+ достигнута` : ` · до цели ${goal}+ осталось <b class="mono">${goal - f.mid}</b>`) : ""}</div>
-        <div class="forecast-scale" role="img" aria-label="Шкала прогноза: ${f.mid} из 100${goal != null ? `, цель ${goal}` : ""}">
-          <div class="forecast-scale__fill" style="width:${Math.min(100, Math.max(0, f.mid))}%"></div>
-          ${goal != null ? `<div class="forecast-scale__goal" style="left:calc(${Math.min(100, Math.max(0, goal))}% - 1px)"></div>` : ""}
+        ${(() => { const scale = forecastScale(); const max = Math.max(1, scale.length ? scale[scale.length - 1] : forecastTotal()); const pct = (v) => Math.min(100, Math.max(0, (v / max) * 100)); return `
+        <div class="forecast-scale__labels forecast-scale__labels--top"><span>0</span>${goal != null ? `<span>${max}</span>` : `<span>${Math.round(max / 2)}</span><span>${max}</span>`}</div>
+        <div class="forecast-scale" role="img" aria-label="Шкала прогноза: ${f.mid} из ${max}${goal != null ? `, цель ${goal}` : ""}">
+          <div class="forecast-scale__fill" style="width:${pct(f.mid)}%"></div>
+          ${goal != null ? `<div class="forecast-scale__goal" style="left:calc(${pct(goal)}% - 1px)"></div>` : ""}
         </div>
-        <div class="forecast-scale__labels${goal != null ? " forecast-scale__labels--goal" : ""}"><span>0</span>${goal != null ? (() => { const gc = Math.min(100, Math.max(0, goal)); const ga = gc <= 12 ? "left" : gc >= 88 ? "right" : "center"; return `<span>100</span><span class="goal goal--${ga}" style="left:${gc}%">цель ${goal}</span>`; })() : `<span>50</span><span>100</span>`}</div>
+        ${goal != null ? (() => { const gc = pct(goal); const ga = gc <= 12 ? "left" : gc >= 88 ? "right" : "center"; return `<div class="forecast-scale__labels forecast-scale__labels--goal"><span class="goal goal--${ga}" style="left:${gc}%">цель ${goal}</span></div>`; })() : ""}`; })()}
         ${topGain ? `<button class="forecast-gain-btn" onclick="go('skill', '${topGain.skillId}')" title="Открыть тему">Закрой «${esc(topGain.shortName)}» — будет <b class="mono">+${topGain.gain}</b><span class="go">→</span></button>` : ""}
         ${cov.totalLessons ? `<div class="forecast-cover">
           <div class="forecast-cover__row"><span>Уроки: ${cov.doneLessons} из ${cov.totalLessons}</span><span>Темы с данными: ${cov.covered} из ${cov.totalSkills}</span></div>
@@ -1529,16 +1731,29 @@ function runNextStep(index = 0) {
   }
 }
 
+/* Цель текущего предмета с healing: в состояниях эры пустой базы goal может
+   отсутствовать или ссылаться на чужую шкалу — для отображения берём первую
+   цель шкалы предмета (как defaultGoal()), иначе у базы нет риски на шкале. */
+function currentGoal() {
+  const list = (typeof DataAPI !== "undefined" && DataAPI.goals) ? (DataAPI.goals() || []) : [];
+  const g = list.find((x) => x && x.id === Store.state.goal);
+  return g || (list.length ? list[0] : null);
+}
 function goalLabel() {
-  const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
+  const g = currentGoal();
   return g ? g.label : "не выбрана";
 }
 
-/* Число цели для шкалы прогноза: из «80+ баллов» достаём 80.
-   Нет цели — нет метки, шкала остаётся чистой. */
+/* Число цели для шкалы прогноза в баллах предмета: сначала ищем порог вида
+   «12+ баллов» в desc (у базы цель — оценка, а баллы лежат в описании:
+   «12+ баллов — уверенный результат»), иначе — первое число label
+   («80+ баллов» у профиля). Нет цели — нет метки, шкала остаётся чистой. */
 function forecastGoalNum() {
-  const g = DataAPI.goals().find((x) => x.id === Store.state.goal);
-  const m = g && String(g.label).match(/\d+/);
+  const g = currentGoal();
+  if (!g) return null;
+  const d = String(g.desc || "").match(/(\d+)\s*\+/);
+  if (d) return Number(d[1]);
+  const m = String(g.label || "").match(/\d+/);
   return m ? Number(m[0]) : null;
 }
 
@@ -1633,7 +1848,9 @@ function continueTraining() {
   const mission = worst && DataAPI.missions().find((m) => m.skill === worst.id && Array.isArray(m.tasks) && m.tasks.length);
   if (mission) return startMission(mission.id);
   const fallbackSkill = worst || DataAPI.skills()[0];
-  const tasks = orderedTasks(DataAPI.practiceTasksBySkill(fallbackSkill ? fallbackSkill.id : "")).slice(0, 6).map((t) => t.id);
+  // Запасной вариант без миссии: весь банк темы, без усечения — состав
+  // практики всегда равен реально доступным заданиям.
+  const tasks = orderedTasks(DataAPI.practiceTasksBySkill(fallbackSkill ? fallbackSkill.id : "")).map((t) => t.id);
   Session.start({ title: worst ? `Тренировка: ${worst.name}` : "Тренировка", taskIds: tasks, mode: "quick" });
 }
 
@@ -1652,8 +1869,9 @@ function screenPath(root) {
             const st = Store.state.skillStats[sk.id];
             const status = skillStatus(sk);
             const locked = status === "locked";
+            const openAction = locked ? `openLockedSkillModal('${sk.id}')` : `go('skill', '${sk.id}')`;
             return `
-            <div class="tree-node tree-node--${status}" onclick="go('skill', '${sk.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
+            <div class="tree-node tree-node--${status}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? `Тема временно недоступна` : "Открыть тему"} ${esc(sk.name)}">
               <div class="tree-node__dot"></div>
               <div class="tree-node__body">
                 <div class="tree-node__name">${sk.name}
@@ -1665,7 +1883,7 @@ function screenPath(root) {
                   <span>· ${sk.ege}</span>
                 </div>
               </div>
-              <div style="color:var(--muted)">${icon("arrow")}</div>
+              <div style="color:var(--muted)">${icon(locked ? "lock" : "arrow")}</div>
             </div>`;
           }).join("")}
         </div>
@@ -1678,7 +1896,7 @@ function screenPath(root) {
       <div class="page-sub">Карта всех тем ЕГЭ и твой прогресс по каждой. Нажми на тему — увидишь урок, тренировку и типичные ошибки.</div>
     </div>
     <div style="margin-top:28px">
-      <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>профильная математика · ${overallProgress()}% освоено</small></div></div>
+      <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>${esc((DataAPI.subjectInfo() || {}).title || "Математика")} · ${overallProgress()}% освоено</small></div></div>
       <div class="tree-connector-v"></div>
       <div class="tree-branches">${branches}</div>
     </div>`;
@@ -1691,6 +1909,25 @@ function overallProgress() {
 
 function statusChipClass(st) {
   return { "locked": "", "not-started": "", "weak": "chip--danger", "in-progress": "chip--accent", "completed": "chip--success", "mastered": "chip--success" }[st];
+}
+
+/* Временно закрытая тема: тот же стиль окна, что и у обычной темы,
+   но вместо урока/практики — честное объяснение, почему недоступна. */
+function openLockedSkillModal(skillId) {
+  const sk = DataAPI.skill(skillId);
+  if (!sk) return;
+  openModal(`
+    <div class="stat-label">${DataAPI.category(sk.cat).name} · ${sk.ege}</div>
+    <div class="skill-modal__title">${sk.name}</div>
+    <div style="margin-top:6px"><span class="chip ${statusChipClass("locked")}">${statusLabel("locked")}</span></div>
+    <div style="margin-top:14px;font-size:14px;line-height:1.55;color:var(--text-2)">
+      Тема временно недоступна: все её задания построены на официальных чертежах,
+      которых пока нет в сборке. Мы не показываем такие задания без рисунка,
+      чтобы не вводить в заблуждение, — тема вернётся, как только чертежи появятся.
+    </div>
+    <div class="skill-modal__actions">
+      <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
+    </div>`);
 }
 
 function openSkillModal(skillId) {
@@ -1727,11 +1964,7 @@ function openSkillModal(skillId) {
       if (b.total >= 90) hint = 'Тема освоена — так держать.';
       else if (b.lessonTotal && b.lessonDone < b.lessonTotal) hint = 'Пройди урок — это сразу +40 к освоению.';
       else {
-        let k = -1;
-        for (let i = 1; i <= 50; i++) {
-          const s2 = b.solved + i, c2 = b.correct + i;
-          if (b.theory + Math.min(1, s2 / 10) * (c2 / s2) * prMax >= 90) { k = i; break; }
-        }
+        const k = practiceSolvesToTarget(skillId, 90);
         hint = k > 0
           ? 'До «освоена» (90%): примерно ' + k + ' ' + plural(k, 'верный ответ', 'верных ответа', 'верных ответов') + ' подряд.'
           : 'Точность сильно просела из-за старых ошибок — понадобится длинная серия верных ответов, чтобы её выправить.';
@@ -1851,7 +2084,8 @@ function screenTraining(root) {
         const sk = DataAPI.skill(m.skill);
         const done = !!Store.state.missionsDone[m.id];
         const prog = missionProgress(m);
-        const taskCount = Array.isArray(m.tasks) ? m.tasks.length : 0;
+        // Состав тренировки — весь банк темы, а не тройка из каталога.
+        const taskCount = missionPracticeIds(m).length;
         // Finished the task list without clearing the completion bar (see
         // sessionFinish): startMission() restarts it from scratch, so the
         // button should say so instead of a misleading "Продолжить".
@@ -1885,20 +2119,24 @@ function screenTraining(root) {
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) return toast("Миссия не найдена", "toast--error", "x");
-  if (!Array.isArray(m.tasks) || !m.tasks.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
+  // Тренировка идёт по всему банку темы (missionPracticeIds), а не по
+  // урезанной тройке из каталога: количество заданий = реальные доступные.
+  const allIds = missionPracticeIds(m);
+  if (!allIds.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
   // A mission can reach the end of its task list without being marked done
   // (the completion bar wasn't met — see sessionFinish). Resuming "from"
   // that point would slice an empty task list, so treat it the same as a
   // fresh restart instead of silently handing Session.start nothing to do.
-  const from = (Store.state.missionsDone[missionId] || missionProgress(m) >= m.tasks.length) ? 0 : missionProgress(m);
+  const rawFrom = (Store.state.missionsDone[missionId] || missionProgress(m) >= allIds.length) ? 0 : missionProgress(m);
+  const from = Math.min(Math.max(rawFrom, 0), Math.max(allIds.length - 1, 0));
   Session.start({
     title: `Миссия: ${m.title}`,
-    taskIds: m.tasks.slice(from),
+    taskIds: allIds.slice(from),
     mode: "mission",
     missionId,
     xpReward: m.xp,
     offset: from,
-    total: m.tasks.length,
+    total: allIds.length,
   });
 }
 
@@ -1991,11 +2229,14 @@ function restoreSessionFromStorage(route, param) {
 function freshSessionForRoute(route, param) {
   if (route === "practice") {
     const m = DataAPI.mission(param);
-    if (!m || !Array.isArray(m.tasks) || !m.tasks.length) return false;
-    const from = (Store.state.missionsDone[param] || missionProgress(m) >= m.tasks.length) ? 0 : missionProgress(m);
+    if (!m) return false;
+    const allIds = missionPracticeIds(m);
+    if (!allIds.length) return false;
+    const rawFrom = (Store.state.missionsDone[param] || missionProgress(m) >= allIds.length) ? 0 : missionProgress(m);
+    const from = Math.min(Math.max(rawFrom, 0), Math.max(allIds.length - 1, 0));
     Session.cur = {
-      title: `Миссия: ${m.title}`, taskIds: m.tasks.slice(from), mode: "mission",
-      missionId: param, bossId: null, xpReward: m.xp, offset: from, total: m.tasks.length,
+      title: `Миссия: ${m.title}`, taskIds: allIds.slice(from), mode: "mission",
+      missionId: param, bossId: null, xpReward: m.xp, offset: from, total: allIds.length,
       hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
       startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
     };
@@ -2055,7 +2296,7 @@ function renderTask(root) {
   root.innerHTML = `
     <div class="session-wrap">
       <div class="session-head">
-        <button class="btn btn--ghost btn--sm" onclick="sessionQuit()">← Выйти</button>
+        <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
         <div class="session-head__title">${esc(S.title)}</div>
         <div class="session-head__progress mono">${progressDone + 1} / ${S.total}</div>
       </div>
@@ -2161,7 +2402,7 @@ function sessionSelfResult(correct) {
   const seconds = (Date.now() - S.taskStartTs) / 1000;
   const hintLevel = S.selfHintLevel || 0;
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
-  const xp = recordAnswer(t, correct, hintLevel, seconds, closesTaskId);
+  const xp = recordAnswer(t, correct, hintLevel, seconds, closesTaskId, S.attempts || 0);
   S.gainedXp += xp;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
@@ -2294,7 +2535,7 @@ function sessionSubmit() {
   const seconds = (Date.now() - S.taskStartTs) / 1000;
   const hintLevel = S.hintLevel || 0;
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
-  const xp = recordAnswer(t, true, hintLevel, seconds, closesTaskId);
+  const xp = recordAnswer(t, true, hintLevel, seconds, closesTaskId, S.attempts || 0);
   S.gainedXp += xp;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
@@ -2651,7 +2892,7 @@ function screenLesson(root) {
   root.innerHTML = `
     <div class="session-wrap lesson-wrap">
       <div class="session-head">
-        <button class="btn btn--ghost btn--sm" onclick="lessonQuit()">← Выйти</button>
+        <button class="btn btn--ghost btn--sm" onclick="askLessonQuit()">← Выйти</button>
         <div class="session-head__title">${icon("bulb")} Урок: ${esc(lesson.title)}</div>
         <div class="session-head__progress mono">${L.idx + 1} / ${total}</div>
       </div>
@@ -2790,7 +3031,6 @@ function lessonPrev() {
 
 function lessonQuit() {
   if (!Lesson.cur) return go("path");
-  if (!window.confirm("Выйти из урока? Текущий ответ и прогресс будут сохранены.")) return;
   const returnRoute = Lesson.cur.returnRoute || "path";
   Lesson.persist();
   Lesson.cur = null;
@@ -2843,11 +3083,34 @@ function lessonFinish() {
 function screenErrors(root) {
   const open = Store.state.errors.filter((e) => !e.resolved);
   const resolved = Store.state.errors.filter((e) => e.resolved);
+  // Полные ошибки (задание не решено) и мини-ошибки (решено неидеально:
+  // подсказка, неверные попытки, медленно) — разные пункты одного списка.
+  const majors = open.filter((e) => errorKindOf(e) === "major");
+  const minors = open.filter((e) => errorKindOf(e) === "minor");
 
-  const bySkill = {};
-  for (const e of open) {
-    (bySkill[e.skill] = bySkill[e.skill] || []).push(e);
-  }
+  const groupCards = (errs, chipClass) => {
+    const bySkill = {};
+    for (const e of errs) {
+      (bySkill[e.skill] = bySkill[e.skill] || []).push(e);
+    }
+    return Object.entries(bySkill).map(([skillId, list]) => {
+      const sk = DataAPI.skill(skillId);
+      const subs = {};
+      list.forEach((e) => { subs[e.sub] = (subs[e.sub] || 0) + 1; });
+      return `
+      <div class="card error-group">
+        <div class="error-group__head">
+          <div style="font-weight:650;font-size:15px">${sk.name}</div>
+          <span class="chip">${sk.ege}</span>
+          <div class="error-group__count"><span class="chip ${chipClass}">${list.length} ${plural(list.length, "ошибка", "ошибки", "ошибок")}</span></div>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Частые проблемы:</div>
+        <div class="error-subtopics">
+          ${Object.entries(subs).map(([sub, n]) => `<span class="chip ${chipClass}">${esc(sub)}${n > 1 ? ` ×${n}` : ""}</span>`).join("")}
+        </div>
+      </div>`;
+    }).join("");
+  };
 
   root.innerHTML = `
     <div class="page-head">
@@ -2858,7 +3121,7 @@ function screenErrors(root) {
     <div class="card card--glow" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px">
       <div>
         <div class="stat-num mono">${open.length}</div>
-        <div class="stat-label">открытых ошибок · закрыто за всё время: ${Store.state.errorsResolved}</div>
+        <div class="stat-label">открытых ошибок (полных: ${majors.length} · мини: ${minors.length}) · закрыто за всё время: ${Store.state.errorsResolved}</div>
       </div>
       <div style="margin-left:auto">
         <button class="btn btn--primary btn--lg" ${open.length ? "" : "disabled"} onclick="startErrorsReview()">
@@ -2867,25 +3130,11 @@ function screenErrors(root) {
       </div>
     </div>
 
-    <div class="section-title">По навыкам</div>
-    ${Object.keys(bySkill).length === 0 ? `<div class="card empty">Открытых ошибок нет. Решай задания — система соберёт здесь всё, что пошло не так.</div>` : ""}
-    ${Object.entries(bySkill).map(([skillId, errs]) => {
-      const sk = DataAPI.skill(skillId);
-      const subs = {};
-      errs.forEach((e) => { subs[e.sub] = (subs[e.sub] || 0) + 1; });
-      return `
-      <div class="card error-group">
-        <div class="error-group__head">
-          <div style="font-weight:650;font-size:15px">${sk.name}</div>
-          <span class="chip">${sk.ege}</span>
-          <div class="error-group__count"><span class="chip chip--danger">${errs.length} ${plural(errs.length, "ошибка", "ошибки", "ошибок")}</span></div>
-        </div>
-        <div style="font-size:13px;color:var(--muted);margin-top:6px">Частые проблемы:</div>
-        <div class="error-subtopics">
-          ${Object.entries(subs).map(([sub, n]) => `<span class="chip chip--danger">${esc(sub)}${n > 1 ? ` ×${n}` : ""}</span>`).join("")}
-        </div>
-      </div>`;
-    }).join("")}
+    ${majors.length ? `<div class="section-title">Требуют повторения</div>${groupCards(majors, "chip--danger")}` : ""}
+    ${minors.length ? `<div class="section-title">Почти получилось — закрепи без подсказок</div>
+    <div style="font-size:13px;color:var(--muted);margin:-6px 0 12px">Решено, но неидеально: с подсказкой, после неверных попыток или слишком медленно. Чистое решение закроет пункт.</div>
+    ${groupCards(minors, "")}` : ""}
+    ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Решай задания — система соберёт здесь всё, что пошло не так.</div>` : ""}
 
     ${resolved.length ? `
     <div class="section-title">Закрытые</div>
@@ -2954,10 +3203,15 @@ function buildErrorsReviewSession() {
   if (!open.length) return null;
 
   /* Частые подтемы идут раньше. Внутри подтемы каждый вопрос уникален:
-     это исключает дубли и даёт второе, похожее задание, когда оно есть. */
+     это исключает дубли и даёт второе, похожее задание, когда оно есть.
+     Полные ошибки — раньше мини-ошибок: сначала закрываем реальные пробелы. */
   const subFreq = {};
   open.forEach((e) => { subFreq[e.sub] = (subFreq[e.sub] || 0) + 1; });
-  const sorted = open.slice().sort((a, b) => subFreq[b.sub] - subFreq[a.sub]);
+  const sorted = open.slice().sort((a, b) => {
+    const ka = errorKindOf(a), kb = errorKindOf(b);
+    if (ka !== kb) return ka === "major" ? -1 : 1;
+    return subFreq[b.sub] - subFreq[a.sub];
+  });
   const queue = reviewQueueForErrors(sorted);
   if (!queue || !queue.taskIds.length) return null;
   return {
@@ -3357,44 +3611,394 @@ function screenProfile(root) {
         </div>
       </div>
       <div>
-        <div class="section-title" style="margin-top:0">Данные</div>
-        <div class="card settings-card">
-          <div class="settings-row">
-            <div class="settings-row__icon" aria-hidden="true">${icon("shield")}</div>
-            <div class="settings-row__body">
-              <div class="settings-row__title">Аккаунт</div>
-              ${accountAuthHTML()}
-            </div>
+        <div class="section-title" style="margin-top:0">Устройства</div>
+        <div class="card settings-card" id="devices-card">
+          <div class="settings-row__sub" id="devices-list">Загрузка устройств…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:34px">Данные</div>
+    <div class="card settings-card">
+      <div class="settings-row">
+        <div class="settings-row__icon" aria-hidden="true">${icon("shield")}</div>
+        <div class="settings-row__body">
+          <div class="settings-row__title">Аккаунт</div>
+          ${accountAuthHTML()}
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row__icon" aria-hidden="true">${icon("layers")}</div>
+        <div class="settings-row__body">
+          <div class="settings-row__title">Предмет</div>
+          <div class="settings-row__sub">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету.</div>
+          <div class="settings-row__control">
+            ${subjectCurrentButtonHTML()}
           </div>
-          <div class="settings-row">
-            <div class="settings-row__icon" aria-hidden="true">${icon("layers")}</div>
-            <div class="settings-row__body">
-              <div class="settings-row__title">Предмет</div>
-              <div class="settings-row__sub">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету.</div>
-              <div class="settings-row__control">
-                ${subjectPickerHTML() || `<b>${esc((DataAPI.subjectInfo() || {}).title || "")}</b>`}
-              </div>
-              ${DataAPI.isSubjectEmpty() ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
-            </div>
-          </div>
-          <div class="settings-row">
-            <div class="settings-row__icon" aria-hidden="true">${icon("check")}</div>
-            <div class="settings-row__body">
-              <div class="settings-row__title">Сохранение</div>
-              <div class="settings-row__sub">Прогресс и результаты автоматически сохраняются на сервере после каждого действия — ничего нажимать не нужно.</div>
-            </div>
-          </div>
-          ${Store.auth && Store.auth.registered ? `
-          <button class="settings-row settings-row--danger" type="button" onclick="logoutAccount()">
-            <span class="settings-row__icon" aria-hidden="true">${icon("logout")}</span>
-            <span class="settings-row__body">
-              <span class="settings-row__title">Выйти из аккаунта</span>
-              <span class="settings-row__sub">Прогресс не удалится и вернётся при следующем входе по email и паролю.</span>
-            </span>
-          </button>` : ""}
+          ${DataAPI.isSubjectEmpty() ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
+        </div>
+      </div>
+      ${Store.auth && Store.auth.registered ? `
+      <button class="settings-row settings-row--danger" type="button" onclick="askLogoutAccount()">
+        <span class="settings-row__icon" aria-hidden="true">${icon("logout")}</span>
+        <span class="settings-row__body">
+          <span class="settings-row__title">Выйти из аккаунта</span>
+          <span class="settings-row__sub">Прогресс не удалится и вернётся при следующем входе по email и паролю.</span>
+        </span>
+      </button>` : ""}
+    </div>`;
+  // Список сессий подгружаем отдельно: screenProfile синхронный, а устройства
+  // требуют запроса к серверу. Кука HttpOnly уходит сама (same-origin).
+  // Заодно сверяем auth-срез с сервером: вход/выход/отзыв сессии в другой
+  // вкладке меняет куку мимо этого таба, и без сверки кнопка «Выйти из
+  // аккаунта» иногда отсутствует при живой сессии (или наоборот).
+  try { loadDevicesSection(); } catch (_) {}
+  try { revalidateProfileAuth(); } catch (_) {}
+}
+
+/* Лёгкая сверка auth-среза профиля с сервером (GET /api/auth/session, без
+   минта аккаунта). Прогресс/состояние не трогаем — только чиним stale
+   Store.auth и перерисовываем профиль, чтобы кнопка выхода соответствовала
+   серверной правде. Полный refreshAfterAuth здесь не нужен и опасен посреди
+   тренировки (подмена снапшота), поэтому при активной сессии/уроке только
+   обновляем срез — следующий переход и так перерисует. */
+let profileAuthCheckInFlight = null;
+let profileAuthCheckAt = 0;
+
+function revalidateProfileAuth() {
+  if (typeof currentRoute === "function" && currentRoute() !== "profile") return Promise.resolve();
+  if (profileAuthCheckInFlight) return profileAuthCheckInFlight;
+  if (Date.now() - profileAuthCheckAt < 15000) return Promise.resolve();
+  profileAuthCheckAt = Date.now();
+  profileAuthCheckInFlight = (async () => {
+    let session = null;
+    try { session = await AuthAPI.session(); } catch (_) { return; }
+    if (typeof currentRoute === "function" && currentRoute() !== "profile") return;
+    const u = (session && session.user) || null;
+    const reg = !!(u && u.registered);
+    const email = (u && u.email) || null;
+    const cur = Store.auth || { registered: false, email: null };
+    if (!!cur.registered === reg && (cur.email || null) === email) return;
+    Store.auth = { registered: reg, email };
+    const busy = (typeof Session !== "undefined" && Session && Session.cur)
+      || (typeof Lesson !== "undefined" && Lesson && Lesson.cur);
+    if (!busy && typeof currentRoute === "function" && currentRoute() === "profile") {
+      try { render(); } catch (_) {}
+    }
+  })().catch(() => {}).finally(() => { profileAuthCheckInFlight = null; });
+  return profileAuthCheckInFlight;
+}
+
+/* ============================================================
+   Устройства: активные серверные сессии текущего аккаунта.
+   Показываем только готовые название/тип с сервера — сырой User-Agent
+   никогда не хранится и не отображается. Отзыв чужой сессии инвалидирует
+   её токен серверно, текущая сессия при этом не ломается; отзыв текущей
+   сессии эквивалентен выходу из аккаунта.
+   ============================================================ */
+
+function deviceIconFor(type) {
+  if (type === "phone") return "phone";
+  if (type === "tablet") return "tablet";
+  if (type === "laptop") return "laptop";
+  return "desktop";
+}
+
+function formatDeviceTime(ts) {
+  const ms = Number(ts);
+  if (!ms) return "—";
+  try {
+    return new Date(ms).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  } catch (_) {
+    return String(ms);
+  }
+}
+
+async function loadDevicesSection() {
+  const box = document.getElementById("devices-list");
+  if (!box) return;
+  let payload;
+  try {
+    payload = await AuthAPI.devices();
+  } catch (_) {
+    box.textContent = "Не удалось загрузить устройства. Проверь соединение и обнови страницу.";
+    return;
+  }
+  const devices = (payload && payload.devices) || [];
+  // Кэш для confirm-модалки: имя/тип подставляем из него, а не из onclick —
+  // не нужно экранировать строки в атрибутах.
+  try { devicesCache = devices; } catch (_) {}
+  if (!devices.length) {
+    box.textContent = "Активных устройств нет.";
+    return;
+  }
+  box.innerHTML = devices.map((d) => `
+    <div class="settings-row settings-row--action" data-device-id="${esc(String(d.id))}"
+      role="button" tabindex="0" title="Подробнее об устройстве"
+      onclick="openDeviceInfo(${Number(d.id)})"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDeviceInfo(${Number(d.id)})}">
+      <div class="settings-row__icon" aria-hidden="true">${icon(deviceIconFor(d.type))}</div>
+      <div class="settings-row__body">
+        <div class="settings-row__title">${esc(d.name || "Браузер")}
+          ${d.current ? `<span class="chip chip--success" style="margin-left:8px">это устройство</span>` : ""}
+        </div>
+        <div class="settings-row__sub">Последняя активность: ${esc(formatDeviceTime(d.lastSeenAt))}</div>
+      </div>
+      <div class="settings-row__control">
+        <button class="btn btn--soft btn--sm" type="button"
+          onclick="event.stopPropagation();openDeviceInfo(${Number(d.id)})"
+          aria-label="${d.current ? "Подробнее и выйти на этом устройстве" : "Подробнее об устройстве " + esc(d.name || "Браузер")}">
+          ${d.current ? "Выйти" : "Завершить"}
+        </button>
+      </div>
+    </div>`).join("");
+}
+
+/* Кэш списка устройств для инфо-диалога (имя/тип/флаг current). */
+let devicesCache = [];
+let deviceModalPrevFocus = null;
+
+function deviceTypeLabel(type) {
+  if (type === "phone") return "Телефон";
+  if (type === "tablet") return "Планшет";
+  if (type === "laptop") return "Ноутбук";
+  return "Компьютер";
+}
+
+function deviceModalRoot() {
+  // Штатный контейнер живёт в index.html рядом с modal-root; если страница
+  // приехала из старого кэша без него — создаём на лету, чтобы диалог всё
+  // равно открылся.
+  let root = null;
+  try { root = document.getElementById("device-modal-root"); } catch (_) { root = null; }
+  if (!root) {
+    try {
+      root = document.createElement("div");
+      root.id = "device-modal-root";
+      document.body.appendChild(root);
+    } catch (_) { return null; }
+  }
+  return root;
+}
+
+/* Инфо-диалог устройства: отдельное центрированное окно с блюром (не
+   bottom-sheet openModal). Тап по строке открывает информацию, завершение
+   сессии — только через второй шаг-подтверждение внутри этого же окна. */
+function openDeviceInfo(id) {
+  const root = deviceModalRoot();
+  if (!root) return;
+  const d = (devicesCache || []).find((x) => Number(x.id) === Number(id)) || null;
+  if (!d) return;
+  const name = d.name || "Браузер";
+  const isCurrent = !!d.current;
+  deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Устройство ${esc(name)}">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Устройство${isCurrent ? ` · <span class="chip chip--success">это устройство</span>` : ""}</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon(deviceIconFor(d.type))}</div>
+          <div class="dlg-device__name">${esc(name)}</div>
+        </div>
+        <div class="dlg-kv">
+          <div class="dlg-kv__row"><span>Тип</span><span>${esc(deviceTypeLabel(d.type))}</span></div>
+          <div class="dlg-kv__row"><span>Последняя активность</span><span>${esc(formatDeviceTime(d.lastSeenAt))}</span></div>
+          <div class="dlg-kv__row"><span>Подключено</span><span>${esc(formatDeviceTime(d.createdAt))}</span></div>
+        </div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Закрыть</button>
+          <button class="btn btn--danger-soft" type="button" onclick="deviceModalAskConfirm(${Number(d.id)})">${isCurrent ? "Выйти" : "Завершить"}</button>
         </div>
       </div>
     </div>`;
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+function deviceModalAskConfirm(id) {
+  const root = deviceModalRoot();
+  if (!root) return;
+  const d = (devicesCache || []).find((x) => Number(x.id) === Number(id)) || null;
+  if (!d) { closeDeviceModal(); return; }
+  const name = d.name || "Браузер";
+  const isCurrent = !!d.current;
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Подтверждение">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Подтверждение</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon(deviceIconFor(d.type))}</div>
+          <div class="dlg-device__name">${isCurrent ? "Выйти на этом устройстве?" : "Завершить сессию?"}</div>
+        </div>
+        <div class="dlg__text">
+          ${isCurrent
+            ? `Сессия «${esc(name)}» завершится — ты выйдешь из аккаунта здесь. Прогресс сохранён на сервере, на других устройствах ничего не изменится.`
+            : `Устройство <b>${esc(name)}</b> выйдет из аккаунта, для продолжения ему придётся войти заново. Твоя текущая сессия не прервётся.`}
+        </div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="openDeviceInfo(${Number(d.id)})">Отмена</button>
+          <button class="btn btn--danger-soft" type="button" onclick="deviceModalRevoke(${Number(d.id)})">${isCurrent ? "Выйти" : "Завершить"}</button>
+        </div>
+      </div>
+    </div>`;
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+async function deviceModalRevoke(id) {
+  try { closeDeviceModal(); } catch (_) {}
+  await revokeDeviceSession(Number(id));
+}
+
+function deviceModalEscHandler(e) {
+  if (e.key === "Escape") closeDeviceModal();
+}
+
+function closeDeviceModal() {
+  const root = document.getElementById("device-modal-root");
+  try { dlgConfirmPending = null; } catch (_) {}
+  if (!root || !root.innerHTML) return;
+  root.innerHTML = "";
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  if (deviceModalPrevFocus && deviceModalPrevFocus.isConnected) {
+    deviceModalPrevFocus.focus({ preventScroll: true });
+  }
+  deviceModalPrevFocus = null;
+}
+
+/* Единый диалог подтверждения на той же системе, что и инфо-диалог
+   устройства (device-modal-root + .dlg-backdrop/.dlg): выход из аккаунта
+   в профиле и кнопки «Выйти» в тренировке/уроке/практике/миссии/боссе.
+   Никаких браузерных вызовов подтверждения — один визуальный стиль везде. */
+let dlgConfirmPending = null;
+
+function openConfirmDialog(opts) {
+  const o = opts || {};
+  const onConfirm = typeof o.onConfirm === "function" ? o.onConfirm : null;
+  const root = deviceModalRoot();
+  if (!root) { if (onConfirm) onConfirm(); return; }
+  dlgConfirmPending = onConfirm;
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
+  const iconName = o.iconName || "logout";
+  const eyebrow = o.eyebrow || "Подтверждение";
+  const title = o.title || "Подтвердить действие?";
+  const text = o.text || "";
+  const cancelText = o.cancelText || "Отмена";
+  const confirmText = o.confirmText || "Подтвердить";
+  const danger = o.danger === false ? "" : " btn--danger-soft";
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">${esc(eyebrow)}</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon(iconName)}</div>
+          <div class="dlg-device__name">${esc(title)}</div>
+        </div>
+        ${text ? `<div class="dlg__text">${text}</div>` : ""}
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">${esc(cancelText)}</button>
+          <button class="btn${danger}" type="button" onclick="dlgConfirmOk()">${esc(confirmText)}</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+function dlgConfirmOk() {
+  const fn = dlgConfirmPending;
+  dlgConfirmPending = null;
+  try { closeDeviceModal(); } catch (_) {}
+  if (fn) { try { fn(); } catch (_) {} }
+}
+
+/* Выход из аккаунта через общий диалог (кнопка в профиле зовёт сюда,
+   сам logoutAccount остаётся прямым выходом — его дёргает подтверждение). */
+function askLogoutAccount() {
+  openConfirmDialog({
+    eyebrow: "Выход из аккаунта",
+    title: "Выйти из аккаунта?",
+    text: "Прогресс не удалится и вернётся при следующем входе по email и паролю.",
+    iconName: "logout",
+    cancelText: "Отмена",
+    confirmText: "Выйти",
+    onConfirm: () => logoutAccount(),
+  });
+}
+
+/* Выход из тренировки/практики/миссии/босса через общий диалог.
+   Сам sessionQuit остаётся прямым выходом (его дёргает подтверждение). */
+function askSessionQuit() {
+  let mode = null, hasProgress = false;
+  try { mode = Session.cur ? Session.cur.mode : null; } catch (_) {}
+  try { hasProgress = !!(Session.cur && Session.cur.results && Session.cur.results.length); } catch (_) {}
+  const title = mode === "boss" ? "Покинуть испытание?"
+    : mode === "mission" ? "Покинуть миссию?"
+    : "Выйти из тренировки?";
+  openConfirmDialog({
+    eyebrow: "Завершение",
+    title,
+    text: hasProgress
+      ? "Текущий результат и прогресс будут сохранены."
+      : "Прогресс будет сохранён, ничего не потеряется.",
+    iconName: "logout",
+    cancelText: "Остаться",
+    confirmText: "Выйти",
+    onConfirm: () => sessionQuit(),
+  });
+}
+
+/* Выход из урока (изучение темы) через общий диалог.
+   Сам lessonQuit остаётся прямым выходом (его дёргает подтверждение). */
+function askLessonQuit() {
+  openConfirmDialog({
+    eyebrow: "Урок",
+    title: "Выйти из урока?",
+    text: "Текущий ответ и прогресс будут сохранены.",
+    iconName: "logout",
+    cancelText: "Остаться",
+    confirmText: "Выйти",
+    onConfirm: () => lessonQuit(),
+  });
+}
+
+async function revokeDeviceSession(id) {
+  const cached = (devicesCache || []).find((x) => Number(x.id) === Number(id)) || null;
+  const wasCurrent = !!(cached && cached.current);
+  try {
+    const result = await AuthAPI.revokeDevice(id);
+    if ((result && result.current) || wasCurrent) {
+      // Текущая сессия завершена серверно (кука уже сброшена) — уходим в
+      // гостевой профиль тем же путём, что и обычный выход из аккаунта.
+      // Сессии/уроки прежнего аккаунта недействительны — сбрасываем их и
+      // localStorage-слепок, иначе новый гость увидит чужие задания.
+      try { Session.cur = null; } catch (_) {}
+      try { Lesson.cur = null; } catch (_) {}
+      try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+      if (typeof pendingSubjectChoice !== "undefined") { try { pendingSubjectChoice = false; } catch (_) {} }
+      try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
+      try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
+      try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}
+      await Store.refreshAfterAuth();
+      toast("Сессия завершена", "", "check");
+      go("login");
+      return;
+    }
+    toast("Устройство отключено", "", "check");
+    await loadDevicesSection();
+  } catch (error) {
+    toast((error && error.message) || "Не удалось завершить сессию", "toast--error", "x");
+  }
 }
 
 /* ============================================================
@@ -3412,7 +4016,7 @@ function accountAuthHTML() {
         <span class="chip chip--success">${icon("check")} привязан</span>
         <span class="auth-status__email mono">${esc(auth.email || "")}</span>
       </div>
-      <div class="settings-row__sub" style="margin-top:6px">Вход автоматический: сессия привязана к этому аккаунту, прогресс доступен с любого устройства.</div>`;
+      <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>`;
   }
   return `
     <div class="settings-row__sub">Гостевой профиль — прогресс привязан к этому устройству.</div>
@@ -3420,6 +4024,16 @@ function accountAuthHTML() {
       <button class="btn btn--primary btn--sm" onclick="go('register')">Войти или зарегистрироваться</button>
     </div>`;
 }
+
+/* Выбор предмета при входе. Флаг живёт в памяти вкладки (+ дублируется в
+   sessionStorage на случай перезагрузки посреди пикера): ставится только
+   действием login, обычный refresh и авто-логин его не видят. Регистрация
+   флаг не трогает — её flow сам спрашивает предмет в онбординге. */
+let pendingSubjectChoice = false;
+
+// Смена предмета уже летит — повторные клики игнорируем, иначе два
+// параллельных POST устроят гонку каталогов и двойной save.
+let subjectSwitching = false;
 
 function authScreenShell(title, sub, body) {
   return `
@@ -3475,7 +4089,7 @@ function screenRegister(root) {
     `
     <form class="auth-form" onsubmit="submitRegister(event)">
       <label class="auth-field"><span>Имя</span>
-        <input class="answer-input" type="text" name="name" autocomplete="name" maxlength="${NAME_MAX_LENGTH}" required>
+        <input class="answer-input" type="text" name="name" autocomplete="name" maxlength="${NAME_MAX_LENGTH}" required value="${esc((Store.state && Store.state.name) || "")}">
       </label>
       <label class="auth-field"><span>Email</span>
         <input class="answer-input" type="email" name="email" autocomplete="email" required>
@@ -3487,8 +4101,68 @@ function screenRegister(root) {
       <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Создать аккаунт</button>
     </form>
     <div class="auth-switch">Уже есть аккаунт? <a href="#/login" onclick="go('login');return false">Войти</a></div>`);
-  const first = root.querySelector("input[name=name]");
+  const first = root.querySelector((Store.state && Store.state.name) ? "input[name=email]" : "input[name=name]");
   if (first) first.focus();
+}
+
+function screenLoginSubject(root) {
+  if (!Store.auth || !Store.auth.registered) {
+    root.innerHTML = authScreenShell("Сначала войди",
+      "Выбор предмета доступен после входа в аккаунт.",
+      `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+         <button class="btn btn--primary" onclick="go('login')">К входу</button>
+       </div>`);
+    return;
+  }
+  const subjects = DataAPI.subjects();
+  const cur = DataAPI.currentSubject();
+  root.innerHTML = authScreenShell("Какой предмет открываем?",
+    "Один аккаунт может использоваться на разных устройствах — выбери, с каким предметом продолжить. Прогресс каждого предмета хранится отдельно и никуда не денется.",
+    `<div class="choice-list">
+       ${subjects.map((s) => `<button class="choice-item" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(s.title)}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}</span></button>`).join("")}
+     </div>`);
+}
+
+async function chooseLoginSubject(id) {
+  if (!id || subjectSwitching) return;
+  subjectSwitching = true;
+  try {
+    toast("Открываем предмет…", "", "hourglass");
+    // Мгновенный отклик: лоадер сразу, а не после ответа сети.
+    try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
+    // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
+    try { Session.cur = null; } catch (_) {}
+    try { Lesson.cur = null; } catch (_) {}
+    try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+    // Явный выбор может оставить адрес без смены хэша (не-onboarded предмет) —
+    // тогда render модалки не закроет, чистим явно.
+    try { closeModal(); } catch (_) {}
+    try { closeDeviceModal(); } catch (_) {}
+    // Явный выбор применяется к сессии через POST /api/subject: каталог и
+    // состояние заменяются целиком, прогресс других предметов не тронут.
+    // Клик по уже открытому предмету — no-op внутри switchSubject, выбор
+    // всё равно засчитан явно.
+    await Store.switchSubject(id);
+    subjectSwitching = false;
+    pendingSubjectChoice = false;
+    try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
+    // Предмет выбран явно в пикере входа: онбординг не переспрашивает его.
+    try {
+      if (typeof Onboarding !== "undefined" && Onboarding) {
+        Onboarding.presetSubject = id;
+        try { sessionStorage.setItem("ege_onboard_preset_subject", id); } catch (_) {}
+      }
+    } catch (_) {}
+    // Новый для аккаунта предмет может быть не onboarded — render сам
+    // покажет онбординг этого предмета; иначе открываем сайт с выбором.
+    if (!Store.state.onboarded) { render(); return; }
+    toast("Предмет выбран", "", "check");
+    if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
+    render();
+  } catch (error) {
+    subjectSwitching = false;
+    try { toast("Не удалось открыть предмет", "toast--error", "x"); } catch (_) {}
+  }
 }
 
 function authFormFail(message) {
@@ -3511,9 +4185,21 @@ async function submitLogin(event) {
   const form = event.target;
   try {
     await AuthAPI.login(form.email.value.trim(), form.password.value);
+    // Сессии и уроки гостя недействительны под новым аккаунтом — сбрасываем
+    // до смены, иначе чужые задания/позиция (и localStorage) пережили бы вход.
+    try { Session.cur = null; } catch (_) {}
+    try { Lesson.cur = null; } catch (_) {}
+    try { localStorage.removeItem("ege_core_session"); } catch (_) {}
     await Store.refreshAfterAuth();
+    // Вход всегда ведёт через явный выбор предмета: один аккаунт может
+    // открываться с разных устройств, поэтому сайт открывается с выбранным
+    // предметом, а не с угаданным current_subject. Флаг дублируется в
+    // sessionStorage, чтобы перезагрузка посреди пикера не теряла его;
+    // обычный refresh после выбора флага уже не видит.
+    pendingSubjectChoice = true;
+    try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
     toast("Вы вошли в аккаунт", "", "check");
-    go("profile");
+    go("subject");
   } catch (error) {
     authFormFail((error && error.message) || "Не удалось войти. Попробуй ещё раз.");
   }
@@ -3544,6 +4230,15 @@ async function logoutAccount() {
       return;
     }
   }
+  pendingSubjectChoice = false;
+  try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
+  try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
+  try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}
+  // Сессии и уроки прежнего аккаунта недействительны — сбрасываем до смены,
+  // иначе свежий гость унаследовал бы чужие задания/позицию (и localStorage).
+  try { Session.cur = null; } catch (_) {}
+  try { Lesson.cur = null; } catch (_) {}
+  try { localStorage.removeItem("ege_core_session"); } catch (_) {}
   await Store.refreshAfterAuth();
   toast("Вы вышли из аккаунта. Прогресс аккаунта сохранён на сервере.", "", "check");
   go("login");
@@ -3564,20 +4259,83 @@ const Onboarding = {
   diagIdx: 0,
   diagResults: [],
   diagAnswered: false,
+  _picking: false,
+  // Предмет, явно выбранный пользователем через профиль/пикер входа перед
+  // показом онбординга нового предмета. show() стартует сразу с вопросов,
+  // не переспрашивая предмет. Дублируется в sessionStorage на случай
+  // перезагрузки посреди онбординга.
+  presetSubject: null,
+  // Предмет-шаг пропущен (старт с вопросов после явного выбора): кнопка
+  // «Назад» на уровне скрыта — возвращаться некуда.
+  subjectSkipped: false,
 
-  // Шаги: приветствие → предмет → уровень → цель → диагностика → итог → имя.
+  // Шаги: предмет → уровень → цель → диагностика → итог → имя.
   // Пустой предмет (контент готовится) идёт коротким путём: предмет → имя.
   STEPS() {
-    return ["stepWelcome", "stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
+    return ["stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
   },
 
   show() {
     if (document.getElementById("onboard-overlay")) return;
+    // Явный выбор предмета перед онбордингом (переключение через профиль
+    // или пикер входа): предмет уже выбран, переспрашивать его не нужно —
+    // сразу к вопросам. Флаг живёт в памяти + дублируется в sessionStorage
+    // на случай перезагрузки посреди онбординга.
+    let preset = this.presetSubject;
+    this.presetSubject = null;
+    if (!preset) {
+      try { preset = sessionStorage.getItem("ege_onboard_preset_subject") || null; } catch (_) { preset = null; }
+    }
+    try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
+    // Имя едино для аккаунта (users.name, не user_subjects): если оно уже
+    // указано — в конце не спрашиваем, переиспользуем для finish().
+    // Новый запуск чистит остальное: иначе после logout/смены аккаунта свежий
+    // гость унаследовал бы subject/диагностику прежнего прохождения
+    // (finish читает их как fallback). Повторный show при открытом оверлее —
+    // тот же запуск, не трогаем (проверено выше).
+    let existingName = "";
+    try {
+      existingName = (Store.state && Store.state.name)
+        ? String(Store.state.name).trim().replace(/\s+/g, " ").slice(0, NAME_MAX_LENGTH)
+        : "";
+    } catch (_) { existingName = ""; }
+    this.selfLevel = null;
+    this.goal = null;
+    this.name = existingName || null;
+    this.diagIdx = 0;
+    this.diagResults = [];
+    this.diagAnswered = false;
+    this._picking = false;
+    this.step = 0;
+    this.subject = null;
+    this.subjectSkipped = false;
+    let current = null;
+    try { current = (typeof DataAPI !== "undefined" && DataAPI.currentSubject) ? DataAPI.currentSubject() : null; } catch (_) {}
+    if (preset && current && preset === current) {
+      let info = null;
+      try { info = DataAPI.subjectInfo(preset); } catch (_) {}
+      if (info) {
+        this.subject = preset;
+        this.subjectSkipped = true;
+        let ready = false;
+        try { ready = !!(info && info.status === "ready" && DataAPI.diagnosticTasks().length); } catch (_) {}
+        if (ready) {
+          this.step = 1;
+        } else if (existingName) {
+          // Пустой предмет + имя уже есть: спрашивать нечего —
+          // сразу заводим профиль без показа оверлея.
+          this.step = 5;
+          this.finish();
+          return;
+        } else {
+          this.step = 5;
+        }
+      }
+    }
     const div = document.createElement("div");
     div.className = "onboard-overlay";
     div.id = "onboard-overlay";
     document.body.appendChild(div);
-    this.step = 0;
     this.render();
   },
 
@@ -3607,13 +4365,36 @@ const Onboarding = {
     const names = this.STEPS();
     const dark = Theme.current() === "dark";
     const themeLabel = dark ? "Включить светлую тему" : "Включить тёмную тему";
+    // Вышедший из аккаунта, но попавший в онбординг: вход/регистрация
+    // доступны без прохождения — ссылка внизу карточки, но только на первых
+    // двух шагах (предмет, уровень): дальше она отвлекает от вопросов.
+    // У привязанного аккаунта её нет.
+    let showAuth = this.step <= 1;
+    try { showAuth = showAuth && !(Store.auth && Store.auth.registered); } catch (_) {}
     el.innerHTML = `
       <button class="btn btn--ghost theme-toggle onboard-theme" type="button" onclick="Onboarding.toggleTheme()" aria-label="${themeLabel}" aria-pressed="${dark}" title="${themeLabel}">${icon(dark ? "sun" : "moon")}</button>
       <div class="onboard-card">
         <div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>
         <div id="onboard-body"></div>
+        ${showAuth ? `<div class="onboard-auth"><span>Уже есть аккаунт?</span><button class="btn btn--primary btn--sm" type="button" onclick="go('login')">Войти или зарегистрироваться</button></div>` : ""}
       </div>`;
     const body = el.querySelector("#onboard-body");
+    // Смена предмета привозит лёгкий каталог: тексты заданий диагностики
+    // догружаются лениво через ensureDetails. Вопросы без них не показываем —
+    // лоадер вместо пустой карточки; итог тоже ждёт детали.
+    if ((names[this.step] === "stepDiagnostic" || names[this.step] === "stepResult")
+        && typeof DataAPI !== "undefined" && !DataAPI.detailsReady()
+        && typeof Store !== "undefined" && Store.ensureDetails) {
+      body.innerHTML = loaderHTML("Готовим задания…");
+      Store.ensureDetails().then(() => {
+        try { if (document.getElementById("onboard-overlay")) this.render(); } catch (_) {}
+      }).catch(() => {
+        try {
+          body.innerHTML = `<div class="card" style="max-width:420px;margin:24px auto;text-align:center">Не удалось загрузить задания.<br><button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="Onboarding.render()">Попробовать снова</button></div>`;
+        } catch (_) {}
+      });
+      return;
+    }
     this[names[this.step]].call(this, body);
     // Диагностика рисует задания через taskVisualHtml → data-mathvisual,
     // но общий render() возвращается раньше NEEDS_DETAILS-гейта и никогда не
@@ -3634,17 +4415,6 @@ const Onboarding = {
     }
   },
 
-  stepWelcome(body) {
-    body.innerHTML = `
-      <div class="onboard-title">Добро пожаловать в ege easy</div>
-      <div class="onboard-sub">
-        Это система подготовки к ЕГЭ, построенная как игра прогресса:
-        уровни, XP, миссии, навыки и босс-испытания. Без мишуры — только задания и измеримый рост.<br><br>
-        Сейчас мы за 2 минуты построим твой стартовый профиль: выберем предмет, определим уровень, цель и сильные стороны.
-      </div>
-      <div style="margin-top:28px"><button class="btn btn--primary btn--lg" onclick="Onboarding.next()">Начать ${icon("arrow")}</button></div>`;
-  },
-
   // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
   // предмета и не должен его определять.
   stepSubject(body) {
@@ -3653,29 +4423,49 @@ const Onboarding = {
       <div class="onboard-title">Какой предмет готовим?</div>
       <div class="onboard-sub">Прогресс, статистика и прогноз ведутся отдельно по каждому предмету.</div>
       <div class="choice-list">
-        ${subjects.map((s) => `<button class="choice-item" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(s.title)}</b><span>${s.status === "ready" ? "Полный курс: уроки, тренировки, прогноз" : "Материалы пока готовятся — можно занять место"}</span></button>`).join("")}
+        ${subjects.map((s) => `<button class="choice-item" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(s.title)}</b><span>${esc(subjectCourseLabel(s))}</span></button>`).join("")}
       </div>`;
   },
 
   pickSubject(v) {
     this.subject = v;
-    const info = DataAPI.subjectInfo(v);
-    const ready = info && info.status === "ready" && DataAPI.diagnosticTasks().length;
-    // Пустой предмет: уровень/цель/диагностика бессмысленны без контента —
-    // сразу к имени, профиль предмета заведётся пустым.
-    this.step = ready ? 2 : 6;
-    this.render();
+    // Предмет выбран явно на его же шаге — пропуск снят: с уровня можно
+    // вернуться к выбору предмета.
+    this.subjectSkipped = false;
+    // Цель из шкалы другого предмета недействительна (сервер отклоняет чужую
+    // цель 400-й вместе со всей настройкой) — выбор цели делаем заново.
+    this.goal = null;
+    if (this._picking) return;
+    this._picking = true;
+    // Шаги ниже (цели, диагностика) — предметные данные из каталога. Переключаем
+    // каталог сразу, а не в finish(): иначе цель и диагностика показываются от
+    // старого предмета, а выбранная чужая цель не сохраняется сервером.
+    // finish() после этого видит свой предмет текущим и просто применяет профиль.
+    Store.switchSubject(v).catch(() => {}).then(() => {
+      this._picking = false;
+      const info = DataAPI.subjectInfo(v);
+      const ready = info && info.status === "ready" && DataAPI.diagnosticTasks().length;
+      // Пустой предмет: уровень/цель/диагностика бессмысленны без контента —
+      // сразу к имени, профиль предмета заведётся пустым. Имя едино для
+      // аккаунта: если уже указано — не показываем шаг имени, а завершаем.
+      this.step = ready ? 1 : 5;
+      if (!ready && this.name) { this.finish(); return; }
+      this.render();
+    });
   },
 
   stepLevel(body) {
+    // Формулировки без привязки к «частям» экзамена: подходят и профилю
+    // (первая/вторая часть), и базе (21 задание с кратким ответом).
     body.innerHTML = `
       <div class="onboard-title">Какой у тебя текущий уровень?</div>
       <div class="onboard-sub">Честный ответ поможет точнее выставить стартовые навыки.</div>
       <div class="choice-list">
         <button class="choice-item" onclick="Onboarding.pickLevel('zero')"><b>Начинаю с нуля</b><span>База школьной программы неустойчива</span></button>
-        <button class="choice-item" onclick="Onboarding.pickLevel('base')"><b>Базовый уровень</b><span>Решаю первую часть, вторая — с трудом</span></button>
-        <button class="choice-item" onclick="Onboarding.pickLevel('confident')"><b>Уверенный</b><span>Решаю и вторую часть, хочу стабильности и скорости</span></button>
-      </div>`;
+        <button class="choice-item" onclick="Onboarding.pickLevel('base')"><b>Базовый уровень</b><span>Простые задания получаются, сложные — с трудом</span></button>
+        <button class="choice-item" onclick="Onboarding.pickLevel('confident')"><b>Уверенный</b><span>Решаю стабильно, хочу скорости и сложных тем</span></button>
+      </div>
+      ${this.backHtml()}`;
   },
 
   stepGoal(body) {
@@ -3684,7 +4474,8 @@ const Onboarding = {
       <div class="onboard-sub">Сохраним её в профиле как ориентир подготовки.</div>
       <div class="choice-list">
         ${DataAPI.goals().map((g) => `<button class="choice-item" onclick="Onboarding.pickGoal('${g.id}')"><b>${g.label}</b><span>${g.desc}</span></button>`).join("")}
-      </div>`;
+      </div>
+      ${this.backHtml()}`;
   },
 
   stepDiagnostic(body) {
@@ -3693,7 +4484,7 @@ const Onboarding = {
     this.diagAnswered = false;
     body.innerHTML = `
       <div class="onboard-title" style="font-size:20px">Диагностика · ${this.diagIdx + 1} / ${diagnosticTasks.length}</div>
-      <div class="onboard-sub">Короткий тест из 5 заданий по разным темам — по нему построим карту навыков.</div>
+      <div class="onboard-sub">Короткий тест из ${diagnosticTasks.length} ${plural(diagnosticTasks.length, "задание", "задания", "заданий")} по разным темам — по нему построим карту навыков.</div>
       <div class="card task-card" style="margin-top:18px;padding:20px">
         <div class="task-card__tags"><span class="chip chip--accent">${t.num}</span><span class="chip">${esc(t.sub)}</span></div>
         <div class="task-card__text" style="font-size:15px">${mathText(t.text)}</div>
@@ -3704,7 +4495,8 @@ const Onboarding = {
         </div>
         ${answerFormatCaption(t.answer, t.valueType)}
         <div id="diagFeedback"></div>
-      </div>`;
+      </div>
+      ${this.backHtml()}`;
     const input = body.querySelector("#diagInput");
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") Onboarding.answerDiag(); });
   },
@@ -3745,7 +4537,8 @@ const Onboarding = {
       <div class="onboard-sub" style="margin-top:16px">
         На главной странице блок <b style="color:var(--text)">«Что делать сейчас»</b> будет подсказывать лучший следующий шаг — урок, тренировку или повторение ошибок — и пересчитывать его после каждого результата.
       </div>
-      <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">
+      <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+        ${this.canGoBack() ? `<button class="btn btn--ghost btn--lg" onclick="Onboarding.back()">← Назад</button>` : `<span></span>`}
         <button class="btn btn--primary btn--lg" onclick="Onboarding.next()">Начать подготовку ${icon("arrow")}</button>
       </div>`;
   },
@@ -3758,7 +4551,10 @@ const Onboarding = {
         <input class="answer-input" id="nameInput" style="width:100%;box-sizing:border-box" placeholder="Имя" autocomplete="given-name" maxlength="${NAME_MAX_LENGTH}" value="${esc(this.name || "")}">
       </div>
       <div id="nameError" class="onboard-sub" style="color:var(--danger);display:none;margin-top:8px"></div>
-      <div style="margin-top:24px"><button class="btn btn--primary btn--lg" onclick="Onboarding.submitName()">Завершить ${icon("arrow")}</button></div>`;
+      <div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+        ${this.canGoBack() ? `<button class="btn btn--ghost btn--lg" onclick="Onboarding.back()">← Назад</button>` : `<span></span>`}
+        <button class="btn btn--primary btn--lg" onclick="Onboarding.submitName()">Завершить ${icon("arrow")}</button>
+      </div>`;
     const input = body.querySelector("#nameInput");
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") Onboarding.submitName(); });
     input.focus();
@@ -3766,6 +4562,21 @@ const Onboarding = {
 
   pickLevel(v) { this.selfLevel = v; this.next(); },
   pickGoal(v) { this.goal = v; this.next(); },
+  /* Цель по умолчанию — первая из шкалы ТЕКУЩЕГО предмета (после switchSubject
+     DataAPI.goals() уже предметные). Хардкод g60 здесь ломал регистрацию базы:
+     сервер отклоняет чужую цель 400-й, когда у предмета есть своя шкала.
+     Выбранную ранее цель перепроверяем по текущей шкале: в finish() этот метод
+     вызывается уже после переключения, а выбор могли сделать до него — чужой
+     id заменяем первым валидным, иначе вся настройка (включая onboarded и имя)
+     не сохраняется и онбординг возвращается после перезагрузки. */
+  defaultGoal() {
+    try {
+      const list = DataAPI.goals() || [];
+      if (list.some((g) => g && g.id === this.goal)) return this.goal;
+      if (list.length && list[0].id) return list[0].id;
+    } catch (_) {}
+    return "g60";
+  },
 
   answerDiag() {
     if (this.diagAnswered) return;
@@ -3787,12 +4598,72 @@ const Onboarding = {
 
   nextDiag() {
     this.diagIdx++;
-    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 5; this.render(); }
+    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 4; this.render(); }
     else this.render();
   },
 
+  // Назад к прошлому шагу — тот же принцип, что в уроках (lessonPrev):
+  // строго на один шаг назад. Из серии диагностики — в цель, из итога —
+  // в последний вопрос (его результат снимается, вопрос можно перепройти),
+  // из имени — в итог (или в предмет, если диагностика пропущена).
+  back() {
+    if (this._picking) return;
+    if (this.step === 3) {
+      if (this.diagAnswered) {
+        // Только что отвечен: снимаем ответ и показываем тот же вопрос заново.
+        this.diagResults.pop();
+        this.diagAnswered = false;
+      } else if (this.diagIdx > 0) {
+        this.diagIdx--;
+        this.diagResults.pop();
+      } else {
+        this.step = 2;
+      }
+      this.render();
+      return;
+    }
+    if (this.step === 4) {
+      let total = 0;
+      try { total = DataAPI.diagnosticTasks().length; } catch (_) {}
+      if (this.diagResults.length && total) {
+        this.diagIdx = total - 1;
+        this.diagResults.pop();
+        this.diagAnswered = false;
+        this.step = 3;
+      } else {
+        this.step = 2;
+      }
+      this.render();
+      return;
+    }
+    if (this.step === 5) {
+      this.step = this.diagResults.length ? 4 : 0;
+      this.render();
+      return;
+    }
+    if (this.step <= 0) return;
+    this.step--;
+    this.render();
+  },
+
+  // Кнопка «Назад» видна везде, кроме первого видимого шага: предмета —
+  // или уровня, если предмет-шаг пропущен после явного выбора.
+  canGoBack() {
+    if (this.step <= 0) return false;
+    if (this.step === 1 && this.subjectSkipped) return false;
+    return true;
+  },
+
+  backHtml() {
+    if (!this.canGoBack()) return "";
+    return `<div class="lesson-nav"><button class="btn btn--ghost" onclick="Onboarding.back()">← Назад</button><span></span></div>`;
+  },
+
   next() {
-    if (this.step === 4) return;
+    if (this.step === 3) return;
+    // Имя едино для аккаунта: итог (шаг 4) с уже известным именем сразу
+    // завершает онбординг, шаг имени не показываем.
+    if (this.step === 4 && this.name) { this.finish(); return; }
     this.step++;
     this.render();
   },
@@ -3814,7 +4685,12 @@ const Onboarding = {
 
   finish() {
     const subj = this.subject || DataAPI.currentSubject() || "profile_math";
+    // Имя едино для аккаунта: при пропуске шага имени (повторный онбординг
+    // нового предмета) переиспользуем уже сохранённое, чтобы не затереть его
+    // пустым значением.
+    const finalName = this.name || (Store.state && Store.state.name) || null;
     this.hide();
+    try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
     const after = () => {
       toast(`Добро пожаловать, ${esc(Store.state.name)}! Профиль создан.`, "toast--xp", "flag");
       render();
@@ -3827,15 +4703,15 @@ const Onboarding = {
     // возвращался.
     if (subj !== DataAPI.currentSubject()) {
       Store.switchSubject(subj)
-        .then(() => { applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name); })
+        .then(() => { applyOnboarding(subj, this.selfLevel || "base", this.defaultGoal(), this.diagResults, finalName); })
         .catch(() => Store.load(subj).then(() => {
-          applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
+          applyOnboarding(subj, this.selfLevel || "base", this.defaultGoal(), this.diagResults, finalName);
         }))
         .then(after)
         .catch(after);
       return;
     }
-    applyOnboarding(subj, this.selfLevel || "base", this.goal || "g60", this.diagResults, this.name);
+    applyOnboarding(subj, this.selfLevel || "base", this.defaultGoal(), this.diagResults, finalName);
     after();
   },
 };
@@ -3945,6 +4821,12 @@ function bootstrapApp() {
       await Store.load();
       await Store.initTabLeader();
       stopBootMsgs();
+      // Перезагрузка посреди пикера входа: выбор ещё не применён, сессия
+      // авторизована — возвращаем экран выбора, а не угаданный предмет.
+      try {
+        if (sessionStorage.getItem("ege_login_subject_pending") === "1"
+            && Store.auth && Store.auth.registered) pendingSubjectChoice = true;
+      } catch (_) {}
       // Кросс-таб синк: соседняя вкладка после каждого save оставляет маяк.
       // Увидели более свежий маяк (событие storage, возврат во вкладку) —
       // перечитываем состояние с сервера, иначе stale-вкладка показывает
@@ -3958,9 +4840,9 @@ function bootstrapApp() {
           }
         });
         document.addEventListener("visibilitychange", () => {
-          if (!document.hidden) Store.checkExternalUpdate().catch(() => {});
+          if (!document.hidden) { Store.checkExternalUpdate().catch(() => {}); try { revalidateProfileAuth(); } catch (_) {} }
         });
-        window.addEventListener("focus", () => { Store.checkExternalUpdate().catch(() => {}); });
+        window.addEventListener("focus", () => { Store.checkExternalUpdate().catch(() => {}); try { revalidateProfileAuth(); } catch (_) {} });
       } catch (_) {}
       render();
     } catch (error) {

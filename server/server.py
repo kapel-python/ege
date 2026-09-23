@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover - the supported deployment target is Uni
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3")))
 CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
+CATALOG_BASIC_PATH = Path(__file__).resolve().parent / "catalog_basic.json"
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
 # Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
@@ -50,6 +51,11 @@ ACCOUNT_ID_MAX_ATTEMPTS = 25
 # file alone (session tokens!) makes this a hard requirement, not a nicety.
 BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui"}
 BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
+# Публичные SEO/мета-файлы, которым разрешено жить под заблокированными
+# суффиксами (.txt): robots.txt и llms.txt отдаются статикой. sitemap.xml
+# отдаётся динамически из do_GET (абсолютные URL от хоста запроса, см.
+# public_base_url), поэтому физического файла в корне нет осознанно.
+PUBLIC_STATIC_FILES = {"robots.txt", "llms.txt", "site.webmanifest", "favicon.svg"}
 MAX_BODY_BYTES = 10 * 1024 * 1024
 # Server-side caps for client-controlled collections. The client caps these
 # itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
@@ -95,6 +101,23 @@ PRIMARY_TO_TEST_PROFILE = [
     80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
 ]
 
+# Прогноз базовой математики: экзамен состоит из 21 задания с кратким
+# ответом, каждое даёт 1 первичный балл (максимум 21), итог — оценка 2–5
+# (7+ баллов — «3», 12+ — «4», 17+ — «5»). Стобалльной шкалы у базы нет,
+# поэтому «тестовый» результат совпадает с первичным: шкала тождественная.
+# Прогноз отвечает на вопрос «сколько заданий решу», а не «сколько баллов
+# из 100 получу» — копировать профильную шкалу сюда было бы неверно.
+SKILL_EGE_WEIGHTS_BASIC = {
+    "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
+    "b05_probability": 1, "b06_choice": 1, "b07_functions": 1, "b08_logic": 1,
+    "b09_grid": 1, "b10_practplan": 1, "b11_practstereo": 1, "b12_planimetry": 1,
+    "b13_stereometry": 1, "b14_fractions": 1, "b15_percent": 1, "b16_expressions": 1,
+    "b17_equations": 1, "b18_inequalities": 1, "b19_integers": 1,
+    "b20_wordprob": 1, "b21_nonstandard": 1,
+}
+TOTAL_EGE_PRIMARY_BASIC = 21
+PRIMARY_TO_TEST_BASIC = list(range(TOTAL_EGE_PRIMARY_BASIC + 1))
+
 SUBJECTS: dict[str, dict] = {
     "profile_math": {
         "id": "profile_math",
@@ -108,15 +131,24 @@ SUBJECTS: dict[str, dict] = {
             "total": TOTAL_EGE_PRIMARY_PROFILE,
             "scale": PRIMARY_TO_TEST_PROFILE,
         },
+        # Что реально входит в курс предмета (для честных подписей в UI:
+        # «Полный курс» — только там, где есть и уроки, и практика, и прогноз).
+        "features": {"lessons": True, "practice": True, "forecast": True},
     },
     "basic_math": {
         "id": "basic_math",
         "title": "Базовая математика",
         "short": "База",
-        "status": "empty",
-        # Контента пока нет: уроки/задания подключатся отдельным файлом.
-        # Прогноз появится вместе с весами шкалы базы.
-        "forecast": None,
+        "status": "ready",
+        "forecast": {
+            "weights": SKILL_EGE_WEIGHTS_BASIC,
+            "total": TOTAL_EGE_PRIMARY_BASIC,
+            "scale": PRIMARY_TO_TEST_BASIC,
+        },
+        # Уроки есть для части навыков (остальные считаются полностью из
+        # практики — та же механика, что у профильных тем без урока).
+        # Остальной цикл полный: диагностика, тренировки, боссы, прогноз.
+        "features": {"lessons": True, "practice": True, "forecast": True},
     },
 }
 SUBJECT_IDS = tuple(SUBJECTS.keys())
@@ -142,7 +174,8 @@ def subjects_payload() -> list:
     """Публичное описание предметов для каталога/онбординга."""
     return [
         {"id": sid, "title": SUBJECTS[sid]["title"], "short": SUBJECTS[sid]["short"],
-         "status": SUBJECTS[sid]["status"], "forecast": SUBJECTS[sid]["forecast"]}
+         "status": SUBJECTS[sid]["status"], "forecast": SUBJECTS[sid]["forecast"],
+         "features": SUBJECTS[sid].get("features", {})}
         for sid in SUBJECT_IDS
     ]
 
@@ -272,8 +305,19 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL,
-      expires_at INTEGER NOT NULL)""")
+      expires_at INTEGER NOT NULL,
+      device_name TEXT,
+      device_type TEXT,
+      last_seen_at INTEGER)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
+    # Существующие БД: таблица создана старой версией без device-колонок.
+    _us_cols = _table_columns(conn, "user_sessions")
+    if "device_name" not in _us_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN device_name TEXT")
+    if "device_type" not in _us_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN device_type TEXT")
+    if "last_seen_at" not in _us_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN last_seen_at INTEGER")
     # UNIQUE допускает множество NULL: незарегистрированные гости не мешают.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     expiry = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
@@ -283,16 +327,79 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
         "WHERE session_token IS NOT NULL AND NOT EXISTS "
         "(SELECT 1 FROM user_sessions WHERE token = users.session_token)",
         (expiry,))
+    # Сырой User-Agent никогда не храним: только человекочитаемое название и
+    # тип + метка последней активности. Старые строки получают нейтральный
+    # дефолт без персональных данных.
+    try:
+        now_ms = int(time.time() * 1000)
+        conn.execute("UPDATE user_sessions SET device_name='Браузер' WHERE device_name IS NULL")
+        conn.execute("UPDATE user_sessions SET device_type='desktop' WHERE device_type IS NULL")
+        conn.execute("UPDATE user_sessions SET last_seen_at=? WHERE last_seen_at IS NULL", (now_ms,))
+    except sqlite3.Error:
+        pass
     conn.commit()
     AUTH_SCHEMA_DONE.add(key)
 
 
-def session_row_for(conn: sqlite3.Connection, token: str | None):
-    """Живая сессия по токену или None. Просроченная удаляется лениво."""
+def parse_device_info(user_agent: str | None) -> tuple[str, str]:
+    """Человекочитаемое (название, тип) по User-Agent без хранения сырого UA.
+
+    Точную модель вернуть можно лишь когда она есть в самом UA (редкие
+    Android-аппараты); во всех остальных случаях — понятное обобщённое
+    название: iPhone / iPad / Windows PC / MacBook / Android-смартфон.
+    Тип — один из: phone, tablet, laptop, desktop.
+    """
+    try:
+        ua = str(user_agent or "")[:512]
+    except Exception:
+        ua = ""
+    low = ua.lower()
+    if "iphone" in low:
+        return ("iPhone", "phone")
+    if "ipad" in low:
+        return ("iPad", "tablet")
+    if "android" in low:
+        # Планшеты на Android обычно без маркера Mobile.
+        if "mobile" not in low:
+            return ("Android-планшет", "tablet")
+        return ("Android-смартфон", "phone")
+    if "windows" in low:
+        return ("Windows PC", "desktop")
+    if "macintosh" in low or "mac os x" in low:
+        return ("MacBook", "laptop")
+    if "cros" in low or "chromebook" in low:
+        return ("Chromebook", "laptop")
+    if "linux" in low:
+        return ("Linux PC", "desktop")
+    if "mobile" in low:
+        return ("Смартфон", "phone")
+    if "tablet" in low:
+        return ("Планшет", "tablet")
+    return ("Браузер", "desktop")
+
+
+def request_device_info(handler) -> tuple[str, str]:
+    """Название/тип текущего устройства по заголовку запроса. Сырой UA за
+    пределы этого вызова не уходит и нигде не хранится."""
+    try:
+        ua = handler.headers.get("User-Agent", "")
+    except Exception:
+        ua = ""
+    return parse_device_info(ua)
+
+
+def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[str, str] | None = None):
+    """Живая сессия по токену или None. Просроченная удаляется лениво.
+
+    Попутно обновляет last_seen_at (троттлинг ~60с) и человекочитаемое
+    название устройства, если оно изменилось. Сырой User-Agent сюда не
+    передаётся — только распарсенная пара (название, тип)."""
     if not token:
         return None
     row = conn.execute(
-        "SELECT us.id AS session_pk, us.expires_at, u.id AS user_id "
+        "SELECT us.id AS session_pk, us.expires_at, u.id AS user_id, "
+        "us.device_name AS device_name, us.device_type AS device_type, "
+        "us.last_seen_at AS last_seen_at "
         "FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.token = ?",
         (token,)).fetchone()
     if not row:
@@ -301,26 +408,104 @@ def session_row_for(conn: sqlite3.Connection, token: str | None):
         conn.execute("DELETE FROM user_sessions WHERE id=?", (row["session_pk"],))
         conn.commit()
         return None
+    try:
+        now_ms = int(time.time() * 1000)
+        try:
+            last_int = int(row["last_seen_at"]) if row["last_seen_at"] is not None else 0
+        except (TypeError, ValueError):
+            last_int = 0
+        updates: list[str] = []
+        args: list = []
+        if not last_int or now_ms - last_int > 60_000:
+            updates.append("last_seen_at=?")
+            args.append(now_ms)
+        if device:
+            dname, dtype = device
+            try:
+                stored_name = row["device_name"]
+            except (KeyError, IndexError, TypeError):
+                stored_name = None
+            try:
+                stored_type = row["device_type"]
+            except (KeyError, IndexError, TypeError):
+                stored_type = None
+            if stored_name != dname:
+                updates.append("device_name=?")
+                args.append(dname)
+            if stored_type != dtype:
+                updates.append("device_type=?")
+                args.append(dtype)
+        if updates:
+            args.append(row["session_pk"])
+            conn.execute(f"UPDATE user_sessions SET {', '.join(updates)} WHERE id=?", args)
+            conn.commit()
+    except sqlite3.Error:
+        pass
     return row
 
 
-def create_user_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, int]:
+def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[str, str] | None = None) -> tuple[str, int]:
     token = token_urlsafe(32)
     expires_at = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
-    conn.execute(
-        "INSERT INTO user_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
-        (user_id, token, now_iso(), expires_at),
-    )
+    name, dtype = device if device else ("Браузер", "desktop")
+    now_ms = int(time.time() * 1000)
+    try:
+        conn.execute(
+            "INSERT INTO user_sessions(user_id, token, created_at, expires_at, device_name, device_type, last_seen_at) VALUES (?,?,?,?,?,?,?)",
+            (user_id, token, now_iso(), expires_at, name, dtype, now_ms),
+        )
+    except sqlite3.Error:
+        # Старая схема без device-колонок (двойная защита к миграции выше).
+        conn.execute(
+            "INSERT INTO user_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
+            (user_id, token, now_iso(), expires_at),
+        )
     return token, expires_at
 
 
-def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id: int) -> tuple[str, int]:
-    """Login/register: инвалидирует текущий токен и выдаёт новый, привязанный к
-    тому же (register) или целевому (login) аккаунту. Старый токен после этого
-    неизвестен серверу — повторная отправка старой куки минтит нового гостя."""
+def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id: int, device: tuple[str, str] | None = None) -> tuple[str, int]:
+    """Login/register: инвалидирует предъявленный токен и выдаёт новый,
+    привязанный к тому же (register) или целевому (login) аккаунту. Старый
+    токен после этого неизвестен серверу — повторная отправка старой куки
+    минтит нового гостя. Другие сессии аккаунта не трогаем никогда: вход
+    второго устройства не должен завершать первое. Дедупликация по паре
+    (device_name, device_type) здесь невозможна — значений всего несколько
+    («Windows PC», «iPhone», «Браузер», ...) и два разных физических
+    устройства одной модели неразличимы; автоудаление «дублей» убивало живые
+    чужие сессии. Повторный вход с того же устройства без старой куки может
+    оставить вторую строку в «Устройствах» — она снимается вручную через
+    отзыв, это косметика, а не повод инвалидировать чужой токен."""
     if old_token:
         conn.execute("DELETE FROM user_sessions WHERE token=?", (old_token,))
-    return create_user_session(conn, user_id)
+    token, expires_at = create_user_session(conn, user_id, device)
+    return token, expires_at
+
+
+def auth_devices_payload(conn: sqlite3.Connection, user_id: int, current_pk: int | None) -> list:
+    """Список активных сессий аккаунта без токенов и сырого UA: только id
+    строки (для отзыва), человекочитаемое название/тип и метки времени."""
+    now_ms = int(time.time() * 1000)
+    rows = conn.execute(
+        "SELECT id, device_name, device_type, created_at, last_seen_at "
+        "FROM user_sessions WHERE user_id=? AND expires_at>? "
+        "ORDER BY last_seen_at DESC, id DESC",
+        (user_id, now_ms),
+    ).fetchall()
+    devices = []
+    for r in rows:
+        try:
+            sid = int(r["id"])
+        except (TypeError, ValueError):
+            continue
+        devices.append({
+            "id": sid,
+            "name": r["device_name"] or "Браузер",
+            "type": r["device_type"] or "desktop",
+            "createdAt": timestamp_value(r["created_at"]),
+            "lastSeenAt": int(r["last_seen_at"]) if r["last_seen_at"] is not None else timestamp_value(r["created_at"]),
+            "current": bool(current_pk is not None and sid == int(current_pk)),
+        })
+    return devices
 
 
 def auth_user_payload(conn: sqlite3.Connection, user_id: int) -> dict | None:
@@ -390,7 +575,7 @@ def existing_user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler)
     account. Admin endpoints must not mint anonymous users for unauthenticated
     probes — unlike /api/bootstrap, where account creation is the normal flow."""
     ensure_auth_schema(conn)
-    row = session_row_for(conn, cookie_value(handler, "ege_session"))
+    row = session_row_for(conn, cookie_value(handler, "ege_session"), request_device_info(handler))
     return row["user_id"] if row else None
 
 
@@ -786,7 +971,7 @@ CREATE TABLE IF NOT EXISTS task_attempts (
 );
 CREATE TABLE IF NOT EXISTS user_errors (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id),
-  skill_id TEXT NOT NULL REFERENCES skills(id), topic TEXT NOT NULL, created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, client_id TEXT NOT NULL DEFAULT ''
+  skill_id TEXT NOT NULL REFERENCES skills(id), topic TEXT NOT NULL, created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'major', client_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS lesson_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id),
@@ -872,6 +1057,28 @@ CREATE TABLE IF NOT EXISTS admin_audit (
 
 def now_iso() -> str:
     return str(int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000))
+
+
+def public_base_url(handler) -> str:
+    """Абсолютный базовый URL сайта для sitemap.xml/robots.txt.
+
+    Домен заранее неизвестен (локальная разработка + произвольный деплой),
+    поэтому: явный EGE_PUBLIC_URL > заголовки обратного прокси >
+    Host запроса > localhost по умолчанию. Никогда не бросает."""
+    try:
+        env = (os.environ.get("EGE_PUBLIC_URL") or "").strip().rstrip("/")
+        if env:
+            return env
+        headers = handler.headers
+        host = (headers.get("X-Forwarded-Host") or headers.get("Host") or "").split(",")[0].strip()
+        if not host:
+            return "http://localhost:2026"
+        proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        if proto not in ("http", "https"):
+            proto = "https" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" else "http"
+        return f"{proto}://{host}"
+    except Exception:
+        return "http://localhost:2026"
 
 
 def timestamp_value(value):
@@ -1190,6 +1397,28 @@ def _fallback_client_id(kind: str, parts: list) -> str:
     return ("natural:" + kind + ":" + "|".join(safe))[:512]
 
 
+def _ensure_error_kind_column(conn: sqlite3.Connection) -> None:
+    """Колонка вида ошибки для существующих БД (новые получают её из SCHEMA)."""
+    if "kind" not in _table_columns(conn, "user_errors"):
+        conn.execute("ALTER TABLE user_errors ADD COLUMN kind TEXT NOT NULL DEFAULT 'major'")
+
+
+def _normalize_error_kind(value) -> str:
+    """Вид ошибки: 'minor' — решено, но неидеально; всё остальное — 'major'.
+
+    Старые записи и payload без kind считаются полными ошибками, поэтому
+    расширение обратно совместимо в обе стороны.
+    """
+    return "minor" if str(value or "").strip().lower() == "minor" else "major"
+
+
+def _serialize_error_row(row) -> dict:
+    keys = row.keys()
+    kind = _normalize_error_kind(row["kind"]) if "kind" in keys and row["kind"] else "major"
+    return {"id": row["id"], "clientId": row["client_id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
+            "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"]), "kind": kind}
+
+
 def _ensure_mutable_subject_pks(conn: sqlite3.Connection) -> None:
     # Пересоздание таблиц временно отключает FK-проверки: копируемые строки
     # заведомо приняты действующим сервером, а legacy-мусор (прогресс по
@@ -1378,6 +1607,11 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_subject ON {table}(user_id, subject)")
         except sqlite3.Error:
             pass
+    # Мини-ошибки: вид ошибки ('major' — задание не решено, 'minor' — решено,
+    # но неидеально). Существующие БД получают колонку на месте, новые — из
+    # SCHEMA. Отсутствующий kind всегда читается как 'major', поэтому старые
+    # записи и старые клиенты остаются полными ошибками без миграции данных.
+    _ensure_error_kind_column(conn)
     # Activity is now event-sourced. Existing daily aggregates are preserved
     # and backfilled once as seed events, so no historical graph disappears.
     conn.execute("""CREATE TABLE IF NOT EXISTS activity_events (
@@ -1450,6 +1684,85 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     for lesson in catalog["lessons"]:
         conn.execute("INSERT INTO lessons(id, skill_id, title, xp, metadata_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,title=excluded.title,xp=excluded.xp,metadata_json=excluded.metadata_json",
                      (lesson["id"], lesson["skill"], lesson["title"], lesson.get("xp", 0), json.dumps(lesson, ensure_ascii=False)))
+    # Базовая математика: отдельный файл-источник. Грузится в те же таблицы
+    # со subject='basic_math', поэтому в API отдаётся тем же кодом, что профиль
+    # (catalog_payload): полноценный предмет, а не надстройка.
+    # achievements/visualAssets/visualAudit — общие, их не трогаем.
+    if CATALOG_BASIC_PATH.exists():
+        basic = json.loads(CATALOG_BASIC_PATH.read_text(encoding="utf-8"))
+        for cat in basic.get("categories", []):
+            conn.execute("INSERT OR IGNORE INTO topics(id, subject_id, name, short, subject) VALUES (?, 'math', ?, ?, 'basic_math')",
+                         (cat["id"], cat["name"], cat.get("short")))
+        for skill in basic.get("skills", []):
+            conn.execute("""INSERT OR IGNORE INTO skills(id, topic_id, level_id, name, display_order, ege, subject)
+                           VALUES (?, ?, 'basic', ?, ?, ?, 'basic_math')""",
+                         (skill["id"], skill["cat"], skill["name"], skill["order"], skill.get("ege")))
+        for task in basic.get("tasks", []):
+            metadata = dict(task)
+            for key in ("id", "skill", "sub", "num", "diff", "text", "answer", "hint", "solution"):
+                metadata.pop(key, None)
+            conn.execute("""INSERT INTO tasks
+              (id, skill_id, topic, exam_number, difficulty, statement, answer, explanation, hint, task_type, metadata_json)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,topic=excluded.topic,exam_number=excluded.exam_number,difficulty=excluded.difficulty,statement=excluded.statement,answer=excluded.answer,explanation=excluded.explanation,hint=excluded.hint,task_type=excluded.task_type,metadata_json=excluded.metadata_json""", (
+                task["id"], task["skill"], task["sub"], task.get("num"), task["diff"], task["text"], task["answer"],
+                task["solution"], task.get("hint") or (task.get("hints") or [None])[0], task.get("type", "short_answer"), json.dumps(metadata, ensure_ascii=False)))
+        for lesson in basic.get("lessons", []):
+            conn.execute("INSERT INTO lessons(id, skill_id, title, xp, metadata_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,title=excluded.title,xp=excluded.xp,metadata_json=excluded.metadata_json",
+                         (lesson["id"], lesson["skill"], lesson["title"], lesson.get("xp", 0), json.dumps(lesson, ensure_ascii=False)))
+        for mission in basic.get("missions", []):
+            conn.execute("INSERT INTO missions(id, skill_id, title, description, xp, difficulty) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id,title=excluded.title,description=excluded.description,xp=excluded.xp,difficulty=excluded.difficulty",
+                         (mission["id"], mission["skill"], mission["title"], mission["desc"], mission["xp"], mission["diff"]))
+        for boss in basic.get("bosses", []):
+            conn.execute("INSERT OR IGNORE INTO bosses(id, topic_id, title, description, task_count, xp, unlock_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (boss["id"], boss["cat"], boss["title"], boss["desc"], boss["size"], boss["xp"], boss["unlockAt"]))
+        # Синхронизация состава: файл — источник истины. INSERT OR IGNORE выше
+        # не удаляет миссии/боссов/уроки, убранные из файла, и не урезает
+        # mission_tasks ужатых миссий — чистим orphan-строки строго в пределах
+        # subject='basic_math', профильные данные не трогаем.
+        basic_skill_ids = [s["id"] for s in basic.get("skills", [])]
+        basic_cat_ids = [c["id"] for c in basic.get("categories", [])]
+        if basic_skill_ids:
+            keep_lessons = [le["id"] for le in basic.get("lessons", [])]
+            if keep_lessons:
+                conn.execute(
+                    f"DELETE FROM lessons WHERE skill_id IN ({','.join('?' * len(basic_skill_ids))}) AND id NOT IN ({','.join('?' * len(keep_lessons))})",
+                    (*basic_skill_ids, *keep_lessons))
+            else:
+                conn.execute(
+                    f"DELETE FROM lessons WHERE skill_id IN ({','.join('?' * len(basic_skill_ids))})",
+                    basic_skill_ids)
+            keep_missions = [m["id"] for m in basic.get("missions", [])]
+            if keep_missions:
+                conn.execute(
+                    f"DELETE FROM missions WHERE skill_id IN ({','.join('?' * len(basic_skill_ids))}) AND id NOT IN ({','.join('?' * len(keep_missions))})",
+                    (*basic_skill_ids, *keep_missions))
+                # Ужатые миссии: пересобрать связи точно по файлу.
+                conn.execute(
+                    f"DELETE FROM mission_tasks WHERE mission_id IN ({','.join('?' * len(keep_missions))})",
+                    keep_missions)
+                for mission in basic.get("missions", []):
+                    for order, task_id in enumerate(mission.get("tasks", [])):
+                        conn.execute("INSERT INTO mission_tasks(mission_id, task_id, display_order) VALUES (?, ?, ?)",
+                                     (mission["id"], task_id, order))
+            else:
+                conn.execute(
+                    f"DELETE FROM missions WHERE skill_id IN ({','.join('?' * len(basic_skill_ids))})",
+                    basic_skill_ids)
+        if basic_cat_ids:
+            keep_bosses = [b["id"] for b in basic.get("bosses", [])]
+            if keep_bosses:
+                conn.execute(
+                    f"DELETE FROM bosses WHERE topic_id IN ({','.join('?' * len(basic_cat_ids))}) AND id NOT IN ({','.join('?' * len(keep_bosses))})",
+                    (*basic_cat_ids, *keep_bosses))
+            else:
+                conn.execute(
+                    f"DELETE FROM bosses WHERE topic_id IN ({','.join('?' * len(basic_cat_ids))})",
+                    basic_cat_ids)
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:basic_math', ?)", (json.dumps(basic.get("daily", _empty_daily()), ensure_ascii=False),))
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:basic_math', ?)", (json.dumps(basic.get("diagnosticTasks", []), ensure_ascii=False),))
+        if basic.get("goals"):
+            conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('goals:basic_math', ?)", (json.dumps(basic["goals"], ensure_ascii=False),))
     for mission in catalog["missions"]:
         conn.execute("INSERT OR IGNORE INTO missions(id, skill_id, title, description, xp, difficulty) VALUES (?, ?, ?, ?, ?, ?)",
                      (mission["id"], mission["skill"], mission["title"], mission["desc"], mission["xp"], mission["diff"]))
@@ -1470,8 +1783,9 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:profile_math', ?)", (json.dumps(catalog["daily"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('goals:profile_math', ?)", (json.dumps(catalog["goals"], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:profile_math', ?)", (json.dumps(catalog["diagnosticTasks"], ensure_ascii=False),))
-    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:basic_math', ?)", (json.dumps(_empty_daily(), ensure_ascii=False),))
-    conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:basic_math', ?)", (json.dumps([], ensure_ascii=False),))
+    if not CATALOG_BASIC_PATH.exists():
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('daily:basic_math', ?)", (json.dumps(_empty_daily(), ensure_ascii=False),))
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('diagnosticTasks:basic_math', ?)", (json.dumps([], ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAssets', ?)", (json.dumps(catalog.get("visualAssets", []), ensure_ascii=False),))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES ('visualAudit', ?)", (json.dumps(catalog.get("visualAudit", {}), ensure_ascii=False),))
     conn.commit()
@@ -1574,7 +1888,11 @@ def _catalog_cache_key() -> tuple:
         mtime = CATALOG_PATH.stat().st_mtime_ns
     except OSError:
         mtime = 0
-    return (mtime, _CATALOG_CACHE["generation"])
+    try:
+        basic_mtime = CATALOG_BASIC_PATH.stat().st_mtime_ns
+    except OSError:
+        basic_mtime = 0
+    return (mtime, basic_mtime, _CATALOG_CACHE["generation"])
 
 
 def catalog_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
@@ -1681,7 +1999,7 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
     ensure_subject_schema(conn)
     ensure_auth_schema(conn)
     token_value = cookie_value(handler, "ege_session")
-    row = session_row_for(conn, token_value)
+    row = session_row_for(conn, token_value, request_device_info(handler))
     if row:
         ensure_subject_rows(conn, row["user_id"], current_subject_for(conn, row["user_id"]))
         conn.commit()
@@ -1693,7 +2011,7 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
     ensure_subject_rows(conn, user_id, DEFAULT_SUBJECT)
     # users.session_token — legacy-колонка; пишем туда же стартовый токен,
     # чтобы бэкфилл ensure_auth_schema не поднимал её обратно как новую сессию.
-    new_token, _ = create_user_session(conn, user_id)
+    new_token, _ = create_user_session(conn, user_id, request_device_info(handler))
     conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, user_id))
     conn.commit()
     return user_id, new_token
@@ -1735,7 +2053,8 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
     for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
         state["skillStats"][r["skill_id"]] = {"progress": r["progress"], "solved": r["solved"], "correct": r["correct"], "timeSec": r["time_sec"]}
     for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject)):
-        state["errors"].append({"id": r["id"], "clientId": r["client_id"] if "client_id" in r.keys() else None, "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
+        state["errors"].append({"id": r["id"], "clientId": r["client_id"] if "client_id" in r.keys() else None, "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"]),
+                                "kind": (_normalize_error_kind(r["kind"]) if "kind" in r.keys() and r["kind"] else "major")})
     for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 5000", (user_id, subject)):
         keys = r.keys()
         state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "ts": timestamp_value(r["created_at"])})
@@ -1920,6 +2239,13 @@ def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: di
     Одинаковый clientId = та же запись (upsert, не дубль). Повтор POST после
     таймаута/даблклика возвращает ту же строку. Legacy без clientId — ключ от
     естественных полей (taskId+skill+ts), как раньше.
+
+    Дополнительно — upsert по task_id среди ОТКРЫТЫХ ошибок: на одно задание
+    висит не больше одной открытой записи. Повторный POST по тому же заданию
+    (ретрай с новым clientId, дубль в локальном состоянии, две вкладки)
+    обновляет открытую запись, а не вставляет строку. Severity при этом
+    только растёт (minor→major): повторный провал не теряется, а downgrade
+    не затирает полную ошибку. Закрытые строки — история, их не трогаем.
     """
     if not isinstance(value, dict):
         raise ValueError("error must be an object")
@@ -1932,31 +2258,55 @@ def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: di
         raise ValueError("unknown task or skill")
     created = str(value.get("ts") or now_iso())
     topic = str(value.get("sub") or "")[:200]
+    kind = _normalize_error_kind(value.get("kind"))
     client_id = _stable_client_id(value) or _fallback_client_id("error", [task_id, skill_id, created])
+    _ensure_error_kind_column(conn)
+    open_row = conn.execute(
+        "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors "
+        "WHERE user_id=? AND subject=? AND task_id=? AND resolved=0 ORDER BY id LIMIT 1",
+        (user_id, subject, task_id),
+    ).fetchone()
+    if open_row is not None:
+        if kind == "major" and _normalize_error_kind(open_row["kind"]) == "minor":
+            conn.execute("UPDATE user_errors SET kind='major' WHERE id=?", (open_row["id"],))
+            open_row = conn.execute(
+                "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors WHERE id=?",
+                (open_row["id"],),
+            ).fetchone()
+        return _serialize_error_row(open_row)
     conn.execute(
-        "INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved,client_id)"
-        " VALUES(?,?,?,?,?,?,0,?)"
+        "INSERT INTO user_errors(user_id,subject,task_id,skill_id,topic,created_at,resolved,kind,client_id)"
+        " VALUES(?,?,?,?,?,?,0,?,?)"
         " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
-        (user_id, subject, task_id, skill_id, topic, created, client_id),
+        (user_id, subject, task_id, skill_id, topic, created, kind, client_id),
     )
     row = conn.execute(
-        "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors "
+        "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors "
         "WHERE user_id=? AND subject=? AND client_id=? LIMIT 1",
         (user_id, subject, client_id),
     ).fetchone()
-    return {"id": row["id"], "clientId": row["client_id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
-            "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
+    return _serialize_error_row(row)
 
 
-def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, error_id, resolved: object) -> dict:
-    """Идемпотентное обновление флага resolved по стабильному ID.
+def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, error_id, resolved: object = None, kind: object = None) -> dict:
+    """Идемпотентное обновление флага resolved и вида ошибки по стабильному ID.
 
     error_id — server-side integer id либо client-generated UUID (clientId):
     одинаковый ID обновляет ту же запись. Повтор PATCH с тем же значением —
-    тот же результат (UPDATE идемпотентен сам по себе).
+    тот же результат (строка ищется SELECT-ом, а не по rowcount UPDATE-а,
+    поэтому повтор не превращается в 404).
+
+    kind — апгрейд severity для синхронизации повторного провала
+    (minor→major); downgrade major→minor никогда не применяется, чтобы
+    чужая вкладка не затирала полную ошибку. Старые клиенты шлют только
+    resolved — для них поведение прежнее.
     """
-    if not isinstance(resolved, bool):
+    if resolved is not None and not isinstance(resolved, bool):
         raise ValueError("resolved must be boolean")
+    new_kind = _normalize_error_kind(kind) if kind is not None else None
+    if resolved is None and new_kind is None:
+        raise ValueError("nothing to update")
+    _ensure_error_kind_column(conn)
     row = None
     try:
         numeric = int(error_id)
@@ -1964,17 +2314,24 @@ def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, e
     except (TypeError, ValueError):
         numeric, is_numeric = None, False
     if is_numeric:
-        changed = conn.execute("UPDATE user_errors SET resolved=? WHERE id=? AND user_id=? AND subject=?", (int(resolved), numeric, user_id, subject)).rowcount
-        if changed == 1:
-            row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors WHERE id=?", (numeric,)).fetchone()
+        row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors WHERE id=? AND user_id=? AND subject=?",
+                           (numeric, user_id, subject)).fetchone()
     if row is None and isinstance(error_id, str) and error_id.strip():
-        changed = conn.execute("UPDATE user_errors SET resolved=? WHERE client_id=? AND user_id=? AND subject=?", (int(resolved), error_id.strip()[:128], user_id, subject)).rowcount
-        if changed == 1:
-            row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id FROM user_errors WHERE client_id=? AND user_id=? AND subject=?", (error_id.strip()[:128], user_id, subject)).fetchone()
+        row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors WHERE client_id=? AND user_id=? AND subject=?",
+                           (error_id.strip()[:128], user_id, subject)).fetchone()
     if row is None:
         raise KeyError("error not found")
-    return {"id": row["id"], "clientId": row["client_id"], "taskId": row["task_id"], "skill": row["skill_id"], "sub": row["topic"],
-            "ts": timestamp_value(row["created_at"]), "resolved": bool(row["resolved"])}
+    updates, params = [], []
+    if resolved is not None:
+        updates.append("resolved=?")
+        params.append(int(resolved))
+    if new_kind == "major" and _normalize_error_kind(row["kind"]) == "minor":
+        updates.append("kind='major'")
+    if updates:
+        params.append(row["id"])
+        conn.execute(f"UPDATE user_errors SET {', '.join(updates)} WHERE id=?", params)
+        row = conn.execute("SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors WHERE id=?", (row["id"],)).fetchone()
+    return _serialize_error_row(row)
 
 
 def patch_settings(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
@@ -1988,9 +2345,8 @@ def patch_settings(conn: sqlite3.Connection, user_id: int, subject: str, value: 
     if self_level is not None and self_level not in SELF_LEVELS:
         raise ValueError("invalid selfLevel")
     if goal is not None:
-        # Список целей строго предмета регистрации: у пустого предмета своих
-        # целей нет вообще, и подсунутый клиентом профильный g60 раньше падал
-        # сюда 400-й ошибкой сразу после переключения предмета. Единственный
+        # Список целей строго предмета регистрации: профильная g60 для базы
+        # (или базовая g4 для профиля) отклоняется 400-й. Единственный
         # резолвер конфига — _subject_config (тот же путь, что у каталога).
         goal_ids = {g.get("id") for g in _subject_config(conn, "goals", subject, [], subject == DEFAULT_SUBJECT) or []}
         if not goal_ids:
@@ -2207,21 +2563,33 @@ def _levels_crossed(xp_from: int, xp_to: int) -> int:
     return level_from_xp(xp_to)["level"] - level_from_xp(xp_from)["level"]
 
 
-def _derive_skill_progress_value(solved: int, correct: int, lesson_done: int, lesson_total: int) -> int:
-    """Мастерство навыка 0–100: теория 40 + практика 60. Единственное место
-    формулы — зеркало клиентского skillProgress() для отображения; персистентная
-    истина хранится в user_progress и считается только здесь, клиент свои
-    +5/+3/+8/+6/+22 больше не присылает и не хранит."""
+def _derive_skill_progress_value(solved: int, correct: int, lesson_done: float, lesson_total: int, task_count: int = 0) -> int:
+    """Мастерство навыка 0–100: теория 40 + практика 60. Зеркало клиентского
+    skillProgress() для отображения.
+
+    Теория: доля завершённых уроков (lesson_done может быть дробным — открытый
+    урок даёт шаги/всего), вес 40. Практика: покрытие банка × точность, где
+    знаменатель покрытия — реальное число решаемых заданий темы (task_count),
+    а не фиксированные 10. Полная по-задачная модель с качеством решения
+    (доля 60/N за задание, скидки за подсказки/разбор/неверные попытки/долгое
+    выполнение/показ решения, зачёт
+    лучшего решения один раз — защита от фарма повторами) живёт на клиенте
+    (skillPracticeDetail в js/state.js) и считается по истории taskAttempts;
+    здешний агрегат — её оценка при отсутствии детальной истории. Живая
+    истина прогресса хранится в user_progress и обновляется только через
+    patch_skill_progress (MAX-слияние клиентского значения)."""
     try:
         solved = max(0, int(solved)); correct = max(0, int(correct))
-        lesson_done = max(0, int(lesson_done)); lesson_total = max(0, int(lesson_total))
+        lesson_done = max(0.0, float(lesson_done)); lesson_total = max(0, int(lesson_total))
+        task_count = max(0, int(task_count))
     except (TypeError, ValueError):
         return 0
     theory_weight = 40 if lesson_total else 0
     practice_weight = 100 - theory_weight
     theory = (lesson_done / lesson_total) * theory_weight if lesson_total else 0
     accuracy = (correct / solved) if solved else 0
-    practice = min(1, solved / 10) * accuracy * practice_weight
+    volume_cap = task_count if task_count > 0 else 10
+    practice = min(1, solved / volume_cap) * accuracy * practice_weight
     return int(round(min(100, theory + practice)))
 
 
@@ -2442,6 +2810,7 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
 
 
 def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    ensure_subject_schema(conn)
     user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     if not user:
         return None
@@ -2492,12 +2861,13 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         detail["skills"].append({"id": r["skill_id"], "name": r["name"], "topic": r["topic"], "progress": r["progress"],
                                  "solved": r["solved"], "correct": r["correct"], "timeSec": round(r["time_sec"])})
     task_titles = {r["id"]: r["exam_number"] for r in conn.execute("SELECT id, exam_number FROM tasks")}
-    for r in conn.execute("""SELECT e.id, e.task_id, e.skill_id, e.topic, e.created_at, e.resolved, sk.name AS skill_name
+    for r in conn.execute("""SELECT e.id, e.task_id, e.skill_id, e.topic, e.created_at, e.resolved, e.kind, sk.name AS skill_name
                              FROM user_errors e LEFT JOIN skills sk ON sk.id=e.skill_id
                              WHERE e.user_id=? ORDER BY e.id DESC LIMIT 100""", (user_id,)):
         detail["errors"].append({"id": r["id"], "taskId": r["task_id"], "examNumber": task_titles.get(r["task_id"]),
                                  "skill": r["skill_name"] or r["skill_id"], "topic": r["topic"],
-                                 "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"])})
+                                 "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"]),
+                                 "kind": (_normalize_error_kind(r["kind"]) if "kind" in r.keys() and r["kind"] else "major")})
     for r in conn.execute("SELECT created_at, text FROM timeline WHERE user_id=? ORDER BY id DESC LIMIT 40", (user_id,)):
         detail["timeline"].append({"ts": timestamp_value(r["created_at"]), "text": r["text"]})
     skill_names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM skills")}
@@ -3007,6 +3377,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Robots-Tag", "noindex, nofollow")
         self.send_security_headers()
         if token: self.send_header("Set-Cookie", self.session_cookie_attrs(token))
         elif clear_session: self.send_header("Set-Cookie", self.session_cookie_clear_attrs())
@@ -3136,7 +3507,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback()
                 self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
                 return
-            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id)
+            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id, request_device_info(self))
             conn.commit()
         except sqlite3.IntegrityError:
             # Гонка двух разных гостей за один email: unique-индекс отверг
@@ -3174,10 +3545,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Неверный email или пароль"}, 401)
             return
         account_id = row["id"]
-        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id)
+        # Вход всегда ведёт через явный выбор предмета на клиенте: один
+        # аккаунт может открываться с разных устройств, поэтому frontend не
+        # угадывает current_subject, а показывает пикер и присылает subject
+        # сюда (или следующим вызовом POST /api/subject). Переданный
+        # известный предмет применяем атомарно к сессии; без него ничего не
+        # меняем — старые клиенты, refresh и авто-логин ведут себя как раньше.
+        requested = payload.get("subject")
+        if is_known_subject(requested):
+            set_current_subject(conn, account_id, requested)
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id, request_device_info(self))
         conn.commit()
         auth_login_success(ip)
-        self.send_json({"ok": True, "user": auth_user_payload(conn, account_id)}, token=new_token)
+        self.send_json({"ok": True, "user": auth_user_payload(conn, account_id),
+                        "requireSubjectChoice": True,
+                        "subjects": subjects_payload(),
+                        "subject": current_subject_for(conn, account_id)}, token=new_token)
 
     def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid/absent cookie: drop whatever
@@ -3188,6 +3571,50 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM user_sessions WHERE token=?", (token,))
             conn.commit()
         self.send_json({"ok": True}, clear_session=True)
+
+    def handle_auth_devices_list(self, conn: sqlite3.Connection) -> None:
+        # Раздел «Устройства» в профиле: все активные серверные сессии
+        # текущего аккаунта. Никогда не минтит пользователя и не отдаёт
+        # токены/сырой User-Agent — только id строки, название, тип и время.
+        ensure_auth_schema(conn)
+        token = cookie_value(self, "ege_session")
+        row = session_row_for(conn, token, request_device_info(self))
+        if not row:
+            self.send_json({"error": "Требуется вход"}, 401)
+            return
+        try:
+            conn.execute("DELETE FROM user_sessions WHERE user_id=? AND expires_at<=?",
+                         (row["user_id"], int(time.time() * 1000)))
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        self.send_json({"devices": auth_devices_payload(conn, row["user_id"], row["session_pk"])})
+
+    def handle_auth_device_revoke(self, conn: sqlite3.Connection, session_id: str) -> None:
+        # Отзыв одной сессии. Чужой аккаунт недоступен: несовпадение user_id
+        # отвечает тем же 404, что и несуществующий id. Отзыв текущей сессии
+        # эквивалентен logout — чистим и куку. Остальные сессии не трогаем.
+        ensure_auth_schema(conn)
+        token = cookie_value(self, "ege_session")
+        row = session_row_for(conn, token, request_device_info(self))
+        if not row:
+            self.send_json({"error": "Требуется вход"}, 401)
+            return
+        try:
+            target_id = int(str(session_id).strip())
+        except (TypeError, ValueError):
+            self.send_json({"error": "Неизвестное устройство"}, 404)
+            return
+        target = conn.execute("SELECT id, user_id FROM user_sessions WHERE id=?", (target_id,)).fetchone()
+        if not target or int(target["user_id"]) != int(row["user_id"]):
+            self.send_json({"error": "Неизвестное устройство"}, 404)
+            return
+        conn.execute("DELETE FROM user_sessions WHERE id=?", (target_id,))
+        conn.commit()
+        if int(target_id) == int(row["session_pk"]):
+            self.send_json({"ok": True, "current": True}, clear_session=True)
+        else:
+            self.send_json({"ok": True, "current": False})
 
     def handle_admin_login(self, conn: sqlite3.Connection) -> None:
         ip = self.client_address[0] if self.client_address else "?"
@@ -3328,8 +3755,13 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path == "/api/subject":
-            # Переключение текущего предмета. Возвращает каталог и состояние
-            # нового предмета — клиент просто перерисовывается, ничего не мержит.
+            # Переключение текущего предмета. Возвращает ЛЁГКИЙ каталог
+            # (summary, как bootstrap-lite) + состояние нового предмета —
+            # клиент просто перерисовывается, ничего не мержит. Тяжёлые
+            # тексты заданий и шаги уроков догружаются лениво через
+            # /api/catalog-tasks + /api/catalog-lessons (см. ensureDetails),
+            # поэтому клик по предмету не виснет на синхронном скачивании
+            # и парсинге ~300 КБ полного каталога.
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
@@ -3342,9 +3774,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "Неизвестный предмет"}, 400); return
                 subject = set_current_subject(conn, user_id, wanted)
                 self.send_json({"ok": True, "subject": subject,
-                                "catalog": catalog_payload(conn, subject),
+                                "catalog": catalog_summary_payload(conn, subject),
                                 "state": read_state(conn, user_id, subject),
-                                "accountId": account_id_for(conn, user_id)}, token=token)
+                                "accountId": account_id_for(conn, user_id),
+                                "auth": auth_state_payload(conn, user_id)}, token=token)
             except (ValueError, KeyError, sqlite3.Error) as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
@@ -3355,6 +3788,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        # Каноникализация хоста: www-дубль склеиваем 301-м редиректом на apex
+        # (www.egeeasy.ru -> egeeasy.ru). Без этого поисковик видит две копии
+        # каждой страницы и размывает вес между ними. Правило общее (любой
+        # www.* -> apex), поэтому переживёт смену домена; localhost, IP и
+        # пустой Host не затрагиваются. Location протокол-независимый (//...),
+        # чтобы не ломать схему за обратным прокси: http->https уже делает
+        # внешний фронтенд.
+        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").split(",")[0].strip().lower()
+        bare = host.split(":")[0]
+        if bare.startswith("www.") and "." in bare[4:]:
+            apex = bare[4:] + (":" + host.rsplit(":", 1)[1] if ":" in host else "")
+            self.send_response(301)
+            self.send_header("Location", "//" + apex + self.path)
+            self.send_security_headers()
+            self.end_headers()
+            return
         if path.startswith("/api/admin"):
             conn = connect()
             try:
@@ -3414,6 +3863,15 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
                     self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None}); return
+                # Устройства: только свои активные сессии, без минта аккаунта.
+                if path == "/api/auth/devices":
+                    try:
+                        self.handle_auth_devices_list(conn)
+                    except (ValueError, KeyError, sqlite3.Error) as exc:
+                        try: conn.rollback()
+                        except sqlite3.Error: pass
+                        self.send_json({"error": f"Request failed: {exc}"}, 400)
+                    return
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
                     self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
@@ -3434,6 +3892,27 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "index.html"
         elif path == '/admin':
             file_path = ROOT / "admin.html"
+        elif path == "/sitemap.xml":
+            # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
+            # а домен зависит от деплоя — берём его из хоста запроса
+            # (EGE_PUBLIC_URL в приоритете, см. public_base_url).
+            # В sitemap — только публичный лендинг; /dashboard, /admin
+            # и /api/* закрыты от индексации и в robots.txt, и мета-тегами.
+            base = public_base_url(self)
+            lastmod = today()
+            body = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                f'  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>'
+                '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n'
+                '</urlset>'
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_security_headers()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body); return
         else:
             file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
         # Static hosting must never leak the server tree: the SQLite file holds
@@ -3444,12 +3923,12 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(403); return
         suffix = file_path.suffix.lower()
-        if suffix in BLOCKED_STATIC_SUFFIXES:
+        if suffix in BLOCKED_STATIC_SUFFIXES and file_path.name not in PUBLIC_STATIC_FILES:
             self.send_error(404); return
         if any(part.startswith(".") or part in BLOCKED_STATIC_DIRS for part in rel.parts[:-1]) or (rel.parts and rel.parts[-1].startswith(".")):
             self.send_error(404); return
         if not file_path.is_file(): self.send_error(404); return
-        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf"}.get(file_path.suffix, "application/octet-stream")
+        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
         data = file_path.read_bytes()
         # ETag по хешу содержимого: повторные заходы отдают 304 без тела.
         # Раньше стоял безусловный no-cache без валидатора — каждый reload
@@ -3470,10 +3949,14 @@ class Handler(BaseHTTPRequestHandler):
         accept = self.headers.get("Accept-Encoding", "") or ""
         encoding = None
         # Текстовую статику жмём: jsxgraph 969 КБ -> ~250 КБ, app.js в ~4 раза.
-        if len(data) > 1024 and "gzip" in accept.lower() and suffix in (".js", ".css", ".html", ".json", ".svg", ".ttf"):
+        if len(data) > 1024 and "gzip" in accept.lower() and suffix in (".js", ".css", ".html", ".json", ".svg", ".ttf", ".txt", ".xml", ".webmanifest"):
             data = gzip.compress(data, compresslevel=5)
             encoding = "gzip"
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
+        # Приватные зоны не индексируются: дублируем meta robots HTTP-заголовком,
+        # чтобы и прямые запросы /index.html и /admin.html были закрыты.
+        if path in ("/dashboard", "/admin") or file_path.name in ("index.html", "admin.html"):
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
@@ -3510,7 +3993,7 @@ class Handler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError, AttributeError):
                     raise ValueError("invalid error id")
                 subject, version, error = domain_write(conn, user_id, payload,
-                    lambda sub: patch_error_resolved(conn, user_id, sub, error_key, payload.get("resolved")))
+                    lambda sub: patch_error_resolved(conn, user_id, sub, error_key, payload.get("resolved"), payload.get("kind")))
                 self.send_json({"ok": True, "subject": subject, "stateVersion": version, "error": error}, token=token)
                 return
             self.send_json({"error": "Not found"}, 404)
@@ -3566,6 +4049,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not self.require_admin(conn): return
                 self.send_json({"error": "Not found"}, 404)
+            finally: conn.close()
+            return
+        if path.startswith("/api/auth/devices/"):
+            # DELETE /api/auth/devices/<id> — отзыв одной сессии аккаунта.
+            session_id = path.rsplit("/", 1)[-1]
+            conn = connect()
+            try:
+                try:
+                    self.handle_auth_device_revoke(conn, session_id)
+                except (ValueError, KeyError, sqlite3.Error) as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
         if path != "/api/state": self.send_json({"error": "Not found"}, 404); return

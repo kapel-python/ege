@@ -24,10 +24,10 @@
   "use strict";
 
   // ---------------------------------------------------------------
-  // Engine-wide interaction lock.
+  // Engine-wide interaction lock: every diagram is a static illustration.
   //
-  // The rule for every MathVisual diagram: the camera may move, the
-  // figure never does. Every builder below already creates its own
+  // The rule for every MathVisual diagram: neither the camera nor the
+  // figure moves. Every builder below already creates its own
   // points/lines/circles/polygons with `fixed: true`, but JSXGraph's
   // 3D module also manufactures its own internal helper points behind
   // the scenes (e.g. a 2D projection point per point3d per edge, used
@@ -37,8 +37,14 @@
   // -- closes that class of loophole centrally instead of chasing it
   // call site by call site, and also protects any future object type
   // this module doesn't build yet. `view3d` itself is deliberately left
-  // alone: it is the camera, and rotate/zoom is exactly the interaction
-  // this file wants to keep.
+  // alone: it is the camera, and even camera control (rotate/zoom/pan) is
+  // off -- a MathVisual figure is a static illustration, and a vertical
+  // swipe starting on it must scroll the page instead of being captured.
+  // Camera-level switches live at each initBoard() call site below
+  // (pan/zoom/drag/keyboard off, view3d az/el/bank/trackball off) plus a
+  // `touch-action: pan-y` restore, because JSXGraph forces
+  // `touch-action: none` on the board container when it wires its pointer
+  // handlers.
   if (typeof JXG !== "undefined" && JXG.Options) {
     const LOCKED_TYPES = ["point", "point3d", "line", "line3d", "circle", "sphere3d",
       "polygon", "polygon3d", "curve", "angle", "nonreflexangle", "glider"];
@@ -125,18 +131,13 @@
 
     if (boundingbox.some((v) => !isFiniteNum(v))) throw new VisualError("некорректная область координат");
 
-    // Interactivity policy is per figure kind, not a blanket "camera is
-    // always free": a flat geometric figure (triangle/quadrilateral/polygon/
-    // circle_geometry -- illustrating a fixed set of measurements) gets no
-    // camera control at all, not even zoom, since there is nothing useful to
-    // frame differently. A coordinate/graph-style board (`spec.axis` is the
-    // exact flag TEMPLATES already uses to mark coordinate_geometry,
-    // vector_diagram, function_graph, derivative_graph) is read by scale, so
-    // it gets zoom in/out and nothing more -- no pan, no rotate (it has none
-    // to give). 3D solids don't go through this function at all; their own
-    // board in render3D() is the one place rotate is offered.
-    const allowZoom = !!spec.axis;
-
+    // Interactivity policy: every figure is a static illustration, no
+    // exceptions by kind. No pan, no zoom (wheel/pinch), no drag, no
+    // rotate, no keyboard camera control -- not even on coordinate/graph
+    // boards, where zoom used to be allowed. The drawing itself
+    // (boundingbox, objects, colors, labels) is untouched; only gesture
+    // handling is off, so a vertical swipe starting on the figure scrolls
+    // the page instead of being captured by the board.
     const board = JXG.JSXGraph.initBoard(el.id, {
       boundingbox,
       keepAspectRatio: spec.keepAspectRatio !== false,
@@ -144,13 +145,21 @@
       showNavigation: false,
       showCopyright: false,
       showInfobox: false, // координатная табличка при нажатии/удержании точки — лишний артефакт на статичной фигуре
-      // Every math object below is built `fixed: true`, so even where zoom
-      // is on, there is nothing a drag can move but the camera.
+      // Every math object below is built `fixed: true`, and with the camera
+      // locked too there is nothing any drag can move.
       pan: { enabled: false },
-      zoom: { enabled: allowZoom, wheel: true, pinch: true, needShift: false },
+      zoom: { enabled: false },
+      drag: { enabled: false },
+      keyboard: { enabled: false },
       resize: { enabled: true, throttle: 80 },
       renderer: "svg",
     });
+    // JSXGraph forces `touch-action: none` (inline style) on the board
+    // container when it wires its pointer handlers, which would trap a
+    // vertical touch swipe inside the figure on mobile. Restore `pan-y` so
+    // the swipe scrolls the page; styles.css pins the same value with
+    // !important as a second layer.
+    el.style.touchAction = "pan-y";
 
     if (spec.grid !== false && spec.type !== "triangle" && spec.type !== "quadrilateral" &&
         spec.type !== "polygon" && spec.type !== "circle_geometry") {
@@ -553,14 +562,16 @@
     container.appendChild(el);
     const board = JXG.JSXGraph.initBoard(el.id, {
       boundingbox: [-6, 6, 6, -6], axis: false, showNavigation: false, showCopyright: false, showInfobox: false,
-      // Rotating the solid (az/el drag on the view3d itself, enabled by
-      // default below) and zooming are the only view-only controls that make
-      // sense for a 3D figure -- board pan would fight the same plain-drag
-      // gesture used for rotation, so it stays off; zoom (wheel/pinch) does
-      // not conflict and is enabled.
-      pan: { enabled: false }, zoom: { enabled: true, wheel: true, pinch: true, needShift: false },
+      // Static illustration, like every 2D board: no pan, no zoom
+      // (wheel/pinch), no drag, no keyboard camera control. 3D rotation is
+      // additionally locked on the view3d itself below.
+      pan: { enabled: false }, zoom: { enabled: false },
+      drag: { enabled: false }, keyboard: { enabled: false },
       resize: { enabled: true, throttle: 80 },
     });
+    // See makeBoard(): JSXGraph forces `touch-action: none` on the board
+    // container -- restore `pan-y` so a vertical swipe scrolls the page.
+    el.style.touchAction = "pan-y";
     // Parallel (axonometric) projection reads as a normal textbook solid-
     // geometry drawing; JSXGraph's "central" (perspective) default instead
     // produces vanishing-point distortion that made unequal edges look
@@ -568,6 +579,14 @@
     const view = board.create("view3d", [[-5, -4], [9.5, 9],
       [[-extent * 0.6, extent], [-extent * 0.6, extent], [0, extent]]],
       { projection: "parallel", depthOrder: { enabled: true },
+        // Static illustration: no camera control. az/el/bank pointer+keyboard
+        // rotation, trackball rotation and shift-drag vertical rotation are
+        // all off -- a swipe starting on the solid scrolls the page.
+        az: { pointer: { enabled: false }, keyboard: { enabled: false } },
+        el: { pointer: { enabled: false }, keyboard: { enabled: false } },
+        bank: { pointer: { enabled: false }, keyboard: { enabled: false } },
+        trackball: { enabled: false },
+        verticalDrag: { enabled: false },
         xPlaneRear: { visible: false }, yPlaneRear: { visible: false }, zPlaneRear: { visible: false },
         xPlaneFront: { visible: false }, yPlaneFront: { visible: false }, zPlaneFront: { visible: false },
         // The auto-created coordinate axes are a debugging aid, not part of a
@@ -580,8 +599,8 @@
       const p = view.create("point3d", coords, {
         name: labels[idx] || "", size: 2, strokeColor: t.text, fillColor: t.text,
         withLabel: !!labels[idx], label: { fontSize: 14, strokeColor: t.text },
-        // Vertices are the figure's math, not a control -- only camera
-        // rotate/zoom on the view itself may change how the solid looks.
+        // Vertices are the figure's math, not a control -- the figure is a
+        // static illustration, so they stay locked.
         fixed: true, highlight: false,
       });
       if (labels[idx]) registry[labels[idx]] = p;
