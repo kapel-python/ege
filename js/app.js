@@ -1117,7 +1117,7 @@ async function render() {
   if (pendingSubjectChoice && route !== "subject" && route !== "login" && route !== "register") { go("subject"); return; }
   // Экраны входа/регистрации доступны и до онбординга: после logout свежий
   // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
-  if (!Store.state.onboarded && route !== "login" && route !== "register") { Onboarding.show(); return; }
+  if (!Store.state.onboarded && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
   // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
   // меняет и потому не страдает; окно навыка для #/skill открывает конец render).
@@ -1203,6 +1203,7 @@ async function render() {
     void screen.offsetWidth;
     screen.style.animation = "";
     screenEmptySubject(screen);
+    try { if (window.Footer) Footer.hide(); } catch (_) {}
     window.scrollTo(0, 0);
     return;
   }
@@ -1229,6 +1230,7 @@ async function render() {
       else openSkillModal(param);
     } catch (_) {}
   }
+  try { if (window.Footer) Footer.sync(route); } catch (_) {}
   window.scrollTo(0, 0);
 }
 
