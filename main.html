@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>ege easy — подготовка к ЕГЭ по математике без стресса</title>
+<title>ege easy — Готовься к ЕГЭ так, чтобы понимать, а не угадывать</title>
 <meta name="description" content="Понятная система подготовки к ЕГЭ по математике (профильная и базовая): теория по шагам, практика на реальных заданиях, работа над ошибками и видимый прогресс.">
 <link rel="canonical" href="https://egeeasy.ru/">
 <meta name="robots" content="index, follow, max-image-preview:large">
@@ -13,7 +13,7 @@
 <meta property="og:type" content="website">
 <meta property="og:locale" content="ru_RU">
 <meta property="og:site_name" content="ege easy">
-<meta property="og:title" content="ege easy — подготовка к ЕГЭ по математике без стресса">
+<meta property="og:title" content="ege easy — Готовься к ЕГЭ так, чтобы понимать, а не угадывать">
 <meta property="og:description" content="Теория по шагам, практика на реальных заданиях ЕГЭ, разбор ошибок и видимый прогресс. Профильная и базовая математика.">
 <meta property="og:url" content="https://egeeasy.ru/">
 <meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
@@ -21,7 +21,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ege easy — подготовка к ЕГЭ по математике">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="ege easy — подготовка к ЕГЭ по математике без стресса">
+<meta name="twitter:title" content="ege easy — Готовься к ЕГЭ так, чтобы понимать, а не угадывать">
 <meta name="twitter:description" content="Теория по шагам, практика на реальных заданиях ЕГЭ, разбор ошибок и видимый прогресс.">
 <meta name="twitter:image" content="https://egeeasy.ru/assets/seo/og-image.png">
 <script type="application/ld+json">
@@ -74,6 +74,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="stylesheet" href="css/footer.css?v=1">
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -893,22 +894,6 @@
     margin:0 0 clamp(32px,5vw,40px);
   }
 
-  /* ===== FOOTER ===== */
-  footer{
-    border-top:1px solid var(--hairline);
-    padding:clamp(32px,5vw,40px) 0;
-  }
-
-  .footer-inner{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:20px;
-    flex-wrap:wrap;
-    font-size:clamp(13px,1.6vw,14px);
-    color:var(--text-faint);
-  }
-
   /* ===== RESPONSIVE ===== */
   @media (max-width:768px){
     .header-link{display:none;}
@@ -1243,15 +1228,11 @@
   </section>
 </main>
 
-<footer>
-  <div class="wrap footer-inner">
-    <span>ege easy</span>
-    <span id="year"></span>
-  </div>
-</footer>
+<div data-ege-footer></div>
+<script defer src="js/footer.js?v=1"></script>
 
 <script>
-  document.getElementById('year').textContent = '© ' + new Date().getFullYear();
+  try { var y = document.getElementById('year'); if (y) y.textContent = '© ' + new Date().getFullYear(); } catch (e) {}
 
   /* Тема лендинга полностью автоматическая (см. скрипт в <head>):
      сохранённая тема сайта (общий ключ ege_core_theme) → иначе системная.

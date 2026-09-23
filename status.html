@@ -25,6 +25,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="stylesheet" href="css/footer.css?v=1">
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -290,8 +291,6 @@
     padding:clamp(24px,4vw,36px);text-align:center;box-shadow:0 1px 0 var(--inset-line) inset,var(--shadow-sm);
   }
   .error-card p{color:var(--text-dim);margin:0 0 20px;overflow-wrap:anywhere;}
-  footer{border-top:1px solid var(--hairline);padding:clamp(24px,4vw,32px) 0;margin-top:clamp(32px,6vw,56px);}
-  .footer-inner{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-size:clamp(13px,1.6vw,14px);color:var(--text-faint);min-width:0;}
   @media (max-width:720px){
     .stat-grid{grid-template-columns:repeat(2,1fr);}
     .svc-grid{grid-template-columns:1fr;}
@@ -389,12 +388,8 @@
   </section>
 </main>
 
-<footer>
-  <div class="wrap footer-inner">
-    <span>ege easy — состояние сервиса</span>
-    <span id="year"></span>
-  </div>
-</footer>
+<div data-ege-footer></div>
+<script defer src="js/footer.js?v=1"></script>
 
 <script>
 (function(){
@@ -414,7 +409,7 @@
   var svcGrid = document.getElementById("svcGrid");
   var subjectsList = document.getElementById("subjectsList");
 
-  document.getElementById("year").textContent = "© " + new Date().getFullYear();
+  try { var yearEl = document.getElementById("year"); if (yearEl) yearEl.textContent = "© " + new Date().getFullYear(); } catch (e) {}
 
   function esc(value){
     return String(value == null ? "" : value)
