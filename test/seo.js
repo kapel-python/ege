@@ -75,7 +75,8 @@ t("приложение: canonical на /", /<link rel="canonical" href="\/">/.t
 const server = read("server/server.py");
 t("сервер: allowlist публичных файлов", /PUBLIC_STATIC_FILES.*robots\.txt/.test(server));
 t("сервер: robots.txt не отдаёт 404 (.txt allowlist)",
-  /BLOCKED_STATIC_SUFFIXES and file_path\.name not in PUBLIC_STATIC_FILES/.test(server));
+  /BLOCKED_STATIC_SUFFIXES and file_path\.name not in PUBLIC_STATIC_FILES/.test(server) ||
+  /_is_blocked_static\(file_path\) and file_path\.name not in PUBLIC_STATIC_FILES/.test(server));
 t("сервер: MIME для txt/xml/webmanifest/ico",
   ['".txt": "text/plain', '".xml": "application/xml', '".webmanifest": "application/manifest+json"', '".ico": "image/x-icon"']
     .every((s) => server.includes(s)));
