@@ -1767,6 +1767,11 @@ body {
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .screen { padding: 20px 16px 110px; }
+  /* На выборе предмета и активном задании нижнего меню нет — не резервируем
+     под него высоту и не оставляем пустой полосы под контентом. */
+  .app.chrome-locked .screen,
+  .app.task-focus .screen { padding-bottom: 0; }
+  .app.task-focus .bottomnav { display: none !important; }
   .topbar { padding: 12px 16px; gap: 12px; }
   .level-chip__bar { width: 80px; }
   .topbar .hide-mobile { display: none; }
