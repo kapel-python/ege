@@ -358,6 +358,12 @@
     -webkit-text-fill-color:transparent;
     color:transparent;
   }
+  /* На почти белом фоне тёмный blue→green выглядит мутно. Светлая тема
+     получает более насыщенный синий→бирюзовый→изумрудный переход, а тёмная
+     сохраняет свой яркий cyan→mint вид. */
+  :root:not([data-theme="dark"]) .grad{
+    background-image:linear-gradient(115deg,#006ED6 0%,#007E8A 50%,#009B62 100%);
+  }
 
   /* ===== LAYOUT ===== */
   .wrap{
@@ -830,6 +836,41 @@
     margin-top:8px;
   }
 
+  /* Светлая тема: путь должен читаться как последовательность шагов, а не
+     как четыре одинаковых тёмных точки. Насыщенная прогрессия синий→изумруд
+     заметна на белом фоне; тёмная тема сохраняет свой cyan→mint-вид. */
+  :root:not([data-theme="dark"]) .step-dot{
+    width:15px;
+    height:15px;
+    background:#006ED6;
+    box-shadow:
+      0 0 0 4px rgba(0,110,214,0.14),
+      0 6px 14px -5px rgba(0,110,214,0.50);
+  }
+  :root:not([data-theme="dark"]) .step:nth-child(2) .step-dot{
+    background:#0086C9;
+    box-shadow:
+      0 0 0 4px rgba(0,134,201,0.14),
+      0 6px 14px -5px rgba(0,110,214,0.45);
+  }
+  :root:not([data-theme="dark"]) .step:nth-child(3) .step-dot{
+    background:#008C9E;
+    box-shadow:
+      0 0 0 4px rgba(0,140,158,0.14),
+      0 6px 14px -5px rgba(0,140,158,0.45);
+  }
+  :root:not([data-theme="dark"]) .step:nth-child(4) .step-dot{
+    background:#009B62;
+    box-shadow:
+      0 0 0 4px rgba(0,155,98,0.14),
+      0 6px 14px -5px rgba(0,155,98,0.45);
+  }
+  :root:not([data-theme="dark"]) .step-line{
+    width:3px;
+    border-radius:999px;
+    background-image:linear-gradient(180deg,rgba(0,126,138,0.52) 0%,rgba(0,110,214,0.18) 100%);
+  }
+
   .step-title{
     font-family:var(--font-display);
     font-size:clamp(17px,2.2vw,20px);
@@ -968,7 +1009,7 @@
       <a class="header-link" href="#subjects">Предметы</a>
       <a class="header-link" href="#features">Возможности</a>
       <a class="header-link" href="#how">Как работает</a>
-      <a class="btn btn-primary" href="/dashboard">Начать подготовку</a>
+      <a class="btn btn-primary" href="/dashboard">начать подготовку</a>
     </nav>
   </div>
 </header>
