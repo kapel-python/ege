@@ -3977,6 +3977,48 @@ function revalidateProfileAuth() {
   return profileAuthCheckInFlight;
 }
 
+/* Сверка админ-признака, пока блок «Обращения» на экране. Сессия могла
+   истечь/быть отозвана в другой вкладке или на другом устройстве, пока вкладка
+   лежала в фоне: тогда сервер вернёт isAdmin=false, и мы обязаны снять блок и
+   вычистить кэш, иначе в UI остались бы чужие (уже недопустимые) данные.
+   Работает только когда блок был виден, с троттлингом, без полного re-render
+   посреди тренировки. */
+let adminSessionCheckInFlight = null;
+let adminSessionCheckAt = 0;
+
+function clearAdminInboxNow() {
+  try { Store.isAdmin = false; } catch (_) {}
+  try { AdminInbox.reset(); } catch (_) {}
+  try {
+    const node = document.getElementById("adminInbox");
+    if (node) node.remove();
+  } catch (_) {}
+}
+
+function revalidateAdminSession() {
+  let visible = false;
+  try { visible = Store.isAdmin === true; } catch (_) { return Promise.resolve(); }
+  if (!visible) return Promise.resolve();
+  if (adminSessionCheckInFlight) return adminSessionCheckInFlight;
+  if (Date.now() - adminSessionCheckAt < 10000) return Promise.resolve();
+  adminSessionCheckAt = Date.now();
+  adminSessionCheckInFlight = (async () => {
+    let payload = null;
+    try { payload = await AuthAPI.session(); } catch (_) { return; }
+    if (!payload || payload.isAdmin === true) return;
+    clearAdminInboxNow();
+  })().catch(() => {}).finally(() => { adminSessionCheckInFlight = null; });
+  return adminSessionCheckInFlight;
+}
+
+function scheduleAdminSessionWatch() {
+  try {
+    if (typeof setInterval === "function") {
+      setInterval(() => { revalidateAdminSession(); }, 60000);
+    }
+  } catch (_) {}
+}
+
 /* ============================================================
    Устройства: активные серверные сессии текущего аккаунта.
    Показываем только готовые название/тип с сервера — сырой User-Agent
@@ -5219,9 +5261,18 @@ function bootstrapApp() {
           }
         });
         document.addEventListener("visibilitychange", () => {
-          if (!document.hidden) { Store.checkExternalUpdate().catch(() => {}); try { revalidateProfileAuth(); } catch (_) {} }
+          if (!document.hidden) {
+            Store.checkExternalUpdate().catch(() => {});
+            try { revalidateProfileAuth(); } catch (_) {}
+            try { revalidateAdminSession(); } catch (_) {}
+          }
         });
-        window.addEventListener("focus", () => { Store.checkExternalUpdate().catch(() => {}); try { revalidateProfileAuth(); } catch (_) {} });
+        window.addEventListener("focus", () => {
+          Store.checkExternalUpdate().catch(() => {});
+          try { revalidateProfileAuth(); } catch (_) {}
+          try { revalidateAdminSession(); } catch (_) {}
+        });
+        scheduleAdminSessionWatch();
       } catch (_) {}
       render();
     } catch (error) {

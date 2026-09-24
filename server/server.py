@@ -4584,10 +4584,23 @@ class Handler(BaseHTTPRequestHandler):
         # session row this token had and clear the cookie. Never mint a user.
         ensure_auth_schema(conn)
         token = cookie_value(self, "ege_session")
+        admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
+        user_id = None
         if token:
+            row = conn.execute("SELECT user_id FROM user_sessions WHERE token=?", (token,)).fetchone()
+            if row:
+                user_id = row["user_id"]
             conn.execute("DELETE FROM user_sessions WHERE token=?", (token,))
-            conn.commit()
-        self.send_json({"ok": True}, clear_session=True)
+        # Выход из аккаунта = полный выход: админ-права живут в паре кук,
+        # привязанной к этой user-сессии, поэтому после её удаления admin-токен
+        # уже ничего не значит — но хранить его в браузере незачем. Чистим и
+        # строку admin_sessions, и куку: старый токен не переживает logout, а
+        # вкладка/браузер не остаётся с «висящими» правами.
+        if user_id is not None and admin_token:
+            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?", (user_id, admin_token))
+        conn.commit()
+        self.send_json({"ok": True}, clear_session=True,
+                       admin_cookie=self.admin_cookie_attrs(None, 0))
 
     def handle_auth_devices_list(self, conn: sqlite3.Connection) -> None:
         # Раздел «Устройства» в профиле: все активные серверные сессии
@@ -4629,7 +4642,15 @@ class Handler(BaseHTTPRequestHandler):
         conn.execute("DELETE FROM user_sessions WHERE id=?", (target_id,))
         conn.commit()
         if int(target_id) == int(row["session_pk"]):
-            self.send_json({"ok": True, "current": True}, clear_session=True)
+            # Отзыв текущей сессии равносилен logout — снимаем и админ-куку,
+            # чтобы в браузере не осталось пары «живая user-сессия + ege_admin».
+            admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
+            if admin_token:
+                conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?",
+                             (row["user_id"], admin_token))
+                conn.commit()
+            self.send_json({"ok": True, "current": True}, clear_session=True,
+                           admin_cookie=self.admin_cookie_attrs(None, 0))
         else:
             self.send_json({"ok": True, "current": False})
 
