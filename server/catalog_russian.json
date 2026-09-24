@@ -1,0 +1,71 @@
+{
+  "subject": "russian",
+  "subjectId": "russian",
+  "title": "Русский язык (ЕГЭ)",
+  "status": "coming-soon",
+  "locked": true,
+  "comingSoon": true,
+  "availability": "coming-soon",
+  "features": {
+    "lessons": false,
+    "practice": false,
+    "forecast": false,
+    "diagnostics": false,
+    "missions": false,
+    "bosses": false,
+    "daily": false,
+    "path": true
+  },
+  "description": "Первый раздел русского языка готовится к публикации.",
+  "categories": [
+    {
+      "id": "russian_writing",
+      "name": "Русский язык",
+      "short": "Русский",
+      "status": "coming-soon",
+      "locked": true,
+      "comingSoon": true,
+      "metadata": {
+        "kind": "subject-section",
+        "availability": "coming-soon"
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "russian_essay",
+      "name": "Итоговое сочинение",
+      "cat": "russian_writing",
+      "order": 0,
+      "ege": null,
+      "status": "locked",
+      "locked": true,
+      "comingSoon": true,
+      "metadata": {
+        "kind": "topic",
+        "topic": "Итоговое сочинение",
+        "availability": "coming-soon",
+        "published": false
+      }
+    }
+  ],
+  "tasks": [],
+  "lessons": [],
+  "missions": [],
+  "bosses": [],
+  "achievements": [],
+  "daily": {
+    "skill": "",
+    "target": 0,
+    "xp": 0,
+    "title": ""
+  },
+  "goals": [],
+  "diagnosticTasks": [],
+  "visualAssets": [],
+  "visualAudit": {
+    "defaultStatus": "not-published",
+    "taskStatuses": {},
+    "references": []
+  }
+}
