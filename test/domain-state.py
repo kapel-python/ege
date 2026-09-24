@@ -131,7 +131,7 @@ def main():
             # Lesson, open lesson draft and mission are independent mutable
             # domains. Their patch must not rewrite append-only history.
             lesson_body = {"subject": subject, "expectedVersion": hint_replay["stateVersion"], "domains": {
-                "lessonSessions": {"lesson_n07_exponential": {"idx": 1, "stepState": {}, "xp": 10}},
+                "lessonSessions": {"lesson_n07_exponential": {"idx": 1, "stepState": {}, "xp": 10, "activeMs": 12345}},
                 "lessonAttempts": [{"lessonId": "lesson_n07_exponential", "completed": True, "firstCompletion": True, "xp": 120, "wrongAttempts": 0, "durationSec": 30, "ts": 1700000005000}],
                 "completedLessons": {"lesson_n07_exponential": {"ts": 1700000005000}},
                 "missionProgress": {"m-n01_planimetry": 3},
@@ -139,6 +139,8 @@ def main():
             }}
             status, lesson_patch = request(opener, base, "/api/state-domains", "PATCH", lesson_body)
             assert status == 200, (status, lesson_patch)
+            status, lesson_after = request(opener, base, "/api/bootstrap")
+            assert status == 200 and lesson_after["state"]["lessonSessions"]["lesson_n07_exponential"]["activeMs"] == 12345, lesson_after
             status, settings = request(opener, base, "/api/settings", "PATCH", {
                 "subject": subject, "expectedVersion": lesson_patch["stateVersion"],
                 "settings": {"name": "Доменный ученик", "selfLevel": "base"},
