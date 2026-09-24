@@ -210,7 +210,9 @@ SUBJECTS: dict[str, dict] = {
         },
         # Что реально входит в курс предмета (для честных подписей в UI:
         # «Полный курс» — только там, где есть и уроки, и практика, и прогноз).
-        "features": {"lessons": True, "practice": True, "forecast": True},
+        "features": {"lessons": True, "practice": True, "forecast": True,
+                      "diagnostics": True, "missions": True, "bosses": True,
+                      "daily": True, "path": True},
     },
     "basic_math": {
         "id": "basic_math",
@@ -227,7 +229,9 @@ SUBJECTS: dict[str, dict] = {
         # Уроки есть для части навыков (остальные считаются полностью из
         # практики — та же механика, что у профильных тем без урока).
         # Остальной цикл полный: диагностика, тренировки, боссы, прогноз.
-        "features": {"lessons": True, "practice": True, "forecast": True},
+        "features": {"lessons": True, "practice": True, "forecast": True,
+                      "diagnostics": True, "missions": True, "bosses": True,
+                      "daily": True, "path": True},
     },
     "russian": {
         "id": "russian",
@@ -2070,6 +2074,30 @@ def _catalog_status(value, default: str = "ready") -> str:
     return text or default
 
 
+def _catalog_subject_id(catalog: dict, expected_subject: str,
+                        conn: sqlite3.Connection | None = None) -> str:
+    """Validate and return the legacy DB grouping id declared by a catalog.
+
+    ``subject`` is the canonical API id. ``subjectId`` is the FK grouping id
+    used by the legacy catalog tables; it is optional for the two math catalogs,
+    but when present it must agree with the canonical id and already exist.
+    """
+    canonical = catalog.get("subject")
+    if canonical not in (None, "") and canonical != expected_subject:
+        raise ValueError(f"catalog subject mismatch for {expected_subject}")
+    declared = catalog.get("subjectId", catalog.get("subject_id"))
+    if declared in (None, ""):
+        return "math"
+    if not isinstance(declared, str) or not declared.strip():
+        raise ValueError(f"invalid catalog subjectId for {expected_subject}")
+    declared = declared.strip()
+    if canonical not in (None, "") and declared != canonical:
+        raise ValueError(f"catalog subjectId mismatch for {expected_subject}")
+    if conn is not None and conn.execute("SELECT 1 FROM subjects WHERE id=?", (declared,)).fetchone() is None:
+        raise ValueError(f"unknown catalog subjectId: {declared}")
+    return declared
+
+
 def _catalog_item_state(item: dict, *, default: str = "ready", subject_locked: bool = False) -> tuple[str, int, int]:
     """Return (status, locked, coming_soon) for a catalog node.
 
@@ -2101,6 +2129,24 @@ def _assert_catalog_owner(conn: sqlite3.Connection, table: str, item_id: str, su
         raise ValueError(f"catalog id {item_id!r} belongs to another subject")
 
 
+def _assert_catalog_reference(conn: sqlite3.Connection, table: str, item_id, subject: str) -> None:
+    """Ensure a catalog edge never crosses the subject ownership boundary."""
+    if not isinstance(item_id, str) or not item_id:
+        raise ValueError(f"missing {table} reference in {subject} catalog")
+    try:
+        if table == "tasks":
+            row = conn.execute(
+                "SELECT s.subject FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE t.id=?",
+                (item_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(f"SELECT subject FROM {table} WHERE id=?", (item_id,)).fetchone()
+    except sqlite3.Error as exc:
+        raise ValueError(f"unknown {table} reference in {subject} catalog") from exc
+    if row is None or row["subject"] != subject:
+        raise ValueError(f"{table} reference {item_id!r} is not owned by {subject}")
+
+
 def _upsert_catalog_topic(conn: sqlite3.Connection, item: dict, subject: str, subject_id: str) -> None:
     item_id = str(item["id"])
     _assert_catalog_owner(conn, "topics", item_id, subject)
@@ -2118,6 +2164,7 @@ def _upsert_catalog_topic(conn: sqlite3.Connection, item: dict, subject: str, su
 
 def _upsert_catalog_skill(conn: sqlite3.Connection, item: dict, subject: str, subject_id: str, level_id: str) -> None:
     item_id = str(item["id"])
+    _assert_catalog_reference(conn, "topics", item.get("cat"), subject)
     _assert_catalog_owner(conn, "skills", item_id, subject)
     status, locked, coming = _catalog_item_state(item, subject_locked=subject_is_locked(subject))
     conn.execute(
@@ -2136,6 +2183,7 @@ def _upsert_catalog_skill(conn: sqlite3.Connection, item: dict, subject: str, su
 
 def _upsert_catalog_task(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
+    _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
     owner = conn.execute(
         "SELECT s.subject FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE t.id=?", (item_id,)
     ).fetchone()
@@ -2163,6 +2211,7 @@ def _upsert_catalog_task(conn: sqlite3.Connection, item: dict, subject: str) -> 
 
 def _upsert_catalog_lesson(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
+    _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
     owner = conn.execute(
         "SELECT s.subject FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE l.id=?", (item_id,)
     ).fetchone()
@@ -2180,6 +2229,10 @@ def _upsert_catalog_lesson(conn: sqlite3.Connection, item: dict, subject: str) -
 
 def _upsert_catalog_mission(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
+    _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
+    task_ids = [str(task_id) for task_id in (item.get("tasks") or [])]
+    for task_id in task_ids:
+        _assert_catalog_reference(conn, "tasks", task_id, subject)
     owner = conn.execute(
         "SELECT s.subject FROM missions m JOIN skills s ON s.id=m.skill_id WHERE m.id=?", (item_id,)
     ).fetchone()
@@ -2195,13 +2248,14 @@ def _upsert_catalog_mission(conn: sqlite3.Connection, item: dict, subject: str) 
          int(item.get("xp", 0)), int(item.get("diff", 1))),
     )
     conn.execute("DELETE FROM mission_tasks WHERE mission_id=?", (item_id,))
-    for order, task_id in enumerate(item.get("tasks") or []):
+    for order, task_id in enumerate(task_ids):
         conn.execute("INSERT INTO mission_tasks(mission_id, task_id, display_order) VALUES (?, ?, ?)",
-                     (item_id, str(task_id), order))
+                     (item_id, task_id, order))
 
 
 def _upsert_catalog_boss(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
+    _assert_catalog_reference(conn, "topics", item.get("cat"), subject)
     owner = conn.execute(
         "SELECT subject FROM topics WHERE id=?", (str(item.get("cat") or ""),)
     ).fetchone()
@@ -2235,8 +2289,7 @@ def _upsert_catalog_achievement(conn: sqlite3.Connection, item: dict, subject: s
 def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: str,
                              *, level_id: str, subject_id: str = "math") -> None:
     """Install one declarative subject catalog into the shared tables."""
-    if catalog.get("subject") and catalog.get("subject") != subject:
-        raise ValueError(f"catalog subject mismatch for {subject}")
+    _catalog_subject_id(catalog, subject, conn)
     for category in catalog.get("categories") or []:
         _upsert_catalog_topic(conn, category, subject, subject_id)
     for skill in catalog.get("skills") or []:
@@ -2299,11 +2352,10 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     loaded: dict[str, dict] = {}
     for path, subject, level_id in source_files:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        if data.get("subject") and data.get("subject") != subject:
-            raise ValueError(f"catalog subject mismatch for {subject}")
+        catalog_subject_id = _catalog_subject_id(data, subject, conn)
         loaded[subject] = data
         _install_subject_catalog(conn, data, subject, level_id=level_id,
-                                 subject_id=str(data.get("subjectId") or "math"))
+                                 subject_id=catalog_subject_id)
 
     def config_value(subject: str, key: str, default):
         return loaded.get(subject, {}).get(key, default)
@@ -2359,11 +2411,17 @@ def _subject_config(conn: sqlite3.Connection, key: str, subject: str, default, a
         allow_legacy = subject == DEFAULT_SUBJECT
     row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (f"{key}:{subject}",)).fetchone()
     if row:
-        return json.loads(row["value_json"])
+        try:
+            return json.loads(row["value_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return default
     if allow_legacy:
         row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (key,)).fetchone()
         if row:
-            return json.loads(row["value_json"])
+            try:
+                return json.loads(row["value_json"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return default
     return default
 
 
@@ -2488,10 +2546,12 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
               for r in conn.execute("SELECT * FROM bosses ORDER BY id")
               if r["topic_id"] in topic_ids]
 
-    achievements = [{"id": r["id"], "name": r["name"], "desc": r["description"], "icon": r["icon"]}
-                    for r in conn.execute(
-                        "SELECT id, name, description, icon FROM achievements WHERE subject=? ORDER BY rowid",
-                        (subject,))]
+    achievements = [] if subject_locked else [
+        {"id": r["id"], "name": r["name"], "desc": r["description"], "icon": r["icon"], "subject": subject}
+        for r in conn.execute(
+            "SELECT id, name, description, icon FROM achievements WHERE subject=? ORDER BY rowid",
+            (subject,))
+    ]
     daily = _subject_config(conn, "daily", subject, _empty_daily())
     if (subject_locked or not isinstance(daily, dict) or not available_skill_ids
             or (daily.get("skill") and daily.get("skill") not in available_skill_ids)
@@ -4101,24 +4161,51 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
 
 def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
     ensure_subject_schema(conn)
-    rows = conn.execute("""SELECT u.id, u.account_id, u.name, u.created_at, u.onboarded, u.self_level, u.goal_id,
+    rows = conn.execute("""SELECT u.id, u.account_id, u.name, u.created_at, u.current_subject,
+                                  u.onboarded, u.self_level, u.goal_id,
+                                  us.onboarded AS subject_onboarded,
+                                  us.self_level AS subject_self_level, us.goal_id AS subject_goal_id,
                                   COALESCE(s.xp,0) AS xp, COALESCE(s.streak,0) AS streak, s.last_active_date,
                                   COALESCE(s.total_solved,0) AS total_solved, COALESCE(s.total_correct,0) AS total_correct
-                           FROM users u LEFT JOIN user_stats s
+                           FROM users u
+                           LEFT JOIN user_subjects us
+                             ON us.user_id = u.id AND us.subject = u.current_subject
+                           LEFT JOIN user_stats s
                              ON s.user_id = u.id AND s.subject = u.current_subject
                            ORDER BY u.id""").fetchall()
     result = []
     q = (query or "").strip().lower()
     for r in rows:
+        subject = resolve_subject(r["current_subject"])
+        info = SUBJECTS.get(subject, {})
+        locked = subject_is_locked(subject)
+        # Locked subjects may still have old rows from before the subject was
+        # published.  The admin list must not present those rows as live
+        # progress just because the account still points at the subject.
+        xp = 0 if locked else r["xp"]
+        streak = 0 if locked else r["streak"]
+        last_active = None if locked else r["last_active_date"]
+        solved = 0 if locked else r["total_solved"]
+        correct = 0 if locked else r["total_correct"]
         item = {
             "id": r["id"], "accountId": r["account_id"], "name": r["name"],
-            "createdAt": timestamp_value(r["created_at"]), "onboarded": bool(r["onboarded"]),
-            "selfLevel": r["self_level"], "goal": r["goal_id"],
-            "xp": r["xp"], "level": level_from_xp(r["xp"])["level"], "streak": r["streak"],
-            "lastActiveDate": r["last_active_date"], "solved": r["total_solved"], "correct": r["total_correct"],
+            "createdAt": timestamp_value(r["created_at"]),
+            "onboarded": bool(r["subject_onboarded"] if r["subject_onboarded"] is not None
+                              else (r["onboarded"] if subject == DEFAULT_SUBJECT else False)),
+            "selfLevel": (r["subject_self_level"] if r["subject_self_level"] is not None
+                          else (r["self_level"] if subject == DEFAULT_SUBJECT else None)),
+            "goal": (r["subject_goal_id"] if r["subject_goal_id"] is not None
+                     else (r["goal_id"] if subject == DEFAULT_SUBJECT else None)),
+            "subject": subject, "subjectTitle": info.get("title", subject),
+            "subjectStatus": info.get("status", "ready"), "subjectLocked": locked,
+            "xp": xp, "level": level_from_xp(xp)["level"], "streak": streak,
+            "lastActiveDate": last_active, "solved": solved, "correct": correct,
         }
         if q:
-            haystack = " ".join(str(x) for x in (item["accountId"], item["name"], item["id"], item["selfLevel"], item["goal"]) if x).lower()
+            haystack = " ".join(str(x) for x in (
+                item["accountId"], item["name"], item["id"], item["selfLevel"],
+                item["goal"], item["subject"], item["subjectTitle"],
+            ) if x).lower()
             if q not in haystack:
                 continue
         result.append(item)
@@ -4131,15 +4218,27 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
     if not user:
         return None
     detail_subject = current_subject_for(conn, user_id)
+    ensure_subject_rows(conn, user_id, detail_subject)
+    subject_info = SUBJECTS.get(detail_subject, {})
+    subject_profile = conn.execute(
+        "SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
+        (user_id, detail_subject),
+    ).fetchone()
+    profile_onboarded = subject_profile["onboarded"] if subject_profile else user["onboarded"]
+    profile_self_level = subject_profile["self_level"] if subject_profile else user["self_level"]
+    profile_goal = subject_profile["goal_id"] if subject_profile else user["goal_id"]
+    locked = subject_is_locked(detail_subject)
     stats = conn.execute("SELECT * FROM user_stats WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()
-    if subject_is_locked(detail_subject):
+    if locked:
         stats = None
     xp = stats["xp"] if stats else 0
     detail = {
         "id": user["id"], "accountId": user["account_id"], "name": user["name"],
-        "createdAt": timestamp_value(user["created_at"]), "onboarded": bool(user["onboarded"]),
-        "selfLevel": user["self_level"], "goal": user["goal_id"],
-        "subject": detail_subject, "locked": subject_is_locked(detail_subject),
+        "createdAt": timestamp_value(user["created_at"]), "onboarded": bool(profile_onboarded),
+        "selfLevel": profile_self_level, "goal": profile_goal,
+        "subject": detail_subject, "subjectTitle": subject_info.get("title", detail_subject),
+        "subjectStatus": subject_info.get("status", "ready"), "subjectLocked": locked,
+        "locked": locked,
         "stats": {
             "xp": xp, "level": level_from_xp(xp), "streak": stats["streak"] if stats else 0,
             "lastActiveDate": stats["last_active_date"] if stats else None,
@@ -4227,12 +4326,30 @@ SELF_LEVELS = {"zero", "base", "confident"}
 
 
 def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
-    """Edit the profile fields an admin may legitimately correct. Only
-    name/selfLevel/goal are accepted; keys absent from the payload are kept."""
-    user = conn.execute("SELECT name, self_level, goal_id FROM users WHERE id=?", (user_id,)).fetchone()
+    """Edit account/profile fields without crossing the current subject.
+
+    ``name`` is account-wide, while self-assessment and goal belong to the
+    subject row. Older clients omitted ``subject``; in that case the current
+    subject is used, preserving the previous profile-math behaviour.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("profile payload must be an object")
+    ensure_subject_schema(conn)
+    user = conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()
     if not user:
         raise KeyError("user not found")
-    name, self_level, goal = user["name"], user["self_level"], user["goal_id"]
+    requested_subject = payload.get("subject")
+    if requested_subject is not None and not is_known_subject(requested_subject):
+        raise ValueError("unknown subject")
+    target_subject = resolve_subject(requested_subject) if requested_subject else current_subject_for(conn, user_id)
+    ensure_subject_rows(conn, user_id, target_subject)
+    subject_profile = conn.execute(
+        "SELECT self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
+        (user_id, target_subject),
+    ).fetchone()
+    name = user["name"]
+    self_level = subject_profile["self_level"] if subject_profile else None
+    goal = subject_profile["goal_id"] if subject_profile else None
     if "name" in payload:
         raw = payload["name"]
         if raw is not None and not isinstance(raw, str):
@@ -4246,22 +4363,29 @@ def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) 
     if "goal" in payload:
         value = payload["goal"]
         if value is not None:
-            # Правка админом идёт в профиль основного предмета — цели берём
-            # через тот же резолвер конфига, без третьей копии SQL.
-            goal_ids = {g.get("id") for g in _subject_config(conn, "goals", DEFAULT_SUBJECT, [], True) or []}
+            goal_ids = {g.get("id") for g in _subject_config(conn, "goals", target_subject, [], target_subject == DEFAULT_SUBJECT) or []}
             if value not in goal_ids:
                 raise ValueError(f"unknown goal: {value}")
         goal = value
-    conn.execute("UPDATE users SET name=?, self_level=?, goal_id=? WHERE id=?", (name, self_level, goal, user_id))
-    bump_state_versions(conn, user_id, DEFAULT_SUBJECT)
+    conn.execute("UPDATE users SET name=? WHERE id=?", (name, user_id))
+    conn.execute(
+        "UPDATE user_subjects SET self_level=?, goal_id=? WHERE user_id=? AND subject=?",
+        (self_level, goal, user_id, target_subject),
+    )
+    # Keep the legacy profile columns in sync for old readers, but never let an
+    # edit in basic/russian overwrite the profile subject's settings.
+    if target_subject == DEFAULT_SUBJECT:
+        conn.execute("UPDATE users SET self_level=?, goal_id=? WHERE id=?", (self_level, goal, user_id))
+    bump_state_versions(conn, user_id, target_subject)
     conn.commit()
-    return {"id": user_id, "name": name, "selfLevel": self_level, "goal": goal}
+    return {"id": user_id, "name": name, "selfLevel": self_level, "goal": goal, "subject": target_subject}
 
 
 def admin_grant_xp(conn: sqlite3.Connection, user_id: int, amount: int, reason: str) -> dict:
     """Manual XP correction through the same append-only audit log the client's
     grantXp uses: derive_stats always adds these rows to the derived XP, and a
     client sync can never wipe them. Negative amounts deduct."""
+    ensure_subject_schema(conn)
     amount = int(amount)
     if not -100000 <= amount <= 100000 or amount == 0:
         raise ValueError("amount must be a non-zero integer within ±100000")
@@ -4286,6 +4410,7 @@ def admin_grant_xp(conn: sqlite3.Connection, user_id: int, amount: int, reason: 
 def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
     """Targeted resets. Each clears only the named state; 'all-progress'
     wipes learning history but keeps the account row itself."""
+    ensure_subject_schema(conn)
     if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
         raise KeyError("user not found")
     groups = {
@@ -4321,12 +4446,13 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
     if target not in groups:
         raise ValueError(f"unknown reset target: {target}")
     group = groups[target]
+    reset_subject = current_subject_for(conn, user_id)
     conn.execute("BEGIN")
-    for table in group["tables"]:
-        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
-    if group["stats"]:
-        conn.execute(group["stats"], (user_id,))
     if target == "all-progress":
+        for table in group["tables"]:
+            conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+        if group["stats"]:
+            conn.execute(group["stats"], (user_id,))
         # XP is derived from events plus the adjustment log; wiping events
         # while leaving grants would resurrect XP from nothing. Keep per-subject
         # rows and advance their versions: recreating them at version 1 could
@@ -4335,10 +4461,18 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         conn.execute("UPDATE users SET onboarded=0, self_level=NULL, goal_id=NULL WHERE id=?", (user_id,))
         conn.execute("UPDATE user_subjects SET onboarded=0, self_level=NULL, goal_id=NULL WHERE user_id=?", (user_id,))
         conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
-                     (user_id, current_subject_for(conn, user_id), now_iso(), "Админ сбросил весь прогресс аккаунта"))
-    bump_state_versions(conn, user_id)
+                     (user_id, reset_subject, now_iso(), "Админ сбросил весь прогресс аккаунта"))
+        bump_state_versions(conn, user_id)
+    else:
+        # A targeted reset belongs to the subject currently open in the admin
+        # detail. It must never erase a sibling subject's history.
+        for table in group["tables"]:
+            conn.execute(f"DELETE FROM {table} WHERE user_id=? AND subject=?", (user_id, reset_subject))
+        if group["stats"]:
+            conn.execute(group["stats"] + " AND subject=?", (user_id, reset_subject))
+        bump_state_versions(conn, user_id, reset_subject)
     conn.commit()
-    return {"ok": True, "target": target, "message": group["label"]}
+    return {"ok": True, "target": target, "subject": reset_subject, "message": group["label"]}
 
 
 def admin_delete_user(conn: sqlite3.Connection, user_id: int, actor_id: int) -> dict:

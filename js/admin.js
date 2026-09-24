@@ -115,6 +115,21 @@ function plural(n, one, few, many) {
 const GOAL_LABELS = { g60: "60+ баллов", g80: "80+ баллов", g95: "95+ баллов", g3: "Оценка 3 (база)", g4: "Оценка 4 (база)", g5: "Оценка 5 (база)" };
 const LEVEL_LABELS = { zero: "С нуля", base: "Базовый", confident: "Уверенный" };
 
+function adminSubjectName(value, fallback = "Предмет") {
+  if (value && typeof value === "object") {
+    value = value.title || value.name || value.short || value.id;
+  }
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+function adminSubjectLocked(user) {
+  if (!user || typeof user !== "object") return false;
+  if (user.subjectLocked === true || user.locked === true) return true;
+  const status = String(user.subjectStatus || user.status || "").trim().toLowerCase().replace(/_/g, "-");
+  return ["locked", "coming-soon", "soon", "disabled", "unavailable"].includes(status);
+}
+
 /* ---------------- API ---------------- */
 
 const AdminApi = {
@@ -626,6 +641,8 @@ async function screenUsers() {
       <div class="a-user-grid">
         ${filtered.map((p) => {
           const initial = (p.name || p.accountId || "?").trim().charAt(0).toUpperCase();
+          const locked = adminSubjectLocked(p);
+          const subjectName = adminSubjectName(p.subjectTitle || p.subject);
           const acc = Math.round((p.correct / p.solved) * 100);
           return `
           <div class="a-user-card clickable" data-id="${p.id}">
@@ -635,14 +652,18 @@ async function screenUsers() {
                 <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}</div>
                 <div class="a-user-card__acct mono">${esc(p.accountId || "—")}</div>
               </div>
-              <div class="a-user-card__lvl"><b>${p.level}</b><span>уровень</span></div>
+              ${locked
+                ? `<div class="a-user-card__lvl"><b>—</b><span>${esc(subjectName)} · скоро</span></div>`
+                : `<div class="a-user-card__lvl"><b>${p.level}</b><span>уровень</span></div>`}
             </div>
-            <div class="a-user-card__stats">
+            ${locked
+              ? `<div class="a-user-card__stats"><div class="a-user-card__stat"><b>—</b><span>учебные материалы закрыты</span></div></div>`
+              : `<div class="a-user-card__stats">
               <div class="a-user-card__stat"><b>${fmtNum(p.xp)}</b><span>XP</span></div>
               <div class="a-user-card__stat"><b>${fmtNum(p.solved)}</b><span>решено</span></div>
               <div class="a-user-card__stat"><b>${p.solved ? acc + "%" : "—"}</b><span>точность</span></div>
               <div class="a-user-card__stat"><b>${p.streak || "—"}</b><span>серия</span></div>
-            </div>
+            </div>`}
             <div class="a-user-card__foot">
               <span>${fmtDate(p.createdAt)}</span>
               <span class="a-user-card__active">${p.lastActiveDate ? "активен " + fmtShortDate(p.lastActiveDate) : "не активен"}</span>
@@ -692,6 +713,8 @@ async function screenUser(ref) {
     return;
   }
   const p = detail, st = p.stats, c = p.counts;
+  const locked = adminSubjectLocked(p);
+  const subjectName = adminSubjectName(p.subjectTitle || p.subject);
   const initial = (p.name || p.accountId || "?").trim().charAt(0).toUpperCase();
   const screen = `
     <div style="margin-bottom:16px"><a class="btn btn--soft btn--sm" href="#/users" style="text-decoration:none">${aicon("back")} Все пользователи</a></div>
@@ -703,14 +726,16 @@ async function screenUser(ref) {
           <div class="a-user-head__meta">
             <span class="mono" style="color:var(--accent);font-weight:600">${esc(p.accountId || "—")}</span>
             <span>id: ${p.id}</span>
-            <span>уровень ${st.level.level} · ${fmtNum(st.xp)} XP</span>
+            ${locked
+              ? `<span class="a-chip a-chip--warn">${esc(subjectName)} · материалы скоро</span>`
+              : `<span>уровень ${st.level.level} · ${fmtNum(st.xp)} XP</span>`}
             ${p.onboarded ? `<span class="a-chip a-chip--success">онбординг пройден</span>` : `<span class="a-chip a-chip--warn">не завершил онбординг</span>`}
             ${p.adminSessions > 0 ? `<span class="a-chip a-chip--accent">admin-сессия активна</span>` : ""}
           </div>
         </div>
         <div class="a-user-head__actions">
           <button class="btn btn--soft btn--sm" id="editProfileBtn">Профиль</button>
-          <button class="btn btn--soft btn--sm" id="grantXpBtn">± XP</button>
+          <button class="btn btn--soft btn--sm" id="grantXpBtn"${locked ? " disabled title=\"XP появятся вместе с материалами предмета\"" : ""}>± XP</button>
           <button class="btn btn--danger-soft btn--sm" id="resetBtn">Сброс…</button>
           <button class="btn btn--danger-soft btn--sm" id="deleteBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя удалить собственный аккаунт\"" : ""}>Удалить</button>
         </div>
@@ -718,15 +743,19 @@ async function screenUser(ref) {
       <div class="a-kv" style="margin-top:20px">
         <div class="a-kv__item"><div class="a-kv__k">Регистрация</div><div class="a-kv__v">${fmtDateTime(p.createdAt)}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Последняя активность</div><div class="a-kv__v">${p.stats.lastActiveDate ? fmtShortDate(p.stats.lastActiveDate) : "нет"}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Серия</div><div class="a-kv__v">${st.streak} ${plural(st.streak, "день", "дня", "дней")}</div></div>
+        ${locked
+          ? `<div class="a-kv__item"><div class="a-kv__k">Предмет</div><div class="a-kv__v">${esc(subjectName)} · пока закрыт</div></div>`
+          : `<div class="a-kv__item"><div class="a-kv__k">Серия</div><div class="a-kv__v">${st.streak} ${plural(st.streak, "день", "дня", "дней")}</div></div>`}
         <div class="a-kv__item"><div class="a-kv__k">Самооценка</div><div class="a-kv__v">${p.selfLevel ? esc(LEVEL_LABELS[p.selfLevel] || p.selfLevel) : "—"}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Цель</div><div class="a-kv__v">${p.goal ? esc(GOAL_LABELS[p.goal] || p.goal) : "—"}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">До след. уровня</div><div class="a-kv__v">${fmtNum(st.level.need - st.level.intoLevel)} XP</div></div>
+        ${locked ? "" : `<div class="a-kv__item"><div class="a-kv__k">До след. уровня</div><div class="a-kv__v">${fmtNum(st.level.need - st.level.intoLevel)} XP</div></div>`}
       </div>
     </div>
 
-    <div class="a-section-title">Прогресс</div>
-    <div class="a-stats">
+    <div class="a-section-title">${locked ? "Статус предмета" : "Прогресс"}</div>
+    ${locked
+      ? `<div class="a-card"><div class="a-empty"><div class="a-empty__icon">${aicon("dashboard")}</div><div class="a-empty__title">Материалы пока закрыты</div><div class="a-empty__sub">${esc(subjectName)} уже подключён, но учебные показатели появятся вместе с заданиями.</div></div></div>`
+      : `<div class="a-stats">
       ${statTile("Решено", fmtNum(st.totalSolved), `верно: ${fmtNum(st.totalCorrect)}${st.accuracy != null ? ` · ${st.accuracy}%` : ""}`)}
       ${statTile("Время", fmtDuration(st.totalTimeSec), `подсказок: ${fmtNum(st.hintsUsed)}`)}
       ${statTile("Лучшая серия", fmtNum(st.bestSeries), `текущая: ${fmtNum(st.correctSeries)}`)}
@@ -737,7 +766,7 @@ async function screenUser(ref) {
       ${statTile("Миссии", fmtNum(c.missionsDone), "завершено")}
       ${statTile("Боссы", fmtNum(c.bossesDefeated), "повержено")}
       ${statTile("Достижения", `${c.achievements}`, `навыков затронуто: ${c.skillsTouched}/${c.skillsTotal}`)}
-    </div>
+    </div>`}
 
     <div class="a-grid-main" style="margin-top:16px">
       <div>
@@ -830,9 +859,12 @@ function openDeleteUserModal(p) {
   const ref = p.accountId || String(p.id);
   const solved = p.stats ? p.stats.totalSolved : p.solved;
   const xp = p.stats ? p.stats.xp : p.xp;
+  const progressSummary = adminSubjectLocked(p)
+    ? "учебные данные выбранного предмета"
+    : `${fmtNum(solved)} решений, ${fmtNum(xp)} XP, уроки, ошибки и достижения`;
   openModal(`
     <div class="a-modal__title" style="color:var(--danger)">Удалить аккаунт ${esc(p.accountId || "")}?</div>
-    <div class="a-modal__desc">Будут удалены сам аккаунт и ВСЕ его данные: ${fmtNum(solved)} решений, ${fmtNum(xp)} XP, уроки, ошибки, достижения, admin-сессии. Действие необратимо.</div>
+    <div class="a-modal__desc">Будут удалены сам аккаунт и ВСЕ его данные: ${progressSummary}, а также admin-сессии. Действие необратимо.</div>
     <div class="a-modal__form">
       <div class="a-modal__warn"><b>Подтверждение:</b> введите Account ID <span class="mono">${esc(p.accountId || "")}</span></div>
       <input class="a-input mono" id="fDel" placeholder="${esc(p.accountId || "")}" autocomplete="off">
@@ -884,6 +916,7 @@ function closeModal() {
 
 function bindUserActions(p) {
   const ref = p.accountId || String(p.id);
+  const locked = adminSubjectLocked(p);
   const reload = async () => { await screenUser(ref); };
 
   document.getElementById("editProfileBtn").onclick = () => {
@@ -901,12 +934,14 @@ function bindUserActions(p) {
           </select>
         </div>
         <div class="a-field"><label>Цель</label>
-          <select class="a-select" id="fGoal">
+          ${locked
+            ? `<div class="a-empty" style="padding:12px 0;text-align:left">Для закрытого предмета цель появится вместе с материалами.</div>`
+            : `<select class="a-select" id="fGoal">
             <option value="" ${!p.goal ? "selected" : ""}>Не выбрана</option>
             <option value="g60" ${p.goal === "g60" ? "selected" : ""}>60+ баллов</option>
             <option value="g80" ${p.goal === "g80" ? "selected" : ""}>80+ баллов</option>
             <option value="g95" ${p.goal === "g95" ? "selected" : ""}>95+ баллов</option>
-          </select>
+          </select>`}
         </div>
         <div id="mErr"></div>
       </div>
@@ -922,7 +957,8 @@ function bindUserActions(p) {
           const body = {
             name: modal.querySelector("#fName").value.trim() || null,
             selfLevel: modal.querySelector("#fLevel").value || null,
-            goal: modal.querySelector("#fGoal").value || null,
+            goal: locked ? null : (modal.querySelector("#fGoal")?.value || null),
+            subject: p.subject || undefined,
           };
           await AdminApi.put(`/api/admin/users/${encodeURIComponent(ref)}/profile`, body);
           closeModal();

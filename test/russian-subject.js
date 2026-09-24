@@ -47,5 +47,95 @@ check("рекомендации не предлагают несуществую
 vm.runInContext(`applyOnboarding("russian", null, null, [], "Тест"); globalThis.russianState = { xp: Store.state.xp, solved: Store.state.totalSolved, stats: Store.state.skillStats, attempts: Store.state.taskAttempts, timeline: Store.state.timeline, daily: Store.state.daily, lessons: Store.state.completedLessons, missions: Store.state.missionsDone, achievements: Store.state.achievements, adjustments: Store.state.xpAdjustments };`, sandbox);
 check("онбординг не создаёт XP или фиктивную статистику", sandbox.russianState.xp === 0 && sandbox.russianState.solved === 0 && Object.keys(sandbox.russianState.stats).length === 0);
 check("locked-профиль не получает учебные события", sandbox.russianState.attempts.length === 0 && sandbox.russianState.timeline.length === 0 && sandbox.russianState.daily.taskIds.length === 0 && Object.keys(sandbox.russianState.lessons).length === 0 && Object.keys(sandbox.russianState.missions).length === 0 && Object.keys(sandbox.russianState.achievements).length === 0 && sandbox.russianState.adjustments.length === 0);
+/* Parity with the two published math subjects: a ready catalog keeps its
+   per-skill zero buckets and can recommend real work; only the Russian
+   coming-soon catalog is metadata-only. */
+const profileCatalog = JSON.parse(fs.readFileSync("server/catalog.json", "utf8"));
+const basicCatalog = JSON.parse(fs.readFileSync("server/catalog_basic.json", "utf8"));
+const registry = [
+  { id: "profile_math", title: "Профильная математика", status: "ready", locked: false, comingSoon: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
+  { id: "basic_math", title: "Базовая математика", status: "ready", locked: false, comingSoon: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
+  { id: "russian", title: "Русский язык", status: "coming-soon", locked: true, comingSoon: true, features: { lessons: false, practice: false, forecast: false, diagnostics: false, missions: false, bosses: false, daily: false, path: true } },
+];
+function readyCatalog(source, id) {
+  return { ...source, subject: id, subjects: registry, forecast: { weights: {}, total: 1, scale: [0, 1] } };
+}
+function inspectReady(source, id) {
+  sandbox.catalog = readyCatalog(source, id);
+  vm.runInContext(`
+    DataAPI.load(catalog);
+    Store.subject = DataAPI.currentSubject();
+    Store.ready = false;
+    Store.state = Store.defaultState();
+    globalThis.parityResult = {
+      available: DataAPI.isSubjectAvailable(),
+      empty: DataAPI.isSubjectEmpty(),
+      skills: DataAPI.availableSkills().length,
+      stats: Object.keys(Store.state.skillStats).length,
+      next: nextStepCandidates().length,
+    };
+  `, sandbox);
+  return sandbox.parityResult;
+}
+const profileParity = inspectReady(profileCatalog, "profile_math");
+const basicParity = inspectReady(basicCatalog, "basic_math");
+check("профиль: ready-контракт и нулевые skillStats сохраняются", profileParity.available && !profileParity.empty && profileParity.stats === profileParity.skills && profileParity.next > 0);
+check("база: ready-контракт и нулевые skillStats сохраняются", basicParity.available && !basicParity.empty && basicParity.stats === basicParity.skills && basicParity.next > 0);
+
+/* Future publication of the same Russian registry must not need a new client
+   branch: unlocking the metadata and adding one real node opens only that
+   node's learning surfaces. */
+const futureRussian = {
+  ...catalog,
+  status: "ready",
+  locked: false,
+  comingSoon: false,
+  availability: "ready",
+  features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true },
+  subjects: registry.map((item) => item.id === "russian"
+    ? { ...item, status: "ready", locked: false, comingSoon: false, availability: "ready", features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } }
+    : item),
+  categories: [{ id: "russian_writing", name: "Русский язык", status: "ready", locked: false, subject: "russian" }],
+  skills: [{ id: "russian_essay", name: "Итоговое сочинение", cat: "russian_writing", status: "ready", locked: false, subject: "russian" }],
+  tasks: [{ id: "russian_task_1", skill: "russian_essay", diff: 1, text: "Условие", answer: "1", subject: "russian" }],
+  lessons: [{ id: "russian_lesson_1", skill: "russian_essay", title: "Урок", steps: [{ id: "step-1" }], subject: "russian" }],
+  missions: [{ id: "russian_mission_1", skill: "russian_essay", title: "Практика", tasks: ["russian_task_1"] }],
+  achievements: [{ id: "russian_achievement_1", name: "Первый русский шаг" }],
+  daily: { skill: "russian_essay", target: 1, xp: 10, title: "Подборка" },
+  goals: [{ id: "russian_goal_1", label: "Русский" }],
+  diagnosticTasks: ["russian_task_1"],
+  forecast: { weights: { russian_essay: 1 }, total: 1, scale: [0, 1] },
+};
+sandbox.catalog = futureRussian;
+vm.runInContext(`
+  DataAPI.load(catalog);
+  Store.subject = DataAPI.currentSubject();
+  Store.ready = false;
+  Store.state = Store.defaultState();
+  globalThis.futureResult = {
+    available: DataAPI.isSubjectAvailable(),
+    task: DataAPI.practiceTasks().length,
+    lesson: DataAPI.lessons().length,
+    mission: DataAPI.missions().length,
+    achievement: DataAPI.achievements().length,
+    diagnostic: DataAPI.diagnosticTasks().length,
+    daily: DataAPI.daily().target,
+    forecast: !!DataAPI.forecastConfig(),
+    stats: Object.keys(Store.state.skillStats).length,
+  };
+`, sandbox);
+const future = sandbox.futureResult;
+check("будущий русский контент открывает только реальные узлы", future.available && future.task === 1 && future.lesson === 1 && future.mission === 1 && future.achievement === 1 && future.diagnostic === 1 && future.daily === 1 && future.forecast && future.stats === 1);
+
+/* Account/session boundary: a subject response without auth may preserve the
+   session only for the same account; a changed account fails closed. */
+vm.runInContext(`
+  Store.accountId = "account-a";
+  Store.auth = { registered: true, email: "a@example.test" };
+  Store._applyBootstrap({ catalog: catalog, accountId: "account-b", state: { subject: "russian" } });
+  globalThis.authBoundary = { accountId: Store.accountId, registered: Store.auth.registered };
+`, sandbox);
+check("смена accountId без auth не сохраняет старую сессию", sandbox.authBoundary.accountId === "account-b" && sandbox.authBoundary.registered === false);
+
 console.log(fails ? `${fails} FAILURES` : "ALL OK");
 process.exit(fails ? 1 : 0);

@@ -35,19 +35,26 @@ function dataFinite(value, fallback = 0) {
 
 function dataStatus(subject) {
   if (!subject || typeof subject !== "object") return "";
-  if (subject.locked === true || subject.available === false || subject.enabled === false) return "locked";
+  const availability = String(subject.availability || subject.access || "").trim().toLowerCase();
+  if (subject.locked === true || subject.comingSoon === true || subject.coming_soon === true
+      || subject.available === false || subject.enabled === false
+      || dataStatusLocked(availability)) return "locked";
   const raw = String(subject.status || subject.state || "").trim().toLowerCase();
   if (raw) return raw;
+  if (availability) return availability;
   if (subject.available === true || subject.enabled === true) return "ready";
   return "ready";
 }
 
 function dataStatusReady(status) {
-  return ["ready", "available", "active", "published", "open", "enabled"].includes(String(status || "").toLowerCase());
+  return ["ready", "available", "active", "published", "open", "enabled"]
+    .includes(String(status || "").trim().toLowerCase());
 }
 
 function dataStatusLocked(status) {
-  return ["locked", "empty", "soon", "coming_soon", "coming-soon", "disabled", "unavailable", "draft", "hidden"].includes(String(status || "").toLowerCase());
+  const value = String(status || "").trim().toLowerCase().replace(/_/g, "-");
+  return ["locked", "empty", "soon", "coming-soon", "comingsoon", "disabled", "unavailable", "draft", "hidden"]
+    .includes(value);
 }
 
 function dataEntitySubject(item) {
@@ -67,9 +74,13 @@ function dataSkillCategoryId(skill) {
 
 function dataEntityLocked(item) {
   if (!item || typeof item !== "object") return true;
-  if (item.locked === true || item.available === false || item.enabled === false) return true;
-  const status = String(item.status || item.access || item.state || "").trim().toLowerCase();
-  return ["locked", "disabled", "unavailable", "hidden", "coming_soon", "coming-soon"].includes(status);
+  const availability = String(item.availability || item.access || "").trim().toLowerCase();
+  if (item.locked === true || item.comingSoon === true || item.coming_soon === true
+      || item.available === false || item.enabled === false
+      || dataStatusLocked(availability)) return true;
+  const status = String(item.status || item.state || "").trim().toLowerCase();
+  return ["locked", "disabled", "unavailable", "hidden", "coming_soon", "coming-soon"].includes(status)
+    || dataStatusLocked(status);
 }
 
 const DataAPI = {
@@ -92,6 +103,9 @@ const DataAPI = {
     }
 
     const registry = catalog.registry && typeof catalog.registry === "object" ? catalog.registry : null;
+    const subjectInfo = catalog.subjectInfo && typeof catalog.subjectInfo === "object"
+      ? catalog.subjectInfo
+      : (catalog.subject && typeof catalog.subject === "object" ? catalog.subject : null);
     const rawSubjects = dataArray(
       catalog.subjects || catalog.subjectRegistry || (registry && (registry.subjects || registry))
     );
@@ -121,10 +135,14 @@ const DataAPI = {
       || missions.length || bosses.length || achievements.length || goals.length || diagnostics.length
       || dataFinite(daily.target) > 0;
     const syntheticStatus = subjectId === DATA_DEFAULT_SUBJECT || hasContent ? "ready" : "locked";
+    const subjectInfoId = dataId(subjectInfo && (subjectInfo.id || subjectInfo.subjectId));
+    const fallbackInfo = subjectInfo && (!subjectInfoId || subjectInfoId === subjectId)
+      ? { ...subjectInfo }
+      : { id: subjectId, title: subjectId === DATA_DEFAULT_SUBJECT ? "Профильная математика" : subjectId,
+          short: subjectId === DATA_DEFAULT_SUBJECT ? "Профиль" : subjectId, status: syntheticStatus, forecast: null };
     const subjects = rawSubjects.length
       ? rawSubjects.map((item) => ({ ...item, id: dataId(item.id || item.subjectId) }))
-      : [{ id: subjectId, title: subjectId === DATA_DEFAULT_SUBJECT ? "Профильная математика" : subjectId,
-           short: subjectId === DATA_DEFAULT_SUBJECT ? "Профиль" : subjectId, status: syntheticStatus, forecast: null }];
+      : [{ ...fallbackInfo, id: subjectId }];
 
     // Keep a copy of the collections on the cache object, but do not invent
     // content.  The original payload remains available to callers that need
@@ -153,7 +171,7 @@ const DataAPI = {
     // deployment: the new subject is still isolated and usable, rather than
     // being silently replaced by profile_math.
     if (!this._subjects.some((item) => dataId(item.id) === subjectId)) {
-      this._subjects.push({ id: subjectId, title: subjectId, short: subjectId, status: "locked" });
+      this._subjects.push({ ...fallbackInfo, id: subjectId, status: dataStatus(fallbackInfo) || "locked" });
     }
     this._subject = subjectId;
     this._registryProvided = rawSubjects.length > 0;
@@ -254,7 +272,8 @@ const DataAPI = {
   },
   subjectStatus(id) {
     const info = this.subjectInfo(id);
-    return info ? dataStatus(info) : "locked";
+    if (!info) return "locked";
+    return String(info.status || info.state || info.availability || "ready").trim().toLowerCase();
   },
   isSubjectKnown(id) { return !!this.subjectInfo(id); },
   isSubjectLocked(id) {
@@ -274,12 +293,16 @@ const DataAPI = {
     const features = info && info.features && typeof info.features === "object" ? info.features : {};
     const available = this.isSubjectAvailable(id);
     return {
+      // path is the metadata/read-only route and remains available for a
+      // coming-soon subject; the learning routes below stay closed.
+      path: !!info && features.path !== false,
       lessons: available && features.lessons !== false,
       practice: available && features.practice !== false,
       forecast: available && features.forecast !== false,
       diagnostics: available && features.diagnostics !== false,
       daily: available && features.daily !== false,
       missions: available && (features.missions !== false) && features.practice !== false,
+      bosses: available && features.bosses !== false,
     };
   },
   subjectFeature(id, feature) {
@@ -326,8 +349,16 @@ const DataAPI = {
   // Accessors used by state/UI.  They intentionally return null/undefined for
   // a locked entity, while skills()/categories() still expose metadata for a
   // read-only locked card.
-  skillForAccess(id) { return this.isSkillLocked(id) ? null : this.skill(id) || null; },
-  topicForAccess(id) { return this.isTopicLocked(id) ? null : this.category(id) || null; },
+  skillForAccess(idOrSkill) {
+    const ref = idOrSkill && typeof idOrSkill === "object" ? idOrSkill.id : idOrSkill;
+    const skill = this.skill(ref);
+    return skill && !this.isSkillLocked(skill) ? skill : null;
+  },
+  topicForAccess(idOrTopic) {
+    const ref = idOrTopic && typeof idOrTopic === "object" ? idOrTopic.id : idOrTopic;
+    const topic = this.category(ref);
+    return topic && !this.isTopicLocked(topic) ? topic : null;
+  },
   taskForAccess(id) {
     const task = this.task(id);
     if (!task || this.taskHasMissingVisual(task) || !this.skillForAccess(task.skill || task.skillId)) return null;
@@ -473,10 +504,11 @@ const DataAPI = {
     return configured.filter((item) => {
       const owner = dataEntitySubject(item);
       if (owner) return owner === subject;
-      // Untagged achievement lists are a legacy profile/basic catalog.  A
-      // new subject must opt in explicitly rather than displaying foreign
-      // badges merely because the server still sends its global list.
-      return this._legacyCatalog || subject === "profile_math" || subject === "basic_math";
+      // Once a subject is published, its catalog is authoritative even when
+      // achievement rows do not repeat the subject id.  Locked subjects were
+      // filtered above, so this cannot expose the previous subject's badges;
+      // it also lets a future Russian catalog add its own rows unchanged.
+      return true;
     });
   },
   daily() {
