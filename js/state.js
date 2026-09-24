@@ -217,15 +217,19 @@ const Store = {
       const stateSubjectHint = safeObject(boot.state).subject;
       if (!catalog.subject && !catalog.subjectId && stateSubjectHint) catalog.subject = stateSubjectHint;
       DataAPI.load(catalog);
-      this.accountId = boot.accountId || null;
+      const accountFieldPresent = Object.prototype.hasOwnProperty.call(boot, "accountId");
+      const incomingAccountId = accountFieldPresent ? (boot.accountId || null) : this.accountId;
+      const accountChanged = accountFieldPresent && incomingAccountId !== this.accountId;
+      this.accountId = incomingAccountId;
       const auth = boot.auth;
-      // Нет auth в пейлоаде (например, старый ответ POST /api/subject) —
-      // не сбрасываем известную сессию в гостя: профиль покажет «Войти»,
-      // хотя аккаунт авторизован. Сброс происходит только по явному
-      // auth из ответа сервера.
+      // Старый ответ POST /api/subject может не содержать auth: при том же
+      // accountId сохраняем известную сессию, но при смене accountId отсутствие
+      // auth fail-closed — иначе UI старого аккаунта утекает в новый.
       this.auth = auth && typeof auth === "object"
         ? { registered: !!auth.registered, email: auth.email || null }
-        : (this.auth || { registered: false, email: null });
+        : (accountChanged
+          ? { registered: false, email: null }
+          : (this.auth || { registered: false, email: null }));
       // Fail-closed: нет явного true от сервера — не админ. Поле приходит из
       // bootstrap/bootstrap-lite/POST /api/subject; старые ответы без него
       // сбрасывают флаг, а не сохраняют чужой.
@@ -248,6 +252,9 @@ const Store = {
       }
 
       const defaults = this.defaultState();
+      const defaultSkillStats = Object.fromEntries(
+        Object.entries(defaults.skillStats || {}).map(([id, value]) => [id, { ...value }])
+      );
       const parsed = statePayload;
       this.state = Object.assign(defaults, parsed);
       this.state.subject = this.subject;
@@ -269,7 +276,7 @@ const Store = {
       // должны выглядеть как результат несуществующего курса.
       const oldStats = safeObject(parsed.skillStats);
       const stats = preserveLearningState
-        ? Object.fromEntries(Object.entries(defaults.skillStats).map(([id, value]) => [id, { ...value }]))
+        ? Object.fromEntries(Object.entries(defaultSkillStats).map(([id, value]) => [id, { ...value }]))
         : {};
       for (const [id, value] of Object.entries(oldStats)) {
         if (preserveLearningState && (!catalogDescribed || validSkill(id))) {
@@ -329,6 +336,10 @@ const Store = {
       this.state.errorsResolved = preserveLearningState ? Math.max(0, Number(parsed.errorsResolved) || 0) : 0;
       this.state.streak = preserveLearningState ? Math.max(0, Number(parsed.streak) || 0) : 0;
       this.state.lastActiveDate = preserveLearningState ? (parsed.lastActiveDate || null) : null;
+      const availableGoals = typeof DataAPI.goals === "function" ? DataAPI.goals() : [];
+      if (!availableGoals.length || !availableGoals.some((goal) => String(goal.id) === String(this.state.goal))) {
+        this.state.goal = null;
+      }
       // Журнал ручных XP-начислений тоже является learning-данными; locked
       // предмет не должен даже временно показывать чужой/старый журнал.
       this.state.xpAdjustments = preserveLearningState ? safeArray(parsed.xpAdjustments) : [];
@@ -1144,6 +1155,7 @@ function practiceAttemptQuality(attempt) {
    отсутствующего официального рисунка), стабильный порядок по id. Одно место,
    откуда сессии берут состав практики, — поэтому показ всегда полный. */
 function practiceTaskIdsForSkill(skillId) {
+  if (!skillIsAccessible(skillId)) return [];
   return DataAPI.practiceTasksBySkill(skillId).slice()
     .sort((a, b) => String(a.id).localeCompare(String(b.id)))
     .map((task) => task.id);
@@ -1270,6 +1282,7 @@ function catProgress(catId) {
   if (typeof DataAPI.isTopicLocked === "function" && DataAPI.isTopicLocked(catId)) return 0;
   const wanted = typeof DataAPI._id === "function" ? DataAPI._id(catId) : String(catId || "");
   const skills = DataAPI.availableSkills().filter((s) => {
+    if (!skillIsAccessible(s)) return false;
     const id = typeof DataAPI._skillCategoryId === "function" ? DataAPI._skillCategoryId(s) : (s.cat || s.topic || s.topicId);
     return String(id || "") === wanted;
   });
@@ -1450,6 +1463,7 @@ const FORECAST_FULL_VOLUME = 12;
 const FORECAST_DIAGNOSTIC_WEIGHT = 2;
 
 function skillEgeWeight(skillId) {
+  if (!skillIsAccessible(skillId)) return 0;
   // Веса — конфиг текущего предмета (каталог: forecast.weights). Встроенный
   // профильный fallback оставлен только для старых payload без реестра;
   // новый предмет без собственного forecast не получает случайный вес.

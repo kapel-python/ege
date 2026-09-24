@@ -73,8 +73,10 @@ def main():
             russian = next((s for s in subjects.get("subjects", []) if s.get("title") == "Русский язык"), None)
             assert russian, subjects
             rid = russian["id"]
-            assert russian.get("status") in {"locked", "soon", "empty", "coming-soon"}, russian
-            assert russian.get("locked") is True or russian.get("comingSoon") is True, russian
+            assert rid == "russian", russian
+            assert russian.get("status") == "coming-soon", russian
+            assert russian.get("locked") is True, russian
+            assert set(russian.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}, russian
             assert not any(russian.get("features", {}).get(k) for k in ("lessons", "practice", "forecast", "diagnostics")), russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")

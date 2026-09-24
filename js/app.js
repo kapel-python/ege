@@ -668,12 +668,12 @@ function copyAccountId(btn) {
 
 let modalPrevFocus = null;
 
-function openModal(html) {
+function openModal(html, ariaLabel) {
   const root = document.getElementById("modal-root");
   modalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   root.innerHTML = `
     <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
-      <div class="modal-wrap"><div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-wrap"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(ariaLabel || "Информация")}">
         <div class="modal__grab" aria-hidden="true"><span></span></div>
         <button class="modal__close" onclick="closeModal()" aria-label="Закрыть окно">${icon("x")}</button>
         ${html}
@@ -685,7 +685,32 @@ function openModal(html) {
 }
 
 function modalEscHandler(e) {
-  if (e.key === "Escape") closeModal();
+  if (e.key === "Escape") {
+    closeModal();
+    return;
+  }
+  if (e.key !== "Tab") return;
+  // Диалог не должен выпускать фокус на страницу под ним. Это особенно важно
+  // для информационного locked-окна: после него пользователь возвращается к
+  // выбранной теме, а не к скрытой кнопке урока/практики.
+  const modal = document.querySelector("#modal-root .modal");
+  if (!modal) return;
+  const focusable = [...modal.querySelectorAll("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+    .filter((node) => node.getClientRects().length > 0);
+  if (!focusable.length) {
+    e.preventDefault();
+    modal.focus({ preventScroll: true });
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && (document.activeElement === first || document.activeElement === modal)) {
+    e.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus({ preventScroll: true });
+  }
 }
 
 function closeModal() {
@@ -961,7 +986,7 @@ function openHelp(key) {
     <div class="help-body">${forecastHelpHTML()}</div>
     <div style="margin-top:22px;display:flex;justify-content:flex-end">
       <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
-    </div>`);
+    </div>`, "Прогноз результата ЕГЭ");
     return;
   }
   const h = HELP[key];
@@ -972,7 +997,7 @@ function openHelp(key) {
     <div class="help-body">${h.body}</div>
     <div style="margin-top:22px;display:flex;justify-content:flex-end">
       <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
-    </div>`);
+    </div>`, h.title);
 }
 
 function helpDot(key) {
@@ -1270,9 +1295,10 @@ async function render() {
   } catch (_) {}
   // Глубокая ссылка на навык: карта + открытое окно темы.
   // Временно закрытая тема — то же окно «недоступна», а не обычное.
-  if (route === "skill" && param && DataAPI.skill(param)) {
+  const routeSkill = route === "skill" && param ? subjectSkillById(param) : null;
+  if (routeSkill) {
     try {
-      if (topicIsLocked(DataAPI.skill(param))) openLockedSkillModal(param);
+      if (topicIsLocked(routeSkill)) openLockedSkillModal(param);
       else openSkillModal(param);
     } catch (_) {}
   }
@@ -1294,6 +1320,17 @@ const ROUTE_TITLES = {
 
 function updateDocumentTitle(route) {
   const label = ROUTE_TITLES[route] || ROUTE_TITLES.dashboard;
+  try {
+    const state = subjectContentState();
+    if (state.locked && SUBJECT_CONTENT_ROUTES.has(route)) {
+      document.title = `${subjectDisplayName(state.info)} — закрытая тема — ege easy`;
+      return;
+    }
+    if (state.empty && EMPTY_SUBJECT_ROUTES.has(route)) {
+      document.title = `${subjectDisplayName(state.info)} — материалы скоро — ege easy`;
+      return;
+    }
+  } catch (_) {}
   document.title = `${label} — ege easy`;
 }
 
@@ -1343,6 +1380,44 @@ function rawCatalogCollection(name, aliases = []) {
   return [];
 }
 
+function registryTopicFromSubjectInfo(info = subjectInfoSafe()) {
+  if (!info || typeof info !== "object") return null;
+  if (info.features && info.features.path === false) return null;
+  const metadata = info.metadata && typeof info.metadata === "object" ? info.metadata : {};
+  const rawTopic = metadata.topic || metadata.topicName || metadata.name;
+  const topicValue = Array.isArray(rawTopic) ? rawTopic[0] : rawTopic;
+  const topicName = topicValue && typeof topicValue === "object"
+    ? (topicValue.title || topicValue.name)
+    : topicValue;
+  if (!topicName) return null;
+  const subjectId = String(info.id || (typeof DataAPI !== "undefined" && DataAPI.currentSubject ? DataAPI.currentSubject() : "") || "subject");
+  const topicId = String(metadata.topicId || metadata.topic_id || metadata.skillId || metadata.skill_id || `${subjectId}_registry_topic`);
+  const categoryId = String(metadata.categoryId || metadata.category_id || metadata.category || `${subjectId}_topics`);
+  const locked = subjectInfoLocked(info) || metadata.locked === true || metadata.comingSoon === true || metadata.published === false;
+  return {
+    id: topicId,
+    name: String(topicName),
+    subject: subjectId,
+    cat: categoryId,
+    order: Number.isFinite(Number(metadata.order)) ? Number(metadata.order) : 0,
+    ege: metadata.ege || null,
+    status: info.status || (locked ? "locked" : "ready"),
+    locked: !!locked,
+    comingSoon: !!locked,
+    metadata: { ...metadata, kind: "topic" },
+    registryOnly: true,
+  };
+}
+
+function subjectSkillById(idOrSkill) {
+  if (idOrSkill && typeof idOrSkill === "object") return idOrSkill;
+  const wanted = String(idOrSkill == null ? "" : idOrSkill);
+  if (!wanted) return null;
+  const found = subjectSkills().find((skill) => String(skill && skill.id) === wanted);
+  if (found) return found;
+  try { return DataAPI.skill(wanted) || null; } catch (_) { return null; }
+}
+
 function subjectSkills() {
   const publicSkills = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.skills ? DataAPI.skills() : []);
   if (publicSkills.length) return publicSkills;
@@ -1350,16 +1425,36 @@ function subjectSkills() {
   if (rawSkills.length) return rawSkills;
   // A transitional payload may expose only topic records.  Keep only records
   // that look like skills and normalise their category field for Path.
-  return rawCatalogCollection("topics").filter((item) => item && (item.skill || item.topicId || item.topic_id || item.kind === "topic")).map((item) => ({
+  const topicRecords = rawCatalogCollection("topics").filter((item) => {
+    const kind = item && (item.kind || (item.metadata && item.metadata.kind));
+    return item && (item.skill || item.topicId || item.topic_id || kind === "topic");
+  }).map((item) => ({
     ...item,
     cat: item.cat || item.topicId || item.topic_id || item.category || "locked-topics",
   }));
+  if (topicRecords.length) return topicRecords;
+  const registryTopic = registryTopicFromSubjectInfo();
+  return registryTopic ? [registryTopic] : [];
 }
 
 function subjectCategories() {
   const publicCategories = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.categories ? DataAPI.categories() : []);
   if (publicCategories.length) return publicCategories;
-  return rawCatalogCollection("categories", ["topics", "lockedTopics", "locked_topics"]);
+  const rawCategories = rawCatalogCollection("categories", ["topics", "lockedTopics", "locked_topics"]);
+  if (rawCategories.length) return rawCategories;
+  const topic = registryTopicFromSubjectInfo();
+  if (!topic) return [];
+  const info = subjectInfoSafe();
+  return [{
+    id: topic.cat,
+    name: String(info.metadata && (info.metadata.section || info.metadata.categoryName) || info.title || "Темы предмета"),
+    short: info.short || "",
+    subject: topic.subject,
+    status: topic.status,
+    locked: topic.locked,
+    comingSoon: topic.comingSoon,
+    metadata: { kind: "subject-section", availability: info.availability || info.status || "coming-soon" },
+  }];
 }
 
 function finiteNumber(value, fallback = 0) {
@@ -1403,8 +1498,9 @@ function subjectDisplayTitle(id) {
 
 function subjectInfoLocked(subject) {
   if (!subject || typeof subject !== "object") return false;
-  if (subject.locked === true || subject.comingSoon === true) return true;
-  const status = String(subject.status || subject.availability || (subject.metadata && subject.metadata.availability) || "").toLowerCase().replace(/_/g, "-");
+  const metadata = subject.metadata && typeof subject.metadata === "object" ? subject.metadata : {};
+  if (subject.locked === true || subject.comingSoon === true || metadata.locked === true || metadata.comingSoon === true) return true;
+  const status = String(subject.status || subject.availability || metadata.availability || "").toLowerCase().replace(/_/g, "-");
   return ["locked", "unavailable", "disabled", "coming-soon", "soon"].includes(status);
 }
 
@@ -1416,9 +1512,10 @@ function subjectFeature(subject, key) {
 }
 
 function subjectAvailabilityLabel(subject) {
-  const status = String(subject && subject.status || "").toLowerCase().replace(/_/g, "-");
-  if (subject && (subject.locked === true || subject.comingSoon === true)) return "скоро";
-  if (["soon", "empty", "planned", "coming-soon", "coming_soon", "locked", "unavailable", "disabled"].includes(status)) return "скоро";
+  const metadata = subject && subject.metadata && typeof subject.metadata === "object" ? subject.metadata : {};
+  const status = String(subject && subject.status || metadata.availability || "").toLowerCase().replace(/_/g, "-");
+  if (subject && (subject.locked === true || subject.comingSoon === true || metadata.locked === true || metadata.comingSoon === true)) return "скоро";
+  if (["soon", "empty", "planned", "coming-soon", "coming_soon", "locked", "unavailable", "disabled", "hidden"].includes(status)) return "скоро";
   if (status === "partial" || status === "limited") return "частично";
   const hasFeature = ["lessons", "practice", "forecast"].some((key) => subjectFeature(subject, key));
   return hasFeature ? "" : "пока закрыто";
@@ -1432,7 +1529,12 @@ function topicDisplayName(topic) {
 
 function topicCategory(topic) {
   if (!topic) return null;
-  try { return DataAPI.category(topic.cat || topic.category); } catch (_) { return null; }
+  const categoryId = topic.cat || topic.category;
+  try {
+    const category = DataAPI.category(categoryId);
+    if (category) return category;
+  } catch (_) {}
+  return subjectCategories().find((category) => String(category && category.id) === String(categoryId)) || null;
 }
 
 function topicCategoryName(topic) {
@@ -1555,6 +1657,15 @@ function pathProgressForSkills(skills) {
 function pathProgressLabel(skills) {
   const progress = pathProgressForSkills(skills);
   return progress == null ? "материалы готовятся" : `${progress}% освоено`;
+}
+
+function lockedTopicCountLabel(count) {
+  const n = Math.max(0, Math.round(nonNegativeNumber(count)));
+  if (n === 1) return "Одна тема пока закрыта";
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} темы пока закрыты`;
+  return `${n} тем пока закрыты`;
 }
 
 function subjectStateCardHTML(state = subjectContentState(), options = {}) {
@@ -1714,7 +1825,7 @@ function chooseSubjectFromDialog(id) {
 function subjectCourseLabel(s) {
   if (!s) return "";
   const status = String(s.status || "").toLowerCase();
-  if (status && status !== "ready" && status !== "partial" && status !== "limited") {
+  if (subjectInfoLocked(s) || (status && status !== "ready" && status !== "partial" && status !== "limited")) {
     return "Материалы пока готовятся — можно занять место";
   }
   // Не подменяем отсутствующие features дефолтом DataAPI: новый предмет
@@ -1794,6 +1905,12 @@ function screenEmptySubject(root) {
    ============================================================ */
 
 function navRouteForRoute(route) {
+  // Прямая ссылка на закрытый урок/практику не должна оставлять весь
+  // restricted-shell без активного пункта: единственный доступный контентный
+  // маршрут здесь — карта тем. Для обычного предмета mappings остаются прежними.
+  if (SUBJECT_CONTENT_ROUTES.has(route)) {
+    try { if (subjectLearningUnavailable()) return "path"; } catch (_) {}
+  }
   return route === "practice" ? "training"
     : route === "boss" || route === "daily" || route === "review" ? "trials"
     : route === "skill" || route === "lesson" ? "path" : route;
@@ -1849,8 +1966,9 @@ function renderSidebar(active) {
       ${n.route === "errors" && openErrors ? `<span class="nav-badge">${openErrors}</span>` : ""}
     </a>`).join("");
   const f = safeForecast();
+  const forecastValue = f.empty ? "скоро" : `${esc(f.low)}–${esc(f.high)}`;
   document.getElementById("sidebarFooter").innerHTML = `
-    Прогноз: <b class="mono" style="color:var(--text-2)">${f.empty ? "скоро" : `${esc(f.low)}–${esc(f.high)}`}</b> баллов<br>
+    Прогноз: <b class="mono" style="color:var(--text-2)">${forecastValue}</b>${f.empty ? "" : " баллов"}<br>
     <span style="font-size:11px">данные сохраняются в SQLite</span>`;
 }
 
@@ -2670,7 +2788,7 @@ function screenPath(root) {
       <div class="tree-connector-v"></div>
       <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
     </div>
-    ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedCount === 1 ? "Одна тема пока закрыта" : `${lockedCount} темы пока закрыты`}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
+    ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedTopicCountLabel(lockedCount)}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
 }
 
 function overallProgress() {
@@ -2685,7 +2803,7 @@ function statusChipClass(st) {
    на несуществующие уроки/практику. Причина берётся из registry или из
    фактического наличия ресурсов, поэтому это не привязка к русскому предмету. */
 function openLockedSkillModal(skillId) {
-  const sk = DataAPI.skill(skillId);
+  const sk = subjectSkillById(skillId);
   if (!sk) return;
   const category = topicCategory(sk);
   const categoryName = category ? subjectDisplayName(category) : "Темы предмета";
@@ -2702,11 +2820,11 @@ function openLockedSkillModal(skillId) {
     ${hasLesson ? `<div class="topic-lock-note">У этой темы уже есть урок, но практика и дополнительные материалы ещё не подключены.</div>` : ""}
     <div class="skill-modal__actions">
       <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
-    </div>`);
+    </div>`, "Информация о закрытой теме");
 }
 
 function openSkillModal(skillId) {
-  const sk = DataAPI.skill(skillId);
+  const sk = subjectSkillById(skillId);
   if (!sk) return;
   if (topicIsLocked(sk)) return openLockedSkillModal(skillId);
   const st = (Store.state.skillStats && Store.state.skillStats[skillId]) || { solved: 0, correct: 0 };
@@ -2777,7 +2895,7 @@ function openSkillModal(skillId) {
       ${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${esc(mission.id)}')">${icon("target")} Практика</button>` : ""}
       ${!mission && asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${esc(skillId)}')">Практика</button>` : ""}
       ${!mission && !asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
-    </div>`);
+    </div>`, "Информация о теме");
 }
 
 /* Человеческая подпись ошибки шага урока для модалки темы.
@@ -2802,7 +2920,7 @@ function humanLessonError(raw) {
    Прямой запуск списком остаётся только как запасной вариант для тем без
    миссии. */
 function startSkillPractice(skillId) {
-  const skill = DataAPI.skill(skillId);
+  const skill = subjectSkillById(skillId);
   if (!skill) return toast("Тема не найдена", "toast--error", "x");
   if (topicIsLocked(skill)) return toast("Тема пока закрыта — урок и практика ещё не подключены", "", "lock");
   const mission = asSafeArray(DataAPI.missions()).find((m) => m && m.skill === skillId && missionPracticeIds(m).length);
@@ -2907,7 +3025,7 @@ function screenTraining(root) {
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) return toast("Миссия не найдена", "toast--error", "x");
-  const skill = DataAPI.skill(m.skill);
+  const skill = subjectSkillById(m.skill);
   if (skill && topicIsLocked(skill)) return toast("Тема пока закрыта — практика ещё не подключена", "", "lock");
   // Тренировка идёт по всему банку темы (missionPracticeIds), а не по
   // урезанной тройке из каталога: количество заданий = реальные доступные.
@@ -4489,7 +4607,7 @@ function screenProfile(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Профиль</div>
-      <div class="page-sub">${contentUnavailable ? "Профиль предмета · материалы пока закрыты" : "Твой путь в цифрах."}</div>
+      <div class="page-sub">${contentUnavailable ? (subjectState.locked ? "Профиль предмета · материалы пока закрыты" : "Профиль предмета · материалы скоро") : "Твой путь в цифрах."}</div>
     </div>
 
     <div class="card card--glow profile-card">
@@ -5389,6 +5507,15 @@ const Onboarding = {
     const method = offering ? "stepOffer" : names[this.step];
     const dark = Theme.current() === "dark";
     const themeLabel = dark ? "Включить светлую тему" : "Включить тёмную тему";
+    // У locked/empty-предмета нет уровня, цели и диагностики: не рисуем шесть
+    // «пройденных» шагов, которых пользователь не проходил. После явного
+    // выбора такого предмета остаётся короткий честный поток «предмет → имя».
+    let shortSubjectFlow = false;
+    try { shortSubjectFlow = !offering && !!this.subject && subjectLearningUnavailable(); } catch (_) {}
+    const nameStep = Math.max(0, names.indexOf("stepName"));
+    const stepCount = shortSubjectFlow ? 2 : names.length;
+    const stepIndex = shortSubjectFlow ? (this.step >= nameStep ? 1 : 0) : this.step;
+    const stepDots = Array.from({ length: stepCount }, (_, i) => `<i class="${i <= stepIndex ? "on" : ""}"></i>`).join("");
     // Вышедший из аккаунта, но попавший в онбординг: вход/регистрация
     // доступны без прохождения. На предложении теста и первых двух шагах
     // показываем ссылку, дальше она отвлекает от вопросов.
@@ -5398,7 +5525,7 @@ const Onboarding = {
     el.innerHTML = `
       <button class="btn btn--ghost theme-toggle onboard-theme" type="button" onclick="Onboarding.toggleTheme()" aria-label="${themeLabel}" aria-pressed="${dark}" title="${themeLabel}">${icon(dark ? "sun" : "moon")}</button>
       <div class="onboard-card">
-        ${offering ? "" : `<div class="onboard-steps">${names.map((_, i) => `<i class="${i <= this.step ? "on" : ""}"></i>`).join("")}</div>`}
+        ${offering ? "" : `<div class="onboard-steps${shortSubjectFlow ? " onboard-steps--short" : ""}" aria-hidden="true">${stepDots}</div>`}
         <div id="onboard-body"></div>
         ${showAuth ? `<div class="onboard-auth"><span>Уже есть аккаунт?</span><button class="btn btn--primary btn--sm" type="button" onclick="go('login')">Войти или зарегистрироваться</button></div>` : ""}
       </div>`;
@@ -5478,7 +5605,7 @@ const Onboarding = {
     const subjects = asSafeArray(DataAPI.subjects());
     body.innerHTML = `
       <div class="onboard-title">Какой предмет готовим?</div>
-      <div class="onboard-sub">Прогресс, статистика и прогноз ведутся отдельно по каждому предмету.</div>
+      <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
       <div class="choice-list">
         ${subjects.map((s) => {
           const status = subjectAvailabilityLabel(s);
