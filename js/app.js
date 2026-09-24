@@ -196,8 +196,8 @@ dashboardHTML.innerHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>ege easy — подготовка к ЕГЭ по математике</title>
-<meta name="description" content="Платформа подготовки к ЕГЭ по математике (профиль и база) с системой прогресса: уровни, XP, миссии, навыки, боссы.">
+<title>ege easy — подготовка к ЕГЭ</title>
+<meta name="description" content="Платформа подготовки к ЕГЭ с отдельными предметами, честным прогрессом и locked-состояниями.">
 <script>
   /* Saved choice wins; on the first visit (no saved value) follow the device
      theme, so the onboarding/diagnostic screens never force light mode.
@@ -221,7 +221,7 @@ dashboardHTML.innerHTML = `<!doctype html>
     <div class="sidebar__logo sidebar__logo--easy">
       <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       <span class="easy-name">ege <em>easy</em></span>
-      <span class="logo-sub">математика без стресса</span>
+      <span class="logo-sub">подготовка без стресса</span>
     </div>
     <nav class="sidebar__nav" id="sidebarNav"></nav>
     <div class="sidebar__footer" id="sidebarFooter"></div>
@@ -452,7 +452,8 @@ function mathText(value) {
 }
 
 function fmtTime(sec) {
-  sec = Math.round(sec);
+  const value = finiteNumber(sec, 0);
+  sec = Math.max(0, Math.round(value));
   if (sec < 60) return `${sec} с`;
   const m = Math.floor(sec / 60), s = sec % 60;
   return s ? `${m} мин ${s} с` : `${m} мин`;
@@ -520,6 +521,24 @@ function forecastNoteHTML() {
   return `Прогноз может быть точнее: у тебя пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}). Чтобы прогноз стал точнее — проходи уроки и практику`;
 }
 
+function safeForecast() {
+  // Пустой/coming-soon предмет не должен получать чужие веса профиля:
+  // state.js исторически оставляет fallback-конфиг, а UI обязан показывать
+  // честное «скоро», а не 0–12 баллов из несуществующих тем.
+  try {
+    const state = subjectContentState();
+    if (state && (state.empty || state.locked)) return { low: 0, high: 0, mid: 0, empty: true };
+  } catch (_) {}
+  let value = null;
+  try { value = forecast(); } catch (_) { value = null; }
+  if (!value || typeof value !== "object") return { low: 0, high: 0, mid: 0, empty: true };
+  const low = finiteNumber(value.low, 0);
+  const high = finiteNumber(value.high, 0);
+  const mid = finiteNumber(value.mid, 0);
+  if (![low, high, mid].every(Number.isFinite)) return { low: 0, high: 0, mid: 0, empty: true };
+  return { ...value, low, high, mid, empty: !!value.empty || (!value.empty && high < low) };
+}
+
 function stars(n) {
   let out = "";
   for (let i = 1; i <= 5; i++) out += `<span class="${i <= n ? "" : "off"}">★</span>`;
@@ -527,7 +546,9 @@ function stars(n) {
 }
 
 function progressBar(pct, cls = "") {
-  return `<div class="progress ${cls}"><div class="progress__fill" style="width:${Math.min(100, Math.max(0, pct))}%"></div></div>`;
+  const value = finiteNumber(pct, 0);
+  const safePct = Math.min(100, Math.max(0, value));
+  return `<div class="progress ${cls}"><div class="progress__fill" style="width:${safePct}%"></div></div>`;
 }
 
 /* Один формат лестницы помощи для задач и data-driven уроков.
@@ -1149,8 +1170,29 @@ async function render() {
   syncChromeForRoute(route, navRoute);
   updateDocumentTitle(route);
   const screen = document.getElementById("screen");
+  const subjectState = subjectContentState();
   const my = ++renderSeq;
   let mathFailed = false;
+
+  // Сначала отсекаем состояния без контента, до загрузки заданий и создания
+  // сессии. Иначе прямой #/lesson/<id> или #/practice/<id> мог превратить
+  // честную заглушку в пустой экран/неработающую кнопку. Path и skill
+  // остаются доступными: там пользователь должен увидеть реальную
+  // зарегистрированную тему и понять, почему она закрыта.
+  if (subjectState.empty && EMPTY_SUBJECT_ROUTES.has(route)) {
+    screen.innerHTML = "";
+    screenEmptySubject(screen);
+    try { if (window.Footer) Footer.hide(); } catch (_) {}
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (subjectState.locked && SUBJECT_CONTENT_ROUTES.has(route)) {
+    screen.innerHTML = "";
+    screenSubjectUnavailable(screen, true);
+    try { if (window.Footer) Footer.hide(); } catch (_) {}
+    window.scrollTo(0, 0);
+    return;
+  }
   if (NEEDS_DETAILS.has(route)) {
     // Экран с заданиями: ждём полные тексты и математические библиотеки.
     // Пока грузится — скелетон вместо пустоты; ушедшую навигацию не трогаем.
@@ -1208,18 +1250,9 @@ async function render() {
     register: screenRegister,
     subject: screenLoginSubject,
   }[route] || screenDashboard;
-  // Пустой предмет: контентным маршрутам нечего показать — честная заглушка
-  // вместо пустых экранов или данных чужого предмета.
-  if (DataAPI.isSubjectEmpty() && EMPTY_SUBJECT_ROUTES.has(route)) {
-    screen.innerHTML = "";
-    screen.style.animation = "none";
-    void screen.offsetWidth;
-    screen.style.animation = "";
-    screenEmptySubject(screen);
-    try { if (window.Footer) Footer.hide(); } catch (_) {}
-    window.scrollTo(0, 0);
-    return;
-  }
+  // Категория «locked» может иметь реальную зарегистрированную тему, поэтому
+  // путь/карточка навыка не должны повторно скрываться здесь как пустой предмет.
+  // Все контентные маршруты уже отсечены выше по subjectState.
   screen.innerHTML = "";
   screen.style.animation = "none";
   void screen.offsetWidth;
@@ -1239,7 +1272,7 @@ async function render() {
   // Временно закрытая тема — то же окно «недоступна», а не обычное.
   if (route === "skill" && param && DataAPI.skill(param)) {
     try {
-      if (typeof TEMP_LOCKED_SKILLS !== "undefined" && TEMP_LOCKED_SKILLS.has(param)) openLockedSkillModal(param);
+      if (topicIsLocked(DataAPI.skill(param))) openLockedSkillModal(param);
       else openSkillModal(param);
     } catch (_) {}
   }
@@ -1270,6 +1303,299 @@ function updateDocumentTitle(route) {
    ветвлений под конкретные предметы в коде нет.
    ============================================================ */
 
+/* ---------------- registry-driven subject/topic presentation ----------------
+
+   Каталог subjects — единственный источник названий и состава курса.  В
+   интерфейсе не нужно знать id конкретного предмета: одинаково корректно
+   показываются профиль, база и новые предметы (например, русский язык).
+   `locked`/`status`/`features` в реестре дополняются проверкой реальных
+   ресурсов, потому что lite-bootstrap содержит только метаданные. */
+
+const TOPIC_LOCKED_VALUES = new Set(["locked", "unavailable", "disabled", "hidden"]);
+const SUBJECT_CONTENT_ROUTES = new Set([
+  "training", "session", "practice", "boss", "daily", "review", "lesson",
+  "errors", "trials", "stats",
+]);
+
+function asSafeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/* DataAPI intentionally hides locked subjects from learning selectors.  Path
+   still needs their read-only registry rows, so read the raw catalog through
+   this narrow adapter.  It works with the normal `skills/categories` shape as
+   well as the lockedTopics/topics aliases used by transitional backends. */
+function rawCatalogCollection(name, aliases = []) {
+  let catalog = null;
+  try { catalog = DataAPI && DataAPI.catalog; } catch (_) { catalog = null; }
+  if (!catalog || typeof catalog !== "object") return [];
+  for (const key of [name, ...aliases]) {
+    const value = catalog[key];
+    if (Array.isArray(value)) {
+      const current = (typeof DataAPI.currentSubject === "function" ? DataAPI.currentSubject() : "");
+      return value.filter((item) => {
+        if (!item || typeof item !== "object") return false;
+        const owner = item.subject || item.subjectId || item.subject_id;
+        return !owner || !current || String(owner) === String(current);
+      });
+    }
+  }
+  return [];
+}
+
+function subjectSkills() {
+  const publicSkills = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.skills ? DataAPI.skills() : []);
+  if (publicSkills.length) return publicSkills;
+  const rawSkills = rawCatalogCollection("skills", ["lockedTopics", "locked_topics"]);
+  if (rawSkills.length) return rawSkills;
+  // A transitional payload may expose only topic records.  Keep only records
+  // that look like skills and normalise their category field for Path.
+  return rawCatalogCollection("topics").filter((item) => item && (item.skill || item.topicId || item.topic_id || item.kind === "topic")).map((item) => ({
+    ...item,
+    cat: item.cat || item.topicId || item.topic_id || item.category || "locked-topics",
+  }));
+}
+
+function subjectCategories() {
+  const publicCategories = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.categories ? DataAPI.categories() : []);
+  if (publicCategories.length) return publicCategories;
+  return rawCatalogCollection("categories", ["topics", "lockedTopics", "locked_topics"]);
+}
+
+function finiteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function nonNegativeNumber(value) {
+  return Math.max(0, finiteNumber(value, 0));
+}
+
+function subjectInfoSafe(id) {
+  try {
+    return (typeof DataAPI !== "undefined" && DataAPI.subjectInfo
+      ? DataAPI.subjectInfo(id)
+      : null) || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function subjectDisplayName(subject) {
+  const value = subject && typeof subject === "object"
+    ? (subject.title || subject.name || subject.short || (subject.metadata && (subject.metadata.topic || subject.metadata.name)))
+    : subject;
+  const text = String(value == null ? "" : value).trim();
+  return text || "Предмет";
+}
+
+function subjectDisplayShort(subject) {
+  const value = subject && typeof subject === "object"
+    ? (subject.short || subject.title || subject.name || (subject.metadata && (subject.metadata.topic || subject.metadata.name)))
+    : subject;
+  const text = String(value == null ? "" : value).trim();
+  return text || subjectDisplayName(subject);
+}
+
+function subjectDisplayTitle(id) {
+  return subjectDisplayName(subjectInfoSafe(id));
+}
+
+function subjectInfoLocked(subject) {
+  if (!subject || typeof subject !== "object") return false;
+  if (subject.locked === true || subject.comingSoon === true) return true;
+  const status = String(subject.status || subject.availability || (subject.metadata && subject.metadata.availability) || "").toLowerCase().replace(/_/g, "-");
+  return ["locked", "unavailable", "disabled", "coming-soon", "soon"].includes(status);
+}
+
+function subjectFeature(subject, key) {
+  const features = subject && subject.features;
+  if (!features || typeof features !== "object" || !Object.prototype.hasOwnProperty.call(features, key)) return true;
+  const value = features[key];
+  return !(value === false || value === 0 || value === "false" || value === "off");
+}
+
+function subjectAvailabilityLabel(subject) {
+  const status = String(subject && subject.status || "").toLowerCase().replace(/_/g, "-");
+  if (subject && (subject.locked === true || subject.comingSoon === true)) return "скоро";
+  if (["soon", "empty", "planned", "coming-soon", "coming_soon", "locked", "unavailable", "disabled"].includes(status)) return "скоро";
+  if (status === "partial" || status === "limited") return "частично";
+  const hasFeature = ["lessons", "practice", "forecast"].some((key) => subjectFeature(subject, key));
+  return hasFeature ? "" : "пока закрыто";
+}
+
+function topicDisplayName(topic) {
+  return subjectDisplayName(topic && typeof topic === "object"
+    ? topic
+    : { title: topic });
+}
+
+function topicCategory(topic) {
+  if (!topic) return null;
+  try { return DataAPI.category(topic.cat || topic.category); } catch (_) { return null; }
+}
+
+function topicCategoryName(topic) {
+  const category = topicCategory(topic);
+  return subjectDisplayName(category || { title: "Темы предмета" });
+}
+
+function topicHasLesson(topic) {
+  if (!topic || !topic.id) return false;
+  try {
+    return DataAPI.lessonsBySkill(topic.id).some((lesson) => (
+      Array.isArray(lesson && lesson.steps) ? lesson.steps.length > 0
+        : nonNegativeNumber(lesson && lesson.stepsCount) > 0
+    ));
+  } catch (_) {
+    return false;
+  }
+}
+
+function topicHasPractice(topic) {
+  if (!topic || !topic.id) return false;
+  try {
+    return DataAPI.practiceTasksBySkill(topic.id).length > 0
+      || DataAPI.missions().some((mission) => mission && mission.skill === topic.id && missionPracticeIds(mission).length > 0);
+  } catch (_) {
+    return false;
+  }
+}
+
+function topicHasLearningContent(topic) {
+  return topicHasLesson(topic) || topicHasPractice(topic);
+}
+
+function topicExplicitlyLocked(topic) {
+  if (!topic || typeof topic !== "object") return false;
+  if (topic.locked === true || topic.available === false || topic.enabled === false) return true;
+  const status = String(topic.status || topic.availability || topic.contentStatus || (topic.metadata && topic.metadata.availability) || "").toLowerCase().replace(/_/g, "-");
+  return TOPIC_LOCKED_VALUES.has(status) || status === "locked" || status === "coming-soon";
+}
+
+function topicIsLocked(topic) {
+  if (!topic) return true;
+  if (subjectInfoLocked(subjectInfoSafe())) return true;
+  if (topicExplicitlyLocked(topic)) return true;
+  try {
+    if (typeof TEMP_LOCKED_SKILLS !== "undefined" && TEMP_LOCKED_SKILLS.has(topic.id)) return true;
+  } catch (_) {}
+  // Отсутствие урока и заданий — тоже честный locked-state, а не кнопка,
+  // которая ведёт в пустую модалку или nonexistent deep-link.
+  return !topicHasLearningContent(topic);
+}
+
+function topicStatus(topic) {
+  return topicIsLocked(topic) ? "locked" : skillStatus(topic);
+}
+
+function topicLockReason(topic) {
+  if (!topic) return "Тема пока недоступна.";
+  const explicit = topic.lockedReason || topic.lockReason || topic.reason;
+  if (explicit) return String(explicit);
+  const info = subjectInfoSafe();
+  // Сначала различаем новый registry-lock и старый math-lock. В новом
+  // TEMP_LOCKED_SKILLS.has() тоже отражает registry, поэтому Drawing reason
+  // нельзя применять ко всем закрытым темам.
+  if (topicExplicitlyLocked(topic) || subjectInfoLocked(info)) {
+    if (!topicHasLesson(topic) && !topicHasPractice(topic)) {
+      return "Для этой темы пока нет урока и заданий для практики. Мы не показываем пустые кнопки — тема вернётся вместе с материалами.";
+    }
+    return "Материалы предмета пока готовятся. Тема откроется, когда выйдет полноценный урок или задания для практики.";
+  }
+  try {
+    if (typeof TEMP_LOCKED_SKILLS !== "undefined" && TEMP_LOCKED_SKILLS.has(topic.id)) {
+      return "Тема временно недоступна: задания требуют официальных чертежей, которых пока нет в сборке. Урок появится вместе с материалами.";
+    }
+  } catch (_) {}
+  if (String(info.status || "").toLowerCase() !== "ready") {
+    return "Материалы предмета пока готовятся. Тема откроется, когда выйдет полноценный урок или задания для практики.";
+  }
+  return "Тема пока закрыта. Доступные материалы появятся здесь после подключения каталога.";
+}
+
+function subjectContentState() {
+  const skills = subjectSkills();
+  const info = subjectInfoSafe();
+  const hasSkills = skills.length > 0;
+  const registryLocked = subjectInfoLocked(info);
+  const hasContent = hasSkills && !registryLocked && skills.some((skill) => !topicIsLocked(skill));
+  const subjectStatus = String(info.status || "").toLowerCase();
+  const explicitEmpty = subjectStatus === "empty"
+    || (!hasSkills && ["planned", "soon"].includes(subjectStatus));
+  return {
+    skills,
+    info,
+    empty: !hasSkills || explicitEmpty,
+    locked: hasSkills && (registryLocked || !hasContent) && !explicitEmpty,
+    hasContent,
+  };
+}
+
+function subjectLearningUnavailable(state = subjectContentState()) {
+  return !!(state && (state.empty || state.locked));
+}
+
+function subjectNavItems() {
+  let unavailable = false;
+  try { unavailable = subjectLearningUnavailable(); } catch (_) {}
+  if (!unavailable) return NAV;
+  // У coming-soon предмета доступна только карта тем; профиль и настройки
+  // остаются, потому что это не учебный контент. Прямые URL всё равно
+  // защищены route-guard'ом ниже.
+  return NAV.filter((item) => ["dashboard", "path", "profile"].includes(item.route));
+}
+
+function pathProgressForSkills(skills) {
+  const playable = asSafeArray(skills).filter((skill) => skill && !topicIsLocked(skill));
+  if (!playable.length) return null;
+  return Math.round(playable.reduce((sum, skill) => sum + nonNegativeNumber(skillProgress(skill.id)), 0) / playable.length);
+}
+
+function pathProgressLabel(skills) {
+  const progress = pathProgressForSkills(skills);
+  return progress == null ? "материалы готовятся" : `${progress}% освоено`;
+}
+
+function subjectStateCardHTML(state = subjectContentState(), options = {}) {
+  const info = state.info || subjectInfoSafe();
+  const skills = asSafeArray(state.skills);
+  const name = subjectDisplayName(info);
+  const topic = state.locked && skills.length === 1 ? skills[0] : null;
+  const title = state.empty ? "Материалы пока готовятся" : "Тема пока закрыта";
+  const text = state.empty
+    ? `В разделе «${name}» уже заведён отдельный прогресс. Уроки, задания и прогноз появятся после подключения материалов.`
+    : topic
+      ? `Тема «${topicDisplayName(topic)}» зарегистрирована в курсе, но её урок и практика ещё не подключены. Мы не показываем пустые переходы — карта и профиль уже работают.`
+      : `В разделе «${name}» пока нет доступных уроков или заданий. Выберите другой предмет или загляните позже.`;
+  const compact = options.compact ? " subject-state-card--compact" : "";
+  return `<section class="subject-state-card subject-state-card--${state.empty ? "empty" : "locked"}${compact}" role="status" aria-live="polite">
+    <div class="subject-state-card__icon">${icon(state.empty ? "clock" : "lock")}</div>
+    <div class="subject-state-card__content">
+      <div class="subject-state-card__title">${esc(title)}</div>
+      <div class="subject-state-card__text">${esc(text)}</div>
+      ${topic ? `<div class="subject-state-card__topic"><span class="subject-state-card__topic-dot" aria-hidden="true"></span>${esc(topicDisplayName(topic))}</div>` : ""}
+    </div>
+    <div class="subject-state-card__actions">
+      ${state.locked && topic ? `<button class="btn btn--soft btn--sm" type="button" onclick="go('path')">${icon("path")} Открыть карту тем</button>` : ""}
+      ${state.empty ? `<button class="btn btn--soft btn--sm" type="button" onclick="go('dashboard')">На главную</button>` : ""}
+      ${subjectSwitcherHTML() ? `<span class="subject-state-card__switch-label">или выбери предмет:</span>${subjectSwitcherHTML()}` : ""}
+    </div>
+  </section>`;
+}
+
+function screenSubjectUnavailable(root, locked = false) {
+  const state = subjectContentState();
+  if (!locked) state.empty = true;
+  const info = state.info || subjectInfoSafe();
+  root.innerHTML = `
+    <div class="page-head">
+      <div class="page-title">${esc(subjectDisplayName(info))}</div>
+      <div class="page-sub">${locked ? "тема пока закрыта · материалы появятся из реестра" : "отдельный прогресс · материалы скоро"}</div>
+    </div>
+    ${subjectStateCardHTML(state)}`;
+}
+
 // Маршруты, которым нужен контент каталога: в пустом предмете вместо них
 // показываем заглушку «Материалы пока готовятся».
 const EMPTY_SUBJECT_ROUTES = new Set([
@@ -1278,28 +1604,31 @@ const EMPTY_SUBJECT_ROUTES = new Set([
 ]);
 
 function subjectSwitcherHTML() {
-  const subjects = DataAPI.subjects();
+  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
   if (subjects.length < 2) return "";
-  const cur = DataAPI.currentSubject();
-  return `<select class="subject-select" onchange="switchSubjectFromUI(this)" aria-label="Выбрать предмет">`
-    + subjects.map((s) => `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(s.short || s.title)}${s.status === "ready" ? "" : " · скоро"}</option>`).join("")
-    + `</select>`;
+  const cur = typeof DataAPI !== "undefined" && DataAPI.currentSubject ? DataAPI.currentSubject() : "";
+  return `<select class="subject-select" onchange="switchSubjectFromUI(this)" aria-label="Выбрать предмет" title="Переключить предмет">
+    ${subjects.map((s) => {
+      const status = subjectAvailabilityLabel(s);
+      return `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(subjectDisplayName(s))}${status ? ` · ${esc(status)}` : ""}</option>`;
+    }).join("")}
+  </select>`;
 }
 
 /* Пилюли предметов для профиля вместо нативного селекта: оба предмета
    видны сразу, у недоступного — бейдж «скоро». */
 function subjectPickerHTML() {
-  const subjects = DataAPI.subjects();
+  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
   if (subjects.length < 2) return "";
   const cur = DataAPI.currentSubject();
   return `<div class="subject-picker" role="group" aria-label="Выбрать предмет">`
     + subjects.map((s) => {
         const active = s.id === cur;
-        const ready = s.status === "ready";
-        return `<button type="button" class="subject-pill${active ? " subject-pill--active" : ""}${ready ? "" : " subject-pill--soon"}"
-          onclick="switchSubjectFromUI('${esc(s.id)}')" aria-pressed="${active}">
-          <span class="subject-pill__name">${esc(s.short || s.title)}</span>
-          ${ready ? "" : `<span class="subject-pill__badge">скоро</span>`}
+        const status = subjectAvailabilityLabel(s);
+        return `<button type="button" class="subject-pill${active ? " subject-pill--active" : ""}${status ? " subject-pill--soon" : ""}"
+          onclick="switchSubjectFromUI('${esc(s.id)}')" aria-pressed="${active}" aria-label="Открыть предмет ${esc(subjectDisplayName(s))}">
+          <span class="subject-pill__name">${esc(subjectDisplayName(s))}</span>
+          ${status ? `<span class="subject-pill__badge">${esc(status)}</span>` : ""}
         </button>`;
       }).join("")
     + `</div>`;
@@ -1309,12 +1638,12 @@ function subjectPickerHTML() {
    на той же dlg-системе, что и остальные подтверждения. Пилюли
    subjectPickerHTML оставлены для совместимости. */
 function subjectCurrentButtonHTML() {
-  const subjects = DataAPI.subjects();
-  const info = DataAPI.subjectInfo() || {};
-  const title = info.title || "Предмет";
+  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
+  const info = subjectInfoSafe();
+  const title = subjectDisplayName(info);
   if (subjects.length < 2) return `<b>${esc(title)}</b>`;
   const sub = subjectCourseLabel(info);
-  return `<button type="button" class="subject-current" onclick="askSubjectDialog()" aria-haspopup="dialog">
+  return `<button type="button" class="subject-current" onclick="askSubjectDialog()" aria-haspopup="dialog" aria-label="Сменить предмет">
     <span class="subject-current__icon" aria-hidden="true">${icon("layers")}</span>
     <span class="subject-current__body">
       <span class="subject-current__name">${esc(title)}</span>
@@ -1328,7 +1657,7 @@ function subjectCurrentButtonHTML() {
    .dlg-backdrop/.dlg), но со списком красивых карточек предметов. */
 function askSubjectDialog() {
   const root = deviceModalRoot();
-  const subjects = DataAPI.subjects();
+  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
   if (!root || subjects.length < 2) return;
   const cur = DataAPI.currentSubject();
   try {
@@ -1338,13 +1667,13 @@ function askSubjectDialog() {
   } catch (_) {}
   const cards = subjects.map((s) => {
     const active = s.id === cur;
-    const ready = s.status === "ready";
+    const status = subjectAvailabilityLabel(s);
     return `<button type="button" class="subj-card${active ? " subj-card--active" : ""}"
         onclick="chooseSubjectFromDialog('${esc(s.id)}')"${active ? ` aria-current="true"` : ""}>
-      <span class="subj-card__badge">${esc(s.short || s.title)}</span>
+      <span class="subj-card__badge">${esc(subjectDisplayShort(s))}</span>
       <span class="subj-card__body">
-        <span class="subj-card__name">${esc(s.title)}</span>
-        <span class="subj-card__sub">${esc(subjectCourseLabel(s))}${ready ? "" : ` · <span class="subj-card__soon">скоро</span>`}</span>
+        <span class="subj-card__name">${esc(subjectDisplayName(s))}</span>
+        <span class="subj-card__sub">${esc(subjectCourseLabel(s))}${status ? ` · <span class="subj-card__soon">${esc(status)}</span>` : ""}</span>
       </span>
       <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
     </button>`;
@@ -1384,15 +1713,24 @@ function chooseSubjectFromDialog(id) {
    набор — «Полный курс», иначе перечисляем только то, что реально есть. */
 function subjectCourseLabel(s) {
   if (!s) return "";
-  if (s.status !== "ready") return "Материалы пока готовятся — можно занять место";
-  const f = (typeof DataAPI !== "undefined" && DataAPI.subjectFeatures)
-    ? DataAPI.subjectFeatures(s.id) : { lessons: true, practice: true, forecast: true };
+  const status = String(s.status || "").toLowerCase();
+  if (status && status !== "ready" && status !== "partial" && status !== "limited") {
+    return "Материалы пока готовятся — можно занять место";
+  }
+  // Не подменяем отсутствующие features дефолтом DataAPI: новый предмет
+  // может иметь только карту тем, и тогда подпись должна честно говорить об
+  // этом, а не обещать несуществующие уроки/практику.
+  const f = s.features && typeof s.features === "object"
+    ? s.features
+    : ((typeof DataAPI !== "undefined" && DataAPI.subjectFeatures)
+      ? DataAPI.subjectFeatures(s.id)
+      : { lessons: true, practice: true, forecast: true });
   const parts = [];
-  if (f.lessons) parts.push("уроки");
-  if (f.practice) parts.push("тренировки");
-  if (f.forecast) parts.push("прогноз");
+  if (subjectFeature(s, "lessons") && f.lessons !== false) parts.push("уроки");
+  if (subjectFeature(s, "practice") && f.practice !== false) parts.push("тренировки");
+  if (subjectFeature(s, "forecast") && f.forecast !== false) parts.push("прогноз");
   if (parts.length >= 3) return "Полный курс: уроки, тренировки, прогноз";
-  if (!parts.length) return "Материалы пока готовятся — можно занять место";
+  if (!parts.length) return "Пока доступна только карта тем";
   const titled = parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(", ");
   return `${titled} — без лишнего`;
 }
@@ -1436,27 +1774,19 @@ async function switchSubjectFromUI(sel) {
 }
 
 function subjectEmptyHTML() {
-  const info = DataAPI.subjectInfo() || { title: "Этот предмет" };
-  return `<div class="card" style="max-width:560px;margin:48px auto;text-align:center;padding:32px 24px">
-    <div style="font-size:15px;font-weight:700">Материалы пока готовятся</div>
-    <div style="margin-top:10px;color:var(--text-2);font-size:14px;line-height:1.55">
-      Раздел «${esc(info.title)}» уже заведён, и твой прогресс будет храниться отдельно.
-      Уроки, задания и прогноз появятся здесь, когда выйдет контентный пакет, — ничего настраивать не нужно.
-    </div>
-    <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-      <button class="btn btn--primary" onclick="go('dashboard')">На главную</button>
-      ${subjectSwitcherHTML() ? `<span style="align-self:center;font-size:13px;color:var(--muted)">или выбери предмет:</span>${subjectSwitcherHTML()}` : ""}
-    </div>
-  </div>`;
+  const state = subjectContentState();
+  return subjectStateCardHTML({ ...state, empty: true });
 }
 
 function screenEmptySubject(root) {
+  const state = subjectContentState();
+  const info = state.info || subjectInfoSafe();
   root.innerHTML = `
     <div class="page-head">
-      <div class="page-title">${esc((DataAPI.subjectInfo() || {}).title || "Предмет")}</div>
-      <div class="page-sub">отдельный прогресс • контент скоро выйдет</div>
+      <div class="page-title">${esc(subjectDisplayName(info))}</div>
+      <div class="page-sub">отдельный прогресс · контент скоро выйдет</div>
     </div>
-    ${subjectEmptyHTML()}`;
+    ${subjectStateCardHTML({ ...state, empty: true })}`;
 }
 
 /* ============================================================
@@ -1511,15 +1841,16 @@ function renderSidebar(active) {
     return;
   }
   nav.removeAttribute("aria-disabled");
+  const navItems = subjectNavItems();
   const openErrors = Store.state.errors.filter((e) => !e.resolved).length;
-  nav.innerHTML = NAV.map((n) => `
+  nav.innerHTML = navItems.map((n) => `
     <a class="nav-item ${n.route === active ? "active" : ""}" href="#/${n.route}">
       ${icon(n.ic)}<span>${n.label}</span>
       ${n.route === "errors" && openErrors ? `<span class="nav-badge">${openErrors}</span>` : ""}
     </a>`).join("");
-  const f = forecast();
+  const f = safeForecast();
   document.getElementById("sidebarFooter").innerHTML = `
-    Прогноз: <b class="mono" style="color:var(--text-2)">${f.empty ? "скоро" : `${f.low}–${f.high}`}</b> баллов<br>
+    Прогноз: <b class="mono" style="color:var(--text-2)">${f.empty ? "скоро" : `${esc(f.low)}–${esc(f.high)}`}</b> баллов<br>
     <span style="font-size:11px">данные сохраняются в SQLite</span>`;
 }
 
@@ -1542,7 +1873,7 @@ function renderBottomNav(active, route = currentRoute()) {
   bottom.removeAttribute("aria-hidden");
   bottom.removeAttribute("hidden");
   bottom.style.display = "";
-  const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
+  const items = subjectNavItems().filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
   bottom.innerHTML = items.map((n) => `
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
 }
@@ -1566,20 +1897,34 @@ function renderTopbar() {
   }
   if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; return; }
   const li = levelInfo();
-  const f = forecast();
+  const f = safeForecast();
   const dark = Theme.current() === "dark";
+  const subjectControl = subjectSwitcherHTML();
+  const subjectState = subjectContentState();
+  if (subjectLearningUnavailable(subjectState)) {
+    const info = subjectState.info || subjectInfoSafe();
+    const status = subjectState.locked ? "Карта тем · скоро" : "Материалы скоро";
+    document.getElementById("topbar").innerHTML = `
+      ${subjectControl ? `<div class="topbar__subject" aria-label="Текущий предмет">${subjectControl}</div>` : `<span class="chip chip--locked">${icon("lock")} ${esc(subjectDisplayName(info))}</span>`}
+      <div class="topbar__spacer"></div>
+      <span class="chip chip--locked hide-mobile">${esc(status)}</span>
+      <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>`;
+    return;
+  }
+  const streak = nonNegativeNumber(Store.state.streak);
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
-      <span class="level-chip__badge">УР. ${li.level}</span>
+      <span class="level-chip__badge">УР. ${esc(li.level)}</span>
       <div>
         <div class="level-chip__bar">${progressBar(li.pct, "progress--thin")}</div>
-        <div class="level-chip__xp">${li.current} / ${li.need} XP</div>
+        <div class="level-chip__xp">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</div>
       </div>
     </div>
+    ${subjectControl ? `<div class="topbar__subject" aria-label="Текущий предмет">${subjectControl}</div>` : ""}
     <div class="topbar__spacer"></div>
-    <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${f.low}–${f.high}</b>`}</div>
+    <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${esc(f.low)}–${esc(f.high)}</b>`}</div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
-    <div class="streak-chip streak-chip--clickable ${streakTier(Store.state.streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${Store.state.streak} дн</div>`;
+    <div class="streak-chip streak-chip--clickable ${streakTier(streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${streak} дн</div>`;
 }
 
 /* ============================================================
@@ -1857,28 +2202,47 @@ function toggleAdminMessage(id) {
 
 function screenDashboard(root) {
   const s = Store.state;
+  const subjectState = subjectContentState();
+  // Пустой/закрытый предмет не должен получать виртуальные «0/1», прогноз
+  // по чужим весам или ежедневную задачу без единого задания. Это отдельный
+  // понятный экран, а не набор декоративных статистик.
+  if (subjectState.empty || subjectState.locked) {
+    const info = subjectState.info || subjectInfoSafe();
+    root.innerHTML = `
+      ${adminInboxHTML()}
+      <div class="page-head">
+        <div class="page-title">Главная</div>
+        <div class="page-sub">${esc(subjectDisplayName(info))} · ${subjectState.empty ? "материалы скоро" : "тема пока закрыта"}</div>
+      </div>
+      ${subjectStateCardHTML(subjectState)}`;
+    try { queueAdminInboxLoad(); } catch (_) {}
+    return;
+  }
   const li = levelInfo();
-  const f = forecast();
+  const f = safeForecast();
   const trend = forecastTrend();
   const act = todayActivity();
-  const openErrors = s.errors.filter((e) => !e.resolved).length;
-  const d = DataAPI.daily();
+  const errors = asSafeArray(s.errors);
+  const openErrors = errors.filter((e) => e && !e.resolved).length;
+  const d = DataAPI.daily() || {};
   ensureDailyChallenge();
-  const dailyGoal = dailyTaskIds().length || d.target || 1;
-  const dailyDone = s.daily.date === todayStr() && s.daily.done;
-  const dailySolved = s.daily.date === todayStr() ? s.daily.solved : 0;
+  const dailyIds = asSafeArray(dailyTaskIds());
+  const dailyGoal = Math.max(0, dailyIds.length || nonNegativeNumber(d.target));
+  const dailyDone = s.daily && s.daily.date === todayStr() && !!s.daily.done;
+  const dailySolved = s.daily && s.daily.date === todayStr() ? nonNegativeNumber(s.daily.solved) : 0;
   const openLesson = mostRecentOpenLesson();
-  const activeMission = !openLesson && (DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id])
-    || DataAPI.missions().find((m) => !s.missionsDone[m.id]));
+  const missions = asSafeArray(DataAPI.missions()).filter((m) => m && missionPracticeIds(m).length && (!DataAPI.skill(m.skill) || !topicIsLocked(DataAPI.skill(m.skill))));
+  const activeMission = !openLesson && (missions.find((m) => missionProgress(m) > 0 && !(s.missionsDone || {})[m.id])
+    || missions.find((m) => !(s.missionsDone || {})[m.id]));
 
   /* Главный навигатор обучения: кандидаты пересчитываются при каждом
      рендере, поэтому после любого результата блок показывает актуальный
      лучший шаг. Альтернативы показываем открыто — пользователь свободен. */
-  const steps = nextStepCandidates();
+  const steps = safeNextStepCandidates();
   const step = steps[0] || null;
   const alts = steps.slice(1, 3);
-  const topGainRaw = forecastTopGains(1)[0] || null;
-  const topGain = topGainRaw ? { gain: topGainRaw.gain, skillId: topGainRaw.skillId, shortName: topGainRaw.name.replace(/^№\d+\s*[—–-]\s*/, "") } : null;
+  const topGainRaw = forecastTopGains(1).find((item) => item && DataAPI.skill(item.skillId) && !topicIsLocked(DataAPI.skill(item.skillId))) || null;
+  const topGain = topGainRaw ? { gain: nonNegativeNumber(topGainRaw.gain), skillId: topGainRaw.skillId, shortName: String(topGainRaw.name || "тема").replace(/^№\d+\s*[—–-]\s*/, "") } : null;
   const cov = forecastCoverage();
   const goal = forecastGoalNum();
 
@@ -1886,9 +2250,9 @@ function screenDashboard(root) {
      ошибки и темы с плохой точностью. Темы, которые просто ещё не тронуты
      (0%), или темы со стабильно верными ответами, но маленьким объёмом —
      не слабые места. */
-  const weakSpots = DataAPI.skills()
-    .filter((sk) => skillNeedsAttention(sk.id))
-    .map((sk) => ({ sk, prog: skillProgress(sk.id), errs: openErrorCount(sk.id) }))
+  const weakSpots = subjectSkills()
+    .filter((sk) => sk && !topicIsLocked(sk) && skillNeedsAttention(sk.id))
+    .map((sk) => ({ sk, prog: nonNegativeNumber(skillProgress(sk.id)), errs: openErrorCount(sk.id) }))
     .sort((a, b) => (a.prog - b.prog) || (b.errs - a.errs))
     .slice(0, 4);
 
@@ -1904,18 +2268,18 @@ function screenDashboard(root) {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
             <div class="stat-label">Уровень подготовки</div>
-            <div class="stat-num">УРОВЕНЬ ${li.level}</div>
+            <div class="stat-num">УРОВЕНЬ ${esc(li.level)}</div>
           </div>
           <div style="text-align:right">
             <div class="stat-label">Опыт ${helpDot("xp")}</div>
-            <div class="mono" style="font-size:17px;font-weight:700">${li.current} <span style="color:var(--muted)">/ ${li.need} XP</span></div>
+            <div class="mono" style="font-size:17px;font-weight:700">${esc(nonNegativeNumber(li.current))} <span style="color:var(--muted)">/ ${esc(nonNegativeNumber(li.need))} XP</span></div>
           </div>
         </div>
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
         <div style="margin-top:18px;font-size:13px;color:var(--text-2)">
-          Сегодня: <b class="mono">${Math.min(act.solved, dailyGoal)} / ${dailyGoal}</b> заданий
+          ${dailyGoal ? `Сегодня: <b class="mono">${Math.min(nonNegativeNumber(act.solved), dailyGoal)} / ${dailyGoal}</b> заданий` : "Ежедневная подборка пока не создана"}
         </div>
-        <div style="margin-top:12px;max-width:340px">${progressBar(Math.min(act.solved / dailyGoal, 1) * 100, "progress--thin progress--success")}</div>
+        <div style="margin-top:12px;max-width:340px">${progressBar(dailyGoal ? Math.min(nonNegativeNumber(act.solved) / dailyGoal, 1) * 100 : 0, "progress--thin progress--success")}</div>
       </div>
 
       <div class="card forecast-card forecast-hero">
@@ -1975,17 +2339,17 @@ function screenDashboard(root) {
       <div class="card card--hover action-card" role="button" tabindex="0" onclick="continueTraining()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();continueTraining()}" aria-label="Продолжить обучение">
         <div class="action-card__icon">${icon("training")}</div>
         <div><div class="action-card__title">Продолжить обучение</div>
-        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))}/${DataAPI.lessonStepsCount(openLesson.lesson)}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${activeMission.tasks.length}` : "Текущая тема по рекомендации"}</div></div>
+        <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min(nonNegativeNumber(openLesson.session.idx) + 1, Math.max(1, DataAPI.lessonStepsCount(openLesson.lesson)))}/${DataAPI.lessonStepsCount(openLesson.lesson)}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${missionPracticeCount(activeMission)}` : "Текущая тема по рекомендации"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--warn" role="button" tabindex="0" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openErrors ? "startErrorsReview()" : "go('errors')"}}" aria-label="Повторить ошибки">
         <div class="action-card__icon">${icon("rotate")}</div>
         <div><div class="action-card__title">Повторить ошибки</div>
         <div class="action-card__sub">${openErrors ? `Открыто ошибок: ${openErrors}` : "Все ошибки закрыты"}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="startDaily()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();startDaily()}" aria-label="Ежедневная задача">
+      <div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="${dailyGoal ? "startDaily()" : "go('trials')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${dailyGoal ? "startDaily()" : "go('trials')"}}" aria-label="Ежедневная задача">
         <div class="action-card__icon">${icon("zap")}</div>
         <div><div class="action-card__title">Ежедневная задача</div>
-        <div class="action-card__sub">${dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${dailyGoal} · +${d.xp} XP`}</div></div>
+        <div class="action-card__sub">${dailyGoal ? (dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${dailyGoal} · +${esc(nonNegativeNumber(d.xp))} XP`) : "Подборка появится после подключения заданий"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--violet" role="button" tabindex="0" onclick="go('trials')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('trials')}" aria-label="Испытания">
         <div class="action-card__icon">${icon("crown")}</div>
@@ -1998,18 +2362,22 @@ function screenDashboard(root) {
       <div>
         <div class="section-title" style="margin-top:0">Навыки ${helpDot("skills")}</div>
         <div class="card" style="padding:10px 8px">
-          ${DataAPI.skills().map((sk) => {
-            const st = s.skillStats[sk.id];
-            const acc = st.solved ? Math.round((st.correct / st.solved) * 100) : 0;
+          ${subjectSkills().map((sk) => {
+            const st = (s.skillStats && s.skillStats[sk.id]) || { solved: 0, correct: 0 };
+            const solved = nonNegativeNumber(st.solved);
+            const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
+            const locked = topicIsLocked(sk);
+            const action = locked ? `openLockedSkillModal('${esc(sk.id)}')` : `go('skill', '${esc(sk.id)}')`;
             return `
-            <div class="skill-row" role="button" tabindex="0" onclick="go('skill', '${sk.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
-              <div class="skill-row__name">${sk.name}</div>
-              ${progressBar(skillProgress(sk.id))}
-              <div class="skill-row__pct">${skillProgress(sk.id)}%</div>
+            <div class="skill-row${locked ? " skill-row--locked" : ""}" role="button" tabindex="0" onclick="${action}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${action}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(sk))}">
+              <div class="skill-row__name">${esc(topicDisplayName(sk))}</div>
+              ${locked ? `<div class="skill-row__locked-label">${icon("lock")} Материалы скоро</div>`
+                : `${progressBar(skillProgress(sk.id))}
+              <div class="skill-row__pct">${nonNegativeNumber(skillProgress(sk.id))}%</div>`}
               <div class="skill-row__tip">
-                Решено: <b>${st.solved}</b> · точность: <b>${acc}%</b><br>
-                Статус: ${statusLabel(skillStatus(sk))}<br>
-                Нажми, чтобы открыть детали
+                ${locked ? "Материалы пока закрыты<br>" : `Решено: <b>${solved}</b> · точность: <b>${acc}%</b><br>`}
+                Статус: ${statusLabel(topicStatus(sk))}<br>
+                ${locked ? "Нажми, чтобы узнать почему" : "Нажми, чтобы открыть детали"}
               </div>
             </div>`;
           }).join("")}
@@ -2042,8 +2410,44 @@ function screenDashboard(root) {
 /* Исполнитель шага из умного блока: кандидаты пересчитываются в момент
    нажатия, а не берутся с прошлого рендера — действие всегда соответствует
    актуальному состоянию знаний. */
+function nextStepActionable(candidate) {
+  if (!candidate || !candidate.action) return false;
+  const payload = candidate.payload || {};
+  try {
+    if (candidate.action === "finish-lesson" || candidate.action === "lesson") {
+      const lesson = DataAPI.lesson(payload.lessonId);
+      const skill = lesson && DataAPI.skill(lesson.skill);
+      return !!lesson && DataAPI.lessonStepsCount(lesson) > 0 && (!skill || (!topicExplicitlyLocked(skill) && topicHasLesson(skill)));
+    }
+    if (candidate.action === "errors-review") return asSafeArray(Store.state.errors).some((e) => e && !e.resolved);
+    if (candidate.action === "practice") {
+      const mission = DataAPI.mission(payload.missionId);
+      const skill = mission && DataAPI.skill(mission.skill);
+      return !!mission && missionPracticeIds(mission).length > 0 && (!skill || !topicIsLocked(skill));
+    }
+    if (candidate.action === "boss") {
+      const boss = DataAPI.bosses().find((item) => item && item.id === payload.bossId);
+      return !!boss && bossUnlocked(boss) && DataAPI.practiceTasks().some((task) => DataAPI.skill(task.skill) && DataAPI.skill(task.skill).cat === boss.cat);
+    }
+    if (candidate.action === "daily") return dailyTaskIds().length > 0;
+    if (candidate.action === "mixed") return DataAPI.practiceTasks().length > 0;
+  } catch (_) {
+    return false;
+  }
+  return false;
+}
+
+function safeNextStepCandidates() {
+  if (subjectContentState().locked) return [];
+  try {
+    return asSafeArray(nextStepCandidates()).filter(nextStepActionable);
+  } catch (_) {
+    return [];
+  }
+}
+
 function runNextStep(index = 0) {
-  const c = nextStepCandidates()[index];
+  const c = safeNextStepCandidates()[index];
   if (!c) return;
   switch (c.action) {
     case "finish-lesson":
@@ -2157,27 +2561,31 @@ function statusLabel(st) {
     "in-progress": "в процессе",
     "completed": "пройден",
     "mastered": "освоен",
-  }[st];
+  }[st] || "неизвестно";
 }
 
 function continueTraining() {
   const s = Store.state;
+  if (subjectContentState().locked) return go("path");
   // Незавершённый урок — самое дешёвое следующее действие: доучить то, что
   // уже открыто, а не начинать новую сессию по свободной практике.
   const openLesson = mostRecentOpenLesson();
   if (openLesson) return Lesson.start(openLesson.lessonId);
-  const active = DataAPI.missions().find((m) => missionProgress(m) > 0 && !s.missionsDone[m.id]);
+  const missions = asSafeArray(DataAPI.missions()).filter((m) => m && missionPracticeIds(m).length);
+  const active = missions.find((m) => missionProgress(m) > 0 && !(s.missionsDone || {})[m.id]);
   if (active) return startMission(active.id);
   // Единый поток тренировки — через миссию темы (награда и прогресс),
   // свободная практика отдельной сущностью больше не представлена.
-  const worst = weakestSkill();
-  const mission = worst && DataAPI.missions().find((m) => m.skill === worst.id && Array.isArray(m.tasks) && m.tasks.length);
+  const available = subjectSkills().filter((sk) => sk && !topicIsLocked(sk));
+  const worst = available.length ? weakestSkill() : null;
+  const mission = worst && missions.find((m) => m.skill === worst.id);
   if (mission) return startMission(mission.id);
-  const fallbackSkill = worst || DataAPI.skills()[0];
+  const fallbackSkill = (worst && !topicIsLocked(worst)) ? worst : available.find((sk) => topicHasPractice(sk));
   // Запасной вариант без миссии: весь банк темы, без усечения — состав
   // практики всегда равен реально доступным заданиям.
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(fallbackSkill ? fallbackSkill.id : "")).map((t) => t.id);
-  Session.start({ title: worst ? `Тренировка: ${worst.name}` : "Тренировка", taskIds: tasks, mode: "quick" });
+  if (!tasks.length) return go("path");
+  Session.start({ title: fallbackSkill ? `Тренировка: ${topicDisplayName(fallbackSkill)}` : "Тренировка", taskIds: tasks, mode: "quick" });
 }
 
 /* ============================================================
@@ -2185,72 +2593,113 @@ function continueTraining() {
    ============================================================ */
 
 function screenPath(root) {
-  const branches = DataAPI.categories().map((cat) => {
-    const skills = DataAPI.skills().filter((s) => s.cat === cat.id).sort((a, b) => a.order - b.order);
+  const allSkills = subjectSkills().filter(Boolean);
+  const categories = subjectCategories().filter(Boolean);
+  const groups = [];
+  const seen = new Set();
+  for (const category of categories) {
+    const skills = allSkills.filter((skill) => skill.cat === category.id).sort((a, b) => nonNegativeNumber(a.order) - nonNegativeNumber(b.order));
+    if (skills.length) {
+      groups.push({ id: category.id, name: subjectDisplayName(category), skills });
+      skills.forEach((skill) => seen.add(skill.id));
+    }
+  }
+  // Старый/частичный реестр может прислать тему без категории. Не теряем
+  // её из Path и не показываем `undefined` в заголовке.
+  const orphans = allSkills.filter((skill) => !seen.has(skill.id)).sort((a, b) => nonNegativeNumber(a.order) - nonNegativeNumber(b.order));
+  if (orphans.length) groups.push({ id: "__topics", name: "Темы предмета", skills: orphans });
+
+  if (!allSkills.length) {
+    root.innerHTML = `
+      <div class="page-head">
+        <div class="page-title">Путь ${helpDot("path")}</div>
+        <div class="page-sub">Карта тем предмета появится вместе с материалами.</div>
+      </div>
+      ${subjectStateCardHTML({ ...subjectContentState(), empty: true })}`;
+    return;
+  }
+
+  const branches = groups.map((group) => {
+    const progressLabel = pathProgressLabel(group.skills);
     return `
       <div class="tree-branch">
-        <div class="tree-branch__title">${cat.name.toUpperCase()} <span>${catProgress(cat.id)}% освоено</span></div>
+        <div class="tree-branch__title">${esc(group.name.toUpperCase())} <span>${esc(progressLabel)}</span></div>
         <div class="tree-nodes">
-          ${skills.map((sk) => {
-            const st = Store.state.skillStats[sk.id];
-            const status = skillStatus(sk);
+          ${group.skills.map((skill) => {
+            const status = topicStatus(skill);
             const locked = status === "locked";
-            const openAction = locked ? `openLockedSkillModal('${sk.id}')` : `go('skill', '${sk.id}')`;
+            const progressValue = nonNegativeNumber(skillProgress(skill.id));
+            const openAction = locked ? `openLockedSkillModal('${esc(skill.id)}')` : `go('skill', '${esc(skill.id)}')`;
+            const ege = skill.ege || skill.examNumber || "тема ЕГЭ";
             return `
-            <div class="tree-node tree-node--${status}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? `Тема временно недоступна` : "Открыть тему"} ${esc(sk.name)}">
+            <div class="tree-node tree-node--${status}" data-topic-locked="${locked ? "true" : "false"}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(skill))}"${locked ? ' aria-haspopup="dialog"' : ""}>
               <div class="tree-node__dot"></div>
               <div class="tree-node__body">
-                <div class="tree-node__name">${sk.name}
-                  <span class="chip ${statusChipClass(status)}" style="font-size:10px">${statusLabel(status)}</span>
+                <div class="tree-node__name">${esc(topicDisplayName(skill))}
+                  <span class="chip ${statusChipClass(status)} tree-node__status">${statusLabel(status)}</span>
                 </div>
-                <div class="tree-node__meta">
-                  <div class="tree-node__bar">${progressBar(skillProgress(sk.id), "progress--thin progress--gauge")}</div>
-                  <span class="mono">${skillProgress(sk.id)}%</span>
-                  <span>· ${sk.ege}</span>
-                </div>
+                ${locked ? `<div class="tree-node__meta"><span>${icon("lock")} Материалы темы пока закрыты</span></div>`
+                  : `<div class="tree-node__meta">
+                    <div class="tree-node__bar">${progressBar(progressValue, "progress--thin progress--gauge")}</div>
+                    <span class="mono">${progressValue}%</span>
+                    <span>· ${esc(ege)}</span>
+                  </div>`}
               </div>
-              <div style="color:var(--muted)">${icon(locked ? "lock" : "arrow")}</div>
+              <div class="tree-node__lock">${icon(locked ? "lock" : "arrow")}</div>
             </div>`;
           }).join("")}
         </div>
       </div>`;
   }).join("");
 
+  const info = subjectInfoSafe();
+  const pathState = subjectContentState();
+  const lockedCount = allSkills.filter((skill) => topicIsLocked(skill)).length;
+  const pathDescription = pathState.locked
+    ? "Карта тем предмета: зарегистрированные темы и статус их материалов."
+    : pathState.empty
+      ? "Карта тем предмета появится вместе с материалами."
+      : "Карта тем ЕГЭ и твой прогресс по каждой.";
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Путь ${helpDot("path")}</div>
-      <div class="page-sub">Карта всех тем ЕГЭ и твой прогресс по каждой. Нажми на тему — увидишь урок, тренировку и типичные ошибки.</div>
+      <div class="page-sub">${esc(pathDescription)} ${lockedCount ? "Закрытые темы отмечены замком — они не ведут в пустые уроки или практику." : "Нажми на тему — увидишь доступные материалы."}</div>
     </div>
-    <div style="margin-top:28px">
-      <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>${esc((DataAPI.subjectInfo() || {}).title || "Математика")} · ${overallProgress()}% освоено</small></div></div>
+    <div class="path-map">
+      <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>${esc(subjectDisplayName(info))} · ${esc(pathProgressLabel(allSkills))}</small></div></div>
       <div class="tree-connector-v"></div>
-      <div class="tree-branches">${branches}</div>
-    </div>`;
+      <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
+    </div>
+    ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedCount === 1 ? "Одна тема пока закрыта" : `${lockedCount} темы пока закрыты`}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
 }
 
 function overallProgress() {
-  const skills = DataAPI.skills();
-  return Math.round(skills.reduce((a, s) => a + skillProgress(s.id), 0) / skills.length);
+  return pathProgressForSkills(subjectSkills().filter(Boolean));
 }
 
 function statusChipClass(st) {
-  return { "locked": "", "not-started": "", "weak": "chip--danger", "in-progress": "chip--accent", "completed": "chip--success", "mastered": "chip--success" }[st];
+  return { "locked": "chip--locked", "not-started": "", "weak": "chip--danger", "in-progress": "chip--accent", "completed": "chip--success", "mastered": "chip--success" }[st] || "";
 }
 
-/* Временно закрытая тема: тот же стиль окна, что и у обычной темы,
-   но вместо урока/практики — честное объяснение, почему недоступна. */
+/* Закрытая тема: тот же стиль окна, что и у обычной темы, но без кнопок
+   на несуществующие уроки/практику. Причина берётся из registry или из
+   фактического наличия ресурсов, поэтому это не привязка к русскому предмету. */
 function openLockedSkillModal(skillId) {
   const sk = DataAPI.skill(skillId);
   if (!sk) return;
+  const category = topicCategory(sk);
+  const categoryName = category ? subjectDisplayName(category) : "Темы предмета";
+  const ege = sk.ege || sk.examNumber || "тема ЕГЭ";
+  const hasLesson = topicHasLesson(sk);
   openModal(`
-    <div class="stat-label">${DataAPI.category(sk.cat).name} · ${sk.ege}</div>
-    <div class="skill-modal__title">${sk.name}</div>
-    <div style="margin-top:6px"><span class="chip ${statusChipClass("locked")}">${statusLabel("locked")}</span></div>
-    <div style="margin-top:14px;font-size:14px;line-height:1.55;color:var(--text-2)">
-      Тема временно недоступна: все её задания построены на официальных чертежах,
-      которых пока нет в сборке. Мы не показываем такие задания без рисунка,
-      чтобы не вводить в заблуждение, — тема вернётся, как только чертежи появятся.
+    <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+    <div class="skill-modal__title">${esc(topicDisplayName(sk))}</div>
+    <div style="margin-top:6px"><span class="chip chip--locked">${icon("lock")} ${statusLabel("locked")}</span></div>
+    <div class="topic-lock-message">
+      ${icon("lock")}
+      <div>${esc(topicLockReason(sk))}</div>
     </div>
+    ${hasLesson ? `<div class="topic-lock-note">У этой темы уже есть урок, но практика и дополнительные материалы ещё не подключены.</div>` : ""}
     <div class="skill-modal__actions">
       <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
     </div>`);
@@ -2258,25 +2707,33 @@ function openLockedSkillModal(skillId) {
 
 function openSkillModal(skillId) {
   const sk = DataAPI.skill(skillId);
-  const st = Store.state.skillStats[skillId];
-  const acc = st.solved ? Math.round((st.correct / st.solved) * 100) : 0;
-  const status = skillStatus(sk);
-  const skillErrors = Store.state.errors.filter((e) => e.skill === skillId && !e.resolved);
-  const subs = [...new Set(skillErrors.map((e) => e.sub))];
-  const mission = DataAPI.missions().find((m) => m.skill === skillId && !Store.state.missionsDone[m.id])
-    || DataAPI.missions().find((m) => m.skill === skillId);
-  const lessons = DataAPI.lessonsBySkill(skillId);
+  if (!sk) return;
+  if (topicIsLocked(sk)) return openLockedSkillModal(skillId);
+  const st = (Store.state.skillStats && Store.state.skillStats[skillId]) || { solved: 0, correct: 0 };
+  const solved = nonNegativeNumber(st.solved);
+  const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
+  const status = topicStatus(sk);
+  const skillErrors = asSafeArray(Store.state.errors).filter((e) => e && e.skill === skillId && !e.resolved);
+  const subs = [...new Set(skillErrors.map((e) => e.sub).filter(Boolean))];
+  const missions = asSafeArray(DataAPI.missions()).filter((m) => m && m.skill === skillId);
+  const doneMissions = Store.state.missionsDone || {};
+  const mission = missions.find((m) => !doneMissions[m.id] && missionPracticeIds(m).length)
+    || missions.find((m) => missionPracticeIds(m).length);
+  const lessons = asSafeArray(DataAPI.lessonsBySkill(skillId)).filter((lesson) => DataAPI.lessonStepsCount(lesson) > 0);
   const lessonErrs = lessonStepErrorsBySkill(skillId);
+  const category = topicCategory(sk);
+  const categoryName = category ? subjectDisplayName(category) : "Темы предмета";
+  const ege = sk.ege || sk.examNumber || "тема ЕГЭ";
 
   openModal(`
-    <div class="stat-label">${DataAPI.category(sk.cat).name} · ${sk.ege}</div>
-    <div class="skill-modal__title">${sk.name}</div>
+    <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+    <div class="skill-modal__title">${esc(topicDisplayName(sk))}</div>
     <div style="margin-top:6px"><span class="chip ${statusChipClass(status)}">${statusLabel(status)}</span></div>
 
     <div style="margin:20px 0 8px">${progressBar(skillProgress(skillId))}</div>
     <div class="skill-modal__stats">
-      <div><div class="skill-modal__stat-num">${skillProgress(skillId)}%</div><div class="stat-label">освоение навыка</div></div>
-      <div><div class="skill-modal__stat-num">${st.solved}</div><div class="stat-label">решено задач</div></div>
+      <div><div class="skill-modal__stat-num">${nonNegativeNumber(skillProgress(skillId))}%</div><div class="stat-label">освоение навыка</div></div>
+      <div><div class="skill-modal__stat-num">${solved}</div><div class="stat-label">решено задач</div></div>
       <div><div class="skill-modal__stat-num">${acc}%</div><div class="stat-label">правильных</div></div>
     </div>
     ${(() => {
@@ -2316,10 +2773,10 @@ function openSkillModal(skillId) {
     </div>` : ""}
 
     <div class="skill-modal__actions">
-      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${lessons[0].id}')">${icon("bulb")} ${Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
-      ${mission && mission.tasks.length ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${mission.id}')">${icon("target")} Практика</button>` : ""}
-      ${!mission && DataAPI.practiceTasksBySkill(skillId).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${skillId}')">Практика</button>` : ""}
-      ${!mission && !DataAPI.practiceTasksBySkill(skillId).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
+      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${esc(lessons[0].id)}')">${icon("bulb")} ${Store.state.completedLessons && Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
+      ${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${esc(mission.id)}')">${icon("target")} Практика</button>` : ""}
+      ${!mission && asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${esc(skillId)}')">Практика</button>` : ""}
+      ${!mission && !asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
     </div>`);
 }
 
@@ -2345,11 +2802,14 @@ function humanLessonError(raw) {
    Прямой запуск списком остаётся только как запасной вариант для тем без
    миссии. */
 function startSkillPractice(skillId) {
-  const mission = DataAPI.missions().find((m) => m.skill === skillId && Array.isArray(m.tasks) && m.tasks.length);
+  const skill = DataAPI.skill(skillId);
+  if (!skill) return toast("Тема не найдена", "toast--error", "x");
+  if (topicIsLocked(skill)) return toast("Тема пока закрыта — урок и практика ещё не подключены", "", "lock");
+  const mission = asSafeArray(DataAPI.missions()).find((m) => m && m.skill === skillId && missionPracticeIds(m).length);
   if (mission) return startMission(mission.id);
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId)).map((t) => t.id);
-  if (!tasks.length) return;
-  Session.start({ title: `Тренировка: ${DataAPI.skill(skillId).name}`, taskIds: tasks, mode: "quick" });
+  if (!tasks.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
+  Session.start({ title: `Тренировка: ${topicDisplayName(skill)}`, taskIds: tasks, mode: "quick" });
 }
 
 /* ============================================================
@@ -2357,8 +2817,10 @@ function startSkillPractice(skillId) {
    ============================================================ */
 
 function screenTraining(root) {
-  const missions = DataAPI.missions();
-  const lessons = DataAPI.lessons();
+  const state = subjectContentState();
+  if (state.empty || state.locked) return screenSubjectUnavailable(root, state.locked);
+  const missions = asSafeArray(DataAPI.missions());
+  const lessons = asSafeArray(DataAPI.lessons());
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Тренировка ${helpDot("training")}</div>
@@ -2445,6 +2907,8 @@ function screenTraining(root) {
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) return toast("Миссия не найдена", "toast--error", "x");
+  const skill = DataAPI.skill(m.skill);
+  if (skill && topicIsLocked(skill)) return toast("Тема пока закрыта — практика ещё не подключена", "", "lock");
   // Тренировка идёт по всему банку темы (missionPracticeIds), а не по
   // урезанной тройке из каталога: количество заданий = реальные доступные.
   const allIds = missionPracticeIds(m);
@@ -3793,7 +4257,7 @@ function screenStats(root) {
   const s = Store.state;
   const acc = s.totalSolved ? Math.round((s.totalCorrect / s.totalSolved) * 100) : 0;
   const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
-  const skills = DataAPI.skills();
+  const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()).filter((skill) => !topicIsLocked(skill));
   const byProg = skills.slice().sort((a, b) => skillProgress(b.id) - skillProgress(a.id));
   // With every skill still at 0% (a brand-new account), sort() ties resolve
   // to catalog order — that would label skills №1-3 "strong" and №18-20
@@ -3938,16 +4402,20 @@ function forecastChart() {
    ============================================================ */
 
 function profileStatsTeaser(s, acc, avgTime) {
-  let f = null;
-  try { f = forecast(); } catch (_) { f = null; }
+  const state = s || {};
+  const f = safeForecast();
   let days = [];
-  try { days = last14Days(); } catch (_) { days = []; }
-  const max = Math.max(1, ...days.map((d) => d.solved || 0));
-  const bars = days.map((d, i) => {
-    const pct = Math.max(6, Math.round(((d.solved || 0) / max) * 100));
+  try { days = asSafeArray(last14Days()); } catch (_) { days = []; }
+  const max = Math.max(1, ...days.map((d) => nonNegativeNumber(d && d.solved)));
+  const hasActivity = days.some((d) => nonNegativeNumber(d && d.solved) > 0);
+  const bars = hasActivity ? days.map((d, i) => {
+    const value = nonNegativeNumber(d && d.solved);
+    const pct = Math.max(6, Math.round(value / max * 100));
     const today = i === days.length - 1;
-    return `<div class="stats-teaser__bar${today ? " stats-teaser__bar--today" : ""}" style="height:${pct}%" title="${d.label}: ${d.solved || 0}"></div>`;
-  }).join("");
+    return `<div class="stats-teaser__bar${today ? " stats-teaser__bar--today" : ""}" style="height:${pct}%" title="${esc(d.label || "День")}: ${value}"></div>`;
+  }).join("") : `<div class="stats-teaser__no-activity">Активность появится после первого задания</div>`;
+  const solved = nonNegativeNumber(state.totalSolved);
+  const accuracy = solved ? Math.round(nonNegativeNumber(state.totalCorrect) / solved * 100) : null;
   // Один блок вместо пары «стат-грид + тизер»: те же данные без повторов
   // (решено/точность раньше дублировались в обоих).
   return `
@@ -3960,11 +4428,11 @@ function profileStatsTeaser(s, acc, avgTime) {
         </div>
       </div>
       <div class="stats-teaser__metrics stats-teaser__metrics--6">
-        <div class="stats-teaser__metric"><b class="mono">${s.totalSolved}</b><span>решено</span></div>
-        <div class="stats-teaser__metric"><b class="mono">${acc}%</b><span>точность</span></div>
-        <div class="stats-teaser__metric"><b class="mono">${s.xp}</b><span>всего XP</span></div>
-        <div class="stats-teaser__metric"><b class="mono">${f && !f.empty ? `${f.low}–${f.high}` : "—"}</b><span>прогноз</span></div>
-        <div class="stats-teaser__metric"><b class="mono">${s.bestSeries}</b><span>лучшая серия</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${solved}</b><span>решено</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${accuracy == null ? "—" : `${accuracy}%`}</b><span>${accuracy == null ? "пока нет ответов" : "точность"}</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${nonNegativeNumber(state.xp)}</b><span>всего XP</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${f.empty ? "—" : `${esc(f.low)}–${esc(f.high)}`}</b><span>прогноз</span></div>
+        <div class="stats-teaser__metric"><b class="mono">${nonNegativeNumber(state.bestSeries)}</b><span>лучшая серия</span></div>
         <div class="stats-teaser__metric"><b class="mono">${avgTime ? fmtTime(avgTime) : "—"}</b><span>среднее время</span></div>
       </div>
       <div class="stats-teaser__bars" aria-hidden="true">${bars}</div>
@@ -3976,24 +4444,59 @@ function profileStatsTeaser(s, acc, avgTime) {
 }
 
 function screenProfile(root) {
-  const s = Store.state;
+  const s = Store.state || {};
+  const subjectState = subjectContentState();
+  const contentUnavailable = subjectState.empty || subjectState.locked;
   const li = levelInfo();
-  const acc = s.totalSolved ? Math.round((s.totalCorrect / s.totalSolved) * 100) : 0;
-  const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
+  const solved = nonNegativeNumber(s.totalSolved);
+  const acc = solved ? Math.round(nonNegativeNumber(s.totalCorrect) / solved * 100) : 0;
+  const avgTime = solved ? Math.round(nonNegativeNumber(s.totalTimeSec) / solved) : 0;
   const accountId = Store.accountId || "";
-  const initial = s.name ? esc(s.name.trim().slice(0, 1).toUpperCase()) : "";
+  const name = s.name ? String(s.name).trim() : "";
+  const initial = name ? esc(name.slice(0, 1).toUpperCase()) : "";
+  const streak = nonNegativeNumber(s.streak);
+  const timeline = asSafeArray(s.timeline);
+  const achievements = asSafeArray(DataAPI.achievements());
+  const profileLearningHTML = contentUnavailable
+    ? subjectStateCardHTML(subjectState)
+    : `${profileStatsTeaser(s, acc, avgTime)}
+      <div class="section-title">Достижения</div>
+      ${achievements.length ? `<div class="badge-grid">
+        ${achievements.map((a) => {
+          const un = achievementUnlocked(a.id);
+          return `
+          <div class="card badge-card ${un ? "" : "badge-card--locked"}">
+            <div class="badge-icon">${icon(a.icon)}</div>
+            <div class="badge-name">${esc(a.name || "Достижение")}</div>
+            <div class="badge-desc">${esc(a.desc || "")}</div>
+            ${un ? `<div style="margin-top:8px"><span class="chip chip--success">получено</span></div>` : `<div style="margin-top:8px"><span class="chip chip--locked">закрыто</span></div>`}
+          </div>`;
+        }).join("")}
+      </div>` : `<div class="card empty">Достижения появятся вместе с материалами предмета.</div>`}`;
+
+  const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip profile-card__streak ${streakTier(streak)}">${icon("flame")} ${streak} дн</div>`;
+  const profileProgressHTML = contentUnavailable
+    ? `<div class="profile-card__locked-progress"><span class="chip chip--locked">${icon("lock")} Уровень и XP появятся вместе с материалами</span></div>`
+    : `<div class="profile-card__progress">
+        <div class="profile-card__level">
+          <span class="level-chip__badge">Уровень ${esc(li.level)}</span>
+          <span class="profile-card__xp mono">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</span>
+          <span class="profile-card__next">до уровня ${esc(nonNegativeNumber(li.level) + 1)}</span>
+        </div>
+        ${progressBar(li.pct)}
+      </div>`;
 
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Профиль</div>
-      <div class="page-sub">Твой путь в цифрах.</div>
+      <div class="page-sub">${contentUnavailable ? "Профиль предмета · материалы пока закрыты" : "Твой путь в цифрах."}</div>
     </div>
 
     <div class="card card--glow profile-card">
       <div class="profile-card__identity">
         <div class="avatar" aria-hidden="true">${initial || icon("profile")}</div>
         <div class="profile-card__who">
-          <div class="profile-card__name">${s.name ? esc(s.name) : "Без имени"}</div>
+          <div class="profile-card__name">${name ? esc(name) : "Без имени"}</div>
           <div class="account-id-wrap">
             <button class="account-id" type="button" data-account-id="${accountId}" onclick="copyAccountId(this)" aria-label="Скопировать ID аккаунта" ${accountId ? "" : "disabled"}>
               <span class="account-id__text">
@@ -4005,46 +4508,25 @@ function screenProfile(root) {
             <span class="account-id__feedback" role="status">${icon("check")} ID скопирован</span>
           </div>
         </div>
-        <div class="streak-chip profile-card__streak ${streakTier(s.streak)}">${icon("flame")} ${s.streak} дн</div>
+        ${profileStreakHTML}
       </div>
 
-      <div class="profile-card__progress">
-        <div class="profile-card__level">
-          <span class="level-chip__badge">Уровень ${li.level}</span>
-          <span class="profile-card__xp mono">${li.current} / ${li.need} XP</span>
-          <span class="profile-card__next">до уровня ${li.level + 1}</span>
-        </div>
-        ${progressBar(li.pct)}
-      </div>
+      ${profileProgressHTML}
     </div>
 
-    ${profileStatsTeaser(s, acc, avgTime)}
-
-    <div class="section-title">Достижения</div>
-    <div class="badge-grid">
-      ${DataAPI.achievements().map((a) => {
-        const un = achievementUnlocked(a.id);
-        return `
-        <div class="card badge-card ${un ? "" : "badge-card--locked"}">
-          <div class="badge-icon">${icon(a.icon)}</div>
-          <div class="badge-name">${a.name}</div>
-          <div class="badge-desc">${a.desc}</div>
-          ${un ? `<div style="margin-top:8px"><span class="chip chip--success">получено</span></div>` : `<div style="margin-top:8px"><span class="chip">закрыто</span></div>`}
-        </div>`;
-      }).join("")}
-    </div>
+    ${profileLearningHTML}
 
     <div class="grid grid--2" style="margin-top:34px">
       <div>
         <div class="section-title" style="margin-top:0">История прогресса</div>
         <div class="card">
-          ${s.timeline.length ? `<div class="timeline">
-            ${s.timeline.slice(0, 10).map((t) => `
+          ${timeline.length ? `<div class="timeline">
+            ${timeline.slice(0, 10).map((t) => `
               <div class="timeline__item">
                 <div class="timeline__date">${relTime(t.ts)}</div>
-                <div class="timeline__text">${esc(t.text)}</div>
+                <div class="timeline__text">${esc(t && t.text || "Событие профиля")}</div>
               </div>`).join("")}
-          </div>` : `<div class="empty">Пока пусто — реши первое задание.</div>`}
+          </div>` : `<div class="empty">${contentUnavailable ? "События появятся после подключения материалов." : "Пока пусто — реши первое задание."}</div>`}
         </div>
       </div>
       <div>
@@ -4072,7 +4554,7 @@ function screenProfile(root) {
           <div class="settings-row__control">
             ${subjectCurrentButtonHTML()}
           </div>
-          ${DataAPI.isSubjectEmpty() ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : ""}
+          ${subjectState.empty ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : subjectState.locked ? `<div class="settings-row__sub">В реестре есть тема, но урок и практика пока не подключены. Пустые переходы скрыты.</div>` : ""}
         </div>
       </div>
       ${Store.auth && Store.auth.registered ? `
@@ -4605,12 +5087,15 @@ function screenLoginSubject(root) {
        </div>`);
     return;
   }
-  const subjects = DataAPI.subjects();
+  const subjects = asSafeArray(DataAPI.subjects());
   const cur = DataAPI.currentSubject();
   root.innerHTML = authScreenShell("Какой предмет открываем?",
     "Один аккаунт может использоваться на разных устройствах — выбери, с каким предметом продолжить. Прогресс каждого предмета хранится отдельно и никуда не денется.",
     `<div class="choice-list">
-       ${subjects.map((s) => `<button class="choice-item" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(s.title)}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}</span></button>`).join("")}
+       ${subjects.map((s) => {
+         const status = subjectAvailabilityLabel(s);
+         return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
+       }).join("")}
      </div>`);
 }
 
@@ -4990,12 +5475,15 @@ const Onboarding = {
   // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
   // предмета и не должен его определять.
   stepSubject(body) {
-    const subjects = DataAPI.subjects();
+    const subjects = asSafeArray(DataAPI.subjects());
     body.innerHTML = `
       <div class="onboard-title">Какой предмет готовим?</div>
       <div class="onboard-sub">Прогресс, статистика и прогноз ведутся отдельно по каждому предмету.</div>
       <div class="choice-list">
-        ${subjects.map((s) => `<button class="choice-item" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(s.title)}</b><span>${esc(subjectCourseLabel(s))}</span></button>`).join("")}
+        ${subjects.map((s) => {
+          const status = subjectAvailabilityLabel(s);
+          return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
+        }).join("")}
       </div>`;
   },
 

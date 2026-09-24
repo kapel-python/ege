@@ -268,6 +268,7 @@
   }
   .skill-dot{width:10px;height:10px;border-radius:50%;background:var(--green);flex-shrink:0;}
   .skill-dot--limited{background:var(--amber);}
+  .skill-dot--locked{background:var(--amber);box-shadow:0 0 0 3px var(--amber-dim);}
   .skill-dot--empty{background:var(--text-faint);}
   .skill-name{flex:1;min-width:0;font-weight:600;font-size:clamp(14px,1.8vw,15px);overflow-wrap:anywhere;}
   .skill-count{flex-shrink:0;color:var(--text-faint);font-size:clamp(12px,1.5vw,13px);white-space:nowrap;}
@@ -460,18 +461,21 @@
   function subjectBadge(status){
     if (status === "available") return '<span class="badge badge--ok">Доступен</span>';
     if (status === "partial") return '<span class="badge badge--warn">Частично</span>';
+    if (status === "locked" || status === "soon" || status === "empty") return '<span class="badge badge--warn">Скоро</span>';
     return '<span class="badge badge--bad">Недоступен</span>';
   }
 
   function skillDotClass(status){
     if (status === "available") return "skill-dot";
     if (status === "limited") return "skill-dot skill-dot--limited";
+    if (status === "locked" || status === "coming-soon") return "skill-dot skill-dot--locked";
     return "skill-dot skill-dot--empty";
   }
 
   function skillStatusText(skill){
     if (skill.status === "available") return "доступна";
     if (skill.status === "limited") return "частично — теория есть, практика скоро";
+    if (skill.status === "locked" || skill.status === "coming-soon") return "заблокирована — материалы скоро";
     return "пока недоступна";
   }
 
@@ -594,7 +598,8 @@
               var sid = bodyId + "-skill-" + skill.id.replace(/[^a-zA-Z0-9_-]/g, "_");
               var countText = skill.tasks > 0
                 ? skill.tasks + " " + plural(skill.tasks, "задание", "задания", "заданий")
-                : (skill.status === "limited" ? "практика скоро" : "нет заданий");
+                : (skill.status === "limited" ? "практика скоро"
+                  : (skill.status === "locked" || skill.status === "coming-soon") ? "материалы скоро" : "нет заданий");
               bodyHtml += '<div class="skill">'
                 + '<button class="skill-head" type="button" aria-expanded="false" aria-controls="' + esc(sid) + '">'
                 + '<span class="' + skillDotClass(skill.status) + '" aria-hidden="true"></span>'
