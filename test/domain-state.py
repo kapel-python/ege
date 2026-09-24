@@ -116,9 +116,21 @@ def main():
             activity_body["expectedVersion"] = activity["stateVersion"]
             status, activity_replay = request(opener, base, "/api/state-domains", "PATCH", activity_body)
             assert status == 200, (status, activity_replay)
+            # Hint counters use the same domain endpoint. This also guards the
+            # server-side cap constant: a missing/typo'd constant used to turn
+            # every hint save into a 500 and the client into a misleading
+            # "не удалось сохранить данные" toast.
+            hint_body = {"subject": subject, "expectedVersion": activity_replay["stateVersion"], "domains": {
+                "hintLevels": {"1": 2, "2": 0, "3": 1},
+            }}
+            status, hint = request(opener, base, "/api/state-domains", "PATCH", hint_body)
+            assert status == 200 and hint["stateVersion"] == activity_replay["stateVersion"] + 1, (status, hint)
+            hint_body["expectedVersion"] = hint["stateVersion"]
+            status, hint_replay = request(opener, base, "/api/state-domains", "PATCH", hint_body)
+            assert status == 200, (status, hint_replay)
             # Lesson, open lesson draft and mission are independent mutable
             # domains. Their patch must not rewrite append-only history.
-            lesson_body = {"subject": subject, "expectedVersion": activity_replay["stateVersion"], "domains": {
+            lesson_body = {"subject": subject, "expectedVersion": hint_replay["stateVersion"], "domains": {
                 "lessonSessions": {"lesson_n07_exponential": {"idx": 1, "stepState": {}, "xp": 10}},
                 "lessonAttempts": [{"lessonId": "lesson_n07_exponential", "completed": True, "firstCompletion": True, "xp": 120, "wrongAttempts": 0, "durationSec": 30, "ts": 1700000005000}],
                 "completedLessons": {"lesson_n07_exponential": {"ts": 1700000005000}},
@@ -162,6 +174,7 @@ def main():
             assert state["missionProgress"].get("m-n01_planimetry") == 3 and "m-n01_planimetry" in state["missionsDone"], state["missionProgress"]
             assert any(item["lessonId"] == "lesson_n07_exponential" for item in state["lessonAttempts"]), state["lessonAttempts"]
             assert state["skillStats"]["n01_planimetry"]["progress"] == 37, state["skillStats"]
+            assert state["hintLevels"] == {"1": 2, "2": 0, "3": 1}, state["hintLevels"]
             assert any(item["id"] == error_create["error"]["id"] and item["resolved"] for item in state["errors"]), state["errors"]
             assert {"n01_p1", "n01_p2"}.issubset({item["taskId"] for item in state["taskAttempts"]}), state["taskAttempts"]
             assert "Первое событие" in [item["text"] for item in state["timeline"]], state["timeline"]
