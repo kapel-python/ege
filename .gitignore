@@ -1,4 +1,14 @@
 server/*.sqlite3
+server/*.sqlite3-wal
+server/*.sqlite3-shm
+server/*.sqlite3-journal
+server/*.sqlite3.bak-*
+server/*.bak-*
+server/*.corrupt-*
+server/*.pre-restore-*
+server/backups/
+deploy/*.env
+!deploy/ege-2026.env.example
 .ege-2026.pid*
 __pycache__/
 *.pyc
