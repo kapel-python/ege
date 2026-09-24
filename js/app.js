@@ -1119,6 +1119,12 @@ async function render() {
     if (!Store.ready || !Store.state) return;
   }
   const route = currentRoute();
+  // Уход со страницы урока тоже ставит таймер на паузу: возвращение через
+  // день не должно превращать урок в многочасовой сеанс.
+  if (route !== "lesson" && typeof Lesson !== "undefined" && Lesson.cur) {
+    pauseLessonClock();
+    Lesson.cur = null;
+  }
   // После входа предмет не угадываем по current_subject: пока пользователь
   // явно не выбрал предмет, любой раздел уводит на экран выбора (кроме
   // login/register — туда ведёт сам flow входа/выхода).
@@ -1402,6 +1408,7 @@ async function switchSubjectFromUI(sel) {
     try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
     try { Session.cur = null; } catch (_) {}
+    try { pauseLessonClock(); } catch (_) {}
     try { Lesson.cur = null; } catch (_) {}
     try { localStorage.removeItem("ege_core_session"); } catch (_) {}
     // Смена адреса закрывает модалки только при смене хэша (см. render) —
@@ -3038,6 +3045,98 @@ function answerFormatCaption(answer, valueType) {
 
 const LESSON_INTERACTIVE_TYPES = new Set(["ACTION", "VALIDATION", "INDEPENDENT_TASK"]);
 
+/* Время урока — это активное время, а не календарное время между первым
+   открытием и завершением. Между возвратами накопленное activeMs сохраняется,
+   а активный отрезок возобновляется только когда экран урока снова виден.
+   Если браузер не успел прислать pagehide (например, вкладку убили), пауза
+   длиннее 30 минут не засчитывается: это защита от огромных «часов» после
+   случайного возвращения через несколько дней. */
+const LESSON_CLOCK_MAX_GAP_MS = 30 * 60 * 1000;
+const LESSON_CLOCK_TICK_MS = 15 * 1000;
+function normalizeLessonActiveMs(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+const LessonClock = {
+  pageVisible() {
+    try {
+      return currentRoute() === "lesson"
+        && !document.hidden
+        && document.visibilityState !== "hidden";
+    } catch (_) {
+      return false;
+    }
+  },
+
+  sync(lesson, now = Date.now()) {
+    if (!lesson) return 0;
+    const activeMs = normalizeLessonActiveMs(lesson.activeMs);
+    if (lesson.activeSince == null) {
+      lesson.activeMs = activeMs;
+      return activeMs;
+    }
+    const previous = Number(lesson.activeSince);
+    if (!Number.isFinite(previous) || previous <= 0) {
+      lesson.activeSince = now;
+      lesson.activeMs = activeMs;
+      return activeMs;
+    }
+    const delta = Math.max(0, now - previous);
+    lesson.activeMs = activeMs + (delta <= LESSON_CLOCK_MAX_GAP_MS ? delta : 0);
+    lesson.activeSince = now;
+    return lesson.activeMs;
+  },
+
+  start(lesson) {
+    if (!lesson || lesson.activeSince != null || !this.pageVisible()) return;
+    lesson.activeSince = Date.now();
+    if (lesson.timerId == null && typeof setInterval === "function") {
+      lesson.timerId = setInterval(() => this.sync(lesson), LESSON_CLOCK_TICK_MS);
+    }
+  },
+
+  pause(lesson) {
+    if (!lesson) return;
+    this.sync(lesson);
+    lesson.activeSince = null;
+    if (lesson.timerId != null) {
+      if (typeof clearInterval === "function") clearInterval(lesson.timerId);
+      lesson.timerId = null;
+    }
+  },
+
+  elapsedMs(lesson) {
+    return this.sync(lesson);
+  },
+};
+
+function resumeLessonClock() {
+  if (typeof Lesson === "undefined" || !Lesson.cur) return;
+  LessonClock.start(Lesson.cur);
+}
+
+function pauseLessonClock() {
+  if (typeof Lesson === "undefined" || !Lesson.cur) return;
+  const lesson = Lesson.cur;
+  if (lesson.activeSince == null && lesson.timerId == null) return;
+  LessonClock.pause(lesson);
+  Lesson.persist();
+}
+
+/* После смены cookie/accountId нельзя сохранять старый урок: запрос уже
+   будет принадлежать новой учётной записи. Таймер только останавливаем, а
+   последний durable checkpoint уже был сделан до смены идентичности. */
+function deactivateLessonClock() {
+  if (typeof Lesson === "undefined" || !Lesson.cur) return;
+  LessonClock.pause(Lesson.cur);
+  Lesson.cur = null;
+}
+
+function lessonDurationSec() {
+  return LessonClock.elapsedMs(typeof Lesson !== "undefined" ? Lesson.cur : null) / 1000;
+}
+
 function lessonStepType(step) {
   // Compatibility with the first declarative lesson format.
   return ({ explain: "EXPLANATION", focus: "FOCUS", input: "ACTION", summary: "FEEDBACK" }[step.type] || step.type || "EXPLANATION").toUpperCase();
@@ -3080,11 +3179,17 @@ const Lesson = {
     try { await Store.ensureDetails(); } catch (_) { toast("Не удалось загрузить урок. Проверь соединение.", "toast--error", "x"); return; }
     const lesson = DataAPI.lesson(lessonId);
     if (!lesson || !Array.isArray(lesson.steps)) return;
+    if (this.cur && this.cur.lesson.id !== lessonId) {
+      pauseLessonClock();
+      this.cur = null;
+    }
     const sourceRoute = ["path", "training"].includes(currentRoute()) ? currentRoute() : "path";
     const saved = Store.state.lessonSessions && Store.state.lessonSessions[lessonId];
+    const now = Date.now();
     this.cur = saved
-      ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now(), returnRoute: saved.returnRoute || sourceRoute }
-      : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: sourceRoute };
+      ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || now, activeMs: normalizeLessonActiveMs(saved.activeMs), activeSince: null, timerId: null, returnRoute: saved.returnRoute || sourceRoute }
+      : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: now, activeMs: 0, activeSince: null, timerId: null, returnRoute: sourceRoute };
+    LessonClock.start(this.cur);
     this.persist();
     go("lesson", lesson.id);
     if (currentRoute() === "lesson") render();
@@ -3099,10 +3204,12 @@ const Lesson = {
 
   persist() {
     if (!this.cur) return;
+    LessonClock.sync(this.cur);
     Store.state.lessonSessions = Store.state.lessonSessions || {};
     Store.state.lessonSessions[this.cur.lesson.id] = {
       idx: this.cur.idx, stepState: this.cur.stepState, xp: this.cur.xp,
       wrongAttempts: this.cur.wrongAttempts, startTs: this.cur.startTs,
+      activeMs: normalizeLessonActiveMs(this.cur.activeMs),
       returnRoute: this.cur.returnRoute || "path",
     };
     Store.save();
@@ -3124,10 +3231,16 @@ async function ensureLessonForRoute(param) {
   try { await Store.ensureDetails(); } catch (_) { return false; }
   const lesson = DataAPI.lesson(id);
   if (!lesson || !Array.isArray(lesson.steps)) return false;
+  if (Lesson.cur && Lesson.cur.lesson.id !== id) {
+    pauseLessonClock();
+    Lesson.cur = null;
+  }
   const saved = Store.state.lessonSessions && Store.state.lessonSessions[id];
+  const now = Date.now();
   Lesson.cur = saved
-    ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || Date.now(), returnRoute: saved.returnRoute || "path" }
-    : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: Date.now(), returnRoute: "path" };
+    ? { lesson, idx: Math.min(saved.idx || 0, lesson.steps.length - 1), stepState: saved.stepState || {}, xp: saved.xp || 0, wrongAttempts: saved.wrongAttempts || 0, startTs: saved.startTs || now, activeMs: normalizeLessonActiveMs(saved.activeMs), activeSince: null, timerId: null, returnRoute: saved.returnRoute || "path" }
+    : { lesson, idx: 0, stepState: {}, xp: 0, wrongAttempts: 0, startTs: now, activeMs: 0, activeSince: null, timerId: null, returnRoute: "path" };
+  LessonClock.start(Lesson.cur);
   Lesson.persist();
   return true;
 }
@@ -3199,6 +3312,7 @@ function lessonActionHtml(step, state) {
 function screenLesson(root) {
   const L = Lesson.cur;
   if (!L) { go("path"); return; }
+  LessonClock.start(L);
   const lesson = L.lesson;
   const step = Lesson.step();
   const type = lessonStepType(step);
@@ -3352,20 +3466,22 @@ function lessonPrev() {
 function lessonQuit() {
   if (!Lesson.cur) return go("path");
   const returnRoute = Lesson.cur.returnRoute || "path";
-  Lesson.persist();
+  pauseLessonClock();
   Lesson.cur = null;
   go(returnRoute);
 }
 
 function lessonFinish() {
   const L = Lesson.cur;
+  const durationSec = lessonDurationSec();
+  LessonClock.pause(L);
   const lesson = L.lesson;
   const independentStep = lesson.steps.find((step) => lessonStepType(step) === "INDEPENDENT_TASK");
   const independent = independentStep ? (L.stepState[independentStep.id] || {}) : null;
   Lesson.clearPersist(lesson.id);
   const { firstCompletion, totalXp, baseXp, stepsXp } = completeLesson(lesson, L.xp, {
     wrongAttempts: L.wrongAttempts,
-    durationSec: (Date.now() - L.startTs) / 1000,
+    durationSec,
   });
   Lesson.cur = null;
   // Экран результата — не урок: подменяем адрес без перерисовки, чтобы
@@ -3385,7 +3501,7 @@ function lessonFinish() {
       ${firstCompletion ? (() => { const b = skillProgressBreakdown(lesson.skill); return `<div style="color:var(--text-2)">Урок «${esc(lesson.title)}» завершён. Навык «${DataAPI.skill(lesson.skill).name}»: ${b.total}% освоено (теория ${b.theory}%, практика ${b.practice}%). До полного освоения осталось ${Math.max(0, 100 - b.total)}%.</div>`; })() : `<div style="color:var(--text-2)">Урок повторён. Прогресс навыка не изменился: он растёт только за первое прохождение и реальные ответы в практике.</div>`}
       <div class="result-stats">
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${lesson.steps.length}</div><div class="stat-label">шагов</div></div>
-        <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime((Date.now() - L.startTs) / 1000)}</div><div class="stat-label">время</div></div>
+        <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime(durationSec)}</div><div class="stat-label">активное время</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${L.wrongAttempts}</div><div class="stat-label">осмысленных ошибок</div></div>
       </div>
       <div class="lesson-result-note ${independent && independent.status === "solved" ? "lesson-result-note--ok" : ""}">${!independent ? `${icon("info")} В этом уроке нет самостоятельного задания.` : independent.status === "solved" ? `${icon("check")} Самостоятельное задание решено.` : `${icon("bulb")} Самостоятельное задание сохранено для повторения.`}</div>
@@ -4358,7 +4474,7 @@ async function revokeDeviceSession(id) {
       // Сессии/уроки прежнего аккаунта недействительны — сбрасываем их и
       // localStorage-слепок, иначе новый гость увидит чужие задания.
       try { Session.cur = null; } catch (_) {}
-      try { Lesson.cur = null; } catch (_) {}
+      try { deactivateLessonClock(); } catch (_) {}
       try { localStorage.removeItem("ege_core_session"); } catch (_) {}
       if (typeof pendingSubjectChoice !== "undefined") { try { pendingSubjectChoice = false; } catch (_) {} }
       try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
@@ -4507,6 +4623,7 @@ async function chooseLoginSubject(id) {
     try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
     try { Session.cur = null; } catch (_) {}
+    try { pauseLessonClock(); } catch (_) {}
     try { Lesson.cur = null; } catch (_) {}
     try { localStorage.removeItem("ege_core_session"); } catch (_) {}
     // Явный выбор может оставить адрес без смены хэша (не-onboarded предмет) —
@@ -4563,6 +4680,7 @@ async function submitLogin(event) {
     // Сессии и уроки гостя недействительны под новым аккаунтом — сбрасываем
     // до смены, иначе чужые задания/позиция (и localStorage) пережили бы вход.
     try { Session.cur = null; } catch (_) {}
+    try { deactivateLessonClock(); } catch (_) {}
     try { Lesson.cur = null; } catch (_) {}
     try { localStorage.removeItem("ege_core_session"); } catch (_) {}
     await Store.refreshAfterAuth();
@@ -4597,6 +4715,9 @@ async function submitRegister(event) {
 }
 
 async function logoutAccount() {
+  // Сначала закрываем таймер и сохраняем накопленное время ещё под старой
+  // сессией; после смены cookie persist-вызовы уже недопустимы.
+  pauseLessonClock();
   try {
     await AuthAPI.logout();
   } catch (firstError) {
@@ -4612,7 +4733,7 @@ async function logoutAccount() {
   // Сессии и уроки прежнего аккаунта недействительны — сбрасываем до смены,
   // иначе свежий гость унаследовал бы чужие задания/позицию (и localStorage).
   try { Session.cur = null; } catch (_) {}
-  try { Lesson.cur = null; } catch (_) {}
+  try { deactivateLessonClock(); } catch (_) {}
   try { localStorage.removeItem("ege_core_session"); } catch (_) {}
   // Admin-кэш прошлого аккаунта недействителен: трём до смены, чтобы чужой
   // inbox ни кадром не мелькнул в новой сессии. Флаг isAdmin приедет из
@@ -5298,14 +5419,22 @@ function bootstrapApp() {
       // перечитываем состояние с сервера, иначе stale-вкладка показывает
       // вчерашний снапшот и первым же действием перетирает сервер.
       try {
-        window.addEventListener("beforeunload", () => Store.releaseTabLeadership());
-        window.addEventListener("pagehide", () => Store.releaseTabLeadership());
+        window.addEventListener("beforeunload", () => {
+          pauseLessonClock();
+          Store.releaseTabLeadership();
+        });
+        window.addEventListener("pagehide", () => {
+          pauseLessonClock();
+          Store.releaseTabLeadership();
+        });
         window.addEventListener("storage", (e) => {
           if (e && typeof e.key === "string" && e.key.indexOf("ege_core_state_ping:") === 0) {
             Store.checkExternalUpdate().catch(() => {});
           }
         });
         document.addEventListener("visibilitychange", () => {
+          if (document.hidden) pauseLessonClock();
+          else resumeLessonClock();
           if (!document.hidden) {
             Store.checkExternalUpdate().catch(() => {});
             try { revalidateProfileAuth(); } catch (_) {}
@@ -5313,10 +5442,14 @@ function bootstrapApp() {
           }
         });
         window.addEventListener("focus", () => {
+          resumeLessonClock();
           Store.checkExternalUpdate().catch(() => {});
           try { revalidateProfileAuth(); } catch (_) {}
           try { revalidateAdminSession(); } catch (_) {}
         });
+        window.addEventListener("pageshow", () => resumeLessonClock());
+        window.addEventListener("blur", () => pauseLessonClock());
+        document.addEventListener("freeze", () => pauseLessonClock());
         scheduleAdminSessionWatch();
       } catch (_) {}
       render();
