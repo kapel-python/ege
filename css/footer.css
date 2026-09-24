@@ -1,36 +1,59 @@
 /* ============================================================
    ege easy — единый футер сайта.
    Один источник правды: разметка живёт в js/footer.js,
-   стили — здесь. Подхватывает токены хоста (лендинг / статус /
-   приложение) с безопасными фолбэками, светлую и тёмную темы —
-   через общий data-theme.
+   стили — здесь. Палитра зафиксирована на самом .ef-footer
+   (эталон — статус/404) и не зависит от токенов хоста, светлая
+   и тёмная темы — через общий data-theme.
    Новая страница: <div data-ege-footer></div> + подключить этот
    CSS и js/footer.js. Исключения — в Footer.BLACKLIST (js/footer.js).
    ============================================================ */
 
-:root{
-  --ef-page: var(--surface-0, var(--bg, #F3F5FA));
-  --ef-card: var(--surface-1, var(--surface, #FFFFFF));
-  --ef-text: var(--text, #0E1526);
-  --ef-dim: var(--text-dim, var(--text-2, #48536B));
-  --ef-faint: var(--text-faint, var(--muted, #5B6579));
-  --ef-accent: var(--accent, #0277B6);
-  --ef-accent-dim: var(--accent-dim, var(--accent-soft, rgba(2,119,182,0.10)));
-  --ef-green: var(--green, var(--success, #15803d));
-  --ef-green-dim: var(--green-dim, var(--success-soft, rgba(21,128,61,0.10)));
-  --ef-brand: var(--brand, var(--brand-green, #16a34a));
-  --ef-hair: var(--hairline, var(--border, rgba(15,23,42,0.08)));
-  --ef-border: var(--card-border, var(--border, rgba(15,23,42,0.10)));
-  --ef-hover: var(--muted-bg, var(--soft-hover, rgba(15,23,42,0.06)));
-  --ef-mborder: var(--muted-border, var(--border-strong, var(--border, rgba(15,23,42,0.12))));
-  --ef-glow-a: var(--glow-accent, var(--accent-glow, rgba(2,119,182,0.14)));
-  --ef-glow-g: var(--glow-green, rgba(21,128,61,0.12));
+/* Фиксированная палитра футера — эталон: статус/404.
+   Раньше токены пробрасывались от хоста
+   (--surface-1/--surface, --muted-bg/--soft-hover), а у приложения
+   (css/styles.css) их нет: там --surface:#12161f и --soft-hover:#222a3d
+   вместо --surface-1:#0A0D12 и --muted-bg:rgba(255,255,255,0.06).
+   Отсюда серый фон в дашборде/тренировке/профиле вместо тёмного,
+   сливающегося со страницей. Теперь фон и остальные цвета заданы
+   явно на самом .ef-footer и не зависят от страницы-хоста. */
+.ef-footer{
+  --ef-card: #FFFFFF;
+  --ef-text: #0E1526;
+  --ef-dim: #48536B;
+  --ef-faint: #5B6579;
+  --ef-accent: #0277B6;
+  --ef-accent-dim: rgba(2,119,182,0.10);
+  --ef-green: #16a34a;
+  --ef-green-dim: rgba(21,128,61,0.10);
+  --ef-brand: #16a34a;
+  --ef-hair: rgba(15,23,42,0.08);
+  --ef-border: rgba(15,23,42,0.10);
+  --ef-hover: rgba(15,23,42,0.06);
+  --ef-shade: rgba(15,23,42,0.06);
+  --ef-mborder: rgba(15,23,42,0.12);
+  --ef-glow-a: rgba(2,119,182,0.14);
+  --ef-glow-g: rgba(22,163,74,0.14);
   --ef-font: var(--font-display, var(--font, 'Manrope','Inter',-apple-system,system-ui,sans-serif));
   --ef-body: var(--font-body, var(--font, 'Inter',-apple-system,system-ui,sans-serif));
   --ef-ease: var(--ease-out, cubic-bezier(0.16,1,0.3,1));
 }
 
-:root[data-theme="dark"]{
+:root[data-theme="dark"] .ef-footer{
+  --ef-card: #0A0D12;
+  --ef-text: #F8F9FB;
+  --ef-dim: #A0A6B8;
+  --ef-faint: #666D82;
+  --ef-accent: #38BDF8;
+  --ef-accent-dim: rgba(56,189,248,0.15);
+  --ef-green: #6EE7B7;
+  --ef-green-dim: rgba(110,231,183,0.15);
+  --ef-brand: #6EE7B7;
+  --ef-hair: rgba(255,255,255,0.06);
+  --ef-border: rgba(255,255,255,0.08);
+  --ef-hover: rgba(255,255,255,0.06);
+  --ef-shade: rgba(0,0,0,0.38);
+  --ef-mborder: rgba(255,255,255,0.1);
+  --ef-glow-a: rgba(56,189,248,0.15);
   --ef-glow-g: rgba(110,231,183,0.12);
 }
 
@@ -38,7 +61,7 @@
   position: relative;
   overflow: hidden;
   border-top: 1px solid var(--ef-hair);
-  background: linear-gradient(180deg, var(--ef-hover) 0%, transparent 30%), var(--ef-card);
+  background: linear-gradient(180deg, var(--ef-shade) 0%, transparent 32%), var(--ef-card);
   color: var(--ef-text);
   font-family: var(--ef-body);
   font-size: 16px;
@@ -50,7 +73,7 @@
   position: absolute;
   top: -1px; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, transparent, #22c07a 20%, var(--ef-accent) 50%, transparent);
-  opacity: 0.7;
+  opacity: 0.45;
 }
 
 .ef-footer::after{ /* мягкие свечения */
