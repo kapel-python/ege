@@ -1041,6 +1041,13 @@ function routeParam() {
    сохраняют — цена переезжает на момент клика, где ожидание уместно. */
 const NEEDS_DETAILS = new Set(["session", "practice", "boss", "daily", "review", "lesson"]);
 
+/* Экраны, на которых пользователь действительно занимается: один общий
+   режим фокуса для урока, практики, миссии, босса и остальных заданий.
+   На мобильном в нём не показывается нижняя навигация, а на всех
+   устройствах скрывается футер — это не список с выбором раздела,
+   а непрерывная работа над конкретным заданием. */
+const TASK_FOCUS_ROUTES = new Set(["session", "practice", "boss", "daily", "review", "lesson"]);
+
 /* Маршруты с живой сессией: перезагрузка восстанавливает место, а не
    сбрасывает на список. */
 const SESSION_ROUTES = new Set(["session", "practice", "boss", "daily", "review"]);
@@ -1120,6 +1127,9 @@ async function render() {
   // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
   if (!Store.state.onboarded && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
+  // Убираем старый футер сразу, ещё до ленивой загрузки формул. На фокусных
+  // маршрутах это не даёт старому контенту мигнуть во время перехода.
+  try { if (window.Footer) Footer.sync(route); } catch (_) {}
   // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
   // меняет и потому не страдает; окно навыка для #/skill открывает конец render).
   if (location.hash !== lastHash) {
@@ -1129,12 +1139,8 @@ async function render() {
   }
   const param = routeParam();
   // Подсветка в меню: глубокий маршрут относится к своему разделу.
-  const navRoute = route === "practice" ? "training"
-    : route === "boss" || route === "daily" || route === "review" ? "trials"
-    : route === "skill" || route === "lesson" ? "path" : route;
-  renderSidebar(navRoute);
-  renderBottomNav(navRoute);
-  renderTopbar();
+  const navRoute = navRouteForRoute(route);
+  syncChromeForRoute(route, navRoute);
   updateDocumentTitle(route);
   const screen = document.getElementById("screen");
   const my = ++renderSeq;
@@ -1450,6 +1456,39 @@ function screenEmptySubject(root) {
    Chrome: sidebar / bottomnav / topbar
    ============================================================ */
 
+function navRouteForRoute(route) {
+  return route === "practice" ? "training"
+    : route === "boss" || route === "daily" || route === "review" ? "trials"
+    : route === "skill" || route === "lesson" ? "path" : route;
+}
+
+/* Один переключатель режима для всех task-экранов. На обычных маршрутах
+   класс снимается, поэтому мобильная навигация возвращается автоматически. */
+function applyTaskFocusMode(route) {
+  try {
+    const app = document.getElementById("app");
+    if (!app) return;
+    app.classList.toggle("task-focus", TASK_FOCUS_ROUTES.has(route));
+  } catch (_) {}
+}
+
+function syncChromeForRoute(route, navRoute = navRouteForRoute(route)) {
+  applyTaskFocusMode(route);
+  renderSidebar(navRoute);
+  renderBottomNav(navRoute, route);
+  renderTopbar();
+}
+
+/* После экрана результата адрес меняется через replaceState и hashchange не
+   срабатывает. Вернуть хром здесь явно, иначе скрытая на время задания
+   навигация осталась бы скрытой и на экране итогов. */
+function restoreChromeAfterResult(route) {
+  try {
+    syncChromeForRoute(route);
+    if (window.Footer) Footer.sync(route);
+  } catch (_) {}
+}
+
 function renderSidebar(active) {
   const locked = isSubjectChoiceLocked();
   try { document.getElementById("app").classList.toggle("chrome-locked", locked); } catch (_) {}
@@ -1477,23 +1516,27 @@ function renderSidebar(active) {
     <span style="font-size:11px">данные сохраняются в SQLite</span>`;
 }
 
-function renderBottomNav(active) {
+function renderBottomNav(active, route = currentRoute()) {
   const locked = isSubjectChoiceLocked();
+  const focused = TASK_FOCUS_ROUTES.has(route);
   const bottom = document.getElementById("bottomnav");
-  if (locked) {
-    // Нижнее меню на этапе выбора предмета скрываем полностью:
-    // disabled-ссылки без стилей `.bottomnav a` выглядели «сырыми».
+  if (locked || focused) {
+    // На выборе предмета и на активном задании нижнее меню скрываем полностью:
+    // disabled-ссылки без стилей `.bottomnav a` выглядели «сырыми», а на
+    // задании меню вообще не должно предлагать случайный переход.
     bottom.setAttribute("aria-disabled", "true");
+    bottom.setAttribute("aria-hidden", "true");
     bottom.setAttribute("hidden", "");
     bottom.style.display = "none";
     bottom.innerHTML = "";
     return;
   }
   bottom.removeAttribute("aria-disabled");
+  bottom.removeAttribute("aria-hidden");
   bottom.removeAttribute("hidden");
   bottom.style.display = "";
   const items = NAV.filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
-  document.getElementById("bottomnav").innerHTML = items.map((n) => `
+  bottom.innerHTML = items.map((n) => `
     <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
 }
 
@@ -2913,7 +2956,8 @@ function sessionFinish(early = false) {
   persistSession();
   // Экран результата — не сессия: подменяем адрес без перерисовки, чтобы
   // перезагрузка вела в список, а не перезапускала тренировку.
-  try { history.replaceState(null, "", "#/" + (S.mode === "boss" ? "trials" : "training")); } catch (_) {}
+  const resultRoute = S.mode === "boss" ? "trials" : "training";
+  try { history.replaceState(null, "", "#/" + resultRoute); } catch (_) {}
 
   const attemptSum = S.attemptXpSum || 0;
   const bonusSum = S.correctBonusSum || 0;
@@ -2951,7 +2995,7 @@ function sessionFinish(early = false) {
         <button class="btn btn--ghost btn--lg" onclick="go('${S.mode === "boss" ? "trials" : "training"}')">${S.mode === "boss" ? "К испытаниям" : "Ещё тренировка"}</button>
       </div>
     </div>`;
-  renderTopbar();
+  restoreChromeAfterResult(resultRoute);
 }
 
 function orderedTasks(arr) {
@@ -3326,7 +3370,8 @@ function lessonFinish() {
   Lesson.cur = null;
   // Экран результата — не урок: подменяем адрес без перерисовки, чтобы
   // перезагрузка вела в раздел, а не переоткрывала урок.
-  try { history.replaceState(null, "", "#/" + (L.returnRoute || "path")); } catch (_) {}
+  const resultRoute = L.returnRoute || "path";
+  try { history.replaceState(null, "", "#/" + resultRoute); } catch (_) {}
 
   document.getElementById("screen").innerHTML = `
     <div class="result-wrap">
@@ -3349,7 +3394,7 @@ function lessonFinish() {
         <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
       </div>
     </div>`;
-  renderTopbar();
+  restoreChromeAfterResult(resultRoute);
 }
 
 /* ============================================================

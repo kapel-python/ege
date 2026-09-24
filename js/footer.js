@@ -57,9 +57,15 @@
      - login/register/subject: вход, регистрация и выбор предмета —
        минималистичные флоу, лишний хром только отвлекает (subject
        к тому же chrome-locked до явного выбора);
+     - task-маршруты: урок, практика, миссия, босс, daily и повторение
+       ошибок — это один сфокусированный экран занятия, глобальные
+       ссылки и рекламный блок внизу здесь только отвлекают;
      - онбординг: оверлей во весь экран, render() уходит в ранний
        return до sync — плюс явный hide() в той ветке. */
-  var BLACKLIST = { login: true, register: true, subject: true };
+  var BLACKLIST = {
+    login: true, register: true, subject: true,
+    session: true, practice: true, boss: true, daily: true, review: true, lesson: true
+  };
 
   /* Ссылки платформы: внутри приложения — SPA-хэш без перезагрузки,
      снаружи — абсолютный путь на приложение. */
