@@ -54,5 +54,7 @@ sudo systemctl enable --now ege-2026.service
 
 ```bash
 node test/smoke.js
+node test/seo.js
+python3 test/support-message.py
 python3 -m py_compile server/server.py
 ```

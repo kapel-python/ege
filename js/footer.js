@@ -41,8 +41,8 @@
           '<nav class="ef-col" aria-label="Компания">' +
             "<h3>Компания</h3>" +
             "<ul>" +
-              '<li><a class="ef-link ef-link--soon" href="#" title="Страница появится позже">О нас <span class="ef-mini ef-mini--soon">скоро</span></a></li>' +
-              '<li><a class="ef-link ef-link--soon" href="#" title="Страница появится позже">Контакты <span class="ef-mini ef-mini--soon">скоро</span></a></li>' +
+              '<li><a class="ef-link" href="/about">О нас <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
+              '<li><a class="ef-link" href="/contacts">Контакты <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
               '<li><a class="ef-link" href="/status">Статус <span class="ef-mini ef-mini--live">live</span></a></li>' +
             "</ul>" +
           "</nav>" +

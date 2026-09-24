@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata as ud
 from zoneinfo import ZoneInfo
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,6 +59,23 @@ BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
 # public_base_url), поэтому физического файла в корне нет осознанно.
 PUBLIC_STATIC_FILES = {"robots.txt", "llms.txt", "site.webmanifest", "favicon.svg"}
 MAX_BODY_BYTES = 10 * 1024 * 1024
+SUPPORT_MESSAGE_MIN_LENGTH = 10
+SUPPORT_MESSAGE_MAX_LENGTH = 2000
+SUPPORT_REQUEST_MAX_BYTES = 12 * 1024
+# Attempt-based limits: every POST to the endpoint burns quota, including
+# invalid/honeypot/bot probes — otherwise a bot can enumerate for free.
+SUPPORT_ATTEMPT_BURST_MAX = 5
+SUPPORT_ATTEMPT_BURST_WINDOW_SEC = 600
+SUPPORT_ATTEMPT_HOUR_MAX = 12
+SUPPORT_ATTEMPT_WINDOW_SEC = 3600
+SUPPORT_GLOBAL_HOUR_MAX = 400
+# Proof-of-page-view: token minted on GET /contacts, must come back in both
+# the cookie and the JSON body. Min age doubles as bot dwell-time check.
+SUPPORT_FORM_COOKIE = "ege_support_form"
+SUPPORT_FORM_MIN_AGE_SEC = 4
+SUPPORT_FORM_MAX_AGE_SEC = 7200
+SUPPORT_SPAM_THRESHOLD = 50
+SUPPORT_DEDUP_WINDOW_SEC = 86400
 # Server-side caps for client-controlled collections. The client caps these
 # itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
 # with headroom, so a crafted payload can't turn one PUT into a DB write storm.
@@ -230,6 +249,11 @@ AUTH_LOGIN_WINDOW_SEC = 15 * 60
 _auth_login_failures: dict[str, list[float]] = {}
 _auth_login_lock = threading.Lock()
 AUTH_SCHEMA_DONE: set[str] = set()
+SUPPORT_SCHEMA_DONE: set[str] = set()
+_support_schema_lock = threading.Lock()
+_SUPPORT_SECRET_FALLBACK = token_hex(32)
+_support_secret_cache: dict[str, str] = {}
+_support_secret_lock = threading.Lock()
 
 
 def normalize_email(value) -> str | None:
@@ -1052,6 +1076,23 @@ CREATE TABLE IF NOT EXISTS admin_audit (
   detail TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_key TEXT NOT NULL CHECK(length(request_key) = 64),
+  message_digest TEXT NOT NULL CHECK(length(message_digest) = 64),
+  source TEXT NOT NULL DEFAULT 'contacts' CHECK(source = 'contacts'),
+  message TEXT NOT NULL CHECK(length(message) BETWEEN 10 AND 2000),
+  spam_score INTEGER NOT NULL DEFAULT 0 CHECK(spam_score BETWEEN 0 AND 100),
+  status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'reviewed', 'resolved', 'archived')),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS support_rate_hits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ident_hash TEXT NOT NULL CHECK(length(ident_hash) = 64),
+  created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_rate_hits_ident_time ON support_rate_hits(ident_hash, created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_support_rate_hits_time ON support_rate_hits(created_at_ms);
 """
 
 
@@ -1140,6 +1181,10 @@ class StateConflictError(Exception):
         self.expected_version = expected_version
         self.current_version = current_version
         super().__init__(f"state version conflict: expected {expected_version}, current {current_version}")
+
+
+class RequestBodyTooLarge(ValueError):
+    """A request body exceeded the endpoint-specific safety cap."""
 
 
 def connect() -> sqlite3.Connection:
@@ -1563,6 +1608,61 @@ def _db_key(conn: sqlite3.Connection) -> str:
         return ":memory:"
 
 
+def ensure_support_schema(conn: sqlite3.Connection) -> None:
+    """Идемпотентно создать хранилище коротких сообщений поддержки.
+
+    Таблица не связана с пользовательскими или учебными доменами и не создаёт
+    гостя: обращение остаётся полностью анонимным. Повторный запуск безопасен
+    для старой БД.
+    """
+    key = _db_key(conn)
+    with _support_schema_lock:
+        if key in SUPPORT_SCHEMA_DONE:
+            return
+        conn.executescript(SCHEMA)
+        columns = _table_columns(conn, "support_messages")
+        if "message" not in columns:
+            raise RuntimeError("support_messages is incompatible: message column is missing")
+
+        # Presence-based expand/backfill, consistent with the project's other
+        # migrations. Legacy rows are preserved and get private random dedupe
+        # keys; future writes always provide the stronger schema values.
+        additions = (
+            ("request_key", "TEXT"),
+            ("message_digest", "TEXT"),
+            ("source", "TEXT NOT NULL DEFAULT 'contacts'"),
+            ("spam_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("status", "TEXT NOT NULL DEFAULT 'new'"),
+            ("created_at", "TEXT"),
+        )
+        for column, ddl in additions:
+            if column not in columns:
+                conn.execute(f"ALTER TABLE support_messages ADD COLUMN {column} {ddl}")
+        conn.execute(
+            "UPDATE support_messages SET request_key=lower(hex(randomblob(32))) "
+            "WHERE request_key IS NULL OR length(request_key) != 64"
+        )
+        conn.execute(
+            "UPDATE support_messages SET message_digest=lower(hex(randomblob(32))) "
+            "WHERE message_digest IS NULL OR length(message_digest) != 64"
+        )
+        conn.execute("UPDATE support_messages SET source='contacts' WHERE source IS NULL OR source != 'contacts'")
+        conn.execute("UPDATE support_messages SET spam_score=0 WHERE spam_score IS NULL OR spam_score NOT BETWEEN 0 AND 100")
+        conn.execute("UPDATE support_messages SET status='new' WHERE status IS NULL OR status NOT IN ('new', 'reviewed', 'resolved', 'archived')")
+        conn.execute("UPDATE support_messages SET created_at=? WHERE created_at IS NULL OR created_at=''", (now_iso(),))
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_messages_request_key ON support_messages(request_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_support_messages_created_at ON support_messages(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_support_messages_digest_time ON support_messages(message_digest, created_at)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS support_rate_hits (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ident_hash TEXT NOT NULL CHECK(length(ident_hash) = 64),
+          created_at_ms INTEGER NOT NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_support_rate_hits_ident_time ON support_rate_hits(ident_hash, created_at_ms)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_support_rate_hits_time ON support_rate_hits(created_at_ms)")
+        conn.commit()
+        SUPPORT_SCHEMA_DONE.add(key)
+
+
 def ensure_subject_schema(conn: sqlite3.Connection) -> None:
     """Идемпотентная миграция под мультипредметность. Дешёвая при повторе."""
     key = _db_key(conn)
@@ -1645,6 +1745,7 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA)
     ensure_subject_schema(conn)
+    ensure_support_schema(conn)
     # Existing SQLite files need the new daily selection column migrated in place.
     daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
     if "task_ids_json" not in daily_columns:
@@ -2222,6 +2323,229 @@ def status_rate_ok(ip: str) -> bool:
             return True
     except Exception:
         return True
+
+
+def support_token_secret(conn: sqlite3.Connection) -> str:
+    """Stable per-deployment secret for support HMACs. Never leaves the server.
+
+    Env override wins (tests, rotation); otherwise persisted once in
+    app_config so every process/thread and restart shares it. Only the HMACs
+    derived from it ever touch the database — never the secret itself in rows.
+    """
+    env = (os.environ.get("EGE_SUPPORT_SECRET") or "").strip()
+    if env:
+        return env
+    db = _db_key(conn)
+    with _support_secret_lock:
+        cached = _support_secret_cache.get(db)
+        if cached:
+            return cached
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        row = conn.execute("SELECT value_json FROM app_config WHERE key='support_form_secret'").fetchone()
+        secret = json.loads(row["value_json"]) if row else None
+        if not isinstance(secret, str) or not secret:
+            secret = token_hex(32)
+            conn.execute("INSERT OR IGNORE INTO app_config(key, value_json) VALUES ('support_form_secret', ?)",
+                         (json.dumps(secret),))
+            conn.commit()
+            row = conn.execute("SELECT value_json FROM app_config WHERE key='support_form_secret'").fetchone()
+            secret = json.loads(row["value_json"]) if row else secret
+        if not isinstance(secret, str) or not secret:
+            return _SUPPORT_SECRET_FALLBACK
+    except (sqlite3.Error, ValueError, TypeError):
+        return _SUPPORT_SECRET_FALLBACK
+    with _support_secret_lock:
+        _support_secret_cache[db] = secret
+    return secret
+
+
+def mint_support_form_token(secret: str, issued_at: int) -> str:
+    """Stateless proof-of-page-view: timestamp + entropy + HMAC. Pure function."""
+    body = f"{int(issued_at)}.{token_hex(16)}"
+    sig = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+
+def support_form_min_age() -> int:
+    try:
+        return max(0, int(os.environ.get("EGE_SUPPORT_MIN_DWELL_SEC", SUPPORT_FORM_MIN_AGE_SEC)))
+    except (TypeError, ValueError):
+        return SUPPORT_FORM_MIN_AGE_SEC
+
+
+def validate_support_form_token(token, secret: str, now: int, min_age: int, max_age: int) -> bool:
+    """True for a genuine token whose age proves a human-scale page view."""
+    try:
+        if not isinstance(token, str):
+            return False
+        ts_s, rand, sig = token.split(".")
+        if not rand or len(rand) > 64 or any(c not in "0123456789abcdef" for c in rand.lower()):
+            return False
+        expected = hmac.new(secret.encode("utf-8"), f"{ts_s}.{rand}".encode("ascii"),
+                            hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return False
+        age = int(now) - int(ts_s)
+        return int(min_age) <= age <= int(max_age)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def support_client_ip(handler) -> str:
+    """Socket IP by default; X-Forwarded-For only behind a trusted proxy.
+
+    Blindly trusting X-Forwarded-For lets any direct client pick its own
+    bucket. Set EGE_TRUSTED_PROXY=1 only when a proxy you control overwrites
+    the header — otherwise every NAT/proxy user shares one global bucket.
+    """
+    try:
+        if os.environ.get("EGE_TRUSTED_PROXY") == "1":
+            first = (handler.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+            if first:
+                return first[:64]
+        if handler.client_address:
+            return str(handler.client_address[0])[:64]
+    except Exception:
+        pass
+    return "?"
+
+
+def support_ident_hash(secret: str, ip: str) -> str:
+    """Rate-limit identity: HMAC, so the raw IP never touches storage or logs."""
+    return hmac.new(secret.encode("utf-8"), f"support-rate:{ip or '?'}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def support_check_rate(conn: sqlite3.Connection, ident: str, now_ms: int) -> int:
+    """Record one attempt and return seconds to wait, 0 when allowed.
+
+    Persistent in SQLite: survives restarts and is shared by all threads, so
+    a bot cannot out-wait a process restart. Every POST burns quota — valid,
+    invalid and honeypot alike — otherwise probes are free.
+    """
+    try:
+        window_ms = SUPPORT_ATTEMPT_WINDOW_SEC * 1000
+        burst_ms = SUPPORT_ATTEMPT_BURST_WINDOW_SEC * 1000
+        conn.execute("DELETE FROM support_rate_hits WHERE created_at_ms < ?", (now_ms - window_ms,))
+        conn.execute("INSERT INTO support_rate_hits(ident_hash, created_at_ms) VALUES (?, ?)",
+                     (ident, now_ms))
+        burst = conn.execute("SELECT COUNT(*) AS c FROM support_rate_hits "
+                             "WHERE ident_hash=? AND created_at_ms>=?", (ident, now_ms - burst_ms)).fetchone()["c"]
+        hour = conn.execute("SELECT COUNT(*) AS c FROM support_rate_hits "
+                            "WHERE ident_hash=? AND created_at_ms>=?", (ident, now_ms - window_ms)).fetchone()["c"]
+        total = conn.execute("SELECT COUNT(*) AS c FROM support_rate_hits WHERE created_at_ms>=?",
+                             (now_ms - window_ms,)).fetchone()["c"]
+        violated_window = 0
+        if burst > SUPPORT_ATTEMPT_BURST_MAX:
+            violated_window = burst_ms
+        elif hour > SUPPORT_ATTEMPT_HOUR_MAX:
+            violated_window = window_ms
+        elif total > SUPPORT_GLOBAL_HOUR_MAX:
+            violated_window = window_ms
+            ident = None  # global flood: wait out the window, not a personal bucket
+        if not violated_window:
+            conn.commit()
+            return 0
+        if ident is None:
+            oldest = conn.execute("SELECT MIN(created_at_ms) AS m FROM support_rate_hits "
+                                  "WHERE created_at_ms>=?", (now_ms - window_ms,)).fetchone()["m"]
+        else:
+            oldest = conn.execute("SELECT MIN(created_at_ms) AS m FROM support_rate_hits "
+                                  "WHERE ident_hash=? AND created_at_ms>=?", (ident, now_ms - violated_window)).fetchone()["m"]
+        conn.commit()
+        return max(1, int((int(oldest or now_ms) + violated_window - now_ms) / 1000) + 1)
+    except sqlite3.Error:
+        try: conn.rollback()
+        except sqlite3.Error: pass
+        return 0  # Недоступность защиты не должна ломать обычную отправку.
+
+
+_SUPPORT_SPAM_KEYWORDS = ("казино", "casino", "viagra", "cialis", "порно", "porn",
+                          "эскорт", "escort", "фриспин")
+
+
+def support_spam_score(message: str) -> int:
+    """Structural spam signals → 0..100. No ML, no external calls, deterministic.
+
+    Deliberately avoids money/finance words («кредит», «ставка», «доход»):
+    those are legitimate in financial-math bug reports. Keyword hits alone
+    never reach the threshold; links/phones do the heavy lifting.
+    """
+    try:
+        score = 0
+        low = message.lower()
+        urls = re.findall(r"https?://|www\.|t\.me\b|telegram\.me\b"
+                          r"|[a-z0-9-]+\.(ru|com|net|org|io|xyz|top|site|online|store|shop|click|link)\b", low)
+        score += min(len(urls), 4) * 30
+        phones = 0
+        for run in re.findall(r"\+?[\d][\d\s\-()]{5,}[\d]", message):
+            digits = re.sub(r"\D", "", run)
+            stripped = run.strip()
+            if 10 <= len(digits) <= 12 and (stripped.startswith("+") or digits.startswith(("7", "8", "9"))
+                                            or "(" in run or "-" in run):
+                phones += 1
+        score += min(phones, 3) * 25
+        if re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", message):
+            score += 15
+        letters = [c for c in message if c.isalpha()]
+        if len(letters) >= 20 and sum(1 for c in letters if c.isupper()) / len(letters) > 0.6:
+            score += 15
+        if re.search(r"(.)\1{4,}", message):
+            score += 10
+        words = re.findall(r"[a-zа-яё0-9]+", low)
+        if len(words) >= 8 and len(set(words)) / len(words) < 0.35:
+            score += 20
+        if any(keyword in low for keyword in _SUPPORT_SPAM_KEYWORDS):
+            score += 25
+        return min(score, 100)
+    except Exception:
+        return 0
+
+
+def normalize_support_message(value) -> str | None:
+    """Validate and normalize a one-way support note without rendering it."""
+    if not isinstance(value, str):
+        return None
+    message = ud.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n").strip())
+    if not SUPPORT_MESSAGE_MIN_LENGTH <= len(message) <= SUPPORT_MESSAGE_MAX_LENGTH:
+        return None
+    # Padding with spaces still counts as garbage: require real content.
+    if sum(1 for char in message if not char.isspace()) < SUPPORT_MESSAGE_MIN_LENGTH:
+        return None
+    # Разрешены только переносы строк и табуляция. Bidi-управляющие символы
+    # также запрещены: иначе поддержка может прочитать текст иначе, чем автор.
+    bidi_controls = {
+        "\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",
+        "\u2066", "\u2067", "\u2068", "\u2069",
+    }
+    if any(ud.category(char) == "Cc" and char not in "\n\t" for char in message) or any(char in bidi_controls for char in message):
+        return None
+    return message
+
+
+def normalize_support_request_id(value) -> str | None:
+    """Client-generated idempotency key: random and safe to hash before storage."""
+    if not isinstance(value, str) or not 16 <= len(value) <= 128:
+        return None
+    if not value.isascii() or any(not (char.isalnum() or char in "_-") for char in value):
+        return None
+    return value
+
+
+def strict_json_object(pairs):
+    """Object hook that rejects duplicate JSON keys instead of last-wins."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value):
+    """Reject non-standard JSON constants accepted by Python by default."""
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def current_subject_for(conn: sqlite3.Connection, user_id: int) -> str:
@@ -3639,7 +3963,9 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
 class Handler(BaseHTTPRequestHandler):
     server_version = "EGECore/1.0"
 
-    def send_json(self, payload: dict, status: int = 200, token: str | None = None, admin_cookie: str | None = None, clear_session: bool = False):
+    def send_json(self, payload: dict, status: int = 200, token: str | None = None,
+                  admin_cookie: str | None = None, clear_session: bool = False,
+                  headers: dict[str, str] | None = None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         # Каталог и состояние — самый тяжёлый JSON (~280 КБ): gzip сжимает
         # его в ~4 раза. Клиенты без Accept-Encoding получают как раньше.
@@ -3656,6 +3982,8 @@ class Handler(BaseHTTPRequestHandler):
         if token: self.send_header("Set-Cookie", self.session_cookie_attrs(token))
         elif clear_session: self.send_header("Set-Cookie", self.session_cookie_clear_attrs())
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
+        for name, value in (headers or {}).items():
+            self.send_header(name, str(value))
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data)))
@@ -3666,7 +3994,35 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
 
-    def read_json(self):
+    def serve_not_found_page(self):
+        """Фирменная страница 404 вместо текстовой заглушки BaseHTTPRequestHandler.
+
+        Отдаёт 404.html с честным статусом 404 (не 200): поисковики не
+        индексируют мусор, а пользователь видит живую страницу ege easy
+        с понятным путём назад. Никогда не бросает: в худшем случае —
+        старая заглушка send_error, но тоже с правильным статусом.
+        """
+        try:
+            data = (ROOT / "404.html").read_bytes()
+        except OSError:
+            self.send_error(404); return
+        accept = self.headers.get("Accept-Encoding", "") or ""
+        encoding = None
+        if len(data) > 1024 and "gzip" in accept.lower():
+            data = gzip.compress(data, compresslevel=5)
+            encoding = "gzip"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Robots-Tag", "noindex, nofollow")
+        self.send_security_headers()
+        if encoding: self.send_header("Content-Encoding", encoding)
+        self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers(); self.wfile.write(data)
+
+    def read_json(self, max_bytes: int = MAX_BODY_BYTES, *,
+                  object_pairs_hook=None, parse_constant=None, utf8_only: bool = False):
         # A client can declare an absurd Content-Length and make a handler
         # thread block on a body that never arrives; refuse oversized or
         # malformed bodies outright (state snapshots are far below this cap).
@@ -3674,11 +4030,19 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except (TypeError, ValueError):
             raise ValueError("invalid Content-Length")
-        if length > MAX_BODY_BYTES:
-            raise ValueError("request body too large")
+        if length > max_bytes:
+            raise RequestBodyTooLarge("request body too large")
         if length < 0:
             raise ValueError("invalid Content-Length")
-        return json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length)
+        if utf8_only:
+            raw = raw.decode("utf-8")
+        options = {}
+        if object_pairs_hook is not None:
+            options["object_pairs_hook"] = object_pairs_hook
+        if parse_constant is not None:
+            options["parse_constant"] = parse_constant
+        return json.loads(raw or b"{}", **options)
 
     # ------------------------------------------------------------------
     # Admin session middleware
@@ -3929,8 +4293,200 @@ class Handler(BaseHTTPRequestHandler):
             admin_audit(conn, user_id, "admin-logout", user_id)
         self.send_json({"ok": True}, admin_cookie=self.admin_cookie_attrs(None, 0))
 
+    def support_request_is_same_origin(self) -> bool:
+        """Reject browser cross-site posts while allowing non-browser clients."""
+        if (self.headers.get("Sec-Fetch-Site", "") or "").lower() == "cross-site":
+            return False
+        origin = (self.headers.get("Origin", "") or "").strip()
+        if not origin:
+            return True
+        try:
+            parsed = urlparse(origin)
+            expected = urlparse(public_base_url(self))
+            return (
+                parsed.scheme in ("http", "https")
+                and parsed.scheme.lower() == expected.scheme.lower()
+                and parsed.netloc.lower() == expected.netloc.lower()
+            )
+        except (TypeError, ValueError):
+            return False
+
+    def support_form_cookie_attrs(self, value: str) -> str:
+        # Cookie читается фронтом для double-submit, поэтому без HttpOnly.
+        # SameSite=Lax + привязка токена к подписи закрывают CSRF с чужих сайтов.
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return f"{SUPPORT_FORM_COOKIE}={value}; Path=/; SameSite=Lax; Max-Age={SUPPORT_FORM_MAX_AGE_SEC}{secure}"
+
+    def send_support_form_cookie(self) -> None:
+        """Proof-of-page-view для быстрой формы: stateless HMAC-токен в
+        читаемой cookie. POST требует тот же токен в теле — бот без чтения
+        страницы и cookie-jar отсекается до хранилища. Никогда не бросает:
+        страница обязана отдаваться даже без cookie, фронт сам попросит
+        обновиться."""
+        try:
+            form_conn = connect()
+            try:
+                form_token = mint_support_form_token(
+                    support_token_secret(form_conn), int(time.time()))
+            finally:
+                form_conn.close()
+            self.send_header("Set-Cookie", self.support_form_cookie_attrs(form_token))
+        except Exception:
+            pass
+
+    def handle_support_message(self, conn: sqlite3.Connection) -> None:
+        """Store one anonymous/public short note; there is deliberately no GET API."""
+        if not self.support_request_is_same_origin():
+            self.send_json({"error": "Cross-site requests are not allowed"}, 403)
+            return
+        content_type_raw = (self.headers.get("Content-Type", "") or "").strip()
+        content_type_parts = [part.strip() for part in content_type_raw.split(";")]
+        content_type = content_type_parts[0].lower() if content_type_parts else ""
+        charset_ok = True
+        for parameter in content_type_parts[1:]:
+            if parameter.lower().startswith("charset="):
+                charset_ok = parameter.split("=", 1)[1].strip('"').lower() in ("utf-8", "utf8")
+        content_encoding = (self.headers.get("Content-Encoding", "") or "").strip().lower()
+        if content_type != "application/json" or not charset_ok or content_encoding not in ("", "identity"):
+            self.send_json({"error": "Expected an uncompressed UTF-8 JSON request"}, 415)
+            return
+
+        ensure_support_schema(conn)
+        secret = support_token_secret(conn)
+        ident = support_ident_hash(secret, support_client_ip(self))
+        now_ms = int(time.time() * 1000)
+        try:
+            payload = self.read_json(
+                SUPPORT_REQUEST_MAX_BYTES,
+                object_pairs_hook=strict_json_object,
+                parse_constant=reject_json_constant,
+                utf8_only=True,
+            )
+        except RequestBodyTooLarge:
+            support_check_rate(conn, ident, now_ms)
+            self.send_json({"error": "Сообщение слишком длинное"}, 413)
+            return
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError, RecursionError):
+            support_check_rate(conn, ident, now_ms)
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            support_check_rate(conn, ident, now_ms)
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+
+        # Attempt-лимит считается для каждого разобранного POST — валидного,
+        # невалидного и honeypot: иначе бот перебирает бесплатно.
+        retry_after = support_check_rate(conn, ident, now_ms)
+        if retry_after:
+            self.send_json(
+                {"error": "Слишком много сообщений. Попробуй немного позже.", "retryAfter": retry_after},
+                429,
+                headers={"Retry-After": str(retry_after)},
+            )
+            return
+
+        # Honeypot: бот получает нейтральный успех, но строка не сохраняется.
+        if payload.get("website") not in (None, ""):
+            self.send_json({"ok": True}, 202)
+            return
+        if set(payload) - {"message", "requestId", "formToken", "website"}:
+            self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400)
+            return
+
+        # Proof-of-page-view: токен должен прийти и в cookie, и в теле, совпасть
+        # и иметь человеческий возраст. Один curl без чтения /contacts отсекается.
+        form_token = payload.get("formToken")
+        cookie_token = cookie_value(self, SUPPORT_FORM_COOKIE)
+        try:
+            tokens_match = (isinstance(form_token, str) and isinstance(cookie_token, str)
+                            and hmac.compare_digest(form_token, cookie_token))
+        except (TypeError, ValueError):
+            tokens_match = False
+        if not tokens_match or not validate_support_form_token(
+                cookie_token, secret, int(time.time()),
+                support_form_min_age(), SUPPORT_FORM_MAX_AGE_SEC):
+            self.send_json({"error": "Страница устарела — обнови её и попробуй ещё раз.",
+                            "code": "form_token"}, 400)
+            return
+
+        message = normalize_support_message(payload.get("message"))
+        request_id = normalize_support_request_id(payload.get("requestId"))
+        if message is None:
+            self.send_json(
+                {"error": f"Сообщение должно содержать от {SUPPORT_MESSAGE_MIN_LENGTH} "
+                          f"до {SUPPORT_MESSAGE_MAX_LENGTH} символов"},
+                400,
+            )
+            return
+        if request_id is None:
+            self.send_json({"error": "Некорректный идентификатор отправки"}, 400)
+            return
+
+        request_key = hashlib.sha256(request_id.encode("ascii")).hexdigest()
+        message_digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
+        previous = conn.execute(
+            "SELECT message_digest FROM support_messages WHERE request_key=?",
+            (request_key,),
+        ).fetchone()
+        if previous:
+            if hmac.compare_digest(previous["message_digest"], message_digest):
+                self.send_json({"ok": True}, 202)
+            else:
+                self.send_json({"error": "Идентификатор отправки уже использован"}, 409)
+            return
+
+        # Spray-защита: тот же текст с новым ключом в пределах суток — не новая
+        # запись, а нейтральный успех. Рассылку это душит, честных не задевает:
+        # повтор своей же неотправленной мысли вернёт тот же 202.
+        duplicate = conn.execute(
+            "SELECT id FROM support_messages WHERE message_digest=? AND CAST(created_at AS INTEGER)>=?",
+            (message_digest, now_ms - SUPPORT_DEDUP_WINDOW_SEC * 1000),
+        ).fetchone()
+        if duplicate:
+            self.send_json({"ok": True}, 202)
+            return
+
+        spam_score = support_spam_score(message)
+        try:
+            conn.execute(
+                "INSERT INTO support_messages(request_key, message_digest, source, message, spam_score, created_at) "
+                "VALUES (?, ?, 'contacts', ?, ?, ?)",
+                (request_key, message_digest, message, spam_score, now_iso()),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # Параллельный повтор того же requestId: одна запись уже создана.
+            conn.rollback()
+            previous = conn.execute(
+                "SELECT message_digest FROM support_messages WHERE request_key=?",
+                (request_key,),
+            ).fetchone()
+            if previous and hmac.compare_digest(previous["message_digest"], message_digest):
+                self.send_json({"ok": True}, 202)
+            else:
+                self.send_json({"error": "Идентификатор отправки уже использован"}, 409)
+            return
+        self.send_json({"ok": True}, 202)
+
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/support/messages":
+            conn = connect()
+            try:
+                self.handle_support_message(conn)
+            except RuntimeError:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": "Форма временно недоступна. Попробуй ещё раз."}, 503)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                status = 503 if "locked" in str(exc).lower() or "busy" in str(exc).lower() else 500
+                self.send_json({"error": "Сообщение не удалось сохранить. Попробуй ещё раз."}, status)
+            finally:
+                conn.close()
+            return
         if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout"):
             conn = connect()
             try:
@@ -4125,6 +4681,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             conn = connect()
             try:
+                # Write-only support endpoint: reject reads before the generic
+                # API fallback can mint a guest user or set a session cookie.
+                if path == "/api/support/messages":
+                    self.send_json({"error": "Not found"}, 404)
+                    return
                 from urllib.parse import parse_qs
                 query = parse_qs(urlparse(self.path).query)
                 req_subject = query.get("subject", [None])[0]
@@ -4187,6 +4748,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "admin.html"
         elif path == '/status':
             file_path = ROOT / "status.html"
+        elif path == '/contacts':
+            file_path = ROOT / "contacts.html"
+        elif path == '/about':
+            file_path = ROOT / "about.html"
         elif path == "/sitemap.xml":
             # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
             # а домен зависит от деплоя — берём его из хоста запроса
@@ -4219,10 +4784,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(403); return
         suffix = file_path.suffix.lower()
         if suffix in BLOCKED_STATIC_SUFFIXES and file_path.name not in PUBLIC_STATIC_FILES:
-            self.send_error(404); return
+            self.serve_not_found_page(); return
         if any(part.startswith(".") or part in BLOCKED_STATIC_DIRS for part in rel.parts[:-1]) or (rel.parts and rel.parts[-1].startswith(".")):
-            self.send_error(404); return
-        if not file_path.is_file(): self.send_error(404); return
+            self.serve_not_found_page(); return
+        if not file_path.is_file(): self.serve_not_found_page(); return
         content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
         data = file_path.read_bytes()
         # ETag по хешу содержимого: повторные заходы отдают 304 без тела.
@@ -4230,7 +4795,10 @@ class Handler(BaseHTTPRequestHandler):
         # заново качал ~1.5 МБ JS (jsxgraph 947 КБ + katex 269 КБ + app 141 КБ).
         etag = f'"{hashlib.sha1(data).hexdigest()[:27]}"'
         if self.headers.get("If-None-Match") == etag:
-            self.send_response(304); self.send_header("ETag", etag); self.end_headers(); return
+            self.send_response(304); self.send_header("ETag", etag)
+            if file_path.name == "contacts.html":
+                self.send_support_form_cookie()
+            self.end_headers(); return
         # Вендорные библиотеки и шрифты меняются почти никогда — долгий кэш.
         # HTML — всегда свежий. Наш js/css: revalidate через ETag (304 без тела,
         # если не менялся) — правки видны сразу после обычного reload, ручной
@@ -4250,8 +4818,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
         # Приватные зоны не индексируются: дублируем meta robots HTTP-заголовком,
         # чтобы и прямые запросы /index.html и /admin.html были закрыты.
-        if path in ("/dashboard", "/admin") or file_path.name in ("index.html", "admin.html", "status.html"):
+        if path in ("/dashboard", "/admin", "/contacts") or file_path.name in ("index.html", "admin.html", "status.html", "contacts.html", "about.html", "404.html"):
             self.send_header("X-Robots-Tag", "noindex, nofollow")
+        if file_path.name == "contacts.html":
+            self.send_support_form_cookie()
         if encoding: self.send_header("Content-Encoding", encoding)
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
