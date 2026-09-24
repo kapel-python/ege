@@ -228,7 +228,6 @@ function renderShell(activeSection, screenHTML) {
           <div style="display:flex;gap:6px;margin-top:4px">
             <button class="btn btn--soft btn--sm" id="themeBtn" title="Переключить тему">${aicon(AdminTheme.current() === "dark" ? "sun" : "moon")}</button>
             <button class="btn btn--soft btn--sm" id="logoutBtn">Выйти ${aicon("logout")}</button>
-            <a class="btn btn--soft btn--sm" href="/dashboard" style="text-decoration:none">К приложению</a>
           </div>
         </div>
       </aside>
@@ -236,6 +235,7 @@ function renderShell(activeSection, screenHTML) {
         <header class="admin-topbar">
           <span class="admin-topbar__title">${esc(SECTIONS.find((s) => s.id === activeSection)?.title || "Пользователь")}</span>
           <span class="admin-topbar__spacer"></span>
+          <a class="btn btn--primary btn--sm admin-topbar__return" href="/dashboard" aria-label="Вернуться в приложение">${aicon("back")}<span>Вернуться в приложение</span></a>
           <span class="chip chip--accent hide-mobile">ADMIN</span>
         </header>
         <main class="admin-screen" id="adminScreen">${screenHTML}</main>
