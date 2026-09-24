@@ -84,7 +84,8 @@ SUPPORT_SPAM_THRESHOLD = 50
 SUPPORT_DEDUP_WINDOW_SEC = 86400
 # Server-side caps for client-controlled collections. The client caps these
 # itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
-# with headroom, so a crafted payload can't turn one PUT into a DB write storm.MAX_COUNTER_VALUE = 10**9
+# with headroom, so a crafted payload can't turn one PUT into a DB write storm.
+MAX_COUNTER_VALUE = 10**9
 MAX_TASK_ATTEMPTS = 20000
 MAX_ERRORS = 5000
 MAX_TIMELINE = 200
