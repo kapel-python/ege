@@ -674,6 +674,17 @@ def admin_session_user(conn: sqlite3.Connection, user_id: int, admin_token: str 
     return {"id": row["id"], "expiresAt": int(row["expires_at"])}
 
 
+def is_admin_session(conn: sqlite3.Connection, user_id: int | None, admin_token: str | None) -> bool:
+    """Read-only admin probe reusing the exact same server-side check as
+    require_admin: True only when this exact user holds a live, unexpired
+    admin_sessions row for the presented token. Never mints accounts or
+    sessions, so it is safe on public endpoints to expose a plain boolean
+    flag. SQLite errors propagate to the caller's 503 path, like elsewhere."""
+    if user_id is None:
+        return False
+    return admin_session_user(conn, user_id, admin_token) is not None
+
+
 def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str | None:
     jar = cookies.SimpleCookie(handler.headers.get("Cookie", ""))
     morsel = jar.get(name)
@@ -3414,6 +3425,76 @@ def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
     return tasks
 
 
+# Read-only inbox for the dashboard admin block ("Обращения").
+# Pagination keeps the dashboard from loading the whole table; newest first.
+SUPPORT_INBOX_DEFAULT_LIMIT = 20
+SUPPORT_INBOX_MAX_LIMIT = 100
+SUPPORT_INBOX_STATUSES = ("new", "reviewed", "resolved", "archived")
+# Порядок групп в общей ленте: непрочитанные сверху, дальше прочитанные,
+# решённые и архив. Внутри группы — новые сверху (id DESC).
+SUPPORT_INBOX_GROUP_SQL = (
+    "CASE status WHEN 'new' THEN 0 WHEN 'reviewed' THEN 1 "
+    "WHEN 'resolved' THEN 2 ELSE 3 END"
+)
+
+
+def admin_support_inbox(conn: sqlite3.Connection, limit: int, offset: int, status: str = "all") -> dict:
+    """One slice of anonymous contact messages, newest first.
+
+    Only ever called behind require_admin. Exposes no internal dedupe keys
+    (request_key/message_digest stay server-side) and no user linkage — the
+    table is deliberately anonymous: id/message/status/created_at only.
+    status="all" returns the full feed grouped by status (new -> reviewed ->
+    resolved -> archived, newest first inside each group), so the admin panel
+    can render separate blocks; a concrete status filters the feed (the
+    dashboard inbox reads only "new", so read items never reappear).
+    newCount is always the global unread count for the header badge."""
+    ensure_support_schema(conn)
+    if status == "all":
+        where: str = ""
+        args: tuple = ()
+        order = f"{SUPPORT_INBOX_GROUP_SQL}, id DESC"
+    else:
+        where, args = "WHERE status=?", (status,)
+        order = "id DESC"
+    total = conn.execute(f"SELECT COUNT(*) AS c FROM support_messages {where}", args).fetchone()["c"]
+    new_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM support_messages WHERE status='new'").fetchone()["c"]
+    rows = conn.execute(
+        "SELECT id, message, status, created_at FROM support_messages "
+        f"{where} ORDER BY {order} LIMIT ? OFFSET ?",
+        (*args, limit, offset),
+    ).fetchall()
+    return {
+        "messages": [
+            {"id": r["id"], "message": r["message"], "status": r["status"],
+             "createdAt": timestamp_value(r["created_at"])}
+            for r in rows
+        ],
+        "total": total,
+        "newCount": new_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def admin_support_mark_read(conn: sqlite3.Connection, message_id: int) -> str:
+    """Mark one contact message as read (new -> reviewed). Idempotent: any
+    other status is returned unchanged, so double clicks and races are safe.
+    Raises KeyError when the id does not exist. Only called behind
+    require_admin; the state change is audited like other admin writes."""
+    ensure_support_schema(conn)
+    row = conn.execute("SELECT status FROM support_messages WHERE id=?", (message_id,)).fetchone()
+    if not row:
+        raise KeyError(message_id)
+    if row["status"] == "new":
+        conn.execute("UPDATE support_messages SET status='reviewed' WHERE id=? AND status='new'",
+                     (message_id,))
+        conn.commit()
+        return "reviewed"
+    return row["status"]
+
+
 def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     def one(sql, *args):
         return conn.execute(sql, args).fetchone()
@@ -4809,10 +4890,46 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path == "/api/admin/login": self.handle_admin_login(conn)
                 else: self.handle_admin_logout(conn)
-            except (ValueError, KeyError, sqlite3.Error) as exc:
+            except sqlite3.Error as exc:
+                rid = log_request_error("admin-login", exc)
+                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
+        if path.startswith("/api/admin/support-messages/"):
+            # POST /api/admin/support-messages/<id>/read — отметить обращение
+            # прочитанным (new -> reviewed). Идемпотентно: повтор возвращает
+            # текущий статус. За тем же require_admin, что весь /admin.
+            parts = path.split("/")
+            if len(parts) == 6 and parts[5] == "read":
+                conn = connect()
+                try:
+                    auth = self.require_admin(conn)
+                    if not auth: return
+                    actor_id, _ = auth
+                    try:
+                        message_id = int(parts[4]) if parts[4].isdigit() else -1
+                    except (TypeError, ValueError):
+                        message_id = -1
+                    if message_id <= 0:
+                        self.send_json({"error": "Некорректный идентификатор"}, 400); return
+                    try:
+                        final = admin_support_mark_read(conn, message_id)
+                    except KeyError:
+                        self.send_json({"error": "Обращение не найдено"}, 404); return
+                    admin_audit(conn, actor_id, "support-read", None, f"message {message_id}")
+                    self.send_json({"ok": True, "id": message_id, "status": final})
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("admin-inbox", exc)
+                    self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                    "ref": rid}, 500)
+                finally: conn.close()
+                return
+            self.send_json({"error": "Not found"}, 404); return
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
@@ -4933,8 +5050,15 @@ class Handler(BaseHTTPRequestHandler):
                                 "catalog": catalog_summary_payload(conn, subject),
                                 "state": read_state(conn, user_id, subject),
                                 "accountId": account_id_for(conn, user_id),
-                                "auth": auth_state_payload(conn, user_id)}, token=token)
-            except (ValueError, KeyError, sqlite3.Error) as exc:
+                                "auth": auth_state_payload(conn, user_id),
+                                "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))}, token=token)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("subject", exc)
+                self.send_json({"error": "Не удалось переключить предмет. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
@@ -4991,6 +5115,27 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"entries": admin_audit_list(conn)}); return
                 if path == "/api/admin/blocked-tasks":
                     self.send_json({"tasks": admin_blocked_tasks(conn)}); return
+                if path == "/api/admin/support-messages":
+                    # Read-only inbox for the dashboard admin block. Same
+                    # require_admin gate as every other /api/admin/* endpoint:
+                    # guests, regular users, spoofed or expired sessions get
+                    # the 401 above, never this payload.
+                    from urllib.parse import parse_qs
+                    args = parse_qs(parsed.query)
+                    try:
+                        raw_limit = args.get("limit", [None])[0]
+                        raw_offset = args.get("offset", [None])[0]
+                        limit = SUPPORT_INBOX_DEFAULT_LIMIT if raw_limit is None else int(str(raw_limit).strip())
+                        offset = 0 if raw_offset is None else int(str(raw_offset).strip())
+                    except (TypeError, ValueError, AttributeError):
+                        self.send_json({"error": "Некорректные параметры пагинации"}, 400); return
+                    if not 1 <= limit <= SUPPORT_INBOX_MAX_LIMIT or not 0 <= offset <= 1_000_000_000:
+                        self.send_json({"error": "Некорректные параметры пагинации"}, 400); return
+                    raw_status = args.get("status", [None])[0]
+                    status = "all" if raw_status is None else str(raw_status).strip()
+                    if status != "all" and status not in SUPPORT_INBOX_STATUSES:
+                        self.send_json({"error": "Некорректный статус"}, 400); return
+                    self.send_json(admin_support_inbox(conn, limit, offset, status)); return
                 parts = path.split("/")
                 if len(parts) == 5 and parts[3] == "users":
                     target_id = resolve_admin_target(conn, parts[4])
@@ -5046,16 +5191,36 @@ class Handler(BaseHTTPRequestHandler):
                 # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
-                    self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None}); return
+                    self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None,
+                                    "isAdmin": is_admin_session(conn, auth_uid, cookie_value(self, ADMIN_COOKIE_NAME))}); return
                 # Устройства: только свои активные сессии, без минта аккаунта.
                 if path == "/api/auth/devices":
                     try:
                         self.handle_auth_devices_list(conn)
-                    except (ValueError, KeyError, sqlite3.Error) as exc:
+                    except sqlite3.Error as exc:
+                        try: conn.rollback()
+                        except sqlite3.Error: pass
+                        rid = log_request_error("devices", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500)
+                    except (ValueError, KeyError) as exc:
                         try: conn.rollback()
                         except sqlite3.Error: pass
                         self.send_json({"error": f"Request failed: {exc}"}, 400)
                     return
+                # Liveness/readiness-проба: только чтение БД и manifest, аккаунт
+                # не заводится, ничего не пишется — безопасна для мониторинга.
+                if path == "/api/health":
+                    try:
+                        self.send_json(health_payload())
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("health", exc)
+                        self.send_json({"ok": False,
+                                        "error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 503)
+                    return
+                if path in ("/api/bootstrap", "/api/bootstrap-lite", "/api/subjects"):
+                    if self.api_rate_limited(): return
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
                     self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
@@ -5066,9 +5231,21 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     catalog = catalog_summary_payload(conn, eff) if path == "/api/bootstrap-lite" else catalog_payload(conn, eff)
+                    # isAdmin — только boolean, решённый сервером через ту же
+                    # admin_sessions-проверку, что и require_admin. Никаких
+                    # admin-данных в bootstrap нет: inbox грузится отдельным
+                    # защищённым запросом и только для администратора.
                     self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id),
-                                    "auth": auth_state_payload(conn, user_id)}, token=token); return
+                                    "auth": auth_state_payload(conn, user_id),
+                                    "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
+            except sqlite3.Error as exc:
+                rid = log_request_error("api-get", exc)
+                try:
+                    self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                    "ref": rid}, 503)
+                except (OSError, ValueError):
+                    pass
             finally: conn.close()
         if path == '/':
             file_path = ROOT / "main.html"
@@ -5206,16 +5383,32 @@ class Handler(BaseHTTPRequestHandler):
             conn.rollback()
             self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
                             "currentVersion": exc.current_version}, 409)
-        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+        except sqlite3.Error as exc:
+            conn.rollback()
+            rid = log_request_error("patch", exc)
+            locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+            self.send_json({"error": "Изменения не сохранены. Попробуй ещё раз.",
+                            "ref": rid}, 503 if locked else 500)
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
             conn.rollback(); self.send_json({"error": f"Patch was not saved: {exc}"}, 400)
         finally: conn.close()
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/admin/support-messages"):
+            # Пишущий метод у inbox один — POST .../read. Явный 405 вместо
+            # молчания (do_PUT иначе не отвечает на неизвестные пути).
+            conn = connect()
+            try:
+                if not self.require_admin(conn): return
+                self.send_json({"error": "Method not allowed"}, 405)
+            finally: conn.close()
+            return
         if path.startswith("/api/admin/users/"):
             # PUT /api/admin/users/<ref>/profile
             parts = path.split("/")
             if len(parts) == 6 and parts[5] == "profile":
+                if self.api_rate_limited(): return
                 conn = connect()
                 try:
                     auth = self.require_admin(conn)

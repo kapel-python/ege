@@ -455,7 +455,110 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     border-radius: 10px;
   }
   .admin-bottomnav a svg { width: 20px; height: 20px; }
+  .admin-bottomnav a span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9.5px;
+    letter-spacing: -0.01em;
+  }
   .admin-bottomnav a.active { color: var(--accent); }
   .a-toast-root { bottom: 74px; right: 14px; left: 14px; }
   .a-toast { max-width: none; }
+}
+
+/* ---------- inbox: обращения со страницы «Контакты» ---------- */
+
+.a-msg {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+.a-msg:hover { border-color: var(--border-strong); }
+.a-msg.open { border-color: var(--accent-ring); }
+.a-msg__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.a-msg__head-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.a-msg__meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.a-msg__text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.a-msg.open .a-msg__text {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.a-msg__full {
+  border-top: 1px solid var(--border);
+  padding: 10px 16px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.a-msg__full-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.a-msg__full-row span { color: var(--muted); flex-shrink: 0; }
+.a-msg__full-row b { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.a-msg__actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+/* Блоки-группы вкладки «Все»: новые сверху, прочитанные ниже и т.д. */
+.a-msg-group { margin-bottom: 20px; }
+.a-msg-group:last-child { margin-bottom: 0; }
+.a-msg-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.a-msg-group__count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.a-msg-group .a-msg:last-child { margin-bottom: 0; }
+
+@media (max-width: 768px) {
+  .a-msg__head { padding: 11px 13px; }
+  .a-msg__full { padding: 9px 13px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a-msg { transition: none; }
 }

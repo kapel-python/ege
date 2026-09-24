@@ -2137,3 +2137,187 @@ body {
 @media (max-width: 640px) {
   .stats-teaser__metrics--6 { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ============================================================
+   Admin Inbox — «Обращения» поверх дашборда (только администратор)
+   Премиальная карточка в дизайн-системе: те же токены, радиусы и чипы,
+   что у остального дашборда; светлая/тёмная темы — через переменные.
+   Блок рендерится только при Store.isAdmin, обычным пользователям
+   в DOM не попадает вообще.
+   ============================================================ */
+.admin-inbox {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 18px;
+  border-color: var(--accent-ring);
+}
+.admin-inbox::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--violet), var(--success));
+}
+.aib-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.aib-badge {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--violet));
+  box-shadow: 0 8px 20px -8px var(--accent-glow);
+}
+.aib-badge svg { width: 22px; height: 22px; }
+.aib-head__titles { flex: 1; min-width: 0; }
+.aib-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.aib-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.aib-admin-chip { flex-shrink: 0; }
+.aib-counts-row { margin-top: 12px; }
+.aib-counts {
+  display: inline-block;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+.aib-counts b { color: var(--text); }
+.aib-counts--loading { color: var(--muted); }
+.aib-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.aib-msg {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+  transition: border-color .15s ease;
+}
+.aib-msg:hover { border-color: var(--border-strong); }
+.aib-msg.open { border-color: var(--accent-ring); }
+.aib-msg__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.aib-msg__head-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.aib-msg__meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aib-msg__text {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.aib-msg.open .aib-msg__text {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.aib-pill { flex-shrink: 0; margin-top: 2px; }
+.aib-msg__full {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.aib-msg__full-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.aib-msg__full-row span { color: var(--muted); flex-shrink: 0; }
+.aib-msg__full-row b { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.aib-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.aib-empty {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+}
+.aib-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 12px;
+  font-size: 13.5px;
+  color: var(--danger-ink);
+  text-align: center;
+}
+.aib-skeleton {
+  height: 76px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
+  background-size: 200% 100%;
+  animation: aib-pulse 1.4s ease-in-out infinite;
+}
+@keyframes aib-pulse {
+  0% { background-position: 0% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (max-width: 480px) {
+  .admin-inbox { padding: 16px; }
+  .aib-badge { width: 38px; height: 38px; border-radius: 11px; }
+  .aib-badge svg { width: 19px; height: 19px; }
+  .aib-title { font-size: 16px; }
+  .aib-msg__head { padding: 11px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aib-skeleton { animation: none; }
+}
+.aib-msg__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}

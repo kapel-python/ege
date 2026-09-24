@@ -37,6 +37,7 @@ const ICONS = {
   tablet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg>',
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
   desktop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
+  inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
 };
 
 function icon(name) {
@@ -1535,6 +1536,275 @@ function renderTopbar() {
    Screen: Главная
    ============================================================ */
 
+/* ============================================================
+   Admin Inbox — «Обращения» поверх дашборда (только администратор)
+   Витрина сообщений со страницы «Контакты»:
+   - блок рендерится, только когда сервер в bootstrap прислал
+     isAdmin: true (решает backend через admin_sessions, фронт лишь
+     отображает; из localStorage флаг никогда не читается);
+   - лента — только НЕПРОЧИТАННЫЕ (GET .../support-messages?status=new
+     за тем же require_admin, что у всей /admin);
+   - единственное действие — «Прочитано» (POST .../<id>/read: new ->
+     reviewed, идемпотентно). Прочитанное исчезает из ленты и больше
+     в блоке не появляется; в БД строка остаётся. Никаких reply/edit/
+     delete/email/Telegram действий;
+   - раскрытие карточек и «показать ещё» — локальное состояние UI.
+   ============================================================ */
+
+const AdminInbox = {
+  messages: [],
+  total: 0,
+  newCount: 0,
+  limit: 20,
+  hasMore: false,
+  loading: false,
+  loadingMore: false,
+  error: null,
+  accountId: null, // чей кэш лежит в messages; смена аккаунта → сброс
+  expanded: {}, // id -> true, переживает перерисовки дашборда
+  reading: {}, // id -> true, пока летит POST .../read (защита от даблклика)
+  reset() {
+    this.messages = [];
+    this.total = 0;
+    this.newCount = 0;
+    this.hasMore = false;
+    this.loading = false;
+    this.loadingMore = false;
+    this.error = null;
+    this.accountId = null;
+    this.expanded = {};
+    this.reading = {};
+  },
+};
+
+const ADMIN_INBOX_STATUS = { new: "Новый", reviewed: "Просмотрено", resolved: "Решено", archived: "В архиве" };
+
+function adminInboxVisible() {
+  try { return Store.isAdmin === true; } catch (_) { return false; }
+}
+
+function formatInboxDate(ts) {
+  const ms = Number(ts);
+  if (!ms) return "—";
+  try {
+    return new Date(ms).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch (_) { return String(ts); }
+}
+
+function adminInboxMessageHTML(m) {
+  const id = Number(m.id) || 0;
+  const open = !!AdminInbox.expanded[id];
+  const status = ADMIN_INBOX_STATUS[m.status] || String(m.status || "—");
+  const isNew = m.status === "new";
+  return `
+  <article class="aib-msg${open ? " open" : ""}">
+    <button type="button" class="aib-msg__head" onclick="toggleAdminMessage(${id})"
+        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}">
+      <span class="aib-msg__head-main">
+        <span class="aib-msg__meta">${esc(formatInboxDate(m.createdAt))} · № ${id}</span>
+        <span class="aib-msg__text">${esc(m.message || "")}</span>
+      </span>
+      ${isNew ? `<span class="chip chip--accent aib-pill">Новый</span>` : `<span class="chip aib-pill">${esc(status)}</span>`}
+    </button>
+    ${open ? `<div class="aib-msg__full">
+      <div class="aib-msg__full-row"><span>Статус</span><b>${esc(status)}</b></div>
+      <div class="aib-msg__full-row"><span>Получено</span><b>${esc(formatInboxDate(m.createdAt))}</b></div>
+      <div class="aib-msg__full-row"><span>Номер</span><b class="mono">№ ${id}</b></div>
+      <div class="aib-msg__actions">
+        <button class="btn btn--soft btn--sm" type="button" data-aib-read="${id}"
+            onclick="markAdminMessageRead(${id})"${AdminInbox.reading[id] ? " disabled" : ""}>${icon("check")} Прочитано</button>
+      </div>
+    </div>` : ""}
+  </article>`;
+}
+
+function adminInboxListHTML() {
+  if (AdminInbox.loading && !AdminInbox.messages.length) {
+    return `<div class="aib-skeleton" aria-hidden="true"></div><div class="aib-skeleton" aria-hidden="true"></div>`;
+  }
+  if (AdminInbox.error && !AdminInbox.messages.length) {
+    return `<div class="aib-error"><span>${esc(AdminInbox.error)}</span> <button class="btn btn--ghost btn--sm" type="button" onclick="refreshAdminInbox(true)">Попробовать снова</button></div>`;
+  }
+  if (!AdminInbox.messages.length) {
+    return `<div class="aib-empty">Новых обращений нет.</div>`;
+  }
+  return AdminInbox.messages.map(adminInboxMessageHTML).join("");
+}
+
+function adminInboxFootHTML() {
+  if (AdminInbox.error && AdminInbox.messages.length) {
+    return `<div class="aib-more aib-error"><span>${esc(AdminInbox.error)}</span> <button class="btn btn--ghost btn--sm" type="button" onclick="loadMoreAdminInbox()">Ещё раз</button></div>`;
+  }
+  if (AdminInbox.loadingMore) return `<div class="aib-more"><span class="aib-counts">загружаем…</span></div>`;
+  if (AdminInbox.hasMore) {
+    const left = Math.max(0, AdminInbox.total - AdminInbox.messages.length);
+    return `<div class="aib-more"><button class="btn btn--ghost btn--sm" type="button" onclick="loadMoreAdminInbox()">Показать ещё${left > 0 ? ` · осталось ${left}` : ""}</button></div>`;
+  }
+  return "";
+}
+
+function adminInboxCountsHTML() {
+  if (AdminInbox.accountId === null && !AdminInbox.messages.length) {
+    return `<span class="aib-counts aib-counts--loading">загружаем…</span>`;
+  }
+  // Лента — только новые: счётчик один, честный с сервера.
+  return `<span class="aib-counts"><b class="mono">${AdminInbox.newCount}</b>&nbsp;новых</span>`;
+}
+
+function adminInboxHTML() {
+  // Не админ — блока нет в DOM вообще (не скрыт CSS, а не отрендерен),
+  // и fetch ниже не выполняется: обычный пользователь не получает ни
+  // разметки, ни данных обращений.
+  if (!adminInboxVisible()) return "";
+  return `
+  <section class="card card--glow admin-inbox" id="adminInbox" aria-label="Обращения пользователей">
+    <div class="aib-head">
+      <span class="aib-badge" aria-hidden="true">${icon("inbox")}</span>
+      <div class="aib-head__titles">
+        <div class="aib-title">Обращения</div>
+        <div class="aib-sub">со страницы «Контакты» · отметь прочитанное, чтобы скрыть</div>
+      </div>
+      <span class="chip chip--accent aib-admin-chip">ADMIN</span>
+    </div>
+    <div class="aib-counts-row">${adminInboxCountsHTML()}</div>
+    <div class="aib-list" id="adminInboxList">${adminInboxListHTML()}</div>
+    <div class="aib-foot" id="adminInboxFoot">${adminInboxFootHTML()}</div>
+  </section>`;
+}
+
+function paintAdminInbox() {
+  try {
+    const box = document.getElementById("adminInbox");
+    if (!box || !adminInboxVisible()) return;
+    const counts = box.querySelector(".aib-counts-row");
+    const list = document.getElementById("adminInboxList");
+    const foot = document.getElementById("adminInboxFoot");
+    if (counts) counts.innerHTML = adminInboxCountsHTML();
+    if (list) list.innerHTML = adminInboxListHTML();
+    if (foot) foot.innerHTML = adminInboxFootHTML();
+  } catch (_) {}
+}
+
+/* 401/403 от inbox-эндпоинта = сервер не признал admin-сессию (истекла,
+   отозвана, чужая). Безопасное состояние: флаг сбрасываем, кэш трём,
+   блок убираем из DOM точечно, без полного ререндера посреди тренировки. */
+function adminInboxAuthFail(error) {
+  if (error && (error.status === 401 || error.status === 403)) {
+    try { Store.isAdmin = false; } catch (_) {}
+    try { AdminInbox.reset(); } catch (_) {}
+    try {
+      const node = document.getElementById("adminInbox");
+      if (node) node.remove();
+    } catch (_) {}
+    return true;
+  }
+  return false;
+}
+
+async function fetchAdminInboxPage(offset, append) {
+  const payload = await ApiClient.get(`/api/admin/support-messages?limit=${AdminInbox.limit}&offset=${offset}&status=new`);
+  const list = Array.isArray(payload.messages) ? payload.messages : [];
+  AdminInbox.messages = append ? AdminInbox.messages.concat(list) : list;
+  AdminInbox.total = Number(payload.total) || 0;
+  AdminInbox.newCount = Number(payload.newCount) || 0;
+  AdminInbox.hasMore = AdminInbox.messages.length < AdminInbox.total;
+  try { AdminInbox.accountId = Store.accountId || null; } catch (_) {}
+}
+
+async function refreshAdminInbox(force) {
+  if (!adminInboxVisible() || AdminInbox.loading) return;
+  try {
+    if (Store.accountId !== AdminInbox.accountId) AdminInbox.reset();
+  } catch (_) { AdminInbox.reset(); }
+  if (!force && AdminInbox.messages.length) {
+    // Кэш уже на экране: тихо сверяем первую страницу (свежие счётчики),
+    // раскрытые карточки при этом не схлопываем, скелетон не показываем.
+    try { await fetchAdminInboxPage(0, false); } catch (error) {
+      if (adminInboxAuthFail(error)) return;
+    }
+    paintAdminInbox();
+    return;
+  }
+  AdminInbox.loading = true;
+  AdminInbox.error = null;
+  paintAdminInbox();
+  try {
+    await fetchAdminInboxPage(0, false);
+  } catch (error) {
+    if (adminInboxAuthFail(error)) return;
+    AdminInbox.error = "Не удалось загрузить обращения.";
+  }
+  AdminInbox.loading = false;
+  paintAdminInbox();
+}
+
+async function loadMoreAdminInbox() {
+  if (!adminInboxVisible() || AdminInbox.loadingMore || !AdminInbox.hasMore) return;
+  AdminInbox.loadingMore = true;
+  AdminInbox.error = null;
+  try {
+    const foot = document.getElementById("adminInboxFoot");
+    if (foot) foot.innerHTML = adminInboxFootHTML();
+  } catch (_) {}
+  try {
+    await fetchAdminInboxPage(AdminInbox.messages.length, true);
+  } catch (error) {
+    if (adminInboxAuthFail(error)) return;
+    AdminInbox.error = "Не удалось догрузить обращения.";
+  }
+  AdminInbox.loadingMore = false;
+  paintAdminInbox();
+}
+
+/* Единственное пишущее действие inbox: отметить обращение прочитанным.
+   Сервер переводит new -> reviewed идемпотентно; лента status=new его
+   больше не отдаёт, поэтому после успеха тихо перечитываем первую
+   страницу — счётчики и порядок всегда честные, раскрытые соседние
+   карточки не схлопываем. Даблклик и гонки закрыты флагом reading. */
+async function markAdminMessageRead(id) {
+  id = Number(id) || 0;
+  if (!id || !adminInboxVisible() || AdminInbox.reading[id]) return;
+  AdminInbox.reading[id] = true;
+  try {
+    const btn = document.querySelector(`[data-aib-read="${id}"]`);
+    if (btn) btn.disabled = true;
+  } catch (_) {}
+  try {
+    await ApiClient.post(`/api/admin/support-messages/${id}/read`, {});
+    delete AdminInbox.expanded[id];
+    await fetchAdminInboxPage(0, false);
+    paintAdminInbox();
+    try { toast("Обращение отмечено прочитанным", "", "check"); } catch (_) {}
+  } catch (error) {
+    if (adminInboxAuthFail(error)) return;
+    try { toast("Не удалось отметить обращение. Попробуй ещё раз.", "toast--error", "x"); } catch (_) {}
+    paintAdminInbox();
+  } finally {
+    delete AdminInbox.reading[id];
+  }
+}
+
+function queueAdminInboxLoad() {
+  if (!adminInboxVisible()) return;
+  try {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => refreshAdminInbox(false), { timeout: 1500 });
+    else setTimeout(() => refreshAdminInbox(false), 50);
+  } catch (_) {
+    refreshAdminInbox(false);
+  }
+}
+
+function toggleAdminMessage(id) {
+  id = Number(id) || 0;
+  if (!id) return;
+  if (AdminInbox.expanded[id]) delete AdminInbox.expanded[id];
+  else AdminInbox.expanded[id] = true;
+  try {
+    const box = document.getElementById("adminInboxList");
+    if (box && adminInboxVisible()) box.innerHTML = adminInboxListHTML();
+  } catch (_) {}
+}
+
 function screenDashboard(root) {
   const s = Store.state;
   const li = levelInfo();
@@ -1573,6 +1843,7 @@ function screenDashboard(root) {
     .slice(0, 4);
 
   root.innerHTML = `
+    ${adminInboxHTML()}
     <div class="page-head">
       <div class="page-title">Главная</div>
       <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось ${egeCountdownLabel()}</div>
@@ -1713,6 +1984,9 @@ function screenDashboard(root) {
         </div>
       </div>
     </div>`;
+  // Inbox догружается отдельным защищённым запросом и только для
+  // администратора; обычные пользователи этот fetch не выполняют вообще.
+  try { queueAdminInboxLoad(); } catch (_) {}
 }
 
 /* Исполнитель шага из умного блока: кандидаты пересчитываются в момент
@@ -3680,8 +3954,20 @@ function revalidateProfileAuth() {
     const reg = !!(u && u.registered);
     const email = (u && u.email) || null;
     const cur = Store.auth || { registered: false, email: null };
-    if (!!cur.registered === reg && (cur.email || null) === email) return;
+    if (!!cur.registered === reg && (cur.email || null) === email) {
+      // Auth-срез совпал, но серверный isAdmin мог измениться в другой вкладке
+      // (вход в /admin): синхронизируем молча, без перерисовки посреди профиля.
+      if (session && typeof session.isAdmin === "boolean" && Store.isAdmin !== session.isAdmin) {
+        Store.isAdmin = session.isAdmin;
+        if (!session.isAdmin) { try { AdminInbox.reset(); } catch (_) {} }
+      }
+      return;
+    }
     Store.auth = { registered: reg, email };
+    if (session && typeof session.isAdmin === "boolean" && Store.isAdmin !== session.isAdmin) {
+      Store.isAdmin = session.isAdmin;
+      if (!session.isAdmin) { try { AdminInbox.reset(); } catch (_) {} }
+    }
     const busy = (typeof Session !== "undefined" && Session && Session.cur)
       || (typeof Lesson !== "undefined" && Lesson && Lesson.cur);
     if (!busy && typeof currentRoute === "function" && currentRoute() === "profile") {
@@ -4241,6 +4527,10 @@ async function logoutAccount() {
   try { Session.cur = null; } catch (_) {}
   try { Lesson.cur = null; } catch (_) {}
   try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+  // Admin-кэш прошлого аккаунта недействителен: трём до смены, чтобы чужой
+  // inbox ни кадром не мелькнул в новой сессии. Флаг isAdmin приедет из
+  // свежего bootstrap через refreshAfterAuth — fail-closed.
+  try { AdminInbox.reset(); } catch (_) {}
   await Store.refreshAfterAuth();
   toast("Вы вышли из аккаунта. Прогресс аккаунта сохранён на сервере.", "", "check");
   go("login");
