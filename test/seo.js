@@ -86,10 +86,14 @@ t("сервер: X-Robots-Tag noindex для API", (() => {
   const i = server.indexOf("no-store");
   return i > 0 && server.slice(i, i + 400).includes("X-Robots-Tag");
 })());
-t("сервер: X-Robots-Tag noindex для /dashboard и /admin",
-  server.includes('path in ("/dashboard", "/admin")') && server.includes('"X-Robots-Tag", "noindex, nofollow"'));
+t("сервер: X-Robots-Tag noindex для /dashboard, /admin и /contacts",
+  server.includes('path in ("/dashboard", "/admin", "/contacts")') && server.includes('"X-Robots-Tag", "noindex, nofollow"'));
 t("сервер: www-дубль клеится 301 на apex", server.includes('bare.startswith("www.")') &&
   server.includes('self.send_response(301)') && server.includes('"Location", "//" + apex'));
+t("сервер: маршрут /about отдаёт about.html", server.includes('path == \'/about\'') &&
+  server.includes('ROOT / "about.html"'));
+t("сервер: несуществующие URL отдают фирменную 404", server.includes("serve_not_found_page") &&
+  server.includes('ROOT / "404.html"') && exists("404.html") && exists("about.html"));
 
 console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
 process.exit(fails ? 1 : 0);
