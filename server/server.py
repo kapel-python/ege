@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -51,8 +52,13 @@ ACCOUNT_ID_MAX_ATTEMPTS = 25
 # Static-file allowlist guardrails: anything under these top-level directories,
 # any dot-prefixed path and these file types are never served over HTTP. The DB
 # file alone (session tokens!) makes this a hard requirement, not a nicety.
-BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui"}
-BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt"}
+BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui", "backups"}
+BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt",
+                            ".wal", ".shm", ".journal", ".bak", ".tmp", ".log",
+                            ".swp", ".swx"}
+# Хвосты SQLite без точки (ege.sqlite3-wal/-shm/-journal): Path.suffix их не
+# ловит, поэтому проверяем окончание имени отдельно (см. _is_blocked_static).
+BLOCKED_STATIC_TAILS = ("-wal", "-shm", "-journal", ".bak", ".tmp", ".swp")
 # Публичные SEO/мета-файлы, которым разрешено жить под заблокированными
 # суффиксами (.txt): robots.txt и llms.txt отдаются статикой. sitemap.xml
 # отдаётся динамически из do_GET (абсолютные URL от хоста запроса, см.
@@ -78,8 +84,7 @@ SUPPORT_SPAM_THRESHOLD = 50
 SUPPORT_DEDUP_WINDOW_SEC = 86400
 # Server-side caps for client-controlled collections. The client caps these
 # itself (taskAttempts 5000, timeline 40, ...) — these are anti-abuse ceilings
-# with headroom, so a crafted payload can't turn one PUT into a DB write storm.
-MAX_COUNTER_VALUE = 10**9
+# with headroom, so a crafted payload can't turn one PUT into a DB write storm.MAX_COUNTER_VALUE = 10**9
 MAX_TASK_ATTEMPTS = 20000
 MAX_ERRORS = 5000
 MAX_TIMELINE = 200
@@ -92,6 +97,55 @@ MAX_TIMELINE_TEXT = 1000
 MAX_FORECAST_HISTORY = 500
 MAX_ACTIVITY_DAYS = 2000
 MAX_STATE_DICT = 2000
+
+# ---------------------------------------------------------------------------
+# Global API flood guard.
+#
+# Точечные лимиты (auth/admin/support/status) уже есть, но горячие доменные
+# endpoints (bootstrap, events, PATCH) их не имели: один флудер с ротацией
+# cookie мог минтить аккаунты и жечь CPU/диск без ограничений. Общий per-IP
+# bucket (300 запросов/мин — живые пользователи его не замечают) + жёсткий
+# cap конкурентных запросов (Semaphore: лишние получают честный 503, а не
+# вешают ThreadingHTTPServer) + таймаут чтения сокета против Slowloris.
+# ---------------------------------------------------------------------------
+API_RATE_MAX = 300
+API_RATE_WINDOW_SEC = 60.0
+_api_hits: dict[str, list[float]] = {}
+_api_lock = threading.Lock()
+MAX_CONCURRENT_REQUESTS = 64
+_REQUEST_SLOTS = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
+SOCKET_READ_TIMEOUT_SEC = 30.0
+# Статика читается целиком в память потоком: файл больше капа не отдаём.
+STATIC_MAX_BYTES = 8 * 1024 * 1024
+
+
+def api_rate_ok(ip: str) -> bool:
+    """True, если с IP ещё можно обслуживать доменный API. Не бросает."""
+    try:
+        now = time.time()
+        key = str(ip or "?")
+        with _api_lock:
+            recent = [t for t in _api_hits.get(key, []) if now - t < API_RATE_WINDOW_SEC]
+            if len(recent) >= API_RATE_MAX:
+                _api_hits[key] = recent
+                return False
+            recent.append(now)
+            _api_hits[key] = recent
+            return True
+    except Exception:
+        return True
+
+
+def log_request_error(label: str, exc: BaseException) -> str:
+    """Лог внутренней ошибки с коротким ref. Клиенту ref отдаём, текст — нет:
+    тексты sqlite3.Error светят схему/пути/состояние блокировок."""
+    rid = token_hex(4)
+    try:
+        print(f"EGE CORE error {rid} [{label}]: {type(exc).__name__}: {exc}",
+              file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    return rid
 
 # ---------------------------------------------------------------------------
 # Multi-subject model.
@@ -910,10 +964,31 @@ def restart_active_systemd_unit() -> bool:
     return True
 
 
+class QuietHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer, не спамящий трейсбеком на обрыв клиента.
+
+    Флудер, рвущий соединения (или получатель 429/503, ушедший до ответа),
+    иначе заливает лог килобайтами BrokenPipeError — шум, за которым не
+    видно настоящих ошибок, и медленное раздувание /var/log.
+    """
+
+    def handle_error(self, request, client_address):
+        _, exc, _ = sys.exc_info()
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        super().handle_error(request, client_address)
+
+
 def create_http_server(host: str, port: int) -> ThreadingHTTPServer:
     """Bind the port, replacing only a legacy instance of this script."""
     try:
-        return ThreadingHTTPServer((host, port), Handler)
+        httpd = QuietHTTPServer((host, port), Handler)
+        httpd.request_queue_size = 64
+        return httpd
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
@@ -928,7 +1003,7 @@ def create_http_server(host: str, port: int) -> ThreadingHTTPServer:
             _stop_process(pid, timeout)
         time.sleep(0.1)
         try:
-            return ThreadingHTTPServer((host, port), Handler)
+            return QuietHTTPServer((host, port), Handler)
         except OSError as retry_exc:
             raise RuntimeError(f"cannot bind {host}:{port} after stopping the old process") from retry_exc
 
@@ -1189,12 +1264,93 @@ class RequestBodyTooLarge(ValueError):
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = _open_db()
+    except sqlite3.DatabaseError as exc:
+        # Самовосстановление при битой БД: «database is locked» сюда не
+        # попадает (это transient, не порча) — восстанавливаемся только когда
+        # файл не база, образ повреждён или схемы нет вообще.
+        if not any(h in str(exc).lower() for h in _DB_RECOVERY_HINTS):
+            raise
+        with _DB_RECOVERY_LOCK:
+            try:
+                probe = _open_db()
+                try:
+                    probe.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                    return probe
+                except sqlite3.DatabaseError:
+                    try:
+                        probe.close()
+                    except sqlite3.Error:
+                        pass
+                    raise
+            except sqlite3.DatabaseError:
+                pass
+            mod = backup_mod()
+            if mod is not None:
+                try:
+                    print(f"EGE CORE self-heal: {exc}; restoring", file=sys.stderr, flush=True)
+                    mod.ensure_db_healthy()
+                except Exception as rec_exc:
+                    print(f"EGE CORE self-heal failed: {rec_exc}", file=sys.stderr, flush=True)
+        return _open_db()
+    if _has_core_schema(conn):
+        return conn
+    # Файл цел, но схемы нет: БД удалили под работающим сервером (создался
+    # пустой файл) или установка не завершена. Один шанс восстановиться.
+    with _DB_RECOVERY_LOCK:
+        try:
+            if _has_core_schema(conn):
+                return conn
+        except sqlite3.DatabaseError:
+            pass
+        mod = backup_mod()
+        if mod is not None:
+            try:
+                print("EGE CORE self-heal: core schema missing; restoring",
+                      file=sys.stderr, flush=True)
+                mod.ensure_db_healthy()
+            except Exception as rec_exc:
+                print(f"EGE CORE self-heal failed: {rec_exc}", file=sys.stderr, flush=True)
+    try:
+        fresh = _open_db()
+    except sqlite3.DatabaseError:
+        return conn
+    try:
+        conn.close()
+    except sqlite3.Error:
+        pass
+    return fresh
+
+
+def _has_core_schema(conn: sqlite3.Connection) -> bool:
+    """True, когда в БД есть таблица users. Дешёвый маркер «схема на месте»:
+    без неё любой запрос всё равно упадёт с 'no such table'."""
+    try:
+        row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+        return row is not None
+    except sqlite3.DatabaseError:
+        return False
+
+
+def _open_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 10000")
+    # WAL: читатели не блокируют писателя и наоборот — меньше «database is
+    # locked» под параллельными сейвами; долговечность — synchronous=NORMAL
+    # (контрольные точки WAL сохраняют данные, катастрофа уровня ОС
+    # покрывается бэкапами, а не ценой latency каждого коммита).
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     ensure_user_indexes(conn)
     return conn
+
+
+_DB_RECOVERY_LOCK = threading.Lock()
+_DB_RECOVERY_HINTS = ("file is not a database", "database disk image is malformed",
+                      "no such table")
 
 
 # Все таблицы прогресса читаются/пишутся строго по user_id (read_state делает
@@ -3960,8 +4116,102 @@ def validate_state(conn: sqlite3.Connection, state: dict) -> None:
         if not isinstance(adj, dict) or not isinstance(adj.get("amount", 0), (int, float)): raise ValueError("invalid xp adjustment")
 
 
+def _is_blocked_static(file_path: Path) -> bool:
+    """True для служебных файлов: БД и её хвосты, бэкапы, временные файлы."""
+    name = file_path.name.lower()
+    if any(s in BLOCKED_STATIC_SUFFIXES for s in file_path.suffixes):
+        return True
+    return name.endswith(BLOCKED_STATIC_TAILS)
+
+
+_BACKUP_MOD = None
+
+
+def backup_mod():
+    """Ленивая загрузка server/backup.py (рядом с этим файлом). None, если
+    модуль недоступен — сервер работает дальше, но без автобэкапов."""
+    global _BACKUP_MOD
+    if _BACKUP_MOD is None:
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "ege_backup", Path(__file__).resolve().parent / "backup.py")
+            if spec is None or spec.loader is None:
+                raise ImportError("no spec for backup.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _BACKUP_MOD = mod
+        except Exception as exc:
+            print(f"EGE CORE backups disabled: {exc}", file=sys.stderr, flush=True)
+            _BACKUP_MOD = False
+    return _BACKUP_MOD or None
+
+
+def health_payload() -> dict:
+    """Срез для /api/health: только чтение, аккаунт не заводится, не пишет."""
+    uptime = 0
+    try:
+        uptime = int((dt.datetime.now(dt.timezone.utc) - SERVER_STARTED_AT).total_seconds())
+    except Exception:
+        pass
+    db: dict = {"exists": False, "sizeBytes": 0, "integrity": "unknown"}
+    try:
+        exists = DB_PATH.exists()
+        db["exists"] = bool(exists)
+        if exists:
+            try:
+                db["sizeBytes"] = DB_PATH.stat().st_size
+            except OSError:
+                pass
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5.0)
+            try:
+                row = conn.execute("PRAGMA quick_check").fetchone()
+                db["integrity"] = "ok" if row and row[0] == "ok" else "corrupt"
+            finally:
+                conn.close()
+        else:
+            db["integrity"] = "missing"
+    except sqlite3.Error:
+        db["integrity"] = "corrupt"
+    backup: dict = {}
+    mod = backup_mod()
+    if mod is not None:
+        try:
+            backup = mod.backup_status()
+        except Exception:
+            backup = {}
+    return {"ok": db["integrity"] == "ok", "uptimeSec": uptime,
+            "db": db, "backup": backup}
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "EGECore/1.0"
+    server_version = "EGE"
+    sys_version = ""
+
+    def setup(self):
+        # Таймаут чтения против Slowloris: заявленный Content-Length без тела
+        # держит поток максимум столько, а не вечно.
+        try:
+            self.connection.settimeout(SOCKET_READ_TIMEOUT_SEC)
+        except (OSError, AttributeError):
+            pass
+        super().setup()
+
+    def handle_one_request(self):
+        # Cap конкурентности: при исчерпании слотов — честный 503 с
+        # Retry-After и закрытием соединения, а не очередь до OOM.
+        if not _REQUEST_SLOTS.acquire(blocking=False):
+            try:
+                self.send_json({"error": "Сервер перегружен. Попробуй ещё раз.",
+                                "retryAfter": 5}, 503, headers={"Retry-After": "5"})
+            except (OSError, ValueError):
+                pass
+            self.close_connection = True
+            return
+        try:
+            super().handle_one_request()
+        finally:
+            _REQUEST_SLOTS.release()
 
     def send_json(self, payload: dict, status: int = 200, token: str | None = None,
                   admin_cookie: str | None = None, clear_session: bool = False,
@@ -3993,6 +4243,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        # Страницы и API — только свои ресурсы: блокируем object/frame,
+        # инлайн-скрипты/стили нужны самому приложению, поэтому разрешены.
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; img-src 'self' data:; "
+                         "style-src 'self' 'unsafe-inline'; "
+                         "script-src 'self' 'unsafe-inline'; "
+                         "object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        self.send_header("Permissions-Policy",
+                         "camera=(), microphone=(), geolocation=(), payment=()")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        try:
+            https = (self.headers.get("X-Forwarded-Proto") == "https"
+                     or os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1")
+        except Exception:
+            https = False
+        if https:
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
 
     def serve_not_found_page(self):
         """Фирменная страница 404 вместо текстовой заглушки BaseHTTPRequestHandler.
@@ -4021,6 +4288,34 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers(); self.wfile.write(data)
 
+    def send_rate_limited(self) -> None:
+        """Честный 429 для API-флуда. Никогда не бросает."""
+        try:
+            body = json.dumps(
+                {"error": "Слишком много запросов. Попробуй через несколько секунд.",
+                 "retryAfter": 10}, ensure_ascii=False).encode("utf-8")
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_security_headers()
+            self.send_header("Retry-After", "10")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body)
+        except (OSError, ValueError):
+            pass
+
+    def api_rate_limited(self) -> bool:
+        """True + отправленный 429, если IP исчерпал общий API-бакет."""
+        try:
+            ip = support_client_ip(self)
+        except Exception:
+            ip = "?"
+        if api_rate_ok(ip):
+            return False
+        self.send_rate_limited()
+        return True
+
     def read_json(self, max_bytes: int = MAX_BODY_BYTES, *,
                   object_pairs_hook=None, parse_constant=None, utf8_only: bool = False):
         # A client can declare an absurd Content-Length and make a handler
@@ -4034,7 +4329,10 @@ class Handler(BaseHTTPRequestHandler):
             raise RequestBodyTooLarge("request body too large")
         if length < 0:
             raise ValueError("invalid Content-Length")
-        raw = self.rfile.read(length)
+        try:
+            raw = self.rfile.read(length)
+        except (socket.timeout, TimeoutError, OSError) as exc:
+            raise ValueError(f"request body timed out: {exc}") from exc
         if utf8_only:
             raw = raw.decode("utf-8")
         options = {}
@@ -4493,7 +4791,14 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/auth/register": self.handle_auth_register(conn)
                 elif path == "/api/auth/login": self.handle_auth_login(conn)
                 else: self.handle_auth_logout(conn)
-            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("auth", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
@@ -4534,14 +4839,21 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         result = admin_delete_user(conn, target_id, actor_id)
                     self.send_json(result)
-                except (ValueError, KeyError, sqlite3.Error) as exc:
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("admin-users", exc)
+                    self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                    "ref": rid}, 500)
+                except (ValueError, KeyError) as exc:
                     try: conn.rollback()
                     except sqlite3.Error: pass
                     status = 404 if isinstance(exc, KeyError) else 400
-                    self.send_json({"error": str(exc)}, status)
+                    self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status)
                 finally: conn.close()
                 return
         if path == "/api/errors":
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
@@ -4553,11 +4865,18 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback()
                 self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
                                 "currentVersion": exc.current_version}, 409)
-            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+            except sqlite3.Error as exc:
+                conn.rollback()
+                rid = log_request_error("errors", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Ошибка не сохранена. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
                 conn.rollback(); self.send_json({"error": f"Error was not saved: {exc}"}, 400)
             finally: conn.close()
             return
         if path.startswith("/api/events/"):
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
@@ -4580,7 +4899,13 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback()
                 self.send_json({"error": "State conflict", "expectedVersion": exc.expected_version,
                                 "currentVersion": exc.current_version}, 409)
-            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, sqlite3.Error, json.JSONDecodeError) as exc:
+            except sqlite3.Error as exc:
+                conn.rollback()
+                rid = log_request_error("events", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "События не сохранены. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
                 conn.rollback(); self.send_json({"error": f"Events were not saved: {exc}"}, 400)
             finally: conn.close()
             return
@@ -4592,6 +4917,7 @@ class Handler(BaseHTTPRequestHandler):
             # /api/catalog-tasks + /api/catalog-lessons (см. ensureDetails),
             # поэтому клик по предмету не виснет на синхронном скачивании
             # и парсинге ~300 КБ полного каталога.
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
@@ -4675,7 +5001,11 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Пользователь не найден"}, 404); return
                     self.send_json({"user": detail}); return
                 self.send_json({"error": "Not found"}, 404); return
-            except (ValueError, KeyError, sqlite3.Error) as exc:
+            except sqlite3.Error as exc:
+                rid = log_request_error("admin-get", exc)
+                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
                 self.send_json({"error": f"Request failed: {exc}"}, 500)
             finally: conn.close()
         if path.startswith("/api/"):
@@ -4783,9 +5113,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(403); return
         suffix = file_path.suffix.lower()
-        if suffix in BLOCKED_STATIC_SUFFIXES and file_path.name not in PUBLIC_STATIC_FILES:
+        if _is_blocked_static(file_path) and file_path.name not in PUBLIC_STATIC_FILES:
             self.serve_not_found_page(); return
         if any(part.startswith(".") or part in BLOCKED_STATIC_DIRS for part in rel.parts[:-1]) or (rel.parts and rel.parts[-1].startswith(".")):
+            self.serve_not_found_page(); return
+        # Симлинк внутри корня, указывающий наружу, уже отсечён resolve()+
+        # relative_to выше (403); оставшиеся симлинки не обслуживаем вовсе,
+        # чтобы подмена файла по ссылке не обходила allowlist по расширению.
+        if file_path.is_symlink(): self.serve_not_found_page(); return
+        try:
+            if file_path.stat().st_size > STATIC_MAX_BYTES:
+                self.serve_not_found_page(); return
+        except OSError:
             self.serve_not_found_page(); return
         if not file_path.is_file(): self.serve_not_found_page(); return
         content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
@@ -4828,6 +5167,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if self.api_rate_limited(): return
         conn = connect()
         try:
             user_id, token = user_for(conn, self)
@@ -4891,11 +5231,17 @@ class Handler(BaseHTTPRequestHandler):
                     result = admin_update_profile(conn, target_id, payload)
                     admin_audit(conn, actor_id, "update-profile", target_id, json.dumps({k: v for k, v in payload.items() if k in ("name", "selfLevel", "goal")}, ensure_ascii=False))
                     self.send_json(result)
-                except (ValueError, KeyError, sqlite3.Error) as exc:
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("admin-profile", exc)
+                    self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                    "ref": rid}, 500)
+                except (ValueError, KeyError) as exc:
                     try: conn.rollback()
                     except sqlite3.Error: pass
                     status = 404 if isinstance(exc, KeyError) else 400
-                    self.send_json({"error": str(exc)}, status)
+                    self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status)
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
@@ -4923,7 +5269,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 try:
                     self.handle_auth_device_revoke(conn, session_id)
-                except (ValueError, KeyError, sqlite3.Error) as exc:
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("device-revoke", exc)
+                    self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                    "ref": rid}, 500)
+                except (ValueError, KeyError) as exc:
                     try: conn.rollback()
                     except sqlite3.Error: pass
                     self.send_json({"error": f"Request failed: {exc}"}, 400)
@@ -4934,6 +5286,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             user_id, token = user_for(conn, self); conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
             self.send_json({"ok": True}, token=token)
+        except sqlite3.Error as exc:
+            try: conn.rollback()
+            except sqlite3.Error: pass
+            rid = log_request_error("delete-state", exc)
+            self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                            "ref": rid}, 503)
         finally: conn.close()
 
     def log_message(self, fmt, *args):
@@ -4941,7 +5299,66 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    def run_backup_cli(argv: list) -> int:
+        """Ручное управление бэкапами: --backup-now, --list-backups,
+        --restore latest|<name> [--force]. Работает без запуска сервера."""
+        mod = backup_mod()
+        if mod is None:
+            print("EGE CORE backups unavailable", file=sys.stderr, flush=True)
+            return 2
+        if "--list-backups" in argv:
+            print(json.dumps(mod.list_backups(), ensure_ascii=False, indent=2))
+            return 0
+        if "--backup-now" in argv:
+            dst = mod.full_backup("manual")
+            if dst is None:
+                print("EGE CORE backup failed", file=sys.stderr, flush=True)
+                return 1
+            print(dst)
+            return 0
+        target = None
+        for i, arg in enumerate(argv):
+            if arg == "--restore" and i + 1 < len(argv):
+                target = argv[i + 1]
+            elif arg.startswith("--restore="):
+                target = arg.split("=", 1)[1]
+        if target:
+            if "--force" not in argv and _server_lock_held():
+                print("EGE CORE: server is running — stop it first or retry with --force",
+                      file=sys.stderr, flush=True)
+                return 3
+            print(mod.restore_backup(target), flush=True)
+            return 0
+        print("usage: server.py [--backup-now | --list-backups | --restore latest|<name> [--force]]",
+              file=sys.stderr, flush=True)
+        return 2
+
+    def _server_lock_held() -> bool:
+        """True, если lock-файл держит другой живой процесс (сервер запущен)."""
+        try:
+            from fcntl import flock, LOCK_EX, LOCK_NB, LOCK_UN
+        except ImportError:
+            return False
+        try:
+            handle = runtime_lock_path().open("a+")
+        except OSError:
+            return False
+        try:
+            flock(handle.fileno(), LOCK_EX | LOCK_NB)
+            flock(handle.fileno(), LOCK_UN)
+            return False
+        except OSError:
+            return True
+        finally:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
     def run_server() -> int:
+        if any(a == "--backup-now" or a == "--list-backups" or a == "--restore"
+               or a.startswith("--restore=") for a in sys.argv[1:]):
+            return run_backup_cli(sys.argv[1:])
         # A manual invocation becomes a restart request when systemd already
         # owns the service.  The service itself is marked as supervised, so it
         # never recursively restarts itself.
@@ -4952,6 +5369,13 @@ if __name__ == "__main__":
         host = os.environ.get("EGE_HOST", "0.0.0.0")
         port = int(os.environ.get("EGE_PORT", "2026"))
         with ServerInstance():
+            mod = backup_mod()
+            backups_on = mod is not None and not mod.disabled()
+            if backups_on:
+                try:
+                    print(f"EGE CORE storage check: {mod.ensure_db_healthy()}", flush=True)
+                except Exception as exc:
+                    print(f"EGE CORE storage check failed: {exc}", file=sys.stderr, flush=True)
             conn = connect()
             try:
                 install_catalog(conn)
@@ -4960,6 +5384,14 @@ if __name__ == "__main__":
             httpd = create_http_server(host, port)
             httpd.daemon_threads = True
             stopping = threading.Event()
+            stop_backups = threading.Event()
+            backup_thread = None
+            if backups_on:
+                try:
+                    backup_thread = mod.start_loop(stop_backups)
+                except Exception as exc:
+                    print(f"EGE CORE backup loop failed to start: {exc}",
+                          file=sys.stderr, flush=True)
 
             def stop_server(signum, _frame):
                 if stopping.is_set():
@@ -4983,6 +5415,9 @@ if __name__ == "__main__":
             try:
                 httpd.serve_forever(poll_interval=0.5)
             finally:
+                stop_backups.set()
+                if backup_thread is not None:
+                    backup_thread.join(timeout=10)
                 httpd.server_close()
                 for sig, handler in previous_handlers.items():
                     signal.signal(sig, handler)

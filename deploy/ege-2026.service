@@ -23,6 +23,23 @@ Environment=EGE_PORT=2026
 Environment=EGE_QUIET=1
 Environment=EGE_SUPERVISED=1
 Environment=PYTHONUNBUFFERED=1
+# Секреты живут вне репозитория: /etc/ege-2026.env (chmod 600).
+# Обязательная переменная: EGE_ADMIN_PASSWORD_HASH=pbkdf2_sha256$<iterations>$<salt>$<hash>
+# Шаблон с примером (без значения): deploy/ege-2026.env.example
+EnvironmentFile=-/etc/ege-2026.env
+
+# Flood/OOM guardrails: the app itself rate-limits API (300/min per IP),
+# caps concurrent requests (503 beyond 64) and reads sockets with a timeout —
+# these unit limits are the outer ring, so one fat POST × N threads cannot
+# take the host down. NOTE: no ProtectHome/ProtectSystem=strict here: the app
+# lives in /root and writes its SQLite DB next to itself, read-only mounts
+# would break it.
+MemoryMax=512M
+CPUQuota=100%
+LimitNOFILE=4096
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=yes
 
 StandardOutput=append:/var/log/ege-2026.log
 StandardError=append:/var/log/ege-2026.log

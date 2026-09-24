@@ -77,6 +77,24 @@ const test = async () => {
     const res = await fetch(BASE + "/");
     t("X-Content-Type-Options: nosniff", res.headers.get("x-content-type-options") === "nosniff");
     t("X-Frame-Options: DENY", res.headers.get("x-frame-options") === "DENY");
+    const csp = res.headers.get("content-security-policy") || "";
+    t("CSP блокирует object/frame", csp.includes("object-src 'none'") && csp.includes("frame-ancestors 'none'"), csp.slice(0, 80));
+    t("Permissions-Policy режет датчики", (res.headers.get("permissions-policy") || "").includes("camera=()"));
+    t("баннер сервера не светит версию", (res.headers.get("server") || "").indexOf("EGECore/1.0") === -1, res.headers.get("server"));
+    const api = await req("/api/health");
+    t("CSP на API тоже", (api.headers.get("content-security-policy") || "").includes("frame-ancestors 'none'"));
+  }
+
+  /* ---- 2b. Health и хвосты БД ---- */
+  {
+    const res = await req("/api/health");
+    const body = await json(res);
+    t("/api/health отвечает без авторизации", res.status === 200 && body.ok === true, `got ${res.status} ok=${body.ok}`);
+    t("health показывает БД и бэкапы", body.db && body.db.integrity === "ok" && body.backup && typeof body.backup === "object", JSON.stringify(body.db));
+    for (const p of ["/server/ege.sqlite3-wal", "/server/ege.sqlite3-shm", "/server/ege.sqlite3.bak", "/server/backups/manifest.json"]) {
+      const r = await fetch(BASE + p);
+      t(`закрыт ${p}`, r.status === 404 || r.status === 403, `got ${r.status}`);
+    }
   }
 
   /* ---- 3. Полный снимок состояния отключён ----
