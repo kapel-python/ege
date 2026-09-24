@@ -47,6 +47,11 @@ const Store = {
   // пользователь (registered + email). Только для отображения в UI — никаких
   // решений на его основе, идентичность всегда определяется сервером по куке.
   auth: { registered: false, email: null },
+  // Серверный признак администратора из того же bootstrap (isAdmin: true/false).
+  // Решает только backend через admin_sessions; фронт его лишь отображает:
+  // показывает/скрывает admin-блок и решает, запрашивать ли inbox. Никогда не
+  // читается из localStorage и не отправляется обратно как доказательство.
+  isAdmin: false,
   listeners: {},
   pendingSave: Promise.resolve(),
   loadPromise: null,
@@ -164,6 +169,10 @@ const Store = {
       this.auth = auth && typeof auth === "object"
         ? { registered: !!auth.registered, email: auth.email || null }
         : (this.auth || { registered: false, email: null });
+      // Fail-closed: нет явного true от сервера — не админ. Поле приходит из
+      // bootstrap/bootstrap-lite/POST /api/subject; старые ответы без него
+      // сбрасывают флаг, а не сохраняют чужой.
+      this.isAdmin = payload.isAdmin === true;
       this.subject = (payload.state && payload.state.subject) || payload.catalog.subject || "profile_math";
       this.subjects = DataAPI.subjects();
       this.detailsPromise = null;
@@ -761,6 +770,7 @@ const Store = {
   reset() {
     this.state = this.defaultState();
     this.accountId = null;
+    this.isAdmin = false;
     if (!this.ready) return Promise.resolve();
     this.pendingSave = this.pendingSave
       .catch(() => {})

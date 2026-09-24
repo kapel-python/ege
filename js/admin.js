@@ -170,6 +170,7 @@ const AICONS = {
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>',
   logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>',
+  inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
@@ -194,10 +195,11 @@ function navigate(path) { location.hash = path; }
 /* ---------------- рендер-каркас ---------------- */
 
 const SECTIONS = [
-  { id: "dashboard", title: "Обзор", icon: "dashboard" },
-  { id: "users", title: "Пользователи", icon: "users" },
-  { id: "blocked", title: "Заблокированные", icon: "blocked" },
-  { id: "audit", title: "Журнал действий", icon: "audit" },
+  { id: "dashboard", title: "Обзор", short: "Обзор", icon: "dashboard" },
+  { id: "inbox", title: "Обращения", short: "Обращения", icon: "inbox" },
+  { id: "users", title: "Пользователи", short: "Люди", icon: "users" },
+  { id: "blocked", title: "Заблокированные", short: "Блокировки", icon: "blocked" },
+  { id: "audit", title: "Журнал действий", short: "Журнал", icon: "audit" },
 ];
 
 function renderShell(activeSection, screenHTML) {
@@ -239,7 +241,7 @@ function renderShell(activeSection, screenHTML) {
         <main class="admin-screen" id="adminScreen">${screenHTML}</main>
       </div>
       <nav class="admin-bottomnav">
-        ${SECTIONS.map((s) => `<a href="#/${s.id}" class="${s.id === activeSection ? "active" : ""}">${aicon(s.icon)}<span>${s.title.split(" ")[0]}</span></a>`).join("")}
+        ${SECTIONS.map((s) => `<a href="#/${s.id}" class="${s.id === activeSection ? "active" : ""}" title="${esc(s.title)}">${aicon(s.icon)}<span>${esc(s.short || s.title)}</span></a>`).join("")}
       </nav>
     </div>`;
   document.getElementById("themeBtn").onclick = () => AdminTheme.toggle();
@@ -1054,6 +1056,7 @@ const AUDIT_LABELS = {
   reset: ["Сброс состояния", "a-chip--warn"],
   "update-profile": ["Изменение профиля", ""],
   "delete-user": ["Удаление аккаунта", "a-chip--danger"],
+  "support-read": ["Обращение прочитано", ""],
 };
 
 async function screenAudit() {
@@ -1088,6 +1091,274 @@ async function screenAudit() {
       <div class="a-empty__sub">Здесь появятся все админ-действия: входы, корректировки, сбросы, удаления</div>
     </div></div>`;
   renderShell("audit", screen);
+}
+
+/* ---------------- Обращения (Contact Inbox) ----------------
+   Полная версия ленты из дашборда: та же серверная логика
+   (GET ?status=&limit=&offset= за require_admin, POST .../<id>/read),
+   но с разделами «Новые / Прочитанные / Все», счётчиками и пагинацией.
+   Раскрытие и «показать ещё» — локальное состояние; отметка «Прочитано»
+   идемпотентна на сервере, даблклики закрыты флагом reading. */
+
+const Inbox = {
+  tab: "all", // all | new | reviewed
+  limit: 20,
+  messages: [],
+  total: 0,
+  newCount: 0,
+  reviewedCount: 0,
+  allCount: 0,
+  hasMore: false,
+  loading: false,
+  loadingMore: false,
+  error: null,
+  expanded: {},
+  reading: {},
+};
+
+// «Все» — первая вкладка и режим по умолчанию; дальше «Новые» и «Прочитанные».
+const INBOX_TABS = [
+  { id: "all", title: "Все" },
+  { id: "new", title: "Новые" },
+  { id: "reviewed", title: "Прочитанные" },
+];
+
+// Группы общей ленты «Все»: сервер уже сортирует в этом порядке, клиент
+// только рисует заголовки блоков (новые сверху, прочитанные ниже и т.д.).
+const INBOX_GROUPS = [
+  { id: "new", title: "Новые", chip: "a-chip--accent" },
+  { id: "reviewed", title: "Просмотрено", chip: "" },
+  { id: "resolved", title: "Решено", chip: "a-chip--success" },
+  { id: "archived", title: "В архиве", chip: "" },
+];
+
+const INBOX_STATUS = {
+  new: ["Новый", "a-chip--accent"],
+  reviewed: ["Просмотрено", ""],
+  resolved: ["Решено", "a-chip--success"],
+  archived: ["В архиве", ""],
+};
+
+function inboxCountFor(tab) {
+  if (tab === "new") return Inbox.newCount;
+  if (tab === "reviewed") return Inbox.reviewedCount;
+  return Inbox.allCount;
+}
+
+async function inboxFetch(status, limit, offset) {
+  return AdminApi.get(`/api/admin/support-messages?limit=${limit}&offset=${offset}&status=${status}`);
+}
+
+async function loadInboxCounts() {
+  const [n, r, a] = await Promise.all([
+    inboxFetch("new", 1, 0),
+    inboxFetch("reviewed", 1, 0),
+    inboxFetch("all", 1, 0),
+  ]);
+  Inbox.newCount = Number(n.newCount) || 0;
+  Inbox.reviewedCount = Number(r.total) || 0;
+  Inbox.allCount = Number(a.total) || 0;
+}
+
+async function loadInboxPage(append) {
+  const offset = append ? Inbox.messages.length : 0;
+  const payload = await inboxFetch(Inbox.tab, Inbox.limit, offset);
+  const list = Array.isArray(payload.messages) ? payload.messages : [];
+  Inbox.messages = append ? Inbox.messages.concat(list) : list;
+  Inbox.total = Number(payload.total) || 0;
+  Inbox.newCount = Number(payload.newCount) || 0;
+  Inbox.hasMore = Inbox.messages.length < Inbox.total;
+}
+
+function inboxMessageHTML(m) {
+  const id = Number(m.id) || 0;
+  const open = !!Inbox.expanded[id];
+  const [label, cls] = INBOX_STATUS[m.status] || [String(m.status || "—"), ""];
+  const isNew = m.status === "new";
+  return `
+  <article class="a-msg${open ? " open" : ""}">
+    <button type="button" class="a-msg__head" onclick="toggleInboxMessage(${id})"
+        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}">
+      <span class="a-msg__head-main">
+        <span class="a-msg__meta">${esc(fmtDateTime(m.createdAt))} · № ${id}</span>
+        <span class="a-msg__text">${esc(m.message || "")}</span>
+      </span>
+      <span class="a-chip ${cls}">${esc(label)}</span>
+    </button>
+    ${open ? `<div class="a-msg__full">
+      <div class="a-msg__full-row"><span>Статус</span><b>${esc(label)}</b></div>
+      <div class="a-msg__full-row"><span>Получено</span><b>${esc(fmtDateTime(m.createdAt))}</b></div>
+      <div class="a-msg__full-row"><span>Номер</span><b class="mono">№ ${id}</b></div>
+      ${isNew ? `<div class="a-msg__actions">
+        <button class="btn btn--soft btn--sm" type="button" data-inbox-read="${id}"
+            onclick="event.stopPropagation();markInboxRead(${id})"${Inbox.reading[id] ? " disabled" : ""}>${aicon("check")} Прочитано</button>
+      </div>` : ""}
+    </div>` : ""}
+  </article>`;
+}
+
+function inboxEmptyHTML() {
+  if (Inbox.tab === "new") return ["Новых обращений нет", "Всё разобрано — так держать."];
+  if (Inbox.tab === "reviewed") return ["Прочитанных пока нет", "Отмеченные «Прочитано» появятся здесь."];
+  return ["Обращений пока нет", "Сообщения со страницы «Контакты» появятся здесь."];
+}
+
+/* Лента: во вкладке «Все» рисуем отдельные блоки по статусу (сервер уже
+   присылает их в этом порядке), в остальных вкладках — плоский список. */
+function inboxListHTML() {
+  if (Inbox.tab !== "all") return Inbox.messages.map(inboxMessageHTML).join("");
+  return INBOX_GROUPS.map((g) => {
+    const items = Inbox.messages.filter((m) => m.status === g.id);
+    if (!items.length) return "";
+    return `
+    <div class="a-msg-group" data-group="${g.id}">
+      <div class="a-msg-group__head">
+        <span class="a-chip ${g.chip}">${esc(g.title)}</span>
+        <span class="a-msg-group__count">${fmtNum(items.length)}</span>
+      </div>
+      ${items.map(inboxMessageHTML).join("")}
+    </div>`;
+  }).join("");
+}
+
+function drawInbox() {
+  const body = document.getElementById("inboxBody");
+  if (!body) return;
+  if (Inbox.loading && !Inbox.messages.length && !Inbox.error) {
+    body.innerHTML = `<div class="a-skeleton" style="height:96px"></div><div class="a-skeleton" style="height:200px;margin-top:14px"></div>`;
+    return;
+  }
+  if (Inbox.error && !Inbox.messages.length) {
+    body.innerHTML = `<div class="a-error-banner">Не удалось загрузить обращения: ${esc(Inbox.error)}<button class="btn btn--soft btn--sm" onclick="screenInbox()">Повторить</button></div>`;
+    return;
+  }
+  const [emptyTitle, emptySub] = inboxEmptyHTML();
+  body.innerHTML = `
+    <div class="a-stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      <div class="a-stat"><div class="a-stat__label">Новых</div><div class="a-stat__value">${fmtNum(Inbox.newCount)}</div><div class="a-stat__sub">требуют внимания</div></div>
+      <div class="a-stat"><div class="a-stat__label">Прочитано</div><div class="a-stat__value">${fmtNum(Inbox.reviewedCount)}</div><div class="a-stat__sub">уже разобраны</div></div>
+      <div class="a-stat"><div class="a-stat__label">Всего</div><div class="a-stat__value">${fmtNum(Inbox.allCount)}</div><div class="a-stat__sub">за всё время</div></div>
+    </div>
+    <div class="a-card" style="margin-bottom:14px">
+      <div class="a-card__head--wrap">
+        <div class="a-seg" role="tablist" aria-label="Фильтр обращений">
+          ${INBOX_TABS.map((t) => `<button class="a-seg__btn${Inbox.tab === t.id ? " a-seg__btn--active" : ""}" role="tab" aria-selected="${Inbox.tab === t.id ? "true" : "false"}" onclick="setInboxTab('${t.id}')">${esc(t.title)} · ${fmtNum(inboxCountFor(t.id))}</button>`).join("")}
+        </div>
+        <span class="a-card__sub">${Inbox.tab === "all"
+          ? "сгруппировано: новые сверху, прочитанные ниже"
+          : "новые сверху · отметка «Прочитано» убирает из «Новых»"}</span>
+      </div>
+    </div>
+    <div id="inboxList">
+      ${Inbox.messages.length ? inboxListHTML() : `
+      <div class="a-card"><div class="a-empty">
+        <div class="a-empty__icon">${aicon("inbox")}</div>
+        <div class="a-empty__title">${esc(emptyTitle)}</div>
+        <div class="a-empty__sub">${esc(emptySub)}</div>
+      </div></div>`}
+    </div>
+    <div id="inboxMore" style="margin-top:12px;text-align:center">
+      ${Inbox.error && Inbox.messages.length ? `<div class="a-error-banner">Не удалось догрузить: ${esc(Inbox.error)}<button class="btn btn--soft btn--sm" onclick="moreInbox()">Ещё раз</button></div>` : ""}
+      ${!Inbox.error && Inbox.loadingMore ? `<span class="a-card__sub">загружаем…</span>` : ""}
+      ${!Inbox.error && !Inbox.loadingMore && Inbox.hasMore ? `
+        <div class="a-card__sub" style="margin-bottom:8px">Показано ${Inbox.messages.length} из ${Inbox.total}</div>
+        <button class="btn btn--soft btn--sm" onclick="moreInbox()">Показать ещё</button>` : ""}
+    </div>`;
+}
+
+function inboxAuthFail(e) {
+  if (e && e.unauthorized) { A.session = null; renderLogin(); return true; }
+  return false;
+}
+
+async function screenInbox() {
+  renderShell("inbox", `<div class="a-skeleton" style="height:96px"></div><div class="a-skeleton" style="height:200px;margin-top:14px"></div>`);
+  Inbox.loading = true;
+  Inbox.error = null;
+  try {
+    await loadInboxCounts();
+    await loadInboxPage(false);
+  } catch (e) {
+    if (inboxAuthFail(e)) return;
+    Inbox.error = e.message || "неизвестная ошибка";
+  }
+  Inbox.loading = false;
+  renderShell("inbox", `<div id="inboxBody"></div>`);
+  drawInbox();
+}
+
+async function setInboxTab(tab) {
+  if (!INBOX_TABS.some((t) => t.id === tab) || Inbox.loading) return;
+  Inbox.tab = tab;
+  Inbox.messages = [];
+  Inbox.total = 0;
+  Inbox.hasMore = false;
+  Inbox.expanded = {};
+  Inbox.loading = true;
+  Inbox.error = null;
+  drawInbox();
+  try {
+    await loadInboxPage(false);
+  } catch (e) {
+    if (inboxAuthFail(e)) return;
+    Inbox.error = e.message || "неизвестная ошибка";
+  }
+  Inbox.loading = false;
+  drawInbox();
+}
+
+async function moreInbox() {
+  if (Inbox.loadingMore || !Inbox.hasMore) return;
+  Inbox.loadingMore = true;
+  Inbox.error = null;
+  drawInbox();
+  try {
+    await loadInboxPage(true);
+  } catch (e) {
+    if (inboxAuthFail(e)) return;
+    Inbox.error = e.message || "неизвестная ошибка";
+  }
+  Inbox.loadingMore = false;
+  drawInbox();
+}
+
+function toggleInboxMessage(id) {
+  id = Number(id) || 0;
+  if (!id) return;
+  if (Inbox.expanded[id]) delete Inbox.expanded[id];
+  else Inbox.expanded[id] = true;
+  const list = document.getElementById("inboxList");
+  if (list && Inbox.messages.length) {
+    list.innerHTML = inboxListHTML();
+  } else {
+    drawInbox();
+  }
+}
+
+async function markInboxRead(id) {
+  id = Number(id) || 0;
+  if (!id || Inbox.reading[id]) return;
+  Inbox.reading[id] = true;
+  try {
+    const btn = document.querySelector(`[data-inbox-read="${id}"]`);
+    if (btn) btn.disabled = true;
+  } catch (_) {}
+  try {
+    await AdminApi.post(`/api/admin/support-messages/${id}/read`, {});
+    delete Inbox.expanded[id];
+    // Лента текущего таба уже не содержит карточку: перечитываем счётчики
+    // и первую страницу — порядок и цифры всегда честные.
+    await loadInboxCounts();
+    await loadInboxPage(false);
+    drawInbox();
+    toast("Обращение отмечено прочитанным");
+  } catch (e) {
+    if (inboxAuthFail(e)) return;
+    toast(`Не удалось отметить: ${e.message || "ошибка"}`, "err");
+    drawInbox();
+  } finally {
+    delete Inbox.reading[id];
+  }
 }
 
 /* ---------------- корневой рендер ---------------- */
@@ -1136,6 +1407,8 @@ async function render() {
     else await screenUsers();
   } else if (route.name === "audit") {
     await screenAudit();
+  } else if (route.name === "inbox") {
+    await screenInbox();
   } else if (route.name === "blocked") {
     await screenBlocked();
   } else {
