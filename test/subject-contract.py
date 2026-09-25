@@ -23,6 +23,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER_DIR = ROOT / "server"
 SERVER_PATH = SERVER_DIR / "server.py"
 SUBJECTS = ("profile_math", "basic_math", "russian")
+CATALOG_FILES = {
+    "profile_math": "catalog.json",
+    "basic_math": "catalog_basic.json",
+    "russian": "catalog_russian.json",
+}
 REQUIRED_FEATURES = frozenset(
     {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}
 )
@@ -339,6 +344,155 @@ def main() -> int:
                     f"weights={len(weights)} owned, foreign={leaks or 'none'}"
                 )
             check("NO CROSS-SUBJECT LEAK content ownership", ownership_ok, "; ".join(ownership_evidence))
+
+            # Visual payloads are subject data too.  Read the same catalog files
+            # that install_catalog() uses, then compare both full-payload routes
+            # by id membership rather than by collection size.
+            source_asset_ids: dict[str, set[str]] = {}
+            source_entity_ids: dict[str, set[str]] = {}
+            source_audit_ids: dict[str, set[str]] = {}
+            visual_source_errors: list[str] = []
+            for subject, filename in CATALOG_FILES.items():
+                try:
+                    source = json.loads((SERVER_DIR / filename).read_text(encoding="utf-8"))
+                    if not isinstance(source, dict):
+                        raise ValueError("catalog root is not an object")
+                    assets = source.get("visualAssets", [])
+                    tasks = source.get("tasks", [])
+                    skills = source.get("skills", [])
+                    audit = source.get("visualAudit", {})
+                    valid_assets = isinstance(assets, list) and all(
+                        isinstance(item, dict) and isinstance(item.get("id"), str)
+                        for item in assets
+                    )
+                    valid_entities = (
+                        isinstance(tasks, list)
+                        and isinstance(skills, list)
+                        and all(
+                            isinstance(item, dict) and isinstance(item.get("id"), str)
+                            for item in tasks + skills
+                        )
+                    )
+                    statuses = audit.get("taskStatuses", {}) if isinstance(audit, dict) else None
+                    valid_audit = isinstance(audit, dict) and isinstance(statuses, dict)
+                    if not (valid_assets and valid_entities and valid_audit):
+                        raise ValueError("invalid visual ownership fields")
+                    source_asset_ids[subject] = {item["id"] for item in assets}
+                    source_entity_ids[subject] = {item["id"] for item in tasks + skills}
+                    source_audit_ids[subject] = set(statuses)
+                except (OSError, TypeError, ValueError) as exc:
+                    visual_source_errors.append(f"{filename}: {exc}")
+                    source_asset_ids[subject] = set()
+                    source_entity_ids[subject] = set()
+                    source_audit_ids[subject] = set()
+
+            # Do not subtract the local set here: a copied foreign id must not
+            # become self-authorizing merely because it was repeated locally.
+            foreign_asset_ids = {
+                subject: {
+                    asset_id
+                    for other, ids in source_asset_ids.items()
+                    if other != subject
+                    for asset_id in ids
+                }
+                for subject in SUBJECTS
+            }
+            foreign_entity_ids = {
+                subject: {
+                    entity_id
+                    for other, ids in source_entity_ids.items()
+                    if other != subject
+                    for entity_id in ids
+                }
+                for subject in SUBJECTS
+            }
+
+            visual_ownership_ok = not visual_source_errors
+            visual_evidence: list[str] = []
+            for subject in SUBJECTS:
+                own_assets = source_asset_ids[subject]
+                own_entities = source_entity_ids[subject]
+                subject_ok = True
+                russian_mask_ok = True
+                subject_evidence: list[str] = []
+                for endpoint in ("/api/catalog-tasks", "/api/bootstrap"):
+                    payload = payloads[(endpoint, subject)]
+                    if endpoint == "/api/catalog-tasks":
+                        served_assets_value = payload.get("visualAssets")
+                        served_audit = payload.get("visualAudit")
+                    else:
+                        bootstrap_catalog = payload.get("catalog")
+                        served_assets_value = (
+                            bootstrap_catalog.get("visualAssets")
+                            if isinstance(bootstrap_catalog, dict)
+                            else None
+                        )
+                        served_audit = (
+                            bootstrap_catalog.get("visualAudit")
+                            if isinstance(bootstrap_catalog, dict)
+                            else None
+                        )
+
+                    assets_well_formed = isinstance(served_assets_value, list) and all(
+                        isinstance(item, dict) and isinstance(item.get("id"), str)
+                        for item in served_assets_value
+                    )
+                    statuses = served_audit.get("taskStatuses", {}) if isinstance(served_audit, dict) else None
+                    audit_well_formed = isinstance(served_audit, dict) and isinstance(statuses, dict)
+                    served_asset_ids = (
+                        {item["id"] for item in served_assets_value}
+                        if assets_well_formed
+                        else set()
+                    )
+                    served_audit_ids = set(statuses) if audit_well_formed else set()
+
+                    unowned_assets = served_asset_ids - own_assets
+                    foreign_only_assets = served_asset_ids & (foreign_asset_ids[subject] - own_assets)
+                    cross_subject_assets = served_asset_ids & foreign_asset_ids[subject]
+                    unowned_audit = served_audit_ids - own_entities
+                    foreign_only_audit = served_audit_ids & (foreign_entity_ids[subject] - own_entities)
+                    cross_subject_audit = served_audit_ids & foreign_entity_ids[subject]
+                    endpoint_ok = (
+                        assets_well_formed
+                        and audit_well_formed
+                        and not unowned_assets
+                        and not foreign_only_assets
+                        and not cross_subject_assets
+                        and not unowned_audit
+                        and not foreign_only_audit
+                        and not cross_subject_audit
+                    )
+                    if subject == "russian":
+                        mask_ok = served_assets_value == [] and not served_audit_ids
+                        russian_mask_ok = russian_mask_ok and mask_ok
+                        endpoint_ok = endpoint_ok and mask_ok
+                    subject_ok = subject_ok and endpoint_ok
+                    label = endpoint.rsplit("/", 1)[-1]
+                    subject_evidence.append(
+                        f"{label}: assets[not-owned={sorted(unowned_assets) or 'none'}, "
+                        f"foreign={sorted(cross_subject_assets) or 'none'}]; "
+                        f"audit[not-owned={sorted(unowned_audit) or 'none'}, "
+                        f"foreign={sorted(cross_subject_audit) or 'none'}]"
+                    )
+
+                source_foreign_assets = sorted(source_asset_ids[subject] & foreign_asset_ids[subject])
+                source_foreign_audit = sorted(source_audit_ids[subject] & foreign_entity_ids[subject])
+                if source_foreign_assets:
+                    subject_evidence.append(f"catalog-foreign-assets={source_foreign_assets}")
+                if source_foreign_audit:
+                    subject_evidence.append(f"catalog-foreign-audit={source_foreign_audit}")
+                if subject == "russian":
+                    subject_evidence.append(
+                        f"locked-mask={'verified' if russian_mask_ok else 'FAILED'}"
+                    )
+                visual_evidence.append(f"{subject}: " + "; ".join(subject_evidence))
+                visual_ownership_ok = visual_ownership_ok and subject_ok
+
+            check(
+                "NO CROSS-SUBJECT LEAK visual ownership",
+                visual_ownership_ok,
+                "; ".join(visual_source_errors + visual_evidence),
+            )
 
             registry_errors = list(contract_errors)
             for path in sorted((SERVER_DIR / "subjects").glob("*.json")):
