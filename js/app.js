@@ -1841,15 +1841,65 @@ const SUBJECT_SECTION_COPY = {
     title: "Статистика",
     sub: "Аналитика подготовки: активность, точность и динамика прогноза.",
     empty: "Графики активности и прогноза появятся после первых заданий.",
+    help: "skills",
+  },
+  // У по-настоящему пустого предмета (без единой темы) Path/skill тоже
+  // должны выглядеть разделом, а не голой карточкой без заголовка.
+  path: {
+    title: "Путь",
+    sub: "Карта тем предмета: зарегистрированные темы и статус их материалов.",
+    empty: "Карта тем появится вместе с материалами предмета.",
+    help: "path",
+  },
+  skill: {
+    title: "Тема",
+    sub: "Материалы выбранной темы: теория, практика и статус готовности.",
+    empty: "Тема появится вместе с материалами предмета.",
+  },
+  // Task-маршруты тоже не должны сливаться в одну заглушку: у каждого
+  // своё имя и объяснение, почему задания недоступны.
+  session: {
+    title: "Тренировка",
+    sub: "Здесь решаются задания по темам.",
+    empty: "Задания этой тренировки появятся вместе с материалами предмета.",
+  },
+  practice: {
+    title: "Практика",
+    sub: "Закрепление выбранной темы на заданиях ЕГЭ.",
+    empty: "Практика по этой теме появится вместе с материалами предмета.",
+  },
+  boss: {
+    title: "Босс-испытание",
+    sub: "Проверка ветки навыков после её прохождения.",
+    empty: "Боссы появятся, когда у темы будут задания.",
+  },
+  daily: {
+    title: "Ежедневная задача",
+    sub: "Короткая подборка заданий на сегодня.",
+    empty: "Ежедневная подборка появится вместе с заданиями предмета.",
+  },
+  review: {
+    title: "Повторение ошибок",
+    sub: "Возврат к заданиям, которые ещё не закрыты.",
+    empty: "Список ошибок появится после первых заданий. Пока повторять нечего.",
+  },
+  lesson: {
+    title: "Урок",
+    sub: "Теория темы по шагам с закреплением.",
+    empty: "Урок откроется, когда материалы темы будут подключены.",
   },
 };
 
 function subjectSectionEmptyStateHTML(state = subjectContentState(), route = null) {
   const copy = route ? SUBJECT_SECTION_COPY[route] : null;
   if (!copy) return subjectStateCardHTML(state);
+  // helpDot есть не для всех разделов; без явного ключа не рисуем лишний «?».
+  const helpKey = copy.help || (route === "training" || route === "session" ? "training"
+    : route === "errors" || route === "review" ? "errors"
+    : route === "trials" ? "trials" : null);
   return `
     <div class="page-head">
-      <div class="page-title">${esc(copy.title)} ${helpDot(route === "training" ? "training" : route === "errors" ? "errors" : route === "trials" ? "trials" : "skills")}</div>
+      <div class="page-title">${esc(copy.title)}${helpKey ? ` ${helpDot(helpKey)}` : ""}</div>
       <div class="page-sub">${esc(copy.sub)}</div>
     </div>
     <div class="card empty">${esc(copy.empty)}</div>`;
@@ -3097,7 +3147,7 @@ function startSkillPractice(skillId) {
 
 function screenTraining(root) {
   const state = subjectContentState();
-  if (state.empty || state.locked) return screenSubjectUnavailable(root, state.locked);
+  if (state.empty || state.locked) return screenSubjectUnavailable(root, state.locked, "training");
   const missions = asSafeArray(DataAPI.missions());
   const lessons = asSafeArray(DataAPI.lessons());
   root.innerHTML = `
@@ -4261,6 +4311,10 @@ function lessonFinish() {
    ============================================================ */
 
 function screenErrors(root) {
+  // Defensive guard: render() перехватывает locked/empty раньше, но прямой
+  // вызов функции (тест, будущий рефакторинг роутера) тоже обязан показать
+  // раздел «Ошибки», а не ready-подобный экран с чужими данными.
+  if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "errors");
   const open = Store.state.errors.filter((e) => !e.resolved);
   const resolved = Store.state.errors.filter((e) => e.resolved);
   // Полные ошибки (задание не решено) и мини-ошибки (решено неидеально:
@@ -4416,6 +4470,7 @@ function startErrorsReview() {
    ============================================================ */
 
 function screenTrials(root) {
+  if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "trials");
   const s = Store.state;
   const d = DataAPI.daily();
   ensureDailyChallenge();
@@ -4433,14 +4488,15 @@ function screenTrials(root) {
     <div class="grid grid--2" style="margin-top:18px">
       <div class="card ${dailyDone ? "mission-card--done" : ""}">
         <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">ЕЖЕДНЕВНАЯ ЗАДАЧА</div>
-        <div style="font-size:18px;font-weight:650;margin-top:8px">${dailyTitle}</div>
-        <div style="margin:14px 0 6px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100, dailyDone ? "progress--success" : "")}</div>
+        <div style="font-size:18px;font-weight:650;margin-top:8px">${dailyGoal ? dailyTitle : "Подборка пока не создана"}</div>
+        ${dailyGoal ? `<div style="margin:14px 0 6px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100, dailyDone ? "progress--success" : "")}</div>` : ""}
         <div style="display:flex;align-items:center;gap:12px">
-          <span class="mono" style="font-size:13px;color:var(--text-2)">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</span>
-          <span class="chip chip--accent mono">+${d.xp} XP</span>
-          <button class="btn ${dailyDone ? "btn--soft" : "btn--primary"} btn--sm" style="margin-left:auto" onclick="startDaily()">
-            ${dailyDone ? "Повторить" : "Решать"}
-          </button>
+          ${dailyGoal ? `
+            <span class="mono" style="font-size:13px;color:var(--text-2)">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</span>
+            <span class="chip chip--accent mono">+${d.xp} XP</span>
+            <button class="btn ${dailyDone ? "btn--soft" : "btn--primary"} btn--sm" style="margin-left:auto" onclick="startDaily()">
+              ${dailyDone ? "Повторить" : "Решать"}
+            </button>` : `<span class="stat-label">Задания появятся вместе с материалами предмета</span>`}
         </div>
       </div>
 
@@ -4533,6 +4589,7 @@ function startBoss(bossId) {
    ============================================================ */
 
 function screenStats(root) {
+  if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "stats");
   const s = Store.state;
   const acc = s.totalSolved ? Math.round((s.totalCorrect / s.totalSolved) * 100) : 0;
   const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
@@ -4754,15 +4811,15 @@ function screenProfile(root) {
       </div>` : `<div class="card empty">Достижения появятся вместе с материалами предмета.</div>`}`;
 
   const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip profile-card__streak ${streakTier(streak)}">${icon("flame")} ${streak} дн</div>`;
-  const profileProgressHTML = contentUnavailable
-    ? `<div class="profile-card__locked-progress"><span class="chip chip--locked">${icon("lock")} Уровень и XP появятся вместе с материалами</span></div>`
-    : `<div class="profile-card__progress">
+  const profileProgressHTML = `
+      <div class="profile-card__progress">
         <div class="profile-card__level">
           <span class="level-chip__badge">Уровень ${esc(li.level)}</span>
           <span class="profile-card__xp mono">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</span>
           <span class="profile-card__next">до уровня ${esc(nonNegativeNumber(li.level) + 1)}</span>
         </div>
         ${progressBar(li.pct)}
+        ${contentUnavailable ? `<div class="profile-card__locked-progress"><span class="chip chip--locked">${icon("lock")} Прогресс начнётся с первого задания</span></div>` : ""}
       </div>`;
 
   root.innerHTML = `
