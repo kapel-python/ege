@@ -18,6 +18,46 @@ function dataId(value) {
   return "";
 }
 
+function dataRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function dataStringId(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function dataSubjectId(value) {
+  const info = dataRecord(value);
+  return info ? (dataId(info.id) || dataId(info.subjectId)) : "";
+}
+
+function dataSubjectInfoId(value) {
+  const info = dataRecord(value);
+  if (!info) return "";
+  // A descriptor is authoritative only when it carries a real string id.
+  // If an id key is present but malformed, do not silently replace it with a
+  // different identifier; legacy subjectId-only descriptors remain accepted.
+  return Object.prototype.hasOwnProperty.call(info, "id")
+    ? dataStringId(info.id)
+    : dataStringId(info.subjectId);
+}
+
+function dataExplicitSubjectLock(value) {
+  const info = dataRecord(value);
+  if (!info) return false;
+  if (info.locked === true || info.comingSoon === true || info.coming_soon === true
+      || info.available === false || info.enabled === false) return true;
+  const explicitlyNotReady = (status) => {
+    const raw = String(status || "").trim().toLowerCase();
+    return !!raw && !dataStatusReady(raw);
+  };
+  if ([info.status, info.state, info.availability, info.access].some(explicitlyNotReady)) return true;
+  const metadata = dataRecord(info.metadata);
+  return !!metadata && (metadata.locked === true || metadata.comingSoon === true
+    || metadata.coming_soon === true
+    || [metadata.status, metadata.state, metadata.availability, metadata.access].some(explicitlyNotReady));
+}
+
 function dataArray(value) {
   if (Array.isArray(value)) return value.filter((item) => item && typeof item === "object");
   if (value && typeof value === "object") {
@@ -109,15 +149,21 @@ const DataAPI = {
     }
 
     const registry = catalog.registry && typeof catalog.registry === "object" ? catalog.registry : null;
-    const subjectInfo = catalog.subjectInfo && typeof catalog.subjectInfo === "object"
-      ? catalog.subjectInfo
-      : (catalog.subject && typeof catalog.subject === "object" ? catalog.subject : null);
+    const subjectObject = dataRecord(catalog.subject);
+    const explicitSubjectInfo = dataRecord(catalog.subjectInfo);
+    const subjectInfo = explicitSubjectInfo || subjectObject;
     const rawSubjects = dataArray(
       catalog.subjects || catalog.subjectRegistry || (registry && (registry.subjects || registry))
     );
-    const subjectId = dataId(catalog.subject)
+
+    // Identity is deliberately resolved from the payload's own descriptor
+    // first.  A registry is only a fallback; its first entry must never win
+    // over an object-form subject or an explicit subjectInfo.
+    const subjectId = dataSubjectInfoId(subjectInfo)
+      || dataSubjectId(subjectObject)
+      || (typeof catalog.subject === "string" ? dataId(catalog.subject) : "")
       || dataId(catalog.subjectId)
-      || dataId(rawSubjects[0]?.id)
+      || dataId(rawSubjects[0]?.id || rawSubjects[0]?.subjectId)
       || DATA_DEFAULT_SUBJECT;
 
     // A summary payload is allowed to omit empty collections.  Normalising
@@ -141,14 +187,73 @@ const DataAPI = {
       || missions.length || bosses.length || achievements.length || goals.length || diagnostics.length
       || dataFinite(daily.target) > 0;
     const syntheticStatus = subjectId === DATA_DEFAULT_SUBJECT || hasContent ? "ready" : "locked";
-    const subjectInfoId = dataId(subjectInfo && (subjectInfo.id || subjectInfo.subjectId));
-    const fallbackInfo = subjectInfo && (!subjectInfoId || subjectInfoId === subjectId)
-      ? { ...subjectInfo }
-      : { id: subjectId, title: subjectId === DATA_DEFAULT_SUBJECT ? "Профильная математика" : subjectId,
-          short: subjectId === DATA_DEFAULT_SUBJECT ? "Профиль" : subjectId, status: syntheticStatus, forecast: null };
+    const syntheticInfo = {
+      id: subjectId,
+      title: subjectId === DATA_DEFAULT_SUBJECT ? "Профильная математика" : subjectId,
+      short: subjectId === DATA_DEFAULT_SUBJECT ? "Профиль" : subjectId,
+      status: syntheticStatus,
+      forecast: null,
+    };
+
+    // These are the fields a registry-less payload may use to describe its
+    // active subject.  Keep the synthetic defaults, then layer the descriptor
+    // and the payload's own top-level fields over them.
+    const topLevelInfo = {};
+    for (const key of ["status", "locked", "comingSoon", "availability", "features", "short", "title", "description", "metadata"]) {
+      if (Object.prototype.hasOwnProperty.call(catalog, key)) topLevelInfo[key] = catalog[key];
+    }
+    const registryInfo = rawSubjects.find((item) => dataId(item.id || item.subjectId) === subjectId);
+    const activeInfo = { ...syntheticInfo };
+    for (const source of [registryInfo, subjectObject, explicitSubjectInfo]) {
+      const info = dataRecord(source);
+      if (!info) continue;
+      for (const [key, value] of Object.entries(info)) {
+        if (value !== undefined) activeInfo[key] = value;
+      }
+    }
+    for (const [key, value] of Object.entries(topLevelInfo)) {
+      if (value !== undefined) activeInfo[key] = value;
+    }
+    activeInfo.id = subjectId;
+    if (typeof activeInfo.title !== "string" || !activeInfo.title.trim()) activeInfo.title = syntheticInfo.title;
+    if (typeof activeInfo.short !== "string" || !activeInfo.short.trim()) activeInfo.short = syntheticInfo.short;
+
+    // A lock declaration is monotonic: a stale ready registry entry cannot
+    // overwrite a lock carried by the active payload, its descriptor, or its
+    // top-level fields.  Preserve a meaningful coming-soon status when there
+    // is no conflict, but make a conflicting ready status explicitly locked.
+    const lockSources = [registryInfo, subjectObject, explicitSubjectInfo, topLevelInfo, catalog];
+    const hasExplicitLock = lockSources.some((source) => dataExplicitSubjectLock(source));
+    const hasComingSoon = lockSources.some((source) => {
+      const info = dataRecord(source);
+      return !!info && (info.comingSoon === true || info.coming_soon === true);
+    });
+    if (hasExplicitLock) {
+      activeInfo.locked = true;
+      const status = String(activeInfo.status || activeInfo.state || "").trim().toLowerCase();
+      if (!dataStatusLocked(status)) activeInfo.status = "locked";
+      if (hasComingSoon) activeInfo.comingSoon = true;
+    }
+
     const subjects = rawSubjects.length
       ? rawSubjects.map((item) => ({ ...item, id: dataId(item.id || item.subjectId) }))
-      : [{ ...fallbackInfo, id: subjectId }];
+      : [{ ...activeInfo, id: subjectId }];
+    if (rawSubjects.length) {
+      const activeIndex = subjects.findIndex((item) => dataId(item.id) === subjectId);
+      if (activeIndex >= 0) {
+        // Keep a registry-provided descriptor byte-for-byte compatible when
+        // there is no stronger access declaration.  Only a monotonic lock
+        // signal is layered onto it.
+        const activeEntry = { ...subjects[activeIndex] };
+        if (hasExplicitLock) {
+          activeEntry.locked = true;
+          const status = String(activeEntry.status || activeEntry.state || "").trim().toLowerCase();
+          if (!dataStatusLocked(status)) activeEntry.status = "locked";
+          if (hasComingSoon) activeEntry.comingSoon = true;
+        }
+        subjects[activeIndex] = activeEntry;
+      }
+    }
 
     // Keep a copy of the collections on the cache object, but do not invent
     // content.  The original payload remains available to callers that need
@@ -170,14 +275,14 @@ const DataAPI = {
     };
     this._subjects = subjects.filter((item) => dataId(item.id));
     if (!this._subjects.length) {
-      this._subjects = [{ id: subjectId, title: subjectId, short: subjectId, status: "ready" }];
+      this._subjects = [{ ...activeInfo, id: subjectId }];
     }
     // If a server sends a catalog for a subject not yet present in its
     // registry, retain a minimal entry.  This is important during a rolling
     // deployment: the new subject is still isolated and usable, rather than
     // being silently replaced by profile_math.
     if (!this._subjects.some((item) => dataId(item.id) === subjectId)) {
-      this._subjects.push({ ...fallbackInfo, id: subjectId, status: dataStatus(fallbackInfo) || "locked" });
+      this._subjects.push({ ...activeInfo, id: subjectId, status: dataStatus(activeInfo) || "locked" });
     }
     this._subject = subjectId;
     this._registryProvided = rawSubjects.length > 0;
