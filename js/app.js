@@ -2134,13 +2134,15 @@ function renderTopbar() {
   const li = levelInfo();
   const f = safeForecast();
   const dark = Theme.current() === "dark";
-  const subjectControl = subjectSwitcherHTML();
+  // Выбора предмета в шапке нет: предмет переключается только в профиле
+  // (subjectCurrentButtonHTML/askSubjectDialog). Шапка показывает текущий
+  // предмет статичным бейджем, без селекта.
   const subjectState = subjectContentState();
   if (subjectLearningUnavailable(subjectState)) {
     const info = subjectState.info || subjectInfoSafe();
     const status = subjectState.locked ? "Карта тем · скоро" : "Материалы скоро";
     document.getElementById("topbar").innerHTML = `
-      ${subjectControl ? `<div class="topbar__subject" aria-label="Текущий предмет">${subjectControl}</div>` : `<span class="chip chip--locked">${icon("lock")} ${esc(subjectDisplayName(info))}</span>`}
+      <span class="chip chip--locked">${icon("lock")} ${esc(subjectDisplayName(info))}</span>
       <div class="topbar__spacer"></div>
       <span class="chip chip--locked hide-mobile">${esc(status)}</span>
       <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>`;
@@ -2155,7 +2157,6 @@ function renderTopbar() {
         <div class="level-chip__xp">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</div>
       </div>
     </div>
-    ${subjectControl ? `<div class="topbar__subject" aria-label="Текущий предмет">${subjectControl}</div>` : ""}
     <div class="topbar__spacer"></div>
     <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${esc(f.low)}–${esc(f.high)}</b>`}</div>
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
