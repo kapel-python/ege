@@ -28,34 +28,41 @@
 - Locked-предмет не получает выдуманных `0%`, `0 XP`, уровня, streak,
   прогноза и истории. Пустые массивы + `locked/coming-soon` — честно.
 
-## 1. Backend: `server/server.py`
+## 1. Backend: реестр `server/subjects/*.json` + `server/subjects_registry.py`
 
-Всё в одном месте, порядок как в файле:
+Контракт предмета — `server/subjects/<id>.json` (поля и валидация:
+`server/subjects/README.md`). Реестр (`subjects_registry.SubjectRegistry`)
+собирает из него `SUBJECTS`/`SUBJECT_IDS`, пути каталогов, `source_files`
+и строки `math_levels`. `server.py` только импортирует реестр, инлайн-данных
+о предметах в нём больше нет (остался fallback на случай деплоя без
+`subjects/` на диске).
 
-1. Константы прогноза (только если у предмета есть прогноз):
-   `SKILL_EGE_WEIGHTS_*`, `TOTAL_EGE_PRIMARY_*`, `PRIMARY_TO_TEST_*`
-   (`server/server.py:166`). Нет шкалы — будет `forecast: None`.
-2. Запись `SUBJECTS["<id>"]` (`server/server.py:196`). Полный контракт
-   ключей одинаковый у всех предметов:
-   `id`, `title`, `short`, `status` (`ready` | `coming-soon`),
-   `locked`, `comingSoon`, `availability`, `forecast` (объект или `None`),
-   `features` (`lessons`, `practice`, `forecast`, `diagnostics`,
-   `missions`, `bosses`, `daily`, `path`), `metadata`.
-   Для locked: `status: "coming-soon"`, `locked/comingSoon: True`,
-   `forecast: None`, все учебные `features: False`, `path: True`.
-3. Константа пути каталога рядом с остальными:
-   `CATALOG_<NAME>_PATH = ... / "catalog_<id>.json"`
-   (`server/server.py:42`).
-4. `install_catalog` (`server/server.py:2309`):
-   - `INSERT OR IGNORE INTO math_levels(id, subject_id, name)` для нового
-     `level_id` (пример: `('russian', 'russian', 'Русский язык')`).
-     Строка `subjects` добавляется автоматически циклом по `SUBJECT_IDS`,
-     руками её дублировать не нужно.
-   - кортеж `source_files`: `(CATALOG_<NAME>_PATH, "<id>", "<level_id>")`.
-5. `_catalog_cache_key` (`server/server.py:2593`): добавить новый путь
-   в кортеж, иначе bootstrap будет отдавать закэшированный каталог.
-6. `_build_public_status`: `contentUpdatedAt = max(...)`
-   (`server/server.py:2907`) — добавить mtime нового файла.
+Чтобы добавить предмет:
+
+1. Создать `server/subjects/<id>.json` (`id` == имя файла, snake_case):
+   `title`, `short`, `description`, `status` (`ready` | `coming-soon`),
+   `locked`/`comingSoon`, `order` (порядок в UI), `catalogFile`
+   (`server/<файл>`), `level: {id, subjectId, name}` (строка `math_levels`),
+   `forecast` (объект `{weights, total, scale}` или `None` — нет шкалы,
+   будет `forecast: None`), `features` (ровно 8 capability-флагов:
+   `lessons`, `practice`, `forecast`, `diagnostics`, `missions`, `bosses`,
+   `daily`, `path`; для locked все учебные `False`, `path: True`),
+   `content`-указатели (`topics → categories/skills`, `preparationVariants
+   → goals`, `onboarding → diagnosticTasks`).
+   Для locked скопировать скелет с `server/subjects/russian.json`.
+2. Положить рядом catalog (`server/<catalogFile>`): для locked — пустые
+   `tasks/lessons/missions/bosses/achievements`, `goals: []`,
+   `diagnosticTasks: []`, нулевой `daily`. ID сущностей — глобально
+   уникальные, ссылки — только внутри своего предмета (проверяет
+   загрузчик, а контракт — что ключи вообще есть в файле).
+3. Перезапустить сервер. Всё остальное (`INSERT subjects`, `math_levels`,
+   `source_files`, пер-предметные ключи `daily/goals/diagnosticTasks/
+   subjectMeta`, `_catalog_cache_key`, `contentUpdatedAt` в статусе)
+   итерирует реестр — править `server.py` не нужно.
+
+Битый контракт роняет старт с `SubjectContractError`, а не отдаёт чужой
+каталог. `description` контракта отдаётся в `subjectInfo.description`
+(`/api/subjects`, bootstrap) — аддитивно, старые клиенты его игнорируют.
 
 Больше ничего в backend менять не нужно: `/api/subjects`,
 `/api/bootstrap`, `/api/bootstrap-lite`, `/api/catalog-tasks`,
@@ -231,8 +238,9 @@ registry-driven, отдельных веток под предметы нет:
 
 ## 7. Типичные ошибки
 
-- Забыт один из: `source_files`, `math_levels`, `_catalog_cache_key`,
-  `contentUpdatedAt` — предмет виден в реестре, но каталог/статус stale.
+- Реестр не подхватил предмет: имя файла `subjects/<id>.json` не совпадает
+  с `id`, нет `catalogFile` на диске или битый контракт — старт упадёт
+  с `SubjectContractError` (читать текст ошибки, а не искать предмет в API).
 - `daily.skill` или `diagnosticTasks` ссылаются на чужой/пустой банк —
   сервер обнуляет их, и это выглядит как «предмет сломан».
 - ID сущности совпал с другим предметом — `install_catalog` упадёт.
