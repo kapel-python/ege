@@ -6,7 +6,7 @@
 декларативный каталог**, а не ветвления `if subject` по коду.
 
 Канонический пример locked-предмета: `russian`
-(`server/server.py:236`, `server/catalog_russian.json`).
+(`server/subjects/russian.json`, `server/catalog_russian.json`).
 Эталон ready-предметов: `profile_math`, `basic_math`.
 
 ## 0. Договорённости
@@ -14,14 +14,16 @@
 - Канонический `id` — snake_case, единожды и навсегда. Он используется
   в API (`?subject=`, `POST /api/subject`), `user_subjects`/`state`,
   каталоге и тестах. Переименование потом — миграция данных.
-- ID всех сущностей каталога (topics/skills/tasks/lessons/missions/
-  bosses/achievements) обязаны быть **глобально уникальными**:
-  загрузчик отказывает молчаливому переезду id между предметами
-  (`_assert_catalog_owner`, `server/server.py:2122`).
-- Все связи проверяются до записи (`_assert_catalog_reference`,
-  `server/server.py:2132`): skill→topic, task/lesson/mission→skill,
-  mission.tasks→tasks, boss→topic. Чужая или отсутствующая ссылка —
-  `ValueError` при `install_catalog`, а не «пустой предмет».
+- Загрузчик не даёт уже существующему id одной сущности молча переехать
+  к другому предмету (`_assert_catalog_owner` и связанные проверки
+  владельца в `server/server.py`). Это не отдельная проверка уникальности
+  id между разными типами сущностей или дублей внутри одного каталога.
+- Перед записью каталога проверяются только ссылки, для которых есть
+  ownership-проверка: skill→topic, task/lesson/mission→skill,
+  mission.tasks→tasks и boss→topic (`_assert_catalog_reference` в
+  `server/server.py`). Отсутствующая или чужая ссылка даёт `ValueError`
+  при `install_catalog`. `daily.skill` и `diagnosticTasks` не являются
+  частью этой проверки: payload затем нормализует/фильтрует их.
 - Не добавлять ветвлений вида `if <новый_id>` в `js/` и `server.py`.
   Все системы читают конфиг через `subject_config()/resolve_subject()`
   (backend) и `DataAPI.subjects()/subjectInfo()` (frontend).
@@ -33,35 +35,56 @@
 Контракт предмета — `server/subjects/<id>.json` (поля и валидация:
 `server/subjects/README.md`). Реестр (`subjects_registry.SubjectRegistry`)
 собирает из него `SUBJECTS`/`SUBJECT_IDS`, пути каталогов, `source_files`
-и строки `math_levels`. `server.py` только импортирует реестр, инлайн-данных
-о предметах в нём больше нет (остался fallback на случай деплоя без
-`subjects/` на диске).
+и строки `math_levels`. `server.py` загружает этот модуль и строит из
+него данные; в `server.py` больше нет ни inline-`SUBJECTS`, ни forecast
+weights, ни per-subject catalog paths.
+Единственный fallback — `_builtin_definitions()` внутри
+`server/subjects_registry.py`: он используется, когда в `server/subjects/`
+не найден ни один `*.json` (каталог отсутствует или пуст). Если сам
+`server/subjects_registry.py` не удаётся загрузить, startup падает с
+`RuntimeError`, а не запускает вторую копию данных; битые найденные
+контракты дают `SubjectContractError`.
+
+Проверка `validate_definition` — структурная: она проверяет форму полей,
+известный статус, каталог, ровно восемь boolean-`features`, ссылки
+`content` на наличие ключей и длину `scale`. Она не проверяет, например,
+уникальность `level.id`, согласованность `status`/`locked`/`availability`
+с `features`, схему или смысл `metadata`, покрытие навыков `forecast.weights`,
+числовые значения и монотонность `scale`, а также содержимое `goals` и
+`diagnosticTasks`. Эти ограничения нужно соблюдать самому разработчику;
+невалидные ссылки каталога отдельно ловятся при `install_catalog`.
 
 Чтобы добавить предмет:
 
-1. Создать `server/subjects/<id>.json` (`id` == имя файла, snake_case):
-   `title`, `short`, `description`, `status` (`ready` | `coming-soon`),
-   `locked`/`comingSoon`, `order` (порядок в UI), `catalogFile`
-   (`server/<файл>`), `level: {id, subjectId, name}` (строка `math_levels`),
-   `forecast` (объект `{weights, total, scale}` или `None` — нет шкалы,
-   будет `forecast: None`), `features` (ровно 8 capability-флагов:
-   `lessons`, `practice`, `forecast`, `diagnostics`, `missions`, `bosses`,
-   `daily`, `path`; для locked все учебные `False`, `path: True`),
+1. Создать `server/subjects/<id>.json`. Рекомендуемое имя — `<id>.json`
+   (сам `id` обязан быть snake_case); несовпадение имени файла и `id`
+   даёт только warning, а не ошибку старта. Заполнить `title`, `short`,
+   `description`, `status` (`ready` | `coming-soon`), `locked`/`comingSoon`,
+   `order` (порядок в UI), `catalogFile` (например, `"catalog_informatics.json"`;
+   реестр соединяет `server_dir / catalogFile`, поэтому префикс `server/`
+   в JSON не нужен), `level: {id, subjectId, name}` (строка `math_levels`),
+   `forecast` (объект `{weights, total, scale}` или `null` — нет шкалы;
+   это JSON-значение `null`), `features` (ровно 8
+   capability-флагов: `lessons`, `practice`, `forecast`, `diagnostics`,
+   `missions`, `bosses`, `daily`, `path`; для locked-скелета обычно ставят
+   все учебные `false`, а `path: true`, но реестр проверяет только форму
+   и boolean-типы, а не согласованность с `status`/`locked`),
    `content`-указатели (`topics → categories/skills`, `preparationVariants
-   → goals`, `onboarding → diagnosticTasks`).
+   → goals`, `onboarding → diagnosticTasks`). `availability` и `metadata`
+   необязательны; их семантика и взаимная согласованность не валидируются.
    Для locked скопировать скелет с `server/subjects/russian.json`.
-2. Положить рядом catalog (`server/<catalogFile>`): для locked — пустые
-   `tasks/lessons/missions/bosses/achievements`, `goals: []`,
-   `diagnosticTasks: []`, нулевой `daily`. ID сущностей — глобально
-   уникальные, ссылки — только внутри своего предмета (проверяет
-   загрузчик, а контракт — что ключи вообще есть в файле).
+2. Положить catalog в `server/` под basename из `catalogFile`: для locked —
+   пустые `tasks/lessons/missions/bosses/achievements`, `goals: []`,
+   `diagnosticTasks: []`, нулевой `daily`. Загрузчик проверяет владение
+   уже существующими id и перечисленные в разделе 0 ссылки, но не является
+   полной проверкой уникальности или семантики содержимого каталога.
 3. Перезапустить сервер. Всё остальное (`INSERT subjects`, `math_levels`,
    `source_files`, пер-предметные ключи `daily/goals/diagnosticTasks/
    subjectMeta`, `_catalog_cache_key`, `contentUpdatedAt` в статусе)
    итерирует реестр — править `server.py` не нужно.
 
-Битый контракт роняет старт с `SubjectContractError`, а не отдаёт чужой
-каталог. `description` контракта отдаётся в `subjectInfo.description`
+Битый найденный контракт роняет старт с `SubjectContractError`, а не отдаёт
+чужой каталог. `description` контракта отдаётся в `subjectInfo.description`
 (`/api/subjects`, bootstrap) — аддитивно, старые клиенты его игнорируют.
 
 Больше ничего в backend менять не нужно: `/api/subjects`,
@@ -112,13 +135,14 @@
 Сущности (все примеры — из живых каталогов):
 
 - `categories`: `{id, name, short, subject?, status, locked, ...}`.
-  Для locked — как `russian_writing` в `catalog_russian.json:20`.
+  Для locked — как `russian_writing` в `server/catalog_russian.json`.
 - `skills` (темы Пути): `{id, name, cat, order, ege, status, locked,
   comingSoon, metadata}`. `cat` обязан существовать в `categories`
   этого же предмета.
 - `tasks`: `{id, skill, sub, num, diff, text, answer, hint, hints,
   solution, type: "short_answer", sourceId, status, ...}`.
-  Формулы — LaTeX `\\(...\\)` / `\\[...\\]` (см. `README.md:72`).
+  Формулы — LaTeX `\\(...\\)` / `\\[...\\]` (см. раздел
+  `README.md` «Математические формулы»).
   `skill` обязан существовать в этом же предмете.
 - `lessons`: `{id, skill, title, xp, steps: [{id, type, title, text,
   ...}]}`. Типы шагов: `EXPLANATION`, `FOCUS`, `ACTION`, `VALIDATION`,
@@ -130,9 +154,10 @@
 - `achievements`: `{id, name, desc, icon}`. Сервер отдаёт их только
   для unlocked-предмета; клиент показывает собственные записи каталога
   без подмешивания чужих бейджей.
-- `daily`: `{skill, target, xp, title}`. Для locked — нулевой
-  (`skill: ""`, `target: 0`). Для ready `skill` обязан быть доступным
-  скиллом этого же предмета, иначе сервер обнуляет daily.
+- `daily`: `{skill, target, xp, title}`. Для locked payload принудительно
+  нулевой (`skill: ""`, `target: 0`). Для ready непустой `skill` должен
+  быть доступным скиллом этого же предмета; при невалидном skill или
+  неположительном `target` сервер обнуляет daily.
 - `goals`: `[{id, label, desc}]` (профиль: `g60/g80/g95`; база:
   `g3/g4/g5`). Пустой locked-каталог — `[]`; цель тогда `null`, без
   подстановки чужой шкалы.
@@ -144,11 +169,13 @@
 Правила наполнения:
 
 - Только реальные задания/уроки. Заглушек и копий из других предметов
-  быть не должно.
+  быть не должно; это требование к контенту, которое загрузчик не проверяет.
 - `subjectId`: для нового предмета указывать канонический id
   (как `russian`), не `math`.
-- После заполнения: снять `locked` в `SUBJECTS` и в записях каталога,
-  `status: "ready"`, проставить настоящие `features`/`forecast`/`goals`.
+- После заполнения: снять `locked` в `server/subjects/<id>.json` и в
+  записях каталога, поставить `status: "ready"`, а затем проставить
+  реальные `features`/`forecast`/`goals`. Не редактируй генерируемый
+  `SUBJECTS`: он собирается из JSON-реестра.
 
 ## 3. Frontend: менять код НЕ нужно (проверить)
 
@@ -166,9 +193,9 @@ registry-driven, отдельных веток под предметы нет:
   очистка XP/streak/attempts/diagnostics/Daily/forecast для locked.
 - Рекомендации (`nextStepCandidates()`/`bestNextStep()` в `js/state.js`,
   `test/recommender.js`): чистая функция от доступного каталога.
-  Отдельно регистрировать предмет не нужно; нужны только реальные
-  `forecast.weights` + доступные навыки/задания/уроки, иначе движок
-  честно вернёт пусто для locked-предмета.
+  Отдельно регистрировать предмет не нужно; для работающего прогноза
+  нужны реальные `forecast.weights`, доступные навыки и структурированная
+  шкала. Если их нет или предмет locked, движок честно вернёт пусто.
 - `js/app.js`: переключатель предметов, онбординг, dashboard, Path,
   profile, topbar/навигация, route guards (`EMPTY_SUBJECT_ROUTES`,
   `SUBJECT_CONTENT_ROUTES`), locked-модалка, deep links
@@ -177,15 +204,15 @@ registry-driven, отдельных веток под предметы нет:
   появится сам.
 - Админка (`js/admin.js` + backend): список/деталь пользователя,
   правка профиля, `± XP`, сбросы — subject-aware. Единственное место
-  с ручным списком — `GOAL_LABELS` (`js/admin.js:115`): добавить туда
+  с ручным списком — `GOAL_LABELS` в `js/admin.js`: добавить туда
   новые `goal id`, если предмет вводит свои.
 
 Известные общие места (не ломать, при новом предмете проверить текст):
 
-- `forecastHelpHTML()` (`js/app.js:966`): ветка `max !== 100`
+- `forecastHelpHTML()` в `js/app.js`: ветка `max !== 100`
   написана под базу (21 задание); предмету с другой шкалой может
   понадобиться своя формулировка.
-- `egeExamDate()` (`js/app.js:2620`): дата 8 июня — математика; подпись
+- `egeExamDate()` в `js/app.js`: дата 8 июня — математика; подпись
   «до ЕГЭ осталось» общая для всех предметов.
 
 ## 4. Публичные страницы и метаданные
@@ -212,9 +239,13 @@ registry-driven, отдельных веток под предметы нет:
    изоляция переключения туда-обратно, `423` на учебную запись locked,
    нулевые counts в `/api/status`.
 2. Скопировать `test/russian-subject.js` → `test/<id>-subject.js`:
-   locked-тема видна, учебных сущностей/рекомендаций/daily/XP нет,
-   онбординг не создаёт статистику; parity ready-каталогов и сценарий
-   будущей публикации.
+   locked-тема и категория видны, tasks/lessons/missions/diagnostics/
+   achievements/daily/recommendations пусты, а `applyOnboarding` не создаёт
+   XP или учебную статистику; отдельными блоками проверяются parity
+   profile/basic и синтетический сценарий будущей публикации. Это не
+   полная браузерная проверка UI: тест не исполняет UI-сценарии и не
+   проверяет bosses, goals или реальный серверный forecast-контракт
+   (в synthetic future-блоке есть только базовая проверка `forecastConfig`).
 3. Добавить оба файла в `README.md` → `## Проверки`.
 4. Быстрый прогон (без миллионов команд):
    `python3 test/<id>-subject.py`, `node test/<id>-subject.js`,
@@ -225,22 +256,26 @@ registry-driven, отдельных веток под предметы нет:
 
 ## 6. Перевод locked → ready (когда контент готов)
 
-1. `SUBJECTS`: `status: "ready"`, `locked/comingSoon: False`,
-   `availability: "ready"`, настоящий `forecast`, все `features: True`,
-   актуальный `metadata`.
+1. В `server/subjects/<id>.json`: `status: "ready"`,
+   `locked/comingSoon: false`, убрать `availability` или явно поставить
+   `"ready"`, задать настоящий `forecast` и реальные capability-флаги
+   `features` (не обязательно механически все `true`), актуальный
+   `metadata`; `SUBJECTS` не редактируется.
 2. Каталог: `status: "ready"`, снять `locked` с категории/скиллов,
    заполнить `tasks/lessons/missions/bosses/achievements/daily/goals/
    diagnosticTasks` реальными данными.
 3. Публичные страницы: перевести бейджи/тексты с «скоро» на «доступно».
-4. Тесты: перевести assertions с locked на ready (пример — parity-блок
-   в `test/russian-subject.js:50`).
-5. Отдельный коммит + `git push`, как требует `AGENTS.md:15`.
+4. Тесты: перевести assertions с locked на ready; ориентир — parity-блок
+   для `profile_math`/`basic_math` в `test/russian-subject.js`.
+5. Отдельный коммит + `git push`, как требует раздел
+   `How to change code` в `AGENTS.md`.
 
 ## 7. Типичные ошибки
 
-- Реестр не подхватил предмет: имя файла `subjects/<id>.json` не совпадает
-  с `id`, нет `catalogFile` на диске или битый контракт — старт упадёт
-  с `SubjectContractError` (читать текст ошибки, а не искать предмет в API).
+- Реестр не подхватил предмет: несовпадение имени
+  `subjects/<id>.json` и `id` даёт только warning; старт с `SubjectContractError`
+  означает отсутствующий/битый `catalogFile` или другой битый контракт
+  (читать текст ошибки, а не искать предмет в API).
 - `daily.skill` или `diagnosticTasks` ссылаются на чужой/пустой банк —
   сервер обнуляет их, и это выглядит как «предмет сломан».
 - ID сущности совпал с другим предметом — `install_catalog` упадёт.
