@@ -3,13 +3,46 @@
    Проверяется поведение: веса, шкала, давность, насыщение, вилка, топ-прирост. */
 const fs = require("fs");
 const src = fs.readFileSync("js/data.js", "utf8") + "\n" + fs.readFileSync("js/state.js", "utf8");
+
+/* Build the same public payload the server attaches to a ready subject. */
+function serverLikePayload(subjectId, catalogFile) {
+  const catalog = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
+  const contracts = ["profile_math", "basic_math", "russian"].map((id) =>
+    JSON.parse(fs.readFileSync(`server/subjects/${id}.json`, "utf8"))
+  );
+  const contract = contracts.find((item) => item.id === subjectId);
+  if (!contract) throw new Error(`Unknown subject contract: ${subjectId}`);
+
+  const publicInfo = (item) => ({
+    id: item.id,
+    title: item.title,
+    short: item.short,
+    description: item.description || "",
+    status: item.status,
+    locked: !!item.locked,
+    comingSoon: !!item.comingSoon,
+    availability: item.availability || item.status,
+    forecast: item.forecast,
+    features: item.features,
+    ...(item.metadata ? { metadata: item.metadata } : {}),
+  });
+
+  return {
+    ...catalog,
+    subject: subjectId,
+    subjects: contracts.map(publicInfo),
+    subjectInfo: publicInfo(contract),
+    forecast: contract.forecast,
+  };
+}
+
 const testBody = async () => {
   let fails = 0;
   const t = (name, cond, extra) => {
     console.log((cond ? "ok   " : "FAIL ") + name + (cond || !extra ? "" : " | " + extra));
     if (!cond) fails++;
   };
-  DataAPI.load(JSON.parse(fs.readFileSync("server/catalog.json", "utf8")));
+  DataAPI.load(serverLikePayload("profile_math", "server/catalog.json"));
   Store.ready = false;
 
   const now = Date.now();
@@ -33,8 +66,10 @@ const testBody = async () => {
 
   /* 1. Веса покрывают все навыки каталога и в сумме дают 32. */
   {
+    const cfg = DataAPI.forecastConfig();
+    const configured = cfg && cfg.weights && typeof cfg.weights === "object" ? cfg.weights : {};
     const wSum = skills.reduce((a, s) => a + skillEgeWeight(s.id), 0);
-    const uncovered = skills.filter((s) => !(s.id in SKILL_EGE_WEIGHTS)).map((s) => s.id);
+    const uncovered = skills.filter((s) => !Object.prototype.hasOwnProperty.call(configured, s.id)).map((s) => s.id);
     t("веса: сумма по каталогу = 32 первичных балла", wSum === 32, "sum=" + wSum);
     t("веса: все навыки каталога явно взвешены", uncovered.length === 0, uncovered.join(","));
     t("веса: вторая часть дороже первой", skillEgeWeight("n17_optimization") > skillEgeWeight("n01_planimetry"));
@@ -42,9 +77,10 @@ const testBody = async () => {
 
   /* 2. Шкала перевода монотонна и совпадает с опубликованной. */
   {
-    const mono = PRIMARY_TO_TEST.every((v, i, a) => i === 0 || v >= a[i - 1]);
-    t("шкала: монотонна и длиной 33 (0–32)", mono && PRIMARY_TO_TEST.length === 33);
-    t("шкала: 0→0, 5→27 (порог), 30→100", PRIMARY_TO_TEST[0] === 0 && PRIMARY_TO_TEST[5] === 27 && PRIMARY_TO_TEST[30] === 100);
+    const scale = forecastScale();
+    const mono = scale.every((v, i, a) => i === 0 || v >= a[i - 1]);
+    t("шкала: монотонна и длиной 33 (0–32)", mono && scale.length === 33);
+    t("шкала: 0→0, 5→27 (порог), 30→100", scale[0] === 0 && scale[5] === 27 && scale[30] === 100);
   }
 
   /* 3. Новичок: низкий прогноз и широкая вилка. */
@@ -148,6 +184,31 @@ const testBody = async () => {
     t("история: старые снимки переживают новый формат", hist.some((x) => x.date === "2020-01-01") && hist.every((x) => Number.isFinite(x.mid)));
     const tr = forecastTrend(9999);
     t("тренд: дельта — число", tr && Number.isFinite(tr.delta), JSON.stringify(tr));
+  }
+
+  /* 11. Базовый предмет использует собственный активный конфиг. */
+  {
+    DataAPI.load(serverLikePayload("basic_math", "server/catalog_basic.json"));
+    Store.ready = false;
+    Store.reset();
+    const scale = forecastScale();
+    t("базовая математика: конфиг даёт total 21 и шкалу длиной 22",
+      forecastTotal() === 21 && scale.length === 22,
+      `total=${forecastTotal()} scaleLength=${scale.length}`);
+  }
+
+  /* 12. Без forecast-конфига математический fallback не должен просачиваться в locked-предмет. */
+  {
+    DataAPI.load(serverLikePayload("russian", "server/catalog_russian.json"));
+    Store.ready = false;
+    Store.reset();
+    const f = forecast();
+    const hist = forecastHistory();
+    const snap = recordForecastSnapshot();
+    t("без forecast-конфига: forecast помечается пустым", f.empty === true, JSON.stringify(f));
+    t("без forecast-конфига: конфиг недоступен", forecastConfigAvailable() === false);
+    t("без forecast-конфига: история пуста", Array.isArray(hist) && hist.length === 0, JSON.stringify(hist));
+    t("без forecast-конфига: снимок не записывается", snap === null, JSON.stringify(snap));
   }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
