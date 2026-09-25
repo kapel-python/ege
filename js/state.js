@@ -44,6 +44,31 @@ function currentSubjectId() {
   return String(Store.subject || "profile_math");
 }
 
+/* Сопровождающий снимок предмет всегда сверяем с уже загруженным каталогом.
+   Нельзя подставлять сюда Store.subject как запасной источник: расхождение
+   Store/catalog — именно тот случай, который должен закрываться до записи. */
+function assertSubjectCatalog(subject) {
+  const requested = String(subject || "").trim();
+  let catalogSubject = "";
+  try {
+    if (typeof DataAPI !== "undefined" && typeof DataAPI.currentSubject === "function") {
+      catalogSubject = String(DataAPI.currentSubject() || "").trim();
+    }
+  } catch (_) {}
+  if (!requested || !catalogSubject || requested !== catalogSubject) {
+    const error = new Error(
+      requested && catalogSubject
+        ? `Предмет «${requested}» не совпадает с загруженным каталогом «${catalogSubject}»`
+        : "Не удалось подтвердить предмет для сохранения"
+    );
+    error.code = "SUBJECT_CATALOG_MISMATCH";
+    error.subject = requested;
+    error.catalogSubject = catalogSubject;
+    throw error;
+  }
+  return requested;
+}
+
 function subjectLearningAvailable() {
   try {
     if (typeof DataAPI === "undefined") return false;
@@ -265,7 +290,7 @@ const Store = {
       this.state.version = defaults.version;
 
       const learningAvailable = subjectLearningAvailable();
-      const preserveLearningState = learningAvailable || !catalogDescribed;
+      const preserveLearningState = learningAvailable || (!catalogDescribed && DataAPI.isLegacySubject());
       const availableIds = new Set(
         (typeof DataAPI.availableSkills === "function" ? DataAPI.availableSkills() : DataAPI.skills())
           .map((skill) => String(skill.id)).filter(Boolean)
@@ -478,6 +503,8 @@ const Store = {
     try {
       const incoming = message.snapshot;
       if (incoming.subject !== this.subject) throw new Error("Другой предмет уже выбран в главной вкладке");
+      assertSubjectCatalog(incoming.subject);
+      if (this.subject) assertSubjectCatalog(this.subject);
       const merged = this.mergeLeaderState(this.state || {}, incoming, message.baseState || {});
       // Leader owns the canonical in-memory snapshot as well as the only PUT.
       this.state = merged;
@@ -678,12 +705,20 @@ const Store = {
   },
 
   async _saveDomains(snapshot) {
+    const subject = String(snapshot && snapshot.subject || "").trim();
+    assertSubjectCatalog(subject);
+    if (this.subject) assertSubjectCatalog(this.subject);
     const base = this.lastSyncedState || {};
-    const subject = snapshot.subject;
     let version = snapshot.stateVersion;
     const request = async (method, path, body) => {
+      // Каталог может смениться между доменными запросами. Проверяем перед
+      // каждым POST/PATCH, чтобы очередной запрос не ушёл уже по чужому id.
+      assertSubjectCatalog(subject);
+      if (this.subject) assertSubjectCatalog(this.subject);
       const payload = { subject, expectedVersion: version, ...body };
       const result = await ApiClient[method](path, payload);
+      assertSubjectCatalog(subject);
+      if (this.subject) assertSubjectCatalog(this.subject);
       if (!Number.isInteger(result.stateVersion) || result.stateVersion < 1) throw new Error("Сервер не вернул версию состояния");
       version = result.stateVersion;
       snapshot.stateVersion = version;
@@ -789,6 +824,8 @@ const Store = {
       domains.deletedLessonStepErrors = snapshot.deletedLessonStepErrors;
     }
     if (Object.keys(domains).length) await request("patch", "/api/state-domains", { domains });
+    assertSubjectCatalog(subject);
+    if (this.subject) assertSubjectCatalog(this.subject);
     if (Array.isArray(snapshot.deletedLessonSessions)) {
       const deleted = new Set(snapshot.deletedLessonSessions);
       this.deletedLessonSessions = this.deletedLessonSessions.filter((lessonId) => !deleted.has(lessonId));
@@ -835,8 +872,14 @@ const Store = {
       .catch(() => {})
       .then(() => {
         const snapshot = JSON.parse(JSON.stringify(this.state));
+        const stateSubject = String(snapshot.subject || "").trim();
+        const storeSubject = String(this.subject || "").trim();
+        const subject = storeSubject || stateSubject || currentSubjectId();
+        // Не позволяем save() переименовать чужой снимок в текущий предмет.
+        assertSubjectCatalog(subject);
+        if (stateSubject) assertSubjectCatalog(stateSubject);
         // Снапшот всегда помечен предметом — сервер пишет строго в его строки.
-        snapshot.subject = this.subject || snapshot.subject || currentSubjectId();
+        snapshot.subject = subject;
         snapshot.deletedLessonSessions = [...this.deletedLessonSessions];
         snapshot.deletedLessonStepErrors = [...this.deletedLessonStepErrors];
         // Нечего писать — пропускаем сеть целиком. lastSyncedState обновляется
@@ -2585,6 +2628,19 @@ function bestNextStep() {
    Онбординг / диагностика
    ============================================================ */
 
+function guardOnboardingSubject(state, subject) {
+  try {
+    assertSubjectCatalog(subject);
+    if (state && state.subject) assertSubjectCatalog(state.subject);
+    if (Store.subject) assertSubjectCatalog(Store.subject);
+  } catch (error) {
+    Store.persistenceError = error;
+    try { Store.emit("persistenceerror", error); } catch (_) {}
+    return false;
+  }
+  return true;
+}
+
 function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   const s = Store.state;
   if (!s) return;
@@ -2594,6 +2650,9 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   const requested = subject ? String(subject) : "";
   const subj = requested && typeof DataAPI.subjectInfo === "function" && DataAPI.subjectInfo(requested)
     ? requested : String(current || "profile_math");
+  // Onboarding не переключает каталог сам. До любой мутации проверяем, что
+  // выбранный предмет и уже загруженный каталог — одна и та же идентичность.
+  if (!guardOnboardingSubject(s, subj)) return false;
   Store.subject = subj;
   s.subject = subj;
 
@@ -2690,6 +2749,7 @@ function completeOnboardingWithoutTest(subject, name) {
   const requested = subject ? String(subject) : "";
   const subj = requested && typeof DataAPI.subjectInfo === "function" && DataAPI.subjectInfo(requested)
     ? requested : String(current || "profile_math");
+  if (!guardOnboardingSubject(s, subj)) return false;
   Store.subject = subj;
   s.subject = subj;
   const cleanedName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
