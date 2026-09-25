@@ -137,5 +137,50 @@ vm.runInContext(`
 `, sandbox);
 check("смена accountId без auth не сохраняет старую сессию", sandbox.authBoundary.accountId === "account-b" && sandbox.authBoundary.registered === false);
 
+/* Каждый раздел locked-предмета обязан показывать СВОЮ структуру.
+   Регрессия: один guard отправлял training/errors/trials/stats в общую
+   карточку, из-за чего «Ошибки» и «Тренировка» были неотличимы.
+   Здесь проверяем и прямой вызов экрана (в обход render()), и route. */
+{
+  const appSrc = fs.readFileSync("js/app.js", "utf8");
+  // app.js — большой браузерный модуль; для этой проверки достаточно
+  // вытащить объявления copy-таблицы и чистые функции-helper'ы.
+  const sectionCopy = /const SUBJECT_SECTION_COPY = (\{[\s\S]*?\n\});/.exec(appSrc);
+  check("в app.js есть таблица section-specific copy", !!sectionCopy);
+  if (sectionCopy) {
+    const copy = vm.runInContext("(" + sectionCopy[1] + ")", sandbox);
+    const required = ["training", "errors", "trials", "stats", "path", "skill",
+      "session", "practice", "boss", "daily", "review", "lesson"];
+    const missing = required.filter((r) => !copy[r] || !copy[r].title || !copy[r].sub || !copy[r].empty);
+    check("section-specific copy покрывает все разделы", missing.length === 0);
+    const sigs = required.map((r) => [copy[r].title, copy[r].empty].join("|"));
+    check("у каждого раздела свой заголовок и текст пустого состояния",
+      new Set(sigs).size === sigs.length);
+    check("training и errors различаются",
+      copy.training.empty !== copy.errors.empty && copy.training.title !== copy.errors.title);
+  }
+  // Прямой вызов screenTraining обязан передать route (иначе fallback на
+  // общую карточку). Проверяем наличие вызова с третьим аргументом.
+  check("screenTraining передаёт route в screenSubjectUnavailable",
+    /if \(state\.empty \|\| state\.locked\) return screenSubjectUnavailable\(root, state\.locked, "training"\);/.test(appSrc));
+  // Defensive guards у остальных экранов: прямой вызов не должен рисуть
+  // ready-подобный экран с нулями. Ищем guard в начале тела функции,
+  // игнорируя любое количество комментариев над ним.
+  const guardIn = (fn) => {
+    const start = appSrc.indexOf("function " + fn + "(root) {");
+    if (start < 0) return false;
+    const body = appSrc.slice(start, start + 900);
+    return new RegExp("if \\(subjectLearningUnavailable\\(\\)\\) return screenSubjectUnavailable\\(root, true, \"" + fn.replace("screen", "").toLowerCase() + "\"\\);").test(body);
+  };
+  check("screenErrors/screenTrials/screenStats имеют locked-guard",
+    guardIn("screenErrors") && guardIn("screenTrials") && guardIn("screenStats"));
+  // Деление на ноль в daily-карте недопустимо даже при обходе guard.
+  check("daily-карта не делит на dailyGoal без проверки",
+    appSrc.includes("${dailyGoal ? dailyTitle") && !appSrc.includes("${dailyTitle}\n        <div style=\"margin:14px 0 6px\">"));
+  // Футер не должен скрываться на locked-разделах.
+  check("locked-разделы не скрывают футер",
+    !/SUBJECT_CONTENT_ROUTES\.has\(route\)\) \{\s*screen\.innerHTML = "";\s*screenSubjectUnavailable\(screen, true, route\);\s*try \{ if \(window\.Footer\) Footer\.hide\(\); \}/.test(appSrc));
+}
+
 console.log(fails ? `${fails} FAILURES` : "ALL OK");
 process.exit(fails ? 1 : 0);
