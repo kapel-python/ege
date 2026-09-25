@@ -2471,12 +2471,18 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         daily = config_value(subject, "daily", _empty_daily())
         goals = config_value(subject, "goals", [])
         diagnostics = config_value(subject, "diagnosticTasks", [])
+        visual_assets = config_value(subject, "visualAssets", [])
+        visual_audit = config_value(subject, "visualAudit", {})
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"daily:{subject}", json.dumps(daily, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"goals:{subject}", json.dumps(goals, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"diagnosticTasks:{subject}", json.dumps(diagnostics, ensure_ascii=False)))
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (f"visualAssets:{subject}", json.dumps(visual_assets, ensure_ascii=False)))
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (f"visualAudit:{subject}", json.dumps(visual_audit, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"subjectMeta:{subject}", json.dumps(_public_subject_info(subject), ensure_ascii=False)))
 
@@ -2673,10 +2679,8 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
         diagnostics = []
     diagnostics = [str(task_id) for task_id in diagnostics
                    if isinstance(task_id, str) and task_id in available_task_ids]
-    config = {r["key"]: json.loads(r["value_json"])
-              for r in conn.execute("SELECT key, value_json FROM app_config")}
-    visual_assets = [] if subject_locked else config.get("visualAssets", [])
-    visual_audit = {} if subject_locked else config.get("visualAudit", {})
+    visual_assets = [] if subject_locked else _subject_config(conn, "visualAssets", subject, [])
+    visual_audit = {} if subject_locked else _subject_config(conn, "visualAudit", subject, {})
     return {
         "subjects": subjects_payload(), "subject": subject,
         "subjectInfo": subject_info, "status": subject_info["status"],
