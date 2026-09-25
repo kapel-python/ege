@@ -1,0 +1,30 @@
+{
+  "id": "basic_math",
+  "title": "Базовая математика",
+  "short": "База",
+  "description": "Базовая математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом оценки.",
+  "status": "ready",
+  "locked": false,
+  "comingSoon": false,
+  "order": 1,
+  "catalogFile": "catalog_basic.json",
+  "level": {"id": "basic", "subjectId": "math", "name": "Базовый уровень"},
+  "forecast": {
+    "weights": {
+      "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
+      "b05_probability": 1, "b06_choice": 1, "b07_functions": 1, "b08_logic": 1,
+      "b09_grid": 1, "b10_practplan": 1, "b11_practstereo": 1, "b12_planimetry": 1,
+      "b13_stereometry": 1, "b14_fractions": 1, "b15_percent": 1, "b16_expressions": 1,
+      "b17_equations": 1, "b18_inequalities": 1, "b19_integers": 1,
+      "b20_wordprob": 1, "b21_nonstandard": 1
+    },
+    "total": 21,
+    "scale": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+  },
+  "features": {"lessons": true, "practice": true, "forecast": true, "diagnostics": true, "missions": true, "bosses": true, "daily": true, "path": true},
+  "content": {
+    "topics": {"source": "catalog", "keys": ["categories", "skills"]},
+    "preparationVariants": {"source": "catalog", "key": "goals"},
+    "onboarding": {"source": "catalog", "key": "diagnosticTasks"}
+  }
+}

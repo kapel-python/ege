@@ -1,0 +1,29 @@
+{
+  "id": "profile_math",
+  "title": "Профильная математика",
+  "short": "Профиль",
+  "description": "Профильная математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом баллов.",
+  "status": "ready",
+  "locked": false,
+  "comingSoon": false,
+  "order": 0,
+  "catalogFile": "catalog.json",
+  "level": {"id": "profile", "subjectId": "math", "name": "Профильный уровень"},
+  "forecast": {
+    "weights": {
+      "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
+      "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
+      "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
+      "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
+      "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2
+    },
+    "total": 32,
+    "scale": [0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100]
+  },
+  "features": {"lessons": true, "practice": true, "forecast": true, "diagnostics": true, "missions": true, "bosses": true, "daily": true, "path": true},
+  "content": {
+    "topics": {"source": "catalog", "keys": ["categories", "skills"]},
+    "preparationVariants": {"source": "catalog", "key": "goals"},
+    "onboarding": {"source": "catalog", "key": "diagnosticTasks"}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "russian",
+  "title": "Русский язык",
+  "short": "Русский",
+  "description": "Первый раздел русского языка готовится к публикации.",
+  "status": "coming-soon",
+  "locked": true,
+  "comingSoon": true,
+  "availability": "coming-soon",
+  "order": 2,
+  "catalogFile": "catalog_russian.json",
+  "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
+  "forecast": null,
+  "features": {"lessons": false, "practice": false, "forecast": false, "diagnostics": false, "missions": false, "bosses": false, "daily": false, "path": true},
+  "metadata": {
+    "availability": "coming-soon",
+    "locked": true,
+    "topic": "Итоговое сочинение",
+    "topicCount": 1
+  },
+  "content": {
+    "topics": {"source": "catalog", "keys": ["categories", "skills"]},
+    "preparationVariants": {"source": "catalog", "key": "goals"},
+    "onboarding": {"source": "catalog", "key": "diagnosticTasks"}
+  }
+}

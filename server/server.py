@@ -39,9 +39,71 @@ except ImportError:  # pragma: no cover - the supported deployment target is Uni
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3")))
-CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
-CATALOG_BASIC_PATH = Path(__file__).resolve().parent / "catalog_basic.json"
-CATALOG_RUSSIAN_PATH = Path(__file__).resolve().parent / "catalog_russian.json"
+
+
+def _load_subject_registry():
+    """Загрузить единый реестр предметов из server/subjects/*.json.
+
+    Возвращает SubjectRegistry либо None, когда реестра нет на диске
+    (минимальный деплой без subjects/): тогда ниже используется legacy
+    инлайн-блок с теми же значениями. Битый контракт (SubjectContractError)
+    пробрасывается наружу осознанно — сервер не должен молча стартовать
+    с чужим набором предметов.
+    """
+    import importlib.util
+
+    reg_path = Path(__file__).resolve().parent / "subjects_registry.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_subjects_registry", reg_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except (ImportError, OSError):
+        return None
+    registry = module.load_registry(server_dir=Path(__file__).resolve().parent)
+    if not registry.from_files:
+        return None
+    return registry
+
+
+_REGISTRY = _load_subject_registry()
+
+
+def _subject_catalog_paths() -> list:
+    if _REGISTRY is not None:
+        return _REGISTRY.catalog_paths()
+    return [CATALOG_PATH, CATALOG_BASIC_PATH, CATALOG_RUSSIAN_PATH]
+
+
+def _subject_source_files() -> tuple:
+    if _REGISTRY is not None:
+        return _REGISTRY.source_files()
+    return (
+        (CATALOG_PATH, "profile_math", "profile"),
+        (CATALOG_BASIC_PATH, "basic_math", "basic"),
+        (CATALOG_RUSSIAN_PATH, "russian", "russian"),
+    )
+
+
+def _subject_level_rows() -> list:
+    if _REGISTRY is not None:
+        return _REGISTRY.level_rows()
+    return [
+        ("basic", "math", "Базовый уровень"),
+        ("profile", "math", "Профильный уровень"),
+        ("russian", "russian", "Русский язык"),
+    ]
+
+
+if _REGISTRY is not None:
+    CATALOG_PATH = _REGISTRY.catalog_path("profile_math")
+    CATALOG_BASIC_PATH = _REGISTRY.catalog_path("basic_math")
+    CATALOG_RUSSIAN_PATH = _REGISTRY.catalog_path("russian")
+else:
+    CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
+    CATALOG_BASIC_PATH = Path(__file__).resolve().parent / "catalog_basic.json"
+    CATALOG_RUSSIAN_PATH = Path(__file__).resolve().parent / "catalog_russian.json"
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
 # Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
@@ -153,109 +215,122 @@ def log_request_error(label: str, exc: BaseException) -> str:
 # Multi-subject model.
 #
 # Предмет — сущность первого класса: весь пользовательский прогресс, каталог
-# и прогнозы разрешаются строго в рамках одного subject. Новый предмет
-# добавляется одной записью в SUBJECTS + контентом в каталоге (навыки/задания
-# с subject=<id>), без ветвлений вида `if basic_math` по коду: все системы
-# читают конфиг через subject_config()/resolve_subject(), а не хардкод.
+# и прогнозы разрешаются строго в рамках одного subject. Канонический контракт
+# предмета — server/subjects/<id>.json (см. server/subjects_registry.py):
+# новый предмет добавляется новым JSON + своим catalog-файлом, без ветвлений
+# вида `if basic_math` по коду и без правок в пяти местах server.py.
+# Все системы читают конфиг через subject_config()/resolve_subject().
+# Инлайн-блок ниже — только fallback для деплоя без subjects/ на диске.
 # ---------------------------------------------------------------------------
 DEFAULT_SUBJECT = "profile_math"
 
-# Веса навыков в первичных баллах ЕГЭ-2026 (профиль) и шкала перевода в
-# тестовые — конфиг прогноза профильной математики. Лежит здесь (а не только
-# в js), чтобы subjects-пейлоад отдавал его клиентам из одного места.
-SKILL_EGE_WEIGHTS_PROFILE = {
-    "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
-    "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
-    "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
-    "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
-    "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2,
-}
-TOTAL_EGE_PRIMARY_PROFILE = 32
-PRIMARY_TO_TEST_PROFILE = [
-    0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
-    80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
-]
+if _REGISTRY is not None:
+    SUBJECTS: dict[str, dict] = _REGISTRY.subjects
+    _profile_forecast = _REGISTRY.forecast_of("profile_math") or {}
+    SKILL_EGE_WEIGHTS_PROFILE = _profile_forecast.get("weights", {})
+    TOTAL_EGE_PRIMARY_PROFILE = _profile_forecast.get("total", 0)
+    PRIMARY_TO_TEST_PROFILE = _profile_forecast.get("scale", [])
+    _basic_forecast = _REGISTRY.forecast_of("basic_math") or {}
+    SKILL_EGE_WEIGHTS_BASIC = _basic_forecast.get("weights", {})
+    TOTAL_EGE_PRIMARY_BASIC = _basic_forecast.get("total", 0)
+    PRIMARY_TO_TEST_BASIC = _basic_forecast.get("scale", [])
+else:
+    # Веса навыков в первичных баллах ЕГЭ-2026 (профиль) и шкала перевода в
+    # тестовые — конфиг прогноза профильной математики. Лежит здесь (а не только
+    # в js), чтобы subjects-пейлоад отдавал его клиентам из одного места.
+    SKILL_EGE_WEIGHTS_PROFILE = {
+        "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
+        "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
+        "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
+        "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
+        "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2,
+    }
+    TOTAL_EGE_PRIMARY_PROFILE = 32
+    PRIMARY_TO_TEST_PROFILE = [
+        0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
+        80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
+    ]
 
-# Прогноз базовой математики: экзамен состоит из 21 задания с кратким
-# ответом, каждое даёт 1 первичный балл (максимум 21), итог — оценка 2–5
-# (7+ баллов — «3», 12+ — «4», 17+ — «5»). Стобалльной шкалы у базы нет,
-# поэтому «тестовый» результат совпадает с первичным: шкала тождественная.
-# Прогноз отвечает на вопрос «сколько заданий решу», а не «сколько баллов
-# из 100 получу» — копировать профильную шкалу сюда было бы неверно.
-SKILL_EGE_WEIGHTS_BASIC = {
-    "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
-    "b05_probability": 1, "b06_choice": 1, "b07_functions": 1, "b08_logic": 1,
-    "b09_grid": 1, "b10_practplan": 1, "b11_practstereo": 1, "b12_planimetry": 1,
-    "b13_stereometry": 1, "b14_fractions": 1, "b15_percent": 1, "b16_expressions": 1,
-    "b17_equations": 1, "b18_inequalities": 1, "b19_integers": 1,
-    "b20_wordprob": 1, "b21_nonstandard": 1,
-}
-TOTAL_EGE_PRIMARY_BASIC = 21
-PRIMARY_TO_TEST_BASIC = list(range(TOTAL_EGE_PRIMARY_BASIC + 1))
+    # Прогноз базовой математики: экзамен состоит из 21 задания с кратким
+    # ответом, каждое даёт 1 первичный балл (максимум 21), итог — оценка 2–5
+    # (7+ баллов — «3», 12+ — «4», 17+ — «5»). Стобалльной шкалы у базы нет,
+    # поэтому «тестовый» результат совпадает с первичным: шкала тождественная.
+    # Прогноз отвечает на вопрос «сколько заданий решу», а не «сколько баллов
+    # из 100 получу» — копировать профильную шкалу сюда было бы неверно.
+    SKILL_EGE_WEIGHTS_BASIC = {
+        "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
+        "b05_probability": 1, "b06_choice": 1, "b07_functions": 1, "b08_logic": 1,
+        "b09_grid": 1, "b10_practplan": 1, "b11_practstereo": 1, "b12_planimetry": 1,
+        "b13_stereometry": 1, "b14_fractions": 1, "b15_percent": 1, "b16_expressions": 1,
+        "b17_equations": 1, "b18_inequalities": 1, "b19_integers": 1,
+        "b20_wordprob": 1, "b21_nonstandard": 1,
+    }
+    TOTAL_EGE_PRIMARY_BASIC = 21
+    PRIMARY_TO_TEST_BASIC = list(range(TOTAL_EGE_PRIMARY_BASIC + 1))
 
-SUBJECTS: dict[str, dict] = {
-    "profile_math": {
-        "id": "profile_math",
-        "title": "Профильная математика",
-        "short": "Профиль",
-        # ready: полный цикл (каталог, диагностика, прогноз). coming-soon:
-        # предмет уже выбирается, но его учебные единицы ещё не опубликованы.
-        "status": "ready",
-        "locked": False,
-        "comingSoon": False,
-        "forecast": {
-            "weights": SKILL_EGE_WEIGHTS_PROFILE,
-            "total": TOTAL_EGE_PRIMARY_PROFILE,
-            "scale": PRIMARY_TO_TEST_PROFILE,
+    SUBJECTS: dict[str, dict] = {
+        "profile_math": {
+            "id": "profile_math",
+            "title": "Профильная математика",
+            "short": "Профиль",
+            # ready: полный цикл (каталог, диагностика, прогноз). coming-soon:
+            # предмет уже выбирается, но его учебные единицы ещё не опубликованы.
+            "status": "ready",
+            "locked": False,
+            "comingSoon": False,
+            "forecast": {
+                "weights": SKILL_EGE_WEIGHTS_PROFILE,
+                "total": TOTAL_EGE_PRIMARY_PROFILE,
+                "scale": PRIMARY_TO_TEST_PROFILE,
+            },
+            # Что реально входит в курс предмета (для честных подписей в UI:
+            # «Полный курс» — только там, где есть и уроки, и практика, и прогноз).
+            "features": {"lessons": True, "practice": True, "forecast": True,
+                          "diagnostics": True, "missions": True, "bosses": True,
+                          "daily": True, "path": True},
         },
-        # Что реально входит в курс предмета (для честных подписей в UI:
-        # «Полный курс» — только там, где есть и уроки, и практика, и прогноз).
-        "features": {"lessons": True, "practice": True, "forecast": True,
-                      "diagnostics": True, "missions": True, "bosses": True,
-                      "daily": True, "path": True},
-    },
-    "basic_math": {
-        "id": "basic_math",
-        "title": "Базовая математика",
-        "short": "База",
-        "status": "ready",
-        "locked": False,
-        "comingSoon": False,
-        "forecast": {
-            "weights": SKILL_EGE_WEIGHTS_BASIC,
-            "total": TOTAL_EGE_PRIMARY_BASIC,
-            "scale": PRIMARY_TO_TEST_BASIC,
+        "basic_math": {
+            "id": "basic_math",
+            "title": "Базовая математика",
+            "short": "База",
+            "status": "ready",
+            "locked": False,
+            "comingSoon": False,
+            "forecast": {
+                "weights": SKILL_EGE_WEIGHTS_BASIC,
+                "total": TOTAL_EGE_PRIMARY_BASIC,
+                "scale": PRIMARY_TO_TEST_BASIC,
+            },
+            # Уроки есть для части навыков (остальные считаются полностью из
+            # практики — та же механика, что у профильных тем без урока).
+            # Остальной цикл полный: диагностика, тренировки, боссы, прогноз.
+            "features": {"lessons": True, "practice": True, "forecast": True,
+                          "diagnostics": True, "missions": True, "bosses": True,
+                          "daily": True, "path": True},
         },
-        # Уроки есть для части навыков (остальные считаются полностью из
-        # практики — та же механика, что у профильных тем без урока).
-        # Остальной цикл полный: диагностика, тренировки, боссы, прогноз.
-        "features": {"lessons": True, "practice": True, "forecast": True,
-                      "diagnostics": True, "missions": True, "bosses": True,
-                      "daily": True, "path": True},
-    },
-    "russian": {
-        "id": "russian",
-        "title": "Русский язык",
-        "short": "Русский",
-        # Канонический id используется и в API, и в user_subjects/state.
-        # Предмет доступен для выбора, но путь содержит только locked-узел:
-        # это не «пустой курс» и не набор выдуманных заданий.
-        "status": "coming-soon",
-        "locked": True,
-        "comingSoon": True,
-        "availability": "coming-soon",
-        "forecast": None,
-        "features": {"lessons": False, "practice": False, "forecast": False,
-                      "diagnostics": False, "missions": False, "bosses": False,
-                      "daily": False, "path": True},
-        "metadata": {
-            "availability": "coming-soon",
+        "russian": {
+            "id": "russian",
+            "title": "Русский язык",
+            "short": "Русский",
+            # Канонический id используется и в API, и в user_subjects/state.
+            # Предмет доступен для выбора, но путь содержит только locked-узел:
+            # это не «пустой курс» и не набор выдуманных заданий.
+            "status": "coming-soon",
             "locked": True,
-            "topic": "Итоговое сочинение",
-            "topicCount": 1,
+            "comingSoon": True,
+            "availability": "coming-soon",
+            "forecast": None,
+            "features": {"lessons": False, "practice": False, "forecast": False,
+                          "diagnostics": False, "missions": False, "bosses": False,
+                          "daily": False, "path": True},
+            "metadata": {
+                "availability": "coming-soon",
+                "locked": True,
+                "topic": "Итоговое сочинение",
+                "topicCount": 1,
+            },
         },
-    },
-}
+    }
 SUBJECT_IDS = tuple(SUBJECTS.keys())
 _LOCKED_SUBJECT_STATUSES = {"locked", "coming-soon", "coming_soon", "disabled", "unavailable"}
 
@@ -342,6 +417,7 @@ def _public_subject_info(subject: str) -> dict:
         "id": subject,
         "title": info["title"],
         "short": info["short"],
+        "description": info.get("description", ""),
         "status": info.get("status", "ready"),
         "locked": locked,
         "comingSoon": coming_soon,
@@ -2338,17 +2414,17 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES (?, ?, ?)",
                      (sid, info["title"], info["short"]))
     conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES ('math', 'Математика', 'Математика')")
-    conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('basic', 'math', 'Базовый уровень')")
-    conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('profile', 'math', 'Профильный уровень')")
-    conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES ('russian', 'russian', 'Русский язык')")
+    # Строки уровней идут из реестра (subjects/<id>.json → level): новый
+    # предмет виден группировке каталога без правок здесь.
+    for level_id, level_subject_id, level_name in _subject_level_rows():
+        conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES (?, ?, ?)",
+                     (level_id, level_subject_id, level_name))
 
     # One loader for every subject.  Missing optional files deliberately produce
     # an empty subject rather than borrowing the profile's daily/diagnostic data.
-    source_files = (
-        (CATALOG_PATH, "profile_math", "profile"),
-        (CATALOG_BASIC_PATH, "basic_math", "basic"),
-        (CATALOG_RUSSIAN_PATH, "russian", "russian"),
-    )
+    # Источник файлов — реестр, а не захардкоженный кортеж: четвёртый предмет
+    # подхватывается автоматически.
+    source_files = _subject_source_files()
     loaded: dict[str, dict] = {}
     for path, subject, level_id in source_files:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -2592,7 +2668,7 @@ _CATALOG_CACHE: dict = {"key": None, "payloads": {}, "generation": 0}
 
 def _catalog_cache_key() -> tuple:
     mtimes = []
-    for path in (CATALOG_PATH, CATALOG_BASIC_PATH, CATALOG_RUSSIAN_PATH):
+    for path in _subject_catalog_paths():
         try:
             mtimes.append(path.stat().st_mtime_ns)
         except OSError:
@@ -2904,9 +2980,7 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
         total_lessons += subj_lessons
         total_missions += subj_missions
         total_bosses += subj_bosses
-    content_updated = max(_status_file_mtime_ms(CATALOG_PATH),
-                          _status_file_mtime_ms(CATALOG_BASIC_PATH),
-                          _status_file_mtime_ms(CATALOG_RUSSIAN_PATH))
+    content_updated = max(_status_file_mtime_ms(path) for path in _subject_catalog_paths())
     services = [
         {"id": "api", "label": "API", "ok": True, "detail": "Отвечает"},
         {"id": "database", "label": "База данных", "ok": db_ok,
