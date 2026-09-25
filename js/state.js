@@ -308,7 +308,7 @@ const Store = {
       this.state.lessonSessions = preserveLearningState ? { ...sessions } : {};
       this.state.lessonStepErrors = preserveLearningState ? safeObject(parsed.lessonStepErrors) : {};
       this.state.lessonErrorHistory = preserveLearningState ? safeArray(parsed.lessonErrorHistory) : [];
-      this.state.forecastHistory = preserveLearningState && (DataAPI.forecastConfig() || DataAPI.isLegacySubject())
+      this.state.forecastHistory = preserveLearningState && forecastConfigAvailable()
         ? safeArray(parsed.forecastHistory) : [];
       this.state.lessonAttempts = preserveLearningState ? safeArray(parsed.lessonAttempts) : [];
       this.state.taskAttempts = preserveLearningState
@@ -1424,30 +1424,9 @@ function plural(n, one, few, many) {
 /* ============================================================
    Прогноз балла по фактическому прогрессу и истории ответов.
    Честная цепочка: освоение тем → взвешенное среднее → первичные
-   баллы (0–32) → тестовая шкала ЕГЭ-2026. Никакого «базового»
-   минимума за ноль знаний и никакой фиксированной вилки.
+   баллы → тестовая шкала, заданные конфигом текущего предмета.
+   Никакого «базового» минимума за ноль знаний и никакой фиксированной вилки.
    ============================================================ */
-
-/* Вес навыка = его цена в первичных баллах ЕГЭ-2026: часть 1 — по 1,
-   часть 2 — по спецификации ФИПИ (13:2, 14:3, 15:2, 16:2, 17:3,
-   18:4, 19:4; задание 19 покрывают два навыка — параметр и числа,
-   по 2 каждый). Сумма всех весов = 32. */
-const SKILL_EGE_WEIGHTS = {
-  n01_planimetry: 1, n02_vectors: 1, n03_stereometry: 1, n04_probability: 1,
-  n05_prob_theorems: 1, n06_random_var: 1, n07_equations: 1, n08_expressions: 1,
-  n09_derivative: 1, n10_applied: 1, n11_word_problems: 1, n12_functions: 1,
-  n14_trig_eq: 2, n15_stereometry: 3, n13_financial: 2, n18_planimetry: 2,
-  n16_inequality: 3, n17_optimization: 4, n19_parameter: 2, n20_numbers: 2,
-};
-const TOTAL_EGE_PRIMARY = 32;
-
-/* Шкала перевода первичных баллов в тестовые (ЕГЭ-2026, профиль).
-   Значения 2, 16, 19 в опубликованной шкале пропущены — взяты
-   линейной интерполяцией между соседями (помечены *). */
-const PRIMARY_TO_TEST = [
-  0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
-  80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
-];
 
 /* Затухание старых попыток: вес = exp(-возраст_дней / 45).
    Период полураспада ~31 день: ответ месяц назад весит вдвое меньше
@@ -1466,47 +1445,61 @@ const FORECAST_FULL_VOLUME = 12;
    заданию ей не засчитывается. */
 const FORECAST_DIAGNOSTIC_WEIGHT = 2;
 
+function getForecastConfig() {
+  try {
+    if (typeof DataAPI === "undefined" || typeof DataAPI.forecastConfig !== "function") return null;
+    const cfg = DataAPI.forecastConfig();
+    return cfg && typeof cfg === "object" && !Array.isArray(cfg) ? cfg : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/* Без полного конфига прогноз считается отсутствующим, а не реконструируется. */
+function forecastConfigIsUsable(cfg) {
+  if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return false;
+  const weights = cfg.weights;
+  const scale = cfg.scale;
+  const total = Number(cfg.total);
+  return !!weights && typeof weights === "object" && !Array.isArray(weights)
+    && Object.keys(weights).length > 0
+    && Array.isArray(scale) && scale.length > 0
+    && scale.every((value) => Number.isFinite(value))
+    && Number.isInteger(total) && total > 0 && scale.length === total + 1;
+}
+
 function skillEgeWeight(skillId) {
-  if (!skillIsAccessible(skillId)) return 0;
-  // Веса — конфиг текущего предмета (каталог: forecast.weights). Встроенный
-  // профильный fallback оставлен только для старых payload без реестра;
-  // новый предмет без собственного forecast не получает случайный вес.
-  const skill = DataAPI.skill(skillId);
-  if (!skill || !skillIsAccessible(skillId)) return 0;
-  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
-  const weights = cfg && cfg.weights && typeof cfg.weights === "object" ? cfg.weights : null;
-  if (weights && Object.prototype.hasOwnProperty.call(weights, skillId)) {
-    const value = Number(weights[skillId]);
+  const id = dataIdValue(skillId && typeof skillId === "object" ? skillId.id : skillId);
+  if (!id || !skillIsAccessible(id)) return 0;
+  const skill = DataAPI.skill(id);
+  if (!skill || !skillIsAccessible(id)) return 0;
+  const cfg = getForecastConfig();
+  if (!forecastConfigIsUsable(cfg)) return 0;
+  const weights = cfg.weights;
+  if (weights && Object.prototype.hasOwnProperty.call(weights, id)) {
+    const value = Number(weights[id]);
     return Number.isFinite(value) && value > 0 ? value : 0;
   }
-  if (cfg) return 0; // не переносим part1/part2 эвристику на другой предмет
-  if (!(typeof DataAPI.isLegacySubject === "function" && DataAPI.isLegacySubject())) return 0;
-  const legacyWeights = SKILL_EGE_WEIGHTS;
-  if (Object.prototype.hasOwnProperty.call(legacyWeights, String(skillId))) return Number(legacyWeights[skillId]) || 0;
-  return String(skill.cat || "") === "part2" ? 2 : 1;
+  return 0;
 }
 
 function forecastScale() {
-  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
-  if (cfg && Array.isArray(cfg.scale) && cfg.scale.length) return cfg.scale;
-  return (typeof DataAPI.isLegacySubject === "function" && DataAPI.isLegacySubject()) ? PRIMARY_TO_TEST : [];
+  const cfg = getForecastConfig();
+  return forecastConfigIsUsable(cfg) ? cfg.scale : [];
 }
 
 function forecastTotal() {
-  const cfg = (typeof DataAPI !== "undefined" && DataAPI.forecastConfig && DataAPI.forecastConfig()) || null;
-  if (cfg && Number(cfg.total) > 0) return Number(cfg.total);
-  return (typeof DataAPI.isLegacySubject === "function" && DataAPI.isLegacySubject()) ? TOTAL_EGE_PRIMARY : 0;
+  const cfg = getForecastConfig();
+  return forecastConfigIsUsable(cfg) ? Number(cfg.total) : 0;
 }
 
 function forecastConfigAvailable() {
-  // Пустой/locked предмет или предмет без реального контента не получает
-  // нулевой «прогноз»: это отсутствие данных, а не результат 0. Для старого
-  // raw-каталога профиля сохраняем встроенный fallback ради совместимости.
-  if (typeof DataAPI === "undefined" || !DataAPI.ready()) return false;
+  // Пустой/locked предмет или предмет без полноценного конфигура не получает
+  // нулевой «прогноз»: это отсутствие данных, а не результат 0.
+  if (typeof DataAPI === "undefined" || typeof DataAPI.ready !== "function" || !DataAPI.ready()) return false;
   if (typeof DataAPI.isSubjectLocked === "function" && DataAPI.isSubjectLocked()) return false;
   if (typeof DataAPI.hasLearningContent === "function" && !DataAPI.hasLearningContent()) return false;
-  if (typeof DataAPI.forecastConfig === "function" && DataAPI.forecastConfig()) return true;
-  return typeof DataAPI.isLegacySubject === "function" && DataAPI.isLegacySubject();
+  return forecastConfigIsUsable(getForecastConfig());
 }
 
 /* Освоение темы глазами прогноза: та же шкала 0–100, что у
@@ -1557,6 +1550,7 @@ function forecastSkillMastery(skillId, now) {
 function forecast() {
   if (!forecastConfigAvailable()) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
   const scale = forecastScale(), total = forecastTotal();
+  if (!scale.length || !(total > 0)) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
   const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
     .filter((s) => skillEgeWeight(s.id) > 0);
   if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
@@ -1582,9 +1576,8 @@ function forecast() {
   const hw = 12 - Math.round((9 * covered) / skills.length);
   return {
     low: Math.max(0, mid - hw),
-    // Потолок диапазона — максимум шкалы предмета (профиль: 100, база: 21),
-    // иначе сильному ученику базы показало бы «18–24» при максимуме 21.
-    high: Math.min(scale[scale.length - 1] ?? 100, mid + hw),
+    // Потолок диапазона берём только из шкалы текущего предмета.
+    high: Math.min(scale[scale.length - 1], mid + hw),
     mid,
     primary: Math.round(primary * 10) / 10,
     mastery: Math.round(mastery * 10) / 10,
@@ -1594,16 +1587,18 @@ function forecast() {
 
 /* «Что даст +N»: какой прирост тестового балла принесёт полное
    закрытие каждой темы. Считается через ту же цепочку
-   (взвешенное среднее → первичные → шкала), поэтому вес второй
-   части честно выше, чем первой. */
+   (взвешенное среднее → первичные → шкала), поэтому вклад тем
+   определяется конфигом текущего предмета. */
 function forecastTopGains(n = 3) {
   if (!forecastConfigAvailable()) return [];
   const scale = forecastScale(), total = forecastTotal();
+  if (!scale.length || !(total > 0)) return [];
   const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
     .filter((s) => skillEgeWeight(s.id) > 0);
   if (!skills.length) return [];
   const now = Date.now();
   const base = forecast();
+  if (base.empty) return [];
   let wSum = 0, wMastery = 0;
   const masteryById = {};
   for (const s of skills) {
@@ -1634,6 +1629,7 @@ function recordForecastSnapshot() {
   if (!Store.state || !forecastConfigAvailable()) return null;
   const date = todayStr();
   const value = { date, ...forecast() };
+  if (value.empty) return null;
   const history = Array.isArray(Store.state.forecastHistory) ? Store.state.forecastHistory : [];
   const i = history.findIndex((x) => x.date === date);
   if (i >= 0) history[i] = value;
@@ -2602,6 +2598,7 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   s.subject = subj;
 
   const learningAvailable = subjectLearningAvailable();
+  if (!forecastConfigAvailable()) s.forecastHistory = [];
   const results = learningAvailable ? safeArray(diagnosticResults) : [];
   /* Самооценка — настройка профиля, а не искусственный прогресс. */
   s.skillStats = learningAvailable ? safeObject(s.skillStats) : {};
