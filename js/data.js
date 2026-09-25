@@ -591,8 +591,28 @@ const ApiClient = {
       const error = new Error(payload.error || `API ${response.status}`);
       error.status = response.status;
       error.payload = payload;
+      // Blocked account: distinct machine-readable code so the UI can tell a
+      // ban apart from 401/403/expiry. Broadcast globally — an in-app ban can
+      // arrive on ANY authenticated request, not just bootstrap.
+      if (response.status === 403 && payload && (payload.code === "ACCOUNT_BLOCKED" || payload.blocked === true)) {
+        error.code = "ACCOUNT_BLOCKED";
+        try { window.__egeBlocked = payload; } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent("ege:account-blocked", { detail: payload })); } catch (_) {}
+      }
       throw error;
     }
+    // A successful response from a block-enforcing endpoint proves the account
+    // is not blocked right now (expiry / unblock recovery). Public endpoints
+    // (catalog, status, health) never check blocks, so they must not clear it.
+    try {
+      const enforcePaths = ["/api/bootstrap", "/api/bootstrap-lite", "/api/subjects",
+        "/api/auth/session", "/api/auth/devices", "/api/subject"];
+      if (window.__egeBlocked && typeof path === "string"
+          && enforcePaths.some((p) => path === p || path.indexOf(p + "?") === 0)) {
+        window.__egeBlocked = null;
+        window.dispatchEvent(new CustomEvent("ege:account-unblocked"));
+      }
+    } catch (_) {}
     return payload;
   },
   get(path) { return this.request(path); },

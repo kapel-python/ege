@@ -1803,6 +1803,15 @@ body {
 .dlg__text { font-size: 14px; line-height: 1.6; color: var(--text-2, var(--text)); margin-top: 14px; }
 .dlg__actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .dlg .chip { white-space: normal; flex-shrink: 1; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+/* ---------- account blocked: то же .dlg-окно, но поверх всего и без закрытия ----------
+   Нет крестика/Esc/backdrop-close осознанно — только «Вернуться на главную». */
+.dlg-backdrop--blocked { z-index: 200; }
+.dlg--blocked { border-color: rgba(255, 107, 107, 0.35); }
+.dlg--blocked .dlg-device__icon { background: var(--danger-soft); color: var(--danger); }
+.dlg-kv__row--col { flex-direction: column; align-items: stretch; gap: 4px; }
+.dlg-kv__row--col > span:last-child { text-align: left; }
+.dlg__actions--single { justify-content: stretch; }
+.dlg__actions--single .btn { flex: 1 1 auto; }
 /* Строка устройства кликабельна целиком — ведёт в инфо-диалог. */
 .settings-row--action { cursor: pointer; border-radius: 0; }
 .settings-row--action:hover { background: var(--soft-hover); }

@@ -578,6 +578,7 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE user_sessions ADD COLUMN last_seen_at INTEGER")
     # UNIQUE допускает множество NULL: незарегистрированные гости не мешают.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+    ensure_block_schema(conn)
     expiry = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
     conn.execute(
         "INSERT INTO user_sessions(user_id, token, created_at, expires_at) "
@@ -863,6 +864,146 @@ def is_admin_session(conn: sqlite3.Connection, user_id: int | None, admin_token:
     if user_id is None:
         return False
     return admin_session_user(conn, user_id, admin_token) is not None
+
+
+# ---------------------------------------------------------------------------
+# Account blocks (user bans).
+#
+# Central enforcement point for the whole backend: every authenticated user
+# request resolves its user_id (via user_for / existing_user_for /
+# session_row_for) and then calls reject_if_blocked(). A blocked account gets
+# 403 + machine-readable code ACCOUNT_BLOCKED on ANY authenticated endpoint,
+# so future endpoints using the same helper inherit enforcement automatically.
+# Guests (no session / freshly minted users) never have a block row.
+# Expiry is lazy: a temporary block with blocked_until <= now is treated as
+# absent and removed on read — no cron needed.
+# ---------------------------------------------------------------------------
+BLOCK_DURATIONS_SEC = {
+    "1h": 3600,
+    "1d": 86400,
+    "1w": 604800,
+    "1m": 2592000,
+    "permanent": None,
+}
+BLOCK_REASON_MAX_LENGTH = 500
+
+
+def ensure_block_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent migration for the user_blocks table. Cheap (IF NOT EXISTS),
+    so it is safe to call on every block read/write, including temp test DBs."""
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
+          user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          reason TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          blocked_until INTEGER,
+          blocked_by INTEGER)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_blocks_until ON user_blocks(blocked_until)")
+    except sqlite3.Error:
+        pass
+
+
+def get_active_block(conn: sqlite3.Connection, user_id: int | None) -> dict | None:
+    """Return the active block for a user, or None.
+
+    Logic: blocked && (permanent || now < blocked_until). An expired temporary
+    block is deleted lazily and counts as unblocked. Never raises for missing
+    tables: returns None and lets the caller proceed.
+    """
+    if user_id is None:
+        return None
+    try:
+        ensure_block_schema(conn)
+        row = conn.execute(
+            "SELECT user_id, reason, created_at, blocked_until, blocked_by "
+            "FROM user_blocks WHERE user_id=?", (user_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    try:
+        until = None if row["blocked_until"] is None else int(row["blocked_until"])
+    except (TypeError, ValueError):
+        until = None
+    if until is not None and until <= int(time.time() * 1000):
+        try:
+            conn.execute("DELETE FROM user_blocks WHERE user_id=?", (user_id,))
+            conn.commit()
+        except sqlite3.Error:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        return None
+    try:
+        created = int(row["created_at"])
+    except (TypeError, ValueError):
+        created = 0
+    reason = row["reason"] if isinstance(row["reason"], str) else ""
+    try:
+        blocker = None if row["blocked_by"] is None else int(row["blocked_by"])
+    except (TypeError, ValueError):
+        blocker = None
+    return {"userId": int(row["user_id"]), "reason": reason,
+            "createdAt": created, "blockedUntil": until,
+            "permanent": until is None, "blockedBy": blocker}
+
+
+def block_api_payload(block: dict) -> dict:
+    """Minimal safe payload for the blocked user (no admin internals)."""
+    return {"blocked": True, "reason": block.get("reason") or "",
+            "blockedUntil": block.get("blockedUntil"),
+            "permanent": bool(block.get("permanent"))}
+
+
+def admin_block_payload(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """Full block info for the admin UI (status + reason + dates)."""
+    block = get_active_block(conn, user_id)
+    if not block:
+        return None
+    payload = dict(block)
+    try:
+        brow = conn.execute("SELECT account_id FROM users WHERE id=?",
+                            (block["blockedBy"],)).fetchone() if block["blockedBy"] else None
+        payload["blockedByAccount"] = brow["account_id"] if brow else None
+    except sqlite3.Error:
+        payload["blockedByAccount"] = None
+    return payload
+
+
+def admin_block_user(conn: sqlite3.Connection, target_id: int, actor_id: int,
+                     reason: str | None, duration: str) -> dict:
+    """Create/replace the block row for a user. Raises ValueError/KeyError."""
+    ensure_block_schema(conn)
+    if target_id == actor_id:
+        raise ValueError("cannot block the account that holds this admin session")
+    if not conn.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone():
+        raise KeyError("user not found")
+    if duration not in BLOCK_DURATIONS_SEC:
+        raise ValueError("unknown duration: expected one of 1h, 1d, 1w, 1m, permanent")
+    clean = " ".join(str(reason or "").split())[:BLOCK_REASON_MAX_LENGTH]
+    now_ms = int(time.time() * 1000)
+    ttl = BLOCK_DURATIONS_SEC[duration]
+    until = None if ttl is None else now_ms + ttl * 1000
+    conn.execute(
+        "INSERT INTO user_blocks(user_id, reason, created_at, blocked_until, blocked_by) "
+        "VALUES (?,?,?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET reason=excluded.reason, created_at=excluded.created_at, "
+        "blocked_until=excluded.blocked_until, blocked_by=excluded.blocked_by",
+        (target_id, clean, now_ms, until, actor_id))
+    conn.commit()
+    return {"userId": target_id, "reason": clean, "createdAt": now_ms,
+            "blockedUntil": until, "permanent": until is None, "blockedBy": actor_id}
+
+
+def admin_unblock_user(conn: sqlite3.Connection, target_id: int) -> bool:
+    """Remove the block row. Returns True when a row was actually removed."""
+    ensure_block_schema(conn)
+    if not conn.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone():
+        raise KeyError("user not found")
+    cur = conn.execute("DELETE FROM user_blocks WHERE user_id=?", (target_id,))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str | None:
@@ -1351,6 +1492,14 @@ CREATE TABLE IF NOT EXISTS admin_audit (
   detail TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_blocks (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  blocked_until INTEGER,
+  blocked_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_user_blocks_until ON user_blocks(blocked_until);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_key TEXT NOT NULL CHECK(length(request_key) = 64),
@@ -4249,6 +4398,28 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
                            ORDER BY u.id""").fetchall()
     result = []
     q = (query or "").strip().lower()
+    now_ms = int(time.time() * 1000)
+    blocks: dict[int, dict] = {}
+    try:
+        ensure_block_schema(conn)
+        for b in conn.execute("SELECT user_id, reason, created_at, blocked_until, blocked_by FROM user_blocks"):
+            try:
+                until = None if b["blocked_until"] is None else int(b["blocked_until"])
+            except (TypeError, ValueError):
+                until = None
+            if until is not None and until <= now_ms:
+                continue
+            try:
+                blocks[int(b["user_id"])] = {
+                    "reason": b["reason"] if isinstance(b["reason"], str) else "",
+                    "createdAt": int(b["created_at"]),
+                    "blockedUntil": until, "permanent": until is None,
+                    "blockedBy": b["blocked_by"],
+                }
+            except (TypeError, ValueError):
+                continue
+    except sqlite3.Error:
+        blocks = {}
     for r in rows:
         subject = resolve_subject(r["current_subject"])
         info = SUBJECTS.get(subject, {})
@@ -4274,6 +4445,7 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
             "subjectStatus": info.get("status", "ready"), "subjectLocked": locked,
             "xp": xp, "level": level_from_xp(xp)["level"], "streak": streak,
             "lastActiveDate": last_active, "solved": solved, "correct": correct,
+            "block": blocks.get(r["id"]),
         }
         if q:
             haystack = " ".join(str(x) for x in (
@@ -4347,6 +4519,7 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         "adminSessions": conn.execute(
             "SELECT COUNT(*) AS c FROM admin_sessions WHERE user_id=? AND expires_at > ?",
             (user_id, int(time.time() * 1000))).fetchone()["c"],
+        "block": admin_block_payload(conn, user_id),
     }
     for r in conn.execute("""SELECT up.skill_id, up.progress, up.solved, up.correct, up.time_sec, sk.name, t.name AS topic
                              FROM user_progress up JOIN skills sk ON sk.id=up.skill_id LEFT JOIN topics t ON t.id=sk.topic_id
@@ -5170,6 +5343,30 @@ class Handler(BaseHTTPRequestHandler):
         return user_id, session
 
     # ------------------------------------------------------------------
+    # Central account-block enforcement.
+    #
+    # Every authenticated user request MUST call reject_if_blocked() right
+    # after resolving its user_id (via user_for / existing_user_for /
+    # session_row_for). When the account has an active block row, this sends
+    # 403 + machine-readable code ACCOUNT_BLOCKED and the caller returns
+    # immediately. Admin endpoints (/api/admin/*) are intentionally exempt:
+    # they use require_admin and must stay usable to inspect/unblock.
+    # Logout (/api/auth/logout) is exempt so a blocked browser can still exit.
+    # ------------------------------------------------------------------
+    def send_account_blocked(self, block: dict) -> None:
+        payload = {"error": "Аккаунт заблокирован", "code": "ACCOUNT_BLOCKED"}
+        payload.update(block_api_payload(block))
+        self.send_json(payload, 403)
+
+    def reject_if_blocked(self, conn: sqlite3.Connection, user_id: int | None) -> dict | None:
+        """Send 403 ACCOUNT_BLOCKED when the account is blocked; else None."""
+        block = get_active_block(conn, user_id)
+        if block:
+            self.send_account_blocked(block)
+            return block
+        return None
+
+    # ------------------------------------------------------------------
     # User accounts: register / login / logout
     #
     # Register attaches an email + password hash to the CURRENT guest row
@@ -5204,6 +5401,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
             return
         user_id, _ = user_for(conn, self)  # текущий гость; привязываем именно его
+        if self.reject_if_blocked(conn, user_id):
+            return
         current = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
         if current and current["email"]:
             self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
@@ -5264,6 +5463,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Неверный email или пароль"}, 401)
             return
         account_id = row["id"]
+        # Blocked account with correct credentials: no new session, straight
+        # to ACCOUNT_BLOCKED so the frontend can show the ban modal.
+        if self.reject_if_blocked(conn, account_id):
+            return
         # Вход всегда ведёт через явный выбор предмета на клиенте: один
         # аккаунт может открываться с разных устройств, поэтому frontend не
         # угадывает current_subject, а показывает пикер и присылает subject
@@ -5314,6 +5517,8 @@ class Handler(BaseHTTPRequestHandler):
         if not row:
             self.send_json({"error": "Требуется вход"}, 401)
             return
+        if self.reject_if_blocked(conn, row["user_id"]):
+            return
         try:
             conn.execute("DELETE FROM user_sessions WHERE user_id=? AND expires_at<=?",
                          (row["user_id"], int(time.time() * 1000)))
@@ -5331,6 +5536,8 @@ class Handler(BaseHTTPRequestHandler):
         row = session_row_for(conn, token, request_device_info(self))
         if not row:
             self.send_json({"error": "Требуется вход"}, 401)
+            return
+        if self.reject_if_blocked(conn, row["user_id"]):
             return
         try:
             target_id = int(str(session_id).strip())
@@ -5656,7 +5863,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
-            if len(parts) == 6 and parts[5] in ("xp", "reset", "delete"):
+            if len(parts) == 6 and parts[5] in ("xp", "reset", "delete", "block", "unblock"):
                 conn = connect()
                 try:
                     auth = self.require_admin(conn)
@@ -5669,6 +5876,8 @@ class Handler(BaseHTTPRequestHandler):
                         payload = self.read_json()
                     except (json.JSONDecodeError, ValueError):
                         self.send_json({"error": "Некорректный JSON"}, 400); return
+                    if not isinstance(payload, dict):
+                        self.send_json({"error": "Некорректный JSON"}, 400); return
                     action = parts[5]
                     if action == "xp":
                         result = admin_grant_xp(conn, target_id, payload.get("amount", 0), payload.get("reason", ""))
@@ -5676,6 +5885,17 @@ class Handler(BaseHTTPRequestHandler):
                     elif action == "reset":
                         result = admin_reset(conn, target_id, str(payload.get("target", "")))
                         admin_audit(conn, actor_id, "reset", target_id, result["target"])
+                    elif action == "block":
+                        duration = str(payload.get("duration", "")).strip()
+                        result = admin_block_user(conn, target_id, actor_id,
+                                                  payload.get("reason"), duration)
+                        detail = f"{duration} {result['reason']}"[:200]
+                        admin_audit(conn, actor_id, "block-user", target_id, detail)
+                        result = {"ok": True, "block": result}
+                    elif action == "unblock":
+                        was = admin_unblock_user(conn, target_id)
+                        admin_audit(conn, actor_id, "unblock-user", target_id, "")
+                        result = {"ok": True, "wasBlocked": was}
                     else:
                         result = admin_delete_user(conn, target_id, actor_id)
                     self.send_json(result)
@@ -5697,6 +5917,8 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
                 payload = self.read_json()
                 subject, version, error = domain_write(conn, user_id, payload,
                     lambda sub: create_error(conn, user_id, sub, payload.get("error")))
@@ -5723,6 +5945,8 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
                 payload = self.read_json()
                 events = payload.get("events") if isinstance(payload, dict) else None
                 if not isinstance(events, list):
@@ -5767,6 +5991,8 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
                 try:
                     payload = self.read_json()
                 except (json.JSONDecodeError, ValueError):
@@ -5920,6 +6146,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
+                    if auth_uid is not None and self.reject_if_blocked(conn, auth_uid):
+                        return
                     self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None,
                                     "isAdmin": is_admin_session(conn, auth_uid, cookie_value(self, ADMIN_COOKIE_NAME))}); return
                 # Устройства: только свои активные сессии, без минта аккаунта.
@@ -5952,12 +6180,16 @@ class Handler(BaseHTTPRequestHandler):
                     if self.api_rate_limited(): return
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
+                    if self.reject_if_blocked(conn, user_id):
+                        return
                     self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
                 # Каталог и состояние всегда одного предмета: без ?subject -
                 # current_subject пользователя (переживает перезагрузку),
                 # с ?subject - явно запрошенный. Разводить их нельзя: иначе
                 # клиент получит чужие задания с чужим прогрессом.
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
+                    if self.reject_if_blocked(conn, user_id):
+                        return
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     catalog = catalog_summary_payload(conn, eff) if path == "/api/bootstrap-lite" else catalog_payload(conn, eff)
                     # isAdmin — только boolean, решённый сервером через ту же
@@ -6077,6 +6309,8 @@ class Handler(BaseHTTPRequestHandler):
         conn = connect()
         try:
             user_id, token = user_for(conn, self)
+            if self.reject_if_blocked(conn, user_id):
+                return
             payload = self.read_json()
             if path.startswith("/api/progress/"):
                 skill_id = path.rsplit("/", 1)[-1]
@@ -6210,7 +6444,10 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
         conn = connect()
         try:
-            user_id, token = user_for(conn, self); conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
+            user_id, token = user_for(conn, self)
+            if self.reject_if_blocked(conn, user_id):
+                return
+            conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
             self.send_json({"ok": True}, token=token)
         except sqlite3.Error as exc:
             try: conn.rollback()
