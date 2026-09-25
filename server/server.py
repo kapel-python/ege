@@ -39,16 +39,16 @@ except ImportError:  # pragma: no cover - the supported deployment target is Uni
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("EGE_DB_PATH", str(ROOT / "server" / "ege.sqlite3")))
+DEFAULT_SUBJECT = "profile_math"
 
 
 def _load_subject_registry():
-    """Загрузить единый реестр предметов из server/subjects/*.json.
+    """Load the sole subject registry and its in-module definitions fallback.
 
-    Возвращает SubjectRegistry либо None, когда реестра нет на диске
-    (минимальный деплой без subjects/): тогда ниже используется legacy
-    инлайн-блок с теми же значениями. Битый контракт (SubjectContractError)
-    пробрасывается наружу осознанно — сервер не должен молча стартовать
-    с чужим набором предметов.
+    ``subjects/*.json`` is canonical.  When that directory is empty, the
+    registry module deliberately supplies its built-in definitions.  Returning
+    None means the registry module itself could not be loaded; startup must not
+    continue with a second copy of the subject contract.
     """
     import importlib.util
 
@@ -61,49 +61,29 @@ def _load_subject_registry():
         spec.loader.exec_module(module)
     except (ImportError, OSError):
         return None
-    registry = module.load_registry(server_dir=Path(__file__).resolve().parent)
-    if not registry.from_files:
-        return None
-    return registry
+    return module.load_registry(server_dir=Path(__file__).resolve().parent)
 
 
 _REGISTRY = _load_subject_registry()
-
-
-def _subject_catalog_paths() -> list:
-    if _REGISTRY is not None:
-        return _REGISTRY.catalog_paths()
-    return [CATALOG_PATH, CATALOG_BASIC_PATH, CATALOG_RUSSIAN_PATH]
-
-
-def _subject_source_files() -> tuple:
-    if _REGISTRY is not None:
-        return _REGISTRY.source_files()
-    return (
-        (CATALOG_PATH, "profile_math", "profile"),
-        (CATALOG_BASIC_PATH, "basic_math", "basic"),
-        (CATALOG_RUSSIAN_PATH, "russian", "russian"),
+if _REGISTRY is None:
+    raise RuntimeError(
+        "subject registry unavailable: restore server/subjects_registry.py "
+        "and deploy its server/subjects/*.json contracts"
     )
 
 
+def _subject_catalog_paths() -> list:
+    return _REGISTRY.catalog_paths()
+
+
+def _subject_source_files() -> tuple:
+    return _REGISTRY.source_files()
+
+
 def _subject_level_rows() -> list:
-    if _REGISTRY is not None:
-        return _REGISTRY.level_rows()
-    return [
-        ("basic", "math", "Базовый уровень"),
-        ("profile", "math", "Профильный уровень"),
-        ("russian", "russian", "Русский язык"),
-    ]
+    return _REGISTRY.level_rows()
 
 
-if _REGISTRY is not None:
-    CATALOG_PATH = _REGISTRY.catalog_path("profile_math")
-    CATALOG_BASIC_PATH = _REGISTRY.catalog_path("basic_math")
-    CATALOG_RUSSIAN_PATH = _REGISTRY.catalog_path("russian")
-else:
-    CATALOG_PATH = Path(__file__).resolve().parent / "catalog.json"
-    CATALOG_BASIC_PATH = Path(__file__).resolve().parent / "catalog_basic.json"
-    CATALOG_RUSSIAN_PATH = Path(__file__).resolve().parent / "catalog_russian.json"
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
 # Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
@@ -218,119 +198,9 @@ def log_request_error(label: str, exc: BaseException) -> str:
 # и прогнозы разрешаются строго в рамках одного subject. Канонический контракт
 # предмета — server/subjects/<id>.json (см. server/subjects_registry.py):
 # новый предмет добавляется новым JSON + своим catalog-файлом, без ветвлений
-# вида `if basic_math` по коду и без правок в пяти местах server.py.
-# Все системы читают конфиг через subject_config()/resolve_subject().
-# Инлайн-блок ниже — только fallback для деплоя без subjects/ на диске.
+# по конкретному id в server.py. Все системы читают конфиг через registry.
 # ---------------------------------------------------------------------------
-DEFAULT_SUBJECT = "profile_math"
-
-if _REGISTRY is not None:
-    SUBJECTS: dict[str, dict] = _REGISTRY.subjects
-    _profile_forecast = _REGISTRY.forecast_of("profile_math") or {}
-    SKILL_EGE_WEIGHTS_PROFILE = _profile_forecast.get("weights", {})
-    TOTAL_EGE_PRIMARY_PROFILE = _profile_forecast.get("total", 0)
-    PRIMARY_TO_TEST_PROFILE = _profile_forecast.get("scale", [])
-    _basic_forecast = _REGISTRY.forecast_of("basic_math") or {}
-    SKILL_EGE_WEIGHTS_BASIC = _basic_forecast.get("weights", {})
-    TOTAL_EGE_PRIMARY_BASIC = _basic_forecast.get("total", 0)
-    PRIMARY_TO_TEST_BASIC = _basic_forecast.get("scale", [])
-else:
-    # Веса навыков в первичных баллах ЕГЭ-2026 (профиль) и шкала перевода в
-    # тестовые — конфиг прогноза профильной математики. Лежит здесь (а не только
-    # в js), чтобы subjects-пейлоад отдавал его клиентам из одного места.
-    SKILL_EGE_WEIGHTS_PROFILE = {
-        "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
-        "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
-        "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
-        "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
-        "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2,
-    }
-    TOTAL_EGE_PRIMARY_PROFILE = 32
-    PRIMARY_TO_TEST_PROFILE = [
-        0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
-        80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
-    ]
-
-    # Прогноз базовой математики: экзамен состоит из 21 задания с кратким
-    # ответом, каждое даёт 1 первичный балл (максимум 21), итог — оценка 2–5
-    # (7+ баллов — «3», 12+ — «4», 17+ — «5»). Стобалльной шкалы у базы нет,
-    # поэтому «тестовый» результат совпадает с первичным: шкала тождественная.
-    # Прогноз отвечает на вопрос «сколько заданий решу», а не «сколько баллов
-    # из 100 получу» — копировать профильную шкалу сюда было бы неверно.
-    SKILL_EGE_WEIGHTS_BASIC = {
-        "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
-        "b05_probability": 1, "b06_choice": 1, "b07_functions": 1, "b08_logic": 1,
-        "b09_grid": 1, "b10_practplan": 1, "b11_practstereo": 1, "b12_planimetry": 1,
-        "b13_stereometry": 1, "b14_fractions": 1, "b15_percent": 1, "b16_expressions": 1,
-        "b17_equations": 1, "b18_inequalities": 1, "b19_integers": 1,
-        "b20_wordprob": 1, "b21_nonstandard": 1,
-    }
-    TOTAL_EGE_PRIMARY_BASIC = 21
-    PRIMARY_TO_TEST_BASIC = list(range(TOTAL_EGE_PRIMARY_BASIC + 1))
-
-    SUBJECTS: dict[str, dict] = {
-        "profile_math": {
-            "id": "profile_math",
-            "title": "Профильная математика",
-            "short": "Профиль",
-            # ready: полный цикл (каталог, диагностика, прогноз). coming-soon:
-            # предмет уже выбирается, но его учебные единицы ещё не опубликованы.
-            "status": "ready",
-            "locked": False,
-            "comingSoon": False,
-            "forecast": {
-                "weights": SKILL_EGE_WEIGHTS_PROFILE,
-                "total": TOTAL_EGE_PRIMARY_PROFILE,
-                "scale": PRIMARY_TO_TEST_PROFILE,
-            },
-            # Что реально входит в курс предмета (для честных подписей в UI:
-            # «Полный курс» — только там, где есть и уроки, и практика, и прогноз).
-            "features": {"lessons": True, "practice": True, "forecast": True,
-                          "diagnostics": True, "missions": True, "bosses": True,
-                          "daily": True, "path": True},
-        },
-        "basic_math": {
-            "id": "basic_math",
-            "title": "Базовая математика",
-            "short": "База",
-            "status": "ready",
-            "locked": False,
-            "comingSoon": False,
-            "forecast": {
-                "weights": SKILL_EGE_WEIGHTS_BASIC,
-                "total": TOTAL_EGE_PRIMARY_BASIC,
-                "scale": PRIMARY_TO_TEST_BASIC,
-            },
-            # Уроки есть для части навыков (остальные считаются полностью из
-            # практики — та же механика, что у профильных тем без урока).
-            # Остальной цикл полный: диагностика, тренировки, боссы, прогноз.
-            "features": {"lessons": True, "practice": True, "forecast": True,
-                          "diagnostics": True, "missions": True, "bosses": True,
-                          "daily": True, "path": True},
-        },
-        "russian": {
-            "id": "russian",
-            "title": "Русский язык",
-            "short": "Русский",
-            # Канонический id используется и в API, и в user_subjects/state.
-            # Предмет доступен для выбора, но путь содержит только locked-узел:
-            # это не «пустой курс» и не набор выдуманных заданий.
-            "status": "coming-soon",
-            "locked": True,
-            "comingSoon": True,
-            "availability": "coming-soon",
-            "forecast": None,
-            "features": {"lessons": False, "practice": False, "forecast": False,
-                          "diagnostics": False, "missions": False, "bosses": False,
-                          "daily": False, "path": True},
-            "metadata": {
-                "availability": "coming-soon",
-                "locked": True,
-                "topic": "Итоговое сочинение",
-                "topicCount": 1,
-            },
-        },
-    }
+SUBJECTS: dict[str, dict] = _REGISTRY.subjects
 SUBJECT_IDS = tuple(SUBJECTS.keys())
 _LOCKED_SUBJECT_STATUSES = {"locked", "coming-soon", "coming_soon", "disabled", "unavailable"}
 
@@ -422,7 +292,7 @@ def _public_subject_info(subject: str) -> dict:
         "locked": locked,
         "comingSoon": coming_soon,
         "availability": info.get("availability", info.get("status", "ready")),
-        "forecast": info.get("forecast"),
+        "forecast": _REGISTRY.forecast_of(subject),
         "features": dict(info.get("features", {})),
         "metadata": dict(metadata),
     }
@@ -1753,7 +1623,7 @@ def ensure_user_indexes(conn: sqlite3.Connection) -> None:
 # id каталога (skill/task/lesson), уникальным в рамках предмета, поэтому им
 # достаточно обычной колонки + индекса.
 # Профиль внутри предмета (onboarded/self_level/goal) хранит user_subjects;
-# колонки users.* остаются и дублируют профиль предмета profile_math ради
+# колонки users.* остаются и дублируют профиль предмета по умолчанию ради
 # совместимости прямых чтений БД. Имя (name) — глобальное свойство
 # пользователя, в user_subjects не дублируется.
 # ---------------------------------------------------------------------------
@@ -2284,10 +2154,10 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 # Subject catalog loading.
 #
-# The old loader had a complete profile branch and a second, almost duplicate
-# branch for basic mathematics.  That made a third subject surprisingly easy to
-# half-wire: it could appear in SUBJECTS while its config still fell back to
-# profile content.  These helpers keep the source files declarative and make
+# The old loader had separate branches for individual subjects. That made a
+# third subject surprisingly easy to half-wire: it could appear in SUBJECTS while
+# its config still fell back to another subject's content. These helpers keep the
+# source files declarative and make
 # ownership/metadata checks happen once, before anything is written to SQLite.
 # ---------------------------------------------------------------------------
 
@@ -2300,19 +2170,23 @@ def _catalog_status(value, default: str = "ready") -> str:
 
 
 def _catalog_subject_id(catalog: dict, expected_subject: str,
-                        conn: sqlite3.Connection | None = None) -> str:
+                        conn: sqlite3.Connection | None = None, *,
+                        fallback_subject_id: str | None = None) -> str:
     """Validate and return the legacy DB grouping id declared by a catalog.
 
     ``subject`` is the canonical API id. ``subjectId`` is the FK grouping id
-    used by the legacy catalog tables; it is optional for the two math catalogs,
-    but when present it must agree with the canonical id and already exist.
+    used by the legacy catalog tables. When a catalog omits it, the grouping id
+    declared by the subject registry is used; an explicit value must exist and,
+    when the catalog also declares a canonical id, must agree with it.
     """
     canonical = catalog.get("subject")
     if canonical not in (None, "") and canonical != expected_subject:
         raise ValueError(f"catalog subject mismatch for {expected_subject}")
     declared = catalog.get("subjectId", catalog.get("subject_id"))
     if declared in (None, ""):
-        return "math"
+        if fallback_subject_id is None:
+            fallback_subject_id = _REGISTRY.definitions[expected_subject]["level"]["subjectId"]
+        return fallback_subject_id
     if not isinstance(declared, str) or not declared.strip():
         raise ValueError(f"invalid catalog subjectId for {expected_subject}")
     declared = declared.strip()
@@ -2512,9 +2386,10 @@ def _upsert_catalog_achievement(conn: sqlite3.Connection, item: dict, subject: s
 
 
 def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: str,
-                             *, level_id: str, subject_id: str = "math") -> None:
-    """Install one declarative subject catalog into the shared tables."""
-    _catalog_subject_id(catalog, subject, conn)
+                             *, level_id: str, subject_id: str | None = None) -> None:
+    """Install one validated declarative subject catalog into shared tables."""
+    if subject_id is None:
+        subject_id = _catalog_subject_id(catalog, subject, conn)
     for category in catalog.get("categories") or []:
         _upsert_catalog_topic(conn, category, subject, subject_id)
     for skill in catalog.get("skills") or []:
@@ -2532,7 +2407,6 @@ def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: s
 
 
 def install_catalog(conn: sqlite3.Connection) -> None:
-    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA)
     ensure_subject_schema(conn)
     ensure_support_schema(conn)
@@ -2562,22 +2436,26 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         info = SUBJECTS[sid]
         conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES (?, ?, ?)",
                      (sid, info["title"], info["short"]))
-    conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES ('math', 'Математика', 'Математика')")
-    # Строки уровней идут из реестра (subjects/<id>.json → level): новый
-    # предмет виден группировке каталога без правок здесь.
+    # Строки уровней и их legacy-группы идут из реестра. Для отсутствующей
+    # канонической строки группы идентификатор служит нейтральным заполнителем;
+    # название и short этой строки API не публикует.
     for level_id, level_subject_id, level_name in _subject_level_rows():
+        conn.execute("INSERT OR IGNORE INTO subjects(id, name, short) VALUES (?, ?, ?)",
+                     (level_subject_id, level_subject_id, level_subject_id))
         conn.execute("INSERT OR IGNORE INTO math_levels(id, subject_id, name) VALUES (?, ?, ?)",
                      (level_id, level_subject_id, level_name))
 
-    # One loader for every subject.  Missing optional files deliberately produce
-    # an empty subject rather than borrowing the profile's daily/diagnostic data.
-    # Источник файлов — реестр, а не захардкоженный кортеж: четвёртый предмет
+    # One loader for every subject. Missing optional files deliberately produce
+    # an empty subject rather than borrowing another subject's data.
+    # Источник файлов — реестр, а не захардкоженный кортеж: новый предмет
     # подхватывается автоматически.
     source_files = _subject_source_files()
     loaded: dict[str, dict] = {}
     for path, subject, level_id in source_files:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        catalog_subject_id = _catalog_subject_id(data, subject, conn)
+        definition = _REGISTRY.definitions[subject]
+        catalog_subject_id = _catalog_subject_id(
+            data, subject, fallback_subject_id=definition["level"]["subjectId"], conn=conn)
         loaded[subject] = data
         _install_subject_catalog(conn, data, subject, level_id=level_id,
                                  subject_id=catalog_subject_id)
@@ -2585,7 +2463,7 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     def config_value(subject: str, key: str, default):
         return loaded.get(subject, {}).get(key, default)
 
-    # Legacy keys remain the profile compatibility surface.  Every known
+    # Legacy keys remain the default-subject compatibility surface. Every known
     # subject also gets an explicit key, so a missing/coming-soon catalog can
     # never fall through to another subject's configuration.
     for subject in SUBJECT_IDS:
@@ -2602,17 +2480,17 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"subjectMeta:{subject}", json.dumps(_public_subject_info(subject), ensure_ascii=False)))
 
-    profile_catalog = loaded.get("profile_math", catalog)
+    default_catalog = loaded.get(DEFAULT_SUBJECT, {})
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                 ("daily", json.dumps(profile_catalog.get("daily", _empty_daily()), ensure_ascii=False)))
+                 ("daily", json.dumps(default_catalog.get("daily", _empty_daily()), ensure_ascii=False)))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                 ("goals", json.dumps(profile_catalog.get("goals", []), ensure_ascii=False)))
+                 ("goals", json.dumps(default_catalog.get("goals", []), ensure_ascii=False)))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                 ("diagnosticTasks", json.dumps(profile_catalog.get("diagnosticTasks", []), ensure_ascii=False)))
+                 ("diagnosticTasks", json.dumps(default_catalog.get("diagnosticTasks", []), ensure_ascii=False)))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                 ("visualAssets", json.dumps(profile_catalog.get("visualAssets", []), ensure_ascii=False)))
+                 ("visualAssets", json.dumps(default_catalog.get("visualAssets", []), ensure_ascii=False)))
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                 ("visualAudit", json.dumps(profile_catalog.get("visualAudit", {}), ensure_ascii=False)))
+                 ("visualAudit", json.dumps(default_catalog.get("visualAudit", {}), ensure_ascii=False)))
     conn.commit()
     _CATALOG_CACHE["generation"] += 1
     invalidate_catalog_cache()
@@ -2629,7 +2507,7 @@ def task_has_missing_visual(item: dict) -> bool:
 def _subject_config(conn: sqlite3.Connection, key: str, subject: str, default, allow_legacy: bool | None = None):
     """Read a subject config without ever borrowing another subject's content.
 
-    Legacy unprefixed keys belong exclusively to the original profile catalog.
+    Legacy unprefixed keys belong exclusively to the default-subject catalog.
     New subjects must have their own explicit key (empty is a valid value).
     """
     if allow_legacy is None:
