@@ -1890,6 +1890,17 @@ const SUBJECT_SECTION_COPY = {
   },
 };
 
+/* Родитель task-экрана: session/practice ведут в training,
+   boss/daily/review — в trials, lesson — в path.  Этот список нельзя
+   получать из navRouteForRoute() для пустого предмета: там скрытые
+   разделы схлопываются в path, а выход должен оставаться в родителе. */
+function taskParentRoute(route) {
+  return route === "session" || route === "practice" ? "training"
+    : route === "boss" || route === "daily" || route === "review" ? "trials"
+    : route === "lesson" ? "path"
+    : null;
+}
+
 function subjectSectionEmptyStateHTML(state = subjectContentState(), route = null) {
   const copy = route ? SUBJECT_SECTION_COPY[route] : null;
   if (!copy) return subjectStateCardHTML(state);
@@ -1897,12 +1908,20 @@ function subjectSectionEmptyStateHTML(state = subjectContentState(), route = nul
   const helpKey = copy.help || (route === "training" || route === "session" ? "training"
     : route === "errors" || route === "review" ? "errors"
     : route === "trials" ? "trials" : null);
+  const taskExitRoute = state && (state.empty || state.locked) && TASK_FOCUS_ROUTES.has(route)
+    ? taskParentRoute(route)
+    : null;
+  const taskExitLabel = taskExitRoute === "path" ? "К карте тем"
+    : taskExitRoute === "trials" ? "К испытаниям" : "К тренировке";
+  const taskExit = taskExitRoute
+    ? `<div style="margin-top:16px"><button class="btn btn--ghost btn--sm" type="button" onclick="go('${taskExitRoute}')">${icon("arrow")} ${taskExitLabel}</button></div>`
+    : "";
   return `
     <div class="page-head">
       <div class="page-title">${esc(copy.title)}${helpKey ? ` ${helpDot(helpKey)}` : ""}</div>
       <div class="page-sub">${esc(copy.sub)}</div>
     </div>
-    <div class="card empty">${esc(copy.empty)}</div>`;
+    <div class="card empty">${esc(copy.empty)}${taskExit}</div>`;
 }
 
 function screenSubjectUnavailable(root, locked = false, route = null) {
@@ -2103,7 +2122,7 @@ function subjectEmptyHTML() {
 
 function screenEmptySubject(root, route = null) {
   const state = subjectContentState();
-  return subjectSectionEmptyStateHTML({ ...state, empty: true }, route);
+  root.innerHTML = subjectSectionEmptyStateHTML({ ...state, empty: true }, route);
 }
 
 /* ============================================================
