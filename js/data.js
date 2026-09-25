@@ -92,6 +92,12 @@ const DataAPI = {
   _forecast: null,
   _registryProvided: false,
   _legacyCatalog: false,
+  // Индекс производных выборок (карты id -> объект, готовые списки).
+  // Перестраивается лениво и сбрасывается при каждой смене каталога,
+  // предмета или деталей: селекторы ниже обязаны читать только через _index().
+  _indexCache: null,
+
+  _invalidateIndex() { this._indexCache = null; },
 
   /* ----------------------------------------------------------------------
      Загрузка и нормализация каталога.
@@ -179,6 +185,7 @@ const DataAPI = {
 
     this._tasksFull = !tasks.some((task) => task && (task._stub || task.stub));
     this._lessonsFull = !lessons.some((lesson) => lesson && (lesson._meta || lesson.meta));
+    this._invalidateIndex();
 
     if (!Array.isArray(this.catalog.visualAssets)) this.catalog.visualAssets = [];
     if (!this.catalog.visualAudit || typeof this.catalog.visualAudit !== "object") this.catalog.visualAudit = {};
@@ -196,6 +203,7 @@ const DataAPI = {
     if (!this.isSubjectAvailable()) {
       this._tasksFull = true;
       this._lessonsFull = true;
+      this._invalidateIndex();
       return this;
     }
 
@@ -220,6 +228,7 @@ const DataAPI = {
     }
     if (Array.isArray(visualAssets)) this.catalog.visualAssets = visualAssets;
     if (visualAudit && typeof visualAudit === "object") this.catalog.visualAudit = visualAudit;
+    this._invalidateIndex();
     return this;
   },
 
@@ -258,6 +267,170 @@ const DataAPI = {
     const wanted = dataId(id);
     if (!wanted) return undefined;
     return this._currentEntities(items).find((item) => dataId(item.id || item.key) === wanted);
+  },
+
+  /* ----------------------------------------------------------------------
+     Индекс производных выборок: все тяжёлые селекторы ниже — O(1)/O(n)
+     вместо O(n²). Семантика побайтово та же, что у прямых сканирований выше:
+     фильтры locked/available/subject продублированы 1:1, меняется только
+     способ поиска (карты вместо линейных find в цикле).
+     Ключ — identity коллекций каталога + текущий предмет: load/loadDetails
+     сбрасывают кэш через _invalidateIndex(), смена предмета меняет subject.
+     ---------------------------------------------------------------------- */
+  _index() {
+    const cat = this.catalog;
+    const subject = dataId(this.currentSubject());
+    const cached = this._indexCache;
+    if (cached && cached.catalog === cat && cached.subject === subject
+        && cat
+        && cached.skillsSrc === cat.skills && cached.categoriesSrc === cat.categories
+        && cached.tasksSrc === cat.tasks && cached.lessonsSrc === cat.lessons
+        && cached.missionsSrc === cat.missions && cached.bossesSrc === cat.bosses) {
+      return cached;
+    }
+    const subjectAvailable = !!cat && this.isSubjectAvailable();
+    const info = this.subjectInfo();
+    const features = info && info.features && typeof info.features === "object" ? info.features : {};
+    const feat = {
+      lessons: subjectAvailable && features.lessons !== false,
+      practice: subjectAvailable && features.practice !== false,
+      missions: subjectAvailable && (features.missions !== false) && features.practice !== false,
+    };
+    const skills = cat ? this._currentEntities(cat.skills) : [];
+    const categories = cat ? this._currentEntities(cat.categories) : [];
+    const categoryById = new Map();
+    for (const c of categories) {
+      const id = dataId(c.id);
+      if (id && !categoryById.has(id)) categoryById.set(id, c);
+    }
+    const skillById = new Map();
+    for (const s of skills) {
+      const id = dataId(s.id);
+      if (id && !skillById.has(id)) skillById.set(id, s);
+    }
+    // Карта locked 1:1 с isSkillLocked(): нет предмета/скилла — locked;
+    // иначе locked скилла или его категории.
+    const skillLocked = new Map();
+    for (const s of skills) {
+      const id = dataId(s.id);
+      let locked = true;
+      if (subjectAvailable) {
+        const catId = dataSkillCategoryId(s);
+        const catObj = catId ? categoryById.get(catId) : undefined;
+        locked = dataEntityLocked(s) || dataEntityLocked(catObj);
+      }
+      skillLocked.set(id, locked);
+    }
+    const availableSkills = skills.filter((s) => skillLocked.get(dataId(s.id)) === false);
+    const tasksAll = subjectAvailable && cat ? this._currentEntities(cat.tasks) : [];
+    const taskById = new Map();
+    for (const t of tasksAll) {
+      const id = dataId(t.id);
+      if (id && !taskById.has(id)) taskById.set(id, t);
+    }
+    const taskUsable = (t) => {
+      if (!t || this.taskHasMissingVisual(t)) return false;
+      return skillLocked.get(dataId(t.skill || t.skillId)) === false;
+    };
+    const practiceTasks = tasksAll.filter(taskUsable);
+    const practiceBySkill = new Map();
+    const tasksBySkillMap = new Map();
+    for (const t of tasksAll) {
+      const sid = dataId(t.skill || t.skillId);
+      if (!sid) continue;
+      if (!tasksBySkillMap.has(sid)) tasksBySkillMap.set(sid, []);
+      tasksBySkillMap.get(sid).push(t);
+    }
+    for (const t of practiceTasks) {
+      const sid = dataId(t.skill || t.skillId);
+      if (!sid) continue;
+      if (!practiceBySkill.has(sid)) practiceBySkill.set(sid, []);
+      practiceBySkill.get(sid).push(t);
+    }
+    let lessons = [];
+    if (feat.lessons && cat) {
+      for (const lesson of this._currentEntities(cat.lessons)) {
+        if (!lesson || typeof lesson !== "object") continue;
+        const sid = dataId(lesson.skill || lesson.skillId);
+        if (!sid || !skillById.has(sid) || skillLocked.get(sid) !== false) continue;
+        if (this.lessonStepsCount(lesson) <= 0) continue;
+        lessons.push(lesson);
+      }
+    }
+    const lessonById = new Map();
+    for (const l of lessons) {
+      const id = dataId(l.id);
+      if (id && !lessonById.has(id)) lessonById.set(id, l);
+    }
+    const lessonsBySkillMap = new Map();
+    for (const l of lessons) {
+      const sid = dataId(l.skill || l.skillId);
+      if (!sid) continue;
+      if (!lessonsBySkillMap.has(sid)) lessonsBySkillMap.set(sid, []);
+      lessonsBySkillMap.get(sid).push(l);
+    }
+    let missions = [];
+    if (feat.missions && cat) {
+      for (const mission of this._currentEntities(cat.missions)) {
+        if (!mission || typeof mission !== "object") continue;
+        const skillId = dataId(mission.skill || mission.skillId);
+        if (!skillId || skillLocked.get(skillId) !== false) continue;
+        const ids = [];
+        const seen = new Set();
+        for (const raw of (Array.isArray(mission.tasks) ? mission.tasks : [])) {
+          const id = dataId(raw && typeof raw === "object" ? (raw.id || raw.taskId) : raw);
+          if (!id || seen.has(id)) continue;
+          const task = taskById.get(id);
+          if (!task || !taskUsable(task)) continue;
+          seen.add(id);
+          ids.push(id);
+        }
+        const hasBank = (practiceBySkill.get(skillId) || []).length > 0;
+        if (!hasBank && !ids.length) continue;
+        missions.push({ ...mission, skill: skillId, tasks: ids });
+      }
+    }
+    const missionById = new Map();
+    for (const m of missions) {
+      const id = dataId(m.id);
+      if (id && !missionById.has(id)) missionById.set(id, m);
+    }
+    let bosses = [];
+    if (subjectAvailable && feat.practice && cat) {
+      const skillsByCat = new Set();
+      for (const s of availableSkills) {
+        const c = dataSkillCategoryId(s);
+        if (c) skillsByCat.add(c);
+      }
+      const practiceCats = new Set();
+      for (const t of practiceTasks) {
+        const sk = skillById.get(dataId(t.skill || t.skillId));
+        const c = sk ? dataSkillCategoryId(sk) : "";
+        if (c) practiceCats.add(c);
+      }
+      for (const boss of this._currentEntities(cat.bosses)) {
+        if (!boss || typeof boss !== "object") continue;
+        const bossCat = dataId(boss.cat || boss.category || boss.topicId || boss.topic_id);
+        if (!bossCat) continue;
+        const topic = categoryById.get(bossCat);
+        if (!topic || dataEntityLocked(topic)) continue;
+        if (!skillsByCat.has(bossCat) || !practiceCats.has(bossCat)) continue;
+        bosses.push(boss);
+      }
+    }
+    const idx = {
+      catalog: cat, subject,
+      skillsSrc: cat && cat.skills, categoriesSrc: cat && cat.categories,
+      tasksSrc: cat && cat.tasks, lessonsSrc: cat && cat.lessons,
+      missionsSrc: cat && cat.missions, bossesSrc: cat && cat.bosses,
+      subjectAvailable, feat,
+      skills, categories, categoryById, skillById, skillLocked, availableSkills,
+      tasksAll, taskById, practiceTasks, practiceBySkill, tasksBySkillMap,
+      lessons, lessonById, lessonsBySkillMap,
+      missions, missionById, bosses,
+    };
+    this._indexCache = idx;
+    return idx;
   },
 
   /* ----------------------------------------------------------------------
@@ -312,17 +485,26 @@ const DataAPI = {
   // Пустой предмет: нет доступного навыка (в том числе если предмет locked).
   isSubjectEmpty(id) {
     if (!this.ready() || !this.isSubjectAvailable(id)) return this.ready();
-    return this.availableSkills(id).length === 0;
+    const wanted = id ? dataId(id) : null;
+    if (wanted && wanted !== dataId(this.currentSubject())) return this.availableSkills(wanted).length === 0;
+    return this._index().availableSkills.length === 0;
   },
   // Есть ли реальный учебный контент, а не только запись реестра.
   hasLearningContent(id) {
     if (!this.ready() || !this.isSubjectAvailable(id)) return false;
-    const skills = this.availableSkills(id);
-    if (!skills.length) return false;
-    return this.practiceTasks().length > 0
-      || this.lessons().length > 0
-      || this.missions().length > 0
-      || this.diagnosticTasks().length > 0;
+    const wanted = id ? dataId(id) : null;
+    if (wanted && wanted !== dataId(this.currentSubject())) {
+      const skills = this.availableSkills(wanted);
+      if (!skills.length) return false;
+      return this.practiceTasks().length > 0
+        || this.lessons().length > 0
+        || this.missions().length > 0
+        || this.diagnosticTasks().length > 0;
+    }
+    const idx = this._index();
+    if (!idx.availableSkills.length) return false;
+    if (idx.practiceTasks.length > 0 || idx.lessons.length > 0 || idx.missions.length > 0) return true;
+    return this.diagnosticTasks().length > 0;
   },
   isLegacySubject(id) {
     const wanted = dataId(id || this.currentSubject());
@@ -331,20 +513,26 @@ const DataAPI = {
 
   isTopicLocked(idOrTopic) {
     if (!this.isSubjectAvailable()) return true;
-    const topic = idOrTopic && typeof idOrTopic === "object"
-      ? idOrTopic
-      : this.category(typeof idOrTopic === "object" ? idOrTopic.id : idOrTopic);
+    if (idOrTopic && typeof idOrTopic === "object") return dataEntityLocked(idOrTopic);
+    const wanted = dataId(idOrTopic);
+    if (!wanted) return true;
+    const topic = this._index().categoryById.get(wanted);
     if (!topic) return true;
     return dataEntityLocked(topic);
   },
   isSkillLocked(idOrSkill) {
     if (!this.isSubjectAvailable()) return true;
-    const skill = idOrSkill && typeof idOrSkill === "object"
-      ? idOrSkill
-      : this.skill(idOrSkill);
-    if (!skill) return true;
-    if (dataEntityLocked(skill)) return true;
-    return this.isTopicLocked(dataSkillCategoryId(skill));
+    if (idOrSkill && typeof idOrSkill === "object") {
+      const catId = dataSkillCategoryId(idOrSkill);
+      const idx = this._index();
+      const catObj = catId ? idx.categoryById.get(catId) : undefined;
+      if (dataEntityLocked(idOrSkill)) return true;
+      return dataEntityLocked(catObj);
+    }
+    const wanted = dataId(idOrSkill);
+    if (!wanted) return true;
+    const locked = this._index().skillLocked.get(wanted);
+    return locked !== false;
   },
   // Accessors used by state/UI.  They intentionally return null/undefined for
   // a locked entity, while skills()/categories() still expose metadata for a
@@ -385,7 +573,7 @@ const DataAPI = {
     // Locked/coming-soon subjects still expose their real Path metadata.  The
     // access-specific helpers below decide what may be opened, while the UI
     // can render the existing topic with a locked state.
-    return this._currentEntities(this._collection("categories"));
+    return this._index().categories.slice();
   },
   topics() { return this.categories(); },
   skills() {
@@ -393,19 +581,23 @@ const DataAPI = {
     // Do not hide a registered locked topic from the Path.  Learning systems
     // use availableSkills()/skillForAccess() and therefore still see no
     // playable content for it.
-    return this._currentEntities(this._collection("skills"));
+    return this._index().skills.slice();
   },
   availableSkills(id) {
     const wanted = id ? dataId(id) : null;
-    return this.skills().filter((skill) => (!wanted || dataId(skill.id) === wanted) && !this.isSkillLocked(skill));
+    const list = this._index().availableSkills;
+    if (!wanted) return list.slice();
+    return list.filter((skill) => dataId(skill.id) === wanted);
   },
   skill(id) {
-    const skill = this._findById(this._collection("skills"), id);
+    const wanted = dataId(id);
+    const skill = wanted ? this._index().skillById.get(wanted) : undefined;
     if (!skill || !this.catalog || !this.isSubjectAvailable()) return skill || null;
     return skill;
   },
   category(id) {
-    return this._findById(this._collection("categories"), id) || null;
+    const wanted = dataId(id);
+    return (wanted && this._index().categoryById.get(wanted)) || null;
   },
   topic(id) { return this.category(id); },
   topicForSkill(skillOrId) {
@@ -416,86 +608,80 @@ const DataAPI = {
   },
   tasks() {
     if (!this.catalog || !this.isSubjectAvailable()) return [];
-    return this._currentEntities(this._collection("tasks"));
+    return this._index().tasksAll.slice();
   },
   task(id) {
-    const task = this._findById(this._collection("tasks"), id);
-    if (!task || !this.isSubjectAvailable()) return null;
+    const wanted = dataId(id);
+    const idx = this._index();
+    const task = wanted ? idx.taskById.get(wanted) : undefined;
+    if (!task || !idx.subjectAvailable) return null;
     // Direct task lookup is also an access boundary: stale local sessions
     // cannot reopen a task from a locked topic/subject by guessing its id.
-    return this.skillForAccess(task.skill || task.skillId) ? task : null;
+    return idx.skillLocked.get(dataId(task.skill || task.skillId)) === false ? task : null;
   },
   taskHasMissingVisual(item) {
     return !!(item && item.visual && item.visual.required && !item.visual.assetId);
   },
   _taskBelongsToCurrent(task) {
-    if (!task || !this.skill(task.skill || task.skillId)) return false;
-    return !this._skillLocked(task.skill || task.skillId);
+    if (!task || typeof task !== "object") return false;
+    const idx = this._index();
+    if (!idx.subjectAvailable) return false;
+    const sid = dataId(task.skill || task.skillId);
+    return !!sid && idx.skillById.has(sid) && idx.skillLocked.get(sid) === false;
   },
   _skillLocked(id) {
-    const skill = this.skill(id);
-    return !skill || this.isSkillLocked(skill);
+    const wanted = dataId(id);
+    const idx = this._index();
+    if (!idx.subjectAvailable || !wanted || !idx.skillById.has(wanted)) return true;
+    return idx.skillLocked.get(wanted) !== false;
   },
   _lessonBelongsToCurrent(lesson) {
-    return !!(lesson && this.skill(lesson.skill || lesson.skillId));
+    if (!lesson || typeof lesson !== "object") return false;
+    const idx = this._index();
+    if (!idx.subjectAvailable) return false;
+    return idx.skillById.has(dataId(lesson.skill || lesson.skillId));
   },
   practiceTasks() {
-    if (!this.subjectFeature(this.currentSubject(), "practice")) return [];
-    return this.tasks().filter((task) => this.taskForAccess(task.id));
+    const idx = this._index();
+    if (!idx.feat.practice) return [];
+    return idx.practiceTasks.slice();
   },
   tasksBySkill(skillId) {
     const wanted = dataId(skillId);
-    if (!wanted || !this.skill(wanted)) return [];
-    return this.tasks().filter((task) => dataSameId(task.skill || task.skillId, wanted));
+    const idx = this._index();
+    if (!wanted || !idx.skillById.has(wanted)) return [];
+    return (idx.tasksBySkillMap.get(wanted) || []).slice();
   },
   practiceTasksBySkill(skillId) {
     const wanted = dataId(skillId);
-    if (!wanted || this.isSkillLocked(wanted)) return [];
-    return this.practiceTasks().filter((task) => dataSameId(task.skill || task.skillId, wanted));
+    const idx = this._index();
+    if (!wanted || idx.skillLocked.get(wanted) !== false) return [];
+    return (idx.practiceBySkill.get(wanted) || []).slice();
   },
   missions() {
-    if (!this.subjectFeature(this.currentSubject(), "missions")) return [];
-    const out = [];
-    for (const mission of this._currentEntities(this._collection("missions"))) {
-      const skillId = dataId(mission.skill || mission.skillId);
-      if (!skillId || this.isSkillLocked(skillId)) continue;
-      const ids = (Array.isArray(mission.tasks) ? mission.tasks : [])
-        .map((id) => dataId(id && typeof id === "object" ? (id.id || id.taskId) : id))
-        .filter((id) => id && !!this.taskForAccess(id));
-      const hasBank = this.practiceTasksBySkill(skillId).length > 0;
-      // Миссия без заданий и без общего банка темы — пустая декорация,
-      // её не показываем.  Явный список сохраняем, если он пересекается с
-      // доступным каталогом.
-      if (!hasBank && !ids.length) continue;
-      out.push({ ...mission, skill: skillId, tasks: [...new Set(ids)] });
-    }
-    return out;
+    const idx = this._index();
+    if (!idx.feat.missions) return [];
+    return idx.missions.slice();
   },
-  mission(id) { return this.missions().find((item) => dataSameId(item.id, id)) || null; },
+  mission(id) { return this._index().missionById.get(dataId(id)) || null; },
   lessons() {
-    if (!this.subjectFeature(this.currentSubject(), "lessons")) return [];
-    return this._currentEntities(this._collection("lessons"))
-      .filter((lesson) => this._lessonBelongsToCurrent(lesson)
-        && !this._skillLocked(lesson.skill || lesson.skillId)
-        && this.lessonStepsCount(lesson) > 0);
+    const idx = this._index();
+    if (!idx.feat.lessons) return [];
+    return idx.lessons.slice();
   },
   lesson(id) {
-    return this.lessons().find((item) => dataSameId(item.id, id)) || null;
+    return this._index().lessonById.get(dataId(id)) || null;
   },
   lessonsBySkill(skillId) {
     const wanted = dataId(skillId);
-    if (!wanted || this.isSkillLocked(wanted)) return [];
-    return this.lessons().filter((lesson) => dataSameId(lesson.skill || lesson.skillId, wanted));
+    const idx = this._index();
+    if (!wanted || idx.skillLocked.get(wanted) !== false) return [];
+    return (idx.lessonsBySkillMap.get(wanted) || []).slice();
   },
   bosses() {
-    if (!this.isSubjectAvailable() || !this.subjectFeature(this.currentSubject(), "practice")) return [];
-    return this._currentEntities(this._collection("bosses")).filter((boss) => {
-      const cat = dataId(boss.cat || boss.category || boss.topicId || boss.topic_id);
-      return !!cat && !this.isTopicLocked(cat) && this.availableSkills().some((skill) => dataSkillCategoryId(skill) === cat)
-        && this.practiceTasks().some((task) => dataId(task.skill || task.skillId)
-          && this.availableSkills().some((skill) => dataId(skill.id) === dataId(task.skill || task.skillId)
-            && dataSkillCategoryId(skill) === cat));
-    });
+    const idx = this._index();
+    if (!idx.subjectAvailable || !idx.feat.practice) return [];
+    return idx.bosses.slice();
   },
   achievements() {
     if (!this.isSubjectAvailable()) return [];
@@ -513,7 +699,7 @@ const DataAPI = {
   },
   daily() {
     if (!this.subjectFeature(this.currentSubject(), "daily") || !this.isSubjectAvailable()
-        || !this.practiceTasks().length) {
+        || !this._index().practiceTasks.length) {
       return { skill: "", target: 0, xp: 0, title: "" };
     }
     const daily = this.catalog && this.catalog.daily && typeof this.catalog.daily === "object"

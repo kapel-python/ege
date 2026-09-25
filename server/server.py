@@ -2707,9 +2707,13 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
         cid for cid, category in category_by_id.items()
         if not category["locked"] and not subject_locked
     }
+    # Один SQL-запрос на предмет, а не по запросу на каждый skill_row:
+    # _subject_skill_ids ходит в БД (JOIN skills/topics), и его вызов внутри
+    # set comprehension выше выполнял ~20 одинаковых запросов на bootstrap.
+    unlocked_skill_ids = _subject_skill_ids(conn, subject) if not subject_locked else set()
     available_skill_ids = {
         str(r["id"]) for r in skill_rows
-        if str(r["id"]) in _subject_skill_ids(conn, subject) and str(r["topic_id"]) in available_category_ids
+        if str(r["id"]) in unlocked_skill_ids and str(r["topic_id"]) in available_category_ids
     } if not subject_locked else set()
 
     tasks = []
