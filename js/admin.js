@@ -115,6 +115,42 @@ function plural(n, one, few, many) {
 const GOAL_LABELS = { g60: "60+ баллов", g80: "80+ баллов", g95: "95+ баллов", g3: "Оценка 3 (база)", g4: "Оценка 4 (база)", g5: "Оценка 5 (база)" };
 const LEVEL_LABELS = { zero: "С нуля", base: "Базовый", confident: "Уверенный" };
 
+/* ---------- блокировки ---------- */
+
+const BLOCK_DURATIONS = [
+  { id: "1h", title: "1 час", secs: 3600 },
+  { id: "1d", title: "1 день", secs: 86400 },
+  { id: "1w", title: "1 неделя", secs: 604800 },
+  { id: "1m", title: "1 месяц", secs: 2592000 },
+  { id: "permanent", title: "Навсегда", secs: null },
+];
+
+function blockUntilPreview(durationId) {
+  const d = BLOCK_DURATIONS.find((x) => x.id === durationId);
+  if (!d) return "";
+  if (d.secs == null) return "Без срока окончания";
+  try {
+    return "До " + new Date(Date.now() + d.secs * 1000).toLocaleString("ru-RU", {
+      day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+    });
+  } catch (e) { return ""; }
+}
+
+function fmtBlockShort(block) {
+  if (!block) return "";
+  if (block.permanent || block.blockedUntil == null) return "Заблокирован · навсегда";
+  try {
+    const s = new Date(Number(block.blockedUntil)).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    return `Заблокирован · до ${s}`;
+  } catch (e) { return "Заблокирован"; }
+}
+
+function fmtBlockUntil(block) {
+  if (!block) return "—";
+  if (block.permanent || block.blockedUntil == null) return "Бессрочно";
+  return fmtDateTime(block.blockedUntil);
+}
+
 function adminSubjectName(value, fallback = "Предмет") {
   if (value && typeof value === "object") {
     value = value.title || value.name || value.short || value.id;
@@ -649,7 +685,7 @@ async function screenUsers() {
             <div class="a-user-card__top">
               <div class="a-avatar a-avatar--sm">${esc(initial)}</div>
               <div class="a-user-card__id">
-                <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}</div>
+                <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}${p.block ? ` <span class="a-chip a-chip--danger">бан</span>` : ""}</div>
                 <div class="a-user-card__acct mono">${esc(p.accountId || "—")}</div>
               </div>
               ${locked
@@ -666,7 +702,9 @@ async function screenUsers() {
             </div>`}
             <div class="a-user-card__foot">
               <span>${fmtDate(p.createdAt)}</span>
-              <span class="a-user-card__active">${p.lastActiveDate ? "активен " + fmtShortDate(p.lastActiveDate) : "не активен"}</span>
+              ${p.block
+                ? `<span class="a-user-card__active" style="color:var(--danger);font-weight:600">${esc(fmtBlockShort(p.block))}</span>`
+                : `<span class="a-user-card__active">${p.lastActiveDate ? "активен " + fmtShortDate(p.lastActiveDate) : "не активен"}</span>`}
               ${p.id === A.session.user.id ? "" : `
               <button class="a-icon-btn a-icon-btn--danger" data-del="${p.id}" title="Удалить аккаунт">${aicon("trash")}</button>`}
             </div>
@@ -730,12 +768,14 @@ async function screenUser(ref) {
               ? `<span class="a-chip a-chip--warn">${esc(subjectName)} · материалы скоро</span>`
               : `<span>уровень ${st.level.level} · ${fmtNum(st.xp)} XP</span>`}
             ${p.onboarded ? `<span class="a-chip a-chip--success">онбординг пройден</span>` : `<span class="a-chip a-chip--warn">не завершил онбординг</span>`}
+            ${p.block ? `<span class="a-chip a-chip--danger">${esc(fmtBlockShort(p.block))}</span>` : `<span class="a-chip a-chip--success">активен</span>`}
             ${p.adminSessions > 0 ? `<span class="a-chip a-chip--accent">admin-сессия активна</span>` : ""}
           </div>
         </div>
         <div class="a-user-head__actions">
           <button class="btn btn--soft btn--sm" id="editProfileBtn">Профиль</button>
           <button class="btn btn--soft btn--sm" id="grantXpBtn"${locked ? " disabled title=\"XP появятся вместе с материалами предмета\"" : ""}>± XP</button>
+          <button class="btn btn--soft btn--sm" id="blockBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя заблокировать собственный аккаунт\"" : ""}>${p.block ? "Разблокировать" : "Заблокировать"}</button>
           <button class="btn btn--danger-soft btn--sm" id="resetBtn">Сброс…</button>
           <button class="btn btn--danger-soft btn--sm" id="deleteBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя удалить собственный аккаунт\"" : ""}>Удалить</button>
         </div>
@@ -750,6 +790,18 @@ async function screenUser(ref) {
         <div class="a-kv__item"><div class="a-kv__k">Цель</div><div class="a-kv__v">${p.goal ? esc(GOAL_LABELS[p.goal] || p.goal) : "—"}</div></div>
         ${locked ? "" : `<div class="a-kv__item"><div class="a-kv__k">До след. уровня</div><div class="a-kv__v">${fmtNum(st.level.need - st.level.intoLevel)} XP</div></div>`}
       </div>
+    </div>
+
+    <div class="a-card" style="margin-top:16px;${p.block ? "border-color:rgba(255,107,107,.4)" : ""}">
+      <div class="a-card__head"><span class="a-card__title">Доступ</span><span class="a-card__sub">${p.block ? "заблокирован" : "активен"}</span></div>
+      ${p.block ? `
+        <div class="a-kv">
+          <div class="a-kv__item"><div class="a-kv__k">Статус</div><div class="a-kv__v" style="color:var(--danger);font-weight:600">${esc(fmtBlockShort(p.block))}</div></div>
+          <div class="a-kv__item"><div class="a-kv__k">Срок</div><div class="a-kv__v">${esc(fmtBlockUntil(p.block))}</div></div>
+          <div class="a-kv__item"><div class="a-kv__k">Дата блокировки</div><div class="a-kv__v">${fmtDateTime(p.block.createdAt)}</div></div>
+          <div class="a-kv__item"><div class="a-kv__k">Причина</div><div class="a-kv__v">${p.block.reason ? esc(p.block.reason) : `<span style="color:var(--muted)">Причина не указана</span>`}</div></div>
+        </div>` : `
+        <div style="font-size:13.5px;color:var(--text-2)">Аккаунт активен. Блокировка отклонит все запросы пользователя на backend и покажет ему окно ограничения.</div>`}
     </div>
 
     <div class="a-section-title">${locked ? "Статус предмета" : "Прогресс"}</div>
@@ -1081,6 +1133,108 @@ function bindUserActions(p) {
   if (deleteBtn && !deleteBtn.disabled) {
     deleteBtn.onclick = () => openDeleteUserModal(p);
   }
+
+  const blockBtn = document.getElementById("blockBtn");
+  if (blockBtn && !blockBtn.disabled) {
+    blockBtn.onclick = () => {
+      if (p.block) openUnblockUserModal(p, reload);
+      else openBlockUserModal(p, reload);
+    };
+  }
+}
+
+/* ---------------- блокировка пользователя ---------------- */
+
+function openBlockUserModal(p, reload) {
+  const ref = p.accountId || String(p.id);
+  let duration = "1d";
+  openModal(`
+    <div class="a-modal__title" style="color:var(--danger)">Заблокировать ${esc(p.accountId || "")}?</div>
+    <div class="a-modal__desc">Пользователь сразу потеряет доступ ко всем разделам, кроме главной страницы. Все его устройства получат окно ограничения при следующем запросе.</div>
+    <div class="a-modal__form">
+      <div class="a-field"><label>Причина (необязательно, но лучше указать)</label>
+        <textarea class="a-textarea" id="fBlockReason" maxlength="500" rows="3" placeholder="Например: спам в обращениях"></textarea>
+      </div>
+      <div class="a-field"><label>Срок блокировки</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px" id="fBlockDurations">
+          ${BLOCK_DURATIONS.map((d) => `
+            <button type="button" class="choice-item" data-dur="${d.id}" style="flex:1 1 90px;${d.id === duration ? "border-color:var(--danger);background:var(--danger-soft)" : ""}">
+              <b>${d.title}</b>
+            </button>`).join("")}
+        </div>
+        <div class="a-field__hint" id="fBlockPreview">${esc(blockUntilPreview(duration))}</div>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--danger-soft" id="mDo">Заблокировать</button>
+    </div>`, (modal) => {
+    modal.classList.add("a-modal--danger");
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelectorAll("[data-dur]").forEach((btn) => {
+      btn.onclick = () => {
+        duration = btn.dataset.dur;
+        modal.querySelectorAll("[data-dur]").forEach((b) => {
+          const on = b.dataset.dur === duration;
+          b.style.borderColor = on ? "var(--danger)" : "";
+          b.style.background = on ? "var(--danger-soft)" : "";
+        });
+        modal.querySelector("#fBlockPreview").textContent = blockUntilPreview(duration);
+      };
+    });
+    modal.querySelector("#mDo").onclick = async () => {
+      const btn = modal.querySelector("#mDo");
+      btn.disabled = true;
+      try {
+        const reason = modal.querySelector("#fBlockReason").value.trim();
+        await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/block`, { reason, duration });
+        closeModal();
+        toast(duration === "permanent" ? "Пользователь заблокирован навсегда" : "Пользователь заблокирован");
+        A.usersCache = null;
+        if (reload) await reload();
+      } catch (e) {
+        btn.disabled = false;
+        if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
+function openUnblockUserModal(p, reload) {
+  const ref = p.accountId || String(p.id);
+  openModal(`
+    <div class="a-modal__title">Разблокировать ${esc(p.accountId || "")}?</div>
+    <div class="a-modal__desc">Доступ восстановится сразу: при следующем запросе пользователь снова сможет пользоваться всеми разделами.</div>
+    ${p.block ? `<div class="a-modal__form">
+      <div class="a-kv">
+        <div class="a-kv__item"><div class="a-kv__k">Срок</div><div class="a-kv__v">${esc(fmtBlockUntil(p.block))}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Причина</div><div class="a-kv__v">${p.block.reason ? esc(p.block.reason) : "—"}</div></div>
+      </div>
+    </div>` : ""}
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mDo">Разблокировать</button>
+    </div>`, (modal) => {
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mDo").onclick = async () => {
+      const btn = modal.querySelector("#mDo");
+      btn.disabled = true;
+      try {
+        await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/unblock`, {});
+        closeModal();
+        toast("Пользователь разблокирован");
+        A.usersCache = null;
+        if (reload) await reload();
+      } catch (e) {
+        btn.disabled = false;
+        if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        closeModal();
+        toast(e.message, "err");
+      }
+    };
+  });
 }
 
 /* ---------------- Журнал действий ---------------- */
@@ -1092,6 +1246,8 @@ const AUDIT_LABELS = {
   reset: ["Сброс состояния", "a-chip--warn"],
   "update-profile": ["Изменение профиля", ""],
   "delete-user": ["Удаление аккаунта", "a-chip--danger"],
+  "block-user": ["Блокировка аккаунта", "a-chip--danger"],
+  "unblock-user": ["Разблокировка аккаунта", "a-chip--success"],
   "support-read": ["Обращение прочитано", ""],
 };
 

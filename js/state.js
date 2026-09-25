@@ -196,7 +196,11 @@ const Store = {
       let payload;
       try {
         payload = await ApiClient.get("/api/bootstrap-lite" + qs);
-      } catch (_) {
+      } catch (e) {
+        // A ban is not a fallback case: rethrow immediately so the global
+        // blocked modal shows instead of masking it behind a second request.
+        if (e && (e.code === "ACCOUNT_BLOCKED"
+            || (e.payload && (e.payload.code === "ACCOUNT_BLOCKED" || e.payload.blocked === true)))) throw e;
         payload = await ApiClient.get("/api/bootstrap" + qs);
       }
       this._applyBootstrap(payload);

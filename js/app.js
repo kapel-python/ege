@@ -251,6 +251,109 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* ============================================================
+   Блокировка аккаунта: глобальное полноэкранное состояние.
+   Backend возвращает 403 + code ACCOUNT_BLOCKED на ЛЮБОМ
+   authenticated запросе (см. reject_if_blocked в server.py);
+   ApiClient транслирует это в событие ege:account-blocked.
+   Окно намеренно нельзя закрыть: нет крестика, Esc и клика по
+   backdrop — только «Вернуться на главную» (лендинг /).
+   Визуально — та же .dlg-система, что у устройств в профиле.
+   ============================================================ */
+
+let accountBlocked = null;
+
+function isBlockedError(e) {
+  return !!(e && (e.code === "ACCOUNT_BLOCKED"
+    || (e.payload && (e.payload.code === "ACCOUNT_BLOCKED" || e.payload.blocked === true))));
+}
+
+function blockedDetail(e) {
+  if (e && e.payload && typeof e.payload === "object") return e.payload;
+  if (e && typeof e === "object" && (e.code === "ACCOUNT_BLOCKED" || e.blocked === true)) return e;
+  return null;
+}
+
+function fmtBlockedUntil(payload) {
+  if (!payload) return "Бессрочно";
+  if (payload.permanent || payload.blockedUntil == null) return "Бессрочно";
+  const d = new Date(Number(payload.blockedUntil));
+  if (Number.isNaN(d.getTime())) return "Бессрочно";
+  try {
+    return "До " + d.toLocaleString("ru-RU", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch (_) { return "Бессрочно"; }
+}
+
+function blockedModalRoot() {
+  let root = null;
+  try { root = document.getElementById("blocked-modal-root"); } catch (_) { root = null; }
+  if (!root) {
+    try {
+      root = document.createElement("div");
+      root.id = "blocked-modal-root";
+      document.body.appendChild(root);
+    } catch (_) { return null; }
+  }
+  return root;
+}
+
+function showAccountBlocked(payload) {
+  const info = (payload && typeof payload === "object") ? payload : {};
+  accountBlocked = info;
+  try { window.__egeBlocked = info; } catch (_) {}
+  const root = blockedModalRoot();
+  if (!root) return;
+  // Старый интерфейс за модалкой не должен оставаться рабочим: чистим экран,
+  // чтобы назад/вперёд и stale-DOM не давали кликабельный кэш.
+  try {
+    const screen = document.getElementById("screen");
+    if (screen) screen.innerHTML = "";
+  } catch (_) {}
+  const reason = typeof info.reason === "string" ? info.reason.trim() : "";
+  root.innerHTML = `
+    <div class="dlg-backdrop dlg-backdrop--blocked">
+      <div class="dlg dlg--blocked" role="dialog" aria-modal="true" aria-label="Доступ ограничен">
+        <div class="dlg__eyebrow">Доступ ограничен</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("lock")}</div>
+          <div class="dlg-device__name">Твой аккаунт заблокирован</div>
+        </div>
+        <div class="dlg__text">Ты пока не можешь пользоваться разделами ege easy. Главная страница остаётся доступной.</div>
+        <div class="dlg-kv">
+          <div class="dlg-kv__row dlg-kv__row--col"><span>Причина</span><span>${reason ? esc(reason) : "Причина не указана."}</span></div>
+          <div class="dlg-kv__row"><span>Срок</span><span>${esc(fmtBlockedUntil(info))}</span></div>
+        </div>
+        <div class="dlg__actions dlg__actions--single">
+          <button class="btn btn--primary" type="button" onclick="location.href='/'">Вернуться на главную</button>
+        </div>
+      </div>
+    </div>`;
+  // Фокус для скринридеров; закрывающих слушателей нет осознанно:
+  // ни Esc, ни клик по backdrop окно не закрывают.
+  try {
+    const dlg = root.querySelector(".dlg");
+    if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+  } catch (_) {}
+}
+
+function hideAccountBlocked() {
+  accountBlocked = null;
+  try { window.__egeBlocked = null; } catch (_) {}
+  try {
+    const root = document.getElementById("blocked-modal-root");
+    if (root) root.innerHTML = "";
+  } catch (_) {}
+}
+
+try {
+  window.addEventListener("ege:account-blocked", (e) => {
+    try { showAccountBlocked((e && e.detail) || {}); } catch (_) {}
+  });
+  window.addEventListener("ege:account-unblocked", () => {
+    try { hideAccountBlocked(); } catch (_) {}
+  });
+} catch (_) {}
+
 /* Единственный рендерер математики проекта.
    Новый формат данных: inline `\\(...\\)`, крупная формула `\\[...\\]`.
    Нормализация ниже сохраняет совместимость со старыми строками каталога. */
@@ -1025,7 +1128,10 @@ Store.on("levelup", ({ to }) => { showLevelUp(to); renderTopbar(); });
 Store.on("achievement", (a) => toast(`Достижение разблокировано: <b>«${a.name}»</b>`, "toast--ach", "crown"));
 Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача выполнена <b class="mono">+${xp} XP</b>`, "toast--xp", "zap"));
 Store.on("xp", () => renderTopbar());
-Store.on("persistenceerror", () => toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x"));
+Store.on("persistenceerror", (err) => {
+  if (isBlockedError(err)) return; // бан показывает модалку, тост не нужен
+  toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x");
+});
 Store.on("stateconflict", () => toast("Данные из другой вкладки объединены с текущими.", "", "rotate"));
 Store.on("externalupdate", () => { try { render(); } catch (_) {} });
 Store.on("externalupdate-pending", () => toast("В другой вкладке есть новые данные — подтянем их, когда закончишь тренировку", "", "rotate"));
@@ -1154,6 +1260,13 @@ let renderSeq = 0;
 let lastHash = "";
 
 async function render() {
+  // Заблокированный аккаунт: обычный интерфейс не рисуем вообще —
+  // только полноэкранное окно. Возврат из него — через лендинг.
+  if (accountBlocked || (typeof window !== "undefined" && window.__egeBlocked)) {
+    if (!accountBlocked) accountBlocked = window.__egeBlocked;
+    try { showAccountBlocked(accountBlocked || {}); } catch (_) {}
+    return;
+  }
   if (!Store.ready || !Store.state) return;
   // Отложённое обновление из соседней вкладки: тренировка/урок уже закрыты
   // (иначе checkExternalUpdate не откладывал бы), подтягиваем свежее
@@ -1161,7 +1274,10 @@ async function render() {
   if (Store.pendingExternalUpdate && !(typeof Session !== "undefined" && Session && Session.cur)
       && !(typeof Lesson !== "undefined" && Lesson && Lesson.cur)) {
     Store.pendingExternalUpdate = false;
-    try { await Store.load(); } catch (_) {}
+    try { await Store.load(); } catch (e) {
+      if (isBlockedError(e)) { try { showAccountBlocked(blockedDetail(e) || {}); } catch (_) {} return; }
+    }
+    if (accountBlocked) { try { showAccountBlocked(accountBlocked); } catch (_) {} return; }
     if (!Store.ready || !Store.state) return;
   }
   const route = currentRoute();
@@ -1226,6 +1342,7 @@ async function render() {
       await Store.ensureDetails();
     } catch (error) {
       if (my !== renderSeq) return;
+      if (isBlockedError(error)) { try { showAccountBlocked(blockedDetail(error) || {}); } catch (_) {} return; }
       screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center">Не удалось загрузить задания.<br><button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button></div>`;
       return;
     }
@@ -5958,6 +6075,7 @@ function stopBootMsgs() {
    ============================================================ */
 
 function showBootError(error) {
+  if (isBlockedError(error)) { try { showAccountBlocked(blockedDetail(error) || {}); } catch (_) {} return; }
   const screen = document.getElementById("screen");
   document.getElementById("topbar").innerHTML = "";
   screen.innerHTML = `<div class="card" style="max-width:640px;margin:64px auto;text-align:center">
@@ -6070,7 +6188,11 @@ function bootstrapApp() {
       render();
     } catch (error) {
       stopBootMsgs();
-      showBootError(error);
+      if (isBlockedError(error)) {
+        try { showAccountBlocked(blockedDetail(error) || window.__egeBlocked || {}); } catch (_) {}
+      } else {
+        showBootError(error);
+      }
     }
   })();
   return bootPromise;
