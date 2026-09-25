@@ -1322,15 +1322,17 @@ async function render() {
   // зарегистрированную тему и понять, почему она закрыта.
   if (subjectState.empty && EMPTY_SUBJECT_ROUTES.has(route)) {
     screen.innerHTML = "";
-    screenEmptySubject(screen);
-    try { if (window.Footer) Footer.hide(); } catch (_) {}
+    screenEmptySubject(screen, route);
+    // Футер — часть единого chrome. На пустом/locked предмете он нужен так же,
+    // как на готовом; скрываем только на task-фокусных маршрутах (см. Footer).
+    try { if (window.Footer) Footer.sync(route); } catch (_) {}
     window.scrollTo(0, 0);
     return;
   }
   if (subjectState.locked && SUBJECT_CONTENT_ROUTES.has(route)) {
     screen.innerHTML = "";
-    screenSubjectUnavailable(screen, true);
-    try { if (window.Footer) Footer.hide(); } catch (_) {}
+    screenSubjectUnavailable(screen, true, route);
+    try { if (window.Footer) Footer.sync(route); } catch (_) {}
     window.scrollTo(0, 0);
     return;
   }
@@ -1814,11 +1816,52 @@ function subjectStateCardHTML(state = subjectContentState(), options = {}) {
   </section>`;
 }
 
-function screenSubjectUnavailable(root, locked = false) {
+/* Каждый раздел locked/empty-предмета показывает СВОЮ структуру и свой
+   честный пустой список — как у готового предмета, только без выдуманных
+   уроков/заданий. Раньше guard в render() отправлял training/errors/trials/
+   stats в одну общую карточку, из-за чего они выглядели одинаково.
+   `route` — имя раздела; null = общий экран (главная/профиль). */
+const SUBJECT_SECTION_COPY = {
+  training: {
+    title: "Тренировка",
+    sub: "Уроки разбирают тему по шагам, тренировки закрепляют её на заданиях ЕГЭ.",
+    empty: "Уроки и тренировки появятся здесь вместе с материалами предмета.",
+  },
+  errors: {
+    title: "Ошибки",
+    sub: "Каждая ошибка — это точка роста. Повторяй слабые места, пока они не закроются.",
+    empty: "Список ошибок появится после первых заданий. Пока повторять нечего.",
+  },
+  trials: {
+    title: "Испытания",
+    sub: "Проверки на прочность: ежедневная подборка, смешанное испытание и боссы по веткам навыков.",
+    empty: "Ежедневная подборка, смешанное испытание и боссы появятся вместе с заданиями.",
+  },
+  stats: {
+    title: "Статистика",
+    sub: "Аналитика подготовки: активность, точность и динамика прогноза.",
+    empty: "Графики активности и прогноза появятся после первых заданий.",
+  },
+};
+
+function subjectSectionEmptyStateHTML(state = subjectContentState(), route = null) {
+  const copy = route ? SUBJECT_SECTION_COPY[route] : null;
+  if (!copy) return subjectStateCardHTML(state);
+  return `
+    <div class="page-head">
+      <div class="page-title">${esc(copy.title)} ${helpDot(route === "training" ? "training" : route === "errors" ? "errors" : route === "trials" ? "trials" : "skills")}</div>
+      <div class="page-sub">${esc(copy.sub)}</div>
+    </div>
+    <div class="card empty">${esc(copy.empty)}</div>`;
+}
+
+function screenSubjectUnavailable(root, locked = false, route = null) {
   const state = subjectContentState();
   if (!locked) state.empty = true;
   const info = state.info || subjectInfoSafe();
-  root.innerHTML = `
+  root.innerHTML = route && SUBJECT_SECTION_COPY[route]
+    ? subjectSectionEmptyStateHTML(state, route)
+    : `
     <div class="page-head">
       <div class="page-title">${esc(subjectDisplayName(info))}</div>
       <div class="page-sub">${locked ? "тема пока закрыта · материалы появятся из реестра" : "отдельный прогресс · материалы скоро"}</div>
@@ -2008,15 +2051,9 @@ function subjectEmptyHTML() {
   return subjectStateCardHTML({ ...state, empty: true });
 }
 
-function screenEmptySubject(root) {
+function screenEmptySubject(root, route = null) {
   const state = subjectContentState();
-  const info = state.info || subjectInfoSafe();
-  root.innerHTML = `
-    <div class="page-head">
-      <div class="page-title">${esc(subjectDisplayName(info))}</div>
-      <div class="page-sub">отдельный прогресс · контент скоро выйдет</div>
-    </div>
-    ${subjectStateCardHTML({ ...state, empty: true })}`;
+  return subjectSectionEmptyStateHTML({ ...state, empty: true }, route);
 }
 
 /* ============================================================
