@@ -1756,12 +1756,14 @@ function subjectLearningUnavailable(state = subjectContentState()) {
 }
 
 function subjectNavItems() {
-  let unavailable = false;
-  try { unavailable = subjectLearningUnavailable(); } catch (_) {}
-  if (!unavailable) return NAV;
-  // У coming-soon предмета доступна только карта тем; профиль и настройки
-  // остаются, потому что это не учебный контент. Прямые URL всё равно
-  // защищены route-guard'ом ниже.
+  let state = null;
+  try { state = subjectContentState(); } catch (_) { state = null; }
+  if (!state || (!state.empty && !state.locked)) return NAV;
+  // Единый chrome: locked-предмет с зарегистрированными темами показывает
+  // то же меню, что готовый. Недоступный контент честно закрыт route-guard'ом
+  // (заглушка вместо пустых переходов), а не отсутствием пункта меню.
+  // Урезаем только пустой предмет без единой темы — там показывать нечего.
+  if (!state.empty && asSafeArray(state.skills).length) return NAV;
   return NAV.filter((item) => ["dashboard", "path", "profile"].includes(item.route));
 }
 
@@ -2022,15 +2024,22 @@ function screenEmptySubject(root) {
    ============================================================ */
 
 function navRouteForRoute(route) {
-  // Прямая ссылка на закрытый урок/практику не должна оставлять весь
-  // restricted-shell без активного пункта: единственный доступный контентный
-  // маршрут здесь — карта тем. Для обычного предмета mappings остаются прежними.
-  if (SUBJECT_CONTENT_ROUTES.has(route)) {
-    try { if (subjectLearningUnavailable()) return "path"; } catch (_) {}
-  }
-  return route === "practice" ? "training"
+  const mapped = route === "practice" ? "training"
     : route === "boss" || route === "daily" || route === "review" ? "trials"
     : route === "skill" || route === "lesson" ? "path" : route;
+  // Прямая ссылка на закрытый контент не должна оставлять меню без активного
+  // пункта. Если вычисленный пункт скрыт урезанным chrome (пустой предмет без
+  // единой темы) — подсвечиваем карту тем. У locked-предмета с темами chrome
+  // полный, и пункт подсвечивается сам.
+  if (SUBJECT_CONTENT_ROUTES.has(route)) {
+    try {
+      if (subjectLearningUnavailable()) {
+        const visible = new Set(subjectNavItems().map((n) => n.route));
+        if (!visible.has(mapped)) return "path";
+      }
+    } catch (_) {}
+  }
+  return mapped;
 }
 
 /* Один переключатель режима для всех task-экранов. На обычных маршрутах
@@ -2134,20 +2143,15 @@ function renderTopbar() {
   const li = levelInfo();
   const f = safeForecast();
   const dark = Theme.current() === "dark";
-  // Выбора предмета в шапке нет: предмет переключается только в профиле
-  // (subjectCurrentButtonHTML/askSubjectDialog). Шапка показывает текущий
-  // предмет статичным бейджем, без селекта.
+  // Единая шапка для всех предметов: уровень, прогноз, тема и серия рисуются
+  // всегда одной структурой. У locked/empty-предмета значения честные
+  // (УР. 1, 0 XP, «скоро», 0 дн — из реального состояния, там нули), а бейдж
+  // с замком объясняет, почему данных нет. Отдельной урезанной шапки больше
+  // нет: предмет переключается только в профиле.
   const subjectState = subjectContentState();
-  if (subjectLearningUnavailable(subjectState)) {
-    const info = subjectState.info || subjectInfoSafe();
-    const status = subjectState.locked ? "Карта тем · скоро" : "Материалы скоро";
-    document.getElementById("topbar").innerHTML = `
-      <span class="chip chip--locked">${icon("lock")} ${esc(subjectDisplayName(info))}</span>
-      <div class="topbar__spacer"></div>
-      <span class="chip chip--locked hide-mobile">${esc(status)}</span>
-      <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>`;
-    return;
-  }
+  const locked = subjectLearningUnavailable(subjectState);
+  const lockedInfo = locked ? (subjectState.info || subjectInfoSafe()) : null;
+  const lockedStatus = locked ? (subjectState.locked ? "Карта тем · скоро" : "Материалы скоро") : "";
   const streak = nonNegativeNumber(Store.state.streak);
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
@@ -2157,8 +2161,10 @@ function renderTopbar() {
         <div class="level-chip__xp">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</div>
       </div>
     </div>
+    ${locked ? `<span class="chip chip--locked hide-mobile">${icon("lock")} ${esc(subjectDisplayName(lockedInfo))}</span>` : ""}
     <div class="topbar__spacer"></div>
     <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${esc(f.low)}–${esc(f.high)}</b>`}</div>
+    ${locked ? `<span class="chip chip--locked hide-mobile">${esc(lockedStatus)}</span>` : ""}
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
     <div class="streak-chip streak-chip--clickable ${streakTier(streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${streak} дн</div>`;
 }
