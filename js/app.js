@@ -2257,7 +2257,24 @@ function streakTier(days) {
   return "";
 }
 
+/* Высота верхней панели нужна липкой шапке сессии: без неё «Назад» и «Выйти»
+   заезжали под topbar и пропадали. Панель переносится на узких экранах, поэтому
+   меряем её фактическую высоту, а не считаем в CSS. */
+function syncTopbarHeight() {
+  try {
+    const bar = document.getElementById("topbar");
+    if (!bar) return;
+    const h = Math.round(bar.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--topbar-h", `${h}px`);
+  } catch (_) {}
+}
+try {
+  window.addEventListener("resize", syncTopbarHeight);
+  window.addEventListener("orientationchange", syncTopbarHeight);
+} catch (_) {}
+
 function renderTopbar() {
+  syncTopbarHeight();
   if (isSubjectChoiceLocked()) {
     document.getElementById("topbar").innerHTML = `
       <div class="topbar__spacer"></div>
@@ -3452,7 +3469,10 @@ function renderTask(root) {
   root.innerHTML = `
     <div class="session-wrap">
       <div class="session-head">
-        <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
+        <div class="session-head__nav">
+          ${sessionPrevButtonHtml()}
+          <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
+        </div>
         <div class="session-head__title">${esc(S.title)}</div>
         <div class="session-head__progress mono">${progressDone + 1} / ${S.total}</div>
       </div>
@@ -3532,10 +3552,10 @@ function essaySourceTextHtml(src) {
   const paragraphs = String(src.text || "").split(/\n{2,}/)
     .map((p) => `<p>${esc(p.trim())}</p>`).join("");
   return `
-    <div class="source-text" id="sourceTextBox">
-      <button class="source-text__bar" type="button" onclick="essaySourceToggle()" aria-expanded="true">
+    <div class="source-text source-text--collapsed" id="sourceTextBox">
+      <button class="source-text__bar" type="button" onclick="essaySourceToggle()" aria-expanded="false">
         <span class="source-text__title">${esc(title)}</span>
-        <span class="source-text__toggle" data-source-toggle-label>Скрыть</span>
+        <span class="source-text__toggle" data-source-toggle-label>Читать</span>
       </button>
       <div class="source-text__content" data-source-body>
         <div class="source-text__body">${paragraphs}</div>
@@ -3696,7 +3716,7 @@ function sessionAnswerAreaHtml(t, S) {
     <div id="essayReadonlySlot"></div>
     <div class="essay-editor" id="essayEditor">
       <textarea class="essay-editor__area" id="essayInput" spellcheck="false"
-        placeholder="Пиши сочинение здесь: сформулируй позицию по теме, подкрепи её двумя аргументами из литературы и сделай вывод…"></textarea>
+        placeholder="${t.sourceTextId ? "Пиши сочинение здесь: сформулируй позицию автора исходного текста, прокомментируй её двумя примерами из него и обоснуй своё отношение…" : "Пиши сочинение здесь: сформулируй позицию по теме, подкрепи её аргументами и сделай вывод…"}"></textarea>
       <div class="essay-editor__foot">
         <span class="essay-editor__count mono" id="essayCount"></span>
         <span class="essay-editor__bar"><span class="essay-editor__bar-fill" id="essayBar"></span></span>
@@ -3706,7 +3726,7 @@ function sessionAnswerAreaHtml(t, S) {
     <div class="session-tools">
       <span id="hintControl"></span>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
-      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">за проверенное сочинение: +${attemptXp(t, true, 0, false).total} XP</span>
+      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">за проверенное сочинение: 100–500 XP по баллам</span>
     </div>
     <div class="essay-editor__submit">
       <button class="btn btn--primary" id="essaySubmitBtn" disabled onclick="sessionEssaySubmit()">Отправить сочинение</button>
@@ -3842,19 +3862,21 @@ async function essayRestoreReady(t) {
     if (sub.status === "ready" && sub.result) {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essayMarkWritten(t.id, sub);
       essaySetFormVisible(false);
       essayMountReadonly(sub.text || "", sub.wordCount);
-      slot.innerHTML = `
+      essayMountFeedback(`
         <div class="feedback feedback--ok">
           <div class="feedback__head">${icon("check")} Это сочинение уже проверено
             <span class="feedback__xp">${esc(sub.result.total_score)} / ${esc(sub.result.max_score)}</span></div>
           <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
             <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
           </div>
-        </div>`;
+        </div>`);
     } else if (sub.status === "submitted" || sub.status === "failed") {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essayMarkWritten(t.id, sub);
       essayClearReadonly();
       essaySetFormVisible(true);
       try {
@@ -3886,34 +3908,149 @@ async function essayRestoreReady(t) {
           if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
         }
       } catch (_) {}
-      slot.innerHTML = `
+      essayMountFeedback(`
         <div class="feedback">
           <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
           <div class="feedback__solution">Текст сохранён (${sub.wordCount} ${essayWordsLabel(sub.wordCount)}), но готового результата нет. Можно продолжить проверку без повторного ввода.</div>
           <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
             <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Продолжить проверку</button>
           </div>
-        </div>`;
+        </div>`);
     }
   } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
 
-/* Кнопка «Назад» под готовым результатом: шаг к прошлому сочинению той же
-   сессии (зеркало sessionNext в обратную сторону). Его готовый отчёт никуда
-   не делся — при отрисовке покажется баннер «уже проверено». На первом
-   задании — обычный выход из практики. */
-function sessionEssayBack() {
+/* Шаг назад по сессии — зеркало sessionNext. Готовый результат прошлого
+   задания никуда не делся: при отрисовке снова покажется его отчёт.
+   На первом задании возвращаться некуда, поэтому кнопки нет (тот же
+   принцип, что у уроков и онбординга) — вместо неё пустое место, чтобы
+   «Далее» оставалась на своём месте. */
+function sessionPrev() {
   const S = Session.cur;
-  if (!S) return;
-  if (S.idx > 0) {
-    S.idx--;
-    S.answered = false;
-    S.taskStartTs = Date.now();
-    persistSession();
-    renderTask(document.getElementById("screen"));
-  } else {
-    askSessionQuit();
+  if (!S || S.idx <= 0) return;
+  S.idx--;
+  S.answered = false;
+  S.taskStartTs = Date.now();
+  // Ответы и XP уже зафиксированы в recordAnswer — назад мы только
+  // перерисовываем карточку, прогресс не пересчитывается.
+  persistSession();
+  renderTask(document.getElementById("screen"));
+}
+
+function sessionHasPrev() {
+  const S = Session.cur;
+  return !!S && S.idx > 0;
+}
+
+function sessionHasNext() {
+  const S = Session.cur;
+  return !!S && S.idx + 1 < S.taskIds.length;
+}
+
+/* Единая навигация сессии. «Назад» живёт в шапке карточки (renderTask), а не
+   в блоке результата: так он виден в любом состоянии — ученик пишет, идёт
+   проверка, отчёт готов — и не зависит от того, докручен ли экран вниз.
+   Раньше essay-экраны собирали «Назад» вручную в трёх местах и по разным
+   правилам: в «проверка завершена» ряд стоял отдельной строкой ПОД зелёным
+   блоком и уезжал за нижнюю кромку экрана (кнопки «Назад» просто не было
+   видно), в ветках «проверка не удалась» / «проверка не завершена» его не
+   было вовсе, а на первом задании он то показывался, то нет. */
+function sessionPrevButtonHtml() {
+  if (!sessionHasPrev()) return "";
+  return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
+}
+
+/* Подпись и цель основной кнопки сессии.
+   У обычных заданий всё как было: «Далее →», а на последнем — «Завершить».
+   У сочинений «Далее» появляется ТОЛЬКО когда впереди есть сочинение, которое
+   ученик уже написал: тогда кнопка действительно ведёт вперёд по написанным
+   работам (после шага «Назад» — снова туда, где он уже работал). Если
+   написанного впереди нет, дальше идёт ещё не написанное сочинение — кнопка
+   называется «Написать ещё раз» и открывает чистый бланк. Раньше подпись
+   «Написать ещё раз» стояла, но ничего не переписывала: sessionNext() всегда
+   вёл на следующее задание, поэтому она сбивала — возвращала к уже
+   проверенному сочинению вместо нового текста. */
+/* Отметка «сочинение написано» — на ней держится правило «Далее» у сочинений.
+   Живёт отдельно от essayReadyByTask (там сам submission с текстом) и
+   переживает перезагрузку: после F5 список написанных работ прежний, иначе
+   кнопка «Далее» исчезла бы у уже проверенных сочинений. */
+function essayMarkWritten(taskId, sub) {
+  const S = Session.cur;
+  if (!S || !taskId) return;
+  if (!S.essayWrittenByTask) S.essayWrittenByTask = {};
+  const known = S.essayReadyByTask && S.essayReadyByTask[taskId];
+  S.essayWrittenByTask[taskId] = {
+    clientId: (sub && sub.clientId) || (known && known.clientId) || "",
+    wordCount: (sub && sub.wordCount) || (known && known.wordCount) || 0,
+    status: (sub && sub.status) || "submitted",
+  };
+  persistSession();
+}
+
+function sessionTaskWritten(taskId) {
+  const S = Session.cur;
+  if (!S || !taskId) return false;
+  const sub = S.essayReadyByTask && S.essayReadyByTask[taskId];
+  if (sub && String(sub.text || "").trim()) return true;
+  if (S.essayWrittenByTask && S.essayWrittenByTask[taskId]) return true;
+  return !!(S.results || []).some((r) => r && r.taskId === taskId && r.essay);
+}
+
+/* Ближайшее написанное сочинение впереди (индекс в taskIds) или -1. */
+function sessionNextWrittenIdx(from) {
+  const S = Session.cur;
+  if (!S) return -1;
+  for (let i = Math.max(from, 0); i < S.taskIds.length; i++) {
+    if (sessionTaskWritten(S.taskIds[i])) return i;
   }
+  return -1;
+}
+
+function sessionNextTarget() {
+  const S = Session.cur;
+  const t = Session.task();
+  const next = S.idx + 1;
+  if (t && isLongTextTask(t)) {
+    const written = sessionNextWrittenIdx(next);
+    if (written >= 0) return written;
+  }
+  return next;
+}
+
+function sessionNextLabel() {
+  const S = Session.cur;
+  const t = S ? Session.task() : null;
+  if (t && isLongTextTask(t)) {
+    if (sessionNextWrittenIdx(S.idx + 1) >= 0) return "Далее →";
+    return sessionHasNext() ? "Написать ещё раз" : "Завершить";
+  }
+  return sessionHasNext() ? "Далее →" : "Завершить";
+}
+
+/* Ряд «вперёд» под результатом — тот же, что у обычных заданий. «Назад» здесь
+   не дублируется: он в шапке (sessionPrevButtonHtml). */
+function sessionNextHtml() {
+  return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+/* Навигация у сочинения — отдельной строкой ПОД блоком результата: «Далее» /
+   «Написать ещё раз» больше не лежат внутри зелёного блока «отчёт готов», а
+   «Назад» стоит там же, под блоком, а не в шапке карточки (иначе одна и та же
+   кнопка была бы на экране дважды). Пишет блок + ряд разом и прячет «Назад»
+   из шапки. */
+function sessionEssayNavHtml() {
+  const back = sessionHasPrev()
+    ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
+    : `<span></span>`;
+  return `<div class="session-nav">${back}<button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+function essayMountFeedback(html) {
+  const slot = document.getElementById("feedbackSlot");
+  if (!slot) return;
+  slot.innerHTML = `${html}${sessionEssayNavHtml()}`;
+  const head = document.getElementById("sessionPrevBtn");
+  if (head) head.style.display = "none";
 }
 
 /* Продолжить проверку сохранённого текста после перезагрузки: новый
@@ -3930,18 +4067,17 @@ async function sessionEssayResume(taskId) {
 
 /* Общая фаза «AI check → report generation → result ready → XP».
    Вызывается и после свежей отправки, и при «Продолжить проверку».
-   На время проверки редактор скрыт — виден только единый лоадер. */
+   На время проверки весь экран заменяется единым лоадером сайта (как на
+   boot): видны только шапка, лоадер по центру и футер — карточка задания,
+   исходный текст и само сочинение исчезают. */
 async function essayRunChecks(t, text, clientId, wordCount) {
   const S = Session.cur;
   if (!S || S.answered) return;
-  const slot = document.getElementById("feedbackSlot");
-  // Единый loading сайта (тот же loaderHTML, что на boot): только смена
-  // текста внутри существующего UI, без новых loader'ов и streaming.
-  // Само сочинение на время проверки скрыто.
+  const screen = document.getElementById("screen");
   essayClearReadonly();
-  essaySetFormVisible(false);
-  slot.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
-  essayCheckMsgStart("feedbackSlot");
+  essayCheckMsgStop();
+  screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+  essayCheckMsgStart();
   const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
 
   let aiRes = null, aiData = {};
@@ -3966,19 +4102,18 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       });
     } catch (_) { /* статус и так остался не-ready — XP не будет */ }
     essayCheckMsgStop();
-    slot.innerHTML = `
+    // Возвращаем экран задания (черновик цел в сессии) и показываем ошибку.
+    essayRestoreSuppress = true;
+    renderTask(screen);
+    essayRestoreSuppress = false;
+    essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Проверка не удалась</div>
         <div class="feedback__solution">${esc(essayAiErrorText(aiRes ? aiRes.status : 0, aiData))}</div>
         <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
-      </div>`;
-    essaySetFormVisible(true);
-    const btn = document.getElementById("essaySubmitBtn");
-    if (btn) { btn.style.display = ""; btn.disabled = false; btn.textContent = "Отправить сочинение"; }
-    const input = document.getElementById("essayInput");
-    if (input) input.disabled = false;
+      </div>`);
     return;
   }
 
@@ -3994,17 +4129,17 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   } catch (_) { savedRes = null; }
   if (!savedRes || !savedRes.ok || !savedData.submission) {
     essayCheckMsgStop();
-    slot.innerHTML = `
+    essayRestoreSuppress = true;
+    renderTask(screen);
+    essayRestoreSuppress = false;
+    essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Отчёт не сформирован</div>
         <div class="feedback__solution">Проверка прошла, но результат не сохранился. Текст не потерян — попробуй снова, XP начислен не будет до готового отчёта.</div>
         <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
-      </div>`;
-    essaySetFormVisible(true);
-    const retryInput = document.getElementById("essayInput");
-    if (retryInput) retryInput.disabled = false;
+      </div>`);
     return;
   }
   const submission = savedData.submission;
@@ -4022,12 +4157,17 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
   S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: 0, essay: true, wordCount, submissionId: submission.submissionId });
   S.answered = true;
-  Session.stopTimer();
   if (S.essayDraftByTask) delete S.essayDraftByTask[t.id];
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = submission;
-  // Редактор уже скрыт на время проверки — оставляем скрытым и показываем
-  // исходный текст readonly: менять его после отправки уже нельзя.
+  essayMarkWritten(t.id, submission);
+  // Возвращаем экран задания: редактор прячем и показываем исходный текст
+  // readonly — менять его после отправки уже нельзя. Таймер останавливаем
+  // ПОСЛЕ перерисовки: renderTask сам запускает свой интервал таймера.
+  essayRestoreSuppress = true;
+  renderTask(screen);
+  essayRestoreSuppress = false;
+  Session.stopTimer();
   essaySetFormVisible(false);
   essayMountReadonly(text, wordCount);
   const input = document.getElementById("essayInput");
@@ -4037,10 +4177,11 @@ async function essayRunChecks(t, text, clientId, wordCount) {
 
   essayCheckMsgStop();
   renderTopbar();
-  // Кнопка — только когда отчёт действительно сформирован и XP выдан.
-  // Навигация — ОТДЕЛЬНО под зелёным блоком: «Назад» и «Написать ещё раз»
-  // на одном уровне, как «Далее» в остальных предметах.
-  slot.innerHTML = `
+  // Зелёный блок — только отчёт. Навигация («Назад» и «Далее» / «Написать
+  // ещё раз») стоит отдельной строкой ПОД ним: в шапке карточки «Назад» на
+  // длинном сочинении + readonly-тексте просто не было видно, а внутри
+  // зелёного блока ряд выглядел частью отчёта.
+  essayMountFeedback(`
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
@@ -4048,12 +4189,8 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       <div style="margin-top:14px;text-align:right">
         <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
       </div>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
-      <button class="btn btn--ghost" onclick="sessionEssayBack()">← Назад</button>
-      <button class="btn btn--primary" onclick="sessionNext()">${(Session.cur && Session.cur.idx + 1 < Session.cur.taskIds.length) ? "Написать ещё раз →" : "Завершить"}</button>
-    </div>`;
-  const doneBox = slot.querySelector(".feedback--ok");
+    </div>`);
+  const doneBox = document.querySelector(".feedback--ok");
   if (doneBox && doneBox.scrollIntoView) {
     try { doneBox.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
   }
@@ -4177,7 +4314,7 @@ function sessionSelfResult(correct) {
         ${correct ? `<span class="feedback__xp">+${xp} XP</span>` : ""}
       </div>
       <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${S.idx + 1 < S.taskIds.length ? "Далее →" : "Завершить"}</button>
+        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
       </div>
     </div>`;
   renderTopbar();
@@ -4251,7 +4388,7 @@ function sessionShowAnswer() {
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
       <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решёшь его позже сам.</div>
       <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--soft" onclick="sessionNext()">${S.idx + 1 < S.taskIds.length ? "Далее →" : "Завершить"}</button>
+        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
       </div>
     </div>`;
   renderTopbar();
@@ -4314,7 +4451,7 @@ function sessionSubmit() {
         <span class="feedback__xp">+${xp} XP</span>
       </div>
       <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${S.idx + 1 < S.taskIds.length ? "Далее →" : "Завершить"}</button>
+        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
       </div>
     </div>`;
 
@@ -4335,7 +4472,10 @@ function sessionSkip() {
 
 function sessionNext() {
   const S = Session.cur;
-  S.idx++;
+  // Обычные задания — строго на следующее. Сочинение — на ближайшее
+  // НАПИСАННОЕ впереди («Далее»), а если такого нет, то на следующее
+  // ненаписанное («Написать ещё раз» → чистый бланк).
+  S.idx = sessionNextTarget();
   if (S.missionId) {
     Store.state.missionProgress[S.missionId] = (S.offset || 0) + S.idx;
     Store.save();
