@@ -180,6 +180,13 @@ def main() -> int:
         guest = Client(base)
         status, _, boot = guest.json("GET", "/api/bootstrap-lite")
         assert status == 200, boot
+        # Дальше проверяем валидацию от лица настоящего пользователя: строка
+        # появляется только после заявки «онбординг пройден» (до этого все
+        # пишущие домены отвечают 401 GUEST_PENDING и не доходят до проверок).
+        status, _, claim = guest.json("POST", "/api/profile/claim", {
+            "subject": "profile_math", "onboarded": True, "name": "Проверяющий",
+            "selfLevel": "base", "goal": "g60"})
+        assert status == 200, claim
         leak_probes = []
         s, _, b = guest.json("POST", "/api/events/attempts",
                              {"subject": "profile_math", "expectedVersion": 1,
@@ -211,14 +218,17 @@ def main() -> int:
         status = None
         try:
             c = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
+            # Сессия настоящего пользователя: иначе запрос отсечётся дешёвым
+            # 401 гостя и до проверки размера тела не дойдёт.
             c.request("POST", "/api/events/attempts",
                       body="x", headers={"Content-Type": "application/json",
+                                         "Cookie": f"ege_session={guest.cookies.get('ege_session', '')}",
                                          "Content-Length": str(50 * 1024 * 1024)})
             status = c.getresponse().status
             c.close()
         except Exception:
             status = "conn-reset"
-        check("50MB Content-Length не вешает поток", status in (400, "conn-reset"),
+        check("50MB Content-Length не вешает поток", status in (400, 413, "conn-reset"),
               f"got {status}")
 
         # --- D. Громкий флуд ---
@@ -234,6 +244,20 @@ def main() -> int:
         check("флуд: ни одного 5xx", not any(c >= 500 for c in codes), str(codes))
         s, _, hdata = anon.json("GET", "/api/health")
         check(f"после флуда сервер жив ({dt:.1f}с)", s == 200 and hdata.get("ok") is True)
+        reset_buckets(server)
+
+        # --- D2. Ранее открытые GET теперь тоже под общим бакетом ---
+        # catalog/auth/devices когда-то обходили 300/мин: флудер жёг CPU/БД
+        # в обход лимита. Теперь все они режутся тем же 429.
+        for probe in ("/api/catalog-tasks", "/api/auth/session", "/api/auth/devices"):
+            reset_buckets(server)
+            probe_client = Client(base)
+            probe_codes: dict = {}
+            for _ in range(310):
+                s, _, _ = probe_client.call("GET", probe)
+                probe_codes[s] = probe_codes.get(s, 0) + 1
+            check(f"{probe}: флуд режется 429", probe_codes.get(429, 0) > 0
+                  and not any(c >= 500 for c in probe_codes), str(probe_codes))
         reset_buckets(server)
 
         # --- E. Конкурентность 80 потоков ---
@@ -287,14 +311,23 @@ def main() -> int:
 
         # --- H. Тихий захват админки ---
         dev_a = Client(base)
-        s, _, ba = dev_a.json("GET", "/api/bootstrap-lite")
-        assert s == 200
+        s, _, pre = dev_a.json("GET", "/api/bootstrap-lite")
+        # Гость до онбординга: каталог отдаётся, а профиля в базе нет.
+        check("гость до онбординга остаётся без accountId",
+              s == 200 and pre.get("accountId") is None, f"got {s} {pre}")
         s, _, login = dev_a.json("POST", "/api/admin/login", {"password": ADMIN_PASSWORD})
         check("легитимный admin-login", s == 200, f"got {s} {login}")
         assert "ege_admin" in dev_a.cookies, "нет admin-куки"
+        ba = login["user"]
         dev_b = Client(base)
-        s, _, bb = dev_b.json("GET", "/api/bootstrap-lite")
-        assert s == 200 and bb["accountId"] != ba["accountId"]
+        s, _, pre_b = dev_b.json("GET", "/api/bootstrap-lite")
+        assert s == 200 and pre_b.get("accountId") is None, pre_b
+        # Жертва — тоже живой человек: строка появляется только после заявки
+        # «онбординг пройден», робот без неё базу не засоряет.
+        s, _, bb = dev_b.json("POST", "/api/profile/claim", {
+            "subject": "profile_math", "onboarded": True, "name": "Жертва",
+            "selfLevel": "base", "goal": "g60"})
+        assert s == 200 and bb.get("accountId") and bb["accountId"] != ba["accountId"], bb
         # чужая admin-кука в чужой сессии
         thief = Client(base)
         thief.cookies["ege_session"] = dev_b.cookies["ege_session"]
@@ -320,11 +353,11 @@ def main() -> int:
         fake = Client(base)
         fake.cookies["ege_session"] = "tampered-token-123-not-in-db"
         s, _, fb = fake.json("GET", "/api/bootstrap-lite")
-        check("поддельная кука -> свежий гость", s == 200 and fb.get("accountId"), f"got {s}")
+        check("поддельная кука -> гость без профиля", s == 200 and fb.get("accountId") is None, f"got {s}")
         s, _, _ = dev_a.json("POST", "/api/auth/logout", {})
         old = dev_a.cookies.get("ege_session", "")
         s, _, after = dev_a.json("GET", "/api/bootstrap-lite")
-        check("logout инвалидирует сессию", s == 200 and after.get("accountId") != ba["accountId"],
+        check("logout инвалидирует сессию", s == 200 and after.get("accountId") is None,
               f"got {s}")
 
         # --- J. Спам в поддержку ---
@@ -342,8 +375,10 @@ def main() -> int:
             fh.seek(0)
             fh.write(b"GARBAGE-ADVERSARIAL" * 64)
         s, _, kb = anon.json("GET", "/api/bootstrap-lite", timeout=20)
-        check("битая БД: запрос сам отрекаверил файл", s == 200 and kb.get("accountId"),
-              f"got {s}")
+        # Восстановление проверяем по каталогу: он читается из живой БД, а
+        # accountId у гостя по контракту теперь всегда пуст.
+        check("битая БД: запрос сам отрекаверил файл",
+              s == 200 and bool(kb.get("catalog", {}).get("tasks")), f"got {s}")
         quarantine = list(Path(tmp).glob("ege.sqlite3.corrupt-*"))
         check("битый файл ушёл в карантин", len(quarantine) >= 1)
         s, _, hdata = anon.json("GET", "/api/health")
@@ -355,8 +390,8 @@ def main() -> int:
             except OSError:
                 pass
         s, _, kb2 = anon.json("GET", "/api/bootstrap-lite", timeout=20)
-        check("удалённая БД: восстановлена из бэкапа", s == 200 and kb2.get("accountId"),
-              f"got {s}")
+        check("удалённая БД: восстановлена из бэкапа",
+              s == 200 and bool(kb2.get("catalog", {}).get("tasks")), f"got {s}")
 
         httpd.shutdown()
         fails = [c for c in CHECKS if not c[1]]

@@ -71,6 +71,14 @@ def main():
             profile_version = boot["state"]["stateVersion"]
             assert boot["state"]["subject"] == "profile_math", boot["state"]["subject"]
 
+            # Онбординг пройден — только теперь в базе появляется пользователь,
+            # и только теперь доступны пишущие домены (см. guest-onboarding.py).
+            status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Артём",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200, (status, claimed)
+
             # История в профиле: версия уходит вперёд, как у реального аккаунта.
             status, seeded = request(opener, base, "/api/events/timeline", "POST", {
                 "subject": "profile_math", "expectedVersion": profile_version,

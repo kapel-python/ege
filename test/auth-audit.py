@@ -115,6 +115,16 @@ class Session:
         self.version = payload["state"]["stateVersion"]
         return payload
 
+    def onboard(self, subject="profile_math", name="Ученик"):
+        """Пройти онбординг: строка пользователя появляется только после неё
+        (см. test/guest-onboarding.py). Версию состояния не двигает — заявка
+        лишь заводит профиль, доменные записи идут следом."""
+        status, payload = self.req("/api/profile/claim", "POST", {
+            "subject": subject, "onboarded": True, "name": name,
+            "selfLevel": "base", "goal": "g60"})
+        assert status == 200, (status, payload)
+        return payload
+
     def settings(self, subject, **settings):
         status, payload = self.req("/api/settings", "PATCH",
                                    {"subject": subject, "expectedVersion": self.version, "settings": settings})
@@ -179,6 +189,7 @@ def seed_guest(s: Session, marker: str, catalog: dict, subject="profile_math") -
     tasks = [t for t in catalog["tasks"] if t.get("skill")]
     t1, t2 = tasks[0], tasks[3]
     s.bootstrap()
+    s.onboard(subject, f"Гость {marker}")
     s.settings(subject, onboarded=True, name=f"Гость {marker}", selfLevel="base", goal="g60")
     s.attempts(subject, [
         {"id": f"att-{marker}-1", "taskId": t1["id"], "skill": t1["skill"], "correct": True,
@@ -360,10 +371,12 @@ def main():
             check("S11: ровно одна строка users для обоих email гонки (последний победил)",
                   len(row) == 1, f"{row}")
             users_after_race = db_query(server, "SELECT COUNT(*) c FROM users")[0]["c"]
-            # 7 = A1, B0, A2fresh(гость после logout dev1), C1, D1, E1, гость dev6.
-            # Login переиспользует/перепривязывает сессию и не минтит новых юзеров.
+            # 6 = A1, B0, A2fresh(онбординг после logout dev1), C1, D1, E1.
+            # Login переиспользует/перепривязывает сессию и не минтит новых
+            # юзеров, а гость без заявки «онбординг пройден» (dev6) строки не
+            # заводит вообще.
             check("S10/S11: дубликатных пользователей не создано",
-                  users_after_race == 7, f"expected 7, got {users_after_race} (users_before={users_before})")
+                  users_after_race == 6, f"expected 6, got {users_after_race} (users_before={users_before})")
 
             # гонка: одновременный login в A и B из одной сессии
             dev6 = Session(base)
@@ -402,6 +415,7 @@ def main():
             # ---------- S17: подмена идентификаторов ----------
             dev9 = Session(base)
             dev9.bootstrap()
+            dev9.onboard("profile_math", "Подмена")
             dev9.settings("profile_math", onboarded=True, name="Подмена", goal="g60",
                           **{"userId": 1, "accountId": account_a, "id": 1})
             hdr_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(dev9.jar))

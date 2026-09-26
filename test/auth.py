@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Регрессия: аккаунты (guest -> register -> login -> logout).
+"""Регрессия: аккаунты (онбординг гостя -> register -> login -> logout).
 
 Покрывает контракт auth целиком на живом сервере с temp-БД:
-1. новый посетитель получает гостевой профиль без регистрации;
-2. регистрация привязывает ТЕКУЩЕГО гостя: accountId, прогресс, имя сохраняются;
+1. новый посетитель — гость БЕЗ профиля (accountId пустой, строки в базе
+   нет); строка появляется только после пройденного онбординга (POST
+   /api/profile/claim), см. test/guest-onboarding.py;
+2. регистрация привязывает ТЕКУЩЕГО пользователя: accountId, прогресс, имя сохраняются;
 3. повторное открытие сайта с той же сессией = auto-login (тот же аккаунт);
-4. logout инвалидирует сессию серверно: старая кука не восстанавливает аккаунт;
+4. logout инвалидирует сессию серверно: старая кука не восстанавливает аккаунт,
+   посетитель снова гость без профиля и новых строк в базе не появляется;
 5. login переводит сессию на существующий аккаунт (второй аккаунт виден);
 6. login обратно возвращает первый аккаунт со всеми данными;
 7. дубликат email -> 409; повторная регистрация залогиненного -> 409;
 8. неверный пароль и несуществующий email -> одинаковый 401;
 9. подмена user id в теле/заголовках не меняет идентичность;
 10. чужие данные недоступны: чужая кука не видит историю, admin API -> 401;
-14. истёкшая сессия -> новый гость + новая кука;
+14. истёкшая сессия -> снова гость без профиля;
 16. legacy-миграция: старый users.session_token продолжает работать;
-17. повторный bootstrap не плодит дубликаты пользователей;
+17. повторный bootstrap не плодит дубликаты пользователей, и строк ровно столько,
+    сколько реальных людей (онбординг, регистрация, вход админа, legacy);
 18. admin-auth живёт отдельно и продолжает работать.
 """
 from __future__ import annotations
@@ -76,6 +80,14 @@ def make_device():
     return opener, jar
 
 
+def conn_count_users(server) -> int:
+    conn = server.connect()
+    try:
+        return int(conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"])
+    finally:
+        conn.close()
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-auth-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -102,12 +114,25 @@ def main():
         try:
             opener_a, jar_a = make_device()
 
-            # 1. Гость заходит без регистрации и сразу получает профиль.
+            # 1. Гость заходит: каталог есть, а профиля в базе нет — строка
+            # появляется только после пройденного онбординга (см.
+            # test/guest-onboarding.py). Поэтому сначала заявка, потом работа.
             status, boot = request(opener_a, base, "/api/bootstrap-lite")
             assert status == 200, (status, boot)
-            account_a = boot["accountId"]
+            assert boot["accountId"] is None, boot["accountId"]
             assert boot["auth"]["registered"] is False, boot["auth"]
             assert boot["auth"]["email"] is None, boot["auth"]
+            assert boot["state"]["onboarded"] is False, boot["state"]
+            count = conn_count_users(server)
+            assert count == 1, f"гость до онбординга не должен заводить строку: {count}"
+
+            status, claim = request(opener_a, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Гость А",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200 and claim["created"] is True, (status, claim)
+            account_a = claim["accountId"]
+            assert account_a, claim
 
             # Гостевой прогресс: настройки + запись в истории.
             version = boot["state"]["stateVersion"]
@@ -175,12 +200,13 @@ def main():
             # Второе «устройство» заводит/регистрирует второй аккаунт.
             opener_b, jar_b = make_device()
             status, boot_b = request(opener_b, base, "/api/bootstrap-lite")
-            account_b = boot_b["accountId"]
-            assert account_b != account_a, (account_a, account_b)
+            assert boot_b["accountId"] is None, boot_b["accountId"]
             status, reg_b = request(opener_b, base, "/api/auth/register", "POST", {
                 "name": "Пользователь Б", "email": "user-b@example.com", "password": "password-b-123",
             })
             assert status == 200, (status, reg_b)
+            account_b = reg_b["user"]["accountId"]
+            assert account_b != account_a, (account_a, account_b)
             status, boot_b = request(opener_b, base, "/api/bootstrap-lite")
             assert boot_b["auth"] == {"registered": True, "email": "user-b@example.com"}, boot_b["auth"]
 
@@ -204,14 +230,14 @@ def main():
             status, out = request(opener_a, base, "/api/auth/logout", "POST", {})
             assert status == 200, (status, out)
             status, guest_again = request(opener_a, base, "/api/bootstrap-lite")
-            assert guest_again["accountId"] != account_a, guest_again["accountId"]
+            assert guest_again["accountId"] is None, guest_again["accountId"]
             assert guest_again["auth"]["registered"] is False, guest_again["auth"]
             # Даже ручная отправка старой (удалённой сервером) куки не
-            # восстанавливает аккаунт — минтится свежий гость с новой кукой.
+            # восстанавливает аккаунт: посетитель снова гость без профиля.
             bare = urllib.request.build_opener()
             status, stale = request(bare, base, "/api/bootstrap-lite", raw_cookie=f"ege_session={token_a}")
             assert status == 200, (status, stale)
-            assert stale["accountId"] not in (account_a, account_b), stale["accountId"]
+            assert stale["accountId"] is None, stale["accountId"]
             assert stale["auth"]["registered"] is False, stale["auth"]
 
             # 5. Login из свежей гостевой сессии открывает именно второй аккаунт.
@@ -247,7 +273,7 @@ def main():
                 conn.close()
             status, expired = request(opener_a, base, "/api/bootstrap-lite")
             assert status == 200, (status, expired)
-            assert expired["accountId"] != account_a, expired["accountId"]
+            assert expired["accountId"] is None, expired["accountId"]
             assert expired["auth"]["registered"] is False, expired["auth"]
 
             # 16. Legacy-миграция: старый users.session_token продолжает работать.
@@ -265,9 +291,11 @@ def main():
                 assert row["email"] == "user-a@example.com"
                 assert row["name"] == "Пользователь А"
                 total = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-                # A, B, гость после logout, гость после истечения, гость из
-                # stale-токена, legacy — осмысленные строки без клонов.
-                assert total <= 6, f"похоже на дубликаты: {total} users"
+                # Ровно три осмысленные строки: legacy, A (онбординг) и
+                # B (регистрация). Гость после logout, гость после истечения
+                # сессии и посетитель со stale-токеном в базе не оставляют
+                # ничего — иначе это были бы те же «боты».
+                assert total == 3, f"ожидались 3 users, получили {total}"
             finally:
                 conn.close()
 

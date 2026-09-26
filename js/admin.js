@@ -52,6 +52,17 @@ function esc(value) {
   ));
 }
 
+// Хэш — недоверенный ввод: % без пары hex разрядов роняет decodeURIComponent
+// с URIError, а render() не имеет вокруг него try/catch. Раньше такая ссылка
+// навсегда оставляла панель в unhandled rejection.
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
+}
+
 const MON = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 function fmtDate(ts) {
@@ -1595,7 +1606,7 @@ async function render() {
   if (!A.session) { renderLogin(); return; }
   const route = parseHash();
   if (route.name === "users") {
-    if (route.param) await screenUser(decodeURIComponent(route.param));
+    if (route.param) await screenUser(safeDecode(route.param));
     else await screenUsers();
   } else if (route.name === "audit") {
     await screenAudit();

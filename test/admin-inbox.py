@@ -139,6 +139,13 @@ def main():
             assert status == 200 and probe.get("isAdmin") is False, (status, probe)
 
             # 2. Обычный пользователь: тот же отказ, пагинация не помогает.
+            # Аккаунт появляется только после онбординга (POST /api/profile/claim),
+            # поэтому сначала заявка профиля, потом проверки видимости.
+            status, claimed = request(user, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Ученик",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200, (status, claimed)
             status, boot = request(user, base, "/api/bootstrap-lite")
             assert status == 200 and boot.get("isAdmin") is False, (status, boot)
             for inbox_path in (

@@ -31,6 +31,9 @@ const ICONS = {
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.3"/><circle cx="12.1" cy="16.7" r="0.5" fill="currentColor" stroke="none"/></svg>',
+  // icon() молча отдаёт ICONS.target на неизвестном имени, поэтому запись
+  // вида icon("info") рисовала мишень там, где просили значок «i».
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4.5"/></svg>',
   logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>',
   phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg>',
@@ -59,191 +62,6 @@ const Theme = {
   toggle() { this.apply(this.current() === "dark" ? "light" : "dark"); renderTopbar(); },
 };
 
-/* ====================== РОУТЕР ====================== */
-
-const mainHTML = document.createElement('template');
-mainHTML.innerHTML = `<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Подготовка к ЕГЭ — математика, русский язык, обществознание</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#0a0b0f;
-    --card:#13141c;
-    --card-border:rgba(255,255,255,0.07);
-    --card-border-strong:rgba(255,255,255,0.14);
-    --text:#f2f3f7;
-    --text-dim:#9297ab;
-    --text-faint:#5c6072;
-
-    --indigo:#6d70f2;
-    --indigo-dim:rgba(109,112,242,0.14);
-    --amber:#e5a86a;
-    --amber-dim:rgba(229,168,106,0.14);
-    --green:#3ddc97;
-    --green-dim:rgba(61,220,151,0.14);
-    --red:#fb6f6f;
-    --red-dim:rgba(251,111,111,0.14);
-
-    --radius-lg:22px;
-    --radius-md:16px;
-    --radius-sm:10px;
-    --container:1120px;
-
-    --font-body:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-    --font-display:'Space Grotesk',var(--font-body);
-  }
-
-  *{box-sizing:border-box;}
-  html{scroll-behavior:smooth;}
-
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family:var(--font-body);
-    -webkit-font-smoothing:antialiased;
-    line-height:1.5;
-  }
-
-  a{color:inherit;text-decoration:none;-webkit-tap-highlight-color:rgba(109,112,242,0.18);}
-
-  h1,.cta-card h2,.logo{font-family:var(--font-display);}
-
-  .wrap{
-    max-width:var(--container);
-    margin:0 auto;
-    padding:0 24px;
-    padding-left:max(24px, env(safe-area-inset-left));
-    padding-right:max(24px, env(safe-area-inset-right));
-  }
-
-  /* ---------- header ---------- */
-  header{
-    border-bottom:1px solid var(--card-border);
-    position:sticky;
-    top:0;
-    background:rgba(10,11,15,0.9);
-    backdrop-filter:blur(8px);
-    z-index:10;
-  }
-  .header-inner{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:16px 0;
-    padding-top:max(16px, calc(env(safe-area-inset-top) + 8px));
-    gap:12px;
-  }
-  .logo{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    font-weight:600;
-    font-size:15px;
-    color:var(--text);
-    min-width:0;
-    flex:1 1 auto;
-  }
-  .logo-easy{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    font-weight:700;
-    font-size:17px;
-    letter-spacing:-0.01em;
-    text-transform:lowercase;
-    flex-shrink:0;
-  }
-  .logo-easy .easy-badge{
-    width:34px;
-    height:34px;
-    border-radius:50%;
-    background:linear-gradient(135deg,#22c07a 0%,#6d70f2 130%);
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 6px 16px -6px rgba(34,192,122,0.55);
-    flex-shrink:0;
-  }
-  .logo-easy .easy-badge svg{width:18px;height:18px;}
-  .logo-easy em{font-style:normal;color:var(--green);}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header class="header">
-    <div class="header-inner">
-      <div class="logo logo-easy">
-        <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span>ege <em>easy</em></span>
-      </div>
-    </div>
-  </header>
-</div>
-</body>
-</html>`;
-
-/* ====================== РОУТЕР ====================== */
-
-const dashboardHTML = document.createElement('template');
-dashboardHTML.innerHTML = `<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>ege easy — подготовка к ЕГЭ</title>
-<meta name="description" content="Платформа подготовки к ЕГЭ с отдельными предметами, честным прогрессом и locked-состояниями.">
-<script>
-  /* Saved choice wins; on the first visit (no saved value) follow the device
-     theme, so the onboarding/diagnostic screens never force light mode.
-     Runs before styles paint to avoid a theme flash. */
-  try {
-    var savedTheme = localStorage.getItem("ege_core_theme");
-    if (savedTheme === "dark") {
-      document.documentElement.dataset.theme = "dark";
-    } else if (!savedTheme && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      document.documentElement.dataset.theme = "dark";
-    }
-  } catch (e) {}
-</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="css/styles.css">
-<link rel="stylesheet" href="css/lesson.css">
-</head>
-<body>
-<div id="app" class="app">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar__logo sidebar__logo--easy">
-      <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="easy-name">ege <em>easy</em></span>
-      <span class="logo-sub">подготовка без стресса</span>
-    </div>
-    <nav class="sidebar__nav" id="sidebarNav"></nav>
-    <div class="sidebar__footer" id="sidebarFooter"></div>
-  </aside>
-
-  <div class="main">
-    <header class="topbar" id="topbar"></header>
-    <main class="screen" id="screen"></main>
-  </div>
-
-  <nav class="bottomnav" id="bottomnav"></nav>
-</div>
-
-<div id="modal-root"></div>
-<div id="device-modal-root"></div>
-<div id="toast-root" class="toast-root"></div>
-
-<script src="js/data.js"></script>
-<script src="js/state.js"></script>
-<script src="js/app.js"></script>
-</body>
-</html>`;
 
 /* ---------------- helpers ---------------- */
 
@@ -1182,7 +1000,15 @@ function currentRoute() {
 function routeParam() {
   const h = location.hash.replace(/^#\//, "");
   const i = h.indexOf("/");
-  return i < 0 ? "" : decodeURIComponent(h.slice(i + 1));
+  if (i < 0) return "";
+  // Ссылку вида #/lesson/% дописывает кто угодно. decodeURIComponent на
+  // таком бросает URIError, а render() не ловит его — SPA застревал в
+  // unhandled rejection до ручной правки адресной строки.
+  try {
+    return decodeURIComponent(h.slice(i + 1));
+  } catch {
+    return "";
+  }
 }
 
 /* Ленивая загрузка тяжёлой математики: katex (269 КБ) + jsxgraph (947 КБ) +
@@ -3463,6 +3289,10 @@ function screenSession(root) {
 }
 
 function renderTask(root) {
+  // Секундомер ниже ставится на каждом рендере. Раньше его гасил только
+  // screenSession, а renderTask зовут ещё и «Далее»/«Назад» и все три пути
+  // ретрая сочинения — там предыдущий интервал оставался жить навсегда.
+  Session.stopTimer();
   const S = Session.cur;
   const t = Session.task();
   const progressDone = S.offset + S.idx;
@@ -3474,7 +3304,7 @@ function renderTask(root) {
     <div class="session-wrap">
       <div class="session-head">
         <div class="session-head__nav">
-          ${sessionPrevButtonHtml()}
+          ${sessionPrevButtonHtml(t)}
           <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
         </div>
         <div class="session-head__title">${esc(S.title)}</div>
@@ -3498,11 +3328,14 @@ function renderTask(root) {
 
         ${sessionAnswerAreaHtml(t, S)}
         <div id="feedbackSlot"></div>
+        ${isLongTextTask(t) ? '<div id="essayNavSlot"></div>' : ""}
       </div>
     </div>`;
 
   if (isLongTextTask(t)) {
     sessionEssayWire(t);
+    essayNavRender();
+    essayStatusesLoad();
     essayRestoreReady(t);
     essaySourceTextLoad(t);
   } else if (t.selfCheck) {
@@ -3966,8 +3799,12 @@ function sessionHasNext() {
    правилам: в «проверка завершена» ряд стоял отдельной строкой ПОД зелёным
    блоком и уезжал за нижнюю кромку экрана (кнопки «Назад» просто не было
    видно), в ветках «проверка не удалась» / «проверка не завершена» его не
-   было вовсе, а на первом задании он то показывался, то нет. */
-function sessionPrevButtonHtml() {
+   было вовсе, а на первом задании он то показывался, то нет. У сочинений
+   «Назад» в шапке не дублируется: он ждёт в постоянном ряду навигации в
+   конце карточки (sessionEssayNavHtml) — там он есть и на ненаписанном
+   сочинении, и под готовым отчётом. */
+function sessionPrevButtonHtml(task) {
+  if (task && isLongTextTask(task)) return "";
   if (!sessionHasPrev()) return "";
   return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
 }
@@ -3987,6 +3824,71 @@ function essayMarkWritten(taskId, sub) {
     status: (sub && sub.status) || "submitted",
   };
   persistSession();
+}
+
+/* Какие сочинения у ученика есть в принципе, а не «те, до которых дошёл в этой
+   сессии»: список работ лежит в essay_submissions, и по одному текущему заданию
+   (essayRestoreReady) его не собрать. Без этой карты навигация на живом входе
+   в практику решала «написано ли что-то впереди» по пустому списку — подпись
+   становилась «Написать ещё раз» даже при готовых работах дальше, и «Далее» по
+   ним было недостижимо. Карта кэшируется на предмет; ответ лёгкий (без текста и
+   разбора). Гость получит 401 и продолжит считать написанным то, что отправил
+   в этой сессии, — как раньше. */
+const EssayStatuses = { subject: "", map: null, inflight: "" };
+
+function essayStatusesApply(map) {
+  const S = Session.cur;
+  if (!S || !map || typeof map !== "object") return;
+  if (!S.essayWrittenByTask) S.essayWrittenByTask = {};
+  const inSession = new Set(S.taskIds || []);
+  let added = 0;
+  for (const [taskId, info] of Object.entries(map)) {
+    if (!info || typeof info !== "object") continue;
+    if (inSession.size && !inSession.has(taskId)) continue;
+    if (S.essayWrittenByTask[taskId]) continue;
+    S.essayWrittenByTask[taskId] = {
+      clientId: String(info.clientId || ""),
+      wordCount: Number(info.wordCount) || 0,
+      status: String(info.status || "submitted"),
+      submissionId: Number(info.submissionId) || 0,
+    };
+    added++;
+  }
+  if (added) persistSession();
+}
+
+async function essayStatusesLoad() {
+  const subject = String(Store.subject || "");
+  if (!subject) return;
+  if (EssayStatuses.subject === subject) {
+    // Карта этого предмета уже есть (или уже летит) — второй запрос не нужен.
+    if (EssayStatuses.map) {
+      essayStatusesApply(EssayStatuses.map);
+      essayNavRender();
+    }
+    return;
+  }
+  if (EssayStatuses.inflight === subject) return;
+  EssayStatuses.subject = subject;
+  EssayStatuses.inflight = subject;
+  let ok = false;
+  try {
+    const res = await fetch(`/api/essays?subject=${encodeURIComponent(subject)}&statuses=1`);
+    if (!res.ok) throw new Error("statuses " + res.status);
+    const data = await res.json().catch(() => ({}));
+    if (data && data.statuses && typeof data.statuses === "object") {
+      EssayStatuses.map = data.statuses;
+      ok = true;
+    }
+  } catch (_) {
+    // Гость (401) или офлайн: карты нет. Следующий экран попробует ещё раз, но
+    // не чаще одного запроса на перерисовку.
+    EssayStatuses.subject = "";
+  }
+  if (EssayStatuses.inflight === subject) EssayStatuses.inflight = "";
+  if (!ok) return;
+  essayStatusesApply(EssayStatuses.map);
+  essayNavRender();
 }
 
 function sessionTaskWritten(taskId) {
@@ -4046,11 +3948,13 @@ function sessionNextHtml() {
   return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
 }
 
-/* Навигация у сочинения — отдельной строкой ПОД блоком результата: «Далее» /
-   «Написать ещё раз» больше не лежат внутри зелёного блока «отчёт готов», а
-   «Назад» стоит там же, под блоком, а не в шапке карточки (в шапке он на
-   длинном сочинении с readonly-текстом просто не был виден). Пишет блок и ряд
-   разом и прячет «Назад» из шапки, чтобы кнопка не была на экране дважды. */
+/* Навигация у сочинения — постоянная строка в конце карточки, а не часть блока
+   результата: «Назад» и «Далее» / «Написать ещё раз» стоят на одном месте в
+   КАЖДОМ состоянии — и когда отчёт готов, и когда сочинение ещё не написано.
+   Раньше ряд жил внутри блока отчёта, поэтому на ненаписанном сочинении его не
+   было вовсе: кнопка «Назад», которой ученик только что пользовался, исчезала,
+   и до уже написанных работ дальше достучаться было нечем. Шапка задания у
+   сочинения «Назад» не дублирует (sessionPrevButtonHtml). */
 function sessionEssayNavHtml() {
   const back = sessionHasPrev()
     ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
@@ -4058,12 +3962,22 @@ function sessionEssayNavHtml() {
   return `<div class="session-nav">${back}<button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
 }
 
+/* Ряд навигации сочинения — последняя строка карточки, под блоком результата,
+   и перерисовывается отдельно от неё: подпись кнопки зависит от написанных
+   работ, которые приезжают асинхронно (essayStatusesLoad), и меняется сразу
+   после проверки. */
+function essayNavRender() {
+  const slot = document.getElementById("essayNavSlot");
+  const t = Session.cur ? Session.task() : null;
+  if (!slot || !t || !isLongTextTask(t)) return;
+  slot.innerHTML = sessionEssayNavHtml();
+}
+
 function essayMountFeedback(html) {
   const slot = document.getElementById("feedbackSlot");
   if (!slot) return;
-  slot.innerHTML = `${html}${sessionEssayNavHtml()}`;
-  const head = document.getElementById("sessionPrevBtn");
-  if (head) head.style.display = "none";
+  slot.innerHTML = html;
+  essayNavRender();
 }
 
 /* Продолжить проверку сохранённого текста после перезагрузки: новый

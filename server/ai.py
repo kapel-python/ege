@@ -156,8 +156,10 @@ def ai_take(keys: list[str], count: int = 1) -> tuple[bool, int]:
                 _ai_hits[name] = recent
         return True, 0
     except Exception:
-        # A broken budget must not take the endpoint down with it.
-        return True, 0
+        # Бюджет — про деньги провайдера: сломанный лимитёр означает «не
+        # списываем», а не «пускаем всех». Запрос получает честный 429,
+        # клиент предложит повторить позже.
+        return False, 60
 
 
 def reset_ai_rate() -> None:

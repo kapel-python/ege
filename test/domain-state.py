@@ -54,6 +54,12 @@ def main():
         try:
             status, boot = request(opener, base, "/api/bootstrap")
             assert status == 200, (status, boot)
+            # Онбординг пройден: пользователь существует, домены пишутся.
+            status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Ученик",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200, (status, claimed)
             version = boot["state"]["stateVersion"]
             subject = boot["state"]["subject"]
             event1 = {"taskId": "n01_p1", "skill": "n01_planimetry", "correct": True, "hintLevel": 0, "seconds": 12, "ts": 1700000000000}
@@ -186,6 +192,52 @@ def main():
             assert status == 410, (status, legacy)
             status, after_legacy = request(opener, base, "/api/bootstrap")
             assert {"n01_p1", "n01_p2"}.issubset({item["taskId"] for item in after_legacy["state"]["taskAttempts"]}), after_legacy["state"]
+            # Anti-abuse ceilings on PATCH domains: a hand-crafted oversized
+            # collection is rejected wholesale (400) and writes nothing, while
+            # the client-side-sized payload of the same shape keeps passing.
+            ver = after_legacy["state"]["stateVersion"]
+            big_diag = [{"taskId": "n01_p1", "correct": True, "ts": 1700000008000 + i}
+                        for i in range(server.MAX_DIAGNOSTICS + 1)]
+            status, too_big = request(opener, base, "/api/state-domains", "PATCH", {
+                "subject": subject, "expectedVersion": ver, "domains": {"diagnostics": big_diag}})
+            assert status == 400, (status, str(too_big)[:120])
+            import datetime as _dt
+            base_day = _dt.date(2020, 1, 1)
+            big_activity = {(base_day + _dt.timedelta(days=i)).isoformat():
+                            {"solved": 1, "correct": 1, "xp": 5} for i in range(server.MAX_ACTIVITY_DAYS + 1)}
+            status, too_big2 = request(opener, base, "/api/state-domains", "PATCH", {
+                "subject": subject, "expectedVersion": ver, "domains": {"activity": big_activity}})
+            assert status == 400, (status, str(too_big2)[:120])
+            big_forecast = [{"date": f"2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}T{i:05d}", "low": 1, "high": 2, "mid": 1}
+                            for i in range(server.MAX_FORECAST_HISTORY + 1)]
+            status, too_big3 = request(opener, base, "/api/state-domains", "PATCH", {
+                "subject": subject, "expectedVersion": ver, "domains": {"forecastHistory": big_forecast}})
+            assert status == 400, (status, str(too_big3)[:120])
+            # Невалидный уровень подсказки молча пропускается, валидные пишутся.
+            status, hint_cap = request(opener, base, "/api/state-domains", "PATCH", {
+                "subject": subject, "expectedVersion": ver,
+                "domains": {"hintLevels": {"1": 3, "99": 100}}})
+            assert status == 200, (status, hint_cap)
+            conn = server.connect()
+            try:
+                bogus = conn.execute("SELECT COUNT(*) FROM user_hint_levels WHERE level=99").fetchone()[0]
+                assert bogus == 0, bogus
+                # Огрызки отклонённых PATCH'ей не записались.
+                diag_count = conn.execute("SELECT COUNT(*) FROM diagnostics").fetchone()[0]
+                assert diag_count == 0, diag_count
+                # read_state режет нелимитированные таблицы по потолку.
+                uid = conn.execute("SELECT MIN(id) FROM users").fetchone()[0]
+                for i in range(server.MAX_DIAGNOSTICS + 50):
+                    conn.execute("INSERT INTO diagnostics(user_id,subject,task_id,correct,created_at,client_id)"
+                                 " VALUES(?,?,?,?,?,?)",
+                                 (uid, subject, "n01_p1", 1, f"2024-01-01T00:00:{i % 60:02d}.{i:05d}", f"bulk-{i}"))
+                conn.commit()
+            finally:
+                conn.close()
+            status, capped = request(opener, base, "/api/bootstrap")
+            assert status == 200 and len(capped["state"]["diagnostics"]) == server.MAX_DIAGNOSTICS, \
+                (status, len(capped["state"].get("diagnostics", [])))
+            assert capped["state"]["hintLevels"] == {"1": 3, "2": 0, "3": 1}, capped["state"]["hintLevels"]
             print("Domain event/patch regression OK: independent writes never replace other domains")
         finally:
             httpd.shutdown()

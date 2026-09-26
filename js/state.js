@@ -114,6 +114,9 @@ const Store = {
   // Deliberately kept outside `state`: state is the exact snapshot that
   // round-trips through PUT /api/state, and the id must never be something
   // the client can send back and have written.
+  // null = гостя в базе ещё нет (онбординг не пройден). Это нормальное
+  // состояние, а не поломка: локальные ключи и канал вкладок уже умеют
+  // работать в области "pending-account".
   accountId: null,
   // Auth-срез текущего аккаунта из bootstrap: гость или зарегистрированный
   // пользователь (registered + email). Только для отображения в UI — никаких
@@ -133,6 +136,12 @@ const Store = {
   // одинаковых toast. Новый сигнал появится после успешного save либо после
   // действительно другого типа ошибки.
   persistenceErrorNotifiedKey: null,
+  // Заявка «онбординг пройден» уже в полёте: гость до онбординга не имеет
+  // серверного профиля, и первая же запись в базу (попытка из диагностики,
+  // таймлайн, настройки профиля) обязана сначала его завести. Один
+  // промис на заявку — чтобы пачка доменных запросов не породила пачку
+  // одинаковых (сервер идемпотентен, но лишние round-trip'ы не нужны).
+  claimPromise: null,
   // Момент последней сверки с сервером (load или собственный save).
   // Другая вкладка после save пишет в localStorage маяк с accountId,
   // writer и stateVersion. Увидев более новую версию, подтягиваем состояние
@@ -157,6 +166,11 @@ const Store = {
   leaderHeartbeatTimer: null,
   leaderRequests: {},
   leaderSaveQueue: Promise.resolve(),
+  // Account ID, под который последний раз поднимались канал и лок вкладок.
+  // У гостя до онбординга это null, поэтому первая заявка профиля меняет
+  // область — и её надо пересоздать (но не посреди сохранения, см.
+  // rescopeTabLeader).
+  leaderScopeAccount: null,
   deletedLessonSessions: [],
   deletedLessonStepErrors: [],
 
@@ -438,6 +452,7 @@ const Store = {
       return Promise.resolve();
     }
     const scope = encodeURIComponent(this.accountId || "pending-account");
+    this.leaderScopeAccount = this.accountId || null;
     this.tabChannelName = `ege-core-state-leader-v1:${scope}`;
     this.tabLockName = `ege-core-state-leader-v1:${scope}`;
     this.tabChannel = new BroadcastChannel(this.tabChannelName);
@@ -754,12 +769,48 @@ const Store = {
     return merged;
   },
 
+  // Гость, который прошёл онбординг, только в этот момент получает серверный
+  // профиль: до этого в базе нет ни строки, ни сессии, ни cookie, поэтому
+  // «зашёл на лендинг» и «начал готовиться» не оставляют следа, а ученик в
+  // дашборде появляется в базе всегда. Заявка идемпотентна на сервере, так что
+  // потерянный ответ и повтор ничего не удваивают.
+  async claimServerProfile(snapshot) {
+    const subject = String(snapshot && snapshot.subject || "").trim();
+    const payload = {
+      subject,
+      onboarded: true,
+      name: snapshot.name == null ? null : String(snapshot.name),
+      selfLevel: snapshot.selfLevel == null ? null : snapshot.selfLevel,
+      goal: snapshot.goal == null ? null : snapshot.goal,
+    };
+    const result = await ApiClient.post("/api/profile/claim", payload);
+    if (!result || typeof result !== "object" || !result.accountId) {
+      throw new Error("Сервер не заявил профиль");
+    }
+    this.accountId = result.accountId;
+    const user = result.user && typeof result.user === "object" ? result.user : {};
+    this.auth = { registered: !!user.registered, email: user.email || null };
+    this.isAdmin = result.isAdmin === true;
+    return result;
+  },
+
   async _saveDomains(snapshot) {
     const subject = String(snapshot && snapshot.subject || "").trim();
     assertSubjectCatalog(subject);
     if (this.subject) assertSubjectCatalog(this.subject);
     const base = this.lastSyncedState || {};
     let version = snapshot.stateVersion;
+    // Первая запись от гостя обязана начинаться с заявки профиля. Иначе сервер
+    // честно ответит 401 GUEST_PENDING (записывать некуда) и данные ученика,
+    // набранные при регистрации, потерялись бы. accountId == null — это ровно
+    // «в базе меня ещё нет»; у кого профиль уже есть, заявки не будет вовсе.
+    if (!this.accountId && snapshot && snapshot.onboarded) {
+      if (!this.claimPromise) {
+        this.claimPromise = this.claimServerProfile(snapshot)
+          .finally(() => { this.claimPromise = null; });
+      }
+      await this.claimPromise;
+    }
     const request = async (method, path, body) => {
       // Каталог может смениться между доменными запросами. Проверяем перед
       // каждым POST/PATCH, чтобы очередной запрос не ушёл уже по чужому id.
@@ -965,6 +1016,9 @@ const Store = {
         this.persistenceError = null;
         this.persistenceErrorNotifiedKey = null;
         if (saved) this._noteOwnSave();
+        // Первая заявка профиля (онбординг гостя) сменила accountId — область
+        // вкладок обновляем здесь, уже с пустой очередью сохранений.
+        return this.rescopeTabLeader();
       })
       .catch((error) => {
         this.reportPersistenceError(error);
@@ -1110,31 +1164,45 @@ const Store = {
       .catch(() => {})
       .then(() => this.requestLeaderAction("reset"))
       // The DELETE removes the whole account row server-side; re-bootstrap so
-      // the next request issues a fresh session with its own new Account ID,
-      // instead of leaving the UI holding a stale, now-deleted one.
+      // the next request reads the current session — a guest after a reset has
+      // no profile again until onboarding is finished, and an account that
+      // survives gets its own fresh Account ID.
       .then(() => this.load())
+      .then(() => this.rescopeTabLeader())
       .catch((error) => {
         this.reportPersistenceError(error);
       });
     return this.pendingSave;
   },
 
-  // После register/login/logout сервер перевыпускает сессию (или минтит
-  // нового гостя) — перечитываем bootstrap: обычный load подтянет новый
+  // Канал и лок вкладок scope от accountId: вкладки разных профилей не должны
+  // попадать в один координатор. У гостя до онбординга scope — «pending-account»,
+  // поэтому первая заявка профиля его меняет. Пересоздавать канал прямо посреди
+  // сохранения нельзя (главная вкладка держит лок и очередь сейвов), поэтому
+  // область обновляется следующим save(), когда очередь уже пуста.
+  rescopeTabLeader() {
+    if (!this.tabLeaderReady) return Promise.resolve(false);
+    const current = this.accountId || null;
+    if (this.leaderScopeAccount === current) return Promise.resolve(false);
+    this.leaderScopeAccount = current;
+    this.releaseTabLeadership();
+    this.tabLeaderReady = false;
+    this.isTabLeader = false;
+    this.leaderTabId = null;
+    this.leaderSeenAt = 0;
+    return this.initTabLeader().then(() => true);
+  },
+
+  // После register/login/logout сервер перевыпускает сессию (или оставляет
+  // гостя без профиля) — перечитываем bootstrap: обычный load подтянет новый
   // аккаунт целиком, вручную ничего мержить не нужно. Сменившийся accountId
-  // требует переинициализации tab-leader: канал и лок имеют scope от
-  // accountId, иначе вкладки нового аккаунта встали бы в чужой координатор.
+  // требует переинициализации tab-leader (см. rescopeTabLeader): канал и лок
+  // имеют scope от accountId, иначе вкладки нового аккаунта встали бы в чужой
+  // координатор.
   async refreshAfterAuth() {
     const prevAccount = this.accountId;
     await this.load();
-    if (this.accountId !== prevAccount && this.tabLeaderReady) {
-      this.releaseTabLeadership();
-      this.tabLeaderReady = false;
-      this.isTabLeader = false;
-      this.leaderTabId = null;
-      this.leaderSeenAt = 0;
-      await this.initTabLeader();
-    }
+    await this.rescopeTabLeader();
     this.emit("authchanged");
     return this.accountId !== prevAccount;
   },

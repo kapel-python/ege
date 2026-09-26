@@ -2,13 +2,16 @@
 """End-to-end пайплайна проверки итогового сочинения (база, без streaming).
 
 submission (POST /api/essays) → AI check (POST /api/ai/essay: существующий
-route, модель К1–К6 + детерминированная грамотность К7–К10) → report
-generation (POST /api/essays/evaluation → status 'ready') → result ready
-(GET /api/essays) → и только потом XP через существующий attempts-flow.
+route, модель К1–К6 + детерминированная грамотность К7–К10; ответ модели
+сохраняется в essay_checks) → report generation (POST /api/essays/evaluation →
+status 'ready' по серверной записи, клиентский result игнорируется) → result
+ready (GET /api/essays) → и только потом XP через существующий attempts-flow.
 
 Офлайн: ai.chat и ai.lt_check заглушены (как в test/ai-essay.py), своя
 temp-БД и свой порт, прод не трогается. Проверяется и ошибочный сценарий:
-'failed' не даёт результата, XP до 'ready' невозможен через этот flow.
+'failed' не даёт результата, XP до 'ready' невозможен через этот flow, а
+evaluation без реальной проверки (или с чужим текстом) отбивается 409 —
+запись себе оценки из консоли закрыта.
 """
 from __future__ import annotations
 
@@ -102,6 +105,11 @@ def main():
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:
             opener = make_device()
+            # Онбординг пройден: весь pipeline эссе — user-scoped, гостю без
+            # профиля не отвечает (401 GUEST_PENDING).
+            status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+                "subject": "russian", "onboarded": True, "name": "Сочинщик"})
+            check("CLAIM profile before pipeline", status == 200, str(claimed)[:160])
             status, _ = request(opener, base, "/api/subject", "POST", {"subject": "russian"})
             check("SUBJECT russian", status == 200)
             ai.reset_ai_rate()
@@ -132,11 +140,34 @@ def main():
             check("AI total recomputed by server", res.get("total_score") == 19, str(res.get("total_score")))
             ai.reset_ai_rate()
 
-            # 4. report generation — только валидный result становится ready
+            # 4. report generation — оценка берётся из серверной записи о
+            # проверке (её оставил /api/ai/essay), а присланный клиентом
+            # result игнорируется: мусор из тела запроса ничего не портит.
             status, bad = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": client_id, "status": "ready",
                 "result": {"total_score": 1, "max_score": 2, "criteria": []}})
-            check("READY with garbage rejected (400, no fake result)", status == 400, f"{status} {bad}")
+            check("READY with garbage body: 200, stored AI result wins",
+                  status == 200 and (bad.get("submission") or {}).get("result", {}).get("total_score") == 19,
+                  f"{status} {str(bad)[:160]}")
+            # 4а. Ни разу не проверенный текст: 'ready' невозможен — 409.
+            # Это и есть закрытая дыра «22/22 из консоли без вызова модели».
+            status, subx = request(opener, base, "/api/essays", "POST", {
+                "subject": "russian", "taskId": "re27_4", "skill": "russian_essay_source",
+                "text": words(160, "непроверенное"), "id": "pipe-x"})
+            cidx = subx.get("clientId")
+            status, unchecked = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "russian", "clientId": cidx, "status": "ready", "result": res})
+            check("READY without any AI check -> 409", status == 409
+                  and unchecked.get("reason") == "essay_not_checked", f"{status} {unchecked}")
+            # 4б. Проверка ДРУГОГО текста не подходит: связка — хэш текста.
+            status, suby = request(opener, base, "/api/essays", "POST", {
+                "subject": "russian", "taskId": "re27_5", "skill": "russian_essay_source",
+                "text": words(160, "другой"), "id": "pipe-y"})
+            cidy = suby.get("clientId")
+            status, mismatched = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "russian", "clientId": cidy, "status": "ready", "result": res})
+            check("READY with check of a different text -> 409", status == 409
+                  and mismatched.get("reason") == "essay_not_checked", f"{status} {mismatched}")
             status, unknown = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": "nope-unknown", "status": "ready", "result": res})
             check("READY unknown submission -> 404", status == 404, f"{status} {unknown}")
@@ -222,12 +253,23 @@ def main():
             check("GET failed: no result to show", status == 200 and gotf["submission"]["status"] == "failed"
                   and gotf["submission"]["result"] is None)
             check("GET failed: no view either", gotf["submission"].get("view") is None)
-            # retry после failed — ready принимается
+            # retry после failed — как у честного клиента: сначала повторная
+            # проверка моделью этого же текста, затем ready принимается
+            ai.reset_ai_rate()
+            status, ai_retry = request(opener, base, "/api/ai/essay", "POST",
+                                       {"text": words(160), "taskId": "re27_2"})
+            check("RETRY runs the AI check again first", status == 200
+                  and (ai_retry.get("result") or {}).get("max_score") == 22, f"{status} {str(ai_retry)[:120]}")
             status, retry = request(opener, base, "/api/essays/evaluation", "POST", {
-                "subject": "russian", "clientId": cid2, "status": "ready", "result": res})
+                "subject": "russian", "clientId": cid2, "status": "ready", "result": ai_retry.get("result")})
             check("RETRY failed->ready ok", status == 200 and retry["submission"]["status"] == "ready")
 
+            # Чужой, но настоящий человек: свой профиль после онбординга.
+            # Проверяем изоляцию по аккаунту, а не отказ гостю без профиля.
             stranger = make_device()
+            status, stranger_claim = request(stranger, base, "/api/profile/claim", "POST", {
+                "subject": "russian", "onboarded": True, "name": "Чужой"})
+            check("чужой профиль заведён", status == 200, str(stranger_claim)[:120])
             status, _ = request(stranger, base, "/api/subject", "POST", {"subject": "russian"})
             status, leak = request(stranger, base, "/api/essays?subject=russian&taskId=re27_1")
             check("чужой GET не видит submission (404)", status == 404, f"{status} {leak}")
@@ -320,8 +362,9 @@ def main():
                   sum(c["score"] for c in (view3.get("criteria") or [])) == view3.get("total_score"),
                   str(view3.get("total_score")))
 
-            # 9. Итог пересчитывается из критериев: клиент не может записать
-            # себе 22/22 при нулевых баллах и получить за это XP.
+            # 9. Подделка результата в evaluation: клиент прислал изменённый
+            # ответ (обнулённые критерии, итог 22) — сервер берёт сохранённую
+            # запись проверки, клиентское тело игнорируется полностью.
             ai.reset_ai_rate()
             ai.chat = lambda messages, **kwargs: json.dumps(model_payload(), ensure_ascii=False)
             forged_text = words(200, "проверка")
@@ -337,12 +380,33 @@ def main():
             forged["total_score"] = 22
             status, saved4 = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": cid4, "status": "ready", "result": forged})
-            check("FORGED total is recomputed from criteria", status == 200
-                  and (saved4.get("submission") or {}).get("result", {}).get("total_score") == 0,
+            check("FORGED body ignored; stored check result wins", status == 200
+                  and (saved4.get("submission") or {}).get("result", {}).get("total_score") == honest.get("total_score"),
                   str((saved4.get("submission") or {}).get("result", {}).get("total_score")))
             status, got4 = request(opener, base, "/api/essays?subject=russian&clientId=" + cid4)
             view4 = (got4.get("submission") or {}).get("view") or {}
-            check("FORGED view shows 0, not 22", view4.get("total_score") == 0, str(view4.get("total_score")))
+            check("view shows the honest score, not the forged one",
+                  view4.get("total_score") == honest.get("total_score"), str(view4.get("total_score")))
+            # 9а. А без проверки вообще — 409: «22/22 из консоли» закрыто.
+            status, sub5 = request(opener, base, "/api/essays", "POST", {
+                "subject": "russian", "taskId": "re27_6", "skill": "russian_essay_source",
+                "text": words(200, "консоль"), "id": "pipe-5"})
+            cid5 = sub5.get("clientId")
+            status, console_forged = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "russian", "clientId": cid5, "status": "ready",
+                "result": {"total_score": 22, "max_score": 22,
+                           "criteria": [{"id": f"K{i}", "name": f"Критерий {i}", "score": 2,
+                                          "max_score": 2, "comment": "подделка."} for i in range(1, 7)]
+                                    + [{"id": "K7", "name": "К7", "score": 2, "max_score": 2, "comment": "подделка."},
+                                       {"id": "K8", "name": "К8", "score": 3, "max_score": 3, "comment": "подделка."},
+                                       {"id": "K9", "name": "К9", "score": 2, "max_score": 2, "comment": "подделка."},
+                                       {"id": "K10", "name": "К10", "score": 5, "max_score": 5, "comment": "подделка."}]}})
+            check("console-forged 22/22 without model call -> 409", status == 409
+                  and console_forged.get("reason") == "essay_not_checked", f"{status} {console_forged}")
+            status, got5 = request(opener, base, "/api/essays?subject=russian&clientId=" + cid5)
+            check("forged submission stays submitted (no result)",
+                  status == 200 and (got5.get("submission") or {}).get("status") == "submitted"
+                  and (got5.get("submission") or {}).get("result") is None, str(got5)[:160])
         finally:
             httpd.shutdown()
             httpd.server_close()

@@ -103,6 +103,12 @@ def main():
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:
             opener = make_device()
+            # Онбординг пройден: сочинения — user-scoped эндпоинт, гостю без
+            # профиля они недоступны (401 GUEST_PENDING).
+            status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+                "subject": "russian", "onboarded": True, "name": "Сочинщик",
+            })
+            check("CLAIM profile before essays", status == 200, str(claimed))
             # переключаем гостя на русский (essay endpoint — user-scoped)
             status, _ = request(opener, base, "/api/subject", "POST", {"subject": "russian"})
             check("SUBJECT switch to russian", status == 200)

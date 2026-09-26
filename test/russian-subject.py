@@ -134,8 +134,15 @@ def main():
             assert status == 200 and lessons.get("lessons") == [], (status, lessons)
 
             # Переключение и запись в профиль не смешиваются с новым предметом.
+            # Онбординг профиля пройден (заявка /api/profile/claim) — только
+            # после этого в базе есть пользователь и доступны пишущие домены.
             status, profile = request(opener, base, "/api/bootstrap?subject=profile_math")
             assert status == 200, (status, profile)
+            status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Русский гость",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200, (status, claimed)
             pver = profile["state"]["stateVersion"]
             pskill = profile["catalog"]["skills"][0]["id"]
             status, saved = request(opener, base, f"/api/progress/{pskill}", "PATCH", {
@@ -200,6 +207,75 @@ def main():
                 assert stored["word_count"] == 150 and stored["evaluation_status"] == "submitted", stored
             finally:
                 conn.close()
+
+            # Карта «какие сочинения у меня уже есть» — навигации практики она
+            # нужна целиком: без неё клиент на живом входе знает только те
+            # задания, до которых дошёл в текущей сессии, и подпись основной
+            # кнопки («Далее» / «Написать ещё раз») получается неверной.
+            status, map1 = request(opener, base, f"/api/essays?subject={rid}&statuses=1")
+            assert status == 200, (status, map1)
+            assert map1.get("subject") == rid, map1
+            entries = map1.get("statuses") or {}
+            assert set(entries) == {"re27_1"}, entries
+            first_entry = entries["re27_1"]
+            assert first_entry.get("status") == "submitted", first_entry
+            assert first_entry.get("wordCount") == 150, first_entry
+            assert first_entry.get("clientId") == "essay-ok-1", first_entry
+            assert isinstance(first_entry.get("submissionId"), int) and first_entry["submissionId"] > 0, first_entry
+            # Лёгкий ответ: только факт, без текста сочинения и без разбора.
+            assert set(first_entry) == {"status", "submissionId", "clientId", "wordCount"}, first_entry
+            assert len(json.dumps(map1, ensure_ascii=False)) < 400, map1
+
+            # По одному (последнему) submission на задание: вторая попытка по
+            # первому заданию заменяет первую, второе задание добавляется.
+            status, _ = request(opener, base, "/api/essays", "POST", {
+                "subject": rid, "taskId": "re27_3", "skill": "russian_essay_source",
+                "text": words_text(210), "id": "essay-ok-3",
+            })
+            assert status == 200
+            status, _ = request(opener, base, "/api/essays", "POST", {
+                "subject": rid, "taskId": "re27_1", "skill": "russian_essay_source",
+                "text": words_text(180), "id": "essay-ok-1-again",
+            })
+            assert status == 200
+            status, map2 = request(opener, base, f"/api/essays?subject={rid}&statuses=1")
+            assert status == 200, (status, map2)
+            entries2 = map2.get("statuses") or {}
+            assert set(entries2) == {"re27_1", "re27_3"}, entries2
+            assert entries2["re27_1"]["wordCount"] == 180, entries2["re27_1"]
+            assert entries2["re27_1"]["clientId"] == "essay-ok-1-again", entries2["re27_1"]
+            assert entries2["re27_3"]["wordCount"] == 210, entries2["re27_3"]
+
+            # Чужие работы в карту не попадают: у второго человека своя.
+            other = make_device()
+            status, _ = request(other, base, "/api/subject", "POST", {"subject": rid})
+            assert status == 200
+            status, other_claim = request(other, base, "/api/profile/claim", "POST",
+                                          {"subject": rid, "onboarded": True})
+            assert status == 200 and other_claim.get("accountId"), (status, other_claim)
+            status, _ = request(other, base, "/api/essays", "POST", {
+                "subject": rid, "taskId": "re27_5", "skill": "russian_essay_source",
+                "text": words_text(200), "id": "essay-other-5",
+            })
+            assert status == 200
+            status, map3 = request(opener, base, f"/api/essays?subject={rid}&statuses=1")
+            assert "re27_5" not in (map3.get("statuses") or {}), map3
+            status, other_map = request(other, base, f"/api/essays?subject={rid}&statuses=1")
+            assert set(other_map.get("statuses") or {}) == {"re27_5"}, other_map
+
+            # Гость карты не получает; точечный селектор по-прежнему
+            # обязателен, а statuses не смешивается с ним.
+            guest = make_device()
+            status, _ = request(guest, base, "/api/subject", "POST", {"subject": rid})
+            assert status == 200
+            status, guest_map = request(guest, base, f"/api/essays?subject={rid}&statuses=1")
+            assert status == 401, (status, guest_map)
+            status, no_selector = request(opener, base, f"/api/essays?subject={rid}")
+            assert status == 400, (status, no_selector)
+            status, mixed = request(opener, base, f"/api/essays?subject={rid}&statuses=1&taskId=re27_1")
+            assert status == 400, (status, mixed)
+            status, single = request(opener, base, f"/api/essays?subject={rid}&taskId=re27_1")
+            assert status == 200 and single["submission"]["taskId"] == "re27_1", (status, single)
 
             status, back = request(opener, base, "/api/subject", "POST", {"subject": "profile_math"})
             assert status == 200 and back["state"]["skillStats"][pskill]["progress"] == 42, back["state"]

@@ -57,14 +57,38 @@ vm.runInContext(src + "\nthis.Store=Store; this.DataAPI=DataAPI; this.ApiClient=
   const boot = await (await fetchWithJar("/api/bootstrap")).json();
   context.Store._applyBootstrap(boot);
   context.Store.ready = true;
+  // Онбординг пройден: именно в этот момент клиент заявляет серверный профиль
+  // (POST /api/profile/claim), и дальше первая запись идёт в доменный эндпоинт.
+  if (boot.accountId !== null) throw new Error("гость до онбординга обязан быть без accountId");
   context.Store.state.taskAttempts.unshift({ taskId: "n01_p1", skill: "n01_planimetry", correct: true, hintLevel: 0, seconds: 4, ts: 1700000000000 });
+
+  // Незаявленный гость пишет данные: заявки быть не должно, сервер честно
+  // отказывает 401 GUEST_PENDING, и в базе не появляется ни строки, ни куки.
+  const claims = () => calls.filter(([m, p]) => m === "POST" && p === "/api/profile/claim").length;
+  await context.Store.save();
+  if (claims() !== 0) throw new Error("заявка профиля ушла без онбординга");
+  const stillGuest = await (await fetchWithJar("/api/bootstrap")).json();
+  if (stillGuest.accountId !== null) throw new Error("гость без онбординга получил профиль");
+
+  // Онбординг пройден — только теперь заявляется профиль.
+  context.Store.state.onboarded = true;
+  context.Store.state.name = "Ученик";
   await context.Store.save();
   const after = await (await fetchWithJar("/api/bootstrap")).json();
   const legacy = calls.some(([method, path]) => method === "PUT" && path === "/api/state");
   const domain = calls.some(([method, path]) => method === "POST" && path === "/api/events/attempts");
+  const claimed = calls.some(([method, path]) => method === "POST" && path === "/api/profile/claim");
   const saved = after.state.taskAttempts.some((x) => x.taskId === "n01_p1");
+  if (!claimed || claims() !== 1) throw new Error("заявка профиля: " + JSON.stringify(calls));
+  if (context.Store.accountId === null) throw new Error("профиль не заявлен: " + JSON.stringify(calls));
+  if (after.accountId !== context.Store.accountId) throw new Error("сервер вернул чужой accountId");
   if (!domain || legacy || !saved) throw new Error(JSON.stringify({ calls, domain, legacy, saved }));
-  console.log("Store E2E OK: domain endpoint used; legacy PUT absent; attempt persisted");
+  // Повторные сохранения профиль не перезаводят: пока accountId не пуст,
+  // заявка не повторяется.
+  await context.Store.save();
+  await context.Store.save();
+  if (claims() !== 1) throw new Error("повторное сохранение плодит заявки: " + claims());
+  console.log("Store E2E OK: гость заблокирован -> claim -> доменный эндпоинт; legacy PUT нет; попытка сохранена");
 })().catch((error) => { console.error(error); process.exit(1); });
 ''', encoding="utf-8")
         try:

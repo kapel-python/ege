@@ -466,10 +466,13 @@ document.getElementById('themeToggle').addEventListener('click', () => {
 });
 
 // ---------- Экранирование ----------
+// Именно в строках ниже esc() подставляется в атрибуты вида
+// data-id="${esc(c.id)}". textContent->innerHTML экранирует & < >, но не
+// кавычки, то есть значение с `"` закрывало атрибут и вставляло разметку.
+// Экранируем и ' и " — как уже сделано в js/app.js и js/admin.js.
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function esc(str) {
-  const div = document.createElement('div');
-  div.textContent = str == null ? '' : String(str);
-  return div.innerHTML;
+  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
 }
 
 // ---------- Валидация ----------

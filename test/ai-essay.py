@@ -768,14 +768,26 @@ def test_endpoint(server) -> None:
     saved_key = os.environ.get("AI_API_KEY")
     os.environ["AI_API_KEY"] = FAKE_KEY
     try:
-        # Гость: user_for сам выдаёт гостевую сессию и cookie. Cookie должен
-        # прийти даже на ошибочном ответе — иначе клиент не сможет удержать
-        # лимит, а сервер будет плодить ему новые аккаунты.
+        # Гость до онбординга профиля в базе не имеет: /api/ai/essay отвечает
+        # 401 GUEST_PENDING и куки не выдаёт — записывать ему некуда.
         status, headers, _ = request(base + "/api/ai/essay", method="POST", body=b"{}",
                                      content_type="application/json")
+        check("гость без профиля -> 401 и без куки",
+              status == 401 and "ege_session=" not in headers.get("Set-Cookie", ""),
+              f"{status} {headers.get('Set-Cookie')}")
+
+        # Онбординг пройден — теперь у посетителя есть профиль и сессия.
+        claim_body = json.dumps({"subject": "russian", "onboarded": True,
+                                 "name": "Сочинщик"}).encode("utf-8")
+        status, headers, _ = request(base + "/api/profile/claim", method="POST", body=claim_body,
+                                     content_type="application/json")
         jar = headers.get("Set-Cookie", "").split(";")[0]
-        check("гость получает сессию и 400 на пустом теле",
-              status == 400 and "ege_session=" in jar, f"{status} {headers.get('Set-Cookie')}")
+        check("онбординг выдаёт куку", status == 200 and "ege_session=" in jar,
+              f"{status} {headers.get('Set-Cookie')}")
+
+        status, _, body = request_json(base + "/api/ai/essay", method="POST", body=b"{}",
+                                       content_type="application/json", cookie=jar)
+        check("400 на пустом теле", status == 400, f"{status} {body}")
 
         # Проверка идёт по заданию с исходным текстом, а оно живёт в
         # предмете «russian»: гость переключается на него, иначе сервер честно
@@ -865,14 +877,16 @@ def test_endpoint(server) -> None:
         check("429 объясняет клиенту", "retryAfter" in body, str(body)[:160])
         ai.reset_ai_rate()
 
-        # Регрессия: клиент перестаёт слать cookie и каждый запрос получает
-        # нового гостя. Без ключа IP лимит обходится и баланс уходит.
-        # Проверка стоит 1: первому анониму хватает, остальным — нет.
+        # Регрессия: клиент перестаёт слать cookie. Раньше каждый такой запрос
+        # получал свежего гостя и тратил общий IP-бюджет. Теперь у гостя без
+        # профиля (онбординг не пройден) записи нет вовсе: /api/ai/essay
+        # отвечает 401 GUEST_PENDING и модель не зовёт — сменой куки лимит
+        # обойти нельзя тем более.
         anonymous = [request_json(base + "/api/ai/essay", method="POST",
                                   body=json.dumps({"text": "ок", "taskId": "re27_1", "subject": "russian"}).encode("utf-8"),
                                   content_type="application/json")[0] for _ in range(6)]
-        check("сброс cookie не обходит лимит",
-              anonymous[:3] == [200, 200, 200] and anonymous[3:] == [429] * 3, str(anonymous))
+        check("сброс cookie не обходит лимит (гость без профиля -> 401)",
+              anonymous == [401] * 6, str(anonymous))
         ai.reset_ai_rate()
 
         # Провайдер недоступен -> 503 и никакого текста провайдера наружу.

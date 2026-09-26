@@ -81,6 +81,16 @@ def make_device():
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar)), jar
 
 
+def onboard(opener, base: str, name: str = "Ученик") -> str:
+    """Пройти онбординг: строка пользователя появляется только после него."""
+    status, claimed = request(opener, base, "/api/profile/claim", "POST", {
+        "subject": "profile_math", "onboarded": True, "name": name,
+        "selfLevel": "base", "goal": "g60",
+    })
+    assert status == 200, (status, claimed)
+    return claimed["accountId"]
+
+
 def check_ui_actions_are_routed():
     """Каждое действие из панели должно существовать в маршрутизации backend'а.
 
@@ -129,11 +139,9 @@ def main():
             admin, admin_jar = make_device()
 
             # Живой аккаунт, который будем банить (устройство -> свой id).
-            status, _ = request(user, base, "/api/bootstrap-lite")
-            assert status == 200, status
-            status, session = request(user, base, "/api/auth/session")
-            assert status == 200, (status, session)
-            target = session["user"]["accountId"]
+            # Строка пользователя появляется только после онбординга
+            # (см. test/guest-onboarding.py), поэтому сначала заявка профиля.
+            target = onboard(user, base)
 
             status, login = request(admin, base, "/api/admin/login", "POST",
                                    {"password": ADMIN_PASSWORD.decode()})

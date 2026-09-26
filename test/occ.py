@@ -70,11 +70,22 @@ def main():
             state_a = boot["state"]
             assert state_a["stateVersion"] == 1, state_a
 
+            # Онбординг пройден — пользователь появился (строка в users создаётся
+            # только здесь, см. test/guest-onboarding.py). Кука выдаётся здесь,
+            # поэтому копируем её в tab_b ПОСЛЕ заявки: вторая вкладка должна
+            # прийти в тот же аккаунт и увидеть ту же версию состояния.
+            status, claimed = request(tab_a, base, "/api/profile/claim", "POST", {
+                "subject": "profile_math", "onboarded": True, "name": "Вкладка",
+                "selfLevel": "base", "goal": "g60",
+            })
+            assert status == 200, (status, claimed)
+
             tab_b, jar_b = client()
             for cookie in jar_a:
                 jar_b.set_cookie(cookie)
             status, boot_b = request(tab_b, base, "/api/bootstrap")
-            assert status == 200 and boot_b["state"]["stateVersion"] == 1, (status, boot_b)
+            assert status == 200 and boot_b["state"]["stateVersion"] == 1, status
+            assert boot_b["accountId"] == claimed["accountId"], "вкладка видит другой аккаунт"
             state_b = boot_b["state"]
 
             status, saved_a = request(tab_a, base, "/api/events/attempts", "POST", {

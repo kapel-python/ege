@@ -93,5 +93,8 @@ node test/seo.js
 python3 test/support-message.py
 python3 test/russian-subject.py
 node test/russian-subject.js
-python3 -m py_compile server/server.py
+python3 -m py_compile server/server.py server/backup.py
 ```
+
+Это быстрый минимум. Полный регрессионный гейт (14 node + 17 python сьютов,
+включая adversarial и безопасность админки) описан в `AGENTS.md`.

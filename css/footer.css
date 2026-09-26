@@ -194,9 +194,6 @@
 }
 
 .ef-mini--live{ background: var(--ef-green-dim); color: var(--ef-green); border: 1px solid var(--ef-mborder); }
-.ef-mini--soon{ background: var(--ef-hover); color: var(--ef-faint); border: 1px solid var(--ef-mborder); }
-.ef-link--soon{ cursor: help; }
-.ef-link--soon:hover{ transform: none; }
 
 .ef-bottom{
   display: flex;

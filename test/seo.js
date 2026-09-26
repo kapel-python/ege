@@ -69,7 +69,10 @@ t("лендинг: декоративные svg скрыты от скринри
 /* ---- index.html (приложение — не индексируется) ---- */
 const app = read("index.html");
 t("приложение: meta robots noindex", /<meta name="robots" content="noindex, nofollow">/.test(app));
-t("приложение: canonical на /", /<link rel="canonical" href="\/">/.test(app));
+// noindex + canonical — конфликтующие сигналы: canonical может победить и
+// проиндексировать SPA-оболочку как дубль лендинга. На noindex-странице
+// canonical быть не должно.
+t("приложение: без canonical (конфликтует с noindex)", !/<link rel="canonical"/.test(app));
 
 /* ---- server.py wiring ---- */
 const server = read("server/server.py");

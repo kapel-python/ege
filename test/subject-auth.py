@@ -74,14 +74,17 @@ def main():
             opener, _jar = make_device()
 
             # Гость заходит и регистрируется — дальше все шаги от авторизованного.
+            # До онбординга в базе его нет (accountId пустой), регистрация
+            # заводит настоящего пользователя — вот его аккаунт.
             status, boot = request(opener, base, "/api/bootstrap-lite")
             assert status == 200, (status, boot)
-            account = boot["accountId"]
+            assert boot["accountId"] is None, boot["accountId"]
             status, reg = request(opener, base, "/api/auth/register", "POST", {
                 "name": "Авторизованный", "email": "auth-user@example.com",
                 "password": "password-auth-123",
             })
             assert status == 200, (status, reg)
+            account = reg["user"]["accountId"]
 
             # 1. Авторизованный меняет предмет — auth обязан пережить смену.
             status, switched = request(opener, base, "/api/subject", "POST", {"subject": "basic_math"})
@@ -109,15 +112,33 @@ def main():
             assert reloaded["accountId"] == account, reloaded["accountId"]
 
             # 4. Гость, меняющий предмет, остаётся гостем — auth не выдумывается.
+            #    Предмет при этом нигде не сохраняется: у гостя до онбординга нет
+            #    строки, а значит нет и current_subject. Выбор живёт в браузере и
+            #    приезжает в заявке /api/profile/claim; перезагрузка без заявки
+            #    честно показывает дефолт.
             guest_opener, _ = make_device()
             status, guest_boot = request(guest_opener, base, "/api/bootstrap-lite")
             assert status == 200, (status, guest_boot)
+            assert guest_boot["accountId"] is None, guest_boot["accountId"]
             status, guest_switch = request(guest_opener, base, "/api/subject", "POST", {"subject": "basic_math"})
             assert status == 200, (status, guest_switch)
+            assert guest_switch["subject"] == "basic_math", guest_switch["subject"]
             assert guest_switch["auth"] == {"registered": False, "email": None}, guest_switch["auth"]
+            assert guest_switch["accountId"] is None, guest_switch["accountId"]
             status, guest_reload = request(guest_opener, base, "/api/bootstrap-lite")
             assert guest_reload["auth"]["registered"] is False, guest_reload["auth"]
-            assert guest_reload["state"]["subject"] == "basic_math", guest_reload["state"]["subject"]
+            assert guest_reload["accountId"] is None, guest_reload["accountId"]
+            assert guest_reload["state"]["subject"] == "profile_math", guest_reload["state"]["subject"]
+
+            # 5. После онбординга выбранный предмет закрепляется и переживает
+            #    перезагрузку — заявка приносит предмет вместе с профилем.
+            status, guest_claim = request(guest_opener, base, "/api/profile/claim", "POST", {
+                "subject": "basic_math", "onboarded": True, "name": "Гость",
+            })
+            assert status == 200 and guest_claim["subject"] == "basic_math", (status, guest_claim)
+            status, guest_after = request(guest_opener, base, "/api/bootstrap-lite")
+            assert guest_after["state"]["subject"] == "basic_math", guest_after["state"]["subject"]
+            assert guest_after["accountId"] == guest_claim["accountId"], guest_after["accountId"]
 
             print("Subject-auth regression OK: смена предмета сохраняет авторизацию, гость остаётся гостем")
         finally:

@@ -123,8 +123,8 @@ def _subject_level_rows() -> list:
 
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
-# Тело AI-запроса — это одно сочинение в JSON; общий MAX_BODY_BYTES (10 МБ,
-# снимок состояния) тут избыточен в сотни раз.
+# Тело AI-запроса — это одно сочинение в JSON; общий MAX_BODY_BYTES (2 МБ,
+# снимок состояния) тут избыточен в десятки раз.
 AI_REQUEST_MAX_BYTES = 64 * 1024
 # Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
 # internal `users.id` primary key. Never exposed as a way to look up or spoof
@@ -147,7 +147,11 @@ BLOCKED_STATIC_TAILS = ("-wal", "-shm", "-journal", ".bak", ".tmp", ".swp")
 # отдаётся динамически из do_GET (абсолютные URL от хоста запроса, см.
 # public_base_url), поэтому физического файла в корне нет осознанно.
 PUBLIC_STATIC_FILES = {"robots.txt", "llms.txt", "site.webmanifest", "favicon.svg"}
-MAX_BODY_BYTES = 10 * 1024 * 1024
+# 2 МБ с запасом покрывают самый крупный честный payload (миграция истории
+# гостя / полный PATCH доменов — сотни КБ), а произведение с cap'ом
+# конкурентности (64 × 2 МБ) влезает в MemoryMax=512M юнита: прежние
+# 64 × 10 МБ сырых тел + распарсенный JSON его превышали.
+MAX_BODY_BYTES = 2 * 1024 * 1024
 SUPPORT_MESSAGE_MIN_LENGTH = 10
 SUPPORT_MESSAGE_MAX_LENGTH = 2000
 SUPPORT_REQUEST_MAX_BYTES = 12 * 1024
@@ -377,20 +381,35 @@ _admin_login_lock = threading.Lock()
 SERVER_STARTED_AT = dt.datetime.now(dt.timezone.utc)
 
 # ---------------------------------------------------------------------------
-# User accounts (registration / login)
+# Гость и пользователь
 #
-# The anonymous "guest" profile IS a users row: public endpoints resolve the
-# caller from the ege_session cookie via user_for() and mint a row on first
-# visit. Registering therefore does NOT create a new user — it attaches an
-# email + password hash to the CURRENT row, so every piece of learning data
-# (stats, progress, attempts, streak, achievements) stays put, keyed by the
-# same users.id. Login re-binds the browser session row to an existing
-# account; logout deletes that session row server-side and clears the cookie,
-# so a stale token afterwards resolves to a fresh guest, never to an account.
-# Sessions live in user_sessions (many per account), with a server-side
-# expiry; the cookie only ever carries an opaque random token. A DEVICE is
-# a GROUP of those rows, not one row: a browser that logs in ten times is
-# still one entry in the profile (see the device fingerprint below).
+# Гость — посетитель, который ещё НЕ прошёл онбординг. В базе его нет
+# вообще: ни строки в users, ни строки в user_sessions, ни cookie. Обход
+# лендинга, открытие приложения «просто посмотреть», рефрейм, превью в
+# мессенджере и любой сетевой робот поэтому не оставляют после себя профилей:
+# GET /api/bootstrap для такого посетителя не пишет ничего.
+#
+# Пользователь появляется ровно в момент явного намерения, и таких мест
+# ровно три:
+#   * POST /api/profile/claim — гость прошёл онбординг до конца (основной
+#     путь: без этого гостя не существует);
+#   * POST /api/auth/register — человек сам завёл email и пароль;
+#   * POST /api/admin/login — вход администратора.
+#
+# До этого момента экраны работают на синтетическом пустом состоянии
+# (pending_state), а любые пользовательские записи (попытки, ошибки, XP,
+# сочинения, оценки) гостю недоступны: 401 с машиночитаемым GUEST_PENDING.
+#
+# Регистрация не создаёт нового пользователя — она привязывает email и хеш
+# пароля к ТЕКУЩЕЙ строке, поэтому весь учебный след (статистика, прогресс,
+# попытки, streak, достижения) остаётся на том же users.id. Вход перепривязывает
+# сессию браузера к существующему аккаунту; выход удаляет строку сессии и чистит
+# куку, поэтому устаревший токен после этого не разрешается ни в чей аккаунт —
+# следующий запрос снова гость, ещё без профиля. Сессии живут в user_sessions
+# (несколько на аккаунт) с серверным сроком жизни, а кука всегда несёт только
+# непрозрачный случайный токен. Устройство — это ГРУППА сессий одного клиента,
+# собранная по отпечаткам ниже: одна строка сессии на вход, одно устройство на
+# все входы, вкладки и перезагрузки.
 # ---------------------------------------------------------------------------
 AUTH_SESSION_DAYS = 365
 AUTH_SESSION_MAX_AGE = AUTH_SESSION_DAYS * 86400
@@ -400,6 +419,10 @@ AUTH_LOGIN_MAX_FAILURES = 10
 AUTH_LOGIN_WINDOW_SEC = 15 * 60
 _auth_login_failures: dict[str, list[float]] = {}
 _auth_login_lock = threading.Lock()
+# Код отказа гостю, который ещё не заявил профиль. Клиент по нему понимает,
+# что профиль надо сначала заявить (POST /api/profile/claim); робот получает
+# честный отказ и не оставляет в базе ничего.
+GUEST_PENDING_CODE = "GUEST_PENDING"
 AUTH_SCHEMA_DONE: set[str] = set()
 SUPPORT_SCHEMA_DONE: set[str] = set()
 _support_schema_lock = threading.Lock()
@@ -915,6 +938,7 @@ def auth_devices_payload(clusters: list[list[dict]], current_pk: int | None) -> 
             "current": bool(here),
             "sessions": len(group),
         })
+    devices.sort(key=lambda d: (d["current"], d["lastSeenAt"]), reverse=True)
     return devices
 
 
@@ -1077,9 +1101,11 @@ def create_admin_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, i
 
 
 def existing_user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> int | None:
-    """Resolve the user from the ege_session cookie WITHOUT creating an
-    account. Admin endpoints must not mint anonymous users for unauthenticated
-    probes — unlike /api/bootstrap, where account creation is the normal flow."""
+    """Resolve the user from the ege_session cookie WITHOUT creating anything.
+
+    Admin endpoints must not mint accounts for unauthenticated probes, and
+    /api/bootstrap doesn't either — it only reports that the caller is still a
+    guest (accountId: null) until onboarding is finished."""
     ensure_auth_schema(conn)
     row = session_row_for(conn, cookie_value(handler, "ege_session"), handler=handler)
     if not row:
@@ -1788,10 +1814,10 @@ def public_base_url(handler) -> str:
         if env:
             return env
         headers = handler.headers
-        host = (headers.get("X-Forwarded-Host") or headers.get("Host") or "").split(",")[0].strip()
+        host = (trusted_forwarded(handler, "X-Forwarded-Host") or headers.get("Host") or "").split(",")[0].strip()
         if not host:
             return "http://localhost:2026"
-        proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        proto = trusted_forwarded(handler, "X-Forwarded-Proto").lower()
         if proto not in ("http", "https"):
             proto = "https" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" else "http"
         return f"{proto}://{host}"
@@ -1878,6 +1904,16 @@ class EssayTooShort(ValueError):
     def __init__(self, word_count: int):
         self.word_count = word_count
         super().__init__(f"essay too short: {word_count} words")
+
+
+class EssayNotChecked(Exception):
+    """status='ready' без серверного результата проверки.
+
+    Оценку сочинению ставит только /api/ai/essay: он зовёт модель и сохраняет
+    её ответ в essay_checks. /api/essays/evaluation для 'ready' читает ИМЕННО
+    сохранённый ответ, а не присланный браузером — иначе консоль писала себе
+    22/22 и забирала XP без единого вызова модели.
+    """
 
 
 def connect() -> sqlite3.Connection:
@@ -2298,6 +2334,26 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
                 " ON essay_submissions(user_id, subject, created_at)"
             )
+        if "essay_checks" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+            # Серверная запись о реальном вызове модели: единственный источник
+            # оценки для evaluation 'ready'. Ключ — хэш нормализованного
+            # текста: клиент присылает один и тот же текст и в submission, и в
+            # проверку, поэтому связка (user, subject, текст) однозначна, а
+            # client_id менять не нужно.
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS essay_checks(
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                     subject TEXT NOT NULL DEFAULT '',
+                     text_sha256 TEXT NOT NULL,
+                     provider TEXT NOT NULL DEFAULT '',
+                     result_json TEXT NOT NULL,
+                     created_at TEXT NOT NULL)"""
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_text"
+                " ON essay_checks(user_id, subject, text_sha256)"
+            )
         _ESSAY_SCHEMA_DONE.add(key)
 
 
@@ -2651,13 +2707,133 @@ def get_latest_essay(conn: sqlite3.Connection, user_id: int, subject: str, task_
     return get_essay_submission(conn, user_id, subject, task_id=task_id)
 
 
+ESSAY_STATUS_MAP_MAX = 200
+
+
+def essay_status_map(conn: sqlite3.Connection, user_id: int | None, subject: str) -> dict:
+    """Какие сочинения у пользователя уже есть — по одному (последнему) на
+    задание. Нужна навигации практики: она решает, что показать под отчётом
+    («Далее» по написанным работам или «Написать ещё раз»), и без неё клиент
+    знает только те задания, до которых дошёл в текущей сессии, — на свежем
+    входе он считает написанным ровно одно сочинение и путает подпись кнопки.
+
+    Ответ лёгкий: без текста и без разбора — только факт, статус, word_count и
+    submission_id (его хватает для ссылки на отчёт). Только свои строки
+    (user_id) и только своего предмета: чужие работы в карту не попадают.
+    """
+    if user_id is None:
+        return {}
+    ensure_essay_schema(conn)
+    rows = conn.execute(
+        "SELECT s.task_id, s.id, s.client_id, s.word_count, s.evaluation_status"
+        "  FROM essay_submissions s"
+        "  JOIN (SELECT task_id, MAX(id) AS last_id FROM essay_submissions"
+        "         WHERE user_id=? AND subject=? GROUP BY task_id) latest"
+        "    ON latest.last_id = s.id"
+        " LIMIT ?",
+        (user_id, subject, ESSAY_STATUS_MAP_MAX),
+    ).fetchall()
+    out: dict = {}
+    for row in rows:
+        out[str(row["task_id"])] = {
+            "status": str(row["evaluation_status"] or "submitted"),
+            "submissionId": int(row["id"]),
+            "clientId": str(row["client_id"] or ""),
+            "wordCount": int(row["word_count"] or 0),
+        }
+    return out
+
+
+def essay_text_hash(text: str) -> str:
+    """Хэш нормализованного текста — ключ связки submission ↔ проверка ИИ."""
+    return hashlib.sha256(normalize_essay_text(text).encode("utf-8")).hexdigest()
+
+
+def _validated_essay_result(result) -> dict:
+    """Проверить форму отчёта о проверке и вернуть его с пересчитанным итогом.
+
+    Итог и максимум — всегда пересчёт из самих критериев: доверять числу,
+    пришедшему снаружи, нельзя даже когда blob хранился у нас (код эволюционирует,
+    а записи остаются). Ответ /api/ai/essay отдаёт total, равный сумме баллов
+    (после вето грамотности обнуляется вместе с итогом), поэтому на честном
+    пути пересчёт совпадает с записанным.
+    """
+    if not isinstance(result, dict):
+        raise ValueError("result must be an object")
+    criteria = result.get("criteria")
+    if not isinstance(criteria, list) or len(criteria) != 10:
+        raise ValueError("result must carry 10 criteria")
+    for item in criteria:
+        if not isinstance(item, dict) or not item.get("id") or not str(item.get("comment") or "").strip():
+            raise ValueError("result criteria are malformed")
+        try:
+            s, m = int(item.get("score")), int(item.get("max_score"))
+        except (TypeError, ValueError):
+            raise ValueError("result criteria are malformed")
+        if s < 0 or s > m:
+            raise ValueError("result criteria are malformed")
+    total = sum(int(item["score"]) for item in criteria)
+    maximum = sum(int(item["max_score"]) for item in criteria)
+    if maximum != 22 or not 0 <= total <= 22:
+        raise ValueError("result scores out of range")
+    if total != int(result.get("total_score") or 0) or maximum != int(result.get("max_score") or 0):
+        result = {**result, "total_score": total, "max_score": maximum}
+    blob = json.dumps(result, ensure_ascii=False)
+    if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
+        raise ValueError("result too large")
+    return result
+
+
+def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
+                      text: str, provider: str, result: dict) -> None:
+    """Записать факт реальной проверки: ответ модели на этот текст.
+
+    Вызывается из /api/ai/essay СРАЗУ после успешного ответа модели — это
+    единственный путь появления строки, и каждая строка стоила бюджета.
+    Повторная проверка того же текста перезаписывает запись (последний ответ
+    модели актуален — клиентский flow при ретрае тоже берёт последний).
+    """
+    ensure_essay_schema(conn)
+    blob = json.dumps(result, ensure_ascii=False)
+    if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
+        raise ValueError("result too large")
+    conn.execute(
+        "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, created_at)"
+        " VALUES(?,?,?,?,?,?)"
+        " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
+        " result_json=excluded.result_json, provider=excluded.provider,"
+        " created_at=excluded.created_at",
+        (user_id, subject, essay_text_hash(text), str(provider or "")[:64], blob, now_iso()),
+    )
+
+
+def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text: str) -> dict | None:
+    """Сохранённый ответ модели на этот текст или None, если проверки не было."""
+    ensure_essay_schema(conn)
+    row = conn.execute(
+        "SELECT result_json, provider FROM essay_checks"
+        " WHERE user_id=? AND subject=? AND text_sha256=?",
+        (user_id, subject, essay_text_hash(text)),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        result = json.loads(row["result_json"])
+    except (ValueError, TypeError):
+        return None
+    return {"result": result, "provider": row["provider"]}
+
+
 def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
     """Зафиксировать итог проверки по submission (точка «report generation»).
 
-    status 'ready' требует валидный result (иначе 400 — частично собранный
-    отчёт никогда не выглядит готовым); 'failed' результат не требует и лишь
-    помечает, что XP начислять нельзя. Пишет только свою строку: чужой
-    client_id здесь просто не найдётся (fail-closed, без раскрытия чужих id).
+    status 'ready' НЕ читает оценку из запроса: клиентский `result` полностью
+    игнорируется, а готовым submission становится только при наличии записи
+    в essay_checks — её создаёт /api/ai/essay после реального ответа модели.
+    Нет записи — 409 (EssayNotChecked): «22/22 из консоли» не проходит.
+    'failed' результат не требует и лишь помечает, что XP начислять нельзя.
+    Пишет только свою строку: чужой client_id здесь просто не найдётся
+    (fail-closed, без раскрытия чужих id).
     """
     ensure_essay_schema(conn)
     if subject_is_locked(subject):
@@ -2669,53 +2845,24 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
     if status not in ("ready", "failed"):
         raise ValueError("unknown status")
     row = conn.execute(
-        "SELECT id FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
+        "SELECT id, text FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
         (user_id, subject, client_id.strip()),
     ).fetchone()
     if not row:
         raise KeyError("submission not found")
     if status == "ready":
-        result = value.get("result")
-        if not isinstance(result, dict):
-            raise ValueError("result must be an object")
-        criteria = result.get("criteria")
-        try:
-            total = int(result.get("total_score"))
-            maximum = int(result.get("max_score"))
-        except (TypeError, ValueError):
-            raise ValueError("result must carry total_score/max_score")
-        if not isinstance(criteria, list) or len(criteria) != 10:
-            raise ValueError("result must carry 10 criteria")
-        if maximum != 22 or not 0 <= total <= 22:
-            raise ValueError("result scores out of range")
-        for item in criteria:
-            if not isinstance(item, dict) or not item.get("id") or not str(item.get("comment") or "").strip():
-                raise ValueError("result criteria are malformed")
-            try:
-                s, m = int(item.get("score")), int(item.get("max_score"))
-            except (TypeError, ValueError):
-                raise ValueError("result criteria are malformed")
-            if s < 0 or s > m:
-                raise ValueError("result criteria are malformed")
-        # Итог и максимум — пересчёт из самих критериев, а не то, что прислал
-        # браузер. Ответ /api/ai/essay отдаёт total, равный сумме баллов
-        # (после вето грамотности обнуляется вместе с итогом), поэтому на
-        # честном пути пересчёт совпадает; принимать клиентское число значило
-        # бы разрешить записать себе 22/22 при нулевых критериях и получить
-        # за это XP (essay_xp считается именно по сохранённому итогу).
-        total = sum(int(item["score"]) for item in criteria)
-        maximum = sum(int(item["max_score"]) for item in criteria)
-        if maximum != 22 or not 0 <= total <= 22:
-            raise ValueError("result scores out of range")
-        if total != int(result.get("total_score") or 0) or maximum != int(result.get("max_score") or 0):
-            result = {**result, "total_score": total, "max_score": maximum}
+        # Оценка — только из серверной записи о проверке этого текста. Чужую
+        # или несуществующую проверку привязать нельзя: ключ — хэш текста
+        # самого submission.
+        check = load_essay_check(conn, user_id, subject, row["text"])
+        if check is None:
+            raise EssayNotChecked()
+        result = _validated_essay_result(check["result"])
         blob = json.dumps(result, ensure_ascii=False)
-        if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
-            raise ValueError("result too large")
         conn.execute(
             "UPDATE essay_submissions SET evaluation_status='ready', evaluation_result=?,"
             " evaluation_provider=?, evaluation_version=?, evaluated_at=? WHERE id=?",
-            (blob, str(value.get("provider") or "ai+grammar")[:64], 1,
+            (blob, (check["provider"] or "ai+grammar")[:64], 1,
              int(time.time() * 1000), int(row["id"])),
         )
     else:
@@ -4163,6 +4310,21 @@ def validate_support_form_token(token, secret: str, now: int, min_age: int, max_
         return False
 
 
+def trusted_forwarded(handler, name: str) -> str:
+    """Заголовок X-Forwarded-* — только за доверенным прокси (EGE_TRUSTED_PROXY=1).
+
+    Без этого гейта любой прямой клиент подменяет себе proto/host: влияет на
+    Secure-флаг кук, HSTS и абсолютные ссылки (public_base_url). Смысл тот же,
+    что у support_client_ip для X-Forwarded-For.
+    """
+    try:
+        if os.environ.get("EGE_TRUSTED_PROXY") != "1":
+            return ""
+        return (handler.headers.get(name, "") or "").split(",")[0].strip()
+    except Exception:
+        return ""
+
+
 def support_client_ip(handler) -> str:
     """Socket IP by default; X-Forwarded-For only behind a trusted proxy.
 
@@ -4364,7 +4526,13 @@ def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) ->
     return subject
 
 
-def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
+def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int | None, str | None]:
+    """Кто перед нами. Ничего не создаёт и не меняет.
+
+    (user_id, None) — живая сессия существующего пользователя.
+    (None, None)   — гость, который ещё не прошёл онбординг: в базе его нет,
+                     и этот этап не имеет права его там заводить.
+    """
     ensure_subject_schema(conn)
     ensure_auth_schema(conn)
     token_value = cookie_value(handler, "ege_session")
@@ -4377,21 +4545,39 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
         except AttributeError:
             pass
         return row["user_id"], None
+    return None, None
+
+
+def provision_user(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int, str | None]:
+    """Завести настоящего пользователя — только из явного намерения клиента.
+
+    Вызывается ровно из трёх мест: заявка «онбординг пройден», регистрация и
+    вход администратора. Живая сессия возвращается как есть (идемпотентно:
+    повторная заявка после потерянного ответа не плодит второго человека), а
+    без сессии создаётся строка users + сессия, и наружу уходит новый токен
+    для cookie. Промежуточных состояний не бывает: строка появляется целиком
+    и сразу со своим публичным ID аккаунта.
+    """
+    user_id, _ = user_for(conn, handler)
+    if user_id is not None:
+        return user_id, None
     cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (token_urlsafe(32), now_iso()))
-    user_id = cur.lastrowid
-    assign_account_id(conn, user_id)
-    conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (user_id,))
-    ensure_subject_rows(conn, user_id, DEFAULT_SUBJECT)
+    new_user_id = cur.lastrowid
+    assign_account_id(conn, new_user_id)
+    conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (new_user_id,))
+    ensure_subject_rows(conn, new_user_id, DEFAULT_SUBJECT)
     # users.session_token — legacy-колонка; пишем туда же стартовый токен,
     # чтобы бэкфилл ensure_auth_schema не поднимал её обратно как новую сессию.
-    new_token, _ = create_user_session(conn, user_id, request_device_info(handler),
-                                       request_device_identity(conn, handler, user_id))
-    conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, user_id))
+    new_token, _ = create_user_session(conn, new_user_id, request_device_info(handler),
+                                       request_device_identity(conn, handler, new_user_id))
+    conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, new_user_id))
     conn.commit()
-    return user_id, new_token
+    return new_user_id, new_token
 
 
-def default_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
+def default_state(conn: sqlite3.Connection, user_id: int | None, subject: str | None = None) -> dict:
+    # user_id не читается: снимок нулевой и одинаковый для нового профиля и
+    # для гостя до онбординга. Нужен только для единой точки вызова.
     subject = resolve_subject(subject)
     accessible_skill_ids = _subject_skill_ids(conn, subject)
     # Нулевые корзины — по ЖИВОМУ каталогу, а не по остаткам таблицы: удалённый
@@ -4416,9 +4602,25 @@ def default_state(conn: sqlite3.Connection, user_id: int, subject: str | None = 
             "timeline": [], "daily": {"date": None, "solved": 0, "done": False, "taskIds": []}, "dailyHistory": [], "skillStats": skills}
 
 
-def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
+def pending_state(conn: sqlite3.Connection, subject: str) -> dict:
+    """Состояние гостя, который ещё не прошёл онбординг.
+
+    Читать нечего: строки пользователя нет, и этот вызов ничего не создаёт.
+    Отдаём тот же нулевой снимок, что был бы у только что заведённого
+    профиля, — снимок нужен клиенту, чтобы нарисовать каталог и экран
+    онбординга, и он неотличим от будущего «нулевого» состояния.
+    """
+    state = default_state(conn, None, subject)
+    state["subject"] = subject
+    return state
+
+
+def read_state(conn: sqlite3.Connection, user_id: int | None, subject: str | None = None) -> dict:
     ensure_subject_schema(conn)
     subject = resolve_subject(subject if is_known_subject(subject) else current_subject_for(conn, user_id))
+    if user_id is None:
+        # Гость до онбординга: в users его нет, читать нечего и незачем.
+        return pending_state(conn, subject)
     ensure_subject_rows(conn, user_id, subject)
     state = default_state(conn, user_id, subject)
     state["subject"] = subject
@@ -4459,7 +4661,7 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
     for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
         if not in_live(live_skills, r["skill_id"]): continue
         state["skillStats"][r["skill_id"]] = {"progress": r["progress"], "solved": r["solved"], "correct": r["correct"], "timeSec": r["time_sec"]}
-    for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject)):
+    for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?", (user_id, subject, MAX_ERRORS)):
         if not in_live(live_tasks, r["task_id"]): continue
         state["errors"].append({"id": r["id"], "clientId": r["client_id"] if "client_id" in r.keys() else None, "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"]),
                                 "kind": (_normalize_error_kind(r["kind"]) if "kind" in r.keys() and r["kind"] else "major")})
@@ -4467,13 +4669,13 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
         keys = r.keys()
         if not in_live(live_tasks, r["task_id"]): continue
         state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "ts": timestamp_value(r["created_at"])})
-    for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=?", (user_id, subject)):
+    for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=? ORDER BY lesson_id, step_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)):
         if not in_live(live_lessons, r["lesson_id"]): continue
         state["lessonStepErrors"][f'{r["lesson_id"]}:{r["step_id"]}'] = {"count": r["count"], "skill": r["skill_id"], "ts": timestamp_value(r["last_at"]), "types": json.loads(r["types_json"])}
     for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at, client_id FROM lesson_error_history WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 200", (user_id, subject)):
         state["lessonErrorHistory"].append({"id": r["client_id"] or None, "lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
-    for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=? AND subject=?", (user_id, subject)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
-    for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=? AND subject=?", (user_id, subject)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
+    for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=? AND subject=? ORDER BY lesson_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
+    for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=? AND subject=? ORDER BY lesson_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
     for r in conn.execute("SELECT * FROM lesson_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 1000", (user_id, subject)):
         keys = r.keys()
         state["lessonAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
@@ -4483,10 +4685,12 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
         if r["completed_at"]: state["missionsDone"][r["mission_id"]] = {"ts": timestamp_value(r["completed_at"])}
     state["bossesDefeated"] = [r["boss_id"] for r in conn.execute("SELECT boss_id FROM user_bosses WHERE user_id=? AND subject=?", (user_id, subject))]
     for r in conn.execute("SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id=? AND subject=?", (user_id, subject)): state["achievements"][r["achievement_id"]] = {"ts": timestamp_value(r["unlocked_at"])}
-    for r in conn.execute("SELECT * FROM activity_history WHERE user_id=? AND subject=?", (user_id, subject)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
-    state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute("SELECT * FROM forecast_history WHERE user_id=? AND subject=? ORDER BY snapshot_date", (user_id, subject))]
+    for r in conn.execute("SELECT * FROM activity_history WHERE user_id=? AND subject=? ORDER BY activity_date DESC LIMIT ?", (user_id, subject, MAX_ACTIVITY_DAYS)): state["activity"][r["activity_date"]] = {"solved": r["solved"], "correct": r["correct"], "xp": r["xp"]}
+    state["forecastHistory"] = [dict(date=r["snapshot_date"], low=r["low"], high=r["high"], mid=r["mid"]) for r in conn.execute(
+        "SELECT * FROM (SELECT * FROM forecast_history WHERE user_id=? AND subject=? ORDER BY snapshot_date DESC LIMIT ?) ORDER BY snapshot_date",
+        (user_id, subject, MAX_FORECAST_HISTORY))]
     state["xpAdjustments"] = [{"amount": r["amount"], "reason": r["reason"], "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM user_xp_adjustments WHERE user_id=? AND subject=? ORDER BY id", (user_id, subject))]
-    daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? AND subject=? ORDER BY progress_date DESC", (user_id, subject)))
+    daily_rows = list(conn.execute("SELECT * FROM daily_progress WHERE user_id=? AND subject=? ORDER BY progress_date DESC LIMIT ?", (user_id, subject, MAX_DAILY_HISTORY)))
     state["dailyHistory"] = []
     for daily in daily_rows:
         try:
@@ -4496,7 +4700,7 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
         state["dailyHistory"].append({"date": daily["progress_date"], "solved": daily["solved"], "done": bool(daily["done"]), "taskIds": task_ids})
     if daily_rows: state["daily"] = state["dailyHistory"][0].copy()
     state["timeline"] = [{"id": r["client_id"] if "client_id" in r.keys() and r["client_id"] else None, "ts": timestamp_value(r["created_at"]), "text": r["text"]} for r in conn.execute("SELECT created_at, text, client_id FROM timeline WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 40", (user_id, subject))]
-    state["diagnostics"] = [{"id": r["client_id"] if "client_id" in r.keys() and r["client_id"] else None, "taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject))]
+    state["diagnostics"] = [{"id": r["client_id"] if "client_id" in r.keys() and r["client_id"] else None, "taskId": r["task_id"], "correct": bool(r["correct"]), "ts": timestamp_value(r["created_at"])} for r in conn.execute("SELECT * FROM diagnostics WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?", (user_id, subject, MAX_DIAGNOSTICS))]
     return state
 
 
@@ -4817,6 +5021,24 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
     mission_ids = {str(r["id"]) for r in conn.execute(
         "SELECT m.id, m.skill_id FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (subject,)
     ) if str(r["skill_id"]) in valid_skills}
+    # Анти-абьюз потолки: клиент сам режет свои коллекции (taskAttempts 5000,
+    # timeline 40, lessonAttempts 1000, ...), а здесь — защита от собранного
+    # вручную payload'а, который иначе превращает один PATCH в шторм INSERT'ов
+    # и раздувает чтение в read_state. Легитимный клиент в эти потолки не
+    # упирается (это годы истории), собранный в консоли — отклоняется целиком.
+    for key, cap in (
+        ("lessonAttempts", MAX_LESSON_ATTEMPTS), ("lessonErrorHistory", MAX_LESSON_ERROR_HISTORY),
+        ("diagnostics", MAX_DIAGNOSTICS), ("forecastHistory", MAX_FORECAST_HISTORY),
+        ("bossesDefeated", MAX_BOSSES), ("activity", MAX_ACTIVITY_DAYS),
+        ("lessonStepErrors", MAX_STATE_DICT), ("lessonSessions", MAX_STATE_DICT),
+        ("completedLessons", MAX_STATE_DICT), ("missionProgress", MAX_STATE_DICT),
+        ("missionsDone", MAX_STATE_DICT), ("achievements", MAX_STATE_DICT),
+        ("hintLevels", 16),
+        ("deletedLessonSessions", MAX_STATE_DICT), ("deletedLessonStepErrors", MAX_STATE_DICT),
+    ):
+        value = domains.get(key)
+        if isinstance(value, (list, dict)) and len(value) > cap:
+            raise ValueError(f"domain {key} exceeds {cap} entries")
     changed = []
     if "lessonAttempts" in domains and isinstance(domains["lessonAttempts"], list):
         for item in domains["lessonAttempts"]:
@@ -4955,7 +5177,7 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
                 used_count = int(used)
             except (TypeError, ValueError):
                 continue
-            if level < 1 or used_count < 0 or used_count > MAX_COUNTER_VALUE:
+            if level < 1 or level > 9 or used_count < 0 or used_count > MAX_COUNTER_VALUE:
                 continue
             conn.execute("INSERT INTO user_hint_levels(user_id,subject,level,used_count) VALUES(?,?,?,?)"
                          " ON CONFLICT(user_id,subject,level) DO UPDATE SET used_count=MAX(user_hint_levels.used_count,excluded.used_count)",
@@ -5021,11 +5243,12 @@ def essay_xp(score) -> int:
 def essay_ready_scores(conn: sqlite3.Connection, user_id: int, subject: str) -> dict:
     """Лучший проверенный балл по каждому заданию-сочинению предмета.
 
-    Источник истины — серверные essay_submissions со статусом 'ready':
-    балл из клиентской попытки не читаем (его можно подделать из консоли).
-    Берём максимум по заданию: переписанное хуже сочинение не роняет уже
-    заработанный XP. Засчитывается один раз (см. solved_once в derive_stats:
-    повтор того же задания платит только минимум попытки).
+    Источник истины — серверные essay_submissions со статусом 'ready', а
+    ready ставится только по записи из essay_checks, которую создаёт
+    /api/ai/essay после реального ответа модели: выписать себе балл из
+    консоли нельзя. Берём максимум по заданию: переписанное хуже сочинение
+    не роняет уже заработанный XP. Засчитывается один раз (см. solved_once
+    в derive_stats: повтор того же задания платит только минимум попытки).
     """
     try:
         ensure_essay_schema(conn)
@@ -5135,7 +5358,10 @@ def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
         item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"],
                 "diff": r["difficulty"], "text": r["statement"], "answer": r["answer"],
                 "hint": r["hint"], "solution": r["explanation"]}
-        item.update(json.loads(r["metadata_json"] or "{}"))
+        try:
+            item.update(json.loads(r["metadata_json"] or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            pass  # битый metadata_json не должен ронять весь аудит
         if not task_has_missing_visual(item):
             continue
         skill = conn.execute("SELECT name, topic_id FROM skills WHERE id=?", (item["skill"],)).fetchone()
@@ -5668,7 +5894,11 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
             "tables": ["user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts",
                        "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons",
                        "user_missions", "user_bosses", "user_achievements", "activity_history",
-                       "forecast_history", "daily_progress", "timeline", "diagnostics"],
+                       "forecast_history", "daily_progress", "timeline", "diagnostics",
+                       # Без essay_submissions «весь прогресс» оставлял ученику
+                       # его прежний отчёт о сочинении: evaluation_result и
+                       # оценка оставались видны и открывались заново.
+                       "essay_submissions"],
             "stats": "UPDATE user_stats SET xp=0, streak=0, last_active_date=NULL, total_solved=0, total_correct=0, total_time_sec=0, hints_used=0, correct_series=0, best_series=0, errors_resolved=0 WHERE user_id=?",
             "label": "Весь прогресс сброшен",
         },
@@ -5991,86 +6221,6 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     }
 
 
-def apply_derived_stats(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
-    """Overwrite the client-sent xp/totals in `state` with server-derived ones.
-    Cumulative counters are clamped to never drop below what is already
-    persisted, so a client that only synced a recent, size-capped slice of
-    its full history (taskAttempts is capped at 5000 entries client-side)
-    never regresses a long-time user's real, previously-saved totals."""
-    derived = derive_stats(conn, state, user_id)
-    clamp_subject = resolve_subject(state.get("subject") if isinstance(state, dict) else None)
-    prev = None if subject_is_locked(clamp_subject) else conn.execute(
-        "SELECT xp, total_solved, total_correct, hints_used, best_series, errors_resolved FROM user_stats WHERE user_id=? AND subject=?",
-        (user_id, clamp_subject),
-    ).fetchone()
-    for key, col in (
-        ("xp", "xp"), ("totalSolved", "total_solved"), ("totalCorrect", "total_correct"),
-        ("hintsUsed", "hints_used"), ("bestSeries", "best_series"), ("errorsResolved", "errors_resolved"),
-    ):
-        state[key] = max(derived[key], prev[col] if prev else 0)
-    state["correctSeries"] = derived["correctSeries"]
-
-
-def validate_state(conn: sqlite3.Connection, state: dict) -> None:
-    if not isinstance(state, dict): raise ValueError("state must be an object")
-    if state.get("subject") is not None and not is_known_subject(state.get("subject")): raise ValueError("unknown subject")
-    name = state.get("name")
-    if name is not None and not isinstance(name, str): raise ValueError("invalid name")
-    if isinstance(name, str) and len(name.strip()) > MAX_NAME_LENGTH: raise ValueError("name too long")
-    for key in ("xp", "streak", "totalSolved", "totalCorrect", "hintsUsed", "correctSeries", "bestSeries", "errorsResolved"):
-        value = state.get(key, 0)
-        if not isinstance(value, (int, float)) or not isinstance(value, int) and value != int(value): raise ValueError(f"invalid {key}")
-        if not 0 <= value <= MAX_COUNTER_VALUE: raise ValueError(f"invalid {key}")
-    # totalTimeSec — единственное дробное поле (сумма секунд с долями), остальные — целые счётчики
-    tv = state.get("totalTimeSec", 0)
-    if not isinstance(tv, (int, float)): raise ValueError("invalid totalTimeSec")
-    if not 0 <= float(tv) <= MAX_COUNTER_VALUE: raise ValueError("invalid totalTimeSec")
-    if state.get("totalCorrect", 0) > state.get("totalSolved", 0): raise ValueError("correct answers exceed attempts")
-    # Unbounded client-controlled collections are a DB-bloat vector: a single
-    # PUT can otherwise write millions of rows that then load on every
-    # bootstrap. The app itself caps these client-side; the caps below are
-    # generous headroom over those client caps, not tighter semantics.
-    for key, cap in (("taskAttempts", MAX_TASK_ATTEMPTS), ("errors", MAX_ERRORS), ("timeline", MAX_TIMELINE),
-                     ("lessonAttempts", MAX_LESSON_ATTEMPTS), ("lessonErrorHistory", MAX_LESSON_ERROR_HISTORY),
-                     ("diagnostics", MAX_DIAGNOSTICS), ("dailyHistory", MAX_DAILY_HISTORY),
-                     ("forecastHistory", MAX_FORECAST_HISTORY)):
-        value = state.get(key, [])
-        if not isinstance(value, list): raise ValueError(f"{key} must be an array")
-        if len(value) > cap: raise ValueError(f"{key} too large")
-    for key in ("skillStats", "lessonStepErrors", "lessonSessions", "completedLessons", "missionProgress",
-                "missionsDone", "achievements", "activity", "hintLevels"):
-        if state.get(key) is not None and not isinstance(state.get(key), dict): raise ValueError(f"{key} must be an object")
-        if isinstance(state.get(key), dict) and len(state[key]) > MAX_STATE_DICT: raise ValueError(f"{key} too large")
-    if isinstance(state.get("activity"), dict) and len(state["activity"]) > MAX_ACTIVITY_DAYS:
-        raise ValueError("activity too large")
-    if not isinstance(state.get("bossesDefeated", []), list): raise ValueError("bossesDefeated must be an array")
-    if len(state.get("bossesDefeated") or []) > MAX_BOSSES: raise ValueError("bossesDefeated too large")
-    validation_subject = resolve_subject(state.get("subject"))
-    valid_skills = _subject_skill_ids(conn, validation_subject, include_locked=subject_is_locked(validation_subject))
-    # skillStats позаписно не валидируем: битые значения отбрасывает
-    # write_state, а отклонение всего PUT из-за одной записи — тот самый
-    # класс багов «ломают сохранение» (см. taskAttempts ниже).
-    valid_tasks = _subject_task_ids(conn, validation_subject, include_locked=subject_is_locked(validation_subject))
-    for item in state.get("taskAttempts") or []:
-        # Одна битая попытка из тысяч раньше отклоняла весь PUT целиком —
-        # теперь такие записи пропускаются (write_state/derive фильтруют так же).
-        if not isinstance(item, dict):
-            continue
-        if item.get("skill") not in valid_skills:
-            continue
-        # taskId может ссылаться на удалённую/заблокированную задачу из старой
-        # истории — не отклоняем весь PUT, просто игнорируем её при подсчёте XP
-        # и не пишем в БД (write_state фильтрует так же). Строгая проверка
-        # ломала сохранение уроков у пользователей с legacy-историей.
-        if item.get("taskId") not in valid_tasks:
-            continue
-        # skill уже проверен выше; taskId — lenient
-    if not isinstance(state.get("errors", []), list): raise ValueError("errors must be an array")
-    if not isinstance(state.get("xpAdjustments", []), list): raise ValueError("xpAdjustments must be an array")
-    for adj in state.get("xpAdjustments") or []:
-        if not isinstance(adj, dict) or not isinstance(adj.get("amount", 0), (int, float)): raise ValueError("invalid xp adjustment")
-
-
 def _is_blocked_static(file_path: Path) -> bool:
     """True для служебных файлов: БД и её хвосты, бэкапы, временные файлы."""
     name = file_path.name.lower()
@@ -6213,7 +6363,7 @@ class Handler(BaseHTTPRequestHandler):
                          "camera=(), microphone=(), geolocation=(), payment=()")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         try:
-            https = (self.headers.get("X-Forwarded-Proto") == "https"
+            https = (trusted_forwarded(self, "X-Forwarded-Proto") == "https"
                      or os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1")
         except Exception:
             https = False
@@ -6317,16 +6467,16 @@ class Handler(BaseHTTPRequestHandler):
     def session_cookie_attrs(self, value: str) -> str:
         # Тот же Secure-механизм, что у admin cookie: по HTTP ничего не
         # меняется, под HTTPS токен сессии перестаёт летать открытым текстом.
-        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or trusted_forwarded(self, "X-Forwarded-Proto") == "https" else ""
         return f"ege_session={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={AUTH_SESSION_MAX_AGE}{secure}"
 
     def session_cookie_clear_attrs(self) -> str:
         """Logout: выкидываем токен и из браузера, и из серверной таблицы."""
-        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or trusted_forwarded(self, "X-Forwarded-Proto") == "https" else ""
         return f"ege_session=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
 
     def admin_cookie_attrs(self, value: str | None, max_age: int) -> str:
-        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or trusted_forwarded(self, "X-Forwarded-Proto") == "https" else ""
         if value is None:
             return f"{ADMIN_COOKIE_NAME}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
         return f"{ADMIN_COOKIE_NAME}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={max_age}{secure}"
@@ -6338,7 +6488,7 @@ class Handler(BaseHTTPRequestHandler):
         # собственном списке, где и так видно только название и время. Живёт
         # столько же, сколько сессия, и переживает logout: выход из аккаунта —
         # это конец сессии, а не конец устройства.
-        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or trusted_forwarded(self, "X-Forwarded-Proto") == "https" else ""
         return f"{DEVICE_COOKIE_NAME}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={AUTH_SESSION_MAX_AGE}{secure}"
 
     def ensure_device_cookie(self) -> None:
@@ -6368,6 +6518,81 @@ class Handler(BaseHTTPRequestHandler):
         return user_id, session
 
     # ------------------------------------------------------------------
+    # Гость без профиля.
+    #
+    # Каждый пользовательский эндпоинт, который что-то ЗАПИСЫВАЕТ от лица
+    # ученика, после user_for() обязан вызвать require_user(): у гостя,
+    # не прошедшего онбординг, нет ни строки в users, ни сессии, поэтому
+    # писать ему нечего. Такой запрос получает 401 с машиночитаемым
+    # GUEST_PENDING и не оставляет в базе ни единой строки — именно это и
+    # не даёт роботам плодить профили. Клиент этот код понимает: он сначала
+    # заявляет профиль (POST /api/profile/claim) и повторяет запись.
+    # ------------------------------------------------------------------
+    def send_guest_pending(self) -> None:
+        self.send_json({"error": "Сначала пройди онбординг — профиль появится после него",
+                        "code": GUEST_PENDING_CODE}, 401)
+
+    def require_user(self, user_id: int | None) -> bool:
+        """True — можно работать от лица пользователя; False — ответ уже отправлен."""
+        if user_id is not None:
+            return True
+        self.send_guest_pending()
+        return False
+
+    def handle_profile_claim(self, conn: sqlite3.Connection) -> None:
+        """POST /api/profile/claim — гость прошёл онбординг, заводим пользователя.
+
+        Единственный обычный (не регистрационный и не админский) путь, который
+        создаёт строку в users. Идемпотентен: у кого сессия уже есть, ничего не
+        меняется и возвращается тот же аккаунт — повтор после потерянного ответа
+        не плодит второго человека. Ничего, кроме самой строки и сессии, здесь
+        не пишется: настройки профиля (имя, уровень, цель) приезжают своим
+        доменным запросом PATCH /api/settings, то есть тем же путём и с той же
+        валидацией, что и у давно заведённого пользователя.
+        """
+        if not self.support_request_is_same_origin():
+            self.send_json({"error": "Cross-site request rejected"}, 403)
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        # Заявить профиль может только тот, кто дошёл до конца онбординга:
+        # без флага onboarded и известного предмета заявка бессмысленна.
+        if payload.get("onboarded") is not True:
+            self.send_json({"error": "Онбординг не завершён"}, 400)
+            return
+        wanted = payload.get("subject")
+        if not is_known_subject(wanted):
+            self.send_json({"error": "Неизвестный предмет"}, 400)
+            return
+        subject = resolve_subject(wanted)
+        user_id, token = provision_user(conn, self)
+        if self.reject_if_blocked(conn, user_id):
+            return
+        created = token is not None
+        if created:
+            # Предмет и имя нового человека — из той же заявки: иначе первый
+            # же ответ сервера вернул бы пустой профиль, и клиент качал бы его
+            # ещё раз. Значения всё равно проходят общую санитизацию.
+            set_current_subject(conn, user_id, subject)
+            name = sanitize_name(payload.get("name"))
+            if name:
+                conn.execute("UPDATE users SET name=? WHERE id=?", (name, user_id))
+            conn.commit()
+        else:
+            subject = current_subject_for(conn, user_id)
+        self.send_json({"ok": True, "created": created, "subject": subject,
+                        "accountId": account_id_for(conn, user_id),
+                        "user": auth_user_payload(conn, user_id),
+                        "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))},
+                       token=token)
+
+    # ------------------------------------------------------------------
     # Central account-block enforcement.
     #
     # Every authenticated user request MUST call reject_if_blocked() right
@@ -6394,15 +6619,16 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # User accounts: register / login / logout
     #
-    # Register attaches an email + password hash to the CURRENT guest row
-    # (user_for), so all learning data survives — same users.id. Login
+    # Register attaches an email + password hash to the CURRENT profile
+    # (provision_user), so all learning data survives — same users.id. Login
     # re-binds the browser's session row to the account identified by email;
-    # the abandoned guest row stays orphaned in the DB, exactly like a lost
-    # cookie today, and is never merged. Logout deletes the session row and
-    # clears the cookie; afterwards the old token resolves to nothing and any
-    # request mints a fresh guest — auto-login cannot resurrect the account.
-    # Identity always comes from the server-side session; the frontend never
-    # supplies a user id and never sees the password.
+    # the abandoned session stays orphaned, exactly like a lost cookie today,
+    # and is never merged. Logout deletes the session row and clears the
+    # cookie; afterwards the old token resolves to nothing and the browser is
+    # a guest again — auto-login cannot resurrect the account, and a guest
+    # only becomes a user again by finishing onboarding. Identity always comes
+    # from the server-side session; the frontend never supplies a user id and
+    # never sees the password.
     # ------------------------------------------------------------------
     def handle_auth_register(self, conn: sqlite3.Connection) -> None:
         ip = self.client_address[0] if self.client_address else "?"
@@ -6425,7 +6651,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
             self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
             return
-        user_id, minted = user_for(conn, self)  # текущий гость; привязываем именно его
+        user_id, minted = provision_user(conn, self)  # регистрация = явное намерение, профиль заводим
         if self.reject_if_blocked(conn, user_id):
             return
         current = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
@@ -6632,7 +6858,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Неверный пароль"}, 401)
             return
         admin_login_success(ip)
-        user_id, token = user_for(conn, self)
+        user_id, token = provision_user(conn, self)  # вход администратора = живой человек
         admin_token, expires_at = create_admin_session(conn, user_id)
         admin_audit(conn, user_id, "admin-login", user_id)
         self.send_json(
@@ -6673,7 +6899,7 @@ class Handler(BaseHTTPRequestHandler):
     def support_form_cookie_attrs(self, value: str) -> str:
         # Cookie читается фронтом для double-submit, поэтому без HttpOnly.
         # SameSite=Lax + привязка токена к подписи закрывают CSRF с чужих сайтов.
-        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or trusted_forwarded(self, "X-Forwarded-Proto") == "https" else ""
         return f"{SUPPORT_FORM_COOKIE}={value}; Path=/; SameSite=Lax; Max-Age={SUPPORT_FORM_MAX_AGE_SEC}{secure}"
 
     def send_support_form_cookie(self) -> None:
@@ -6846,6 +7072,26 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return
+        if path == "/api/profile/claim":
+            # Заявка «онбординг пройден» — единственный обычный путь, который
+            # заводит пользователя из гостя. Всё остальное молча не создаёт
+            # ничего: см. user_for / provision_user.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                self.handle_profile_claim(conn)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("profile-claim", exc)
+                self.send_json({"error": "Не удалось создать профиль. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout"):
             conn = connect()
             try:
@@ -6979,6 +7225,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
                 payload = self.read_json()
@@ -7008,6 +7255,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ensure_essay_schema(conn)
                 user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
                 payload = self.read_json(max_bytes=64 * 1024, object_pairs_hook=strict_json_object,
@@ -7041,17 +7289,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/essays/evaluation":
             # POST /api/essays/evaluation — фиксация итога проверки («report
-            # generation»): клиент привозит результат существующего AI route
-            # POST /api/ai/essay (модель К1–К6 + детерминированная грамотность
-            # К7–К10 уже склеены там в ответ на 22), сервер лишь валидирует
-            # форму и кладёт её в evaluation_* того же submission. Только
-            # после 'ready' клиент вправе начислить XP существующим
-            # attempts-flow; 'failed' помечает, что результат не готов.
+            # generation»). Оценка берётся НЕ из запроса, а из essay_checks —
+            # записи, которую оставляет /api/ai/essay после реального ответа
+            # модели (К1–К6 + детерминированная грамотность К7–К10 на 22).
+            # Присланный браузером result игнорируется: это закрывает запись
+            # себе произвольного балла из консоли ради XP. Только после
+            # 'ready' клиент вправе начислить XP существующим attempts-flow;
+            # 'failed' помечает, что результат не готов.
             if self.api_rate_limited(): return
             conn = connect()
             try:
                 ensure_essay_schema(conn)
                 user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
                 payload = self.read_json(max_bytes=128 * 1024, object_pairs_hook=strict_json_object,
@@ -7068,6 +7318,14 @@ class Handler(BaseHTTPRequestHandler):
             except KeyError:
                 conn.rollback()
                 self.send_json({"error": "Сочинение не найдено"}, 404)
+            except EssayNotChecked:
+                conn.rollback()
+                # Честный клиент всегда проходит проверку первой; 409 увидит
+                # только тот, кто пишет evaluation в обход модели. Клиентский
+                # ретрай (sessionEssayResume) лечит это сам: повторная
+                # проверка создаёт запись, и следующий evaluation проходит.
+                self.send_json({"error": "Сочинение ещё не проверено. Сначала запусти проверку.",
+                                "reason": "essay_not_checked"}, 409)
             except sqlite3.Error as exc:
                 conn.rollback()
                 rid = log_request_error("essays-evaluation", exc)
@@ -7083,6 +7341,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
                 payload = self.read_json()
@@ -7138,6 +7397,20 @@ class Handler(BaseHTTPRequestHandler):
                 wanted = payload.get("subject")
                 if not is_known_subject(wanted):
                     self.send_json({"error": "Неизвестный предмет"}, 400); return
+                if user_id is None:
+                    # Гость до онбординга: помнить ему нечего (строки нет), но
+                    # каталог и пустое состояние выбранного предмета показать
+                    # надо — онбординг как раз выбирает предмет. Отвечаем эхом
+                    # и ничего не пишем; выбранный предмет переживёт перезагрузку
+                    # в localStorage и приедет в заявке /api/profile/claim.
+                    subject = resolve_subject(wanted)
+                    self.send_json({"ok": True, "subject": subject,
+                                    "catalog": catalog_summary_payload(conn, subject),
+                                    "state": pending_state(conn, subject),
+                                    "accountId": None,
+                                    "auth": {"registered": False, "email": None},
+                                    "isAdmin": False})
+                    return
                 subject = set_current_subject(conn, user_id, wanted)
                 self.send_json({"ok": True, "subject": subject,
                                 "catalog": catalog_summary_payload(conn, subject),
@@ -7176,6 +7449,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = connect()
             try:
                 user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
                 try:
@@ -7244,6 +7518,22 @@ class Handler(BaseHTTPRequestHandler):
                     rid = log_request_error("ai-upstream", exc)
                     self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
                     return
+                # Факт проверки фиксируем на сервере: только этой записи будет
+                # доверять /api/essays/evaluation. Присланный браузером result
+                # там теперь игнорируется — оценка без вызова модели не ставится.
+                if format_id == "essay":
+                    try:
+                        store_essay_check(conn, user_id, subject_now, payload.get("text"),
+                                          "ai+grammar", result)
+                        conn.commit()
+                    except (sqlite3.Error, ValueError) as exc:
+                        # Не записали — значит evaluation позже честно скажет
+                        # «не проверено». Лучше честная 503 здесь, чем это.
+                        conn.rollback()
+                        rid = log_request_error("ai-check-store", exc)
+                        self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",
+                                        "ref": rid}, 503, token=token)
+                        return
                 self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
             except sqlite3.Error as exc:
                 try: conn.rollback()
@@ -7275,6 +7565,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.startswith("/api/admin"):
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/admin/session":
@@ -7351,12 +7642,24 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/support/messages":
                     self.send_json({"error": "Not found"}, 404)
                     return
+                # Общий per-IP бакет на ВСЕ читающие API-GET'ы: раньше часть
+                # путей (catalog-*, auth/session, auth/devices) обходила его,
+                # и флудер мог жечь CPU/БД в обход лимита. /api/status держит
+                # свой мягкий лимит (60/мин), /api/health оставляем мониторингу.
+                # Вызывается ровно один раз на запрос: бакет списывается при
+                # каждой проверке, двойной вызов считался бы за два запроса.
+                if path not in ("/api/status", "/api/health"):
+                    if self.api_rate_limited(): return
                 from urllib.parse import parse_qs
                 query = parse_qs(urlparse(self.path).query)
                 req_subject = query.get("subject", [None])[0]
                 # Read-only срезы каталога не заводят аккаунт: каждая такая
-                # выдача раньше писала строку в users (спам-аккаунты раздувают
-                # БД, а rows без активности висят навсегда).
+                # выдача когда-то писала строку в users (спам-аккаунты раздувают
+                # БД, а rows без активности висят навсегда). Сейчас не заводит
+                # уже ни один GET — строка появляется только после онбординга
+                # (POST /api/profile/claim), регистрации или входа администратора.
+                # Обходить user_for() здесь всё равно нельзя: он больше ничего не
+                # создаёт, и это свойство не должно снова потеряться.
                 if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn, req_subject)); return
                 if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn, req_subject)); return
                 # Публичный срез для страницы /status: аккаунт не заводится,
@@ -7411,13 +7714,14 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "Сервис временно недоступен. Попробуй ещё раз.",
                                         "ref": rid}, 503)
                     return
-                if path in ("/api/bootstrap", "/api/bootstrap-lite", "/api/subjects"):
-                    if self.api_rate_limited(): return
                 user_id, token = user_for(conn, self)
                 if path == "/api/subjects":
                     if self.reject_if_blocked(conn, user_id):
                         return
-                    self.send_json({"subjects": subjects_payload(), "current": current_subject_for(conn, user_id)}, token=token); return
+                    # Гостя до онбординга current_subject не хранится (строки
+                    # нет) — отвечаем дефолтом, предмет он ещё выбирает.
+                    current = current_subject_for(conn, user_id) if user_id is not None else resolve_subject(req_subject)
+                    self.send_json({"subjects": subjects_payload(), "current": current}, token=token); return
                 # Каталог и состояние всегда одного предмета: без ?subject -
                 # current_subject пользователя (переживает перезагрузку),
                 # с ?subject - явно запрошенный. Разводить их нельзя: иначе
@@ -7427,7 +7731,6 @@ class Handler(BaseHTTPRequestHandler):
                     # текст задания 27. Публичный учебный материал: позиции
                     # автора и разбора в нём нет, это ответ, который ученик
                     # формулирует сам. Отдаём всем, кто открыл предмет.
-                    if self.api_rate_limited(): return
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     text_id = (query.get("id", [None])[0] or "").strip()
                     if not text_id:
@@ -7440,7 +7743,11 @@ class Handler(BaseHTTPRequestHandler):
                     # GET /api/essays?subject=&taskId= — последний submission
                     # для повторного открытия готового результата (перезагрузка,
                     # возврат в практику). Только свои строки текущего юзера.
-                    if self.api_rate_limited(): return
+                    # ?statuses=1 — наоборот, карта «какие сочинения уже есть»
+                    # сразу по всем заданиям предмета: навигации практики она
+                    # нужна целиком, по одному заданию её не собрать
+                    # (см. essay_status_map).
+                    if not self.require_user(user_id): return
                     if self.reject_if_blocked(conn, user_id):
                         return
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
@@ -7450,8 +7757,14 @@ class Handler(BaseHTTPRequestHandler):
                         sid = int((query.get("sid", [None])[0] or "").strip() or 0)
                     except (TypeError, ValueError):
                         sid = 0
+                    if (query.get("statuses", [None])[0] or "").strip() in ("1", "true"):
+                        if task_id or client_id or sid > 0:
+                            self.send_json({"error": "statuses не принимает sid, taskId или clientId"}, 400, token=token); return
+                        self.send_json({"ok": True, "subject": eff,
+                                        "statuses": essay_status_map(conn, user_id, eff)}, token=token)
+                        return
                     if not task_id and not client_id and sid <= 0:
-                        self.send_json({"error": "Нужен sid, taskId или clientId"}, 400, token=token); return
+                        self.send_json({"error": "Нужен sid, taskId, clientId или statuses=1"}, 400, token=token); return
                     if sid > 0 and not is_known_subject(req_subject):
                         # /essay/<sid>: предмет из пути не приходит — ищем по
                         # всем своим предметам, чужое всё равно не найдётся.
@@ -7472,6 +7785,17 @@ class Handler(BaseHTTPRequestHandler):
                     # admin_sessions-проверку, что и require_admin. Никаких
                     # admin-данных в bootstrap нет: inbox грузится отдельным
                     # защищённым запросом и только для администратора.
+                    if user_id is None:
+                        # Гость до онбординга: каталог и пустое состояние
+                        # показываем (без них не нарисовать ни главную, ни
+                        # экран онбординга), но профиля у него ещё нет —
+                        # поэтому accountId пустой и никакой cookie не ставится.
+                        # Строка в users появится только после заявки
+                        # /api/profile/claim, то есть после пройденного онбординга.
+                        self.send_json({"catalog": catalog, "state": pending_state(conn, eff),
+                                        "accountId": None, "auth": {"registered": False, "email": None},
+                                        "isAdmin": False, "guestPending": True})
+                        return
                     self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id),
                                     "auth": auth_state_payload(conn, user_id),
                                     "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))}, token=token); return
@@ -7586,10 +7910,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        # Неизвестный PATCH — тихий 404 независимо от того, кто его прислал.
+        # Проверка пути идёт ДО гостевого отказа: «эндпоинта нет» и «профиля
+        # нет» — разные ответы, и подменять один другим нельзя.
+        if not (path.startswith("/api/progress/") or path.startswith("/api/errors/")
+                or path in ("/api/state-domains", "/api/settings")):
+            self.send_json({"error": "Not found"}, 404)
+            return
         if self.api_rate_limited(): return
         conn = connect()
         try:
             user_id, token = user_for(conn, self)
+            # PATCH — это запись (прогресс, домены, настройки профиля), а гостю
+            # без профиля записывать некуда: 401 GUEST_PENDING вместо тихой
+            # пустой записи и, главное, вместо заведения пользователя.
+            if not self.require_user(user_id): return
             if self.reject_if_blocked(conn, user_id):
                 return
             payload = self.read_json()
@@ -7691,6 +8026,9 @@ class Handler(BaseHTTPRequestHandler):
             # могли терять чужую историю. Клиент использует доменные endpoints:
             # events/*, progress/*, errors/*, settings и state-domains.
             self.send_json({"error": "Full state snapshots are retired; use domain endpoints"}, 410); return
+        #do_PUT без catch-all: любой неузнанный PUT просто уходил из функции
+        # без ответа, и клиент висел до таймаута вместо честного 404.
+        self.send_json({"error": "Not found"}, 404)
 
     def do_DELETE(self):
         path = urlparse(self.path).path
@@ -7705,6 +8043,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/auth/devices/"):
             # DELETE /api/auth/devices/<id> — отзыв одной сессии аккаунта.
+            if self.api_rate_limited(): return
             session_id = path.rsplit("/", 1)[-1]
             conn = connect()
             try:
@@ -7723,9 +8062,13 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
+        if self.api_rate_limited(): return
         conn = connect()
         try:
             user_id, token = user_for(conn, self)
+            # Сброс профиля удаляет строку пользователя. У гостя до онбординга
+            # её нет — удалять нечего, и это тоже не повод её завести.
+            if not self.require_user(user_id): return
             if self.reject_if_blocked(conn, user_id):
                 return
             conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()

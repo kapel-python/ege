@@ -877,19 +877,29 @@ const ApiClient = {
       await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
     }
     if (!response) throw lastError || new Error("Сервер недоступен");
-    const payload = await response.json().catch(() => ({}));
+    const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      const error = new Error(payload.error || `API ${response.status}`);
+      const data = payload || {};
+      const error = new Error(data.error || `API ${response.status}`);
       error.status = response.status;
-      error.payload = payload;
+      error.payload = data;
       // Blocked account: distinct machine-readable code so the UI can tell a
       // ban apart from 401/403/expiry. Broadcast globally — an in-app ban can
       // arrive on ANY authenticated request, not just bootstrap.
-      if (response.status === 403 && payload && (payload.code === "ACCOUNT_BLOCKED" || payload.blocked === true)) {
+      if (response.status === 403 && (data.code === "ACCOUNT_BLOCKED" || data.blocked === true)) {
         error.code = "ACCOUNT_BLOCKED";
-        try { window.__egeBlocked = payload; } catch (_) {}
-        try { window.dispatchEvent(new CustomEvent("ege:account-blocked", { detail: payload })); } catch (_) {}
+        try { window.__egeBlocked = data; } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent("ege:account-blocked", { detail: data })); } catch (_) {}
       }
+      throw error;
+    }
+    // 2xx с битым/пустым телом — не «пустой успех»: все /api/* отвечают JSON,
+    // поэтому нераспарсенный ответ означает обрыв/вмешательство прокси. Тихая
+    // подмена на {} превращала это в «успешное пустое состояние» в UI.
+    if (payload === null) {
+      const error = new Error(`API ${response.status}: некорректный ответ сервера`);
+      error.status = response.status;
+      error.payload = {};
       throw error;
     }
     // A successful response from a block-enforcing endpoint proves the account
