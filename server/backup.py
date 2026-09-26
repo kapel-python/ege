@@ -104,6 +104,30 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _unlink_quiet(path: Path) -> None:
+    """Удалить файл, не поднимая исключение.
+
+    Вызывается в finally-блоках: там уже разбирают неудачу, и вторая ошибка
+    поверх первой (файл занят/нет прав) ничего улучшить не может.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _sidecars(db: Path) -> tuple:
+    """Хвосты SQLite рядом с файлом БД: WAL, shm и журнал.
+
+    WAL-хвосты удаляются не просто «на всякий случай», а потому что SQLite
+    создаёт их даже для `mode=ro`-коннекта: проверка распакованного бэкапа
+    честно проходит quick_check и всё равно оставляет -wal/-shm в каталоге.
+    Удалить только .verify.<pid>.sqlite3 — значит оставить мусор навсегда:
+    _prune ищет *.sqlite3.gz и такой мусор не видит.
+    """
+    return tuple(db.with_name(db.name + suffix) for suffix in ("-wal", "-shm", "-journal"))
+
+
 def _unique_dst(directory: Path, prefix: str) -> Path:
     """Путь вида prefix-<ts>.sqlite3.gz; при коллизии в одну секунду — -2, -3."""
     base = f"{prefix}-{_stamp()}"
@@ -179,11 +203,8 @@ def sqlite_backup_into(src: Path, dst_gz: Path) -> None:
             shutil.copyfileobj(fin, fout, 1024 * 1024)
         os.replace(tmp_gz, dst_gz)
     finally:
-        for tmp in (tmp_db, tmp_gz):
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+        for tmp in (tmp_db, tmp_gz, *_sidecars(tmp_db)):
+            _unlink_quiet(tmp)
 
 
 def verify_backup(path_gz: Path) -> bool:
@@ -201,10 +222,8 @@ def verify_backup(path_gz: Path) -> bool:
     except (OSError, sqlite3.Error, EOFError):
         return False
     finally:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+        for leftover in (tmp, *_sidecars(tmp)):
+            _unlink_quiet(leftover)
 
 
 def _prune(directory: Path, keep: int, max_age_sec: float | None = None) -> None:
@@ -228,10 +247,56 @@ def _prune(directory: Path, keep: int, max_age_sec: float | None = None) -> None
             except OSError:
                 continue
     for path in doomed:
+        _unlink_quiet(path)
+
+
+TEMP_PREFIXES = ("verify.", "restore.", "manifest.")
+TEMP_SUFFIXES = (".partial", ".tmp", "-wal", "-shm", "-journal")
+
+
+def _is_temp_name(name: str) -> bool:
+    """True для временных файлов модуля.
+
+    Обязательное условие — ведущая точка. Рядом с живой БД лежат
+    ege.sqlite3-wal/-shm, и их нельзя трогать никогда; все временные файлы
+    здесь (`.verify.<pid>.sqlite3`, `.{snap}.gz.<pid>.partial`,
+    `.manifest.<pid>.tmp`, `.restore.<pid>.sqlite3`) точечные.
+    """
+    if not name.startswith("."):
+        return False
+    base = name.lstrip(".")
+    return (base.startswith(TEMP_PREFIXES)
+            or base.endswith(TEMP_SUFFIXES))
+
+
+def sweep_temp_files(max_age_sec: float = 3600.0) -> int:
+    """Убрать осиротевшие временные файлы. Возвращает число удалённых.
+
+    Даже с уборкой хвостов в verify_backup мусор возможен: процесс убили
+    между созданием файла и unlink, а каталог бэкапов пережил рестарт.
+    _prune их не видит (ищет *.sqlite3.gz), поэтому чистим отдельно — и при
+    старте, и на каждом тике. Возрастная проверка не даёт снести временный
+    файл живой проверки: наш собственный только что создан и под защитой.
+    """
+    directories = {backup_dir(), minutely_dir(), full_dir(), db_path().parent}
+    cutoff = time.time() - max_age_sec
+    removed = 0
+    for directory in directories:
         try:
-            path.unlink(missing_ok=True)
+            entries = list(directory.iterdir())
         except OSError:
-            pass
+            continue
+        for entry in entries:
+            if not _is_temp_name(entry.name):
+                continue
+            try:
+                if entry.stat().st_mtime > cutoff:
+                    continue
+                entry.unlink()
+            except OSError:
+                continue
+            removed += 1
+    return removed
 
 
 def full_backup(reason: str = "scheduled") -> Path | None:
@@ -364,17 +429,21 @@ def _install_snapshot(path_gz: Path, dest: Path) -> None:
     os.replace(tmp, dest)
     # Хвосты WAL/журнала от битого файла не должны пережить восстановление:
     # SQLite иначе попытается накатить чужой WAL поверх здорового снапшота.
-    for suffix in ("-wal", "-shm", "-journal"):
-        try:
-            dest.with_name(dest.name + suffix).unlink(missing_ok=True)
-        except OSError:
-            pass
+    for leftover in _sidecars(dest):
+        _unlink_quiet(leftover)
 
 
 def ensure_db_healthy() -> str:
     """Проверка/восстановление БД на старте. Возвращает короткий статус."""
     if disabled():
         return "backups-disabled"
+    # До любой работы: каталог бэкапов мог остаться с мусором от прошлого
+    # процесса, удалённого посреди проверки.
+    try:
+        sweep_temp_files()
+    except OSError as exc:
+        print(f"EGE CORE recovery: temp sweep failed ({exc})",
+              file=sys.stderr, flush=True)
     target = db_path()
     try:
         state = db_integrity(target)
@@ -428,6 +497,23 @@ def ensure_db_healthy() -> str:
         return f"error: {exc}"
 
 
+def count_temp_files() -> int:
+    """Сколько точечных временных файлов сейчас лежит в каталогах бэкапов.
+
+    Только чтение (без stat по каждому файлу) — /api/health зовёт это на
+    каждый опрос. Ненулевое значение означает, что уборка отстала: sweep
+    срабатывает раз в минуту, поэтому 1–2 файла нормальны, десятки — нет.
+    """
+    total = 0
+    for directory in {backup_dir(), minutely_dir(), full_dir(), db_path().parent}:
+        try:
+            total += sum(1 for entry in directory.iterdir()
+                         if entry.name.startswith(".") and _is_temp_name(entry.name))
+        except OSError:
+            continue
+    return total
+
+
 def backup_status() -> dict:
     """Лёгкий статус для /api/health (только manifest + размер файла)."""
     manifest = read_manifest()
@@ -440,7 +526,8 @@ def backup_status() -> dict:
             "lastMinutely": manifest.get("last_minutely"),
             "lastMinutelyAt": manifest.get("last_minutely_at"),
             "restoredFrom": manifest.get("restored_from"),
-            "dbSizeBytes": size}
+            "dbSizeBytes": size,
+            "tempFiles": count_temp_files()}
 
 
 def tick_once() -> None:
@@ -449,6 +536,12 @@ def tick_once() -> None:
     manifest = read_manifest()
     if _full_due(manifest.get("last_full_at")):
         full_backup("scheduled")
+    # Мусор от убитых проверок копится незаметно: чистим на каждом тике,
+    # иначе каталог растёт лишними файлами до следующего рестарта.
+    try:
+        sweep_temp_files()
+    except OSError as exc:
+        print(f"EGE CORE backup: temp sweep failed: {exc}", file=sys.stderr, flush=True)
 
 
 def start_loop(stop: threading.Event) -> threading.Thread:
