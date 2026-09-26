@@ -3900,46 +3900,38 @@ function sessionTaskWritten(taskId) {
   return !!(S.results || []).some((r) => r && r.taskId === taskId && r.essay);
 }
 
-/* Ближайшее написанное сочинение впереди (индекс в taskIds) или -1. */
-function sessionNextWrittenIdx(from) {
-  const S = Session.cur;
-  if (!S) return -1;
-  for (let i = Math.max(from, 0); i < S.taskIds.length; i++) {
-    if (sessionTaskWritten(S.taskIds[i])) return i;
-  }
-  return -1;
-}
-
-/* Куда ведёт основная кнопка. Обычные задания — строго на следующее.
-   Сочинение — на ближайшее НАПИСАННОЕ впереди («Далее»), а если такого нет,
-   то на следующее ненаписанное («Написать ещё раз» → чистый бланк). */
+/* Куда ведёт основная кнопка. Всегда строго на следующее задание: у сочинений
+   «Далее» и «Написать ещё раз» — не разные адреса, а РАЗНЫЕ ПОДПИСИ одного и
+   того же шага (в sessionEssayNextLabel), поэтому прыгать через ненаписанные
+   задания больше нечем и незачем. */
 function sessionNextTarget() {
   const S = Session.cur;
-  const t = S ? Session.task() : null;
-  const next = S ? S.idx + 1 : 0;
-  if (t && isLongTextTask(t)) {
-    const written = sessionNextWrittenIdx(next);
-    if (written >= 0) return written;
-  }
-  return next;
+  return S ? S.idx + 1 : 0;
 }
 
 /* Подпись основной кнопки сессии. У обычных заданий всё как было: «Далее →»,
-   на последнем — «Завершить». У сочинений «Далее» появляется ТОЛЬКО когда
-   впереди есть сочинение, которое ученик уже написал: тогда кнопка ведёт
-   вперёд по написанным работам (после «Назад» — туда, где он уже работал).
-   Если написанного впереди нет, дальше идёт ещё не написанное сочинение —
-   кнопка называется «Написать ещё раз» и открывает чистый бланк. Раньше эта
-   подпись стояла, но ничего не переписывала: sessionNext() всегда вёл на
-   следующее задание, поэтому возвращала к уже проверенному сочинению. */
+   на последнем — «Завершить». У сочинений подпись говорит ровно о том, что
+   ждёт на СЛЕДУЮЩЕМ задании, и больше ничего не обещает:
+     • следующее уже написано → «Далее →» (есть что посмотреть);
+     • следующее чистое, а текущее уже написано → «Написать ещё раз»;
+     • следующее чистое и текущее мы пишем сами → кнопки нет вовсе, иначе
+       рядом с «Отправить сочинение» висела бы вторая, ничего не делающая;
+     • следующего задания нет → «Завершить», иначе тренировку нечем закрыть. */
 function sessionNextLabel() {
   const S = Session.cur;
   const t = S ? Session.task() : null;
-  if (t && isLongTextTask(t)) {
-    if (sessionNextWrittenIdx(S.idx + 1) >= 0) return "Далее →";
-    return sessionHasNext() ? "Написать ещё раз" : "Завершить";
-  }
+  if (t && isLongTextTask(t)) return sessionEssayNextLabel();
   return sessionHasNext() ? "Далее →" : "Завершить";
+}
+
+function sessionEssayNextLabel() {
+  const S = Session.cur;
+  if (!S) return "";
+  if (!sessionHasNext()) return "Завершить";
+  const nextId = S.taskIds[S.idx + 1];
+  if (sessionTaskWritten(nextId)) return "Далее →";
+  if (sessionTaskWritten(S.taskIds[S.idx])) return "Написать ещё раз";
+  return "";
 }
 
 /* Ряд «вперёд» под результатом — тот же, что у обычных заданий. «Назад» здесь
@@ -3949,17 +3941,27 @@ function sessionNextHtml() {
 }
 
 /* Навигация у сочинения — постоянная строка в конце карточки, а не часть блока
-   результата: «Назад» и «Далее» / «Написать ещё раз» стоят на одном месте в
-   КАЖДОМ состоянии — и когда отчёт готов, и когда сочинение ещё не написано.
-   Раньше ряд жил внутри блока отчёта, поэтому на ненаписанном сочинении его не
-   было вовсе: кнопка «Назад», которой ученик только что пользовался, исчезала,
-   и до уже написанных работ дальше достучаться было нечем. Шапка задания у
-   сочинения «Назад» не дублирует (sessionPrevButtonHtml). */
+   результата: «Назад» и кнопка вперёд стоят на одном месте в КАЖДОМ состоянии
+   — и когда отчёт готов, и когда сочинение ещё не написано. Раньше ряд жил
+   внутри блока отчёта, поэтому на ненаписанном сочинении его не было вовсе:
+   кнопка «Назад», которой ученик только что пользовался, исчезала, и до уже
+   написанных работ дальше достучаться было нечем. Шапка задания у сочинения
+   «Назад» не дублирует (sessionPrevButtonHtml).
+
+   Ряда нет, если показать нечего: на первом ненаписанном задании возвращаться
+   некуда, а кнопки вперёд sessionEssayNextLabel не дала — пустой ряд лишь
+   развёл бы «Назад» и «Далее» по краям пустой строки. */
 function sessionEssayNavHtml() {
   const back = sessionHasPrev()
     ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
-    : `<span></span>`;
-  return `<div class="session-nav">${back}<button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+    : "";
+  const forward = sessionNextLabel();
+  if (!back && !forward) return "";
+  const backCell = back || `<span></span>`;
+  const forwardCell = forward
+    ? `<button class="btn btn--primary" onclick="sessionNext()">${esc(forward)}</button>`
+    : "";
+  return `<div class="session-nav">${backCell}${forwardCell}</div>`;
 }
 
 /* Ряд навигации сочинения — последняя строка карточки, под блоком результата,

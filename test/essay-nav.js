@@ -2,13 +2,18 @@
    Реальные js/data.js + js/state.js + js/app.js в браузерной VM.
 
    Проверяется ровно то, что ломалось:
-   1. Подпись «Далее →» / «Написать ещё раз» / «Завершить» у сочинения.
-   2. Куда ведёт кнопка (ближайшее написанное вперёд, иначе следующее).
-   3. Ряд навигации («Назад» + вперёд) есть у КАЖДОГО сочинения — и под
-      готовым отчётом, и на ненаписанном, где раньше его не было вовсе.
+   1. Подпись говорит о СОСЕДНЕМ задании и ничего больше:
+        следующее написано                  → «Далее →»
+        следующее чистое, текущее написано   → «Написать ещё раз»
+        следующее чистое, текущее пишем сами → кнопки нет вовсе
+        следующего задания нет                → «Завершить»
+   2. Кнопка ведёт строго на следующее задание (никаких прыжков через
+      ненаписанные) — и подпись всегда описывает этот самый шаг.
+   3. Ряд «Назад» есть у КАЖДОГО сочинения, кроме первого, даже когда
+      кнопки вперёд нет; на первом ненаписанном ряда нет вовсе.
    4. Карта написанных работ приходит с сервера целиком: на живом входе в
       практику клиент знал только то, до чего дошёл в текущей сессии, и
-      подпись становилась «Написать ещё раз» даже при готовых работах дальше.
+      подпись кнопки получалась неверной.
    5. Гость/офлайн не ломают навигацию: остаётся то, что отправлено в сессии.
 */
 const fs = require("fs");
@@ -97,8 +102,9 @@ const memoryStorage = () => {
 };
 const noop = () => {};
 
-/* Уже написанные работы ученика: как у живого аккаунта, который начинал
-   практику не с нуля. Готовы 1, 2, 3, 5 и 6; 4, 7 и 8 не написаны. */
+/* Уже написанные работы: как у живого аккаунта, который начинал практику не
+   с нуля. Готовы 1, 2, 3, 5 и 6; 4, 7 и 8 не написаны — из них 4 и 7 стоят
+   в середине списка, поэтому видно все три состояния кнопки подряд. */
 const WRITTEN = {
   re27_1: { status: "ready", submissionId: 8, clientId: "c-1", wordCount: 332 },
   re27_2: { status: "ready", submissionId: 10, clientId: "c-2", wordCount: 340 },
@@ -118,8 +124,9 @@ const readySubmission = (taskId) => ({
   result: { total_score: 16, max_score: 22, criteria: [] },
 });
 
-/* guest: true — сервер отвечает 401 (профиля нет), и карты не будет. */
-function makeFetch({ guest = false, fail = false } = {}) {
+/* guest: сервер отвечает 401 (профиля нет) и карты не будет.
+   noSubmissions: точечный запрос тоже пуст — честный чистый аккаунт. */
+function makeFetch({ guest = false, fail = false, statuses = WRITTEN, noSubmissions = false } = {}) {
   const calls = [];
   const json = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
   return {
@@ -138,9 +145,11 @@ function makeFetch({ guest = false, fail = false } = {}) {
       if (path === "/api/essays") {
         if (guest) return json({ error: "Нужен профиль" }, 401);
         if (fail) throw new Error("offline");
-        if (/[?&]statuses=1/.test(u)) return json({ ok: true, subject: "russian", statuses: WRITTEN });
+        if (/[?&]statuses=1/.test(u)) return json({ ok: true, subject: "russian", statuses });
         const taskId = (/[?&]taskId=([^&]+)/.exec(u) || [])[1];
-        if (taskId && WRITTEN[taskId]) return json({ ok: true, subject: "russian", submission: readySubmission(decodeURIComponent(taskId)) });
+        if (!noSubmissions && taskId && WRITTEN[taskId]) {
+          return json({ ok: true, subject: "russian", submission: readySubmission(decodeURIComponent(taskId)) });
+        }
         return json({ error: "Сочинение не найдено" }, 404);
       }
       throw new Error("essay-nav test must not perform network I/O: " + u);
@@ -217,8 +226,7 @@ function buildSandbox(options) {
   return { sandbox, net };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
-const flush = async (times = 6) => { for (let i = 0; i < times; i++) await settle(); };
+const flush = async (times = 6) => { for (let i = 0; i < times; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 /* Состояние экрана задания: что реально нарисовано. */
 const screenOf = (sandbox) => vm.runInContext(`
@@ -232,13 +240,18 @@ const screenOf = (sandbox) => vm.runInContext(`
       idx: Session.cur.idx,
       row: row.trim().length > 0,
       label,
+      labelFn: sessionNextLabel(),
       back: row.includes("sessionPrev()"),
       headBack: head.includes("id=\\"sessionPrevBtn\\""),
       written: Object.keys(Session.cur.essayWrittenByTask || {}).sort(),
       nextTarget: sessionNextTarget(),
-      labelFn: sessionNextLabel(),
+      hasEditor: !!document.getElementById("essayInput"),
     };
   })()
+`, sandbox);
+
+const goto = (sandbox, idx) => vm.runInContext(`
+  Session.cur.idx = ${idx}; renderTask(document.getElementById("screen"));
 `, sandbox);
 
 async function main() {
@@ -249,115 +262,152 @@ async function main() {
     await flush();
 
     const first = screenOf(sandbox);
-    check("1-е задание: подпись «Далее →» (впереди есть написанные работы)",
-      first.labelFn === "Далее →" && first.label === "Далее →", `label=${first.label} labelFn=${first.labelFn}`);
-    check("1-е задание: «Далее» ведёт на ближайшее написанное (2-е)",
-      first.nextTarget === 1, `target=${first.nextTarget}`);
     check("карта написанных работ пришла с сервера целиком",
       first.written.join(",") === "re27_1,re27_2,re27_3,re27_5,re27_6", first.written.join(","));
-    check("1-е задание: «Назад» не показан (возвращаться некуда)",
-      first.back === false && first.headBack === false, `row=${first.back} head=${first.headBack}`);
 
-    // Шаг вперёд: 2-е задание (тоже готовое) — ряд на месте, «Назад» есть.
+    /* Ожидаемая подпись на каждом задании: говорит о СЛЕДУЮЩЕМ. */
+    const expected = [
+      { idx: 0, task: "re27_1", label: "Далее →", back: false, target: 1 },
+      { idx: 1, task: "re27_2", label: "Далее →", back: true, target: 2 },
+      { idx: 2, task: "re27_3", label: "Написать ещё раз", back: true, target: 3 },
+      { idx: 3, task: "re27_4", label: "Далее →", back: true, target: 4 },
+      { idx: 4, task: "re27_5", label: "Далее →", back: true, target: 5 },
+      { idx: 5, task: "re27_6", label: "Написать ещё раз", back: true, target: 6 },
+      { idx: 6, task: "re27_7", label: "", back: true, target: 7 },
+      { idx: 7, task: "re27_8", label: "Завершить", back: true, target: 8 },
+    ];
+    for (const step of expected) {
+      goto(sandbox, step.idx);
+      await flush();
+      const st = screenOf(sandbox);
+      const where = `${step.idx + 1}/8 ${step.task}${sessionNote(step)}`;
+      check(`${where}: подпись «${step.label || "нет кнопки"}»`,
+        st.label === step.label && st.labelFn === step.label, `label=${st.label}`);
+      check(`${where}: «Назад» ${step.back ? "есть" : "нет"}`,
+        st.back === step.back, `back=${st.back}`);
+      check(`${where}: кнопка ведёт строго на следующее`,
+        st.nextTarget === step.target, `target=${st.nextTarget}`);
+      check(`${where}: «Назад» в шапке не дублируется`, st.headBack === false);
+    }
+
+    /* Ряда нет только там, где показать нечего. */
+    goto(sandbox, 6); // 7/8 не написано, 8/8 не написано: вперёд некуда
+    await flush();
+    const deadEnd = screenOf(sandbox);
+    check("на «тупике» (7/8) кнопки вперёд нет, но «Назад» остаётся",
+      deadEnd.label === "" && deadEnd.back === true && deadEnd.row === true,
+      `label=${deadEnd.label} back=${deadEnd.back} row=${deadEnd.row}`);
+    check("на «тупике» редактор сочинения на месте", deadEnd.hasEditor === true);
+
+    goto(sandbox, 0);
+    await flush();
+    check("на первом задании «Назад» не показан (возвращаться некуда)",
+      screenOf(sandbox).back === false);
+
+    /* Шаг реальной кнопкой туда, где её раньше не было. */
+    goto(sandbox, 3); // 4/8 не написано, дальше 5/8 готово
+    await flush();
     vm.runInContext(`sessionNext()`, sandbox);
     await flush();
-    const second = screenOf(sandbox);
-    check("2-е задание: ряд навигации отрисован", second.row === true);
-    check("2-е задание: «Назад» есть в ряду", second.back === true);
-    check("2-е задание: «Назад» в шапке не дублируется", second.headBack === false);
-    check("2-е задание: подпись «Далее →»", second.label === "Далее →", second.label);
+    check("с ненаписанного 4-го «Далее» уводит на готовое 5-е",
+      screenOf(sandbox).task === "re27_5", screenOf(sandbox).task);
 
-    vm.runInContext(`sessionNext()`, sandbox); // 3-е
+    goto(sandbox, 2); // 3/8 готово, 4/8 чистое
     await flush();
-    const third = screenOf(sandbox);
-    check("3-е задание: «Далее» через ненаписанное 4-е уходит на 5-е",
-      third.idx === 2 && third.nextTarget === 4, `idx=${third.idx} target=${third.nextTarget}`);
-    vm.runInContext(`sessionNext()`, sandbox); // 5-е
+    vm.runInContext(`sessionNext()`, sandbox);
     await flush();
-    const fifth = screenOf(sandbox);
-    check("«Далее» с 3-го приводит на готовое 5-е задание", fifth.idx === 4 && fifth.task === "re27_5",
-      `${fifth.idx}/${fifth.task}`);
-    check("5-е задание: подпись «Далее →»", fifth.label === "Далее →", fifth.label);
+    check("«Написать ещё раз» с 3-го открывает чистый бланк 4-го",
+      screenOf(sandbox).task === "re27_4" && screenOf(sandbox).label === "Далее →",
+      `${screenOf(sandbox).task}/${screenOf(sandbox).label}`);
 
-    vm.runInContext(`sessionNext()`, sandbox); // 6-е — последнее написанное
+    /* «Назад» работает и там, где кнопки вперёд нет. */
+    goto(sandbox, 6);
     await flush();
-    const sixth = screenOf(sandbox);
-    check("6-е задание (дальше написанного нет): «Написать ещё раз»",
-      sixth.label === "Написать ещё раз", sixth.label);
-    check("«Написать ещё раз» ведёт на следующее ненаписанное (7-е)",
-      sixth.nextTarget === 6, `target=${sixth.nextTarget}`);
-
-    vm.runInContext(`sessionNext()`, sandbox); // 7-е — НЕ написано
-    await flush();
-    const seventh = screenOf(sandbox);
-    check("7-е задание (сочинение не написано): ряд навигации есть", seventh.row === true);
-    check("7-е задание: «Назад» есть — кнопка не исчезает на ненаписанном",
-      seventh.back === true, `row=${seventh.row} back=${seventh.back}`);
-    check("7-е задание: видно и «Написать ещё раз»", seventh.label === "Написать ещё раз", seventh.label);
-    check("на ненаписанном задании редактор на месте",
-      vm.runInContext(`!!document.getElementById("essayInput")`, sandbox) === true);
-
     vm.runInContext(`sessionPrev()`, sandbox);
     await flush();
-    const backToSixth = screenOf(sandbox);
-    check("«Назад» с ненаписанного возвращает на 6-е задание",
-      backToSixth.idx === 5 && backToSixth.task === "re27_6", `${backToSixth.idx}/${backToSixth.task}`);
+    check("«Назад» с 7-го возвращает на 6-е", screenOf(sandbox).task === "re27_6",
+      screenOf(sandbox).task);
 
-    vm.runInContext(`Session.cur.idx = 7; renderTask(document.getElementById("screen"))`, sandbox);
-    await flush();
-    const last = screenOf(sandbox);
-    check("последнее задание: «Завершить»", last.label === "Завершить", last.label);
     check("карта запрошена один раз за сессию",
       net.calls.filter((u) => /[?&]statuses=1/.test(u)).length === 1,
       String(net.calls.filter((u) => /statuses=1/.test(u)).length));
   }
 
-  /* ---------- 2. Гость: 401 — навигация не ломается ---------- */
+  /* ---------- 2. Чистый аккаунт: писать нечего — кнопок нет ---------- */
+  {
+    const { sandbox } = buildSandbox({ statuses: {}, noSubmissions: true });
+    vm.runInContext(`renderTask(document.getElementById("screen"))`, sandbox);
+    await flush();
+    const first = screenOf(sandbox);
+    check("чистый аккаунт: на первом задании ряда нет вовсе",
+      first.row === false && first.label === "" && first.back === false,
+      `row=${first.row} label=${first.label}`);
+    check("чистый аккаунт: писать нечего — и написать нечего",
+      first.labelFn === "" && first.hasEditor === true, first.labelFn);
+    goto(sandbox, 1);
+    await flush();
+    const second = screenOf(sandbox);
+    check("чистый аккаунт: дальше ряд есть только из-за «Назад»",
+      second.row === true && second.back === true && second.label === "",
+      `back=${second.back} label=${second.label}`);
+    goto(sandbox, 7);
+    await flush();
+    check("чистый аккаунт: последнее задание закрывает тренировку",
+      screenOf(sandbox).label === "Завершить", screenOf(sandbox).label);
+  }
+
+  /* ---------- 3. Гость: 401 — навигация не ломается ---------- */
   {
     const { sandbox } = buildSandbox({ guest: true });
     vm.runInContext(`renderTask(document.getElementById("screen"))`, sandbox);
     await flush();
     const state = screenOf(sandbox);
-    check("гость: ряд навигации на месте", state.row === true && state.back === false);
-    check("гость: без карты подпись «Написать ещё раз» (писать ещё нечего дальше)",
-      state.label === "Написать ещё раз", state.label);
+    check("гость: экран отрисован, кнопок вперёд нет", state.row === false && state.label === "");
     check("гость: лишних запросов карты не повторяет бесконечно",
       state.written.length === 0, state.written.join(","));
   }
 
-  /* ---------- 3. Офлайн: исключение из fetch не ломает экран ---------- */
+  /* ---------- 4. Офлайн: исключение из fetch не ломает экран ---------- */
   {
     const { sandbox } = buildSandbox({ fail: true });
     vm.runInContext(`renderTask(document.getElementById("screen"))`, sandbox);
     await flush();
     const state = screenOf(sandbox);
-    check("офлайн: ряд навигации отрисован", state.row === true);
-    check("офлайн: подпись не сломана", state.label === "Написать ещё раз", state.label);
+    check("офлайн: подпись не сломана", state.labelFn === "" && state.hasEditor === true, state.labelFn);
   }
 
-  /* ---------- 4. Написанное в этой сессии попадает в карту без сервера ---------- */
+  /* ---------- 5. Написанное в этой сессии попадает в карту без сервера ---------- */
   {
     const { sandbox } = buildSandbox({ guest: true });
     vm.runInContext(`
       renderTask(document.getElementById("screen"));
-      essayMarkWritten("re27_8", { clientId: "live", wordCount: 300, status: "ready" });
+      essayMarkWritten("re27_2", { clientId: "live", wordCount: 300, status: "ready" });
       renderTask(document.getElementById("screen"));
     `, sandbox);
     await flush();
     const state = screenOf(sandbox);
     check("отправленное в сессии сочинение учитывается навигацией",
-      state.written.includes("re27_8"), state.written.join(","));
-    const withWrittenAhead = vm.runInContext(`
-      Session.cur.idx = 6; renderTask(document.getElementById("screen"));
+      state.written.includes("re27_2"), state.written.join(","));
+    check("написанное СЛЕДУЮЩЕЕ задание даёт «Далее →» (есть что посмотреть)",
+      state.labelFn === "Далее →", state.labelFn);
+    const next = vm.runInContext(`
+      Session.cur.idx = 1; renderTask(document.getElementById("screen"));
       ({ label: sessionNextLabel(), target: sessionNextTarget() })
     `, sandbox);
-    check("после отправки подпись впереди меняется на «Далее →»",
-      withWrittenAhead.label === "Далее →" && withWrittenAhead.target === 7,
-      JSON.stringify(withWrittenAhead));
+    check("на написанном задании с чистым следующим — «Написать ещё раз»",
+      next.label === "Написать ещё раз" && next.target === 2, JSON.stringify(next));
   }
 
   console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
   process.exit(failures ? 1 : 0);
+}
+
+/* Пояснение к ожиданию: что там с текущим и следующим заданием. */
+function sessionNote(step) {
+  const current = step.idx < 8 && ["re27_1", "re27_2", "re27_3", "re27_5", "re27_6"].includes(step.task);
+  const nextTask = ["re27_1", "re27_2", "re27_3", "re27_4", "re27_5", "re27_6", "re27_7", "re27_8"][step.idx + 1];
+  const next = nextTask ? ["re27_1", "re27_2", "re27_3", "re27_5", "re27_6"].includes(nextTask) : null;
+  return ` [текущее ${current ? "написано" : "чистое"}, следующее ${nextTask ? (next ? "готово" : "чистое") : "нет"}]`;
 }
 
 main();
