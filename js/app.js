@@ -5932,6 +5932,9 @@ function openDeviceInfo(id) {
           <div class="dlg-kv__row"><span>Тип</span><span>${esc(deviceTypeLabel(d.type))}</span></div>
           <div class="dlg-kv__row"><span>Последняя активность</span><span>${esc(formatDeviceTime(d.lastSeenAt))}</span></div>
           <div class="dlg-kv__row"><span>Подключено</span><span>${esc(formatDeviceTime(d.createdAt))}</span></div>
+          ${Number(d.sessions) > 1
+            ? `<div class="dlg-kv__row"><span>Сессий на устройстве</span><span>${esc(String(Number(d.sessions)))}</span></div>`
+            : ""}
         </div>
         <div class="dlg__actions">
           <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Закрыть</button>
@@ -5963,7 +5966,7 @@ function deviceModalAskConfirm(id) {
         <div class="dlg__text">
           ${isCurrent
             ? `Сессия «${esc(name)}» завершится — ты выйдешь из аккаунта здесь. Прогресс уже сохранён и останется доступен на других устройствах.`
-            : `Устройство <b>${esc(name)}</b> выйдет из аккаунта, для продолжения ему придётся войти заново. Твоя текущая сессия не прервётся.`}
+            : `Устройство <b>${esc(name)}</b> выйдет из аккаунта${Number(d.sessions) > 1 ? ` (${esc(String(Number(d.sessions)))} сессии)` : ""}, для продолжения ему придётся войти заново. Твоя текущая сессия не прервётся.`}
         </div>
         <div class="dlg__actions">
           <button class="btn btn--soft" type="button" onclick="openDeviceInfo(${Number(d.id)})">Отмена</button>

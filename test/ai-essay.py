@@ -735,7 +735,13 @@ def request(url: str, *, method: str = "GET", body: bytes | None = None,
     except HTTPError as error:
         response = error
     with response:
-        return response.status, dict(response.headers.items()), response.read()
+        # Повторяющиеся Set-Cookie схлопывать в dict нельзя: в ответе их может
+        # быть два (сессия + отпечаток устройства), а dict оставил бы последний,
+        # и тест потерял бы куку сессии. Берём первое вхождение — как Message.get.
+        collected: dict = {}
+        for name, value in response.headers.items():
+            collected.setdefault(name, value)
+        return response.status, collected, response.read()
 
 
 def request_json(url: str, **kwargs):

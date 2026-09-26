@@ -196,6 +196,12 @@ API_RATE_MAX = 300
 API_RATE_WINDOW_SEC = 60.0
 _api_hits: dict[str, list[float]] = {}
 _api_lock = threading.Lock()
+
+# Сколько живых сессий (вкладок/входов) одного устройства держим в базе.
+# Не режет ничего живого: верхняя граница на одно УСТРОЙСТВО, поэтому лишние
+# вкладки того же браузера не вытесняют соседние устройства. Ревизии хранятся
+# лениво и уходят вместе с сессией, которой принадлежат.
+DEVICE_SESSION_REVISIONS_MAX = 12
 MAX_CONCURRENT_REQUESTS = 64
 _REQUEST_SLOTS = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
 SOCKET_READ_TIMEOUT_SEC = 30.0
@@ -381,8 +387,10 @@ SERVER_STARTED_AT = dt.datetime.now(dt.timezone.utc)
 # same users.id. Login re-binds the browser session row to an existing
 # account; logout deletes that session row server-side and clears the cookie,
 # so a stale token afterwards resolves to a fresh guest, never to an account.
-# Sessions live in user_sessions (many per account, one per device), with a
-# server-side expiry; the cookie only ever carries an opaque random token.
+# Sessions live in user_sessions (many per account), with a server-side
+# expiry; the cookie only ever carries an opaque random token. A DEVICE is
+# a GROUP of those rows, not one row: a browser that logs in ten times is
+# still one entry in the profile (see the device fingerprint below).
 # ---------------------------------------------------------------------------
 AUTH_SESSION_DAYS = 365
 AUTH_SESSION_MAX_AGE = AUTH_SESSION_DAYS * 86400
@@ -398,6 +406,34 @@ _support_schema_lock = threading.Lock()
 _SUPPORT_SECRET_FALLBACK = token_hex(32)
 _support_secret_cache: dict[str, str] = {}
 _support_secret_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Отпечаток устройства
+#
+# «Устройство» в профиле — это не строка user_sessions, а ГРУППА её строк:
+# сколько вкладок открыто, сколько раз перезагрузили страницу и сколько раз
+# входили-выходили — это всё одна и та же строка куки ege_session, а значит и
+# одно устройство. Как только у человека появляется второй клиент (другой
+# браузер без куки, curl, встроенный вебвью), без общего признака он превращается
+# в лишнее устройство в списке.
+#
+# Общий признак — два независимых отпечатка, оба считаются от серверного
+# секрета и хранятся только как HMAC (сырые IP/UA в базе не появляются, и
+# псевдонимы уникальны в пределах одного аккаунта):
+#   * device_key — ege_device, случайная долгоживущая кука браузера: переживает
+#     перезагрузки, новые вкладки, logout+login и смену мобильного IP;
+#   * device_net — HMAC от сетевого адреса: ловит второй браузер/вебвью на той
+#     же машине, у которого куки ege_device ещё нет.
+# Сессии одного устройства группируются по любому общему отпечатку, поэтому
+# лишние устройства не появляются, а настоящие разные (разные сети) остаются.
+# ---------------------------------------------------------------------------
+DEVICE_COOKIE_NAME = "ege_device"
+DEVICE_KEY_LENGTH = 32
+_DEVICE_COOKIE_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+_DEVICE_SECRET_FALLBACK = token_hex(32)
+_device_secret_cache: dict[str, str] = {}
+_device_secret_lock = threading.Lock()
 
 
 def normalize_email(value) -> str | None:
@@ -476,6 +512,8 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
       expires_at INTEGER NOT NULL,
       device_name TEXT,
       device_type TEXT,
+      device_key TEXT,
+      device_net TEXT,
       last_seen_at INTEGER)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
     # Существующие БД: таблица создана старой версией без device-колонок.
@@ -486,6 +524,18 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE user_sessions ADD COLUMN device_type TEXT")
     if "last_seen_at" not in _us_cols:
         conn.execute("ALTER TABLE user_sessions ADD COLUMN last_seen_at INTEGER")
+    # Отпечатки устройства добавляем без backfill: IP старых сессий сервер уже
+    # не знает, а выдумывать его — значит склеить чужие устройства. Такие строки
+    # (NULL в обеих колонках) группируются по названию и дополняются отпечатками
+    # при первом же обращении этого браузера (см. session_row_for).
+    if "device_key" not in _us_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN device_key TEXT")
+    if "device_net" not in _us_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN device_net TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_device "
+                 "ON user_sessions(user_id, device_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_net "
+                 "ON user_sessions(user_id, device_net)")
     # UNIQUE допускает множество NULL: незарегистрированные гости не мешают.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     ensure_block_schema(conn)
@@ -538,7 +588,9 @@ def parse_device_info(user_agent: str | None) -> tuple[str, str]:
         return ("MacBook", "laptop")
     if "cros" in low or "chromebook" in low:
         return ("Chromebook", "laptop")
-    if "linux" in low:
+    # X11/ubuntu/freebsd — те же настольные Linux, что и «linux». Проверка после
+    # «cros», иначе Chrome OS (в его UA тоже есть X11) назвался бы Linux PC.
+    if "linux" in low or "x11" in low or "ubuntu" in low or "freebsd" in low:
         return ("Linux PC", "desktop")
     if "mobile" in low:
         return ("Смартфон", "phone")
@@ -557,17 +609,121 @@ def request_device_info(handler) -> tuple[str, str]:
     return parse_device_info(ua)
 
 
-def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[str, str] | None = None):
+def device_fingerprint_secret(conn: sqlite3.Connection) -> str:
+    """Стабильный секрет инсталляции для HMAC отпечатков устройства.
+
+    Отдельный от support-секрета: тот переопределяется переменной окружения в
+    тестах, а здесь секрет обязан пережить перезапуск, иначе все устройства
+    аккаунтов «разъедутся» и в профили вернётся мусор. Хранится в app_config,
+    наружу и в строки сессий не отдаётся — только производные HMAC.
+    """
+    db = _db_key(conn)
+    with _device_secret_lock:
+        cached = _device_secret_cache.get(db)
+        if cached:
+            return cached
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        row = conn.execute("SELECT value_json FROM app_config WHERE key='device_fingerprint_secret'").fetchone()
+        secret = json.loads(row["value_json"]) if row else None
+        if not isinstance(secret, str) or not secret:
+            secret = token_hex(32)
+            conn.execute("INSERT OR IGNORE INTO app_config(key, value_json) VALUES ('device_fingerprint_secret', ?)",
+                         (json.dumps(secret),))
+            conn.commit()
+            # Гонка двух процессов: выигравшую строку читаем обратно, иначе
+            # отпечатки устройств разъедутся до перезапуска.
+            row = conn.execute("SELECT value_json FROM app_config WHERE key='device_fingerprint_secret'").fetchone()
+            secret = json.loads(row["value_json"]) if row else secret
+        if not isinstance(secret, str) or not secret:
+            return _DEVICE_SECRET_FALLBACK
+    except (sqlite3.Error, ValueError, TypeError):
+        return _DEVICE_SECRET_FALLBACK
+    with _device_secret_lock:
+        _device_secret_cache[db] = secret
+    return secret
+
+
+def device_cookie_is_valid(raw) -> bool:
+    """Кука ege_device — только наш непрозрачный id, никакого мусора из заголовка."""
+    if not isinstance(raw, str):
+        return False
+    raw = raw.strip()
+    return 16 <= len(raw) <= 128 and not set(raw) - _DEVICE_COOKIE_CHARS
+
+
+def request_device_identity(conn: sqlite3.Connection, handler, user_id: int | None
+                            ) -> tuple[str | None, str | None]:
+    """(отпечаток куки, отпечаток сети) текущего клиента для одного аккаунта.
+
+    Оба значения — HMAC от серверного секрета, account_id внутри: сырые IP и
+    кука в базу не пишутся, а один и тот же отпечаток в разных аккаунтах
+    не связывает человека между профилями. Без куки (или с битой кукой)
+    отпечаток куки равен None — тогда устройство опознаётся по сети.
+    """
+    if user_id is None:
+        return None, None
+    try:
+        secret = device_fingerprint_secret(conn).encode("utf-8")
+        raw = cookie_value(handler, DEVICE_COOKIE_NAME)
+        raw = raw.strip() if isinstance(raw, str) else ""
+        key = None
+        if device_cookie_is_valid(raw):
+            key = hmac.new(secret, f"device-key:{int(user_id)}:{raw}".encode("utf-8"),
+                           hashlib.sha256).hexdigest()[:DEVICE_KEY_LENGTH]
+        net = hmac.new(secret, f"device-net:{int(user_id)}:{support_client_ip(handler)}".encode("utf-8"),
+                       hashlib.sha256).hexdigest()[:DEVICE_KEY_LENGTH]
+        return key, net
+    except (sqlite3.Error, ValueError, TypeError):
+        return None, None
+
+
+def adopt_legacy_device_rows(conn: sqlite3.Connection, user_id: int, name, dtype, key, net) -> int:
+    """Привязать к опознанному устройству его старые сессии без отпечатков.
+
+    Так рождается вторая строка в «Устройствах»: тот же браузер вошёл до
+    появления отпечатков (или зашёл снова, потеряв куку сессии), а его прошлая
+    строка осталась жить. Как только устройство опознано, все его прежние строки
+    с тем же названием и типом получают те же отпечатки и снова становятся
+    одним устройством. Ничего не удаляется: живая сессия не исчезает без воли
+    человека, лишнее убирается вручную — отзывом устройства.
+
+    Возвращает число привязанных строк (0 — обновлять нечего)."""
+    if not key:
+        return 0
+    try:
+        cur = conn.execute(
+            "UPDATE user_sessions SET device_key=?, device_net=COALESCE(device_net, ?) "
+            "WHERE user_id=? AND device_key IS NULL AND device_net IS NULL "
+            "AND COALESCE(device_name, 'Браузер')=COALESCE(?, 'Браузер') "
+            "AND COALESCE(device_type, 'desktop')=COALESCE(?, 'desktop')",
+            (key, net, int(user_id), name, dtype),
+        )
+        return int(cur.rowcount or 0)
+    except sqlite3.Error:
+        return 0
+
+
+def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[str, str] | None = None,
+                    handler=None):
     """Живая сессия по токену или None. Просроченная удаляется лениво.
 
-    Попутно обновляет last_seen_at (троттлинг ~60с) и человекочитаемое
-    название устройства, если оно изменилось. Сырой User-Agent сюда не
-    передаётся — только распарсенная пара (название, тип)."""
+    Попутно обновляет last_seen_at (троттлинг ~60с), человекочитаемое
+    название устройства, если оно изменилось, и отпечатки устройства: сессии,
+    заведённые до их появления, узнают их при первом же обращении и перестают
+    висеть отдельным устройством (вместе с ними подтягиваются прежние строки
+    того же клиента — см. adopt_legacy_device_rows). Сырой User-Agent и IP сюда
+    не передаются — только распарсенная пара (название, тип) и два готовых
+    HMAC. handler обязателен именно ради отпечатков: они считаются от
+    user_id, а он известен только после находки строки сессии."""
     if not token:
         return None
+    if device is None and handler is not None:
+        device = request_device_info(handler)
     row = conn.execute(
         "SELECT us.id AS session_pk, us.expires_at, u.id AS user_id, "
         "us.device_name AS device_name, us.device_type AS device_type, "
+        "us.device_key AS device_key, us.device_net AS device_net, "
         "us.last_seen_at AS last_seen_at "
         "FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.token = ?",
         (token,)).fetchone()
@@ -604,6 +760,21 @@ def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[s
             if stored_type != dtype:
                 updates.append("device_type=?")
                 args.append(dtype)
+        # Отпечатки дописываются только в пустые колонки: выданная кука
+        # браузера не должна перебивать уже узнанный отпечаток, а сеть —
+        # тем более (мобильный адрес меняется). Повторов записи не будет: после
+        # backfill обе колонки заполнены, троттлить ничего не нужно.
+        if handler is not None and (not row["device_key"] or not row["device_net"]):
+            key, net = request_device_identity(conn, handler, row["user_id"])
+            if key and not row["device_key"]:
+                updates.append("device_key=?")
+                args.append(key)
+            if net and not row["device_net"]:
+                updates.append("device_net=?")
+                args.append(net)
+                if key:
+                    adopt_legacy_device_rows(conn, row["user_id"], row["device_name"], row["device_type"],
+                                             key, net)
         if updates:
             args.append(row["session_pk"])
             conn.execute(f"UPDATE user_sessions SET {', '.join(updates)} WHERE id=?", args)
@@ -613,16 +784,23 @@ def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[s
     return row
 
 
-def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[str, str] | None = None) -> tuple[str, int]:
+def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[str, str] | None = None,
+                        device_identity: tuple[str | None, str | None] | None = None) -> tuple[str, int]:
     token = token_urlsafe(32)
     expires_at = int(time.time() * 1000) + AUTH_SESSION_MAX_AGE * 1000
     name, dtype = device if device else ("Браузер", "desktop")
     now_ms = int(time.time() * 1000)
+    key, net = device_identity if device_identity else (None, None)
     try:
         conn.execute(
-            "INSERT INTO user_sessions(user_id, token, created_at, expires_at, device_name, device_type, last_seen_at) VALUES (?,?,?,?,?,?,?)",
-            (user_id, token, now_iso(), expires_at, name, dtype, now_ms),
+            "INSERT INTO user_sessions(user_id, token, created_at, expires_at, device_name, device_type, device_key, device_net, last_seen_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (user_id, token, now_iso(), expires_at, name, dtype, key, net, now_ms),
         )
+        # Прежние сессии того же клиента (строки, заведённые до отпечатков)
+        # привязываем к новой — иначе они навсегда остались бы вторым
+        # устройством в профиле.
+        adopt_legacy_device_rows(conn, user_id, name, dtype, key, net)
     except sqlite3.Error:
         # Старая схема без device-колонок (двойная защита к миграции выше).
         conn.execute(
@@ -632,49 +810,208 @@ def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[st
     return token, expires_at
 
 
-def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id: int, device: tuple[str, str] | None = None) -> tuple[str, int]:
+def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id: int,
+                        device: tuple[str, str] | None = None,
+                        device_identity: tuple[str | None, str | None] | None = None) -> tuple[str, int]:
     """Login/register: инвалидирует предъявленный токен и выдаёт новый,
     привязанный к тому же (register) или целевому (login) аккаунту. Старый
     токен после этого неизвестен серверу — повторная отправка старой куки
     минтит нового гостя. Другие сессии аккаунта не трогаем никогда: вход
-    второго устройства не должен завершать первое. Дедупликация по паре
-    (device_name, device_type) здесь невозможна — значений всего несколько
-    («Windows PC», «iPhone», «Браузер», ...) и два разных физических
-    устройства одной модели неразличимы; автоудаление «дублей» убивало живые
-    чужие сессии. Повторный вход с того же устройства без старой куки может
-    оставить вторую строку в «Устройствах» — она снимается вручную через
-    отзыв, это косметика, а не повод инвалидировать чужой токен."""
+    второго устройства не должен завершать первое, поэтому и по отпечатку
+    ничего не удаляется. Зато отпечаток (device_key/device_net) у новой строки
+    тот же, что у прошлых входов с этой машины, — в «Устройствах» это одна
+    строка, сколько бы раз человек ни входил и выходил."""
     if old_token:
         conn.execute("DELETE FROM user_sessions WHERE token=?", (old_token,))
-    token, expires_at = create_user_session(conn, user_id, device)
+    token, expires_at = create_user_session(conn, user_id, device, device_identity)
     return token, expires_at
 
 
-def auth_devices_payload(conn: sqlite3.Connection, user_id: int, current_pk: int | None) -> list:
-    """Список активных сессий аккаунта без токенов и сырого UA: только id
-    строки (для отзыва), человекочитаемое название/тип и метки времени."""
+def _auth_device_clusters(conn: sqlite3.Connection, user_id: int) -> list[list[dict]]:
+    """Связные кластеры живых сессий аккаунта по отпечаткам устройства.
+
+    Сессия — строка user_sessions, устройство — группа строк одного клиента.
+    Кластеры строятся по общему отпечатку: кука браузера (переживает вкладки,
+    перезагрузки страниц и logout+login) и сеть (ловит второй браузер, вебвью
+    или curl с той же машины, где куки ege_device ещё нет). Связи транзитивны,
+    поэтому «браузер + его вебвью» — одно устройство, а ноутбук и телефон из
+    домашней сети — по-прежнему два. Строка без отпечатков (заведена до их
+    появления) попадает в кластер по названию и типу: это всё, что о ней
+    известно, и старые дубли одного браузера не расползаются снова.
+    """
     now_ms = int(time.time() * 1000)
     rows = conn.execute(
-        "SELECT id, device_name, device_type, created_at, last_seen_at "
-        "FROM user_sessions WHERE user_id=? AND expires_at>? "
-        "ORDER BY last_seen_at DESC, id DESC",
-        (user_id, now_ms),
+        "SELECT id, device_name, device_type, device_key, device_net, created_at, last_seen_at "
+        "FROM user_sessions WHERE user_id=? AND expires_at>?",
+        (int(user_id), now_ms),
     ).fetchall()
-    devices = []
+    parent: dict = {}
+
+    def find(node):
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def union(left, right) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    members: list[dict] = []
     for r in rows:
         try:
             sid = int(r["id"])
         except (TypeError, ValueError):
             continue
+        name = r["device_name"] or "Браузер"
+        dtype = r["device_type"] or "desktop"
+        try:
+            last_seen = int(r["last_seen_at"]) if r["last_seen_at"] is not None else 0
+        except (TypeError, ValueError):
+            last_seen = 0
+        parent[sid] = sid
+        members.append({"id": sid, "name": name, "type": dtype,
+                        "keyed": bool(r["device_key"] or r["device_net"]),
+                        "createdAt": timestamp_value(r["created_at"]),
+                        "lastSeenAt": last_seen or timestamp_value(r["created_at"])})
+        tags = []
+        if r["device_key"]:
+            tags.append(("key", r["device_key"]))
+        if r["device_net"]:
+            tags.append(("net", r["device_net"]))
+        if not tags:
+            tags.append(("legacy", name, dtype))
+        for tag in tags:
+            parent.setdefault(tag, tag)
+            union(sid, tag)
+    clusters: dict = {}
+    for member in members:
+        clusters.setdefault(find(member["id"]), []).append(member)
+    return list(clusters.values())
+
+
+def auth_devices_payload(clusters: list[list[dict]], current_pk: int | None) -> list:
+    """Активные устройства аккаунта без токенов, IP и сырого UA: только id
+    строки (для отзыва), человекочитаемое название/тип, метки времени и
+    число сессий устройства. Одна строка на одно устройство, сколько бы
+    вкладок и входов за ним ни стояло (см. _auth_device_clusters)."""
+    devices = []
+    for group in clusters:
+        here = [m for m in group if current_pk is not None and m["id"] == int(current_pk)]
+        # Название берём у сессии, в которой мы сидим сейчас: её User-Agent
+        # самый свежий (session_row_for обновляет его на каждом обращении), и
+        # именно она не даёт устройству называться «Браузером» из-за соседнего
+        # вебвью. Если это не наше устройство — берём самую свежую сессию.
+        freshest = here[0] if here else max(group, key=lambda m: (m["lastSeenAt"], m["id"]))
         devices.append({
-            "id": sid,
-            "name": r["device_name"] or "Браузер",
-            "type": r["device_type"] or "desktop",
-            "createdAt": timestamp_value(r["created_at"]),
-            "lastSeenAt": int(r["last_seen_at"]) if r["last_seen_at"] is not None else timestamp_value(r["created_at"]),
-            "current": bool(current_pk is not None and sid == int(current_pk)),
+            "id": here[0]["id"] if here else freshest["id"],
+            "name": freshest["name"],
+            "type": freshest["type"],
+            "createdAt": min(timestamp_value(m["createdAt"]) for m in group),
+            "lastSeenAt": freshest["lastSeenAt"],
+            "current": bool(here),
+            "sessions": len(group),
         })
     return devices
+
+
+def drop_unidentified_generic_sessions(conn: sqlite3.Connection, user_id: int,
+                                       clusters: list[list[dict]], current_pk: int | None) -> int:
+    """Убрать безымянные сессии от клиентов, которых мы так и не опознали.
+
+    Так выглядит мусорное «Браузер» в профиле: строка, заведённая клиентом,
+    чей User-Agent не поддаётся разбору (curl, тест, робот, вебвью), у которой
+    после появления отпечатков не осталось НИ ОДНОГО из них — то есть браузер
+    с тех пор ни разу не пришёл. Своего имени такая строка не знает, а назвать
+    её устройством нельзя.
+
+    Условия намеренно узкие, иначе это была бы тихая порча чужих сессий:
+      * у аккаунта есть хотя бы одно ОПОЗНАННОЕ устройство (иначе «мусор» —
+        единственное настоящее устройство человека);
+      * имя — ровно запасной вариант «Браузер» (любое опознанное имя вроде
+        «Windows PC» или «iPhone» не трогаем никогда);
+      * это не та сессия, в которой мы сидим сейчас.
+
+    Строка удаляется целиком: токен без браузера всё равно никому не нужен, а
+    вернувшийся клиент просто войдёт заново и появится под своим настоящим
+    именем. Возвращает число удалённых строк."""
+    try:
+        if not any(m["keyed"] for group in clusters for m in group):
+            return 0
+        cur = conn.execute(
+            "DELETE FROM user_sessions WHERE user_id=? AND id<>? "
+            "AND device_key IS NULL AND device_net IS NULL "
+            "AND COALESCE(device_name, 'Браузер')='Браузер'",
+            (int(user_id), int(current_pk) if current_pk is not None else -1),
+        )
+        deleted = int(cur.rowcount or 0)
+        if deleted:
+            conn.commit()
+        return deleted
+    except sqlite3.Error:
+        return 0
+
+
+def prune_device_session_revisions(conn: sqlite3.Connection, user_id: int,
+                                   clusters: list[list[dict]], current_pk: int | None) -> int:
+    """Подчистить доисторические входы одного устройства, оставив живые вкладки.
+
+    Каждый вход без старой куки (закрытая приватная вкладка, ротация токена,
+    падение куки) оставлял в user_sessions строку, которой больше нельзя
+    воспользоваться: токена у пользователя нет, и она только раздувает таблицу.
+    Рвём их лениво, при чтении «Устройств», и жёстко по границе: из одного
+    устройства остаётся не больше DEVICE_SESSION_REVISIONS_MAX живых сессий
+    (текущая входит в этот лимит и неприкосновенна), а более старые не
+    трогаем никогда — иначе устройство, которым человек реально пользуется (и у
+    которого всего одна сессия), вытесняло бы живые сессии соседних устройств.
+
+    Возвращает число удалённых строк; на устройствах до лимита — 0."""
+    try:
+        victims: list[int] = []
+        for group in clusters:
+            if len(group) <= DEVICE_SESSION_REVISIONS_MAX:
+                continue
+            # Новые первыми; текущая сессия выходит из-под ножа и занимает одно
+            # из мест лимита, чтобы «N вкладок» означало ровно N строк.
+            newest = sorted(group, key=lambda m: (m["lastSeenAt"], m["id"]), reverse=True)
+            keep = DEVICE_SESSION_REVISIONS_MAX - sum(
+                1 for m in newest if current_pk is not None and m["id"] == int(current_pk))
+            for member in newest:
+                if current_pk is not None and member["id"] == int(current_pk):
+                    continue
+                if keep > 0:
+                    keep -= 1
+                    continue
+                victims.append(member["id"])
+        for sid in victims:
+            conn.execute("DELETE FROM user_sessions WHERE id=? AND user_id=?", (sid, int(user_id)))
+        if victims:
+            conn.commit()
+        return len(victims)
+    except sqlite3.Error:
+        return 0
+
+
+def auth_device_session_ids(conn: sqlite3.Connection, user_id: int, session_id) -> list[int]:
+    """Все строки сессий устройства, которому принадлежит session_id.
+
+    Отзыв устройства = отзыв всех его сессий (вкладок и повторных входов), иначе
+    «Завершить» оставлял бы половину работы. Чужие строки не затрагиваются:
+    кластер строится только по сессиям этого user_id, а несуществующий или чужой
+    id даёт пустой список.
+    """
+    try:
+        target = int(session_id)
+    except (TypeError, ValueError):
+        return []
+    for group in _auth_device_clusters(conn, user_id):
+        ids = [m["id"] for m in group]
+        if target in ids:
+            return sorted(ids)
+    return []
 
 
 def auth_user_payload(conn: sqlite3.Connection, user_id: int) -> dict | None:
@@ -744,8 +1081,14 @@ def existing_user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler)
     account. Admin endpoints must not mint anonymous users for unauthenticated
     probes — unlike /api/bootstrap, where account creation is the normal flow."""
     ensure_auth_schema(conn)
-    row = session_row_for(conn, cookie_value(handler, "ege_session"), request_device_info(handler))
-    return row["user_id"] if row else None
+    row = session_row_for(conn, cookie_value(handler, "ege_session"), handler=handler)
+    if not row:
+        return None
+    try:
+        handler.ensure_device_cookie()
+    except AttributeError:
+        pass
+    return row["user_id"]
 
 
 def admin_session_user(conn: sqlite3.Connection, user_id: int, admin_token: str | None) -> dict | None:
@@ -4025,10 +4368,14 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
     ensure_subject_schema(conn)
     ensure_auth_schema(conn)
     token_value = cookie_value(handler, "ege_session")
-    row = session_row_for(conn, token_value, request_device_info(handler))
+    row = session_row_for(conn, token_value, handler=handler)
     if row:
         ensure_subject_rows(conn, row["user_id"], current_subject_for(conn, row["user_id"]))
         conn.commit()
+        try:
+            handler.ensure_device_cookie()
+        except AttributeError:
+            pass
         return row["user_id"], None
     cur = conn.execute("INSERT INTO users(session_token, created_at) VALUES (?, ?)", (token_urlsafe(32), now_iso()))
     user_id = cur.lastrowid
@@ -4037,7 +4384,8 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
     ensure_subject_rows(conn, user_id, DEFAULT_SUBJECT)
     # users.session_token — legacy-колонка; пишем туда же стартовый токен,
     # чтобы бэкфилл ensure_auth_schema не поднимал её обратно как новую сессию.
-    new_token, _ = create_user_session(conn, user_id, request_device_info(handler))
+    new_token, _ = create_user_session(conn, user_id, request_device_info(handler),
+                                       request_device_identity(conn, handler, user_id))
     conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, user_id))
     conn.commit()
     return user_id, new_token
@@ -5836,9 +6184,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Robots-Tag", "noindex, nofollow")
         self.send_security_headers()
-        if token: self.send_header("Set-Cookie", self.session_cookie_attrs(token))
+        if token:
+            self.ensure_device_cookie()
+            self.send_header("Set-Cookie", self.session_cookie_attrs(token))
         elif clear_session: self.send_header("Set-Cookie", self.session_cookie_clear_attrs())
         if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
+        device_cookie = getattr(self, "_device_cookie", None)
+        if device_cookie: self.send_header("Set-Cookie", self.device_cookie_attrs(device_cookie))
         for name, value in (headers or {}).items():
             self.send_header(name, str(value))
         if encoding: self.send_header("Content-Encoding", encoding)
@@ -5979,6 +6331,28 @@ class Handler(BaseHTTPRequestHandler):
             return f"{ADMIN_COOKIE_NAME}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
         return f"{ADMIN_COOKIE_NAME}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={max_age}{secure}"
 
+    def device_cookie_attrs(self, value: str) -> str:
+        # Отпечаток браузера для группировки сессий в «Устройствах». Это НЕ
+        # секрет и НЕ доступ: даже подменённая кука ничего не открывает —
+        # максимум притянет сессии одного аккаунта к одному устройству в его
+        # собственном списке, где и так видно только название и время. Живёт
+        # столько же, сколько сессия, и переживает logout: выход из аккаунта —
+        # это конец сессии, а не конец устройства.
+        secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" or self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return f"{DEVICE_COOKIE_NAME}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={AUTH_SESSION_MAX_AGE}{secure}"
+
+    def ensure_device_cookie(self) -> None:
+        """Выдать отпечаток устройства, если браузер его ещё не присылал.
+
+        Отвечает только тем запросам, где мы уже узнали живую сессию
+        (см. user_for/existing_user_for), поэтому гость и робот куку не получают.
+        Значение уходит один раз; дальше браузер сам присылает его сам."""
+        if getattr(self, "_device_cookie", None):
+            return
+        if device_cookie_is_valid(cookie_value(self, DEVICE_COOKIE_NAME)):
+            return
+        self._device_cookie = token_urlsafe(24)
+
     def require_admin(self, conn: sqlite3.Connection) -> tuple[int, dict] | None:
         """Return (user_id, session) when the caller holds a live admin
         session; otherwise send 401 and return None. Probes never create an
@@ -6051,7 +6425,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
             self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
             return
-        user_id, _ = user_for(conn, self)  # текущий гость; привязываем именно его
+        user_id, minted = user_for(conn, self)  # текущий гость; привязываем именно его
         if self.reject_if_blocked(conn, user_id):
             return
         current = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
@@ -6076,7 +6450,13 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback()
                 self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
                 return
-            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id, request_device_info(self))
+            # Токен, который только что выдали посреди этой же регистрации,
+            # тоже гасим: иначе у первого входа остаётся осиротевшая строка
+            # сессии, а в «Устройствах» она читается как лишнее устройство.
+            stale = minted or cookie_value(self, "ege_session")
+            new_token, _ = rotate_user_session(conn, stale, user_id,
+                                               request_device_info(self),
+                                               request_device_identity(conn, self, user_id))
             conn.commit()
         except sqlite3.IntegrityError:
             # Гонка двух разных гостей за один email: unique-индекс отверг
@@ -6127,7 +6507,9 @@ class Handler(BaseHTTPRequestHandler):
         requested = payload.get("subject")
         if is_known_subject(requested):
             set_current_subject(conn, account_id, requested)
-        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id, request_device_info(self))
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id,
+                                           request_device_info(self),
+                                           request_device_identity(conn, self, account_id))
         conn.commit()
         auth_login_success(ip)
         self.send_json({"ok": True, "user": auth_user_payload(conn, account_id),
@@ -6159,12 +6541,14 @@ class Handler(BaseHTTPRequestHandler):
                        admin_cookie=self.admin_cookie_attrs(None, 0))
 
     def handle_auth_devices_list(self, conn: sqlite3.Connection) -> None:
-        # Раздел «Устройства» в профиле: все активные серверные сессии
-        # текущего аккаунта. Никогда не минтит пользователя и не отдаёт
-        # токены/сырой User-Agent — только id строки, название, тип и время.
+        # Раздел «Устройства» в профиле: активные устройства текущего
+        # аккаунта. Устройство — группа сессий одного клиента, поэтому вкладки
+        # и повторные входы не плодят лишние строки. Никогда не минтит
+        # пользователя и не отдаёт токены/IP/сырой User-Agent — только id
+        # строки, название, тип и время.
         ensure_auth_schema(conn)
         token = cookie_value(self, "ege_session")
-        row = session_row_for(conn, token, request_device_info(self))
+        row = session_row_for(conn, token, handler=self)
         if not row:
             self.send_json({"error": "Требуется вход"}, 401)
             return
@@ -6176,15 +6560,24 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
         except sqlite3.Error:
             pass
-        self.send_json({"devices": auth_devices_payload(conn, row["user_id"], row["session_pk"])})
+        # Кластеры сессий читаем один раз: подчистка и сборка списка смотрят на
+        # один и тот же снимок, поэтому «Сессий на устройстве» показывает ровно
+        # то, что осталось после подчистки, а безымянный мусор не висит в профиле.
+        clusters = _auth_device_clusters(conn, row["user_id"])
+        drop_unidentified_generic_sessions(conn, row["user_id"], clusters, row["session_pk"])
+        prune_device_session_revisions(conn, row["user_id"], clusters, row["session_pk"])
+        self.send_json({"devices": auth_devices_payload(
+            _auth_device_clusters(conn, row["user_id"]), row["session_pk"])})
 
     def handle_auth_device_revoke(self, conn: sqlite3.Connection, session_id: str) -> None:
-        # Отзыв одной сессии. Чужой аккаунт недоступен: несовпадение user_id
-        # отвечает тем же 404, что и несуществующий id. Отзыв текущей сессии
-        # эквивалентен logout — чистим и куку. Остальные сессии не трогаем.
+        # Отзыв УСТРОЙСТВА: удаляются все его сессии (вкладки и повторные входы),
+        # иначе «Завершить» оставлял бы половину работы. Чужой аккаунт
+        # недоступен: несовпадение user_id отвечает тем же 404, что и
+        # несуществующий id. Отзыв устройства, в котором мы сидим сейчас,
+        # эквивалентен logout — чистим и куку. Другие устройства не трогаем.
         ensure_auth_schema(conn)
         token = cookie_value(self, "ege_session")
-        row = session_row_for(conn, token, request_device_info(self))
+        row = session_row_for(conn, token, handler=self)
         if not row:
             self.send_json({"error": "Требуется вход"}, 401)
             return
@@ -6199,10 +6592,16 @@ class Handler(BaseHTTPRequestHandler):
         if not target or int(target["user_id"]) != int(row["user_id"]):
             self.send_json({"error": "Неизвестное устройство"}, 404)
             return
-        conn.execute("DELETE FROM user_sessions WHERE id=?", (target_id,))
+        # Кластер считается только по живьим сессиям этого user_id, так что
+        # подсунуть чужой id и снести чужую сессию нельзя.
+        session_ids = auth_device_session_ids(conn, row["user_id"], target_id) or [target_id]
+        revoked_current = int(row["session_pk"]) in session_ids
+        for sid in session_ids:
+            conn.execute("DELETE FROM user_sessions WHERE id=? AND user_id=?",
+                         (sid, int(row["user_id"])))
         conn.commit()
-        if int(target_id) == int(row["session_pk"]):
-            # Отзыв текущей сессии равносилен logout — снимаем и админ-куку,
+        if revoked_current:
+            # Отзыв текущего устройства равносилен logout — снимаем и админ-куку,
             # чтобы в браузере не осталось пары «живая user-сессия + ege_admin».
             admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
             if admin_token:
