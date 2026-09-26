@@ -30,6 +30,7 @@ const ICONS = {
   "eye-off": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.5 5.2A9.5 9.5 0 0 1 12 5c5 0 8.5 4.5 10 7-.4.7-1.2 1.8-2.3 2.9M6.6 6.6C4.1 8.1 2.6 10.4 2 12c1.5 2.5 5 7 10 7 1.6 0 3-.5 4.3-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.3"/><circle cx="12.1" cy="16.7" r="0.5" fill="currentColor" stroke="none"/></svg>',
   // icon() молча отдаёт ICONS.target на неизвестном имени, поэтому запись
   // вида icon("info") рисовала мишень там, где просили значок «i».
@@ -3388,12 +3389,20 @@ function essaySourceTextHtml(src) {
     .filter(Boolean).join(" · ");
   const paragraphs = String(src.text || "").split(/\n{2,}/)
     .map((p) => `<p>${esc(p.trim())}</p>`).join("");
+  /* Шапка — не одна большая кнопка: раскрытие и копирование — два разных
+     действия, поэтому это два соседних контрола. Тоггл выглядит чипом,
+     а не синей ссылкой с подчёркиванием; копия — иконкой справа сверху. */
   return `
     <div class="source-text source-text--collapsed" id="sourceTextBox">
-      <button class="source-text__bar" type="button" onclick="essaySourceToggle()" aria-expanded="false">
-        <span class="source-text__title">${esc(title)}</span>
-        <span class="source-text__toggle" data-source-toggle-label>Читать</span>
-      </button>
+      <div class="source-text__bar">
+        <button class="source-text__head" type="button" onclick="essaySourceToggle()" aria-expanded="false">
+          <span class="source-text__title">${esc(title)}</span>
+          <span class="source-text__chip"><span data-source-toggle-label>Читать</span><span class="source-text__chev">${icon("chevron")}</span></span>
+        </button>
+        <button class="source-text__copy" type="button" onclick="essaySourceCopy(this)" aria-label="Скопировать текст" title="Скопировать текст">
+          <span class="source-text__copy-icon">${icon("copy")}</span>
+        </button>
+      </div>
       <div class="source-text__content" data-source-body>
         <div class="source-text__body">${paragraphs}</div>
       </div>
@@ -3402,13 +3411,56 @@ function essaySourceTextHtml(src) {
 
 function essaySourceToggle() {
   const box = document.getElementById("sourceTextBox");
-  const body = document.querySelector("[data-source-body]");
-  const label = document.querySelector("[data-source-toggle-label]");
-  const bar = box ? box.querySelector(".source-text__bar") : null;
-  if (!box || !body) return;
+  if (!box) return;
+  const label = box.querySelector("[data-source-toggle-label]");
+  const head = box.querySelector(".source-text__head");
   const collapsed = box.classList.toggle("source-text--collapsed");
   if (label) label.textContent = collapsed ? "Читать" : "Скрыть";
-  if (bar) bar.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (head) head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+/* Копирование исходного текста в буфер: та же схема, что у копирования
+   account id — Clipboard API, при недоступности скрытый textarea +
+   execCommand. Текст берём из отрисованного блока: innerText отдаёт его
+   уже раскодированным и с абзацами, как в оригинале. */
+function essaySourceCopy(btn) {
+  const box = btn && btn.closest ? btn.closest(".source-text") : null;
+  const body = box ? box.querySelector(".source-text__body") : null;
+  let text = "";
+  if (body) {
+    text = String(body.innerText || "").trim();
+    if (!text) {
+      text = Array.from(body.querySelectorAll("p")).map((p) => p.textContent).join("\n\n").trim();
+    }
+    if (!text) text = String(body.textContent || "").trim();
+  }
+  if (!text) return;
+  const iconEl = btn.querySelector(".source-text__copy-icon");
+  const announce = () => {
+    if (iconEl) iconEl.innerHTML = icon("check");
+    btn.classList.add("is-copied");
+    clearTimeout(btn._copyResetTimer);
+    btn._copyResetTimer = setTimeout(() => {
+      if (iconEl) iconEl.innerHTML = icon("copy");
+      btn.classList.remove("is-copied");
+    }, 1800);
+  };
+  const legacyCopy = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    try { document.execCommand("copy"); announce(); } catch (e) { /* clipboard unavailable in this browser */ }
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(announce).catch(legacyCopy);
+  } else {
+    legacyCopy();
+  }
 }
 
 async function essaySourceTextLoad(t) {

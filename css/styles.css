@@ -1523,10 +1523,11 @@ body {
 .timer-chip { font-variant-numeric: tabular-nums; }
 
 /* ---------- исходный текст к заданию 27 ----------
-   Одна компактная карточка: в свёрнутом виде — маленькая плашка
-   («Исходный текст · автор · N слов» + «Читать»), в развёрнутом —
-   проблема и сам текст с внутренней прокруткой. Ссылки на внешний
-   источник нет: ученик работает с текстом здесь, а не уходит с сайта. */
+   Одна карточка: в свёрнутом виде — плашка («Исходный текст · автор · N слов»
+   + чип «Читать» + кнопка копии), в развёрнутом — текст, набранный крупно,
+   как в читалке. Раскрытие — чип с поворачивающимся шевроном, а не синяя
+   ссылка с подчёркиванием; копирование — отдельная иконка справа сверху,
+   она не сворачивает блок. */
 .source-text {
   margin-top: 18px;
   border: 1px solid var(--border-strong);
@@ -1536,30 +1537,53 @@ body {
 }
 .source-text--loading { padding: 14px 16px; font-size: 14px; color: var(--muted); }
 .source-text__bar {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 12px 16px; border: none; cursor: pointer;
-  background: var(--surface-2); color: var(--text);
-  font: inherit; text-align: left;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 10px 18px;
+  background: var(--surface-2);
 }
-.source-text__bar:hover .source-text__toggle { text-decoration: underline; }
+.source-text__head {
+  flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 4px 0; border: none; background: none; cursor: pointer;
+  font: inherit; color: var(--text); text-align: left;
+}
 .source-text__title {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 14px; font-weight: 600;
+  font-size: 14.5px; font-weight: 600;
 }
-.source-text__toggle { flex: none; font-size: 13px; font-weight: 700; color: var(--accent); }
-.source-text__toggle::after { content: " ▲"; font-size: 11px; }
-.source-text--collapsed .source-text__toggle::after { content: " ▼"; }
-.source-text__content { display: block; border-top: 1px dashed var(--border); }
+.source-text__chip {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 13px; font-weight: 600;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.source-text__head:hover .source-text__chip { background: var(--accent); color: #fff; }
+.source-text__chev { display: inline-flex; transition: transform 0.2s ease; }
+.source-text__chev svg { width: 14px; height: 14px; }
+.source-text:not(.source-text--collapsed) .source-text__chev { transform: rotate(180deg); }
+.source-text__copy {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.source-text__copy:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.source-text__copy svg { width: 17px; height: 17px; }
+.source-text__copy.is-copied { color: var(--success-ink); border-color: var(--success); background: var(--success-soft); }
+.source-text__content { display: block; border-top: 1px solid var(--border); }
 .source-text--collapsed .source-text__content { display: none; }
 .source-text__body {
-  padding: 14px 16px;
-  font-size: 15.5px; line-height: 1.75; color: var(--text);
+  padding: 22px 24px;
+  font-size: 17px; line-height: 1.8; color: var(--text);
   white-space: pre-wrap; overflow-wrap: break-word;
 }
-.source-text__body p { margin: 0 0 12px; text-indent: 1.4em; }
+.source-text__body p { margin: 0 0 14px; text-indent: 1.5em; }
 .source-text__body p:last-child { margin-bottom: 0; }
 @media (max-width: 720px) {
-  .source-text__body { font-size: 15px; }
+  .source-text__bar { padding: 8px 10px 8px 14px; }
+  .source-text__title { font-size: 13.5px; }
+  .source-text__body { padding: 16px 18px; font-size: 16px; line-height: 1.75; }
 }
 
 /* ---------- lessons ---------- */
