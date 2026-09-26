@@ -5,9 +5,10 @@
 Архитектура registry-driven: новый предмет — это **запись в реестре +
 декларативный каталог**, а не ветвления `if subject` по коду.
 
-Канонический пример locked-предмета: `russian`
-(`server/subjects/russian.json`, `server/catalog_russian.json`).
-Эталон ready-предметов: `profile_math`, `basic_math`.
+Эталон минимального ready-предмета с одной темой: `russian`
+(`server/subjects/russian.json`, `server/catalog_russian.json`) —
+открыта практика итогового сочинения без уроков и прогноза.
+Эталон полноценных ready-предметов: `profile_math`, `basic_math`.
 
 ## 0. Договорённости
 
@@ -72,7 +73,8 @@ weights, ни per-subject catalog paths.
    `content`-указатели (`topics → categories/skills`, `preparationVariants
    → goals`, `onboarding → diagnosticTasks`). `availability` и `metadata`
    необязательны; их семантика и взаимная согласованность не валидируются.
-   Для locked скопировать скелет с `server/subjects/russian.json`.
+   Для locked скопировать форму полей с любого действующего контракта
+   (`server/subjects/russian.json` — пример минимального ready, поля те же).
 2. Положить catalog в `server/` под basename из `catalogFile`: для locked —
    пустые `tasks/lessons/missions/bosses/achievements`, `goals: []`,
    `diagnosticTasks: []`, нулевой `daily`. Загрузчик проверяет владение
@@ -96,7 +98,8 @@ weights, ни per-subject catalog paths.
 
 ## 2. Каталог: `server/catalog_<id>.json`
 
-Скопировать структуру с `server/catalog_russian.json` (locked-скелет)
+Скопировать структуру с `server/catalog_russian.json` (минимальный
+ready-каталог: одна тема, практика без уроков)
 и наполнять по образцу полей из `server/catalog.json` (ready-профиль)
 и `server/catalog_basic.json` (пример с `subject` в записях).
 
@@ -135,7 +138,8 @@ weights, ни per-subject catalog paths.
 Сущности (все примеры — из живых каталогов):
 
 - `categories`: `{id, name, short, subject?, status, locked, ...}`.
-  Для locked — как `russian_writing` в `server/catalog_russian.json`.
+  Для locked-раздела добавить `status: "locked"`, `locked/comingSoon: true`
+  (как это было у `russian_writing` до публикации русского).
 - `skills` (темы Пути): `{id, name, cat, order, ege, status, locked,
   comingSoon, metadata}`. `cat` обязан существовать в `categories`
   этого же предмета.

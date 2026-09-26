@@ -72,6 +72,43 @@ if _REGISTRY is None:
     )
 
 
+def _load_ai_module():
+    """Load the AI transport module (server/ai.py).
+
+    Failure is not fatal: without a key the AI endpoints answer 503, which is
+    strictly better than refusing to boot the whole site over a helper file.
+    """
+    import importlib.util
+
+    ai_path = Path(__file__).resolve().parent / "ai.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_ai", ai_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError):
+        return None
+
+
+_AI = _load_ai_module()
+
+
+def _ai_user_message(exc: BaseException) -> str:
+    """Человеческий текст для нашей же ошибки ввода.
+
+    Внутренние формулировки ai.py не показываем: там про серверные лимиты, а
+    пользователю нужно знать, что исправить в своём тексте.
+    """
+    detail = str(exc)
+    if "длиннее лимита" in detail:
+        return "Текст слишком длинный"
+    if "пустой" in detail:
+        return "Отправь текст сочинения"
+    return "Некорректный запрос проверки"
+
+
 def _subject_catalog_paths() -> list:
     return _REGISTRY.catalog_paths()
 
@@ -86,6 +123,9 @@ def _subject_level_rows() -> list:
 
 SCRIPT_PATH = Path(__file__).resolve()
 MAX_NAME_LENGTH = 60
+# Тело AI-запроса — это одно сочинение в JSON; общий MAX_BODY_BYTES (10 МБ,
+# снимок состояния) тут избыточен в сотни раз.
+AI_REQUEST_MAX_BYTES = 64 * 1024
 # Public account identifier shown in the UI (e.g. "a7k29x") — distinct from the
 # internal `users.id` primary key. Never exposed as a way to look up or spoof
 # the internal id; it only ever maps forward, account_id -> user, in the DB.
@@ -1489,6 +1529,14 @@ class RequestBodyTooLarge(ValueError):
     """A request body exceeded the endpoint-specific safety cap."""
 
 
+class EssayTooShort(ValueError):
+    """Длинный текстовый ответ меньше обязательного минимума слов."""
+
+    def __init__(self, word_count: int):
+        self.word_count = word_count
+        super().__init__(f"essay too short: {word_count} words")
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -1823,6 +1871,311 @@ def _fallback_client_id(kind: str, parts: list) -> str:
     """
     safe = ["" if p is None else str(p) for p in parts]
     return ("natural:" + kind + ":" + "|".join(safe))[:512]
+
+
+# ---------------------------------------------------------------------------
+# Длинные текстовые ответы (итоговое сочинение и будущие типы с развёрнутым
+# ответом). Подсчёт слов — единый алгоритм с клиентом (js/state.js, countWords):
+# словоом считается непрерывный блок букв/цифр (кириллица, латиница), внутри
+# которого допустимы дефис/апостроф («какой-то», «ч'т») без пробелов вокруг.
+# Пунктуация, кавычки, скобки, множественные пробелы и переносы строк словами
+# не считаются. Сервер — источник истины: клиентская проверка только UX.
+# ---------------------------------------------------------------------------
+
+ESSAY_MIN_WORDS = 150
+ESSAY_MAX_CHARS = 30000
+ESSAY_WORD_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё]+(?:['’\-–][0-9A-Za-zА-Яа-яЁё]+)*")
+_ESSAY_SCHEMA_DONE: set[str] = set()
+_essay_schema_lock = threading.Lock()
+
+
+def count_essay_words(text: str) -> int:
+    """Число слов в развёрнутом текстовом ответе (см. регулярку выше)."""
+    return len(ESSAY_WORD_RE.findall(text or ""))
+
+
+def normalize_essay_text(value) -> str:
+    """Привести текст сочинения к сохраняемому виду.
+
+    NFC, без управляющих символов (кроме \n и \t), с ограничением длины.
+    Возвращает пустую строку, если содержательного текста нет.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = ud.normalize("NFC", value)
+    text = "".join(ch for ch in text if ch in "\n\t" or ord(ch) >= 0x20)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text[:ESSAY_MAX_CHARS]
+    return text.strip()
+
+
+def ensure_essay_schema(conn: sqlite3.Connection) -> None:
+    """Идемпотентно создать хранилище длинных текстовых ответов.
+
+    evaluation_* — заранее заложенная точка расширения под будущую
+    AI-проверку: сейчас колонки остаются NULL/'submitted', заполнять их
+    будет отдельный пайплайн проверки без переписывания submission flow.
+    """
+    key = _db_key(conn)
+    with _essay_schema_lock:
+        if key in _ESSAY_SCHEMA_DONE:
+            return
+        conn.executescript(SCHEMA)
+        if "essay_submissions" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS essay_submissions(
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                     subject TEXT NOT NULL DEFAULT 'profile_math',
+                     task_id TEXT NOT NULL REFERENCES tasks(id),
+                     skill_id TEXT NOT NULL,
+                     text TEXT NOT NULL,
+                     word_count INTEGER NOT NULL,
+                     client_id TEXT NOT NULL DEFAULT '',
+                     evaluation_status TEXT NOT NULL DEFAULT 'submitted',
+                     evaluation_provider TEXT,
+                     evaluation_version INTEGER,
+                     evaluation_result TEXT,
+                     evaluation_file TEXT,
+                     evaluated_at INTEGER,
+                     created_at TEXT NOT NULL)"""
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_submissions_user_subject_client"
+                " ON essay_submissions(user_id, subject, client_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
+                " ON essay_submissions(user_id, subject, created_at)"
+            )
+        _ESSAY_SCHEMA_DONE.add(key)
+
+
+def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
+    """Сохранить длинный текстовый ответ с серверной проверкой объёма.
+
+    Возвращает запись с word_count; повторная отправка того же client_id
+    идемпотентна. Минимальный объём проверяется ЗДЕСЬ, а не на клиенте:
+    обход фронтенда не должен позволять сдать сочинение короче лимита.
+    """
+    if subject_is_locked(subject):
+        raise SubjectLockedError(subject)
+    task_id = value.get("taskId")
+    skill_id = value.get("skill")
+    text = normalize_essay_text(value.get("text"))
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ValueError("unknown task")
+    if not isinstance(skill_id, str) or not skill_id.strip():
+        raise ValueError("unknown skill")
+    if not text:
+        raise ValueError("empty text")
+    task = conn.execute(
+        "SELECT t.id, t.task_type, t.skill_id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+        " WHERE t.id=? AND s.id=? AND s.subject=?",
+        (task_id.strip(), skill_id.strip(), subject),
+    ).fetchone()
+    if not task or task["task_type"] != "long_text":
+        raise ValueError("task does not accept a long text answer")
+    word_count = count_essay_words(text)
+    if word_count < ESSAY_MIN_WORDS:
+        raise EssayTooShort(word_count)
+    created = str(value.get("ts") or now_iso())
+    client_id = _stable_client_id(value) or _fallback_client_id("essay", [task_id, skill_id, created])
+    conn.execute(
+        "INSERT INTO essay_submissions(user_id,subject,task_id,skill_id,text,word_count,client_id,created_at)"
+        " VALUES(?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+        (user_id, subject, task["id"], task["skill_id"], text, word_count, client_id, created),
+    )
+    row = conn.execute(
+        "SELECT id, word_count, evaluation_status FROM essay_submissions"
+        " WHERE user_id=? AND subject=? AND client_id=?",
+        (user_id, subject, client_id),
+    ).fetchone()
+    return {"taskId": task["id"], "wordCount": int(row["word_count"]) if row else word_count,
+            "minWords": ESSAY_MIN_WORDS, "clientId": client_id,
+            "submissionId": int(row["id"]) if row else None,
+            "evaluationStatus": row["evaluation_status"] if row else "submitted"}
+
+
+ESSAY_EVALUATION_STATUSES = ("submitted", "ready", "failed")
+ESSAY_EVALUATION_MAX_BYTES = 64 * 1024
+
+
+def serialize_essay_row(row) -> dict:
+    """Публичный срез submission для клиента: текст не отдаём целиком в списке,
+    но для готового результата он нужен самому автору — отдаём полностью:
+    это его собственный текст, чужой недоступен (фильтр по user_id выше)."""
+    result = None
+    raw = row["evaluation_result"] if "evaluation_result" in row.keys() else None
+    if raw:
+        try:
+            result = json.loads(raw)
+        except (ValueError, TypeError):
+            result = None
+    return {
+        "submissionId": int(row["id"]),
+        "taskId": row["task_id"],
+        "skill": row["skill_id"],
+        "wordCount": int(row["word_count"]),
+        "minWords": ESSAY_MIN_WORDS,
+        "clientId": row["client_id"],
+        "status": row["evaluation_status"],
+        "result": result,
+        "text": row["text"],
+        "createdAt": timestamp_value(row["created_at"]),
+        "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
+    }
+
+
+def essay_result_view(submission: dict) -> dict | None:
+    """Адаптер готового результата под схему ege-result.html (без смены AI-формата).
+
+    AI-контракт (merge_essay: total_score/max_score, criteria[].max_score,
+    short_verdict, what_to_improve) остаётся как есть — здесь только
+    переименование полей в ожидаемые шаблоном (verdict, improvements,
+    criteria[].max) и раскладка K1–K6/K7–K10 по группам «Содержание» /
+    «Грамотность». Цитат/переписок (quote/rewrite) модель не возвращает —
+    их нет и в отчёте, вместо выдуманных. None, пока нет готового result.
+    """
+    result = (submission or {}).get("result")
+    if not isinstance(result, dict):
+        return None
+    criteria_in = result.get("criteria")
+    if not isinstance(criteria_in, list) or not criteria_in:
+        return None
+    groups = [
+        {"id": "content", "name": "Содержание сочинения"},
+        {"id": "literacy", "name": "Грамотность речи"},
+    ]
+    literacy_ids = {"K7", "K8", "K9", "K10"}
+    criteria = []
+    for item in criteria_in:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("id") or "")
+        try:
+            score, maximum = int(item.get("score")), int(item.get("max_score"))
+        except (TypeError, ValueError):
+            continue
+        criteria.append({
+            "id": cid,
+            "group": "literacy" if cid in literacy_ids else "content",
+            "name": f"{cid}. {item.get('name') or ''}".strip(),
+            "score": score,
+            "max": maximum,
+            "comment": str(item.get("comment") or ""),
+        })
+    if not criteria:
+        return None
+    improve = [str(x) for x in (result.get("what_to_improve") or []) if str(x or "").strip()]
+    return {
+        "total_score": result.get("total_score"),
+        "max_score": result.get("max_score"),
+        "word_count": submission.get("wordCount"),
+        "word_norm_min": submission.get("minWords") or ESSAY_MIN_WORDS,
+        "verdict": result.get("short_verdict") or "",
+        "groups": groups,
+        "criteria": criteria,
+        "improvements": improve,
+        "recommendation": result.get("recommendation") or "",
+    }
+
+
+def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
+                          *, task_id: str = "", client_id: str = "") -> dict | None:
+    """Один submission для повторного открытия: точный client_id в приоритете,
+    иначе последний по заданию. Только свои строки (user_id). К ответу сразу
+    прикладывается готовое view под ege-result.html (None, пока не ready)."""
+    ensure_essay_schema(conn)
+    row = None
+    if client_id:
+        row = conn.execute(
+            "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
+            (user_id, subject, client_id),
+        ).fetchone()
+    if row is None and task_id:
+        row = conn.execute(
+            "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND task_id=?"
+            " ORDER BY id DESC LIMIT 1",
+            (user_id, subject, task_id),
+        ).fetchone()
+    if row is None:
+        return None
+    data = serialize_essay_row(row)
+    data["view"] = essay_result_view(data)
+    return data
+
+
+def get_latest_essay(conn: sqlite3.Connection, user_id: int, subject: str, task_id: str) -> dict | None:
+    """Последний submission пользователя по заданию для повторного открытия
+    готового результата после перезагрузки. Только свои строки (user_id)."""
+    return get_essay_submission(conn, user_id, subject, task_id=task_id)
+
+
+def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
+    """Зафиксировать итог проверки по submission (точка «report generation»).
+
+    status 'ready' требует валидный result (иначе 400 — частично собранный
+    отчёт никогда не выглядит готовым); 'failed' результат не требует и лишь
+    помечает, что XP начислять нельзя. Пишет только свою строку: чужой
+    client_id здесь просто не найдётся (fail-closed, без раскрытия чужих id).
+    """
+    ensure_essay_schema(conn)
+    if subject_is_locked(subject):
+        raise SubjectLockedError(subject)
+    client_id = value.get("clientId", value.get("client_id"))
+    status = str(value.get("status") or "").strip().lower()
+    if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 200:
+        raise ValueError("unknown submission")
+    if status not in ("ready", "failed"):
+        raise ValueError("unknown status")
+    row = conn.execute(
+        "SELECT id FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
+        (user_id, subject, client_id.strip()),
+    ).fetchone()
+    if not row:
+        raise KeyError("submission not found")
+    if status == "ready":
+        result = value.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("result must be an object")
+        criteria = result.get("criteria")
+        try:
+            total = int(result.get("total_score"))
+            maximum = int(result.get("max_score"))
+        except (TypeError, ValueError):
+            raise ValueError("result must carry total_score/max_score")
+        if not isinstance(criteria, list) or len(criteria) != 10:
+            raise ValueError("result must carry 10 criteria")
+        if maximum != 22 or not 0 <= total <= 22:
+            raise ValueError("result scores out of range")
+        for item in criteria:
+            if not isinstance(item, dict) or not item.get("id") or not str(item.get("comment") or "").strip():
+                raise ValueError("result criteria are malformed")
+            try:
+                s, m = int(item.get("score")), int(item.get("max_score"))
+            except (TypeError, ValueError):
+                raise ValueError("result criteria are malformed")
+            if s < 0 or s > m:
+                raise ValueError("result criteria are malformed")
+        blob = json.dumps(result, ensure_ascii=False)
+        if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
+            raise ValueError("result too large")
+        conn.execute(
+            "UPDATE essay_submissions SET evaluation_status='ready', evaluation_result=?,"
+            " evaluation_provider=?, evaluation_version=?, evaluated_at=? WHERE id=?",
+            (blob, str(value.get("provider") or "ai+grammar")[:64], 1,
+             int(time.time() * 1000), int(row["id"])),
+        )
+    else:
+        conn.execute(
+            "UPDATE essay_submissions SET evaluation_status='failed', evaluated_at=? WHERE id=?",
+            (int(time.time() * 1000), int(row["id"])),
+        )
+    conn.commit()
+    fresh = conn.execute("SELECT * FROM essay_submissions WHERE id=?", (int(row["id"]),)).fetchone()
+    return serialize_essay_row(fresh)
 
 
 def _ensure_error_kind_column(conn: sqlite3.Connection) -> None:
@@ -2410,6 +2763,7 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     ensure_subject_schema(conn)
     ensure_support_schema(conn)
+    ensure_essay_schema(conn)
     # Existing SQLite files need the new daily selection column migrated in place.
     daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
     if "task_ids_json" not in daily_columns:
@@ -5749,55 +6103,67 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
-            if len(parts) == 6 and parts[5] in ("xp", "reset", "delete", "block", "unblock"):
+            if len(parts) != 6 or parts[5] not in ("xp", "reset", "delete", "block", "unblock"):
+                # Ветка не должна проваливаться в общий 404 «Not found» в конце
+                # do_POST: неизвестное действие или лишний сегмент выглядели бы
+                # так же, как отсутствие самого endpoint'а (именно это и показал
+                # бан, пока сервер не перезапустили с новым route). Отвечаем сами
+                # и только после admin-гейта, чтобы гость не отличал 401 от 404.
                 conn = connect()
                 try:
-                    auth = self.require_admin(conn)
-                    if not auth: return
-                    actor_id, _ = auth
-                    target_id = resolve_admin_target(conn, parts[4])
-                    if target_id is None:
-                        self.send_json({"error": "Пользователь не найден"}, 404); return
-                    try:
-                        payload = self.read_json()
-                    except (json.JSONDecodeError, ValueError):
-                        self.send_json({"error": "Некорректный JSON"}, 400); return
-                    if not isinstance(payload, dict):
-                        self.send_json({"error": "Некорректный JSON"}, 400); return
-                    action = parts[5]
-                    if action == "xp":
-                        result = admin_grant_xp(conn, target_id, payload.get("amount", 0), payload.get("reason", ""))
-                        admin_audit(conn, actor_id, "grant-xp", target_id, f"{result['amount']:+d} {result['reason']}")
-                    elif action == "reset":
-                        result = admin_reset(conn, target_id, str(payload.get("target", "")))
-                        admin_audit(conn, actor_id, "reset", target_id, result["target"])
-                    elif action == "block":
-                        duration = str(payload.get("duration", "")).strip()
-                        result = admin_block_user(conn, target_id, actor_id,
-                                                  payload.get("reason"), duration)
-                        detail = f"{duration} {result['reason']}"[:200]
-                        admin_audit(conn, actor_id, "block-user", target_id, detail)
-                        result = {"ok": True, "block": result}
-                    elif action == "unblock":
-                        was = admin_unblock_user(conn, target_id)
-                        admin_audit(conn, actor_id, "unblock-user", target_id, "")
-                        result = {"ok": True, "wasBlocked": was}
-                    else:
-                        result = admin_delete_user(conn, target_id, actor_id)
-                    self.send_json(result)
-                except sqlite3.Error as exc:
-                    try: conn.rollback()
-                    except sqlite3.Error: pass
-                    rid = log_request_error("admin-users", exc)
-                    self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
-                                    "ref": rid}, 500)
-                except (ValueError, KeyError) as exc:
-                    try: conn.rollback()
-                    except sqlite3.Error: pass
-                    status = 404 if isinstance(exc, KeyError) else 400
-                    self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status)
+                    if not self.require_admin(conn): return
+                    self.send_json({"error": "Неизвестный маршрут админ-панели. "
+                                             "Действия: xp, reset, delete, block, unblock"}, 404)
                 finally: conn.close()
                 return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                target_id = resolve_admin_target(conn, parts[4])
+                if target_id is None:
+                    self.send_json({"error": "Пользователь не найден"}, 404); return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                action = parts[5]
+                if action == "xp":
+                    result = admin_grant_xp(conn, target_id, payload.get("amount", 0), payload.get("reason", ""))
+                    admin_audit(conn, actor_id, "grant-xp", target_id, f"{result['amount']:+d} {result['reason']}")
+                elif action == "reset":
+                    result = admin_reset(conn, target_id, str(payload.get("target", "")))
+                    admin_audit(conn, actor_id, "reset", target_id, result["target"])
+                elif action == "block":
+                    duration = str(payload.get("duration", "")).strip()
+                    result = admin_block_user(conn, target_id, actor_id,
+                                              payload.get("reason"), duration)
+                    detail = f"{duration} {result['reason']}"[:200]
+                    admin_audit(conn, actor_id, "block-user", target_id, detail)
+                    result = {"ok": True, "block": result}
+                elif action == "unblock":
+                    was = admin_unblock_user(conn, target_id)
+                    admin_audit(conn, actor_id, "unblock-user", target_id, "")
+                    result = {"ok": True, "wasBlocked": was}
+                else:
+                    result = admin_delete_user(conn, target_id, actor_id)
+                self.send_json(result)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-users", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                status = 404 if isinstance(exc, KeyError) else 400
+                self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status)
+            finally: conn.close()
+            return
         if path == "/api/errors":
             if self.api_rate_limited(): return
             conn = connect()
@@ -5824,6 +6190,82 @@ class Handler(BaseHTTPRequestHandler):
                                 "ref": rid}, 503 if locked else 500)
             except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
                 conn.rollback(); self.send_json({"error": f"Error was not saved: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path == "/api/essays":
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                ensure_essay_schema(conn)
+                user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                payload = self.read_json(max_bytes=64 * 1024, object_pairs_hook=strict_json_object,
+                                         parse_constant=reject_json_constant, utf8_only=True)
+                if not isinstance(payload, dict):
+                    raise ValueError("payload must be an object")
+                subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+                conn.execute("BEGIN IMMEDIATE")
+                ensure_subject_rows(conn, user_id, subject)
+                result = append_essay_submission(conn, user_id, subject, payload)
+                conn.commit()
+                self.send_json({"ok": True, "subject": subject, **result}, token=token)
+            except SubjectLockedError as exc:
+                conn.rollback()
+                self.send_json({"error": "Предмет пока заблокирован", "subject": exc.subject}, 423)
+            except EssayTooShort as exc:
+                conn.rollback()
+                self.send_json({"error": "Слишком короткий текст",
+                                "reason": "essay_too_short",
+                                "wordCount": exc.word_count,
+                                "minWords": ESSAY_MIN_WORDS}, 422)
+            except sqlite3.Error as exc:
+                conn.rollback()
+                rid = log_request_error("essays", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Сочинение не сохранено. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
+                conn.rollback(); self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path == "/api/essays/evaluation":
+            # POST /api/essays/evaluation — фиксация итога проверки («report
+            # generation»): клиент привозит результат существующего AI route
+            # POST /api/ai/essay (модель К1–К6 + детерминированная грамотность
+            # К7–К10 уже склеены там в ответ на 22), сервер лишь валидирует
+            # форму и кладёт её в evaluation_* того же submission. Только
+            # после 'ready' клиент вправе начислить XP существующим
+            # attempts-flow; 'failed' помечает, что результат не готов.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                ensure_essay_schema(conn)
+                user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                payload = self.read_json(max_bytes=128 * 1024, object_pairs_hook=strict_json_object,
+                                         parse_constant=reject_json_constant, utf8_only=True)
+                if not isinstance(payload, dict):
+                    raise ValueError("payload must be an object")
+                subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+                ensure_subject_rows(conn, user_id, subject)
+                saved = save_essay_evaluation(conn, user_id, subject, payload)
+                self.send_json({"ok": True, "subject": subject, "submission": saved}, token=token)
+            except SubjectLockedError as exc:
+                conn.rollback()
+                self.send_json({"error": "Предмет пока заблокирован", "subject": exc.subject}, 423)
+            except KeyError:
+                conn.rollback()
+                self.send_json({"error": "Сочинение не найдено"}, 404)
+            except sqlite3.Error as exc:
+                conn.rollback()
+                rid = log_request_error("essays-evaluation", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Результат не сохранён. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
+                conn.rollback(); self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
         if path.startswith("/api/events/"):
@@ -5903,6 +6345,79 @@ class Handler(BaseHTTPRequestHandler):
                 try: conn.rollback()
                 except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path.startswith("/api/ai/"):
+            # POST /api/ai/<format> — the browser posts the student's text and
+            # gets the parsed assessment back. The provider key stays in the
+            # process: nothing here forwards it, and the upstream error body is
+            # never echoed (it can quote the account).
+            # `format` is a server-side id resolved in ai.FORMATS, so a new
+            # assessment is one registry entry, not a branch in this file. The
+            # client picks neither model nor prompt.
+            if self.api_rate_limited(): return
+            format_id = path[len("/api/ai/"):]
+            if _AI is None or not format_id or "/" in format_id:
+                self.send_json({"error": "Not found"}, 404); return
+            if format_id not in _AI.FORMATS:
+                self.send_json({"error": "Not found"}, 404); return
+            if not self.support_request_is_same_origin():
+                self.send_json({"error": "Cross-site request rejected"}, 403); return
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                try:
+                    payload = self.read_json(max_bytes=AI_REQUEST_MAX_BYTES)
+                except RequestBodyTooLarge:
+                    self.send_json({"error": "Текст слишком большой"}, 413, token=token); return
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
+                if not isinstance(payload, dict) or set(payload) - {"text"}:
+                    self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400, token=token); return
+                # Metered call: a much tighter bucket than the generic API one.
+                # Counted per user AND per IP — the cookie is the only proof of
+                # identity, so a client that stops sending it would otherwise
+                # mint a fresh guest and a fresh budget on every request.
+                try:
+                    ip = support_client_ip(self)
+                except Exception:
+                    ip = "?"
+                allowed, retry_after = _AI.ai_take([f"user:{user_id}", f"ip:{ip}"])
+                if not allowed:
+                    self.send_json({"error": "Слишком много проверок. Попробуй позже.",
+                                    "retryAfter": retry_after}, 429, token=token,
+                                   headers={"Retry-After": str(retry_after)})
+                    return
+                try:
+                    result = _AI.run_format(format_id, payload.get("text"))
+                except _AI.AIInputError as exc:
+                    # Наш ввод, наш 400: повтор не поможет.
+                    self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
+                except _AI.AIFormatError as exc:
+                    # The model answered, but not with the contract we asked
+                    # for. Not the student's fault and not worth a retry storm.
+                    rid = log_request_error("ai-format", exc)
+                    self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
+                                    "ref": rid}, 502, token=token)
+                    return
+                except _AI.AIUnavailable as exc:
+                    rid = log_request_error("ai-unavailable", exc)
+                    self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
+                    return
+                except _AI.AIError as exc:
+                    rid = log_request_error("ai-upstream", exc)
+                    self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
+                    return
+                self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("ai", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
             finally: conn.close()
             return
         self.send_json({"error": "Not found"}, 404)
@@ -6073,6 +6588,22 @@ class Handler(BaseHTTPRequestHandler):
                 # current_subject пользователя (переживает перезагрузку),
                 # с ?subject - явно запрошенный. Разводить их нельзя: иначе
                 # клиент получит чужие задания с чужим прогрессом.
+                if path == "/api/essays":
+                    # GET /api/essays?subject=&taskId= — последний submission
+                    # для повторного открытия готового результата (перезагрузка,
+                    # возврат в практику). Только свои строки текущего юзера.
+                    if self.api_rate_limited(): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
+                    task_id = (query.get("taskId", [None])[0] or "").strip()
+                    client_id = (query.get("clientId", [None])[0] or "").strip()
+                    if not task_id and not client_id:
+                        self.send_json({"error": "Нужен taskId или clientId"}, 400, token=token); return
+                    found = get_essay_submission(conn, user_id, eff, task_id=task_id, client_id=client_id)
+                    if not found:
+                        self.send_json({"error": "Сочинение не найдено"}, 404, token=token); return
+                    self.send_json({"ok": True, "subject": eff, "submission": found}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
                         return

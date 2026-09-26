@@ -206,7 +206,7 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key == "path" for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice", "missions"} for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
@@ -222,45 +222,53 @@ def main() -> int:
                 check(f"CAPABILITY MATRIX {subject}", matrix_ok, matrix)
 
             russian_tasks = payloads[("/api/catalog-tasks", "russian")]
+            served_russian_tasks = russian_tasks.get("tasks") or []
             check(
-                "RUSSIAN ISOLATION task details",
-                russian_tasks.get("tasks") == []
+                "RUSSIAN CONTENT task details",
+                len(served_russian_tasks) == 6
+                and all(isinstance(t, dict) and t.get("skill") == "russian_essay" for t in served_russian_tasks)
+                and all(t.get("type") == "long_text" for t in served_russian_tasks)
                 and russian_tasks.get("visualAssets") == []
                 and isinstance(russian_tasks.get("visualAudit"), dict),
-                f"tasks={len(russian_tasks.get('tasks') or [])}, "
+                f"tasks={len(served_russian_tasks)}, "
                 f"visualAssets={len(russian_tasks.get('visualAssets') or [])}, "
                 f"visualAudit={type(russian_tasks.get('visualAudit')).__name__}",
             )
 
             russian_lessons = payloads[("/api/catalog-lessons", "russian")]
             check(
-                "RUSSIAN ISOLATION lesson details",
+                "RUSSIAN CONTENT lesson details (no lessons yet)",
                 russian_lessons.get("lessons") == [],
                 f"lessons={len(russian_lessons.get('lessons') or [])}",
             )
 
             russian_boot = payloads[("/api/bootstrap", "russian")]
             russian_catalog = russian_boot.get("catalog") or {}
-            empty_catalog_keys = (
-                "tasks", "lessons", "missions", "bosses",
-                "achievements", "goals", "diagnosticTasks",
-            )
-            catalog_empty = all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
-            daily = russian_catalog.get("daily")
-            check(
-                "RUSSIAN ISOLATION bootstrap catalog",
+            russian_missions = russian_catalog.get("missions") or []
+            empty_catalog_keys = ("lessons", "bosses", "achievements", "goals", "diagnosticTasks")
+            catalog_shape_ok = (
                 russian_catalog.get("forecast") is None
-                and catalog_empty
-                and isinstance(daily, dict)
-                and daily.get("target") == 0,
+                and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
+                and len(russian_catalog.get("tasks") or []) == 6
+                and len(russian_missions) == 1
+                and russian_missions[0].get("skill") == "russian_essay"
+                and isinstance(russian_catalog.get("daily"), dict)
+                and (russian_catalog.get("daily") or {}).get("target") == 0
+            )
+            check(
+                "RUSSIAN CONTENT bootstrap catalog",
+                catalog_shape_ok,
                 f"forecast={russian_catalog.get('forecast')!r}, "
-                f"empty={catalog_empty}, daily.target={(daily or {}).get('target')!r}",
+                f"tasks={len(russian_catalog.get('tasks') or [])}, missions={len(russian_missions)}",
             )
 
             russian_state = russian_boot.get("state") or {}
             empty_daily = {"date": None, "solved": 0, "done": False, "taskIds": []}
+            skill_stats = russian_state.get("skillStats") or {}
+            zero_bucket = {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0}
             state_isolated = (
-                russian_state.get("skillStats") == {}
+                set(skill_stats) == {"russian_essay"}
+                and all(v == zero_bucket for v in skill_stats.values())
                 and russian_state.get("achievements") == {}
                 and russian_state.get("forecastHistory") == []
                 and russian_state.get("diagnostics") == []
@@ -272,7 +280,7 @@ def main() -> int:
             check(
                 "RUSSIAN ISOLATION bootstrap state",
                 state_isolated,
-                "skillStats={}, achievements={}, histories/attempts/errors=[], xp=0, daily=[]",
+                "skillStats=zero bucket for russian_essay only, achievements={}, histories/attempts/errors=[], xp=0, daily=[]",
             )
 
             scanned_russian = list(scan_without_registry(russian_boot))
@@ -297,9 +305,14 @@ def main() -> int:
                     if key in FORBIDDEN_CONTENT_FIELDS
                 }
             )
+            # Открытый предмет честно отдаёт тексты своих заданий: поля
+            # text/answer/solution допустимы ТОЛЬКО внутри catalog.tasks, а
+            # поля steps (шаги уроков) не должны встречаться нигде.
+            content_fields_in_tasks = {p for p in forbidden_paths if p.startswith("$.catalog.tasks[")}
+            steps_paths = [p for p in forbidden_paths if p.endswith(".steps")]
             check(
-                "RUSSIAN ISOLATION task content fields",
-                not forbidden_paths,
+                "RUSSIAN CONTENT task content fields",
+                forbidden_paths == sorted(content_fields_in_tasks) and not steps_paths,
                 f"text/answer/solution/steps={forbidden_paths or 'none'}; registry excluded",
             )
 

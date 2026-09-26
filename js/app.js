@@ -1117,7 +1117,7 @@ function showLevelUp(to) {
     <div class="levelup-box">
       <div class="levelup-box__label">НОВЫЙ УРОВЕНЬ</div>
       <div class="levelup-box__level">${to}</div>
-      <div style="color:var(--text-2);margin-top:8px">Новый уровень подготовки</div>
+      <div class="levelup-box__sub">Новый уровень подготовки</div>
     </div>`;
   div.onclick = () => div.remove();
   root.appendChild(div);
@@ -1130,11 +1130,11 @@ Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача вы�
 Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", (err) => {
   if (isBlockedError(err)) return; // бан показывает модалку, тост не нужен
-  toast("Не удалось сохранить данные. Проверь соединение с сервером.", "toast--error", "x");
+  toast("Не удалось сохранить прогресс. Попробуй ещё раз.", "toast--error", "x");
 });
-Store.on("stateconflict", () => toast("Данные из другой вкладки объединены с текущими.", "", "rotate"));
+// Синхронизация вкладок — внутренний механизм. Обычному пользователю не
+// нужны сообщения о merge, отложенном обновлении или выборе главной вкладки.
 Store.on("externalupdate", () => { try { render(); } catch (_) {} });
-Store.on("externalupdate-pending", () => toast("В другой вкладке есть новые данные — подтянем их, когда закончишь тренировку", "", "rotate"));
 
 /* ============================================================
    Router
@@ -1164,6 +1164,7 @@ function go(route, param) {
       param = undefined;
     }
   } catch (_) {}
+  if (route !== "errors") resolvedErrorsExpanded = false;
   const h = "#/" + route + (param ? "/" + encodeURIComponent(param) : "");
   // Тот же адрес повторно — просто перерисовать (возврат в уже открытый урок/сессию).
   if (location.hash === h) render();
@@ -1247,7 +1248,7 @@ const Vendor = {
       ]);
       this.ensureCss("vendor/katex/katex.min.css");
       this.ensureCss("vendor/jsxgraph/jsxgraph.css");
-      if (!window.MathVisual) await this.loadScript("js/mathvisual.js?v=2");
+      if (!window.MathVisual) await this.loadScript("js/mathvisual.js?v=3");
       // Экрану, который ждал библиотеку, уже есть DOM с плейсхолдерами —
       // монтируем их сразу, наблюдатель MutationObserver подхватит будущие.
       try { MathVisualMount.mountWithin(document.body); } catch (_) {}
@@ -1273,9 +1274,30 @@ async function render() {
   // состояние с сервера до отрисовки — экран никогда не рисует stale-снапшот.
   if (Store.pendingExternalUpdate && !(typeof Session !== "undefined" && Session && Session.cur)
       && !(typeof Lesson !== "undefined" && Lesson && Lesson.cur)) {
-    Store.pendingExternalUpdate = false;
-    try { await Store.load(); } catch (e) {
+    // Если обновление было отложено во время локального save, сначала
+    // дожидаемся его. Иначе загрузка свежего bootstrap могла бы затереть
+    // только что закрытую ошибку до попадания на сервер.
+    if (Store.lastSyncedState && JSON.stringify(Store.state) !== JSON.stringify(Store.lastSyncedState)) {
+      try { await Store.pendingSave; } catch (_) {}
+      if (Store.lastSyncedState && JSON.stringify(Store.state) !== JSON.stringify(Store.lastSyncedState)) {
+        // Незавершённый локальный save — внутреннее состояние синхронизации.
+        // Следующий render повторит попытку; пользовательский toast здесь был
+        // ложным сообщением об «обновлении из другой вкладки».
+        return;
+      }
+    }
+    try {
+      await Store.load();
+      // Очищаем флаг только после успешного ответа. При сетевой ошибке
+      // pendingExternalUpdate должен сохраниться, иначе следующий render
+      // снова покажет устаревшее состояние и потеряет возможность догрузить
+      // закрытые ошибки.
+      Store.pendingExternalUpdate = false;
+    } catch (e) {
       if (isBlockedError(e)) { try { showAccountBlocked(blockedDetail(e) || {}); } catch (_) {} return; }
+      // Не сбрасываем флаг: фоновый refresh повторится при следующем render.
+      // Технические детали синхронизации обычному пользователю не показываем.
+      return;
     }
     if (accountBlocked) { try { showAccountBlocked(accountBlocked); } catch (_) {} return; }
     if (!Store.ready || !Store.state) return;
@@ -1348,13 +1370,13 @@ async function render() {
       screen.innerHTML = `<div class="card" style="max-width:420px;margin:64px auto;text-align:center">Не удалось загрузить задания.<br><button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button></div>`;
       return;
     }
-    // Без katex/jsxgraph экран всё равно отрисуется (plain-формулы и
-    // заглушки диаграмм, как раньше без вендора) — просто предупредим.
+    // Без katex/jsxgraph экран всё равно отрисуется plain-формулами.
+    // Ниже MathVisualMount заменит незагруженные схемы короткой понятной
+    // заглушкой; служебную ошибку вендора обычному пользователю не показываем.
     try {
       await Vendor.ensureMath();
     } catch (error) {
       mathFailed = true;
-      try { toast("Математические библиотеки не загрузились — формулы показаны текстом", "toast--error", "x"); } catch (_) {}
     }
     if (my !== renderSeq || currentRoute() !== route) return;
   }
@@ -2082,7 +2104,6 @@ async function switchSubjectFromUI(sel) {
   if (!id || id === DataAPI.currentSubject() || subjectSwitching) return;
   subjectSwitching = true;
   try {
-    toast("Переключаем предмет…", "", "hourglass");
     // Мгновенный отклик: лоадер на экране сразу, а не после ответа сети —
     // иначе клик выглядит зависшим, пока летят save + POST /api/subject.
     try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
@@ -2197,11 +2218,10 @@ function renderSidebar(active) {
       ${icon(n.ic)}<span>${n.label}</span>
       ${n.route === "errors" && openErrors ? `<span class="nav-badge">${openErrors}</span>` : ""}
     </a>`).join("");
-  const f = safeForecast();
-  const forecastValue = f.empty ? "скоро" : `${esc(f.low)}–${esc(f.high)}`;
-  document.getElementById("sidebarFooter").innerHTML = `
-    Прогноз: <b class="mono" style="color:var(--text-2)">${forecastValue}</b>${f.empty ? "" : " баллов"}<br>
-    <span style="font-size:11px">данные сохраняются в SQLite</span>`;
+  // На главной прогноз уже подробно показан в карточке. В меню держим
+  // только навигацию: служебная надпись про SQLite и второй прогноз лишь
+  // занимают место и дублируют один и тот же показатель.
+  document.getElementById("sidebarFooter").innerHTML = "";
 }
 
 function renderBottomNav(active, route = currentRoute()) {
@@ -2247,13 +2267,10 @@ function renderTopbar() {
   }
   if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; return; }
   const li = levelInfo();
-  const f = safeForecast();
   const dark = Theme.current() === "dark";
-  // Единая шапка для всех предметов: уровень, прогноз, тема и серия рисуются
-  // всегда одной структурой. У locked/empty-предмета значения честные
-  // (УР. 1, 0 XP, «скоро», 0 дн — из реального состояния, там нули), а бейдж
-  // с замком объясняет, почему данных нет. Отдельной урезанной шапки больше
-  // нет: предмет переключается только в профиле.
+  // В шапке оставляем только быстрый контекст: уровень, статус предмета
+  // и серию. Подробный прогноз уже находится в одноимённой карточке на
+  // главной — второй чип здесь был бы дублированием.
   const subjectState = subjectContentState();
   const locked = subjectLearningUnavailable(subjectState);
   const lockedInfo = locked ? (subjectState.info || subjectInfoSafe()) : null;
@@ -2269,7 +2286,6 @@ function renderTopbar() {
     </div>
     ${locked ? `<span class="chip chip--locked hide-mobile">${icon("lock")} ${esc(subjectDisplayName(lockedInfo))}</span>` : ""}
     <div class="topbar__spacer"></div>
-    <div class="chip hide-mobile">${f.empty ? "Прогноз&nbsp;<b class=\"mono\">скоро</b>" : `Прогноз&nbsp;<b class="mono">${esc(f.low)}–${esc(f.high)}</b>`}</div>
     ${locked ? `<span class="chip chip--locked hide-mobile">${esc(lockedStatus)}</span>` : ""}
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
     <div class="streak-chip streak-chip--clickable ${streakTier(streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${streak} дн</div>`;
@@ -3151,7 +3167,7 @@ function humanLessonError(raw) {
    миссии. */
 function startSkillPractice(skillId) {
   const skill = subjectSkillById(skillId);
-  if (!skill) return toast("Тема не найдена", "toast--error", "x");
+  if (!skill) { go("path"); return; }
   if (topicIsLocked(skill)) return toast("Тема пока закрыта — урок и практика ещё не подключены", "", "lock");
   const mission = asSafeArray(DataAPI.missions()).find((m) => m && m.skill === skillId && missionPracticeIds(m).length);
   if (mission) return startMission(mission.id);
@@ -3254,7 +3270,7 @@ function screenTraining(root) {
 
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
-  if (!m) return toast("Миссия не найдена", "toast--error", "x");
+  if (!m) { go("training"); return; }
   const skill = subjectSkillById(m.skill);
   if (skill && topicIsLocked(skill)) return toast("Тема пока закрыта — практика ещё не подключена", "", "lock");
   // Тренировка идёт по всему банку темы (missionPracticeIds), а не по
@@ -3327,6 +3343,7 @@ function persistSession() {
       title: S.title, taskIds: S.taskIds, mode: S.mode,
       missionId: S.missionId, bossId: S.bossId, xpReward: S.xpReward,
       offset: S.offset, total: S.total, idx: S.idx, errorMap: S.errorMap,
+      essayDraftByTask: S.essayDraftByTask || {},
     }));
   } catch (_) {}
 }
@@ -3356,6 +3373,7 @@ function restoreSessionFromStorage(route, param) {
     idx: Math.min(Math.max(d.idx || 0, 0), ids.length - 1),
     results: [], hintsUsed: 0, startTs: Date.now(), taskStartTs: Date.now(),
     answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    essayDraftByTask: d.essayDraftByTask || {},
   };
   return true;
 }
@@ -3452,22 +3470,15 @@ function renderTask(root) {
 
         <div id="hintSlot"></div>
 
-        ${t.selfCheck ? sessionSelfCheckAreaHtml(t) : `
-        <div class="answer-row">
-          <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
-          <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
-        </div>
-        ${answerFormatCaption(t.answer, t.valueType)}
-        <div class="session-tools">
-          <span id="hintControl"></span>
-          <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
-          <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
-        </div>`}
+        ${sessionAnswerAreaHtml(t, S)}
         <div id="feedbackSlot"></div>
       </div>
     </div>`;
 
-  if (t.selfCheck) {
+  if (isLongTextTask(t)) {
+    sessionEssayWire(t);
+    essayRestoreReady(t);
+  } else if (t.selfCheck) {
     // Развёрнутые задания (№14–20) не проверяются автоматически: единый
     // текстовый ответ не отражает полноту доказательства и записи решения.
     // Ученик решает на бумаге, сверяется с официальным решением и честно
@@ -3482,6 +3493,348 @@ function renderTask(root) {
     const chip = document.getElementById("timerChip");
     if (chip) chip.innerHTML = `${icon("clock")} ${fmtClock((Date.now() - S.taskStartTs) / 1000)}`;
   }, 1000);
+}
+
+/* ---------------- длинные текстовые ответы (итоговое сочинение) ----------------
+   Редактор — часть Practice UI, а не отдельная страница: та же карточка,
+   кнопки и обратная связь. Минимальный объём дублируется на сервере
+   (POST /api/essays): клиентский счётчик — только для живой подсказки. */
+
+function isLongTextTask(t) {
+  return !!t && (t.type === "long_text" || t.answerType === "long_text");
+}
+
+function essayWordsLabel(n) {
+  const mod100 = n % 100, mod10 = n % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "слов";
+  if (mod10 === 1) return "слово";
+  if (mod10 >= 2 && mod10 <= 4) return "слова";
+  return "слов";
+}
+
+function sessionAnswerAreaHtml(t, S) {
+  if (isLongTextTask(t)) return `
+    <div class="essay-editor" id="essayEditor">
+      <textarea class="essay-editor__area" id="essayInput" spellcheck="false"
+        placeholder="Пиши сочинение здесь: сформулируй позицию по теме, подкрепи её двумя аргументами из литературы и сделай вывод…"></textarea>
+      <div class="essay-editor__foot">
+        <span class="essay-editor__count mono" id="essayCount"></span>
+        <span class="essay-editor__bar"><span class="essay-editor__bar-fill" id="essayBar"></span></span>
+      </div>
+    </div>
+    <div class="essay-editor__error" id="essayError" style="display:none"></div>
+    <div class="session-tools">
+      <span id="hintControl"></span>
+      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
+      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">за проверенное сочинение: +${attemptXp(t, true, 0, false).total} XP</span>
+    </div>
+    <div class="essay-editor__submit">
+      <button class="btn btn--primary" id="essaySubmitBtn" disabled onclick="sessionEssaySubmit()">Отправить сочинение</button>
+    </div>`;
+  if (t.selfCheck) return sessionSelfCheckAreaHtml(t);
+  return `
+    <div class="answer-row">
+      <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
+      <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
+    </div>
+    ${answerFormatCaption(t.answer, t.valueType)}
+    <div class="session-tools">
+      <span id="hintControl"></span>
+      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
+      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
+    </div>`;
+}
+
+/* Черновик живёт в состоянии сессии (и дублируется в localStorage через
+   persistSession), поэтому перерисовка экрана — подсказка, выход из модалки —
+   не стирает текст. Ключ — id задания: в сессии может быть несколько тем. */
+function sessionEssayWire(t) {
+  const S = Session.cur;
+  const input = document.getElementById("essayInput");
+  if (!input) return;
+  if (!S.essayDraftByTask) S.essayDraftByTask = {};
+  input.value = S.essayDraftByTask[t.id] || "";
+  const countEl = document.getElementById("essayCount");
+  const barEl = document.getElementById("essayBar");
+  const btn = document.getElementById("essaySubmitBtn");
+  const editor = document.getElementById("essayEditor");
+  const update = () => {
+    S.essayDraftByTask[t.id] = input.value;
+    const n = countWords(input.value);
+    if (n < ESSAY_MIN_WORDS) {
+      countEl.textContent = `${n} / ${ESSAY_MIN_WORDS} ${essayWordsLabel(ESSAY_MIN_WORDS)} · ещё ${ESSAY_MIN_WORDS - n}`;
+      countEl.classList.remove("essay-editor__count--ok");
+      editor.classList.remove("essay-editor--ready");
+      btn.disabled = true;
+    } else {
+      countEl.textContent = `${n} ${essayWordsLabel(n)} · минимум выполнен`;
+      countEl.classList.add("essay-editor__count--ok");
+      editor.classList.add("essay-editor--ready");
+      btn.disabled = false;
+    }
+    barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
+  };
+  input.addEventListener("input", update);
+  update();
+  renderSessionHintControl();
+}
+
+/* Pipeline проверки итогового сочинения:
+   submission (POST /api/essays) → AI check (POST /api/ai/essay: модель К1–К6
+   + детерминированная грамотность К7–К10, параллельно внутри ai.py) →
+   report generation (POST /api/essays/evaluation → evaluation_status='ready')
+   → result ready (кнопка «Посмотреть результат →») → и только тогда XP
+   через существующий recordAnswer/attempts-flow. До 'ready' XP нет, иначе
+   получился бы «AI ещё работает → XP уже выдан». */
+
+const ESSAY_CHECK_MSGS = [
+  "Подсчитываю баллы…",
+  "Проверяю сочинение…",
+  "Анализирую критерии…",
+  "Собираю результат…",
+  "Готовлю отчёт…",
+];
+
+function essayCheckMsgStart(scopeId) {
+  essayCheckMsgStop();
+  let k = 0;
+  Session.essayCheckTimer = setInterval(() => {
+    k = (k + 1) % ESSAY_CHECK_MSGS.length;
+    const scope = scopeId ? document.getElementById(scopeId) : document;
+    const el = scope ? scope.querySelector("[data-loader-sub]") : null;
+    if (el) el.textContent = ESSAY_CHECK_MSGS[k];
+    else essayCheckMsgStop();
+  }, 1600);
+}
+
+function essayCheckMsgStop() {
+  if (Session.essayCheckTimer) { clearInterval(Session.essayCheckTimer); Session.essayCheckTimer = null; }
+}
+
+function essayAiErrorText(status, data) {
+  if (status === 429) return "Слишком много проверок. Подожди немного и попробуй снова.";
+  if (status === 503) return "Проверка временно недоступна. Текст сохранён — попробуй снова чуть позже.";
+  if (status === 502) return "Проверка не удалась. Текст сохранён — попробуй снова.";
+  if (data && data.error) return data.error;
+  return "Не удалось проверить сочинение. Текст сохранён — попробуй снова.";
+}
+
+/* Отчёт — это ege-result.html (единый шаблон результата): данные подставляет
+   сервер (GET /api/essays → submission.view через essay_result_view), здесь
+   только ссылка на точный submission. Никакого inline-рендера отчёта —
+   параллельной системы нет. */
+function essayResultUrl(submission) {
+  if (!submission) return "";
+  const subject = Store.subject || "russian";
+  if (submission.clientId) {
+    return `/ege-result.html?subject=${encodeURIComponent(subject)}&clientId=${encodeURIComponent(submission.clientId)}`;
+  }
+  return `/ege-result.html?subject=${encodeURIComponent(subject)}&taskId=${encodeURIComponent(submission.taskId || "")}`;
+}
+
+function openEssayResult(taskId) {
+  const S = Session.cur;
+  const submission = S && S.essayReadyByTask && S.essayReadyByTask[taskId];
+  const url = essayResultUrl(submission);
+  if (url) location.href = url;
+}
+
+/* Повторное открытие: готовый результат переживает перезагрузку — лежит в
+   essay_submissions (evaluation_status='ready'), а не во frontend-state.
+   XP при просмотре НЕ начисляем: он уже зафиксирован attempts-flow. */
+async function essayRestoreReady(t) {
+  try {
+    const res = await fetch(`/api/essays?subject=${encodeURIComponent(Store.subject)}&taskId=${encodeURIComponent(t.id)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.submission) return;
+    const sub = data.submission;
+    const slot = document.getElementById("feedbackSlot");
+    if (!slot || !Session.cur || Session.cur.answered) return;
+    if (!Session.cur || Session.task().id !== t.id) return;
+    if (sub.status === "ready" && sub.result) {
+      if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
+      Session.cur.essayReadyByTask[t.id] = sub;
+      slot.innerHTML = `
+        <div class="feedback feedback--ok">
+          <div class="feedback__head">${icon("check")} Это сочинение уже проверено
+            <span class="feedback__xp">${esc(sub.result.total_score)} / ${esc(sub.result.max_score)}</span></div>
+          <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
+          </div>
+        </div>`;
+    } else if (sub.status === "submitted" || sub.status === "failed") {
+      if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
+      Session.cur.essayReadyByTask[t.id] = sub;
+      slot.innerHTML = `
+        <div class="feedback">
+          <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
+          <div class="feedback__solution">Текст сохранён (${sub.wordCount} ${essayWordsLabel(sub.wordCount)}), но готового результата нет. Можно продолжить проверку без повторного ввода.</div>
+          <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Продолжить проверку</button>
+          </div>
+        </div>`;
+    }
+  } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
+}
+
+/* Продолжить проверку сохранённого текста после перезагрузки: новый
+   submission не создаём, текст берём с сервера (он не потерялся). */
+async function sessionEssayResume(taskId) {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  const t = Session.task();
+  if (!t || t.id !== taskId) return;
+  const saved = S.essayReadyByTask && S.essayReadyByTask[taskId];
+  if (!saved || !saved.text) return;
+  await essayRunChecks(t, saved.text, saved.clientId, saved.wordCount);
+}
+
+/* Общая фаза «AI check → report generation → result ready → XP».
+   Вызывается и после свежей отправки, и при «Продолжить проверку». */
+async function essayRunChecks(t, text, clientId, wordCount) {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  const slot = document.getElementById("feedbackSlot");
+  // Единый loading сайта (тот же loaderHTML, что на boot): только смена
+  // текста внутри существующего UI, без новых loader'ов и streaming.
+  slot.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+  essayCheckMsgStart("feedbackSlot");
+  const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+
+  let aiRes = null, aiData = {};
+  try {
+    aiRes = await fetch("/api/ai/essay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    aiData = await aiRes.json().catch(() => ({}));
+  } catch (_) { aiRes = null; }
+  if (!aiRes || !aiRes.ok || !aiData.result) {
+    try {
+      await fetch("/api/essays/evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: Store.subject, clientId, status: "failed" }),
+      });
+    } catch (_) { /* статус и так остался не-ready — XP не будет */ }
+    essayCheckMsgStop();
+    slot.innerHTML = `
+      <div class="feedback feedback--bad">
+        <div class="feedback__head">${icon("x")} Проверка не удалась</div>
+        <div class="feedback__solution">${esc(essayAiErrorText(aiRes ? aiRes.status : 0, aiData))}</div>
+        <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
+        </div>
+      </div>`;
+    const btn = document.getElementById("essaySubmitBtn");
+    if (btn) { btn.style.display = ""; btn.disabled = false; btn.textContent = "Отправить сочинение"; }
+    const input = document.getElementById("essayInput");
+    if (input) input.disabled = false;
+    return;
+  }
+
+  // Report generation: фиксируем готовый отчёт в том же submission.
+  let savedRes = null, savedData = {};
+  try {
+    savedRes = await fetch("/api/essays/evaluation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: Store.subject, clientId, status: "ready", result: aiData.result }),
+    });
+    savedData = await savedRes.json().catch(() => ({}));
+  } catch (_) { savedRes = null; }
+  if (!savedRes || !savedRes.ok || !savedData.submission) {
+    essayCheckMsgStop();
+    slot.innerHTML = `
+      <div class="feedback feedback--bad">
+        <div class="feedback__head">${icon("x")} Отчёт не сформирован</div>
+        <div class="feedback__solution">Проверка прошла, но результат не сохранился. Текст не потерян — попробуй снова, XP начислен не будет до готового отчёта.</div>
+        <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
+        </div>
+      </div>`;
+    return;
+  }
+  const submission = savedData.submission;
+
+  // Только теперь — существующий механизм фиксации результата/XP/прогресса.
+  const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
+  const xp = recordAnswer(t, true, 0, seconds, closesTaskId, 0);
+  S.gainedXp += xp;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
+  S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
+  S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
+  S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: 0, essay: true, wordCount, submissionId: submission.submissionId });
+  S.answered = true;
+  Session.stopTimer();
+  if (S.essayDraftByTask) delete S.essayDraftByTask[t.id];
+  if (!S.essayReadyByTask) S.essayReadyByTask = {};
+  S.essayReadyByTask[t.id] = submission;
+  const input = document.getElementById("essayInput");
+  if (input) input.disabled = true;
+  const submitBtn = document.getElementById("essaySubmitBtn");
+  if (submitBtn) submitBtn.style.display = "none";
+
+  essayCheckMsgStop();
+  renderTopbar();
+  // Кнопка — только когда отчёт действительно сформирован и XP выдан.
+  slot.innerHTML = `
+    <div class="feedback feedback--ok">
+      <div class="feedback__head">${icon("check")} Проверка завершена
+        <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
+      <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
+      </div>
+    </div>`;
+  const doneBox = slot.querySelector(".feedback--ok");
+  if (doneBox && doneBox.scrollIntoView) {
+    try { doneBox.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
+  }
+}
+
+async function sessionEssaySubmit() {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  const t = Session.task();
+  const input = document.getElementById("essayInput");
+  const btn = document.getElementById("essaySubmitBtn");
+  const errBox = document.getElementById("essayError");
+  const text = (input.value || "").trim();
+  if (countWords(text) < ESSAY_MIN_WORDS) return;
+  btn.disabled = true;
+  btn.textContent = "Отправка…";
+  errBox.style.display = "none";
+  // Шаг 1 — сохранить submission как обычно. Проверка НЕ завершена,
+  // XP НЕ начисляем: дальше pipeline, а не feedback с баллами.
+  let data = null, ok = false;
+  try {
+    const res = await fetch("/api/essays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: Store.subject, taskId: t.id, skill: t.skill, text, id: newEntityId() }),
+    });
+    data = await res.json().catch(() => ({}));
+    ok = res.ok && !!data.ok;
+  } catch (_) {
+    data = {};
+  }
+  if (!ok) {
+    btn.disabled = false;
+    btn.textContent = "Отправить сочинение";
+    errBox.style.display = "";
+    errBox.textContent = data && data.minWords
+      ? `Сервер посчитал ${data.wordCount} ${essayWordsLabel(data.wordCount)} — минимум ${data.minWords}. Допиши текст и отправь снова.`
+      : (data && data.error) || "Не удалось отправить сочинение. Проверь соединение и попробуй ещё раз.";
+    return;
+  }
+  if (!S.essayReadyByTask) S.essayReadyByTask = {};
+  S.essayReadyByTask[t.id] = { taskId: t.id, clientId: data.clientId, text, wordCount: data.wordCount, status: "submitted" };
+  input.disabled = true;
+  btn.style.display = "none";
+  // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри).
+  await essayRunChecks(t, text, data.clientId, data.wordCount);
 }
 
 /* ---------------- задания части 2: самопроверка вместо авто-проверки ---------------- */
@@ -3765,6 +4118,13 @@ function sessionFinish(early = false) {
   if (solved >= 5 && S.hintsUsed === 0 && correct / solved >= 0.8) unlockAchievement("nohints");
 
   const errorsClosed = S.results.filter((r) => r.correct && S.mode === "errors").length;
+  /* Сессия из длинных текстовых ответов не «правильна/неправильна»:
+     сочинение либо отправлено (минимальный объём есть), либо нет.
+     Оценки по критериям здесь нет — только честный факт отправки. */
+  const essayOnly = S.results.length > 0 && S.results.every((r) => {
+    const task = DataAPI.task(r.taskId);
+    return task && isLongTextTask(task);
+  });
 
   const isBossWin = boss && correct / solved >= 0.6 && bossDefeated(boss);
   const title = missionDone ? "ПРАКТИКА ЗАВЕРШЕНА" : boss ? (isBossWin ? "ИСПЫТАНИЕ ПРОЙДЕНО" : "БОСС УСТОЯЛ") : "ТРЕНИРОВКА ЗАВЕРШЕНА";
@@ -3775,7 +4135,7 @@ function sessionFinish(early = false) {
   persistSession();
   // Экран результата — не сессия: подменяем адрес без перерисовки, чтобы
   // перезагрузка вела в список, а не перезапускала тренировку.
-  const resultRoute = S.mode === "boss" ? "trials" : "training";
+  const resultRoute = S.mode === "boss" ? "trials" : S.mode === "errors" ? "errors" : "training";
   try { history.replaceState(null, "", "#/" + resultRoute); } catch (_) {}
 
   const attemptSum = S.attemptXpSum || 0;
@@ -3792,7 +4152,7 @@ function sessionFinish(early = false) {
       <div class="result-xp mono">+${S.gainedXp + missionXp} XP</div>
       <div class="result-breakdown">
         <div class="result-breakdown__row"><span>За выполнение заданий</span><b class="mono">+${attemptSum} XP</b></div>
-        ${bonusSum ? `<div class="result-breakdown__row"><span>За правильные ответы</span><b class="mono">+${bonusSum} XP</b></div>` : ""}
+        ${bonusSum ? `<div class="result-breakdown__row"><span>${essayOnly ? "За выполнение сочинений" : "За правильные ответы"}</span><b class="mono">+${bonusSum} XP</b></div>` : ""}
         ${errSum ? `<div class="result-breakdown__row"><span>За закрытие ошибок</span><b class="mono">+${errSum} XP</b></div>` : ""}
         ${missionXp ? `<div class="result-breakdown__row"><span>Бонус миссии</span><b class="mono">+${missionXp} XP</b></div>` : ""}
       </div>
@@ -3800,10 +4160,11 @@ function sessionFinish(early = false) {
       ${repeatNote}
       ${boss && isBossWin ? `<div style="color:var(--success)">Навыки ветки «${DataAPI.category(boss.cat).name}» повышены на +6%</div>` : ""}
       <div class="result-stats">
-        <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${correct}/${solved}</div><div class="stat-label">правильно</div></div>
+        <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${correct}/${solved}</div><div class="stat-label">${essayOnly ? "отправлено" : "правильно"}</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime(totalTime)}</div><div class="stat-label">время</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${S.hintsUsed}</div><div class="stat-label">подсказок</div></div>
       </div>
+      ${essayOnly ? `<div style="color:var(--text-2);font-size:14px;margin:-8px 0 20px">Сочинения сохранены и проверены: разбор каждого — на странице результата (кнопка «Посмотреть результат →» в карточке задания).</div>` : ""}
       ${boss ? `<div class="card" style="text-align:left;margin-bottom:20px">
         <div class="stat-label" style="margin-bottom:8px">Проверялись навыки</div>
         <div class="error-subtopics">${checkedSkills.map((n) => `<span class="chip">${n}</span>`).join("")}</div>
@@ -3811,7 +4172,7 @@ function sessionFinish(early = false) {
       ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто ошибок: <b>${errorsClosed}</b></div>` : ""}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn--primary btn--lg" onclick="go('dashboard')">На главную</button>
-        <button class="btn btn--ghost btn--lg" onclick="go('${S.mode === "boss" ? "trials" : "training"}')">${S.mode === "boss" ? "К испытаниям" : "Ещё тренировка"}</button>
+        <button class="btn btn--ghost btn--lg" onclick="go('${resultRoute}')">${S.mode === "boss" ? "К испытаниям" : S.mode === "errors" ? "К ошибкам" : "Ещё тренировка"}</button>
       </div>
     </div>`;
   restoreChromeAfterResult(resultRoute);
@@ -3988,7 +4349,7 @@ const Lesson = {
 
   async start(lessonId) {
     // Шаги урока живут в ленивой половине каталога — дожидаемся их до чтения.
-    try { await Store.ensureDetails(); } catch (_) { toast("Не удалось загрузить урок. Проверь соединение.", "toast--error", "x"); return; }
+    try { await Store.ensureDetails(); } catch (_) { toast("Не удалось загрузить урок. Попробуй ещё раз.", "toast--error", "x"); return; }
     const lesson = DataAPI.lesson(lessonId);
     if (!lesson || !Array.isArray(lesson.steps)) return;
     if (this.cur && this.cur.lesson.id !== lessonId) {
@@ -4329,13 +4690,23 @@ function lessonFinish() {
    Screen: Ошибки
    ============================================================ */
 
+const RESOLVED_ERRORS_PREVIEW = 10;
+let resolvedErrorsExpanded = false;
+
+function toggleResolvedErrors() {
+  resolvedErrorsExpanded = !resolvedErrorsExpanded;
+  render();
+}
+
 function screenErrors(root) {
   // Defensive guard: render() перехватывает locked/empty раньше, но прямой
   // вызов функции (тест, будущий рефакторинг роутера) тоже обязан показать
   // раздел «Ошибки», а не ready-подобный экран с чужими данными.
   if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "errors");
   const open = Store.state.errors.filter((e) => !e.resolved);
-  const resolved = Store.state.errors.filter((e) => e.resolved);
+  const resolvedTotal = Store.state.errors.filter((e) => e.resolved).length;
+  const resolvedLimit = resolvedErrorsExpanded ? resolvedTotal : RESOLVED_ERRORS_PREVIEW;
+  const resolved = resolvedErrorsForDisplay(Store.state.errors, Store.state.taskAttempts, resolvedLimit);
   // Полные ошибки (задание не решено) и мини-ошибки (решено неидеально:
   // подсказка, неверные попытки, медленно) — разные пункты одного списка.
   const majors = open.filter((e) => errorKindOf(e) === "major");
@@ -4383,24 +4754,30 @@ function screenErrors(root) {
       </div>
     </div>
 
+    ${resolvedTotal ? `
+    <div class="section-title">Закрытые · ${resolvedTotal}</div>
+    <div class="card" style="padding:8px 16px">
+      ${resolved.map((e) => {
+        const t = DataAPI.task(e.taskId);
+        const closedAt = errorResolutionTimestamp(e, Store.state.taskAttempts);
+        return `<div style="display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <span style="color:var(--success)">${icon("check")}</span>
+          <span style="color:var(--text-2)">${esc(t ? t.sub : e.sub)}</span>
+          <span style="margin-left:auto;color:var(--muted);font-size:12px">${relTime(closedAt)}</span>
+        </div>`;
+      }).join("")}
+      ${resolvedTotal > RESOLVED_ERRORS_PREVIEW ? `<div style="padding:9px 0 3px;color:var(--muted);font-size:12px">
+        ${resolvedErrorsExpanded
+          ? `<button class="btn btn--soft btn--sm" type="button" onclick="toggleResolvedErrors()">Свернуть</button>`
+          : `<button class="btn btn--soft btn--sm" type="button" onclick="toggleResolvedErrors()">Показать все (${resolvedTotal})</button>`}
+      </div>` : ""}
+    </div>` : ""}
+
     ${majors.length ? `<div class="section-title">Требуют повторения</div>${groupCards(majors, "chip--danger")}` : ""}
     ${minors.length ? `<div class="section-title">Почти получилось — закрепи без подсказок</div>
     <div style="font-size:13px;color:var(--muted);margin:-6px 0 12px">Решено, но неидеально: с подсказкой, после неверных попыток или слишком медленно. Чистое решение закроет пункт.</div>
     ${groupCards(minors, "")}` : ""}
-    ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Решай задания — система соберёт здесь всё, что пошло не так.</div>` : ""}
-
-    ${resolved.length ? `
-    <div class="section-title">Закрытые</div>
-    <div class="card" style="padding:8px 16px">
-      ${resolved.slice(0, 8).map((e) => {
-        const t = DataAPI.task(e.taskId);
-        return `<div style="display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px">
-          <span style="color:var(--success)">${icon("check")}</span>
-          <span style="color:var(--text-2)">${esc(t ? t.sub : e.sub)}</span>
-          <span style="margin-left:auto;color:var(--muted);font-size:12px">${relTime(e.ts)}</span>
-        </div>`;
-      }).join("")}
-    </div>` : ""}`;
+    ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Решай задания — система соберёт здесь всё, что пошло не так.</div>` : ""}`;
 }
 
 function reviewQueueForErrors(errors) {
@@ -4479,7 +4856,7 @@ function startErrorsReview() {
   const open = Store.state.errors.filter((e) => !e.resolved);
   if (!open.length) return toast("Открытых ошибок нет", "", "check");
   const q = buildErrorsReviewSession();
-  if (!q) return toast("Не удалось собрать повторение", "", "x");
+  if (!q) return toast("Не удалось подобрать задания. Попробуй ещё раз.", "", "x");
 
   Session.start(q);
 }
@@ -4591,7 +4968,7 @@ function startMixedTrial() {
 
 function startBoss(bossId) {
   const boss = DataAPI.bosses().find((b) => b.id === bossId);
-  if (!boss) return toast("Испытание не найдено", "toast--error", "x");
+  if (!boss) { go("trials"); return; }
   if (!bossUnlocked(boss)) return;
   const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
   Session.start({
@@ -5163,7 +5540,7 @@ function deviceModalAskConfirm(id) {
         </div>
         <div class="dlg__text">
           ${isCurrent
-            ? `Сессия «${esc(name)}» завершится — ты выйдешь из аккаунта здесь. Прогресс сохранён на сервере, на других устройствах ничего не изменится.`
+            ? `Сессия «${esc(name)}» завершится — ты выйдешь из аккаунта здесь. Прогресс уже сохранён и останется доступен на других устройствах.`
             : `Устройство <b>${esc(name)}</b> выйдет из аккаунта, для продолжения ему придётся войти заново. Твоя текущая сессия не прервётся.`}
         </div>
         <div class="dlg__actions">
@@ -5318,14 +5695,14 @@ async function revokeDeviceSession(id) {
       try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
       try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}
       await Store.refreshAfterAuth();
-      toast("Сессия завершена", "", "check");
+      toast("Вы вышли из аккаунта на этом устройстве.", "", "check");
       go("login");
       return;
     }
-    toast("Устройство отключено", "", "check");
+    toast("Выход на выбранном устройстве завершён.", "", "check");
     await loadDevicesSection();
   } catch (error) {
-    toast((error && error.message) || "Не удалось завершить сессию", "toast--error", "x");
+    toast("Не удалось завершить выход. Попробуй ещё раз.", "toast--error", "x");
   }
 }
 
@@ -5458,7 +5835,6 @@ async function chooseLoginSubject(id) {
   if (!id || subjectSwitching) return;
   subjectSwitching = true;
   try {
-    toast("Открываем предмет…", "", "hourglass");
     // Мгновенный отклик: лоадер сразу, а не после ответа сети.
     try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
@@ -5488,7 +5864,6 @@ async function chooseLoginSubject(id) {
     // Новый для аккаунта предмет может быть не onboarded — render сам
     // покажет онбординг этого предмета; иначе открываем сайт с выбором.
     if (!Store.state.onboarded) { render(); return; }
-    toast("Предмет выбран", "", "check");
     if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
     render();
   } catch (error) {
@@ -5509,6 +5884,17 @@ function authFormBusy() {
   if (box) { box.textContent = ""; box.classList.remove("is-visible"); }
   const btn = document.getElementById("auth-submit");
   if (btn) btn.disabled = true;
+}
+
+function authFormError(error, fallback) {
+  const status = Number(error && error.status) || 0;
+  const payloadCode = error && error.payload && error.payload.code ? String(error.payload.code) : "";
+  const code = error && error.code ? String(error.code) : payloadCode;
+  const expected = [400, 401, 409, 422, 429].includes(status) || code === "ACCOUNT_BLOCKED";
+  const message = error && error.message ? String(error.message).trim() : "";
+  const technical = /\b(?:api|endpoint|stack|traceback|exception)\b|request failed|fetch/i.test(message);
+  const humanRussian = /[А-Яа-яЁё]/.test(message);
+  return expected && humanRussian && message.length <= 300 && !technical ? message : fallback;
 }
 
 async function submitLogin(event) {
@@ -5534,7 +5920,7 @@ async function submitLogin(event) {
     toast("Вы вошли в аккаунт", "", "check");
     go("subject");
   } catch (error) {
-    authFormFail((error && error.message) || "Не удалось войти. Попробуй ещё раз.");
+    authFormFail(authFormError(error, "Не удалось войти. Попробуй ещё раз."));
   }
 }
 
@@ -5550,7 +5936,7 @@ async function submitRegister(event) {
     toast("Аккаунт создан — весь прогресс сохранён", "", "check");
     go("profile");
   } catch (error) {
-    authFormFail((error && error.message) || "Не удалось создать аккаунт. Попробуй ещё раз.");
+    authFormFail(authFormError(error, "Не удалось создать аккаунт. Попробуй ещё раз."));
   }
 }
 
@@ -5562,7 +5948,7 @@ async function logoutAccount() {
     await AuthAPI.logout();
   } catch (firstError) {
     try { await AuthAPI.logout(); } catch (secondError) {
-      toast("Не удалось выйти: проверь соединение и попробуй снова", "toast--error", "x");
+      toast("Не удалось выйти. Попробуй ещё раз.", "toast--error", "x");
       return;
     }
   }
@@ -5580,7 +5966,7 @@ async function logoutAccount() {
   // свежего bootstrap через refreshAfterAuth — fail-closed.
   try { AdminInbox.reset(); } catch (_) {}
   await Store.refreshAfterAuth();
-  toast("Вы вышли из аккаунта. Прогресс аккаунта сохранён на сервере.", "", "check");
+  toast("Вы вышли из аккаунта. Прогресс сохранён.", "", "check");
   go("login");
 }
 
@@ -6199,9 +6585,8 @@ function showBootError(error) {
   const screen = document.getElementById("screen");
   document.getElementById("topbar").innerHTML = "";
   screen.innerHTML = `<div class="card" style="max-width:640px;margin:64px auto;text-align:center">
-    <div class="page-title">Сервер недоступен</div>
-    <div style="margin-top:12px;color:var(--text-2);line-height:1.6">Данные аккаунта не загружены. Проверь соединение с сервером и обнови страницу.</div>
-    <div class="mono" style="margin-top:12px;color:var(--muted);font-size:12px">${esc(error.message || error)}</div>
+    <div class="page-title">Не удалось загрузить сайт</div>
+    <div style="margin-top:12px;color:var(--text-2);line-height:1.6">Проверь интернет-соединение и обнови страницу.</div>
     <button class="btn btn--primary" style="margin-top:20px" onclick="location.reload()">Повторить</button>
   </div>`;
 }
@@ -6243,7 +6628,7 @@ const MathVisualMount = {
     scope.querySelectorAll("[data-mathvisual]:not([data-mathvisual-mounted])").forEach((el) => {
       el.dataset.mathvisualMounted = "1";
       el.classList.add("task-visual--missing");
-      el.innerHTML = '<div class="task-visual__fallback" style="display:block" role="status">Не удалось загрузить рисунок — проверь соединение и обнови страницу.</div>';
+      el.innerHTML = '<div class="task-visual__fallback" style="display:block" role="status">Рисунок временно недоступен.</div>';
     });
   },
 };
@@ -6289,18 +6674,21 @@ function bootstrapApp() {
           if (document.hidden) pauseLessonClock();
           else resumeLessonClock();
           if (!document.hidden) {
-            Store.checkExternalUpdate().catch(() => {});
+            Store.checkExternalUpdate(true).catch(() => {});
             try { revalidateProfileAuth(); } catch (_) {}
             try { revalidateAdminSession(); } catch (_) {}
           }
         });
         window.addEventListener("focus", () => {
           resumeLessonClock();
-          Store.checkExternalUpdate().catch(() => {});
+          Store.checkExternalUpdate(true).catch(() => {});
           try { revalidateProfileAuth(); } catch (_) {}
           try { revalidateAdminSession(); } catch (_) {}
         });
-        window.addEventListener("pageshow", () => resumeLessonClock());
+        window.addEventListener("pageshow", () => {
+          resumeLessonClock();
+          Store.checkExternalUpdate(true).catch(() => {});
+        });
         window.addEventListener("blur", () => pauseLessonClock());
         document.addEventListener("freeze", () => pauseLessonClock());
         scheduleAdminSessionWatch();

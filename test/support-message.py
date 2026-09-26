@@ -333,6 +333,9 @@ def main():
             assert "requestIdFor(message)" in contacts
             assert "requestId: requestId" in contacts or "requestId:requestId" in contacts
             assert "formToken:" in contacts and 'getCookie("ege_support_form")' in contacts
+            assert "function supportFailureText" in contacts
+            assert "payload.error" not in contacts
+            assert "error.userMessage" in contacts
             footer = (ROOT / "js" / "footer.js").read_text(encoding="utf-8")
             assert 'href="/contacts">Контакты' in footer
             assert 'Контакты <span class="ef-mini ef-mini--soon">скоро' not in footer
