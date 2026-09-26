@@ -169,8 +169,8 @@ async function main() {
     // кнопка готового отчёта (есть AI-ключ), либо честная ошибка без XP
     // (ключа нет). В обоих случаях — никаких mock-баллов и висящих спиннеров.
     await page.click("#essaySubmitBtn");
-    await page.waitForSelector("#feedbackSlot .ege-loader", { timeout: 15000 });
-    const loaderSub = await page.$eval("#feedbackSlot [data-loader-sub]", (e) => e.textContent);
+    await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
+    const loaderSub = await page.$eval("#screen [data-loader-sub]", (e) => e.textContent);
     t("pipeline: единый лоадер с текстом проверки",
       /Подсчитываю баллы|Проверяю сочинение|Анализирую критерии|Собираю результат|Готовлю отчёт/.test(loaderSub), loaderSub);
     await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
@@ -242,7 +242,7 @@ async function main() {
     await shot(page, "essay-200-mobile-light.png");
     await overflow(page, "mobile long");
     await page.click("#essaySubmitBtn");
-    await page.waitForSelector("#feedbackSlot .ege-loader", { timeout: 15000 });
+    await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
     await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
     await page.evaluate(() => {
       const el = document.querySelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad");
