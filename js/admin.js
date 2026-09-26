@@ -170,6 +170,24 @@ function adminSubjectName(value, fallback = "Предмет") {
   return text || fallback;
 }
 
+/* Онбординг — свойство АККАУНТА, а не открытого предмета: человек, прошедший
+   его в русском, остаётся «онбординг пройден», когда админ смотрит его профиль
+   по профильной математике. Поэтому бейдж строится по onboardedAny, а рядом
+   перечисляются предметы, где онбординг реально пройден (список приходит с
+   сервера и новым предметом пополняется сам). */
+function adminOnboardedSubjects(user) {
+  const list = user && Array.isArray(user.onboardedSubjects) ? user.onboardedSubjects : [];
+  return list.map((item) => adminSubjectName(item && typeof item === "object" ? item : { id: item }, "Предмет"));
+}
+
+function onboardedBadge(user) {
+  const any = !!(user && (user.onboardedAny ?? user.onboarded));
+  if (!any) return `<span class="a-chip a-chip--warn">онбординг не пройден</span>`;
+  const done = adminOnboardedSubjects(user);
+  const where = done.length ? ` · ${esc(done.join(", "))}` : "";
+  return `<span class="a-chip a-chip--success"${where ? ` title="Пройден в: ${esc(done.join(", "))}"` : ""}>онбординг пройден${where}</span>`;
+}
+
 function adminSubjectLocked(user) {
   if (!user || typeof user !== "object") return false;
   if (user.subjectLocked === true || user.locked === true) return true;
@@ -521,7 +539,7 @@ async function screenDashboard() {
   const screen = `
     <div class="a-stats">
       ${statTile("Аккаунтов", fmtNum(u.total), `+${u.newToday} за 24 ч · +${u.newWeek} за неделю`)}
-      ${statTile("Онбординг прошли", fmtNum(u.onboarded), `${Math.round((u.onboarded / Math.max(1, u.total)) * 100)}% аккаунтов`)}
+      ${statTile("Онбординг прошли", fmtNum(u.onboarded), `${Math.round((u.onboarded / Math.max(1, u.total)) * 100)}% аккаунтов · не прошли: ${fmtNum(u.withoutOnboarding ?? Math.max(0, u.total - u.onboarded))}`)}
       ${statTile("Активны сегодня", fmtNum(u.activeToday), `за 7 дней: <span class="up">${fmtNum(u.activeWeek)}</span>`)}
       ${statTile("Решали задания", fmtNum(u.activeEver), `средний XP: ${fmtNum(Math.round(u.avgXp))}`)}
     </div>
@@ -696,7 +714,7 @@ async function screenUsers() {
             <div class="a-user-card__top">
               <div class="a-avatar a-avatar--sm">${esc(initial)}</div>
               <div class="a-user-card__id">
-                <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboarded ? "" : ` <span class="a-chip">new</span>`}${p.block ? ` <span class="a-chip a-chip--danger">бан</span>` : ""}</div>
+                <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboardedAny ? "" : ` <span class="a-chip">new</span>`}${p.block ? ` <span class="a-chip a-chip--danger">бан</span>` : ""}</div>
                 <div class="a-user-card__acct mono">${esc(p.accountId || "—")}</div>
               </div>
               ${locked
@@ -778,7 +796,7 @@ async function screenUser(ref) {
             ${locked
               ? `<span class="a-chip a-chip--warn">${esc(subjectName)} · материалы скоро</span>`
               : `<span>уровень ${st.level.level} · ${fmtNum(st.xp)} XP</span>`}
-            ${p.onboarded ? `<span class="a-chip a-chip--success">онбординг пройден</span>` : `<span class="a-chip a-chip--warn">не завершил онбординг</span>`}
+            ${onboardedBadge(p)}
             ${p.block ? `<span class="a-chip a-chip--danger">${esc(fmtBlockShort(p.block))}</span>` : `<span class="a-chip a-chip--success">активен</span>`}
             ${p.adminSessions > 0 ? `<span class="a-chip a-chip--accent">admin-сессия активна</span>` : ""}
           </div>
@@ -799,6 +817,10 @@ async function screenUser(ref) {
           : `<div class="a-kv__item"><div class="a-kv__k">Серия</div><div class="a-kv__v">${st.streak} ${plural(st.streak, "день", "дня", "дней")}</div></div>`}
         <div class="a-kv__item"><div class="a-kv__k">Самооценка</div><div class="a-kv__v">${p.selfLevel ? esc(LEVEL_LABELS[p.selfLevel] || p.selfLevel) : "—"}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Цель</div><div class="a-kv__v">${p.goal ? esc(GOAL_LABELS[p.goal] || p.goal) : "—"}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Онбординг пройден</div><div class="a-kv__v">${
+          adminOnboardedSubjects(p).length
+            ? esc(adminOnboardedSubjects(p).join(", "))
+            : `<span style="color:var(--muted)">нигде</span>`}</div></div>
         ${locked ? "" : `<div class="a-kv__item"><div class="a-kv__k">До след. уровня</div><div class="a-kv__v">${fmtNum(st.level.need - st.level.intoLevel)} XP</div></div>`}
       </div>
     </div>

@@ -3142,9 +3142,26 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
       subject TEXT NOT NULL, onboarded INTEGER NOT NULL DEFAULT 0,
       self_level TEXT, goal_id TEXT, state_version INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY(user_id, subject))""")
-    # Backfill: существующие аккаунты уже прошли онбординг профиля.
+    # Backfill: профили, заведённые до появления предметов, относятся к
+    # предмету по умолчанию — это единственный случай, где он назван явно.
     conn.execute(f"""INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)
       SELECT id, '{DEFAULT_SUBJECT}', onboarded, self_level, goal_id FROM users""")
+    # users.onboarded переводим из «профиль предмета по умолчанию» в
+    # производную «прошёл онбординг в любом предмете»: пока этого не сделать,
+    # аккаунт, прошедший онбординг русского, выглядел бы в админке как
+    # никогда не заходивший. Пересчёт идемпотентный и идёт по всем строкам.
+    conn.execute("""UPDATE users SET onboarded = CASE WHEN EXISTS
+                     (SELECT 1 FROM user_subjects us
+                       WHERE us.user_id = users.id AND us.onboarded = 1)
+                   THEN 1 ELSE 0 END
+                   WHERE onboarded <> CASE WHEN EXISTS
+                     (SELECT 1 FROM user_subjects us
+                       WHERE us.user_id = users.id AND us.onboarded = 1)
+                   THEN 1 ELSE 0 END""")
+    # users.self_level / users.goal_id — мёртвое зеркало профиля предмета по
+    # умолчанию: его больше не читает ни один запрос, поэтому и не
+    # поддерживается. Чистим, чтобы значения не выдавали себя за актуальные.
+    conn.execute("UPDATE users SET self_level=NULL, goal_id=NULL WHERE self_level IS NOT NULL OR goal_id IS NOT NULL")
     # Таблицы с точным ключом по предмету — пересоздание с subject в PK.
     for table, (ddl, cols) in _SUBJECT_PK_REBUILDS.items():
         columns = _table_columns(conn, table)
@@ -4491,29 +4508,54 @@ def current_subject_for(conn: sqlite3.Connection, user_id: int) -> str:
 
 
 def ensure_subject_rows(conn: sqlite3.Connection, user_id: int, subject: str) -> None:
-    """Лениво заводит пер-предметные строки: профиль и счётчики."""
+    """Лениво заводит пер-предметные строки: профиль и счётчики.
+
+    Строка профиля предмета всегда начинается с чистого листа, и ветвления по
+    «предмету по умолчанию» здесь нет: любой предмет равноправен, а ученик,
+    открывший новый предмет, получает такой же пустой профиль, как когда-то
+    получил первый. Данные аккаунтов, созданных до появления предметов,
+    переносятся один раз миграцией ensure_subject_schema (backfill ниже).
+    """
     subject = resolve_subject(subject)
     cols = _table_columns(conn, "users")
     if "current_subject" in cols:
         cur = conn.execute("SELECT current_subject FROM users WHERE id=?", (user_id,)).fetchone()
         if not cur or not is_known_subject(cur["current_subject"]):
             conn.execute("UPDATE users SET current_subject=? WHERE id=?", (subject, user_id))
-    row = conn.execute("SELECT onboarded FROM users WHERE id=?", (user_id,)).fetchone()
-    if row:
-        if subject == DEFAULT_SUBJECT:
-            # Существующие аккаунты уже прошли онбординг профиля — переносим.
-            conn.execute(
-                "INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)"
-                " SELECT id, ?, onboarded, self_level, goal_id FROM users WHERE id=?",
-                (subject, user_id))
-        else:
-            # Новый предмет всегда начинается с чистого профиля, даже если
-            # в users.onboarded уже стоит флаг другого предмета.
-            conn.execute(
-                "INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)"
-                " VALUES (?, ?, 0, NULL, NULL)",
-                (user_id, subject))
+    conn.execute(
+        "INSERT OR IGNORE INTO user_subjects(user_id, subject, onboarded, self_level, goal_id)"
+        " VALUES (?, ?, 0, NULL, NULL)",
+        (user_id, subject))
     conn.execute("INSERT OR IGNORE INTO user_stats(user_id, subject) VALUES (?, ?)", (user_id, subject))
+
+
+def user_onboarded_subject_ids(conn: sqlite3.Connection, user_id: int) -> list[str]:
+    """Предметы, в которых человек прошёл онбординг.
+
+    Источник истины — user_subjects: он одинаков для любого предмета и новым
+    предметом пополняется сам, без правок в этом коде.
+    """
+    try:
+        rows = conn.execute("SELECT subject FROM user_subjects WHERE user_id=? AND onboarded=1",
+                            (user_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    return [str(r["subject"]) for r in rows if is_known_subject(r["subject"])]
+
+
+def refresh_account_onboarded(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Пересчитать флаг аккаунта «прошёл онбординг» из профилей предметов.
+
+    users.onboarded — единственная производная величина от user_subjects и
+    единственное место, где профиль аккаунта сворачивается в один флаг.
+    Смысл флага — «этот человек реально прошёл онбординг», в любом предмете.
+    Ровно этот вопрос задают и админка, и механизм гостя, поэтому ответ не
+    зависит от того, какой предмет открыт сейчас, и ветвления по предмету
+    здесь принципиально быть не может: новый предмет подхватывается сам.
+    """
+    onboarded = 1 if user_onboarded_subject_ids(conn, user_id) else 0
+    conn.execute("UPDATE users SET onboarded=? WHERE id=?", (onboarded, user_id))
+    return bool(onboarded)
 
 
 def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
@@ -4624,12 +4666,13 @@ def read_state(conn: sqlite3.Connection, user_id: int | None, subject: str | Non
     ensure_subject_rows(conn, user_id, subject)
     state = default_state(conn, user_id, subject)
     state["subject"] = subject
-    user = conn.execute("SELECT onboarded, self_level, goal_id, name FROM users WHERE id=?", (user_id,)).fetchone()
+    # Профиль предмета живёт только в user_subjects: ensure_subject_rows выше
+    # гарантирует строку, поэтому запасного чтения из users.* не осталось и
+    # быть не должно — иначе новый предмет снова понадобил бы частный случай.
     prof = conn.execute("SELECT onboarded, self_level, goal_id, state_version FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
     if prof is not None:
         state.update({"onboarded": bool(prof["onboarded"]), "selfLevel": prof["self_level"], "goal": prof["goal_id"], "stateVersion": prof["state_version"]})
-    elif user:
-        state.update({"onboarded": bool(user["onboarded"]), "selfLevel": user["self_level"], "goal": user["goal_id"]})
+    user = conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()
     if user:
         state["name"] = user["name"]
     # A coming-soon subject may have a visible locked node, but it has no
@@ -4978,32 +5021,44 @@ def patch_error_resolved(conn: sqlite3.Connection, user_id: int, subject: str, e
     return _serialize_error_row(row)
 
 
+def validate_profile_settings(conn: sqlite3.Connection, subject: str, self_level, goal) -> str | None:
+    """Проверить самооценку и цель по шкале ПРЕДМЕТА. Возвращает цель к записи.
+
+    Единственное место, где решается, что цель применима к предмету: и
+    PATCH /api/settings, и заявка о прохождении онбординга зовут именно его,
+    поэтому правило не может разойтись между путями. Единственный резолвер
+    шкалы — _subject_config (тот же путь, что у каталога), предмет подставляет
+    свой: профильная g60 для базы (или базовая g4 для профиля) отклоняется.
+    """
+    if self_level is not None and self_level not in SELF_LEVELS:
+        raise ValueError("invalid selfLevel")
+    if goal is None:
+        return None
+    goal_ids = {g.get("id") for g in _subject_config(conn, "goals", subject, [], subject == DEFAULT_SUBJECT) or []}
+    if not goal_ids:
+        # У предмета нет шкалы целей (контент готовится) — хранить нечего и
+        # отклонять всю настройку из-за необязательного ориентира нельзя:
+        # иначе регистрация на таком предмете не сохраняется вовсе.
+        return None
+    if goal not in goal_ids:
+        raise ValueError("unknown goal")
+    return goal
+
+
 def patch_settings(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
     if not isinstance(value, dict):
         raise ValueError("settings must be an object")
     current = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
     onboarded = int(bool(value["onboarded"])) if "onboarded" in value else int(current["onboarded"])
     self_level = value.get("selfLevel", current["self_level"])
-    goal = value.get("goal", current["goal_id"])
+    goal = validate_profile_settings(conn, subject, self_level, value.get("goal", current["goal_id"]))
     name_value = value.get("name") if "name" in value else conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()["name"]
-    if self_level is not None and self_level not in SELF_LEVELS:
-        raise ValueError("invalid selfLevel")
-    if goal is not None:
-        # Список целей строго предмета регистрации: профильная g60 для базы
-        # (или базовая g4 для профиля) отклоняется 400-й. Единственный
-        # резолвер конфига — _subject_config (тот же путь, что у каталога).
-        goal_ids = {g.get("id") for g in _subject_config(conn, "goals", subject, [], subject == DEFAULT_SUBJECT) or []}
-        if not goal_ids:
-            # У предмета нет шкалы целей (контент готовится) — хранить нечего и
-            # отклонять всю настройку из-за необязательного ориентира нельзя:
-            # иначе регистрация на таком предмете не сохраняется вовсе.
-            goal = None
-        elif goal not in goal_ids:
-            raise ValueError("unknown goal")
     conn.execute("UPDATE user_subjects SET onboarded=?, self_level=?, goal_id=? WHERE user_id=? AND subject=?", (onboarded, self_level, goal, user_id, subject))
     conn.execute("UPDATE users SET name=? WHERE id=?", (sanitize_name(name_value), user_id))
-    if subject == DEFAULT_SUBJECT:
-        conn.execute("UPDATE users SET onboarded=?, self_level=?, goal_id=? WHERE id=?", (onboarded, self_level, goal, user_id))
+    # Флаг аккаунта — производная от всех предметов, поэтому обновляется
+    # одинаково для любого subject: онбординг второго предмета у уже
+    # onboarded-человека ничего не ломает и его не сбрасывает.
+    refresh_account_onboarded(conn, user_id)
     return {"onboarded": bool(onboarded), "selfLevel": self_level, "goal": goal, "name": sanitize_name(name_value)}
 
 
@@ -5473,7 +5528,10 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     yesterday_msk = (dt.datetime.now(ZoneInfo("Europe/Moscow")) - dt.timedelta(days=1)).date().isoformat()
 
     users_total = one("SELECT COUNT(*) AS c FROM users")["c"]
-    onboarded = one("SELECT COUNT(*) AS c FROM users WHERE onboarded=1")["c"]
+    # «Прошли онбординг» = прошли хотя бы в одном предмете. Считаем прямо по
+    # user_subjects, а не по производному users.onboarded: одно число должно
+    # отражать все предметы сразу, иначе админка показывает 27 вместо 58.
+    onboarded = one("SELECT COUNT(DISTINCT user_id) AS c FROM user_subjects WHERE onboarded=1")["c"]
     named = one("SELECT COUNT(*) AS c FROM users WHERE name IS NOT NULL AND name != ''")["c"]
     created = [r["created_at"] for r in conn.execute("SELECT created_at FROM users")]
     day_ms = 86400000
@@ -5574,7 +5632,12 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     }
 
     return {
-        "users": {"total": users_total, "onboarded": onboarded, "named": named, "newToday": new_today,
+        "users": {"total": users_total, "onboarded": onboarded,
+                  # Не прошли онбординг нигде: после чистки ботов это должны
+                  # быть только те, кто зарегистрировался, но не закончил
+                  # профиль, — их видно сразу, а не прячется в проценте.
+                  "withoutOnboarding": max(0, users_total - onboarded),
+                  "named": named, "newToday": new_today,
                   "newWeek": new_week, "activeToday": active_today, "activeWeek": active_week,
                   "activeEver": active_ever, "avgXp": round(stats["avg_xp"], 1), "bestStreak": stats["best_streak"]},
         "learning": {"xpTotal": stats["xp"], "solvedTotal": solved, "correctTotal": stats["correct"],
@@ -5593,10 +5656,14 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
 
 def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
     ensure_subject_schema(conn)
+    # Профиль предмета — из user_subjects по текущему предмету; «прошёл ли
+    # онбординг вообще» — EXISTS по всем предметам сразу. Ни одного сравнения
+    # с предметом по умолчанию: новый предмет в списке выглядит так же.
     rows = conn.execute("""SELECT u.id, u.account_id, u.name, u.created_at, u.current_subject,
-                                  u.onboarded, u.self_level, u.goal_id,
                                   us.onboarded AS subject_onboarded,
                                   us.self_level AS subject_self_level, us.goal_id AS subject_goal_id,
+                                  EXISTS(SELECT 1 FROM user_subjects a
+                                          WHERE a.user_id = u.id AND a.onboarded = 1) AS onboarded_any,
                                   COALESCE(s.xp,0) AS xp, COALESCE(s.streak,0) AS streak, s.last_active_date,
                                   COALESCE(s.total_solved,0) AS total_solved, COALESCE(s.total_correct,0) AS total_correct
                            FROM users u
@@ -5644,12 +5711,10 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
         item = {
             "id": r["id"], "accountId": r["account_id"], "name": r["name"],
             "createdAt": timestamp_value(r["created_at"]),
-            "onboarded": bool(r["subject_onboarded"] if r["subject_onboarded"] is not None
-                              else (r["onboarded"] if subject == DEFAULT_SUBJECT else False)),
-            "selfLevel": (r["subject_self_level"] if r["subject_self_level"] is not None
-                          else (r["self_level"] if subject == DEFAULT_SUBJECT else None)),
-            "goal": (r["subject_goal_id"] if r["subject_goal_id"] is not None
-                     else (r["goal_id"] if subject == DEFAULT_SUBJECT else None)),
+            "onboarded": bool(r["subject_onboarded"]),
+            "onboardedAny": bool(r["onboarded_any"]),
+            "selfLevel": r["subject_self_level"],
+            "goal": r["subject_goal_id"],
             "subject": subject, "subjectTitle": info.get("title", subject),
             "subjectStatus": info.get("status", "ready"), "subjectLocked": locked,
             "xp": xp, "level": level_from_xp(xp)["level"], "streak": streak,
@@ -5679,9 +5744,12 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         "SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
         (user_id, detail_subject),
     ).fetchone()
-    profile_onboarded = subject_profile["onboarded"] if subject_profile else user["onboarded"]
-    profile_self_level = subject_profile["self_level"] if subject_profile else user["self_level"]
-    profile_goal = subject_profile["goal_id"] if subject_profile else user["goal_id"]
+    # Профиль предмета — только из user_subjects; users.* здесь не читается.
+    profile_onboarded = subject_profile["onboarded"] if subject_profile else 0
+    profile_self_level = subject_profile["self_level"] if subject_profile else None
+    profile_goal = subject_profile["goal_id"] if subject_profile else None
+    onboarded_subjects = [{"id": sid, "title": SUBJECTS.get(sid, {}).get("title", sid)}
+                          for sid in user_onboarded_subject_ids(conn, user_id)]
     locked = subject_is_locked(detail_subject)
     stats = conn.execute("SELECT * FROM user_stats WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()
     if locked:
@@ -5690,6 +5758,9 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
     detail = {
         "id": user["id"], "accountId": user["account_id"], "name": user["name"],
         "createdAt": timestamp_value(user["created_at"]), "onboarded": bool(profile_onboarded),
+        # Аккаунтный срез: прошёл ли человек онбординг вообще и где именно.
+        # Новый предмет попадает сюда сам — список строится из user_subjects.
+        "onboardedAny": bool(onboarded_subjects), "onboardedSubjects": onboarded_subjects,
         "selfLevel": profile_self_level, "goal": profile_goal,
         "subject": detail_subject, "subjectTitle": subject_info.get("title", detail_subject),
         "subjectStatus": subject_info.get("status", "ready"), "subjectLocked": locked,
@@ -5828,10 +5899,9 @@ def admin_update_profile(conn: sqlite3.Connection, user_id: int, payload: dict) 
         "UPDATE user_subjects SET self_level=?, goal_id=? WHERE user_id=? AND subject=?",
         (self_level, goal, user_id, target_subject),
     )
-    # Keep the legacy profile columns in sync for old readers, but never let an
-    # edit in basic/russian overwrite the profile subject's settings.
-    if target_subject == DEFAULT_SUBJECT:
-        conn.execute("UPDATE users SET self_level=?, goal_id=? WHERE id=?", (self_level, goal, user_id))
+    # Профиль предмета живёт в user_subjects и больше нигде не дублируется:
+    # правка в любом предмете одинаково безопасна, отдельного «предмета по
+    # умолчанию», который нельзя было бы перезаписать, больше не существует.
     bump_state_versions(conn, user_id, target_subject)
     conn.commit()
     return {"id": user_id, "name": name, "selfLevel": self_level, "goal": goal, "subject": target_subject}
@@ -5918,8 +5988,11 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         # rows and advance their versions: recreating them at version 1 could
         # let a very old version-1 tab write after a reset.
         conn.execute("DELETE FROM user_xp_adjustments WHERE user_id=?", (user_id,))
-        conn.execute("UPDATE users SET onboarded=0, self_level=NULL, goal_id=NULL WHERE id=?", (user_id,))
+        # Сброс «весь прогресс» обнуляет профиль во ВСЕХ предметах, поэтому
+        # и флаг аккаунта пересчитывается из них, а не ставится руками: у
+        # человека, открывшего два предмета, обнуляются оба.
         conn.execute("UPDATE user_subjects SET onboarded=0, self_level=NULL, goal_id=NULL WHERE user_id=?", (user_id,))
+        refresh_account_onboarded(conn, user_id)
         conn.execute("INSERT INTO timeline(user_id, subject, created_at, text) VALUES (?,?,?,?)",
                      (user_id, reset_subject, now_iso(), "Админ сбросил весь прогресс аккаунта"))
         bump_state_versions(conn, user_id)
@@ -6571,18 +6644,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Неизвестный предмет"}, 400)
             return
         subject = resolve_subject(wanted)
+        # Валидируем ДО заведения строки: иначе плохая цель или самооценка
+        # оставили бы человека с профилем, который не сохранился.
+        try:
+            goal = validate_profile_settings(conn, subject, payload.get("selfLevel"), payload.get("goal"))
+        except ValueError as exc:
+            self.send_json({"error": f"Неверная настройка профиля: {exc}"}, 400)
+            return
         user_id, token = provision_user(conn, self)
         if self.reject_if_blocked(conn, user_id):
             return
         created = token is not None
         if created:
-            # Предмет и имя нового человека — из той же заявки: иначе первый
-            # же ответ сервера вернул бы пустой профиль, и клиент качал бы его
-            # ещё раз. Значения всё равно проходят общую санитизацию.
+            # Заявка самодостаточна: профиль ПРЕДМЕТА (онбординг, имя, уровень,
+            # цель) применяется тем же patch_settings, что и доменный запрос, —
+            # одна валидация на оба пути и никакой зависимости от того, дойдёт
+            # ли следующий PATCH: иначе потерянный ответ оставил бы человека
+            # «онбордившимся» локально и «не онбордившимся» в базе.
             set_current_subject(conn, user_id, subject)
-            name = sanitize_name(payload.get("name"))
-            if name:
-                conn.execute("UPDATE users SET name=? WHERE id=?", (name, user_id))
+            patch_settings(conn, user_id, subject, {
+                "onboarded": True,
+                "selfLevel": payload.get("selfLevel"),
+                "goal": goal,
+                "name": payload.get("name"),
+            })
             conn.commit()
         else:
             subject = current_subject_for(conn, user_id)
@@ -7086,7 +7171,7 @@ class Handler(BaseHTTPRequestHandler):
                 rid = log_request_error("profile-claim", exc)
                 self.send_json({"error": "Не удалось создать профиль. Попробуй ещё раз.",
                                 "ref": rid}, 500)
-            except (ValueError, KeyError) as exc:
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
