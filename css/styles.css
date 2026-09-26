@@ -116,7 +116,15 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { color-scheme: light; }
+html {
+  color-scheme: light;
+  /* Глушим синюю браузерную подсветку тапа (iOS/Android) на всём
+     интерфейсе: свой отклик у интерактивных элементов уже задан,
+     браузерная заливка только шумит. Локальные правила mathvisual
+     (.mathvisual-board/.mathvisual-svg) оставлены — там заодно
+     выключены touch-callout и user-select. */
+  -webkit-tap-highlight-color: transparent;
+}
 html[data-theme="dark"] { color-scheme: dark; }
 
 body {
@@ -1453,35 +1461,9 @@ body {
   animation: screenIn 0.25s ease;
 }
 
-/* Исходный текст (отдельный блок сверху темы) и readonly-показ
-   отправленного сочинения: ученику удобно сначала прочитать отрывок
-   и понять требование, а не смешивать текст с самим заданием. */
-.essay-source {
-  margin: 16px 0 4px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-.essay-source__label {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-.essay-source__preview,
-.essay-source__body {
-  font-size: 15px;
-  line-height: 1.7;
-  color: var(--text);
-  white-space: pre-line;
-  overflow-wrap: break-word;
-}
-.essay-source__preview { color: var(--text-2); }
-.essay-source__toggle { margin-top: 10px; }
-
+/* readonly-показ отправленного сочинения: текст виден, но менять его уже
+   нельзя. Сам исходный текст задания рисует единый блок .source-text ниже —
+   и серверный (/api/essay-text), и инлайновый из поля задания. */
 .essay-readonly {
   margin-top: 24px;
   border: 1px solid var(--border-strong);
