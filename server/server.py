@@ -5654,12 +5654,140 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# «Важность» пользователя для списка в админке.
+#
+# Смысл: сверху должны стоять те, о ком админу стоит думать в первую очередь —
+# люди, которых тут много и которые ещё активны, а не случайный порядок
+# регистрации. Считаем это тремя понятными слагаемыми плюс «требует внимания»,
+# каждое — 0 или вес из фиксированной шкалы ниже. Никаких весов, обученных на
+# данных, никакой нормализации по выборке: сумма берётся из сырых полей
+# строки, поэтому порядок воспроизводим и объясним. Каждой строке отдаём
+# ещё и `tierLabel` (короткая метка группы) и `priorityWhy` (причина словами) —
+# иначе «важность» остаётся невидимым числом, и понять, почему человек
+# оказался первым, нельзя. Счёт и подпись считаются одним вызовом, поэтому
+# карточка не может объяснять число, по которому её не сортировали.
+# ---------------------------------------------------------------------------
+
+# Сколько очков даёт «как давно человек был»: (макс. дней назад, очки).
+ADMIN_ACTIVITY_POINTS = ((0, 40), (1, 34), (3, 27), (7, 20), (14, 13), (30, 7), (90, 3))
+# Объём: сколько решено и сколько опыта набрано (два независимых веса).
+ADMIN_SOLVED_POINTS = ((300, 18), (100, 15), (30, 11), (5, 6), (1, 2))
+ADMIN_XP_POINTS = ((20000, 12), (6000, 9), (1500, 6), (1, 3))
+
+
+def _days_since_msk_day(day, today) -> int | None:
+    """Сколько московских суток назад пришёлся день активности. Битая или
+    нестроковая дата даёт None («не активен»), а не 0: иначе мусор в
+    user_stats выглядел бы как сегодняшняя активность и поднимал бы
+    человека наверх списка."""
+    if not isinstance(day, str) or not day.strip():
+        return None
+    try:
+        return max(0, (today - dt.date.fromisoformat(day.strip()[:10])).days)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bucket_points(value: int, table) -> int:
+    for threshold, points in table:
+        if value >= threshold:
+            return points
+    return 0
+
+
+def admin_user_priority(item: dict, today) -> dict:
+    """Важность одной строки списка пользователей. Чистая функция от уже
+    посчитанного item (те же поля, что видит карточка), чтобы счёт и причина
+    всегда считали одно и то же."""
+    xp = int(item.get("xp") or 0)
+    solved = int(item.get("solved") or 0)
+    streak = int(item.get("streak") or 0)
+    onboarded = bool(item.get("onboardedAny"))
+    days = _days_since_msk_day(item.get("lastActiveDate"), today)
+
+    activity = 0
+    if days is not None:
+        for limit, points in ADMIN_ACTIVITY_POINTS:
+            if days <= limit:
+                activity = points
+                break
+    volume = (_bucket_points(solved, ADMIN_SOLVED_POINTS)
+              + _bucket_points(xp, ADMIN_XP_POINTS)
+              + (3 if streak >= 7 else 0))
+    # Качество профиля — всего 10 очков и только как разрешитель ничьих: его
+    # набирает любой, кто дошёл до конца онбординга, поэтому выставлять его
+    # выше активности и объёма нельзя, иначе список забивают брошенные аккаунты
+    # с идеально заполненным профилем.
+    profile = ((4 if onboarded else 0) + (2 if item.get("selfLevel") else 0)
+               + (2 if item.get("goal") else 0) + (2 if item.get("name") else 0))
+    # Требует внимания: бан админ обязан увидеть сразу, брошенный после
+    # регистрации человек — заметно слабее, незаконченный онбординг — почти
+    # не вес (новых аккаунтов всегда много, и они не должны спорить с теми,
+    # кто реально занимается).
+    if item.get("block"):
+        attention = 12
+    elif not onboarded:
+        attention = 2
+    elif days is None and (xp or solved):
+        attention = 6
+    else:
+        attention = 0
+
+    if item.get("isAdmin"):
+        tier, tier_label = "admin", "Админ"
+    elif item.get("block"):
+        tier, tier_label = "blocked", "Заблокирован"
+    elif not onboarded:
+        tier, tier_label = "new", "Новый"
+    elif days is None:
+        tier, tier_label = "stuck", "Не начинал"
+    elif days <= 7:
+        tier, tier_label = "active", "Активен"
+    elif days <= 30:
+        tier, tier_label = "cooling", "Остывает"
+    else:
+        tier, tier_label = "cold", "Остыл"
+
+    # Причина словами: сначала «когда был», потом объём, потом то, что
+    # требует внимания. Больше четырёх кусков не нужно — строка должна
+    # помещаться в подпись карточки.
+    if days is None:
+        why = ["не активен"]
+    elif days == 0:
+        why = ["активен сегодня"]
+    elif days == 1:
+        why = ["активен вчера"]
+    else:
+        why = [f"{days} дн. назад"]
+    if xp:
+        why.append(f"{xp} XP")
+    if solved:
+        why.append(f"{solved} решено")
+    if item.get("block"):
+        why.append("бан")
+    elif not onboarded:
+        why.append("без онбординга")
+    elif days is None and (xp or solved):
+        why.append("требует внимания")
+    if streak >= 7:
+        why.append(f"серия {streak}")
+
+    return {"priority": activity + volume + profile + attention,
+            "priorityParts": {"activity": activity, "volume": volume,
+                              "profile": profile, "attention": attention},
+            "tier": tier, "tierLabel": tier_label,
+            "priorityWhy": " · ".join(why[:4]),
+            "activityDays": days}
+
+
 def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
     ensure_subject_schema(conn)
     # Профиль предмета — из user_subjects по текущему предмету; «прошёл ли
     # онбординг вообще» — EXISTS по всем предметам сразу. Ни одного сравнения
     # с предметом по умолчанию: новый предмет в списке выглядит так же.
     rows = conn.execute("""SELECT u.id, u.account_id, u.name, u.created_at, u.current_subject,
+                                  u.email, u.password_hash,
                                   us.onboarded AS subject_onboarded,
                                   us.self_level AS subject_self_level, us.goal_id AS subject_goal_id,
                                   EXISTS(SELECT 1 FROM user_subjects a
@@ -5675,6 +5803,20 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
     result = []
     q = (query or "").strip().lower()
     now_ms = int(time.time() * 1000)
+    today = dt.datetime.now(tz=ZoneInfo("Europe/Moscow")).date()
+    # Кто сейчас админ: та же живая admin_sessions, что у require_admin и
+    # is_admin_session. Вышедшего админа она не покажет (строки удаляются на
+    # выходе), но у него и нет активности, так что вниз списка он и так
+    # уезжает по объёму.
+    admin_ids: set[int] = set()
+    try:
+        for r in conn.execute("SELECT DISTINCT user_id FROM admin_sessions WHERE expires_at > ?", (now_ms,)):
+            try:
+                admin_ids.add(int(r["user_id"]))
+            except (TypeError, ValueError):
+                continue
+    except sqlite3.Error:
+        admin_ids = set()
     blocks: dict[int, dict] = {}
     try:
         ensure_block_schema(conn)
@@ -5720,15 +5862,28 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
             "xp": xp, "level": level_from_xp(xp)["level"], "streak": streak,
             "lastActiveDate": last_active, "solved": solved, "correct": correct,
             "block": blocks.get(r["id"]),
+            "isAdmin": r["id"] in admin_ids,
         }
+        # Кто перед нами: человек зарегистрировался (есть хеш пароля) или
+        # пользуется гостевым аккаунтом. Тот же признак, что у
+        # auth_state_payload, и почта отдаётся только зарегистрированным —
+        # чтобы не показывать мусор из незавершённых регистраций.
+        item["registered"] = bool(r["password_hash"])
+        item["email"] = r["email"] if item["registered"] else None
+        item.update(admin_user_priority(item, today))
         if q:
             haystack = " ".join(str(x) for x in (
                 item["accountId"], item["name"], item["id"], item["selfLevel"],
-                item["goal"], item["subject"], item["subjectTitle"],
+                item["goal"], item["subject"], item["subjectTitle"], item["email"],
             ) if x).lower()
             if q not in haystack:
                 continue
         result.append(item)
+    # Порядок списка — по важности, а не по id: сверху «важные», снизу
+    # админы (своих коллег видеть как «самых важных» не надо), при равном
+    # счёте — более свежие. Это единственное место, где решается порядок
+    # /api/admin/users, клиент его только рисует.
+    result.sort(key=lambda p: (1 if p["isAdmin"] else 0, -p["priority"], -int(p["id"])))
     return result
 
 
@@ -5765,6 +5920,11 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         "subject": detail_subject, "subjectTitle": subject_info.get("title", detail_subject),
         "subjectStatus": subject_info.get("status", "ready"), "subjectLocked": locked,
         "locked": locked,
+        # Почта и «зарегистрирован или гость» — как в auth_state_payload:
+        # признак регистрации это наличие хеша пароля, почта показывается
+        # только зарегистрированным.
+        "registered": bool(user["password_hash"]),
+        "email": user["email"] if user["password_hash"] else None,
         "stats": {
             "xp": xp, "level": level_from_xp(xp), "streak": stats["streak"] if stats else 0,
             "lastActiveDate": stats["last_active_date"] if stats else None,

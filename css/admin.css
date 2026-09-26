@@ -273,7 +273,20 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-avatar--sm { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 13px; font-size: 16px; }
 .a-user-card__id { min-width: 0; flex: 1; }
 .a-user-card__name { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.a-user-card__acct { font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-user-card__acct { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-width: 0; font-size: 12px; font-weight: 600; }
+.a-user-card__acct > .mono { color: var(--accent); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-user-card__acct .a-chip { flex: 0 0 auto; }
+/* Почта зарегистрированного аккаунта; гость — тот же чип с призраком. */
+.a-user-id { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-weight: 500; color: var(--muted); }
+.a-user-id__mail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-chip--ghost { color: var(--muted); }
+/* Почему человек оказался в этом месте списка: чип «№7 · Активен» + причина
+   словами («активен сегодня · 12400 XP · 86 решено»). Без этой строки порядок
+   приходилось бы угадывать по цифрам. */
+.a-user-card__why { display: flex; align-items: center; gap: 6px; margin-top: 7px; min-width: 0; }
+.a-user-card__whytxt { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-chip--tier { flex: 0 0 auto; font-weight: 700; letter-spacing: 0.01em; white-space: nowrap; }
+.a-user-hint { margin: -6px 0 12px; font-size: 12px; color: var(--muted); }
 .a-user-card__lvl { text-align: right; flex: 0 0 auto; }
 .a-user-card__lvl b { display: block; font-size: 18px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .a-user-card__lvl span { font-size: 10.5px; color: var(--muted); }
@@ -453,6 +466,7 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .admin-topbar__return svg { width: 14px; height: 14px; }
   .a-user-head__actions { margin-left: 0; width: 100%; }
   .a-toolbar .a-input { max-width: none; flex: 1; }
+  .a-toolbar .a-select { max-width: none; flex: 1 1 100%; }
   .a-user-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .a-user-card { padding: 12px 14px; }
   .a-user-card__foot { flex-wrap: wrap; row-gap: 6px; }

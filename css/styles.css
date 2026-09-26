@@ -396,6 +396,43 @@ body {
 .stars { color: var(--warn-ink); letter-spacing: 2px; font-size: 12px; }
 .stars .off { color: var(--border-strong); }
 
+/* Блок сложности — одна функция stars() на весь продукт (карточка миссии,
+   карточка задания во всех видах практики, смешанное испытание), поэтому
+   правило одно и правится здесь. В тёмной теме он уже удачный: там
+   --warn-ink = #fcd34d, яркий жёлтый, который светит на почти чёрном фоне.
+   А --warn-ink общий для обеих тем, и на белом он становится #9a5b00 —
+   тёмно-янтарный: блок выглядит грязно-оранжевым и почти сливается с
+   фоном. Поэтому светлой теме отдаём собственный яркий золотой градиент
+   со свечением — но красим им сами глифы-звёзды (правило .stars > span
+   ниже), а не подложку.
+   Важно: блок остаётся голым рядом звёзд, как был. Ни отступов, ни
+   скруглённой подложки, ни рамки, ни тени у .stars нет намеренно — иначе
+   в чипе смешанного испытания (stars(3) внутри .chip) и в flex-ряду тегов
+   карточки задания двойная подложка читалась бы как вложенный «пузырёк».
+   От базового правила отличается только типографика. Тёмную тему не трогаем:
+   --warn-ink и --border-strong там уже дают нужный контраст. Звёзды —
+   декоративные глифы, а не текст, поэтому правило AA-контраста для текста
+   к ним не относится (тот же аргумент, что у --streak-*). */
+:root:not([data-theme="dark"]) .stars {
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+:root:not([data-theme="dark"]) .stars > span {
+  background: linear-gradient(180deg, #ffe066 0%, #ffb300 52%, #f57c00 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* Тёплый ореол + светлый блик снизу: на белом звезда «выступает» вперёд. */
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 4px rgba(217, 119, 6, 0.45));
+}
+:root:not([data-theme="dark"]) .stars > span.off {
+  background: none;
+  color: rgba(120, 113, 108, 0.32);
+  -webkit-text-fill-color: rgba(120, 113, 108, 0.32);
+  filter: none;
+}
+
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 .section-title {

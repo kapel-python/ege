@@ -252,6 +252,8 @@ const AICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M3 7.5l8.2 5.5a1 1 0 0 0 1.2 0L21 7.5"/></svg>',
+  ghost: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10.5a7 7 0 0 1 14 0v10a.6.6 0 0 1-1 .55l-2.1-1.5a.6.6 0 0 0-.66 0l-2.24 1.5a.6.6 0 0 1-.66 0l-2.24-1.5a.6.6 0 0 0-.66 0L6 21.05a.6.6 0 0 1-1-.55z"/><circle cx="9.4" cy="11" r="1.15" fill="currentColor" stroke="none"/><circle cx="14.6" cy="11" r="1.15" fill="currentColor" stroke="none"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22c4.4 0 7-2.8 7-6.5 0-3-2-5.5-3.5-7C14 7 13 5.5 13 3c-3 2-5 5-5 8-1-.5-1.8-1.5-2-3-1.5 1.6-3 4-3 6.5C3 19.2 7.6 22 12 22z"/></svg>',
@@ -675,6 +677,63 @@ async function refreshActivityCard(card) {
 
 /* ---------------- Пользователи ---------------- */
 
+/* Порядок списка. «important» — уже пришедший с сервера порядок по важности
+   (активность + объём + качество профиля, админы внизу), его мы не трогаем.
+   Остальные — простые перестановки того же массива по сырым полям карточки. */
+const USER_SORTS = {
+  important: { label: "Важные сверху", hint: "Сверху — активные и объёмные: свежесть активности, объём и качество профиля. Админы и пустые аккаунты внизу." },
+  recent: { label: "По свежести активности", hint: "Недавно активные сверху, кто давно не заходил — внизу." },
+  xp: { label: "По опыту", hint: "Больше XP — выше." },
+  level: { label: "По уровню", hint: "Выше уровень — выше." },
+  new: { label: "Сначала новые", hint: "Свежая регистрация сверху." },
+};
+
+function userSort() {
+  try {
+    const v = localStorage.getItem("ege_admin_user_sort");
+    if (v && Object.prototype.hasOwnProperty.call(USER_SORTS, v)) return v;
+  } catch (e) {}
+  return "important";
+}
+
+/* Метка группы пользователя. Сервер отдаёт tierLabel (он же считает счёт),
+   здесь только цвет и подпись. */
+const USER_TIERS = {
+  active: { cls: "a-chip--success" },
+  cooling: { cls: "a-chip--warn" },
+  cold: { cls: "" },
+  stuck: { cls: "a-chip--warn" },
+  new: { cls: "a-chip--accent" },
+  blocked: { cls: "a-chip--danger" },
+  admin: { cls: "" },
+};
+
+/* Одна понятная перестановка на пресет: сравнение двух строк. null/пустое
+   всегда вниз, чтобы «нет данных» не оказывалось наверху. */
+function sortUsersFor(mode, list) {
+  if (mode === "important") return list;
+  const out = list.slice();
+  const num = (p, f) => (Number(p[f]) || 0);
+  const cmp = {
+    recent: (a, b) => (a.activityDays ?? 1e9) - (b.activityDays ?? 1e9) || num(b, "solved") - num(a, "solved"),
+    xp: (a, b) => num(b, "xp") - num(a, "xp") || num(b, "solved") - num(a, "solved"),
+    level: (a, b) => num(b, "level") - num(a, "level") || num(b, "xp") - num(a, "xp"),
+    new: (a, b) => num(b, "id") - num(a, "id"),
+  }[mode];
+  return cmp ? out.sort(cmp) : out;
+}
+
+/* Кто перед нами: зарегистрированный аккаунт (тогда показываем почту) или
+   гость. `registered` приходит с сервера и означает ровно то же, что в
+   auth_state_payload (есть хеш пароля), поэтому подпись не расходится с тем,
+   что человек сам видит в приложении. Одна функция на карточку списка и на
+   страницу пользователя — иначе «гость» в двух местах выглядел бы по-разному. */
+function userIdentity(p) {
+  if (p.email) return `<span class="a-user-id" title="Почта аккаунта">${aicon("mail")}<span class="a-user-id__mail">${esc(p.email)}</span></span>`;
+  if (p.registered) return `<span class="a-chip" title="Аккаунт зарегистрирован, но почта не указана">регистрация</span>`;
+  return `<span class="a-chip a-chip--ghost" title="Гостевой аккаунт: без почты и пароля">${aicon("ghost")} гость</span>`;
+}
+
 async function screenUsers() {
   renderShell("users", `<div class="a-skeleton" style="height:300px"></div>`);
   let users;
@@ -688,34 +747,46 @@ async function screenUsers() {
   }
   renderShell("users", `
     <div class="a-toolbar">
-      <input class="a-input" id="userSearch" placeholder="Поиск: Account ID, имя, внутренний id…" value="${esc(A.lastQuery || "")}">
+      <input class="a-input" id="userSearch" placeholder="Поиск: Account ID, почта, имя, внутренний id…" value="${esc(A.lastQuery || "")}">
+      <select class="a-select" id="userSort" title="Порядок списка">
+        ${Object.entries(USER_SORTS).map(([id, s]) => `<option value="${id}"${id === userSort() ? " selected" : ""}>${esc(s.label)}</option>`).join("")}
+      </select>
       <span class="spacer"></span>
       <span class="a-card__sub" id="userCount"></span>
     </div>
+    <div class="a-user-hint" id="userSortHint"></div>
     <div id="usersTable"></div>`);
   const input = document.getElementById("userSearch");
+  const sortSelect = document.getElementById("userSort");
   const drawList = () => {
     const q = input.value.trim().toLowerCase();
     A.lastQuery = input.value;
-    const filtered = q
-      ? users.filter((p) => [p.accountId, p.name, String(p.id), p.selfLevel, p.goal].filter(Boolean).join(" ").toLowerCase().includes(q))
+    const found = q
+      ? users.filter((p) => [p.accountId, p.name, p.email, String(p.id), p.selfLevel, p.goal].filter(Boolean).join(" ").toLowerCase().includes(q))
       : users;
+    const filtered = sortUsersFor(sortSelect.value, found);
     document.getElementById("userCount").textContent = `${filtered.length} из ${users.length}`;
+    document.getElementById("userSortHint").textContent = (USER_SORTS[sortSelect.value] || USER_SORTS.important).hint;
     const wrap = document.getElementById("usersTable");
     wrap.innerHTML = filtered.length ? `
       <div class="a-user-grid">
-        ${filtered.map((p) => {
+        ${filtered.map((p, idx) => {
           const initial = (p.name || p.accountId || "?").trim().charAt(0).toUpperCase();
           const locked = adminSubjectLocked(p);
           const subjectName = adminSubjectName(p.subjectTitle || p.subject);
           const acc = Math.round((p.correct / p.solved) * 100);
+          const tier = USER_TIERS[p.tier] || null;
+          /* Номер места + состояние в одном чипе: сразу видно, где человек и
+             почему он здесь. Причина словами — строкой ниже. */
+          const tierChip = `<span class="a-chip a-chip--tier ${tier ? tier.cls : ""}" title="Почему здесь: ${esc(p.priorityWhy || "")}">№${idx + 1} · ${esc(p.tierLabel || "—")}</span>`;
           return `
           <div class="a-user-card clickable" data-id="${p.id}">
             <div class="a-user-card__top">
               <div class="a-avatar a-avatar--sm">${esc(initial)}</div>
               <div class="a-user-card__id">
                 <div class="a-user-card__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}${p.onboardedAny ? "" : ` <span class="a-chip">new</span>`}${p.block ? ` <span class="a-chip a-chip--danger">бан</span>` : ""}</div>
-                <div class="a-user-card__acct mono">${esc(p.accountId || "—")}</div>
+                <div class="a-user-card__acct"><span class="mono">${esc(p.accountId || "—")}</span>${userIdentity(p)}</div>
+                <div class="a-user-card__why">${tierChip}${p.priorityWhy ? `<span class="a-user-card__whytxt">${esc(p.priorityWhy)}</span>` : ""}</div>
               </div>
               ${locked
                 ? `<div class="a-user-card__lvl"><b>—</b><span>${esc(subjectName)} · скоро</span></div>`
@@ -756,6 +827,10 @@ async function screenUsers() {
     });
   };
   input.oninput = drawList;
+  sortSelect.onchange = () => {
+    try { localStorage.setItem("ege_admin_user_sort", sortSelect.value); } catch (e) {}
+    drawList();
+  };
   drawList();
 }
 
@@ -792,6 +867,7 @@ async function screenUser(ref) {
           <div class="a-user-head__name">${p.name ? esc(p.name) : `<span style="color:var(--muted)">Без имени</span>`}</div>
           <div class="a-user-head__meta">
             <span class="mono" style="color:var(--accent);font-weight:600">${esc(p.accountId || "—")}</span>
+            ${userIdentity(p)}
             <span>id: ${p.id}</span>
             ${locked
               ? `<span class="a-chip a-chip--warn">${esc(subjectName)} · материалы скоро</span>`
