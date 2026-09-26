@@ -1154,9 +1154,24 @@ body {
   gap: 14px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+  /* Шапка с навигацией не уезжает при прокрутке: на длинном задании
+     (сочинение с исходным текстом) кнопки «Назад» и «Выйти» остаются на
+     экране. Раньше шапка была обычным блоком, и на прокрученной вниз
+     странице навигации просто не было видно. top — высота верхней панели,
+     её измеряет syncTopbarHeight(), иначе шапка заезжала бы под topbar. */
+  position: sticky;
+  top: var(--topbar-h, 0px);
+  z-index: 5;
+  padding: 8px 0;
+  margin: -8px 0 12px;
+  background: var(--bg);
 }
 .session-head__title { font-size: 15px; font-weight: 600; }
 .session-head__progress { margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Навигация сессии: «Назад» появляется слева от «Выйти» со второго задания,
+   «Далее» живёт под результатом — оба ряда на одном принципе, как у уроков. */
+.session-head__nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.session-nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
 
 .task-card { padding: 28px; }
 .task-card__tags { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
