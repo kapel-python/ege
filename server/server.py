@@ -1884,7 +1884,14 @@ def _fallback_client_id(kind: str, parts: list) -> str:
 
 ESSAY_MIN_WORDS = 150
 ESSAY_MAX_CHARS = 30000
-ESSAY_WORD_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё]+(?:['’\-–][0-9A-Za-zА-Яа-яЁё]+)*")
+# Счётчик слов для приёма работы и бейджа объёма — тот же, что обнуляет
+# баллы за недобор объёма (ai.count_words). Пока определения жили в двух
+# модулях, они разошлись (регулярка против len(text.split())), и работа,
+# которой хватало 150 слов на экране, получала 0/22 с вёрсткой «норма».
+# Запасная регулярка — на случай, если модуль оценки не загрузился; тест
+# ai-essay.py сверяет оба счётчика, чтобы копия не разъехалась снова.
+ESSAY_WORD_RE = getattr(_AI, "ESSAY_WORD_RE", None) or re.compile(
+    r"[0-9A-Za-zА-Яа-яЁё]+(?:['’\-–][0-9A-Za-zА-Яа-яЁё]+)*")
 _ESSAY_SCHEMA_DONE: set[str] = set()
 _essay_schema_lock = threading.Lock()
 
@@ -2244,8 +2251,11 @@ def essay_result_view(submission: dict) -> dict | None:
         "recommendation": result.get("recommendation") or "",
     }
     if calibration and calibration.get("note"):
-        # Итог после вето ниже суммы показанных критериев — без этой пометки
-        # экран и разбор разойдутся. Поле опционально: обычные работы его
+        # Пометка о вето: работа без позиции автора (К1 = 0) не получает баллов
+        # грамотности, поэтому итог ниже, чем дала бы сумма К7–К10. Сами
+        # критерии при этом обнулены (veto_unrelated_literacy), так что
+        # арифметика на экране сходится, а пометка объясняет ученику, почему
+        # грамотность не засчитана. Поле опционально: обычные работы его
         # не несут, шаблон его отсутствие спокойно переживает.
         view["calibration_note"] = str(calibration["note"])
     return view
@@ -2344,6 +2354,18 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
                 raise ValueError("result criteria are malformed")
             if s < 0 or s > m:
                 raise ValueError("result criteria are malformed")
+        # Итог и максимум — пересчёт из самих критериев, а не то, что прислал
+        # браузер. Ответ /api/ai/essay отдаёт total, равный сумме баллов
+        # (после вето грамотности обнуляется вместе с итогом), поэтому на
+        # честном пути пересчёт совпадает; принимать клиентское число значило
+        # бы разрешить записать себе 22/22 при нулевых критериях и получить
+        # за это XP (essay_xp считается именно по сохранённому итогу).
+        total = sum(int(item["score"]) for item in criteria)
+        maximum = sum(int(item["max_score"]) for item in criteria)
+        if maximum != 22 or not 0 <= total <= 22:
+            raise ValueError("result scores out of range")
+        if total != int(result.get("total_score") or 0) or maximum != int(result.get("max_score") or 0):
+            result = {**result, "total_score": total, "max_score": maximum}
         blob = json.dumps(result, ensure_ascii=False)
         if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
             raise ValueError("result too large")

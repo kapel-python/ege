@@ -36,7 +36,7 @@
   - `python3 test/support-message.py` (быстрая форма поддержки: миграция, валидация, идемпотентность, антиспам)
   - `python3 test/essay-submission.py` (длинные текстовые ответа: единый подсчёт слов с клиентом, POST /api/essays — 149 отклонено / 150 принято, идемпотентность; temp-БД)
   - `python3 test/essay-pipeline.py` (pipeline проверки сочинения: submission → AI check (POST /api/ai/essay) → POST /api/essays/evaluation (ready/failed) → GET /api/essays (view под ege-result.html) → XP только после ready через attempts-flow; изоляция чужих submission; temp-БД, AI замокан)
-  - `python3 test/ai-essay.py` (регрессия AI-оценки: transport, парсер JSON, валидатор К1–К6, детерминированная грамотность К7–К10, калибровка итога второй инстанцией, единая рубрика задания 27, endpoint POST /api/ai/essay; офлайн, temp-БД; live-режим — `EGE_AI_LIVE=1`)
+  - `python3 test/ai-essay.py` (регрессия AI-оценки: transport, парсер JSON, валидатор К1–К6, потолки рубрики кодом, терпимый разбор балла, детерминированная грамотность К7–К10, вето на баллы грамотности при К1 = 0 (правило сервера, без второго вызова модели), единый счётчик слов на приёме и в оценке, единая рубрика задания 27, endpoint POST /api/ai/essay; офлайн, temp-БД; live-режим — `EGE_AI_LIVE=1`)
   - `node test/essay-words.js` (паритет клиентского countWords с серверным алгоритмом, граничные случаи)
   - `python3 test/store-save-e2e.py` (реальный Store.save против временного сервера: domain endpoint, без legacy `/api/state`)
   - `python3 -m py_compile server/server.py` (lint backend)

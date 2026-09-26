@@ -271,18 +271,18 @@ def main():
                 "subject": "russian", "clientId": client_id, "status": "ready", "result": res})
             check("READY idempotent", status == 200 and dup["submission"]["status"] == "ready")
 
-            # 8. вето второй инстанции сквозняком: работа без позиции (К1=0)
-            # не harvestит баллы грамотности — итог 0 с объяснением на экране.
+            # 8. вето сквозняком: работа без позиции (К1=0) не тянет баллы
+            # грамотности. Правило сервера, второй инстанции больше нет:
+            # один вызов модели, итог = баллы содержания, К7–К10 обнулены,
+            # поэтому сумма критериев на экране равна итогу.
             ai.reset_ai_rate()
             calls = {"n": 0}
 
             def scripted(messages, **kwargs):
                 calls["n"] += 1
-                if calls["n"] == 1:
-                    body = model_payload()
-                    body["criteria"][0]["score"] = 0  # К1=0, содержание 6
-                    return json.dumps(body, ensure_ascii=False)
-                return "0"
+                body = model_payload()
+                body["criteria"][0]["score"] = 0  # К1=0; потолок рубрики жмёт К2 -> 1
+                return json.dumps(body, ensure_ascii=False)
 
             ai.chat = scripted
             veto_text = words(200, "мусор")
@@ -293,19 +293,56 @@ def main():
             status, ai3 = request(opener, base, "/api/ai/essay", "POST", {"text": veto_text, "taskId": "re27_3"})
             res3 = ai3.get("result", {})
             cal3 = res3.get("calibration") or {}
-            check("VETO second AI call happened", status == 200 and calls["n"] == 2,
+            crit3 = res3.get("criteria", [])
+            content3 = sum(c["score"] for c in crit3[:6])
+            check("VETO one AI call only", status == 200 and calls["n"] == 1,
                   f"{status} calls={calls['n']}")
-            check("VETO total zeroed", res3.get("total_score") == 0, str(res3.get("total_score")))
-            check("VETO recorded", cal3.get("proposed") == 18 and cal3.get("final") == 0
-                  and "18 → 0" in str(cal3.get("note")), str(cal3))
+            check("VETO total = content score", res3.get("total_score") == content3,
+                  f"{res3.get('total_score')} vs {content3}")
+            check("VETO literacy zeroed",
+                  all(c["score"] == 0 for c in crit3[6:]),
+                  str([(c["id"], c["score"]) for c in crit3[6:]]))
+            check("VETO rubric cap applied (К1=0 -> К2<=1)",
+                  next(c["score"] for c in crit3 if c["id"] == "K2") == 1)
+            check("VETO recorded", cal3.get("proposed") == content3 + 12
+                  and cal3.get("final") == content3 and "грамотност" in str(cal3.get("note")).lower(),
+                  str(cal3))
             status, saved3 = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": cid3, "status": "ready", "result": res3})
             check("VETO ready persists", status == 200 and saved3["submission"]["status"] == "ready")
             status, got3 = request(opener, base, "/api/essays?subject=russian&clientId=" + cid3)
             view3 = (got3.get("submission") or {}).get("view") or {}
             check("VETO note reaches result page",
-                  status == 200 and view3.get("total_score") == 0
-                  and "18 → 0" in str(view3.get("calibration_note")), str(view3.get("calibration_note")))
+                  status == 200 and view3.get("total_score") == content3
+                  and "грамотност" in str(view3.get("calibration_note")).lower(),
+                  str(view3.get("calibration_note")))
+            check("VETO screen arithmetic adds up",
+                  sum(c["score"] for c in (view3.get("criteria") or [])) == view3.get("total_score"),
+                  str(view3.get("total_score")))
+
+            # 9. Итог пересчитывается из критериев: клиент не может записать
+            # себе 22/22 при нулевых баллах и получить за это XP.
+            ai.reset_ai_rate()
+            ai.chat = lambda messages, **kwargs: json.dumps(model_payload(), ensure_ascii=False)
+            forged_text = words(200, "проверка")
+            status, sub4 = request(opener, base, "/api/essays", "POST", {
+                "subject": "russian", "taskId": "re27_3", "skill": "russian_essay_source",
+                "text": forged_text, "id": "pipe-4"})
+            cid4 = sub4.get("clientId")
+            _st, ai4 = request(opener, base, "/api/ai/essay", "POST", {"text": forged_text, "taskId": "re27_3"})
+            honest = ai4.get("result", {})
+            forged = json.loads(json.dumps(honest, ensure_ascii=False))
+            for item in forged["criteria"]:
+                item["score"] = 0
+            forged["total_score"] = 22
+            status, saved4 = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "russian", "clientId": cid4, "status": "ready", "result": forged})
+            check("FORGED total is recomputed from criteria", status == 200
+                  and (saved4.get("submission") or {}).get("result", {}).get("total_score") == 0,
+                  str((saved4.get("submission") or {}).get("result", {}).get("total_score")))
+            status, got4 = request(opener, base, "/api/essays?subject=russian&clientId=" + cid4)
+            view4 = (got4.get("submission") or {}).get("view") or {}
+            check("FORGED view shows 0, not 22", view4.get("total_score") == 0, str(view4.get("total_score")))
         finally:
             httpd.shutdown()
             httpd.server_close()

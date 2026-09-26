@@ -318,8 +318,9 @@ def test_rate_limit(ai) -> None:
 
 
 def test_charges(ai) -> None:
-    section("charges_for/ai_take(count): сочинение резервирует 2 вызова")
-    check("essay стоит 2 (оценка + возможная калибровка)", ai.charges_for("essay") == 2)
+    section("charges_for/ai_take(count): проверка стоит один вызов")
+    check("essay стоит 1 (оценка; вето и грамотность — без модели)",
+          ai.charges_for("essay") == 1)
     check("неизвестный формат стоит 1", ai.charges_for("nope") == 1)
     check("пустой формат стоит 1", ai.charges_for("") == 1)
 
@@ -394,129 +395,144 @@ def k1zero_payload() -> dict:
     return body
 
 
-def test_calibration(ai) -> None:
-    section("calibrate_essay: вторая инстанция — вето, только понижает")
+def test_veto(ai) -> None:
+    section("вето на баллы грамотности: правило сервера, без второго вызова")
     original_chat = ai.chat
     original_lt = ai.lt_check
     ai.lt_check = lambda text: []  # офлайн: грамотность без совпадений (12 баллов)
     try:
-        partial6 = {"total_score": 6, "criteria": [], "what_to_improve": [],
-                    "recommendation": "r", "short_verdict": "v"}
+        # Мусор: К1=0. Потолок рубрики срезает К2 (2 -> 1), содержание 5,
+        # грамотность 12, итог 17 -> вето оставляет только содержание.
+        partial = ai.validate_essay(k1zero_payload(), 300)
+        content = partial["total_score"]
+        check("потолок рубрики: К1=0 -> К2 не выше 1",
+              next(c["score"] for c in partial["criteria"] if c["id"] == "K2") == 1,
+              str([(c["id"], c["score"]) for c in partial["criteria"]]))
+        check("потолок объяснён в комментарии",
+              "Потолок рубрики" in next(c["comment"] for c in partial["criteria"] if c["id"] == "K2"))
 
-        def run_cal(answer, content=6, proposed=18):
-            ai.chat = lambda messages, **kw: answer
-            return ai.calibrate_essay(LONG_TEXT, dict(partial6, total_score=content), [], proposed)
+        merged = ai.merge_essay(partial, valid_grammar(), 300)
+        proposed = merged["total_score"]
+        check("до вето итог = содержание + грамотность",
+              proposed == content + 11, f"{proposed} при содержании {content}")
+        check("до вето пометки нет", merged.get("calibration") is None)
 
-        final, note = run_cal("0")
-        check("вето в 0 принимается", final == 0 and bool(note), f"{final} {note}")
-        final, note = run_cal("6")
-        check("итог на уровне содержания — полное вето с объяснением",
-              final == 6 and note and "содержания" in note, str(note))
-        final, note = run_cal("3")
-        check("частичная срезка с арифметикой",
-              final == 3 and note == "Повторная проверка скорректировала итог: 18 → 3.", str(note))
-        final, note = run_cal("18")
-        check("подтверждение итога без пометки", final == 18 and note is None)
-        final, note = run_cal("18\n")
-        check("перевод строки в конце допустим", final == 18 and note is None)
+        fired = ai.veto_unrelated_literacy(merged, partial)
+        check("вето сработало", fired is True)
+        check("итог равен баллам содержания", merged["total_score"] == content,
+              str(merged["total_score"]))
+        check("К7–К10 обнулены, разбор сходится с итогом",
+              all(c["score"] == 0 for c in merged["criteria"][6:]),
+              str([(c["id"], c["score"]) for c in merged["criteria"][6:]]))
+        check("сумма критериев равна итогу",
+              sum(c["score"] for c in merged["criteria"]) == merged["total_score"])
+        cal = merged.get("calibration") or {}
+        check("пометка о вето разобрана и объясняет причину",
+              cal.get("proposed") == proposed and cal.get("final") == content
+              and "грамотност" in str(cal.get("note")).lower(), str(cal))
 
-        for label, answer in (
-            ("слова вместо числа", "Итог: ноль"),
-            ("пустой ответ", "   "),
-            ("число выше итога", "19"),
-            ("двузначное враньё", "99"),
-            ("отрицательное", "-1"),
-        ):
-            try:
-                run_cal(answer)
-                check(f"отклонено: {label}", False, "принято без ошибки")
-            except ai.AIFormatError:
-                check(f"отклонено: {label}", True)
-            except Exception as exc:  # noqa: BLE001
-                check(f"отклонено: {label}", False, f"{type(exc).__name__}: {exc}")
+        # Повтор того же прогона обязан дать тот же итог: правило детерминировано,
+        # а не «угадай моделью» (на живых прогонах вето срывалось в 3 из 11).
+        again = ai.merge_essay(ai.validate_essay(k1zero_payload(), 300), valid_grammar(), 300)
+        ai.veto_unrelated_literacy(again, partial)
+        check("тот же класс работ — тот же итог (детерминировано)",
+              again["total_score"] == merged["total_score"],
+              f"{again['total_score']} != {merged['total_score']}")
 
-        # Короткий запрос: мало токенов на выход, вменяемый таймаут.
-        seen: dict = {}
-        seen_msgs: list = []
-        def spy(messages, **kwargs):
-            seen.update(kwargs)
-            seen_msgs.extend(messages)
-            return "18"
-        ai.chat = spy
-        ai.calibrate_essay(LONG_TEXT, partial6, [], 18)
-        check("калибровка просит только число",
-              seen.get("max_tokens") == ai.ESSAY_CALIBRATION_MAX_TOKENS, str(seen))
-        check("текст уходит во второй запрос целиком (независимый взгляд)",
-              any("тестовое" in str(m.get("content", "")) for m in seen_msgs))
-        # В режиме исходника калибрующая инстанция говорит о неразобранном
-        # исходном тексте, а в свободной теме — о невысказанном тезисе.
-        check("калибровка упоминает неразобранный исходный текст",
-              "не разобрал исходный текст" in ai._calibration_system(True))
-        check("калибровка смотрит неразобранный исходный текст",
-              "не разобрал исходный текст" in ai._calibration_system(True))
+        # Нормальная работа (К1=1) — вето не трогает.
+        ok_partial = ai.validate_essay(valid_payload(), 300)
+        ok_merged = ai.merge_essay(ok_partial, valid_grammar(), 300)
+        check("К1=1 — вето молчит", ai.veto_unrelated_literacy(ok_merged, ok_partial) is False
+              and ok_merged["total_score"] == 18 and ok_merged.get("calibration") is None,
+              str(ok_merged["total_score"]))
 
-        # run_format: триггер — К1=0 при ненулевой грамотности.
+        # Короткая работа обнулена ключом по объёму — ветировать нечего.
+        short_partial = ai.validate_essay(k1zero_payload(), 149)
+        short_merged = ai.merge_essay(short_partial, valid_grammar(), 149)
+        check("короткая работа: вето молчит, итог 0",
+              ai.veto_unrelated_literacy(short_merged, short_partial) is False
+              and short_merged["total_score"] == 0, str(short_merged["total_score"]))
+
+        # Сквозняком: ровно один вызов модели, никакой второй инстанции.
         calls: list = []
         def scripted(messages, **kwargs):
             calls.append(messages)
-            if len(calls) == 1:
-                return json.dumps(k1zero_payload(), ensure_ascii=False)
-            return "0"
+            return json.dumps(k1zero_payload(), ensure_ascii=False)
         ai.chat = scripted
         out = ai.run_format("essay", LONG_TEXT)
-        check("K1=0 + грамотность → второй запрос", len(calls) == 2, str(len(calls)))
-        check("вето применено к итогу", out["total_score"] == 0, str(out["total_score"]))
-        cal = out.get("calibration") or {}
-        check("calibration расписан", cal.get("proposed") == 18 and cal.get("final") == 0
-              and bool(cal.get("note")), str(cal))
+        check("К1=0: один вызов модели, без второй инстанции", len(calls) == 1, str(len(calls)))
+        check("вето применено к итогу", out["total_score"] == 5, str(out["total_score"]))
+        check("калибровка в ответе разобрана",
+              (out.get("calibration") or {}).get("final") == 5, str(out.get("calibration")))
 
-        # Обычная работа (К1=1): второго запроса нет — без роста цены/задержки.
+        # Штатная работа: один вызов, пометки нет.
         calls.clear()
         ai.chat = lambda messages, **kwargs: (calls.append(messages),
                                               json.dumps(valid_payload(), ensure_ascii=False))[1]
         out = ai.run_format("essay", LONG_TEXT)
-        check("K1=1 → один запрос, без калибровки",
+        # здесь lt_check заглушен «без ошибок» — грамотность 12, содержание 7
+        check("К1=1: один вызов, вето не сработало",
               len(calls) == 1 and out["total_score"] == 19 and out.get("calibration") is None,
               f"calls={len(calls)} total={out['total_score']}")
-
-        # Подтверждение предложенного итога: тоже без пометки.
-        calls.clear()
-        ai.chat = lambda messages, **kwargs: (calls.append(messages),
-                                              json.dumps(k1zero_payload(), ensure_ascii=False)
-                                              if len(calls) == 1 else "18")[1]
-        out = ai.run_format("essay", LONG_TEXT)
-        check("подтверждение итога: total цел, пометки нет",
-              out["total_score"] == 18 and out.get("calibration") is None, str(out["total_score"]))
-
-        # Короткая работа с К1=0: грамотность уже обнулена ключом — ветировать
-        # нечего, второго запроса нет.
-        calls.clear()
-        ai.chat = lambda messages, **kwargs: (calls.append(messages),
-                                              json.dumps(k1zero_payload(), ensure_ascii=False))[1]
-        out = ai.run_format("essay", "Короткий текст из трёх слов.")
-        check("короткая работа без второго запроса",
-              len(calls) == 1 and out["total_score"] == 0 and out.get("calibration") is None,
-              f"calls={len(calls)} total={out['total_score']}")
-
-        # Отказ транспорта калибровки — наружу как upstream-ошибка (endpoint
-        # даст 502/503), а не тихий старый итог.
-        def boom_then_fail(messages, **kwargs):
-            if len(calls) == 0:
-                calls.append(messages)
-                return json.dumps(k1zero_payload(), ensure_ascii=False)
-            raise ai.AIError("провайдер временно перегружен")
-        calls.clear()
-        ai.chat = boom_then_fail
-        try:
-            ai.run_format("essay", LONG_TEXT)
-            check("отказ калибровки → исключение", False, "принято без ошибки")
-        except (ai.AIError, ai.AIUnavailable):
-            check("отказ калибровки → исключение", True)
-        except Exception as exc:  # noqa: BLE001
-            check("отказ калибровки → исключение", False, f"{type(exc).__name__}: {exc}")
     finally:
         ai.chat = original_chat
         ai.lt_check = original_lt
+
+
+def test_caps_and_tolerance(ai) -> None:
+    section("потолки рубрики кодом и терпимый разбор балла")
+    # Живой замер: около 9% проверок падали с 502 на нечисловом балле.
+    for raw, label in (("1", "строка с числом"), ("2 балла", "балл со словом"),
+                       ("3.", "число с точкой"), (1.0, "float целый"), (2, "обычное число")):
+        body = valid_payload()
+        body["criteria"][1]["score"] = raw
+        try:
+            out = ai.validate_essay(body, 300)
+            check(f"разобран балл: {label}", isinstance(out["criteria"][1]["score"], int),
+                  repr(out["criteria"][1]["score"]))
+        except ai.AIFormatError as exc:
+            check(f"разобран балл: {label}", False, str(exc))
+    for raw, label in (("один", "слово вместо числа"), ("", "пустая строка"),
+                       (None, "null"), (True, "булево число"),
+                       ("3 из 4", "неоднозначная фраза"), ("1e2", "научная нотация")):
+        body = valid_payload()
+        body["criteria"][1]["score"] = raw
+        try:
+            ai.validate_essay(body, 300)
+            check(f"отклонён балл: {label}", False, "принято без ошибки")
+        except ai.AIFormatError:
+            check(f"отклонён балл: {label}", True)
+
+    # Потолки из рубрики проверяет сервер, а не просьба в промпте.
+    body = valid_payload()
+    body["criteria"][0]["score"] = 0            # К1 = 0
+    body["criteria"][1]["score"] = 3            # К2 = 3 при К1 = 0
+    body["criteria"][2]["score"] = 2            # К3 = 2 при К1 = 0
+    out = ai.validate_essay(body, 300)
+    got = {c["id"]: c["score"] for c in out["criteria"]}
+    check("К1=0 зажимает К2 и К3", got["K2"] == 1 and got["K3"] == 1, str(got))
+    check("итог пересчитан под потолок", out["total_score"] == sum(got.values()),
+          f"{out['total_score']} vs {sum(got.values())}")
+    check("потолок не срабатывает при К1=1",
+          ai.validate_essay(valid_payload(), 300)["total_score"] == 7)
+
+
+def test_word_counter(server, ai) -> None:
+    section("счётчик слов один и тот же на приёме и в оценке")
+    tricky = ["что—то", "какой-то", "вес 1,5 килограмма", "в 10.30 утра",
+              "А.Я. Бруштейн", "г. 2023 году", "из-за", "ч'т", "списки-номера"]
+    for snippet in tricky:
+        left = ai.count_words(snippet)
+        right = server.count_essay_words(snippet)
+        check(f"паритет счётчиков: {snippet!r}", left == right, f"ai={left} server={right}")
+    # Регрессия, из-за которой счётчики и разошлись: работа на пороге 150 слов
+    # не должна проходить приём и тут же обнуляться баллами.
+    base = server.count_essay_words("слово " * 150)
+    edge = " ".join(["слово"] * 147) + " что—то слово"
+    check("150 слов по приёму — те же 150 в оценке",
+          server.count_essay_words(edge) == 150 and ai.count_words(edge) == 150,
+          f"{server.count_essay_words(edge)} / {ai.count_words(edge)}")
+    check("базовый текст ровно на пороге", base == 150, str(base))
 
 
 # ---------------------------------------------------------------------------
@@ -833,12 +849,11 @@ def test_endpoint(server) -> None:
         check("ref вместо текста ошибки", "ref" in body and "error" in body, str(body)[:160])
         ai.chat = lambda messages, **kw: json.dumps(valid_payload(), ensure_ascii=False)
 
-        # Исчерпание бюджета: сочинение стоит 2 вызова (оценка + возможная
-        # калибровка, см. charges_for), при EGE_AI_RATE_MAX=3 второй запрос
-        # уже упирается в лимит.
+        # Исчерпание бюджета: проверка стоит один вызов (charges_for), при
+        # EGE_AI_RATE_MAX=3 четвёртый запрос уже упирается в лимит.
         ai.reset_ai_rate()
         codes = [post({"text": "ок"})[0] for _ in range(5)]
-        check("после лимита -> 429", codes[0] == 200 and codes[1:] == [429, 429, 429, 429], str(codes))
+        check("после лимита -> 429", codes == [200, 200, 200, 429, 429], str(codes))
         status, headers, body = post({"text": "ок"})
         check("429 с Retry-After", headers.get("Retry-After", "").isdigit(), str(headers.get("Retry-After")))
         check("429 объясняет клиенту", "retryAfter" in body, str(body)[:160])
@@ -846,11 +861,12 @@ def test_endpoint(server) -> None:
 
         # Регрессия: клиент перестаёт слать cookie и каждый запрос получает
         # нового гостя. Без ключа IP лимит обходится и баланс уходит.
-        # Сочинение стоит 2: первому анониму хватает, остальным — нет.
+        # Проверка стоит 1: первому анониму хватает, остальным — нет.
         anonymous = [request_json(base + "/api/ai/essay", method="POST",
                                   body=json.dumps({"text": "ок", "taskId": "re27_1", "subject": "russian"}).encode("utf-8"),
                                   content_type="application/json")[0] for _ in range(6)]
-        check("сброс cookie не обходит лимит", anonymous[0] == 200 and anonymous[1:] == [429] * 5, str(anonymous))
+        check("сброс cookie не обходит лимит",
+              anonymous[:3] == [200, 200, 200] and anonymous[3:] == [429] * 3, str(anonymous))
         ai.reset_ai_rate()
 
         # Провайдер недоступен -> 503 и никакого текста провайдера наружу.
@@ -982,7 +998,8 @@ def main() -> int:
     test_run_format_input(ai)
     test_grammar(ai)
     test_source_mode(ai)
-    test_calibration(ai)
+    test_veto(ai)
+    test_caps_and_tolerance(ai)
     test_config_and_transport(ai)
 
     os.environ["EGE_DB_PATH"] = str(Path(tempfile.mkdtemp(prefix="ege-ai-test-")) / "ege.sqlite3")
@@ -995,6 +1012,7 @@ def main() -> int:
     finally:
         conn.close()
     test_endpoint(server)
+    test_word_counter(server, ai)
 
     if LIVE:
         test_live(ai)
