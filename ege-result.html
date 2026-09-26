@@ -18,6 +18,25 @@
     }catch(e){}
   })();
 </script>
+<script>
+  /* Тот же детект слабых устройств/сети, что на лендинге (main.html):
+     без per-frame blur и каскадных задержек. */
+  (function(){
+    try{
+      var cn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+      var slowNet=!!(cn&&(cn.saveData||/^(slow-2g|2g|3g)$/.test(cn.effectiveType||'')));
+      var lowMem=(navigator.deviceMemory&&navigator.deviceMemory<=4);
+      var lowCpu=(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4);
+      var minSide=Math.min(screen.width||0,screen.height||0);
+      var smallSlow=(minSide>0&&minSide<380&&(lowMem||lowCpu));
+      var reduceData=(window.matchMedia&&matchMedia('(prefers-reduced-data: reduce)').matches);
+      if(slowNet||(lowMem&&lowCpu)||smallSlow||reduceData){
+        document.documentElement.classList.add('lite-anim');
+      }
+    }catch(e){}
+  })();
+</script>
+<script>document.documentElement.classList.add('js');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -44,7 +63,7 @@
     --red: #D8484D; --red-soft: rgba(216,72,77,.10);
   }
   * { box-sizing: inherit; }
-  html, body { height: 100%; }
+  html, body { min-height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: 'Manrope', -apple-system, sans-serif; -webkit-font-smoothing: antialiased;
@@ -66,11 +85,14 @@
   .logo-badge svg { width: 16px; height: 16px; }
   .logo-text em { font-style: normal; color: var(--green); }
   .back-link {
-    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--text-soft); text-decoration: none;
-    font-size: 13.5px; font-weight: 700; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px;
+    border: none; text-decoration: none; white-space: nowrap;
+    background: linear-gradient(135deg, #38BDF8 0%, #3B82F6 50%, #2563EB 100%); color: #fff;
+    font-size: 13.5px; font-weight: 700;
+    box-shadow: 0 10px 22px -10px rgba(56, 189, 248, 0.5);
+    transition: transform 0.25s var(--ease-out, ease), box-shadow 0.25s var(--ease-out, ease), background-color .2s ease, color .2s ease;
   }
-  .back-link:hover { color: var(--text); border-color: var(--purple-border); }
+  .back-link:hover { transform: translateY(-2px); color: #fff; }
 
   .page { max-width: 720px; margin: 0 auto; padding: 20px 18px 40px; }
 
@@ -206,12 +228,6 @@
 
   .disclaimer { margin-top: 20px; text-align: center; font-size: 13.5px; color: var(--text-soft); opacity: .8; line-height: 1.5; }
 
-  /* Нижняя навигация отчёта: назад (к карточке задания) и дальше
-     (к практике за следующим сочинением). */
-  .result-nav { margin-top: 6px; }
-  .result-nav__inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .result-nav__next { text-decoration: none; display: inline-block; }
-
   /* --- skeleton --- */
   .skel { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: skel-shine 1.4s ease infinite; border-radius: 10px; }
   @keyframes skel-shine { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
@@ -226,6 +242,66 @@
     font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
   }
 
+  /* ===== REVEAL (перенос из main.html: те же ease и расстояния) =====
+     Начальное состояние только под .js: без JS элементы видны сразу. */
+  :root { --ease-out: cubic-bezier(0.16,1,0.3,1); --ease-spring: cubic-bezier(0.34,1.4,0.64,1); }
+
+  .js .rv{
+    opacity:0;
+    transform:translateY(28px);
+    filter:blur(5px);
+    transition:
+      opacity 0.8s var(--ease-out),
+      transform 0.8s var(--ease-out),
+      filter 0.8s var(--ease-out),
+      background-color 0.2s ease,
+      border-color 0.2s ease;
+    transition-delay:var(--d,0ms);
+    will-change:opacity,transform;
+  }
+
+  .js .rv.in{
+    opacity:1;
+    transform:none;
+    filter:blur(0);
+  }
+
+  .js .rv-scale{
+    opacity:0;
+    transform:translateY(24px) scale(0.96);
+    filter:blur(5px);
+    transition:
+      opacity 0.8s var(--ease-out),
+      transform 0.8s var(--ease-spring),
+      filter 0.8s var(--ease-out),
+      background-color 0.2s ease,
+      border-color 0.2s ease;
+    transition-delay:var(--d,0ms);
+    will-change:opacity,transform;
+  }
+
+  .js .rv-scale.in{
+    opacity:1;
+    transform:none;
+    filter:blur(0);
+  }
+
+  /* после завершения появления снимаем задержку и will-change,
+     чтобы hover-эффекты карточек срабатывали мгновенно */
+  .js .rv.in.done,
+  .js .rv-scale.in.done{
+    transition-delay:0ms;
+    will-change:auto;
+  }
+
+  /* LITE-ANIM: та же траектория, без blur и задержек (слабые GPU / slow-3g) */
+  html.lite-anim .rv,
+  html.lite-anim .rv-scale{
+    filter:none !important;
+    transition:opacity 0.6s var(--ease-out),transform 0.6s var(--ease-out),background-color 0.2s ease,border-color 0.2s ease !important;
+    transition-delay:0ms !important;
+  }
+
   [hidden] { display: none !important; }
 
   /* Состояние ошибки — только блок ошибки: таблетка, заголовок, скелетон,
@@ -234,6 +310,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .crit-card, body, .card, .recommendation, .crit-body, .chevron, .skel { transition: none; animation: none; }
+    .js .rv, .js .rv-scale { opacity: 1; transform: none; filter: none; }
   }
 </style>
 </head>
@@ -255,13 +332,13 @@
 <main>
 <div class="page">
 
-  <div class="topbar">
+  <div class="topbar rv" style="--d:0ms">
     <span class="level-pill">Проверка сочинения</span>
     <button class="theme-toggle" id="themeToggle" type="button" aria-label="Переключить на светлую тему" aria-pressed="false"></button>
   </div>
 
-  <h1 class="title">Результат проверки</h1>
-  <p class="subtitle">Разбор твоего сочинения по критериям ФИПИ — что получилось, а над чем ещё стоит поработать.</p>
+  <h1 class="title rv" style="--d:40ms">Результат проверки</h1>
+  <p class="subtitle rv" style="--d:80ms">Разбор твоего сочинения по критериям ФИПИ — что получилось, а над чем ещё стоит поработать.</p>
 
   <!-- Скелетон-заглушка на время запроса к бэкенду -->
   <div id="skeletonState">
@@ -287,7 +364,7 @@
   <!-- Готовый результат -->
   <div id="resultState" hidden aria-live="polite">
     <div class="top-row">
-      <div class="card score-tint" id="scoreCard">
+      <div class="card score-tint rv-scale" id="scoreCard" style="--d:0ms">
         <p class="stat-label">Общий результат</p>
         <div class="stat-score tnum">
           <span id="scoreValue">0</span><span class="max" id="scoreMax"></span>
@@ -295,14 +372,14 @@
         </div>
         <p class="cal-note" id="calibrationNote" hidden></p>
       </div>
-      <div class="card">
+      <div class="card rv-scale" style="--d:120ms">
         <p class="stat-label">Количество слов</p>
         <div class="stat-words tnum" id="wordsValue">—</div>
         <span class="badge" id="wordsBadge"></span>
       </div>
     </div>
 
-    <div class="card verdict-card">
+    <div class="card verdict-card rv" style="--d:250ms">
       <p class="stat-label">Краткий вердикт</p>
       <p id="verdictText"></p>
     </div>
@@ -315,25 +392,18 @@
 
     <div class="section">
       <h2 class="section-title">Что стоит улучшить</h2>
-      <div class="card list-card"><ul id="improveList"></ul></div>
+      <div class="card list-card rv" style="--d:340ms"><ul id="improveList"></ul></div>
     </div>
 
-    <div class="recommendation">
+    <div class="recommendation rv" style="--d:420ms">
       <p class="stat-label">Рекомендация</p>
       <p id="recommendationText"></p>
     </div>
   </div>
 
-  <p class="disclaimer">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
+  <p class="disclaimer rv" style="--d:0ms">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
 </div>
 </main>
-
-<nav class="result-nav" aria-label="Дальше">
-  <div class="wrap result-nav__inner">
-    <a class="back-link" href="/dashboard" onclick="if(history.length>1){history.back();return false;}">← Назад</a>
-    <a class="retry-btn result-nav__next" href="/dashboard">Следующее сочинение →</a>
-  </div>
-</nav>
 
 <div data-ege-footer></div>
 <!-- Абсолютный путь: страница живёт и на /ege-result.html, и на /essay/<sid> —
@@ -423,6 +493,34 @@ function showSkeleton() { document.body.classList.remove('state-error'); skeleto
 function showError() { skeletonEl.hidden = true; errorEl.hidden = false; resultEl.hidden = true; document.body.classList.add('state-error'); }
 function showResult() { document.body.classList.remove('state-error'); skeletonEl.hidden = true; errorEl.hidden = true; resultEl.hidden = false; }
 
+// ---------- Reveal по скроллу (перенос из main.html) ----------
+const revealObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      activateReveal(entry.target);
+      revealObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' }) : null;
+
+function activateReveal(el) {
+  el.classList.add('in');
+  el.addEventListener('transitionend', function onEnd(e) {
+    if (e.target !== el || e.propertyName !== 'opacity') return;
+    el.classList.add('done');
+    el.removeEventListener('transitionend', onEnd);
+  });
+}
+
+/* Элементы, уже попавшие во вьюпорт, получают .in сразу; остальные —
+   по IntersectionObserver при скролле. Без observer всё видно сразу. */
+function observeReveals(root) {
+  (root || document).querySelectorAll('.rv:not(.in), .rv-scale:not(.in)').forEach(el => {
+    if (revealObserver) revealObserver.observe(el);
+    else activateReveal(el);
+  });
+}
+
 // ---------- Рендер-хелперы ----------
 function pillClass(score, max) {
   if (score <= 0) return "zero";
@@ -462,7 +560,7 @@ function critCardHTML(c, idx) {
       <div class="rewrite-row after"><span class="rewrite-tag">СТАЛО</span><span>${esc(c.rewrite.after)}</span></div>
     </div>` : "";
   return `
-    <div class="crit-card" data-id="${esc(c.id)}">
+    <div class="crit-card rv" data-id="${esc(c.id)}" style="--d:${300 + idx * 70}ms">
       <button class="crit-head" type="button" aria-expanded="false" aria-controls="${panelId}">
         <span class="crit-dot ${cls}"></span>
         <span class="crit-name">${esc(c.name)}</span>
@@ -552,6 +650,7 @@ function render(data) {
 
   document.getElementById("recommendationText").textContent = data.recommendation;
   showResult();
+  observeReveals(resultEl);
 }
 
 /**
@@ -656,6 +755,7 @@ async function fetchFromApi() {
   return view;
 }
 
+observeReveals(document);
 document.getElementById('retryBtn').addEventListener('click', () => loadResult(fetchFromApi));
 loadResult(fetchFromApi);
 

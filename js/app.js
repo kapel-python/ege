@@ -3361,6 +3361,9 @@ function persistSession() {
       missionId: S.missionId, bossId: S.bossId, xpReward: S.xpReward,
       offset: S.offset, total: S.total, idx: S.idx, errorMap: S.errorMap,
       essayDraftByTask: S.essayDraftByTask || {},
+      // Какие сочинения уже написаны: без этого после перезагрузки «Далее»
+      // пропадал бы у уже проверенных работ. Без текста — только факт.
+      essayWrittenByTask: S.essayWrittenByTask || {},
     }));
   } catch (_) {}
 }
@@ -3391,6 +3394,7 @@ function restoreSessionFromStorage(route, param) {
     results: [], hintsUsed: 0, startTs: Date.now(), taskStartTs: Date.now(),
     answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
     essayDraftByTask: d.essayDraftByTask || {},
+    essayWrittenByTask: d.essayWrittenByTask || {},
   };
   return true;
 }
@@ -3870,20 +3874,21 @@ async function essayRestoreReady(t) {
     if (sub.status === "ready" && sub.result) {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essayMarkWritten(t.id, sub);
       essaySetFormVisible(false);
       essayMountReadonly(sub.text || "", sub.wordCount);
-      slot.innerHTML = `
+      essayMountFeedback(`
         <div class="feedback feedback--ok">
           <div class="feedback__head">${icon("check")} Это сочинение уже проверено
             <span class="feedback__xp">${esc(sub.result.total_score)} / ${esc(sub.result.max_score)}</span></div>
           <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
             <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
           </div>
-          ${sessionNextHtml()}
-        </div>`;
+        </div>`);
     } else if (sub.status === "submitted" || sub.status === "failed") {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essayMarkWritten(t.id, sub);
       essayClearReadonly();
       essaySetFormVisible(true);
       try {
@@ -3915,15 +3920,14 @@ async function essayRestoreReady(t) {
           if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
         }
       } catch (_) {}
-      slot.innerHTML = `
+      essayMountFeedback(`
         <div class="feedback">
           <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
           <div class="feedback__solution">Текст сохранён (${sub.wordCount} ${essayWordsLabel(sub.wordCount)}), но готового результата нет. Можно продолжить проверку без повторного ввода.</div>
           <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
             <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Продолжить проверку</button>
           </div>
-          ${sessionNextHtml()}
-        </div>`;
+        </div>`);
     }
   } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
@@ -3965,17 +3969,74 @@ function sessionHasNext() {
    было вовсе, а на первом задании он то показывался, то нет. */
 function sessionPrevButtonHtml() {
   if (!sessionHasPrev()) return "";
-  return `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`;
+  return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
 }
 
-/* Подпись основной кнопки сессии — ровно как у обычных заданий.
-   Раньше у сочинений стояло «Написать ещё раз», но кнопка никогда ничего не
-   переписывала: sessionNext() всегда ведёт на СЛЕДУЮЩЕЕ задание. Особенно
-   сбивало после шага «Назад» — там «Написать ещё раз» возвращала к уже
-   проверенному сочинению, а не к новому тексту. Теперь одна формулировка
-   на все состояния ответа (проверено / проверка не завершена / проверка не
-   удалась) и на все предметы. */
+/* Отметка «сочинение написано» — на ней держится правило «Далее» у сочинений.
+   Живёт отдельно от essayReadyByTask (там сам submission с текстом) и
+   переживает перезагрузку: после F5 список написанных работ прежний, иначе
+   кнопка «Далее» исчезла бы у уже проверенных сочинений. */
+function essayMarkWritten(taskId, sub) {
+  const S = Session.cur;
+  if (!S || !taskId) return;
+  if (!S.essayWrittenByTask) S.essayWrittenByTask = {};
+  const known = S.essayReadyByTask && S.essayReadyByTask[taskId];
+  S.essayWrittenByTask[taskId] = {
+    clientId: (sub && sub.clientId) || (known && known.clientId) || "",
+    wordCount: (sub && sub.wordCount) || (known && known.wordCount) || 0,
+    status: (sub && sub.status) || "submitted",
+  };
+  persistSession();
+}
+
+function sessionTaskWritten(taskId) {
+  const S = Session.cur;
+  if (!S || !taskId) return false;
+  const sub = S.essayReadyByTask && S.essayReadyByTask[taskId];
+  if (sub && String(sub.text || "").trim()) return true;
+  if (S.essayWrittenByTask && S.essayWrittenByTask[taskId]) return true;
+  return !!(S.results || []).some((r) => r && r.taskId === taskId && r.essay);
+}
+
+/* Ближайшее написанное сочинение впереди (индекс в taskIds) или -1. */
+function sessionNextWrittenIdx(from) {
+  const S = Session.cur;
+  if (!S) return -1;
+  for (let i = Math.max(from, 0); i < S.taskIds.length; i++) {
+    if (sessionTaskWritten(S.taskIds[i])) return i;
+  }
+  return -1;
+}
+
+/* Куда ведёт основная кнопка. Обычные задания — строго на следующее.
+   Сочинение — на ближайшее НАПИСАННОЕ впереди («Далее»), а если такого нет,
+   то на следующее ненаписанное («Написать ещё раз» → чистый бланк). */
+function sessionNextTarget() {
+  const S = Session.cur;
+  const t = S ? Session.task() : null;
+  const next = S ? S.idx + 1 : 0;
+  if (t && isLongTextTask(t)) {
+    const written = sessionNextWrittenIdx(next);
+    if (written >= 0) return written;
+  }
+  return next;
+}
+
+/* Подпись основной кнопки сессии. У обычных заданий всё как было: «Далее →»,
+   на последнем — «Завершить». У сочинений «Далее» появляется ТОЛЬКО когда
+   впереди есть сочинение, которое ученик уже написал: тогда кнопка ведёт
+   вперёд по написанным работам (после «Назад» — туда, где он уже работал).
+   Если написанного впереди нет, дальше идёт ещё не написанное сочинение —
+   кнопка называется «Написать ещё раз» и открывает чистый бланк. Раньше эта
+   подпись стояла, но ничего не переписывала: sessionNext() всегда вёл на
+   следующее задание, поэтому возвращала к уже проверенному сочинению. */
 function sessionNextLabel() {
+  const S = Session.cur;
+  const t = S ? Session.task() : null;
+  if (t && isLongTextTask(t)) {
+    if (sessionNextWrittenIdx(S.idx + 1) >= 0) return "Далее →";
+    return sessionHasNext() ? "Написать ещё раз" : "Завершить";
+  }
   return sessionHasNext() ? "Далее →" : "Завершить";
 }
 
@@ -3983,6 +4044,26 @@ function sessionNextLabel() {
    не дублируется: он в шапке (sessionPrevButtonHtml). */
 function sessionNextHtml() {
   return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+/* Навигация у сочинения — отдельной строкой ПОД блоком результата: «Далее» /
+   «Написать ещё раз» больше не лежат внутри зелёного блока «отчёт готов», а
+   «Назад» стоит там же, под блоком, а не в шапке карточки (в шапке он на
+   длинном сочинении с readonly-текстом просто не был виден). Пишет блок и ряд
+   разом и прячет «Назад» из шапки, чтобы кнопка не была на экране дважды. */
+function sessionEssayNavHtml() {
+  const back = sessionHasPrev()
+    ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
+    : `<span></span>`;
+  return `<div class="session-nav">${back}<button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+function essayMountFeedback(html) {
+  const slot = document.getElementById("feedbackSlot");
+  if (!slot) return;
+  slot.innerHTML = `${html}${sessionEssayNavHtml()}`;
+  const head = document.getElementById("sessionPrevBtn");
+  if (head) head.style.display = "none";
 }
 
 /* Продолжить проверку сохранённого текста после перезагрузки: новый
@@ -4038,16 +4119,14 @@ async function essayRunChecks(t, text, clientId, wordCount) {
     essayRestoreSuppress = true;
     renderTask(screen);
     essayRestoreSuppress = false;
-    const slot = document.getElementById("feedbackSlot");
-    slot.innerHTML = `
+    essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Проверка не удалась</div>
         <div class="feedback__solution">${esc(essayAiErrorText(aiRes ? aiRes.status : 0, aiData))}</div>
         <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
-        ${sessionNextHtml()}
-      </div>`;
+      </div>`);
     return;
   }
 
@@ -4066,15 +4145,14 @@ async function essayRunChecks(t, text, clientId, wordCount) {
     essayRestoreSuppress = true;
     renderTask(screen);
     essayRestoreSuppress = false;
-    document.getElementById("feedbackSlot").innerHTML = `
+    essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Отчёт не сформирован</div>
         <div class="feedback__solution">Проверка прошла, но результат не сохранился. Текст не потерян — попробуй снова, XP начислен не будет до готового отчёта.</div>
         <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
-        ${sessionNextHtml()}
-      </div>`;
+      </div>`);
     return;
   }
   const submission = savedData.submission;
@@ -4095,6 +4173,7 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   if (S.essayDraftByTask) delete S.essayDraftByTask[t.id];
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = submission;
+  essayMarkWritten(t.id, submission);
   // Возвращаем экран задания: редактор прячем и показываем исходный текст
   // readonly — менять его после отправки уже нельзя. Таймер останавливаем
   // ПОСЛЕ перерисовки: renderTask сам запускает свой интервал таймера.
@@ -4111,12 +4190,11 @@ async function essayRunChecks(t, text, clientId, wordCount) {
 
   essayCheckMsgStop();
   renderTopbar();
-  // Кнопка отчёта и навигация — внутри одного зелёного блока, тем же рядом,
-  // что «Далее» в остальных предметах. Раньше ряд с «Назад» стоял отдельной
-  // строкой ПОД блоком и оказывался за нижней кромкой экрана: на длинном
-  // сочинении (плюс readonly-текст) кнопки «Назад» просто не было видно.
-  const slot = document.getElementById("feedbackSlot");
-  slot.innerHTML = `
+  // Зелёный блок — только отчёт. Навигация («Назад» и «Далее» / «Написать
+  // ещё раз») стоит отдельной строкой ПОД ним: внутри зелёного блока ряд
+  // выглядел частью отчёта, а в шапке карточки «Назад» на длинном сочинении
+  // с readonly-текстом просто не было видно.
+  essayMountFeedback(`
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
@@ -4124,9 +4202,8 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       <div style="margin-top:14px;text-align:right">
         <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
       </div>
-      ${sessionNextHtml()}
-    </div>`;
-  const doneBox = slot.querySelector(".feedback--ok");
+    </div>`);
+  const doneBox = document.querySelector(".feedback--ok");
   if (doneBox && doneBox.scrollIntoView) {
     try { doneBox.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
   }
@@ -4174,6 +4251,7 @@ async function sessionEssaySubmit() {
   }
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = { taskId: t.id, clientId: data.clientId, text, wordCount: data.wordCount, status: "submitted" };
+  essayMarkWritten(t.id, S.essayReadyByTask[t.id]);
   // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри).
   await essayRunChecks(t, text, data.clientId, data.wordCount);
 }
@@ -4408,7 +4486,10 @@ function sessionSkip() {
 
 function sessionNext() {
   const S = Session.cur;
-  S.idx++;
+  // Обычные задания — строго на следующее. Сочинение — на ближайшее
+  // НАПИСАННОЕ впереди («Далее»), а если такого нет, то на следующее
+  // ненаписанное («Написать ещё раз» → чистый бланк).
+  S.idx = sessionNextTarget();
   if (S.missionId) {
     Store.state.missionProgress[S.missionId] = (S.offset || 0) + S.idx;
     Store.save();
