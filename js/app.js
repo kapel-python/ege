@@ -3526,36 +3526,32 @@ async function essaySourceTextFetch(id) {
 }
 
 function essaySourceTextHtml(src) {
-  const citation = [src.author, src.work && !/^фрагмент|текст с ЕГЭ/.test(src.work) ? `«${src.work}»` : ""]
+  const author = String(src.author || "").trim();
+  const title = ["Исходный текст", author, `${src.wordCount} ${essayWordsLabel(src.wordCount)}`]
     .filter(Boolean).join(" · ");
   const paragraphs = String(src.text || "").split(/\n{2,}/)
     .map((p) => `<p>${esc(p.trim())}</p>`).join("");
   return `
     <div class="source-text" id="sourceTextBox">
-      <div class="source-text__head">
-        <div class="source-text__meta">
-          ${citation ? `<div class="source-text__cite">${esc(citation)}</div>` : ""}
-          <div class="source-text__tags">
-            ${src.exam ? `<span class="chip">ЕГЭ ${esc(src.exam)}</span>` : ""}
-            <span class="chip">${src.wordCount} ${essayWordsLabel(src.wordCount)}</span>
-          </div>
-        </div>
-        <button class="btn btn--ghost btn--sm" type="button" onclick="essaySourceToggle()">
-          <span data-source-toggle-label>Свернуть текст</span>
-        </button>
+      <button class="source-text__bar" type="button" onclick="essaySourceToggle()" aria-expanded="true">
+        <span class="source-text__title">${esc(title)}</span>
+        <span class="source-text__toggle" data-source-toggle-label>Скрыть</span>
+      </button>
+      <div class="source-text__content" data-source-body>
+        <div class="source-text__body">${paragraphs}</div>
       </div>
-      <div class="source-text__problem"><b>Проблема, поставленная в тексте:</b> ${esc(src.problem)}</div>
-      <div class="source-text__body" data-source-body>${paragraphs}</div>
-      ${src.sourceUrl ? `<a class="source-text__url" href="${esc(src.sourceUrl)}" target="_blank" rel="noopener noreferrer">Источник текста</a>` : ""}
     </div>`;
 }
 
 function essaySourceToggle() {
+  const box = document.getElementById("sourceTextBox");
   const body = document.querySelector("[data-source-body]");
   const label = document.querySelector("[data-source-toggle-label]");
-  if (!body) return;
-  const collapsed = body.classList.toggle("source-text__body--collapsed");
-  if (label) label.textContent = collapsed ? "Показать текст" : "Свернуть текст";
+  const bar = box ? box.querySelector(".source-text__bar") : null;
+  if (!box || !body) return;
+  const collapsed = box.classList.toggle("source-text--collapsed");
+  if (label) label.textContent = collapsed ? "Читать" : "Скрыть";
+  if (bar) bar.setAttribute("aria-expanded", collapsed ? "false" : "true");
 }
 
 async function essaySourceTextLoad(t) {
@@ -3902,6 +3898,24 @@ async function essayRestoreReady(t) {
   } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
 
+/* Кнопка «Назад» под готовым результатом: шаг к прошлому сочинению той же
+   сессии (зеркало sessionNext в обратную сторону). Его готовый отчёт никуда
+   не делся — при отрисовке покажется баннер «уже проверено». На первом
+   задании — обычный выход из практики. */
+function sessionEssayBack() {
+  const S = Session.cur;
+  if (!S) return;
+  if (S.idx > 0) {
+    S.idx--;
+    S.answered = false;
+    S.taskStartTs = Date.now();
+    persistSession();
+    renderTask(document.getElementById("screen"));
+  } else {
+    askSessionQuit();
+  }
+}
+
 /* Продолжить проверку сохранённого текста после перезагрузки: новый
    submission не создаём, текст берём с сервера (он не потерялся). */
 async function sessionEssayResume(taskId) {
@@ -3996,8 +4010,12 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   const submission = savedData.submission;
 
   // Только теперь — существующий механизм фиксации результата/XP/прогресса.
+  // Балл проверки известен лишь в этой точке («результат готов»): отдаём его
+  // в recordAnswer, где он конвертируется в XP по шкале essayXp. Повтор того
+  // же задания сверх защиты alreadyMastered ничего не доплачивает.
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
-  const xp = recordAnswer(t, true, 0, seconds, closesTaskId, 0);
+  const essayScore = submission && submission.result ? Number(submission.result.total_score) : NaN;
+  const xp = recordAnswer(t, true, 0, seconds, closesTaskId, 0, essayScore);
   S.gainedXp += xp;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
@@ -4020,14 +4038,20 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   essayCheckMsgStop();
   renderTopbar();
   // Кнопка — только когда отчёт действительно сформирован и XP выдан.
+  // Навигация — ОТДЕЛЬНО под зелёным блоком: «Назад» и «Написать ещё раз»
+  // на одном уровне, как «Далее» в остальных предметах.
   slot.innerHTML = `
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
       <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
-      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <div style="margin-top:14px;text-align:right">
         <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
       </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <button class="btn btn--ghost" onclick="sessionEssayBack()">← Назад</button>
+      <button class="btn btn--primary" onclick="sessionNext()">${(Session.cur && Session.cur.idx + 1 < Session.cur.taskIds.length) ? "Написать ещё раз →" : "Завершить"}</button>
     </div>`;
   const doneBox = slot.querySelector(".feedback--ok");
   if (doneBox && doneBox.scrollIntoView) {

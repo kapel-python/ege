@@ -4598,6 +4598,66 @@ def attempt_xp(diff: int, correct: bool, hint_level: int, already_mastered: bool
     return total + bonus
 
 
+# ---------------------------------------------------------------------------
+# Гибкая шкала XP за проверенное сочинение (задание 27, задачи long_text).
+# Зеркало js/state.js essayXp: линейно от балла AI-проверки 0–22, минимум
+# 100 XP за саму работу, 22 балла ≈ 500 XP. Обычные задания не затрагиваются.
+# ---------------------------------------------------------------------------
+ESSAY_SCORE_MAX = 22
+ESSAY_XP_MIN = 100
+ESSAY_XP_MAX = 500
+
+
+def essay_xp(score) -> int:
+    """XP за проверенное сочинение по баллу 0–22. Монотонно, всегда >= 100."""
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return ESSAY_XP_MIN
+    if value != value or value in (float("inf"), float("-inf")):
+        return ESSAY_XP_MIN
+    clamped = max(0.0, min(float(ESSAY_SCORE_MAX), value))
+    # Округление «половина вверх» — зеркало Math.round в essayXp.
+    # Точный .5 здесь недостижим (400*k/22 никогда не даёт ровно половину),
+    # но формула корректна и для него.
+    return ESSAY_XP_MIN + int((ESSAY_XP_MAX - ESSAY_XP_MIN) * clamped / ESSAY_SCORE_MAX + 0.5)
+
+
+def essay_ready_scores(conn: sqlite3.Connection, user_id: int, subject: str) -> dict:
+    """Лучший проверенный балл по каждому заданию-сочинению предмета.
+
+    Источник истины — серверные essay_submissions со статусом 'ready':
+    балл из клиентской попытки не читаем (его можно подделать из консоли).
+    Берём максимум по заданию: переписанное хуже сочинение не роняет уже
+    заработанный XP. Засчитывается один раз (см. solved_once в derive_stats:
+    повтор того же задания платит только минимум попытки).
+    """
+    try:
+        ensure_essay_schema(conn)
+        rows = conn.execute(
+            "SELECT task_id, evaluation_result FROM essay_submissions"
+            " WHERE user_id=? AND subject=? AND evaluation_status='ready'",
+            (user_id, subject),
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+    best: dict = {}
+    for row in rows or []:
+        try:
+            result = json.loads(row["evaluation_result"] or "")
+            total = int(result.get("total_score"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if not 0 <= total <= ESSAY_SCORE_MAX:
+            continue
+        task_id = row["task_id"]
+        if not isinstance(task_id, str) or not task_id:
+            continue
+        if total > best.get(task_id, -1):
+            best[task_id] = total
+    return best
+
+
 def level_from_xp(xp: int) -> dict:
     """Mirror of the client's xpForLevel formula (400 + 120·(n−1) per level)."""
     remaining = max(0, int(xp))
@@ -5340,6 +5400,12 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     subj_skills = {r["id"] for r in conn.execute("SELECT id FROM skills WHERE subject=?", (derive_subject,))}
     tasks = {r["id"]: r["difficulty"] for r in conn.execute(
         "SELECT t.id AS id, t.difficulty AS difficulty FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (derive_subject,))}
+    # Задачи-сочинения (задание 27) платят по гибкой шкале от балла проверки,
+    # а не по attempt_xp — см. essay_xp. Множество нужно, чтобы обычные задания
+    # шли строго старым путём, без изменения их экономики хоть на балл.
+    essay_tasks = {r["id"] for r in conn.execute(
+        "SELECT t.id AS id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=? AND t.task_type='long_text'", (derive_subject,))}
+    essay_scores = essay_ready_scores(conn, user_id, derive_subject) if user_id is not None else {}
     lessons_xp = {r["id"]: r["xp"] for r in conn.execute(
         "SELECT l.id AS id, l.xp AS xp FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (derive_subject,))}
     missions_xp = {r["id"]: r["xp"] for r in conn.execute(
@@ -5382,8 +5448,18 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
         is_correct = bool(a.get("correct")) and hint_level < 3
         task_id = a.get("taskId")
         already_mastered = task_id in solved_once
-        # Попытка платит минимум всегда — практика никогда не даёт +0 XP.
-        xp += attempt_xp(tasks.get(task_id, 1), is_correct, hint_level, already_mastered)
+        # Проверенное сочинение платит по шкале от балла AI (0–22), а не фикс
+        # attempt_xp: балл — из серверных ready-submissions (подделать нельзя).
+        # Первый верный ответ — полная шкала, повтор — только минимум попытки
+        # (тот же already_mastered, что у обычных заданий); без готового
+        # результата — обычный attempt_xp, как раньше.
+        essay_score = essay_scores.get(task_id) if (
+            is_correct and not already_mastered and task_id in essay_tasks) else None
+        if essay_score is None:
+            # Попытка платит минимум всегда — практика никогда не даёт +0 XP.
+            xp += attempt_xp(tasks.get(task_id, 1), is_correct, hint_level, already_mastered)
+        else:
+            xp += essay_xp(essay_score)
         if is_correct:
             total_correct += 1
             correct_series += 1
