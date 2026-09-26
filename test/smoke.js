@@ -1,7 +1,9 @@
 /* Core smoke test. Catalog content is read from the same SQLite bootstrap
    export used by the backend; no browser storage or synthetic account state. */
 const fs = require("fs");
-const src = fs.readFileSync("js/data.js", "utf8") + "\n" + fs.readFileSync("js/state.js", "utf8");
+const src = fs.readFileSync("js/data.js", "utf8") + "\n"
+  + fs.readFileSync("js/state.js", "utf8") + "\n"
+  + fs.readFileSync("js/mathvisual.js", "utf8");
 const testBody = async () => {
   let fails = 0;
   const t = (name, cond) => { console.log((cond ? "ok  " : "FAIL") + " " + name); if (!cond) fails++; };
@@ -66,6 +68,28 @@ const testBody = async () => {
   const tangentCircle = DataAPI.task("n18_p2").mathVisual;
   t("№18.2 не обрезает окружность рамкой рисунка", tangentCircle.boundingBox[3] <= -13);
 
+  // Внутренний VisualError остаётся в result/console, но не попадает в DOM.
+  {
+    const previousDocument = global.document;
+    const previousJXG = global.JXG;
+    const fallback = { style: {}, setAttribute() {}, textContent: "" };
+    const visualContainer = {
+      innerHTML: "initial",
+      className: "",
+      classList: { add() {} },
+      appendChild(node) { this.child = node; },
+    };
+    global.JXG = {};
+    global.document = { createElement: () => fallback };
+    const VisualEngine = global.MathVisual || module.exports.MathVisual;
+    const visualResult = VisualEngine.render(visualContainer, { type: "internal_missing_type" });
+    t("MathVisual не показывает внутреннюю ошибку сборки",
+      !visualResult.ok && fallback.textContent === "Рисунок недоступен"
+      && !fallback.textContent.includes("internal_missing_type"));
+    if (previousDocument === undefined) delete global.document; else global.document = previousDocument;
+    if (previousJXG === undefined) delete global.JXG; else global.JXG = previousJXG;
+  }
+
   t("checkAnswer exact", checkAnswer(DataAPI.task("n01_p1"), "3"));
   t("checkAnswer comma/dot", checkAnswer(DataAPI.task("n04_p1"), "0,3"));
   t("checkAnswer fraction (generic, not tied to a specific catalog task)", checkAnswer({ answer: "3/4" }, "6/8"));
@@ -86,7 +110,26 @@ const testBody = async () => {
   const before = Store.state.xp;
   recordAnswer(task, true, 0, 25);
   t("ошибка закрыта и XP начислен", Store.state.errors[0].resolved && Store.state.errorsResolved === 1 && Store.state.xp > before);
+  t("закрытие ошибки получает timestamp", Number(Store.state.errors[0].resolvedAt) > 0);
   t("попытки сохранены в runtime-снимке", Store.state.taskAttempts.length === 2);
+
+  Store.reset();
+  {
+    const old = Array.from({ length: 8 }, (_, i) => ({
+      id: 100 + i, taskId: "old_" + i, ts: 5000 + i,
+      sub: "Старая ошибка " + i, resolved: true, kind: "major",
+    }));
+    const fresh = Array.from({ length: 4 }, (_, i) => ({
+      id: 200 + i, taskId: "fresh_" + i, ts: 1000 + i,
+      sub: "Только что закрытая " + i, resolved: true, kind: "major",
+    }));
+    const attempts = fresh.map((error, i) => ({
+      taskId: error.taskId, correct: true, hintLevel: 0, ts: 9000 + i,
+    }));
+    const visible = resolvedErrorsForDisplay([...old, ...fresh], attempts, 4);
+    t("закрытые ошибки сортируются по времени закрытия, а не по дате создания",
+      visible.length === 4 && visible.every((error, i) => error.taskId === fresh[3 - i].taskId));
+  }
 
   Store.reset();
   const lesson = DataAPI.lesson("lesson_n07_exponential");
@@ -253,12 +296,29 @@ const testBody = async () => {
   // иначе график молча теряет/смещает данные для пользователей не из MSK.
   t("dateKeyForTimestamp(now) совпадает с todayStr() (инвариант графика активности)", dateKeyForTimestamp(Date.now()) === todayStr());
 
+  // Один сбой сохранения не должен создавать поток одинаковых toast.
+  {
+    let persistenceEvents = 0;
+    const countPersistenceError = () => { persistenceEvents++; };
+    Store.on("persistenceerror", countPersistenceError);
+    const firstError = Object.assign(new Error("leader unavailable"), { status: 0 });
+    Store.reportPersistenceError(firstError);
+    Store.reportPersistenceError(Object.assign(new Error("leader unavailable"), { status: 0 }));
+    Store.reportPersistenceError(Object.assign(new Error("state rejected"), { status: 400 }));
+    t("повторяющаяся ошибка сохранения дедуплицируется", persistenceEvents === 2);
+    Store.listeners.persistenceerror = (Store.listeners.persistenceerror || [])
+      .filter((listener) => listener !== countPersistenceError);
+    Store.persistenceError = null;
+    Store.persistenceErrorNotifiedKey = null;
+  }
+
   // Кросс-таб синк: save оставляет маяк, чужой свежий маяк тянет reload,
   // во время тренировки обновление откладывается (иначе сессия пишет в
   // чужой снапшот, а stale-вкладка перетирает сервер).
   Store.ready = true;
   Store.state = Store.defaultState();
   Store.subject = "profile_math";
+  Store.accountId = "account-math";
   Store.lastSyncTs = 0;
   Store.pendingExternalUpdate = false;
   {
@@ -277,21 +337,98 @@ const testBody = async () => {
     await Store.save();
     t("save использует доменный attempts endpoint, не legacy PUT", domainPath === "/api/events/attempts");
     const ping = JSON.parse(__ls[Store.pingKey("profile_math")] || "null");
-    t("save оставляет маяк для соседних вкладок", !!ping && ping.subject === "profile_math" && ping.ts === Store.lastSyncTs && Store.lastSyncTs > 0);
+    t("save оставляет версионный маяк для соседних вкладок",
+      !!ping && ping.v === 2 && ping.subject === "profile_math"
+      && ping.accountId === Store.accountId && ping.writer === Store.tabId
+      && ping.stateVersion === Store.state.stateVersion && ping.ts === Store.lastSyncTs
+      && Store.pingKey("profile_math").includes("account-math") && Store.lastSyncTs > 0);
     t("свой маяк не требует обновления", Store.shouldRefreshForPing(ping) === false);
-    t("старый маяк не требует обновления", Store.shouldRefreshForPing({ subject: "profile_math", ts: Store.lastSyncTs - 1 }) === false);
-    t("маяк чужого предмета игнорируется", Store.shouldRefreshForPing({ subject: "basic_math", ts: Date.now() + 60000 }) === false);
-    t("битый маяк игнорируется", Store.shouldRefreshForPing(null) === false && Store.shouldRefreshForPing("x") === false);
+    t("уже применённая версия не вызывает повторную загрузку",
+      Store.shouldRefreshForPing({ ...ping, writer: "another-tab", ts: Store.lastSyncTs + 60000 }) === false);
+    const futureVersion = Store.state.stateVersion + 1;
+    t("старый timestamp не требует обновления",
+      Store.shouldRefreshForPing({ ...ping, writer: "another-tab", stateVersion: futureVersion, ts: Store.lastSyncTs - 1 }) === false);
+    t("маяк чужого предмета игнорируется",
+      Store.shouldRefreshForPing({ ...ping, writer: "another-tab", subject: "basic_math", stateVersion: futureVersion, ts: Date.now() + 60000 }) === false);
+    t("маяк чужого аккаунта игнорируется",
+      Store.shouldRefreshForPing({ ...ping, writer: "another-tab", accountId: "account-other", stateVersion: futureVersion, ts: Date.now() + 60000 }) === false);
+    t("старый и битый маяк игнорируются",
+      Store.shouldRefreshForPing({ ...ping, v: 1, stateVersion: futureVersion, ts: Date.now() + 60000 }) === false
+      && Store.shouldRefreshForPing(null) === false && Store.shouldRefreshForPing("x") === false);
     let loadCalls = 0;
     Store.load = async () => { loadCalls++; Store.lastSyncTs = Date.now() + 120000; return Store.state; };
-    __ls[Store.pingKey("profile_math")] = JSON.stringify({ subject: "profile_math", ts: Store.lastSyncTs + 60000 });
+    const freshForeignPing = { ...ping, writer: "another-tab", stateVersion: futureVersion, ts: Store.lastSyncTs + 60000 };
+    __ls[Store.pingKey("profile_math")] = JSON.stringify(freshForeignPing);
     t("свежий чужой маяк перезагружает состояние", (await Store.checkExternalUpdate()) === "reloaded" && loadCalls === 1 && !Store.pendingExternalUpdate);
     t("без нового маяка перезагрузки нет", (await Store.checkExternalUpdate()) === "none" && loadCalls === 1);
+    Store.lastForcedExternalCheckAt = 0;
+    delete global.localStorage;
+    t("focus revalidation работает без localStorage-маяка",
+      (await Store.checkExternalUpdate(true)) === "reloaded" && loadCalls === 2);
+    global.localStorage = {
+      getItem: (k) => (k in __ls ? __ls[k] : null),
+      setItem: (k, v) => { __ls[k] = String(v); },
+      removeItem: (k) => { delete __ls[k]; },
+    };
     global.Session = { cur: { title: "Тренировка" } };
-    __ls[Store.pingKey("profile_math")] = JSON.stringify({ subject: "profile_math", ts: Store.lastSyncTs + 60000 });
-    t("во время тренировки обновление откладывается", (await Store.checkExternalUpdate()) === "deferred" && Store.pendingExternalUpdate && loadCalls === 1);
+    // Собственный ответ может изменить state раньше, чем завершится save.
+    // Фокус в этом окне не является доказательством другой вкладки.
+    Store.state.taskAttempts.push({
+      taskId: "local-dirty-answer", skill: "n01_planimetry", correct: false,
+      hintLevel: 0, seconds: 1, ts: Date.now(),
+    });
+    __ls[Store.pingKey("profile_math")] = JSON.stringify(ping);
+    let pendingEvents = 0;
+    const countPendingEvent = () => { pendingEvents++; };
+    Store.on("externalupdate-pending", countPendingEvent);
+    Store.lastForcedExternalCheckAt = 0;
+    t("focus во время тренировки без чужого маяка не создаёт ложное обновление",
+      (await Store.checkExternalUpdate(true)) === "none"
+      && !Store.pendingExternalUpdate && pendingEvents === 0 && loadCalls === 2);
+    const pingAppliedWhileSaving = {
+      ...ping,
+      writer: "another-tab",
+      stateVersion: Store.state.stateVersion + 1,
+      ts: Store.lastSyncTs + 60000,
+    };
+    Store.state.taskAttempts.push({
+      taskId: "answer-waiting-for-save", skill: "n01_planimetry", correct: false,
+      hintLevel: 0, seconds: 1, ts: Date.now(),
+    });
+    Store.pendingSave = Promise.resolve().then(() => {
+      Store.state.stateVersion = pingAppliedWhileSaving.stateVersion;
+      Store.lastSyncedState = JSON.parse(JSON.stringify(Store.state));
+      Store.lastSyncTs = pingAppliedWhileSaving.ts;
+    });
+    __ls[Store.pingKey("profile_math")] = JSON.stringify(pingAppliedWhileSaving);
+    t("ping, уже применённый во время save, не откладывается повторно",
+      (await Store.checkExternalUpdate()) === "none"
+      && !Store.pendingExternalUpdate && pendingEvents === 0 && loadCalls === 2);
+    __ls[Store.pingKey("profile_math")] = JSON.stringify({
+      ...ping,
+      writer: "another-tab",
+      stateVersion: Store.state.stateVersion + 1,
+      ts: Store.lastSyncTs + 60000,
+    });
+    t("настоящее обновление другой вкладки откладывается",
+      (await Store.checkExternalUpdate()) === "deferred"
+      && Store.pendingExternalUpdate && pendingEvents === 1 && loadCalls === 2);
+    Store.listeners["externalupdate-pending"] = (Store.listeners["externalupdate-pending"] || [])
+      .filter((listener) => listener !== countPendingEvent);
     delete global.Session;
     delete global.localStorage;
+  }
+
+  // Ошибка — монотонная сущность: свежая серверная копия не должна
+  // откатывать локальное закрытие или понижать major обратно до minor.
+  {
+    const mergedErrorState = Store.mergeConflictState(
+      { errors: [{ id: 7, clientId: "error-7", taskId: "n01_p1", skill: "n01_planimetry", sub: "Проверка", ts: 10, resolved: false, kind: "minor" }] },
+      { errors: [{ clientId: "error-7", taskId: "n01_p1", skill: "n01_planimetry", sub: "Проверка", ts: 10, resolved: true, kind: "major", resolvedAt: 20 }] }
+    );
+    t("merge не откатывает закрытую ошибку свежей открытой копией",
+      mergedErrorState.errors.length === 1 && mergedErrorState.errors[0].resolved
+      && mergedErrorState.errors[0].kind === "major" && mergedErrorState.errors[0].resolvedAt === 20);
   }
 
   // OCC на клиенте: 409 не теряет локальную попытку. Store получает свежую

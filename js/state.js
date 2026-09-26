@@ -129,10 +129,14 @@ const Store = {
   loadPromise: null,
   ready: false,
   persistenceError: null,
+  // Один и тот же сбой не должен превращать очередь сохранений в поток
+  // одинаковых toast. Новый сигнал появится после успешного save либо после
+  // действительно другого типа ошибки.
+  persistenceErrorNotifiedKey: null,
   // Момент последней сверки с сервером (load или собственный save).
-  // Другая вкладка после каждого save пишет маяк в localStorage; увидев
-  // более свежий маяк, подтягиваем состояние с сервера вместо показа
-  // старого снапшота из памяти (иначе stale-вкладка ещё и перетрёт сервер).
+  // Другая вкладка после save пишет в localStorage маяк с accountId,
+  // writer и stateVersion. Увидев более новую версию, подтягиваем состояние
+  // с сервера; timestamp-only или уже применённый сигнал игнорируем.
   lastSyncTs: 0,
   pendingExternalUpdate: false,
   // Последний подтверждённый серверный снимок нужен, чтобы при 409 отличить
@@ -189,7 +193,7 @@ const Store = {
       missionsDone: {},
       missionProgress: {},
       achievements: {},
-      errors: [], // {taskId, skill, sub, ts, resolved, kind: 'major'|'minor'}
+      errors: [], // {taskId, skill, sub, ts, resolved, resolvedAt, kind: 'major'|'minor'}
       // Открытые ошибки в шагах урока; история хранит типы уже исправленных ошибок.
       lessonStepErrors: {}, // "lessonId:stepId" -> {count, skill, ts, types}
       lessonErrorHistory: [], // {lessonId, stepId, skill, type, ts}
@@ -377,6 +381,8 @@ const Store = {
       this.ready = true;
       this.lastSyncTs = Date.now();
       this.pendingExternalUpdate = false;
+      this.persistenceError = null;
+      this.persistenceErrorNotifiedKey = null;
       // Daily/forecast — производные состояния. Для locked/empty предмета
       // они не создаются вообще, поэтому не вызываем их и не запускаем save.
       if (learningAvailable) ensureDailyChallenge();
@@ -666,7 +672,51 @@ const Store = {
         return true;
       });
     };
-    for (const key of ["taskAttempts", "lessonAttempts", "errors", "lessonErrorHistory", "diagnostics", "dailyHistory", "timeline"]) {
+    /* Ошибка — не append-only факт, а сущность с монотонным состоянием.
+       Обычный unique() оставлял первую (свежую) открытую копию и мог
+       откатить локально уже закрытую ошибку. Сливаем копии по clientId/id,
+       сохраняя resolved=true и major-kind независимо от порядка сторон. */
+    const errorKey = (item) => {
+      if (!item || typeof item !== "object") return `json:${JSON.stringify(item)}`;
+      for (const key of ["clientId", "id"]) {
+        const value = item[key];
+        if (typeof value === "string" && value) return `id:${value}`;
+        if (typeof value === "number" && Number.isFinite(value)) return `id:${value}`;
+      }
+      return `natural:${item.taskId || ""}:${item.ts ?? ""}`;
+    };
+    const mergeError = (left, right) => {
+      const a = left || {};
+      const b = right || {};
+      const kind = (errorKindOf(a) === "major" || errorKindOf(b) === "major") ? "major" : "minor";
+      return {
+        ...a,
+        id: a.id ?? b.id,
+        clientId: a.clientId || b.clientId,
+        taskId: a.taskId ?? b.taskId,
+        skill: a.skill ?? b.skill,
+        sub: a.sub ?? b.sub,
+        ts: a.ts ?? b.ts,
+        resolved: !!a.resolved || !!b.resolved,
+        resolvedAt: Math.max(Number(a.resolvedAt) || 0, Number(b.resolvedAt) || 0) || undefined,
+        kind,
+      };
+    };
+    const errors = [];
+    const errorIndexes = new Map();
+    for (const error of [...(fresh.errors || []), ...(local.errors || [])]) {
+      if (!error) continue;
+      const key = errorKey(error);
+      if (errorIndexes.has(key)) {
+        const index = errorIndexes.get(key);
+        errors[index] = mergeError(errors[index], error);
+      } else {
+        errorIndexes.set(key, errors.length);
+        errors.push({ ...error });
+      }
+    }
+    merged.errors = errors;
+    for (const key of ["taskAttempts", "lessonAttempts", "lessonErrorHistory", "diagnostics", "dailyHistory", "timeline"]) {
       merged[key] = unique([...(fresh[key] || []), ...(local[key] || [])]);
     }
     for (const key of ["completedLessons", "missionsDone", "achievements"]) {
@@ -866,6 +916,19 @@ const Store = {
     }
   },
 
+  reportPersistenceError(error) {
+    this.persistenceError = error;
+    const status = Number(error && error.status) || 0;
+    const payloadCode = error && error.payload && error.payload.code ? error.payload.code : "";
+    const code = error && error.code ? error.code : payloadCode;
+    const message = error && error.message ? error.message : String(error || "unknown");
+    const key = `${status}:${String(code || "")}:${message}`;
+    if (key === this.persistenceErrorNotifiedKey) return false;
+    this.persistenceErrorNotifiedKey = key;
+    try { this.emit("persistenceerror", error); } catch (_) {}
+    return true;
+  },
+
   save() {
     if (!this.state || !this.ready) return Promise.resolve();
     this.pendingSave = this.pendingSave
@@ -898,34 +961,57 @@ const Store = {
         }
         return this.requestLeaderSave(snapshot).then(() => true);
       })
-      .then((saved) => { this.persistenceError = null; if (saved) this._noteOwnSave(); })
+      .then((saved) => {
+        this.persistenceError = null;
+        this.persistenceErrorNotifiedKey = null;
+        if (saved) this._noteOwnSave();
+      })
       .catch((error) => {
-        this.persistenceError = error;
-        this.emit("persistenceerror", error);
+        this.reportPersistenceError(error);
       });
     return this.pendingSave;
   },
 
-  // Ключ маяка свой на предмет: вкладки разных предметов друг другу не указ.
-  pingKey(subject) { return "ege_core_state_ping:" + (subject || currentSubjectId()); },
+  // Ключ маяка свой на аккаунт и предмет: вкладки разных профилей или
+  // предметов друг другу не указ. Версионная схема v2 исключает старые
+  // timestamp-only маяки, которые нельзя надёжно отличить от собственного save.
+  pingKey(subject) {
+    const account = encodeURIComponent(String(this.accountId || "pending-account"));
+    return "ege_core_state_ping:" + account + ":" + (subject || currentSubjectId());
+  },
 
-  // Успешно сохранились: фиксируем момент и будим соседние вкладки.
-  // Только localStorage (без DOM/window) — безопасно для node-тестов.
+  // Успешно сохранились: фиксируем момент, версию и writer и будим соседние
+  // вкладки. Только localStorage (без DOM/window) — безопасно для node-тестов.
   _noteOwnSave() {
     this.lastSyncTs = Date.now();
     try {
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem(this.pingKey(this.subject),
-          JSON.stringify({ subject: this.subject || currentSubjectId(), ts: this.lastSyncTs }));
+        const subject = this.subject || currentSubjectId();
+        localStorage.setItem(this.pingKey(subject), JSON.stringify({
+          v: 2,
+          accountId: this.accountId || null,
+          writer: this.tabId,
+          subject,
+          stateVersion: Math.max(1, Number(this.state && this.state.stateVersion) || 1),
+          ts: this.lastSyncTs,
+        }));
       }
     } catch (_) {}
   },
 
-  // Чистое решение «чужой ли маяк новее нас» — без чтения хранилищ,
-  // покрывается node-тестом напрямую.
+  // Свежий маяк означает только более новую серверную версию этого же
+  // аккаунта и предмета, сохранённую другой вкладкой. Свой writer и уже применённая версия
+  // отбрасываются, поэтому BroadcastChannel + localStorage не создают повтор.
   shouldRefreshForPing(ping) {
-    if (!ping || typeof ping !== "object") return false;
+    if (!ping || typeof ping !== "object" || ping.v !== 2) return false;
     if (ping.subject !== (this.subject || currentSubjectId())) return false;
+    const pingAccount = ping.accountId == null ? null : String(ping.accountId);
+    const currentAccount = this.accountId == null ? null : String(this.accountId);
+    if (pingAccount !== currentAccount) return false;
+    if (ping.writer && ping.writer === this.tabId) return false;
+    if (!Number.isInteger(ping.stateVersion) || ping.stateVersion < 1) return false;
+    const currentVersion = Math.max(1, Number(this.state && this.state.stateVersion) || 1);
+    if (ping.stateVersion <= currentVersion) return false;
     return (Number(ping.ts) || 0) > (this.lastSyncTs || 0);
   },
 
@@ -934,20 +1020,56 @@ const Store = {
   // сессии — откладываем до следующей навигации (см. render в app.js),
   // иначе ответы текущей сессии ушли бы в чужой снапшот.
   // Возвращает "reloaded" | "deferred" | "none".
-  async checkExternalUpdate() {
+  async checkExternalUpdate(force = false) {
     if (!this.ready || !this.state) return "none";
     let ping = null;
     try {
-      if (typeof localStorage === "undefined") return "none";
-      const raw = localStorage.getItem(this.pingKey(this.subject));
-      ping = raw ? JSON.parse(raw) : null;
-    } catch (_) { return "none"; }
-    if (!this.shouldRefreshForPing(ping)) return "none";
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem(this.pingKey(this.subject));
+        ping = raw ? JSON.parse(raw) : null;
+      }
+    } catch (_) {
+      if (!force) return "none";
+    }
+    let hasFreshPing = this.shouldRefreshForPing(ping);
+    if (!force && !hasFreshPing) return "none";
+    // focus/visibility срабатывают чаще обычного storage-события. Не делаем
+    // сетевой reload на каждом переключении окна, но при возврате в уже
+    // открытую вкладку всё равно сверяем состояние с сервером: другая
+    // устройство/вкладка могла закрыть ошибки без localStorage-маяка.
+    if (force) {
+      const now = Date.now();
+      if (this.lastForcedExternalCheckAt && now - this.lastForcedExternalCheckAt < 5000) return "none";
+      this.lastForcedExternalCheckAt = now;
+    }
     const busy = (typeof Session !== "undefined" && Session && Session.cur)
       || (typeof Lesson !== "undefined" && Lesson && Lesson.cur);
-    if (busy) {
+    let dirty = this.lastSyncedState
+      && JSON.stringify(this.state) !== JSON.stringify(this.lastSyncedState);
+    // Фокус может прийти ровно между локальным ответом и его сохранением.
+    // Дожидаемся очереди save и только затем решаем, можно ли заменить state
+    // серверным снимком; несохранённый ответ не должен исчезнуть.
+    if (dirty && this.pendingSave) {
+      await this.pendingSave.catch(() => {});
+      dirty = this.lastSyncedState
+        && JSON.stringify(this.state) !== JSON.stringify(this.lastSyncedState);
+    }
+    // Пока ждали локальную очередь, тот же ping мог уже примениться через
+    // BroadcastChannel или текущий save. Пересчитываем по новой stateVersion,
+    // чтобы не откладывать уже закрытое обновление.
+    hasFreshPing = this.shouldRefreshForPing(ping);
+    if (busy || dirty) {
+      // Само по себе событие focus не доказывает, что данные изменились в
+      // другой вкладке. Без более свежего маяка это обычная незавершённая
+      // тренировка/локальный ответ текущей вкладки: не создаём ложное
+      // отложенное обновление. Позже следующая проверка всё равно сверит
+      // сервер, когда вкладка освободится.
+      if (!hasFreshPing) return "none";
+      const wasPending = this.pendingExternalUpdate;
       this.pendingExternalUpdate = true;
-      try { this.emit("externalupdate-pending"); } catch (_) {}
+      if (!wasPending) {
+        try { this.emit("externalupdate-pending"); } catch (_) {}
+      }
       return "deferred";
     }
     await this.load();
@@ -992,8 +1114,7 @@ const Store = {
       // instead of leaving the UI holding a stale, now-deleted one.
       .then(() => this.load())
       .catch((error) => {
-        this.persistenceError = error;
-        this.emit("persistenceerror", error);
+        this.reportPersistenceError(error);
       });
     return this.pendingSave;
   },
@@ -1053,6 +1174,38 @@ const MINOR_SLOW_SEC = 180; // единый порог с PRACTICE_LONG_SECONDS:
 // (старые данные, чужая вкладка, сервер до миграции) — всегда major.
 function errorKindOf(e) {
   return e && e.kind === "minor" ? "minor" : "major";
+}
+
+/* Когда ошибка была закрыта. Для текущей сессии recordAnswer сразу ставит
+   resolvedAt, а после перезагрузки восстанавливаем время из подтверждающей
+   попытки: прямой ответ по taskId либо ответ с closesTaskId в умном
+   повторении. Это нужно истории «Закрытые»: ошибка может быть создана давно,
+   но закрыта только что и обязана попасть в начало ограниченного списка. */
+function errorResolutionTimestamp(error, attempts) {
+  if (!error) return 0;
+  const createdAt = Math.max(0, Number(error.ts) || 0);
+  let resolvedAt = Math.max(0, Number(error.resolvedAt) || 0);
+  for (const attempt of safeArray(attempts)) {
+    if (!attempt || !attempt.correct || Number(attempt.hintLevel) >= 3) continue;
+    const direct = String(attempt.taskId) === String(error.taskId);
+    const review = attempt.closesTaskId && String(attempt.closesTaskId) === String(error.taskId);
+    if (!direct && !review) continue;
+    const ts = Math.max(0, Number(attempt.ts) || 0);
+    // Ответ раньше ошибки не мог её закрыть (например, старая правильная
+    // попытка по этому же заданию).
+    if (ts >= createdAt && ts > resolvedAt) resolvedAt = ts;
+  }
+  return resolvedAt || createdAt;
+}
+
+function resolvedErrorsForDisplay(errors, attempts, limit = 8) {
+  const max = Math.max(0, Number(limit) || 0);
+  return safeArray(errors)
+    .map((error, index) => ({ error, index, resolvedAt: errorResolutionTimestamp(error, attempts) }))
+    .filter((item) => item.error && item.error.resolved)
+    .sort((a, b) => b.resolvedAt - a.resolvedAt || a.index - b.index)
+    .slice(0, max)
+    .map((item) => item.error);
 }
 
 // Неидеальное решение — кандидат в мини-ошибки. Единый источник истины с
@@ -1700,6 +1853,24 @@ function forecastTrend(days = 14) {
 }
 
 /* ============================================================
+   Длинные текстовые ответы (итоговое сочинение): общий с сервером
+   (server.py, ESSAY_WORD_RE) алгоритм подсчёта слов. Слово —
+   непрерывный блок букв/цифр (кириллица, латиница), внутри которого
+   допустимы дефис/апостроф без пробелов. Пунктуация и переносы строк
+   словами не считаются. Минимум — обязательная серверная проверка;
+   здесь он же используется только для живого счётчика и блокировки
+   кнопки отправки.
+   ============================================================ */
+
+const ESSAY_MIN_WORDS = 150;
+const ESSAY_WORD_RE = /[0-9A-Za-zА-Яа-яЁё]+(?:['’\-–][0-9A-Za-zА-Яа-яЁё]+)*/g;
+
+function countWords(text) {
+  const matches = String(text == null ? "" : text).match(ESSAY_WORD_RE);
+  return matches ? matches.length : 0;
+}
+
+/* ============================================================
    Проверка ответов
    ============================================================ */
 
@@ -1965,6 +2136,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
       || s.errors.find((e) => e && String(e.taskId) === String(task.id) && !e.resolved);
     if (err && (errorKindOf(err) === "major" || !imperfect)) {
       err.resolved = true;
+      err.resolvedAt = Date.now();
       s.errorsResolved++;
       xp += XP_ERROR_RESOLVED;
       xpBreakdown.errorResolved += XP_ERROR_RESOLVED;
@@ -2634,8 +2806,7 @@ function guardOnboardingSubject(state, subject) {
     if (state && state.subject) assertSubjectCatalog(state.subject);
     if (Store.subject) assertSubjectCatalog(Store.subject);
   } catch (error) {
-    Store.persistenceError = error;
-    try { Store.emit("persistenceerror", error); } catch (_) {}
+    Store.reportPersistenceError(error);
     return false;
   }
   return true;

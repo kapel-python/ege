@@ -748,6 +748,26 @@
     return {response: response, payload: payload};
   }
 
+  function supportFailureText(payload, status){
+    status = Number(status) || 0;
+    if(status === 429){
+      return "Слишком много сообщений. Попробуй немного позже.";
+    }
+    if(payload && payload.code === "form_token"){
+      return "Страница устарела — обнови её и попробуй ещё раз.";
+    }
+    if(status === 413){
+      return "Сообщение слишком длинное.";
+    }
+    if(status === 409){
+      return "Это сообщение уже отправлено. Если хочешь отправить другое, измени текст.";
+    }
+    if(status >= 500){
+      return "Форма временно недоступна. Попробуй ещё раз.";
+    }
+    return "Не удалось отправить сообщение. Попробуй ещё раз.";
+  }
+
   form.addEventListener("submit", async function(event){
     event.preventDefault();
     var message = input.value.trim();
@@ -790,17 +810,13 @@
         }
       }
       if(!response.ok){
-        var fallback = response.status === 429
-          ? "Слишком много сообщений. Попробуй немного позже."
-          : (payload.code === "form_token"
-            ? "Страница устарела — обнови её и попробуй ещё раз."
-            : "Не удалось отправить сообщение. Попробуй ещё раз.");
-        var messageText = typeof payload.error === "string" ? payload.error : fallback;
+        var messageText = supportFailureText(payload, response.status);
         if(response.status === 429 && Number(payload.retryAfter) > 0){
           messageText += " Попробуй примерно через " + Math.max(1, Math.ceil(Number(payload.retryAfter) / 60)) + " мин.";
         }
         var error = new Error(messageText);
         error.status = response.status;
+        error.userMessage = messageText;
         throw error;
       }
 
@@ -809,9 +825,11 @@
       input.blur();
       window.requestAnimationFrame(function(){ successTitle.focus(); });
     }catch(error){
-      setError(error && error.name === "AbortError"
-        ? "Сервер не ответил вовремя. Сообщение сохранено в поле — попробуй ещё раз."
-        : (error && error.message ? error.message : "Не удалось отправить сообщение. Попробуй ещё раз."));
+      setError(error && error.userMessage
+        ? error.userMessage
+        : (error && error.name === "AbortError"
+          ? "Сайт не ответил вовремя. Сообщение сохранено в поле — попробуй ещё раз."
+          : "Не удалось отправить сообщение. Попробуй ещё раз."));
     }finally{
       window.clearTimeout(timeout);
       sending = false;

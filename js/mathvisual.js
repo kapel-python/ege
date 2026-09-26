@@ -87,14 +87,14 @@
 
   class VisualError extends Error {}
 
-  function renderFallback(container, message) {
+  function renderFallback(container) {
     container.innerHTML = "";
     container.className = "task-visual task-visual--missing mathvisual-host";
     const div = document.createElement("div");
     div.className = "task-visual__fallback";
     div.style.display = "block";
     div.setAttribute("role", "status");
-    div.textContent = "Не удалось построить рисунок" + (message ? ": " + message : ".");
+    div.textContent = "Рисунок недоступен";
     container.appendChild(div);
   }
 
@@ -753,7 +753,7 @@
         template(container, spec, theme());
         return { ok: true };
       } catch (err) {
-        renderFallback(container, err && err.message ? err.message : String(err));
+        renderFallback(container);
         if (global.console) console.warn("MathVisual render failed:", err);
         return { ok: false, error: err && err.message ? err.message : String(err) };
       }
