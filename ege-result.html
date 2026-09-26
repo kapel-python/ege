@@ -206,6 +206,12 @@
 
   .disclaimer { margin-top: 20px; text-align: center; font-size: 13.5px; color: var(--text-soft); opacity: .8; line-height: 1.5; }
 
+  /* Нижняя навигация отчёта: назад (к карточке задания) и дальше
+     (к практике за следующим сочинением). */
+  .result-nav { margin-top: 6px; }
+  .result-nav__inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .result-nav__next { text-decoration: none; display: inline-block; }
+
   /* --- skeleton --- */
   .skel { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: skel-shine 1.4s ease infinite; border-radius: 10px; }
   @keyframes skel-shine { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
@@ -321,6 +327,13 @@
   <p class="disclaimer">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
 </div>
 </main>
+
+<nav class="result-nav" aria-label="Дальше">
+  <div class="wrap result-nav__inner">
+    <a class="back-link" href="/dashboard" onclick="if(history.length>1){history.back();return false;}">← Назад</a>
+    <a class="retry-btn result-nav__next" href="/dashboard">Следующее сочинение →</a>
+  </div>
+</nav>
 
 <div data-ege-footer></div>
 <!-- Абсолютный путь: страница живёт и на /ege-result.html, и на /essay/<sid> —
