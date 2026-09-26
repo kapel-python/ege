@@ -206,7 +206,7 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice", "missions"} for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice"} for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
@@ -223,14 +223,18 @@ def main() -> int:
 
             russian_tasks = payloads[("/api/catalog-tasks", "russian")]
             served_russian_tasks = russian_tasks.get("tasks") or []
+            # Свободные темы (итоговое) и работа с текстом (задание 27): у
+            # вторых обязан быть sourceTextId, у первых — не бывает.
+            russian_re27 = [t for t in served_russian_tasks if t.get("skill") == "russian_essay_source"]
             check(
                 "RUSSIAN CONTENT task details",
-                len(served_russian_tasks) == 6
-                and all(isinstance(t, dict) and t.get("skill") == "russian_essay" for t in served_russian_tasks)
+                len(served_russian_tasks) == 8
+                and len(russian_re27) == 8
                 and all(t.get("type") == "long_text" for t in served_russian_tasks)
+                and all(t.get("sourceTextId") for t in russian_re27)
                 and russian_tasks.get("visualAssets") == []
                 and isinstance(russian_tasks.get("visualAudit"), dict),
-                f"tasks={len(served_russian_tasks)}, "
+                f"tasks={len(served_russian_tasks)} (re27={len(russian_re27)}), "
                 f"visualAssets={len(russian_tasks.get('visualAssets') or [])}, "
                 f"visualAudit={type(russian_tasks.get('visualAudit')).__name__}",
             )
@@ -249,9 +253,8 @@ def main() -> int:
             catalog_shape_ok = (
                 russian_catalog.get("forecast") is None
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
-                and len(russian_catalog.get("tasks") or []) == 6
-                and len(russian_missions) == 1
-                and russian_missions[0].get("skill") == "russian_essay"
+                and len(russian_catalog.get("tasks") or []) == 8
+                and russian_missions == []
                 and isinstance(russian_catalog.get("daily"), dict)
                 and (russian_catalog.get("daily") or {}).get("target") == 0
             )
@@ -267,7 +270,7 @@ def main() -> int:
             skill_stats = russian_state.get("skillStats") or {}
             zero_bucket = {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0}
             state_isolated = (
-                set(skill_stats) == {"russian_essay"}
+                set(skill_stats) == {"russian_essay_source"}
                 and all(v == zero_bucket for v in skill_stats.values())
                 and russian_state.get("achievements") == {}
                 and russian_state.get("forecastHistory") == []
@@ -280,7 +283,7 @@ def main() -> int:
             check(
                 "RUSSIAN ISOLATION bootstrap state",
                 state_isolated,
-                "skillStats=zero bucket for russian_essay only, achievements={}, histories/attempts/errors=[], xp=0, daily=[]",
+                "skillStats=zero bucket for russian_essay_source only, achievements={}, histories/attempts/errors=[], xp=0, daily=[]",
             )
 
             scanned_russian = list(scan_without_registry(russian_boot))

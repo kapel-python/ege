@@ -2017,6 +2017,7 @@ def serialize_essay_row(row) -> dict:
         "submissionId": int(row["id"]),
         "taskId": row["task_id"],
         "skill": row["skill_id"],
+        "subject": row["subject"],
         "wordCount": int(row["word_count"]),
         "minWords": ESSAY_MIN_WORDS,
         "clientId": row["client_id"],
@@ -2026,6 +2027,167 @@ def serialize_essay_row(row) -> dict:
         "createdAt": timestamp_value(row["created_at"]),
         "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
     }
+
+
+ESSAY_SOURCE_DIR = Path(__file__).resolve().parent / "essay_texts.d"
+# Исходный текст к заданию 27: читаемый материал, который ученик разбирает.
+# Лежит отдельной таблицей (не в каталоге): каталог кэшируется и грузится
+# целиком, а тексты нужны только на экране задания.
+_ESSAY_SOURCE_SCHEMA_DONE: set[str] = set()
+
+
+def ensure_essay_source_schema(conn: sqlite3.Connection) -> None:
+    key = _db_key(conn)
+    with _essay_schema_lock:
+        if key in _ESSAY_SOURCE_SCHEMA_DONE:
+            return
+        conn.executescript(SCHEMA)
+        conn.execute("""CREATE TABLE IF NOT EXISTS essay_source_texts(
+          id TEXT PRIMARY KEY,
+          subject TEXT NOT NULL DEFAULT 'russian',
+          author TEXT NOT NULL DEFAULT '',
+          work TEXT NOT NULL DEFAULT '',
+          exam TEXT NOT NULL DEFAULT '',
+          problem TEXT NOT NULL DEFAULT '',
+          problem_circle_json TEXT NOT NULL DEFAULT '[]',
+          text TEXT NOT NULL,
+          word_count INTEGER NOT NULL DEFAULT 0,
+          source_url TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_essay_source_texts_subject"
+                     " ON essay_source_texts(subject)")
+        _ESSAY_SOURCE_SCHEMA_DONE.add(key)
+
+
+def _essay_source_file(path: Path) -> dict:
+    """Разобрать и проверить один файл исходника. Бросает ValueError/KeyError."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("исходник должен быть объектом")
+    text_id = str(data.get("id") or "").strip()
+    if not text_id or not re.fullmatch(r"[a-z0-9_]{3,60}", text_id):
+        raise ValueError(f"некорректный id исходника: {text_id!r}")
+    body = str(data.get("text") or "").strip()
+    if not body:
+        raise ValueError(f"{text_id}: пустой текст")
+    words = count_essay_words(body)
+    if not 150 <= words <= 400:
+        # Экзаменационный объём текста задания 27: меньше 150 — не текст для
+        # разбора, больше 400 — не экзаменационная нарезка, а целый фрагмент
+        # произведения (такие страницы публикуют, но ученику они не по формату).
+        # Правило проверяется на входе, чтобы длинный текст нельзя было
+        # положить в каталог «на всякий случай».
+        raise ValueError(f"{text_id}: объём {words} слов вне диапазона 150–400")
+    problem = str(data.get("problem") or "").strip()
+    if not problem:
+        raise ValueError(f"{text_id}: не указана проблема")
+    circle = data.get("problemCircle") or []
+    if not isinstance(circle, list):
+        raise ValueError(f"{text_id}: problemCircle должен быть списком")
+    url = str(data.get("sourceUrl") or "").strip()
+    if url and not url.startswith("http"):
+        raise ValueError(f"{text_id}: некорректный sourceUrl")
+    return {
+        "id": text_id,
+        "subject": str(data.get("subject") or "russian").strip() or "russian",
+        "author": str(data.get("author") or "").strip(),
+        "work": str(data.get("work") or "").strip(),
+        "exam": str(data.get("exam") or "").strip(),
+        "problem": problem,
+        "problem_circle": [str(x).strip() for x in circle if str(x or "").strip()],
+        "text": body,
+        "word_count": words,
+        "source_url": url,
+        "notes": str(data.get("notes") or "").strip(),
+    }
+
+
+def install_essay_source_texts(conn: sqlite3.Connection) -> int:
+    """Идемпотентно поставить файлы server/essay_texts.d/*.json. Возвращает счётчик.
+
+    Каталог текстов отделён от кода: правка контента = правка JSON, без
+    миграций и без изменения install_catalog. Каждая установка сверяет
+    содержимое (обновился текст → обновился и в БД) и откатывает файл целиком,
+    если он невалиден: битый контент не должен молча ломать предмет.
+    """
+    if not ESSAY_SOURCE_DIR.is_dir():
+        return 0
+    ensure_essay_source_schema(conn)
+    installed = 0
+    for path in sorted(ESSAY_SOURCE_DIR.glob("*.json")):
+        try:
+            item = _essay_source_file(path)
+        except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+            print(f"EGE CORE essay source skipped {path.name}: {exc}", file=sys.stderr, flush=True)
+            continue
+        if not is_known_subject(item["subject"]):
+            print(f"EGE CORE essay source skipped {path.name}: unknown subject {item['subject']!r}",
+                  file=sys.stderr, flush=True)
+            continue
+        conn.execute(
+            "INSERT INTO essay_source_texts(id,subject,author,work,exam,problem,problem_circle_json,"
+            "text,word_count,source_url,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET subject=excluded.subject, author=excluded.author,"
+            " work=excluded.work, exam=excluded.exam, problem=excluded.problem,"
+            " problem_circle_json=excluded.problem_circle_json, text=excluded.text,"
+            " word_count=excluded.word_count, source_url=excluded.source_url, notes=excluded.notes",
+            (item["id"], item["subject"], item["author"], item["work"], item["exam"], item["problem"],
+             json.dumps(item["problem_circle"], ensure_ascii=False), item["text"], item["word_count"],
+             item["source_url"], item["notes"], now_iso()))
+        installed += 1
+    if installed:
+        conn.commit()
+        invalidate_catalog_cache()
+    return installed
+
+
+def essay_source_text_payload(conn: sqlite3.Connection, subject: str, text_id: str) -> dict | None:
+    """Читаемый исходник для задания: автор, произведение, проблема, текст.
+
+    Ни позиции автора, ни разбора здесь нет и быть не должно — это ответ,
+    который ученик должен сформулировать сам.
+    """
+    ensure_essay_source_schema(conn)
+    row = conn.execute(
+        "SELECT * FROM essay_source_texts WHERE id=? AND subject=?",
+        (text_id, resolve_subject(subject))).fetchone()
+    if not row:
+        return None
+    try:
+        circle = json.loads(row["problem_circle_json"] or "[]")
+    except (ValueError, TypeError):
+        circle = []
+    return {
+        "id": row["id"], "author": row["author"], "work": row["work"],
+        "exam": row["exam"], "problem": row["problem"],
+        "problemCircle": circle if isinstance(circle, list) else [],
+        "text": row["text"], "wordCount": int(row["word_count"]),
+        "sourceUrl": row["source_url"],
+    }
+
+
+def essay_source_mode_for_task(conn: sqlite3.Connection, subject: str, task_id: str) -> tuple[str, str]:
+    """Проблема исходного текста для задания. Бросает ValueError, если задания
+    нет или у него нет исходника.
+
+    Решает сервер по каталогу, а не по вводу клиента: подменить рубрику из
+    браузера нельзя, а задание без исходника проверкой не является.
+    """
+    subject = resolve_subject(subject)
+    row = conn.execute(
+        "SELECT t.metadata_json FROM tasks t JOIN skills s ON s.id=t.skill_id"
+        " WHERE t.id=? AND s.subject=?", (task_id, subject)).fetchone()
+    if row is None:
+        raise ValueError("unknown task")
+    meta = _catalog_row_metadata(row["metadata_json"])
+    text_id = str(meta.get("sourceTextId") or "").strip()
+    if not text_id:
+        raise ValueError("у задания нет исходного текста")
+    payload = essay_source_text_payload(conn, subject, text_id)
+    if not payload:
+        raise ValueError("unknown source text")
+    return "source", payload["problem"]
 
 
 def essay_result_view(submission: dict) -> dict | None:
@@ -2069,7 +2231,8 @@ def essay_result_view(submission: dict) -> dict | None:
     if not criteria:
         return None
     improve = [str(x) for x in (result.get("what_to_improve") or []) if str(x or "").strip()]
-    return {
+    calibration = result.get("calibration") if isinstance(result.get("calibration"), dict) else None
+    view = {
         "total_score": result.get("total_score"),
         "max_score": result.get("max_score"),
         "word_count": submission.get("wordCount"),
@@ -2080,16 +2243,38 @@ def essay_result_view(submission: dict) -> dict | None:
         "improvements": improve,
         "recommendation": result.get("recommendation") or "",
     }
+    if calibration and calibration.get("note"):
+        # Итог после вето ниже суммы показанных критериев — без этой пометки
+        # экран и разбор разойдутся. Поле опционально: обычные работы его
+        # не несут, шаблон его отсутствие спокойно переживает.
+        view["calibration_note"] = str(calibration["note"])
+    return view
 
 
 def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
-                          *, task_id: str = "", client_id: str = "") -> dict | None:
-    """Один submission для повторного открытия: точный client_id в приоритете,
-    иначе последний по заданию. Только свои строки (user_id). К ответу сразу
-    прикладывается готовое view под ege-result.html (None, пока не ready)."""
+                          *, task_id: str = "", client_id: str = "",
+                          sid: int = 0) -> dict | None:
+    """Один submission для повторного открытия: точный sid/client_id в
+    приоритете, иначе последний по заданию. Только свои строки (user_id):
+    числовой sid перебором чужого не достать — чужая строка просто не
+    найдётся. К ответу сразу прикладывается готовое view под
+    ege-result.html (None, пока не ready)."""
     ensure_essay_schema(conn)
     row = None
-    if client_id:
+    if sid and sid > 0:
+        if subject:
+            row = conn.execute(
+                "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND id=?",
+                (user_id, subject, sid),
+            ).fetchone()
+        else:
+            # Красивая ссылка /essay/<sid> — без предмета в пути: ищем строку
+            # только по своему user_id. Чужой sid здесь не найдётся никогда.
+            row = conn.execute(
+                "SELECT * FROM essay_submissions WHERE user_id=? AND id=?",
+                (user_id, sid),
+            ).fetchone()
+    if row is None and client_id:
         row = conn.execute(
             "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
             (user_id, subject, client_id),
@@ -2759,11 +2944,74 @@ def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: s
         _upsert_catalog_achievement(conn, achievement, subject)
 
 
+def _prune_removed_catalog_rows(conn: sqlite3.Connection, loaded: dict) -> None:
+    """Убрать из БД узлы каталога, которых больше нет в файлах предмета.
+
+    Установщик только добавляет и обновляет, поэтому удалённая из каталога
+    тема или задание жили бы вечно: ученик видел бы то, чего в каталоге уже
+    нет, а /api/status считал бы призраков. Референсы не перечисляем — пробуем
+    удалить под SAVEPOINT при включённых FK: если на строку ссылается прогресс
+    учеников, откатываем и оставляем узел (и пишем в лог). Удаляем от
+    зависимых к независимым: задания → темы.
+    """
+    keep = {table: {str(item.get("id")) for subject in loaded
+                    for item in ((loaded.get(subject) or {}).get(key) or [])
+                    if isinstance(item, dict) and item.get("id")}
+            for table, key in (("lessons", "lessons"), ("missions", "missions"),
+                               ("tasks", "tasks"), ("skills", "skills"),
+                               ("topics", "categories"))}
+    for table in ("lessons", "missions", "tasks", "skills", "topics"):
+        for row in conn.execute(f"SELECT id FROM {table}").fetchall():
+            node = str(row["id"])
+            if node in keep[table]:
+                continue
+            try:
+                conn.execute("SAVEPOINT prune_node")
+                conn.execute(f"DELETE FROM {table} WHERE id=?", (node,))
+                conn.execute("RELEASE prune_node")
+            except sqlite3.IntegrityError:
+                # На узел ссылается прогресс. Пустые нулевые корзины (их создаёт
+                # ensure_subject_rows для каждой темы) убираем: они не содержат
+                # ничего ученического, а из-за них удалённая тема оставалась бы
+                # видимой. Настоящий прогресс не трогаем — тогда узел остаётся.
+                try:
+                    conn.execute("ROLLBACK TO prune_node")
+                    conn.execute("RELEASE prune_node")
+                except sqlite3.Error:
+                    pass
+                deleted_empty = False
+                if table == "skills":
+                    try:
+                        cur = conn.execute(
+                            "DELETE FROM user_progress WHERE skill_id=? AND progress=0 AND solved=0"
+                            " AND correct=0 AND time_sec=0", (node,))
+                        deleted_empty = bool(cur.rowcount)
+                    except sqlite3.Error:
+                        deleted_empty = False
+                if deleted_empty:
+                    try:
+                        conn.execute(f"DELETE FROM {table} WHERE id=?", (node,))
+                        continue
+                    except sqlite3.Error:
+                        pass
+                print(f"EGE CORE catalog prune skipped {table}/{node}: есть прогресс учеников",
+                      file=sys.stderr, flush=True)
+
+
+# Что реально лежит в файлах каталога на последней установке: id тем, заданий,
+# уроков и миссий. Строки БД, которых здесь уже нет, показывать нельзя —
+# иначе удалённая из каталога тема жила бы в UI вечно (см. _build_catalog_payload).
+_CATALOG_LIVE_IDS: dict[str, dict[str, set]] = {}
+
+
 def install_catalog(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     ensure_subject_schema(conn)
     ensure_support_schema(conn)
     ensure_essay_schema(conn)
+    # Читаемые тексты к заданию 27 живут файлами в server/essay_texts.d:
+    # контент правится без правки кода, а битый файл откатывается целиком.
+    install_essay_source_texts(conn)
     # Existing SQLite files need the new daily selection column migrated in place.
     daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_progress)")}
     if "task_ids_json" not in daily_columns:
@@ -2814,6 +3062,18 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         _install_subject_catalog(conn, data, subject, level_id=level_id,
                                  subject_id=catalog_subject_id)
 
+    def _ids_of(subject: str, key: str) -> set:
+        return {str(item.get("id")) for item in (loaded.get(subject) or {}).get(key) or []
+                if isinstance(item, dict) and item.get("id")}
+    _CATALOG_LIVE_IDS.clear()
+    for subject in loaded:
+        _CATALOG_LIVE_IDS[subject] = {
+            "skills": _ids_of(subject, "skills"),
+            "tasks": _ids_of(subject, "tasks"),
+            "lessons": _ids_of(subject, "lessons"),
+            "missions": _ids_of(subject, "missions"),
+        }
+
     def config_value(subject: str, key: str, default):
         return loaded.get(subject, {}).get(key, default)
 
@@ -2840,6 +3100,8 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"subjectMeta:{subject}", json.dumps(_public_subject_info(subject), ensure_ascii=False)))
 
+    _prune_removed_catalog_rows(conn, loaded)
+    # Легаси-ключи без явного предмета: конфиг текущего предмета по умолчанию.
     default_catalog = loaded.get(DEFAULT_SUBJECT, {})
     conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                  ("daily", json.dumps(default_catalog.get("daily", _empty_daily()), ensure_ascii=False)))
@@ -2929,9 +3191,18 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
     subject_info = _public_subject_info(subject)
     subject_locked = subject_is_locked(subject)
 
-    skill_rows = list(conn.execute(
+    # Узлы, удалённые из файла каталога, но сохранившиеся в БД из-за чужого
+    # прогресса, в выдачу не попадают: каталог — это файлы, а не остатки таблицы.
+    live = _CATALOG_LIVE_IDS.get(subject) or {}
+    live_skills = live.get("skills")
+    live_tasks = live.get("tasks")
+    live_lessons = live.get("lessons")
+    live_missions = live.get("missions")
+
+    skill_rows = [r for r in conn.execute(
         "SELECT id, name, topic_id, display_order, ege, status, locked, coming_soon, metadata_json "
-        "FROM skills WHERE subject=? ORDER BY topic_id, display_order", (subject,)))
+        "FROM skills WHERE subject=? ORDER BY topic_id, display_order", (subject,))
+        if live_skills is None or r["id"] in live_skills]
     skill_subject = {r["id"]: subject for r in skill_rows}
     skills = [_catalog_node_payload(r, kind="skill", subject=subject) for r in skill_rows]
     categories = [
@@ -2960,6 +3231,8 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
     for r in conn.execute("SELECT * FROM tasks ORDER BY id"):
         if skill_subject.get(r["skill_id"]) != subject or r["skill_id"] not in available_skill_ids:
             continue
+        if live_tasks is not None and r["id"] not in live_tasks:
+            continue
         meta = _catalog_row_metadata(r["metadata_json"])
         item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"],
                 "diff": r["difficulty"], "text": r["statement"], "answer": r["answer"],
@@ -2975,8 +3248,10 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
         available_task_ids.add(r["id"])
 
     lessons = []
-    for r in conn.execute("SELECT skill_id, metadata_json FROM lessons ORDER BY id"):
+    for r in conn.execute("SELECT id, skill_id, metadata_json FROM lessons ORDER BY id"):
         if r["skill_id"] not in available_skill_ids:
+            continue
+        if live_lessons is not None and r["id"] not in live_lessons:
             continue
         try:
             lesson = json.loads(r["metadata_json"] or "{}")
@@ -2998,6 +3273,8 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
     missions = []
     for r in conn.execute("SELECT * FROM missions ORDER BY id"):
         if r["skill_id"] not in available_skill_ids:
+            continue
+        if live_missions is not None and r["id"] not in live_missions:
             continue
         tasks_for_mission = [tid for tid in mission_task_rows.get(r["id"], [])
                              if tid in available_task_ids]
@@ -3202,16 +3479,25 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
             except sqlite3.Error:
                 categories = []
         cat_ids = {c["id"] for c in categories}
+        # Публичные счётчики считаем по тому же, что видит ученик: узлы,
+        # удалённые из файлов каталога, но оставшиеся в БД из-за чужого
+        # прогресса, на /status не показываем (иначе цифры разойдутся с
+        # каталогом). Тот же фильтр, что в _build_catalog_payload.
+        live = _CATALOG_LIVE_IDS.get(sid) or {}
+        skill_rows = [r for r in skill_rows
+                      if live.get("skills") is None or r["id"] in live["skills"]]
+        skill_ids = {r["id"] for r in skill_rows}
+        categories = [c for c in categories if live.get("skills") is None or c["id"] in cat_ids]
         # Доступные задания = все минус нерешаемые без официального рисунка
         # (тот же предикат, что прячет их от учеников в каталоге).
         available_by_skill: dict[str, int] = {}
         blocked_by_skill: dict[str, int] = {}
         visuals_by_skill: dict[str, int] = {}
-        skill_ids = {r["id"] for r in skill_rows}
         try:
-            task_rows = list(conn.execute(
+            task_rows = [r for r in conn.execute(
                 "SELECT t.id, t.skill_id, t.metadata_json FROM tasks t "
-                "JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (sid,)))
+                "JOIN skills s ON s.id=t.skill_id WHERE s.subject=?", (sid,))
+                if live.get("tasks") is None or r["id"] in live["tasks"]]
         except sqlite3.Error:
             task_rows = []
         diag_task_ids: set[str] = set()
@@ -3246,9 +3532,10 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
         if diag_task_ids and not subject_locked:
             diagnostics_any = True
         try:
-            lesson_rows = list(conn.execute(
-                "SELECT l.skill_id AS skill_id, l.metadata_json AS metadata_json FROM lessons l "
-                "JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (sid,)))
+            lesson_rows = [r for r in conn.execute(
+                "SELECT l.id AS id, l.skill_id AS skill_id, l.metadata_json AS metadata_json FROM lessons l "
+                "JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (sid,))
+                if live.get("lessons") is None or r["id"] in live["lessons"]]
         except sqlite3.Error:
             lesson_rows = []
         lesson_by_skill: dict[str, dict] = {}
@@ -3263,9 +3550,10 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
                 "steps": len(steps) if isinstance(steps, list) else 0,
             }
         try:
-            mission_rows = list(conn.execute(
-                "SELECT m.skill_id AS skill_id FROM missions m "
-                "JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (sid,)))
+            mission_rows = [r for r in conn.execute(
+                "SELECT m.id AS id, m.skill_id AS skill_id FROM missions m "
+                "JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (sid,))
+                if live.get("missions") is None or r["id"] in live["missions"]]
         except sqlite3.Error:
             mission_rows = []
         missions_by_skill: dict[str, int] = {}
@@ -6374,24 +6662,48 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "Текст слишком большой"}, 413, token=token); return
                 except (json.JSONDecodeError, ValueError):
                     self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
-                if not isinstance(payload, dict) or set(payload) - {"text"}:
+                # subject — публичный выбор каталога (текст и задание общедоступны),
+                # он нужен, чтобы задание нашлось независимо от текущего предмета
+                # гостя; никаких оценок и прогресса он не открывает.
+                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject"}:
                     self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400, token=token); return
+                try:
+                    # Рубрика одна — работа с прочитанным текстом, и выбирает её
+                    # сервер по заданию: подменить рубрику из браузера нельзя
+                    # (см. essay_source_mode_for_task), а задание без исходного
+                    # текста проверкой не является.
+                    task_id = payload.get("taskId")
+                    if not isinstance(task_id, str) or not task_id.strip():
+                        raise _AI.AIInputError("Нужно задание с исходным текстом")
+                    subject_now = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+                    try:
+                        mode, problem = essay_source_mode_for_task(conn, subject_now, task_id.strip())
+                    except ValueError as exc:
+                        raise _AI.AIInputError(str(exc)) from None
+                except _AI.AIInputError as exc:
+                    # Наш ввод, наш 400: повтор не поможет. Проверяем ДО списания
+                    # бюджета, чтобы опечатка в taskId не стоила денег провайдера.
+                    self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
                 # Metered call: a much tighter bucket than the generic API one.
                 # Counted per user AND per IP — the cookie is the only proof of
                 # identity, so a client that stops sending it would otherwise
                 # mint a fresh guest and a fresh budget on every request.
+                # Сочинение резервирует сразу два вызова (оценка + возможная
+                # калибровка итога, см. _AI.charges_for): начатая проверка не
+                # должна упереться в пустой бюджет посередине.
                 try:
                     ip = support_client_ip(self)
                 except Exception:
                     ip = "?"
-                allowed, retry_after = _AI.ai_take([f"user:{user_id}", f"ip:{ip}"])
+                allowed, retry_after = _AI.ai_take([f"user:{user_id}", f"ip:{ip}"],
+                                                   _AI.charges_for(format_id))
                 if not allowed:
                     self.send_json({"error": "Слишком много проверок. Попробуй позже.",
                                     "retryAfter": retry_after}, 429, token=token,
                                    headers={"Retry-After": str(retry_after)})
                     return
                 try:
-                    result = _AI.run_format(format_id, payload.get("text"))
+                    result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem)
                 except _AI.AIInputError as exc:
                     # Наш ввод, наш 400: повтор не поможет.
                     self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
@@ -6588,6 +6900,20 @@ class Handler(BaseHTTPRequestHandler):
                 # current_subject пользователя (переживает перезагрузку),
                 # с ?subject - явно запрошенный. Разводить их нельзя: иначе
                 # клиент получит чужие задания с чужим прогрессом.
+                if path == "/api/essay-text":
+                    # GET /api/essay-text?subject=&id= — читаемый исходный
+                    # текст задания 27. Публичный учебный материал: позиции
+                    # автора и разбора в нём нет, это ответ, который ученик
+                    # формулирует сам. Отдаём всем, кто открыл предмет.
+                    if self.api_rate_limited(): return
+                    eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
+                    text_id = (query.get("id", [None])[0] or "").strip()
+                    if not text_id:
+                        self.send_json({"error": "Нужен id"}, 400, token=token); return
+                    found = essay_source_text_payload(conn, eff, text_id)
+                    if not found:
+                        self.send_json({"error": "Текст не найден"}, 404, token=token); return
+                    self.send_json({"ok": True, "subject": eff, "sourceText": found}, token=token); return
                 if path == "/api/essays":
                     # GET /api/essays?subject=&taskId= — последний submission
                     # для повторного открытия готового результата (перезагрузка,
@@ -6598,9 +6924,20 @@ class Handler(BaseHTTPRequestHandler):
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     task_id = (query.get("taskId", [None])[0] or "").strip()
                     client_id = (query.get("clientId", [None])[0] or "").strip()
-                    if not task_id and not client_id:
-                        self.send_json({"error": "Нужен taskId или clientId"}, 400, token=token); return
-                    found = get_essay_submission(conn, user_id, eff, task_id=task_id, client_id=client_id)
+                    try:
+                        sid = int((query.get("sid", [None])[0] or "").strip() or 0)
+                    except (TypeError, ValueError):
+                        sid = 0
+                    if not task_id and not client_id and sid <= 0:
+                        self.send_json({"error": "Нужен sid, taskId или clientId"}, 400, token=token); return
+                    if sid > 0 and not is_known_subject(req_subject):
+                        # /essay/<sid>: предмет из пути не приходит — ищем по
+                        # всем своим предметам, чужое всё равно не найдётся.
+                        found = get_essay_submission(conn, user_id, "", task_id=task_id,
+                                                     client_id=client_id, sid=sid)
+                        eff = found["subject"] if found else current_subject_for(conn, user_id)
+                    else:
+                        found = get_essay_submission(conn, user_id, eff, task_id=task_id, client_id=client_id, sid=sid)
                     if not found:
                         self.send_json({"error": "Сочинение не найдено"}, 404, token=token); return
                     self.send_json({"ok": True, "subject": eff, "submission": found}, token=token); return
@@ -6637,6 +6974,11 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "contacts.html"
         elif path == '/about':
             file_path = ROOT / "about.html"
+        elif path == '/essay' or path.startswith('/essay/'):
+            # Красивая ссылка на результат: /essay/<sid> отдаёт тот же
+            # ege-result.html; sid страница берёт из пути сама. Старые
+            # /ege-result.html-ссылки продолжают работать как раньше.
+            file_path = ROOT / "ege-result.html"
         elif path == "/sitemap.xml":
             # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
             # а домен зависит от деплоя — берём его из хоста запроса

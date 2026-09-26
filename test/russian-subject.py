@@ -74,7 +74,7 @@ def main():
             assert russian.get("status") == "ready", russian
             assert russian.get("locked") is False, russian
             assert set(russian.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}, russian
-            assert russian["features"]["practice"] is True and russian["features"]["missions"] is True, russian
+            assert russian["features"]["practice"] is True and russian["features"]["missions"] is False, russian
             assert not any(russian["features"][k] for k in ("lessons", "forecast", "diagnostics", "bosses", "daily")), russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")
@@ -82,20 +82,54 @@ def main():
             catalog, state = boot["catalog"], boot["state"]
             assert catalog["subject"] == rid and state["subject"] == rid
             tasks = catalog.get("tasks", [])
-            assert len(tasks) == 6, catalog
-            assert all(t.get("skill") == "russian_essay" for t in tasks), catalog
+            # Два вида практики: свободные темы (итоговое) и работа с текстом
+            # (задание 27, у каждого задания есть исходник).
+            source_tasks = [t for t in tasks if t.get("skill") == "russian_essay_source"]
+            assert len(source_tasks) == 8, len(source_tasks)
+            assert len(tasks) == 8, "в предмете одна тема — работа с текстом"
             assert all(t.get("type") == "long_text" for t in tasks), catalog
+            assert all(t.get("sourceTextId") for t in source_tasks), "у задания 27 без исходника"
+
+            # Исходники читаются сервером и содержат текст без разбора.
+            status, source_detail = request(opener, base, f"/api/catalog-tasks?subject={rid}")
+            assert status == 200, (status, source_detail)
+            detail_tasks = {t["id"]: t for t in source_detail.get("tasks", [])}
+            re27 = detail_tasks["re27_1"]
+            assert re27["sourceTextId"] == "src_brushtein_vybor_exam", re27
+            status, source_payload = request(opener, base,
+                                             f"/api/essay-text?subject={rid}&id={re27['sourceTextId']}")
+            assert status == 200, (status, source_payload)
+            src = source_payload["sourceText"]
+            assert src["author"] and src["problem"] and len(src["text"]) > 500, src
+            assert 150 <= src["wordCount"] <= 400, src
+            # Каждый из 8 текстов — экзаменационная нарезка, а не целый фрагмент.
+            volumes = {}
+            for task in source_tasks:
+                payload = request(opener, base,
+                                   f"/api/essay-text?subject={rid}&id={task['sourceTextId']}")
+                assert payload[0] == 200, (task["id"], payload)
+                volumes[task["id"]] = payload[1]["sourceText"]["wordCount"]
+            assert all(150 <= v <= 400 for v in volumes.values()), volumes
+            assert len(volumes) == len(source_tasks), volumes
+            # Ответ ученика (позиция автора, ключевые фрагменты) в тексте не лежит.
+            for spoiler in ("Авторская позиция", "Позиция автора:", "Ключевые фрагменты",
+                            "Связь между фрагментами", "Разбор текста"):
+                assert spoiler not in src["text"], spoiler
+            status, no_source = request(opener, base, f"/api/essay-text?subject={rid}&id=nope")
+            assert status == 404, (status, no_source)
             assert catalog.get("lessons", []) == [], catalog
             missions = catalog.get("missions", [])
-            assert len(missions) == 1 and missions[0].get("skill") == "russian_essay", catalog
+            assert missions == [], "миссий нет: практика идёт по теме"
             assert catalog.get("bosses", []) == [], catalog
             assert catalog.get("diagnosticTasks", []) == [], catalog
-            topics = [x for x in catalog.get("skills", []) if x.get("name") == "Итоговое сочинение"]
-            assert len(topics) == 1, catalog
+            topics = [x for x in catalog.get("skills", []) if x.get("id") == "russian_essay_source"]
+            assert len(topics) == 1 and topics[0].get("ege") == "27", topics
             assert not topics[0].get("locked") and topics[0].get("status", "ready") == "ready", topics[0]
+            assert not [x for x in catalog.get("skills", []) if x.get("id") == "russian_essay"], \
+                "свободное сочинение без исходника убрано"
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={rid}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 6, (status, task_details)
+            assert status == 200 and len(task_details.get("tasks", [])) == 8, (status, len(task_details.get("tasks", [])))
             status, lessons = request(opener, base, f"/api/catalog-lessons?subject={rid}")
             assert status == 200 and lessons.get("lessons") == [], (status, lessons)
 
@@ -120,7 +154,7 @@ def main():
             assert status == 200, (status, settings)
 
             # Практика темы доступна: запись прогресса russian_essay проходит.
-            status, progress = request(opener, base, f"/api/progress/russian_essay", "PATCH", {
+            status, progress = request(opener, base, f"/api/progress/russian_essay_source", "PATCH", {
                 "subject": rid, "expectedVersion": settings["stateVersion"],
                 "progress": {"progress": 10, "solved": 1, "correct": 1, "timeSec": 60},
             })
@@ -128,14 +162,14 @@ def main():
 
             # Приём сочинения: сервер сам считает слова и отклоняет короткий текст.
             status, short = request(opener, base, "/api/essays", "POST", {
-                "subject": rid, "taskId": "re_1_1", "skill": "russian_essay",
+                "subject": rid, "taskId": "re27_1", "skill": "russian_essay_source",
                 "text": words_text(149), "id": "essay-short-1",
             })
             assert status == 422 and short.get("reason") == "essay_too_short", (status, short)
             assert short.get("wordCount") == 149 and short.get("minWords") == 150, short
 
             status, ok_sub = request(opener, base, "/api/essays", "POST", {
-                "subject": rid, "taskId": "re_1_1", "skill": "russian_essay",
+                "subject": rid, "taskId": "re27_1", "skill": "russian_essay_source",
                 "text": words_text(150), "id": "essay-ok-1",
             })
             assert status == 200 and ok_sub.get("ok") is True, (status, ok_sub)
@@ -143,14 +177,14 @@ def main():
 
             # Идемпотентность: тот же client_id не плодит записи.
             status, again = request(opener, base, "/api/essays", "POST", {
-                "subject": rid, "taskId": "re_1_1", "skill": "russian_essay",
+                "subject": rid, "taskId": "re27_1", "skill": "russian_essay_source",
                 "text": words_text(150), "id": "essay-ok-1",
             })
             assert status == 200, (status, again)
 
             # Задание без long_text не принимает длинный ответ.
             status, wrong_task = request(opener, base, "/api/essays", "POST", {
-                "subject": rid, "taskId": "n01_p1", "skill": "russian_essay",
+                "subject": rid, "taskId": "n01_p1", "skill": "russian_essay_source",
                 "text": words_text(200), "id": "essay-wrong-task",
             })
             assert status == 400, (status, wrong_task)
@@ -159,10 +193,10 @@ def main():
             conn = server.connect()
             try:
                 rows = conn.execute(
-                    "SELECT COUNT(*) AS n FROM essay_submissions WHERE task_id='re_1_1'").fetchone()
+                    "SELECT COUNT(*) AS n FROM essay_submissions WHERE task_id='re27_1'").fetchone()
                 assert rows["n"] == 1, rows
                 stored = conn.execute(
-                    "SELECT word_count, evaluation_status FROM essay_submissions WHERE task_id='re_1_1'").fetchone()
+                    "SELECT word_count, evaluation_status FROM essay_submissions WHERE task_id='re27_1'").fetchone()
                 assert stored["word_count"] == 150 and stored["evaluation_status"] == "submitted", stored
             finally:
                 conn.close()
@@ -171,15 +205,16 @@ def main():
             assert status == 200 and back["state"]["skillStats"][pskill]["progress"] == 42, back["state"]
             assert back["catalog"]["subject"] == "profile_math", back["catalog"]["subject"]
             # Прогресс русского не протёк в профиль.
-            assert back["state"]["skillStats"].get("russian_essay") is None, back["state"]["skillStats"]
+            assert back["state"]["skillStats"].get("russian_essay_source") is None, back["state"]["skillStats"]
 
             status, public = request(opener, base, "/api/status")
             assert status == 200, (status, public)
             public_russian = next((s for s in public.get("subjects", []) if s.get("id") == rid), None)
             assert public_russian, public
             public_counts = public_russian.get("counts", {})
-            assert public_counts.get("tasks") == 6, public_russian
-            assert public_counts.get("missions") == 1, public_russian
+            assert public_counts.get("tasks") == 8, public_russian
+            assert public_counts.get("skills") == 1, public_russian
+            assert public_counts.get("missions") == 0, public_russian
             assert public_counts.get("lessons") == 0 and public_counts.get("bosses") == 0, public_russian
             print("Russian subject integration OK: essay practice available, submissions validated and stored, state isolated")
         finally:

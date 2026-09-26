@@ -107,8 +107,8 @@ def main():
             status, _ = request(opener, base, "/api/subject", "POST", {"subject": "russian"})
             check("SUBJECT switch to russian", status == 200)
 
-            def submit(text, task="re_1_1", client_id=None):
-                body = {"subject": "russian", "taskId": task, "skill": "russian_essay", "text": text}
+            def submit(text, task="re27_1", client_id=None):
+                body = {"subject": "russian", "taskId": task, "skill": "russian_essay_source", "text": text}
                 if client_id:
                     body["id"] = client_id
                 return request(opener, base, "/api/essays", "POST", body)
@@ -136,16 +136,16 @@ def main():
             check("API raw POST under limit rejected", status == 422, str(body))
 
             # валидация задания: только long_text, только свой предмет/навык
-            status, body = submit(words(200), task="re_1_1")
+            status, body = submit(words(200), task="re27_1")
             check("API essay task ok", status == 200)
             status, body = request(opener, base, "/api/essays", "POST",
                                    {"subject": "russian", "taskId": "n01_p1", "skill": "n01_planimetry", "text": words(200)})
             check("API math task rejected for russian", status == 400, str(body))
             status, body = request(opener, base, "/api/essays", "POST",
-                                   {"subject": "russian", "taskId": "re_1_1", "skill": "n01_planimetry", "text": words(200)})
+                                   {"subject": "russian", "taskId": "re27_1", "skill": "n01_planimetry", "text": words(200)})
             check("API skill/task mismatch rejected", status == 400, str(body))
             status, body = request(opener, base, "/api/essays", "POST",
-                                   {"subject": "russian", "taskId": "nope", "skill": "russian_essay", "text": words(200)})
+                                   {"subject": "russian", "taskId": "nope", "skill": "russian_essay_source", "text": words(200)})
             check("API unknown task rejected", status == 400, str(body))
 
             # идемпотентность по client_id
@@ -167,13 +167,13 @@ def main():
             version = boot["state"]["stateVersion"]
             status, saved = request(opener, base, "/api/events/attempts", "POST", {
                 "subject": "russian", "expectedVersion": version,
-                "events": [{"taskId": "re_1_1", "skill": "russian_essay", "correct": True,
+                "events": [{"taskId": "re27_1", "skill": "russian_essay_source", "correct": True,
                             "hintLevel": 0, "seconds": 120, "id": "attempt-essay-1"}],
             })
             check("ATTEMPT essay attempt accepted", status == 200 and saved.get("ok") is True, str(saved))
             status, boot2 = request(opener, base, "/api/bootstrap?subject=russian")
             check("XP essay earns XP via standard flow", boot2["state"]["xp"] > 0, f"xp={boot2['state']['xp']}")
-            attempt = next((a for a in boot2["state"]["taskAttempts"] if a["taskId"] == "re_1_1"), None)
+            attempt = next((a for a in boot2["state"]["taskAttempts"] if a["taskId"] == "re27_1"), None)
             check("HISTORY essay in attempt history", attempt is not None and attempt["correct"] is True)
         finally:
             httpd.shutdown()

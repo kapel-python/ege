@@ -5,11 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>Результат проверки сочинения</title>
+<script>
+  /* Та же тема, что у всего сайта: сохранённый выбор (общий ключ
+     ege_core_theme) → иначе системная. Атрибут всегда явный, как на
+     /status и остальных страницах — от него зависит и общий футер. */
+  (function(){
+    try{
+      var saved=null;
+      try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
+      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
+      document.documentElement.setAttribute('data-theme',theme);
+    }catch(e){}
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/footer.css?v=3">
 <style>
-  :root {
+  :root,
+  :root[data-theme="dark"] {
     --bg: #0A0C12; --surface: #12151D; --surface-2: #171B25; --border: #242836;
     --text: #F1F2F6; --text-soft: #8B92A3;
     --purple: #8C7CF6; --purple-soft: rgba(140,124,246,.14); --purple-border: rgba(140,124,246,.30);
@@ -35,9 +50,31 @@
     font-family: 'Manrope', -apple-system, sans-serif; -webkit-font-smoothing: antialiased;
     transition: background .2s ease, color .2s ease;
   }
-  .page { max-width: 720px; margin: 0 auto; padding: 28px 18px 60px; }
 
-  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; }
+  /* --- хром сайта: та же шапка, что на /status, /about, /contacts --- */
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 18px; }
+  .site-header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(10, 12, 18, 0.88);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  :root[data-theme="light"] .site-header { background: rgba(244, 245, 249, 0.88); }
+  .header-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 16px; letter-spacing: -0.01em; color: var(--text); text-decoration: none; white-space: nowrap; }
+  .logo-badge { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #22c07a 0%, #38BDF8 100%); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .logo-badge svg { width: 16px; height: 16px; }
+  .logo-text em { font-style: normal; color: var(--green); }
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-soft); text-decoration: none;
+    font-size: 13.5px; font-weight: 700; white-space: nowrap;
+  }
+  .back-link:hover { color: var(--text); border-color: var(--purple-border); }
+
+  .page { max-width: 720px; margin: 0 auto; padding: 20px 18px 40px; }
+
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   .level-pill {
     display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
     background: var(--purple-soft); border: 1px solid var(--purple-border); color: var(--purple);
@@ -54,14 +91,14 @@
   }
   .theme-toggle svg { width: 18px; height: 18px; display: block; }
 
-  h1.title { font-size: 24px; font-weight: 800; margin: 0 0 6px; letter-spacing: -0.01em; }
-  .subtitle { font-size: 14.5px; color: var(--text-soft); line-height: 1.5; margin: 0 0 22px; }
+  h1.title { font-size: 22px; font-weight: 800; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 14px; color: var(--text-soft); line-height: 1.5; margin: 0 0 16px; }
 
-  .top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
   @media (max-width: 480px) { .top-row { grid-template-columns: 1fr; } }
 
   .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 20px 22px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px;
     transition: background .2s ease, border-color .2s ease;
   }
   .card.score-tint { border-left: 4px solid var(--tint, var(--purple)); }
@@ -70,7 +107,9 @@
   .tnum { font-variant-numeric: tabular-nums; }
   .stat-score { font-size: 34px; font-weight: 800; line-height: 1; display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; }
   .stat-score .max { font-size: 16px; color: var(--text-soft); font-weight: 600; }
-  .unit-pill {
+  /* Пометка вето второй инстанции: итог ниже суммы критериев — без неё
+     экран и разбор разойдутся. Показывается только для работ со срезкой. */
+  .cal-note { margin: 10px 0 0; font-size: 13px; line-height: 1.5; color: var(--amber); }  .unit-pill {
     font-size: 12px; font-weight: 700; color: var(--purple); background: var(--purple-soft);
     border: 1px solid var(--purple-border); padding: 3px 10px; border-radius: 999px;
     white-space: nowrap; margin-left: 2px;
@@ -81,29 +120,34 @@
   .badge.ok { background: var(--green-soft); color: var(--green); }
   .badge.warn { background: var(--red-soft); color: var(--red); }
 
-  .verdict-card { margin-bottom: 24px; }
-  .verdict-card p { margin: 0; font-size: 15.5px; line-height: 1.6; color: var(--text); }
+  .verdict-card { margin-bottom: 18px; }
+  .verdict-card p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text); }
 
-  .section { margin-bottom: 26px; }
-  .section-title { font-size: 19px; font-weight: 800; margin: 0 0 6px; }
-  .section-desc { font-size: 14px; color: var(--text-soft); line-height: 1.5; margin: 0 0 14px; }
+  .section { margin-bottom: 18px; }
+  .section-title { font-size: 18px; font-weight: 800; margin: 0 0 4px; }
+  .section-desc { font-size: 13.5px; color: var(--text-soft); line-height: 1.5; margin: 0 0 10px; }
 
-  .group { margin-bottom: 18px; }
+  .group { margin-bottom: 12px; }
   .group:last-child { margin-bottom: 0; }
-  .group-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 10px; }
-  .group-name { font-size: 14px; font-weight: 700; color: var(--text-soft); }
-  .group-score { font-size: 14px; font-weight: 800; color: var(--text); }
+  .group-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 8px; }
+  .group-name { font-size: 13.5px; font-weight: 700; color: var(--text-soft); }
+  .group-score { font-size: 13.5px; font-weight: 800; color: var(--text); }
 
-  .criteria { display: flex; flex-direction: column; gap: 10px; }
+  .criteria { display: flex; flex-direction: column; gap: 8px; }
+  /* На широком экране критерии в две колонки: страница короче почти вдвое,
+     данные те же. Аккордеон внутри карточки работает как раньше. */
+  @media (min-width: 640px) {
+    .criteria { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  }
 
   .crit-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
     transition: border-color .15s ease, background .15s ease; overflow: hidden;
   }
   .crit-card:hover { border-color: var(--purple-border); }
 
   .crit-head {
-    display: flex; align-items: center; gap: 12px; padding: 16px 18px; cursor: pointer;
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
     user-select: none; background: none; border: none; width: 100%; text-align: left; color: inherit; font: inherit;
   }
   .crit-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
@@ -129,7 +173,7 @@
 
   .crit-body { max-height: 0; opacity: 0; transition: max-height .22s ease, opacity .18s ease; }
   .crit-card.open .crit-body { max-height: 480px; opacity: 1; }
-  .crit-body-inner { padding: 0 18px 18px 46px; }
+  .crit-body-inner { padding: 0 14px 14px 36px; }
 
   .crit-comment { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-soft); }
 
@@ -149,18 +193,18 @@
   .rewrite-row.after .rewrite-tag { background: var(--green); color: #fff; }
 
   .list-card ul { margin: 0; padding: 0; list-style: none; }
-  .list-card li { position: relative; padding: 10px 0 10px 22px; font-size: 14.5px; line-height: 1.5; border-bottom: 1px solid var(--border); }
+  .list-card li { position: relative; padding: 8px 0 8px 22px; font-size: 14px; line-height: 1.5; border-bottom: 1px solid var(--border); }
   .list-card li:last-child { border-bottom: none; }
   .list-card li::before { content: ""; position: absolute; left: 0; top: 18px; width: 6px; height: 6px; border-radius: 50%; background: var(--purple); }
 
   .recommendation {
-    background: var(--purple-soft); border: 1px solid var(--purple-border); border-radius: 20px; padding: 20px 22px;
+    background: var(--purple-soft); border: 1px solid var(--purple-border); border-radius: 16px; padding: 16px 18px;
     transition: background .2s ease, border-color .2s ease;
   }
   .recommendation .stat-label { color: var(--purple); }
-  .recommendation p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--text); }
+  .recommendation p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text); }
 
-  .disclaimer { margin-top: 30px; text-align: center; font-size: 14px; color: var(--text-soft); opacity: .8; line-height: 1.5; }
+  .disclaimer { margin-top: 20px; text-align: center; font-size: 13.5px; color: var(--text-soft); opacity: .8; line-height: 1.5; }
 
   /* --- skeleton --- */
   .skel { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: skel-shine 1.4s ease infinite; border-radius: 10px; }
@@ -178,12 +222,31 @@
 
   [hidden] { display: none !important; }
 
+  /* Состояние ошибки — только блок ошибки: таблетка, заголовок, скелетон,
+     результат и дисклеймер прячутся. Шапка и футер остаются. */
+  body.state-error .page > :not(#errorState) { display: none !important; }
+
   @media (prefers-reduced-motion: reduce) {
     .crit-card, body, .card, .recommendation, .crit-body, .chevron, .skel { transition: none; animation: none; }
   }
 </style>
 </head>
 <body>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a href="/" class="logo" aria-label="ege easy — на главную">
+      <span class="logo-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="logo-text">ege <em>easy</em></span>
+    </a>
+    <nav aria-label="Действия">
+      <a class="back-link" href="/dashboard" onclick="if(history.length>1){history.back();return false;}">← К практике</a>
+    </nav>
+  </div>
+</header>
+
+<main>
 <div class="page">
 
   <div class="topbar">
@@ -207,10 +270,10 @@
     <div class="skel skel-card"></div>
   </div>
 
-  <!-- Состояние ошибки -->
+  <!-- Состояние ошибки: текст подставляет loadResult под конкретный случай -->
   <div id="errorState" hidden>
     <div class="card error-card">
-      <p>Не удалось получить результат проверки. Попробуйте ещё раз.</p>
+      <p id="errorText">Не удалось получить результат проверки. Попробуйте ещё раз.</p>
       <button class="retry-btn" id="retryBtn" type="button">Повторить</button>
     </div>
   </div>
@@ -224,6 +287,7 @@
           <span id="scoreValue">0</span><span class="max" id="scoreMax"></span>
           <span class="unit-pill">баллов</span>
         </div>
+        <p class="cal-note" id="calibrationNote" hidden></p>
       </div>
       <div class="card">
         <p class="stat-label">Количество слов</p>
@@ -256,6 +320,12 @@
 
   <p class="disclaimer">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
 </div>
+</main>
+
+<div data-ege-footer></div>
+<!-- Абсолютный путь: страница живёт и на /ege-result.html, и на /essay/<sid> —
+     относительный js/footer.js под вторым ломался бы в /essay/js/footer.js. -->
+<script defer src="/js/footer.js?v=1"></script>
 
 <script>
 /**
@@ -290,8 +360,9 @@ const moonIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 
 function applyTheme(theme) {
   const light = theme === 'light';
-  if (light) document.documentElement.setAttribute('data-theme', 'light');
-  else document.documentElement.removeAttribute('data-theme');
+  // Атрибут всегда явный (light/dark), как на остальных страницах:
+  // общий футер переключает палитру по :root[data-theme="dark"].
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   const btn = document.getElementById('themeToggle');
   btn.innerHTML = light ? moonIcon : sunIcon;
   btn.setAttribute('aria-pressed', light ? 'true' : 'false');
@@ -300,7 +371,10 @@ function applyTheme(theme) {
 function getStoredTheme() { try { return localStorage.getItem('ege_core_theme'); } catch (e) { return null; } }
 function setStoredTheme(t) { try { localStorage.setItem('ege_core_theme', t); } catch (e) {} }
 
-let currentTheme = getStoredTheme() === 'light' ? 'light' : 'dark';
+let currentTheme = getStoredTheme();
+if (currentTheme !== 'light' && currentTheme !== 'dark') {
+  currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
 applyTheme(currentTheme);
 document.getElementById('themeToggle').addEventListener('click', () => {
   currentTheme = currentTheme === 'light' ? 'dark' : 'light';
@@ -332,9 +406,9 @@ const skeletonEl = document.getElementById('skeletonState');
 const errorEl = document.getElementById('errorState');
 const resultEl = document.getElementById('resultState');
 
-function showSkeleton() { skeletonEl.hidden = false; errorEl.hidden = true; resultEl.hidden = true; }
-function showError() { skeletonEl.hidden = true; errorEl.hidden = false; resultEl.hidden = true; }
-function showResult() { skeletonEl.hidden = true; errorEl.hidden = true; resultEl.hidden = false; }
+function showSkeleton() { document.body.classList.remove('state-error'); skeletonEl.hidden = false; errorEl.hidden = true; resultEl.hidden = true; }
+function showError() { skeletonEl.hidden = true; errorEl.hidden = false; resultEl.hidden = true; document.body.classList.add('state-error'); }
+function showResult() { document.body.classList.remove('state-error'); skeletonEl.hidden = true; errorEl.hidden = true; resultEl.hidden = false; }
 
 // ---------- Рендер-хелперы ----------
 function pillClass(score, max) {
@@ -403,6 +477,15 @@ function render(data) {
   animateCount(document.getElementById("scoreValue"), data.total_score, 1400);
   document.getElementById("scoreMax").textContent = "/ " + data.max_score;
 
+  const calNote = document.getElementById("calibrationNote");
+  if (data.calibration_note) {
+    calNote.textContent = data.calibration_note;
+    calNote.hidden = false;
+  } else {
+    calNote.hidden = true;
+    calNote.textContent = "";
+  }
+
   document.getElementById("wordsValue").textContent = data.word_count + " слов";
   const wordsBadge = document.getElementById("wordsBadge");
   const minWords = data.word_norm_min ?? 150;
@@ -461,7 +544,9 @@ function render(data) {
 /**
  * Загружает результат с реального бэкенда.
  * Показывает скелетон во время запроса и карточку ошибки с кнопкой
- * "Повторить" при сбое (сеть, таймаут, невалидный ответ).
+ * "Повторить" при сбое. Текст ошибки — простым языком и по делу: что
+ * случилось и что делать (нет ссылки, ссылка битая, чужое/устарело,
+ * проверка не готова, нет сети, данные повреждены).
  *
  * @param {() => Promise<object>} fetcher - функция, возвращающая JSON с результатом
  */
@@ -472,8 +557,37 @@ async function loadResult(fetcher) {
     render(data);
   } catch (err) {
     console.error("Ошибка загрузки результата проверки:", err);
-    showError();
+    showErrorText(errorKind(err));
   }
+}
+
+// Человеческие тексты под каждый случай. Про чужую ссылку пишем прямо,
+// но без раскрытия: сервер отвечает 404 и на «нет», и на «чужое», так что
+// по тексту нельзя понять, существует ли такой результат.
+const ERROR_TEXTS = {
+  noid: "В ссылке нет данных о сочинении. Открой результат кнопкой «Посмотреть результат →» из практики — там правильная ссылка.",
+  badlink: "Ссылка повреждена: в ней нет идентификатора сочинения. Открой результат кнопкой «Посмотреть результат →» из практики.",
+  missing: "Такого результата нет. Возможно, ты открыл чужую ссылку — чужие работы мы не показываем, — или ссылка устарела. Свой результат открой из практики.",
+  pending: "Проверка ещё не завершена. Дождись кнопки «Посмотреть результат →» в практике и открой отчёт оттуда.",
+  offline: "Нет связи с сервером. Проверь интернет и нажми «Повторить».",
+  corrupt: "Данные результата повреждены и не прошли проверку. Попробуй открыть снова из практики — там лежит исходная версия.",
+  server: "Сервер временно не отвечает. Нажми «Повторить» чуть позже.",
+};
+
+function errorKind(err) {
+  const kind = err && err.kind;
+  return Object.prototype.hasOwnProperty.call(ERROR_TEXTS, kind) ? kind : "server";
+}
+
+function showErrorText(kind) {
+  document.getElementById("errorText").textContent = ERROR_TEXTS[kind] || ERROR_TEXTS.server;
+  showError();
+}
+
+function kinded(kind) {
+  const err = new Error(kind);
+  err.kind = kind;
+  return err;
 }
 
 // Реальный бэкенд: готовый отчёт этого submission отдаёт
@@ -483,30 +597,50 @@ async function loadResult(fetcher) {
 // Точный submission — по clientId; fallback — последний по taskId.
 function resultParams() {
   const q = new URLSearchParams(location.search);
+  // Красивая ссылка /essay/<sid>: sid из пути, subject не нужен — сервер
+  // найдёт submission по всем своим предметам. Старые ссылки с ?subject=
+  // и ?clientId/?taskId работают как раньше.
+  const m = location.pathname.match(/^\/essay\/(\d+)/);
   return {
     subject: (q.get('subject') || '').trim(),
+    sid: (q.get('sid') || '').trim() || (m ? m[1] : ''),
     clientId: (q.get('clientId') || '').trim(),
     taskId: (q.get('taskId') || '').trim(),
   };
 }
 
-function fetchFromApi() {
+async function fetchFromApi() {
   const p = resultParams();
-  if (!p.subject || (!p.clientId && !p.taskId)) {
-    return Promise.reject(new Error('Нет идентификатора сочинения'));
+  if (!p.sid && !p.clientId && !p.taskId) throw kinded("noid");
+  const params = new URLSearchParams();
+  if (p.subject) params.set('subject', p.subject);
+  if (p.sid) params.set('sid', p.sid);
+  else if (p.clientId) params.set('clientId', p.clientId);
+  else params.set('taskId', p.taskId);
+  const url = '/api/essays?' + params.toString();
+  let res;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  } catch (err) {
+    // Обрыв сети, DNS, таймаут — fetch не даёт статус, только отказ.
+    throw kinded("offline");
   }
-  const url = '/api/essays?subject=' + encodeURIComponent(p.subject)
-    + (p.clientId ? '&clientId=' + encodeURIComponent(p.clientId)
-                  : '&taskId=' + encodeURIComponent(p.taskId));
-  return fetch(url, { signal: AbortSignal.timeout(15000) }).then(res => {
-    if (res.status === 404) throw new Error('Результат не найден');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
-  }).then(body => {
-    const view = body && body.submission && body.submission.view;
-    if (!view) throw new Error('Проверка ещё не завершена');
-    return view;
-  });
+  if (res.status === 404) throw kinded("missing");
+  if (!res.ok) throw kinded(res.status === 400 ? "badlink" : "server");
+  let body;
+  try {
+    body = await res.json();
+  } catch (err) {
+    throw kinded("corrupt");
+  }
+  const view = body && body.submission && body.submission.view;
+  if (!view) throw kinded("pending");
+  try {
+    validate(view);
+  } catch (err) {
+    throw kinded("corrupt");
+  }
+  return view;
 }
 
 document.getElementById('retryBtn').addEventListener('click', () => loadResult(fetchFromApi));
