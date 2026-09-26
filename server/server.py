@@ -4024,9 +4024,16 @@ def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple
 def default_state(conn: sqlite3.Connection, user_id: int, subject: str | None = None) -> dict:
     subject = resolve_subject(subject)
     accessible_skill_ids = _subject_skill_ids(conn, subject)
+    # Нулевые корзины — по ЖИВОМУ каталогу, а не по остаткам таблицы: удалённый
+    # навык ещё висит в skills, пока на него ссылается чей-то прогресс, и без
+    # этой проверки в профиле появлялся бы фантомный навык с нулями (то же, что
+    # _build_catalog_payload делает с самим каталогом). Карта пуста до
+    # install_catalog — тогда ведём себя как раньше.
+    live_skills = (_CATALOG_LIVE_IDS.get(subject) or {}).get("skills")
     skills = {str(r["id"]): {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0}
               for r in conn.execute("SELECT id FROM skills WHERE subject=?", (subject,))
-              if str(r["id"]) in accessible_skill_ids}
+              if str(r["id"]) in accessible_skill_ids
+              and (live_skills is None or str(r["id"]) in live_skills)}
     info = _public_subject_info(subject)
     return {"version": 4, "subject": subject, "subjectStatus": info["status"],
             "locked": info["locked"], "comingSoon": info["comingSoon"],
@@ -4066,15 +4073,32 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
                       "correctSeries": stats["correct_series"], "bestSeries": stats["best_series"], "errorsResolved": stats["errors_resolved"]})
     state["hintLevels"] = {str(i): 0 for i in range(1, 4)}
     for r in conn.execute("SELECT level, used_count FROM user_hint_levels WHERE user_id=? AND subject=?", (user_id, subject)): state["hintLevels"][str(r["level"])] = r["used_count"]
+    # Узлы каталога, удалённые из файлов, остаются в таблицах, пока на них
+    # ссылается чей-то прогресс (см. _prune_removed_catalog_rows) — но выдавать
+    # их ученику нельзя: в UI их нет, и строка превращается в фантомную ошибку
+    # «Сочинение» на несуществующем задании, в прогресс удалённого навыка и в
+    # «выполненную» миссию, которой больше нет. Тот же фильтр по живому
+    # каталогу, что в _build_catalog_payload и /api/status, поэтому старые
+    # данные просто не видны — принудительный сброс профиля не нужен.
+    live = _CATALOG_LIVE_IDS.get(subject) or {}
+    live_skills = live.get("skills")
+    live_tasks = live.get("tasks")
+    live_lessons = live.get("lessons")
+    live_missions = live.get("missions")
+    in_live = lambda ids, node: ids is None or node in ids
     for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
+        if not in_live(live_skills, r["skill_id"]): continue
         state["skillStats"][r["skill_id"]] = {"progress": r["progress"], "solved": r["solved"], "correct": r["correct"], "timeSec": r["time_sec"]}
     for r in conn.execute("SELECT * FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC", (user_id, subject)):
+        if not in_live(live_tasks, r["task_id"]): continue
         state["errors"].append({"id": r["id"], "clientId": r["client_id"] if "client_id" in r.keys() else None, "taskId": r["task_id"], "skill": r["skill_id"], "sub": r["topic"], "ts": timestamp_value(r["created_at"]), "resolved": bool(r["resolved"]),
                                 "kind": (_normalize_error_kind(r["kind"]) if "kind" in r.keys() and r["kind"] else "major")})
     for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 5000", (user_id, subject)):
         keys = r.keys()
+        if not in_live(live_tasks, r["task_id"]): continue
         state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=?", (user_id, subject)):
+        if not in_live(live_lessons, r["lesson_id"]): continue
         state["lessonStepErrors"][f'{r["lesson_id"]}:{r["step_id"]}'] = {"count": r["count"], "skill": r["skill_id"], "ts": timestamp_value(r["last_at"]), "types": json.loads(r["types_json"])}
     for r in conn.execute("SELECT lesson_id, step_id, skill_id, error_type, created_at, client_id FROM lesson_error_history WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 200", (user_id, subject)):
         state["lessonErrorHistory"].append({"id": r["client_id"] or None, "lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
@@ -4084,6 +4108,7 @@ def read_state(conn: sqlite3.Connection, user_id: int, subject: str | None = Non
         keys = r.keys()
         state["lessonAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT * FROM user_missions WHERE user_id=? AND subject=?", (user_id, subject)):
+        if not in_live(live_missions, r["mission_id"]): continue
         state["missionProgress"][r["mission_id"]] = r["progress"]
         if r["completed_at"]: state["missionsDone"][r["mission_id"]] = {"ts": timestamp_value(r["completed_at"])}
     state["bossesDefeated"] = [r["boss_id"] for r in conn.execute("SELECT boss_id FROM user_bosses WHERE user_id=? AND subject=?", (user_id, subject))]

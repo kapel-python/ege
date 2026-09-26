@@ -216,7 +216,65 @@ def main():
             assert public_counts.get("skills") == 1, public_russian
             assert public_counts.get("missions") == 0, public_russian
             assert public_counts.get("lessons") == 0 and public_counts.get("bosses") == 0, public_russian
-            print("Russian subject integration OK: essay practice available, submissions validated and stored, state isolated")
+
+            # Наследие старой системы сочинений (skill russian_essay, миссия
+            # russian_essay_practice, задания re_1_*/re_2_*/re_3_*) остаётся в
+            # таблицах, пока на него ссылается чей-то прогресс: prune такие узлы
+            # пропускает (см. _prune_removed_catalog_rows). В выдаче их быть не
+            # должно — иначе у клиента появляются фантомные ошибки на
+            # несуществующих заданиях, прогресс удалённого навыка и «выполненная»
+            # миссия, которой в каталоге нет. Принудительный сброс профиля для
+            # этого не нужен: строки просто не выдаются.
+            # accountId заранее: запись ниже держит write-lock, а HTTP-сервер
+            # в этом тесте однопоточный и ждал бы его до конца блока.
+            status, boot_russian = request(opener, base, f"/api/bootstrap?subject={rid}")
+            assert status == 200 and boot_russian.get("accountId"), boot_russian
+            legacy = server.connect()
+            try:
+                legacy.execute("PRAGMA foreign_keys=OFF")
+                uid_row = legacy.execute("SELECT id FROM users WHERE account_id=?",
+                                         (boot_russian["accountId"],)).fetchone()
+                assert uid_row is not None, boot_russian["accountId"]
+                legacy_uid = uid_row["id"]
+                legacy.execute(
+                    "INSERT OR IGNORE INTO skills (id, topic_id, name, display_order, subject)"
+                    " VALUES ('russian_essay','russian_writing','Итоговое сочинение',1,'russian')")
+                for old in ("re_1_2", "re_2_1", "re_3_4"):
+                    legacy.execute(
+                        "INSERT OR IGNORE INTO tasks (id, skill_id, topic, statement, answer, task_type)"
+                        " VALUES (?,'russian_essay','Сочинение','x','','long_text')", (old,))
+                legacy.execute(
+                    "INSERT OR IGNORE INTO missions (id, skill_id, title)"
+                    " VALUES ('russian_essay_practice','russian_essay','Практика')")
+                for old in ("re_1_2", "re_2_1", "re_3_4"):
+                    legacy.execute(
+                        "INSERT INTO user_errors (user_id, task_id, skill_id, topic, created_at,"
+                        " resolved, subject, client_id, kind)"
+                        " VALUES (?,?,'russian_essay','Сочинение',1,0,'russian',?,'major')",
+                        (legacy_uid, old, f"legacy-{old}"))
+                legacy.execute(
+                    "INSERT INTO user_progress (user_id, subject, skill_id, progress, solved, correct, time_sec)"
+                    " VALUES (?,'russian','russian_essay',17,8,3,142.8)", (legacy_uid,))
+                legacy.execute(
+                    "INSERT OR REPLACE INTO user_missions (user_id, subject, mission_id, progress, completed_at)"
+                    " VALUES (?,'russian','russian_essay_practice',6,1)", (legacy_uid,))
+                legacy.commit()
+            finally:
+                legacy.close()
+
+            status, after_legacy = request(opener, base, f"/api/bootstrap?subject={rid}")
+            assert status == 200, (status, after_legacy)
+            legacy_state = after_legacy["state"]
+            legacy_error_ids = {e["taskId"] for e in legacy_state.get("errors", [])}
+            assert not (legacy_error_ids & {"re_1_2", "re_2_1", "re_3_4"}), legacy_error_ids
+            assert "russian_essay" not in legacy_state.get("skillStats", {}), legacy_state.get("skillStats")
+            assert legacy_state.get("skillStats", {}).get("russian_essay_source") is not None, legacy_state.get("skillStats")
+            assert "russian_essay_practice" not in legacy_state.get("missionProgress", {}), legacy_state.get("missionProgress")
+            assert "russian_essay_practice" not in legacy_state.get("missionsDone", {}), legacy_state.get("missionsDone")
+            # Реальный прогресс по живому навыку не пострадал.
+            assert legacy_state["skillStats"]["russian_essay_source"]["solved"] == 1, legacy_state["skillStats"]
+            print("Russian subject integration OK: essay practice available, submissions validated and stored,"
+                  " state isolated, legacy catalog leftovers hidden")
         finally:
             httpd.shutdown()
             httpd.server_close()
