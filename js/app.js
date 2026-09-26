@@ -3465,8 +3465,10 @@ function renderTask(root) {
           ${stars(t.diff)}
           <span class="chip timer-chip" style="margin-left:auto" id="timerChip">${icon("clock")} 00:00</span>
         </div>
+        ${essaySourceHtml(t)}
         <div class="task-card__text">${mathText(t.text)}</div>
         ${taskVisualHtml(t)}
+        <div id="sourceTextSlot"></div>
 
         <div id="hintSlot"></div>
 
@@ -3478,6 +3480,7 @@ function renderTask(root) {
   if (isLongTextTask(t)) {
     sessionEssayWire(t);
     essayRestoreReady(t);
+    essaySourceTextLoad(t);
   } else if (t.selfCheck) {
     // Развёрнутые задания (№14–20) не проверяются автоматически: единый
     // текстовый ответ не отражает полноту доказательства и записи решения.
@@ -3504,6 +3507,80 @@ function isLongTextTask(t) {
   return !!t && (t.type === "long_text" || t.answerType === "long_text");
 }
 
+/* ---------------- исходный текст к заданию 27 ----------------
+   Задание 27 — работа С чужим текстом: ученик читает его и пишет по нему.
+   Текст лежит на сервере (essay_source_texts) и подгружается на экран задания
+   отдельным запросом, а не едет в каталоге: он большой и нужен только здесь.
+   Разбор, позиция автора и примеры в нём отсутствуют намеренно — это ответ,
+   который ученик формулирует сам. Проверку сервер ведёт по строгой рубрике
+   (source), и выбирает её он же по заданию, а не клиент. */
+const EssaySource = { cache: new Map() };
+
+async function essaySourceTextFetch(id) {
+  if (EssaySource.cache.has(id)) return EssaySource.cache.get(id);
+  const res = await fetch(`/api/essay-text?subject=${encodeURIComponent(Store.subject)}&id=${encodeURIComponent(id)}`);
+  const data = await res.json().catch(() => ({}));
+  const src = res.ok ? data.sourceText : null;
+  if (src) EssaySource.cache.set(id, src);
+  return src;
+}
+
+function essaySourceTextHtml(src) {
+  const citation = [src.author, src.work && !/^фрагмент|текст с ЕГЭ/.test(src.work) ? `«${src.work}»` : ""]
+    .filter(Boolean).join(" · ");
+  const paragraphs = String(src.text || "").split(/\n{2,}/)
+    .map((p) => `<p>${esc(p.trim())}</p>`).join("");
+  return `
+    <div class="source-text" id="sourceTextBox">
+      <div class="source-text__head">
+        <div class="source-text__meta">
+          ${citation ? `<div class="source-text__cite">${esc(citation)}</div>` : ""}
+          <div class="source-text__tags">
+            ${src.exam ? `<span class="chip">ЕГЭ ${esc(src.exam)}</span>` : ""}
+            <span class="chip">${src.wordCount} ${essayWordsLabel(src.wordCount)}</span>
+          </div>
+        </div>
+        <button class="btn btn--ghost btn--sm" type="button" onclick="essaySourceToggle()">
+          <span data-source-toggle-label>Свернуть текст</span>
+        </button>
+      </div>
+      <div class="source-text__problem"><b>Проблема, поставленная в тексте:</b> ${esc(src.problem)}</div>
+      <div class="source-text__body" data-source-body>${paragraphs}</div>
+      ${src.sourceUrl ? `<a class="source-text__url" href="${esc(src.sourceUrl)}" target="_blank" rel="noopener noreferrer">Источник текста</a>` : ""}
+    </div>`;
+}
+
+function essaySourceToggle() {
+  const body = document.querySelector("[data-source-body]");
+  const label = document.querySelector("[data-source-toggle-label]");
+  if (!body) return;
+  const collapsed = body.classList.toggle("source-text__body--collapsed");
+  if (label) label.textContent = collapsed ? "Показать текст" : "Свернуть текст";
+}
+
+async function essaySourceTextLoad(t) {
+  const id = t && t.sourceTextId;
+  const slot = document.getElementById("sourceTextSlot");
+  if (!id || !slot) return;
+  if (!Session.sourceTexts) Session.sourceTexts = {};
+  const cached = Session.sourceTexts[id];
+  if (cached) { slot.innerHTML = essaySourceTextHtml(cached); return; }
+  slot.innerHTML = `<div class="source-text source-text--loading" role="status">Открываем текст для чтения…</div>`;
+  try {
+    const src = await essaySourceTextFetch(id);
+    if (!src) {
+      slot.innerHTML = `<div class="source-text source-text--loading">Текст к этому заданию временно недоступен. Написать сочинение по проблеме всё равно можно.</div>`;
+      return;
+    }
+    Session.sourceTexts[id] = src;
+    const live = document.getElementById("sourceTextSlot");
+    if (live) live.innerHTML = essaySourceTextHtml(src);
+  } catch (_) {
+    const live = document.getElementById("sourceTextSlot");
+    if (live) live.innerHTML = `<div class="source-text source-text--loading">Текст к этому заданию не загрузился. Обнови страницу или напиши сочинение по проблеме из задания.</div>`;
+  }
+}
+
 function essayWordsLabel(n) {
   const mod100 = n % 100, mod10 = n % 10;
   if (mod100 >= 11 && mod100 <= 14) return "слов";
@@ -3512,8 +3589,115 @@ function essayWordsLabel(n) {
   return "слов";
 }
 
+/* Исходный текст для сочинения: отдельный блок сверху темы.
+   Поле source сегодня — короткая provenance-подпись («Демоверсия…»),
+   поэтому как связный отрывок воспринимаем только длинный текст:
+   явные sourceText/source_text/passage — всегда, а source — только если
+   это реально отрывок (много слов), а не подпись. Короткая подпись блок
+   не создаёт, и текущие 6 тем выглядят как раньше. */
+function essaySourceText(t) {
+  if (!isLongTextTask(t) || !t || typeof t !== "object") return "";
+  const explicit = t.sourceText ?? t.source_text ?? t.passage ?? t.readingText ?? t.reading_text ?? "";
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  const src = typeof t.source === "string" ? t.source.trim() : "";
+  if (!src) return "";
+  try {
+    if (typeof countWords === "function" && countWords(src) < 20 && src.length < 300) return "";
+  } catch (_) {
+    if (src.length < 300) return "";
+  }
+  return src;
+}
+
+function essaySourcePreview(text, limit = 10) {
+  const words = String(text == null ? "" : text).split(/\s+/).filter(Boolean);
+  if (words.length <= limit) return words.join(" ");
+  return words.slice(0, limit).join(" ");
+}
+
+function essaySourceHtml(t) {
+  const src = essaySourceText(t);
+  if (!src) return "";
+  const words = String(src).split(/\s+/).filter(Boolean);
+  const collapsible = words.length > 10;
+  const preview = esc(essaySourcePreview(src, 10)) + (collapsible ? "…" : "");
+  if (!collapsible) {
+    return `
+      <div class="essay-source" id="essaySource">
+        <div class="essay-source__label">Исходный текст</div>
+        <div class="essay-source__body">${esc(src)}</div>
+      </div>`;
+  }
+  return `
+    <div class="essay-source" id="essaySource">
+      <div class="essay-source__label">Исходный текст</div>
+      <div class="essay-source__preview" data-essay-source-preview>${preview}</div>
+      <div class="essay-source__body" data-essay-source-full style="display:none">${esc(src)}</div>
+      <button class="btn btn--ghost btn--sm essay-source__toggle" type="button" onclick="toggleEssaySource(this)">Показать полностью</button>
+    </div>`;
+}
+
+function toggleEssaySource(btn) {
+  try {
+    const box = btn && btn.closest ? btn.closest(".essay-source") : null;
+    if (!box) return;
+    const full = box.querySelector("[data-essay-source-full]");
+    const preview = box.querySelector("[data-essay-source-preview]");
+    if (!full) return;
+    const open = full.style.display !== "none";
+    full.style.display = open ? "none" : "";
+    if (preview) preview.style.display = open ? "" : "none";
+    btn.textContent = open ? "Показать полностью" : "Скрыть";
+  } catch (_) {}
+}
+
+/* Во время проверки редактор скрыт — виден только единый лоадер.
+   После готового результата редактор заменяется readonly-блоком:
+   исходный текст ученика виден, но менять его уже нельзя. */
+function essaySetFormVisible(visible) {
+  const display = visible ? "" : "none";
+  const editor = document.getElementById("essayEditor");
+  if (editor) editor.style.display = display;
+  const errBox = document.getElementById("essayError");
+  if (errBox && !visible) errBox.style.display = "none";
+  const card = document.querySelector ? document.querySelector(".task-card") : null;
+  if (card && card.querySelectorAll) {
+    card.querySelectorAll(".session-tools, .essay-editor__submit").forEach((el) => {
+      el.style.display = display;
+    });
+  } else {
+    const submitWrap = document.querySelector ? document.querySelector(".essay-editor__submit") : null;
+    if (submitWrap) submitWrap.style.display = display;
+  }
+}
+
+function essayReadonlyHtml(text, wordCount) {
+  const n = Number(wordCount);
+  const countLine = Number.isFinite(n) && n > 0 ? `${n} ${essayWordsLabel(n)}` : "";
+  return `
+    <div class="essay-readonly" id="essayReadonly">
+      <div class="essay-readonly__label">Твоё сочинение ${countLine ? `<span class="mono">· ${esc(countLine)}</span>` : ""}</div>
+      <div class="essay-readonly__body">${esc(String(text == null ? "" : text))}</div>
+      <div class="essay-readonly__note">Текст уже отправлен на проверку и больше не редактируется.</div>
+    </div>`;
+}
+
+function essayMountReadonly(text, wordCount) {
+  const slot = document.getElementById("essayReadonlySlot");
+  if (!slot) return;
+  slot.innerHTML = essayReadonlyHtml(text, wordCount);
+}
+
+function essayClearReadonly() {
+  const slot = document.getElementById("essayReadonlySlot");
+  if (slot) slot.innerHTML = "";
+  const legacy = document.getElementById("essayReadonly");
+  if (legacy && (!slot || !slot.contains(legacy))) legacy.remove();
+}
+
 function sessionAnswerAreaHtml(t, S) {
   if (isLongTextTask(t)) return `
+    <div id="essayReadonlySlot"></div>
     <div class="essay-editor" id="essayEditor">
       <textarea class="essay-editor__area" id="essayInput" spellcheck="false"
         placeholder="Пиши сочинение здесь: сформулируй позицию по теме, подкрепи её двумя аргументами из литературы и сделай вывод…"></textarea>
@@ -3626,6 +3810,12 @@ function essayAiErrorText(status, data) {
 function essayResultUrl(submission) {
   if (!submission) return "";
   const subject = Store.subject || "russian";
+  // Короткая ссылка — числовой sid (~50 символов). Перебор чужого не
+  // работает: сервер отдаёт submission только его автору, остальным 404.
+  // Старые clientId/taskId-ссылки продолжают работать (fallback ниже).
+  if (submission.submissionId) {
+    return `/essay/${submission.submissionId}`;
+  }
   if (submission.clientId) {
     return `/ege-result.html?subject=${encodeURIComponent(subject)}&clientId=${encodeURIComponent(submission.clientId)}`;
   }
@@ -3641,7 +3831,9 @@ function openEssayResult(taskId) {
 
 /* Повторное открытие: готовый результат переживает перезагрузку — лежит в
    essay_submissions (evaluation_status='ready'), а не во frontend-state.
-   XP при просмотре НЕ начисляем: он уже зафиксирован attempts-flow. */
+   XP при просмотре НЕ начисляем: он уже зафиксирован attempts-flow.
+   Готовый текст показываем readonly-блоком без лоадера: ученик видит
+   свой исходный текст, но менять его уже нельзя. */
 async function essayRestoreReady(t) {
   try {
     const res = await fetch(`/api/essays?subject=${encodeURIComponent(Store.subject)}&taskId=${encodeURIComponent(t.id)}`);
@@ -3654,6 +3846,8 @@ async function essayRestoreReady(t) {
     if (sub.status === "ready" && sub.result) {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essaySetFormVisible(false);
+      essayMountReadonly(sub.text || "", sub.wordCount);
       slot.innerHTML = `
         <div class="feedback feedback--ok">
           <div class="feedback__head">${icon("check")} Это сочинение уже проверено
@@ -3665,6 +3859,37 @@ async function essayRestoreReady(t) {
     } else if (sub.status === "submitted" || sub.status === "failed") {
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
+      essayClearReadonly();
+      essaySetFormVisible(true);
+      try {
+        const input = document.getElementById("essayInput");
+        if (input && !String(input.value || "").trim() && sub.text) {
+          input.value = sub.text;
+          if (Session.cur) {
+            if (!Session.cur.essayDraftByTask) Session.cur.essayDraftByTask = {};
+            Session.cur.essayDraftByTask[t.id] = sub.text;
+          }
+          const n = countWords(sub.text);
+          const countEl = document.getElementById("essayCount");
+          const barEl = document.getElementById("essayBar");
+          const btn = document.getElementById("essaySubmitBtn");
+          const editor = document.getElementById("essayEditor");
+          if (countEl) {
+            if (n < ESSAY_MIN_WORDS) {
+              countEl.textContent = `${n} / ${ESSAY_MIN_WORDS} ${essayWordsLabel(ESSAY_MIN_WORDS)} · ещё ${ESSAY_MIN_WORDS - n}`;
+              countEl.classList.remove("essay-editor__count--ok");
+              if (editor) editor.classList.remove("essay-editor--ready");
+              if (btn) btn.disabled = true;
+            } else {
+              countEl.textContent = `${n} ${essayWordsLabel(n)} · минимум выполнен`;
+              countEl.classList.add("essay-editor__count--ok");
+              if (editor) editor.classList.add("essay-editor--ready");
+              if (btn && !input.disabled) btn.disabled = false;
+            }
+          }
+          if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
+        }
+      } catch (_) {}
       slot.innerHTML = `
         <div class="feedback">
           <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
@@ -3690,13 +3915,17 @@ async function sessionEssayResume(taskId) {
 }
 
 /* Общая фаза «AI check → report generation → result ready → XP».
-   Вызывается и после свежей отправки, и при «Продолжить проверку». */
+   Вызывается и после свежей отправки, и при «Продолжить проверку».
+   На время проверки редактор скрыт — виден только единый лоадер. */
 async function essayRunChecks(t, text, clientId, wordCount) {
   const S = Session.cur;
   if (!S || S.answered) return;
   const slot = document.getElementById("feedbackSlot");
   // Единый loading сайта (тот же loaderHTML, что на boot): только смена
   // текста внутри существующего UI, без новых loader'ов и streaming.
+  // Само сочинение на время проверки скрыто.
+  essayClearReadonly();
+  essaySetFormVisible(false);
   slot.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart("feedbackSlot");
   const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
@@ -3706,7 +3935,11 @@ async function essayRunChecks(t, text, clientId, wordCount) {
     aiRes = await fetch("/api/ai/essay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      // taskId нужен серверу, чтобы выбрать рубрику: у заданий с исходным
+      // текстом строгая (позиция автора + два примера ИЗ текста), у свободных
+      // тем — «тезис + аргументы». Сам текст исходника уходит один раз, при
+      // загрузке экрана, и в проверку не дублируется.
+      body: JSON.stringify({ text, taskId: t.id }),
     });
     aiData = await aiRes.json().catch(() => ({}));
   } catch (_) { aiRes = null; }
@@ -3727,6 +3960,7 @@ async function essayRunChecks(t, text, clientId, wordCount) {
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
       </div>`;
+    essaySetFormVisible(true);
     const btn = document.getElementById("essaySubmitBtn");
     if (btn) { btn.style.display = ""; btn.disabled = false; btn.textContent = "Отправить сочинение"; }
     const input = document.getElementById("essayInput");
@@ -3754,6 +3988,9 @@ async function essayRunChecks(t, text, clientId, wordCount) {
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
       </div>`;
+    essaySetFormVisible(true);
+    const retryInput = document.getElementById("essayInput");
+    if (retryInput) retryInput.disabled = false;
     return;
   }
   const submission = savedData.submission;
@@ -3771,6 +4008,10 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   if (S.essayDraftByTask) delete S.essayDraftByTask[t.id];
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = submission;
+  // Редактор уже скрыт на время проверки — оставляем скрытым и показываем
+  // исходный текст readonly: менять его после отправки уже нельзя.
+  essaySetFormVisible(false);
+  essayMountReadonly(text, wordCount);
   const input = document.getElementById("essayInput");
   if (input) input.disabled = true;
   const submitBtn = document.getElementById("essaySubmitBtn");
@@ -3833,6 +4074,9 @@ async function sessionEssaySubmit() {
   S.essayReadyByTask[t.id] = { taskId: t.id, clientId: data.clientId, text, wordCount: data.wordCount, status: "submitted" };
   input.disabled = true;
   btn.style.display = "none";
+  // Сразу скрываем само сочинение — остаётся только единый лоадер.
+  essayClearReadonly();
+  essaySetFormVisible(false);
   // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри).
   await essayRunChecks(t, text, data.clientId, data.wordCount);
 }

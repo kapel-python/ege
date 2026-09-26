@@ -23,6 +23,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -124,15 +125,22 @@ def ai_rate_ok(caller: str) -> tuple[bool, int]:
     return allowed, retry
 
 
-def ai_take(keys: list[str]) -> tuple[bool, int]:
-    """Charge one AI call against every key at once.
+def ai_take(keys: list[str], count: int = 1) -> tuple[bool, int]:
+    """Charge `count` AI calls against every key at once.
 
     A per-user bucket alone is not a limit: the cookie is the only proof of
     identity, so a client that simply stops sending it gets a brand-new guest —
     and a fresh budget — on every request. Callers therefore also pass an IP
     key, and the call is charged to all keys or to none, so a rejected request
-    never burns one bucket while leaving the other intact.
+    never burns one bucket while leaving the other intact. Multi-call formats
+    (assessment plus a possible calibration, see charges_for) reserve the whole
+    cost atomically: either every key affords all `count` charges or nothing
+    is spent.
     """
+    try:
+        count = max(1, int(count))
+    except (TypeError, ValueError):
+        count = 1
     try:
         now = time.time()
         with _ai_lock:
@@ -140,11 +148,11 @@ def ai_take(keys: list[str]) -> tuple[bool, int]:
             for key in keys:
                 name = str(key or "?")
                 recent = [t for t in _ai_hits.get(name, []) if now - t < AI_RATE_WINDOW_SEC]
-                if len(recent) >= AI_RATE_MAX:
-                    return False, max(1, int(AI_RATE_WINDOW_SEC - (now - recent[0])))
+                if len(recent) + count > AI_RATE_MAX:
+                    return False, max(1, int(AI_RATE_WINDOW_SEC - (now - recent[0]))) if recent else 1
                 buckets[name] = recent
             for name, recent in buckets.items():
-                recent.append(now)
+                recent.extend([now] * count)
                 _ai_hits[name] = recent
         return True, 0
     except Exception:
@@ -344,6 +352,10 @@ def _clean_text(value: Any) -> str:
 # ответе; полные формулировки критериев живут в _ESSAY_SYSTEM.
 # Максимумы живут здесь, а не берутся из ответа модели: иначе модель может
 # «повысить» потолок и нарисовать себе 30 из 30.
+# Критерии задания 27: ученик пишет по ПРОЧИТАННОМУ тексту, поэтому К1 — это
+# позиция автора исходника, а К2 требует два примера именно из него. Рубрика
+# одна: свободное сочинение без исходника продукт не предлагает (иначе модель
+# ругает «примеры из других книг» — см. историю этого промпта).
 ESSAY_CRITERIA: tuple[tuple[str, str, int], ...] = (
     ("K1", "Позиция автора", 1),
     ("K2", "Комментарий", 3),
@@ -520,7 +532,7 @@ def score_grammar(text: str) -> list:
     return criteria
 
 
-_ESSAY_SYSTEM = """СИТУАЦИЯ
+_ESSAY_SYSTEM_SOURCE = """СИТУАЦИЯ
 
 Ученик прочитал литературный текст и написал по нему сочинение-рассуждение: назвал \
 проблему, прокомментировал позицию автора примерами, высказал своё отношение к ней. \
@@ -739,11 +751,15 @@ II. Речевое оформление сочинения
 }"""
 
 
-def _essay_user(text: str) -> str:
-    return f"Объём работы: {count_words(text)} слов.\n\n--- ТЕКСТ СОЧИНЕНИЯ ---\n{text}"
+def _essay_user_source(text: str, problem: str = "") -> str:
+    """Задание ученику: текст работы + проблема, которую задаёт исходник."""
+    lead = f"Проблема, поставленная в исходном тексте: {problem}." if problem else \
+        "Проблема в исходном тексте не названа — найди её сам по тексту."
+    return f"{lead}\n\nОбъём работы: {count_words(text)} слов.\n\n--- ТЕКСТ СОЧИНЕНИЯ ---\n{text}"
 
 
-def validate_essay(raw: dict, words: int = 0) -> dict:
+def validate_essay(raw: dict, words: int = 0,
+                   criteria: tuple = ESSAY_CRITERIA) -> dict:
     """Проверяет содержательную разметку модели (К1–К6) и пересчитывает итоги.
 
     `total_score` и `max_score` не берутся из ответа, а считаются заново:
@@ -772,7 +788,9 @@ def validate_essay(raw: dict, words: int = 0) -> dict:
     # Модель отвечает только за содержание: К7–К10 в её ответе — нарушение
     # схемы, а не «лишнее, которое можно выкинуть». Выкидывать молча нельзя:
     # merge ниже добавил бы свои К7–К10, и клиент получил бы критерии дважды.
-    model_ids = {cid for cid, _n, _m in ESSAY_MODEL_CRITERIA}
+    # Реестр (названия/максимумы) задаёт режим: свободная тема или исходник.
+    model_registry = tuple(criteria[:6])
+    model_ids = {cid for cid, _n, _m in model_registry}
     stray = sorted(set(by_id) - model_ids)
     if stray:
         raise AIFormatError(f"модель вернула чужие критерии: {', '.join(stray)}")
@@ -780,7 +798,7 @@ def validate_essay(raw: dict, words: int = 0) -> dict:
     criteria: list[dict] = []
     total = 0
     expected_max = 0
-    for cid, name, official_max in ESSAY_MODEL_CRITERIA:
+    for cid, name, official_max in model_registry:
         item = by_id.get(cid)
         if item is None:
             raise AIFormatError(f"нет критерия {cid}")
@@ -803,7 +821,7 @@ def validate_essay(raw: dict, words: int = 0) -> dict:
         criteria.append({"id": cid, "name": name, "score": score,
                          "max_score": max_score, "comment": comment})
 
-    model_max = sum(item[2] for item in ESSAY_MODEL_CRITERIA)
+    model_max = sum(item[2] for item in model_registry)
     if expected_max != model_max:
         raise AIFormatError(f"сумма максимумов {expected_max}, а должно быть {model_max}")
 
@@ -832,6 +850,8 @@ def merge_essay(partial: dict, grammar: list, words: int = 0) -> dict:
     Баллы грамотности всё равно перепроверяются и зажимаются в максимум:
     это наш код, но контракт ответа клиенту не должен зависеть от того,
     кто его заполнил. Короткая работа обнуляет и этот блок — по ключу.
+    Поле calibration заполняет run_format, когда срабатывает вторая
+    инстанция (см. calibrate_essay); здесь всегда None.
     """
     criteria = list(partial["criteria"])
     total = partial["total_score"]
@@ -857,42 +877,174 @@ def merge_essay(partial: dict, grammar: list, words: int = 0) -> dict:
         "criteria": criteria,
         "what_to_improve": partial["what_to_improve"],
         "recommendation": partial["recommendation"],
+        # Метаданные вето — перед вердиктом: short_verdict остаётся строго
+        # последним полем и у модели, и в ответе клиенту.
+        "calibration": None,
         "short_verdict": partial["short_verdict"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Калибровка итога — вторая инстанция (вето, не переподсчёт)
+#
+# Дыра: мусор (набор слов, чужой промпт) получает К1–К6 около нуля, а
+# детерминированная грамотность честно ставит ему 10–12 за отсутствие
+# ошибок — итог 10/22 за работу, которая сочинением не является. Первый
+# проход чинить нельзя: его дело — оценить содержание, а грамотность
+# обязана оставаться детерминированной (иначе вернётся лотерея баллов).
+# Поэтому после склейки, и только когда работа подозрительна (позиции
+# нет — К1=0, а грамотность насчитала баллы), тот же провайдер новым
+# коротким чатом отвечает одним числом — окончательным итогом.
+# Второму запросу текст даём полностью: входные токены стоят доли копейки,
+# а без текста инстанция не добавляет новой информации — лишь пересказывает
+# первую и не способна ни подтвердить мусор независимо, ни спасти настоящее
+# сочинение при ошибке К1. Вето только
+# понижает (сервер зажимает ответ в [0, предложенный итог]): поднять
+# баллы выше суммы показанных критериев калибровка не может, иначе
+# разбор и итог разойдутся. Обычные работы (К1=1) второго запроса не
+# делают — без роста цены и задержки. Короткие работы обнулены раньше
+# и сюда не доходят (грамотность уже 0 — ветировать нечего).
+# ---------------------------------------------------------------------------
+ESSAY_CALIBRATION_MAX_TOKENS = 16
+CAL_TIMEOUT_SEC = float(_env("EGE_AI_CAL_TIMEOUT_SEC", default="30") or 30)
+
+def _calibration_system(source: bool) -> str:
+    """Текст второй инстанции под режим: в «free» виноват отсутствующий тезис,
+    в «source» — неразобранный исходный текст (позиция автора не сформулирована)."""
+    subject = ("ученик не разобрал исходный текст: позиция автора (К1) не сформулирована"
+               if source else "тезиса по теме (К1) в тексте нет")
+    return f"""СИТУАЦИЯ
+Ученик прислал текст на проверку сочинения ЕГЭ. Первая проверка уже оценила содержание: {subject} — работа не привязана к заданию. Автоматическая проверка грамотности при этом насчитала баллы. Предложенный итог — сумма обеих оценок.
+Твоя задача — решить судьбу грамотностных баллов одним числом. Тебе даны текст и обе оценки: читай текст сам, описаниям первой проверки доверяй лишь как подсказке. Если текст — не сочинение по заданию (набор слов, промпт, мусор, чужой текст), грамотность не оценивается: итог равен баллам содержания. Если это настоящее, но слабое сочинение — оставь предложенный итог.
+Ответ — только одно целое число от 0 до предложенного итога, без слов, знаков и пояснений. Больше предложенного итога ставить запрещено."""
+
+
+def _essay_calibration_user(text: str, partial: dict, grammar: list, proposed: int) -> str:
+    def rows(items: list) -> str:
+        lines = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            lines.append(f"{item.get('id')}: {item.get('score')}/{item.get('max_score')} — {item.get('comment')}")
+        return "\n".join(lines)
+    content_total = partial["total_score"]
+    grammar_total = proposed - content_total
+    return (
+        f"Баллы содержания: {content_total}. Баллы грамотности: {grammar_total}. "
+        f"Предложенный итог: {proposed}.\n\n--- ТЕКСТ ---\n{text}\n\n"
+        f"--- ОЦЕНКА СОДЕРЖАНИЯ ---\n{rows(partial['criteria'])}\n\n"
+        f"--- ОЦЕНКА ГРАМОТНОСТИ ---\n{rows(grammar)}"
+    )
+
+
+def calibrate_essay(text: str, partial: dict, grammar: list, proposed: int,
+                    source: bool = False) -> tuple[int, str | None]:
+    """Одним числом вынести окончательный итог. Возвращает (итог, причина).
+
+    Причина — серверная, детерминированная: что случилось (полное вето или
+    частичная корректировка), а не интерпретация модели. Так разбор (те же
+    критерии) и итог всегда сходятся, а контракт ответа — одно число —
+    не плодит новых классов ошибок парсинга. Не число или число вне
+    [0, proposed] — AIFormatError (endpoint даст 502, как за мусор от
+    модели в первом проходе): частично собранный итог не выдаём.
+    """
+    try:
+        content_total = int(partial["total_score"])
+        proposed_int = int(proposed)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        raise AIFormatError("калибровка: нет итога первой проверки") from None
+    if proposed_int <= 0:
+        raise AIFormatError("калибровка: нечего проверять")
+    body = _clean_text(text)
+    if not body:
+        raise AIInputError("пустой текст")
+    raw = chat([{"role": "system", "content": _calibration_system(source)},
+                {"role": "user", "content": _essay_calibration_user(body, partial, grammar, proposed_int)}],
+               max_tokens=ESSAY_CALIBRATION_MAX_TOKENS, timeout=CAL_TIMEOUT_SEC)
+    match = re.search(r"(?m)^\s*(\d+)\s*$", raw or "")
+    if not match:
+        raise AIFormatError("калибровка ответила не числом")
+    final = int(match.group(1))
+    if final < 0 or final > proposed_int:
+        raise AIFormatError("калибровка вышла за рамки итога")
+    if final == proposed_int:
+        return final, None
+    if final == content_total:
+        note = "Текст не является сочинением по заданию — засчитаны только баллы содержания."
+    else:
+        note = f"Повторная проверка скорректировала итог: {proposed_int} → {final}."
+    return final, note
 
 
 FORMATS: dict[str, dict] = {
     "essay": {
         "max_input_chars": MAX_INPUT_CHARS,
-        "system": _ESSAY_SYSTEM,
-        "user": _essay_user,
+        "system": _ESSAY_SYSTEM_SOURCE,
+        "user": _essay_user_source,
         "validate": validate_essay,
         # Детерминированный блок: грамотность считается без модели, затем
         # merge склеивает обе части в ответ на 22 балла.
         "grammar": score_grammar,
         "merge": merge_essay,
+        # Вторая инстанция: вето на незаслуженные баллы грамотности, когда
+        # работа без тезиса (К1=0) их тянет. Только понижает, вызывается
+        # новым коротким чатом уже после склейки (см. run_format).
+        "calibration": calibrate_essay,
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Режим формата "essay" один: "source" — сочинение-рассуждение по прочитанному
+# тексту (позиция автора, два примера ИЗ текста, отношение с примером-аргументом).
+# Свободной темы без исходника продукт не предлагает: там модель неизбежно
+# спорит с учеником («примеры из других книг» — не нарушение задания).
+# ---------------------------------------------------------------------------
+ESSAY_SOURCE_MODES = ("source",)
+
+
+def charges_for(format_id: str) -> int:
+    """Сколько вызовов модели может стоить один запрос формата.
+
+    Обычный формат — один вызов. Сочинение — до двух: оценка плюс
+    возможная калибровка итога. Списывается заранее и атомарно через
+    ai_take(..., count): начатая проверка не должна упереться в пустой
+    бюджет посередине.
+    """
+    spec = FORMATS.get(_clean_text(format_id))
+    if spec is None:
+        return 1
+    return 2 if callable(spec.get("calibration")) else 1
 
 
 def format_ids() -> list[str]:
     return sorted(FORMATS)
 
 
-def run_format(format_id: str, text: str) -> dict:
+def run_format(format_id: str, text: str, *, source: str | None = None,
+               problem: str = "") -> dict:
     """Validate the input, call the model, return the normalised result.
 
     Only `text` is accepted from the caller: the model, the system prompt and
     the rubric are server-side, so a client cannot point the metered call at a
     cheaper model or rewrite the grading instructions.
 
-    If a format declares a deterministic block ("grammar" + "merge"), both
-    halves run in parallel: the model takes 13–21 с, LanguageTool — 1–3 с,
-    so the literacy block adds no latency to the wait.
+    `source` is the only rubric: a сочинение-рассуждение по прочитанному
+    тексту — позиция автора исходника, два примера ИЗ него, отношение с
+    примером-аргументом. Сам исходник оценщику не нужен (его уже прочитал
+    ученик), достаточно `problem`. Контракт ответа: К1–К10, 22 балла,
+    вердикт последним. Неизвестный режим — AIInputError (наш 400), а не
+    молча другая рубрика.
     """
     spec = FORMATS.get(_clean_text(format_id))
     if spec is None:
         raise AIInputError("неизвестный формат")
+    mode = _clean_text(source) or "source"
+    if mode not in ESSAY_SOURCE_MODES:
+        raise AIInputError(f"неизвестный режим проверки: {mode}")
+    system_prompt = _ESSAY_SYSTEM_SOURCE
+    user_prompt = lambda body: _essay_user_source(body, problem)  # noqa: E731
+    registry = ESSAY_CRITERIA
     body = _clean_text(text)
     if not body:
         raise AIInputError("пустой текст")
@@ -901,10 +1053,26 @@ def run_format(format_id: str, text: str) -> dict:
     words = count_words(body)
     grammar_fn = spec.get("grammar")
     if grammar_fn is None:
-        return spec["validate"](chat_json(spec["system"], spec["user"](body)), words)
+        return spec["validate"](chat_json(system_prompt, user_prompt(body)), words, registry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        model_future = pool.submit(chat_json, spec["system"], spec["user"](body))
+        model_future = pool.submit(chat_json, system_prompt, user_prompt(body))
         grammar_future = pool.submit(grammar_fn, body)
-        partial = spec["validate"](model_future.result(), words)
+        partial = spec["validate"](model_future.result(), words, registry)
         grammar = grammar_future.result()
-    return spec["merge"](partial, grammar, words)
+    merged = spec["merge"](partial, grammar, words)
+    calibrate_fn = spec.get("calibration")
+    if not callable(calibrate_fn):
+        return merged
+    by_id = {c.get("id"): c for c in partial["criteria"] if isinstance(c, dict)}
+    try:
+        k1 = int((by_id.get("K1") or {}).get("score", 1))
+    except (TypeError, ValueError):
+        k1 = 1
+    grammar_sum = merged["total_score"] - partial["total_score"]
+    if k1 != 0 or grammar_sum <= 0:
+        return merged
+    proposed = merged["total_score"]
+    final, note = calibrate_fn(body, partial, grammar, proposed, mode == "source")
+    merged["total_score"] = final
+    merged["calibration"] = {"proposed": proposed, "final": final, "note": note} if note else None
+    return merged

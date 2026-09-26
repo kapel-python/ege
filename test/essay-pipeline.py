@@ -109,7 +109,7 @@ def main():
             text = words(200)
             # 1. submission — проверка НЕ завершена, XP нет
             status, sub = request(opener, base, "/api/essays", "POST", {
-                "subject": "russian", "taskId": "re_1_1", "skill": "russian_essay",
+                "subject": "russian", "taskId": "re27_1", "skill": "russian_essay_source",
                 "text": text, "id": "pipe-1"})
             check("SUBMIT ok, status submitted", status == 200 and sub.get("evaluationStatus") == "submitted", str(sub)[:160])
             check("SUBMIT returns clientId", bool(sub.get("clientId")), str(sub)[:160])
@@ -118,13 +118,13 @@ def main():
             check("XP is zero right after submit", boot0["state"]["xp"] == 0, f"xp={boot0['state']['xp']}")
 
             # 2. до проверок готового результата нет
-            status, got = request(opener, base, "/api/essays?subject=russian&taskId=re_1_1")
+            status, got = request(opener, base, "/api/essays?subject=russian&taskId=re27_1")
             check("GET before checks: submitted, no result",
                   status == 200 and got["submission"]["status"] == "submitted"
                   and got["submission"]["result"] is None, str(got)[:200])
 
             # 3. AI check существующим route (модель + алгоритмы внутри)
-            status, ai_res = request(opener, base, "/api/ai/essay", "POST", {"text": text})
+            status, ai_res = request(opener, base, "/api/ai/essay", "POST", {"text": text, "taskId": "re27_1"})
             res = ai_res.get("result", {})
             check("AI 200 with 10 criteria on 22",
                   status == 200 and res.get("max_score") == 22 and len(res.get("criteria", [])) == 10,
@@ -146,7 +146,7 @@ def main():
                   and saved["submission"]["status"] == "ready", f"{status} {str(saved)[:200]}")
 
             # 5. result ready — тот же submission, те же баллы
-            status, got2 = request(opener, base, "/api/essays?subject=russian&taskId=re_1_1")
+            status, got2 = request(opener, base, "/api/essays?subject=russian&taskId=re27_1")
             r2 = got2.get("submission", {})
             check("GET after checks: ready with same scores",
                   status == 200 and r2.get("status") == "ready"
@@ -176,12 +176,34 @@ def main():
             check("GET by clientId returns exact submission",
                   status == 200 and exact["submission"]["clientId"] == client_id
                   and (exact["submission"].get("view") or {}).get("total_score") == 19, f"{status}")
+            sid = (got2.get("submission") or {}).get("submissionId")
+            status, by_sid = request(opener, base, f"/api/essays?subject=russian&sid={sid}")
+            check("GET by short sid returns same submission",
+                  status == 200 and by_sid["submission"]["submissionId"] == sid
+                  and (by_sid["submission"].get("view") or {}).get("total_score") == 19, f"{status}")
+            status, nosub = request(opener, base, f"/api/essays?sid={sid}")
+            check("GET sid without subject (pretty link) finds it",
+                  status == 200 and nosub["submission"]["submissionId"] == sid
+                  and nosub.get("subject") == "russian", f"{status} {nosub}")
+            status, bad_sid = request(opener, base, "/api/essays?subject=russian&sid=999999999")
+            check("GET unknown sid -> 404", status == 404, f"{status}")
+            status, no_id = request(opener, base, "/api/essays?subject=russian")
+            check("GET without id -> 400", status == 400, f"{status}")
+            # Красивый роут отдаёт ту же страницу результата.
+            try:
+                with opener.open(urllib.request.Request(base + f"/essay/{sid}"), timeout=10) as resp:
+                    pretty_status, pretty_type, pretty_body = resp.status, resp.headers.get("Content-Type", ""), resp.read()
+            except urllib.error.HTTPError as exc:
+                pretty_status, pretty_type, pretty_body = exc.code, "", b""
+            check("GET /essay/<sid> serves result page",
+                  pretty_status == 200 and "text/html" in pretty_type
+                  and "Результат проверки" in pretty_body.decode("utf-8", "replace"), f"{pretty_status} {pretty_type}")
 
             # 6. XP — только теперь, существующим attempts-flow
             ver = got2.get("submission") and request(opener, base, "/api/bootstrap?subject=russian")[1]["state"]["stateVersion"]
             status, att = request(opener, base, "/api/events/attempts", "POST", {
                 "subject": "russian", "expectedVersion": ver,
-                "events": [{"taskId": "re_1_1", "skill": "russian_essay", "correct": True,
+                "events": [{"taskId": "re27_1", "skill": "russian_essay_source", "correct": True,
                             "hintLevel": 0, "seconds": 120, "id": "attempt-pipe-1"}]})
             check("ATTEMPT after ready accepted", status == 200 and att.get("ok") is True, str(att)[:160])
             status, boot1 = request(opener, base, "/api/bootstrap?subject=russian")
@@ -189,14 +211,14 @@ def main():
 
             # 7. ошибочный сценарий: failed — результата нет, чужой не видит
             status, sub2 = request(opener, base, "/api/essays", "POST", {
-                "subject": "russian", "taskId": "re_1_2", "skill": "russian_essay",
+                "subject": "russian", "taskId": "re27_2", "skill": "russian_essay_source",
                 "text": words(160), "id": "pipe-2"})
             cid2 = sub2.get("clientId")
             status, fail = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": cid2, "status": "failed"})
             check("FAILED marks not-ready", status == 200 and fail["submission"]["status"] == "failed"
                   and fail["submission"]["result"] is None, f"{status} {str(fail)[:160]}")
-            status, gotf = request(opener, base, "/api/essays?subject=russian&taskId=re_1_2")
+            status, gotf = request(opener, base, "/api/essays?subject=russian&taskId=re27_2")
             check("GET failed: no result to show", status == 200 and gotf["submission"]["status"] == "failed"
                   and gotf["submission"]["result"] is None)
             check("GET failed: no view either", gotf["submission"].get("view") is None)
@@ -207,19 +229,83 @@ def main():
 
             stranger = make_device()
             status, _ = request(stranger, base, "/api/subject", "POST", {"subject": "russian"})
-            status, leak = request(stranger, base, "/api/essays?subject=russian&taskId=re_1_1")
+            status, leak = request(stranger, base, "/api/essays?subject=russian&taskId=re27_1")
             check("чужой GET не видит submission (404)", status == 404, f"{status} {leak}")
             status, leak2 = request(stranger, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": client_id, "status": "failed"})
             check("чужой EVALUATION не трогает submission (404)", status == 404, f"{status} {leak2}")
-            status, mine = request(opener, base, "/api/essays?subject=russian&taskId=re_1_1")
+            status, leak3 = request(stranger, base, f"/api/essays?subject=russian&sid={sid}")
+            check("чужой sid не открывает submission (404)", status == 404, f"{status} {leak3}")
+            status, mine = request(opener, base, "/api/essays?subject=russian&taskId=re27_1")
             check("свой результат цел после чужих попыток",
                   status == 200 and mine["submission"]["status"] == "ready")
+
+            # 7б. Рубрика одна и выбирается сервером по заданию: у задания с
+            # исходником — позиция автора, примеры ИЗ текста. Без исходника
+            # проверки не существует, и клиент её не может включить.
+            ai.reset_ai_rate()
+            text27 = words(200)
+            status, ai_src = request(opener, base, "/api/ai/essay", "POST",
+                                    {"text": text27, "taskId": "re27_1"})
+            src_names = [c["name"] for c in (ai_src.get("result") or {}).get("criteria", [])][:3]
+            check("рубрика задания 27 (позиция автора)",
+                  status == 200 and src_names == ["Позиция автора", "Комментарий", "Собственное отношение"],
+                  f"{status} {src_names}")
+            ai.reset_ai_rate()
+            status, ai_plain = request(opener, base, "/api/ai/essay", "POST", {"text": text27})
+            check("без задания проверки нет (нужен исходный текст)", status == 400, f"{status} {ai_plain}")
+            status, ai_bad = request(opener, base, "/api/ai/essay", "POST",
+                                     {"text": text27, "taskId": "re27_1", "source": "source"})
+            check("клиент не может навязать режим рубрики", status == 400, f"{status} {ai_bad}")
+            ai.reset_ai_rate()
+            status, ai_unknown = request(opener, base, "/api/ai/essay", "POST",
+                                         {"text": text27, "taskId": "nope"})
+            check("неизвестное задание -> 400", status == 400, f"{status} {ai_unknown}")
+            ai.reset_ai_rate()
+            status, ai_free_task = request(opener, base, "/api/ai/essay", "POST",
+                                           {"text": text27, "taskId": "re_1_1"})
+            check("задание без исходника проверкой не является", status == 400, f"{status} {ai_free_task}")
 
             # идемпотентность повторной фиксации
             status, dup = request(opener, base, "/api/essays/evaluation", "POST", {
                 "subject": "russian", "clientId": client_id, "status": "ready", "result": res})
             check("READY idempotent", status == 200 and dup["submission"]["status"] == "ready")
+
+            # 8. вето второй инстанции сквозняком: работа без позиции (К1=0)
+            # не harvestит баллы грамотности — итог 0 с объяснением на экране.
+            ai.reset_ai_rate()
+            calls = {"n": 0}
+
+            def scripted(messages, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    body = model_payload()
+                    body["criteria"][0]["score"] = 0  # К1=0, содержание 6
+                    return json.dumps(body, ensure_ascii=False)
+                return "0"
+
+            ai.chat = scripted
+            veto_text = words(200, "мусор")
+            status, sub3 = request(opener, base, "/api/essays", "POST", {
+                "subject": "russian", "taskId": "re27_3", "skill": "russian_essay_source",
+                "text": veto_text, "id": "pipe-3"})
+            cid3 = sub3.get("clientId")
+            status, ai3 = request(opener, base, "/api/ai/essay", "POST", {"text": veto_text, "taskId": "re27_3"})
+            res3 = ai3.get("result", {})
+            cal3 = res3.get("calibration") or {}
+            check("VETO second AI call happened", status == 200 and calls["n"] == 2,
+                  f"{status} calls={calls['n']}")
+            check("VETO total zeroed", res3.get("total_score") == 0, str(res3.get("total_score")))
+            check("VETO recorded", cal3.get("proposed") == 18 and cal3.get("final") == 0
+                  and "18 → 0" in str(cal3.get("note")), str(cal3))
+            status, saved3 = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "russian", "clientId": cid3, "status": "ready", "result": res3})
+            check("VETO ready persists", status == 200 and saved3["submission"]["status"] == "ready")
+            status, got3 = request(opener, base, "/api/essays?subject=russian&clientId=" + cid3)
+            view3 = (got3.get("submission") or {}).get("view") or {}
+            check("VETO note reaches result page",
+                  status == 200 and view3.get("total_score") == 0
+                  and "18 → 0" in str(view3.get("calibration_note")), str(view3.get("calibration_note")))
         finally:
             httpd.shutdown()
             httpd.server_close()

@@ -12,6 +12,7 @@ Live-проверка на настоящем ключе — отдельный 
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -227,23 +228,25 @@ def test_validate(ai) -> None:
           "word_count_status" not in ai.validate_essay(
               {**valid_payload(), "word_count_status": "too_short"}, 300))
     check("состав ответа ровно как в задании",
-          sorted(result) == ["criteria", "max_score", "recommendation",
+          sorted(result) == ["calibration", "criteria", "max_score", "recommendation",
                              "short_verdict", "total_score", "what_to_improve"],
           str(sorted(result)))
 
     # Промпт должен содержать сами критерии, а не только «оцени по K1..K10».
     for needle, label in (
-        ("ИСХОДНЫЙ ТЕКСТ НЕ ДАН", "честная оговорка про исходный текст"),
+        ("ИСХОДНЫЙ ТЕКСТ НЕ ДАН", "честная оговорка: исходника у оценщика нет"),
+        ("не снимай балл за то, что не можешь сверить цитату или деталь с источником",
+         "запрет минусовать за несверяемую цитату"),
         ("К1. Отражение позиции автора", "К1 сформулирован"),
-        ("К2. Комментарий к позиции", "К2 сформулирован"),
+        ("К2. Комментарий к позиции автора", "К2 сформулирован"),
         ("К3. Собственное отношение", "К3 сформулирован"),
         ("К4. Фактическая точность речи", "К4 сформулирован"),
         ("К5. Логичность речи", "К5 сформулирован"),
         ("К6. Соблюдение этических норм", "К6 сформулирован"),
         ("проверяет отдельный автоматический инструмент", "грамотность вынесена из модели"),
         ("Идентификаторы критериев строго K1..K6", "схема из 6 критериев"),
-        ("комикс, аниме, манга", "запрет негодных примеров"),
         ("смысловая связь между примерами", "требование К2 к связи"),
+        ("комикс, аниме, манга", "запрет негодных примеров-аргументов"),
         ("short_verdict: 2–3 предложения", "правила заполнения"),
         ("recommendation: 1–2 предложения", "правила заполнения"),
         ("2–5 конкретных правок", "правила заполнения"),
@@ -314,11 +317,213 @@ def test_rate_limit(ai) -> None:
     check("сброс работает", ai.ai_take(["user:1"])[0] is True)
 
 
+def test_charges(ai) -> None:
+    section("charges_for/ai_take(count): сочинение резервирует 2 вызова")
+    check("essay стоит 2 (оценка + возможная калибровка)", ai.charges_for("essay") == 2)
+    check("неизвестный формат стоит 1", ai.charges_for("nope") == 1)
+    check("пустой формат стоит 1", ai.charges_for("") == 1)
+
+    # Атомарность: либо все ключи тянут весь count, либо не списывается ничего.
+    ai.reset_ai_rate()
+    check("первый count=2 проходит", ai.ai_take(["u"], 2)[0] is True)
+    allowed, _ = ai.ai_take(["u"], 2)
+    check("второй count=2 отклонён (2+2>3)", allowed is False)
+    check("отказ не сжёг бюджет: count=1 ещё проходит", ai.ai_take(["u"])[0] is True)
+    check("после исчерпания и 1 отклоняется", ai.ai_take(["u"])[0] is False)
+    ai.reset_ai_rate()
+    check("пара ключей списывается вместе", ai.ai_take(["a", "b"], 2)[0] is True)
+    check("нехватка на одном ключе блочит всю связку", ai.ai_take(["a", "c"], 2)[0] is False)
+    check("незадетый ключ связки цел", ai.ai_take(["c"])[0] is True)
+    ai.reset_ai_rate()
+
+
+def test_source_mode(ai) -> None:
+    section("run_format(source): режим работы с исходным текстом")
+    original_chat = ai.chat
+    original_lt = ai.lt_check
+    ai.lt_check = lambda text: []
+    try:
+        check("режим один — source", set(ai.ESSAY_SOURCE_MODES) == {"source"})
+        check("названия критериев — как в задании 27",
+              [c[1] for c in ai.ESSAY_CRITERIA[:3]] == ["Позиция автора", "Комментарий", "Собственное отношение"],
+              str([c[1] for c in ai.ESSAY_CRITERIA[:3]]))
+        for bad in ("SOURCE", "unknown", "27", "free"):
+            try:
+                ai.run_format("essay", LONG_TEXT, source=bad)
+                check(f"отклонён режим {bad!r}", False, "принято")
+            except ai.AIInputError:
+                check(f"отклонён режим {bad!r}", True)
+
+        seen: list = []
+        def spy(messages, **kwargs):
+            seen.extend(messages)
+            return json.dumps(valid_payload(), ensure_ascii=False)
+        ai.chat = spy
+        # Режим по умолчанию тоже source: отдельной «свободной» рубрики нет.
+        ai.run_format("essay", LONG_TEXT, problem="Как человек воспринимает природу?")
+        system = str(seen[0]["content"])
+        check("модель получила строгий промпт задания 27",
+              "К1. Отражение позиции автора" in system and "СИТУАЦИЯ" in system)
+        check("проблема исходника ушла в задание", "Как человек воспринимает природу?" in str(seen[1]["content"]))
+        # Оценщику сам исходник не нужен (он учеником уже прочитан): в сигнатуре
+        # нет параметра с исходным текстом, в задание уходят проблема и работа.
+        params = set(inspect.signature(ai.run_format).parameters)
+        user_msg = str(seen[1]["content"])
+        check("исходный текст в проверку не передаётся: у оценщика его нет",
+              params == {"format_id", "text", "source", "problem"}
+              and "тестовое" in user_msg and user_msg.count("--- ТЕКСТ") == 1
+              and "ИСХОДНЫЙ ТЕКСТ" not in user_msg.upper(),
+              str(sorted(params)))
+        out = ai.run_format("essay", LONG_TEXT, problem="Проблема?")
+        check("названия критериев в ответе — из рубрики исходника",
+              [c["name"] for c in out["criteria"][:3]] == ["Позиция автора", "Комментарий", "Собственное отношение"],
+              str([c["name"] for c in out["criteria"][:3]]))
+        check("шкала прежняя: 22 балла, 10 критериев",
+              out["max_score"] == 22 and len(out["criteria"]) == 10, str(out["max_score"]))
+    finally:
+        ai.chat = original_chat
+        ai.lt_check = original_lt
+
+
+def k1zero_payload() -> dict:
+    """Мусор с точки зрения первой проверки: К1=0 (позиции нет), остальное
+    ненулевое. Содержание 6, грамотность без совпадений 12, итог 18 —
+    классический случай под вето второй инстанции."""
+    body = valid_payload()
+    body["criteria"][0]["score"] = 0
+    return body
+
+
+def test_calibration(ai) -> None:
+    section("calibrate_essay: вторая инстанция — вето, только понижает")
+    original_chat = ai.chat
+    original_lt = ai.lt_check
+    ai.lt_check = lambda text: []  # офлайн: грамотность без совпадений (12 баллов)
+    try:
+        partial6 = {"total_score": 6, "criteria": [], "what_to_improve": [],
+                    "recommendation": "r", "short_verdict": "v"}
+
+        def run_cal(answer, content=6, proposed=18):
+            ai.chat = lambda messages, **kw: answer
+            return ai.calibrate_essay(LONG_TEXT, dict(partial6, total_score=content), [], proposed)
+
+        final, note = run_cal("0")
+        check("вето в 0 принимается", final == 0 and bool(note), f"{final} {note}")
+        final, note = run_cal("6")
+        check("итог на уровне содержания — полное вето с объяснением",
+              final == 6 and note and "содержания" in note, str(note))
+        final, note = run_cal("3")
+        check("частичная срезка с арифметикой",
+              final == 3 and note == "Повторная проверка скорректировала итог: 18 → 3.", str(note))
+        final, note = run_cal("18")
+        check("подтверждение итога без пометки", final == 18 and note is None)
+        final, note = run_cal("18\n")
+        check("перевод строки в конце допустим", final == 18 and note is None)
+
+        for label, answer in (
+            ("слова вместо числа", "Итог: ноль"),
+            ("пустой ответ", "   "),
+            ("число выше итога", "19"),
+            ("двузначное враньё", "99"),
+            ("отрицательное", "-1"),
+        ):
+            try:
+                run_cal(answer)
+                check(f"отклонено: {label}", False, "принято без ошибки")
+            except ai.AIFormatError:
+                check(f"отклонено: {label}", True)
+            except Exception as exc:  # noqa: BLE001
+                check(f"отклонено: {label}", False, f"{type(exc).__name__}: {exc}")
+
+        # Короткий запрос: мало токенов на выход, вменяемый таймаут.
+        seen: dict = {}
+        seen_msgs: list = []
+        def spy(messages, **kwargs):
+            seen.update(kwargs)
+            seen_msgs.extend(messages)
+            return "18"
+        ai.chat = spy
+        ai.calibrate_essay(LONG_TEXT, partial6, [], 18)
+        check("калибровка просит только число",
+              seen.get("max_tokens") == ai.ESSAY_CALIBRATION_MAX_TOKENS, str(seen))
+        check("текст уходит во второй запрос целиком (независимый взгляд)",
+              any("тестовое" in str(m.get("content", "")) for m in seen_msgs))
+        # В режиме исходника калибрующая инстанция говорит о неразобранном
+        # исходном тексте, а в свободной теме — о невысказанном тезисе.
+        check("калибровка упоминает неразобранный исходный текст",
+              "не разобрал исходный текст" in ai._calibration_system(True))
+        check("калибровка смотрит неразобранный исходный текст",
+              "не разобрал исходный текст" in ai._calibration_system(True))
+
+        # run_format: триггер — К1=0 при ненулевой грамотности.
+        calls: list = []
+        def scripted(messages, **kwargs):
+            calls.append(messages)
+            if len(calls) == 1:
+                return json.dumps(k1zero_payload(), ensure_ascii=False)
+            return "0"
+        ai.chat = scripted
+        out = ai.run_format("essay", LONG_TEXT)
+        check("K1=0 + грамотность → второй запрос", len(calls) == 2, str(len(calls)))
+        check("вето применено к итогу", out["total_score"] == 0, str(out["total_score"]))
+        cal = out.get("calibration") or {}
+        check("calibration расписан", cal.get("proposed") == 18 and cal.get("final") == 0
+              and bool(cal.get("note")), str(cal))
+
+        # Обычная работа (К1=1): второго запроса нет — без роста цены/задержки.
+        calls.clear()
+        ai.chat = lambda messages, **kwargs: (calls.append(messages),
+                                              json.dumps(valid_payload(), ensure_ascii=False))[1]
+        out = ai.run_format("essay", LONG_TEXT)
+        check("K1=1 → один запрос, без калибровки",
+              len(calls) == 1 and out["total_score"] == 19 and out.get("calibration") is None,
+              f"calls={len(calls)} total={out['total_score']}")
+
+        # Подтверждение предложенного итога: тоже без пометки.
+        calls.clear()
+        ai.chat = lambda messages, **kwargs: (calls.append(messages),
+                                              json.dumps(k1zero_payload(), ensure_ascii=False)
+                                              if len(calls) == 1 else "18")[1]
+        out = ai.run_format("essay", LONG_TEXT)
+        check("подтверждение итога: total цел, пометки нет",
+              out["total_score"] == 18 and out.get("calibration") is None, str(out["total_score"]))
+
+        # Короткая работа с К1=0: грамотность уже обнулена ключом — ветировать
+        # нечего, второго запроса нет.
+        calls.clear()
+        ai.chat = lambda messages, **kwargs: (calls.append(messages),
+                                              json.dumps(k1zero_payload(), ensure_ascii=False))[1]
+        out = ai.run_format("essay", "Короткий текст из трёх слов.")
+        check("короткая работа без второго запроса",
+              len(calls) == 1 and out["total_score"] == 0 and out.get("calibration") is None,
+              f"calls={len(calls)} total={out['total_score']}")
+
+        # Отказ транспорта калибровки — наружу как upstream-ошибка (endpoint
+        # даст 502/503), а не тихий старый итог.
+        def boom_then_fail(messages, **kwargs):
+            if len(calls) == 0:
+                calls.append(messages)
+                return json.dumps(k1zero_payload(), ensure_ascii=False)
+            raise ai.AIError("провайдер временно перегружен")
+        calls.clear()
+        ai.chat = boom_then_fail
+        try:
+            ai.run_format("essay", LONG_TEXT)
+            check("отказ калибровки → исключение", False, "принято без ошибки")
+        except (ai.AIError, ai.AIUnavailable):
+            check("отказ калибровки → исключение", True)
+        except Exception as exc:  # noqa: BLE001
+            check("отказ калибровки → исключение", False, f"{type(exc).__name__}: {exc}")
+    finally:
+        ai.chat = original_chat
+        ai.lt_check = original_lt
+
+
 # ---------------------------------------------------------------------------
 # 4. run_format: входные границы
 # ---------------------------------------------------------------------------
 def test_run_format_input(ai) -> None:
-    section("run_format: границы входа и изоляция промпта")
+    section("run_format: границы входа, режимы и изоляция промпта")
     calls: list[list[dict]] = []
     original = ai.chat
     original_lt = ai.lt_check
@@ -361,6 +566,17 @@ def test_run_format_input(ai) -> None:
                 check(f"отклонено: {label}", True, "AIInputError")
             except Exception as exc:  # noqa: BLE001
                 check(f"отклонено: {label}", False, f"{type(exc).__name__}: {exc}")
+
+        # Рубрика одна: работа с исходным текстом (см. test_source_mode),
+        # неизвестный режим — fail-closed (наш 400).
+        check("режим source — единственный", ai.ESSAY_SOURCE_MODES == ("source",))
+        try:
+            ai.run_format("essay", LONG_TEXT, source="источник")
+            check("неизвестный режим отклонён явно", False, "принято без ошибки")
+        except ai.AIInputError:
+            check("неизвестный режим отклонён явно", True, "AIInputError")
+        except Exception as exc:  # noqa: BLE001
+            check("неизвестный режим отклонён явно", False, f"{type(exc).__name__}: {exc}")
 
         # Модель не должна иметь возможности переопределить формат ответа.
         try:
@@ -539,7 +755,23 @@ def test_endpoint(server) -> None:
         check("гость получает сессию и 400 на пустом теле",
               status == 400 and "ege_session=" in jar, f"{status} {headers.get('Set-Cookie')}")
 
+        # Проверка идёт по заданию с исходным текстом, а оно живёт в
+        # предмете «russian»: гость переключается на него, иначе сервер честно
+        # ответит «задание не найдено» (предмет определяется по сессии).
+        status, _, switched = request_json(base + "/api/subject", method="POST",
+                                           body=json.dumps({"subject": "russian"}).encode("utf-8"),
+                                           content_type="application/json", cookie=jar)
+        check("переключились на русский предмет", status == 200, f"{status}")
+
         def post(payload, **kwargs):
+            # Задание с исходным текстом обязательно: без него проверки не
+            # существует (см. essay_source_mode_for_task).
+            payload = {"taskId": "re27_1", **payload}
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            return request_json(base + "/api/ai/essay", method="POST", body=body,
+                                content_type="application/json", cookie=jar, **kwargs)
+
+        def post_raw(payload, **kwargs):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             return request_json(base + "/api/ai/essay", method="POST", body=body,
                                 content_type="application/json", cookie=jar, **kwargs)
@@ -601,10 +833,12 @@ def test_endpoint(server) -> None:
         check("ref вместо текста ошибки", "ref" in body and "error" in body, str(body)[:160])
         ai.chat = lambda messages, **kw: json.dumps(valid_payload(), ensure_ascii=False)
 
-        # Исчерпание бюджета: 3 дешёвых 200, дальше 429.
+        # Исчерпание бюджета: сочинение стоит 2 вызова (оценка + возможная
+        # калибровка, см. charges_for), при EGE_AI_RATE_MAX=3 второй запрос
+        # уже упирается в лимит.
         ai.reset_ai_rate()
         codes = [post({"text": "ок"})[0] for _ in range(5)]
-        check("после лимита -> 429", codes[3:] == [429, 429], str(codes))
+        check("после лимита -> 429", codes[0] == 200 and codes[1:] == [429, 429, 429, 429], str(codes))
         status, headers, body = post({"text": "ок"})
         check("429 с Retry-After", headers.get("Retry-After", "").isdigit(), str(headers.get("Retry-After")))
         check("429 объясняет клиенту", "retryAfter" in body, str(body)[:160])
@@ -612,10 +846,11 @@ def test_endpoint(server) -> None:
 
         # Регрессия: клиент перестаёт слать cookie и каждый запрос получает
         # нового гостя. Без ключа IP лимит обходится и баланс уходит.
+        # Сочинение стоит 2: первому анониму хватает, остальным — нет.
         anonymous = [request_json(base + "/api/ai/essay", method="POST",
-                                  body=json.dumps({"text": "ок"}).encode("utf-8"),
+                                  body=json.dumps({"text": "ок", "taskId": "re27_1", "subject": "russian"}).encode("utf-8"),
                                   content_type="application/json")[0] for _ in range(6)]
-        check("сброс cookie не обходит лимит", anonymous[3:] == [429, 429, 429], str(anonymous))
+        check("сброс cookie не обходит лимит", anonymous[0] == 200 and anonymous[1:] == [429] * 5, str(anonymous))
         ai.reset_ai_rate()
 
         # Провайдер недоступен -> 503 и никакого текста провайдера наружу.
@@ -721,7 +956,7 @@ def test_live(ai) -> None:
     check("советы непустые", len(result["what_to_improve"]) > 0, str(result["what_to_improve"]))
     check("в живом ответе нет word_count_status", "word_count_status" not in result)
     check("состав живого ответа как в задании",
-          sorted(result) == ["criteria", "max_score", "recommendation",
+          sorted(result) == ["calibration", "criteria", "max_score", "recommendation",
                              "short_verdict", "total_score", "what_to_improve"],
           str(sorted(result)))
     print(f"\n  Живой ответ провайдера ({ai.model_name()}):")
@@ -743,8 +978,11 @@ def main() -> int:
     test_extract_json(ai)
     test_validate(ai)
     test_rate_limit(ai)
+    test_charges(ai)
     test_run_format_input(ai)
     test_grammar(ai)
+    test_source_mode(ai)
+    test_calibration(ai)
     test_config_and_transport(ai)
 
     os.environ["EGE_DB_PATH"] = str(Path(tempfile.mkdtemp(prefix="ege-ai-test-")) / "ege.sqlite3")

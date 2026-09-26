@@ -2,7 +2,7 @@
   "id": "russian",
   "title": "Русский язык",
   "short": "Русский",
-  "description": "Итоговое сочинение: реальные темы из официального банка ФИПИ и практика письменного ответа.",
+  "description": "Русский язык: работа с текстом (задание 27) — реальные тексты ЕГЭ и проверка сочинения по критериям ФИПИ.",
   "status": "ready",
   "locked": false,
   "comingSoon": false,
@@ -11,10 +11,10 @@
   "catalogFile": "catalog_russian.json",
   "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
   "forecast": null,
-  "features": {"lessons": false, "practice": true, "forecast": false, "diagnostics": false, "missions": true, "bosses": false, "daily": false, "path": true},
+  "features": {"lessons": false, "practice": true, "forecast": false, "diagnostics": false, "missions": false, "bosses": false, "daily": false, "path": true},
   "metadata": {
     "availability": "ready",
-    "topic": "Итоговое сочинение",
+    "topic": "Сочинение по тексту",
     "topicCount": 1
   },
   "content": {
