@@ -3383,23 +3383,22 @@ async function essaySourceTextFetch(id) {
   return src;
 }
 
-function essaySourceTextHtml(src) {
-  const author = String(src.author || "").trim();
-  const title = ["Исходный текст", author, `${src.wordCount} ${essayWordsLabel(src.wordCount)}`]
-    .filter(Boolean).join(" · ");
-  const paragraphs = String(src.text || "").split(/\n{2,}/)
+/* Один каркас на оба источника исходника: и на текст с сервера
+   (/api/essay-text), и на текст, который лежит прямо в задании. Раньше это
+   были два разных блока, и второй со временем выглядел бы беднее первого:
+   свой мелкий шрифт, своя «синяя» кнопка, никакого копирования. Теперь
+   общий рендер, общие стили и общее поведение. */
+function sourceTextBlockHtml({ id, title, text }) {
+  const paragraphs = String(text || "").split(/\n{2,}/)
     .map((p) => `<p>${esc(p.trim())}</p>`).join("");
-  /* Шапка — не одна большая кнопка: раскрытие и копирование — два разных
-     действия, поэтому это два соседних контрола. Тоггл выглядит чипом,
-     а не синей ссылкой с подчёркиванием; копия — иконкой справа сверху. */
   return `
-    <div class="source-text source-text--collapsed" id="sourceTextBox">
+    <div class="source-text source-text--collapsed"${id ? ` id="${esc(id)}"` : ""}>
       <div class="source-text__bar">
-        <button class="source-text__head" type="button" onclick="essaySourceToggle()" aria-expanded="false">
+        <button class="source-text__head" type="button" onclick="sourceTextToggle(this)" aria-expanded="false">
           <span class="source-text__title">${esc(title)}</span>
           <span class="source-text__chip"><span data-source-toggle-label>Читать</span><span class="source-text__chev">${icon("chevron")}</span></span>
         </button>
-        <button class="source-text__copy" type="button" onclick="essaySourceCopy(this)" aria-label="Скопировать текст" title="Скопировать текст">
+        <button class="source-text__copy" type="button" onclick="sourceTextCopy(this)" aria-label="Скопировать текст" title="Скопировать текст">
           <span class="source-text__copy-icon">${icon("copy")}</span>
         </button>
       </div>
@@ -3409,8 +3408,17 @@ function essaySourceTextHtml(src) {
     </div>`;
 }
 
-function essaySourceToggle() {
-  const box = document.getElementById("sourceTextBox");
+function essaySourceTextHtml(src) {
+  const author = String(src.author || "").trim();
+  const title = ["Исходный текст", author, `${src.wordCount} ${essayWordsLabel(src.wordCount)}`]
+    .filter(Boolean).join(" · ");
+  return sourceTextBlockHtml({ id: "sourceTextBox", title, text: src.text });
+}
+
+/* Раскрытие и копирование работают от нажатой кнопки, а не от id: на экране
+   теоретически могут оказаться оба блока, и каждый должен жить сам по себе. */
+function sourceTextToggle(btn) {
+  const box = btn && btn.closest ? btn.closest(".source-text") : null;
   if (!box) return;
   const label = box.querySelector("[data-source-toggle-label]");
   const head = box.querySelector(".source-text__head");
@@ -3423,7 +3431,7 @@ function essaySourceToggle() {
    account id — Clipboard API, при недоступности скрытый textarea +
    execCommand. Текст берём из отрисованного блока: innerText отдаёт его
    уже раскодированным и с абзацами, как в оригинале. */
-function essaySourceCopy(btn) {
+function sourceTextCopy(btn) {
   const box = btn && btn.closest ? btn.closest(".source-text") : null;
   const body = box ? box.querySelector(".source-text__body") : null;
   let text = "";
@@ -3514,46 +3522,14 @@ function essaySourceText(t) {
   return src;
 }
 
-function essaySourcePreview(text, limit = 10) {
-  const words = String(text == null ? "" : text).split(/\s+/).filter(Boolean);
-  if (words.length <= limit) return words.join(" ");
-  return words.slice(0, limit).join(" ");
-}
-
 function essaySourceHtml(t) {
   const src = essaySourceText(t);
   if (!src) return "";
-  const words = String(src).split(/\s+/).filter(Boolean);
-  const collapsible = words.length > 10;
-  const preview = esc(essaySourcePreview(src, 10)) + (collapsible ? "…" : "");
-  if (!collapsible) {
-    return `
-      <div class="essay-source" id="essaySource">
-        <div class="essay-source__label">Исходный текст</div>
-        <div class="essay-source__body">${esc(src)}</div>
-      </div>`;
-  }
-  return `
-    <div class="essay-source" id="essaySource">
-      <div class="essay-source__label">Исходный текст</div>
-      <div class="essay-source__preview" data-essay-source-preview>${preview}</div>
-      <div class="essay-source__body" data-essay-source-full style="display:none">${esc(src)}</div>
-      <button class="btn btn--ghost btn--sm essay-source__toggle" type="button" onclick="toggleEssaySource(this)">Показать полностью</button>
-    </div>`;
-}
-
-function toggleEssaySource(btn) {
-  try {
-    const box = btn && btn.closest ? btn.closest(".essay-source") : null;
-    if (!box) return;
-    const full = box.querySelector("[data-essay-source-full]");
-    const preview = box.querySelector("[data-essay-source-preview]");
-    if (!full) return;
-    const open = full.style.display !== "none";
-    full.style.display = open ? "none" : "";
-    if (preview) preview.style.display = open ? "" : "none";
-    btn.textContent = open ? "Показать полностью" : "Скрыть";
-  } catch (_) {}
+  const words = typeof countWords === "function"
+    ? countWords(src)
+    : String(src).split(/\s+/).filter(Boolean).length;
+  const title = ["Исходный текст", `${words} ${essayWordsLabel(words)}`].join(" · ");
+  return sourceTextBlockHtml({ id: "essaySource", title, text: src });
 }
 
 /* Во время проверки редактор скрыт — виден только единый лоадер.
