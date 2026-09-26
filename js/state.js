@@ -1233,6 +1233,32 @@ function attemptXp(task, correct, hintLevel, alreadyMastered) {
   return { attempt, correctBonus: bonus, total: attempt + bonus };
 }
 
+/* ============================================================
+   Гибкая шкала XP за проверенное сочинение (задание 27, задачи
+   типа long_text). Зеркало server.py essay_xp: сервер пересчитывает
+   XP из попыток в derive_stats и не доверяет клиентским числам,
+   поэтому обе стороны делят ровно эту формулу, а балл сервер берёт
+   из своих essay_submissions (статус 'ready'), а не из попытки.
+   Линейно от балла AI-проверки 0–22: 22 ≈ 500 XP (долгая работа),
+   0 — минимум 100 XP за саму работу, ниже 100 никогда.
+   Повтор того же задания — уже mastered: только минимум за посещение
+   (та же защита от повторов, что у обычных заданий).
+   ============================================================ */
+const ESSAY_SCORE_MAX = 22; // максимум AI-проверки задания 27
+const ESSAY_XP_MIN = 100;   // минимум за проверенное сочинение — за саму работу
+const ESSAY_XP_MAX = 500;   // идеальные 22 балла
+
+function essayXp(score) {
+  const s = Math.max(0, Math.min(ESSAY_SCORE_MAX, Number(score)));
+  if (!Number.isFinite(s)) return ESSAY_XP_MIN;
+  return ESSAY_XP_MIN + Math.round((ESSAY_XP_MAX - ESSAY_XP_MIN) * s / ESSAY_SCORE_MAX);
+}
+
+// Задача-сочинение: тот же признак, что isLongTextTask в js/app.js.
+function isEssayTask(task) {
+  return !!task && (task.type === "long_text" || task.answerType === "long_text");
+}
+
 function levelInfo() {
   let xp = Math.max(0, Number(Store.state && Store.state.xp) || 0);
   let level = 1;
@@ -2060,7 +2086,7 @@ function dailyTaskIds() {
    закрывается любым верным ответом, как раньше.
    ============================================================ */
 
-function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts) {
+function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts, essayScore) {
   const s = Store.state;
   const taskRef = task && typeof task === "object" ? task.id : task;
   const canonical = task && DataAPI.taskForAccess ? DataAPI.taskForAccess(taskRef) : null;
@@ -2118,7 +2144,18 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     act.correct++;
     s.correctSeries++;
     s.bestSeries = Math.max(s.bestSeries, s.correctSeries);
-    const parts = attemptXp(task, true, hintLevel, alreadyMastered);
+    // Проверенное сочинение: балл AI известен только с готовым результатом
+    // (essayRunChecks передаёт его сюда) — XP идёт по гибкой шкале essayXp,
+    // а не по фиксу attemptXp. Без балла (не должно случаться в UI) — обычный
+    // путь; повтор того же задания — только минимум за посещение.
+    let parts;
+    if (isEssayTask(task) && !alreadyMastered && Number.isFinite(Number(essayScore))) {
+      const total = essayXp(essayScore);
+      const base = attemptXp(task, true, hintLevel, true).attempt;
+      parts = { attempt: base, correctBonus: total - base, total };
+    } else {
+      parts = attemptXp(task, true, hintLevel, alreadyMastered);
+    }
     xp = parts.total;
     xpBreakdown = { attempt: parts.attempt, correctBonus: parts.correctBonus, errorResolved: 0 };
     st.progress = skillProgress(skillId);
