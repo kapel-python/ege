@@ -81,6 +81,7 @@
   }
   :root[data-theme="light"] .site-header { background: rgba(244, 245, 249, 0.88); }
   .header-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; }
+  .header-actions { display: flex; align-items: center; gap: 10px; }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 16px; letter-spacing: -0.01em; color: var(--text); text-decoration: none; white-space: nowrap; }
   .logo-badge { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #22c07a 0%, #38BDF8 100%); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .logo-badge svg { width: 16px; height: 16px; }
@@ -236,9 +237,8 @@
   .ai-model-btn {
     background: none; border: none; padding: 0; cursor: pointer;
     font: inherit; font-weight: 800; color: #3B82F6;
-    border-bottom: 1px dashed rgba(59, 130, 246, 0.55);
   }
-  .ai-model-btn:hover { color: #2563EB; border-bottom-style: solid; }
+  .ai-model-btn:hover { color: #2563EB; }
 
   /* --- skeleton --- */
   .skel { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: skel-shine 1.4s ease infinite; border-radius: 10px; }
@@ -335,7 +335,8 @@
       </span>
       <span class="logo-text">ege <em>easy</em></span>
     </a>
-    <nav aria-label="Действия">
+    <nav class="header-actions" aria-label="Действия">
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Переключить на светлую тему" aria-pressed="false"></button>
       <a class="back-link" href="/dashboard" onclick="if(history.length>1){history.back();return false;}">← К практике</a>
     </nav>
   </div>
@@ -346,7 +347,6 @@
 
   <div class="topbar rv" style="--d:0ms">
     <span class="level-pill">Проверка сочинения</span>
-    <button class="theme-toggle" id="themeToggle" type="button" aria-label="Переключить на светлую тему" aria-pressed="false"></button>
   </div>
 
   <h1 class="title rv" style="--d:40ms">Результат проверки</h1>
