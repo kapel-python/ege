@@ -14,9 +14,12 @@
       не вызывается): затирать начатое новым визитом нельзя.
    4. Одиночная сессия: нет ряда навигации («Далее»/«Назад»/«Написать ещё
       раз»), нет «Пропустить», есть редактор + «Взять другое».
-   5. Готовая проверка одиночной сессии — сразу итоговый экран
-      (ТРЕНИРОВКА ЗАВЕРШЕНА, +XP, кнопка «Разбор сочинения →» со ссылкой
-      на отчёт), а не зелёный блок с навигацией.
+   5. Готовая проверка одиночной сессии — зелёный блок отчёта, а единственное
+      действие визита «Завершить →» стоит ОТДЕЛЬНОЙ строкой ПОД блоком (как
+      в остальных предметах), а не внутри него; на чистом бланке и на неудачной
+      проверке такой строки нет вовсе. Кнопка закрывает визит итоговым
+      экраном (ТРЕНИРОВКА ЗАВЕРШЕНА, +XP, «Разбор сочинения →» со ссылкой
+      на отчёт).
    6. «Взять другое» откладывает текст (localStorage, без XP и попыток);
       последнее недописанное не отпускает — дальше только новый круг.
    7. Гость/офлайн вход не ломают: решает локальное.
@@ -486,12 +489,19 @@ async function main() {
     const done = run(sandbox, `({
       alive: !!Session.cur,
       html: document.getElementById("screen").innerHTML,
+      block: document.getElementById("feedbackSlot").innerHTML,
+      nav: document.getElementById("essayNavSlot").innerHTML,
     })`);
     check("готовый разбор — сначала блок отчёта, а не редирект на финиш",
       done.alive === true && done.html.includes("Проверка завершена"), done.html.slice(0, 120));
-    check("в блоке отчёта XP и обе кнопки",
-      /16 \/ 22/.test(done.html) && done.html.includes("Посмотреть результат")
-      && done.html.includes("Завершить"), done.html.slice(0, 200));
+    check("в блоке отчёта XP и кнопка разбора",
+      /16 \/ 22/.test(done.html) && done.block.includes("Посмотреть результат")
+      && !done.block.includes("Завершить"), done.block.slice(0, 200));
+    check("«Завершить →» — отдельной строкой ПОД блоком (как в остальных предметах)",
+      done.nav.includes("Завершить →") && done.nav.includes("sessionFinish()")
+      && done.nav.includes("session-nav")
+      && done.html.indexOf("Проверка завершена") < done.html.indexOf("Завершить →"),
+      done.nav.slice(0, 160));
     run(sandbox, `sessionFinish()`);
     await flush();
     const fin = run(sandbox, `({
@@ -574,23 +584,29 @@ async function main() {
     const fin = run(sandbox, `({
       curNull: Session.cur === null,
       html: document.getElementById("screen").innerHTML,
+      block: document.getElementById("feedbackSlot").innerHTML,
+      nav: document.getElementById("essayNavSlot").innerHTML,
     })`);
     check("после отправки и перезагрузки — блок отчёта, а не конец практики",
       fin.curNull === false && fin.html.includes("Проверка завершена")
         && !fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 160));
-    check("в восстановленном блоке обе кнопки: разбор и «Завершить →»",
-      fin.html.includes("Посмотреть результат") && fin.html.includes("Завершить →")
+    check("восстановленный блок — только разбор, «Завершить →» строкой ниже",
+      fin.block.includes("Посмотреть результат") && !fin.block.includes("Завершить")
+        && fin.nav.includes("Завершить →")
         && !/\+\d+ XP/.test(fin.html),
-      fin.html.slice(0, 240));
+      fin.block.slice(0, 200));
     // Повторная перезагрузка того же состояния — тот же экран (идемпотентно).
     run(sandbox, `renderTask(document.getElementById("screen"))`);
     await flush();
     const again = run(sandbox, `({
       curNull: Session.cur === null,
       html: document.getElementById("screen").innerHTML,
+      nav: document.getElementById("essayNavSlot").innerHTML,
     })`);
     check("ещё одна перезагрузка не ломает экран (блок на месте, визит жив)",
       again.curNull === false && again.html.includes("Проверка завершена"), again.html.slice(0, 120));
+    check("после повторной перезагрузки «Завершить →» тоже на месте",
+      again.nav.includes("Завершить →"), again.nav.slice(0, 120));
   }
 
   /* ---------- 8. Гость и офлайн ---------- */
@@ -618,6 +634,9 @@ async function main() {
       return b ? (b.style.display || "") : "нет кнопки";
     })()`);
     check("чистый бланк: кнопка видна", takeBtn() !== "none" && takeBtn() !== "нет кнопки", takeBtn());
+    const navRow = () => run(sandbox, `document.getElementById("essayNavSlot").innerHTML`);
+    check("чистый бланк: строки «Завершить →» нет (закрывать нечего)",
+      !navRow().includes("Завершить"), navRow().slice(0, 100));
     // Старая готовая работа по ЭТОМУ ЖЕ заданию не должна делать кнопку
     // мёртвой: карта про текущий визит в метки не попадает (видит их сам
     // визит), иначе «Взять другое» молча ничего не делал бы.
@@ -627,6 +646,8 @@ async function main() {
     await flush();
     check("старая готовая работа не делает «Взять другое» мёртвой",
       takeBtn() !== "none" && takeBtn() !== "нет кнопки", takeBtn());
+    check("чужая готовая работа «Завершить →» не протаскивает",
+      !navRow().includes("Завершить"), navRow().slice(0, 100));
     // А вот реальная сохранённая работа сессии (отправлено в этом визите) —
     // кнопку гасит: откладывать уже нечего.
     run(sandbox, `

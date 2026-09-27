@@ -3315,6 +3315,7 @@ function renderTask(root) {
   // screenSession, а renderTask зовут ещё и «Далее»/«Назад» и все три пути
   // ретрая сочинения — там предыдущий интервал оставался жить навсегда.
   Session.stopTimer();
+  essayReportShown = false; // карточка задания перерисована целиком: отчёта нет
   const S = Session.cur;
   const t = Session.task();
   const progressDone = S.offset + S.idx;
@@ -4335,8 +4336,17 @@ function sessionNextHtml() {
    развёл бы «Назад» и «Далее» по краям пустой строки. */
 function sessionEssayNavHtml() {
   // Один визит — одно сочинение: листать нечего («Далее»/«Назад»/«Написать
-  // ещё раз» убраны), следующее задание придёт следующим визитом.
-  if (isSingleEssaySession()) return "";
+  // ещё раз» убраны), следующее задание придёт следующим визитом. Единственное
+  // действие визита — «Завершить →», и он стоит ЗДЕСЬ, отдельной строкой ПОД
+  // зелёным блоком отчёта (как в остальных предметах), а не внутри него: внутри
+  // ряд выглядел частью отчёта, а после перезагрузки с зелёным блоком ещё и
+  // уезжал за пределы экрана. Показывает его только что готовый отчёт своего
+  // визита (essayReportShown) — на чистом бланке и на неудачной проверке такой
+  // строки нет вовсе.
+  if (isSingleEssaySession()) {
+    if (!essayReportShown) return "";
+    return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button></div>`;
+  }
   const back = sessionHasPrev()
     ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
     : "";
@@ -4359,6 +4369,14 @@ function essayNavRender() {
   if (!slot || !t || !isLongTextTask(t)) return;
   slot.innerHTML = sessionEssayNavHtml();
 }
+
+/* Готовый отчёт ТЕКУЩЕГО визита стоит на экране: его монтируют essayFinishReady
+   и essayRestoreReportBlock. Одиночный визит закрывает кнопка «Завершить →», и
+   рисует её строка навигации ПОД зелёным блоком (sessionEssayNavHtml) — как в
+   остальных предметах; на чистом бланке и на неудачной проверке такой строки
+   нет. Флаг снимает renderTask — экран задания всегда перерисовывается целиком
+   (editor + отчёт), и «Завершить» не должен пережить чужой экран. */
+let essayReportShown = false;
 
 function essayMountFeedback(html) {
   const slot = document.getElementById("feedbackSlot");
@@ -4576,8 +4594,10 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   // ещё раз») стоит отдельной строкой ПОД ним: внутри зелёного блока ряд
   // выглядел частью отчёта, а в шапке карточки «Назад» на длинном сочинении
   // с readonly-текстом просто не было видно. В одиночном визите навигации
-  // нет вовсе — вместо неё кнопка «Завершить →» закрывает визит итогом.
+  // нет вовсе — вместо неё кнопка «Завершить →» закрывает визит итогом, и
+  // стоит она там же, под блоком (sessionEssayNavHtml).
   const singleEssay = S.taskIds.length === 1 && isLongTextTask(t);
+  essayReportShown = singleEssay; // кнопка «Завершить →» — в строке навигации под блоком
   essayMountFeedback(`
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
@@ -4585,7 +4605,6 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
       <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ${singleEssay ? "btn--soft" : "btn--primary"}" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
-        ${singleEssay ? `<button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button>` : ""}
       </div>
     </div>`);
   const doneBox = document.querySelector(".feedback--ok");
@@ -4608,6 +4627,7 @@ function essayRestoreReportBlock(t, sub) {
   essayMountReadonly(String(sub.text || ""), Number(sub.wordCount) || 0);
   const input = document.getElementById("essayInput");
   if (input) input.disabled = true;
+  essayReportShown = true; // кнопка «Завершить →» — в строке навигации под блоком
   essayMountFeedback(`
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
@@ -4615,7 +4635,6 @@ function essayRestoreReportBlock(t, sub) {
       <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn btn--soft" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
-        <button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button>
       </div>
     </div>`);
   const doneBox = document.querySelector(".feedback--ok");
