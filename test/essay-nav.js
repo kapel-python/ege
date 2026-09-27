@@ -432,7 +432,47 @@ async function main() {
       entered.taskIds && entered.taskIds.join(",") === "re27_1", JSON.stringify(entered));
   }
 
-  /* ---------- 8. Старые многозадачные сессии живут как раньше ---------- */
+  /* ---------- 8. Кнопка отправки прячется, когда есть что продолжать ---------- */
+  {
+    const { sandbox } = buildSandbox({ statuses: {} });
+    await enterPractice(sandbox); // [re27_1]
+    run(sandbox, `
+      globalThis.__submitWrap = { style: {} };
+      document.querySelector = (sel) => sel === ".essay-editor__submit" ? globalThis.__submitWrap : null;
+      renderTask(document.getElementById("screen"));
+    `);
+    await flush();
+    const freshVisible = run(sandbox, `globalThis.__submitWrap.style.display || ""`);
+    check("чистый бланк: кнопка отправки видна", freshVisible !== "none", freshVisible);
+    // Неудачная проверка: текст сохранён, результата нет.
+    run(sandbox, `globalThis.__draft = Array(200).fill("слово").join(" ")`);
+    run(sandbox, `
+      Session.cur.essayReadyByTask = { re27_1: { text: globalThis.__draft, wordCount: 200, status: "submitted", clientId: "c-x" } };
+      Session.cur.essayDraftByTask = { re27_1: globalThis.__draft };
+      renderTask(document.getElementById("screen"));
+    `);
+    await flush();
+    check("неудача: дубль отправки спрятан", run(sandbox, `globalThis.__submitWrap.style.display`) === "none");
+    // Правка после неудачи — уже новая работа: кнопка возвращается.
+    run(sandbox, `
+      document.getElementById("essayInput").value = globalThis.__draft + " ещё";
+      essaySyncSubmitVisibility(Session.task());
+    `);
+    check("правка текста возвращает кнопку отправки",
+      run(sandbox, `globalThis.__submitWrap.style.display`) !== "none");
+    // Resume-блок — единственное действие.
+    run(sandbox, `
+      document.getElementById("essayInput").value = globalThis.__draft;
+      essayMountResumeFeedback(Session.task());
+    `);
+    const mounted = run(sandbox, `document.getElementById("feedbackSlot").innerHTML`);
+    check("блок «Проверка не завершена» предлагает продолжить",
+      mounted.includes("Продолжить проверку"), mounted.slice(0, 80));
+    check("после resume-блока дубль отправки снова спрятан",
+      run(sandbox, `globalThis.__submitWrap.style.display`) === "none");
+  }
+
+  /* ---------- 9. Старые многозадачные сессии живут как раньше ---------- */
   {
     const { sandbox } = buildSandbox({});
     run(sandbox, `

@@ -214,6 +214,13 @@ async function main() {
       t("fail: честная ошибка без XP и без висящего loading",
         /не удалась|недоступна|не сформирован/i.test(errText) && errText.includes("Попробовать снова"),
         errText.slice(0, 140));
+      // Неудача: дубль отправки спрятан, единственное действие — повтор.
+      t("fail: одна кнопка повтора вместо двух отправок", await page.evaluate(() => {
+        const w = document.querySelector(".essay-editor__submit");
+        const fb = document.getElementById("feedbackSlot").innerHTML;
+        return !!w && w.style.display === "none"
+          && fb.includes("Попробовать снова") && !fb.includes("Отправить сочинение");
+      }));
       await shot(page, "essay-feedback-desktop-light.png");
     }
 

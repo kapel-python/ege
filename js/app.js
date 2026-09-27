@@ -3661,10 +3661,61 @@ function sessionEssayWire(t) {
       btn.disabled = false;
     }
     barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
+    // Правка после неудачной проверки возвращает кнопку отправки: текст
+    // уже не тот, что сохранён, — это новая работа (см. essaySyncSubmitVisibility).
+    essaySyncSubmitVisibility(t);
   };
   input.addEventListener("input", update);
   update();
+  essaySyncSubmitVisibility(t);
   renderSessionHintControl();
+}
+
+/* Кнопка «Отправить сочинение» видна, только если отправлять есть что:
+   сохранённой работы нет вовсе (чистый бланк) либо текст в редакторе
+   отличается от сохранённого (ученик правит после неудачной проверки —
+   это уже новая работа, а «Продолжить проверку» доведёт старую).
+   Иначе рядом висели бы две кнопки об одном и том же, а повторная
+   отправка плодила бы лишний submission и лишний вызов модели. */
+function essaySyncSubmitVisibility(t) {
+  if (!t || !isLongTextTask(t)) return;
+  const S = Session.cur;
+  if (!S || !Session.task() || Session.task().id !== t.id) return;
+  const wrap = (typeof document !== "undefined" && document.querySelector)
+    ? document.querySelector(".essay-editor__submit")
+    : null;
+  if (!wrap) return;
+  const saved = S.essayReadyByTask && S.essayReadyByTask[t.id];
+  const savedText = saved && String(saved.text || "").trim() ? String(saved.text || "") : "";
+  const input = document.getElementById("essayInput");
+  const show = !savedText || !input || String(input.value || "") !== savedText;
+  wrap.style.display = show ? "" : "none";
+}
+
+/* Блок «проверка не завершена»: текст сохранён, готового результата нет —
+   единственное действие (кнопка отправки при этом спрятана, см.
+   essaySyncSubmitVisibility). Продолжение сначала дёшево спрашивает
+   evaluation (проверка могла дойти на сервере без нас — тогда без нового
+   вызова модели и без траты лимита) и только при 409 идёт в полный проход. */
+function essayResumeFeedbackHtml(t, sub) {
+  const wc = Number(sub && sub.wordCount) || 0;
+  return `
+    <div class="feedback">
+      <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
+      <div class="feedback__solution">Текст сохранён (${wc} ${essayWordsLabel(wc)}), но готового результата нет. Можно продолжить проверку без повторного ввода.</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Продолжить проверку</button>
+      </div>
+    </div>`;
+}
+
+function essayMountResumeFeedback(t) {
+  const S = Session.cur;
+  const sub = S && S.essayReadyByTask && S.essayReadyByTask[t.id];
+  if (!sub || !String(sub.text || "").trim()) return false;
+  essayMountFeedback(essayResumeFeedbackHtml(t, sub));
+  essaySyncSubmitVisibility(t);
+  return true;
 }
 
 /* Pipeline проверки итогового сочинения:
@@ -3816,14 +3867,7 @@ async function essayRestoreReady(t) {
           if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
         }
       } catch (_) {}
-      essayMountFeedback(`
-        <div class="feedback">
-          <div class="feedback__head">${icon("clock")} Проверка не завершена</div>
-          <div class="feedback__solution">Текст сохранён (${sub.wordCount} ${essayWordsLabel(sub.wordCount)}), но готового результата нет. Можно продолжить проверку без повторного ввода.</div>
-          <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Продолжить проверку</button>
-          </div>
-        </div>`);
+      essayMountResumeFeedback(t);
     }
   } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
@@ -4310,10 +4354,15 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
           resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
           windowSec: 8 * 3600, at: Date.now(),
         };
+        // Под модалкой — тот же resume-блок, что после прочих неудач:
+        // когда таймер дойдёт и окно закроется, единственной кнопкой
+        // останется «Продолжить проверку», а не дубль отправки.
+        essayMountResumeFeedback(t);
         openAiLimitModal(aiData);
         return;
       }
       const burstRetry = Math.max(1, Number(aiData.retryAfter) || 60);
+      essayMountResumeFeedback(t);
       aiLimitsFetch(true).then((st) => openAiLimitModal(st, burstRetry));
       return;
     }
