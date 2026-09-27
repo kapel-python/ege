@@ -4091,10 +4091,10 @@ function essayRepeatNoteHtml(t) {
   try {
     href = essayResultUrl({ submissionId: m.submissionId, clientId: m.clientId }) || "";
   } catch (_) {}
-  return `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;margin:0 0 14px;border:1px solid var(--border);border-radius:12px;background:var(--accent-soft)">
-    <span style="flex:none;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:var(--accent);color:#fff;font-size:13px;font-weight:700;line-height:1">i</span>
-    <span style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:var(--text)">Это сочинение уже было проверено — сейчас пишешь заново, а прошлый разбор сохранён.</span>
-    ${href ? `<a href="${esc(href)}" style="flex:none;align-self:center;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:9px;border:1px solid var(--accent);color:var(--accent);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap">Посмотреть разбор →</a>` : ""}
+  return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;margin:0 0 14px;border:1px solid var(--border);border-radius:999px;background:var(--accent-soft);box-shadow:0 2px 10px rgba(30,41,59,.06)">
+    <span style="flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--violet));color:#fff;font-size:13px;font-weight:800;line-height:1;box-shadow:0 2px 6px var(--accent-glow)">i</span>
+    <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Это сочинение уже было проверено — пишешь заново, прошлый разбор сохранён.</span>
+    ${href ? `<a href="${esc(href)}" style="flex:none;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--violet));color:#fff;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 3px 10px var(--accent-glow)">Посмотреть разбор →</a>` : ""}
   </div>`;
 }
 
