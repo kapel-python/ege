@@ -8,7 +8,7 @@
    (пагинация не обходит авторизацию);
 3. admin (POST /api/admin/login): bootstrap/bootstrap-lite/POST /api/subject и
    GET /api/auth/session содержат isAdmin=true; inbox -> 200, новые сверху,
-   точные поля {id,message,status,createdAt}, total/newCount корректны;
+   точные поля {id,message,status,source,createdAt}, total/newCount корректны;
 4. пагинация: limit/offset режут выдачу; limit=0/-1/abc/101, offset=-1/abc -> 400;
 5. утечек нет: request_key/message_digest нигде не отдаются;
 6. привязка куки: ege_admin, скопированная на другой аккаунт, -> 401;
@@ -16,7 +16,11 @@
 8. протухшая admin-сессия -> 401 на inbox и isAdmin=false в bootstrap;
 9. logout (/api/auth/logout) -> isAdmin=false, inbox -> 401;
 10. существующая /admin не сломана: overview продолжает отвечать 200 админу
-    и 401 остальным.
+    и 401 остальным;
+11. системные обращения (source='system', смена ИИ-провайдера): от обычного
+    отличаются только этим полем — те же лента, счётчики, пагинация, аудит и
+    «Прочитано»; дедупль не даёт одной аварии забить ленту, чужие события
+    игнорируются, гостю и пользователю по-прежнему 401.
 
 Живой сервер на temp-БД, прод не трогается.
 """
@@ -192,8 +196,10 @@ def main():
             assert messages[2]["status"] == "reviewed", messages[2]
             assert [m["status"] for m in messages] == ["new", "new", "reviewed"], messages
             for m in messages:
-                assert set(m.keys()) == {"id", "message", "status", "createdAt"}, m.keys()
+                assert set(m.keys()) == {"id", "message", "status", "source", "createdAt"}, m.keys()
                 assert isinstance(m["id"], int) and isinstance(m["message"], str), m
+                # source — единственное отличие системного обращения от обычного.
+                assert m["source"] == "contacts", m
             assert_no_leak(inbox, "admin inbox")
 
             # 4. Пагинация.
@@ -368,7 +374,60 @@ def main():
             status, only_rev = request(admin, base, "/api/admin/support-messages?status=reviewed&limit=100&offset=0")
             assert [m["id"] for m in only_rev["messages"]] == [2], only_rev
 
-            print("admin-inbox: OK (guest/user/admin/spoof/expiry/logout/pagination/read)")
+            # 13. Системные обращения (смена ИИ-провайдера и т.п.). Отличие
+            # ровно одно — source='system'; таблетку рисует клиент, а всё
+            # остальное (лента, счётчики, «Прочитано», пагинация) — то же самое.
+            now = int(__import__("time").time() * 1000)
+            switch_id = server.log_system_support_message({
+                "kind": "provider_switch", "from": "closerouter", "to": "gptunnel",
+                "reason": "AIUnavailable: на балансе ИИ закончились средства", "at": now,
+            })
+            assert switch_id, "системное обращение не записалось"
+            # Тот же отказ повторно ленту не плодит (дедупль на час).
+            assert server.log_system_support_message({
+                "kind": "provider_switch", "from": "closerouter", "to": "gptunnel",
+                "reason": "AIUnavailable: на балансе ИИ закончились средства", "at": now,
+            }) is None
+            # Восстановление — другое событие, значит и другая строка.
+            back_id = server.log_system_support_message({
+                "kind": "provider_restored", "from": "gptunnel", "to": "closerouter", "at": now,
+            })
+            assert back_id and back_id != switch_id, (switch_id, back_id)
+            # Чужое событие в ленту не пишется и не падает.
+            assert server.log_system_support_message({"kind": "нет-такого"}) is None
+
+            status, sysbox = request(admin, base, "/api/admin/support-messages?limit=100&offset=0")
+            assert status == 200 and sysbox["total"] == 5, (status, sysbox)
+            system_rows = [m for m in sysbox["messages"] if m["source"] == "system"]
+            assert [m["id"] for m in system_rows] == [back_id, switch_id], system_rows
+            for m in system_rows:
+                assert set(m.keys()) == {"id", "message", "status", "source", "createdAt"}, m.keys()
+                assert m["status"] == "new" and isinstance(m["createdAt"], int), m
+            assert "CloseRouter" in system_rows[1]["message"] and "GPTunnel" in system_rows[1]["message"], system_rows[1]
+            assert "Система" in system_rows[1]["message"], system_rows[1]
+            # Ровно те же свойства: система считается в newCount и в общем total.
+            assert sysbox["newCount"] == 3, sysbox
+            assert_no_leak(sysbox, "system inbox")
+            # Гостю и пользователю системные обращения не видны — тот же 401.
+            for opener in (guest, user):
+                status, body = request(opener, base, "/api/admin/support-messages")
+                assert status == 401, (status, body)
+            # Системное обращение «прочитывается» тем же POST и уходит из new.
+            status, read_sys = request(admin, base, f"/api/admin/support-messages/{switch_id}/read", "POST", {})
+            assert status == 200 and read_sys["status"] == "reviewed", (status, read_sys)
+            status, after = request(admin, base, "/api/admin/support-messages?status=new&limit=100&offset=0")
+            assert status == 200 and switch_id not in [m["id"] for m in after["messages"]], after
+            conn5 = server.connect()
+            try:
+                audit = conn5.execute(
+                    "SELECT action, target_user_id, detail FROM admin_audit WHERE action='support-read'"
+                    " ORDER BY id DESC LIMIT 1").fetchone()
+                assert audit and audit["target_user_id"] is None and audit["detail"] == f"message {switch_id}", \
+                    dict(audit) if audit else None
+            finally:
+                conn5.close()
+
+            print("admin-inbox: OK (guest/user/admin/spoof/expiry/logout/pagination/read/system)")
         finally:
             httpd.shutdown()
 

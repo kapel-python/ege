@@ -1783,7 +1783,7 @@ CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_key TEXT NOT NULL CHECK(length(request_key) = 64),
   message_digest TEXT NOT NULL CHECK(length(message_digest) = 64),
-  source TEXT NOT NULL DEFAULT 'contacts' CHECK(source = 'contacts'),
+  source TEXT NOT NULL DEFAULT 'contacts' CHECK(source IN ('contacts', 'system')),
   message TEXT NOT NULL CHECK(length(message) BETWEEN 10 AND 2000),
   spam_score INTEGER NOT NULL DEFAULT 0 CHECK(spam_score BETWEEN 0 AND 100),
   status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'reviewed', 'resolved', 'archived')),
@@ -3049,6 +3049,55 @@ def _db_key(conn: sqlite3.Connection) -> str:
         return ":memory:"
 
 
+SUPPORT_REBUILD_TABLE = "support_messages_rebuild"
+
+
+def _support_relax_source_check(conn: sqlite3.Connection) -> None:
+    """Снять старый CHECK(source = 'contacts') пересборкой таблицы.
+
+    SQLite не умеет менять CHECK, а таблица живёт с ним с незапамятных времён
+    (system-сообщения туда не влезали). Пересборка идемпотентна: сначала
+    спрашиваем у sqlite_master, менять есть что, иначе не трогаем таблицу
+    вообще. Строки переносятся как есть, внешних ссылок на support_messages
+    в схеме нет, индексы пересоздаются дальше по ensure_support_schema."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='support_messages'"
+    ).fetchone()
+    sql = str(row[0] or "") if row else ""
+    if "source" not in sql or "CHECK(source IN ('contacts', 'system'))" in sql:
+        return
+    columns = set(_table_columns(conn, "support_messages"))
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        # Та же схема, что и в SCHEMA, но с новым CHECK: executescript(SCHEMA)
+        # здесь не годится — он пересоздаёт и кучу чужих таблиц.
+        conn.execute(f"""CREATE TABLE IF NOT EXISTS {SUPPORT_REBUILD_TABLE} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          request_key TEXT NOT NULL CHECK(length(request_key) = 64),
+          message_digest TEXT NOT NULL CHECK(length(message_digest) = 64),
+          source TEXT NOT NULL DEFAULT 'contacts' CHECK(source IN ('contacts', 'system')),
+          message TEXT NOT NULL CHECK(length(message) BETWEEN 10 AND 2000),
+          spam_score INTEGER NOT NULL DEFAULT 0 CHECK(spam_score BETWEEN 0 AND 100),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'reviewed', 'resolved', 'archived')),
+          created_at TEXT NOT NULL)""")
+        names = [c for c in ("id", "request_key", "message_digest", "source",
+                             "message", "spam_score", "status", "created_at") if c in columns]
+        if names:
+            # Всё, что не contacts, — contacts: чужих значений в старой БД быть не может.
+            source = "'contacts'" if "source" in columns else "'contacts'"
+            select = ", ".join(source if c == "source" else c for c in names)
+            conn.execute(f"INSERT OR IGNORE INTO {SUPPORT_REBUILD_TABLE} ({', '.join(names)}) "
+                         f"SELECT {select} FROM support_messages")
+        conn.execute("DROP TABLE support_messages")
+        conn.execute(f"ALTER TABLE {SUPPORT_REBUILD_TABLE} RENAME TO support_messages")
+        conn.commit()
+    finally:
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+        except sqlite3.Error:
+            pass
+
+
 def ensure_support_schema(conn: sqlite3.Connection) -> None:
     """Идемпотентно создать хранилище коротких сообщений поддержки.
 
@@ -3064,6 +3113,7 @@ def ensure_support_schema(conn: sqlite3.Connection) -> None:
         columns = _table_columns(conn, "support_messages")
         if "message" not in columns:
             raise RuntimeError("support_messages is incompatible: message column is missing")
+        _support_relax_source_check(conn)
 
         # Presence-based expand/backfill, consistent with the project's other
         # migrations. Legacy rows are preserved and get private random dedupe
@@ -3087,7 +3137,8 @@ def ensure_support_schema(conn: sqlite3.Connection) -> None:
             "UPDATE support_messages SET message_digest=lower(hex(randomblob(32))) "
             "WHERE message_digest IS NULL OR length(message_digest) != 64"
         )
-        conn.execute("UPDATE support_messages SET source='contacts' WHERE source IS NULL OR source != 'contacts'")
+        conn.execute("UPDATE support_messages SET source='contacts' "
+                     "WHERE source IS NULL OR source NOT IN ('contacts', 'system')")
         conn.execute("UPDATE support_messages SET spam_score=0 WHERE spam_score IS NULL OR spam_score NOT BETWEEN 0 AND 100")
         conn.execute("UPDATE support_messages SET status='new' WHERE status IS NULL OR status NOT IN ('new', 'reviewed', 'resolved', 'archived')")
         conn.execute("UPDATE support_messages SET created_at=? WHERE created_at IS NULL OR created_at=''", (now_iso(),))
@@ -4491,6 +4542,123 @@ def normalize_support_request_id(value) -> str | None:
     return value
 
 
+SYSTEM_SUPPORT_SOURCE = "system"
+# Источник системного обращения: видно в UI таблеткой, ученик его не пишет.
+# Текст собирает сервер из события роутера (server/ai.py), а не браузер.
+# Дедупль-ключ выводится из самого события, поэтому «свой» ключ хранить негде:
+# хэш считаем константой процесса — он и не для защиты, а для разведения отпечатков.
+SUPPORT_SYSTEM_KEY = b"ege-support-system-v1"
+# Час: за это время повторный отказ того же провайдера — та же авария, а не новая.
+SUPPORT_SYSTEM_DEDUP_WINDOW_SEC = 3600
+_AI_SYSTEM_EVENT_TITLES = {
+    "provider_switch": "Смена ИИ-провайдера",
+    "provider_restored": "ИИ-провайдер восстановлен",
+    "provider_outage": "ИИ-провайдеры недоступны",
+}
+
+
+def _ai_system_text(event: dict) -> str | None:
+    """Человеческий текст системного обращения из события роутера ИИ.
+
+    Никогда не падает и возвращает None, если событие не наше или текст не
+    проходит ту же проверку, что и сообщение с «Контактов»: рендер такой же,
+    значит и правила те же."""
+    try:
+        kind = str(event.get("kind") or "")
+        title = _AI_SYSTEM_EVENT_TITLES.get(kind)
+        if not title:
+            return None
+        stamp = timestamp_value(event.get("at"))
+        when = ""
+        if isinstance(stamp, int):
+            when = dt.datetime.fromtimestamp(stamp / 1000, ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M МСК")
+        reason = str(event.get("reason") or "").strip()[:300]
+        # Причина от провайдера может цитировать его ответ целиком — в ленту
+        # админа уходит только короткая техническая строка.
+        reason = re.sub(r"\s+", " ", reason)
+        parts = [f"Система. {title}."]
+        if _AI is not None and hasattr(_AI, "provider_title"):
+            source = _AI.provider_title(str(event.get("from") or ""))
+            target = _AI.provider_title(str(event.get("to") or ""))
+            if kind == "provider_switch" and source and target:
+                parts.append(f"Провайдер «{source}» отказал, запросы переведены на «{target}».")
+            elif kind == "provider_restored" and target:
+                parts.append(f"Провайдер «{target}» снова доступен, запросы возвращены на него.")
+        if kind == "provider_outage":
+            failed = event.get("providers") or []
+            names = ", ".join(str(name) for name in failed) if isinstance(failed, (list, tuple)) else ""
+            if names:
+                parts.append(f"Не отвечает ни один провайдер: {names}.")
+        if reason:
+            parts.append(f"Причина: {reason}.")
+        if when:
+            parts.append(f"Время: {when}.")
+        return normalize_support_message(" ".join(parts))
+    except Exception:
+        return None
+
+
+def log_system_support_message(event: dict) -> int | None:
+    """Положить системное событие ИИ в ленту обращений. Возвращает id или None.
+
+    Обычное обращение во всём, кроме одного: source='system' и текст собран
+    сервером. Поэтому у него ровно те же свойства (статус new → reviewed,
+    пагинация, «Прочитано»), и админ работает с ним как с любым другим.
+
+    Дедупль: одно и то же событие не плодит ленту. Ключ — хэш (kind, from, to),
+    окно — час: за этот срок повторная неудача того же провайдера — та же авария.
+    Никогда не бросает: роутер ИИ не должен падать из-за ленты поддержки."""
+    try:
+        text = _ai_system_text(event)
+        if not text:
+            return None
+        conn = connect()
+        try:
+            ensure_support_schema(conn)
+            kind = str(event.get("kind") or "unknown")
+            source = str(event.get("from") or "")
+            target = str(event.get("to") or "")
+            now_ms = int(time.time() * 1000)
+            fingerprint = f"ai:{kind}:{source}:{target}"
+            digest = hmac.new(SUPPORT_SYSTEM_KEY, fingerprint.encode("utf-8"), hashlib.sha256).hexdigest()
+            fresh = conn.execute(
+                "SELECT id FROM support_messages WHERE message_digest=? AND CAST(created_at AS INTEGER)>=?",
+                (digest, now_ms - SUPPORT_SYSTEM_DEDUP_WINDOW_SEC * 1000),
+            ).fetchone()
+            if fresh:
+                return None
+            # Ключ строки — событие + миллисекунда записи: уникальный индекс
+            # тогда схлопывает только настоящую гонку двух потоков на одном
+            # событии,
+            # а не память о нём на годы вперёд. Основной дедупль — SELECT выше.
+            request_key = hmac.new(
+                SUPPORT_SYSTEM_KEY,
+                f"{fingerprint}:{now_ms}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            try:
+                conn.execute(
+                    "INSERT INTO support_messages(request_key, message_digest, source, message, spam_score, status, created_at)"
+                    " VALUES(?, ?, ?, ?, 0, 'new', ?)",
+                    (request_key, digest, SYSTEM_SUPPORT_SOURCE, text, now_iso()),
+                )
+            except sqlite3.IntegrityError:
+                # Два потока увидели одно и то же событие (или мы попали ровно на
+                # границу часового окна): строка уже есть — это не ошибка.
+                conn.rollback()
+                return None
+            conn.commit()
+            return int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        finally:
+            conn.close()
+    except Exception as exc:
+        try:
+            print(f"EGE CORE: системное обращение не записано: {exc}", file=sys.stderr, flush=True)
+        except Exception:
+            pass
+        return None
+
+
 def strict_json_object(pairs):
     """Object hook that rejects duplicate JSON keys instead of last-wins."""
     result = {}
@@ -5477,7 +5645,10 @@ def admin_support_inbox(conn: sqlite3.Connection, limit: int, offset: int, statu
 
     Only ever called behind require_admin. Exposes no internal dedupe keys
     (request_key/message_digest stay server-side) and no user linkage — the
-    table is deliberately anonymous: id/message/status/created_at only.
+    table is deliberately anonymous: id/message/status/source/created_at only.
+    source is 'contacts' for what people wrote and 'system' for what the server
+    logged about itself (see log_system_support_message) — a badge in the UI,
+    nothing else: such a row is marked read, paginated and grouped like any other.
     status="all" returns the full feed grouped by status (new -> reviewed ->
     resolved -> archived, newest first inside each group), so the admin panel
     can render separate blocks; a concrete status filters the feed (the
@@ -5495,13 +5666,14 @@ def admin_support_inbox(conn: sqlite3.Connection, limit: int, offset: int, statu
     new_count = conn.execute(
         "SELECT COUNT(*) AS c FROM support_messages WHERE status='new'").fetchone()["c"]
     rows = conn.execute(
-        "SELECT id, message, status, created_at FROM support_messages "
+        "SELECT id, message, status, source, created_at FROM support_messages "
         f"{where} ORDER BY {order} LIMIT ? OFFSET ?",
         (*args, limit, offset),
     ).fetchall()
     return {
         "messages": [
             {"id": r["id"], "message": r["message"], "status": r["status"],
+             "source": r["source"] or "contacts",
              "createdAt": timestamp_value(r["created_at"])}
             for r in rows
         ],
@@ -8439,6 +8611,14 @@ if __name__ == "__main__":
             stop_ai_probe = threading.Event()
             ai_probe_thread = None
             if _AI is not None:
+                # Смена активного ИИ-провайдера — обычное обращение в ленте
+                # админа, но с таблеткой «Система». Подписка живёт в процессе:
+                # тесты и любой другой запуск без run_server просто не пишут.
+                try:
+                    _AI.set_system_listener(log_system_support_message)
+                except Exception as exc:
+                    print(f"EGE CORE AI system listener not set: {exc}",
+                          file=sys.stderr, flush=True)
                 try:
                     ai_probe_thread = _AI.start_failover_loop(stop_ai_probe)
                 except Exception as exc:

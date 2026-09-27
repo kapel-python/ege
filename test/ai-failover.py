@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Роутер ИИ-провайдеров: приоритет CloseRouter, бесшовный failover на
-gptunnel при отказе и часовой probe восстановления.
+gptunnel при отказе, часовой probe восстановления и системные обращения
+в ленте админа при смене провайдера.
 
 Офлайн: сеть заглушена на уровне ai._chat_via / urllib.request.urlopen,
 состояние роутера — в temp-БД (EGE_DB_PATH), прод не трогается. Запуск из
@@ -345,6 +346,87 @@ def main() -> int:
             answer = ai.chat([{"role": "user", "content": "сочинение"}])
             check("402 превратился в ответ запасного", answer == "спас:qwen3.8-flash", answer)
             check("активный переключён на gptunnel", ai.active_provider() == "gptunnel")
+
+            # ----------------------------------------------------------
+            section("Системные обращения: смена провайдера попадает в ленту админа")
+            # ----------------------------------------------------------
+            # Роутер только сообщает факт; собирает обращение сервер. Здесь
+            # подписчик настоящий (server.log_system_support_message) — временная
+            # БД, так что запись идёт в support_messages рядом с роутером.
+            srv_spec = importlib.util.spec_from_file_location(
+                "ege_ai_failover_srv", ROOT / "server" / "server.py")
+            srv = importlib.util.module_from_spec(srv_spec)
+            srv_spec.loader.exec_module(srv)
+            # Подписка — на том самом экземпляре ai, которым мы зовём chat():
+            # у server.py свой собственный, загруженный отдельно.
+            events = []
+            ai.set_system_listener(lambda event: (
+                events.append(event), srv.log_system_support_message(event))[1])
+
+            def system_rows():
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    return conn.execute(
+                        "SELECT id, source, status, message FROM support_messages"
+                        " WHERE source='system' ORDER BY id").fetchall()
+                finally:
+                    conn.close()
+
+            reset()
+            events.clear()
+            ai._chat_via = original_chat_via
+
+            def closerouter_402(name, messages, **kw):
+                if name == "closerouter":
+                    raise ai.AIUnavailable("на балансе ИИ закончились средства")
+                return f"ok:{name}"
+
+            ai._chat_via = closerouter_402
+            ai.chat([{"role": "user", "content": "сочинение"}])
+            rows = system_rows()
+            check("смена провайдера записана в ленту", len(rows) == 1, rows)
+            check("источник — system", bool(rows) and rows[0][1] == "system", rows)
+            check("статус — new (обычное непрочитанное обращение)",
+                  bool(rows) and rows[0][2] == "new", rows)
+            check("в тексте оба провайдера и причина",
+                  bool(rows) and "CloseRouter" in rows[0][3] and "GPTunnel" in rows[0][3]
+                  and "средства" in rows[0][3], rows[0][3] if rows else "")
+            check("событие отдало kind=provider_switch",
+                  any(e.get("kind") == "provider_switch" and e.get("from") == "closerouter"
+                      and e.get("to") == "gptunnel" for e in events), events)
+
+            # Повторный отказ в пределах часа — та же авария, второй строки нет.
+            ai._chat_via = closerouter_402
+            ai.chat([{"role": "user", "content": "ещё одно"}])
+            check("дедупль: повтор не плодит ленту", len(system_rows()) == 1, system_rows())
+
+            # Восстановление приоритетного — отдельное событие и отдельная строка.
+            ai._chat_via = lambda name, messages, **kw: f"ok:{name}"
+            ai._notify_system({"kind": "provider_restored", "from": "gptunnel",
+                               "to": "closerouter", "at": int(time.time() * 1000)})
+            rows = system_rows()
+            check("восстановление записано отдельной строкой", len(rows) == 2, rows)
+            check("в тексте восстановления есть провайдер",
+                  len(rows) == 2 and "снова доступен" in rows[1][3], rows[1][3] if len(rows) > 1 else "")
+
+            # Отказ последнего провайдера — авария, а не «смена».
+            def all_dead(name, messages, **kw):
+                raise ai.AIUnavailable("на балансе ИИ закончились средства")
+
+            reset()
+            ai._chat_via = all_dead
+            try:
+                ai.chat([{"role": "user", "content": "сочинение"}])
+            except ai.AIUnavailable:
+                pass
+            rows = system_rows()
+            kinds = [r[3] for r in rows]
+            check("авария (все упали) записана один раз",
+                  sum(1 for r in rows if "Не отвечает ни один провайдер" in r[3]) == 1, kinds)
+            check("подписчик не роняет проверку при мусорном событии",
+                  srv.log_system_support_message({"kind": "нет-такого"}) is None)
+
+            ai.set_system_listener(None)
         finally:
             ai._chat_via = original_chat_via
             urllib.request.urlopen = original_urlopen

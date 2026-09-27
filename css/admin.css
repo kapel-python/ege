@@ -534,6 +534,16 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   flex-direction: column;
   gap: 4px;
 }
+/* Системное обращение (source=system): та же карточка, но с таблеткой и
+   приглушённой рамкой — видно, что автор не человек, а сам сервер. */
+.a-msg__chips {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.a-msg--system { border-style: dashed; }
 .a-msg__meta {
   font-size: 12px;
   color: var(--muted);

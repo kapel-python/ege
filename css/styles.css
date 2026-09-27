@@ -2592,6 +2592,8 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+/* Таблетка «Система» и рамка пунктиром: сообщение о состоянии сервера. */
+.aib-msg--system { border-style: dashed; }
 .aib-msg__meta {
   font-size: 12px;
   color: var(--muted);

@@ -104,6 +104,7 @@ def _env(*names: str, default: str = "") -> str:
 # Новый провайдер = одна запись здесь + место в PROVIDER_PRIORITY.
 PROVIDERS: dict[str, dict] = {
     "gptunnel": {
+        "title": "GPTunnel",
         "key": lambda: _env("EGE_AI_API_KEY", "AI_API_KEY"),
         "base_url": lambda: _env("EGE_AI_BASE_URL", "AI_BASE_URL",
                                  default=DEFAULT_BASE_URL).rstrip("/"),
@@ -113,6 +114,7 @@ PROVIDERS: dict[str, dict] = {
         "merge_system": False,
     },
     "closerouter": {
+        "title": "CloseRouter",
         "key": lambda: _env("EGE_CLOSEROUTER_API_KEY", "CLOSEROUTER_API_KEY"),
         "base_url": lambda: _env("EGE_CLOSEROUTER_BASE_URL",
                                  default=CLOSEROUTER_BASE_URL).rstrip("/"),
@@ -126,6 +128,12 @@ PROVIDERS: dict[str, dict] = {
 # (см. active_provider) идёт первым вне зависимости от этого порядка, так что
 # после отказа приоритетного запросы сразу идут на запасной.
 PROVIDER_PRIORITY: tuple[str, ...] = ("closerouter", "gptunnel")
+
+
+def provider_title(name: str) -> str:
+    """Человеческое имя провайдера для сообщений админу (fallback — сам id)."""
+    spec = PROVIDERS.get(str(name or "")) or {}
+    return str(spec.get("title") or name or "").strip()
 
 
 def api_key() -> str:
@@ -355,12 +363,49 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
         print(f"EGE CORE ai: провайдер {name} недоступен ({exc}); "
               f"активный теперь {switch_to}", file=sys.stderr, flush=True)
     _router_update(patch)
+    if patch.get("active"):
+        # Смена активного — событие для ленты админа. Отказ самого запасного
+        # (switch_to пуст) — не смена, о нём скажет provider_outage из chat().
+        _notify_system({"kind": "provider_switch", "from": name, "to": switch_to,
+                        "reason": f"{type(exc).__name__}: {exc}"[:200], "at": now_ms})
 
 
 def _note_provider_success(name: str) -> None:
     """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления."""
     if str(_router_state().get("active") or "") not in ("", name):
         _router_update({"active": name, "updatedAt": int(time.time() * 1000)})
+
+
+# ---------------------------------------------------------------------------
+# Системные события — сообщения в ленту «Обращения»
+#
+# Роутер ничего не знает про админку: он только сообщает ФАКТ («активный
+# сменился», «приоритетный восстановлен», «не отвечает никто»), а текст
+# обращения собирает server.py — он владеет схемой support_messages и
+# единственный, кто умеет не пустить в текст ключ провайдера. Подписчика
+# ставит сервер при загрузке модуля (set_system_listener); подписчика нет —
+# всё работает как раньше, просто никто не читает ленту.
+# ---------------------------------------------------------------------------
+_system_listener: Callable[[dict], None] | None = None
+
+
+def set_system_listener(fn: Callable[[dict], None] | None) -> None:
+    """Подписать сервер на события роутера (см. _notify_system)."""
+    global _system_listener
+    _system_listener = fn
+
+
+def _notify_system(event: dict) -> None:
+    """Отдать событие подписчику. Никогда не бросает: инфраструктурная рассылка
+    не имеет права уронить ни проверку сочинения ученика, ни фоновую пробу."""
+    fn = _system_listener
+    if fn is None:
+        return
+    try:
+        fn(dict(event))
+    except Exception as exc:  # noqa: BLE001 — подписчик чужой, мы не падаем
+        print(f"EGE CORE ai: системное уведомление не доставлено: {exc}",
+              file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +487,11 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
             if state is not None:
                 state["provider"] = name
             return answer
+        # Все настроенные провайдеры отказали: это уже авария, а не «попробуй
+        # запасного» — сообщаем один раз на случай (дедупль на стороне сервера).
+        _notify_system({"kind": "provider_outage", "providers": list(names),
+                        "reason": f"{type(last_exc).__name__}: {last_exc}"[:200],
+                        "at": int(time.time() * 1000)})
         raise last_exc
     finally:
         _ai_slots.release()
@@ -565,7 +615,8 @@ def probe_tick(now: float | None = None) -> bool:
     preferred = PROVIDER_PRIORITY[0]
     if not _provider_configured(preferred):
         return False
-    if active_provider() == preferred:
+    current = active_provider()
+    if current == preferred:
         return False  # уже на приоритетном — проверять нечего
     moment = time.time() if now is None else float(now)
     try:
@@ -590,6 +641,8 @@ def probe_tick(now: float | None = None) -> bool:
         _ai_slots.release()
     _router_update({"active": preferred, "updatedAt": now_ms,
                     "lastProbeAt": now_ms, "lastProbeError": None})
+    _notify_system({"kind": "provider_restored", "from": str(current or ""),
+                    "to": preferred, "reason": "проба прошла", "at": now_ms})
     print(f"EGE CORE ai: приоритетный провайдер {preferred} восстановлен — снова активен",
           flush=True)
     return True

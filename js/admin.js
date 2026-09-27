@@ -1476,18 +1476,22 @@ function inboxMessageHTML(m) {
   const open = !!Inbox.expanded[id];
   const [label, cls] = INBOX_STATUS[m.status] || [String(m.status || "—"), ""];
   const isNew = m.status === "new";
+  // source='system' — сообщение о самом сервере (например, смена ИИ-провайдера).
+  // Свойства у него ровно те же, отличается только таблетка.
+  const isSystem = m.source === "system";
   return `
-  <article class="a-msg${open ? " open" : ""}">
+  <article class="a-msg${open ? " open" : ""}${isSystem ? " a-msg--system" : ""}">
     <button type="button" class="a-msg__head" onclick="toggleInboxMessage(${id})"
-        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}">
+        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}${isSystem ? ", системное" : ""}">
       <span class="a-msg__head-main">
         <span class="a-msg__meta">${esc(fmtDateTime(m.createdAt))} · № ${id}</span>
         <span class="a-msg__text">${esc(m.message || "")}</span>
       </span>
-      <span class="a-chip ${cls}">${esc(label)}</span>
+      <span class="a-msg__chips">${isSystem ? `<span class="a-chip a-chip--ghost">Система</span>` : ""}<span class="a-chip ${cls}">${esc(label)}</span></span>
     </button>
     ${open ? `<div class="a-msg__full">
       <div class="a-msg__full-row"><span>Статус</span><b>${esc(label)}</b></div>
+      ${isSystem ? `<div class="a-msg__full-row"><span>Источник</span><b>Система</b></div>` : ""}
       <div class="a-msg__full-row"><span>Получено</span><b>${esc(fmtDateTime(m.createdAt))}</b></div>
       <div class="a-msg__full-row"><span>Номер</span><b class="mono">№ ${id}</b></div>
       ${isNew ? `<div class="a-msg__actions">

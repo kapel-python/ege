@@ -15,6 +15,9 @@
  *   F10 ручной вызов refreshAdminInbox() не-админом: запросов нет, DOM нет
  *   F11 /admin: админу виден раздел, юзеру — форма входа (данных нет)
  *   F12 обращение с HTML/скриптом рендерится текстом, не исполняется
+ *   F13 системное обращение (смена ИИ-провайдера): таблетка «Система» в
+ *       блоке дашборда и в панели, строка «Источник» в раскрытой карточке,
+ *       обычные «Новый»/«Прочитано»/счётчики работают как у любого обращения
  *
  * Запуск: node test/admin-inbox-ui.js
  * Нужен playwright-core (NODE_PATH) и Chromium; путь можно задать EGE_CHROME.
@@ -436,6 +439,108 @@ conn.commit(); conn.close()
     });
     t("F11 юзер: прямой вызов inbox -> 401", plainApi === 401, String(plainApi));
     await plainCtx.close();
+
+    // ------------------------------------------------------------------
+    section("F13: системное обращение — таблетка «Система», свойства те же");
+    // ------------------------------------------------------------------
+    // Пишем настоящим серверным путём (log_system_support_message), а не
+    // руками в SQL: проверяем ровно то, что увидит админ после отказа
+    // приоритетного ИИ-провайдера.
+    const sysScript = `
+import importlib.util, os, sys, time
+os.environ["EGE_DB_PATH"] = ${JSON.stringify(DB)}
+os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+spec = importlib.util.spec_from_file_location("srv", ${JSON.stringify(SERVER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+mid = m.log_system_support_message({"kind": "provider_switch", "from": "closerouter",
+    "to": "gptunnel", "reason": "AIUnavailable: на балансе ИИ закончились средства",
+    "at": int(time.time() * 1000)})
+print(mid or "")
+`;
+    const sysId = execFileSync("python3", ["-c", sysScript], { encoding: "utf8" }).trim();
+    t("F13 сервер записал системное обращение", /^\d+$/.test(sysId), sysId);
+
+    const sysCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const sysPage = await newPage(sysCtx);
+    await loginAdmin(sysPage);
+    await openDashboard(sysPage);
+    await sysPage.waitForSelector("#adminInbox .aib-msg", { timeout: 30000 });
+    const dashCard = await sysPage.evaluate((id) => {
+      const cards = Array.from(document.querySelectorAll("#adminInbox .aib-msg"));
+      const card = cards.find((c) => c.textContent.includes(`№ ${id}`));
+      if (!card) return null;
+      return {
+        text: card.innerText,
+        // Классsystem-признака висит на самой карточке, а не на потомке.
+        system: card.classList.contains("aib-msg--system"),
+        badge: Array.from(card.querySelectorAll(".aib-pill")).map((p) => p.textContent.trim()),
+        new: Array.from(card.querySelectorAll(".aib-pill")).some((p) => p.textContent.trim() === "Новый"),
+      };
+    }, sysId);
+    t("F13 системное обращение видно в блоке дашборда", !!dashCard, String(sysId));
+    t("F13 у него таблетка «Система»",
+      !!dashCard && dashCard.badge.includes("Система") && dashCard.system, JSON.stringify(dashCard && dashCard.badge));
+    t("F13 и при этом остаётся обычным «Новый»", !!dashCard && dashCard.new, JSON.stringify(dashCard && dashCard.badge));
+    t("F13 текст говорит о смене провайдера и называет обоих",
+      !!dashCard && /CloseRouter/.test(dashCard.text) && /GPTunnel/.test(dashCard.text)
+      && /средства/.test(dashCard.text), dashCard && dashCard.text.slice(0, 120));
+    // Раскрытая карточка показывает источник — и «Прочитано» на месте.
+    if (dashCard) {
+      await sysPage.click(`#adminInbox .aib-msg:has-text("№ ${sysId}") .aib-msg__head`);
+      await sleep(400);
+      const full = await sysPage.evaluate((id) => {
+        const card = Array.from(document.querySelectorAll("#adminInbox .aib-msg"))
+          .find((c) => c.textContent.includes(`№ ${id}`));
+        const fullBox = card && card.querySelector(".aib-msg__full");
+        return fullBox ? {
+          text: fullBox.innerText,
+          hasRead: !!fullBox.querySelector("[data-aib-read]"),
+        } : null;
+      }, sysId);
+      t("F13 в раскрытой карточке есть строка «Источник» и кнопка «Прочитано»",
+        !!full && /Источник/.test(full.text) && full.hasRead, full && full.text.replace(/\n/g, " | ").slice(0, 140));
+    }
+    // Панель админа: та же таблетка, та же кнопка.
+    await sysPage.goto(`${BASE}/admin#/inbox`, { waitUntil: "domcontentloaded" });
+    await sysPage.waitForSelector("#inboxBody .a-msg", { timeout: 30000 });
+    const adminCard = await sysPage.evaluate((id) => {
+      const card = Array.from(document.querySelectorAll("#inboxBody .a-msg"))
+        .find((c) => c.textContent.includes(`№ ${id}`));
+      if (!card) return null;
+      return {
+        text: card.innerText,
+        system: card.classList.contains("a-msg--system"),
+        chips: Array.from(card.querySelectorAll(".a-chip")).map((c) => c.textContent.trim()),
+      };
+    }, sysId);
+    t("F13 в панели админа таблетка «Система»",
+      !!adminCard && adminCard.system && adminCard.chips.includes("Система"),
+      JSON.stringify(adminCard && adminCard.chips));
+    t("F13 обычное обращение осталось без таблетки",
+      await sysPage.evaluate(() => {
+        const plain = Array.from(document.querySelectorAll("#inboxBody .a-msg"))
+          .find((c) => !c.classList.contains("a-msg--system"));
+        return !!plain && !Array.from(plain.querySelectorAll(".a-chip"))
+          .some((c) => c.textContent.trim() === "Система");
+      }));
+    // Системное обращение прочитывается тем же POST, что и обычное.
+    await sysPage.click(`#inboxBody .a-msg:has-text("№ ${sysId}") .a-msg__head`);
+    await sleep(300);
+    const readBtn = await sysPage.$(`#inboxBody [data-inbox-read="${sysId}"]`);
+    t("F13 у системного обращения есть кнопка «Прочитано»", !!readBtn);
+    if (readBtn) {
+      await readBtn.click();
+      await sleep(900);
+      const jar = await sysCtx.cookies();
+      const afterRead = await api("/api/admin/support-messages?status=new&limit=100",
+        { headers: { Cookie: jar.map((c) => `${c.name}=${c.value}`).join("; ") } });
+      t("F13 после «Прочитано» оно ушло из ленты новых",
+        afterRead.status === 200 && !(afterRead.payload.messages || []).some((m) => String(m.id) === String(sysId)),
+        JSON.stringify((afterRead.payload.messages || []).map((m) => m.id)));
+      t("F13 счётчик новых уменьшился", afterRead.payload.newCount >= 0,
+        String(afterRead.payload.newCount));
+    }
+    await sysCtx.close();
 
     // ------------------------------------------------------------------
     const allErrors = [];

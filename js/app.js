@@ -2199,18 +2199,23 @@ function adminInboxMessageHTML(m) {
   const open = !!AdminInbox.expanded[id];
   const status = ADMIN_INBOX_STATUS[m.status] || String(m.status || "—");
   const isNew = m.status === "new";
+  // source='system' — сообщение о самом сервере (например, смена ИИ-провайдера).
+  // Всё остальное — как у обычного обращения: статус, «Прочитано», счётчики.
+  const isSystem = m.source === "system";
   return `
-  <article class="aib-msg${open ? " open" : ""}">
+  <article class="aib-msg${open ? " open" : ""}${isSystem ? " aib-msg--system" : ""}">
     <button type="button" class="aib-msg__head" onclick="toggleAdminMessage(${id})"
-        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}">
+        aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}${isSystem ? ", системное" : ""}">
       <span class="aib-msg__head-main">
         <span class="aib-msg__meta">${esc(formatInboxDate(m.createdAt))} · № ${id}</span>
         <span class="aib-msg__text">${esc(m.message || "")}</span>
       </span>
+      ${isSystem ? `<span class="chip aib-pill">Система</span>` : ""}
       ${isNew ? `<span class="chip chip--accent aib-pill">Новый</span>` : `<span class="chip aib-pill">${esc(status)}</span>`}
     </button>
     ${open ? `<div class="aib-msg__full">
       <div class="aib-msg__full-row"><span>Статус</span><b>${esc(status)}</b></div>
+      ${isSystem ? `<div class="aib-msg__full-row"><span>Источник</span><b>Система</b></div>` : ""}
       <div class="aib-msg__full-row"><span>Получено</span><b>${esc(formatInboxDate(m.createdAt))}</b></div>
       <div class="aib-msg__full-row"><span>Номер</span><b class="mono">№ ${id}</b></div>
       <div class="aib-msg__actions">

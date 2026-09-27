@@ -403,7 +403,7 @@ def main() -> int:
               page1.get("total") == 3 and page1.get("newCount") == 1,
               f"total={page1.get('total')} new={page1.get('newCount')}")
 
-            allowed = {"id", "message", "status", "createdAt"}
+            allowed = {"id", "message", "status", "source", "createdAt"}
             sample = (page1.get("messages") or [{}])[0]
             t("D5 наружу только разрешённые поля", set(sample) <= allowed, str(sorted(sample)))
             t("D6 нет внутренних ключей дедупа",
