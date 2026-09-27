@@ -10,7 +10,7 @@
    3. Исчерпанный продуктовый лимит (429 AI_LIMIT внутри практики) — единое
       .dlg-окно (та же система, что у устройств профиля и модалок
       перепроверки на ege-result.html) с живым таймером ЧЧ:ММ:СС и
-      остатком «0 из 3». Отдельных inline-блоков нет.
+      остатком «0 из 5». Отдельных inline-блоков нет.
    4. Голый 429 burst-бакета — то же окно в режиме «Слишком частые запросы»
       с коротким отсчётом retryAfter; по нулю окно гаснет само.
    5. Таймер продуктового окна дотикал до нуля → перезапрос → проверка
@@ -91,7 +91,7 @@ const memoryStorage = () => {
 const noop = () => {};
 
 /* Управляемый ответ /api/ai/limits: limitResponse=null имитирует офлайн. */
-let limitResponse = { ok: true, limit: 3, remaining: 3, resetInSec: null, windowSec: 28800 };
+let limitResponse = { ok: true, limit: 5, remaining: 5, resetInSec: null, windowSec: 28800 };
 const limitCalls = [];
 const intervals = [];
 
@@ -180,7 +180,7 @@ const resetRoots = () => {
 
   /* 3. Окно темы открывается всегда — даже при remaining=0 (гейта нет). */
   resetRoots();
-  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 3661, windowSec: 28800 };
+  limitResponse = { ok: true, limit: 5, remaining: 0, resetInSec: 3661, windowSec: 28800 };
   limitCalls.length = 0;
   run(`openSkillModal("russian_essay_source")`);
   await flush();
@@ -198,16 +198,16 @@ const resetRoots = () => {
   check("гость не вызывает /api/ai/limits", limitCalls.length === 0, String(limitCalls.length));
   run(`Store.accountId = "limits-ui";`);
 
-  /* 5. Продуктовый лимит: единое .dlg-окно с таймером и «0 из 3». */
+  /* 5. Продуктовый лимит: единое .dlg-окно с таймером и «0 из 5». */
   resetRoots();
   intervals.length = 0;
-  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 3661, windowSec: 28800 })`);
+  run(`openAiLimitModal({ limit: 5, remaining: 0, resetInSec: 3661, windowSec: 28800 })`);
   await flush();
   const dlg = devRoot();
   check("открыто .dlg-окно лимита (та же система, что у устройств)", dlg.includes("dlg-backdrop"));
   check("заголовок «Проверки на сегодня закончились»", dlg.includes("Проверки на сегодня закончились"));
-  check("текст про лимит 3 проверки в день", dlg.includes("3 проверки сочинения в день на аккаунт"), dlg.slice(0, 200));
-  check("остаток «0 из 3»", dlg.includes(">0</span> из 3"), (dlg.match(/data-ai-limit-left[^<]*</) || [""])[0]);
+  check("текст про лимит 5 проверок в день", dlg.includes("5 проверок сочинения в день на аккаунт"), dlg.slice(0, 200));
+  check("остаток «0 из 5»", dlg.includes(">0</span> из 5"), (dlg.match(/data-ai-limit-left[^<]*</) || [""])[0]);
   check("живой таймер ЧЧ:ММ:СС из resetInSec", dlg.includes("01:01:01"), (dlg.match(/\d\d:\d\d:\d\d/) || [""])[0]);
   check("закрытие крестиком и кнопкой", dlg.includes('onclick="closeAiLimitModal()"'));
   check("тикающий интервал запущен", intervals.length >= 1, String(intervals.length));
@@ -221,8 +221,8 @@ const resetRoots = () => {
   intervals.length = 0;
   const timerSpan = { textContent: "", isConnected: true };
   element("device-modal-root")._qs["[data-ai-limit-timer]"] = timerSpan;
-  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 };
-  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
+  limitResponse = { ok: true, limit: 5, remaining: 0, resetInSec: 2, windowSec: 28800 };
+  run(`openAiLimitModal({ limit: 5, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
   await flush();
   check("окно лимита открыто", devRoot().includes("dlg-backdrop"));
   check("начальный рендер таймера 00:00:02", devRoot().includes("00:00:02"),
@@ -230,7 +230,7 @@ const resetRoots = () => {
   const tick = intervals[intervals.length - 1];
   check("интервал тика пойман", typeof tick === "function");
   limitCalls.length = 0;
-  limitResponse = { ok: true, limit: 3, remaining: 1, resetInSec: null, windowSec: 28800 };
+  limitResponse = { ok: true, limit: 5, remaining: 1, resetInSec: null, windowSec: 28800 };
   tick(); // left: 2 -> 1
   check("тик обновляет цифры", timerSpan.textContent === "00:00:01", timerSpan.textContent);
   tick(); // left: 1 -> 0 → перезапрос
@@ -243,11 +243,11 @@ const resetRoots = () => {
   intervals.length = 0;
   const timerSpan2 = { textContent: "", isConnected: true };
   element("device-modal-root")._qs["[data-ai-limit-timer]"] = timerSpan2;
-  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 };
-  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
+  limitResponse = { ok: true, limit: 5, remaining: 0, resetInSec: 2, windowSec: 28800 };
+  run(`openAiLimitModal({ limit: 5, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
   await flush();
   const tick2 = intervals[intervals.length - 1];
-  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 5000, windowSec: 28800 };
+  limitResponse = { ok: true, limit: 5, remaining: 0, resetInSec: 5000, windowSec: 28800 };
   tick2(); tick2();
   await flush();
   check("сервер сказал ждать → окно перезапущено с новым таймером",
@@ -274,14 +274,14 @@ const resetRoots = () => {
 
   /* 10. Burst с известным остатком: остаток виден, лимит не выдуман. */
   resetRoots();
-  run(`openAiLimitModal({ limit: 3, remaining: 2, resetInSec: 20000, windowSec: 28800 }, 60)`);
+  run(`openAiLimitModal({ limit: 5, remaining: 2, resetInSec: 20000, windowSec: 28800 }, 60)`);
   await flush();
-  check("burst с остатком: показан «2 из 3»", devRoot().includes(">2</span> из 3"), devRoot().slice(0, 300));
+  check("burst с остатком: показан «2 из 5»", devRoot().includes(">2</span> из 5"), devRoot().slice(0, 300));
   check("burst с остатком: короткий отсчёт, а не 8ч", devRoot().includes("00:01:00"), devRoot().slice(0, 300));
 
   /* 11. Успешная проверка локально уменьшает кэш остатка. */
   run(`AiLimits.accountId = Store.accountId;
-       AiLimits.cache = { limit: 3, remaining: 1, resetInSec: null, windowSec: 28800, at: Date.now() };
+       AiLimits.cache = { limit: 5, remaining: 1, resetInSec: null, windowSec: 28800, at: Date.now() };
        aiLimitsNoteSpend();`);
   const after = run(`AiLimits.cache.remaining`);
   check("aiLimitsNoteSpend: 1 → 0", after === 0, String(after));

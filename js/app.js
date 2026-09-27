@@ -4350,7 +4350,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
       if (aiData && aiData.code === "AI_LIMIT") {
         AiLimits.accountId = Store.accountId;
         AiLimits.cache = {
-          limit: Math.max(1, Number(aiData.limit) || 3), remaining: 0,
+          limit: Math.max(1, Number(aiData.limit) || AI_LIMIT_FALLBACK), remaining: 0,
           resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
           windowSec: 8 * 3600, at: Date.now(),
         };
@@ -4538,7 +4538,7 @@ async function sessionEssaySubmit() {
 }
 
 /* ---------------- лимит ИИ-проверок сочинений ----------------
-   3 проверки на аккаунт, цепочечная зарядка 8 часов: каждая потраченная
+   5 проверок на аккаунт, цепочечная зарядка 8 часов: каждая потраченная
    возвращается через 8 часов. Списывает и решает только сервер
    (POST /api/ai/essay → 429 AI_LIMIT за продуктовый бюджет, голый 429
    за burst-бакет всплесков); окно темы на «Пути» открывается всегда —
@@ -4548,6 +4548,12 @@ async function sessionEssaySubmit() {
    при отправке. */
 
 const AiLimits = { cache: null, accountId: null, pending: null, freshMs: 30000 };
+
+/* Запасное значение лимита, когда сервер числа не дал (офлайн, гость):
+   единственная тройка→пятёрка на весь бандл. Рабочая величина живёт только
+   на сервере (AI_USAGE_MAX_DEFAULT) и приезжает в каждом ответе лимита —
+   клиент её не решает, а подставляет. */
+const AI_LIMIT_FALLBACK = 5;
 
 function aiLimitsFreshCached() {
   if (!Store.accountId || AiLimits.accountId !== Store.accountId) return null;
@@ -4569,7 +4575,7 @@ function aiLimitsFetch(force) {
       .then(({ ok, data }) => {
         if (!ok || !data || !data.ok) return null; // 401/сеть — не блокируем: решит сервер на проверке
         const st = {
-          limit: Math.max(1, Number(data.limit) || 3),
+          limit: Math.max(1, Number(data.limit) || AI_LIMIT_FALLBACK),
           remaining: Math.max(0, Number(data.remaining) || 0),
           resetInSec: data.resetInSec == null ? null : Math.max(0, Number(data.resetInSec) || 0),
           windowSec: Math.max(60, Number(data.windowSec) || 8 * 3600),
@@ -4603,7 +4609,7 @@ function aiLimitsNoteSpend() {
 
 /* Единая модалка лимита — та же .dlg-система, что у инфо-диалога устройства
    в профиле и модалок перепроверки на ege-result.html. Два режима одного окна:
-   продуктовый (429 AI_LIMIT: «0 из 3», таймер 8-часовой цепочки; по нулю
+   продуктовый (429 AI_LIMIT: «0 из limit», таймер 8-часовой цепочки; по нулю
    переспрашиваем сервер — вернувшаяся проверка просто закрывает окно, черновик
    в практике цел, отправка повторяется кнопкой) и burst (голый 429 бакета
    всплесков: короткий отсчёт retryAfter, по нулю окно закрывается само).
@@ -4628,7 +4634,7 @@ function openAiLimitModal(status, burstRetryAfterSec) {
   if (!root) return;
   aiLimitStopTick();
   const burst = burstRetryAfterSec != null;
-  const limit = Math.max(1, Number(status && status.limit) || 3);
+  const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
   const remaining = Math.max(0, Math.min(limit, Number(status && status.remaining) || 0));
   let left = burst
     ? Math.max(1, Math.floor(Number(burstRetryAfterSec) || 60))

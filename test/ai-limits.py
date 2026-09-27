@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Антиабуз лимита ИИ-проверок сочинений: 3 проверки на аккаунт, цепочечная
+"""Антиабуз лимита ИИ-проверок сочинений: 5 проверок на аккаунт, цепочечная
 зарядка — первая трата из полного кармана запускает таймер, дальше жетоны
 возвращаются ПО ОДНОМУ каждые 8 часов, пока карман снова не полон.
 
 Сценарии — как действуют реальные ученики, а не синтетические диктофоны:
-  * обычный ученик: 3 проверки проходят, 4-я — 429 AI_LIMIT с живым
+  * обычный ученик: 5 проверок проходят, 6-я — 429 AI_LIMIT с живым
     resetInSec и Retry-After, модель при отказе не вызывается (0 денег);
   * цепочка: «за ночь появился 1 запрос» (8ч от первой траты), второй и
     третий запросы таймер не сдвигают — следующий жетон ещё через 8ч,
@@ -233,31 +233,31 @@ def main():
             check("гостю не выдали сессионную куку", "ege_session" not in guest.cookies)
 
             # --------------------------------------- обычный ученик: 3 и стоп
-            section("3 проверки на аккаунт, 4-я — 429 AI_LIMIT")
+            section("5 проверок на аккаунт, 6-я — 429 AI_LIMIT")
             a = Client("10.1.0.1")
             status, _, body = claim(a, "Аня")
             check("claim Ани", status == 200, f"{status} {body}")
             check("кука устройства выдана", "ege_device" in a.cookies)
             status, _, st = limits(a)
-            check("лимит свежего аккаунта: 3 из 3, таймера нет",
-                  status == 200 and st.get("limit") == 3 and st.get("remaining") == 3
+            check("лимит свежего аккаунта: 5 из 5, таймера нет",
+                  status == 200 and st.get("limit") == 5 and st.get("remaining") == 5
                   and st.get("resetInSec") is None and st.get("windowSec") == 8 * 3600,
                   f"{status} {st}")
-            for i in range(3):
+            for i in range(5):
                 status, _, body = ai_check(a)
                 check(f"проверка #{i + 1} -> 200", status == 200 and body.get("ok") is True,
                       f"{status} {str(body)[:120]}")
-            check("модель вызвана ровно 3 раза", model_calls["n"] == 3, str(model_calls["n"]))
+            check("модель вызвана ровно 5 раз", model_calls["n"] == 5, str(model_calls["n"]))
             status, _, st = limits(a)
-            check("после 3 проверок: remaining 0, таймер до возврата первой (~8ч)",
+            check("после 5 проверок: remaining 0, таймер до возврата первой (~8ч)",
                   st.get("remaining") == 0 and isinstance(st.get("resetInSec"), int)
                   and 7 * 3600 < st["resetInSec"] <= 8 * 3600, str(st))
             before = model_calls["n"]
             status, headers, body = ai_check(a)
-            check("4-я проверка -> 429 AI_LIMIT",
+            check("6-я проверка -> 429 AI_LIMIT",
                   status == 429 and body.get("code") == "AI_LIMIT", f"{status} {body}")
             check("429 несёт limit/remaining/resetInSec",
-                  body.get("limit") == 3 and body.get("remaining") == 0
+                  body.get("limit") == 5 and body.get("remaining") == 0
                   and isinstance(body.get("resetInSec"), int) and body["resetInSec"] > 0, str(body))
             check("429 несёт retryAfter и заголовок Retry-After",
                   body.get("retryAfter", 0) > 0 and str(headers.get("Retry-After", "")).isdigit(),
@@ -282,40 +282,41 @@ def main():
             status, _, st = limits(a)
             check("16ч от первой траты: вернулся только ВТОРОЙ жетон (цепочка, не окно)",
                   st.get("remaining") == 1, str(st))
-            db_age_buckets(WINDOW_MS + 60_000)  # 24ч от первой траты
+            db_age_buckets(16 * 3600_000)  # 32ч от первой траты
             status, _, st = limits(a)
-            check("24ч от первой траты: третий жетон", st.get("remaining") == 2, str(st))
-            db_age_buckets(WINDOW_MS + 60_000)  # отыграны все 4 потраченных жетона
+            check("32ч от первой траты: вернулись 3 из 6 потраченных, а не всё сразу",
+                  st.get("remaining") == 3, str(st))
+            db_age_buckets(16 * 3600_000)  # 48ч: отыграна вся цепочка из 6 тиков
             status, _, st = limits(a)
             check("каждый жетон — свои 8ч цепочки: карман снова полон, таймер погашен",
-                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+                  st.get("remaining") == 5 and st.get("resetInSec") is None, str(st))
 
-            # ------- размазанные траты: второй и третий запросы таймер не двигают
+            # ------- размазанные траты: поздние запросы таймер не двигают
             section("размазал на часы — всё равно отсчёт от ПЕРВОЙ траты")
             o = Client("10.4.0.1")
             claim(o, "Оля")
             status, _, _ = ai_check(o)  # первая трата запускает таймер
             check("Оля: первая трата", status == 200, f"{status}")
             db_age_buckets(3 * 3600_000)  # через 3 часа
-            status, _, _ = ai_check(o)
-            status2, _, _ = ai_check(o)  # добивает остаток спустя часы
-            check("Оля: траты #2 и #3 спустя 3ч", status == 200 and status2 == 200)
+            for _ in range(4):
+                status, _, _ = ai_check(o)  # добивает остаток спустя часы
+            check("Оля: траты #2–#5 спустя 3ч", status == 200, f"{status}")
             status, _, st = limits(o)
             check("карман пуст, таймер показывает ~5ч (остаток от первой траты, не 8ч)",
                   st.get("remaining") == 0
                   and 4 * 3600 < st.get("resetInSec", 0) <= 5 * 3600, str(st))
             db_age_buckets(5 * 3600_000 + 60_000)  # итого 8ч+ от первой траты
             status, _, st = limits(o)
-            check("8ч от ПЕРВОЙ траты — вернулся ровно один жетон, хотя #3 была 5ч назад",
+            check("8ч от ПЕРВОЙ траты — вернулся ровно один жетон, хотя #5 была 5ч назад",
                   st.get("remaining") == 1, str(st))
             db_age_buckets(4 * 3600_000)  # итого 12ч+ от первой траты
             status, _, st = limits(o)
-            check("12ч от первой траты: размазанные #2/#3 ещё не вернулись (окно дало бы 3)",
+            check("12ч от первой траты: размазанные #2–#5 ещё не вернулись (окно вернуло бы все 5)",
                   st.get("remaining") == 1, str(st))
-            db_age_buckets(20 * 3600_000)  # цепочка отыграла оба оставшихся тика
+            db_age_buckets(28 * 3600_000)  # итого 40ч: отыграна вся цепочка
             status, _, st = limits(o)
             check("после отыгрыша всей цепочки карман снова полон",
-                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+                  st.get("remaining") == 5 and st.get("resetInSec") is None, str(st))
 
             # ------------------------------------- сбой не жжёт лимит (refund)
             section("неудачная проверка лимита не стоит")
@@ -332,7 +333,7 @@ def main():
             check("отказ провайдера -> 502", status == 502, f"{status} {body}")
             status, _, st = limits(c)
             check("502 вернул резервацию: лимит не потрачен и таймер не остался тикать",
-                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+                  st.get("remaining") == 5 and st.get("resetInSec") is None, str(st))
 
             def boom_unavailable(messages, **kw):
                 note_model_call()
@@ -342,7 +343,7 @@ def main():
             status, _, body = ai_check(c)
             check("провайдер недоступен -> 503", status == 503, f"{status} {body}")
             status, _, st = limits(c)
-            check("503 вернул резервацию", st.get("remaining") == 3, str(st))
+            check("503 вернул резервацию", st.get("remaining") == 5, str(st))
 
             def garbage(messages, **kw):
                 note_model_call()
@@ -352,7 +353,7 @@ def main():
             status, _, body = ai_check(c)
             check("мусорный ответ модели -> 502", status == 502, f"{status} {body}")
             status, _, st = limits(c)
-            check("502 формата вернул резервацию", st.get("remaining") == 3, str(st))
+            check("502 формата вернул резервацию", st.get("remaining") == 5, str(st))
             check("все 4 сбоя дошли до модели, но не списались",
                   model_calls["n"] == before + 3, str(model_calls["n"]))
             ai.chat = good_chat
@@ -361,18 +362,18 @@ def main():
             check("пустой текст -> 400 (валидация до модели)",
                   status == 400 and model_calls["n"] == before, f"{status} {body}")
             status, _, st = limits(c)
-            check("400 не тратит лимит", st.get("remaining") == 3, str(st))
+            check("400 не тратит лимит", st.get("remaining") == 5, str(st))
             status, _, body = ai_check(c)
             check("удачная проверка списывается", status == 200, f"{status}")
             status, _, st = limits(c)
-            check("remaining 2 после одной удачной", st.get("remaining") == 2, str(st))
+            check("remaining 4 после одной удачной", st.get("remaining") == 4, str(st))
 
             # -------- сбой вне контракта ошибок: жетон не утекает (finally)
             section("сырой сбой модели не съедает лимит")
             k = Client("10.5.0.1")
             claim(k, "Костя")
             status, _, st = limits(k)
-            check("Костя: свежий карман 3 из 3", st.get("remaining") == 3, str(st))
+            check("Костя: свежий карман 5 из 5", st.get("remaining") == 5, str(st))
 
             def boom_raw(messages, **kw):
                 note_model_call()
@@ -388,25 +389,25 @@ def main():
             check("сырой сбой не дал 200", crashed)
             status, _, st = limits(k)
             check("жетон не утёк: карман снова полон, таймер погашен",
-                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+                  st.get("remaining") == 5 and st.get("resetInSec") is None, str(st))
             ai.chat = good_chat
             status, _, body = ai_check(k)
             check("следующая проверка проходит", status == 200, f"{status}")
             status, _, st = limits(k)
-            check("и списывается ровно один жетон", st.get("remaining") == 2, str(st))
+            check("и списывается ровно один жетон", st.get("remaining") == 4, str(st))
             ai.chat = boom_raw
             try:
-                ai_check(k)  # второй сырой сбой подряд: 2 -> 1 -> refund -> 2
+                ai_check(k)  # второй сырой сбой подряд: 4 -> 3 -> refund -> 4
             except Exception:
                 pass
             ai.chat = good_chat
             status, _, st = limits(k)
-            check("двойного возврата нет: ровно 2, а не полный карман",
-                  st.get("remaining") == 2, str(st))
+            check("двойного возврата нет: ровно 4, а не полный карман",
+                  st.get("remaining") == 4, str(st))
 
             # ------------------- ферма: вышел и завёл новый аккаунт (то же устройство)
             section("ферма «вышел — новый аккаунт» на одном устройстве закрыта")
-            for i in range(3):  # Аня снова тратит всё: устройство «горячее»
+            for i in range(5):  # Аня снова тратит всё: устройство «горячее»
                 status, _, _ = ai_check(a)
                 check(f"Аня дожимает лимит #{i + 1}", status == 200, f"{status}")
             status, _, st = limits(a)
@@ -448,8 +449,8 @@ def main():
             e = Client("10.1.0.2")
             claim(e, "Ева")
             status, _, st = limits(e)
-            check("новичок с другого устройства/сети не заблокирован: 3 из 3",
-                  st.get("remaining") == 3, str(st))
+            check("новичок с другого устройства/сети не заблокирован: 5 из 5",
+                  st.get("remaining") == 5, str(st))
             status, _, body = ai_check(e)
             check("его проверка проходит", status == 200, f"{status}")
 
@@ -465,7 +466,7 @@ def main():
             db_age_user(anya3, TRUST_MS + 3600_000)
             status, _, st = limits(a)
             check("аккаунт старше суток на горячем устройстве: свой лимит цел",
-                  st.get("remaining") == 3, str(st))
+                  st.get("remaining") == 5, str(st))
             before = model_calls["n"]
             status, _, body = ai_check(a)
             check("и проверка проходит", status == 200 and model_calls["n"] == before + 1, f"{status}")
@@ -483,7 +484,7 @@ def main():
             status, _, body = g.request(base, "POST", "/api/auth/register",
                                         {"email": "grisha@example.com", "password": "secret-pass-1"})
             check("register Гриши", status == 200, f"{status} {body}")
-            for i in range(3):
+            for i in range(5):
                 status, _, _ = ai_check(g)
                 check(f"Гриша тратит #{i + 1}", status == 200, f"{status}")
             g.request(base, "POST", "/api/auth/logout")
@@ -514,7 +515,7 @@ def main():
             section("гонка вкладок: лишнюю проверку не выдать")
             h = Client("10.8.0.1")
             claim(h, "Нина")
-            for i in range(2):
+            for i in range(4):
                 status, _, _ = ai_check(h)
                 check(f"Нина тратит #{i + 1}", status == 200, f"{status}")
             status, _, st = limits(h)
@@ -560,11 +561,11 @@ def main():
             j = Client("10.6.0.1")
             claim(j, "Женя")
             status, _, st = limits(j)
-            check("без env снова 3 из 3", st.get("limit") == 3 and st.get("remaining") == 3, str(st))
+            check("без env снова 5 из 5", st.get("limit") == 5 and st.get("remaining") == 5, str(st))
 
             # ------------------------------ граница окна: 59 секунд до тика
             section("граница тика: таймер моложе 8ч ещё не созрел")
-            for k in range(3):
+            for k in range(5):
                 status, _, _ = ai_check(j)
                 check(f"Женя тратит #{k + 1}", status == 200, f"{status}")
             db_age_buckets(WINDOW_MS - 60_000)
