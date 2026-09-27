@@ -4748,26 +4748,33 @@ def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) ->
 # Лимит ИИ-проверок сочинений (продуктовый бюджет ученика — не путать
 # с ai.ai_take, тем in-memory бакетом против скриптовых всплесков).
 #
-# 3 проверки на аккаунт, скользящее окно 8 часов: потраченная проверка
-# возвращается ровно через 8 часов после списания. Каждая трата запускает
-# свой отсчёт, поэтому «за ночь» возвращается часть лимита, а через 8 часов
-# после первой траты лимит восстановлен полностью. Бюджет живёт в SQLite
-# (переживает рестарт) и списывается одним атомарным INSERT..SELECT со
-# стражами — гонка двух вкладок не выдаёт лишнюю проверку. Неудачная
-# проверка (битый ввод, отказ провайдера, мусорный ответ модели)
-# возвращается: ученик не платит лимитом за сбой на нашей стороне.
+# 3 проверки на аккаунт, цепочечная зарядка: первая трата из полного кармана
+# запускает таймер, и дальше жетоны возвращаются ПО ОДНОМУ каждые 8 часов,
+# пока карман снова не полон. Второй и третий запросы на таймер не влияют:
+# хоть разом потратил 3, хоть на три часа размазал — первый жетон вернётся
+# через 8 часов после первой траты, полное восстановление — через 24 часа
+# от неё же. Бюджет живёт в SQLite (переживает рестарт) как одна строка на
+# владельца (owner/count/timer_ms); зарядка — ленивая: при каждом обращении
+# бакет «догоняется» на созревшие тики, поэтому фонового потока не нужно.
+# Списание — пачка охраняемых UPDATE в одной транзакции (первый INSERT её
+# открывает, журнальный замок сериализует гонку вкладок) — лишней проверки
+# не выдать. Неудачная проверка (битый ввод, отказ провайдера, мусорный
+# ответ модели) возвращается: ученик не платит лимитом за сбой на нашей
+# стороне; ставший полным бакет гасит таймер — состояние ровно как до траты.
 #
 # Обход «выйти и завести новый аккаунт» закрыт вторым бюджетом — по
-# устройству (та же скользящая тройка на 8 часов). Отпечаток —
-# МЕЖАККАУНТНЫЙ HMAC от куки ege_device и от сетевого адреса (без user_id
-# внутри, иначе новый аккаунт на том же браузере был бы неуловим; сырые
-# кука и IP в базе не появляются). Бюджет устройства применяется только
-# к СВЕЖИМ аккаунтам (младше суток): именно их плодит фермер в цикле
+# устройству (та же цепочечная тройка). Отпечаток — МЕЖАККАУНТНЫЙ HMAC от
+# куки ege_device и от сетевого адреса (без user_id внутри, иначе новый
+# аккаунт на том же браузере был бы неуловим; сырые кука и IP в базе не
+# появляются). Трата свежего аккаунта списывает жетон из КАЖДОГО бакета
+# (аккаунт, кука, сеть), а блокирует пустой любой из них — иначе фермер
+# обнулил бы куку и жил на бакете сети. Бюджет устройства применяется
+# только к СВЕЖИМ аккаунтам (младше суток): именно их плодит фермер в цикле
 # «вышел — зарегистрировался». Давний аккаунт на общем компьютере ограничен
 # лишь своим бюджетом — сознательный выбор в пользу «лучше недожать, чем
 # обвинить обычного ученика»: ложное срабатывание возможно только у новичка
-# на устройстве, где кто-то уже исчерпал лимит сегодня, и только на первые
-# сутки его аккаунта.
+# на устройстве, где кто-то уже исчерпал лимит, и только на первые сутки
+# его аккаунта.
 # ---------------------------------------------------------------------------
 
 AI_LIMIT_CODE = "AI_LIMIT"
@@ -4803,17 +4810,22 @@ def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
     key = _db_key(conn)
     if key in _AI_USAGE_SCHEMA_DONE:
         return
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
+    if cols and "owner" not in cols:
+        # Первая версия таблицы (журнал трат: user_id/device_*/created_ms)
+        # не переводится на цепочечную модель: состояние цепочки из голых
+        # событий не восстановить. Худшее последствие пересоздания — горстка
+        # учеников получит лимит чуть раньше срока; это допустимо.
+        conn.execute("DROP TABLE ai_usage")
+    # Одна строка на бакет: owner — 'u:<user_id>' (аккаунт), 'k:<hmac>' (кука
+    # устройства), 'n:<hmac>' (сеть); count — жетоны в кармане; timer_ms —
+    # старт текущего тика цепочки (NULL = карман полон, таймер стоит).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ai_usage (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
-          device_key TEXT,
-          device_net TEXT,
-          created_ms INTEGER NOT NULL
+          owner TEXT PRIMARY KEY,
+          count INTEGER NOT NULL,
+          timer_ms INTEGER
         )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_user ON ai_usage(user_id, created_ms)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_key ON ai_usage(device_key, created_ms)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_net ON ai_usage(device_net, created_ms)")
     conn.commit()
     _AI_USAGE_SCHEMA_DONE.add(key)
 
@@ -4852,42 +4864,89 @@ def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bo
     return 0 <= now_ms - created_ms < ai_usage_device_trust_ms()
 
 
+def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
+                     fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
+    """Бакеты, из которых списывает этот пользователь: всегда аккаунт,
+    а для СВЕЖЕГО аккаунта ещё и отпечатки устройства (кука и сеть)."""
+    owners = [f"u:{user_id}"]
+    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
+        if fp_key:
+            owners.append(f"k:{fp_key}")
+        if fp_net:
+            owners.append(f"n:{fp_net}")
+    return owners
+
+
+def _ai_usage_catch_up(conn: sqlite3.Connection, owner: str,
+                       now_ms: int, limit: int, window_ms: int) -> None:
+    """Ленивая зарядка цепочки: тик созревает каждые window_ms, пока карман
+    не полон. Сколько тиков прошло — столько жетонов вернулось (сверх limit
+    не вскарабкаться); наполнившийся доверху бакет гасит таймер, нет —
+    таймер передвигается на отыгранные тики. Идемпотентно: повторный вызов
+    с тем же now_ms ничего не меняет. Деление целочисленное (SQLite /)."""
+    conn.execute("""
+        UPDATE ai_usage SET
+          count = MIN(?, count + (? - timer_ms) / ?),
+          timer_ms = CASE WHEN count + (? - timer_ms) / ? >= ?
+                          THEN NULL
+                          ELSE timer_ms + ((? - timer_ms) / ?) * ? END
+        WHERE owner = ? AND timer_ms IS NOT NULL AND ? >= timer_ms + ?""",
+        (limit, now_ms, window_ms, now_ms, window_ms, limit,
+         now_ms, window_ms, window_ms, owner, now_ms, window_ms))
+
+
+def _ai_usage_count_at(state: tuple[int, int | None], t_ms: int,
+                       now_ms: int, limit: int, window_ms: int) -> int:
+    """Проекция бакета (count, timer_ms) на момент t_ms: чистая функция,
+    ничего не пишет. Таймер-призрак (count < limit, но timer NULL) считаем
+    стартующим сейчас — такой строки быть не должно, но пусть лечится."""
+    count, timer_ms = state
+    if count >= limit:
+        return count
+    start = timer_ms if timer_ms is not None else now_ms
+    if t_ms < start + window_ms:
+        return count
+    return min(limit, count + (t_ms - start) // window_ms)
+
+
 def ai_usage_status(conn: sqlite3.Connection, user_id: int,
                     fp_key: str | None, fp_net: str | None,
                     now_ms: int | None = None) -> dict:
     """Сколько проверок осталось и когда вернётся следующая.
 
-    remaining — минимум двух бюджетов (аккаунт и, для свежего аккаунта,
-    устройство); resetInSec — ближайший момент, когда этот минимум вырастет
-    (при ничьей обоих бюджетов в нуле ждать придётся обоих).
+    remaining — минимум по бакетам (аккаунт и, для свежего аккаунта,
+    устройство); resetInSec — ближайший момент, когда этот минимум вырастет:
+    если несколько бакетов делят минимум, ждать придётся последнего из них.
     """
     ensure_ai_usage_schema(conn)
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     limit = ai_usage_max()
     window_ms = ai_usage_window_ms()
-    since = now_ms - window_ms
-    acc = [int(r["created_ms"]) for r in conn.execute(
-        "SELECT created_ms FROM ai_usage WHERE user_id=? AND created_ms>?", (user_id, since))]
-    dev: list[int] = []
-    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
-        dev = [int(r["created_ms"]) for r in conn.execute(
-            "SELECT created_ms FROM ai_usage WHERE created_ms>? AND (device_key=? OR device_net=?)",
-            (since, fp_key, fp_net))]
-
-    def remaining_at(t_ms: int) -> int:
-        a = limit - sum(1 for c in acc if c + window_ms > t_ms)
-        d = limit - sum(1 for c in dev if c + window_ms > t_ms)
-        return max(0, min(a, d))
-
-    remaining = remaining_at(now_ms)
+    owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
+    states: list[tuple[int, int | None]] = []
+    for owner in owners:
+        _ai_usage_catch_up(conn, owner, now_ms, limit, window_ms)
+        row = conn.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?",
+                           (owner,)).fetchone()
+        if row:
+            timer = int(row["timer_ms"]) if row["timer_ms"] is not None else None
+            states.append((int(row["count"]), timer))
+        else:
+            states.append((limit, None))  # бакет ещё не заводился — карман полон
+    conn.commit()  # фиксируем ленивую зарядку
+    remaining = min(_ai_usage_count_at(s, now_ms, now_ms, limit, window_ms)
+                    for s in states)
     reset_ms = None
     if remaining < limit:
-        for t in sorted({c + window_ms for c in acc + dev}):
-            if t > now_ms and remaining_at(t) > remaining:
+        ticks = sorted({(s[1] if s[1] is not None else now_ms) + window_ms
+                        for s in states if s[0] < limit})
+        for t in ticks:
+            if t > now_ms and min(_ai_usage_count_at(s, t, now_ms, limit, window_ms)
+                                  for s in states) > remaining:
                 reset_ms = t
                 break
         if reset_ms is None:
-            reset_ms = now_ms + window_ms  # страховка: блок без строк в окне быть не может
+            reset_ms = now_ms + window_ms  # страховка: блок с полным карманом невозможен
     return {
         "ok": True,
         "limit": limit,
@@ -4898,44 +4957,60 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
 
 
 def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
-                         fp_key: str | None, fp_net: str | None) -> tuple[bool, int | None]:
-    """Атомарно списать одну проверку из бюджета.
+                         fp_key: str | None, fp_net: str | None) -> list[str] | None:
+    """Атомарно списать одну проверку. Возвращает затронутые бакеты (для
+    refund) либо None, если хоть один пуст.
 
-    Один INSERT..SELECT со стражами по обоим бюджетам: либо строка встала
-    (проверка зарезервирована), либо нет (rowcount=0). Гонка параллельных
-    вкладок упирается в журнальный замок SQLite — лишней проверки не выдать.
+    Все шаги — в одной транзакции (её открывает первый INSERT, журнальный
+    замок SQLite держится до commit/rollback): гонка параллельных вкладок
+    сериализуется, частичного списания «аккаунт минусанул, устройство нет»
+    не бывает. Трата из ПОЛНОГО бакета запускает таймер цепочки (якорь
+    первой траты); трата из уже тикающего таймер не трогает — второй и
+    третий запросы на расписание возврата не влияют.
     """
     ensure_ai_usage_schema(conn)
     now_ms = int(time.time() * 1000)
     limit = ai_usage_max()
     window_ms = ai_usage_window_ms()
-    since = now_ms - window_ms
-    # Точечная подчистка: старые строки ни на что не влияют, таблица не растёт.
-    conn.execute("DELETE FROM ai_usage WHERE created_ms<=?", (since,))
-    sql = ("INSERT INTO ai_usage (user_id, device_key, device_net, created_ms)"
-           " SELECT ?,?,?,?"
-           " WHERE (SELECT COUNT(*) FROM ai_usage WHERE user_id=? AND created_ms>?) < ?")
-    args: list = [user_id, fp_key, fp_net, now_ms, user_id, since, limit]
-    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
-        sql += (" AND (SELECT COUNT(*) FROM ai_usage WHERE created_ms>?"
-                " AND (device_key=? OR device_net=?)) < ?")
-        args += [since, fp_key, fp_net, limit]
-    cur = conn.execute(sql, args)
+    owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
+    for owner in owners:
+        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                     " VALUES (?,?,NULL)", (owner, limit))
+        _ai_usage_catch_up(conn, owner, now_ms, limit, window_ms)
+    for owner in owners:
+        cur = conn.execute("""
+            UPDATE ai_usage SET
+              count = count - 1,
+              timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END
+            WHERE owner = ? AND count > 0""", (now_ms, owner))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return None
     conn.commit()
-    if cur.rowcount:
-        return True, int(cur.lastrowid)
-    return False, None
+    return owners
 
 
-def ai_usage_refund(conn: sqlite3.Connection, reservation_id: int | None) -> None:
-    """Вернуть резервацию: проверка не состоялась — лимит не потрачен."""
-    if not reservation_id:
+def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
+    """Вернуть резервацию: проверка не состоялась — лимит не потрачен.
+    Жетон возвращается в каждый затронутый бакет; наполнившийся доверху
+    гасит таймер. Вместе со списанием это даёт точное восстановление
+    состояния «как до траты»: (3,NULL)→(2,t)→(3,NULL), (2,t)→(1,t)→(2,t)."""
+    if not owners:
         return
     try:
-        conn.execute("DELETE FROM ai_usage WHERE id=?", (reservation_id,))
+        limit = ai_usage_max()
+        for owner in owners:
+            conn.execute("""
+                UPDATE ai_usage SET
+                  count = MIN(?, count + 1),
+                  timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END
+                WHERE owner = ?""", (limit, limit, owner))
         conn.commit()
     except sqlite3.Error:
-        pass
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int | None, str | None]:
@@ -8117,13 +8192,13 @@ class Handler(BaseHTTPRequestHandler):
                                     "retryAfter": retry_after}, 429, token=token,
                                    headers={"Retry-After": str(retry_after)})
                     return
-                # Продуктовый бюджет (3 проверки, скользящие 8 часов + антиабуз
-                # по устройству для свежих аккаунтов): резервируем ДО вызова
-                # модели — деньги провайдера защищает резервация, а лимит
-                # ученика при сбое возвращается (refund в ветках ошибок ниже).
+                # Продуктовый бюджет (3 проверки, цепочечная зарядка 8 часов
+                # + антиабуз по устройству для свежих аккаунтов): резервируем
+                # ДО вызова модели — деньги провайдера защищает резервация,
+                # а лимит ученика при сбое возвращается (refund ниже).
                 fp_key, fp_net = ai_usage_device_fp(conn, self)
-                reserved, reservation_id = ai_usage_try_reserve(conn, user_id, fp_key, fp_net)
-                if not reserved:
+                usage_owners = ai_usage_try_reserve(conn, user_id, fp_key, fp_net)
+                if usage_owners is None:
                     st = ai_usage_status(conn, user_id, fp_key, fp_net)
                     retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
                     self.send_json({"error": "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся.",
@@ -8136,23 +8211,23 @@ class Handler(BaseHTTPRequestHandler):
                     result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem)
                 except _AI.AIInputError as exc:
                     # Наш ввод, наш 400: повтор не поможет.
-                    ai_usage_refund(conn, reservation_id)
+                    ai_usage_refund(conn, usage_owners)
                     self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
                 except _AI.AIFormatError as exc:
                     # The model answered, but not with the contract we asked
                     # for. Not the student's fault and not worth a retry storm.
-                    ai_usage_refund(conn, reservation_id)
+                    ai_usage_refund(conn, usage_owners)
                     rid = log_request_error("ai-format", exc)
                     self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
                                     "ref": rid}, 502, token=token)
                     return
                 except _AI.AIUnavailable as exc:
-                    ai_usage_refund(conn, reservation_id)
+                    ai_usage_refund(conn, usage_owners)
                     rid = log_request_error("ai-unavailable", exc)
                     self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
                     return
                 except _AI.AIError as exc:
-                    ai_usage_refund(conn, reservation_id)
+                    ai_usage_refund(conn, usage_owners)
                     rid = log_request_error("ai-upstream", exc)
                     self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
                     return
@@ -8167,7 +8242,7 @@ class Handler(BaseHTTPRequestHandler):
                     except (sqlite3.Error, ValueError) as exc:
                         # Не записали — значит evaluation позже честно скажет
                         # «не проверено». Лучше честная 503 здесь, чем это.
-                        ai_usage_refund(conn, reservation_id)
+                        ai_usage_refund(conn, usage_owners)
                         conn.rollback()
                         rid = log_request_error("ai-check-store", exc)
                         self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",

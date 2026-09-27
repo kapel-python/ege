@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Антиабуз лимита ИИ-проверок сочинений: 3 проверки на аккаунт, скользящее
-окно 8 часов (потраченная проверка возвращается ровно через 8 часов).
+"""Антиабуз лимита ИИ-проверок сочинений: 3 проверки на аккаунт, цепочечная
+зарядка — первая трата из полного кармана запускает таймер, дальше жетоны
+возвращаются ПО ОДНОМУ каждые 8 часов, пока карман снова не полон.
 
 Сценарии — как действуют реальные ученики, а не синтетические диктофоны:
   * обычный ученик: 3 проверки проходят, 4-я — 429 AI_LIMIT с живым
     resetInSec и Retry-After, модель при отказе не вызывается (0 денег);
-  * «за ночь появился 1 запрос»: истекает только самая старая трата,
-    а через 8 часов после первой лимит восстановлен полностью;
-  * сбой не жжёт лимит: 400/502/503 возвращают резервацию;
+  * цепочка: «за ночь появился 1 запрос» (8ч от первой траты), второй и
+    третий запросы таймер не сдвигают — следующий жетон ещё через 8ч,
+    полный карман — когда отыграна вся цепочка; вернувшийся жетон тратится,
+    и это тоже не перезапускает таймер;
+  * сбой не жжёт лимит: 400/502/503 возвращают резервацию, а наполнившийся
+    доверху карман гасит таймер — состояние ровно «как до траты»;
   * ферма «вышел — завёл новый аккаунт» на том же браузере: свежий аккаунт
     упирается в бюджет устройства; то же при стёртых куках (ловит сеть);
     перелогин в свой же аккаунт лимит не обнуляет;
@@ -181,19 +185,14 @@ def main():
             finally:
                 conn.close()
 
-        def db_age_usage(user_id, delta_ms, oldest_only=False):
-            """Перемотать траты в прошлое: окно скользящее, поэтому старение
-            строк равносильно ожиданию."""
+        def db_age_buckets(delta_ms):
+            """Перемотать время для всех бакетов разом: таймеры цепочек уходят
+            в прошлое, ленивая зарядка при следующем обращении догонит.
+            Это и есть «подождать N часов» — зарядка считается от timer_ms."""
             conn = server.connect()
             try:
-                if oldest_only:
-                    conn.execute(
-                        "UPDATE ai_usage SET created_ms = created_ms - ? WHERE id ="
-                        " (SELECT id FROM ai_usage WHERE user_id=? ORDER BY created_ms ASC LIMIT 1)",
-                        (delta_ms, user_id))
-                else:
-                    conn.execute("UPDATE ai_usage SET created_ms = created_ms - ? WHERE user_id=?",
-                                 (delta_ms, user_id))
+                conn.execute("UPDATE ai_usage SET timer_ms = timer_ms - ?"
+                             " WHERE timer_ms IS NOT NULL", (int(delta_ms),))
                 conn.commit()
             finally:
                 conn.close()
@@ -266,23 +265,56 @@ def main():
             check("заблокированный запрос не вызывает модель (0 денег)",
                   model_calls["n"] == before)
 
-            # ----------------------- скользящее окно: ночь и полное восстановление
-            section("скользящее окно 8ч: возврат по одной, полное восстановление")
-            ania = db_user_id("Аня")
-            check("юзер Ани найден в БД", ania is not None)
-            db_age_usage(ania, WINDOW_MS + 60_000, oldest_only=True)
+            # ------------- цепочечная зарядка: по жетону каждые 8ч от ПЕРВОЙ траты
+            section("цепочка 8ч: «за ночь появился 1 запрос», таймер идёт от первой траты")
+            db_age_buckets(WINDOW_MS + 60_000)  # прошло 8ч с первой траты
             status, _, st = limits(a)
-            check("истекла самая старая трата -> появился ровно 1 запрос",
+            check("истёк первый тик цепочки -> появился ровно 1 запрос",
                   st.get("remaining") == 1, str(st))
-            check("таймер теперь показывает возврат следующей (~8ч)",
+            check("таймер теперь показывает следующий тик (~8ч)",
                   isinstance(st.get("resetInSec"), int) and st["resetInSec"] > 7 * 3600, str(st))
             status, _, body = ai_check(a)
             check("вернувшийся запрос тратится -> 200", status == 200, f"{status}")
             status, _, st = limits(a)
-            check("и снова remaining 0", st.get("remaining") == 0, str(st))
-            db_age_usage(ania, WINDOW_MS + 60_000)
+            check("и снова remaining 0 — трата в тикающий карман таймер не перезапустила",
+                  st.get("remaining") == 0, str(st))
+            db_age_buckets(WINDOW_MS + 60_000)  # 16ч от первой траты
             status, _, st = limits(a)
-            check("через 8ч после первой траты лимит восстановлен полностью",
+            check("16ч от первой траты: вернулся только ВТОРОЙ жетон (цепочка, не окно)",
+                  st.get("remaining") == 1, str(st))
+            db_age_buckets(WINDOW_MS + 60_000)  # 24ч от первой траты
+            status, _, st = limits(a)
+            check("24ч от первой траты: третий жетон", st.get("remaining") == 2, str(st))
+            db_age_buckets(WINDOW_MS + 60_000)  # отыграны все 4 потраченных жетона
+            status, _, st = limits(a)
+            check("каждый жетон — свои 8ч цепочки: карман снова полон, таймер погашен",
+                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+
+            # ------- размазанные траты: второй и третий запросы таймер не двигают
+            section("размазал на часы — всё равно отсчёт от ПЕРВОЙ траты")
+            o = Client("10.4.0.1")
+            claim(o, "Оля")
+            status, _, _ = ai_check(o)  # первая трата запускает таймер
+            check("Оля: первая трата", status == 200, f"{status}")
+            db_age_buckets(3 * 3600_000)  # через 3 часа
+            status, _, _ = ai_check(o)
+            status2, _, _ = ai_check(o)  # добивает остаток спустя часы
+            check("Оля: траты #2 и #3 спустя 3ч", status == 200 and status2 == 200)
+            status, _, st = limits(o)
+            check("карман пуст, таймер показывает ~5ч (остаток от первой траты, не 8ч)",
+                  st.get("remaining") == 0
+                  and 4 * 3600 < st.get("resetInSec", 0) <= 5 * 3600, str(st))
+            db_age_buckets(5 * 3600_000 + 60_000)  # итого 8ч+ от первой траты
+            status, _, st = limits(o)
+            check("8ч от ПЕРВОЙ траты — вернулся ровно один жетон, хотя #3 была 5ч назад",
+                  st.get("remaining") == 1, str(st))
+            db_age_buckets(4 * 3600_000)  # итого 12ч+ от первой траты
+            status, _, st = limits(o)
+            check("12ч от первой траты: размазанные #2/#3 ещё не вернулись (окно дало бы 3)",
+                  st.get("remaining") == 1, str(st))
+            db_age_buckets(20 * 3600_000)  # цепочка отыграла оба оставшихся тика
+            status, _, st = limits(o)
+            check("после отыгрыша всей цепочки карман снова полон",
                   st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
 
             # ------------------------------------- сбой не жжёт лимит (refund)
@@ -299,8 +331,8 @@ def main():
             status, _, body = ai_check(c)
             check("отказ провайдера -> 502", status == 502, f"{status} {body}")
             status, _, st = limits(c)
-            check("502 вернул резервацию: лимит не потрачен",
-                  st.get("remaining") == 3, str(st))
+            check("502 вернул резервацию: лимит не потрачен и таймер не остался тикать",
+                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
 
             def boom_unavailable(messages, **kw):
                 note_model_call()
@@ -493,40 +525,41 @@ def main():
             status, _, st = limits(j)
             check("без env снова 3 из 3", st.get("limit") == 3 and st.get("remaining") == 3, str(st))
 
-            # ------------------------------ граница окна: 59 секунд до возврата
-            section("граница окна: трата моложе 8ч ещё занята")
+            # ------------------------------ граница окна: 59 секунд до тика
+            section("граница тика: таймер моложе 8ч ещё не созрел")
             for k in range(3):
                 status, _, _ = ai_check(j)
                 check(f"Женя тратит #{k + 1}", status == 200, f"{status}")
-            zhenia = db_user_id("Женя")
-            db_age_usage(zhenia, WINDOW_MS - 60_000, oldest_only=True)
+            db_age_buckets(WINDOW_MS - 60_000)
             status, _, st = limits(j)
-            check("трата 8ч-минута назад всё ещё занята",
+            check("тик 8ч-минута назад ещё не созрел",
                   st.get("remaining") == 0, str(st))
             check("таймер показывает около минуты",
                   isinstance(st.get("resetInSec"), int) and 0 < st["resetInSec"] <= 120, str(st))
-            db_age_usage(zhenia, 120_000, oldest_only=True)
+            db_age_buckets(120_000)
             status, _, st = limits(j)
-            check("ещё две минуты — и запрос вернулся", st.get("remaining") == 1, str(st))
+            check("ещё две минуты — и первый жетон цепочки вернулся",
+                  st.get("remaining") == 1, str(st))
 
             # ------------------------------------------ приватность отпечатков
             section("в базе только HMAC: ни сырой куки, ни IP")
             conn = server.connect()
             try:
-                rows = conn.execute("SELECT user_id, device_key, device_net FROM ai_usage").fetchall()
+                rows = conn.execute("SELECT owner FROM ai_usage").fetchall()
             finally:
                 conn.close()
-            check("траты записаны", len(rows) > 0)
-            hex32 = re.compile(r"^[0-9a-f]{32}$")
-            check("device_key — только 32-символьный HMAC или NULL",
-                  all(r["device_key"] is None or hex32.match(str(r["device_key"])) for r in rows))
-            check("device_net — только 32-символьный HMAC или NULL",
-                  all(r["device_net"] is None or hex32.match(str(r["device_net"])) for r in rows))
-            raw_values = {str(r["device_key"]) for r in rows} | {str(r["device_net"]) for r in rows}
-            leaked_ips = [ip for ip in ("10.1.0.1", "10.1.0.2", "10.8.0.1") if ip in raw_values]
+            check("бакеты записаны", len(rows) > 0)
+            owners = [str(r["owner"]) for r in rows]
+            shape = re.compile(r"^(u:\d+|[kn]:[0-9a-f]{32})$")
+            check("owner — только u:<id> либо 32-символьный HMAC куки/сети",
+                  all(shape.match(o) for o in owners), str(owners[:4]))
+            check("бакеты устройства реально заводились",
+                  any(o.startswith("k:") for o in owners) and any(o.startswith("n:") for o in owners))
+            leaked_ips = [ip for ip in ("10.1.0.1", "10.1.0.2", "10.8.0.1")
+                          if any(ip in o for o in owners)]
             check("сырых IP в базе нет", not leaked_ips, str(leaked_ips))
             leaked_cookies = [v for v in (a.cookies.get("ege_device"), g.cookies.get("ege_device"))
-                              if v and v in raw_values]
+                              if v and any(v in o for o in owners)]
             check("сырых значений куки в базе нет", not leaked_cookies, str(leaked_cookies))
         finally:
             httpd.shutdown()
