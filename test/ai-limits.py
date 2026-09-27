@@ -367,6 +367,43 @@ def main():
             status, _, st = limits(c)
             check("remaining 2 после одной удачной", st.get("remaining") == 2, str(st))
 
+            # -------- сбой вне контракта ошибок: жетон не утекает (finally)
+            section("сырой сбой модели не съедает лимит")
+            k = Client("10.5.0.1")
+            claim(k, "Костя")
+            status, _, st = limits(k)
+            check("Костя: свежий карман 3 из 3", st.get("remaining") == 3, str(st))
+
+            def boom_raw(messages, **kw):
+                note_model_call()
+                raise RuntimeError("сырой сбой вне контракта AIError")
+
+            ai.chat = boom_raw
+            crashed = False
+            try:
+                status, _, _ = ai_check(k)
+                crashed = status != 200
+            except Exception:
+                crashed = True  # необработанное исключение рвёт соединение
+            check("сырой сбой не дал 200", crashed)
+            status, _, st = limits(k)
+            check("жетон не утёк: карман снова полон, таймер погашен",
+                  st.get("remaining") == 3 and st.get("resetInSec") is None, str(st))
+            ai.chat = good_chat
+            status, _, body = ai_check(k)
+            check("следующая проверка проходит", status == 200, f"{status}")
+            status, _, st = limits(k)
+            check("и списывается ровно один жетон", st.get("remaining") == 2, str(st))
+            ai.chat = boom_raw
+            try:
+                ai_check(k)  # второй сырой сбой подряд: 2 -> 1 -> refund -> 2
+            except Exception:
+                pass
+            ai.chat = good_chat
+            status, _, st = limits(k)
+            check("двойного возврата нет: ровно 2, а не полный карман",
+                  st.get("remaining") == 2, str(st))
+
             # ------------------- ферма: вышел и завёл новый аккаунт (то же устройство)
             section("ферма «вышел — новый аккаунт» на одном устройстве закрыта")
             for i in range(3):  # Аня снова тратит всё: устройство «горячее»

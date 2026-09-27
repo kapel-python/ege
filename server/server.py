@@ -8213,8 +8213,15 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 # Продуктовый бюджет (3 проверки, цепочечная зарядка 8 часов
                 # + антиабуз по устройству для свежих аккаунтов): резервируем
-                # ДО вызова модели — деньги провайдера защищает резервация,
-                # а лимит ученика при сбое возвращается (refund ниже).
+                # ДО вызова модели — деньги провайдера защищает резервация.
+                # Возврат — при ЛЮБОМ неуспехе ниже (флаг + finally), а не
+                # только при известных ошибках модели: неожиданное исключение
+                # (вне контракта AIError, обрыв соединения при ответе, замок
+                # SQLite во внешней ветке) иначе утекает жетоном — счётчик
+                # уменьшен, проверки нет, а refund никто не зовёт. Флаг
+                # взводится только в точке невозврата (запись stored для essay,
+                # ответ модели для остальных форматов); finally возвращает
+                # ровно один раз и только при неуспехе.
                 fp_key, fp_net = ai_usage_device_fp(conn, self)
                 usage_owners = ai_usage_try_reserve(conn, user_id, fp_key, fp_net)
                 if usage_owners is None:
@@ -8226,77 +8233,82 @@ class Handler(BaseHTTPRequestHandler):
                                     "retryAfter": retry},
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
+                usage_spent = False
                 try:
-                    result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem,
-                                            reviewer_note=note)
-                except _AI.AIInputError as exc:
-                    # Наш ввод, наш 400: повтор не поможет.
-                    ai_usage_refund(conn, usage_owners)
-                    self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
-                except _AI.AIFormatError as exc:
-                    # The model answered, but not with the contract we asked
-                    # for. Not the student's fault and not worth a retry storm.
-                    ai_usage_refund(conn, usage_owners)
-                    rid = log_request_error("ai-format", exc)
-                    self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
-                                    "ref": rid}, 502, token=token)
-                    return
-                except _AI.AIUnavailable as exc:
-                    ai_usage_refund(conn, usage_owners)
-                    rid = log_request_error("ai-unavailable", exc)
-                    self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
-                    return
-                except _AI.AIError as exc:
-                    ai_usage_refund(conn, usage_owners)
-                    rid = log_request_error("ai-upstream", exc)
-                    self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
-                    return
-                # Факт проверки фиксируем на сервере: только этой записи будет
-                # доверять /api/essays/evaluation. Присланный браузером result
-                # там теперь игнорируется — оценка без вызова модели не ставится.
-                if format_id == "essay":
                     try:
-                        store_essay_check(conn, user_id, subject_now, payload.get("text"),
-                                          _AI.last_used_provider() or "ai+grammar", result)
-                        conn.commit()
-                    except (sqlite3.Error, ValueError) as exc:
-                        # Не записали — значит evaluation позже честно скажет
-                        # «не проверено». Лучше честная 503 здесь, чем это.
-                        ai_usage_refund(conn, usage_owners)
-                        conn.rollback()
-                        rid = log_request_error("ai-check-store", exc)
-                        self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",
-                                        "ref": rid}, 503, token=token)
+                        result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem,
+                                                reviewer_note=note)
+                    except _AI.AIInputError as exc:
+                        # Наш ввод, наш 400: повтор не поможет.
+                        self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
+                    except _AI.AIFormatError as exc:
+                        # The model answered, but not with the contract we asked
+                        # for. Not the student's fault and not worth a retry storm.
+                        rid = log_request_error("ai-format", exc)
+                        self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
+                                        "ref": rid}, 502, token=token)
                         return
-                    # Серверное доведение до ready (закрыл сайт — всё равно
-                    # готово): если клиент прислал clientId своего submission
-                    # с ТЕМ ЖЕ текстом — помечаем ready сразу, в том же
-                    # запросе. Best-effort: чужой id, несовпадение текста или
-                    # гонка просто пропускаются — клиент добьёт отдельным
-                    # POST /api/essays/evaluation, как раньше.
-                    bound = None
-                    try:
-                        raw_cid = payload.get("clientId", payload.get("client_id"))
-                        if isinstance(raw_cid, str) and raw_cid.strip() and len(raw_cid.strip()) <= 200:
-                            try:
-                                bound = save_essay_evaluation(
-                                    conn, user_id, subject_now,
-                                    {"clientId": raw_cid.strip(), "status": "ready"})
-                            except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
-                                bound = None
-                    except sqlite3.Error:
+                    except _AI.AIUnavailable as exc:
+                        rid = log_request_error("ai-unavailable", exc)
+                        self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
+                        return
+                    except _AI.AIError as exc:
+                        rid = log_request_error("ai-upstream", exc)
+                        self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
+                        return
+                    # Факт проверки фиксируем на сервере: только этой записи будет
+                    # доверять /api/essays/evaluation. Присланный браузером result
+                    # там теперь игнорируется — оценка без вызова модели не ставится.
+                    if format_id == "essay":
                         try:
+                            store_essay_check(conn, user_id, subject_now, payload.get("text"),
+                                              _AI.last_used_provider() or "ai+grammar", result)
+                            conn.commit()
+                        except (sqlite3.Error, ValueError) as exc:
+                            # Не записали — значит evaluation позже честно скажет
+                            # «не проверено». Лучше честная 503 здесь, чем это.
                             conn.rollback()
-                        except sqlite3.Error:
-                            pass
+                            rid = log_request_error("ai-check-store", exc)
+                            self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",
+                                            "ref": rid}, 503, token=token)
+                            return
+                        usage_spent = True
+                        # Серверное доведение до ready (закрыл сайт — всё равно
+                        # готово): если клиент прислал clientId своего submission
+                        # с ТЕМ ЖЕ текстом — помечаем ready сразу, в том же
+                        # запросе. Best-effort: чужой id, несовпадение текста или
+                        # гонка просто пропускаются — клиент добьёт отдельным
+                        # POST /api/essays/evaluation, как раньше.
                         bound = None
-                    if bound is not None:
-                        self.send_json({"ok": True, "format": format_id, "result": result,
-                                        "submission": bound}, token=token)
+                        try:
+                            raw_cid = payload.get("clientId", payload.get("client_id"))
+                            if isinstance(raw_cid, str) and raw_cid.strip() and len(raw_cid.strip()) <= 200:
+                                try:
+                                    bound = save_essay_evaluation(
+                                        conn, user_id, subject_now,
+                                        {"clientId": raw_cid.strip(), "status": "ready"})
+                                except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
+                                    bound = None
+                        except sqlite3.Error:
+                            try:
+                                conn.rollback()
+                            except sqlite3.Error:
+                                pass
+                            bound = None
+                        if bound is not None:
+                            self.send_json({"ok": True, "format": format_id, "result": result,
+                                            "submission": bound}, token=token)
+                        else:
+                            self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
                     else:
+                        usage_spent = True
                         self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
-                else:
-                    self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
+                finally:
+                    # Точка невозврата — usage_spent выше: проверка состоялась
+                    # (модель ответила, запись stored для essay). Всё остальное —
+                    # неуспех, жетон возвращается ровно один раз.
+                    if not usage_spent:
+                        ai_usage_refund(conn, usage_owners)
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
