@@ -1,0 +1,123 @@
+/* ============================================================
+   ege easy — единая .dlg-система (центрированное окно с блюром).
+   Единственный источник стилей для инфо-диалогов устройства,
+   подтверждений, blocked-окна и модалки модели на ege-result.
+
+   Подключение на странице (после её основного CSS):
+     <link rel="stylesheet" href="/css/dlg.css?v=1">
+     <div id="device-modal-root"></div>  <!-- или свой корень -->
+
+   Токены с fallback — чтобы файл работал и вне SPA
+   (например, на ege-result.html со своим набором переменных):
+   --scrim/--surface-3/--border-strong/--muted/--shadow/--soft-hover/
+   --radius-sm/--text-2/--accent/--danger-* есть в styles.css SPA,
+   остальные страницы получают fallback из их токенов.
+   ============================================================ */
+
+/* ---------- device dialog: центрированное окно с блюром ----------
+   В отличие от bottom-sheet модалки остаётся строго по центру и на
+   телефоне: отдельный бэкдроп с блюром, без ручки свайпа. */
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--scrim, rgba(8, 10, 16, 0.6));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } }
+.dlg {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 20px;
+  padding: 24px;
+  max-height: 86vh;
+  max-height: 86dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  box-shadow: 0 24px 64px var(--shadow, rgba(5, 8, 20, 0.45));
+  animation: dlgIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+@keyframes dlgIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.dlg__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--muted, var(--text-soft));
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+.dlg__close:hover { color: var(--text); background: var(--surface-3, var(--surface-2)); }
+.dlg__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, var(--text-soft)); }
+.dlg-device { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.dlg-device__icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: var(--surface-3, var(--surface-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--accent, var(--purple));
+  flex-shrink: 0;
+}
+.dlg-device__icon svg { width: 26px; height: 26px; }
+.dlg-device__name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.dlg-kv { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
+.dlg-kv__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; }
+.dlg-kv__row > span:first-child { color: var(--muted, var(--text-soft)); flex-shrink: 0; }
+.dlg-kv__row > span:last-child { text-align: right; overflow-wrap: anywhere; }
+.dlg__text { font-size: 14px; line-height: 1.6; color: var(--text-2, var(--text-soft)); margin-top: 14px; }
+.dlg__actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.dlg .chip { white-space: normal; flex-shrink: 1; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+/* ---------- account blocked: то же .dlg-окно, но поверх всего и без закрытия ----------
+   Нет крестика/Esc/backdrop-close осознанно — только «Вернуться на главную». */
+.dlg-backdrop--blocked { z-index: 200; }
+.dlg--blocked { border-color: rgba(255, 107, 107, 0.35); }
+.dlg--blocked .dlg-device__icon { background: var(--danger-soft, var(--red-soft)); color: var(--danger, var(--red)); }
+.dlg-kv__row--col { flex-direction: column; align-items: stretch; gap: 4px; }
+.dlg-kv__row--col > span:last-child { text-align: left; }
+.dlg__actions--single { justify-content: stretch; }
+.dlg__actions--single .btn { flex: 1 1 auto; }
+
+/* ---------- кнопки внутри .dlg ----------
+   Минимальный набор .btn: в SPA полный набор живёт в styles.css,
+   этот блок — общий базовый, достаточный для .dlg__actions. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm, 12px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.2s;
+  text-decoration: none;
+  color: var(--text);
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.98); }
+.btn--soft { background: var(--surface-3, var(--surface-2)); color: var(--text); }
+.btn--soft:hover { background: var(--soft-hover, var(--surface-2)); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
