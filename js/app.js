@@ -3725,6 +3725,14 @@ function openEssayResult(taskId) {
    такую перерисовку (флаг читается синхронно, до первого await). */
 let essayRestoreSuppress = false;
 
+/* In-flight guard проверки сочинения: повторный клик по «Отправить» /
+   «Продолжить проверку» / «Попробовать снова», пока летит предыдущий
+   POST /api/ai/essay, игнорируется — иначе двойной клик списал бы 2 проверки
+   из лимита и дважды дёрнул модель. Флаг один на обе точки входа
+   (sessionEssaySubmit через essayRunChecks и sessionEssayResume), сбрасывается
+   в finally каждого выхода из essayRunChecks. */
+let essayCheckInflight = false;
+
 /* Повторное открытие: готовый результат переживает перезагрузку — лежит в
    essay_submissions (evaluation_status='ready'), а не во frontend-state.
    XP при просмотре НЕ начисляем: он уже зафиксирован attempts-flow.
@@ -4019,23 +4027,61 @@ function essayMountFeedback(html) {
 }
 
 /* Продолжить проверку сохранённого текста после перезагрузки: новый
-   submission не создаём, текст берём с сервера (он не потерялся). */
+   submission не создаём, текст берём с сервера (он не потерялся).
+   Дешёвая попытка первым делом: проверка могла уже завершиться на сервере
+   (закрыл вкладку во время AI — авто-привязка в POST /api/ai/essay довела
+   submission до ready). Тогда evaluation сразу отдаёт ready без нового
+   вызова модели и без траты лимита — финишируем тем же essayFinishReady
+   (с XP через attempts-flow, защита alreadyMastered от двойной выдачи).
+   Только при 409 (проверки действительно нет) идём в полный AI-проход. */
 async function sessionEssayResume(taskId) {
   const S = Session.cur;
   if (!S || S.answered) return;
+  if (essayCheckInflight) return;
   const t = Session.task();
   if (!t || t.id !== taskId) return;
   const saved = S.essayReadyByTask && S.essayReadyByTask[taskId];
   if (!saved || !saved.text) return;
-  await essayRunChecks(t, saved.text, saved.clientId, saved.wordCount);
+  essayCheckInflight = true;
+  try {
+    try {
+      const evRes = await fetch("/api/essays/evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: Store.subject, clientId: saved.clientId, status: "ready" }),
+      });
+      const evData = await evRes.json().catch(() => ({}));
+      if (evRes.ok && evData.submission && evData.submission.status === "ready") {
+        const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+        essayFinishReady(t, evData.submission, saved.text, saved.wordCount, seconds);
+        return;
+      }
+    } catch (_) { /* evaluation не удалась — идём в полный проход с AI */ }
+    await essayRunChecksInner(t, saved.text, saved.clientId, saved.wordCount);
+  } finally {
+    essayCheckInflight = false;
+  }
 }
 
 /* Общая фаза «AI check → report generation → result ready → XP».
    Вызывается и после свежей отправки, и при «Продолжить проверку».
    На время проверки весь экран заменяется единым лоадером сайта (как на
    boot): видны только шапка, лоадер по центру и футер — карточка задания,
-   исходный текст и само сочинение исчезают. */
+   исходный текст и само сочинение исчезают.
+   Защита от двойного вызова модели: wrapper essayRunChecks держит
+   essayCheckInflight на весь проход (двойной клик игнорируется), а
+   sessionEssaySubmit/Resume держат тот же флаг сами и зовут Inner напрямую. */
 async function essayRunChecks(t, text, clientId, wordCount) {
+  if (essayCheckInflight) return;
+  essayCheckInflight = true;
+  try {
+    await essayRunChecksInner(t, text, clientId, wordCount);
+  } finally {
+    essayCheckInflight = false;
+  }
+}
+
+async function essayRunChecksInner(t, text, clientId, wordCount) {
   const S = Session.cur;
   if (!S || S.answered) return;
   const screen = document.getElementById("screen");
@@ -4054,7 +4100,10 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       // текстом строгая (позиция автора + два примера ИЗ текста), у свободных
       // тем — «тезис + аргументы». Сам текст исходника уходит один раз, при
       // загрузке экрана, и в проверку не дублируется.
-      body: JSON.stringify({ text, taskId: t.id }),
+      // clientId — привязка к своему submission: сервер сразу доводит его
+      // до ready в том же запросе, поэтому закрытие вкладки во время
+      // проверки ничего не теряет (результат ждёт в GET /api/essays).
+      body: JSON.stringify({ text, taskId: t.id, clientId }),
     });
     aiData = await aiRes.json().catch(() => ({}));
   } catch (_) { aiRes = null; }
@@ -4103,6 +4152,12 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   aiLimitsNoteSpend(); // проверка состоялась — сервер списал одну, кэш следом
 
   // Report generation: фиксируем готовый отчёт в том же submission.
+  // Сервер уже мог довести его до ready сам (clientId в /api/ai/essay выше):
+  // тогда готовый submission приехал в aiData.submission и второй запрос
+  // не нужен — отдельный evaluation стал бы лишь идемпотентным no-op.
+  let submission = aiData && aiData.submission && aiData.submission.status === "ready"
+    ? aiData.submission : null;
+  if (!submission) {
   let savedRes = null, savedData = {};
   try {
     savedRes = await fetch("/api/essays/evaluation", {
@@ -4127,7 +4182,15 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       </div>`);
     return;
   }
-  const submission = savedData.submission;
+  submission = savedData.submission;
+  }
+
+  essayFinishReady(t, submission, text, wordCount, seconds);
+}
+
+function essayFinishReady(t, submission, text, wordCount, seconds) {
+  const S = Session.cur;
+  if (!S || !t || !submission) return;
 
   // Только теперь — существующий механизм фиксации результата/XP/прогресса.
   // Балл проверки известен лишь в этой точке («результат готов»): отдаём его
@@ -4150,7 +4213,8 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   // readonly — менять его после отправки уже нельзя. Таймер останавливаем
   // ПОСЛЕ перерисовки: renderTask сам запускает свой интервал таймера.
   essayRestoreSuppress = true;
-  renderTask(screen);
+  const finishScreen = document.getElementById("screen");
+  renderTask(finishScreen);
   essayRestoreSuppress = false;
   Session.stopTimer();
   essaySetFormVisible(false);
@@ -4184,16 +4248,22 @@ async function essayRunChecks(t, text, clientId, wordCount) {
 async function sessionEssaySubmit() {
   const S = Session.cur;
   if (!S || S.answered) return;
+  // Двойной клик по «Отправить» — второй игнорируется: иначе ушли бы два
+  // POST /api/essays (два submission) и два POST /api/ai/essay (две траты
+  // лимита, два вызова модели). Флаг тот же, что у essayRunChecks.
+  if (essayCheckInflight) return;
   const t = Session.task();
   const input = document.getElementById("essayInput");
-  const text = (input.value || "").trim();
+  const text = ((input && input.value) || "").trim();
   if (countWords(text) < ESSAY_MIN_WORDS) return;
+  essayCheckInflight = true;
   // Клик по «Отправить» сразу убирает всё с экрана: единый loading сайта
   // на весь экран (шапка, лоадер по центру, футер) — ровно как при загрузке
   // страницы. Черновик уже в сессии (essayDraftByTask), перерисовка его
   // не теряет. Шаг 1 — сохранить submission как обычно. Проверка НЕ
   // завершена, XP НЕ начисляем: дальше pipeline, а не feedback с баллами.
   essayCheckMsgStop();
+  try {
   document.getElementById("screen").innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart();
   let data = null, ok = false;
@@ -4215,17 +4285,23 @@ async function sessionEssaySubmit() {
     renderTask(document.getElementById("screen"));
     essayRestoreSuppress = false;
     const errBox = document.getElementById("essayError");
+    if (errBox) {
     errBox.style.display = "";
     errBox.textContent = data && data.minWords
       ? `Сервер посчитал ${data.wordCount} ${essayWordsLabel(data.wordCount)} — минимум ${data.minWords}. Допиши текст и отправь снова.`
       : (data && data.error) || "Не удалось отправить сочинение. Проверь соединение и попробуй ещё раз.";
+    }
     return;
   }
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = { taskId: t.id, clientId: data.clientId, text, wordCount: data.wordCount, status: "submitted" };
   essayMarkWritten(t.id, S.essayReadyByTask[t.id]);
-  // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри).
-  await essayRunChecks(t, text, data.clientId, data.wordCount);
+  // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри Inner:
+  // флаг уже держим мы, поэтому зовём Inner напрямую, а не wrapper).
+  await essayRunChecksInner(t, text, data.clientId, data.wordCount);
+  } finally {
+    essayCheckInflight = false;
+  }
 }
 
 /* ---------------- лимит ИИ-проверок сочинений ----------------

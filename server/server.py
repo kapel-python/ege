@@ -8158,7 +8158,13 @@ class Handler(BaseHTTPRequestHandler):
                 # note — необязательное замечание ученика к перепроверке
                 # (только ege-result.html): уходит в промпт как мнение,
                 # рубрику не меняет, лимита отдельного нет — тратит те же 3.
-                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject", "note"}:
+                # clientId/client_id — необязательная привязка к своему
+                # submission: сервер сразу доводит его до 'ready' в том же
+                # запросе (best-effort). Тогда закрытие вкладки во время
+                # проверки ничего не теряет: поток обработчика дожимает
+                # модель и привязку до конца, а отдельный
+                # POST /api/essays/evaluation позже станет идемпотентным no-op.
+                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject", "note", "clientId", "client_id"}:
                     self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400, token=token); return
                 try:
                     # Рубрика одна — работа с прочитанным текстом, и выбирает её
@@ -8262,7 +8268,35 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",
                                         "ref": rid}, 503, token=token)
                         return
-                self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
+                    # Серверное доведение до ready (закрыл сайт — всё равно
+                    # готово): если клиент прислал clientId своего submission
+                    # с ТЕМ ЖЕ текстом — помечаем ready сразу, в том же
+                    # запросе. Best-effort: чужой id, несовпадение текста или
+                    # гонка просто пропускаются — клиент добьёт отдельным
+                    # POST /api/essays/evaluation, как раньше.
+                    bound = None
+                    try:
+                        raw_cid = payload.get("clientId", payload.get("client_id"))
+                        if isinstance(raw_cid, str) and raw_cid.strip() and len(raw_cid.strip()) <= 200:
+                            try:
+                                bound = save_essay_evaluation(
+                                    conn, user_id, subject_now,
+                                    {"clientId": raw_cid.strip(), "status": "ready"})
+                            except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
+                                bound = None
+                    except sqlite3.Error:
+                        try:
+                            conn.rollback()
+                        except sqlite3.Error:
+                            pass
+                        bound = None
+                    if bound is not None:
+                        self.send_json({"ok": True, "format": format_id, "result": result,
+                                        "submission": bound}, token=token)
+                    else:
+                        self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
+                else:
+                    self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass

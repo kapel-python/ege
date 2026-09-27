@@ -1144,6 +1144,10 @@ async function onRecheckClick() {
 }
 
 async function doRecheck(note) {
+  // Двойной клик по «Перепроверить» — второй игнорируется: recheckLoading
+  // поднимается синхронно в openRecheckLoading, иначе ушли бы два
+  // POST /api/ai/essay (две траты лимита, два вызова модели на тот же текст).
+  if (recheckLoading) return;
   const sub = recheckSubmission;
   if (!sub || !sub.text || !sub.taskId || !sub.clientId) {
     openRecheckError("Нечего перепроверять",
@@ -1152,7 +1156,7 @@ async function doRecheck(note) {
   }
   const cleanNote = String(note || "").slice(0, RECHECK_NOTE_MAX);
   openRecheckLoading();
-  const aiBody = { text: sub.text, taskId: sub.taskId };
+  const aiBody = { text: sub.text, taskId: sub.taskId, clientId: sub.clientId };
   if (sub.subject) aiBody.subject = sub.subject;
   if (cleanNote.trim()) aiBody.note = cleanNote.trim();
   let aiRes = null, aiData = {};
@@ -1190,8 +1194,16 @@ async function doRecheck(note) {
   }
   // Привязываем новый ответ модели к тому же submission: оценка берётся
   // только из серверной записи (essay_checks), клиентский result игнорируется.
+  // Сервер уже мог привязать сам (clientId в /api/ai/essay выше — тогда
+  // готовый submission приехал в aiData.submission): закрытие вкладки во
+  // время перепроверки тоже ничего не теряет, результат ждёт в GET.
+  // Отдельный evaluation в этом случае — лишь идемпотентный no-op.
+  let evData = null;
+  if (aiData && aiData.submission && aiData.submission.status === "ready") {
+    evData = aiData;
+  } else {
   const evBody = { subject: sub.subject, clientId: sub.clientId, status: "ready" };
-  let evRes = null, evData = {};
+  let evRes = null;
   try {
     evRes = await fetch("/api/essays/evaluation", {
       method: "POST",
@@ -1209,6 +1221,7 @@ async function doRecheck(note) {
     openRecheckError("Отчёт не обновился",
       (evData && evData.error) || "Проверка прошла, но результат не сохранился. Попробуй ещё раз.", cleanNote);
     return;
+  }
   }
   // Перечитываем готовый отчёт и рисуем заново тем же render.
   try {
