@@ -4,7 +4,7 @@
    подтверждений, blocked-окна и модалки модели на ege-result.
 
    Подключение на странице (после её основного CSS):
-     <link rel="stylesheet" href="/css/dlg.css?v=1">
+     <link rel="stylesheet" href="/css/dlg.css?v=2">
      <div id="device-modal-root"></div>  <!-- или свой корень -->
 
    Токены с fallback — чтобы файл работал и вне SPA
@@ -99,8 +99,18 @@
 
 /* ---------- кнопки внутри .dlg ----------
    Минимальный набор .btn: в SPA полный набор живёт в styles.css,
-   этот блок — общий базовый, достаточный для .dlg__actions. */
-.btn {
+   этот блок — общий базовый, достаточный для .dlg__actions.
+
+   Через :where() — база не перебивает страницу-хозяина. dlg.css
+   подключается ПОСЛЕ основного CSS, и «голая» `.btn` (специфичность
+   0-1-0, как у .btn--sm/.btn--lg/.theme-toggle) выигрывала бы каскад
+   у кнопок приложения: в шапке темы .btn-овский padding 10px 18px
+   съедал `.theme-toggle { padding: 0 }`, иконка сжималась в 0 px,
+   а border-color из .btn--ghost возвращался к transparent — кнопка
+   оставалась кликабельной, но невидимой. У :where() специфичность
+   0-0-0: в SPA побеждает styles.css, на страницах вне SPA (где
+   других .btn нет) база работает как раньше. */
+:where(.btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -117,7 +127,7 @@
   color: var(--text);
   white-space: nowrap;
 }
-.btn:active { transform: scale(0.98); }
-.btn--soft { background: var(--surface-3, var(--surface-2)); color: var(--text); }
-.btn--soft:hover { background: var(--soft-hover, var(--surface-2)); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+:where(.btn:active) { transform: scale(0.98); }
+:where(.btn--soft) { background: var(--surface-3, var(--surface-2)); color: var(--text); }
+:where(.btn--soft:hover) { background: var(--soft-hover, var(--surface-2)); }
+:where(.btn:disabled) { opacity: 0.45; cursor: not-allowed; }

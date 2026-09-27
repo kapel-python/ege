@@ -71,6 +71,7 @@
   - `node test/lesson-timer.js` (активное время урока, pause/resume)
   - `node test/deeplinks.js` (маршруты, подсказки формата, matching сессий и labels)
   - `node test/route-hardening.js` (устойчивость роутера и экранирование: `icon("info")` не падает в fallback-мишень, `renderTask` гасит прошлый секундомер, `routeParam`/`safeDecode` переживают битый `%`-эскейп, `esc` в ege-result.html экранирует и кавычки — он подставляется в `data-id`)
+  - `node test/css-cascade.js` (каскад: базовый `.btn` в `css/dlg.css` обёрнут в `:where()` — общий CSS подключается после `styles.css` и не перебивает модификаторы страницы (`.btn--sm`/`.btn--lg`/`.theme-toggle` — кнопка темы в шапке), чужие классы допустимы только под `.dlg*`-контейнером, версия `dlg.css` одна в `index.html` и `ege-result.html`)
   - `python3 test/subject-auth.py` (смена предмета не роняет авторизацию: auth в ответе /api/subject, быстрые повторные смены, перезагрузка)
   - `python3 test/domain-state.py` (append-only события, независимые patch-домены и анти-абьюз потолки коллекций: oversized list/dict → 400 без записи, read_state читает с LIMIT)
   - `python3 test/occ.py` (optimistic concurrency control для независимых доменов)
