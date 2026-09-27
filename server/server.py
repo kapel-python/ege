@@ -4744,6 +4744,200 @@ def set_current_subject(conn: sqlite3.Connection, user_id: int, subject: str) ->
     return subject
 
 
+# ---------------------------------------------------------------------------
+# Лимит ИИ-проверок сочинений (продуктовый бюджет ученика — не путать
+# с ai.ai_take, тем in-memory бакетом против скриптовых всплесков).
+#
+# 3 проверки на аккаунт, скользящее окно 8 часов: потраченная проверка
+# возвращается ровно через 8 часов после списания. Каждая трата запускает
+# свой отсчёт, поэтому «за ночь» возвращается часть лимита, а через 8 часов
+# после первой траты лимит восстановлен полностью. Бюджет живёт в SQLite
+# (переживает рестарт) и списывается одним атомарным INSERT..SELECT со
+# стражами — гонка двух вкладок не выдаёт лишнюю проверку. Неудачная
+# проверка (битый ввод, отказ провайдера, мусорный ответ модели)
+# возвращается: ученик не платит лимитом за сбой на нашей стороне.
+#
+# Обход «выйти и завести новый аккаунт» закрыт вторым бюджетом — по
+# устройству (та же скользящая тройка на 8 часов). Отпечаток —
+# МЕЖАККАУНТНЫЙ HMAC от куки ege_device и от сетевого адреса (без user_id
+# внутри, иначе новый аккаунт на том же браузере был бы неуловим; сырые
+# кука и IP в базе не появляются). Бюджет устройства применяется только
+# к СВЕЖИМ аккаунтам (младше суток): именно их плодит фермер в цикле
+# «вышел — зарегистрировался». Давний аккаунт на общем компьютере ограничен
+# лишь своим бюджетом — сознательный выбор в пользу «лучше недожать, чем
+# обвинить обычного ученика»: ложное срабатывание возможно только у новичка
+# на устройстве, где кто-то уже исчерпал лимит сегодня, и только на первые
+# сутки его аккаунта.
+# ---------------------------------------------------------------------------
+
+AI_LIMIT_CODE = "AI_LIMIT"
+AI_USAGE_MAX_DEFAULT = 3
+AI_USAGE_WINDOW_DEFAULT_SEC = 8 * 3600
+AI_USAGE_DEVICE_TRUST_DEFAULT_SEC = 24 * 3600
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(float(os.environ.get(name) or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def ai_usage_max() -> int:
+    # Читается в момент вызова: тесты меняют лимит без перезагрузки сервера.
+    return _env_int("EGE_AI_USAGE_MAX", AI_USAGE_MAX_DEFAULT)
+
+
+def ai_usage_window_ms() -> int:
+    return _env_int("EGE_AI_USAGE_WINDOW_SEC", AI_USAGE_WINDOW_DEFAULT_SEC) * 1000
+
+
+def ai_usage_device_trust_ms() -> int:
+    return _env_int("EGE_AI_USAGE_DEVICE_TRUST_SEC", AI_USAGE_DEVICE_TRUST_DEFAULT_SEC) * 1000
+
+
+_AI_USAGE_SCHEMA_DONE: set[str] = set()
+
+
+def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
+    key = _db_key(conn)
+    if key in _AI_USAGE_SCHEMA_DONE:
+        return
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_usage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          device_key TEXT,
+          device_net TEXT,
+          created_ms INTEGER NOT NULL
+        )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_user ON ai_usage(user_id, created_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_key ON ai_usage(device_key, created_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_net ON ai_usage(device_net, created_ms)")
+    conn.commit()
+    _AI_USAGE_SCHEMA_DONE.add(key)
+
+
+def ai_usage_device_fp(conn: sqlite3.Connection, handler) -> tuple[str | None, str | None]:
+    """Отпечаток устройства для антиабуза — МЕЖАККАУНТНЫЙ (без user_id в HMAC),
+    иначе новый аккаунт на том же браузере был бы неуловим. Храним только
+    HMAC: ни сырой куки, ни IP в базе не появляется."""
+    try:
+        secret = device_fingerprint_secret(conn).encode("utf-8")
+    except sqlite3.Error:
+        return None, None
+    raw = cookie_value(handler, DEVICE_COOKIE_NAME)
+    raw = raw.strip() if isinstance(raw, str) else ""
+    if not device_cookie_is_valid(raw):
+        # Кука может выдаваться прямо этим ответом (первый запрос браузера):
+        # привязываем трату и к ней, чтобы следующий «новый аккаунт» её увидел.
+        issued = getattr(handler, "_device_cookie", None)
+        raw = issued.strip() if isinstance(issued, str) else ""
+    key = None
+    if device_cookie_is_valid(raw):
+        key = hmac.new(secret, f"ai-dev-key:{raw}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    net = hmac.new(secret, f"ai-dev-net:{support_client_ip(handler)}".encode("utf-8"),
+                   hashlib.sha256).hexdigest()[:32]
+    return key, net
+
+
+def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bool:
+    """Аккаунт младше доверенного возраста — к нему применяется бюджет устройства.
+    Возраст неизвестен → считаем давним (лучше недожать, чем пережать)."""
+    try:
+        row = conn.execute("SELECT created_at FROM users WHERE id=?", (user_id,)).fetchone()
+        created_ms = int(row["created_at"]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+    return 0 <= now_ms - created_ms < ai_usage_device_trust_ms()
+
+
+def ai_usage_status(conn: sqlite3.Connection, user_id: int,
+                    fp_key: str | None, fp_net: str | None,
+                    now_ms: int | None = None) -> dict:
+    """Сколько проверок осталось и когда вернётся следующая.
+
+    remaining — минимум двух бюджетов (аккаунт и, для свежего аккаунта,
+    устройство); resetInSec — ближайший момент, когда этот минимум вырастет
+    (при ничьей обоих бюджетов в нуле ждать придётся обоих).
+    """
+    ensure_ai_usage_schema(conn)
+    now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    limit = ai_usage_max()
+    window_ms = ai_usage_window_ms()
+    since = now_ms - window_ms
+    acc = [int(r["created_ms"]) for r in conn.execute(
+        "SELECT created_ms FROM ai_usage WHERE user_id=? AND created_ms>?", (user_id, since))]
+    dev: list[int] = []
+    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
+        dev = [int(r["created_ms"]) for r in conn.execute(
+            "SELECT created_ms FROM ai_usage WHERE created_ms>? AND (device_key=? OR device_net=?)",
+            (since, fp_key, fp_net))]
+
+    def remaining_at(t_ms: int) -> int:
+        a = limit - sum(1 for c in acc if c + window_ms > t_ms)
+        d = limit - sum(1 for c in dev if c + window_ms > t_ms)
+        return max(0, min(a, d))
+
+    remaining = remaining_at(now_ms)
+    reset_ms = None
+    if remaining < limit:
+        for t in sorted({c + window_ms for c in acc + dev}):
+            if t > now_ms and remaining_at(t) > remaining:
+                reset_ms = t
+                break
+        if reset_ms is None:
+            reset_ms = now_ms + window_ms  # страховка: блок без строк в окне быть не может
+    return {
+        "ok": True,
+        "limit": limit,
+        "remaining": remaining,
+        "resetInSec": None if reset_ms is None else max(1, (reset_ms - now_ms + 999) // 1000),
+        "windowSec": window_ms // 1000,
+    }
+
+
+def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
+                         fp_key: str | None, fp_net: str | None) -> tuple[bool, int | None]:
+    """Атомарно списать одну проверку из бюджета.
+
+    Один INSERT..SELECT со стражами по обоим бюджетам: либо строка встала
+    (проверка зарезервирована), либо нет (rowcount=0). Гонка параллельных
+    вкладок упирается в журнальный замок SQLite — лишней проверки не выдать.
+    """
+    ensure_ai_usage_schema(conn)
+    now_ms = int(time.time() * 1000)
+    limit = ai_usage_max()
+    window_ms = ai_usage_window_ms()
+    since = now_ms - window_ms
+    # Точечная подчистка: старые строки ни на что не влияют, таблица не растёт.
+    conn.execute("DELETE FROM ai_usage WHERE created_ms<=?", (since,))
+    sql = ("INSERT INTO ai_usage (user_id, device_key, device_net, created_ms)"
+           " SELECT ?,?,?,?"
+           " WHERE (SELECT COUNT(*) FROM ai_usage WHERE user_id=? AND created_ms>?) < ?")
+    args: list = [user_id, fp_key, fp_net, now_ms, user_id, since, limit]
+    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
+        sql += (" AND (SELECT COUNT(*) FROM ai_usage WHERE created_ms>?"
+                " AND (device_key=? OR device_net=?)) < ?")
+        args += [since, fp_key, fp_net, limit]
+    cur = conn.execute(sql, args)
+    conn.commit()
+    if cur.rowcount:
+        return True, int(cur.lastrowid)
+    return False, None
+
+
+def ai_usage_refund(conn: sqlite3.Connection, reservation_id: int | None) -> None:
+    """Вернуть резервацию: проверка не состоялась — лимит не потрачен."""
+    if not reservation_id:
+        return
+    try:
+        conn.execute("DELETE FROM ai_usage WHERE id=?", (reservation_id,))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+
+
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int | None, str | None]:
     """Кто перед нами. Ничего не создаёт и не меняет.
 
@@ -7923,23 +8117,42 @@ class Handler(BaseHTTPRequestHandler):
                                     "retryAfter": retry_after}, 429, token=token,
                                    headers={"Retry-After": str(retry_after)})
                     return
+                # Продуктовый бюджет (3 проверки, скользящие 8 часов + антиабуз
+                # по устройству для свежих аккаунтов): резервируем ДО вызова
+                # модели — деньги провайдера защищает резервация, а лимит
+                # ученика при сбое возвращается (refund в ветках ошибок ниже).
+                fp_key, fp_net = ai_usage_device_fp(conn, self)
+                reserved, reservation_id = ai_usage_try_reserve(conn, user_id, fp_key, fp_net)
+                if not reserved:
+                    st = ai_usage_status(conn, user_id, fp_key, fp_net)
+                    retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
+                    self.send_json({"error": "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся.",
+                                    "code": AI_LIMIT_CODE, "limit": st["limit"],
+                                    "remaining": st["remaining"], "resetInSec": st["resetInSec"],
+                                    "retryAfter": retry},
+                                   429, token=token, headers={"Retry-After": str(retry)})
+                    return
                 try:
                     result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem)
                 except _AI.AIInputError as exc:
                     # Наш ввод, наш 400: повтор не поможет.
+                    ai_usage_refund(conn, reservation_id)
                     self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
                 except _AI.AIFormatError as exc:
                     # The model answered, but not with the contract we asked
                     # for. Not the student's fault and not worth a retry storm.
+                    ai_usage_refund(conn, reservation_id)
                     rid = log_request_error("ai-format", exc)
                     self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
                                     "ref": rid}, 502, token=token)
                     return
                 except _AI.AIUnavailable as exc:
+                    ai_usage_refund(conn, reservation_id)
                     rid = log_request_error("ai-unavailable", exc)
                     self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
                     return
                 except _AI.AIError as exc:
+                    ai_usage_refund(conn, reservation_id)
                     rid = log_request_error("ai-upstream", exc)
                     self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
                     return
@@ -7954,6 +8167,7 @@ class Handler(BaseHTTPRequestHandler):
                     except (sqlite3.Error, ValueError) as exc:
                         # Не записали — значит evaluation позже честно скажет
                         # «не проверено». Лучше честная 503 здесь, чем это.
+                        ai_usage_refund(conn, reservation_id)
                         conn.rollback()
                         rid = log_request_error("ai-check-store", exc)
                         self.send_json({"error": "Проверка не сохранилась. Попробуй ещё раз.",
@@ -8201,6 +8415,17 @@ class Handler(BaseHTTPRequestHandler):
                     if not found:
                         self.send_json({"error": "Сочинение не найдено"}, 404, token=token); return
                     self.send_json({"ok": True, "subject": eff, "submission": found}, token=token); return
+                if path == "/api/ai/limits":
+                    # GET /api/ai/limits — остаток проверок сочинений и время до
+                    # возврата следующей. Клиент решает, показывать ли окно темы
+                    # или окно «лимит исчерпан»; списывает всё равно только POST.
+                    # Личные данные — гостю, как всем доменам ученика: 401.
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    fp_key, fp_net = ai_usage_device_fp(conn, self)
+                    self.send_json(ai_usage_status(conn, user_id, fp_key, fp_net), token=token)
+                    return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
                         return

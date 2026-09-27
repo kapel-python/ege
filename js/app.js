@@ -1267,6 +1267,7 @@ async function render() {
   if (routeSkill) {
     try {
       if (topicIsLocked(routeSkill)) openLockedSkillModal(param);
+      else if (skillUsesAiChecks(param)) openEssaySkillModalGated(param);
       else openSkillModal(param);
     } catch (_) {}
   }
@@ -2884,6 +2885,11 @@ function screenPath(root) {
       <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
     </div>
     ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedTopicCountLabel(lockedCount)}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
+  // Тёплый кэш лимита ИИ: клик по теме сочинения решается мгновенно, без
+  // видимой задержки на запрос, а окно лимита успевает заменить окно темы.
+  try {
+    if (allSkills.some((sk) => sk && skillUsesAiChecks(sk.id))) aiLimitsFetch();
+  } catch (_) {}
 }
 
 function overallProgress() {
@@ -4068,6 +4074,18 @@ async function essayRunChecks(t, text, clientId, wordCount) {
     essayRestoreSuppress = true;
     renderTask(screen);
     essayRestoreSuppress = false;
+    // Дневной лимит проверок: вместо красной ошибки — окно лимита с живым
+    // таймером; кэш обнуляем, чтобы гейт на «Пути» знал без перезапроса.
+    if (aiRes && aiRes.status === 429 && aiData && aiData.code === "AI_LIMIT") {
+      AiLimits.accountId = Store.accountId;
+      AiLimits.cache = {
+        limit: Math.max(1, Number(aiData.limit) || 3), remaining: 0,
+        resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
+        windowSec: 8 * 3600, at: Date.now(),
+      };
+      openAiLimitModal(aiData, null);
+      return;
+    }
     essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Проверка не удалась</div>
@@ -4078,6 +4096,7 @@ async function essayRunChecks(t, text, clientId, wordCount) {
       </div>`);
     return;
   }
+  aiLimitsNoteSpend(); // проверка состоялась — сервер списал одну, кэш следом
 
   // Report generation: фиксируем готовый отчёт в том же submission.
   let savedRes = null, savedData = {};
@@ -4203,6 +4222,169 @@ async function sessionEssaySubmit() {
   essayMarkWritten(t.id, S.essayReadyByTask[t.id]);
   // Шаги 2–5 — проверки, отчёт, кнопка, и только потом XP (внутри).
   await essayRunChecks(t, text, data.clientId, data.wordCount);
+}
+
+/* ---------------- лимит ИИ-проверок сочинений ----------------
+   3 проверки на аккаунт, скользящее окно 8 часов: каждая потраченная
+   возвращается через 8 часов после списания. Списывает и решает только
+   сервер (POST /api/ai/essay → 429 AI_LIMIT); здесь — честный гейт:
+   при нуле вместо окна темы открывается окно лимита, а сам запрос
+   статуса никогда не блокирует (гость/офлайн → окно темы как обычно,
+   финальное слово всё равно за сервером при отправке). */
+
+const AiLimits = { cache: null, accountId: null, pending: null, freshMs: 30000 };
+
+function aiLimitsFreshCached() {
+  if (!Store.accountId || AiLimits.accountId !== Store.accountId) return null;
+  const c = AiLimits.cache;
+  return c && (Date.now() - c.at) < AiLimits.freshMs ? c : null;
+}
+
+function aiLimitsFetch(force) {
+  if (!Store.accountId) return Promise.resolve(null); // гость: лимита нет, окно темы открывается как обычно
+  if (!force) {
+    const cached = aiLimitsFreshCached();
+    if (cached) return Promise.resolve(cached);
+    if (AiLimits.pending) return AiLimits.pending;
+  }
+  if (typeof fetch !== "function") return Promise.resolve(null);
+  try {
+    AiLimits.pending = fetch("/api/ai/limits")
+      .then((res) => res.json().catch(() => ({})).then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok || !data || !data.ok) return null; // 401/сеть — не блокируем: решит сервер на проверке
+        const st = {
+          limit: Math.max(1, Number(data.limit) || 3),
+          remaining: Math.max(0, Number(data.remaining) || 0),
+          resetInSec: data.resetInSec == null ? null : Math.max(0, Number(data.resetInSec) || 0),
+          windowSec: Math.max(60, Number(data.windowSec) || 8 * 3600),
+          at: Date.now(),
+        };
+        AiLimits.accountId = Store.accountId;
+        AiLimits.cache = st;
+        return st;
+      })
+      .catch(() => null)
+      .finally(() => { AiLimits.pending = null; });
+    return AiLimits.pending;
+  } catch (_) {
+    return Promise.resolve(null);
+  }
+}
+
+/* Локально уменьшаем кэш после успешной проверки: гейт на «Пути» остаётся
+   точным без лишнего запроса. */
+function aiLimitsNoteSpend() {
+  const c = aiLimitsFreshCached();
+  if (!c) return;
+  c.remaining = Math.max(0, (Number(c.remaining) || 0) - 1);
+  if (!(c.resetInSec > 0)) c.resetInSec = c.windowSec || 8 * 3600;
+}
+
+/* Тема, чья практика состоит из сочинений, — единственная, которая тратит
+   ИИ-проверки. Определяется данными каталога (long_text-задания), а не
+   захардкоженным id: новый предмет с сочинением подхватится сам. */
+function skillUsesAiChecks(skillId) {
+  return asSafeArray(DataAPI.practiceTasksBySkill(skillId)).some((t) => isLongTextTask(t));
+}
+
+/* Клик по теме сочинения на «Пути»: сначала сверяемся с лимитом, и только
+   потом решаем, какое окно открыть. Окно темы при исчерпанном лимите не
+   рисуем вообще. */
+function openEssaySkillModalGated(skillId) {
+  const cached = aiLimitsFreshCached();
+  if (cached) { aiLimitsGateApply(skillId, cached); return; }
+  aiLimitsFetch().then((st) => aiLimitsGateApply(skillId, st));
+}
+
+function aiLimitsGateApply(skillId, status) {
+  // Клик уехал с роута, пока шёл запрос, — ничего не открываем.
+  if (currentRoute() !== "skill" || routeParam() !== skillId) return;
+  if (status && Number(status.remaining) <= 0) { openAiLimitModal(status, skillId); return; }
+  openSkillModal(skillId);
+}
+
+/* Окно «лимит исчерпан» — та же .dlg-система, что у инфо-диалога устройства
+   в профиле и дисклеймера модели на ege-result.html. Таймер живой (ч:м:с),
+   по нулю переспрашиваем сервер: вернувшаяся проверка сразу открывает тему,
+   которую ученик хотел. */
+let aiLimitTickTimer = null;
+
+function aiLimitStopTick() {
+  if (aiLimitTickTimer) { clearInterval(aiLimitTickTimer); aiLimitTickTimer = null; }
+}
+
+function aiLimitFmt(totalSec) {
+  const s = Math.max(0, Math.floor(Number(totalSec) || 0));
+  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function openAiLimitModal(status, skillId) {
+  const root = deviceModalRoot();
+  if (!root) return;
+  aiLimitStopTick();
+  const limit = Math.max(1, Number(status && status.limit) || 3);
+  const remaining = Math.max(0, Math.min(limit, Number(status && status.remaining) || 0));
+  let left = Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
+  try {
+    deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  } catch (_) {}
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeAiLimitModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Лимит проверок сочинений исчерпан">
+        <button class="dlg__close" type="button" onclick="closeAiLimitModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Проверка сочинения</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("clock")}</div>
+          <div class="dlg-device__name">Проверки на сегодня закончились</div>
+        </div>
+        <div class="dlg__text">
+          Лимит — ${limit} ${plural(limit, "проверка", "проверки", "проверок")} сочинения в день на аккаунт:
+          каждая потраченная возвращается через 8 часов.
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.
+        </div>
+        ${left > 0 ? `
+        <div class="dlg-kv">
+          <div class="dlg-kv__row"><span>Обновление лимита через</span><span class="mono" data-ai-limit-timer>${aiLimitFmt(left)}</span></div>
+        </div>` : ""}
+        <div class="dlg__actions">
+          <button class="btn btn--primary" type="button" onclick="closeAiLimitModal()">Понятно</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+  if (left > 0) {
+    aiLimitTickTimer = setInterval(() => {
+      const el = root.querySelector("[data-ai-limit-timer]");
+      if (!el || !el.isConnected) { aiLimitStopTick(); return; } // окно закрыто (Esc/фон) — тикаем в никуда
+      left -= 1;
+      if (left > 0) { el.textContent = aiLimitFmt(left); return; }
+      aiLimitStopTick();
+      el.textContent = aiLimitFmt(0);
+      // Время вышло — сверяемся с сервером. Если проверка вернулась, закрываем
+      // окно лимита и сразу открываем тему, которую ученик хотел.
+      aiLimitsFetch(true).then((st) => {
+        if (!st) return;
+        if (Number(st.remaining) > 0) {
+          closeAiLimitModal();
+          if (skillId && currentRoute() === "skill" && routeParam() === skillId) openSkillModal(skillId);
+        } else {
+          openAiLimitModal(st, skillId); // сервер сказал ждать ещё — перезапускаем таймер
+        }
+      });
+    }, 1000);
+  }
+}
+
+function closeAiLimitModal() {
+  aiLimitStopTick();
+  closeDeviceModal();
 }
 
 /* ---------------- задания части 2: самопроверка вместо авто-проверки ---------------- */

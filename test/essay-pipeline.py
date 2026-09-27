@@ -43,6 +43,9 @@ def check(name, condition, detail=""):
 def load_server(db_path: Path):
     os.environ["EGE_DB_PATH"] = str(db_path)
     os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    # Пайплайн делает больше трёх проверок на один аккаунт; дневной лимит
+    # ai_usage здесь не под тестом — его покрывает test/ai-limits.py.
+    os.environ["EGE_AI_USAGE_MAX"] = "1000"
     spec = importlib.util.spec_from_file_location("ege_essay_pipeline_test", SERVER_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

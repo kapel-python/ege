@@ -30,6 +30,10 @@ AI_PATH = SERVER_DIR / "ai.py"
 # Читаем до импорта: лимит ИИ фиксируется в момент загрузки модуля.
 os.environ["EGE_AI_RATE_MAX"] = "3"
 os.environ["EGE_AI_RATE_WINDOW_SEC"] = "3600"
+# Персистентный дневной лимит (ai_usage) здесь мешал бы: тест делает больше
+# трёх проверок на один аккаунт, проверяя in-memory бюджет всплесков и
+# контракт endpoint'а. Сам дневной лимит покрывает test/ai-limits.py.
+os.environ["EGE_AI_USAGE_MAX"] = "1000"
 
 LIVE = os.environ.get("EGE_AI_LIVE") == "1"
 FAKE_KEY = "sk-test-not-a-real-key-000000000000"
