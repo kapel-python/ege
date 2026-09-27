@@ -1267,7 +1267,6 @@ async function render() {
   if (routeSkill) {
     try {
       if (topicIsLocked(routeSkill)) openLockedSkillModal(param);
-      else if (skillUsesAiChecks(param)) openEssaySkillModalGated(param);
       else openSkillModal(param);
     } catch (_) {}
   }
@@ -2885,11 +2884,9 @@ function screenPath(root) {
       <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
     </div>
     ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedTopicCountLabel(lockedCount)}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
-  // Тёплый кэш лимита ИИ: клик по теме сочинения решается мгновенно, без
-  // видимой задержки на запрос, а окно лимита успевает заменить окно темы.
-  try {
-    if (allSkills.some((sk) => sk && skillUsesAiChecks(sk.id))) aiLimitsFetch();
-  } catch (_) {}
+  // Лимит ИИ-проверок здесь не гейтим: окно темы открывается всегда,
+  // лимит решает только сервер при отправке (429 внутри практики и на
+  // перепроверке — единая модалка openAiLimitModal).
 }
 
 function overallProgress() {
@@ -4074,16 +4071,23 @@ async function essayRunChecks(t, text, clientId, wordCount) {
     essayRestoreSuppress = true;
     renderTask(screen);
     essayRestoreSuppress = false;
-    // Дневной лимит проверок: вместо красной ошибки — окно лимита с живым
-    // таймером; кэш обнуляем, чтобы гейт на «Пути» знал без перезапроса.
-    if (aiRes && aiRes.status === 429 && aiData && aiData.code === "AI_LIMIT") {
-      AiLimits.accountId = Store.accountId;
-      AiLimits.cache = {
-        limit: Math.max(1, Number(aiData.limit) || 3), remaining: 0,
-        resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
-        windowSec: 8 * 3600, at: Date.now(),
-      };
-      openAiLimitModal(aiData, null);
+    // Лимит проверок: всегда единая модалка openAiLimitModal, а не
+    // inline-блок. Разбираем оба серверных 429 с этого роута: продуктовый
+    // (429 AI_LIMIT с полями limit/remaining/resetInSec) и burst-бакет
+    // всплесков ai_take (голый 429 с retryAfter, без продуктовых полей).
+    if (aiRes && aiRes.status === 429) {
+      if (aiData && aiData.code === "AI_LIMIT") {
+        AiLimits.accountId = Store.accountId;
+        AiLimits.cache = {
+          limit: Math.max(1, Number(aiData.limit) || 3), remaining: 0,
+          resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
+          windowSec: 8 * 3600, at: Date.now(),
+        };
+        openAiLimitModal(aiData);
+        return;
+      }
+      const burstRetry = Math.max(1, Number(aiData.retryAfter) || 60);
+      aiLimitsFetch(true).then((st) => openAiLimitModal(st, burstRetry));
       return;
     }
     essayMountFeedback(`
@@ -4225,12 +4229,14 @@ async function sessionEssaySubmit() {
 }
 
 /* ---------------- лимит ИИ-проверок сочинений ----------------
-   3 проверки на аккаунт, скользящее окно 8 часов: каждая потраченная
-   возвращается через 8 часов после списания. Списывает и решает только
-   сервер (POST /api/ai/essay → 429 AI_LIMIT); здесь — честный гейт:
-   при нуле вместо окна темы открывается окно лимита, а сам запрос
-   статуса никогда не блокирует (гость/офлайн → окно темы как обычно,
-   финальное слово всё равно за сервером при отправке). */
+   3 проверки на аккаунт, цепочечная зарядка 8 часов: каждая потраченная
+   возвращается через 8 часов. Списывает и решает только сервер
+   (POST /api/ai/essay → 429 AI_LIMIT за продуктовый бюджет, голый 429
+   за burst-бакет всплесков); окно темы на «Пути» открывается всегда —
+   гейта там нет, внутри практики и так есть проверки. Оба 429 внутри
+   практики (essayRunChecks) открывают единую модалку openAiLimitModal,
+   гость/офлайн модалкой не блокируются — финальное слово за сервером
+   при отправке. */
 
 const AiLimits = { cache: null, accountId: null, pending: null, freshMs: 30000 };
 
@@ -4272,8 +4278,8 @@ function aiLimitsFetch(force) {
   }
 }
 
-/* Локально уменьшаем кэш после успешной проверки: гейт на «Пути» остаётся
-   точным без лишнего запроса. */
+/* Локально уменьшаем кэш после успешной проверки, чтобы модалка лимита
+   и повторные запросы статуса видели актуальный остаток без лишнего запроса. */
 function aiLimitsNoteSpend() {
   const c = aiLimitsFreshCached();
   if (!c) return;
@@ -4281,33 +4287,19 @@ function aiLimitsNoteSpend() {
   if (!(c.resetInSec > 0)) c.resetInSec = c.windowSec || 8 * 3600;
 }
 
-/* Тема, чья практика состоит из сочинений, — единственная, которая тратит
-   ИИ-проверки. Определяется данными каталога (long_text-задания), а не
-   захардкоженным id: новый предмет с сочинением подхватится сам. */
-function skillUsesAiChecks(skillId) {
-  return asSafeArray(DataAPI.practiceTasksBySkill(skillId)).some((t) => isLongTextTask(t));
-}
+/* Окно темы открывается всегда: гейта по лимиту на «Пути» нет — сочинение
+   пишется и отправляется изнутри, лимит проверяет сервер при отправке.
+   Сочинения от обычных заданий отличаются данными каталога (long_text),
+   отдельных id тема не требует. */
 
-/* Клик по теме сочинения на «Пути»: сначала сверяемся с лимитом, и только
-   потом решаем, какое окно открыть. Окно темы при исчерпанном лимите не
-   рисуем вообще. */
-function openEssaySkillModalGated(skillId) {
-  const cached = aiLimitsFreshCached();
-  if (cached) { aiLimitsGateApply(skillId, cached); return; }
-  aiLimitsFetch().then((st) => aiLimitsGateApply(skillId, st));
-}
-
-function aiLimitsGateApply(skillId, status) {
-  // Клик уехал с роута, пока шёл запрос, — ничего не открываем.
-  if (currentRoute() !== "skill" || routeParam() !== skillId) return;
-  if (status && Number(status.remaining) <= 0) { openAiLimitModal(status, skillId); return; }
-  openSkillModal(skillId);
-}
-
-/* Окно «лимит исчерпан» — та же .dlg-система, что у инфо-диалога устройства
-   в профиле и дисклеймера модели на ege-result.html. Таймер живой (ч:м:с),
-   по нулю переспрашиваем сервер: вернувшаяся проверка сразу открывает тему,
-   которую ученик хотел. */
+/* Единая модалка лимита — та же .dlg-система, что у инфо-диалога устройства
+   в профиле и модалок перепроверки на ege-result.html. Два режима одного окна:
+   продуктовый (429 AI_LIMIT: «0 из 3», таймер 8-часовой цепочки; по нулю
+   переспрашиваем сервер — вернувшаяся проверка просто закрывает окно, черновик
+   в практике цел, отправка повторяется кнопкой) и burst (голый 429 бакета
+   всплесков: короткий отсчёт retryAfter, по нулю окно закрывается само).
+   Других мест про лимит нет: внутри практики оба 429 идут сюда, отдельных
+   inline-блоков «Проверка не удалась / Слишком много проверок» больше нет. */
 let aiLimitTickTimer = null;
 
 function aiLimitStopTick() {
@@ -4322,34 +4314,39 @@ function aiLimitFmt(totalSec) {
   return `${hh}:${mm}:${ss}`;
 }
 
-function openAiLimitModal(status, skillId) {
+function openAiLimitModal(status, burstRetryAfterSec) {
   const root = deviceModalRoot();
   if (!root) return;
   aiLimitStopTick();
+  const burst = burstRetryAfterSec != null;
   const limit = Math.max(1, Number(status && status.limit) || 3);
   const remaining = Math.max(0, Math.min(limit, Number(status && status.remaining) || 0));
-  let left = Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
+  let left = burst
+    ? Math.max(1, Math.floor(Number(burstRetryAfterSec) || 60))
+    : Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
+  const hasBalance = status && status.remaining != null;
   try {
     deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   } catch (_) {}
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeAiLimitModal()">
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Лимит проверок сочинений исчерпан">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${burst ? "Слишком частые запросы" : "Лимит проверок сочинений исчерпан"}">
         <button class="dlg__close" type="button" onclick="closeAiLimitModal()" aria-label="Закрыть окно">${icon("x")}</button>
         <div class="dlg__eyebrow">Проверка сочинения</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">${icon("clock")}</div>
-          <div class="dlg-device__name">Проверки на сегодня закончились</div>
+          <div class="dlg-device__name">${burst ? "Слишком частые запросы" : "Проверки на сегодня закончились"}</div>
         </div>
         <div class="dlg__text">
-          Лимит — ${limit} ${plural(limit, "проверка", "проверки", "проверок")} сочинения в день на аккаунт:
+          ${burst
+            ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
+            : `Лимит — ${limit} ${plural(limit, "проверка", "проверки", "проверок")} сочинения в день на аккаунт:
           каждая потраченная возвращается через 8 часов.
-          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.`}
         </div>
-        ${left > 0 ? `
         <div class="dlg-kv">
-          <div class="dlg-kv__row"><span>Обновление лимита через</span><span class="mono" data-ai-limit-timer>${aiLimitFmt(left)}</span></div>
-        </div>` : ""}
+          <div class="dlg-kv__row"><span>${burst ? "Повторная попытка через" : "Обновление лимита через"}</span><span class="mono" data-ai-limit-timer>${aiLimitFmt(left)}</span></div>
+        </div>
         <div class="dlg__actions">
           <button class="btn btn--primary" type="button" onclick="closeAiLimitModal()">Понятно</button>
         </div>
@@ -4359,27 +4356,25 @@ function openAiLimitModal(status, skillId) {
   document.addEventListener("keydown", deviceModalEscHandler);
   const dlg = root.querySelector(".dlg");
   if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
-  if (left > 0) {
-    aiLimitTickTimer = setInterval(() => {
-      const el = root.querySelector("[data-ai-limit-timer]");
-      if (!el || !el.isConnected) { aiLimitStopTick(); return; } // окно закрыто (Esc/фон) — тикаем в никуда
-      left -= 1;
-      if (left > 0) { el.textContent = aiLimitFmt(left); return; }
-      aiLimitStopTick();
-      el.textContent = aiLimitFmt(0);
-      // Время вышло — сверяемся с сервером. Если проверка вернулась, закрываем
-      // окно лимита и сразу открываем тему, которую ученик хотел.
-      aiLimitsFetch(true).then((st) => {
-        if (!st) return;
-        if (Number(st.remaining) > 0) {
-          closeAiLimitModal();
-          if (skillId && currentRoute() === "skill" && routeParam() === skillId) openSkillModal(skillId);
-        } else {
-          openAiLimitModal(st, skillId); // сервер сказал ждать ещё — перезапускаем таймер
-        }
-      });
-    }, 1000);
-  }
+  aiLimitTickTimer = setInterval(() => {
+    const el = root.querySelector("[data-ai-limit-timer]");
+    if (!el || !el.isConnected) { aiLimitStopTick(); return; } // окно закрыто (Esc/фон) — тикаем в никуда
+    left -= 1;
+    if (left > 0) { el.textContent = aiLimitFmt(left); return; }
+    aiLimitStopTick();
+    el.textContent = aiLimitFmt(0);
+    if (burst) { closeAiLimitModal(); return; } // burst-бакет отпустил — окно гаснет, отправка повторяется кнопкой
+    // Время вышло — сверяемся с сервером. Вернувшаяся проверка закрывает окно
+    // (черновик цел, отправка повторяется кнопкой); иначе перезапускаем таймер.
+    aiLimitsFetch(true).then((st) => {
+      if (!st) return;
+      if (Number(st.remaining) > 0) {
+        closeAiLimitModal();
+      } else {
+        openAiLimitModal(st); // сервер сказал ждать ещё — перезапускаем таймер
+      }
+    });
+  }, 1000);
 }
 
 function closeAiLimitModal() {

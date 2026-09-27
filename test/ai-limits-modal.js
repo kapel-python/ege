@@ -1,18 +1,21 @@
-/* Гейт лимита ИИ-проверок на «Пути» и окно «лимит исчерпан».
+/* Единая модалка лимита ИИ-проверок.
    Реальные js/data.js + js/state.js + js/app.js в браузерной VM.
 
    Проверяется ровно то, что требует задача:
-   1. Тема сочинения определяется данными каталога (long_text-задания), а не
+   1. Сочинения определяются данными каталога (long_text-задания), а не
       захардкоженным id — любой предмет с сочинением подхватывается сам.
-   2. Клик по теме сочинения при исчерпанном лимите НЕ открывает окно темы:
-      вместо него — единое .dlg-окно (та же система, что у устройств профиля
-      и дисклеймера модели на ege-result.html) с живым таймером ЧЧ:ММ:СС и
-      остатком «0 из 3».
-   3. При наличии хотя бы одной проверки открывается обычное окно темы,
-      окно лимита не показывается.
-   4. Гость и офлайн не блокируются: решает сервер при отправке (429 AI_LIMIT).
-   5. Таймер дотикал до нуля → перезапрос → проверка вернулась → окно лимита
-      закрывается и открывается тема, которую ученик хотел.
+   2. Окно темы на «Пути» открывается ВСЕГДА, без сверки с лимитом: гейта
+      нет, лимит проверяет только сервер при отправке. Даже при remaining=0,
+      гостю и в офлайне открывается обычное окно темы, а не модалка.
+   3. Исчерпанный продуктовый лимит (429 AI_LIMIT внутри практики) — единое
+      .dlg-окно (та же система, что у устройств профиля и модалок
+      перепроверки на ege-result.html) с живым таймером ЧЧ:ММ:СС и
+      остатком «0 из 3». Отдельных inline-блоков нет.
+   4. Голый 429 burst-бакета — то же окно в режиме «Слишком частые запросы»
+      с коротким отсчётом retryAfter; по нулю окно гаснет само.
+   5. Таймер продуктового окна дотикал до нуля → перезапрос → проверка
+      вернулась → окно закрывается (черновик цел, отправка повторяется
+      кнопкой); иначе окно перезапускается с новым таймером.
    6. Успешная проверка локально уменьшает кэш остатка.
 */
 const fs = require("fs");
@@ -157,38 +160,50 @@ const run = (code) => vm.runInContext(code, sandbox);
 const flush = async (times = 8) => { for (let i = 0; i < times; i++) await new Promise((r) => setTimeout(r, 0)); };
 const devRoot = () => element("device-modal-root").innerHTML;
 const modalRoot = () => element("modal-root").innerHTML;
+const resetRoots = () => {
+  element("modal-root").innerHTML = "";
+  element("device-modal-root").innerHTML = "";
+  element("device-modal-root")._qs = {};
+};
 
 (async () => {
-  /* 1. Тема сочинения определяется данными, а не id. */
-  check("тема с сочинениями распознаётся как ИИ-проверяемая",
-    run(`skillUsesAiChecks("russian_essay_source")`) === true);
-  check("тема без long_text-заданий — нет",
-    run(`skillUsesAiChecks("no_such_skill")`) === false);
+  /* 1. Сочинения определяются данными, а не id. */
+  check("тема с сочинениями распознаётся по long_text-заданиям",
+    run(`asSafeArray(DataAPI.practiceTasksBySkill("russian_essay_source")).some((t) => isLongTextTask(t))`) === true);
+  check("неизвестный skill — не сочинение",
+    run(`asSafeArray(DataAPI.practiceTasksBySkill("no_such_skill")).some((t) => isLongTextTask(t))`) === false);
 
   /* 2. aiLimitFmt: живой формат ЧЧ:ММ:СС. */
   check("aiLimitFmt(0)", run(`aiLimitFmt(0)`) === "00:00:00");
   check("aiLimitFmt(3661)", run(`aiLimitFmt(3661)`) === "01:01:01");
   check("aiLimitFmt(28800)", run(`aiLimitFmt(28800)`) === "08:00:00");
 
-  /* 3. Лимит есть → обычное окно темы, окна лимита нет. */
-  location_hash("skill", "russian_essay_source");
-  limitResponse = { ok: true, limit: 3, remaining: 2, resetInSec: 20000, windowSec: 28800 };
-  run(`AiLimits.cache = null; AiLimits.accountId = null;`);
-  await run(`openEssaySkillModalGated("russian_essay_source"); "done"`);
-  await flush();
-  check("при remaining=2 открылось окно темы", modalRoot().includes("modal-backdrop"), modalRoot().slice(0, 80));
-  check("окно лимита НЕ показано", !devRoot().includes("dlg-backdrop"), devRoot().slice(0, 80));
-
-  /* 4. Лимит исчерпан → окно темы НЕ открывается, вместо него .dlg-окно. */
-  run(`closeModal && closeModal()`);
-  element("modal-root").innerHTML = "";
-  element("device-modal-root").innerHTML = "";
+  /* 3. Окно темы открывается всегда — даже при remaining=0 (гейта нет). */
+  resetRoots();
   limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 3661, windowSec: 28800 };
-  run(`AiLimits.cache = null; AiLimits.accountId = null;`);
-  await run(`openEssaySkillModalGated("russian_essay_source"); "done"`);
+  limitCalls.length = 0;
+  run(`openSkillModal("russian_essay_source")`);
+  await flush();
+  check("при remaining=0 открылось обычное окно темы", modalRoot().includes("modal-backdrop"), modalRoot().slice(0, 80));
+  check("окно лимита НЕ показано", !devRoot().includes("dlg-backdrop"), devRoot().slice(0, 80));
+  check("открытие темы не ходит за лимитом", limitCalls.length === 0, String(limitCalls.length));
+
+  /* 4. Гость и офлайн: окно темы открывается сразу. */
+  resetRoots();
+  run(`Store.accountId = null;`);
+  limitCalls.length = 0;
+  run(`openSkillModal("russian_essay_source")`);
+  await flush();
+  check("гостю открывается обычное окно темы", modalRoot().includes("modal-backdrop"));
+  check("гость не вызывает /api/ai/limits", limitCalls.length === 0, String(limitCalls.length));
+  run(`Store.accountId = "limits-ui";`);
+
+  /* 5. Продуктовый лимит: единое .dlg-окно с таймером и «0 из 3». */
+  resetRoots();
+  intervals.length = 0;
+  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 3661, windowSec: 28800 })`);
   await flush();
   const dlg = devRoot();
-  check("окно темы НЕ открылось", !modalRoot().includes("modal-backdrop"), modalRoot().slice(0, 80));
   check("открыто .dlg-окно лимита (та же система, что у устройств)", dlg.includes("dlg-backdrop"));
   check("заголовок «Проверки на сегодня закончились»", dlg.includes("Проверки на сегодня закончились"));
   check("текст про лимит 3 проверки в день", dlg.includes("3 проверки сочинения в день на аккаунт"), dlg.slice(0, 200));
@@ -197,20 +212,19 @@ const modalRoot = () => element("modal-root").innerHTML;
   check("закрытие крестиком и кнопкой", dlg.includes('onclick="closeAiLimitModal()"'));
   check("тикающий интервал запущен", intervals.length >= 1, String(intervals.length));
 
-  /* 5. Esc/фон: closeAiLimitModal чистит контейнер. */
+  /* 6. Esc/фон: closeAiLimitModal чистит контейнер. */
   run(`closeAiLimitModal()`);
   check("closeAiLimitModal очищает окно", devRoot() === "");
 
-  /* 6. Таймер дотикал до нуля → перезапрос → проверка вернулась → открылась тема. */
-  element("modal-root").innerHTML = "";
+  /* 7. Таймер дотикал до нуля → перезапрос → проверка вернулась → окно закрыто. */
+  resetRoots();
   intervals.length = 0;
   const timerSpan = { textContent: "", isConnected: true };
   element("device-modal-root")._qs["[data-ai-limit-timer]"] = timerSpan;
   limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 };
-  run(`AiLimits.cache = null; AiLimits.accountId = null;`);
-  await run(`openEssaySkillModalGated("russian_essay_source"); "done"`);
+  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
   await flush();
-  check("окно лимита снова открыто", devRoot().includes("dlg-backdrop"));
+  check("окно лимита открыто", devRoot().includes("dlg-backdrop"));
   check("начальный рендер таймера 00:00:02", devRoot().includes("00:00:02"),
         (devRoot().match(/\d\d:\d\d:\d\d/) || [""])[0]);
   const tick = intervals[intervals.length - 1];
@@ -223,29 +237,49 @@ const modalRoot = () => element("modal-root").innerHTML;
   await flush();
   check("по нулю таймера лимит перезапрошен у сервера", limitCalls.length >= 1, String(limitCalls.length));
   check("проверка вернулась → окно лимита закрыто", !devRoot().includes("dlg-backdrop"), devRoot().slice(0, 60));
-  check("и открылась тема, которую ученик хотел", modalRoot().includes("modal-backdrop"), modalRoot().slice(0, 60));
 
-  /* 7. Гость: запроса к /api/ai/limits нет, окно темы открывается сразу. */
-  element("modal-root").innerHTML = "";
-  element("device-modal-root").innerHTML = "";
-  run(`Store.accountId = null; AiLimits.cache = null; AiLimits.accountId = null;`);
-  limitCalls.length = 0;
-  await run(`openEssaySkillModalGated("russian_essay_source"); "done"`);
+  /* 8. Таймер дотикал до нуля → сервер сказал ждать ещё → окно перезапущено. */
+  resetRoots();
+  intervals.length = 0;
+  const timerSpan2 = { textContent: "", isConnected: true };
+  element("device-modal-root")._qs["[data-ai-limit-timer]"] = timerSpan2;
+  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 };
+  run(`openAiLimitModal({ limit: 3, remaining: 0, resetInSec: 2, windowSec: 28800 })`);
   await flush();
-  check("гость не вызывает /api/ai/limits", limitCalls.length === 0, String(limitCalls.length));
-  check("гостю открывается обычное окно темы", modalRoot().includes("modal-backdrop"));
-  run(`Store.accountId = "limits-ui";`);
-
-  /* 8. Офлайн: не блокируем, открываем тему (сервер решит при отправке). */
-  element("modal-root").innerHTML = "";
-  limitResponse = null;
-  run(`AiLimits.cache = null; AiLimits.accountId = null; AiLimits.pending = null;`);
-  await run(`openEssaySkillModalGated("russian_essay_source"); "done"`);
+  const tick2 = intervals[intervals.length - 1];
+  limitResponse = { ok: true, limit: 3, remaining: 0, resetInSec: 5000, windowSec: 28800 };
+  tick2(); tick2();
   await flush();
-  check("офлайн не блокирует окно темы", modalRoot().includes("modal-backdrop"));
-  check("окно лимита не показано", !devRoot().includes("dlg-backdrop"));
+  check("сервер сказал ждать → окно перезапущено с новым таймером",
+    devRoot().includes("dlg-backdrop") && devRoot().includes("01:23:20"),
+    (devRoot().match(/\d\d:\d\d:\d\d/) || [""])[0]);
 
-  /* 9. Успешная проверка локально уменьшает кэш остатка. */
+  /* 9. Burst-режим: тот же .dlg, «Слишком частые запросы», короткий отсчёт. */
+  resetRoots();
+  intervals.length = 0;
+  const burstSpan = { textContent: "", isConnected: true };
+  element("device-modal-root")._qs["[data-ai-limit-timer]"] = burstSpan;
+  run(`openAiLimitModal(null, 2)`);
+  await flush();
+  const burstDlg = devRoot();
+  check("burst: открыто .dlg-окно", burstDlg.includes("dlg-backdrop"));
+  check("burst: заголовок «Слишком частые запросы»", burstDlg.includes("Слишком частые запросы"));
+  check("burst: начальный отсчёт 00:00:02", burstDlg.includes("00:00:02"));
+  const burstTick = intervals[intervals.length - 1];
+  check("burst: интервал тика пойман", typeof burstTick === "function");
+  burstTick(); // left: 2 -> 1
+  check("burst: тик обновляет цифры", burstSpan.textContent === "00:00:01", burstSpan.textContent);
+  burstTick(); // left: 1 -> 0 → окно гаснет само
+  check("burst: по нулю окно закрылось", !devRoot().includes("dlg-backdrop"), devRoot().slice(0, 60));
+
+  /* 10. Burst с известным остатком: остаток виден, лимит не выдуман. */
+  resetRoots();
+  run(`openAiLimitModal({ limit: 3, remaining: 2, resetInSec: 20000, windowSec: 28800 }, 60)`);
+  await flush();
+  check("burst с остатком: показан «2 из 3»", devRoot().includes(">2</span> из 3"), devRoot().slice(0, 300));
+  check("burst с остатком: короткий отсчёт, а не 8ч", devRoot().includes("00:01:00"), devRoot().slice(0, 300));
+
+  /* 11. Успешная проверка локально уменьшает кэш остатка. */
   run(`AiLimits.accountId = Store.accountId;
        AiLimits.cache = { limit: 3, remaining: 1, resetInSec: null, windowSec: 28800, at: Date.now() };
        aiLimitsNoteSpend();`);
@@ -253,14 +287,10 @@ const modalRoot = () => element("modal-root").innerHTML;
   check("aiLimitsNoteSpend: 1 → 0", after === 0, String(after));
   check("и таймер появляется (следующая через 8ч)", run(`AiLimits.cache.resetInSec`) === 28800);
 
-  /* 10. Кэш другого аккаунта не считается свежим. */
+  /* 12. Кэш другого аккаунта не считается свежим. */
   run(`Store.accountId = "another";`);
   check("кэш чужого аккаунта инвалиден", run(`aiLimitsFreshCached()`) === null);
 
   console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
-
-function location_hash(route, param) {
-  sandbox.location.hash = `#/${route}/${param}`;
-}
