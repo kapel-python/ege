@@ -398,7 +398,8 @@ def last_used_provider() -> str | None:
 
 
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
-         max_tokens: int | None = None, temperature: float | None = None) -> str:
+         max_tokens: int | None = None, temperature: float | None = None,
+         state: dict | None = None) -> str:
     """Send a chat completion and return the assistant text.
 
     `messages` is the OpenAI shape ([{"role": ..., "content": ...}, ...]) and is
@@ -438,6 +439,8 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 continue
             _note_provider_success(name)
             _chat_state.provider = name
+            if state is not None:
+                state["provider"] = name
             return answer
         raise last_exc
     finally:
@@ -1435,7 +1438,8 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     if grammar_fn is None:
         return spec["validate"](chat_json(system_prompt, user_prompt(body)), words, registry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        model_future = pool.submit(chat_json, system_prompt, user_prompt(body))
+        holder: dict = {}
+        model_future = pool.submit(chat_json, system_prompt, user_prompt(body), state=holder)
         grammar_future = pool.submit(grammar_fn, body)
         partial = spec["validate"](model_future.result(), words, registry)
         grammar = grammar_future.result()
@@ -1443,4 +1447,9 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     veto_fn = spec.get("veto")
     if callable(veto_fn):
         veto_fn(merged, partial)
+    if holder.get("provider"):
+        # Подпись итога — модель, выставившая баллы (holder вернул из пула
+        # потоков, где реально шёл chat). Вето второй инстанцией шло в нашем
+        # потоке и перезаписало thread-local — возвращаем сюда проверяющую.
+        _chat_state.provider = holder["provider"]
     return merged
