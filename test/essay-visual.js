@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-/* Визуальная проверка редактора итогового сочинения (headless Chromium).
+/* Визуальная проверка практики итогового сочинения (headless Chromium).
 
    Живой сервер поднимается на temp-БД и свободном порте, прод не трогается.
    Сценарии: пустой редактор, 149 слов (кнопка заблокирована), 150 слов
-   (минимум выполнен), длинное сочинение, экран результата.
+   (минимум выполнен), длинное сочинение, одиночный визит без счётчиков
+   (есть «Взять другое», нет «Пропустить»), отправка -> единый лоадер ->
+   либо итоговый экран с кнопкой разбора (есть AI-ключ), либо честная
+   ошибка без XP (ключа нет), повторный визит — следующее сочинение.
    Скриншоты: desktop 1280 и mobile 390, light и dark -> screenshots/.
 
    Запуск: node test/essay-visual.js
@@ -90,30 +93,25 @@ function essayText(n) {
 async function openRussianPractice(page) {
   await page.goto(`${BASE}/dashboard`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => typeof Store !== "undefined" && Store.ready === true, null, { timeout: 30000 });
-  // Свежий гость видит онбординг — помечаем его пройденным локально.
+  // Гость становится учеником заявкой (сессионная кука), предмет при этом
+  // запоминается сервером — гостевой echo-вариант POST /api/subject после
+  // перезагрузки не держится.
   await page.evaluate(async () => {
-    if (Store.state) Store.state.onboarded = true;
-    try { Onboarding.hide(); } catch (_) {}
-    try { render(); } catch (_) {}
-  });
-  await page.evaluate(async () => {
-    await fetch("/api/subject", {
+    const res = await fetch("/api/profile/claim", {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: "russian" }),
+      body: JSON.stringify({ subject: "russian", onboarded: true, name: "Визуал" }),
     });
+    if (!res.ok) throw new Error("claim " + res.status);
   });
   await page.goto(`${BASE}/dashboard`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => typeof Store !== "undefined" && Store.ready === true
     && Store.state && Store.state.subject === "russian", null, { timeout: 30000 });
-  await page.evaluate(() => {
-    if (Store.state) Store.state.onboarded = true;
-    try { Onboarding.hide(); } catch (_) {}
-    try { render(); } catch (_) {}
-    location.hash = "#/practice/russian_essay_practice";
-  });
+  // Вход в практику — настоящим путём (Путь → тема → Практика): один визит —
+  // одно сочинение, следующее — следующим визитом.
+  await page.evaluate(() => { startSkillPractice("russian_essay_source"); });
   await page.waitForSelector("#essayInput", { timeout: 30000 });
-  await sleep(600); // таймер/прогресс-бар дорисовались
+  await sleep(600); // таймер дорисовался
 }
 
 async function shot(page, name) {
@@ -147,6 +145,13 @@ async function main() {
     await shot(page, "essay-empty-desktop-light.png");
     t("empty: submit disabled", await page.$eval("#essaySubmitBtn", (b) => b.disabled));
     t("empty: counter 0/150", (await page.$eval("#essayCount", (e) => e.textContent)).includes("0 / 150"));
+    // Один визит — одно сочинение: счётчика N/8 нет, «Пропустить» заменено
+    // на «Взять другое».
+    t("single: нет счётчика N/8", await page.$(".session-head__progress") === null);
+    t("single: есть «Взять другое», нет «Пропустить»", await page.evaluate(() => {
+      const h = document.getElementById("screen").innerHTML;
+      return h.includes("essayTakeAnother()") && !h.includes("sessionSkip()");
+    }));
 
     await page.fill("#essayInput", essayText(149));
     await sleep(200);
@@ -166,22 +171,26 @@ async function main() {
     await overflow(page, "desktop long");
 
     // Отправка -> pipeline: единый лоадер с текстами проверки, затем либо
-    // кнопка готового отчёта (есть AI-ключ), либо честная ошибка без XP
-    // (ключа нет). В обоих случаях — никаких mock-баллов и висящих спиннеров.
+    // итоговый экран с кнопкой разбора (есть AI-ключ: один визит — одно
+    // сочинение, зелёного блока с навигацией больше нет), либо честная
+    // ошибка без XP (ключа нет). В обоих случаях — никаких mock-баллов
+    // и висящих спиннеров.
     await page.click("#essaySubmitBtn");
     await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
     const loaderSub = await page.$eval("#screen [data-loader-sub]", (e) => e.textContent);
     t("pipeline: единый лоадер с текстом проверки",
       /Подсчитываю баллы|Проверяю сочинение|Анализирую критерии|Собираю результат|Готовлю отчёт/.test(loaderSub), loaderSub);
-    await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
-    const readyBtn = await page.$("#feedbackSlot .feedback--ok");
-    if (readyBtn) {
-      const doneText = await page.$eval("#feedbackSlot .feedback--ok", (e) => e.textContent);
-      t("ready: кнопка после готового отчёта, не раньше",
-        doneText.includes("Посмотреть результат") && /\d+ \/ 22/.test(doneText), doneText.slice(0, 120));
-      await shot(page, "essay-feedback-desktop-light.png");
+    await page.waitForSelector("#screen .result-wrap, #feedbackSlot .feedback--bad", { timeout: 180000 });
+    const finished = await page.$("#screen .result-wrap");
+    if (finished) {
+      const finText = await page.$eval("#screen .result-wrap", (e) => e.textContent);
+      t("finish: итоговый экран сразу после проверки",
+        finText.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), finText.slice(0, 120));
+      t("finish: кнопка разбора сочинения",
+        finText.includes("Разбор сочинения"), finText.slice(0, 200));
+      await shot(page, "essay-finish-desktop-light.png");
       // Кнопка ведёт на ege-result.html с реальными данными этого submission.
-      await page.click("#feedbackSlot .feedback--ok .btn--primary");
+      await page.click("#screen .result-wrap .btn--primary");
       await page.waitForURL("**/ege-result.html**", { timeout: 15000 });
       await page.waitForSelector("#resultState:not([hidden])", { timeout: 15000 });
       await sleep(2200); // animateCount шаблона: читаем финальное значение
@@ -190,27 +199,22 @@ async function main() {
       t("result: 10 реальных критериев на 22", critCount === 10 && scoreMax.includes("22"),
         `cards=${critCount} max=${scoreMax}`);
       await shot(page, "essay-result-desktop-light.png");
+      // Назад — в тренировку (финиш подменил адрес), новый вход в практику —
+      // следующее сочинение: первое визитом закрыто и не блокирует.
       await page.goBack();
+      await page.evaluate(() => { startSkillPractice("russian_essay_source"); });
+      await page.waitForFunction(
+        () => typeof Session !== "undefined" && Session.cur && Session.cur.taskIds[0] === "re27_2",
+        null, { timeout: 15000 });
       await page.waitForSelector("#essayInput", { timeout: 30000 });
+      t("next visit: второе сочинение, первое не блокирует вход", true);
+      await shot(page, "essay-second-desktop-light.png");
     } else {
       const errText = await page.$eval("#feedbackSlot .feedback--bad", (e) => e.textContent);
       t("fail: честная ошибка без XP и без висящего loading",
         /не удалась|недоступна|не сформирован/i.test(errText) && errText.includes("Попробовать снова"),
         errText.slice(0, 140));
       await shot(page, "essay-feedback-desktop-light.png");
-    }
-
-    // Возврат в практику после просмотра результата: готовый отчёт доступен
-    // без повторной проверки (персистентность через essay_submissions).
-    if (readyBtn) {
-      await page.goBack();
-      await page.waitForSelector("#essayInput", { timeout: 30000 });
-      await page.waitForSelector("#feedbackSlot .feedback--ok", { timeout: 15000 });
-      const banner = await page.$eval("#feedbackSlot", (e) => e.textContent);
-      t("persist: результат доступен после возврата", banner.includes("уже проверено")
-        && banner.includes("Посмотреть результат"), banner.slice(0, 120));
-      await sleep(500);
-      await shot(page, "essay-result-desktop-light.png");
     }
 
     t("no page errors (desktop light)", pageErrors.length === 0, pageErrors.join(" | "));
@@ -243,19 +247,21 @@ async function main() {
     await overflow(page, "mobile long");
     await page.click("#essaySubmitBtn");
     await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
-    await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
-    await page.evaluate(() => {
-      const el = document.querySelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad");
+    await page.waitForSelector("#screen .result-wrap, #feedbackSlot .feedback--bad", { timeout: 180000 });
+    const doneSel = await page.$("#screen .result-wrap")
+      ? "#screen .result-wrap .btn--primary"
+      : "#feedbackSlot .feedback--bad .btn--primary";
+    await page.evaluate((s) => {
+      const el = document.querySelector(s);
       if (el) el.scrollIntoView({ block: "nearest" });
-    });
+    }, doneSel);
     await sleep(400);
     await shot(page, "essay-feedback-mobile-light.png");
     // Кнопка результата/повтора доступна без закрытия клавиатурой: она вне textarea.
-    t("mobile: result button visible after pipeline", await page.$eval(
-      "#feedbackSlot .feedback--ok .btn--primary, #feedbackSlot .feedback--bad .btn--primary", (b) => {
-        const r = b.getBoundingClientRect();
-        return r.bottom <= window.innerHeight && r.width > 0;
-      }));
+    t("mobile: result button visible after pipeline", await page.$eval(doneSel, (b) => {
+      const r = b.getBoundingClientRect();
+      return r.bottom <= window.innerHeight && r.width > 0;
+    }));
     await ctx.close();
 
     // ---------- MOBILE DARK ----------

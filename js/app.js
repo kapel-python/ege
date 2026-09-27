@@ -3023,8 +3023,21 @@ function startSkillPractice(skillId) {
   if (topicIsLocked(skill)) return toast("Тема пока закрыта — урок и практика ещё не подключены", "", "lock");
   const mission = asSafeArray(DataAPI.missions()).find((m) => m && m.skill === skillId && missionPracticeIds(m).length);
   if (mission) return startMission(mission.id);
+  return startSkillPracticeNoMission(skillId, skill);
+}
+
+/* Практика темы без миссии. Тип заданий (сочинение или обычные) виден
+   только в полных деталях каталога — лёгкий bootstrap их не везёт, поэтому
+   решение «один визит — одно сочинение» принимаем после ensureDetails.
+   Без деталей (офлайн) — старый общий список: экран сессии всё равно
+   упрётся в гейт деталей и честно покажет ошибку загрузки. */
+async function startSkillPracticeNoMission(skillId, skill) {
+  try { await Store.ensureDetails(); } catch (_) {}
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId)).map((t) => t.id);
   if (!tasks.length) return toast("В этой теме пока нет заданий для практики", "", "bulb");
+  // Тема из одних сочинений — визит за визитом по одному тексту.
+  const allLong = tasks.every((id) => isLongTextTask(DataAPI.task(id)));
+  if (allLong) return startEssayPractice(skillId);
   Session.start({ title: `Тренировка: ${topicDisplayName(skill)}`, taskIds: tasks, mode: "quick" });
 }
 
@@ -3317,9 +3330,9 @@ function renderTask(root) {
           <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
         </div>
         <div class="session-head__title">${esc(S.title)}</div>
-        <div class="session-head__progress mono">${progressDone + 1} / ${S.total}</div>
+        ${isSingleEssaySession() ? "" : `<div class="session-head__progress mono">${progressDone + 1} / ${S.total}</div>`}
       </div>
-      <div style="margin-bottom:18px">${progressBar((progressDone / S.total) * 100)}</div>
+      ${isSingleEssaySession() ? "" : `<div style="margin-bottom:18px">${progressBar((progressDone / S.total) * 100)}</div>`}
 
       <div class="card task-card">
         <div class="task-card__tags">
@@ -3598,7 +3611,9 @@ function sessionAnswerAreaHtml(t, S) {
     <div class="essay-editor__error" id="essayError" style="display:none"></div>
     <div class="session-tools">
       <span id="hintControl"></span>
-      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
+      ${isSingleEssaySession()
+        ? (sessionTaskWritten(t.id) ? "" : `<button class="btn btn--ghost btn--sm" onclick="essayTakeAnother()">Взять другое →</button>`)
+        : `<button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>`}
       <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">за проверенное сочинение: 100–500 XP по баллам</span>
     </div>
     <div class="essay-editor__submit">
@@ -3749,6 +3764,10 @@ async function essayRestoreReady(t) {
     if (!slot || !Session.cur || Session.cur.answered) return;
     if (!Session.cur || Session.task().id !== t.id) return;
     if (sub.status === "ready" && sub.result) {
+      // Одиночный визит в новом круге: прошлая готовая работа — история,
+      // а не замок. Редактор остаётся чистым, пишем заново; без этого
+      // старый отчёт прятал бы бланк и круг было бы не начать.
+      if (isSingleEssaySession()) return;
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
       essayMarkWritten(t.id, sub);
@@ -3935,6 +3954,162 @@ async function essayStatusesLoad() {
   essayNavRender();
 }
 
+/* Пропуски сочинений («Взять другое»): только локально, на устройство.
+   Серверная карта знает лишь готовые работы, а «отложи этот текст» — мягкое
+   пожелание, не учёт: рассинхрон между устройствами безвреден (там текст
+   либо предложат снова, либо ученик его напишет). Ключ — аккаунт+предмет,
+   гость живёт в своей корзине. */
+const ESSAY_SKIP_STORE = "ege_essay_skipped";
+
+function essaySkipKey() {
+  return `${Store.accountId || "guest"}:${Store.subject || ""}`;
+}
+
+function essaySkippedIds() {
+  try {
+    const all = JSON.parse(localStorage.getItem(ESSAY_SKIP_STORE) || "{}") || {};
+    const set = all[essaySkipKey()];
+    return new Set(Array.isArray(set) ? set : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function essaySkipSave(ids) {
+  try {
+    const all = JSON.parse(localStorage.getItem(ESSAY_SKIP_STORE) || "{}") || {};
+    all[essaySkipKey()] = [...ids];
+    localStorage.setItem(ESSAY_SKIP_STORE, JSON.stringify(all));
+  } catch (_) {}
+}
+
+/* Одно сочинение за визит: сессия из единственного long_text-задания.
+   Остальное (устаревшие многозадачные сессии из localStorage) продолжает
+   жить по старым правилам, пока не завершится, — новых таких не создаём. */
+function isSingleEssaySession() {
+  const S = Session.cur;
+  return !!S && S.taskIds.length === 1 && isLongTextTask(Session.task());
+}
+
+/* Активная недописанная работа: вход в практику возвращается в неё, а не
+   начинает новую. Готовое (результат уже в сессии) активным не считается —
+   такие сессии завершаются сами сразу после проверки. */
+function essayActiveTaskUnfinished() {
+  const S = Session.cur;
+  if (!S || !S.taskIds.length) return false;
+  const t = Session.task();
+  if (!t || !isLongTextTask(t)) return false;
+  if ((S.results || []).some((r) => r && r.taskId === t.id && r.essay)) return false;
+  const ready = S.essayReadyByTask && S.essayReadyByTask[t.id];
+  if (ready && String(ready.status) === "ready") return false;
+  return true;
+}
+
+/* Какие задания уже проверены (есть ready-разбор): серверная карта +
+   метки текущей сессии (гость и свежие отправки, ещё не попавшие в карту). */
+function essayReadyTaskIds(taskIds) {
+  const ready = new Set();
+  const map = (EssayStatuses.subject === Store.subject && EssayStatuses.map) || {};
+  for (const id of taskIds) {
+    const info = map[id];
+    if (info && String(info.status) === "ready") ready.add(id);
+  }
+  const S = Session.cur;
+  if (S) {
+    for (const id of taskIds) {
+      const w = S.essayWrittenByTask && S.essayWrittenByTask[id];
+      if (w && String(w.status) === "ready") ready.add(id);
+      const sub = S.essayReadyByTask && S.essayReadyByTask[id];
+      if (sub && String(sub.status) === "ready") ready.add(id);
+    }
+    for (const r of (S.results || [])) if (r && r.essay && r.taskId) ready.add(r.taskId);
+  }
+  return ready;
+}
+
+/* Следующее сочинение визита: первое недописанное по порядку каталога,
+   пропущенные («Взять другое») — в последнюю очередь. Всё готово —
+   новый круг с первого текста (старые работы остаются историей, за повтор
+   платит только минимум XP через alreadyMastered — как «Пройти ещё раз»
+   в остальных предметах). */
+function essayNextTaskId(taskIds) {
+  const ready = essayReadyTaskIds(taskIds);
+  const skipped = essaySkippedIds();
+  const open = taskIds.filter((id) => !ready.has(id) && !skipped.has(id));
+  if (open.length) return { id: open[0], restarted: false };
+  const unfinished = taskIds.filter((id) => !ready.has(id));
+  if (unfinished.length) {
+    // Все недописанные отложены — пропуски сгорели, продолжаем с первого из них.
+    essaySkipSave(new Set());
+    return { id: unfinished[0], restarted: false };
+  }
+  essaySkipSave(new Set());
+  return { id: taskIds[0], restarted: true };
+}
+
+/* Свежая карта готовых работ с сервера: входу нужна правда на сейчас
+   (сочинение могли дописать с другого устройства), а не кэш сессии.
+   Гость/офлайн — только локальное, без блокировки входа. */
+async function essayStatusesRefresh() {
+  const subject = String(Store.subject || "");
+  if (!subject || typeof fetch !== "function") return null;
+  try {
+    const res = await fetch(`/api/essays?subject=${encodeURIComponent(subject)}&statuses=1`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data && data.statuses && typeof data.statuses === "object") {
+      EssayStatuses.subject = subject;
+      EssayStatuses.map = data.statuses;
+      essayStatusesApply(data.statuses);
+      return data.statuses;
+    }
+  } catch (_) {}
+  return null;
+}
+
+/* Вход в практику сочинений: один визит — одно сочинение. Недописанная
+   активная работа возвращается (а не затирается новой), дальше — первое
+   недописанное по каталогу, после всех готовых — новый круг. */
+async function startEssayPractice(skillId) {
+  const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId));
+  if (!tasks.length) {
+    toast("В этой теме пока нет заданий для практики", "", "bulb");
+    return;
+  }
+  if (essayActiveTaskUnfinished()) {
+    go("session");
+    return;
+  }
+  await essayStatusesRefresh();
+  const pick = essayNextTaskId(tasks.map((t) => t.id));
+  if (pick.restarted) toast("Новый круг: все сочинения уже проверены — пишем заново", "", "check");
+  const t = DataAPI.task(pick.id);
+  Session.start({ title: (t && t.sub) || "Сочинение", taskIds: [pick.id], mode: "quick" });
+}
+
+/* «Взять другое»: отложить текущий текст в конец очереди и выйти.
+   XP и попыток не пишет (в отличие от «Пропустить»), черновик не сохраняет —
+   текст отложен сознательно. Отправленное пропускать нечего: оно допишется
+   само через проверку. Последнее недописанное не отпускаем — иначе выбор
+   сведётся к нему же: дальше только новый круг, допиши это. */
+function essayTakeAnother() {
+  const S = Session.cur;
+  const t = S ? Session.task() : null;
+  if (!S || S.taskIds.length !== 1 || !t || !isLongTextTask(t)) return;
+  if (sessionTaskWritten(t.id)) return;
+  const ids = orderedTasks(DataAPI.practiceTasksBySkill(t.skill)).map((x) => x.id);
+  const ready = essayReadyTaskIds(ids);
+  if (!ids.some((id) => id !== t.id && !ready.has(id))) {
+    toast("Это последнее ненаписанное сочинение — допиши его, дальше начнётся новый круг", "", "bulb");
+    return;
+  }
+  const skipped = essaySkippedIds();
+  skipped.add(t.id);
+  essaySkipSave(skipped);
+  Session.cur = null;
+  persistSession();
+  go("training");
+}
+
 function sessionTaskWritten(taskId) {
   const S = Session.cur;
   if (!S || !taskId) return false;
@@ -3996,6 +4171,9 @@ function sessionNextHtml() {
    некуда, а кнопки вперёд sessionEssayNextLabel не дала — пустой ряд лишь
    развёл бы «Назад» и «Далее» по краям пустой строки. */
 function sessionEssayNavHtml() {
+  // Один визит — одно сочинение: листать нечего («Далее»/«Назад»/«Написать
+  // ещё раз» убраны), следующее задание придёт следующим визитом.
+  if (isSingleEssaySession()) return "";
   const back = sessionHasPrev()
     ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
     : "";
@@ -4209,6 +4387,12 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = submission;
   essayMarkWritten(t.id, submission);
+  // Один визит — одно сочинение: готовый разбор сразу закрывает визит
+  // итоговым экраном (сам разбор — кнопкой оттуда), листать дальше нечего.
+  if (S.taskIds.length === 1) {
+    sessionFinish();
+    return;
+  }
   // Возвращаем экран задания: редактор прячем и показываем исходный текст
   // readonly — менять его после отправки уже нельзя. Таймер останавливаем
   // ПОСЛЕ перерисовки: renderTask сам запускает свой интервал таймера.
@@ -4755,6 +4939,17 @@ function sessionFinish(early = false) {
 
   const checkedSkills = boss ? [...new Set(S.results.map((r) => DataAPI.skill(DataAPI.task(r.taskId).skill).name))] : null;
 
+  // Одиночное сочинение: разбор готового — кнопкой с итогового экрана
+  // (внутри визита его показать было некуда: навигации нет). Ссылку считаем
+  // до обнуления сессии — openEssayResult после финиша работу уже не найдёт.
+  let essayReportHref = "";
+  if (essayOnly && S.taskIds.length === 1) {
+    const onlySub = S.essayReadyByTask && S.essayReadyByTask[S.taskIds[0]];
+    if (onlySub) {
+      try { essayReportHref = essayResultUrl(onlySub) || ""; } catch (_) {}
+    }
+  }
+
   Session.cur = null;
   persistSession();
   // Экран результата — не сессия: подменяем адрес без перерисовки, чтобы
@@ -4795,7 +4990,8 @@ function sessionFinish(early = false) {
       </div>` : ""}
       ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто ошибок: <b>${errorsClosed}</b></div>` : ""}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn--primary btn--lg" onclick="go('dashboard')">На главную</button>
+        ${essayReportHref ? `<button class="btn btn--primary btn--lg" onclick="location.href='${esc(essayReportHref)}'">Разбор сочинения →</button>` : ""}
+        <button class="btn ${essayReportHref ? "btn--ghost" : "btn--primary"} btn--lg" onclick="go('dashboard')">На главную</button>
         <button class="btn btn--ghost btn--lg" onclick="go('${resultRoute}')">${S.mode === "boss" ? "К испытаниям" : S.mode === "errors" ? "К ошибкам" : "Ещё тренировка"}</button>
       </div>
     </div>`;
