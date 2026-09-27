@@ -386,7 +386,7 @@ def test_source_mode(ai) -> None:
         params = set(inspect.signature(ai.run_format).parameters)
         user_msg = str(seen[1]["content"])
         check("исходный текст в проверку не передаётся: у оценщика его нет",
-              params == {"format_id", "text", "source", "problem"}
+              params == {"format_id", "text", "source", "problem", "reviewer_note"}
               and "тестовое" in user_msg and user_msg.count("--- ТЕКСТ") == 1
               and "ИСХОДНЫЙ ТЕКСТ" not in user_msg.upper(),
               str(sorted(params)))

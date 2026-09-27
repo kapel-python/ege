@@ -8155,7 +8155,10 @@ class Handler(BaseHTTPRequestHandler):
                 # subject — публичный выбор каталога (текст и задание общедоступны),
                 # он нужен, чтобы задание нашлось независимо от текущего предмета
                 # гостя; никаких оценок и прогресса он не открывает.
-                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject"}:
+                # note — необязательное замечание ученика к перепроверке
+                # (только ege-result.html): уходит в промпт как мнение,
+                # рубрику не меняет, лимита отдельного нет — тратит те же 3.
+                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject", "note"}:
                     self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400, token=token); return
                 try:
                     # Рубрика одна — работа с прочитанным текстом, и выбирает её
@@ -8174,6 +8177,16 @@ class Handler(BaseHTTPRequestHandler):
                     # Наш ввод, наш 400: повтор не поможет. Проверяем ДО списания
                     # бюджета, чтобы опечатка в taskId не стоила денег провайдера.
                     self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
+                # Замечание к перепроверке — тоже ввод, тоже ДО списания:
+                # длинное «замечание» не должно стоить ученику проверку.
+                note = payload.get("note", "")
+                if note is None:
+                    note = ""
+                if not isinstance(note, str):
+                    self.send_json({"error": "Некорректное замечание"}, 400, token=token); return
+                note = note.strip()
+                if len(note) > _AI.ESSAY_RECHECK_NOTE_MAX:
+                    self.send_json({"error": f"Замечание слишком длинное (максимум {_AI.ESSAY_RECHECK_NOTE_MAX} символов)"}, 400, token=token); return
                 # Metered call: a much tighter bucket than the generic API one.
                 # Counted per user AND per IP — the cookie is the only proof of
                 # identity, so a client that stops sending it would otherwise
@@ -8208,7 +8221,8 @@ class Handler(BaseHTTPRequestHandler):
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
                 try:
-                    result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem)
+                    result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem,
+                                            reviewer_note=note)
                 except _AI.AIInputError as exc:
                     # Наш ввод, наш 400: повтор не поможет.
                     ai_usage_refund(conn, usage_owners)
