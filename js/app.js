@@ -3726,14 +3726,16 @@ function essayMountResumeFeedback(t) {
    асинхронно (карта сервера, восстановление) уже после отрисовки — без
    этого вызова кнопка оставалась бы видимой, но мёртвой: клик молча
    выходил бы через sessionTaskWritten. Вызовы — везде, где метки меняются
-   мимо renderTask. */
+   мимо renderTask. Ищем по обработчику кнопки, а не по прямому действию:
+   клик сначала открывает подтверждение (askEssayTakeAnother), и искать надо
+   ровно то, что стоит в разметке. */
 function essaySyncTakeAnotherVisibility(t) {
   if (!t || !isLongTextTask(t)) return;
   const S = Session.cur;
   if (!S || S.taskIds.length !== 1) return;
   if (!Session.task() || Session.task().id !== t.id) return;
   if (typeof document === "undefined" || !document.querySelector) return;
-  const btn = document.querySelector('[onclick="essayTakeAnother()"]');
+  const btn = document.querySelector('[onclick="askEssayTakeAnother()"]');
   if (!btn) return;
   btn.style.display = sessionTaskWritten(t.id) ? "none" : "";
 }
@@ -4241,7 +4243,8 @@ async function startEssayPractice(skillId) {
    XP и попыток не пишет (в отличие от «Пропустить»), черновик не сохраняет —
    текст отложен сознательно. Отправленное пропускать нечего: оно допишется
    само через проверку. Последняя недоведённая работа не отпускается —
-   иначе выбор свёлся бы к ней же. */
+   иначе выбор свёлся бы к ней же. Прямое действие: кнопка зовёт сначала
+   подтверждение askEssayTakeAnother, а уже оно — сюда. */
 function essayTakeAnother() {
   const S = Session.cur;
   const t = S ? Session.task() : null;
@@ -6717,6 +6720,34 @@ function askLessonQuit() {
     cancelText: "Остаться",
     confirmText: "Выйти",
     onConfirm: () => lessonQuit(),
+  });
+}
+
+/* «Взять другое» в практике сочинений — через тот же общий диалог, что выход
+   из тренировки: тема уезжает в конец очереди, а написанный черновик при этом
+   пропадает, и одно неверное касание по кнопке стоило бы работы. Сам
+   essayTakeAnother остаётся прямым действием (его дёргает подтверждение) и
+   держит все проверки: последняя недоведённая работа и единственная тема
+   отвечают тостом прямо из него. */
+function askEssayTakeAnother() {
+  const S = Session.cur;
+  const t = S ? Session.task() : null;
+  if (!S || S.taskIds.length !== 1 || !t || !isLongTextTask(t)) return;
+  let draft = "";
+  try {
+    const input = document.getElementById("essayInput");
+    draft = String((input && input.value) || (S.essayDraftByTask && S.essayDraftByTask[t.id]) || "");
+  } catch (_) {}
+  openConfirmDialog({
+    eyebrow: "Практика сочинений",
+    title: "Взять другое сочинение?",
+    text: String(draft).trim()
+      ? "Эта тема уйдёт в конец очереди — вернёшься к ней после остальных. Несохранённый черновик пропадёт."
+      : "Эта тема уйдёт в конец очереди — вернёшься к ней после остальных.",
+    iconName: "rotate",
+    cancelText: "Остаться",
+    confirmText: "Взять другое",
+    onConfirm: () => essayTakeAnother(),
   });
 }
 

@@ -4,9 +4,10 @@
    Живой сервер поднимается на temp-БД и свободном порте, прод не трогается.
    Сценарии: пустой редактор, 149 слов (кнопка заблокирована), 150 слов
    (минимум выполнен), длинное сочинение, одиночный визит без счётчиков
-   (есть «Взять другое», нет «Пропустить»), отправка -> единый лоадер ->
-   либо итоговый экран с кнопкой разбора (есть AI-ключ), либо честная
-   ошибка без XP (ключа нет), повторный визит — следующее сочинение.
+   (есть «Взять другое» с подтверждением, нет «Пропустить»), отправка ->
+   единый лоадер -> либо итоговый экран с кнопкой разбора (есть AI-ключ),
+   либо честная ошибка без XP (ключа нет), повторный визит — следующее
+   сочинение.
    Скриншоты: desktop 1280 и mobile 390, light и dark -> screenshots/.
 
    Запуск: node test/essay-visual.js
@@ -150,7 +151,29 @@ async function main() {
     t("single: нет счётчика N/8", await page.$(".session-head__progress") === null);
     t("single: есть «Взять другое», нет «Пропустить»", await page.evaluate(() => {
       const h = document.getElementById("screen").innerHTML;
-      return h.includes("essayTakeAnother()") && !h.includes("sessionSkip()");
+      return h.includes("askEssayTakeAnother()") && !h.includes("sessionSkip()");
+    }));
+    // «Взять другое» спрашивает подтверждение тем же окном, что и «Выйти» в
+    // шапке: клик ничего не откладывает, пока не нажата «Взять другое» в окне.
+    await page.click('[onclick="askEssayTakeAnother()"]');
+    await page.waitForSelector("#device-modal-root .dlg", { timeout: 5000 });
+    t("«Взять другое» открывает окно подтверждения", await page.evaluate(() => {
+      const root = document.getElementById("device-modal-root");
+      return !!root && /Взять другое сочинение\?/.test(root.textContent || "")
+        && /Остаться/.test(root.textContent || "");
+    }));
+    t("открытое окно ничего не отложило (визит на месте)", await page.evaluate(() => {
+      const raw = localStorage.getItem("ege_essay_skipped") || "{}";
+      const set = JSON.parse(raw)[`${Store.accountId || "guest"}:russian`];
+      return Array.isArray(set) && set.length === 0 && !!Session.cur;
+    }));
+    await shot(page, "essay-take-another-confirm-desktop-light.png");
+    await page.click("#device-modal-root .dlg__actions .btn--soft");
+    await sleep(200);
+    t("«Остаться» закрывает окно и оставляет визит", await page.evaluate(() => {
+      const root = document.getElementById("device-modal-root");
+      return !!root && !root.innerHTML && !!Session.cur
+        && !!document.getElementById("essayInput");
     }));
 
     await page.fill("#essayInput", essayText(149));

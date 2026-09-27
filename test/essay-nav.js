@@ -81,10 +81,12 @@ class FakeElement {
       this._nodes[m[1]] = child;
     }
     // Кнопка «Взять другое» — по onclick, не по id: её ищет querySelector.
-    const take = /<button[^>]*onclick="essayTakeAnother\(\)"/.exec(this._innerHTML);
+    // Обработчик у кнопки — подтверждение askEssayTakeAnother (прямое действие
+    // essayTakeAnother зовёт уже оно), поэтому регексп ловит именно его.
+    const take = /<button[^>]*onclick="askEssayTakeAnother\(\)"/.exec(this._innerHTML);
     if (take) {
       const btn = new FakeElement("button");
-      btn.setAttribute("onclick", "essayTakeAnother()");
+      btn.setAttribute("onclick", "askEssayTakeAnother()");
       this._nodes.__takeAnother = btn;
     }
   }
@@ -150,7 +152,7 @@ const document = {
   getElementById: (id) => findInTree(elements.get("screen") || document.body, id) || element(id),
   querySelector: (sel) => {
     const m = /^\[onclick="([^"]+)"\]$/.exec(String(sel || ""));
-    if (m && /essayTakeAnother/.test(m[1])) {
+    if (m && /EssayTakeAnother/.test(m[1])) {
       return findInTree(elements.get("screen") || document.body, "__takeAnother") || null;
     }
     return null;
@@ -329,7 +331,7 @@ const singleScreenOf = (sandbox) => run(sandbox, `(() => {
     navRow: slot ? slot.innerHTML : "",
     headCounter: head.includes("session-head__progress"),
     headSlash: /\\/\\s*\\d/.test(head),
-    takeAnother: head.includes("essayTakeAnother()"),
+    takeAnother: head.includes("askEssayTakeAnother()"),
     skip: head.includes("sessionSkip()"),
   };
 })()`);
@@ -434,15 +436,46 @@ async function main() {
     await enterPractice(sandbox); // [re27_4]
     run(sandbox, `renderTask(document.getElementById("screen"))`);
     await flush();
-    run(sandbox, `essayTakeAnother()`);
+    const dlg = () => run(sandbox, `(() => {
+      const root = document.getElementById("device-modal-root");
+      return root ? root.innerHTML : "";
+    })()`);
+    const alive = () => run(sandbox, `Session.cur ? Session.cur.taskIds.join(",") : "сессии нет"`);
+    // Клик по кнопке — подтверждение, а не действие: тот же .dlg, что у
+    // «Выйти» в шапке, пока ничего не отложено.
+    run(sandbox, `askEssayTakeAnother()`);
+    const d = dlg();
+    check("клик открывает общее окно подтверждения, а не откладывает сразу",
+      d.includes("dlg-backdrop") && d.includes("Взять другое сочинение?")
+      && d.includes("Практика сочинений") && d.includes("Остаться")
+      && d.includes("Взять другое") && alive() === "re27_4", d.slice(0, 200));
+    check("окно честно говорит про черновик (в редакторе пусто)",
+      /Эта тема уйдёт в конец очереди/.test(d) && !/черновик пропадёт/.test(d),
+      d.replace(/<[^>]+>/g, " ").trim().slice(0, 220));
+    run(sandbox, `closeDeviceModal()`);
+    check("«Остаться» (закрытие окна) ничего не откладывает",
+      alive() === "re27_4" && !run(sandbox, `localStorage.getItem("ege_essay_skipped")`),
+      alive());
+    // Тот же путь с написанным черновиком: он сгорает, и об этом сказано прямо.
+    run(sandbox, `document.getElementById("essayInput").value = Array(20).fill("слово").join(" ");`);
+    run(sandbox, `askEssayTakeAnother()`);
+    const dDraft = dlg();
+    check("с черновиком окно предупреждает, что он пропадёт",
+      /Несохранённый черновик пропадёт/.test(dDraft),
+      dDraft.replace(/<[^>]+>/g, " ").trim().slice(0, 240));
+    // Подтверждение — прямой вызов essayTakeAnother: откладывает и открывает
+    // следующее сочинение.
+    run(sandbox, `dlgConfirmOk()`);
     const after = run(sandbox, `({
       cur: Session.cur,
+      dlg: document.getElementById("device-modal-root").innerHTML,
       skipped: JSON.parse(localStorage.getItem("ege_essay_skipped") || "{}"),
     })`);
-    check("«Взять другое» закрывает сессию и откладывает текст",
-      after.cur === null
+    check("подтверждение закрывает сессию и откладывает текст",
+      after.cur === null && after.dlg === ""
       && ((after.skipped["testnav:russian"] || []).join(",") === "re27_4"),
-      JSON.stringify(after.skipped));
+      JSON.stringify(after));
+    await flush();
     const entered = await enterPractice(sandbox);
     check("следующий вход — re27_7, а не отложенное",
       entered.taskIds && entered.taskIds.join(",") === "re27_7", JSON.stringify(entered));
@@ -526,7 +559,7 @@ async function main() {
     const head = run(sandbox, `document.getElementById("screen").innerHTML`);
     const feedback = run(sandbox, `document.getElementById("feedbackSlot").innerHTML`);
     check("в новом круге редактор не подменён старым отчётом",
-      !feedback.includes("уже проверено") && head.includes("essayTakeAnother()"),
+      !feedback.includes("уже проверено") && head.includes("askEssayTakeAnother()"),
       feedback.slice(0, 100));
     const pastId = run(sandbox, `(EssayStatuses.map["${taskId}"] || {}).submissionId`);
     check("визит помечен как повторный, со ссылкой на прошлый разбор",
@@ -563,7 +596,7 @@ async function main() {
     check("перезагрузка без отправки возвращает к тому же заданию, не к финишу",
       afterReload.task === taskId
         && !afterReload.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА")
-        && afterReload.html.includes("essayTakeAnother()"),
+        && afterReload.html.includes("askEssayTakeAnother()"),
       JSON.stringify({ task: afterReload.task, fin: afterReload.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА") }));
   }
   {
@@ -630,7 +663,7 @@ async function main() {
     run(sandbox, `renderTask(document.getElementById("screen"))`);
     await flush();
     const takeBtn = () => run(sandbox, `(() => {
-      const b = document.querySelector('[onclick="essayTakeAnother()"]');
+      const b = document.querySelector('[onclick="askEssayTakeAnother()"]');
       return b ? (b.style.display || "") : "нет кнопки";
     })()`);
     check("чистый бланк: кнопка видна", takeBtn() !== "none" && takeBtn() !== "нет кнопки", takeBtn());
@@ -669,7 +702,7 @@ async function main() {
     await flush();
     run(sandbox, `Session.cur.essayDraftByTask = { "${first}": "черновик визита" }`);
     const vis = run(sandbox, `(() => {
-      const b = document.querySelector('[onclick="essayTakeAnother()"]');
+      const b = document.querySelector('[onclick="askEssayTakeAnother()"]');
       return b ? (b.style.display || "") : "нет кнопки";
     })()`);
     check("новый круг: «Взять другое» видна, хотя про тему есть готовый отчёт",
