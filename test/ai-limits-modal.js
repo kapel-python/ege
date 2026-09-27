@@ -1,5 +1,5 @@
 /* Единая модалка лимита ИИ-проверок.
-   Реальные js/data.js + js/state.js + js/app.js в браузерной VM.
+   Реальные js/data.js + js/state.js + js/ai-limit.js + js/app.js в браузерной VM.
 
    Проверяется ровно то, что требует задача:
    1. Сочинения определяются данными каталога (long_text-задания), а не
@@ -143,7 +143,7 @@ sandbox.catalogPayload = {
   ],
 };
 vm.createContext(sandbox);
-vm.runInContext([read("js/data.js"), read("js/state.js"), read("js/app.js")].join("\n"), sandbox,
+vm.runInContext([read("js/data.js"), read("js/state.js"), read("js/ai-limit.js"), read("js/app.js")].join("\n"), sandbox,
   { filename: "ai-limits-modal-bundle.js" });
 vm.runInContext(`
   DataAPI.load(catalogPayload);
@@ -265,6 +265,8 @@ const resetRoots = () => {
   check("burst: открыто .dlg-окно", burstDlg.includes("dlg-backdrop"));
   check("burst: заголовок «Слишком частые запросы»", burstDlg.includes("Слишком частые запросы"));
   check("burst: начальный отсчёт 00:00:02", burstDlg.includes("00:00:02"));
+  check("фолбэк лимита — единый общий (js/ai-limit.js), без NaN",
+    run(`AI_LIMIT_FALLBACK`) === 5 && !burstDlg.includes("NaN"), String(run(`AI_LIMIT_FALLBACK`)));
   const burstTick = intervals[intervals.length - 1];
   check("burst: интервал тика пойман", typeof burstTick === "function");
   burstTick(); // left: 2 -> 1

@@ -1,5 +1,5 @@
 /* Практика сочинений «один визит — одно сочинение».
-   Реальные js/data.js + js/state.js + js/app.js в браузерной VM.
+   Реальные js/data.js + js/state.js + js/ai-limit.js + js/app.js в браузерной VM.
 
    Контракт входа (startEssayPractice):
    1. Вход создаёт сессию ровно из ОДНОГО задания — никаких списков 8/8,
@@ -220,7 +220,7 @@ function buildSandbox(options) {
   };
   vm.createContext(sandbox);
   vm.runInContext(
-    [read("js/data.js"), read("js/state.js"), read("js/app.js")].join("\n"),
+    [read("js/data.js"), read("js/state.js"), read("js/ai-limit.js"), read("js/app.js")].join("\n"),
     sandbox,
     { filename: "essay-nav-bundle.js" }
   );

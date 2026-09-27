@@ -458,6 +458,7 @@
 <!-- Абсолютный путь: страница живёт и на /ege-result.html, и на /essay/<sid> —
      относительный js/footer.js под вторым ломался бы в /essay/js/footer.js. -->
 <script defer src="/js/footer.js?v=1"></script>
+<script defer src="/js/ai-limit.js?v=1"></script>
 
 <script>
 /**
@@ -901,18 +902,6 @@ async function fetchFromApi() {
 // в #model-modal-root (подтверждение, загрузка, лимит, ошибка): отдельных
 // блоков и разбросанных мест нет.
 const RECHECK_NOTE_MAX = 500;
-/* Запасное значение лимита, когда сервер числа не дал (офлайн, гость):
-   единственное на всю страницу. Рабочая величина живёт только на сервере
-   (AI_USAGE_MAX_DEFAULT) и приезжает в каждом ответе лимита. */
-const RECHECK_LIMIT_FALLBACK = 5;
-
-/* Локальное склонение (страница автономна, общего plural из бандла нет). */
-function recheckPlural(n, one, few, many) {
-  const m10 = Math.abs(Number(n) || 0) % 10, m100 = Math.abs(Number(n) || 0) % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
-}
 const RECHECK_MSGS = [
   "Подсчитываю баллы…",
   "Проверяю сочинение…",
@@ -987,14 +976,14 @@ async function recheckFetchLimits() {
   if (!res.ok || !data || !data.ok) return { ok: false };
   return {
     ok: true,
-    limit: Math.max(1, Number(data.limit) || RECHECK_LIMIT_FALLBACK),
+    limit: Math.max(1, Number(data.limit) || AI_LIMIT_FALLBACK),
     remaining: Math.max(0, Number(data.remaining) || 0),
     resetInSec: data.resetInSec == null ? null : Math.max(0, Number(data.resetInSec) || 0),
   };
 }
 
 function openRecheckConfirm(status, prevNote) {
-  const limit = Math.max(1, Number(status && status.limit) || RECHECK_LIMIT_FALLBACK);
+  const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
   const remaining = Math.max(0, Math.min(limit, Number(status && status.remaining) || 0));
   const note = typeof prevNote === "string" ? prevNote.slice(0, RECHECK_NOTE_MAX) : "";
   openRecheckModal(`
@@ -1059,7 +1048,7 @@ function openRecheckLoading() {
 
 function openRecheckLimit(status) {
   recheckLoading = false;
-  const limit = Math.max(1, Number(status && status.limit) || RECHECK_LIMIT_FALLBACK);
+  const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
   let left = Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
   openRecheckModal(`
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Лимит проверок исчерпан">
@@ -1074,7 +1063,7 @@ function openRecheckLimit(status) {
           <div class="dlg-device__name">Проверки закончились</div>
         </div>
         <div class="dlg__text">
-          Лимит — ${limit} ${recheckPlural(limit, "проверка", "проверки", "проверок")} в день на аккаунт: каждая потраченная возвращается через 8 часов.
+          Лимит — ${limit} ${aiLimitPlural(limit, "проверка", "проверки", "проверок")} в день на аккаунт: каждая потраченная возвращается через 8 часов.
           Сейчас доступно: <b><span class="tnum">0 из ${limit}</span></b>.
         </div>
         ${left > 0 ? `
@@ -1152,7 +1141,7 @@ async function onRecheckClick() {
   if (st && st.ok && Number(st.remaining) <= 0) { openRecheckLimit(st); return; }
   // Гость/офлайн гейтом не блокируем: финальное слово за сервером при
   // отправке. Лимит показываем, только если сервер его отдал.
-  openRecheckConfirm(st && st.ok ? st : { limit: RECHECK_LIMIT_FALLBACK, remaining: 1, resetInSec: null }, "");
+  openRecheckConfirm(st && st.ok ? st : { limit: AI_LIMIT_FALLBACK, remaining: 1, resetInSec: null }, "");
 }
 
 async function doRecheck(note) {
@@ -1187,7 +1176,7 @@ async function doRecheck(note) {
   }
   if (!aiRes.ok || !aiData.result) {
     if (aiRes.status === 429 && aiData && aiData.code === "AI_LIMIT") {
-      openRecheckLimit({ limit: aiData.limit || RECHECK_LIMIT_FALLBACK, remaining: 0, resetInSec: aiData.resetInSec });
+      openRecheckLimit({ limit: aiData.limit || AI_LIMIT_FALLBACK, remaining: 0, resetInSec: aiData.resetInSec });
       return;
     }
     if (aiRes.status === 401) {

@@ -4549,12 +4549,6 @@ async function sessionEssaySubmit() {
 
 const AiLimits = { cache: null, accountId: null, pending: null, freshMs: 30000 };
 
-/* Запасное значение лимита, когда сервер числа не дал (офлайн, гость):
-   единственная тройка→пятёрка на весь бандл. Рабочая величина живёт только
-   на сервере (AI_USAGE_MAX_DEFAULT) и приезжает в каждом ответе лимита —
-   клиент её не решает, а подставляет. */
-const AI_LIMIT_FALLBACK = 5;
-
 function aiLimitsFreshCached() {
   if (!Store.accountId || AiLimits.accountId !== Store.accountId) return null;
   const c = AiLimits.cache;
