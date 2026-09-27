@@ -524,33 +524,76 @@ async function main() {
       `task=${taskId} pastId=${pastId} head=${head.slice(0, 160)}`);
   }
 
-  /* ---------- 7. Зомби-визит (готовность дожила до перезагрузки) — сразу итог ---------- */
+  /* ---------- 7. Перезагрузка возвращает к заданию, а не в конец практики ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: ALL_READY });
     const entered = await enterPractice(sandbox);
     const taskId = entered.taskIds[0];
-    // Визит довели до разбора, но итог не закрыли и страница перезагрузилась:
-    // results потеряны, а метки написанного пережили (localStorage).
+    // НОВЫЙ КРУГ: все 8 готовы, визит попал на переписанное первым. Локальных
+    // меток у визита нет, и restore не должен их заводить: его собственная
+    // запись на следующей перезагрузке выглядела бы как «свой визит» —
+    // визит улетал бы на финиш, а «Взять другое» становилась мёртвой.
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    await flush();
+    const newCycle = run(sandbox, `({
+      written: Object.keys(Session.cur.essayWrittenByTask || {}).join(","),
+      readyByTask: Object.keys(Session.cur.essayReadyByTask || {}).join(","),
+      alive: !!Session.cur,
+    })`);
+    check("новый круг: restore не оставляет меток (иначе перезагрузка = финиш)",
+      newCycle.alive && !newCycle.written && !newCycle.readyByTask, JSON.stringify(newCycle));
+
+    // ПЕРЕЗАГРУЗКА без отправки: то же задание, финиша нет.
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    await flush();
+    const afterReload = run(sandbox, `({
+      task: Session.cur ? Session.cur.taskIds.join(",") : null,
+      html: document.getElementById("screen").innerHTML,
+    })`);
+    check("перезагрузка без отправки возвращает к тому же заданию, не к финишу",
+      afterReload.task === taskId
+        && !afterReload.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА")
+        && afterReload.html.includes("essayTakeAnother()"),
+      JSON.stringify({ task: afterReload.task, fin: afterReload.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА") }));
+  }
+  {
+    const { sandbox } = buildSandbox({ statuses: ALL_READY });
+    const entered = await enterPractice(sandbox);
+    const taskId = entered.taskIds[0];
+    // ЭТОТ ЖЕ визит отправлял: метки от отправки пережили перезагрузку,
+    // проверка успела завершиться. Экран потерян — возвращаем зелёный блок
+    // с кнопками, а НЕ итог практики: в остальных предметах перезагрузка
+    // возвращает к текущему заданию.
     run(sandbox, `
       Session.cur.results = [];
       Session.cur.essayReadyByTask = {};
       Session.cur.essayWrittenByTask = { "${taskId}": { clientId: "c-z", wordCount: 300, status: "ready" } };
       renderTask(document.getElementById("screen"));
     `);
-    await flush(); // restore находит готовое + метки — закрываем итогом
+    await flush();
     const fin = run(sandbox, `({
       curNull: Session.cur === null,
       html: document.getElementById("screen").innerHTML,
     })`);
-    check("зомби-визит закрывается итоговым экраном без новой проверки",
-      fin.curNull === true && fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 160));
-    const pastId = run(sandbox, `(EssayStatuses.map["${taskId}"] || {}).submissionId`);
-    check("у зомби-итога есть кнопка разбора (не пустой 0/0 без выхода)",
-      fin.html.includes("Разбор сочинения") && fin.html.includes("/essay/" + pastId),
-      `pastId=${pastId} html=${fin.html.slice(0, 200)}`);
+    check("после отправки и перезагрузки — блок отчёта, а не конец практики",
+      fin.curNull === false && fin.html.includes("Проверка завершена")
+        && !fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 160));
+    check("в восстановленном блоке обе кнопки: разбор и «Завершить →»",
+      fin.html.includes("Посмотреть результат") && fin.html.includes("Завершить →")
+        && !/\+\d+ XP/.test(fin.html),
+      fin.html.slice(0, 240));
+    // Повторная перезагрузка того же состояния — тот же экран (идемпотентно).
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    await flush();
+    const again = run(sandbox, `({
+      curNull: Session.cur === null,
+      html: document.getElementById("screen").innerHTML,
+    })`);
+    check("ещё одна перезагрузка не ломает экран (блок на месте, визит жив)",
+      again.curNull === false && again.html.includes("Проверка завершена"), again.html.slice(0, 120));
   }
 
-  /* ---------- 7. Гость и офлайн ---------- */
+  /* ---------- 8. Гость и офлайн ---------- */
   {
     const { sandbox } = buildSandbox({ guest: true });
     const entered = await enterPractice(sandbox);
@@ -564,7 +607,7 @@ async function main() {
       entered.taskIds && entered.taskIds.join(",") === "re27_1", JSON.stringify(entered));
   }
 
-  /* ---------- 8. «Взять другое» гаснет, когда откладывать нечего ---------- */
+  /* ---------- 9. «Взять другое» гаснет, когда откладывать нечего ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: {} });
     await enterPractice(sandbox); // [re27_1]
@@ -594,8 +637,32 @@ async function main() {
     check("сохранённая работа сессии прячет кнопку",
       takeBtn() === "none", takeBtn());
   }
+  {
+    // Сценарий ученика с полным кругом: все 8 тем проверены, он зашёл в новый
+    // круг, карта принесла готовый отчёт по текущему заданию — и «Взять
+    // другое» обязана РЕАЛЬНО откладывать текст, а не молча выходить.
+    const { sandbox } = buildSandbox({ statuses: ALL_READY });
+    const entered = await enterPractice(sandbox);
+    const first = entered.taskIds[0];
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    await flush();
+    run(sandbox, `Session.cur.essayDraftByTask = { "${first}": "черновик визита" }`);
+    const vis = run(sandbox, `(() => {
+      const b = document.querySelector('[onclick="essayTakeAnother()"]');
+      return b ? (b.style.display || "") : "нет кнопки";
+    })()`);
+    check("новый круг: «Взять другое» видна, хотя про тему есть готовый отчёт",
+      vis !== "none" && vis !== "нет кнопки", vis);
+    run(sandbox, `essayTakeAnother()`);
+    await flush();
+    const after = run(sandbox, `Session.cur ? Session.cur.taskIds.join(",") : "сессии нет"`);
+    check("клик по «Взять другое» в новом круге откладывает текст и берёт другое",
+      after !== first && after !== "сессии нет", `было ${first}, стало ${after}`);
+    check("отложенный визит чистый: прошлый отчёт не вылез отчётом",
+      run(sandbox, `!document.getElementById("feedbackSlot").innerHTML.includes("уже проверено")`));
+  }
 
-  /* ---------- 9. Кнопка отправки прячется, когда есть что продолжать ---------- */
+  /* ---------- 10. Кнопка отправки прячется, когда есть что продолжать ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: {} });
     await enterPractice(sandbox); // [re27_1]
@@ -634,8 +701,36 @@ async function main() {
     check("после resume-блока дубль отправки снова спрятан",
       run(sandbox, `globalThis.__submitWrap.style.display`) === "none");
   }
+  {
+    // Жалоба ученика: в новом круге (все 8 тем проверены) после набора текста
+    // кнопка «Отправить сочинение» исчезала. Причина — restore заводил метки
+    // по текущему заданию из прошлого разбора, и сохранённый старый текст
+    // сравнивался с новым. Свежая карта не должна влиять на отправку.
+    const { sandbox } = buildSandbox({ statuses: ALL_READY });
+    await enterPractice(sandbox);
+    run(sandbox, `
+      globalThis.__submitWrap2 = { style: {} };
+      document.querySelector = (sel) => sel === ".essay-editor__submit" ? globalThis.__submitWrap2 : null;
+      renderTask(document.getElementById("screen"));
+    `);
+    await flush();
+    const t0 = run(sandbox, `Session.cur.taskIds.join(",")`);
+    run(sandbox, `
+      document.getElementById("essayInput").value = Array(200).fill("новое").join(" ");
+      essaySyncSubmitVisibility(Session.task());
+    `);
+    const shown = run(sandbox, `globalThis.__submitWrap2.style.display || ""`);
+    check("новый круг: кнопка отправки видна и после набора текста",
+      shown !== "none", `task=${t0} display="${shown}"`);
+    const sendBtn = run(sandbox, `(() => {
+      const b = document.getElementById("essaySubmitBtn");
+      return b ? { disabled: !!b.disabled, inDom: true } : { inDom: false };
+    })()`);
+    check("кнопка «Отправить сочинение» на месте в DOM нового круга",
+      sendBtn.inDom === true, JSON.stringify(sendBtn));
+  }
 
-  /* ---------- 9. Старые многозадачные сессии живут как раньше ---------- */
+  /* ---------- 11. Старые многозадачные сессии живут как раньше ---------- */
   {
     const { sandbox } = buildSandbox({});
     run(sandbox, `

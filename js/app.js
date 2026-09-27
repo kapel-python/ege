@@ -4268,7 +4268,9 @@ function essayTakeAnother() {
   essaySkipSave(skipped);
   Session.cur = null;
   persistSession();
-  go("training");
+  // Сразу следующее сочинение, а не экран «Тренировка»: кнопка называется
+  // «взять другое» — значит и даёт другое, без лишнего клика по карточке.
+  startEssayPractice(t.skill);
 }
 
 function sessionTaskWritten(taskId) {
