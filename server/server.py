@@ -8424,6 +8424,18 @@ if __name__ == "__main__":
                 except Exception as exc:
                     print(f"EGE CORE backup loop failed to start: {exc}",
                           file=sys.stderr, flush=True)
+            # Фоновый probe приоритетного ИИ-провайдера: пока активен запасной,
+            # раз в час проверяет восстановление и возвращает приоритетный.
+            # Без модуля ИИ (или без ключа приоритетного) поток просто
+            # просыпается и ничего не делает.
+            stop_ai_probe = threading.Event()
+            ai_probe_thread = None
+            if _AI is not None:
+                try:
+                    ai_probe_thread = _AI.start_failover_loop(stop_ai_probe)
+                except Exception as exc:
+                    print(f"EGE CORE AI failover loop failed to start: {exc}",
+                          file=sys.stderr, flush=True)
 
             def stop_server(signum, _frame):
                 if stopping.is_set():
@@ -8448,8 +8460,11 @@ if __name__ == "__main__":
                 httpd.serve_forever(poll_interval=0.5)
             finally:
                 stop_backups.set()
+                stop_ai_probe.set()
                 if backup_thread is not None:
                     backup_thread.join(timeout=10)
+                if ai_probe_thread is not None:
+                    ai_probe_thread.join(timeout=5)
                 httpd.server_close()
                 for sig, handler in previous_handlers.items():
                     signal.signal(sig, handler)

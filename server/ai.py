@@ -11,9 +11,19 @@ text and receives the parsed JSON back, nothing else. Upstream error bodies are
 never echoed to the client (they can carry account details) — callers get a
 short error class plus a server-side ref.
 
-Config (env): AI_API_KEY, AI_BASE_URL, DEFAULT_MODEL, or the EGE_-prefixed
-spellings. The prefix wins when both are set, so the file can follow either
-convention. The deterministic literacy block (K7–K10) talks to LanguageTool:
+Config (env): two OpenAI-compatible providers in priority order. Preferred is
+CloseRouter (EGE_CLOSEROUTER_API_KEY / CLOSEROUTER_API_KEY,
+EGE_CLOSEROUTER_BASE_URL, EGE_CLOSEROUTER_MODEL); fallback is gptunnel
+(EGE_AI_API_KEY / AI_API_KEY, EGE_AI_BASE_URL / AI_BASE_URL, EGE_AI_MODEL /
+DEFAULT_MODEL — the EGE_ prefix wins when both are set). chat() tries the
+active provider first; an upstream failure (balance, auth, timeout, HTTP
+error) silently retries on the next configured provider inside the same
+request, and the router state in app_config (key "ai_router") remembers who
+is active so later requests skip the broken one. A background loop
+(start_failover_loop, EGE_AI_PROBE_INTERVAL_SEC, default hourly) pings the
+preferred provider with a one-token "привет" while the fallback is active
+and switches back on success. A provider without a key is simply skipped.
+The deterministic literacy block (K7–K10) talks to LanguageTool:
 EGE_LT_URL (default is the public API; production should point at a
 self-hosted server), EGE_LT_TIMEOUT_SEC. Deliberately stdlib-only: server.py
 has no third-party imports and this module must not add one.
@@ -24,11 +34,14 @@ import concurrent.futures
 import json
 import os
 import re
+import sqlite3
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable
 
 # ---------------------------------------------------------------------------
@@ -44,7 +57,13 @@ DEFAULT_BASE_URL = "https://gptunnel.ru/v1"
 # Правь EGE_AI_MODEL, если нужна другая, но проверяй латентность: клиент ждёт ответ
 # вживую, и разброс в 7 баллов на одной работе — это не оценка, а лотерея.
 DEFAULT_MODEL = "qwen3.8-flash"
-DEFAULT_TIMEOUT_SEC = 90.0
+# Замеренная латентность обоих провайдеров на полной рубрике: 10–21 с
+# (closerouter 10–14 с, gptunnel 13–21 с). 45 с — двойной запас над худшим
+# замером. Одновременно это цена failover: запрос, на котором приоритетный
+# провайдер завис, ждёт максимум 45 с до молчаливого переключения на
+# запасной, а не 90. Клиент ждёт ответ без своего таймаута (fetch в
+# essayRunChecks), поэтому серверный потолок и есть терпение ученика.
+DEFAULT_TIMEOUT_SEC = 45.0
 # Оценка обязана быть воспроизводимой: та же работа — тот же балл. Замерено на
 # qwen3.8-flash с одной рубрикой: при температуре по умолчанию провайдера (1.0)
 # один и тот же текст получал 14 и 21 балл, при 0.0 — 21 и 21. Рубрика:
@@ -55,6 +74,17 @@ MAX_INPUT_CHARS = 8000
 # A bad or hostile key must not burn the request budget on a long retry loop.
 MAX_UPSTREAM_BYTES = 256 * 1024
 
+# CloseRouter — приоритетный провайдер (openai-совместимый шлюз,
+# https://api.closerouter.dev/v1, ключи вида closerouter_...).
+# anthropic/claude-sonnet-5 замерена живьём на полной рубрике: 10–14 с,
+# стабильный JSON, разброс 0–1 балл на том же тексте при temperature 0 —
+# не хуже qwen3.8-flash, но быстрее. Две её особенности зашиты в PROVIDERS:
+# auth "bearer" (OpenAI-стандарт, а не сырой ключ) и merge_system True
+# (маршрут anthropic молча роняет роль system — модель отвечает как чат-
+# ассистент, не видя рубрику; слитый в user промпт выполняется точно).
+CLOSEROUTER_BASE_URL = "https://api.closerouter.dev/v1"
+CLOSEROUTER_MODEL = "anthropic/claude-sonnet-5"
+
 
 def _env(*names: str, default: str = "") -> str:
     for name in names:
@@ -64,16 +94,50 @@ def _env(*names: str, default: str = "") -> str:
     return default
 
 
+# Реестр провайдеров. Каждый — данные: где ключ, куда стучаться, какая модель
+# и какие провайдер-специфичные quirks нужны в запросе:
+# - auth: "raw" — ключ как есть в Authorization (quirk gptunnel), "bearer" —
+#   стандартный "Bearer <key>";
+# - extra_body: поля, которые шлюз ждёт сверх OpenAI-схемы (у gptunnel это
+#   useWalletBalance — списывать предоплату вместо отказа посреди запроса);
+# - merge_system: подклеить system-промпт к первому user-сообщению.
+# Новый провайдер = одна запись здесь + место в PROVIDER_PRIORITY.
+PROVIDERS: dict[str, dict] = {
+    "gptunnel": {
+        "key": lambda: _env("EGE_AI_API_KEY", "AI_API_KEY"),
+        "base_url": lambda: _env("EGE_AI_BASE_URL", "AI_BASE_URL",
+                                 default=DEFAULT_BASE_URL).rstrip("/"),
+        "model": lambda: _env("EGE_AI_MODEL", "DEFAULT_MODEL", default=DEFAULT_MODEL),
+        "auth": "raw",
+        "extra_body": {"useWalletBalance": True},
+        "merge_system": False,
+    },
+    "closerouter": {
+        "key": lambda: _env("EGE_CLOSEROUTER_API_KEY", "CLOSEROUTER_API_KEY"),
+        "base_url": lambda: _env("EGE_CLOSEROUTER_BASE_URL",
+                                 default=CLOSEROUTER_BASE_URL).rstrip("/"),
+        "model": lambda: _env("EGE_CLOSEROUTER_MODEL", default=CLOSEROUTER_MODEL),
+        "auth": "bearer",
+        "extra_body": {},
+        "merge_system": True,
+    },
+}
+# Порядок предпочтения: первый — приоритетный, за ним запасные. Активный
+# (см. active_provider) идёт первым вне зависимости от этого порядка, так что
+# после отказа приоритетного запросы сразу идут на запасной.
+PROVIDER_PRIORITY: tuple[str, ...] = ("closerouter", "gptunnel")
+
+
 def api_key() -> str:
-    return _env("EGE_AI_API_KEY", "AI_API_KEY")
+    return PROVIDERS["gptunnel"]["key"]()
 
 
 def base_url() -> str:
-    return _env("EGE_AI_BASE_URL", "AI_BASE_URL", default=DEFAULT_BASE_URL).rstrip("/")
+    return PROVIDERS["gptunnel"]["base_url"]()
 
 
 def model_name() -> str:
-    return _env("EGE_AI_MODEL", "DEFAULT_MODEL", default=DEFAULT_MODEL)
+    return PROVIDERS["gptunnel"]["model"]()
 
 
 # ---------------------------------------------------------------------------
@@ -169,8 +233,158 @@ def reset_ai_rate() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Router state — кто сейчас активный провайдер
+#
+# Живёт в app_config (ключ "ai_router", JSON): {"active": имя, "updatedAt": ms,
+# "lastError": str, "lastProbeAt": ms, "lastProbeError": str}. Отдельная
+# таблица избыточна: это один singleton-документ, а app_config уже создана
+# install_catalog'ом и переживает рестарты. Внутри процесса состояние
+# кэшируется (одно чтение на процесс), записи редки — только смена активного
+# и результаты проб.
+#
+# Железное правило: состояние роутера никогда не роняет запрос. БД недоступна
+# или строки нет — работаем на приоритетном настроенном провайдере; запись не
+# удалась — failover всё равно действует внутри процесса до рестарта.
+# ---------------------------------------------------------------------------
+_ROUTER_KEY = "ai_router"
+_router_cache: dict | None = None
+_router_lock = threading.Lock()
+
+
+def _router_db_path() -> str:
+    env = (os.environ.get("EGE_DB_PATH") or "").strip()
+    if env:
+        return env
+    return str(Path(__file__).resolve().parent / "ege.sqlite3")
+
+
+def _load_router_state() -> dict:
+    try:
+        conn = sqlite3.connect(f"file:{_router_db_path()}?mode=ro", uri=True, timeout=3.0)
+        try:
+            row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                               (_ROUTER_KEY,)).fetchone()
+        finally:
+            conn.close()
+        if row:
+            data = json.loads(row[0])
+            if isinstance(data, dict):
+                return data
+    except (sqlite3.Error, OSError, ValueError):
+        pass
+    return {}
+
+
+def _router_state() -> dict:
+    global _router_cache
+    with _router_lock:
+        if _router_cache is None:
+            _router_cache = _load_router_state()
+        return dict(_router_cache)
+
+
+def _router_update(patch: dict) -> dict:
+    """Слить patch в состояние роутера (память + app_config). Не бросает."""
+    global _router_cache
+    with _router_lock:
+        state = dict(_router_cache) if _router_cache is not None else _load_router_state()
+        state.update(patch)
+        _router_cache = dict(state)
+    try:
+        conn = sqlite3.connect(_router_db_path(), timeout=5.0)
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS app_config "
+                         "(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+            conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                         (_ROUTER_KEY, json.dumps(state, ensure_ascii=False)))
+            conn.commit()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        print(f"EGE CORE ai: router state not saved: {exc}", file=sys.stderr, flush=True)
+    return state
+
+
+def reset_router() -> None:
+    """Тестовый хук: забыть кэш состояния (строку в БД не трогает)."""
+    global _router_cache
+    with _router_lock:
+        _router_cache = None
+
+
+def _provider_configured(name: str) -> bool:
+    spec = PROVIDERS.get(name) or {}
+    key_fn = spec.get("key")
+    return bool(key_fn and key_fn())
+
+
+def active_provider() -> str | None:
+    """Кого звать первым: сохранённый активный, иначе приоритетный настроенный."""
+    stored = str(_router_state().get("active") or "")
+    if stored in PROVIDERS and _provider_configured(stored):
+        return stored
+    for name in PROVIDER_PRIORITY:
+        if _provider_configured(name):
+            return name
+    return None
+
+
+def _ordered_providers() -> list:
+    """Порядок попыток: активный, за ним остальные настроенные по приоритету."""
+    active = active_provider()
+    if active is None:
+        return []
+    return [active] + [name for name in PROVIDER_PRIORITY
+                       if name != active and _provider_configured(name)]
+
+
+def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None) -> None:
+    """Отказ провайдера: записать и, если сломался активный, переключить его.
+
+    Переключение оптимистичное — на того, кого chat() попробует следующим;
+    если и он упадёт, активный останется на нём (флип-флопа между двумя
+    упавшими нет, т.к. переключает только отказ текущего активного).
+    Отказ — это тоже свежая информация о здоровье: lastProbeAt двигается,
+    и фоновая проба придёт не раньше чем через интервал после него."""
+    now_ms = int(time.time() * 1000)
+    patch: dict[str, Any] = {"lastError": f"{name}: {type(exc).__name__}: {exc}"[:300],
+                             "lastErrorAt": now_ms, "lastProbeAt": now_ms}
+    current = str(_router_state().get("active") or "")
+    if switch_to and current in ("", name):
+        patch["active"] = switch_to
+        print(f"EGE CORE ai: провайдер {name} недоступен ({exc}); "
+              f"активный теперь {switch_to}", file=sys.stderr, flush=True)
+    _router_update(patch)
+
+
+def _note_provider_success(name: str) -> None:
+    """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления."""
+    if str(_router_state().get("active") or "") not in ("", name):
+        _router_update({"active": name, "updatedAt": int(time.time() * 1000)})
+
+
+# ---------------------------------------------------------------------------
 # Transport — the single call every format goes through
 # ---------------------------------------------------------------------------
+def _wire_messages(provider: str, messages: list) -> list:
+    """Причесать messages под провайдера (quirk merge_system).
+
+    У closerouter маршрут anthropic молча роняет роль system (замерено живьём:
+    модель отвечала как чат-ассистент, не видя рубрику), поэтому системный
+    промпт подклеивается к первому user-сообщению. gptunnel системную роль
+    выполняет — его сообщения не трогаем.
+    """
+    spec = PROVIDERS.get(provider) or {}
+    if not spec.get("merge_system"):
+        return messages
+    if len(messages) >= 2 and messages[0].get("role") == "system":
+        head = str(messages[0].get("content") or "")
+        rest = [dict(item) for item in messages[1:]]
+        rest[0]["content"] = f"{head}\n\n{rest[0].get('content') or ''}"
+        return rest
+    return messages
+
+
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
          max_tokens: int | None = None, temperature: float | None = None) -> str:
     """Send a chat completion and return the assistant text.
@@ -179,49 +393,78 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     passed through untouched, which is what makes the call reusable: a format
     only decides what to put in the list.
 
-    The provider expects the raw key in Authorization (no "Bearer " scheme) —
-    that is the one non-standard quirk, taken from the working reference
-    client. `useWalletBalance` charges the prepaid balance instead of failing
-    when it is exhausted mid-request.
+    Failover: провайдеры идут в порядке _ordered_providers() (активный
+    первым). Отказ одного (баланс, авторизация, таймаут, HTTP-ошибка) молча
+    переносит ЭТОТ ЖЕ запрос на следующего настроенного провайдера — ученик
+    ошибки не видит, максимум ждёт дольше; состояние роутера переключается,
+    так что следующие запросы сразу идут на живого. Ошибка ФОРМАТА
+    (AIFormatError) здесь не ловится: она всплывает позже, в chat_json, и
+    означает живой, но небрежный ответ модели, а не недоступность провайдера.
     """
-    key = api_key()
-    if not key:
-        raise AIUnavailable("AI не настроен")
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
+    names = _ordered_providers()
+    if not names:
+        raise AIUnavailable("AI не настроен")
+    # Слот — один на весь вызов, включая переключение провайдеров: это бюджет
+    # конкурентных клиентских проверок, а не отдельных попыток. Занятость слота
+    # — локальное состояние процесса: оно не переключает провайдера и не ждёт
+    # долго — клиенту честнее сразу «занят, попробуй сейчас», чем висеть и
+    # потом упасть по таймауту вместе с уже начавшимся вызовом.
+    if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
+        raise AIError("ИИ занят, попробуй через несколько секунд")
+    try:
+        last_exc: Exception | None = None
+        for index, name in enumerate(names):
+            try:
+                answer = _chat_via(name, messages, model=model, timeout=timeout,
+                                   max_tokens=max_tokens, temperature=temperature)
+            except (AIError, AIUnavailable) as exc:
+                last_exc = exc
+                switch_to = names[index + 1] if index + 1 < len(names) else None
+                _note_provider_failure(name, exc, switch_to)
+                continue
+            _note_provider_success(name)
+            return answer
+        raise last_exc
+    finally:
+        _ai_slots.release()
+
+
+def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
+              timeout: float | None = None, max_tokens: int | None = None,
+              temperature: float | None = None) -> str:
+    """Один HTTP-вызов конкретного провайдера. Без failover и без слота —
+    это забота chat() (и проба probe_tick зовёт напрямую сюда)."""
+    spec = PROVIDERS[provider]
+    key = spec["key"]()
+    if not key:
+        raise AIUnavailable("AI не настроен")
 
     body: dict[str, Any] = {
-        "model": model or model_name(),
-        "messages": messages,
-        "useWalletBalance": True,
+        "model": model or spec["model"](),
+        "messages": _wire_messages(provider, messages),
     }
+    body.update(spec.get("extra_body") or {})
     if max_tokens:
         body["max_tokens"] = int(max_tokens)
     body["temperature"] = float(
         DEFAULT_TEMPERATURE if temperature is None else temperature)
 
     request = urllib.request.Request(
-        f"{base_url()}/chat/completions",
+        f"{spec['base_url']()}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
-            # Raw key on purpose — see docstring.
-            "Authorization": key,
+            # gptunnel ждёт сырой ключ (quirk), остальные — стандартный Bearer.
+            "Authorization": key if spec.get("auth") == "raw" else f"Bearer {key}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
     deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
     try:
-        # Слот ждём недолго: вызов занимает минуту, и клиенту честнее сразу
-        # получить «занят, попробуй сейчас», чем висеть и потом упасть по
-        # таймауту вместе с уже начавшимся вызовом.
-        if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
-            raise AIError("ИИ занят, попробуй через несколько секунд")
-        try:
-            with urllib.request.urlopen(request, timeout=deadline) as response:
-                raw = response.read(MAX_UPSTREAM_BYTES + 1)
-        finally:
-            _ai_slots.release()
+        with urllib.request.urlopen(request, timeout=deadline) as response:
+            raw = response.read(MAX_UPSTREAM_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise _http_error(exc) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -261,7 +504,11 @@ def _http_error(exc: urllib.error.HTTPError) -> Exception:
 
 
 def balance() -> float | None:
-    """Remaining prepaid balance, or None when the provider does not report it."""
+    """Remaining prepaid balance, or None when the provider does not report it.
+
+    Точка /balance есть только у gptunnel — функция про запасной провайдер
+    и отвечает None, когда его ключ не настроен, даже если активен другой.
+    """
     key = api_key()
     if not key:
         return None
@@ -279,6 +526,76 @@ def balance() -> float | None:
         return float(data.get("balance"))
     except (TypeError, ValueError, AttributeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Probe — возврат приоритетного провайдера
+#
+# Пока активен запасной, раз в час (EGE_AI_PROBE_INTERVAL_SEC) приоритетный
+# провайдер проверяется дешёвым живым запросом («привет», один токен ответа).
+# Успех — активным снова становится он; отказ — ждём следующий интервал.
+# Проба идёт мимо пользовательского бюджета (это фон сервера, а не проверка
+# ученика) и мимо failover: она зовёт _chat_via напрямую, чтобы её собственный
+# отказ не трогал активного — он и так уже запасной.
+# ---------------------------------------------------------------------------
+PROBE_INTERVAL_SEC = float(_env("EGE_AI_PROBE_INTERVAL_SEC", default="3600") or 3600)
+PROBE_TIMEOUT_SEC = float(_env("EGE_AI_PROBE_TIMEOUT_SEC", default="45") or 45)
+# Как часто просыпается фоновый поток, чтобы проверить «не пора ли».
+PROBE_WAKE_SEC = 60.0
+
+
+def probe_tick(now: float | None = None) -> bool:
+    """Одна проверка приоритетного провайдера. True — он восстановлен и активен."""
+    preferred = PROVIDER_PRIORITY[0]
+    if not _provider_configured(preferred):
+        return False
+    if active_provider() == preferred:
+        return False  # уже на приоритетном — проверять нечего
+    moment = time.time() if now is None else float(now)
+    try:
+        last_probe = float(_router_state().get("lastProbeAt") or 0) / 1000.0
+    except (TypeError, ValueError):
+        last_probe = 0.0
+    if moment - last_probe < PROBE_INTERVAL_SEC:
+        return False
+    now_ms = int(moment * 1000)
+    # Сервер занят проверками — проба не горит, попробуем на следующем тике.
+    # Это локальное условие, а не отказ провайдера: lastProbeAt не трогаем.
+    if not _ai_slots.acquire(timeout=1.0):
+        return False
+    try:
+        _chat_via(preferred, [{"role": "user", "content": "привет"}],
+                  timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
+    except Exception as exc:  # noqa: BLE001 — любой отказ: ждём ещё интервал
+        _router_update({"lastProbeAt": now_ms,
+                        "lastProbeError": f"{type(exc).__name__}: {exc}"[:300]})
+        return False
+    finally:
+        _ai_slots.release()
+    _router_update({"active": preferred, "updatedAt": now_ms,
+                    "lastProbeAt": now_ms, "lastProbeError": None})
+    print(f"EGE CORE ai: приоритетный провайдер {preferred} восстановлен — снова активен",
+          flush=True)
+    return True
+
+
+def start_failover_loop(stop: threading.Event) -> threading.Thread:
+    """Фоновый поток возврата приоритетного провайдера. Не падает никогда."""
+    def run() -> None:
+        # Первая проверка почти сразу: если рестарт пришёлся на восстановление
+        # провайдера, ждать целый час незачем.
+        if stop.wait(5.0):
+            return
+        while not stop.is_set():
+            try:
+                probe_tick()
+            except Exception as exc:  # noqa: BLE001 — фон не должен падать
+                print(f"EGE CORE ai probe: {exc}", file=sys.stderr, flush=True)
+            stop.wait(PROBE_WAKE_SEC)
+
+    thread = threading.Thread(target=run, name="ege-ai-failover", daemon=True)
+    thread.start()
+    return thread
 
 
 # ---------------------------------------------------------------------------
