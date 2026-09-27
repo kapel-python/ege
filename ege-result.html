@@ -226,7 +226,12 @@
   .recommendation .stat-label { color: var(--purple); }
   .recommendation p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text); }
 
-  .disclaimer { margin-top: 20px; text-align: center; font-size: 13.5px; color: var(--text-soft); opacity: .8; line-height: 1.5; }
+  /* Примечание под отчётом — тот же .card, что «Общий результат»
+     и «Краткий вердикт»: единый стиль блоков страницы. */
+  .ai-note { margin-top: 24px; }
+  .ai-note__text { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text); }
+  .ai-note__model { margin: 10px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--text-soft); }
+  .ai-note__model b { font-weight: 800; color: #3B82F6; }
 
   /* --- skeleton --- */
   .skel { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: skel-shine 1.4s ease infinite; border-radius: 10px; }
@@ -401,7 +406,11 @@
     </div>
   </div>
 
-  <p class="disclaimer rv" style="--d:0ms">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
+  <div class="card ai-note rv" style="--d:0ms">
+    <p class="stat-label">Важно</p>
+    <p class="ai-note__text">Это приблизительная оценка от искусственного интеллекта на основе критериев ФИПИ ЕГЭ 2027. Учти, что это не официальная проверка.</p>
+    <p class="ai-note__model" id="aiModelLine" hidden>• Сочинение проверено моделью <b id="aiModelName"></b></p>
+  </div>
 </div>
 </main>
 
@@ -598,6 +607,15 @@ function render(data) {
   } else {
     calNote.hidden = true;
     calNote.textContent = "";
+  }
+
+  const modelLine = document.getElementById("aiModelLine");
+  if (typeof data.provider === "string" && data.provider.trim()) {
+    document.getElementById("aiModelName").textContent = data.provider;
+    modelLine.hidden = false;
+  } else {
+    modelLine.hidden = true;
+    document.getElementById("aiModelName").textContent = "";
   }
 
   document.getElementById("wordsValue").textContent = data.word_count + " слов";

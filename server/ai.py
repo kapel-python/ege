@@ -385,6 +385,18 @@ def _wire_messages(provider: str, messages: list) -> list:
     return messages
 
 
+# Провайдер, реально ответивший в последнем chat() ЭТОГО потока. Thread-local,
+# потому что запрос целиком (run_format + фиксация результата в БД) живёт в
+# одном обработчике: по возврату run_format сервер читает имя провайдера и
+# подписывает им проверку сочинения.
+_chat_state = threading.local()
+
+
+def last_used_provider() -> str | None:
+    """Ключ провайдера, ответившего на последний chat() в этом потоке, или None."""
+    return getattr(_chat_state, "provider", None)
+
+
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
          max_tokens: int | None = None, temperature: float | None = None) -> str:
     """Send a chat completion and return the assistant text.
@@ -425,6 +437,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 _note_provider_failure(name, exc, switch_to)
                 continue
             _note_provider_success(name)
+            _chat_state.provider = name
             return answer
         raise last_exc
     finally:

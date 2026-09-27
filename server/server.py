@@ -2432,6 +2432,7 @@ def serialize_essay_row(row) -> dict:
         "text": row["text"],
         "createdAt": timestamp_value(row["created_at"]),
         "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
+        "evaluationProvider": row["evaluation_provider"] if "evaluation_provider" in row.keys() else None,
     }
 
 
@@ -2657,6 +2658,13 @@ def essay_result_view(submission: dict) -> dict | None:
         # грамотность не засчитана. Поле опционально: обычные работы его
         # не несут, шаблон его отсутствие спокойно переживает.
         view["calibration_note"] = str(calibration["note"])
+    provider_key = str(submission.get("evaluationProvider") or "").strip()
+    provider_names = {"closerouter": "Claude Sonnet 5", "gptunnel": "Qwen Flash"}
+    if provider_key in provider_names:
+        # Чем подписать проверку на экране результата: фактический провайдер,
+        # ответивший на этот запрос (failover мог молча переключить модель).
+        # Неизвестные значения (старые записи «ai+grammar») не показываем.
+        view["provider"] = provider_names[provider_key]
     return view
 
 
@@ -7769,7 +7777,7 @@ class Handler(BaseHTTPRequestHandler):
                 if format_id == "essay":
                     try:
                         store_essay_check(conn, user_id, subject_now, payload.get("text"),
-                                          "ai+grammar", result)
+                                          _AI.last_used_provider() or "ai+grammar", result)
                         conn.commit()
                     except (sqlite3.Error, ValueError) as exc:
                         # Не записали — значит evaluation позже честно скажет
