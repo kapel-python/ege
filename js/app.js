@@ -3835,19 +3835,18 @@ async function essayRestoreReady(t) {
     if (!Session.cur || Session.task().id !== t.id) return;
     if (sub.status === "ready" && sub.result) {
       if (isSingleEssaySession()) {
-        // Готовая работа на сервере при живых метках сессии = этот визит
-        // уже доводили до разбора до перезагрузки/возврата: закрываем
-        // итогом (XP уже зафиксирован attempts-flow, sessionFinish только
-        // показывает). Меток нет = новый круг: прошлый разбор — история,
-        // бланк чистый, пишем заново.
-        const finishedHere = sessionTaskWritten(t.id);
-        if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
-        Session.cur.essayReadyByTask[t.id] = sub;
-        essayMarkWritten(t.id, sub);
-        if (finishedHere) {
-          sessionFinish();
-          return;
-        }
+        // Свой визит отличить можно ТОЛЬКО по меткам, которые оставила
+        // отправка (essayMarkWritten из sessionEssaySubmit): серверная
+        // готовность прошлого разбора меток не пишет. Поэтому restore меток
+        // не ставит НИКОГДА. Раньше ставил — и его же запись на следующей
+        // перезагрузке выглядела как «свой визит»: визит улетал на финиш, а
+        // в новом круге «Взять другое» становилась видимой мёртвой кнопкой.
+        if (!sessionTaskWritten(t.id)) return; // новый круг — бланк чистый
+        // Своё отправленное дождалось проверки, а экран потерялся (перезагрузка,
+        // возврат из другого предмета): возвращаем ровно то, что было, — зелёный
+        // блок отчёта. Финиш — только кнопкой, как в остальных предметах:
+        // перезагрузка не должна выбрасывать в конец практики.
+        essayRestoreReportBlock(t, sub);
         return;
       }
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
@@ -4091,7 +4090,7 @@ function essayRepeatNoteHtml(t) {
   try {
     href = essayResultUrl({ submissionId: m.submissionId, clientId: m.clientId }) || "";
   } catch (_) {}
-  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 12px 10px 14px;margin:0 0 14px;border:1px solid var(--border);border-radius:16px;background:var(--accent-soft);box-shadow:0 2px 10px rgba(30,41,59,.06)">
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 12px 10px 14px;margin:10px 0 18px;border:1px solid var(--border);border-radius:16px;background:var(--accent-soft);box-shadow:0 2px 10px rgba(30,41,59,.06)">
     <span style="flex:none;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--violet));color:#fff;font-size:13px;font-weight:800;line-height:1;box-shadow:0 2px 6px var(--accent-glow)">i</span>
     <span style="flex:1 1 260px;min-width:0;font-size:14px;line-height:1.4;color:var(--text)">Это сочинение уже было проверено — пишешь заново, прошлый разбор сохранён.</span>
     ${href ? `<a href="${esc(href)}" style="flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--violet));color:#fff;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 3px 10px var(--accent-glow)">Посмотреть разбор →</a>` : ""}
@@ -4181,9 +4180,21 @@ function essayNextTaskId(taskIds) {
   const unfinished = (id) => !essayTaskReady(id);
   const open = full.filter((id) => unfinished(id) && !skipped.has(id));
   if (open.length) return open[0];
-  essaySkipSave(new Set());
   const rest = full.filter(unfinished);
-  return rest.length ? rest[0] : full[0];
+  if (rest.length) {
+    // Отложенные недоведённые — единственные, к ним больше нечего идти:
+    // пропуски сгорают, чтобы круг нельзя было замкнуть в тупик.
+    essaySkipSave(new Set());
+    return rest[0];
+  }
+  // Новый круг: недоведённых нет, заново переписываются все темы. Отложенные
+  // здесь НЕ горят: иначе «Взять другое» возвращал бы ту же тему, которую
+  // только что отложили, — то есть ничего не делал (жалоба «кнопка не
+  // работает»). Обойдя весь круг, отложенные сгорают.
+  const fresh = full.filter((id) => !skipped.has(id));
+  if (fresh.length) return fresh[0];
+  essaySkipSave(new Set());
+  return full[0];
 }
 
 /* Свежая карта готовых работ с сервера: входу нужна правда на сейчас
@@ -4239,8 +4250,18 @@ function essayTakeAnother() {
   const full = essayOrderedIds(ids);
   const skipped = essaySkippedIds();
   const unfinished = (id) => !essayTaskReady(id);
-  if (!full.some((id) => id !== t.id && unfinished(id) && !skipped.has(id))) {
+  // Предупреждение про «последнюю недоведённую» — про СУЩЕСТВО работы: пока
+  // недоведённая есть, а другой нет, откладывать некуда. В новом круге
+  // недоведённых нет вообще (заново переписываются все темы), и откладывать
+  // есть куда — следующая по кругу. Раньше проверка шла только по «есть ли
+  // другая недоведённая», и в полностью написанном круге кнопка упиралась в
+  // тост, хотя визит шёл по новому кругу: ученику казалось, что она сломана.
+  if (unfinished(t.id) && !full.some((id) => id !== t.id && unfinished(id) && !skipped.has(id))) {
     toast("Это последняя недоведённая работа — заверши её, дальше новый круг", "", "bulb");
+    return;
+  }
+  if (full.length < 2) {
+    toast("Здесь всего одна тема — откладывать некуда", "", "bulb");
     return;
   }
   skipped.add(t.id);
@@ -4563,6 +4584,36 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ${singleEssay ? "btn--soft" : "btn--primary"}" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
         ${singleEssay ? `<button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button>` : ""}
+      </div>
+    </div>`);
+  const doneBox = document.querySelector(".feedback--ok");
+  if (doneBox && doneBox.scrollIntoView) {
+    try { doneBox.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
+  }
+}
+
+/* Зелёный блок отчёта, который essayRestoreReady ставит визиту, дождавшемуся
+   проверки уже без нас (перезагрузка, возврат из другого предмета). Тот же
+   вид, что даёт essayFinishReady, но БЕЗ recordAnswer: баллы и XP зафиксированы
+   в Store до перезагрузки, повторный проход начислил бы их второй раз. Финиш —
+   только кнопкой «Завершить →»: как в остальных предметах, перезагрузка
+   возвращает к текущему заданию, а не прыгает в конец практики. */
+function essayRestoreReportBlock(t, sub) {
+  const S = Session.cur;
+  if (!S || !t || !sub || !sub.result) return;
+  Session.stopTimer();
+  essaySetFormVisible(false);
+  essayMountReadonly(String(sub.text || ""), Number(sub.wordCount) || 0);
+  const input = document.getElementById("essayInput");
+  if (input) input.disabled = true;
+  essayMountFeedback(`
+    <div class="feedback feedback--ok">
+      <div class="feedback__head">${icon("check")} Проверка завершена
+        <span class="feedback__xp">${esc(sub.result.total_score)} / ${esc(sub.result.max_score)}</span></div>
+      <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn btn--soft" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
+        <button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button>
       </div>
     </div>`);
   const doneBox = document.querySelector(".feedback--ok");
