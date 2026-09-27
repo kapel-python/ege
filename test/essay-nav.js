@@ -37,6 +37,10 @@ const check = (name, condition, detail = "") => {
   console.log(`${condition ? "ok  " : "FAIL"} ${name}${detail ? ` | ${detail}` : ""}`);
 };
 
+/* Слоты, созданные отрисовкой карточки, хранят в себе вложенные узлы
+   (например #feedbackSlot). Настоящий DOM так не делает — getElementById
+   всегда возвращает живой элемент, — а тестовый без этого терял бы
+   содержимое слотов при перечитывании. */
 class FakeElement {
   constructor(tagName = "div") {
     this.tagName = String(tagName).toUpperCase();
@@ -48,6 +52,7 @@ class FakeElement {
     this._innerHTML = "";
     this.children = [];
     this.attributes = {};
+    this._nodes = {};
     const classes = new Set();
     this.classList = {
       add: (...n) => n.forEach((x) => classes.add(x)),
@@ -60,8 +65,44 @@ class FakeElement {
       },
     };
   }
-  set innerHTML(v) { this._innerHTML = String(v); this.children = []; }
-  get innerHTML() { return this._innerHTML; }
+  set innerHTML(v) {
+    this._innerHTML = String(v);
+    this.children = [];
+    // Вложенные слоты (id="...") переживают перерисовку: настоящий DOM
+    // держит их живыми, тестовый обязан вести себя так же, иначе код,
+    // монтирующий отчёт в #feedbackSlot, терял бы адресат.
+    this._nodes = {};
+    for (const m of this._innerHTML.matchAll(/id="([A-Za-z][\w-]*)"/g)) {
+      const child = new FakeElement("div");
+      child.setAttribute("id", m[1]);
+      this._nodes[m[1]] = child;
+    }
+    // Кнопка «Взять другое» — по onclick, не по id: её ищет querySelector.
+    const take = /<button[^>]*onclick="essayTakeAnother\(\)"/.exec(this._innerHTML);
+    if (take) {
+      const btn = new FakeElement("button");
+      btn.setAttribute("onclick", "essayTakeAnother()");
+      this._nodes.__takeAnother = btn;
+    }
+  }
+  get innerHTML() {
+    // Возвращаем разметку вместе с содержимым слотов — как в браузере,
+    // где их текст является частью #screen.innerHTML.
+    let html = this._innerHTML;
+    for (const [id, child] of Object.entries(this._nodes)) {
+      if (!child._innerHTML) continue;
+      html = html.replace(`id="${id}"`, `id="${id}" data-slot="${id}">${child._innerHTML.replace(/^/, "")}`);
+    }
+    return html;
+  }
+  _slot(id) {
+    if (!this._nodes[id]) {
+      const child = new FakeElement("div");
+      child.setAttribute("id", id);
+      this._nodes[id] = child;
+    }
+    return this._nodes[id];
+  }
   appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
   insertBefore(c) { this.children.unshift(c); c.parentNode = this; return c; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; }
@@ -84,6 +125,16 @@ const element = (id) => {
   if (!elements.has(id)) elements.set(id, new FakeElement());
   return elements.get(id);
 };
+/* Вложенный слот отрисованной карточки (напр. #feedbackSlot из разметки
+   #screen) и есть тот же узел, что getElementById вернёт в браузере. */
+const findInTree = (root, id) => {
+  if (root._nodes && root._nodes[id]) return root._nodes[id];
+  for (const c of root.children) {
+    const hit = findInTree(c, id);
+    if (hit) return hit;
+  }
+  return null;
+};
 const document = {
   readyState: "loading",
   title: "",
@@ -93,8 +144,14 @@ const document = {
   head: new FakeElement("html"),
   body: new FakeElement("body"),
   createElement: (tag) => new FakeElement(tag),
-  getElementById: (id) => element(id),
-  querySelector: () => null,
+  getElementById: (id) => findInTree(elements.get("screen") || document.body, id) || element(id),
+  querySelector: (sel) => {
+    const m = /^\[onclick="([^"]+)"\]$/.exec(String(sel || ""));
+    if (m && /essayTakeAnother/.test(m[1])) {
+      return findInTree(elements.get("screen") || document.body, "__takeAnother") || null;
+    }
+    return null;
+  },
   querySelectorAll: () => [],
   addEventListener: () => {},
   removeEventListener: () => {},
@@ -295,10 +352,43 @@ async function main() {
   {
     const { sandbox } = buildSandbox({ statuses: ALL_READY });
     const entered = await enterPractice(sandbox);
-    check("всё готово — новый круг с re27_1",
-      entered.taskIds && entered.taskIds.join(",") === "re27_1", JSON.stringify(entered));
-    const toasts = run(sandbox, `globalThis.__toasts.join(" | ")`);
-    check("новый круг объявляется тостом", /Новый круг/.test(toasts), toasts);
+    // ALL_READY: чем больше submissionId, тем свежее отчёт. Самый свежий
+    // (re27_8) в новом круге переписывается первым.
+    check("всё готово — новый круг начинается со САМОГО СВЕЖЕГО отчёта (re27_8)",
+      entered.taskIds && entered.taskIds.join(",") === "re27_8", JSON.stringify(entered));
+  }
+  {
+    // Прогресс второго круга: re27_1 только что переписано (submissionId 37 —
+    // меньше прежних, отчёт устарел), остальные готовые — свежее. Значит
+    // re27_1 уходит в конец, а не предлагается снова.
+    const cycle2 = {
+      ...ALL_READY,
+      re27_1: { status: "ready", submissionId: 37, clientId: "c-1b", wordCount: 310 },
+    };
+    const { sandbox } = buildSandbox({ statuses: cycle2 });
+    const entered = await enterPractice(sandbox);
+    check("переписанное уходит в конец, а не предлагается снова (re27_8)",
+      entered.taskIds && entered.taskIds.join(",") === "re27_8", JSON.stringify(entered));
+  }
+  {
+    // Свежий отчёт у re27_2 — вот его и предлагаем первым.
+    const cycle2b = {
+      ...ALL_READY,
+      re27_2: { status: "ready", submissionId: 999, clientId: "c-2b", wordCount: 320 },
+    };
+    const { sandbox } = buildSandbox({ statuses: cycle2b });
+    const entered = await enterPractice(sandbox);
+    check("свежее всего переписанное (re27_2) идёт первым",
+      entered.taskIds && entered.taskIds.join(",") === "re27_2", JSON.stringify(entered));
+  }
+  {
+    // Отправленное, но не проверенное — продолжить его, а не начинать чистое.
+    const { sandbox } = buildSandbox({
+      statuses: { re27_4: { status: "submitted", submissionId: 41, clientId: "c-4", wordCount: 250 } },
+    });
+    const entered = await enterPractice(sandbox);
+    check("недоведённое (submitted) — вернуться в него раньше чистых",
+      entered.taskIds && entered.taskIds.join(",") === "re27_4", JSON.stringify(entered));
   }
 
   /* ---------- 2. Активная недописанная возвращается ---------- */
@@ -376,11 +466,11 @@ async function main() {
     run(sandbox, `globalThis.__toasts = []; essayTakeAnother();`);
     const stayed = run(sandbox, `!!Session.cur && Session.cur.taskIds.join(",") === "re27_8"`);
     const warned = run(sandbox, `globalThis.__toasts.join(" | ")`);
-    check("последнее недописанное не отпускает (тост, сессия жива)",
-      stayed === true && /последнее/i.test(warned), warned);
+    check("последнее недоведённое не отпускает (тост, сессия жива)",
+      stayed === true && /последн/i.test(warned), warned);
   }
 
-  /* ---------- 5. Готовая проверка — сразу итоговый экран ---------- */
+  /* ---------- 5. Готовая проверка — блок отчёта, финиш кнопкой ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: {} });
     await enterPractice(sandbox); // [re27_1]
@@ -393,11 +483,22 @@ async function main() {
       result: { total_score: 16, max_score: 22, criteria: [] },
     }, "текст", 200, 30)`);
     await flush();
+    const done = run(sandbox, `({
+      alive: !!Session.cur,
+      html: document.getElementById("screen").innerHTML,
+    })`);
+    check("готовый разбор — сначала блок отчёта, а не редирект на финиш",
+      done.alive === true && done.html.includes("Проверка завершена"), done.html.slice(0, 120));
+    check("в блоке отчёта XP и обе кнопки",
+      /16 \/ 22/.test(done.html) && done.html.includes("Посмотреть результат")
+      && done.html.includes("Завершить"), done.html.slice(0, 200));
+    run(sandbox, `sessionFinish()`);
+    await flush();
     const fin = run(sandbox, `({
       curNull: Session.cur === null,
       html: document.getElementById("screen").innerHTML,
     })`);
-    check("сессия закрыта итоговым экраном", fin.curNull === true
+    check("кнопка «Завершить» закрывает визит итоговым экраном", fin.curNull === true
       && fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 120));
     check("на итоговом экране кнопка разбора со ссылкой на отчёт",
       fin.html.includes("Разбор сочинения") && fin.html.includes("/essay/77"),
@@ -405,10 +506,11 @@ async function main() {
     check("XP начислен", /\+\d+ XP/.test(fin.html), (fin.html.match(/\+\d+ XP/) || [])[0] || "");
   }
 
-  /* ---------- 6. Новый круг: старый готовый отчёт не блокирует бланк ---------- */
+  /* ---------- 6. Новый круг: бланк чистый, но с пометкой о прошлом разборе ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: ALL_READY });
-    await enterPractice(sandbox); // [re27_1], новый круг
+    const entered = await enterPractice(sandbox); // самый свежий отчёт = re27_8
+    const taskId = entered.taskIds[0];
     run(sandbox, `renderTask(document.getElementById("screen"))`);
     await flush(); // essayRestoreReady подтянет СТАРЫЙ ready — бланк должен уцелеть
     const head = run(sandbox, `document.getElementById("screen").innerHTML`);
@@ -416,6 +518,36 @@ async function main() {
     check("в новом круге редактор не подменён старым отчётом",
       !feedback.includes("уже проверено") && head.includes("essayTakeAnother()"),
       feedback.slice(0, 100));
+    const pastId = run(sandbox, `(EssayStatuses.map["${taskId}"] || {}).submissionId`);
+    check("визит помечен как повторный, со ссылкой на прошлый разбор",
+      head.includes("уже было проверено") && head.includes("/essay/" + pastId),
+      `task=${taskId} pastId=${pastId} head=${head.slice(0, 160)}`);
+  }
+
+  /* ---------- 7. Зомби-визит (готовность дожила до перезагрузки) — сразу итог ---------- */
+  {
+    const { sandbox } = buildSandbox({ statuses: ALL_READY });
+    const entered = await enterPractice(sandbox);
+    const taskId = entered.taskIds[0];
+    // Визит довели до разбора, но итог не закрыли и страница перезагрузилась:
+    // results потеряны, а метки написанного пережили (localStorage).
+    run(sandbox, `
+      Session.cur.results = [];
+      Session.cur.essayReadyByTask = {};
+      Session.cur.essayWrittenByTask = { "${taskId}": { clientId: "c-z", wordCount: 300, status: "ready" } };
+      renderTask(document.getElementById("screen"));
+    `);
+    await flush(); // restore находит готовое + метки — закрываем итогом
+    const fin = run(sandbox, `({
+      curNull: Session.cur === null,
+      html: document.getElementById("screen").innerHTML,
+    })`);
+    check("зомби-визит закрывается итоговым экраном без новой проверки",
+      fin.curNull === true && fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 160));
+    const pastId = run(sandbox, `(EssayStatuses.map["${taskId}"] || {}).submissionId`);
+    check("у зомби-итога есть кнопка разбора (не пустой 0/0 без выхода)",
+      fin.html.includes("Разбор сочинения") && fin.html.includes("/essay/" + pastId),
+      `pastId=${pastId} html=${fin.html.slice(0, 200)}`);
   }
 
   /* ---------- 7. Гость и офлайн ---------- */
@@ -432,7 +564,38 @@ async function main() {
       entered.taskIds && entered.taskIds.join(",") === "re27_1", JSON.stringify(entered));
   }
 
-  /* ---------- 8. Кнопка отправки прячется, когда есть что продолжать ---------- */
+  /* ---------- 8. «Взять другое» гаснет, когда откладывать нечего ---------- */
+  {
+    const { sandbox } = buildSandbox({ statuses: {} });
+    await enterPractice(sandbox); // [re27_1]
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    await flush();
+    const takeBtn = () => run(sandbox, `(() => {
+      const b = document.querySelector('[onclick="essayTakeAnother()"]');
+      return b ? (b.style.display || "") : "нет кнопки";
+    })()`);
+    check("чистый бланк: кнопка видна", takeBtn() !== "none" && takeBtn() !== "нет кнопки", takeBtn());
+    // Старая готовая работа по ЭТОМУ ЖЕ заданию не должна делать кнопку
+    // мёртвой: карта про текущий визит в метки не попадает (видит их сам
+    // визит), иначе «Взять другое» молча ничего не делал бы.
+    run(sandbox, `
+      essayStatusesApply({ re27_1: { status: "ready", submissionId: 5, clientId: "c-x", wordCount: 200 } });
+    `);
+    await flush();
+    check("старая готовая работа не делает «Взять другое» мёртвой",
+      takeBtn() !== "none" && takeBtn() !== "нет кнопки", takeBtn());
+    // А вот реальная сохранённая работа сессии (отправлено в этом визите) —
+    // кнопку гасит: откладывать уже нечего.
+    run(sandbox, `
+      Session.cur.essayReadyByTask = { re27_1: { text: "текст", wordCount: 200, status: "submitted", clientId: "c-y" } };
+      essaySyncTakeAnotherVisibility(Session.task());
+    `);
+    await flush();
+    check("сохранённая работа сессии прячет кнопку",
+      takeBtn() === "none", takeBtn());
+  }
+
+  /* ---------- 9. Кнопка отправки прячется, когда есть что продолжать ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: {} });
     await enterPractice(sandbox); // [re27_1]

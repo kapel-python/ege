@@ -3348,6 +3348,7 @@ function renderTask(root) {
 
         <div id="hintSlot"></div>
 
+        ${isLongTextTask(t) ? essayRepeatNoteHtml(t) : ""}
         ${sessionAnswerAreaHtml(t, S)}
         <div id="feedbackSlot"></div>
         ${isLongTextTask(t) ? '<div id="essayNavSlot"></div>' : ""}
@@ -3715,7 +3716,25 @@ function essayMountResumeFeedback(t) {
   if (!sub || !String(sub.text || "").trim()) return false;
   essayMountFeedback(essayResumeFeedbackHtml(t, sub));
   essaySyncSubmitVisibility(t);
+  essaySyncTakeAnotherVisibility(t);
   return true;
+}
+
+/* Кнопка «Взять другое» видна, только пока работу можно отложить, то есть
+   она ещё не начата (нет сохранённого текста и меток). Метки приезжают
+   асинхронно (карта сервера, восстановление) уже после отрисовки — без
+   этого вызова кнопка оставалась бы видимой, но мёртвой: клик молча
+   выходил бы через sessionTaskWritten. Вызовы — везде, где метки меняются
+   мимо renderTask. */
+function essaySyncTakeAnotherVisibility(t) {
+  if (!t || !isLongTextTask(t)) return;
+  const S = Session.cur;
+  if (!S || S.taskIds.length !== 1) return;
+  if (!Session.task() || Session.task().id !== t.id) return;
+  if (typeof document === "undefined" || !document.querySelector) return;
+  const btn = document.querySelector('[onclick="essayTakeAnother()"]');
+  if (!btn) return;
+  btn.style.display = sessionTaskWritten(t.id) ? "none" : "";
 }
 
 /* Pipeline проверки итогового сочинения:
@@ -3815,10 +3834,22 @@ async function essayRestoreReady(t) {
     if (!slot || !Session.cur || Session.cur.answered) return;
     if (!Session.cur || Session.task().id !== t.id) return;
     if (sub.status === "ready" && sub.result) {
-      // Одиночный визит в новом круге: прошлая готовая работа — история,
-      // а не замок. Редактор остаётся чистым, пишем заново; без этого
-      // старый отчёт прятал бы бланк и круг было бы не начать.
-      if (isSingleEssaySession()) return;
+      if (isSingleEssaySession()) {
+        // Готовая работа на сервере при живых метках сессии = этот визит
+        // уже доводили до разбора до перезагрузки/возврата: закрываем
+        // итогом (XP уже зафиксирован attempts-flow, sessionFinish только
+        // показывает). Меток нет = новый круг: прошлый разбор — история,
+        // бланк чистый, пишем заново.
+        const finishedHere = sessionTaskWritten(t.id);
+        if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
+        Session.cur.essayReadyByTask[t.id] = sub;
+        essayMarkWritten(t.id, sub);
+        if (finishedHere) {
+          sessionFinish();
+          return;
+        }
+        return;
+      }
       if (!Session.cur.essayReadyByTask) Session.cur.essayReadyByTask = {};
       Session.cur.essayReadyByTask[t.id] = sub;
       essayMarkWritten(t.id, sub);
@@ -3948,10 +3979,19 @@ function essayStatusesApply(map) {
   if (!S || !map || typeof map !== "object") return;
   if (!S.essayWrittenByTask) S.essayWrittenByTask = {};
   const inSession = new Set(S.taskIds || []);
+  // Задание текущего одиночного визита — не трогаем: его метками владеет
+  // сам визит (отправка/восстановление), а старая готовая метка из карты
+  // неотличима от меток зомби-визита и ломала бы их различение в restore.
+  // На выбор следующего это не влияет: он читает карту напрямую.
+  const singleNow = S.taskIds.length === 1 && S.taskIds.every((id) => {
+    const t = DataAPI.task(id);
+    return t && isLongTextTask(t);
+  }) ? new Set(S.taskIds) : null;
   let added = 0;
   for (const [taskId, info] of Object.entries(map)) {
     if (!info || typeof info !== "object") continue;
     if (inSession.size && !inSession.has(taskId)) continue;
+    if (singleNow && singleNow.has(taskId)) continue;
     if (S.essayWrittenByTask[taskId]) continue;
     S.essayWrittenByTask[taskId] = {
       clientId: String(info.clientId || ""),
@@ -3962,6 +4002,9 @@ function essayStatusesApply(map) {
     added++;
   }
   if (added) persistSession();
+  // Метки могли прийти под уже нарисованный экран: пересинхронизируем
+  // кнопку «Взять другое» (иначе осталась бы видимой, но мёртвой).
+  if (Session.cur && Session.task()) essaySyncTakeAnotherVisibility(Session.task());
 }
 
 async function essayStatusesLoad() {
@@ -4035,9 +4078,25 @@ function isSingleEssaySession() {
   return !!S && S.taskIds.length === 1 && isLongTextTask(Session.task());
 }
 
+/* Плашка повторного визита: это сочинение уже проверялось раньше (старый
+   разбор — история), сейчас пишется заново. Без неё следующий круг
+   выглядит багом «дали ту же тему». Показываем только на чистом бланке:
+   дописываемую работу (есть метки сессии) она бы только путала. */
+function essayRepeatNoteHtml(t) {
+  if (!isSingleEssaySession() || sessionTaskWritten(t.id)) return "";
+  const map = (EssayStatuses.subject === Store.subject && EssayStatuses.map) || {};
+  const m = map[t.id];
+  if (!m || String(m.status) !== "ready") return "";
+  let href = "";
+  try {
+    href = essayResultUrl({ submissionId: m.submissionId, clientId: m.clientId }) || "";
+  } catch (_) {}
+  return `<div style="color:var(--muted);font-size:13px;margin:0 0 12px">Это сочинение уже было проверено — пишешь заново, прошлый разбор сохранён${href ? ` (<a href="${esc(href)}">посмотреть</a>)` : ""}.</div>`;
+}
+
 /* Активная недописанная работа: вход в практику возвращается в неё, а не
    начинает новую. Готовое (результат уже в сессии) активным не считается —
-   такие сессии завершаются сами сразу после проверки. */
+   дальше решает кнопка «Завершить →» в блоке отчёта. */
 function essayActiveTaskUnfinished() {
   const S = Session.cur;
   if (!S || !S.taskIds.length) return false;
@@ -4049,46 +4108,78 @@ function essayActiveTaskUnfinished() {
   return true;
 }
 
-/* Какие задания уже проверены (есть ready-разбор): серверная карта +
-   метки текущей сессии (гость и свежие отправки, ещё не попавшие в карту). */
-function essayReadyTaskIds(taskIds) {
-  const ready = new Set();
-  const map = (EssayStatuses.subject === Store.subject && EssayStatuses.map) || {};
-  for (const id of taskIds) {
-    const info = map[id];
-    if (info && String(info.status) === "ready") ready.add(id);
-  }
+/* Задание начато локально (черновик, отправка, метка карты): тексты и факты
+   есть в этой сессии, хотя серверная карта их может ещё не знать. */
+function essayLocalStarted(id) {
   const S = Session.cur;
-  if (S) {
-    for (const id of taskIds) {
-      const w = S.essayWrittenByTask && S.essayWrittenByTask[id];
-      if (w && String(w.status) === "ready") ready.add(id);
-      const sub = S.essayReadyByTask && S.essayReadyByTask[id];
-      if (sub && String(sub.status) === "ready") ready.add(id);
-    }
-    for (const r of (S.results || [])) if (r && r.essay && r.taskId) ready.add(r.taskId);
-  }
-  return ready;
+  if (!S || !id) return false;
+  if (S.essayWrittenByTask && S.essayWrittenByTask[id]) return true;
+  const sub = S.essayReadyByTask && S.essayReadyByTask[id];
+  if (sub && String(sub.text || "").trim()) return true;
+  if ((S.results || []).some((r) => r && r.taskId === id && r.essay)) return true;
+  const draft = S.essayDraftByTask && S.essayDraftByTask[id];
+  return !!String(draft || "").trim();
 }
 
-/* Следующее сочинение визита: первое недописанное по порядку каталога,
-   пропущенные («Взять другое») — в последнюю очередь. Всё готово —
-   новый круг с первого текста (старые работы остаются историей, за повтор
-   платит только минимум XP через alreadyMastered — как «Пройти ещё раз»
-   в остальных предметах). */
-function essayNextTaskId(taskIds) {
-  const ready = essayReadyTaskIds(taskIds);
-  const skipped = essaySkippedIds();
-  const open = taskIds.filter((id) => !ready.has(id) && !skipped.has(id));
-  if (open.length) return { id: open[0], restarted: false };
-  const unfinished = taskIds.filter((id) => !ready.has(id));
-  if (unfinished.length) {
-    // Все недописанные отложены — пропуски сгорели, продолжаем с первого из них.
-    essaySkipSave(new Set());
-    return { id: unfinished[0], restarted: false };
+/* Порядок выбора сочинений: сначала недоведённые до разбора (отправленные,
+   но не проверенные — их дешевле продолжить, чем начинать новое), затем
+   никогда не написанные, затем проверенные.
+   Проверенные сортируются по серверному submissionId по УБЫВАНИЮ: id тем
+   больше, чем позже перезаписали задание, т.е. тем свежее его отчёт —
+   и тем раньше в новом круге это задание стоит (заново пишем его первым).
+   Меньший id = древняя работа, уходит в конец. Новый круг после полностью
+   готового набора начинается сам, без счётчиков и без кнопки «начать с
+   нуля», и сходится между устройствами (id серверный). Если id нулевые
+   (старая выгрузка) — каталожный порядок.
+   Пропуски («Взять другое») учитывает essayNextTaskId. */
+function essayOrderedIds(taskIds) {
+  const map = (EssayStatuses.subject === Store.subject && EssayStatuses.map) || {};
+  const orderIdx = new Map(taskIds.map((id, i) => [id, i]));
+  const submitted = [], fresh = [], ready = [];
+  for (const id of taskIds) {
+    const m = map[id];
+    if (m && String(m.status) === "ready") {
+      ready.push([Number(m.submissionId) || 0, id]);
+      continue;
+    }
+    if (m || essayLocalStarted(id)) {
+      submitted.push(id);
+      continue;
+    }
+    fresh.push(id);
   }
+  ready.sort((a, b) => (b[0] - a[0]) || ((orderIdx.get(a[1]) ?? 0) - (orderIdx.get(b[1]) ?? 0)));
+  return [...submitted, ...fresh, ...ready.map((x) => x[1])];
+}
+
+/* Готовность задания: есть ready-разбор. Карта сервера первична (свежая
+   на каждый вход); метки сессии покрывают гостя и свежие отправки. */
+function essayTaskReady(id) {
+  const map = (EssayStatuses.subject === Store.subject && EssayStatuses.map) || {};
+  const m = map[id];
+  if (m && String(m.status) === "ready") return true;
+  const S = Session.cur;
+  if (!S) return false;
+  const w = S.essayWrittenByTask && S.essayWrittenByTask[id];
+  if (w && String(w.status) === "ready") return true;
+  const sub = S.essayReadyByTask && S.essayReadyByTask[id];
+  if (sub && String(sub.status) === "ready") return true;
+  return (S.results || []).some((r) => r && r.taskId === id && r.essay);
+}
+
+/* Следующее сочинение визита. Сначала недоведённые до разбора (даже
+   отложенные: пропуски сгорают, удалить из очереди нельзя), и только
+   когда их нет — готовые по давности (новый круг сам, без счётчиков).
+   Пропуски живут максимум до первого добора: дальше — без них. */
+function essayNextTaskId(taskIds) {
+  const full = essayOrderedIds(taskIds);
+  const skipped = essaySkippedIds();
+  const unfinished = (id) => !essayTaskReady(id);
+  const open = full.filter((id) => unfinished(id) && !skipped.has(id));
+  if (open.length) return open[0];
   essaySkipSave(new Set());
-  return { id: taskIds[0], restarted: true };
+  const rest = full.filter(unfinished);
+  return rest.length ? rest[0] : full[0];
 }
 
 /* Свежая карта готовых работ с сервера: входу нужна правда на сейчас
@@ -4112,7 +4203,8 @@ async function essayStatusesRefresh() {
 
 /* Вход в практику сочинений: один визит — одно сочинение. Недописанная
    активная работа возвращается (а не затирается новой), дальше — первое
-   недописанное по каталогу, после всех готовых — новый круг. */
+   по порядку essayOrderedIds (недоведённые, затем ненаписанные, затем
+   проверенные от давнего к свежему — новый круг начинается сам). */
 async function startEssayPractice(skillId) {
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId));
   if (!tasks.length) {
@@ -4125,28 +4217,28 @@ async function startEssayPractice(skillId) {
   }
   await essayStatusesRefresh();
   const pick = essayNextTaskId(tasks.map((t) => t.id));
-  if (pick.restarted) toast("Новый круг: все сочинения уже проверены — пишем заново", "", "check");
-  const t = DataAPI.task(pick.id);
-  Session.start({ title: (t && t.sub) || "Сочинение", taskIds: [pick.id], mode: "quick" });
+  const t = DataAPI.task(pick);
+  Session.start({ title: (t && t.sub) || "Сочинение", taskIds: [pick], mode: "quick" });
 }
 
 /* «Взять другое»: отложить текущий текст в конец очереди и выйти.
    XP и попыток не пишет (в отличие от «Пропустить»), черновик не сохраняет —
    текст отложен сознательно. Отправленное пропускать нечего: оно допишется
-   само через проверку. Последнее недописанное не отпускаем — иначе выбор
-   сведётся к нему же: дальше только новый круг, допиши это. */
+   само через проверку. Последняя недоведённая работа не отпускается —
+   иначе выбор свёлся бы к ней же. */
 function essayTakeAnother() {
   const S = Session.cur;
   const t = S ? Session.task() : null;
   if (!S || S.taskIds.length !== 1 || !t || !isLongTextTask(t)) return;
   if (sessionTaskWritten(t.id)) return;
   const ids = orderedTasks(DataAPI.practiceTasksBySkill(t.skill)).map((x) => x.id);
-  const ready = essayReadyTaskIds(ids);
-  if (!ids.some((id) => id !== t.id && !ready.has(id))) {
-    toast("Это последнее ненаписанное сочинение — допиши его, дальше начнётся новый круг", "", "bulb");
+  const full = essayOrderedIds(ids);
+  const skipped = essaySkippedIds();
+  const unfinished = (id) => !essayTaskReady(id);
+  if (!full.some((id) => id !== t.id && unfinished(id) && !skipped.has(id))) {
+    toast("Это последняя недоведённая работа — заверши её, дальше новый круг", "", "bulb");
     return;
   }
-  const skipped = essaySkippedIds();
   skipped.add(t.id);
   essaySkipSave(skipped);
   Session.cur = null;
@@ -4436,12 +4528,6 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
   S.essayReadyByTask[t.id] = submission;
   essayMarkWritten(t.id, submission);
-  // Один визит — одно сочинение: готовый разбор сразу закрывает визит
-  // итоговым экраном (сам разбор — кнопкой оттуда), листать дальше нечего.
-  if (S.taskIds.length === 1) {
-    sessionFinish();
-    return;
-  }
   // Возвращаем экран задания: редактор прячем и показываем исходный текст
   // readonly — менять его после отправки уже нельзя. Таймер останавливаем
   // ПОСЛЕ перерисовки: renderTask сам запускает свой интервал таймера.
@@ -4462,14 +4548,17 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   // Зелёный блок — только отчёт. Навигация («Назад» и «Далее» / «Написать
   // ещё раз») стоит отдельной строкой ПОД ним: внутри зелёного блока ряд
   // выглядел частью отчёта, а в шапке карточки «Назад» на длинном сочинении
-  // с readonly-текстом просто не было видно.
+  // с readonly-текстом просто не было видно. В одиночном визите навигации
+  // нет вовсе — вместо неё кнопка «Завершить →» закрывает визит итогом.
+  const singleEssay = S.taskIds.length === 1 && isLongTextTask(t);
   essayMountFeedback(`
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
       <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ${singleEssay ? "btn--soft" : "btn--primary"}" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
+        ${singleEssay ? `<button class="btn btn--primary" onclick="sessionFinish()">Завершить →</button>` : ""}
       </div>
     </div>`);
   const doneBox = document.querySelector(".feedback--ok");
@@ -4991,8 +5080,10 @@ function sessionFinish(early = false) {
   // Одиночное сочинение: разбор готового — кнопкой с итогового экрана
   // (внутри визита его показать было некуда: навигации нет). Ссылку считаем
   // до обнуления сессии — openEssayResult после финиша работу уже не найдёт.
+  // Условие — не essayOnly: зомби-визит (готовность дожила до перезагрузки)
+  // закрывается с пустыми results, но разбор у него настоящий.
   let essayReportHref = "";
-  if (essayOnly && S.taskIds.length === 1) {
+  if (S.taskIds.length === 1) {
     const onlySub = S.essayReadyByTask && S.essayReadyByTask[S.taskIds[0]];
     if (onlySub) {
       try { essayReportHref = essayResultUrl(onlySub) || ""; } catch (_) {}
