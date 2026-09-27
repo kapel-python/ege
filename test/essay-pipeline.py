@@ -77,6 +77,27 @@ def words(n, w="слово"):
     return " ".join([w] * n)
 
 
+# Фикстуры для реальных проверок. Гейт «текст набран повторами» смотрит на
+# долю уникальных 5-грамм, и текст из двухсот одинаковых слов честно
+# получает 0/22 — раньше он проходил проверку и стоил жетона. Поэтому для
+# проверок, которые должны дойти до модели, берётся связный по числу слов,
+# но разнообразный текст: все его слова различны, значит повторов нет.
+_POOL = ("память детство пример позиция автор текст отношение связь вывод "
+         "вопрос память первые письмо сад война город книга голос долг выбор "
+         "имя слово вера совесть путь дом смерть время труд").split()
+
+
+def essay_text(n, tag="проверка"):
+    out = []
+    for i in range(n):
+        base = _POOL[i % len(_POOL)]
+        round_no = i // len(_POOL)
+        out.append(base if round_no == 0 else f"{base}-{tag}-{round_no}")
+    if tag != "проверка":
+        out = [w if w.endswith(tag) else f"{w}-{tag}" for w in out]
+    return " ".join(out)
+
+
 def model_payload():
     criteria = []
     for cid, name, mx in (("K1", "Позиция автора", 1), ("K2", "Комментарий", 3),
@@ -117,7 +138,7 @@ def main():
             check("SUBJECT russian", status == 200)
             ai.reset_ai_rate()
 
-            text = words(200)
+            text = essay_text(200)
             # 1. submission — проверка НЕ завершена, XP нет
             status, sub = request(opener, base, "/api/essays", "POST", {
                 "subject": "russian", "taskId": "re27_1", "skill": "russian_essay_source",
@@ -289,7 +310,7 @@ def main():
             # исходником — позиция автора, примеры ИЗ текста. Без исходника
             # проверки не существует, и клиент её не может включить.
             ai.reset_ai_rate()
-            text27 = words(200)
+            text27 = essay_text(200, "рубрика")
             status, ai_src = request(opener, base, "/api/ai/essay", "POST",
                                     {"text": text27, "taskId": "re27_1"})
             src_names = [c["name"] for c in (ai_src.get("result") or {}).get("criteria", [])][:3]
@@ -326,11 +347,11 @@ def main():
             def scripted(messages, **kwargs):
                 calls["n"] += 1
                 body = model_payload()
-                body["criteria"][0]["score"] = 0  # К1=0; потолок рубрики жмёт К2 -> 1
+                body["criteria"][0]["score"] = 0  # К1=0; официальный каскад обнуляет К2 и К3
                 return json.dumps(body, ensure_ascii=False)
 
             ai.chat = scripted
-            veto_text = words(200, "мусор")
+            veto_text = essay_text(200, "мусор")
             status, sub3 = request(opener, base, "/api/essays", "POST", {
                 "subject": "russian", "taskId": "re27_3", "skill": "russian_essay_source",
                 "text": veto_text, "id": "pipe-3"})
@@ -347,8 +368,10 @@ def main():
             check("VETO literacy zeroed",
                   all(c["score"] == 0 for c in crit3[6:]),
                   str([(c["id"], c["score"]) for c in crit3[6:]]))
-            check("VETO rubric cap applied (К1=0 -> К2<=1)",
-                  next(c["score"] for c in crit3 if c["id"] == "K2") == 1)
+            check("VETO rubric cap applied (К1=0 -> К2=0 и К3=0)",
+                  next(c["score"] for c in crit3 if c["id"] == "K2") == 0
+                  and next(c["score"] for c in crit3 if c["id"] == "K3") == 0,
+                  str([(c["id"], c["score"]) for c in crit3[:3]]))
             check("VETO recorded", cal3.get("proposed") == content3 + 12
                   and cal3.get("final") == content3 and "грамотност" in str(cal3.get("note")).lower(),
                   str(cal3))
@@ -370,7 +393,7 @@ def main():
             # запись проверки, клиентское тело игнорируется полностью.
             ai.reset_ai_rate()
             ai.chat = lambda messages, **kwargs: json.dumps(model_payload(), ensure_ascii=False)
-            forged_text = words(200, "проверка")
+            forged_text = essay_text(200, "подделка")
             status, sub4 = request(opener, base, "/api/essays", "POST", {
                 "subject": "russian", "taskId": "re27_3", "skill": "russian_essay_source",
                 "text": forged_text, "id": "pipe-4"})

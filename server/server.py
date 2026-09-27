@@ -2348,12 +2348,25 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                      text_sha256 TEXT NOT NULL,
                      provider TEXT NOT NULL DEFAULT '',
                      result_json TEXT NOT NULL,
+                     rubric_version INTEGER NOT NULL DEFAULT 1,
                      created_at TEXT NOT NULL)"""
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_text"
                 " ON essay_checks(user_id, subject, text_sha256)"
             )
+        else:
+            # rubric_version — версия правил, по которым получен result_json.
+            # Пока оценку можно было не воспроизвести (перепроверка звала модель
+            # заново), такой колонки не было. Теперь тот же текст на тех же
+            # условиях обязан давать тот же ответ, а правила измениться могут:
+            # поэтому версия пишется рядом с результатом и кэш берётся только
+            # при совпадении. Старые записи (версии 1) просто не кэшируются.
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(essay_checks)")}
+            if "rubric_version" not in columns:
+                conn.execute(
+                    "ALTER TABLE essay_checks ADD COLUMN rubric_version INTEGER NOT NULL DEFAULT 1")
+                conn.commit()
         _ESSAY_SCHEMA_DONE.add(key)
 
 
@@ -2574,12 +2587,17 @@ def essay_source_text_payload(conn: sqlite3.Connection, subject: str, text_id: s
     }
 
 
-def essay_source_mode_for_task(conn: sqlite3.Connection, subject: str, task_id: str) -> tuple[str, str]:
-    """Проблема исходного текста для задания. Бросает ValueError, если задания
-    нет или у него нет исходника.
+def essay_source_mode_for_task(conn: sqlite3.Connection, subject: str, task_id: str) -> tuple[str, str, str]:
+    """Рубрика, проблема и исходный текст задания. Бросает ValueError, если
+    задания нет или у него нет исходника.
 
     Решает сервер по каталогу, а не по вводу клиента: подменить рубрику из
     браузера нельзя, а задание без исходника проверкой не является.
+
+    Исходный текст уходит не модели (её конструкция «оценщик не сверяет с
+    книгой» и промпт без исходника — осознанные решения), а нашим
+    детерминированным слоям: проверке «не переписан ли исходник» и правилу
+    «ошибка, дословно взятая из исходника, ученику не принадлежит».
     """
     subject = resolve_subject(subject)
     row = conn.execute(
@@ -2594,7 +2612,7 @@ def essay_source_mode_for_task(conn: sqlite3.Connection, subject: str, task_id: 
     payload = essay_source_text_payload(conn, subject, text_id)
     if not payload:
         raise ValueError("unknown source text")
-    return "source", payload["problem"]
+    return "source", payload["problem"], str(payload.get("text") or "")
 
 
 def essay_result_view(submission: dict) -> dict | None:
@@ -2794,36 +2812,47 @@ def _validated_essay_result(result) -> dict:
 
 def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
                       text: str, provider: str, result: dict) -> None:
-    """Записать факт реальной проверки: ответ модели на этот текст.
+    """Записать факт проверки этого текста и версию правил, которыми он оценён.
 
-    Вызывается из /api/ai/essay СРАЗУ после успешного ответа модели — это
-    единственный путь появления строки, и каждая строка стоила бюджета.
-    Повторная проверка того же текста перезаписывает запись (последний ответ
-    модели актуален — клиентский flow при ретрае тоже берёт последний).
+    Вызывается из /api/ai/essay СРАЗУ после успешного ответа — это единственный
+    путь появления строки. Повторная проверка перезаписывает запись, но
+    одинаковый текст на одинаковых условиях берётся из кэша, а не переоценивается
+    заново (см. load_essay_check).
     """
     ensure_essay_schema(conn)
     blob = json.dumps(result, ensure_ascii=False)
     if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
         raise ValueError("result too large")
     conn.execute(
-        "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, created_at)"
-        " VALUES(?,?,?,?,?,?)"
+        "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
+        " VALUES(?,?,?,?,?,?,?)"
         " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
         " result_json=excluded.result_json, provider=excluded.provider,"
-        " created_at=excluded.created_at",
-        (user_id, subject, essay_text_hash(text), str(provider or "")[:64], blob, now_iso()),
+        " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
+        (user_id, subject, essay_text_hash(text), str(provider or "")[:64], blob,
+         int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
     )
 
 
-def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text: str) -> dict | None:
-    """Сохранённый ответ модели на этот текст или None, если проверки не было."""
+def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text: str,
+                     rubric: int = 0) -> dict | None:
+    """Сохранённый ответ на этот текст или None, если проверки не было.
+
+    `rubric` — запрошенная версия правил. Если она задана и не совпадает с
+    версией записи, запись не выдаётся: правила изменились, значит старый ответ
+    уже не по ним, и текст надо оценивать заново. Без `rubric` (путь
+    /api/essays/evaluation) берётся любая запись — там важна та оценка, которая
+    была записана, и пересчитывать её задним числом нельзя.
+    """
     ensure_essay_schema(conn)
     row = conn.execute(
-        "SELECT result_json, provider FROM essay_checks"
+        "SELECT result_json, provider, rubric_version FROM essay_checks"
         " WHERE user_id=? AND subject=? AND text_sha256=?",
         (user_id, subject, essay_text_hash(text)),
     ).fetchone()
     if row is None:
+        return None
+    if rubric and int(row["rubric_version"] or 0) != int(rubric):
         return None
     try:
         result = json.loads(row["result_json"])
@@ -2867,10 +2896,16 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
             raise EssayNotChecked()
         result = _validated_essay_result(check["result"])
         blob = json.dumps(result, ensure_ascii=False)
+        # evaluation_version — версия ПРАВИЛ, по которым получен результат, а не
+        # счётчик переоценок: раньше здесь стояла константа 1 у всех строк, и по
+        # полю нельзя было отличить старую раскладку от новой. Поле, по которому
+        # переоценивать нельзя, — это в ЛОГЕ; хранится оно, чтобы версию можно
+        # было увидеть рядом с баллом. Уже записанные работы не трогаются: их
+        # evaluation_result остаётся тем, что реально поставили при проверке.
         conn.execute(
             "UPDATE essay_submissions SET evaluation_status='ready', evaluation_result=?,"
             " evaluation_provider=?, evaluation_version=?, evaluated_at=? WHERE id=?",
-            (blob, (check["provider"] or "ai+grammar")[:64], 1,
+            (blob, (check["provider"] or "ai+grammar")[:64], int(_AI.ESSAY_RUBRIC_VERSION),
              int(time.time() * 1000), int(row["id"])),
         )
     else:
@@ -8178,7 +8213,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise _AI.AIInputError("Нужно задание с исходным текстом")
                     subject_now = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
                     try:
-                        mode, problem = essay_source_mode_for_task(conn, subject_now, task_id.strip())
+                        mode, problem, source_text = essay_source_mode_for_task(
+                            conn, subject_now, task_id.strip())
                     except ValueError as exc:
                         raise _AI.AIInputError(str(exc)) from None
                 except _AI.AIInputError as exc:
@@ -8195,6 +8231,16 @@ class Handler(BaseHTTPRequestHandler):
                 note = note.strip()
                 if len(note) > _AI.ESSAY_RECHECK_NOTE_MAX:
                     self.send_json({"error": f"Замечание слишком длинное (максимум {_AI.ESSAY_RECHECK_NOTE_MAX} символов)"}, 400, token=token); return
+                # Тот же текст на тех же условиях — тот же ответ. Раньше
+                # перепроверка без замечания звала модель заново и перезаписывала
+                # запись, из-за чего один и тот же текст получал разные баллы
+                # (в продовой выборке 5 против 2 за копию исходника, 1 против 4
+                # за повторённую фразу). Теперь решение воспроизводимо, а
+                # жетон за него не списывается. С замечанием ученика кэш
+                # обходится: там новый вопрос и новый ответ по нему.
+                # Порядок важен: кэш стоит ПОСЛЕ анти-лавинового барьера ниже —
+                # повтор одного и того же текста тоже должен попадать в счётчик.
+                essay_text = payload.get("text")
                 # Анти-лавиновый барьер (ai.ai_take), а не гейт для ученика:
                 # продуктовый бюджет ниже (5 проверок в сутки с цепочкой) уже
                 # мерит честный путь, поэтому потолки здесь заведомо выше
@@ -8217,6 +8263,34 @@ class Handler(BaseHTTPRequestHandler):
                                     "retryAfter": retry_after}, 429, token=token,
                                    headers={"Retry-After": str(retry_after)})
                     return
+                if not note and format_id == "essay" and isinstance(essay_text, str):
+                    cached = load_essay_check(conn, user_id, subject_now, essay_text,
+                                              rubric=_AI.ESSAY_RUBRIC_VERSION)
+                    if cached is not None:
+                        # Запись о проверке уже есть — переписывать нечего,
+                        # только привязать submission, если клиент прислал id.
+                        bound = None
+                        raw_cid = payload.get("clientId", payload.get("client_id"))
+                        if isinstance(raw_cid, str) and raw_cid.strip() and len(raw_cid.strip()) <= 200:
+                            try:
+                                bound = save_essay_evaluation(
+                                    conn, user_id, subject_now,
+                                    {"clientId": raw_cid.strip(), "status": "ready"})
+                            except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
+                                bound = None
+                        payload_out = {"ok": True, "format": format_id, "result": cached["result"]}
+                        if bound is not None:
+                            payload_out["submission"] = bound
+                        self.send_json(payload_out, token=token)
+                        return
+                # Детерминированные гейты («переписан исходник», «текст из
+                # повторов») не требуют модели: считаем их ДО списания бюджета,
+                # чтобы ученик не платил жетоном за ноль, который и так известен.
+                # Прогон повторяется внутри run_format — он чистый, стоит
+                # миллисекунды и всегда даёт тот же вердикт.
+                precheck = (_AI.essay_precheck(essay_text, source_text)
+                            if format_id == "essay" and isinstance(essay_text, str) else None)
+                needs_model = precheck is None
                 # Продуктовый бюджет (5 проверок, цепочечная зарядка 8 часов
                 # + антиабуз по устройству для свежих аккаунтов): резервируем
                 # ДО вызова модели — деньги провайдера защищает резервация.
@@ -8227,10 +8301,11 @@ class Handler(BaseHTTPRequestHandler):
                 # уменьшен, проверки нет, а refund никто не зовёт. Флаг
                 # взводится только в точке невозврата (запись stored для essay,
                 # ответ модели для остальных форматов); finally возвращает
-                # ровно один раз и только при неуспехе.
+                # ровно один раз и только при неуспехе. Если модель не нужна
+                # (проверка решена детерминированно) — не резервируем вовсе.
                 fp_key, fp_net = ai_usage_device_fp(conn, self)
-                usage_owners = ai_usage_try_reserve(conn, user_id, fp_key, fp_net)
-                if usage_owners is None:
+                usage_owners = ai_usage_try_reserve(conn, user_id, fp_key, fp_net) if needs_model else None
+                if needs_model and usage_owners is None:
                     st = ai_usage_status(conn, user_id, fp_key, fp_net)
                     retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
                     self.send_json({"error": "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся.",
@@ -8243,7 +8318,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     try:
                         result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem,
-                                                reviewer_note=note)
+                                                reviewer_note=note, source_text=source_text)
                     except _AI.AIInputError as exc:
                         # Наш ввод, наш 400: повтор не поможет.
                         self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
@@ -8312,8 +8387,10 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     # Точка невозврата — usage_spent выше: проверка состоялась
                     # (модель ответила, запись stored для essay). Всё остальное —
-                    # неуспех, жетон возвращается ровно один раз.
-                    if not usage_spent:
+                    # неуспех, жетон возвращается ровно один раз. Если модель
+                    # не вызывалась (детерминированный вердикт), резервировать
+                    # было нечего и возвращать тоже.
+                    if usage_owners and not usage_spent:
                         ai_usage_refund(conn, usage_owners)
             except sqlite3.Error as exc:
                 try: conn.rollback()
@@ -8679,6 +8756,8 @@ class Handler(BaseHTTPRequestHandler):
         if suffix in (".html",):
             cache_control = "no-cache"
         elif rel.parts and rel.parts[0] in ("vendor", "assets"):
+            # Версии статики держатся в имени файла, поэтому год в кэше: после
+            # деплоя браузер обязан взять новую ссылку, а не год держать старую.
             cache_control = "public, max-age=31536000, immutable"
         else:
             cache_control = "no-cache"

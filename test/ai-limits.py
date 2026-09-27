@@ -129,6 +129,27 @@ def words(n, w="слово"):
     return " ".join([w] * n)
 
 
+# Тексты для настоящих проверок. Два требования, и оба от бюджета:
+# работа не должна быть набрана повторами (иначе её честно обнулит детер­
+# минированный гейт и модель не позовётся) и каждая проверка должна быть
+# СВОЕЙ (одинаковый текст по новым правилам берётся из кэша, жетон не тратится,
+# и бюджет было бы нечем мерить). Поэтому текст всегда новый и разнообразный.
+_POOL = ("память детство пример позиция автор текст отношение связь вывод "
+         "вопрос письмо сад война город книга голос долг выбор имя слово вера "
+         "совесть путь дом смерть время труд").split()
+_CHECK_SEQ = [0]
+
+
+def fresh_text(n=200):
+    _CHECK_SEQ[0] += 1
+    seq = _CHECK_SEQ[0]
+    out = []
+    for i in range(n):
+        base = _POOL[i % len(_POOL)]
+        out.append(base if seq == 1 and i < len(_POOL) else f"{base}-{seq}-{i // len(_POOL)}")
+    return " ".join(out)
+
+
 def model_payload():
     criteria = []
     for cid, name, mx in (("K1", "Позиция автора", 1), ("K2", "Комментарий", 3),
@@ -215,7 +236,7 @@ def main():
 
         def ai_check(client, text=None):
             return client.request(base, "POST", "/api/ai/essay",
-                                  {"text": text if text is not None else words(200),
+                                  {"text": text if text is not None else fresh_text(200),
                                    "taskId": "re27_1", "subject": "russian"})
 
         try:
