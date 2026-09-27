@@ -3614,7 +3614,7 @@ function sessionAnswerAreaHtml(t, S) {
     <div class="session-tools">
       <span id="hintControl"></span>
       ${isSingleEssaySession()
-        ? (sessionTaskWritten(t.id) ? "" : `<button class="btn btn--ghost btn--sm" onclick="essayTakeAnother()">Взять другое →</button>`)
+        ? (sessionTaskWritten(t.id) ? "" : `<button class="btn btn--ghost btn--sm" onclick="askEssayTakeAnother()">Взять другое →</button>`)
         : `<button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>`}
       <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">за проверенное сочинение: 100–500 XP по баллам</span>
     </div>
@@ -4770,8 +4770,12 @@ function aiLimitsNoteSpend() {
    в профиле и модалок перепроверки на ege-result.html. Два режима одного окна:
    продуктовый (429 AI_LIMIT: «0 из limit», таймер 8-часовой цепочки; по нулю
    переспрашиваем сервер — вернувшаяся проверка просто закрывает окно, черновик
-   в практике цел, отправка повторяется кнопкой) и burst (голый 429 бакета
-   всплесков: короткий отсчёт retryAfter, по нулю окно закрывается само).
+   в практике цел, отправка повторяется кнопкой) и burst (голый 429
+   анти-лавиновой сетки ai_take: суточный отсчёт retryAfter, по нулю окно
+   закрывается само). Burst — аварийная страховка, а не бытовой сценарий:
+   потолки сетки (20 проверок в сутки на человека) выше продуктового лимита,
+   поэтому весь дневной запас можно потратить за один присест, и обычный
+   ученик это окно не видит.
    Других мест про лимит нет: внутри практики оба 429 идут сюда, отдельных
    inline-блоков «Проверка не удалась / Слишком много проверок» больше нет. */
 let aiLimitTickTimer = null;

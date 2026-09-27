@@ -173,15 +173,32 @@ class AIFormatError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Per-caller budget
+# Per-caller budget — the anti-runaway NET, not a student gate
 #
 # The generic /api/ bucket allows 300 req/min per IP, which is survivable for
-# SQLite but ruinous for a metered model: one script would drain the balance in
-# minutes. The AI bucket is per user, much tighter, and tunable, because the
-# right number depends on the price the operator signed up for.
+# SQLite but ruinous for a metered model. This layer sits above the product
+# budget (ai_usage in SQLite: 5 checks/day, chained refill) and exists only so
+# that nothing can run away with the provider's balance. The product budget
+# already meters the honest path, therefore the numbers here are deliberately
+# LOOSER than any real student can reach: spending the whole daily budget in one
+# sitting is allowed (and then again as the chain refills), the net only bites a
+# script. A net that a real student can trip is a bug, not safety — it shows up
+# as "Слишком частые запросы" while the daily counter still reads "5 из 5".
+#
+# Two keys, two caps, because they stop different things:
+# - user (AI_RATE_MAX, 20/rolling day): one person, one account. A student's
+#   own ceiling is ~8 checks/day (5 at once + one per 8h chain refill), so 20
+#   leaves 2.5x headroom.
+# - network (AI_NET_RATE_MAX, 120/rolling day): the only net left for account
+#   farming, because the device-fingerprint budget is deliberately skipped for
+#   accounts older than a day (EGE_AI_USAGE_DEVICE_TRUST_SEC) — a farmer waits a
+#   day per account and then farms with the IP key as the sole cap. It must stay
+#   generous: a school or a mobile carrier puts a whole class behind one
+#   address, and blocking a class costs more than a farmer's morning costs.
 # ---------------------------------------------------------------------------
-AI_RATE_MAX = int(_env("EGE_AI_RATE_MAX", default="6") or 6)
-AI_RATE_WINDOW_SEC = float(_env("EGE_AI_RATE_WINDOW_SEC", default="3600") or 3600)
+AI_RATE_MAX = int(_env("EGE_AI_RATE_MAX", default="20") or 20)
+AI_NET_RATE_MAX = int(_env("EGE_AI_NET_RATE_MAX", default="120") or 120)
+AI_RATE_WINDOW_SEC = float(_env("EGE_AI_RATE_WINDOW_SEC", default="86400") or 86400)
 _ai_hits: dict[str, list[float]] = {}
 _ai_lock = threading.Lock()
 # Upstream calls hold a worker thread for the whole round-trip; cap the
@@ -197,7 +214,26 @@ def ai_rate_ok(caller: str) -> tuple[bool, int]:
     return allowed, retry
 
 
-def ai_take(keys: list[str], count: int = 1) -> tuple[bool, int]:
+def _bucket_key(key) -> tuple[str, int]:
+    """(bucket name, its cap) for one ai_take key.
+
+    A plain string takes the shared cap (AI_RATE_MAX); a `(name, cap)` pair sets
+    its own. The per-call cap is what lets a shared address (school, carrier
+    NAT) keep a generous allowance while a single account stays tight.
+    """
+    if isinstance(key, (tuple, list)):
+        name = str(key[0] or "?") if len(key) else "?"
+        cap = key[1] if len(key) > 1 else AI_RATE_MAX
+    else:
+        name, cap = str(key or "?"), AI_RATE_MAX
+    try:
+        cap = max(1, int(cap))
+    except (TypeError, ValueError):
+        cap = AI_RATE_MAX
+    return name, cap
+
+
+def ai_take(keys: list, count: int = 1) -> tuple[bool, int]:
     """Charge `count` AI calls against every key at once.
 
     A per-user bucket alone is not a limit: the cookie is the only proof of
@@ -207,7 +243,7 @@ def ai_take(keys: list[str], count: int = 1) -> tuple[bool, int]:
     never burns one bucket while leaving the other intact. Multi-call formats
     (assessment plus a possible calibration, see charges_for) reserve the whole
     cost atomically: either every key affords all `count` charges or nothing
-    is spent.
+    is spent. See _bucket_key for the per-key cap form.
     """
     try:
         count = max(1, int(count))
@@ -218,9 +254,9 @@ def ai_take(keys: list[str], count: int = 1) -> tuple[bool, int]:
         with _ai_lock:
             buckets: dict[str, list[float]] = {}
             for key in keys:
-                name = str(key or "?")
+                name, cap = _bucket_key(key)
                 recent = [t for t in _ai_hits.get(name, []) if now - t < AI_RATE_WINDOW_SEC]
-                if len(recent) + count > AI_RATE_MAX:
+                if len(recent) + count > cap:
                     return False, max(1, int(AI_RATE_WINDOW_SEC - (now - recent[0]))) if recent else 1
                 buckets[name] = recent
             for name, recent in buckets.items():

@@ -321,6 +321,46 @@ def test_rate_limit(ai) -> None:
     check("сброс работает", ai.ai_take(["user:1"])[0] is True)
 
 
+def test_burst_net(ai) -> None:
+    section("anti-runaway net: потолок по ключу и «весь дневной бюджет за раз»")
+    # EGE_AI_RATE_MAX=3 в этом файле — глобальный потолок для ключа-строки.
+    ai.reset_ai_rate()
+    ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX = 20, 120
+    try:
+        # Продуктовый лимит — 5 проверок в сутки. Ученик, который честно
+        # потратил весь запас одним присестом (и потом ещё по жетону каждые
+        # 8 часов), анти-лавиновую сетку задеть не может: 8 < 20.
+        spent = [ai.ai_take([("user:daily", ai.AI_RATE_MAX)], ai.charges_for("essay"))[0]
+                 for _ in range(5)]
+        check("5 проверок подряд в один присест проходят",
+              spent == [True] * 5, str(spent))
+        check("ещё 3 (полная цепочка за сутки) — тоже проходят",
+              all(ai.ai_take([("user:daily", ai.AI_RATE_MAX)], 1)[0] for _ in range(3)))
+        check("до потолка 20 сутки свободно (20-8 = 12 запасных)",
+              all(ai.ai_take([("user:daily", ai.AI_RATE_MAX)], 1)[0] for _ in range(12)))
+        check("21-я за сутки отклоняется — сценарий упирается в сеть",
+              ai.ai_take([("user:daily", ai.AI_RATE_MAX)])[0] is False)
+        check("отказ не сжёг бюджет сети: другой адрес не затронут",
+              ai.ai_take([("ip:10.0.0.9", ai.AI_NET_RATE_MAX)])[0] is True)
+
+        # Свой потолок у ключа: за одним адресом школа/оператор, общий потолок
+        # из 20 проверок в сутки заблокировал бы целый класс.
+        ai.reset_ai_rate()
+        for index in range(120):
+            if not ai.ai_take([("ip:class", ai.AI_NET_RATE_MAX)])[0]:
+                check("сеть: 120 проверок в сутки проходят", False, f"заблокирована на {index + 1}")
+                return
+        check("сеть: 120 проверок в сутки проходят (4 класса за адресом)", True)
+        check("121-я по сети отклонена", ai.ai_take([("ip:class", ai.AI_NET_RATE_MAX)])[0] is False)
+        check("пользователь сети не заблокирован её потолком",
+              ai.ai_take(["user:ok"])[0] is True)
+        check("битый потолок в ключе не роняет бакет (падает на общий)",
+              ai.ai_take([("ip:broken", "не число")])[0] is True)
+    finally:
+        ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX = 3, 120
+        ai.reset_ai_rate()
+
+
 def test_charges(ai) -> None:
     section("charges_for/ai_take(count): проверка стоит один вызов")
     check("essay стоит 1 (оценка; вето и грамотность — без модели)",
@@ -1029,6 +1069,7 @@ def main() -> int:
     test_extract_json(ai)
     test_validate(ai)
     test_rate_limit(ai)
+    test_burst_net(ai)
     test_charges(ai)
     test_run_format_input(ai)
     test_grammar(ai)

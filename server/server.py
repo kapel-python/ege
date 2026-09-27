@@ -8195,19 +8195,23 @@ class Handler(BaseHTTPRequestHandler):
                 note = note.strip()
                 if len(note) > _AI.ESSAY_RECHECK_NOTE_MAX:
                     self.send_json({"error": f"Замечание слишком длинное (максимум {_AI.ESSAY_RECHECK_NOTE_MAX} символов)"}, 400, token=token); return
-                # Metered call: a much tighter bucket than the generic API one.
-                # Counted per user AND per IP — the cookie is the only proof of
-                # identity, so a client that stops sending it would otherwise
-                # mint a fresh guest and a fresh budget on every request.
-                # Сочинение резервирует сразу два вызова (оценка + возможная
-                # калибровка итога, см. _AI.charges_for): начатая проверка не
-                # должна упереться в пустой бюджет посередине.
+                # Анти-лавиновый барьер (ai.ai_take), а не гейт для ученика:
+                # продуктовый бюджет ниже (5 проверок в сутки с цепочкой) уже
+                # мерит честный путь, поэтому потолки здесь заведомо выше
+                # любого живого человека — потратить весь дневной запас за
+                # один присест можно. Считаем по пользователю И по сети: кука
+                # — единственное доказательство личности, поэтому клиент без
+                # неё получил бы нового гостя (и новый бюджет) на каждый
+                # запрос. У сети свой, более щедрый потолок (AI_NET_RATE_MAX):
+                # за одним адресом школа или мобильный оператор, и заблокировать
+                # класс дороже, чем позволить фермеру одно утро.
                 try:
                     ip = support_client_ip(self)
                 except Exception:
                     ip = "?"
-                allowed, retry_after = _AI.ai_take([f"user:{user_id}", f"ip:{ip}"],
-                                                   _AI.charges_for(format_id))
+                allowed, retry_after = _AI.ai_take(
+                    [(f"user:{user_id}", _AI.AI_RATE_MAX), (f"ip:{ip}", _AI.AI_NET_RATE_MAX)],
+                    _AI.charges_for(format_id))
                 if not allowed:
                     self.send_json({"error": "Слишком много проверок. Попробуй позже.",
                                     "retryAfter": retry_after}, 429, token=token,
