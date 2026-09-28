@@ -8657,10 +8657,16 @@ class Handler(BaseHTTPRequestHandler):
                 usage_spent = False
                 try:
                     try:
+                        # Имя для обращения модели берём из профиля: пустое —
+                        # нейтральный режим без угадывания пола.
+                        name_row = conn.execute("SELECT name FROM users WHERE id=?",
+                                                (user_id,)).fetchone()
+                        student_name = str((name_row["name"] if name_row else "") or "").strip()
                         result = _ai_check_with_retry(
                             format_id, payload.get("text"), user_id=user_id, ip=ip,
                             source=mode, problem=problem,
-                            reviewer_note=note, source_text=source_text)
+                            reviewer_note=note, source_text=source_text,
+                            student_name=student_name)
                     except _AI.AIInputError as exc:
                         # Наш ввод, наш 400: повтор не поможет.
                         self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
