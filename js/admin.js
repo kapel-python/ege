@@ -884,6 +884,7 @@ async function screenUser(ref) {
         <div class="a-user-head__actions">
           <button class="btn btn--soft btn--sm" id="editProfileBtn">Профиль</button>
           <button class="btn btn--soft btn--sm" id="grantXpBtn"${locked ? " disabled title=\"XP появятся вместе с материалами предмета\"" : ""}>± XP</button>
+          <button class="btn btn--soft btn--sm" id="aiLimitBtn">Проверки сочинений</button>
           <button class="btn btn--soft btn--sm" id="blockBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя заблокировать собственный аккаунт\"" : ""}>${p.block ? "Разблокировать" : "Заблокировать"}</button>
           <button class="btn btn--danger-soft btn--sm" id="resetBtn">Сброс…</button>
           <button class="btn btn--danger-soft btn--sm" id="deleteBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя удалить собственный аккаунт\"" : ""}>Удалить</button>
@@ -1172,6 +1173,73 @@ function bindUserActions(p) {
           if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
           modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
         }
+      };
+    });
+  };
+
+  document.getElementById("aiLimitBtn").onclick = () => {
+    const cur = p.aiLimit || {};
+    const remaining = Number.isFinite(Number(cur.remaining)) ? Number(cur.remaining) : 0;
+    const limit = Number.isFinite(Number(cur.limit)) ? Number(cur.limit) : 5;
+    const custom = cur.customLimit;
+    const resetNote = cur.resetInSec != null
+      ? `, следующая вернётся через ${fmtDuration(cur.resetInSec)}`
+      : " — все на месте";
+    const customNote = custom != null
+      ? ` Выдано вручную: всего ${custom} вместо обычных 5.`
+      : "";
+    openModal(`
+      <div class="a-modal__title">Проверки сочинений — ${esc(p.accountId || "")}</div>
+      <div class="a-modal__desc">Сейчас ученику доступно <b>${remaining} из ${limit}</b>${resetNote}. Каждая потраченная проверка возвращается через 8 часов.${customNote}</div>
+      <div class="a-modal__form">
+        <div class="a-field"><label>Доступно сейчас (0–1000)</label><input class="a-input mono" id="fAiRemaining" type="number" min="0" max="1000" step="1" value="${remaining}"></div>
+        <div class="a-field"><label>Всего выдавать (пусто — не менять)</label><input class="a-input mono" id="fAiLimit" type="number" min="0" max="1000" step="1" placeholder="${limit}"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button type="button" class="btn btn--soft btn--sm" id="mRefill">Выдать все</button>
+          <button type="button" class="btn btn--soft btn--sm" id="mZero">Забрать все</button>
+          <button type="button" class="btn btn--soft btn--sm" id="mStd">Вернуть обычные 5</button>
+        </div>
+        <div id="mErr"></div>
+      </div>
+      <div class="a-modal__actions">
+        <button class="btn btn--soft" id="mCancel">Отмена</button>
+        <button class="btn btn--primary" id="mSave">Применить</button>
+      </div>`, (modal) => {
+      modal.querySelector("#mCancel").onclick = closeModal;
+      const err = (msg) => { modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(msg)}</div>`; };
+      const send = async (body, btn) => {
+        if (btn) btn.disabled = true;
+        try {
+          const res = await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/ailimit`, body);
+          closeModal();
+          const st = res.aiLimit || {};
+          toast(`Проверок доступно: ${st.remaining} из ${st.limit}`);
+          reload();
+        } catch (e) {
+          if (btn) btn.disabled = false;
+          if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+          err(e.message);
+        }
+      };
+      modal.querySelector("#mRefill").onclick = (ev) => send({ refill: true }, ev.target);
+      modal.querySelector("#mZero").onclick = (ev) => send({ remaining: 0 }, ev.target);
+      modal.querySelector("#mStd").onclick = (ev) => send({ limit: null, refill: true }, ev.target);
+      modal.querySelector("#mSave").onclick = async (ev) => {
+        const rawRem = modal.querySelector("#fAiRemaining").value.trim();
+        const rawLim = modal.querySelector("#fAiLimit").value.trim();
+        const body = {};
+        if (rawLim !== "") {
+          const v = parseInt(rawLim, 10);
+          if (!Number.isFinite(v) || v < 0 || v > 1000) { err("«Всего выдавать»: число 0–1000"); return; }
+          body.limit = v;
+        }
+        if (rawRem !== "") {
+          const v = parseInt(rawRem, 10);
+          if (!Number.isFinite(v) || v < 0 || v > 1000) { err("«Доступно сейчас»: число 0–1000"); return; }
+          body.remaining = v;
+        }
+        if (!("limit" in body) && !("remaining" in body)) { err("Укажите, сколько выдать"); return; }
+        await send(body, ev.target);
       };
     });
   };
