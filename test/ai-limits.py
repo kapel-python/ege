@@ -375,8 +375,13 @@ def main():
             check("мусорный ответ модели -> 502", status == 502, f"{status} {body}")
             status, _, st = limits(c)
             check("502 формата вернул резервацию", st.get("remaining") == 5, str(st))
-            check("все 4 сбоя дошли до модели, но не списались",
-                  model_calls["n"] == before + 3, str(model_calls["n"]))
+            check("все 3 сбоя дошли до модели, но не списались ни одного жетона",
+                  st.get("remaining") == 5, str(st))
+            # Повтор удваивает обращения к модели ровно у тех сбоев, которые
+            # повторяемы: 402 (AIError) и мусорный ответ (AIFormatError) — по
+            # два вызова, недоступность провайдера (AIUnavailable) — один.
+            check("повтор ровно у повторяемых сбоев: 2 + 1 + 2",
+                  model_calls["n"] == before + 5, str(model_calls["n"] - before))
             ai.chat = good_chat
             before = model_calls["n"]
             status, _, body = ai_check(c, text="  ")

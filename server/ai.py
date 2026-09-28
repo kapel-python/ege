@@ -207,6 +207,18 @@ AI_MAX_CONCURRENCY = int(_env("EGE_AI_MAX_CONCURRENCY", default="2") or 2)
 _ai_slots = threading.Semaphore(AI_MAX_CONCURRENCY)
 AI_SLOT_WAIT_SEC = float(_env("EGE_AI_SLOT_WAIT_SEC", default="3") or 3)
 
+# Сколько раз одна проверка пробует обратиться к модели, прежде чем ученику
+# показывают ошибку. Второй вызов НЕВИДИМ: клиент ждёт без таймаута и крутит
+# тексты загрузчика, поэтому человек просто ждёт дольше. Жетон при этом не
+# тратится ни разу — резервация одна, точка невозврата наступает только после
+# записи проверки, так что любой неуспех возвращает её целиком; повтор платит
+# провайдер, не ученик.
+AI_CHECK_ATTEMPTS = int(_env("EGE_AI_CHECK_ATTEMPTS", default="2") or 2)
+# Потолок суммарного ожидания, после которого повтор бессмысленен: если первая
+# попытка уже заняла столько, времени не уйдёт, а деньги провайдера уйдут.
+# Реальные прогоны занимают 10-21 с, потолок вызова — EGE_AI_TIMEOUT_SEC.
+AI_RETRY_BUDGET_SEC = float(_env("EGE_AI_RETRY_BUDGET_SEC", default="45") or 45)
+
 
 def ai_rate_ok(caller: str) -> tuple[bool, int]:
     """(allowed, seconds_until_reset) for one AI call by `caller`."""

@@ -2775,6 +2775,40 @@ def essay_text_hash(text: str) -> str:
     return hashlib.sha256(normalize_essay_text(text).encode("utf-8")).hexdigest()
 
 
+def _ai_check_with_retry(format_id: str, text, *, user_id: int, ip: str, **kwargs):
+    """Проверка с одним невидимым повтором, если модель не отдала результат.
+
+    Повторяются ТОЛЬКО те сбои, которые могут повториться сами: модель ответила
+    не по контракту (AIFormatError — живой случай 28.09: вместо числа пришло
+    слово, и ученик получал 502) или упала на транспорте (AIError). Наш ввод
+    (AIInputError) от повтора не станет валиднее, а недоступность инфраструктуры
+    (AIUnavailable — LanguageTool лежит или провайдер не настроен) требует
+    времени, а не второй попытки.
+
+    Жетон не списывается ни разу: резервация одна, точка невозврата наступает
+    только после записи проверки, поэтому любой неуспех возвращает её целиком.
+    Повтор — это ещё один реальный вызов провайдера, поэтому и анти-лавиновую
+    сетку он увидит; если сетка не даёт, повтор не делаем и отдаём исходную
+    ошибку. Суммарное ожидание ограничено бюджетом: клиент ждёт без таймаута,
+    но человек не бесконечно.
+    """
+    attempts = max(1, int(_AI.AI_CHECK_ATTEMPTS))
+    started = time.monotonic()
+    failure: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return _AI.run_format(format_id, text, **kwargs)
+        except (_AI.AIFormatError, _AI.AIError) as exc:
+            failure = exc
+            if attempt >= attempts or time.monotonic() - started >= _AI.AI_RETRY_BUDGET_SEC:
+                break
+            allowed, _retry_after = _AI.ai_take(
+                [(f"user:{user_id}", _AI.AI_RATE_MAX), (f"ip:{ip}", _AI.AI_NET_RATE_MAX)], 1)
+            if not allowed:
+                break
+    raise failure  # noqa: B904 — повторяем ровно то, что поймали
+
+
 def _validated_essay_result(result) -> dict:
     """Проверить форму отчёта о проверке и вернуть его с пересчитанным итогом.
 
@@ -8317,8 +8351,10 @@ class Handler(BaseHTTPRequestHandler):
                 usage_spent = False
                 try:
                     try:
-                        result = _AI.run_format(format_id, payload.get("text"), source=mode, problem=problem,
-                                                reviewer_note=note, source_text=source_text)
+                        result = _ai_check_with_retry(
+                            format_id, payload.get("text"), user_id=user_id, ip=ip,
+                            source=mode, problem=problem,
+                            reviewer_note=note, source_text=source_text)
                     except _AI.AIInputError as exc:
                         # Наш ввод, наш 400: повтор не поможет.
                         self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return

@@ -1056,20 +1056,81 @@ def test_endpoint(server) -> None:
         def boom(messages, **kwargs):
             raise ai.AIUnavailable("AI не настроен")
         ai.chat = boom
+        ai.reset_ai_rate()
         status, _, body = post({"text": "Моё сочинение."})
         check("провайдер недоступен -> 503", status == 503, f"{status} {body}")
         check("внутренняя причина не утёкла", "AI не настроен" not in json.dumps(body, ensure_ascii=False))
         ai.reset_ai_rate()
 
+        # Повтор внутри одного запроса: модель сорвалась один раз — ученик не
+        # видит ошибки и просто ждёт дольше. Живой случай 28.09: вместо числа
+        # модель прислала слово, и проверка падала в 502. Списать ученику за
+        # сорванную попытку нельзя: списание одно, и оно за результат, а не за
+        # число попыток.
+        retry_text = " ".join([LONG_TEXT, "И ещё несколько слов для уникальности этого текста."])
+        calls = {"n": 0}
+
+        def flaky(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ai.AIFormatError("критерий K1: баллы не числа")
+            return json.dumps(valid_payload(), ensure_ascii=False)
+
+        ai.chat = flaky
+        ai.reset_ai_rate()
+        _, _, before = request_json(base + "/api/ai/limits", method="GET", cookie=jar)
+        status, _, body = post({"text": retry_text})
+        _, _, after = request_json(base + "/api/ai/limits", method="GET", cookie=jar)
+        check("сбой модели один раз -> 200 с результатом",
+              status == 200 and body.get("result", {}).get("total_score") == 19,
+              f"{status} {str(body)[:160]}")
+        check("модель позвана дважды, повтор невидим ученику", calls["n"] == 2, str(calls["n"]))
+        check("списан ровно один жетон, а не два (сорванная попытка бесплатна)",
+              after.get("remaining") == before.get("remaining") - 1,
+              f"{before.get('remaining')} -> {after.get('remaining')}")
+
+        # Повтор не помогает, если модель сорвалась оба раза: 502 как раньше,
+        # и жетон возвращён целиком.
+        calls["n"] = 0
+
+        def flaky_twice(messages, **kwargs):
+            calls["n"] += 1
+            raise ai.AIFormatError("критерий K1: баллы не числа")
+
+        ai.chat = flaky_twice
+        ai.reset_ai_rate()
+        _, _, before = request_json(base + "/api/ai/limits", method="GET", cookie=jar)
+        status, _, body = post({"text": retry_text + " Ещё немного."})
+        _, _, after = request_json(base + "/api/ai/limits", method="GET", cookie=jar)
+        check("два сбоя подряд -> 502", status == 502, f"{status} {str(body)[:160]}")
+        check("модель позвана дважды и не больше", calls["n"] == 2, str(calls["n"]))
+        check("после двух сбоев жетон возвращён",
+              before.get("remaining") == after.get("remaining"),
+              f"{before.get('remaining')} -> {after.get('remaining')}")
+        ai.chat = lambda messages, **kw: json.dumps(valid_payload(), ensure_ascii=False)
+        ai.reset_ai_rate()
+
         # LanguageTool недоступен, а модель ответила: ответа всё равно нет —
         # 503, а не «оценка без грамотности». Без блока К7–К10 итог на 22
-        # собрать нельзя, а подменять его нельзя.
-        ai.chat = lambda messages, **kw: json.dumps(valid_payload(), ensure_ascii=False)
+        # собрать нельзя, а подменять его нельзя. Повтора тут нет: недоступность
+        # инфраструктуры требует времени, а не второй попытки, и второй вызов
+        # модели только зря потратит деньги.
+        calls = {"n": 0}
+
+        def counted(messages, **kwargs):
+            calls["n"] += 1
+            return json.dumps(valid_payload(), ensure_ascii=False)
+
+        ai.chat = counted
         def lt_dead(text):
             raise ai.AIUnavailable("проверка грамотности недоступна: URLError")
         ai.lt_check = lt_dead
+        ai.reset_ai_rate()
         status, _, body = post({"text": "Моё сочинение."})
         check("отказ LanguageTool -> 503", status == 503, f"{status} {body}")
+        check("на недоступности LanguageTool модель зовётся один раз",
+              calls["n"] == 1, str(calls["n"]))
+        ai.chat = lambda messages, **kw: json.dumps(valid_payload(), ensure_ascii=False)
         ai.lt_check = lambda text: []
         ai.reset_ai_rate()
 
