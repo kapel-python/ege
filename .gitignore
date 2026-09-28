@@ -8,7 +8,8 @@ server/*.bak-*
 server/*.corrupt-*
 server/*.pre-restore-*
 server/backups/
-/ege.sqlite3
+/*.sqlite3*
+*.pid
 .ege-2026.pid*
 /hermes-webui/
 
@@ -61,7 +62,16 @@ logs/
 
 # Editors and operating systems
 .claude/settings.local.json
+.claude/settings.json
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Merge / patch leftovers
+*.orig
+*.rej
+*.bak
+
+# Local one-off preview/agent scratch pages
+/agent-loader-preview.html

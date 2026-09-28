@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Lint (py_compile)
+        run: python3 -m py_compile server/server.py server/ai.py server/backup.py
+
+      # Self-contained node suites: no live server, no browser.
+      - name: Node tests
+        run: |
+          for t in smoke seo recommender auth-merge forecast onboarding-flow \
+                   tab-leader lesson-timer deeplinks route-hardening css-cascade \
+                   essay-words subject-switch subject-ui russian-subject source-block \
+                   ai-limits-modal essay-nav; do
+            echo "--- node test/$t.js"
+            node "test/$t.js"
+          done
+
+      # Every python suite builds its own temp DB and its own server; none
+      # touches the production database.
+      - name: Python tests
+        run: |
+          for t in support-message russian-subject auth auth-audit device-dedup \
+                   guest-onboarding onboard-subject subject-profile subject-contract \
+                   subject-auth domain-state occ backup-hygiene http-edges \
+                   essay-submission store-save-e2e admin-inbox admin-block \
+                   admin-inbox-security adversarial ai-essay ai-failover ai-limits \
+                   essay-pipeline; do
+            echo "--- python test/$t.py"
+            python3 "test/$t.py"
+          done

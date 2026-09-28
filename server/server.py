@@ -356,7 +356,11 @@ def subjects_payload() -> list:
 # Admin access
 #
 # The admin password is never stored or transmitted in plaintext: the server
-# keeps only a PBKDF2-SHA256 hash (override via EGE_ADMIN_PASSWORD_HASH).
+# keeps only a PBKDF2-SHA256 hash. There is deliberately NO built-in fallback
+# hash: EGE_ADMIN_PASSWORD_HASH must be set in the environment or the server
+# refuses to start. A public repository must not ship a usable admin
+# credential — offline brute-forcing a published PBKDF2 hash is not limited
+# by the in-app login throttle.
 # A successful login creates a server-side admin session row bound to the
 # internal users.id of the *current* account; the browser receives only a
 # random opaque token in an HttpOnly cookie. Verification on every admin API
@@ -366,10 +370,7 @@ def subjects_payload() -> list:
 # sessions. This is deliberately separate from the user session system:
 # holding an ege_session never implies admin rights.
 # ---------------------------------------------------------------------------
-ADMIN_PASSWORD_HASH = os.environ.get(
-    "EGE_ADMIN_PASSWORD_HASH",
-    "pbkdf2_sha256$210000$<redacted-dev-salt>$<redacted-dev-hash>",
-)
+ADMIN_PASSWORD_HASH = os.environ.get("EGE_ADMIN_PASSWORD_HASH", "")
 ADMIN_COOKIE_NAME = "ege_admin"
 ADMIN_SESSION_DAYS = 30
 ADMIN_SESSION_MAX_AGE = ADMIN_SESSION_DAYS * 86400
@@ -9368,6 +9369,13 @@ if __name__ == "__main__":
         if any(a == "--backup-now" or a == "--list-backups" or a == "--restore"
                or a.startswith("--restore=") for a in sys.argv[1:]):
             return run_backup_cli(sys.argv[1:])
+        if not ADMIN_PASSWORD_HASH:
+            raise RuntimeError(
+                "EGE_ADMIN_PASSWORD_HASH is not set — refusing to start. "
+                "Generate a PBKDF2-SHA256 hash and export it before launch "
+                "(see deploy/ege-2026.env.example for the one-liner). "
+                "A built-in fallback hash is intentionally absent."
+            )
         # A manual invocation becomes a restart request when systemd already
         # owns the service.  The service itself is marked as supervised, so it
         # never recursively restarts itself.

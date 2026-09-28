@@ -96,5 +96,24 @@ node test/russian-subject.js
 python3 -m py_compile server/server.py server/backup.py
 ```
 
-Это быстрый минимум. Полный регрессионный гейт (14 node + 17 python сьютов,
+Это быстрый минимум. Полный регрессионный гейт (18 node + 24 python сьютов,
 включая adversarial и безопасность админки) описан в `AGENTS.md`.
+
+Полный гейт гоняется в CI на каждом пуше в `master` и каждом PR
+(`.github/workflows/ci.yml`): 18 node-сьютов без сервера и браузера, 24 python-сьюта
+на временных БД, плюс `py_compile`. Сьюиты, требующие живого сервера и Chromium
+(`test/security.js`, `test/admin.js`, `test/admin-inbox-ui.js`, `test/essay-visual.js`),
+в CI не входят — они остаются ручными.
+
+## Лицензия
+
+MIT — см. `LICENSE`. Вендорённые библиотеки (KaTeX, JsXGraph) тоже MIT:
+`vendor/katex/LICENSE`, `vendor/jsxgraph/LICENSE.MIT`.
+
+## Секреты
+
+Секретов в репозитории нет и быть не должно: `.env`, базы данных, бэкапы,
+скриншоты и логи исключены в `.gitignore`. Прод-конфигурация живёт в
+`/etc/ege-2026.env` (chmod 600), шаблон — `deploy/ege-2026.env.example`.
+`EGE_ADMIN_PASSWORD_HASH` обязателен: встроенного fallback-хеша в коде нет,
+без него сервер отказывается стартовать.
