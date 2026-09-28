@@ -438,10 +438,11 @@
 
     <!-- Перепроверка: только здесь, на странице результата. Все состояния
          (подтверждение, загрузка, лимит, ошибка) — единая .dlg-модалка,
-         отдельных блоков нет. -->
-    <div class="recheck-wrap rv" style="--d:480ms">
+         отдельных блоков нет. Кнопка без .rv: она должна быть видна сразу
+         после готового результата, а не ждать скролла reveal-анимации. -->
+    <div class="recheck-wrap">
       <button class="retry-btn" id="recheckBtn" type="button">Перепроверить сочинение</button>
-      <p class="recheck-meta">Не согласен с оценкой? ИИ проверит работу ещё раз — это потратит 1 проверку из лимита.</p>
+      <p class="recheck-meta">Не согласен с оценкой? Добавь уточнение — ИИ посмотрит работу заново. Без уточнения покажем сохранённый результат (это бесплатно).</p>
     </div>
   </div>
 
@@ -1001,7 +1002,8 @@ function openRecheckConfirm(status, prevNote) {
         <div class="dlg__text">
           ИИ проверит работу заново по той же рубрике задания 27: содержание (К1–К6) — модель,
           грамотность (К7–К10) — автоматическая проверка, потолки и правило объёма — как обычно.
-          Это потратит <b>1 проверку</b>: доступно <b><span class="tnum">${remaining} из ${limit}</span></b>.
+          С уточнением это потратит <b>1 проверку</b>: доступно <b><span class="tnum">${remaining} из ${limit}</span></b>.
+          Без уточнения вернём сохранённый результат — он будет тем же, лимит не потратится.
           Ниже можно добавить уточнение для проверяющего (необязательно) — например, какой критерий кажется спорным.
         </div>
         <textarea class="recheck-note" id="recheckNote" maxlength="${RECHECK_NOTE_MAX}" placeholder="Например: мне кажется, в К2 два примера с пояснениями… (необязательно)">${esc(note)}</textarea>
@@ -1122,6 +1124,46 @@ function recheckRetryFromError() {
   doRecheck(typeof openRecheckError._note === "string" ? openRecheckError._note : "");
 }
 
+function openRecheckCached(prevNote) {
+  // Без замечания сервер отдаёт сохранённый ответ (cached:true): модель не
+  // зовётся, лимит не тратится, результат тот же. Молчаливый ре-рендер +
+  // scrollTo(top) выглядел багом «выкинуло наверх без перепроверки» —
+  // поэтому показываем честное пояснение вместо вида «новой» проверки.
+  recheckLoading = false;
+  const note = typeof prevNote === "string" ? prevNote : "";
+  openRecheckModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Результат без изменений">
+        <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="dlg__eyebrow">Перепроверка сочинения</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+          </div>
+          <div class="dlg-device__name">Результат без изменений</div>
+        </div>
+        <div class="dlg__text">
+          Этот текст уже проверялся по текущей рубрике — показали сохранённый результат без изменений.
+          Лимит не потрачен. Чтобы ИИ посмотрел работу заново, добавь уточнение (какой критерий кажется спорным).
+        </div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
+          <button class="retry-btn" type="button" onclick="openRecheckCachedBack()">Добавить уточнение</button>
+        </div>
+      </div>`, true);
+  openRecheckCached._note = note;
+}
+
+function openRecheckCachedBack() {
+  // Возврат к подтверждению с тем же текстом замечания (обычно пустым):
+  // лимит сверяем заново — за время открытого окна он мог измениться.
+  const note = typeof openRecheckCached._note === "string" ? openRecheckCached._note : "";
+  recheckFetchLimits().then((st) => {
+    openRecheckConfirm(st && st.ok ? st : { limit: AI_LIMIT_FALLBACK, remaining: 1, resetInSec: null }, note);
+  });
+}
+
 async function onRecheckClick() {
   if (recheckLoading) return;
   const sub = recheckSubmission;
@@ -1193,6 +1235,10 @@ async function doRecheck(note) {
       (aiData && aiData.error) || "Сервер временно не отвечает. Проверка не списана — попробуй ещё раз.", cleanNote);
     return;
   }
+  // Флаг кэша от сервера: без замечания модель не зовётся, лимит не
+  // тратится, ответ — сохранённый. Нужен, чтобы не врать про «лимит списан»
+  // и не делать вид новой проверки молчаливым ре-рендером.
+  const wasCached = !!(aiData && aiData.cached);
   // Привязываем новый ответ модели к тому же submission: оценка берётся
   // только из серверной записи (essay_checks), клиентский result игнорируется.
   // Сервер уже мог привязать сам (clientId в /api/ai/essay выше — тогда
@@ -1215,22 +1261,26 @@ async function doRecheck(note) {
     evData = await evRes.json().catch(() => ({}));
   } catch (err) {
     openRecheckError("Отчёт не обновился",
-      "Проверка прошла, но результат не привязался. Попробуй ещё раз — лимит уже списан за эту проверку.", cleanNote);
+      wasCached
+        ? "Сохранённый результат не привязался. Попробуй ещё раз — лимит не потрачен."
+        : "Проверка прошла, но результат не привязался. Попробуй ещё раз — лимит уже списан за эту проверку.", cleanNote);
     return;
   }
   if (!evRes.ok || !evData.submission) {
     openRecheckError("Отчёт не обновился",
-      (evData && evData.error) || "Проверка прошла, но результат не сохранился. Попробуй ещё раз.", cleanNote);
+      (evData && evData.error) || (wasCached
+        ? "Сохранённый результат не сохранился. Попробуй ещё раз — лимит не потрачен."
+        : "Проверка прошла, но результат не сохранился. Попробуй ещё раз."), cleanNote);
     return;
   }
   }
   // Перечитываем готовый отчёт и рисуем заново тем же render.
   try {
     const view = await fetchFromApi();
-    recheckLoading = false;
-    closeRecheckModalForce();
     render(view);
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+    if (wasCached) openRecheckCached(cleanNote);
+    else { recheckLoading = false; closeRecheckModalForce(); }
   } catch (err) {
     openRecheckError("Отчёт не открылся",
       "Перепроверка прошла, но свежий отчёт не загрузился. Обнови страницу — новый результат уже сохранён.");

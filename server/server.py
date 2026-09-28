@@ -8312,7 +8312,12 @@ class Handler(BaseHTTPRequestHandler):
                                     {"clientId": raw_cid.strip(), "status": "ready"})
                             except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
                                 bound = None
-                        payload_out = {"ok": True, "format": format_id, "result": cached["result"]}
+                        payload_out = {"ok": True, "format": format_id, "result": cached["result"],
+                                       # Честный флаг для ege-result.html: без замечания
+                                       # перепроверки нет — показан сохранённый ответ,
+                                       # лимит не потрачен. Клиент по нему открывает
+                                       # пояснение вместо «молчаливого» ре-рендера.
+                                       "cached": True}
                         if bound is not None:
                             payload_out["submission"] = bound
                         self.send_json(payload_out, token=token)
