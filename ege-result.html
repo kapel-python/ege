@@ -1005,6 +1005,11 @@ async function fetchFromApi() {
     subject: body.submission.subject || p.subject || "",
     submissionId: body.submission.submissionId || 0,
   };
+  // История «Было → стало» живёт рядом с видом, а не внутри него: сервер
+  // отдаёт previous/checkCount полями submission. Прикладываем их к виду,
+  // иначе render() их не увидит и блок будет вечно пуст.
+  view.previous = body.submission.previous || null;
+  view.checkCount = body.submission.checkCount || 0;
   return view;
 }
 
