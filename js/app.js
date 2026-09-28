@@ -2473,7 +2473,7 @@ function screenDashboard(root) {
     ${adminInboxHTML()}
     <div class="page-head">
       <div class="page-title">Главная</div>
-      <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось ${egeCountdownLabel()}</div>
+      <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось <b>примерно ${egeCountdownLabel()}</b></div>
     </div>
 
     <div class="hero">
@@ -2700,10 +2700,16 @@ function forecastGoalNum() {
   return m ? Number(m[0]) : null;
 }
 
-/* Дата профильной математики в основной период — 8 июня.
-   Если в этом году экзамен уже прошёл, считаем до 8 июня следующего года.
-   Все расчёты — по московскому календарю (Europe/Moscow), а не по
+/* Дата экзамена — по ПРЕДМЕТУ, а не одна на всех. В основном периоде
+   большинство предметов сдают 4 июня, профильная математика — 8 июня.
+   Года наперёд ФИПИ публикует только типовой день сессии, поэтому это
+   ориентир, а не объявленное расписание: год от года день сдвигается.
+   Если в этом году экзамен уже прошёл, считаем до этой же даты следующего
+   года. Все расчёты — по московскому календарю (Europe/Moscow), а не по
    локальному часовому поясу браузера. */
+const EGE_EXAM_DAY_JUNE = { profile_math: 8 };
+const EGE_EXAM_DAY_JUNE_DEFAULT = 4;
+
 function moscowDayParts(date) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Moscow", day: "numeric", month: "numeric", year: "numeric",
@@ -2712,11 +2718,17 @@ function moscowDayParts(date) {
   return { y: get("year"), m: get("month"), d: get("day") };
 }
 
+function egeExamDayOfJune() {
+  const mapped = EGE_EXAM_DAY_JUNE[currentSubjectId()];
+  return Number.isFinite(mapped) ? mapped : EGE_EXAM_DAY_JUNE_DEFAULT;
+}
+
 function egeExamDate(from) {
   const t = moscowDayParts(from || new Date());
   const todayKey = Date.UTC(t.y, t.m - 1, t.d);
-  let examKey = Date.UTC(t.y, 5, 8);
-  if (todayKey > examKey) examKey = Date.UTC(t.y + 1, 5, 8);
+  const day = egeExamDayOfJune();
+  let examKey = Date.UTC(t.y, 5, day);
+  if (todayKey > examKey) examKey = Date.UTC(t.y + 1, 5, day);
   return new Date(examKey);
 }
 
@@ -2755,7 +2767,6 @@ function egeCountdownLabel(now) {
   if (d <= 48) return "чуть больше месяца";
   if (d <= 56) return "полтора месяца";
   if (d <= 66) return "почти 2 месяца";
-  if (d >= 350) return "почти год";
   if (d >= 168 && d <= 198) return "полгода";
   const mExact = d / 30.44;
   const r = Math.max(2, Math.round(mExact));
