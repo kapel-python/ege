@@ -1528,8 +1528,13 @@ body {
   padding: 4px 0; border: none; background: none; cursor: pointer;
   font: inherit; color: var(--text); text-align: left;
 }
+/* Заголовок переносится, а не обрезается: на телефоне «Исходный текст ·
+   автор · N слов» в одну строку не влезал, и многоточие съедало ровно
+   автора — самое важное в подписи. Перенос по пробелам сохраняет целые
+   слова, а min-width: 0 даёт заголовку сжиматься внутри флекс-строки. */
 .source-text__title {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0; overflow-wrap: break-word; word-break: normal;
+  line-height: 1.35;
   font-size: 14.5px; font-weight: 600;
 }
 .source-text__chip {
@@ -1566,6 +1571,16 @@ body {
   .source-text__bar { padding: 8px 10px 8px 14px; }
   .source-text__title { font-size: 13.5px; }
   .source-text__body { padding: 16px 18px; font-size: 16px; line-height: 1.75; }
+}
+/* Уже совсем узкий телефон: строка с подписью, чипом «Читать» и кнопкой
+   копии в одну линию не собирается — подпись съедала автора. Отдаём
+   подписи всю ширину (чип с копией уезжают на вторую строку), так что
+   «Исходный текст · автор · N слов» читается целиком и не рвётся. */
+@media (max-width: 420px) {
+  .source-text__bar { flex-wrap: wrap; row-gap: 8px; }
+  .source-text__head { flex: 1 0 100%; flex-wrap: wrap; row-gap: 8px; }
+  .source-text__title { flex: 1 0 100%; }
+  .source-text__copy { margin-left: auto; }
 }
 
 /* ---------- lessons ---------- */

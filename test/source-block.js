@@ -325,6 +325,22 @@ async function main() {
     check("стили: у блока есть и чип, и кнопка копии",
       /\.source-text__chip/.test(rules) && /\.source-text__copy/.test(rules));
     check("стили: старых .essay-source правил не осталось", !/^\.essay-source/m.test(css));
+
+    /* Подпись «Исходный текст · автор · N слов» на телефоне не влезала в
+       одну строку, и nowrap + ellipsis съедали ровно автора («Исходный
+       текст …»). Заголовок обязан переноситься, а на узком экране —
+       получать строку целиком, иначе чип снова отжимает автора. */
+    const titleRule = (css.match(/\.source-text__title \{[^}]*\}/) || [""])[0];
+    check("стили: подпись не обрезается многоточием",
+      !/white-space:\s*nowrap/.test(titleRule) && !/text-overflow:\s*ellipsis/.test(titleRule),
+      titleRule);
+    check("стили: подпись переносится по словам",
+      /overflow-wrap:\s*break-word/.test(titleRule) || /word-break:\s*break-word/.test(titleRule),
+      titleRule);
+    const narrowIdx = rules.indexOf("@media (max-width: 420px)");
+    check("стили: на узком экране подпись занимает строку целиком",
+      narrowIdx >= 0 && /\.source-text__title \{[^}]*flex:\s*1 0 100%/.test(rules.slice(narrowIdx)),
+      narrowIdx >= 0 ? rules.slice(narrowIdx, narrowIdx + 200) : "нет @media (max-width: 420px)");
   }
 
   console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
