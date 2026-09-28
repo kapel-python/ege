@@ -8330,6 +8330,12 @@ class Handler(BaseHTTPRequestHandler):
                 precheck = (_AI.essay_precheck(essay_text, source_text)
                             if format_id == "essay" and isinstance(essay_text, str) else None)
                 needs_model = precheck is None
+                # Причина детерминированного гейта (source_rewrite/low_diversity):
+                # такой вердикт не зовёт модель, не тратит лимит и не зависит
+                # от замечания — клиент по флагу показывает пояснение вместо
+                # вида «новой» проверки (иначе мгновенный тот же 0 выглядит
+                # «игнором» кнопки).
+                gate_reason = precheck.get("reason") if isinstance(precheck, dict) else None
                 # Продуктовый бюджет (5 проверок, цепочечная зарядка 8 часов
                 # + антиабуз по устройству для свежих аккаунтов): резервируем
                 # ДО вызова модели — деньги провайдера защищает резервация.
@@ -8418,10 +8424,13 @@ class Handler(BaseHTTPRequestHandler):
                                 pass
                             bound = None
                         if bound is not None:
-                            self.send_json({"ok": True, "format": format_id, "result": result,
-                                            "submission": bound}, token=token)
+                            payload_ok = {"ok": True, "format": format_id, "result": result,
+                                          "submission": bound}
                         else:
-                            self.send_json({"ok": True, "format": format_id, "result": result}, token=token)
+                            payload_ok = {"ok": True, "format": format_id, "result": result}
+                        if gate_reason:
+                            payload_ok["deterministic"] = gate_reason
+                        self.send_json(payload_ok, token=token)
                     else:
                         usage_spent = True
                         self.send_json({"ok": True, "format": format_id, "result": result}, token=token)

@@ -1164,6 +1164,37 @@ function openRecheckCachedBack() {
   });
 }
 
+function openRecheckGate(reason) {
+  // Детерминированный вердикт гейта (deterministic:reason от сервера):
+  // правило ФИПИ проверено автоматически, без ИИ — мгновенный тот же 0
+  // и с замечанием, и без. Без пояснения это выглядит «игнором» кнопки:
+  // загрузка мигает долю секунды и страница просто уезжает наверх.
+  // Лимит не потрачен, модель не звалась.
+  recheckLoading = false;
+  const texts = {
+    source_rewrite: "Работа переписывает исходный текст: по ключу ФИПИ это 0 баллов. Правило проверяется автоматически, без ИИ, поэтому повтор — даже с уточнением — даст тот же результат.",
+    low_diversity: "Текст набран повторами: по ключу ФИПИ это 0 баллов. Правило проверяется автоматически, без ИИ, поэтому повтор — даже с уточнением — даст тот же результат.",
+  };
+  const text = texts[reason] || "Этот результат выставлен автоматическим правилом, без ИИ, поэтому повтор даст тот же результат.";
+  openRecheckModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Проверка завершена">
+        <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="dlg__eyebrow">Перепроверка сочинения</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+          </div>
+          <div class="dlg-device__name">Результат не изменится</div>
+        </div>
+        <div class="dlg__text">${esc(text)} Лимит не потрачен. Напиши работу заново своими словами — тогда проверка пройдёт полностью.</div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
+        </div>
+      </div>`, true);
+}
+
 async function onRecheckClick() {
   if (recheckLoading) return;
   const sub = recheckSubmission;
@@ -1239,6 +1270,10 @@ async function doRecheck(note) {
   // тратится, ответ — сохранённый. Нужен, чтобы не врать про «лимит списан»
   // и не делать вид новой проверки молчаливым ре-рендером.
   const wasCached = !!(aiData && aiData.cached);
+  // Детерминированный вердикт гейта: правило сработало до модели и не зависит
+  // от замечания — тоже мгновенно, бесплатно и с тем же результатом.
+  const gateReason = (aiData && typeof aiData.deterministic === "string") ? aiData.deterministic : "";
+  const wasFree = wasCached || !!gateReason;
   // Привязываем новый ответ модели к тому же submission: оценка берётся
   // только из серверной записи (essay_checks), клиентский result игнорируется.
   // Сервер уже мог привязать сам (clientId в /api/ai/essay выше — тогда
@@ -1261,14 +1296,14 @@ async function doRecheck(note) {
     evData = await evRes.json().catch(() => ({}));
   } catch (err) {
     openRecheckError("Отчёт не обновился",
-      wasCached
+      wasFree
         ? "Сохранённый результат не привязался. Попробуй ещё раз — лимит не потрачен."
         : "Проверка прошла, но результат не привязался. Попробуй ещё раз — лимит уже списан за эту проверку.", cleanNote);
     return;
   }
   if (!evRes.ok || !evData.submission) {
     openRecheckError("Отчёт не обновился",
-      (evData && evData.error) || (wasCached
+      (evData && evData.error) || (wasFree
         ? "Сохранённый результат не сохранился. Попробуй ещё раз — лимит не потрачен."
         : "Проверка прошла, но результат не сохранился. Попробуй ещё раз."), cleanNote);
     return;
@@ -1279,7 +1314,8 @@ async function doRecheck(note) {
     const view = await fetchFromApi();
     render(view);
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
-    if (wasCached) openRecheckCached(cleanNote);
+    if (gateReason) openRecheckGate(gateReason);
+    else if (wasCached) openRecheckCached(cleanNote);
     else { recheckLoading = false; closeRecheckModalForce(); }
   } catch (err) {
     openRecheckError("Отчёт не открылся",
