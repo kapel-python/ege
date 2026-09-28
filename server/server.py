@@ -2380,12 +2380,18 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                  provider TEXT NOT NULL DEFAULT '',
                  result_json TEXT NOT NULL,
                  rubric_version INTEGER NOT NULL DEFAULT 1,
+                 note TEXT NOT NULL DEFAULT '',
                  created_at TEXT NOT NULL)"""
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_essay_check_history_user_subject_text"
             " ON essay_check_history(user_id, subject, text_sha256, id)"
         )
+        if "note" not in {r["name"] for r in conn.execute("PRAGMA table_info(essay_check_history)")}:
+            # Аудит замечаний к перепроверке: без него флип 3 → 20 по записке
+            # ученика не расследовать — замечание уходило только в промпт.
+            conn.execute("ALTER TABLE essay_check_history ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            conn.commit()
         _ESSAY_SCHEMA_DONE.add(key)
 
 
@@ -2883,13 +2889,15 @@ def _validated_essay_result(result) -> dict:
 
 
 def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
-                      text: str, provider: str, result: dict) -> None:
+                      text: str, provider: str, result: dict, note: str = "") -> None:
     """Записать факт проверки этого текста и версию правил, которыми он оценён.
 
     Вызывается из /api/ai/essay СРАЗУ после успешного ответа — это единственный
     путь появления строки. Повторная проверка перезаписывает запись в
     essay_checks, но прежние результаты не теряются: каждая запись дописывается
     в essay_check_history — по ней ege-result.html рисует «Было → стало».
+    `note` — замечание ученика к перепроверке (аудит: без него флипы оценки
+    не расследовать).
     """
     ensure_essay_schema(conn)
     blob = json.dumps(result, ensure_ascii=False)
@@ -2906,10 +2914,10 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
          int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
     )
     conn.execute(
-        "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
-        " VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, result_json, rubric_version, note, created_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
         (key[0], key[1], key[2], str(provider or "")[:64], blob,
-         int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
+         int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
     )
     # История — только для блока «Было → стало»: глубже не смотрим,
     # поэтому старые записи сверх лимита удаляем сразу.
@@ -2934,7 +2942,7 @@ def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
     """
     ensure_essay_schema(conn)
     rows = conn.execute(
-        "SELECT result_json, provider, rubric_version FROM essay_check_history"
+        "SELECT result_json, provider, rubric_version, note FROM essay_check_history"
         " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT 2",
         (user_id, subject, essay_text_hash(text)),
     ).fetchall()
@@ -2951,7 +2959,8 @@ def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
             result = None
         if isinstance(result, dict):
             previous = {"result": result, "provider": rows[1]["provider"] or "",
-                        "rubric_version": int(rows[1]["rubric_version"] or 0)}
+                        "rubric_version": int(rows[1]["rubric_version"] or 0),
+                        "note": rows[1]["note"] if "note" in rows[1].keys() else ""}
     return {"previous": previous, "checks": checks}
 
 
@@ -4961,6 +4970,67 @@ def ai_usage_device_trust_ms() -> int:
     return _env_int("EGE_AI_USAGE_DEVICE_TRUST_SEC", AI_USAGE_DEVICE_TRUST_DEFAULT_SEC) * 1000
 
 
+# Персональный потолок ИИ-проверок, который ставит админ из карточки
+# пользователя. Лежит в ai_user_limits (переживает рестарт): без строки
+# действует общий EGE_AI_USAGE_MAX, со строкой — её max_limit. Нужен потому,
+# что ручной UPDATE ai_usage.count сверх 5 жил до первой ленивой зарядки:
+# _ai_usage_catch_up делал MIN(5, ...) и срезал грант обратно к стандарту.
+AI_USER_LIMIT_MIN = 0
+AI_USER_LIMIT_MAX = 1000
+
+_AI_USER_LIMIT_SCHEMA_DONE: set[str] = set()
+
+
+def ensure_ai_user_limit_schema(conn: sqlite3.Connection) -> None:
+    key = _db_key(conn)
+    if key in _AI_USER_LIMIT_SCHEMA_DONE:
+        return
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_user_limits (
+          user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          max_limit INTEGER NOT NULL,
+          updated_at_ms INTEGER NOT NULL,
+          updated_by INTEGER
+        )""")
+    conn.commit()
+    _AI_USER_LIMIT_SCHEMA_DONE.add(key)
+
+
+def ai_custom_limit(conn: sqlite3.Connection, user_id: int) -> int | None:
+    """Персональный потолок пользователя или None (действует общий)."""
+    try:
+        ensure_ai_user_limit_schema(conn)
+        row = conn.execute("SELECT max_limit FROM ai_user_limits WHERE user_id=?",
+                           (user_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    try:
+        value = int(row["max_limit"])
+    except (TypeError, ValueError):
+        return None
+    if AI_USER_LIMIT_MIN <= value <= AI_USER_LIMIT_MAX:
+        return value
+    return None
+
+
+def ai_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
+    """Потолок, который реально действует на пользователя."""
+    custom = ai_custom_limit(conn, user_id)
+    return custom if custom is not None else ai_usage_max()
+
+
+def ai_limit_for_owner(conn: sqlite3.Connection, owner: str) -> int:
+    """Потолок для одного бакета: u:<id> — персональный, k:/n: — общий."""
+    if owner.startswith("u:"):
+        try:
+            return ai_effective_limit(conn, int(owner[2:]))
+        except (TypeError, ValueError):
+            pass
+    return ai_usage_max()
+
+
 _AI_USAGE_SCHEMA_DONE: set[str] = set()
 
 
@@ -5025,8 +5095,17 @@ def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bo
 def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
                      fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
     """Бакеты, из которых списывает этот пользователь: всегда аккаунт,
-    а для СВЕЖЕГО аккаунта ещё и отпечатки устройства (кука и сеть)."""
+    а для СВЕЖЕГО аккаунта ещё и отпечатки устройства (кука и сеть).
+
+    Исключение — персональный грант админа выше общего лимита: общий
+    бакет устройства с потолком 5 тогда душил бы грант 100 через min(),
+    поэтому доверенный аккаунт списывает только из своего u:-бакета."""
     owners = [f"u:{user_id}"]
+    try:
+        if ai_effective_limit(conn, user_id) > ai_usage_max():
+            return owners
+    except sqlite3.Error:
+        pass
     if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
         if fp_key:
             owners.append(f"k:{fp_key}")
@@ -5077,29 +5156,31 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
     если несколько бакетов делят минимум, ждать придётся последнего из них.
     """
     ensure_ai_usage_schema(conn)
+    ensure_ai_user_limit_schema(conn)
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
-    limit = ai_usage_max()
+    limit = ai_effective_limit(conn, user_id)
     window_ms = ai_usage_window_ms()
     owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
-    states: list[tuple[int, int | None]] = []
+    states: list[tuple[int, int | None, int]] = []
     for owner in owners:
-        _ai_usage_catch_up(conn, owner, now_ms, limit, window_ms)
+        owner_limit = ai_limit_for_owner(conn, owner)
+        _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
         row = conn.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?",
                            (owner,)).fetchone()
         if row:
             timer = int(row["timer_ms"]) if row["timer_ms"] is not None else None
-            states.append((int(row["count"]), timer))
+            states.append((int(row["count"]), timer, owner_limit))
         else:
-            states.append((limit, None))  # бакет ещё не заводился — карман полон
+            states.append((owner_limit, None, owner_limit))  # бакет ещё не заводился — карман полон
     conn.commit()  # фиксируем ленивую зарядку
-    remaining = min(_ai_usage_count_at(s, now_ms, now_ms, limit, window_ms)
+    remaining = min(_ai_usage_count_at((s[0], s[1]), now_ms, now_ms, s[2], window_ms)
                     for s in states)
     reset_ms = None
     if remaining < limit:
         ticks = sorted({(s[1] if s[1] is not None else now_ms) + window_ms
-                        for s in states if s[0] < limit})
+                        for s in states if s[0] < s[2]})
         for t in ticks:
-            if t > now_ms and min(_ai_usage_count_at(s, t, now_ms, limit, window_ms)
+            if t > now_ms and min(_ai_usage_count_at((s[0], s[1]), t, now_ms, s[2], window_ms)
                                   for s in states) > remaining:
                 reset_ms = t
                 break
@@ -5127,14 +5208,15 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
     третий запросы на расписание возврата не влияют.
     """
     ensure_ai_usage_schema(conn)
+    ensure_ai_user_limit_schema(conn)
     now_ms = int(time.time() * 1000)
-    limit = ai_usage_max()
     window_ms = ai_usage_window_ms()
     owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
     for owner in owners:
+        owner_limit = ai_limit_for_owner(conn, owner)
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                     " VALUES (?,?,NULL)", (owner, limit))
-        _ai_usage_catch_up(conn, owner, now_ms, limit, window_ms)
+                     " VALUES (?,?,NULL)", (owner, owner_limit))
+        _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
     for owner in owners:
         cur = conn.execute("""
             UPDATE ai_usage SET
@@ -5156,19 +5238,132 @@ def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
     if not owners:
         return
     try:
-        limit = ai_usage_max()
         for owner in owners:
+            owner_limit = ai_limit_for_owner(conn, owner)
             conn.execute("""
                 UPDATE ai_usage SET
                   count = MIN(?, count + 1),
                   timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END
-                WHERE owner = ?""", (limit, limit, owner))
+                WHERE owner = ?""", (owner_limit, owner_limit, owner))
         conn.commit()
     except sqlite3.Error:
         try:
             conn.rollback()
         except sqlite3.Error:
             pass
+
+
+def admin_ai_limit_status(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Состояние ИИ-лимита для карточки админа: остаток, потолки, таймер."""
+    ensure_ai_usage_schema(conn)
+    ensure_ai_user_limit_schema(conn)
+    if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+        raise KeyError("user not found")
+    now_ms = int(time.time() * 1000)
+    custom = ai_custom_limit(conn, user_id)
+    st = ai_usage_status(conn, user_id, None, None, now_ms)
+    return {
+        "limit": int(st["limit"]),
+        "remaining": int(st["remaining"]),
+        "resetInSec": st["resetInSec"],
+        "windowSec": int(st["windowSec"]),
+        "globalLimit": ai_usage_max(),
+        "customLimit": custom,
+    }
+
+
+def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
+    """Ручное управление ИИ-лимитом из админки.
+
+    payload: {"limit": int|null, "remaining": int|null, "refill": bool}.
+    limit null — снять персональный потолок (вернуться к общему);
+    remaining выше потолка — потолок поднимается сам, иначе грант срезала
+    бы ближайшая ленивая зарядка MIN(limit, ...). refill:true — долить до
+    полного без разбора чисел. Частичный остаток (< лимита) стартует таймер
+    сейчас, иначе цепочка с timer NULL никогда бы не заряжалась.
+    """
+    ensure_ai_usage_schema(conn)
+    ensure_ai_user_limit_schema(conn)
+    if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+        raise KeyError("user not found")
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
+    has_limit = "limit" in payload
+    has_remaining = "remaining" in payload
+    refill = payload.get("refill") is True
+    raw_limit = payload.get("limit")
+    raw_remaining = payload.get("remaining")
+    if not has_limit and not has_remaining and not refill:
+        raise ValueError("нужны limit, remaining или refill")
+    now_ms = int(time.time() * 1000)
+    window_ms = ai_usage_window_ms()
+    conn.execute("BEGIN")
+    try:
+        if has_limit:
+            if raw_limit is None:
+                conn.execute("DELETE FROM ai_user_limits WHERE user_id=?", (user_id,))
+            else:
+                try:
+                    new_limit = int(raw_limit)
+                except (TypeError, ValueError):
+                    raise ValueError("limit должен быть целым числом или null")
+                if not AI_USER_LIMIT_MIN <= new_limit <= AI_USER_LIMIT_MAX:
+                    raise ValueError(f"limit должен быть {AI_USER_LIMIT_MIN}..{AI_USER_LIMIT_MAX}")
+                conn.execute(
+                    "INSERT INTO ai_user_limits(user_id, max_limit, updated_at_ms, updated_by)"
+                    " VALUES (?,?,?,NULL)"
+                    " ON CONFLICT(user_id) DO UPDATE SET max_limit=excluded.max_limit,"
+                    " updated_at_ms=excluded.updated_at_ms",
+                    (user_id, new_limit, now_ms))
+        eff = ai_effective_limit(conn, user_id)
+        owner = f"u:{user_id}"
+        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                     " VALUES (?,?,NULL)", (owner, eff))
+        _ai_usage_catch_up(conn, owner, now_ms, eff, window_ms)
+        if refill:
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL WHERE owner=?",
+                         (eff, owner))
+        elif has_remaining:
+            try:
+                want = int(raw_remaining)
+            except (TypeError, ValueError):
+                raise ValueError("remaining должен быть целым числом")
+            if not 0 <= want <= AI_USER_LIMIT_MAX:
+                raise ValueError(f"remaining должен быть 0..{AI_USER_LIMIT_MAX}")
+            if want > eff:
+                # Грант выше потолка: поднимаем потолок, иначе MIN(limit)
+                # в зарядке срежет его обратно к стандарту.
+                eff = want
+                conn.execute(
+                    "INSERT INTO ai_user_limits(user_id, max_limit, updated_at_ms, updated_by)"
+                    " VALUES (?,?,?,NULL)"
+                    " ON CONFLICT(user_id) DO UPDATE SET max_limit=excluded.max_limit,"
+                    " updated_at_ms=excluded.updated_at_ms",
+                    (user_id, eff, now_ms))
+            timer = None if want >= eff else now_ms
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
+                         (min(want, eff), timer, owner))
+        else:
+            # Менялся только потолок: остаток клампим, таймер чиним.
+            row = conn.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?",
+                               (owner,)).fetchone()
+            count = int(row["count"]) if row else eff
+            count = min(count, eff)
+            if count >= eff:
+                timer = None
+            else:
+                timer = row["timer_ms"] if row and row["timer_ms"] is not None else now_ms
+                timer = int(timer)
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
+                         (count, timer, owner))
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        raise
+    return admin_ai_limit_status(conn, user_id)
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int | None, str | None]:
@@ -6568,6 +6763,10 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
             (user_id, int(time.time() * 1000))).fetchone()["c"],
         "block": admin_block_payload(conn, user_id),
     }
+    try:
+        detail["aiLimit"] = admin_ai_limit_status(conn, user_id)
+    except (sqlite3.Error, KeyError, ValueError):
+        detail["aiLimit"] = None
     for r in conn.execute("""SELECT up.skill_id, up.progress, up.solved, up.correct, up.time_sec, sk.name, t.name AS topic
                              FROM user_progress up JOIN skills sk ON sk.id=up.skill_id LEFT JOIN topics t ON t.id=sk.topic_id
                              WHERE up.user_id=? AND up.subject=? AND (up.solved>0 OR up.progress>0) ORDER BY up.progress DESC, up.solved DESC""", (user_id, detail_subject)):
@@ -8011,7 +8210,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
-            if len(parts) != 6 or parts[5] not in ("xp", "reset", "delete", "block", "unblock"):
+            if len(parts) != 6 or parts[5] not in ("xp", "reset", "delete", "block", "unblock", "ailimit"):
                 # Ветка не должна проваливаться в общий 404 «Not found» в конце
                 # do_POST: неизвестное действие или лишний сегмент выглядели бы
                 # так же, как отсутствие самого endpoint'а (именно это и показал
@@ -8021,7 +8220,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if not self.require_admin(conn): return
                     self.send_json({"error": "Неизвестный маршрут админ-панели. "
-                                             "Действия: xp, reset, delete, block, unblock"}, 404)
+                                             "Действия: xp, reset, delete, block, unblock, ailimit"}, 404)
                 finally: conn.close()
                 return
             conn = connect()
@@ -8056,6 +8255,11 @@ class Handler(BaseHTTPRequestHandler):
                     was = admin_unblock_user(conn, target_id)
                     admin_audit(conn, actor_id, "unblock-user", target_id, "")
                     result = {"ok": True, "wasBlocked": was}
+                elif action == "ailimit":
+                    result = admin_ai_limit_set(conn, target_id, payload)
+                    admin_audit(conn, actor_id, "ai-limit", target_id,
+                                f"limit={result['limit']} remaining={result['remaining']}"[:200])
+                    result = {"ok": True, "aiLimit": result}
                 else:
                     result = admin_delete_user(conn, target_id, actor_id)
                 self.send_json(result)
@@ -8481,7 +8685,8 @@ class Handler(BaseHTTPRequestHandler):
                     if format_id == "essay":
                         try:
                             store_essay_check(conn, user_id, subject_now, payload.get("text"),
-                                              _AI.last_used_provider() or "ai+grammar", result)
+                                              _AI.last_used_provider() or "ai+grammar", result,
+                                              note=note)
                             conn.commit()
                         except (sqlite3.Error, ValueError) as exc:
                             # Не записали — значит evaluation позже честно скажет
