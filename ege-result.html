@@ -442,7 +442,7 @@
          после готового результата, а не ждать скролла reveal-анимации. -->
     <div class="recheck-wrap">
       <button class="retry-btn" id="recheckBtn" type="button">Перепроверить сочинение</button>
-      <p class="recheck-meta">Не согласен с оценкой? Добавь уточнение — ИИ посмотрит работу заново. Без уточнения покажем сохранённый результат (это бесплатно).</p>
+      <p class="recheck-meta">Не согласен с оценкой? ИИ проверит работу ещё раз — это потратит 1 проверку из лимита.</p>
     </div>
   </div>
 
@@ -1002,8 +1002,7 @@ function openRecheckConfirm(status, prevNote) {
         <div class="dlg__text">
           ИИ проверит работу заново по той же рубрике задания 27: содержание (К1–К6) — модель,
           грамотность (К7–К10) — автоматическая проверка, потолки и правило объёма — как обычно.
-          С уточнением это потратит <b>1 проверку</b>: доступно <b><span class="tnum">${remaining} из ${limit}</span></b>.
-          Без уточнения вернём сохранённый результат — он будет тем же, лимит не потратится.
+          Это потратит <b>1 проверку</b>: доступно <b><span class="tnum">${remaining} из ${limit}</span></b>.
           Ниже можно добавить уточнение для проверяющего (необязательно) — например, какой критерий кажется спорным.
         </div>
         <textarea class="recheck-note" id="recheckNote" maxlength="${RECHECK_NOTE_MAX}" placeholder="Например: мне кажется, в К2 два примера с пояснениями… (необязательно)">${esc(note)}</textarea>
@@ -1124,60 +1123,19 @@ function recheckRetryFromError() {
   doRecheck(typeof openRecheckError._note === "string" ? openRecheckError._note : "");
 }
 
-function openRecheckCached(prevNote) {
-  // Без замечания сервер отдаёт сохранённый ответ (cached:true): модель не
-  // зовётся, лимит не тратится, результат тот же. Молчаливый ре-рендер +
-  // scrollTo(top) выглядел багом «выкинуло наверх без перепроверки» —
-  // поэтому показываем честное пояснение вместо вида «новой» проверки.
-  recheckLoading = false;
-  const note = typeof prevNote === "string" ? prevNote : "";
-  openRecheckModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Результат без изменений">
-        <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
-        <div class="dlg__eyebrow">Перепроверка сочинения</div>
-        <div class="dlg-device">
-          <div class="dlg-device__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
-          </div>
-          <div class="dlg-device__name">Результат без изменений</div>
-        </div>
-        <div class="dlg__text">
-          Этот текст уже проверялся по текущей рубрике — показали сохранённый результат без изменений.
-          Лимит не потрачен. Чтобы ИИ посмотрел работу заново, добавь уточнение (какой критерий кажется спорным).
-        </div>
-        <div class="dlg__actions">
-          <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
-          <button class="retry-btn" type="button" onclick="openRecheckCachedBack()">Добавить уточнение</button>
-        </div>
-      </div>`, true);
-  openRecheckCached._note = note;
-}
-
-function openRecheckCachedBack() {
-  // Возврат к подтверждению с тем же текстом замечания (обычно пустым):
-  // лимит сверяем заново — за время открытого окна он мог измениться.
-  const note = typeof openRecheckCached._note === "string" ? openRecheckCached._note : "";
-  recheckFetchLimits().then((st) => {
-    openRecheckConfirm(st && st.ok ? st : { limit: AI_LIMIT_FALLBACK, remaining: 1, resetInSec: null }, note);
-  });
-}
-
 function openRecheckGate(reason) {
-  // Детерминированный вердикт гейта (deterministic:reason от сервера):
-  // правило ФИПИ проверено автоматически, без ИИ — мгновенный тот же 0
-  // и с замечанием, и без. Без пояснения это выглядит «игнором» кнопки:
-  // загрузка мигает долю секунды и страница просто уезжает наверх.
-  // Лимит не потрачен, модель не звалась.
+  // Гарантированный 0 гейта (deterministic:reason от сервера): работа НЕ
+  // перепроверялась — правило ФИПИ проверено автоматически, без ИИ, и оно
+  // не зависит от замечания. Единственный случай, когда перепроверки нет:
+  // во всех остальных клиент всегда зовёт модель за жетон пользователя.
   recheckLoading = false;
   const texts = {
-    source_rewrite: "Работа переписывает исходный текст: по ключу ФИПИ это 0 баллов. Правило проверяется автоматически, без ИИ, поэтому повтор — даже с уточнением — даст тот же результат.",
-    low_diversity: "Текст набран повторами: по ключу ФИПИ это 0 баллов. Правило проверяется автоматически, без ИИ, поэтому повтор — даже с уточнением — даст тот же результат.",
+    source_rewrite: "Работа не перепроверялась: она полностью переписывает исходный текст — по ключу ФИПИ это 0 баллов.",
+    low_diversity: "Работа не перепроверялась: текст набран повторами — по ключу ФИПИ это 0 баллов.",
   };
-  const text = texts[reason] || "Этот результат выставлен автоматическим правилом, без ИИ, поэтому повтор даст тот же результат.";
+  const text = texts[reason] || "Работа не перепроверялась: автоматическое правило выставило 0 баллов.";
   openRecheckModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Проверка завершена">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Проверка не выполнялась">
         <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
@@ -1186,9 +1144,9 @@ function openRecheckGate(reason) {
           <div class="dlg-device__icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
           </div>
-          <div class="dlg-device__name">Результат не изменится</div>
+          <div class="dlg-device__name">Перепроверки не было</div>
         </div>
-        <div class="dlg__text">${esc(text)} Лимит не потрачен. Напиши работу заново своими словами — тогда проверка пройдёт полностью.</div>
+        <div class="dlg__text">${esc(text)} ИИ такую работу не оценит — модель её не видит и ставит случайные баллы, поэтому правило срабатывает до неё. Лимит не потрачен. Напиши работу заново своими словами — тогда проверка пройдёт полностью.</div>
         <div class="dlg__actions">
           <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
         </div>
@@ -1230,7 +1188,10 @@ async function doRecheck(note) {
   }
   const cleanNote = String(note || "").slice(0, RECHECK_NOTE_MAX);
   openRecheckLoading();
-  const aiBody = { text: sub.text, taskId: sub.taskId, clientId: sub.clientId };
+  // recheck:true — явная перепроверка: сервер всегда идёт через модель за
+  // жетон пользователя (кэш её не обслуживает, только практика). Исключение —
+  // гарантированные нули гейтов: их вернёт флаг deterministic без трат.
+  const aiBody = { text: sub.text, taskId: sub.taskId, clientId: sub.clientId, recheck: true };
   if (sub.subject) aiBody.subject = sub.subject;
   if (cleanNote.trim()) aiBody.note = cleanNote.trim();
   let aiRes = null, aiData = {};
@@ -1266,14 +1227,12 @@ async function doRecheck(note) {
       (aiData && aiData.error) || "Сервер временно не отвечает. Проверка не списана — попробуй ещё раз.", cleanNote);
     return;
   }
-  // Флаг кэша от сервера: без замечания модель не зовётся, лимит не
-  // тратится, ответ — сохранённый. Нужен, чтобы не врать про «лимит списан»
-  // и не делать вид новой проверки молчаливым ре-рендером.
-  const wasCached = !!(aiData && aiData.cached);
-  // Детерминированный вердикт гейта: правило сработало до модели и не зависит
-  // от замечания — тоже мгновенно, бесплатно и с тем же результатом.
+  // Флаг гейта от сервера: гарантированный 0 (модель не звалась, лимит не
+  // тратился) — единственный случай, когда перепроверки не было. Всё
+  // остальное всегда идёт через модель за жетон: кэш перепроверку больше
+  // не обслуживает.
   const gateReason = (aiData && typeof aiData.deterministic === "string") ? aiData.deterministic : "";
-  const wasFree = wasCached || !!gateReason;
+  const wasFree = !!gateReason;
   // Привязываем новый ответ модели к тому же submission: оценка берётся
   // только из серверной записи (essay_checks), клиентский result игнорируется.
   // Сервер уже мог привязать сам (clientId в /api/ai/essay выше — тогда
@@ -1315,7 +1274,6 @@ async function doRecheck(note) {
     render(view);
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
     if (gateReason) openRecheckGate(gateReason);
-    else if (wasCached) openRecheckCached(cleanNote);
     else { recheckLoading = false; closeRecheckModalForce(); }
   } catch (err) {
     openRecheckError("Отчёт не открылся",

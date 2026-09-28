@@ -8228,14 +8228,17 @@ class Handler(BaseHTTPRequestHandler):
                 # гостя; никаких оценок и прогресса он не открывает.
                 # note — необязательное замечание ученика к перепроверке
                 # (только ege-result.html): уходит в промпт как мнение,
-                # рубрику не меняет, лимита отдельного нет — тратит те же 3.
+                # рубрику не меняет, лимита отдельного нет — тратит тот же бюджет.
+                # recheck — явный флаг перепроверки (только ege-result.html):
+                # перепроверка всегда идёт через модель за жетон пользователя
+                # (его выбор — тратить или нет), кэш её не обслуживает.
                 # clientId/client_id — необязательная привязка к своему
                 # submission: сервер сразу доводит его до 'ready' в том же
                 # запросе (best-effort). Тогда закрытие вкладки во время
                 # проверки ничего не теряет: поток обработчика дожимает
                 # модель и привязку до конца, а отдельный
                 # POST /api/essays/evaluation позже станет идемпотентным no-op.
-                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject", "note", "clientId", "client_id"}:
+                if not isinstance(payload, dict) or set(payload) - {"text", "taskId", "subject", "note", "recheck", "clientId", "client_id"}:
                     self.send_json({"error": "В запросе есть неподдерживаемые поля"}, 400, token=token); return
                 try:
                     # Рубрика одна — работа с прочитанным текстом, и выбирает её
@@ -8265,15 +8268,18 @@ class Handler(BaseHTTPRequestHandler):
                 note = note.strip()
                 if len(note) > _AI.ESSAY_RECHECK_NOTE_MAX:
                     self.send_json({"error": f"Замечание слишком длинное (максимум {_AI.ESSAY_RECHECK_NOTE_MAX} символов)"}, 400, token=token); return
-                # Тот же текст на тех же условиях — тот же ответ. Раньше
-                # перепроверка без замечания звала модель заново и перезаписывала
-                # запись, из-за чего один и тот же текст получал разные баллы
-                # (в продовой выборке 5 против 2 за копию исходника, 1 против 4
-                # за повторённую фразу). Теперь решение воспроизводимо, а
-                # жетон за него не списывается. С замечанием ученика кэш
-                # обходится: там новый вопрос и новый ответ по нему.
+                # Кэш одинакового текста — только для практики (первая проверка
+                # и её бесплатные ретраи/«продолжить проверку»): тот же текст на
+                # тех же условиях — тот же ответ, жетон не списывается.
+                # Перепроверка (recheck:true с ege-result.html) кэш обходит
+                # всегда — даже без замечания: ученик явно просит проверить
+                # заново через модель и платит за это жетоном. Исключение —
+                # только гарантированные нули гейтов ниже: их модель всё равно
+                # не оценит (замер: копии получали случайные 5/5/2/2 вместо 0),
+                # поэтому они возвращаются детерминированно и бесплатно.
                 # Порядок важен: кэш стоит ПОСЛЕ анти-лавинового барьера ниже —
                 # повтор одного и того же текста тоже должен попадать в счётчик.
+                recheck = payload.get("recheck") is True
                 essay_text = payload.get("text")
                 # Анти-лавиновый барьер (ai.ai_take), а не гейт для ученика:
                 # продуктовый бюджет ниже (5 проверок в сутки с цепочкой) уже
@@ -8297,12 +8303,14 @@ class Handler(BaseHTTPRequestHandler):
                                     "retryAfter": retry_after}, 429, token=token,
                                    headers={"Retry-After": str(retry_after)})
                     return
-                if not note and format_id == "essay" and isinstance(essay_text, str):
+                if not note and not recheck and format_id == "essay" and isinstance(essay_text, str):
                     cached = load_essay_check(conn, user_id, subject_now, essay_text,
                                               rubric=_AI.ESSAY_RUBRIC_VERSION)
                     if cached is not None:
                         # Запись о проверке уже есть — переписывать нечего,
                         # только привязать submission, если клиент прислал id.
+                        # Сюда ходит только практика (у перепроверки recheck:true
+                        # и кэш обходится): её ретраи остаются бесплатными.
                         bound = None
                         raw_cid = payload.get("clientId", payload.get("client_id"))
                         if isinstance(raw_cid, str) and raw_cid.strip() and len(raw_cid.strip()) <= 200:
@@ -8313,10 +8321,6 @@ class Handler(BaseHTTPRequestHandler):
                             except (KeyError, EssayNotChecked, ValueError, SubjectLockedError):
                                 bound = None
                         payload_out = {"ok": True, "format": format_id, "result": cached["result"],
-                                       # Честный флаг для ege-result.html: без замечания
-                                       # перепроверки нет — показан сохранённый ответ,
-                                       # лимит не потрачен. Клиент по нему открывает
-                                       # пояснение вместо «молчаливого» ре-рендера.
                                        "cached": True}
                         if bound is not None:
                             payload_out["submission"] = bound
