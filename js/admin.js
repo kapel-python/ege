@@ -184,8 +184,12 @@ function onboardedBadge(user) {
   const any = !!(user && (user.onboardedAny ?? user.onboarded));
   if (!any) return `<span class="a-chip a-chip--warn">онбординг не пройден</span>`;
   const done = adminOnboardedSubjects(user);
-  const where = done.length ? ` · ${esc(done.join(", "))}` : "";
-  return `<span class="a-chip a-chip--success"${where ? ` title="Пройден в: ${esc(done.join(", "))}"` : ""}>онбординг пройден${where}</span>`;
+  // Предметы в чип не пишем: длинный nowrap-чип («онбординг пройден ·
+  // Базовая математика, ...») вылезал за край экрана на телефонах. Полный
+  // список уже виден строкой ниже («Онбординг пройден»), а здесь он остаётся
+  // в подсказке при наведении.
+  const title = done.length ? ` title="Пройден в: ${esc(done.join(", "))}"` : "";
+  return `<span class="a-chip a-chip--success"${title}>онбординг пройден</span>`;
 }
 
 function adminSubjectLocked(user) {
