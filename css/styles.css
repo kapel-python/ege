@@ -1506,10 +1506,11 @@ body {
 
 /* ---------- исходный текст к заданию 27 ----------
    Одна карточка: в свёрнутом виде — плашка («Исходный текст · автор · N слов»
-   + чип «Читать» + кнопка копии), в развёрнутом — текст, набранный крупно,
-   как в читалке. Раскрытие — чип с поворачивающимся шевроном, а не синяя
-   ссылка с подчёркиванием; копирование — отдельная иконка справа сверху,
-   она не сворачивает блок. */
+   + чип «Читать»), в развёрнутом — текст, набранный крупно, как в читалке.
+   Раскрытие — чип с поворачивающимся шевроном, а не синяя ссылка с
+   подчёркиванием. Копирование — отдельная иконка справа вверху САМОГО
+   текста, а не в плашке: копировать имеет смысл ровно то, что сейчас
+   читаешь, и в свёрнутом виде копировать нечего. Она не сворачивает блок. */
 .source-text {
   margin-top: 18px;
   border: 1px solid var(--border-strong);
@@ -1548,20 +1549,27 @@ body {
 .source-text__chev { display: inline-flex; transition: transform 0.2s ease; }
 .source-text__chev svg { width: 14px; height: 14px; }
 .source-text:not(.source-text--collapsed) .source-text__chev { transform: rotate(180deg); }
+/* Кнопка копии лежит в теле текста, а не в плашке: плашка только про то,
+   что текст есть, а копировать надо то, что читаешь. Поэтому она
+   появляется вместе с текстом и висит в правом верхнем углу поверх
+   читалки. Правый отступ тела (--copy-gutter) держит эту полосу в
+   резерве, чтобы ни одна строка не заезжала под кнопку. */
+.source-text__content { display: block; position: relative; border-top: 1px solid var(--border); }
+.source-text--collapsed .source-text__content { display: none; }
 .source-text__copy {
-  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  position: absolute; top: 12px; right: 12px; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; border-radius: 10px;
-  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  border: 1px solid var(--border); background: var(--bg-2); color: var(--muted);
   cursor: pointer;
   transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 .source-text__copy:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .source-text__copy svg { width: 17px; height: 17px; }
 .source-text__copy.is-copied { color: var(--success-ink); border-color: var(--success); background: var(--success-soft); }
-.source-text__content { display: block; border-top: 1px solid var(--border); }
-.source-text--collapsed .source-text__content { display: none; }
 .source-text__body {
   padding: 22px 24px;
+  padding-right: 72px; /* резерв под кнопку копии в правом верхнем углу */
   font-size: 17px; line-height: 1.8; color: var(--text);
   white-space: pre-wrap; overflow-wrap: break-word;
 }
@@ -1570,17 +1578,18 @@ body {
 @media (max-width: 720px) {
   .source-text__bar { padding: 8px 10px 8px 14px; }
   .source-text__title { font-size: 13.5px; }
-  .source-text__body { padding: 16px 18px; font-size: 16px; line-height: 1.75; }
+  .source-text__copy { top: 8px; right: 8px; width: 32px; height: 32px; }
+  .source-text__copy svg { width: 15px; height: 15px; }
+  .source-text__body { padding: 16px 18px; padding-right: 58px; font-size: 16px; line-height: 1.75; }
 }
-/* Уже совсем узкий телефон: строка с подписью, чипом «Читать» и кнопкой
-   копии в одну линию не собирается — подпись съедала автора. Отдаём
-   подписи всю ширину (чип с копией уезжают на вторую строку), так что
-   «Исходный текст · автор · N слов» читается целиком и не рвётся. */
+/* Уже совсем узкий телефон: строка с подписью и чипом «Читать» в одну
+   линию не собирается — подпись съедала автора. Отдаём подписи всю
+   ширину (чип уезжает на вторую строку), так что «Исходный текст · автор ·
+   N слов» читается целиком и не рвётся. */
 @media (max-width: 420px) {
   .source-text__bar { flex-wrap: wrap; row-gap: 8px; }
   .source-text__head { flex: 1 0 100%; flex-wrap: wrap; row-gap: 8px; }
   .source-text__title { flex: 1 0 100%; }
-  .source-text__copy { margin-left: auto; }
 }
 
 /* ---------- lessons ---------- */

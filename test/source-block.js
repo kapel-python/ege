@@ -208,6 +208,14 @@ const FORBIDDEN = [
 function assertSkeleton(label, html) {
   for (const [name, re] of SKELETON) check(`${label}: ${name}`, re.test(html));
   for (const [name, re] of FORBIDDEN) check(`${label}: нет ${name}`, !re.test(html));
+  /* Копия живёт в теле текста, а не в плашке: копировать имеет смысл
+     ровно то, что сейчас читаешь, и в свёрнутом виде копировать нечего.
+     Разметку проверяем по границам div'ов, а не регуляркой по всему
+     документу, — иначе кнопка «нашлась бы» где угодно. */
+  const bar = html.match(/<div class="source-text__bar">([\s\S]*?)<\/div>/);
+  const content = html.match(/<div class="source-text__content"[^>]*>([\s\S]*)$/);
+  check(`${label}: копии нет в плашке`, !!bar && !/source-text__copy/.test(bar[1]));
+  check(`${label}: копия в теле текста`, !!content && /source-text__copy/.test(content[1]));
 }
 
 async function main() {
@@ -341,6 +349,18 @@ async function main() {
     check("стили: на узком экране подпись занимает строку целиком",
       narrowIdx >= 0 && /\.source-text__title \{[^}]*flex:\s*1 0 100%/.test(rules.slice(narrowIdx)),
       narrowIdx >= 0 ? rules.slice(narrowIdx, narrowIdx + 200) : "нет @media (max-width: 420px)");
+
+    /* Кнопка копии висит поверх текста, значит тело обязано держать
+       резерв справа — иначе первая строка уедет под иконку. Резерв
+       задан явным padding-right (а не внутри padding), поэтому и
+       проверяем именно его. */
+    const copyRule = (css.match(/\.source-text__copy \{[^}]*\}/) || [""])[0];
+    check("стили: копия привязана к телу текста",
+      /position:\s*absolute/.test(copyRule) && /top:/.test(copyRule) && /right:/.test(copyRule),
+      copyRule);
+    const bodyPad = (css.match(/\.source-text__body \{[^}]*\}/) || [""])[0];
+    const padRight = parseFloat((bodyPad.match(/padding-right:\s*([\d.]+)px/) || [])[1] || "0");
+    check("стили: текст не заезжает под кнопку копии", padRight >= 40, `padding-right ${padRight}px`);
   }
 
   console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");

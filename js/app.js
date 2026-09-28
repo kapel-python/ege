@@ -3421,11 +3421,11 @@ function sourceTextBlockHtml({ id, title, text }) {
           <span class="source-text__title">${esc(title)}</span>
           <span class="source-text__chip"><span data-source-toggle-label>Читать</span><span class="source-text__chev">${icon("chevron")}</span></span>
         </button>
+      </div>
+      <div class="source-text__content" data-source-body>
         <button class="source-text__copy" type="button" onclick="sourceTextCopy(this)" aria-label="Скопировать текст" title="Скопировать текст">
           <span class="source-text__copy-icon">${icon("copy")}</span>
         </button>
-      </div>
-      <div class="source-text__content" data-source-body>
         <div class="source-text__body">${paragraphs}</div>
       </div>
     </div>`;
