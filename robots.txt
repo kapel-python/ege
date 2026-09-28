@@ -1,6 +1,8 @@
 # ege easy — правила обхода для поисковых роботов.
-# Индексируется только публичный лендинг (/). Приложение (/dashboard),
-# админка и API — приватные зоны, им в индексе делать нечего.
+# В индексе нужен только публичный лендинг (/). Приложение (/dashboard),
+# админка и API — приватные зоны. Служебные страницы (/about, /status,
+# /contacts, /404.html, отчёт по сочинению) обходиться могут — они закрыты
+# от индекса самим сервером через X-Robots-Tag: noindex, см. ниже.
 
 User-agent: *
 Allow: /$
@@ -10,10 +12,28 @@ Allow: /js/
 Allow: /vendor/
 Allow: /favicon.svg
 Allow: /site.webmanifest
+Allow: /llms.txt
+# /main.html намеренно НЕ закрыт: это байт-в-байт копия корня, но с
+# canonical на https://egeeasy.ru/ — робот обязан её прочитать, иначе
+# канонический виджет не сработает и страница попадёт в индекс отдельным
+# адресом. Дубликат снимает canonical, а не запрет обхода.
 Disallow: /dashboard
 Disallow: /index.html
 Disallow: /admin
 Disallow: /admin.html
+# Служебные страницы (/about, /status, /contacts, /404.html, /ege-result.html,
+# /essay/*) намеренно НЕ закрыты здесь: сервер отдаёт их с
+# X-Robots-Tag: noindex, nofollow. Закрывать их в robots.txt нельзя — робот
+# не сможет прочитать noindex, и страница останется в индексе как «без
+# описания». Запрет в robots.txt и noindex несовместимы.
+# Файлы репозитория и служебные каталоги сервер и так не отдаёт (404),
+# но явный запрет избавляет робота от попыток.
+Disallow: /LICENSE
+Disallow: /server/
+Disallow: /test/
+Disallow: /deploy/
+Disallow: /backups/
+Disallow: /.git/
 Disallow: /api/
 Disallow: /*?*
 
