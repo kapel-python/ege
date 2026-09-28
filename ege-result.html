@@ -278,6 +278,39 @@
   .recheck-load-sub { text-align: center; font-size: 13px; color: var(--text-soft); margin: 8px 0 0; }
   .mono { font-variant-numeric: tabular-nums; font-weight: 800; }
 
+  /* --- было → стало (история перепроверок, только ege-result) ---
+     Тот же язык, что у остальной страницы: .card, .pill, .crit-dot,
+     табличные цифры. Переключение темы — через CSS-переменные, отдельных
+     правил под light/dark нет. */
+  .dyn-card { padding: 0; overflow: hidden; }
+  .dyn-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px 0; }
+  .dyn-title { font-size: 15px; font-weight: 800; }
+  .dyn-count {
+    flex: none; margin-left: auto; font-size: 12px; font-weight: 700; color: var(--text-soft);
+    background: var(--surface-2); border: 1px solid var(--border);
+    padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  .dyn-total { display: flex; align-items: center; gap: 12px; padding: 10px 18px 0; flex-wrap: wrap; }
+  .dyn-nums { font-size: 30px; font-weight: 800; line-height: 1; display: flex; align-items: baseline; gap: 8px; }
+  .dyn-nums .old { color: var(--text-soft); font-weight: 700; }
+  .dyn-nums .arrow { color: var(--text-soft); font-size: 22px; font-weight: 700; }
+  .dyn-nums .max { font-size: 15px; color: var(--text-soft); font-weight: 600; }
+  .dyn-sub { padding: 8px 18px 0; font-size: 13.5px; line-height: 1.5; color: var(--text-soft); margin: 0; }
+  .dyn-rows { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 12px 18px 18px; margin: 0; }
+  @media (min-width: 640px) { .dyn-rows { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .dyn-row {
+    display: flex; align-items: center; gap: 8px; margin: 0;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+    font-size: 13.5px; line-height: 1.4; background: transparent;
+  }
+  .dyn-row.same { opacity: .55; }
+  .dyn-row .dyn-name { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dyn-row .dyn-scores { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-soft); }
+  .dyn-row .dyn-scores b { color: var(--text); }
+  .dyn-delta { flex: none; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .dyn-delta.up { background: var(--green-soft); color: var(--green); }
+  .dyn-delta.down { background: var(--red-soft); color: var(--red); }
+
   /* ===== REVEAL (перенос из main.html: те же ease и расстояния) =====
      Начальное состояние только под .js: без JS элементы видны сразу. */
   :root { --ease-out: cubic-bezier(0.16,1,0.3,1); --ease-spring: cubic-bezier(0.34,1.4,0.64,1); }
@@ -419,6 +452,12 @@
       <p class="stat-label">Краткий вердикт</p>
       <p id="verdictText"></p>
     </div>
+
+    <!-- Было → стало: история перепроверок этого текста. Контейнер всегда в
+         DOM, содержимое подставляет render() — только если сервер отдал
+         previous (проверок было минимум две). Данные серверные, поэтому блок
+         переживает перезагрузку. -->
+    <div id="dynContainer"></div>
 
     <div class="section">
       <h2 class="section-title">Разбор по критериям</h2>
@@ -642,6 +681,76 @@ function critCardHTML(c, idx) {
     </div>`;
 }
 
+// ---------- Было → стало (история перепроверок) ----------
+// Локальное склонение: aiLimitPlural из js/ai-limit.js на момент первого
+// render() может быть ещё не загружен (defer), поэтому три формы здесь.
+function dynPlural(n, one, few, many) {
+  const m10 = Math.abs(Number(n) || 0) % 10, m100 = Math.abs(Number(n) || 0) % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
+}
+
+function dynRowHTML(c, prevById) {
+  const p = prevById[String(c.id)];
+  const cur = Number(c.score);
+  const old = p ? Number(p.score) : NaN;
+  const cls = pillClass(cur, Number(c.max) || 0);
+  if (!isFinite(old)) {
+    // Критерия не было в прошлой схеме (смена рубрики): показываем факт
+    // без дельты, ряд не приглушаем.
+    return `<div class="dyn-row"><span class="crit-dot ${cls}"></span>`
+      + `<span class="dyn-name">${esc(critLabel(c.name))}</span>`
+      + `<span class="dyn-scores tnum">— → <b>${esc(cur)}</b></span></div>`;
+  }
+  const d = cur - old;
+  const same = d === 0;
+  const chip = same ? ""
+    : `<span class="dyn-delta ${d > 0 ? "up" : "down"}">${d > 0 ? "+" : ""}${d}</span>`;
+  return `<div class="dyn-row${same ? " same" : ""}"><span class="crit-dot ${cls}"></span>`
+    + `<span class="dyn-name">${esc(critLabel(c.name))}</span>`
+    + `<span class="dyn-scores tnum">${esc(old)} → <b>${esc(cur)}</b></span>${chip}</div>`;
+}
+
+function renderDynHistory(box, prev, count, cur) {
+  if (!box) return;
+  const oldTotal = prev ? Number(prev.total_score) : NaN;
+  const newTotal = cur ? Number(cur.total_score) : NaN;
+  const max = (cur && Number(cur.max_score)) || 22;
+  const ok = prev && typeof prev === "object" && Array.isArray(prev.criteria)
+    && prev.criteria.length > 0 && isFinite(oldTotal) && isFinite(newTotal);
+  if (!ok) { box.innerHTML = ""; return; }
+  const prevById = {};
+  prev.criteria.forEach(c => { if (c && c.id != null) prevById[String(c.id)] = c; });
+  const delta = newTotal - oldTotal;
+  const pill = delta === 0 ? ""
+    : `<span class="pill ${delta > 0 ? "full" : "zero"} tnum">${delta > 0 ? "+" : ""}${delta}</span>`;
+  const word = dynPlural(Math.abs(delta), "балл", "балла", "баллов");
+  const verdict = delta > 0 ? `Стало лучше на ${delta} ${word}.`
+    : delta < 0 ? `Стало хуже на ${Math.abs(delta)} ${word}.`
+    : "Оценка не изменилась — перепроверка подтвердила результат.";
+  const n = Math.max(2, Math.floor(Number(count) || 2));
+  const prevCal = (prev.calibration_note && String(prev.calibration_note).trim()
+    && String(prev.calibration_note).trim() !== String(cur.calibration_note || "").trim())
+    ? `<p class="dyn-sub">Тогда: ${esc(String(prev.calibration_note).trim())}</p>` : "";
+  const rows = (cur.criteria || []).map(c => dynRowHTML(c, prevById)).join("");
+  box.innerHTML = `
+    <div class="section">
+      <h2 class="section-title">Было → стало</h2>
+      <p class="section-desc">Сравнение с предыдущей проверкой этого текста.</p>
+      <div class="card dyn-card rv" style="--d:300ms">
+        <div class="dyn-total">
+          <div class="dyn-nums tnum"><span class="old">${esc(oldTotal)}</span><span class="arrow">→</span><span>${esc(newTotal)}</span><span class="max">/ ${esc(max)}</span></div>
+          ${pill}
+          <span class="dyn-count">Проверка №${n}</span>
+        </div>
+        <p class="dyn-sub">${esc(verdict)}</p>
+        ${prevCal}
+        <div class="dyn-rows">${rows}</div>
+      </div>
+    </div>`;
+}
+
 // ---------- Главный рендер ----------
 function render(data) {
   validate(data);
@@ -722,6 +831,9 @@ function render(data) {
   });
 
   document.getElementById("recommendationText").textContent = data.recommendation;
+  // Было → стало: прошлое берём из ответа сервера (previous), поэтому блок
+  // переживает перезагрузку. Нет прошлого — контейнер остаётся пустым.
+  renderDynHistory(document.getElementById("dynContainer"), data.previous, data.checkCount, data);
   showResult();
   observeReveals(resultEl);
 }

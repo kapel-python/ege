@@ -2367,6 +2367,25 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "ALTER TABLE essay_checks ADD COLUMN rubric_version INTEGER NOT NULL DEFAULT 1")
                 conn.commit()
+        # История проверок текста для блока «Было → стало» на ege-result.html:
+        # каждая успешная проверка дописывается сюда (включая первую), а
+        # essay_checks держит только последнюю. Блок переживает перезагрузку,
+        # потому что прошлое берётся из базы, а не из памяти вкладки.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS essay_check_history(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                 subject TEXT NOT NULL DEFAULT '',
+                 text_sha256 TEXT NOT NULL,
+                 provider TEXT NOT NULL DEFAULT '',
+                 result_json TEXT NOT NULL,
+                 rubric_version INTEGER NOT NULL DEFAULT 1,
+                 created_at TEXT NOT NULL)"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_essay_check_history_user_subject_text"
+            " ON essay_check_history(user_id, subject, text_sha256, id)"
+        )
         _ESSAY_SCHEMA_DONE.add(key)
 
 
@@ -2724,6 +2743,25 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
         return None
     data = serialize_essay_row(row)
     data["view"] = essay_result_view(data)
+    # Прошлая проверка этого текста для блока «Было → стало»: адаптируем тем
+    # же essay_result_view, чтобы критерии совпали с текущей схемой экрана.
+    # Нет прошлого (первая проверка) или оно не адаптировалось — поле честно
+    # пустое, блок на странице не рисуется. Счётчик включает текущую.
+    data["previous"] = None
+    data["checkCount"] = 0
+    try:
+        hist = previous_essay_check(conn, user_id, data["subject"], row["text"])
+    except sqlite3.Error:
+        hist = {"previous": None, "checks": 0}
+    data["checkCount"] = int(hist.get("checks") or 0)
+    prev = hist.get("previous")
+    if prev is not None:
+        data["previous"] = essay_result_view({
+            "result": prev["result"],
+            "wordCount": data["wordCount"],
+            "minWords": data["minWords"],
+            "evaluationProvider": prev["provider"],
+        })
     return data
 
 
@@ -2849,23 +2887,72 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
     """Записать факт проверки этого текста и версию правил, которыми он оценён.
 
     Вызывается из /api/ai/essay СРАЗУ после успешного ответа — это единственный
-    путь появления строки. Повторная проверка перезаписывает запись, но
-    одинаковый текст на одинаковых условиях берётся из кэша, а не переоценивается
-    заново (см. load_essay_check).
+    путь появления строки. Повторная проверка перезаписывает запись в
+    essay_checks, но прежние результаты не теряются: каждая запись дописывается
+    в essay_check_history — по ней ege-result.html рисует «Было → стало».
     """
     ensure_essay_schema(conn)
     blob = json.dumps(result, ensure_ascii=False)
     if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
         raise ValueError("result too large")
+    key = (user_id, subject, essay_text_hash(text))
     conn.execute(
         "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
         " VALUES(?,?,?,?,?,?,?)"
         " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
         " result_json=excluded.result_json, provider=excluded.provider,"
         " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
-        (user_id, subject, essay_text_hash(text), str(provider or "")[:64], blob,
+        (key[0], key[1], key[2], str(provider or "")[:64], blob,
          int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
     )
+    conn.execute(
+        "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
+        " VALUES(?,?,?,?,?,?,?)",
+        (key[0], key[1], key[2], str(provider or "")[:64], blob,
+         int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
+    )
+    # История — только для блока «Было → стало»: глубже не смотрим,
+    # поэтому старые записи сверх лимита удаляем сразу.
+    conn.execute(
+        "DELETE FROM essay_check_history WHERE user_id=? AND subject=? AND text_sha256=?"
+        " AND id NOT IN (SELECT id FROM essay_check_history"
+        " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT ?)",
+        (key[0], key[1], key[2], key[0], key[1], key[2], ESSAY_HISTORY_KEEP),
+    )
+
+
+ESSAY_HISTORY_KEEP = 10
+
+
+def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
+                         text: str) -> dict:
+    """Прошлая проверка текста + счётчик всех проверок для «Было → стало».
+
+    Возвращает {"previous": {"result","provider","rubric_version"} | None,
+    "checks": int}. Битое прошлое молча пропускаем: блок просто не рисуется,
+    а текущая оценка не страдает.
+    """
+    ensure_essay_schema(conn)
+    rows = conn.execute(
+        "SELECT result_json, provider, rubric_version FROM essay_check_history"
+        " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT 2",
+        (user_id, subject, essay_text_hash(text)),
+    ).fetchall()
+    total = conn.execute(
+        "SELECT COUNT(*) FROM essay_check_history WHERE user_id=? AND subject=? AND text_sha256=?",
+        (user_id, subject, essay_text_hash(text)),
+    ).fetchone()
+    checks = int(total[0]) if total else 0
+    previous = None
+    if len(rows) >= 2:
+        try:
+            result = json.loads(rows[1]["result_json"])
+        except (ValueError, TypeError):
+            result = None
+        if isinstance(result, dict):
+            previous = {"result": result, "provider": rows[1]["provider"] or "",
+                        "rubric_version": int(rows[1]["rubric_version"] or 0)}
+    return {"previous": previous, "checks": checks}
 
 
 def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text: str,
