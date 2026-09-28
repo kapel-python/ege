@@ -1253,6 +1253,77 @@ def test_gates(ai) -> None:
         ai.chat, ai.lt_check = original_chat, original_lt
 
 
+def test_off_task(ai) -> None:
+    section("работа не по исходнику: К1 = 0 и ни автора, ни цитаты")
+    # Живой случай 28.09: ученик отправил рекламу Telegram-бота. Модель честно
+    # написала «текст не является сочинением-рассуждением» и дала К1 = 0, но
+    # К4 + К5 + К6 остались независимыми — и реклама стоила 4 балла. Правило
+    # ФИПИ «работа, написанная без опоры на прочитанный текст, не оценивается»
+    # требует обнулить такую работу целиком.
+    ad = " ".join((
+        "Смотри, расскажу подробнее, как это работает и почему тебе это может "
+        "быть удобно каждый день без лишней возни. Я подключаю на твой личный "
+        "аккаунт программу, которая сама отвечает в диалогах, пока ты занят "
+        "своими делами. Выбирав нужный чат, ты пишешь обычное сообщение, а "
+        "дальше всё происходит без твоего участия и без ожидания ответа "
+        "часами. Скорость появляется сразу, и собеседник не понимает, что "
+        "пишет не он, ведь стиль сохраняется, а ответы выходят живыми. "
+        "Настройка занимает меньше суток, доступ выдаётся сразу после "
+        "оплаты, и дальше всё происходит само. Отдельно можно подключить "
+        "умный модуль, который продолжит разговор в твоём тоне, задаст "
+        "вопрос, если ответ неоднозначный, и поддержит диалог так, будто "
+        "его ведёт живой человек с твоей стороны. Тариф состоит из двух "
+        "частей, и вторая нужна только тем, кто хочет настоящую живую "
+        "переписку вместо однотипных заготовок. Оплата проходит прямо "
+        "здесь, доступ выдаётся в тот же день, а помощь настраивает всё "
+        "вместе с тобой по ходу дела. Экономия выходит заметной уже на "
+        "первой неделе, особенно если сообщений много и они идут долго."
+    ).split())
+    check("реклама длиннее порога объёма", ai.count_words(" ".join(ad)) >= ai.ESSAY_MIN_WORDS,
+          str(ai.count_words(" ".join(ad))))
+    check("реклама разнообразна (гейт повторов её не ловит)",
+          ai.detect_low_diversity(" ".join(ad))["uniqShare"] >= ai.ESSAY_DIVERSITY_MIN,
+          str(ai.detect_low_diversity(" ".join(ad))))
+    check("реклама: якоря нет", ai.essay_anchor_missing(" ".join(ad)) is True)
+    check("настоящая работа: якорь есть",
+          ai.essay_anchor_missing(LONG_TEXT) is False, LONG_TEXT[:60])
+    check("работа с автором, но без цитаты — якорь есть",
+          ai.essay_anchor_missing("автор считает, что это верно и так далее") is False)
+    check("работа с цитатой, но без слова «автор» — якорь есть",
+          ai.essay_anchor_missing("он говорит: «всё это было бы смешно»") is False)
+    check("короткая цитата не считается якорем",
+          ai.essay_anchor_missing("он говорит: «всё так» и уходит") is True)
+
+    original_chat, original_lt = ai.chat, ai.lt_check
+    ai.lt_check = lambda text: []
+    try:
+        ai.chat = lambda messages, **kwargs: json.dumps(k1zero_payload(), ensure_ascii=False)
+        out = ai.run_format("essay", " ".join(ad))
+        crit = {c["id"]: c["score"] for c in out["criteria"]}
+        check("реклама: 0 из 22", out["total_score"] == 0, str(out["total_score"]))
+        check("реклама: обнулены ВСЕ критерии, включая содержание",
+              all(v == 0 for v in crit.values()), str(crit))
+        cal = out.get("calibration") or {}
+        check("реклама: помечена причиной off_task и объяснена",
+              cal.get("reason") == "off_task" and cal.get("final") == 0
+              and "не опирается на прочитанный текст" in str(cal.get("note")), str(cal))
+        check("реклама: комментарий критерия не противоречит баллу",
+              all("не начислены" in c["comment"] for c in out["criteria"]))
+        check("реклама: вердикт не обещает баллы за К1–К3, которых нет",
+              "по всем критериям" in out["short_verdict"], out["short_verdict"][:90])
+        check("реклама: вердикт последним полем", list(out)[-1] == "short_verdict")
+        # Настоящая работа с тем же вердиктом модели (К1 = 0) сохраняет остаток
+        # содержания: правило бьёт по работам вне текста, а не по слабым.
+        ai.chat = lambda messages, **kwargs: json.dumps(k1zero_payload(), ensure_ascii=False)
+        ok = ai.run_format("essay", LONG_TEXT)
+        check("работа с якорем: остаток содержания сохранён (К1 = 0 -> только К4-К6)",
+              ok["total_score"] == 3, str(ok["total_score"]))
+        check("работа с якорем: отметки off_task нет",
+              (ok.get("calibration") or {}).get("reason") is None, str(ok.get("calibration")))
+    finally:
+        ai.chat, ai.lt_check = original_chat, original_lt
+
+
 def main() -> int:
     print("AI-оценка сочинения: офлайн-регрессия" + (" + LIVE" if LIVE else ""))
     ai = load_module("ege_ai_unit", AI_PATH)
@@ -1264,6 +1335,7 @@ def main() -> int:
     test_run_format_input(ai)
     test_grammar(ai)
     test_gates(ai)
+    test_off_task(ai)
     test_source_mode(ai)
     test_veto(ai)
     test_caps_and_tolerance(ai)
