@@ -154,7 +154,10 @@ html { -webkit-tap-highlight-color: transparent; }
 
 .ef-badge svg{ width: 20px; height: 20px; position: relative; z-index: 1; }
 
-.ef-tagline{ font-size: 13px; color: var(--ef-faint); font-weight: 500; margin-top: -10px; }
+/* Отступ от логотипа: .ef-brand даёт 14px через flex-gap, прежний
+   margin-top:-10px съедал его почти целиком и прижимал строку к логотипу.
+   +6px сверх gap = 20px зазора; крутится одним значением. */
+.ef-tagline{ font-size: 13px; color: var(--ef-faint); font-weight: 500; margin-top: 6px; }
 
 .ef-text{ color: var(--ef-dim); font-size: 14.5px; line-height: 1.7; margin: 0; max-width: 34ch; }
 
