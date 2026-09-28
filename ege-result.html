@@ -831,6 +831,12 @@ function render(data) {
   });
 
   document.getElementById("recommendationText").textContent = data.recommendation;
+  // Снимок для восстановления после reload во время перепроверки: по нему
+  // отличаем «пришёл новый отчёт» от «сервер ещё считает старый».
+  lastRenderedView = {
+    total_score: Number(data.total_score),
+    checkCount: data.checkCount == null ? null : Math.floor(Number(data.checkCount) || 0),
+  };
   // Было → стало: прошлое берём из ответа сервера (previous), поэтому блок
   // переживает перезагрузку. Нет прошлого — контейнер остаётся пустым.
   renderDynHistory(document.getElementById("dynContainer"), data.previous, data.checkCount, data);
@@ -1032,6 +1038,17 @@ let recheckPrevFocus = null;
 let recheckTickTimer = null;
 let recheckMsgTimer = null;
 let recheckLoading = false;
+// Последний отрисованный отчёт: снимок для восстановления после перезагрузки
+// (отличить «пришёл новый результат перепроверки» от «сервер ещё считает»).
+let lastRenderedView = null;
+// Метка «перепроверка в полёте» в sessionStorage: переживает reload в той же
+// вкладке, в новой вкладке её нет. Повторный POST после reload НЕ шлём (это
+// списало бы второй жетон): только показываем то же незакрываемое окно и
+// ждём свежий отчёт через GET /api/essays.
+const RECHECK_PENDING_KEY = "ege_recheck_pending";
+const RECHECK_PENDING_TTL_MS = 10 * 60 * 1000;
+const RECHECK_RESUME_TIMEOUT_MS = 120000;
+const RECHECK_RESUME_POLL_MS = 3000;
 
 function recheckFmt(totalSec) {
   const s = Math.max(0, Math.floor(Number(totalSec) || 0));
@@ -1166,6 +1183,7 @@ function openRecheckLoading() {
 
 function openRecheckLimit(status) {
   recheckLoading = false;
+  recheckPendingClear();
   const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
   let left = Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
   openRecheckModal(`
@@ -1213,6 +1231,7 @@ function openRecheckLimit(status) {
 
 function openRecheckError(title, text, retryNote) {
   recheckLoading = false;
+  recheckPendingClear();
   const canRetry = typeof retryNote === "string";
   openRecheckModal(`
       <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -1246,6 +1265,7 @@ function openRecheckGate(reason) {
   // не зависит от замечания. Единственный случай, когда перепроверки нет:
   // во всех остальных клиент всегда зовёт модель за жетон пользователя.
   recheckLoading = false;
+  recheckPendingClear();
   const texts = {
     source_rewrite: "Работа не перепроверялась: она полностью переписывает исходный текст — по ключу ФИПИ это 0 баллов.",
     low_diversity: "Работа не перепроверялась: текст набран повторами — по ключу ФИПИ это 0 баллов.",
@@ -1268,6 +1288,111 @@ function openRecheckGate(reason) {
           <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
         </div>
       </div>`, true);
+}
+
+// ---------- Перепроверка переживает reload ----------
+// Метка «в полёте» — один ключ на вкладку: страница результата открыта в
+// одном экземпляре, а идентификаторы лежат внутри и сверяются с URL.
+function recheckPendingSave(note) {
+  try {
+    const p = resultParams();
+    const snap = lastRenderedView || {};
+    const pending = {
+      ts: Date.now(),
+      note: String(note || "").slice(0, RECHECK_NOTE_MAX),
+      clientId: (recheckSubmission && recheckSubmission.clientId) || p.clientId || "",
+      sid: (recheckSubmission && recheckSubmission.submissionId)
+        ? String(recheckSubmission.submissionId) : (p.sid || ""),
+      taskId: (recheckSubmission && recheckSubmission.taskId) || p.taskId || "",
+      prevCheckCount: (snap.checkCount == null ? null : snap.checkCount),
+      prevTotal: Number.isFinite(snap.total_score) ? snap.total_score : null,
+    };
+    sessionStorage.setItem(RECHECK_PENDING_KEY, JSON.stringify(pending));
+  } catch (e) {}
+}
+
+function recheckPendingRead() {
+  try {
+    const raw = sessionStorage.getItem(RECHECK_PENDING_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || typeof p !== "object") return null;
+    return p;
+  } catch (e) { return null; }
+}
+
+function recheckPendingClear() {
+  try { sessionStorage.removeItem(RECHECK_PENDING_KEY); } catch (e) {}
+}
+
+function recheckPendingFresh(p) {
+  const ts = Math.floor(Number(p && p.ts) || 0);
+  return ts > 0 && (Date.now() - ts) < RECHECK_PENDING_TTL_MS;
+}
+
+// Метка относится к этой странице: совпал хотя бы один непустой
+// идентификатор (clientId в приоритете — он точнее всего).
+function recheckPendingMatches(p, params) {
+  if (!p || !params) return false;
+  if (p.clientId && params.clientId && p.clientId === params.clientId) return true;
+  if (p.sid && params.sid && String(p.sid) === String(params.sid)) return true;
+  if (p.taskId && params.taskId && p.taskId === params.taskId) return true;
+  return false;
+}
+
+// Новый отчёт arrived: вырос счётчик проверок (надёжный сигнал — итог при
+// подтверждении может совпасть), либо при неизвестном счётчике изменился итог.
+function recheckViewIsFresh(view, pending) {
+  if (!view || !pending) return false;
+  const newCount = (view.checkCount == null ? null : Math.floor(Number(view.checkCount) || 0));
+  const prevCount = (pending.prevCheckCount == null ? null : Math.floor(Number(pending.prevCheckCount) || 0));
+  if (newCount != null && prevCount != null && newCount > prevCount) return true;
+  if (pending.prevTotal != null && Number(view.total_score) !== Number(pending.prevTotal)) return true;
+  return false;
+}
+
+function recheckSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// После reload: то же незакрываемое окно + ожидание готового отчёта через
+// GET. Свой POST не повторяем: исходный запрос мог дойти до сервера (жетон
+// списан, проверка пишется) — повтор списал бы второй жетон за тот же текст.
+async function recheckResumePending(pending) {
+  openRecheckLoading();
+  try {
+    const root = document.getElementById("model-modal-root");
+    const sub = root ? root.querySelector(".recheck-load-sub") : null;
+    if (sub) sub.textContent = "Страница была обновлена — ждём результат перепроверки. Окно закроется само, когда отчёт будет готов.";
+  } catch (e) {}
+  const deadline = Date.now() + RECHECK_RESUME_TIMEOUT_MS;
+  let lastView = null;
+  while (Date.now() < deadline) {
+    try {
+      const view = await fetchFromApi();
+      lastView = view;
+      if (recheckViewIsFresh(view, pending)) {
+        render(view);
+        closeRecheckModalForce();
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+        return;
+      }
+    } catch (err) {
+      // pending/offline/missing: сервер ещё считает или сети нет — ждём
+      // до дедлайна, а не падаем на первой же итерации.
+    }
+    await recheckSleep(RECHECK_RESUME_POLL_MS);
+  }
+  // Новый отчёт не появился: показываем старый под модалкой (если успели
+  // его прочитать), чтобы было куда вернуться, и предлагаем повторить с
+  // сохранённым замечанием. Повтор — осознанно за новый жетон.
+  recheckLoading = false;
+  if (lastView) {
+    try { render(lastView); } catch (e) {}
+  }
+  openRecheckError("Перепроверка прервалась",
+    "Страница была обновлена во время перепроверки, а новый результат так и не появился. Если отчёт ниже не обновился — попробуй ещё раз.",
+    (pending && typeof pending.note === "string") ? pending.note : "");
 }
 
 async function onRecheckClick() {
@@ -1305,6 +1430,7 @@ async function doRecheck(note) {
   }
   const cleanNote = String(note || "").slice(0, RECHECK_NOTE_MAX);
   openRecheckLoading();
+  recheckPendingSave(cleanNote);
   // recheck:true — явная перепроверка: сервер всегда идёт через модель за
   // жетон пользователя (кэш её не обслуживает, только практика). Исключение —
   // гарантированные нули гейтов: их вернёт флаг deterministic без трат.
@@ -1401,6 +1527,7 @@ async function doRecheck(note) {
 function closeRecheckModalForce() {
   const root = document.getElementById("model-modal-root");
   recheckLoading = false;
+  recheckPendingClear();
   recheckStopTimers();
   if (root) root.innerHTML = "";
   document.removeEventListener("keydown", recheckEscHandler);
@@ -1413,7 +1540,18 @@ function closeRecheckModalForce() {
 observeReveals(document);
 document.getElementById('retryBtn').addEventListener('click', () => loadResult(fetchFromApi));
 document.getElementById('recheckBtn').addEventListener('click', onRecheckClick);
-loadResult(fetchFromApi);
+// Reload во время незакрываемого окна загрузки: показываем то же окно снова
+// и ждём готовый отчёт (без повторного POST — жетон уже мог быть списан).
+(function recheckBoot() {
+  let pending = null;
+  try { pending = recheckPendingRead(); } catch (e) { pending = null; }
+  if (pending && recheckPendingFresh(pending) && recheckPendingMatches(pending, resultParams())) {
+    recheckResumePending(pending);
+  } else {
+    if (pending) recheckPendingClear();
+    loadResult(fetchFromApi);
+  }
+})();
 
 // Публичный API для интеграции в реальный фронтенд:
 window.EgeEssayResult = { render, loadResult };
