@@ -20,8 +20,9 @@ active provider first; an upstream failure (balance, auth, timeout, HTTP
 error) silently retries on the next configured provider inside the same
 request, and the router state in app_config (key "ai_router") remembers who
 is active so later requests skip the broken one. A background loop
-(start_failover_loop, EGE_AI_PROBE_INTERVAL_SEC, default hourly) pings the
-preferred provider with a one-token "привет" while the fallback is active
+(start_failover_loop, EGE_AI_PROBE_INTERVAL_SEC, default 15 min) pings the
+preferred provider with a one-token "привет" ONLY while the fallback is
+active (probe_tick returns immediately when the preferred provider already is)
 and switches back on success. A provider without a key is simply skipped.
 The deterministic literacy block (K7–K10) talks to LanguageTool:
 EGE_LT_URL (default is the public API; production should point at a
@@ -819,14 +820,23 @@ def balance() -> float | None:
 # ---------------------------------------------------------------------------
 # Probe — возврат приоритетного провайдера
 #
-# Пока активен запасной, раз в час (EGE_AI_PROBE_INTERVAL_SEC) приоритетный
-# провайдер проверяется дешёвым живым запросом («привет», один токен ответа).
-# Успех — активным снова становится он; отказ — ждём следующий интервал.
-# Проба идёт мимо пользовательского бюджета (это фон сервера, а не проверка
-# ученика) и мимо failover: она зовёт _chat_via напрямую, чтобы её собственный
-# отказ не трогал активного — он и так уже запасной.
+# Пока активен запасной, раз в 15 минут (EGE_AI_PROBE_INTERVAL_SEC)
+# приоритетный провайдер проверяется дешёвым живым запросом («привет», один
+# токен ответа). Успех — активным снова становится он; отказ — ждём следующий
+# интервал. Проба идёт мимо пользовательского бюджета (это фон сервера, а не
+# проверка ученика) и мимо failover: она зовёт _chat_via напрямую, чтобы её
+# собственный отказ не трогал активного — он и так уже запасной.
+#
+# Интервал 15 минут, а не час: closerouter (anthropic-маршрут) отвечает
+# флакующим 400, и каждый такой отказ уводил приоритетного провайдера в
+# запасные на целый час — при живом closerouter это час лишних запросов в
+# gptunnel и ученик на гранё (400 + failover) вместо приоритетного маршрута.
+# Проба при этом копеечная (1 токен) и НЕ грузит провайдера, когда он и так
+# активен: probe_tick выходит сразу, если current == preferred (строка
+# `уже на приоритетном — проверять нечего`), то есть запрос уходит только
+# когда активен запасной.
 # ---------------------------------------------------------------------------
-PROBE_INTERVAL_SEC = float(_env("EGE_AI_PROBE_INTERVAL_SEC", default="3600") or 3600)
+PROBE_INTERVAL_SEC = float(_env("EGE_AI_PROBE_INTERVAL_SEC", default="900") or 900)
 PROBE_TIMEOUT_SEC = float(_env("EGE_AI_PROBE_TIMEOUT_SEC", default="45") or 45)
 # Как часто просыпается фоновый поток, чтобы проверить «не пора ли».
 PROBE_WAKE_SEC = 60.0

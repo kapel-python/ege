@@ -197,12 +197,14 @@ def main() -> int:
                   ai.active_provider() == "gptunnel", ai.active_provider())
 
             # ----------------------------------------------------------
-            section("Probe: возврат приоритетного через час")
+            section("Probe: возврат приоритетного за 15 минут")
             # ----------------------------------------------------------
             reset()
             ai._chat_via = closerouter_dead  # closerouter упал, активный — gptunnel
             ai.chat([{"role": "user", "content": "x"}])
             check("активен запасной gptunnel", ai.active_provider() == "gptunnel")
+            check("интервал пробы — 15 минут по умолчанию", ai.PROBE_INTERVAL_SEC == 900.0,
+                  str(ai.PROBE_INTERVAL_SEC))
             t0 = time.time()
             ai._chat_via = healthy  # closerouter восстановился
             calls.clear()
@@ -231,7 +233,7 @@ def main() -> int:
             check("probe попытался ровно один раз", calls == ["closerouter"], calls)
             row = router_row(db_path)
             check("lastProbeError записан", bool(row and row.get("lastProbeError")), row)
-            check("повторный probe раньше часа не дёргает провайдера",
+            check("повторный probe раньше интервала не дёргает провайдера",
                   ai.probe_tick(now=t_probe + 60) is False and calls == ["closerouter"], calls)
             check("после интервала probe снова пытается",
                   (calls.clear(), ai.probe_tick(now=t_probe + ai.PROBE_INTERVAL_SEC + 1),
@@ -246,6 +248,14 @@ def main() -> int:
             calls.clear()
             check("probe пропускается, когда активен приоритетный",
                   ai.probe_tick() is False and calls == [], calls)
+            # Главное опасение: не дёргаем closerouter, пока он и так активен.
+            # Проба идёт мимо _ordered_providers, поэтому замер по самому факту
+            # вызова, а не по счётчику чата.
+            pinged = []
+            ai._chat_via = lambda *a, **kw: (pinged.append(1), healthy(*a, **kw))[1]
+            check("15 минут без единого запроса к активному closerouter",
+                  (ai.probe_tick(now=time.time() + ai.PROBE_INTERVAL_SEC + 1) is False
+                   and pinged == []), pinged)
 
             # ----------------------------------------------------------
             section("Ключи: без ключей — 503, один провайдер — без failover")
