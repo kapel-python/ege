@@ -389,6 +389,91 @@ def main():
                   and body.get("final") == "Свежая попытка.", f"{status} {body}")
             check("force зовёт модель", calls["n"] == 1, str(calls["n"]))
 
+            section("replaceLast: ход ЗАМЕНЯЕТ последнюю пару, а не дублирует")
+            # Свой клиент с большим грантом: у Ани к этому месту жетоны
+            # предыдущих секций уже на исходе, а здесь каждый ход платит.
+            c4 = Client("10.8.0.1")
+            claim(c4, "Дина-замена")
+            _, body = new_thread(c4)
+            tid_d = body["thread"]["id"]
+            conn2 = server.connect()
+            conn2.row_factory = sqlite3.Row
+            try:
+                uid_d = conn2.execute("SELECT id FROM users WHERE name='Дина-замена'").fetchone()["id"]
+                agent.admin_agent_quota_set(conn2, uid_d, {"remaining": 100})
+            finally:
+                conn2.close()
+            with lock:
+                script.clear()
+                script.append({"text": "Первый ответ.", "tool_calls": []})
+                script.append({"text": "Второй ответ.", "tool_calls": []})
+            status, body = turn(c4, tid_d, "заменяемый вопрос")
+            check("обычный ход -> 200", status == 200, f"{status} {body}")
+            status, body = turn(c4, tid_d, "заменяемый вопрос", {"replaceLast": True})
+            check("replaceLast с тем же текстом обходит кэш (не cached)",
+                  status == 200 and body.get("cached") is not True, f"{status} {body}")
+            check("replaceLast -> новый ответ от модели",
+                  body.get("final") == "Второй ответ.", str(body.get("final")))
+
+            def msgs_of(tid):
+                c = server.connect()
+                c.row_factory = sqlite3.Row
+                try:
+                    return c.execute("SELECT role, content FROM agent_messages"
+                                     " WHERE thread_id=? ORDER BY seq", (int(tid),)).fetchall()
+                finally:
+                    c.close()
+
+            rows = msgs_of(tid_d)
+            user_cnt = sum(1 for r in rows if r["role"] == "user" and (r["content"] or "") == "заменяемый вопрос")
+            check("в базе ОДИН такой вопрос (пара заменена, не продублирована)", user_cnt == 1, str(user_cnt))
+            finals = [r["content"] for r in rows if r["role"] == "assistant" and (r["content"] or "").strip()]
+            check("в базе последний финал — новый", finals[-1] == "Второй ответ.", str(finals[-2:]))
+
+            status, body = turn(c4, tid_d, "изменённый вопрос", {"replaceLast": True})
+            check("замена на другой текст -> 200", status == 200, f"{status} {body}")
+            rows = msgs_of(tid_d)
+            check("старый вопрос исчез из базы",
+                  not any(r["role"] == "user" and r["content"] == "заменяемый вопрос" for r in rows),
+                  str([r["content"] for r in rows if r["role"] == "user"][-2:]))
+
+            # Неуспех заменяющего хода не сносит старую пару (снос — в транзакции успеха).
+            def boom_chat(messages, tools, **kw):
+                with lock:
+                    calls["n"] += 1
+                raise ai.AIError("upstream 500")
+            saved = ai.chat_with_tools
+            ai.chat_with_tools = boom_chat
+            try:
+                status, body = turn(c4, tid_d, "вопрос со сбоем", {"replaceLast": True})
+                check("сбой модели -> 502", status == 502, f"{status} {body}")
+            finally:
+                ai.chat_with_tools = saved
+            rows = msgs_of(tid_d)
+            check("после 502 старая пара цела (изменённый вопрос на месте)",
+                  any(r["role"] == "user" and r["content"] == "изменённый вопрос" for r in rows)
+                  and not any(r["content"] == "вопрос со сбоем" for r in rows),
+                  str([r["content"] for r in rows if r["role"] == "user"][-2:]))
+
+            # replaceLast поверх ожидания подтверждения действия — 400, ничего не ломает.
+            with lock:
+                script.clear()
+                script.append({"text": None, "tool_calls": [{"id": "act1", "name": "reset_progress",
+                                                             "arguments": {}}]})
+            c3 = Client("10.9.0.1")
+            claim(c3, "Дина-pending")
+            _, body = new_thread(c3)
+            tid_v = body["thread"]["id"]
+            status, body = turn(c3, tid_v, "разбери ошибку")
+            check("ход встал на подтверждение", status == 200 and body.get("pending") is True, f"{status} {body}")
+            status, body = turn(c3, tid_v, "другой вопрос", {"replaceLast": True})
+            check("replaceLast при needs_confirm -> 400 AGENT_PENDING",
+                  status == 400 and body.get("code") == "AGENT_PENDING", f"{status} {body}")
+            rows = msgs_of(tid_v)
+            check("ожидающий шаг не снесён",
+                  any(r["role"] == "tool" for r in rows) and not any(r["content"] == "другой вопрос" for r in rows),
+                  str([(r["role"], r["content"][:20]) for r in rows]))
+
             section("детерминированная ошибка инструментов -> 400, не 502")
             with lock:
                 script.clear()

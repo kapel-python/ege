@@ -199,14 +199,22 @@ def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, r
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
-def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int) -> list:
+def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int,
+                             before_seq: int | None = None) -> list:
     """История треда → формат build_messages (user/assistant/tool с call_id).
 
     Окно — последние 60 строк: безлимитный тред упирался в 90-секундный
-    потолок хода и давал детерминированный 502 на каждую попытку."""
-    rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
-                        " FROM agent_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 60",
-                        (int(thread_id),)).fetchall()
+    потолок хода и давал детерминированный 502 на каждую попытку.
+    before_seq — граница для заменяющего хода (replaceLast): история БЕЗ
+    последней пары «вопрос+ответ», которая будет снесена при успехе."""
+    if before_seq is not None:
+        rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
+                            " FROM agent_messages WHERE thread_id=? AND seq<? ORDER BY seq DESC LIMIT 60",
+                            (int(thread_id), int(before_seq))).fetchall()
+    else:
+        rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
+                            " FROM agent_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 60",
+                            (int(thread_id),)).fetchall()
     rows = list(reversed(rows))
     history: list = []
     for r in rows:
@@ -9215,11 +9223,29 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
                                         "retryAfter": wait}, 400, token=token,
                                        headers={"Retry-After": str(wait)}); return
+                    # replaceLast:true — «перегенерировать ответ» / «изменить и
+                    # отправить» из меню последнего сообщения: ход ЗАМЕНЯЕТ
+                    # последнюю пару «вопрос+ответ», а не дублирует её. Граница
+                    # замены считается до модели; снос старых строк — в той же
+                    # транзакции, что вставка новых, поэтому сбой модели ничего
+                    # не удаляет (старая пара остаётся живой).
+                    replace_from = None
+                    if payload.get("replaceLast") is True:
+                        lu = conn.execute("SELECT seq FROM agent_messages WHERE thread_id=? AND role='user' ORDER BY seq DESC LIMIT 1",
+                                          (tid,)).fetchone()
+                        if lu is not None:
+                            pend = conn.execute("SELECT COUNT(*) FROM agent_messages WHERE thread_id=? AND seq>? AND status='needs_confirm'",
+                                                (tid, int(lu["seq"]))).fetchone()[0]
+                            if pend:
+                                self.send_json({"error": "Прошлый ход ждёт подтверждения действия — сначала реши его.",
+                                                "code": "AGENT_PENDING"}, 400, token=token); return
+                            replace_from = int(lu["seq"])
                     usage_spent = False
                     try:
                         # Повторный ход кэшируется: тот же текст последним — отдаём готовое без модели и без жетона.
                         # force:true от клиента (кнопка «Попробовать снова») обходит кэш: явный повтор = новый шанс.
-                        if payload.get("force") is not True:
+                        # replaceLast обходит кэш всегда: замена ради нового ответа.
+                        if replace_from is None and payload.get("force") is not True:
                             last_user = conn.execute("SELECT content, seq FROM agent_messages WHERE thread_id=? AND role='user' ORDER BY seq DESC LIMIT 1",
                                                      (tid,)).fetchone()
                             if last_user is not None and (last_user["content"] or "").strip() == text:
@@ -9284,7 +9310,7 @@ class Handler(BaseHTTPRequestHandler):
                         thread_title = (str(thread["title"] or "")
                                         if str(thread["title"] or "") not in ("Новый чат", "")
                                         else _AGENT.thread_title_for(text))
-                        history = _agent_history_for_model(conn, tid)
+                        history = _agent_history_for_model(conn, tid, before_seq=replace_from)
                         messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
                         cost = {"n": 0}
                         _chat_fn = _agent_chat_fn(cost, tid)
@@ -9308,6 +9334,10 @@ class Handler(BaseHTTPRequestHandler):
                             rid = log_request_error("agent-model", exc)
                             self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
+                        # Заменяющий ход сносит старую пару в этой же транзакции.
+                        if replace_from is not None:
+                            conn.execute("DELETE FROM agent_messages WHERE thread_id=? AND seq>=?",
+                                         (tid, replace_from))
                         _agent_add_message(conn, tid, user_id, "user", text)
                         out_steps = []
                         for st in steps:

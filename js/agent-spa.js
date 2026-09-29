@@ -107,12 +107,18 @@
   }
 
   /* ---------- меню сообщения ----------
-     Клик по сообщению (своё или ответ наставника) открывает маленькое меню:
-     скопировать, повторить, своё — ещё и «изменить и отправить снова».
-     Меню одно на ленту: position fixed у точки клика, закрывается кликом
-     мимо / Esc / прокруткой. Текст сообщения берётся из DOM (у ответа —
-     textContent уже отрендеренного markdown). */
-  var msgMenu = { node: null };
+     Долгое нажатие (500 мс) на своё сообщение или ответ наставника открывает
+     меню у точки нажатия; тап в любом другом месте, Esc и прокрутка его
+     закрывают. Действия зависят от места в ленте:
+     - ЛЮБОЕ сообщение: «Скопировать».
+     - только ПОСЛЕДНИЙ вопрос ученика: + «Изменить и отправить» (замена
+       существующего сообщения, не новое) ;
+     - только ПОСЛЕДНИЙ ответ наставника (или последний вопрос до ответа):
+       + «Перегенерировать» — тот же вопрос уходит с replaceLast, сервер
+       ЗАМЕНЯЕТ пару «вопрос+ответ» и модель даёт новый ответ.
+     У более ранних сообщений — только копирование: «изменить» середину
+     переписки означало бы переписать всю историю после неё. */
+  var msgMenu = { node: null, timer: null };
   function closeMsgMenu() {
     if (!msgMenu.node) return;
     try { if (msgMenu.node.parentNode) msgMenu.node.parentNode.removeChild(msgMenu.node); } catch (_) {}
@@ -155,47 +161,74 @@
   }
   function msgMenuFor(e, node) {
     var isUser = node.classList.contains("agent__msg-user");
-    var text = isUser ? (node.textContent || "").trim() : answerText(node.closest(".agent__ai") || node);
+    var card = isUser ? null : node.closest(".agent__ai");
+    var text = isUser ? (node.textContent || "").trim() : answerText(card || node);
     if (!text) return;
+    var last = isUser ? lastUserBubble() : lastAssistantCard();
+    var isLast = (isUser ? node === last : !!card && card === last);
     var items = [{ label: "Скопировать", icon: ICON_COPY, run: function () { copyText(text); } }];
-    if (isUser) {
+    if (isLast) {
+      if (isUser) {
+        items.push({
+          label: "Изменить и отправить",
+          icon: ICON_EDIT,
+          run: function () { editLastQuestion(text); },
+        });
+      }
       items.push({
-        label: "Изменить и отправить",
-        icon: ICON_EDIT,
+        label: isUser ? "Перегенерировать ответ" : "Перегенерировать",
+        icon: ICON_RETRY,
         run: function () {
-          if (!ui.input || S.busy) { ui.input && (ui.input.value = text); syncInput(); return; }
-          ui.input.value = text;
-          ui.input.style.height = "auto";
-          ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
-          syncInput();
-          try { ui.input.focus({ preventScroll: true }); } catch (_) {}
+          var q = isUser ? text : questionBeforeCard(card);
+          if (!q) { say("Вопрос не найден"); return; }
+          if (S.busy) { say("Наставник ещё отвечает"); return; }
+          regenerate(q);
         },
       });
     }
-    items.push({
-      label: "Повторить вопрос",
-      icon: ICON_RETRY,
-      run: function () {
-        var q = text;
-        if (!isUser) {
-          // Для ответа наставника повторяем последний вопрос ученика ДО этой карточки.
-          var card = node.closest(".agent__ai");
-          var prev = null;
-          if (card && ui.live) {
-            var kids = ui.live.childNodes;
-            for (var i = 0; i < kids.length; i++) {
-              if (kids[i] === card) break;
-              if (kids[i].classList && kids[i].classList.contains("agent__msg-user")) prev = kids[i];
-            }
-          }
-          q = prev ? (prev.textContent || "").trim() : "";
-        }
-        if (!q) { say("Вопрос не найден"); return; }
-        if (S.busy) { say("Наставник ещё отвечает"); return; }
-        send(q, { force: true });
-      },
-    });
     openMsgMenu(e.clientX || 8, e.clientY || 8, items);
+  }
+  // Последний пузырёк ученика и последняя карточка ответа в ленте.
+  function lastUserBubble() {
+    var out = null;
+    if (ui.live) ui.live.querySelectorAll(".agent__msg-user").forEach(function (n) { out = n; });
+    return out;
+  }
+  function lastAssistantCard() {
+    var out = null;
+    if (ui.live) ui.live.querySelectorAll(".agent__ai").forEach(function (n) {
+      if (n.hasAttribute("data-answer")) out = n;
+    });
+    return out;
+  }
+  // Вопрос ученика, стоящий в ленте перед карточкой ответа.
+  function questionBeforeCard(card) {
+    var prev = null;
+    if (card && ui.live) {
+      var kids = ui.live.childNodes;
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i] === card) break;
+        if (kids[i].classList && kids[i].classList.contains("agent__msg-user")) prev = kids[i];
+      }
+    }
+    return prev ? (prev.textContent || "").trim() : "";
+  }
+  // «Изменить и отправить»: последний вопрос ЗАМЕНЯЕТСЯ (replaceLast),
+  // новый ход встаёт на его место, а не дублирует переписку.
+  var editTarget = null;
+  function editLastQuestion(text) {
+    if (!ui.input) return;
+    editTarget = text;
+    ui.input.value = text;
+    ui.input.style.height = "auto";
+    ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
+    syncInput();
+    try { ui.input.focus({ preventScroll: true }); } catch (_) {}
+  }
+  // «Перегенерировать»: тот же вопрос уходит с replaceLast — сервер сносит
+  // последнюю пару и отвечает заново. force не нужен (кэш replaceLast обходит).
+  function regenerate(q) {
+    send(q, { replaceLast: true });
   }
 
   /* ---------- движение ----------
@@ -1440,15 +1473,29 @@
     text = (text || "").trim();
     if (!text || S.busy) return;
     var force = !!(opts && opts.force);
+    // Отправка из «Изменить и отправить» всегда заменяет последний вопрос.
+    var replaceLast = !!((opts && opts.replaceLast) || editTarget !== null);
+    editTarget = null;
     if (!S.currentId) {
       var mg0 = S.mountGen;
-      createThread().then(function (t) { if (t && S.mountGen === mg0) send(text, opts); });
+      createThread().then(function (t) { if (t && S.mountGen === mg0) send(text, replaceLast ? { force: force, replaceLast: true } : opts); });
       return;
     }
     var g = ++S.navGen;
     var mg = S.mountGen;
     setBusy(true);
     showEmpty(false);
+    // Заменяющий ход: старая пара «вопрос+ответ» уходит из ленты СРАЗУ —
+    // сервер снесёт её в базе только при успехе, но показывать и дубль,
+    // и новый вопрос одновременно нельзя. При неуспехе failTurn вернёт
+    // текст в поле, а переписка перечитается с сервера (она цела).
+    if (replaceLast) {
+      var oldCard = lastAssistantCard();
+      var oldBubble = lastUserBubble();
+      if (oldCard && oldCard.parentNode) oldCard.parentNode.removeChild(oldCard);
+      if (oldBubble && oldBubble.parentNode) oldBubble.parentNode.removeChild(oldBubble);
+      cacheForget(S.currentId);
+    }
     var bubble = userBubble(text);
     if (ui.input) { ui.input.value = ""; ui.input.style.height = "auto"; }
     try { localStorage.removeItem(draftKey()); } catch (_) {}
@@ -1458,10 +1505,11 @@
     // Ход переживает перемонтирование экрана (render из соседней вкладки,
     // возврат из фона): промис один, обработчики цепляются заново.
     var turn = { threadId: S.currentId, text: text, ctrl: ctrl, promise: null,
-                 startedAt: Date.now(), dead: false, claimedBy: -1 };
+                 startedAt: Date.now(), dead: false, claimedBy: -1, replaceLast: replaceLast };
     S.abort = ctrl;
     var payload = { threadId: S.currentId, text: text };
     if (force) payload.force = true;
+    if (replaceLast) payload.replaceLast = true;
     turn.promise = api("POST", "/api/agent/turns", payload, ctrl ? ctrl.signal : undefined);
     S.turn = turn;
     turn.promise.then(function (res) { settleTurn(turn, g, mg, skel, bubble, text, res); })
@@ -1560,8 +1608,11 @@
       return;
     }
     if (handleAuthError(res)) return;
+    // Заменяющий ход не записался: сервер старую пару НЕ сносил — вернём
+    // ленту из базы, иначе вопрос и ответ пропадут с экрана.
+    if (turn.replaceLast) loadThreadMessages();
     errorCard((res.data && res.data.error) || "Наставник не смог ответить.", "Попробовать снова",
-      function () { send(text, { force: true }); });
+      function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
   }
   /* AGENT_BUSY — не тупик: сервер сам сказал, через сколько освободится слот.
      Раньше здесь была только кнопка, и каждый клик до освобождения давал тот
@@ -1622,8 +1673,11 @@
     if (skel && skel.parentNode) skel.parentNode.removeChild(skel);
     if (S.abort === turn.ctrl) S.abort = null;
     setBusy(false);
+    // Заменяющий ход не дошёл: старую пару клиент уже снял с ленты, а сервер
+    // её НЕ сносил (снос — в транзакции успеха). Возвращаем ленту из базы.
+    if (turn.replaceLast) loadThreadMessages();
     errorCard("Нет соединения. Текст цел — повтори, когда появится сеть.", "Попробовать снова",
-      function () { send(text, { force: true }); });
+      function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
   }
   function confirmStep(messageId, approve, btns) {
     var mg = S.mountGen;
@@ -1684,22 +1738,48 @@
       }
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });
-    // Меню сообщения: клик по своему пузырьку или по тексту ответа.
-    // Только .agent__answer у наставника — шаги, тогглы и кнопки-подсказки
-    // остаются кликабельными без меню.
-    ui.feed.addEventListener("click", function (e) {
+    // Меню сообщения: ДОЛГОЕ нажатие (500 мс) на свой пузырёк или текст
+    // ответа — как у списка чатов. Обычный клик/выделение текста не трогаем;
+    // правый клик на десктопе — тот же вход в меню. Отмена: отпускание,
+    // уход пальца, движение больше 8px.
+    ui.feed.addEventListener("pointerdown", function (e) {
+      var node = e.target.closest ? e.target.closest(".agent__msg-user, .agent__answer") : null;
+      if (!node || !ui.feed.contains(node)) return;
       if (e.target.closest && (e.target.closest("button") || e.target.closest("a"))) return;
+      var x = e.clientX || 0, y = e.clientY || 0;
+      var pt = { clientX: x, clientY: y };
+      function cancel() {
+        if (msgMenu.timer) { try { clearTimeout(msgMenu.timer); } catch (_) {} msgMenu.timer = null; }
+      }
+      cancel();
+      msgMenu.timer = setTimeout(function () {
+        msgMenu.timer = null;
+        try { if (navigator.vibrate) navigator.vibrate(12); } catch (_) {}
+        msgMenuFor(pt, node);
+      }, 500);
+      ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) {
+        ui.feed.addEventListener(ev, cancel, { once: true, capture: true });
+      });
+      var move = function (mv) {
+        if (!msgMenu.timer) { ui.feed.removeEventListener("pointermove", move); return; }
+        if (Math.abs((mv.clientX || 0) - x) > 8 || Math.abs((mv.clientY || 0) - y) > 8) {
+          cancel();
+          ui.feed.removeEventListener("pointermove", move);
+        }
+      };
+      ui.feed.addEventListener("pointermove", move);
+    });
+    ui.feed.addEventListener("contextmenu", function (e) {
       var node = e.target.closest ? e.target.closest(".agent__msg-user, .agent__answer") : null;
       if (!node || !ui.feed.contains(node)) return;
       e.preventDefault();
-      e.stopPropagation();               // иначе document-обработчик тут же закроет открытое меню
       msgMenuFor(e, node);
     });
     // Один раз на документ (маунтов экрана может быть много): при отсутствии
-    // меню обработчики ничего не делают.
+    // меню обработчики ничего не делают. Любой тап в другом месте — закрыть.
     if (!msgMenu.wired) {
       msgMenu.wired = true;
-      document.addEventListener("click", function (e) {
+      document.addEventListener("pointerdown", function (e) {
         if (msgMenu.node && !msgMenu.node.contains(e.target)) closeMsgMenu();
       });
       document.addEventListener("keydown", function (e) {

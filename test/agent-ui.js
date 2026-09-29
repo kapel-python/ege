@@ -151,11 +151,23 @@ check("копирование через Clipboard API с запасным пу�
 /* Меню по клику на сообщение: своё — скопировать/изменить/повторить,
    ответ — скопировать/повторить. Ответ копируется сырым markdown
    (data-answer), а не textContent отрендеренного HTML. */
-check("меню сообщения по клику (своё и ответ), копирование сырого markdown",
+check("меню сообщения по ДОЛГОМУ нажатию (pointerdown+500мс), не по клику",
+  /ui\.feed\.addEventListener\("pointerdown"[\s\S]{0,900}?setTimeout\([\s\S]{0,300}?msgMenuFor/.test(spaCode)
+  && spaCode.includes("contextmenu") && !/ui\.feed\.addEventListener\("click"[\s\S]{0,120}?msgMenuFor/.test(spaCode));
+check("перегенерировать/изменить только у последней пары, копирование сырого markdown",
   spaCode.includes("openMsgMenu") && spaCode.includes("msgMenuFor")
   && spaCode.includes("agent__msg-user, .agent__answer")
   && spaCode.includes('card.setAttribute("data-answer"')
   && spaCode.includes("card.dataset.answer") && /\.agent__msgmenu\b/.test(spaCss));
+check("действие только у последнего сообщения (lastUserBubble/lastAssistantCard/isLast)",
+  spaCode.includes("lastUserBubble") && spaCode.includes("lastAssistantCard")
+  && /var isLast =/.test(spaCode) && /if \(isLast\)/.test(spaCode));
+check("перегенерировать и изменить идут через replaceLast (замена, не дубль)",
+  /regenerate/.test(spaCode) && /replaceLast: true/.test(spaCode)
+  && /payload\.replaceLast = true/.test(spaCode)
+  && /if \(replaceLast\)/.test(spaCode));
+check("заменяющий ход на неуспехе перечитывает ленту (turn.replaceLast)",
+  /if \(turn\.replaceLast\) loadThreadMessages\(\)/.test(spaCode));
 /* Черновик ученика: одна строка localStorage на аккаунт, переживает
    перезагрузку и смену чата; чистится при отправке. */
 check("черновик ученика живёт в localStorage по аккаунту",
