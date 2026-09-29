@@ -126,7 +126,22 @@ check("шаг умеет переливаться по высоте (morph)", sp
 check("лоадер растёт в пустом шаге", spaCode.includes("agent__tbody") && spaCss.includes(".agent__tbody"));
 check("лоадер гаснет перед результатом", spaCode.includes('classList.add("is-out")') && spaCss.includes(".agent__tbody.is-out"));
 check("лента следует за растущим блоком (follow)", spaCode.includes("function follow") && spaCode.includes("follow("));
-check("ответ печатается с курсором", spaCode.includes('classList.add("typing")') && spaCss.includes(".agent__answer.typing"));
+/* Ответ печатается приёмом лендинга ([data-type] в main.html): слова
+   выезжают из-под масок, курсор — элемент, который едет по фронту. Старая
+   версия переписывала textContent каждые 34 мс (перекладка абзаца на
+   каждом слове) и пропускала анимацию для коротких ходов. */
+check("ответ печатается с курсором",
+  spaCode.includes("printPara") && spaCode.includes("buildTyped")
+  && spaCode.includes("agent__caret") && spaCss.includes(".agent__caret"));
+check("слово печати едет из-под маски (приём лендинга)",
+  /\.agent__wm \{[^}]*overflow: hidden/.test(spaCss)
+  && /\.agent__ww \{[^}]*translateY\(115%\)/.test(spaCss)
+  && /\.agent__ww\.is-in \{[^}]*transform: none/.test(spaCss)
+  && /\.agent__wl \{ display: block/.test(spaCss));
+check("текст не переписывается по кадрам (нет textContent в цикле печати)",
+  !/textContent = words\.slice/.test(spaCode) && !/words\.slice\(0, n\)/.test(spaCode));
+check("короткий ход тоже печатается", /if \(built\) \{[\s\S]{0,120}revealTurn/.test(spaCode)
+  && /printPara\(p, p\.textContent, alive/.test(spaCode));
 check("сворачивание ленты после хода", spaCode.includes('classList.remove("open")') && spaCss.includes(".agent__ai.done .agent__trace-toggle"));
 check("новый ход дорисовывает прерванный (bail)", spaCode.includes("pendingBail") && spaCode.includes("animGen"));
 check("ход переживает размонтирование (S.turn + reattach)",
@@ -169,6 +184,49 @@ check("колонка прижата к краям окна (fixed + top/bottom,
    некому: резерву просто некуда было уйти. */
 check("колонка агента тянется на всю высоту экрана (flex: 1)",
   /\.agent \{[^}]*flex: 1 1 auto/.test(spaCss));
+
+/* --- паритет с эталоном agent_preview.html ---
+   Эталон — источник правды по вёрстке раздела: ритм ленты, ширина колонки,
+   карточка поля с тенью, зелёная галочка шага, рейл с кнопкой во всю
+   ширину. Расхождения с ним и были жалобой («галочка серая», «не так
+   красиво»), поэтому они зафиксированы проверками. */
+const previewCss = read("agent_preview.html").match(/<style>([\s\S]*?)<\/style>/)[1];
+const norm = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+const previewN = norm(previewCss);
+const rule = (css, sel) => {
+  const m = norm(css).match(new RegExp("(?:^|\\})\\s*" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
+  return m ? m[1] : "";
+};
+const prop = (decl, name) => (decl.match(new RegExp("(?:^|;)\\s*" + name + ":([^;]*)")) || [, ""])[1].trim();
+check("галочка шага зелёная и для чтения (как в эталоне)",
+  !/\.agent__mark\.is-read/.test(spaCss) && /\.agent__mark \{[^}]*--success-soft/.test(spaCss)
+  && /--success-ink/.test(rule(previewCss, ".tmark")), rule(spaCss, ".agent__mark"));
+check("лента: отступы и ширина колонки как в эталоне",
+  /\d+px 28px/.test(rule(spaCss, ".agent__feed")) && prop(rule(spaCss, ".agent__feed-inner"), "max-width") === "760px",
+  rule(spaCss, ".agent__feed") + " | " + prop(rule(spaCss, ".agent__feed-inner"), "max-width"));
+check("поле ввода — карточка 760px с тенью, зона с подложкой шапки",
+  prop(rule(spaCss, ".agent__composer"), "max-width") === "760px"
+  && prop(rule(spaCss, ".agent__composer"), "box-shadow") === "var(--card-shadow)"
+  && prop(rule(spaCss, ".agent__composer-zone"), "background") === "var(--chrome-bg)"
+  && /blur\(10px\)/.test(rule(spaCss, ".agent__composer-zone")));
+check("рейл: заголовок своей строкой, «Новый чат» во всю ширину",
+  /\.agent__threads-head \.section-title \{[^}]*margin: 0/.test(spaCss)
+  && prop(rule(spaCss, ".agent__new"), "width") === "100%"
+  && spaCode.includes("side.appendChild(newBtn)"));
+check("у подсказок разные значки (эталон: галочка и вопрос)",
+  spaCode.includes("ICON_TASKS") && spaCode.includes("ICON_HELP")
+  && /\.agent__qr svg \{[^}]*var\(--accent-ink\)/.test(spaCss));
+check("у карточек подсказок свои значки",
+  /"Разберу твои решения по теме", "errors"/.test(spaCode)
+  && /"Соберу задания под твой уровень", "compass"/.test(spaCode));
+/* --- лента ведёт себя как в эталоне: плавно на резком прыжке и за растущим
+   блоком, а человек, ушедший вверх, не вытаскивается силой --- */
+check("плавная доводка на резком прыжке (не каждый кадр)",
+  spaCode.includes("SMOOTH_FROM") && /scrollDown\(false, first\)/.test(spaCode)
+  && /first = false/.test(spaCode));
+check("разворот шагов доведёт ленту за блоком", /open && dist\(\) < 200/.test(spaCode));
+check("ушедшего вверх не тащим (stick)", spaCode.includes("if (!force && !S.stick) return;")
+  && spaCode.includes("stick = dist() < 120"));
 
 /* --- читаемость текста чата (свои чернила раздела) ---
    Общие --text-2/--muted рассчитаны на белые карточки, а чат стоит на фоне

@@ -1,6 +1,10 @@
 /* Экран «ИИ-наставник» (#/ai) — часть SPA: только layout чата и пузыри.
    Шапка, сайдбар, тема, тосты и модалки — общие (styles.css / dlg.css).
-   Всё скоупировано под .agent, наружу ничего не течёт. */
+   Всё скоупировано под .agent, наружу ничего не течёт.
+   Вёрстка, ритм и все состояния — по эталону agent_preview.html: отступы
+   ленты и композера, ширина колонки 760px, карточка поля с тенью, зелёная
+   галочка шага, печать ответа из-под маски. Отличается только оболочка
+   приложения (своя шапка сверху, нижнее меню снизу) и то, что под капотом. */
 /* Раздел агента — единая поверхность без карточки: сверху шапка приложения,
    снизу нижнее меню, а между ними сам раздел (тулбар, лента, композер),
    прижатый к краям экрана. Скроллится только лента. */
@@ -25,6 +29,12 @@
   --agent-ink-2: #c2c8da;
   --agent-ink-3: #949cb0;
 }
+/* Базовое правило кнопок из эталона. В общей системе его нет: <button> без
+   класса берёт шрифт браузера (13.3px, line-height normal), из-за чего
+   плашки подсказок и строки чатов были на 4px ниже и с другим
+   интерлиньяжом, чем в эталоне. :where() — чтобы правила вида
+   (13px у .agent__qr) выигрывали и не затирались. */
+.agent :where(button, textarea) { font: inherit; color: inherit; touch-action: manipulation; }
 /* Резерв под фиксированное нижнее меню — на экране: колонка заканчивается
    ровно там, где начинается меню, поэтому композер прижат к его верхнему краю
    и под ним не остаётся пустой полосы. Клавиатура этот резерв снимает
@@ -50,14 +60,24 @@
   bottom: var(--agent-kb-inset, 0px);
   min-height: 0; overflow: hidden;
 }
+/* Рейл: своя подложка, как в эталоне — иначе он сливается с лентой, потому
+   что у приложения этот оттенок уже занят боковой навигацией. */
 .agent__threads {
   width: 264px; flex: none;
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: var(--sidebar-bg);
+  display: flex; flex-direction: column; gap: 16px; padding: 20px 16px;
   min-height: 0; position: relative;
 }
-.agent__threads-head { display: flex; align-items: center; gap: 8px; }
-.agent__threads-head .section-title { flex: 1; }
+.agent__threads-head { display: flex; align-items: center; gap: 12px; }
+/* Общий .section-title несёт margin: 34px 0 14px (отступы разделов
+   страницы) и weight 700 — здесь он сдвигал заголовок рейла вниз и рвал
+   его на «ИИ- / НАСТАННИК». В рейле заголовок только подпись над кнопкой. */
+.agent__threads-head .section-title { flex: 1; margin: 0; font-weight: 800; gap: 12px; }
+/* «Новый чат» — во всю ширину под заголовком, как в эталоне: так он не
+   отбирает место у заголовка и остаётся главной кнопкой рейла. */
+.agent__new { width: 100%; }
+.agent__new svg { flex: none; }
 .agent__list {
   list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; min-height: 0;
   display: flex; flex-direction: column; gap: 2px;
@@ -115,7 +135,7 @@
 .agent__ctx-item--danger svg { color: var(--danger); }
 .agent__ctx-item--danger:hover { background: var(--danger-soft); }
 .agent__thread--loading { cursor: default; pointer-events: none; }
-.agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .agent__foot small { font-size: 12px; color: var(--agent-ink-3); }
 .agent__del {
   display: grid; place-items: center; width: 38px; height: 38px; flex: none; cursor: pointer;
@@ -137,8 +157,12 @@
 }
 .agent__toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); flex: none; }
 .agent__menu { display: none; }
-.agent__title { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent__quota { position: relative; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; flex: none; transition: transform .15s; }
+/* Заголовок хода — как в эталоне: 18px, плотный интерлиньяж. На телефоне
+   16px (правило ниже в медиазапросе). */
+.agent__title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Кольцо квоты — как в эталоне: 36px на карточной подложке (в 32px на
+   телефоне под тач-цель тулбара). */
+.agent__quota { position: relative; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; flex: none; transition: transform .15s; }
 .agent__quota:active { transform: scale(.96); }
 .agent__quota svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
 .agent__quota .q-track, .agent__quota .q-ring { fill: none; stroke-width: 3; }
@@ -164,10 +188,10 @@
 
 .agent__feed {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch; padding: 20px;
+  -webkit-overflow-scrolling: touch; padding: 24px 28px;
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
-.agent__feed-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.agent__feed-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 .agent__feed-inner .agent__feed-inner { width: 100%; max-width: none; margin: 0; }
 .agent__msg-user {
   align-self: flex-end; max-width: 85%; padding: 10px 16px; border-radius: var(--radius);
@@ -179,9 +203,27 @@
    абзаца без него схлопывался — «1) то 2) то 3) то» одной простынёй.
    Абзацы режет сервер (пустая строка), лишних отступов не бывает. */
 .agent__answer { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
-/* Курсор во время печати ответа: текст появляется по словам. */
-.agent__answer.typing::after {
-  content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px;
+/* Печать ответа — приём лендинга ([data-type] в main.html): слова выезжают
+   из-под невидимой маски. Разметку (.agent__wl / .agent__wm / .agent__ww)
+   строит agent-spa.js, движение — CSS. Старая версия переписывала
+   textContent каждые 34 мс: абзац перекладывался заново на каждом слове
+   (и на телефоне это ещё и дёргало ленту), а само появление текста
+   выглядело как прыжок, а не как печать. Здесь текст в DOM один раз, и
+   дальше едет только transform. */
+.agent__wl { display: block; }                     /* строка ответа = блок */
+.agent__wm {
+  display: inline-block; overflow: hidden; vertical-align: bottom;
+  padding-bottom: .12em; margin-bottom: -.12em;   /* маска не режет хвосты букв */
+}
+.agent__ww {
+  display: inline-block; transform: translateY(115%);
+  transition: transform .34s cubic-bezier(.2, .7, .2, 1);
+}
+.agent__ww.is-in { transform: none; }
+/* Курсор печати едет по фронту: инлайн-элемент, который переносится за
+   каждое открытое слово (поэтому он элемент, а не ::after у абзаца). */
+.agent__caret {
+  display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px;
   background: var(--accent); animation: agentBlink 1s steps(2) infinite;
 }
 .agent__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
@@ -243,9 +285,10 @@
 }
 .agent__mark svg { width: 9px; height: 9px; }
 .agent__step + .agent__step .agent__mark { top: 14px; }
-/* Чтение — нейтральная галочка, действие применено — зелёная, действие в
-   ожидании подтверждения — предупреждение с часиками. */
-.agent__mark.is-read { background: var(--surface-3); color: var(--agent-ink-2); }
+/* Галочка шага — зелёная и для чтения, и для применённого действия: в
+   эталоне она одна на все шаги, и серая выглядела как «шаг не засчитан».
+   Различает состояния не цвет галочки, а цвет заголовка шага (ниже) и
+   часики у действия, ждущего подтверждения. */
 .agent__mark.is-wait { background: var(--warn-soft); color: var(--warn-ink); }
 
 /* Лоадер хода: точка с расходящимся кольцом и «бегущий» текст под текущий шаг. */
@@ -264,7 +307,7 @@
 .agent__skel i { display: block; height: 14px; border-radius: 7px; background: var(--surface-3); }
 .agent__skel i + i { max-width: 45%; height: 11px; }
 
-.agent__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; color: var(--agent-ink-3); font-size: 14px; }
+.agent__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 20px 24px; color: var(--agent-ink-3); font-size: 14px; }
 /* Без этого hidden не работает: display:flex выше перебивает UA-стиль
    [hidden]{display:none}, а своего правила в SPA нет — пустой блок
    оставался видимым всегда, даже с сообщениями. */
@@ -276,9 +319,9 @@
   animation: agentRise .4s cubic-bezier(.2, .7, .2, 1) both;
 }
 .agent__empty-badge svg { width: 28px; height: 28px; }
-.agent__empty h2 { margin: 16px 0 6px; font-size: 20px; font-weight: 800; color: var(--text); }
+.agent__empty h2 { margin: 20px 0 6px; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: var(--text); }
 .agent__empty p { margin: 0; max-width: 34ch; }
-.agent__suggest { width: 100%; max-width: 420px; margin-top: 24px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.agent__suggest { width: 100%; max-width: 420px; margin-top: 28px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
 .agent__suggest-card {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left; cursor: pointer;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text);
@@ -301,14 +344,19 @@
    открытии клавиатуры dvh сжимается, и композер остаётся над ней. Никаких
    px-фиксаций на focus (именно они уводили страницу и не возвращали её).
    Резерв под нижнее меню живёт на .screen--agent, а не здесь: иначе поле
-   отрывалось от меню на высоту самого резерва. */
+   отрывалось от меню на высоту самого резерва.
+   Зона — полупрозрачная подложка шапки с размытием, как в эталоне: она
+   отделяет поле от ленты и держит ощущение «прибито к низу». */
 .agent__composer-zone {
   position: relative; flex: none;
-  padding: 12px 16px 16px;
+  padding: 12px 28px 20px;
+  background: var(--chrome-bg);
   border-top: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 .agent__to-bottom {
-  position: absolute; right: 20px; top: -52px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  position: absolute; right: 28px; top: -52px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
   background: var(--surface); border: 1px solid var(--border-strong); color: var(--agent-ink-2);
   box-shadow: 0 8px 20px -8px var(--shadow);
   opacity: 0; visibility: hidden; transform: translateY(8px) scale(.9);
@@ -317,9 +365,13 @@
 .agent__to-bottom.show { opacity: 1; visibility: visible; transform: none; }
 .agent__to-bottom:hover { border-color: var(--accent); }
 .agent__to-bottom svg { width: 18px; height: 18px; }
+/* Поле — карточка шириной с колонку ленты (760px) с мягкой тенью: так оно
+   не растягивается во весь экран и читается как отдельный элемент. */
 .agent__composer {
+  max-width: 760px; margin: 0 auto;
   display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 20px; border-radius: 28px;
   border: 1px solid var(--border-strong); background: var(--surface);
+  box-shadow: var(--card-shadow);
   transition: background-color .25s, border-color .2s, box-shadow .2s;
 }
 .agent__composer:focus-within { border-color: var(--accent-ring); box-shadow: 0 0 0 3px var(--accent-soft), 0 12px 30px -14px var(--accent-glow); }
@@ -343,11 +395,11 @@
 .agent__composer.busy .agent__stop { display: inline-flex; }
 .agent__composer.busy .agent__send { display: none; }
 .agent__composer:not(.busy) .agent__stop { display: none; }
-.agent__hint { margin: 8px 0 0; font-size: 12px; color: var(--agent-ink-3); text-align: center; }
+.agent__hint { max-width: 760px; margin: 8px auto 0; font-size: 12px; color: var(--agent-ink-3); }
 
 .agent__scrim { display: none; }
 
-@keyframes agentRise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes agentRise { from { opacity: 0; transform: translateY(8px); } }
 @keyframes agentFade { from { opacity: 0; } }
 @keyframes agentStrip { from { transform: scaleY(.2); opacity: 0; } }
 @keyframes agentPop { from { transform: scale(.4); opacity: 0; } }
@@ -360,7 +412,7 @@
 }
 @keyframes agentShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-.agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .3s ease both; }
+.agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .32s cubic-bezier(.2, .7, .2, 1) both; }
 
 @media (max-width: 900px) {
   /* Резерв под нижнее меню — на экране (тот же --agent-bottom/--bottomnav-h):
@@ -391,7 +443,8 @@
   .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-2); }
   .agent__menu svg { width: 20px; height: 20px; }
   .agent__title { font-size: 16px; }
-  .agent__feed { padding: 16px 12px; }
+  .agent__feed { padding: 16px max(12px, env(safe-area-inset-right, 0px)) 16px max(12px, env(safe-area-inset-left, 0px)); }
+  .agent__feed-inner { gap: 16px; }
   .agent__msg-user { max-width: 92%; }
   /* safe-area снизу НЕ прибавляем: под комозером теперь сама полоса меню,
      а под меню — системный отступ. Дублировали бы и оставляли зазор. */
@@ -403,10 +456,10 @@
      их тач-зоны остаются 44px (padding внутрь, а не рост кнопки). */
   .agent__toolbar { padding: 4px 10px; gap: 6px; }
   .agent__menu { width: 44px; height: 44px; }
-  .agent__quota { width: 30px; height: 30px; font-size: 12px; }
+  .agent__quota { width: 32px; height: 32px; font-size: 12px; }
   .agent__quota .q-track, .agent__quota .q-ring { stroke-width: 3.4; }
   /* Тач-цели и шрифт поля: 16px не даёт iOS зумить страницу при фокусе. */
-  .agent__thread, .agent__send, .agent__stop, .agent__del, .agent__menu { min-height: 44px; }
+  .agent__thread, .agent__send, .agent__stop, .agent__del, .agent__menu, .agent__new { min-height: 44px; }
   .agent__del { width: 44px; height: 44px; }
   /* На телефоне вход в меню чата один — долгое нажатие, поэтому «⋯» скрыта,
      но остаётся доступной с клавиатуры (фокус) и не занимает место в тапе. */
@@ -426,4 +479,7 @@
   .agent__loader-dot, .agent__loader-text { animation: none; }
   .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--agent-ink-2); filter: none; }
   .agent__tbody { transition: none; }
+  /* Печать ответа без движения: слова на месте, курсор не мигает. */
+  .agent__ww { transition: none; transform: none; }
+  .agent__caret { animation: none; }
 }

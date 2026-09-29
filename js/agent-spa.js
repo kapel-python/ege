@@ -21,7 +21,15 @@
      у человека уже есть кнопка «Обновить чат». */
   var REATTACH_MS = 300000;
   var WATCH_TRIES = 12, WATCH_EVERY_MS = 8000;
-  var ICON_QR = "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9";
+  /* Значки подсказок — из эталона (agent_preview.html): у первого ответа
+     «дай задачи» галочка, у второго «что дальше» — вопрос. Раньше обе
+     кнопки рисовали одну иконку и читались одинаково. */
+  var ICON_TASKS = "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9";
+  var ICON_HELP = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 17h.01";
+  var PLUS_D = "M12 5v14M5 12h14";
+  // Корзина, а не крестик: в эталоне удаление чата — корзина, и «×» рядом
+  // с текстом «Раздел бесплатный» читался как «закрыть панель».
+  var TRASH_D = "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3";
   var root = null, ui = {};
 
   function $(s, r) { return (r || root || document).querySelector(s); }
@@ -72,11 +80,15 @@
   }
   // Лента следует за растущим блоком покадрово: одиночный scrollTo на каждом
   // шаге на iOS обрывал плавную прокрутку и лента отставала от текста.
+  // Первый кадр — с плавным доводом (блок мог вырасти резко, например на
+  // длинном шаге), дальше мгновенно: перезапуск smooth на каждом кадре
+  // дёргал бы ленту вместо того, чтобы вести её за текстом.
   function follow(ms) {
-    var g = S.mountGen, end = Date.now() + ms;
+    var g = S.mountGen, end = Date.now() + ms, first = true;
     (function tick() {
       if (g !== S.mountGen) return;
-      scrollDown();
+      scrollDown(false, first);
+      first = false;
       if (Date.now() < end) raf(tick);
     })();
   }
@@ -334,12 +346,16 @@
     var wrap = el("div", "agent");
     var side = el("aside", "agent__threads");
     side.setAttribute("aria-label", "Чаты с наставником");
+    // Заголовок — своей строкой (иначе он отбирал ширину у кнопки и рвался
+    // на «ИИ- / НАСТАННИК»), кнопка «Новый чат» — под ним во всю ширину
+    // рейла, как в эталоне: так она остаётся главным действием раздела.
     var head = el("div", "agent__threads-head");
     head.appendChild(el("h2", "section-title", "ИИ-наставник"));
-    var newBtn = el("button", "btn btn--primary btn--sm", "+ Новый чат");
+    var newBtn = el("button", "btn btn--primary agent__new", null);
     newBtn.type = "button"; newBtn.id = "agent-new";
+    newBtn.innerHTML = svgRaw(PLUS_D, "2.4");
+    newBtn.appendChild(document.createTextNode("Новый чат"));
     newBtn.addEventListener("click", function () { createThread(); nav(false); });
-    head.appendChild(newBtn);
     var list = el("ul", "agent__list");
     list.id = "agent-threads";
     var foot = el("div", "agent__foot");
@@ -347,10 +363,10 @@
     var del = el("button", "agent__del", null);
     del.type = "button"; del.id = "agent-del";
     del.setAttribute("aria-label", "Удалить чат"); del.title = "Удалить чат";
-    del.innerHTML = icon("x");
+    del.innerHTML = svgRaw(TRASH_D, "2");
     del.addEventListener("click", deleteCurrent);
     foot.appendChild(del);
-    side.appendChild(head); side.appendChild(list); side.appendChild(foot);
+    side.appendChild(head); side.appendChild(newBtn); side.appendChild(list); side.appendChild(foot);
 
     var main = el("div", "agent__main");
     var bar = el("div", "agent__toolbar");
@@ -404,12 +420,12 @@
       '<span class="agent__empty-badge" aria-hidden="true">' + icon("ai") + "</span>" +
       '<h2>Здесь пока пусто</h2><p>Спроси про тему или свои ошибки, а я покажу, как искал ответ.</p>' +
       '<div class="agent__suggest">' +
-      [["Почему я ошибаюсь в производных?", "Почему я ошибаюсь", "Разберу твои решения по теме"],
-       ["Составь план подготовки на неделю", "План на неделю", "Соберу задания под твой уровень"],
-       ["Объясни задание 17 с параметрами", "Задание 17", "Объясню параметры простыми словами"]
+      [["Почему я ошибаюсь в производных?", "Почему я ошибаюсь", "Разберу твои решения по теме", "errors"],
+       ["Составь план подготовки на неделю", "План на неделю", "Соберу задания под твой уровень", "compass"],
+       ["Объясни задание 17 с параметрами", "Задание 17", "Объясню параметры простыми словами", "help"]
       ].map(function (s, i) {
         return '<button class="agent__suggest-card" type="button" style="--i:' + i + '" data-ask="' + esc(s[0]) + '">' +
-          '<span class="agent__suggest-ic" aria-hidden="true">' + icon("ai") + "</span>" +
+          '<span class="agent__suggest-ic" aria-hidden="true">' + icon(s[3]) + "</span>" +
           '<span class="agent__suggest-tx"><b>' + esc(s[1]) + "</b><span>" + esc(s[2]) + "</span></span>" +
           '<span class="agent__suggest-go" aria-hidden="true">' + svgRaw(ARROW_D, "2.4") + "</span></button>";
       }).join("") + "</div>";
@@ -461,13 +477,17 @@
 
   /* ---------- прокрутка ---------- */
   function dist() { return ui.feed.scrollHeight - ui.feed.scrollTop - ui.feed.clientHeight; }
+  // Столько пикселей до низа считаем «резким прыжком»: дальше доводим
+  // плавно, рядом с краем — мгновенно (иначе каждый кадр перезапускал бы
+  // плавную прокрутку и текст дёргался).
+  var SMOOTH_FROM = 240;
   function scrollDown(force, smooth) {
     if (!ui.feed) return;
     if (!force && !S.stick) return;
     if (force) { S.stick = true; S.lock = Date.now() + 700; }
-    var calm = false;
-    try { calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (_) {}
-    try { ui.feed.scrollTo({ top: ui.feed.scrollHeight, behavior: smooth && !calm ? "smooth" : "auto" }); }
+    var far = dist() > SMOOTH_FROM;
+    var behavior = (smooth || far) && !calm() ? "smooth" : "auto";
+    try { ui.feed.scrollTo({ top: ui.feed.scrollHeight, behavior: behavior }); }
     catch (_) { ui.feed.scrollTop = ui.feed.scrollHeight; }
   }
 
@@ -828,6 +848,81 @@
     card.appendChild(toggle); card.appendChild(trace);
     return { toggle: toggle, trace: trace, ol: ol, prepped: prepped };
   }
+  /* ---------- печать ответа ----------
+     Приём взят с лендинга ([data-type] в main.html): текст раскладывается
+     на слова в масках, и слова выезжают из-под маски (transform, CSS).
+     Старая версия переписывала textContent каждые 34 мс — абзац целиком
+     перекладывался заново на каждом слове (дёргалась лента, особенно на
+     телефоне), а появление текста читалось как прыжок, а не как печать.
+     Здесь DOM собирается один раз, дальше едет только класс на слове.
+     Курсор — отдельный элемент: он переезжает за каждое открытое слово,
+     поэтому ::after у абзаца (стоял бы всегда в конце) не годится. */
+  function buildTyped(p, text) {
+    p.textContent = "";
+    var words = [];
+    String(text).split("\n").forEach(function (line) {
+      var row = el("span", "agent__wl");
+      line.split(" ").forEach(function (w, i) {
+        if (!w) return;                       // подряд идущие пробелы схлопнутся сами
+        if (i) row.appendChild(document.createTextNode(" "));   // разделитель между словами
+        var mask = el("span", "agent__wm");
+        var word = el("span", "agent__ww", w);
+        mask.appendChild(word);
+        row.appendChild(mask);
+        words.push(word);
+      });
+      p.appendChild(row);
+    });
+    return words;
+  }
+  // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
+  // на полминуты (шаг 900 мс на весь текст, но не медленнее 12 и не быстрее 34).
+  function printPara(p, text, isAlive, done) {
+    if (calm()) { p.textContent = text; if (done) done(); return; }
+    var words = buildTyped(p, text);
+    var caret = el("span", "agent__caret");
+    p.appendChild(caret);
+    p.classList.add("typing");
+    var step = Math.max(12, Math.min(34, Math.round(900 / Math.max(1, words.length))));
+    var i = 0;
+    (function tick() {
+      if (!isAlive()) {                       // ход перебит/размонтирован — дорисовываем текст
+        p.classList.remove("typing");
+        if (caret.parentNode) caret.parentNode.removeChild(caret);
+        words.forEach(function (w) { w.classList.add("is-in"); });
+        return;
+      }
+      if (i < words.length) {
+        words[i].classList.add("is-in");
+        if (caret.parentNode) caret.parentNode.insertBefore(caret, words[i].nextSibling);
+        i++;
+        scrollDown();
+        later(step, tick);
+        return;
+      }
+      if (caret.parentNode) caret.parentNode.removeChild(caret);
+      p.classList.remove("typing");
+      if (done) done();
+    })();
+  }
+  // Подсказки под ответом: две кнопки с РАЗНЫМИ значками (галочка —
+  // «разбери подробнее», вопрос — «что дальше»), как в эталоне.
+  function quickActions(card, isAlive) {
+    var row = el("div", "agent__actions");
+    [["Хочу разбор", "Разбери подробнее", ICON_TASKS], ["Что дальше?", "Что мне делать дальше?", ICON_HELP]]
+      .forEach(function (q, i) {
+        var b = el("button", "agent__qr");
+        b.type = "button";
+        try { b.style.setProperty("--i", String(i)); } catch (_) { b.setAttribute("style", "--i:" + i); }
+        b.setAttribute("data-ask", q[1]);
+        b.appendChild(svgIcon(q[2], "2.2"));
+        b.appendChild(document.createTextNode(q[0]));
+        row.appendChild(b);
+      });
+    card.appendChild(row);
+    if (isAlive) follow(350);
+    return row;
+  }
   // Показать результат хода: пустые шаги -> лоадер -> содержимое, затем
   // сворачиваем ленту и печатаем ответ по словам. Анимация всегда уступает
   // новому ходу (animGen): два одновременных раскрытия путают и ленту, и
@@ -871,38 +966,12 @@
       if (!paras.length) { actions(); return; }
       var p = paras.shift();
       card.appendChild(p);
-      var text = p.textContent, words = text.split(" ");
-      p.textContent = "";
       p.classList.add("enter");
-      if (quiet) { p.textContent = text; scrollDown(); write(); return; }
-      p.classList.add("typing");
-      var n = 0;
-      (function tick() {
-        if (!alive()) { p.classList.remove("typing"); p.textContent = text; return; }
-        n++;
-        p.textContent = words.slice(0, n).join(" ");
-        scrollDown();
-        if (n < words.length) later(34, tick);
-        else { p.classList.remove("typing"); later(160, write); }
-      })();
+      printPara(p, p.textContent, alive, function () { later(quiet ? 0 : 140, write); });
     }
     function actions() {
       if (!alive()) return;
-      if (!built.actions) {
-        var row = el("div", "agent__actions");
-        [["Хочу разбор", "Разбери подробнее"], ["Что дальше?", "Что мне делать дальше?"]]
-          .forEach(function (q, i) {
-            var b = el("button", "agent__qr");
-            b.type = "button";
-            try { b.style.setProperty("--i", String(i)); } catch (_) { b.setAttribute("style", "--i:" + i); }
-            b.setAttribute("data-ask", q[1]);
-            b.appendChild(svgIcon(ICON_QR, "2.2"));
-            b.appendChild(document.createTextNode(q[0]));
-            row.appendChild(b);
-          });
-        card.appendChild(row);
-        built.actions = row;
-      }
+      if (!built.actions) built.actions = quickActions(card, alive);
       // Ход доигран целиком: карточку больше нечего дорисовывать, и новый
       // ход не должен трогать её шаги (иначе у пользователя сбросится
       // раскрытое «Подробнее»).
@@ -950,9 +1019,9 @@
       if (built) built.prepped.forEach(function (p) { built.ol.appendChild(p.li); stepFill(p); });
       paras.forEach(function (p) { card.appendChild(p); });
     }
-    // Короткий ход (один шаг или пусто) анимировать незачем — это тикает
-    // после перезагрузки истории, там нужен сразу готовый результат.
-    if (!animate || !built || built.prepped.length + paras.length <= 1) {
+    // История (animate=false) рисуется сразу целиком: после перезагрузки
+    // анимировать уже полученный ответ незачем.
+    if (!animate) {
       if (built) {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
         paintAll();
@@ -968,8 +1037,24 @@
     // Незаконченная анимация прошлого хода — дорисовать разом, иначе она
     // будет мешать новой (у обеих один токен S.animGen).
     if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
-    revealTurn(built, paras, g);
-    S.pendingBail = built.bail;
+    if (built) {
+      revealTurn(built, paras, g);
+      S.pendingBail = built.bail;
+      return card;
+    }
+    // Ответ без шагов (короткий ход: поздороваться, уточнить) печатается
+    // так же, как после шагов. Раньше он выпадал разом — и именно это
+    // выглядело «дёргано»: у человека глаз уже привык к печати по ходу.
+    var ag = ++S.animGen;
+    function alive() { return g === S.mountGen && ag === S.animGen && card.parentNode; }
+    (function next() {
+      if (!alive()) return;
+      if (!paras.length) { quickActions(card, alive); return; }
+      var p = paras.shift();
+      card.appendChild(p);
+      p.classList.add("enter");
+      printPara(p, p.textContent, alive, function () { later(calm() ? 0 : 140, next); });
+    })();
     return card;
   }
   function errorCard(text, btnLabel, onRetry) {
@@ -1346,6 +1431,10 @@
         tg.setAttribute("aria-expanded", String(!!open));
         var lbl = tg.querySelector("span:not(.num)");
         if (lbl) lbl.textContent = open ? "Скрыть шаги" : "Показать шаги";
+        // Развернутая лента шагов вытолкнула ответ вниз: если он и так был у
+        // нижнего края, плавно доводим ленту за растущим блоком (как в
+        // эталоне) — иначе открытые шаги оказываются за краем экрана.
+        if (open && dist() < 200) later(380, function () { scrollDown(true, true); });
         return;
       }
       var q = e.target.closest ? e.target.closest("[data-ask]") : null;
