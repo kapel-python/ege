@@ -52,6 +52,10 @@ AGENT_TEXT_MIN = 1
 AGENT_TEXT_MAX = 2000
 MAX_TOOL_STEPS = 10
 TURN_TIMEOUT_SEC = 90.0
+# Потолок шагов не должен отдавать ученику отказ: сначала один вызов БЕЗ
+# инструментов (короткий ответ по уже собранным данным), и только если время
+# хода кончилось или модель снова полезла в инструменты — эта честная просьба.
+LONG_TURN_TEXT = "Собрал часть данных, но ход получился слишком длинным. Уточни вопрос — отвечу короче."
 
 
 class AgentInputError(ValueError):
@@ -1004,6 +1008,10 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
         parsed = chat_fn(messages, AGENT_TOOLS)
         text = parsed.get("text")
         calls = parsed.get("tool_calls") or []
+        # Модель часто пишет реплику («Сейчас соберу…») и зовёт инструменты в
+        # одном сообщении. Это не пол-ответа: вызовы главнее, реплику
+        # переигрываем в том же assistant-сообщении (см. parse_tool_message).
+        preamble = parsed.get("preamble")
         if text is not None and not calls:
             return steps, text, None
         if not calls:
@@ -1011,8 +1019,9 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             from importlib.util import spec_from_file_location as _s, module_from_spec as _m  # lazy
             raise ValueError("пустой ответ модели")
         if len(steps) + len(calls) > MAX_TOOL_STEPS:
-            # Потолок кодом: длинный цикл обрываем финальным текстом, а не ошибкой.
-            return steps, "Собрал часть данных, но ход получился слишком длинным. Уточни вопрос — отвечу короче.", None
+            # Потолок кодом: длинный цикл обрываем ответом по собранным данным,
+            # а не ошибкой — ученик звал «вызови всё», и отказ тут обиднее ответа.
+            return steps, _summarize(chat_fn, messages, deadline), None
         for call in calls:
             name = str(call.get("name") or "")
             call_args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
@@ -1034,10 +1043,38 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             label = describe_step(name, call_args, data)
             steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
                           "status": "done", "call_id": call_id, "result": data})
-            messages.append({"role": "assistant", "content": None,
+            messages.append({"role": "assistant", "content": preamble or None,
                              "tool_calls": [{"id": call_id, "type": "function",
                                               "function": {"name": name, "arguments": json.dumps(call_args, ensure_ascii=False)}}]})
             messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": json.dumps(data, ensure_ascii=False)[:4000]})
+            # Реплика принадлежит первому вызову пачки: дальше в пачке она уже
+            # была бы переигровкой того же сообщения.
+            preamble = None
         # Продолжаем цикл: модель решает дальше с результатами инструментов.
-    return steps, "Собрал часть данных, но ход получился слишком длинным. Уточни вопрос — отвечу короче.", None
+    return steps, _summarize(chat_fn, messages, deadline), None
+
+
+def _summarize(chat_fn, messages: list, deadline: float) -> str:
+    """Финал по потолку шагов: один вызов БЕЗ инструментов — короткий ответ по
+    уже собранным данным.
+
+    Ничего не теряем: жетон хода уже потрачен, данные на руках, а ученику
+    «собери всё» отказ вместо ответа. Время хода кончилось, модель снова
+    полезла в инструменты или сломалось — тогда честная просьба уточнить.
+    """
+    if time.monotonic() <= deadline:
+        # Последнее сообщение истории — результат инструмента, а вызова без
+        # tools такой хвост у провайдеров не ждут: закрываем его короткой
+        # репликой ученика («дальше не лезь, ответь»), а не молчанием.
+        ask = list(messages) + [{"role": "user",
+                                 "content": "Данных достаточно. Ответь коротко по тому, "
+                                            "что уже собрано, и не вызывай новые инструменты."}]
+        try:
+            parsed = chat_fn(ask, []) or {}
+        except Exception:  # noqa: BLE001 — ответ без модели лучше 502
+            return LONG_TURN_TEXT
+        text = parsed.get("text")
+        if text and not (parsed.get("tool_calls") or []):
+            return str(text)[:8000]
+    return LONG_TURN_TEXT

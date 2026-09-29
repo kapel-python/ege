@@ -493,11 +493,12 @@ def last_used_provider() -> str | None:
 # ---------------------------------------------------------------------------
 # Tool-calling для ИИ-наставника (server/agent.py).
 #
-# Обычный OpenAI-совместимый вызов с `tools`: модель либо отвечает текстом,
-# либо просит вызвать инструменты — одновременно оба варианта запрещены.
-# Контракт ответа разбирает parse_tool_message: текст + tool_calls вместе —
-# это AIFormatError (модель нарушила контракт, нужен повтор/502, а не
-# «угадать» половину ответа). Формат wire — OpenAI:
+# Обычный OpenAI-совместимый вызов с `tools`: модель отвечает текстом либо
+# просит вызвать инструменты. Контракт ответа разбирает parse_tool_message;
+# текст рядом с вызовами («Сейчас соберу… » + tool_calls) — не нарушение, а
+# обычная реплика перед вызовами: вызовы главнее, текст уходит в preamble
+# (живой замер 29.09: так отвечал gptunnel/qwen3.8-flash на «вызови все
+# доступные инструменты» — 3 ответа из 3). Формат wire — OpenAI:
 # tools=[{"type":"function","function":{"name","description","parameters"}}],
 # ответ — choices[0].message = {"content": str|None, "tool_calls": [...]}.
 # ---------------------------------------------------------------------------
@@ -534,10 +535,22 @@ def _clean_tool_calls(raw) -> list:
 
 
 def parse_tool_message(message: dict) -> dict:
-    """Разобрать ответ модели с tools: либо текст, либо вызовы — не оба сразу.
+    """Разобрать ответ модели с tools.
 
-    Возвращает {"text": str|None, "tool_calls": [...]}. Пустой ответ (ни текста,
-    ни вызовов) — тоже AIFormatError: молчание модели не является ответом.
+    Возвращает {"text": str|None, "tool_calls": [...], "preamble": str|None}.
+    Пустой ответ (ни текста, ни вызовов) — AIFormatError: молчание модели не
+    является ответом.
+
+    Текст ВМЕСТЕ с вызовами — не ошибка формата (замерено 29.09 на gptunnel,
+    qwen3.8-flash: 3 ответа из 3 на вопрос «вызови все доступные инструменты»
+    пришли как короткая реплика «Сейчас соберу полную картину по тебе» плюс
+    tool_calls; closerouter на том же вопросе отвечал пустым content). Строгий
+    разбор превращал это в AIFormatError, невидимый повтор при temperature 0
+    приносил тот же смешанный ответ, и ход падал в 502 «Наставник не смог
+    ответить» — тред оставался пустым. Теперь вызовы главнее: текст уходит в
+    "preamble" (цикл переигровывает его в assistant-сообщении, чтобы модель
+    сохраняла свой контекст), а ответом ход считается по-прежнему только
+    сообщение без вызовов.
     """
     if not isinstance(message, dict):
         raise AIFormatError("ответ модели не объект")
@@ -551,11 +564,10 @@ def parse_tool_message(message: dict) -> dict:
     else:
         raise AIFormatError("текст ответа не строка")
     calls = _clean_tool_calls(message.get("tool_calls"))
-    if text is not None and calls:
-        raise AIFormatError("модель вернула текст и вызовы инструментов одновременно")
     if text is None and not calls:
         raise AIFormatError("пустой ответ модели")
-    return {"text": text, "tool_calls": calls}
+    return {"text": text, "tool_calls": calls,
+            "preamble": text if (text is not None and calls) else None}
 
 
 def _chat_via_message(provider: str, messages: list[dict], *, model: str | None = None,
@@ -581,7 +593,14 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
         if not isinstance(tools, list) or not tools:
             raise AIInputError("tools должен быть непустым списком")
         body["tools"] = tools
-        body["tool_choice"] = tool_choice if tool_choice is not None else "auto"
+        # tool_choice по умолчанию у OpenAI и есть "auto", поэтому поле шлём
+        # только когда его просят явно: closerouter (маршрут anthropic) на
+        # многошаговом разговоре с инструментами отвечает 400 именно на
+        # явный "auto" — замер 29.09: первый ход цикла проходит, второй
+        # (с хвостом из tool-сообщений) 400, и лишний запрос уходит в
+        # failover каждый ход. "required"/"none" шлём как есть.
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
 
     request = urllib.request.Request(
         f"{spec['base_url']()}/chat/completions",
@@ -623,9 +642,10 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
                     state: dict | None = None) -> dict:
     """chat() для цикла агента: failover + слот + строгий парсер tool-ответа.
 
-    Возвращает {"text": str|None, "tool_calls": [...]} — ровно один вариант.
-    Ошибка формата (текст+вызовы, пусто, битые аргументы) — AIFormatError и
-    НЕ переключает провайдера: провайдер жив, небрежна модель.
+    Возвращает {"text": str|None, "tool_calls": [...], "preamble": str|None}.
+    Ошибка формата (пустой ответ, битые аргументы) — AIFormatError и
+    НЕ переключает провайдера: провайдер жив, небрежна модель. Реплика рядом с
+    вызовами ошибкой не считается — см. parse_tool_message.
     """
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
@@ -733,8 +753,9 @@ def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
     """Один HTTP-вызов конкретного провайдера. Без failover и без слота —
     это забота chat() (и проба probe_tick зовёт напрямую сюда).
 
-    С tools возвращает разобранный {"text","tool_calls"} (парсер запрещает оба
-    сразу), без — сырой текст (legacy путь проверок сочинений).
+    С tools возвращает разобранный {"text","tool_calls","preamble"} (реплика
+    вместе с вызовами допустима — см. parse_tool_message), без — сырой текст
+    (legacy путь проверок сочинений).
     """
     message = _chat_via_message(provider, messages, model=model, timeout=timeout,
                                 max_tokens=max_tokens, temperature=temperature,

@@ -7,11 +7,11 @@ Temp-БД, живой сервер, мок провайдера (без сети
   * ответ без tools — финальный текст и одно списание квоты;
   * ответ с tools — цикл отрабатывает, шаги в базе и в ответе;
   * действие — confirm без записи, approve меняет, отмена пишет «Отменено учеником»;
-  * длинный цикл — обрыв финальным текстом по MAX_TOOL_STEPS;
+  * длинный цикл — обрыв ответом по собранным данным (вызов без tools);
   * 10 ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает жетон;
   * повторный ход — кэш, usage.cost не растёт;
   * 400 на пустой/длинный, 400 AGENT_BUSY на параллельный ход;
-  * парсер ai.py отвергает текст+tool_calls одновременно;
+  * парсер ai.py: реплика вместе с вызовами — не ошибка (preamble), пустой ответ — ошибка;
   * заголовок — первые 60 символов, подписка — колонка в users.
 """
 from __future__ import annotations
@@ -119,7 +119,17 @@ def main():
                     return script.pop(0)
             return {"text": "Финальный ответ.", "tool_calls": []}
 
+        def mock_plain(messages, **kw):
+            """Финал по потолку шагов (agent._summarize) идёт в chat() без tools."""
+            with lock:
+                calls["n"] += 1
+                item = script.pop(0) if script else None
+            if not item or item.get("tool_calls"):
+                return ""  # без инструментов ответ без вызовов — тут пусто
+            return item.get("text") or ""
+
         ai.chat_with_tools = mock_chat
+        ai.chat = mock_plain
         ai.reset_ai_rate()
 
         httpd = server.create_http_server("127.0.0.1", 0)
@@ -140,18 +150,27 @@ def main():
             return client.request(base, "POST", "/api/agent/turns", payload)
 
         try:
-            section("парсер: текст и tool_calls одновременно запрещены")
-            try:
-                ai.parse_tool_message({"content": "hi", "tool_calls": [
-                    {"id": "1", "function": {"name": "fold_web", "arguments": "{}"}}]})
-                check("текст+вызовы отвергаются", False)
-            except ai.AIFormatError:
-                check("текст+вызовы отвергаются", True)
+            section("парсер: реплика вместе с вызовами — не ошибка формата")
+            # Живой случай 29.09 (gptunnel/qwen3.8-flash): ответ на «вызови все
+            # доступные инструменты» приходил как «Сейчас соберу… » + tool_calls,
+            # строгий разбор давал AIFormatError → 502 и пустой тред.
+            mixed = ai.parse_tool_message({"content": "Сейчас соберу всё.", "tool_calls": [
+                {"id": "1", "function": {"name": "fold_web", "arguments": "{}"}}]})
+            check("текст+вызовы разбираются, вызовы главнее",
+                  bool(mixed["tool_calls"]) and mixed["text"] == "Сейчас соберу всё."
+                  and mixed["preamble"] == "Сейчас соберу всё.", str(mixed)[:200])
+            only_calls = ai.parse_tool_message({"content": None, "tool_calls": [
+                {"function": {"name": "fold_web", "arguments": '{"op":"forecast"}'}}]})
+            check("только вызовы — ок, preamble пустой",
+                  only_calls["tool_calls"][0]["name"] == "fold_web" and only_calls["preamble"] is None,
+                  str(only_calls)[:200])
             check("только текст — ок",
                   ai.parse_tool_message({"content": "hi"})["text"] == "hi")
-            check("только вызовы — ок",
-                  ai.parse_tool_message({"content": None, "tool_calls": [
-                      {"function": {"name": "fold_web", "arguments": '{"op":"forecast"}'}}]})["tool_calls"][0]["name"] == "fold_web")
+            try:
+                ai.parse_tool_message({"content": None, "tool_calls": []})
+                check("пустой ответ — AIFormatError", False)
+            except ai.AIFormatError:
+                check("пустой ответ — AIFormatError", True)
 
             section("гость закрыт")
             guest = Client("10.0.0.1")
@@ -280,7 +299,7 @@ def main():
             check("cancel -> Отменено учеником",
                   status == 200 and body.get("final") == "Отменено учеником.", f"{status} {body}")
 
-            section("длинный цикл обрывается финалом")
+            section("длинный цикл обрывается ответом, а не отказом")
             with lock:
                 script.clear()
                 for i in range(12):
@@ -292,6 +311,32 @@ def main():
                   f"{status} {str(body)[:200]}")
             check("шагов не больше MAX",
                   len(body.get("steps") or []) <= agent.MAX_TOOL_STEPS, str(len(body.get("steps") or [])))
+            # Тот же потолок, но на вызове без инструментов модель отвечает
+            # текстом: ход заканчивается настоящим ответом по собранным данным.
+            with lock:
+                script.clear()
+                for i in range(agent.MAX_TOOL_STEPS + 1):
+                    script.append({"text": None, "tool_calls": [{"id": f"m{i}", "name": "fold_web",
+                                                                 "arguments": {"op": "progress"}}]})
+                script.append({"text": "Собрал всё по твоим данным.", "tool_calls": []})
+            status, body = turn(a, tid_a, "вызови все доступные инструменты")
+            check("потолок шагов -> ответ по собранным данным",
+                  status == 200 and body.get("final") == "Собрал всё по твоим данным."
+                  and len(body.get("steps") or []) == agent.MAX_TOOL_STEPS,
+                  f"{status} {str(body)[:200]}")
+            # Реплика модели вместе с вызовами — обычный ход, а не 502: реплика
+            # уходит в preamble, инструменты выполняются.
+            with lock:
+                script.clear()
+                script.append(ai.parse_tool_message({"content": "Сейчас соберу всё.", "tool_calls": [
+                    {"id": "p1", "function": {"name": "fold_web",
+                                              "arguments": '{"op":"forecast"}'}}]}))
+                script.append({"text": "Вот твой прогноз.", "tool_calls": []})
+            status, body = turn(a, tid_a, "собери всё по мне")
+            check("реплика+вызовы -> 200 с финалом",
+                  status == 200 and body.get("final") == "Вот твой прогноз."
+                  and len(body.get("steps") or []) == 1,
+                  f"{status} {str(body)[:200]}")
 
             section("400 на пустой/длинный")
             status, body = turn(a, tid_a, "   ")

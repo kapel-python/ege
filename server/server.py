@@ -9074,6 +9074,12 @@ class Handler(BaseHTTPRequestHandler):
                         cost = {"n": 0}
                         def _chat_cf(msgs, tools):
                             cost["n"] += 1
+                            if not tools:
+                                # Финал по потолку шагов (agent._summarize) — тот
+                                # же вызов без инструментов, что и в обычном ходе.
+                                text = _AI.chat(msgs, temperature=0.0)
+                                return {"text": (text or "").strip()[:8000] or None,
+                                        "tool_calls": [], "preamble": None}
                             return _AI.chat_with_tools(msgs, tools, temperature=0.0)
                         try:
                             steps2, final2, pending2 = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_cf)
@@ -9218,6 +9224,13 @@ class Handler(BaseHTTPRequestHandler):
                         cost = {"n": 0}
                         def _chat_fn(msgs, tools):
                             cost["n"] += 1
+                            if not tools:
+                                # Финал по потолку шагов (agent._summarize):
+                                # вызов БЕЗ инструментов — короткий текст по
+                                # уже собранным данным, вместо отказа ученику.
+                                text = _AI.chat(msgs, temperature=0.0)
+                                return {"text": (text or "").strip()[:8000] or None,
+                                        "tool_calls": [], "preamble": None}
                             # Один невидимый повтор для сбоев, которые повторяются сами:
                             # AIFormatError (модель ответила не по контракту — живой
                             # случай 28.09) и AIError (транспорт/402). Как у сочинений:
