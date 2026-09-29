@@ -174,32 +174,49 @@ class AIFormatError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Per-caller budget — the anti-runaway NET, not a student gate
+# Anti-flood NET (burst guard) — not a student gate
 #
-# The generic /api/ bucket allows 300 req/min per IP, which is survivable for
-# SQLite but ruinous for a metered model. This layer sits above the product
-# budget (ai_usage in SQLite: 5 checks/day, chained refill) and exists only so
-# that nothing can run away with the provider's balance. The product budget
-# already meters the honest path, therefore the numbers here are deliberately
-# LOOSER than any real student can reach: spending the whole daily budget in one
-# sitting is allowed (and then again as the chain refills), the net only bites a
-# script. A net that a real student can trip is a bug, not safety — it shows up
-# as "Слишком частые запросы" while the daily counter still reads "5 из 5".
+# The generic /api/ bucket allows 300 req/min per IP, which SQLite survives but
+# a metered model does not. This layer sits ABOVE the product budget and answers
+# a different question: "is this a script hammering the server?" — so it counts
+# BURSTS in a short sliding window, not totals per day.
 #
-# Two keys, two caps, because they stop different things:
-# - user (AI_RATE_MAX, 20/rolling day): one person, one account. A student's
-#   own ceiling is ~8 checks/day (5 at once + one per 8h chain refill), so 20
-#   leaves 2.5x headroom.
-# - network (AI_NET_RATE_MAX, 120/rolling day): the only net left for account
-#   farming, because the device-fingerprint budget is deliberately skipped for
-#   accounts older than a day (EGE_AI_USAGE_DEVICE_TRUST_SEC) — a farmer waits a
-#   day per account and then farms with the IP key as the sole cap. It must stay
-#   generous: a school or a mobile carrier puts a whole class behind one
-#   address, and blocking a class costs more than a farmer's morning costs.
+# Why bursts and not a daily count (the previous shape: 20/day per account +
+# 120/day per address): a daily cap measured the wrong thing and cut off the
+# honest path. An admin with a 500-check personal limit was stopped after ~40
+# requests a day — "Слишком частые запросы" while his own budget still read
+# "460 из 500" — and the network bucket (120/day) is smaller than a single class
+# (30 students × their own ~8 checks) on one school address. Day-scale metering
+# is the product budget's job and it does it better: it lives in SQLite
+# (ai_usage, per account + device cookie + network fingerprint), survives a
+# restart, counts ONLY calls that really reached the model, refills on a chain,
+# and the owner can raise it per user from the admin card. Nothing is spent
+# before a token is reserved, so the money is already protected there; this net
+# only has to keep the server from being hammered.
+#
+# Two keys, two caps, over AI_RATE_WINDOW_SEC (60 s):
+# - user (AI_RATE_MAX, 60/window = 1 request per second): one account, no
+#   matter how many browsers or addresses it uses. A live human tops out near
+#   one request per 5-20 s (a check takes 10-21 s, an agent turn 6-19 s, and the
+#   client will not let a second submit through anyway), so this is 6-20x the
+#   fastest human pace — hammering the button still never shows this window.
+# - network (AI_NET_RATE_MAX, 300/window = 5 rps): the net left for account
+#   farming and for a client that drops its cookie. It matches the generic
+#   /api/ guard (API_RATE_MAX = 300/min), so it never binds before that one.
+#   Behind one address sit a school or a mobile carrier: 30 students checking
+#   at once is 30, a whole class in a five-minute burst is ~100.
+#
+# Rule of the layer: if a live person with a working AI limit can see this
+# window, it is a bug — it must belong to a script (or a deliberate load test,
+# which is what EGE_AI_RATE_MAX / EGE_AI_NET_RATE_MAX are for).
 # ---------------------------------------------------------------------------
-AI_RATE_MAX = int(_env("EGE_AI_RATE_MAX", default="20") or 20)
-AI_NET_RATE_MAX = int(_env("EGE_AI_NET_RATE_MAX", default="120") or 120)
-AI_RATE_WINDOW_SEC = float(_env("EGE_AI_RATE_WINDOW_SEC", default="86400") or 86400)
+AI_RATE_MAX = int(_env("EGE_AI_RATE_MAX", default="60") or 60)
+AI_NET_RATE_MAX = int(_env("EGE_AI_NET_RATE_MAX", default="300") or 300)
+AI_RATE_WINDOW_SEC = float(_env("EGE_AI_RATE_WINDOW_SEC", default="60") or 60)
+# A bucket never grows past its cap (that is the cap's meaning), and stale
+# buckets are dropped once the table gets big: a botnet rotating addresses must
+# not turn this in-memory dict into a slow memory leak.
+AI_BUCKETS_MAX = int(_env("EGE_AI_RATE_BUCKETS_MAX", default="20000") or 20000)
 _ai_hits: dict[str, list[float]] = {}
 _ai_lock = threading.Lock()
 # Upstream calls hold a worker thread for the whole round-trip; cap the
@@ -247,7 +264,7 @@ def _bucket_key(key) -> tuple[str, int]:
 
 
 def ai_take(keys: list, count: int = 1) -> tuple[bool, int]:
-    """Charge `count` AI calls against every key at once.
+    """Charge `count` AI calls against every key at once (burst window).
 
     A per-user bucket alone is not a limit: the cookie is the only proof of
     identity, so a client that simply stops sending it gets a brand-new guest —
@@ -257,6 +274,10 @@ def ai_take(keys: list, count: int = 1) -> tuple[bool, int]:
     (assessment plus a possible calibration, see charges_for) reserve the whole
     cost atomically: either every key affords all `count` charges or nothing
     is spent. See _bucket_key for the per-key cap form.
+
+    Returns `(allowed, seconds_until_reset)`; the second value is a burst
+    countdown (1..AI_RATE_WINDOW_SEC), not a day-long wait — the client's
+    "Слишком частые запросы" window ticks it down second by second.
     """
     try:
         count = max(1, int(count))
@@ -265,6 +286,7 @@ def ai_take(keys: list, count: int = 1) -> tuple[bool, int]:
     try:
         now = time.time()
         with _ai_lock:
+            _prune_ai_buckets(now)
             buckets: dict[str, list[float]] = {}
             for key in keys:
                 name, cap = _bucket_key(key)
@@ -281,6 +303,22 @@ def ai_take(keys: list, count: int = 1) -> tuple[bool, int]:
         # списываем», а не «пускаем всех». Запрос получает честный 429,
         # клиент предложит повторить позже.
         return False, 60
+
+
+def _prune_ai_buckets(now: float) -> None:
+    """Drop buckets with nothing left inside the window. Called under _ai_lock.
+
+    Without it every address a botnet ever tried would stay in the dict until
+    the process restarted. Pruning only touches keys whose newest hit has
+    already fallen out of the window, so a live bucket is never emptied, and it
+    runs only once the table outgrows AI_BUCKETS_MAX (a plain loop per call
+    would be wasted work for a normal day).
+    """
+    if len(_ai_hits) <= AI_BUCKETS_MAX:
+        return
+    for name in [n for n, hits in _ai_hits.items()
+                 if not hits or now - hits[-1] >= AI_RATE_WINDOW_SEC]:
+        del _ai_hits[name]
 
 
 def reset_ai_rate() -> None:

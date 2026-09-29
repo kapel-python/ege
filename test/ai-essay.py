@@ -349,42 +349,79 @@ def test_rate_limit(ai) -> None:
 
 
 def test_burst_net(ai) -> None:
-    section("anti-runaway net: потолок по ключу и «весь дневной бюджет за раз»")
-    # EGE_AI_RATE_MAX=3 в этом файле — глобальный потолок для ключа-строки.
-    ai.reset_ai_rate()
-    ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX = 20, 120
-    try:
-        # Продуктовый лимит — 5 проверок в сутки. Ученик, который честно
-        # потратил весь запас одним присестом (и потом ещё по жетону каждые
-        # 8 часов), анти-лавиновую сетку задеть не может: 8 < 20.
-        spent = [ai.ai_take([("user:daily", ai.AI_RATE_MAX)], ai.charges_for("essay"))[0]
-                 for _ in range(5)]
-        check("5 проверок подряд в один присест проходят",
-              spent == [True] * 5, str(spent))
-        check("ещё 3 (полная цепочка за сутки) — тоже проходят",
-              all(ai.ai_take([("user:daily", ai.AI_RATE_MAX)], 1)[0] for _ in range(3)))
-        check("до потолка 20 сутки свободно (20-8 = 12 запасных)",
-              all(ai.ai_take([("user:daily", ai.AI_RATE_MAX)], 1)[0] for _ in range(12)))
-        check("21-я за сутки отклоняется — сценарий упирается в сеть",
-              ai.ai_take([("user:daily", ai.AI_RATE_MAX)])[0] is False)
-        check("отказ не сжёг бюджет сети: другой адрес не затронут",
-              ai.ai_take([("ip:10.0.0.9", ai.AI_NET_RATE_MAX)])[0] is True)
+    section("anti-flood net: всплеск, а не «много за день»")
+    # Боевые числа (60/мин на аккаунт, 300/мин на адрес, окно 60 с): файл теста
+    # держит EGE_AI_RATE_MAX=3 ради остальных проверок, поэтому здесь потолки
+    # возвращаются к настоящим. Время окна не ждём — отметки в бакете сдвигаем
+    # назад руками (детерминированно и мгновенно).
+    saved = (ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX, ai.AI_RATE_WINDOW_SEC, ai.AI_BUCKETS_MAX)
+    ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX, ai.AI_RATE_WINDOW_SEC = 60, 300, 60.0
+    ai.AI_BUCKETS_MAX = 20000
 
-        # Свой потолок у ключа: за одним адресом школа/оператор, общий потолок
-        # из 20 проверок в сутки заблокировал бы целый класс.
+    def age(bucket: str, seconds: float) -> None:
+        """Сдвинуть все отметки бакета в прошлое — «прошло N секунд»."""
+        hits = ai._ai_hits.get(bucket)
+        if hits:
+            ai._ai_hits[bucket] = [t - seconds for t in hits]
+
+    try:
+        # 1. Живой человек. Продуктовый день — 5 проверок за присест и по жетону
+        #    каждые 8 ч (≈8 в сутки), столько же ходов наставника. Сетка
+        #    заведомо щедрее: даже «всё сразу» — 8 запросов подряд, потолок 60.
         ai.reset_ai_rate()
-        for index in range(120):
+        spent = [ai.ai_take([("user:day", ai.AI_RATE_MAX)], ai.charges_for("essay"))[0]
+                 for _ in range(8)]
+        check("весь дневной запас человека проходит (8 подряд)", spent == [True] * 8, str(spent))
+
+        # 2. Скрипт: 60 запросов в минуту — ровно потолок, 61-й отклонён, и
+        #    отсчёт в секундах (окно минутное), а не в сутках.
+        ai.reset_ai_rate()
+        burst = [ai.ai_take([("user:flood", ai.AI_RATE_MAX)])[0] for _ in range(60)]
+        check("60 запросов в минуту проходят (потолок аккаунта)", burst == [True] * 60, str(burst))
+        allowed, retry = ai.ai_take([("user:flood", ai.AI_RATE_MAX)])
+        check("61-й в ту же минуту отклонён", allowed is False, str(retry))
+        check("отсчёт в секундах, а не в сутках", 0 < retry <= 60, str(retry))
+
+        # 3. Регрессия-профиль владельца: сетка не счётчик за день. Отметки
+        #    двухчасовой давности забыты — аккаунт снова получает полный
+        #    потолок (старая сетка 20/сутки резала админа с лимитом 500 на
+        #    40-м запросе, пока его счётчик показывал «460 из 500»).
+        age("user:flood", 7200)
+        check("вчерашние запросы забыты — потолок снова полный",
+              ai.ai_take([("user:flood", ai.AI_RATE_MAX)])[0] is True)
+
+        # 4. Сеть: 300 в минуту — столько же, сколько общий /api/-барьер
+        #    (API_RATE_MAX), за адресом живущий класс (30) или оператор.
+        ai.reset_ai_rate()
+        blocked_at = None
+        for index in range(300):
             if not ai.ai_take([("ip:class", ai.AI_NET_RATE_MAX)])[0]:
-                check("сеть: 120 проверок в сутки проходят", False, f"заблокирована на {index + 1}")
-                return
-        check("сеть: 120 проверок в сутки проходят (4 класса за адресом)", True)
-        check("121-я по сети отклонена", ai.ai_take([("ip:class", ai.AI_NET_RATE_MAX)])[0] is False)
+                blocked_at = index + 1
+                break
+        check("сеть: 300 запросов в минуту проходят (класс/оператор)",
+              blocked_at is None, f"заблокирована на {blocked_at}")
+        check("301-й по сети отклонён", ai.ai_take([("ip:class", ai.AI_NET_RATE_MAX)])[0] is False)
+        check("отказ по сети не жжёт другой адрес",
+              ai.ai_take([("ip:10.0.0.9", ai.AI_NET_RATE_MAX)])[0] is True)
         check("пользователь сети не заблокирован её потолком",
               ai.ai_take(["user:ok"])[0] is True)
         check("битый потолок в ключе не роняет бакет (падает на общий)",
               ai.ai_take([("ip:broken", "не число")])[0] is True)
+        # 5. Мёртвые бакеты не копятся: ленивая чистка выбрасывает ключи, чьи
+        #    отметки вышли из окна (ротация адресов ботнета).
+        ai.AI_BUCKETS_MAX = 5
+        for index in range(40):
+            ai.ai_take([(f"ip:rot{index}", 5)])
+        check("ротация адресов создаёт бакеты", len(ai._ai_hits) > ai.AI_BUCKETS_MAX,
+              str(len(ai._ai_hits)))
+        for name in list(ai._ai_hits):
+            age(name, 61)
+        ai.ai_take([("ip:next", 5)])
+        check("после окна мёртвые бакеты вычищены, живые целы",
+              set(ai._ai_hits) == {"ip:next"}, str(sorted(ai._ai_hits)))
     finally:
-        ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX = 3, 120
+        (ai.AI_RATE_MAX, ai.AI_NET_RATE_MAX, ai.AI_RATE_WINDOW_SEC,
+         ai.AI_BUCKETS_MAX) = saved
         ai.reset_ai_rate()
 
 
