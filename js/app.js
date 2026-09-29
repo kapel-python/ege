@@ -42,6 +42,7 @@ const ICONS = {
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
   desktop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
+  ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
 };
 
 function icon(name) {
@@ -966,6 +967,7 @@ const NAV = [
   { route: "errors",    label: "Ошибки",    ic: "errors" },
   { route: "trials",    label: "Испытания", ic: "trials" },
   { route: "stats",     label: "Статистика",ic: "stats" },
+  { route: "ai",        label: "ИИ",        ic: "ai" },
   { route: "profile",   label: "Профиль",   ic: "profile" },
 ];
 
@@ -1130,6 +1132,9 @@ async function render() {
     if (!Store.ready || !Store.state) return;
   }
   const route = currentRoute();
+  // Агент — во всю ширину: класс на контейнере включает full-bleed в CSS.
+  // Стоит раньше всех return, поэтому сам снимается при уходе с раздела.
+  try { document.getElementById("screen").classList.toggle("screen--agent", route === "ai"); } catch (_) {}
   // Уход со страницы урока тоже ставит таймер на паузу: возвращение через
   // день не должно превращать урок в многочасовой сеанс.
   if (route !== "lesson" && typeof Lesson !== "undefined" && Lesson.cur) {
@@ -1238,6 +1243,7 @@ async function render() {
     errors: screenErrors,
     trials: screenTrials,
     stats: screenStats,
+    ai: screenAgent,
     profile: screenProfile,
     login: screenLogin,
     register: screenRegister,
@@ -1282,7 +1288,7 @@ const ROUTE_TITLES = {
   dashboard: "Главная", path: "Путь", skill: "Тема", training: "Тренировка",
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
-  errors: "Ошибки", trials: "Испытания", stats: "Статистика", profile: "Профиль",
+  errors: "Ошибки", trials: "Испытания", stats: "Статистика", ai: "ИИ-наставник", profile: "Профиль",
   login: "Вход", register: "Регистрация", subject: "Выбор предмета",
 };
 
@@ -1615,7 +1621,7 @@ function subjectNavItems() {
   // (заглушка вместо пустых переходов), а не отсутствием пункта меню.
   // Урезаем только пустой предмет без единой темы — там показывать нечего.
   if (!state.empty && asSafeArray(state.skills).length) return NAV;
-  return NAV.filter((item) => ["dashboard", "path", "profile"].includes(item.route));
+  return NAV.filter((item) => ["dashboard", "path", "ai", "profile"].includes(item.route));
 }
 
 function pathProgressForSkills(skills) {
@@ -2040,11 +2046,15 @@ function renderSidebar(active) {
   nav.removeAttribute("aria-disabled");
   const navItems = subjectNavItems();
   const openErrors = Store.state.errors.filter((e) => !e.resolved).length;
-  nav.innerHTML = navItems.map((n) => `
-    <a class="nav-item ${n.route === active ? "active" : ""}" href="#/${n.route}">
+  nav.innerHTML = navItems.map((n) => {
+    const href = n.href ? n.href : `#/${n.route}`;
+    const ext = n.href ? ` target="_self" rel="noopener"` : "";
+    return `
+    <a class="nav-item ${n.route === active ? "active" : ""}" href="${href}"${ext}>
       ${icon(n.ic)}<span>${n.label}</span>
       ${n.route === "errors" && openErrors ? `<span class="nav-badge">${openErrors}</span>` : ""}
-    </a>`).join("");
+    </a>`;
+  }).join("");
   // На главной прогноз уже подробно показан в карточке. В меню держим
   // только навигацию: служебная надпись про SQLite и второй прогноз лишь
   // занимают место и дублируют один и тот же показатель.
@@ -2070,9 +2080,12 @@ function renderBottomNav(active, route = currentRoute()) {
   bottom.removeAttribute("aria-hidden");
   bottom.removeAttribute("hidden");
   bottom.style.display = "";
-  const items = subjectNavItems().filter((n) => ["dashboard", "path", "training", "errors", "profile"].includes(n.route));
-  bottom.innerHTML = items.map((n) => `
-    <a href="#/${n.route}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`).join("");
+  const items = subjectNavItems().filter((n) => ["dashboard", "path", "training", "errors", "ai", "profile"].includes(n.route));
+  bottom.innerHTML = items.map((n) => {
+    const href = n.href ? n.href : `#/${n.route}`;
+    return `
+    <a href="${href}" class="${n.route === active ? "active" : ""}">${icon(n.ic)}<span>${n.label}</span></a>`;
+  }).join("");
 }
 
 /* Уровень огня серии: 0–6 дней — обычный, 7–30 — красный, 31+ — фиолетовый.
@@ -2086,13 +2099,23 @@ function streakTier(days) {
 
 /* Высота верхней панели нужна липкой шапке сессии: без неё «Назад» и «Выйти»
    заезжали под topbar и пропадали. Панель переносится на узких экранах, поэтому
-   меряем её фактическую высоту, а не считаем в CSS. */
+   меряем её фактическую высоту, а не считаем в CSS.
+   Здесь же — высота нижней навигации: на телефоне она position:fixed и перекрывает
+   низ экрана, а экран агента держит свою колонку ровно в dvh, поэтому резерв под
+   неё нужно снять из той же высоты, что и шапку. На десктопе меню скрыто (height
+   0) — резерв автоматически схлопывается, отдельно его чистить не нужно. */
 function syncTopbarHeight() {
   try {
     const bar = document.getElementById("topbar");
-    if (!bar) return;
-    const h = Math.round(bar.getBoundingClientRect().height);
-    document.documentElement.style.setProperty("--topbar-h", `${h}px`);
+    if (bar) {
+      const h = Math.round(bar.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--topbar-h", `${h}px`);
+    }
+  } catch (_) {}
+  try {
+    const nav = document.getElementById("bottomnav");
+    const navH = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+    document.documentElement.style.setProperty("--bottomnav-h", `${navH}px`);
   } catch (_) {}
 }
 try {

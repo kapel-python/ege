@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ИИ-наставник — ege easy</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script>
+// ИИ-наставник живёт в SPA: /dashboard#/ai. Старые ссылки /agent#/thread/<id>
+// везут id треда в хэше — сервер его не видит, поэтому перекладываем здесь.
+try {
+  var m = (location.hash || "").match(/thread\/(\d+)/);
+  var target = "/dashboard#/ai" + (m ? "/" + m[1] : "");
+  location.replace(target);
+} catch (e) {
+  location.replace("/dashboard#/ai");
+}
+</script>
+</head>
+<body>
+<p style="font-family:sans-serif;padding:24px"><a href="/dashboard#/ai">Открыть ИИ-наставника</a></p>
+</body>
+</html>

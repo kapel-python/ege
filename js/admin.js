@@ -884,7 +884,7 @@ async function screenUser(ref) {
         <div class="a-user-head__actions">
           <button class="btn btn--soft btn--sm" id="editProfileBtn">Профиль</button>
           <button class="btn btn--soft btn--sm" id="grantXpBtn"${locked ? " disabled title=\"XP появятся вместе с материалами предмета\"" : ""}>± XP</button>
-          <button class="btn btn--soft btn--sm" id="aiLimitBtn">Проверки сочинений</button>
+          <button class="btn btn--soft btn--sm" id="aiLimitBtn">ИИ-лимиты</button>
           <button class="btn btn--soft btn--sm" id="blockBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя заблокировать собственный аккаунт\"" : ""}>${p.block ? "Разблокировать" : "Заблокировать"}</button>
           <button class="btn btn--danger-soft btn--sm" id="resetBtn">Сброс…</button>
           <button class="btn btn--danger-soft btn--sm" id="deleteBtn" ${p.id === A.session.user.id ? "disabled title=\"Нельзя удалить собственный аккаунт\"" : ""}>Удалить</button>
@@ -1188,8 +1188,16 @@ function bindUserActions(p) {
     const customNote = custom != null
       ? ` Выдано вручную: всего ${custom} вместо обычных 5.`
       : "";
+    const ag = cur.agent || {};
+    const agRemaining = Number.isFinite(Number(ag.remaining)) ? Number(ag.remaining) : 0;
+    const agLimit = Number.isFinite(Number(ag.limit)) ? Number(ag.limit) : 10;
+    const agCustom = ag.customLimit;
+    const agReset = ag.resetInSec != null ? `, следующий вернётся через ${fmtDuration(ag.resetInSec)}` : "";
+    const agCustomNote = agCustom != null
+      ? ` Выдано вручную: всего ${agCustom} вместо обычных ${ag.globalLimit || 10}.`
+      : "";
     openModal(`
-      <div class="a-modal__title">Проверки сочинений — ${esc(p.accountId || "")}</div>
+      <div class="a-modal__title">ИИ-лимиты — ${esc(p.accountId || "")}</div>
       <div class="a-modal__desc">Сейчас ученику доступно <b>${remaining} из ${limit}</b>${resetNote}. Каждая потраченная проверка возвращается через 8 часов.${customNote}</div>
       <div class="a-modal__form">
         <div class="a-field"><label>Доступно сейчас (0–1000)</label><input class="a-input mono" id="fAiRemaining" type="number" min="0" max="1000" step="1" value="${remaining}"></div>
@@ -1198,6 +1206,16 @@ function bindUserActions(p) {
           <button type="button" class="btn btn--soft btn--sm" id="mRefill">Выдать все</button>
           <button type="button" class="btn btn--soft btn--sm" id="mZero">Забрать все</button>
           <button type="button" class="btn btn--soft btn--sm" id="mStd">Вернуть обычные 5</button>
+        </div>
+      </div>
+      <div class="a-modal__desc" style="margin-top:18px">Ходы наставника: доступно <b>${agRemaining} из ${agLimit}</b>${agReset}. Каждый потраченный ход возвращается через 8 часов.${agCustomNote}</div>
+      <div class="a-modal__form">
+        <div class="a-field"><label>Ходов доступно сейчас (0–1000)</label><input class="a-input mono" id="fAgRemaining" type="number" min="0" max="1000" step="1" value="${agRemaining}"></div>
+        <div class="a-field"><label>Ходов всего выдавать (пусто — не менять)</label><input class="a-input mono" id="fAgLimit" type="number" min="0" max="1000" step="1" placeholder="${agLimit}"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button type="button" class="btn btn--soft btn--sm" id="mAgRefill">Выдать все ходы</button>
+          <button type="button" class="btn btn--soft btn--sm" id="mAgZero">Забрать все ходы</button>
+          <button type="button" class="btn btn--soft btn--sm" id="mAgStd">Вернуть обычные ${ag.globalLimit || 10}</button>
         </div>
         <div id="mErr"></div>
       </div>
@@ -1213,7 +1231,9 @@ function bindUserActions(p) {
           const res = await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/ailimit`, body);
           closeModal();
           const st = res.aiLimit || {};
-          toast(`Проверок доступно: ${st.remaining} из ${st.limit}`);
+          const agSt = st.agent || {};
+          toast(`Проверок сочинений: ${st.remaining} из ${st.limit}` +
+                (agSt ? ` · ходов наставника: ${agSt.remaining} из ${agSt.limit}` : ""));
           reload();
         } catch (e) {
           if (btn) btn.disabled = false;
@@ -1221,24 +1241,36 @@ function bindUserActions(p) {
           err(e.message);
         }
       };
+      const numField = (sel, label) => {
+        const raw = modal.querySelector(sel).value.trim();
+        if (raw === "") return null;
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v) || v < 0 || v > 1000) { err(`«${label}»: число 0–1000`); return undefined; }
+        return v;
+      };
       modal.querySelector("#mRefill").onclick = (ev) => send({ refill: true }, ev.target);
       modal.querySelector("#mZero").onclick = (ev) => send({ remaining: 0 }, ev.target);
       modal.querySelector("#mStd").onclick = (ev) => send({ limit: null, refill: true }, ev.target);
+      modal.querySelector("#mAgRefill").onclick = (ev) => send({ agent: { refill: true } }, ev.target);
+      modal.querySelector("#mAgZero").onclick = (ev) => send({ agent: { remaining: 0 } }, ev.target);
+      modal.querySelector("#mAgStd").onclick = (ev) => send({ agent: { limit: null, refill: true } }, ev.target);
       modal.querySelector("#mSave").onclick = async (ev) => {
-        const rawRem = modal.querySelector("#fAiRemaining").value.trim();
-        const rawLim = modal.querySelector("#fAiLimit").value.trim();
         const body = {};
-        if (rawLim !== "") {
-          const v = parseInt(rawLim, 10);
-          if (!Number.isFinite(v) || v < 0 || v > 1000) { err("«Всего выдавать»: число 0–1000"); return; }
-          body.limit = v;
+        const lim = numField("#fAiLimit", "Всего выдавать");
+        const rem = numField("#fAiRemaining", "Доступно сейчас");
+        if (lim === undefined || rem === undefined) return;
+        if (lim !== null) body.limit = lim;
+        if (rem !== null) body.remaining = rem;
+        const agLim = numField("#fAgLimit", "Ходов всего выдавать");
+        const agRem = numField("#fAgRemaining", "Ходов доступно сейчас");
+        if (agLim === undefined || agRem === undefined) return;
+        if (agLim !== null || agRem !== null) {
+          const agent = {};
+          if (agLim !== null) agent.limit = agLim;
+          if (agRem !== null) agent.remaining = agRem;
+          body.agent = agent;
         }
-        if (rawRem !== "") {
-          const v = parseInt(rawRem, 10);
-          if (!Number.isFinite(v) || v < 0 || v > 1000) { err("«Доступно сейчас»: число 0–1000"); return; }
-          body.remaining = v;
-        }
-        if (!("limit" in body) && !("remaining" in body)) { err("Укажите, сколько выдать"); return; }
+        if (!("limit" in body) && !("remaining" in body) && !body.agent) { err("Укажите, сколько выдать"); return; }
         await send(body, ev.target);
       };
     });

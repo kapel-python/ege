@@ -95,6 +95,166 @@ def _load_ai_module():
 _AI = _load_ai_module()
 
 
+def _load_agent_module():
+    """Load the agent module (server/agent.py). Failure is not fatal: without
+    it the /api/agent/* endpoints answer 503, the rest of the site works."""
+    import importlib.util
+
+    agent_path = Path(__file__).resolve().parent / "agent.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_agent", agent_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_AGENT = _load_agent_module()
+
+# Параллельный ход в том же треде — 400 AGENT_BUSY. In-memory guard на процесс:
+# ход держит слот до 95 секунд (потолок цикла 90с + запас), ожидание
+# подтверждения слот не держит (цикл остановлен, ждём человека).
+_AGENT_BUSY: dict[int, float] = {}
+_AGENT_BUSY_LOCK = threading.Lock()
+_AGENT_BUSY_TTL_SEC = 95.0
+
+
+def _agent_busy_acquire(thread_id: int) -> bool:
+    now = time.monotonic()
+    with _AGENT_BUSY_LOCK:
+        until = _AGENT_BUSY.get(int(thread_id), 0)
+        if until > now:
+            return False
+        _AGENT_BUSY[int(thread_id)] = now + _AGENT_BUSY_TTL_SEC
+        return True
+
+
+def _agent_busy_release(thread_id: int) -> None:
+    with _AGENT_BUSY_LOCK:
+        _AGENT_BUSY.pop(int(thread_id), None)
+
+
+def _agent_busy_retry_after(thread_id: int) -> int:
+    """Сколько секунд ждать до освобождения слота (для ответа AGENT_BUSY)."""
+    with _AGENT_BUSY_LOCK:
+        until = _AGENT_BUSY.get(int(thread_id), 0)
+    return max(1, int(until - time.monotonic()) + 1) if until else 1
+
+
+def _agent_thread_owned(conn: sqlite3.Connection, thread_id: int, user_id: int):
+    try:
+        tid = int(thread_id)
+    except (TypeError, ValueError):
+        return None
+    if _AGENT is not None:
+        try:
+            _AGENT.ensure_agent_schema(conn)
+        except sqlite3.Error:
+            pass
+    try:
+        return conn.execute("SELECT id, user_id, subject, title, created_at, updated_at"
+                            " FROM agent_threads WHERE id=? AND user_id=?", (tid, int(user_id))).fetchone()
+    except sqlite3.Error:
+        return None
+
+
+def _agent_next_seq(conn: sqlite3.Connection, thread_id: int) -> int:
+    row = conn.execute("SELECT MAX(seq) AS m FROM agent_messages WHERE thread_id=?",
+                       (int(thread_id),)).fetchone()
+    try:
+        return int(row["m"] or 0) + 1
+    except (TypeError, ValueError, KeyError):
+        return 1
+
+
+def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, role: str,
+                       content: str = "", *, tool_name=None, tool_args=None,
+                       status: str = "done", result=None) -> int:
+    seq = _agent_next_seq(conn, thread_id)
+    now_ms = int(time.time() * 1000)
+    conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
+                 " tool_args_json, status, result_json, seq, created_at)"
+                 " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                 (int(thread_id), int(user_id), role, str(content or "")[:8000],
+                  tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
+                  status, json.dumps(result if result is not None else {},
+                                     ensure_ascii=False)[:16000],
+                  seq, now_ms))
+    conn.execute("UPDATE agent_threads SET updated_at=? WHERE id=?", (now_ms, int(thread_id)))
+    return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+
+def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int) -> list:
+    """История треда → формат build_messages (user/assistant/tool с call_id).
+
+    Окно — последние 60 строк: безлимитный тред упирался в 90-секундный
+    потолок хода и давал детерминированный 502 на каждую попытку."""
+    rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
+                        " FROM agent_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 60",
+                        (int(thread_id),)).fetchall()
+    rows = list(reversed(rows))
+    history: list = []
+    for r in rows:
+        role = r["role"]
+        if role == "user":
+            history.append({"role": "user", "content": r["content"] or ""})
+        elif role == "assistant":
+            history.append({"role": "assistant", "content": r["content"] or ""})
+        elif role == "tool":
+            try:
+                targs = json.loads(r["tool_args_json"] or "{}")
+            except (ValueError, TypeError):
+                targs = {}
+            if not isinstance(targs, dict):
+                targs = {}
+            call_id = f"tool-{r['id']}"
+            history.append({"role": "assistant", "content": None,
+                            "tool_calls": [{"id": call_id, "name": r["tool_name"] or "",
+                                            "arguments": targs}]})
+            try:
+                res = json.loads(r["result_json"] or "{}")
+            except (ValueError, TypeError):
+                res = {}
+            if r["status"] == "needs_confirm":
+                # Ожидание человека: модели показываем предложение, а не пустоту.
+                try:
+                    proposal = json.loads(r["result_json"] or "{}")
+                    label = proposal.get("label") if isinstance(proposal, dict) else None
+                except (ValueError, TypeError):
+                    label = None
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": f"Ожидает подтверждения: {label or r['tool_name']}"[:2000]})
+            elif r["status"] == "cancelled":
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": "Отменено учеником."})
+            else:
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": json.dumps(res, ensure_ascii=False)[:4000]})
+    return history
+
+
+def _agent_public_message(row) -> dict:
+    try:
+        args = json.loads(row["tool_args_json"] or "{}")
+    except (ValueError, TypeError):
+        args = {}
+    try:
+        res = json.loads(row["result_json"] or "{}")
+    except (ValueError, TypeError):
+        res = {}
+    out = {"id": int(row["id"]), "role": row["role"], "content": row["content"] or "",
+           "seq": int(row["seq"]), "status": row["status"],
+           "createdAt": int(row["created_at"])}
+    if row["tool_name"]:
+        out["tool"] = row["tool_name"]
+        out["args"] = args if isinstance(args, dict) else {}
+        out["result"] = res if isinstance(res, dict) else {}
+    return out
+
+
 def _ai_user_message(exc: BaseException) -> str:
     """Человеческий текст для нашей же ошибки ввода.
 
@@ -5263,7 +5423,7 @@ def admin_ai_limit_status(conn: sqlite3.Connection, user_id: int) -> dict:
     now_ms = int(time.time() * 1000)
     custom = ai_custom_limit(conn, user_id)
     st = ai_usage_status(conn, user_id, None, None, now_ms)
-    return {
+    payload = {
         "limit": int(st["limit"]),
         "remaining": int(st["remaining"]),
         "resetInSec": st["resetInSec"],
@@ -5271,6 +5431,35 @@ def admin_ai_limit_status(conn: sqlite3.Connection, user_id: int) -> dict:
         "globalLimit": ai_usage_max(),
         "customLimit": custom,
     }
+    # Квота ходов ИИ-наставника живёт в том же бакете-таблице, но отдельным
+    # owner `agent:<user_id>` и со своим персональным потолком.
+    try:
+        payload["agent"] = _AGENT.admin_agent_quota_status(conn, user_id)
+    except (sqlite3.Error, KeyError, ValueError):
+        payload["agent"] = None
+    return payload
+
+
+def _validate_ai_limit_payload(raw_limit, has_limit: bool,
+                               raw_remaining, has_remaining: bool,
+                               refill: bool) -> None:
+    """Проверка чисел до любой записи: ValueError → 400, база не тронута."""
+    if has_limit and raw_limit is not None:
+        try:
+            value = int(raw_limit)
+        except (TypeError, ValueError):
+            raise ValueError("limit должен быть целым числом или null")
+        if not AI_USER_LIMIT_MIN <= value <= AI_USER_LIMIT_MAX:
+            raise ValueError(f"limit должен быть {AI_USER_LIMIT_MIN}..{AI_USER_LIMIT_MAX}")
+    if has_remaining:
+        try:
+            value = int(raw_remaining)
+        except (TypeError, ValueError):
+            raise ValueError("remaining должен быть целым числом")
+        if not 0 <= value <= AI_USER_LIMIT_MAX:
+            raise ValueError(f"remaining должен быть 0..{AI_USER_LIMIT_MAX}")
+    if not (has_limit or has_remaining or refill):
+        raise ValueError("нужны limit, remaining или refill")
 
 
 def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
@@ -5289,13 +5478,29 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
         raise KeyError("user not found")
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
+    # Вложенный объект `agent` — квота ходов ИИ-наставника: свой бакет
+    # `agent:<user_id>`, свой персональный потолок, те же ключи limit /
+    # remaining / refill. Пустой — значит по сочинениям ничего не меняем.
+    agent_payload = payload.get("agent")
+    if agent_payload is not None and not isinstance(agent_payload, dict):
+        raise ValueError("agent должен быть объектом")
+    payload = {k: v for k, v in payload.items() if k != "agent"}
     has_limit = "limit" in payload
     has_remaining = "remaining" in payload
     refill = payload.get("refill") is True
     raw_limit = payload.get("limit")
     raw_remaining = payload.get("remaining")
-    if not has_limit and not has_remaining and not refill:
+    if not has_limit and not has_remaining and not refill and agent_payload is None:
         raise ValueError("нужны limit, remaining или refill")
+    if agent_payload is not None:
+        # Валидируем сочинения первыми: применённый грант агента не должен
+        # уезжать в базу при 400 по второй половине запроса.
+        _validate_ai_limit_payload(raw_limit if has_limit else None, has_limit,
+                                   raw_remaining if has_remaining else None, has_remaining,
+                                   refill)
+        _AGENT.admin_agent_quota_set(conn, user_id, agent_payload)
+    if not has_limit and not has_remaining and not refill:
+        return admin_ai_limit_status(conn, user_id)
     now_ms = int(time.time() * 1000)
     window_ms = ai_usage_window_ms()
     conn.execute("BEGIN")
@@ -8258,8 +8463,13 @@ class Handler(BaseHTTPRequestHandler):
                     result = {"ok": True, "wasBlocked": was}
                 elif action == "ailimit":
                     result = admin_ai_limit_set(conn, target_id, payload)
+                    agent_note = ""
+                    if isinstance(result.get("agent"), dict):
+                        ag = result["agent"]
+                        agent_note = (f" agent: limit={ag['limit']} remaining={ag['remaining']}")
                     admin_audit(conn, actor_id, "ai-limit", target_id,
-                                f"limit={result['limit']} remaining={result['remaining']}"[:200])
+                                (f"limit={result['limit']} remaining={result['remaining']}"
+                                 + agent_note)[:200])
                     result = {"ok": True, "aiLimit": result}
                 else:
                     result = admin_delete_user(conn, target_id, actor_id)
@@ -8754,6 +8964,354 @@ class Handler(BaseHTTPRequestHandler):
                                 "ref": rid}, 503 if locked else 500)
             finally: conn.close()
             return
+        if path == "/api/agent/threads" or path == "/api/agent/turns" or path == "/api/agent/turns/confirm" or path.startswith("/api/agent/threads/"):
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                if _AGENT is None:
+                    self.send_json({"error": "Раздел временно недоступен"}, 503); return
+                try:
+                    _AGENT.ensure_agent_schema(conn)
+                except sqlite3.Error:
+                    pass
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                try:
+                    payload = self.read_json(max_bytes=AI_REQUEST_MAX_BYTES)
+                except RequestBodyTooLarge:
+                    self.send_json({"error": "Запрос слишком большой"}, 413, token=token); return
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный запрос"}, 400, token=token); return
+                # POST /api/agent/threads — создать тред.
+                if path == "/api/agent/threads":
+                    subj_raw = payload.get("subject")
+                    subject = resolve_subject(subj_raw) if is_known_subject(subj_raw) else current_subject_for(conn, user_id)
+                    now_ms = int(time.time() * 1000)
+                    cur = conn.execute("INSERT INTO agent_threads(user_id, subject, title, created_at, updated_at)"
+                                       " VALUES(?,?,?, ?,?)", (int(user_id), subject, "Новый чат", now_ms, now_ms))
+                    conn.commit()
+                    tid = int(cur.lastrowid)
+                    self.send_json({"ok": True, "thread": {"id": tid, "subject": subject,
+                                                            "title": "Новый чат", "createdAt": now_ms,
+                                                            "updatedAt": now_ms}}, token=token); return
+                # POST /api/agent/threads/<id>/delete — удалить свой тред.
+                if path.startswith("/api/agent/threads/") and path.endswith("/delete"):
+                    parts = path.split("/")
+                    try:
+                        tid = int(parts[4])
+                    except (TypeError, ValueError, IndexError):
+                        self.send_json({"error": "Некорректный идентификатор"}, 400, token=token); return
+                    row = _agent_thread_owned(conn, tid, user_id)
+                    if row is None:
+                        self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    conn.execute("DELETE FROM agent_messages WHERE thread_id=?", (tid,))
+                    conn.execute("DELETE FROM agent_threads WHERE id=? AND user_id=?", (tid, int(user_id)))
+                    conn.commit()
+                    self.send_json({"ok": True, "id": tid}, token=token); return
+                # POST /api/agent/turns/confirm — {messageId, approve}.
+                if path == "/api/agent/turns/confirm":
+                    raw_mid = payload.get("messageId", payload.get("message_id", payload.get("id")))
+                    try:
+                        mid = int(raw_mid)
+                    except (TypeError, ValueError):
+                        self.send_json({"error": "Нужен messageId"}, 400, token=token); return
+                    approve = payload.get("approve")
+                    if not isinstance(approve, bool):
+                        self.send_json({"error": "Нужен approve"}, 400, token=token); return
+                    msg = conn.execute("SELECT m.id, m.thread_id, m.tool_name, m.tool_args_json, m.result_json, m.status,"
+                                       " t.subject, t.user_id FROM agent_messages m"
+                                       " JOIN agent_threads t ON t.id=m.thread_id"
+                                       " WHERE m.id=? AND m.user_id=? AND t.user_id=?",
+                                       (mid, int(user_id), int(user_id))).fetchone()
+                    if msg is None:
+                        self.send_json({"error": "Шаг не найден"}, 404, token=token); return
+                    if msg["status"] != "needs_confirm":
+                        self.send_json({"error": "Шаг уже обработан"}, 400, token=token); return
+                    tid = int(msg["thread_id"])
+                    subject = str(msg["subject"] or current_subject_for(conn, user_id))
+                    try:
+                        targs = json.loads(msg["tool_args_json"] or "{}")
+                    except (ValueError, TypeError):
+                        targs = {}
+                    try:
+                        proposal = json.loads(msg["result_json"] or "{}")
+                    except (ValueError, TypeError):
+                        proposal = {}
+                    if not approve:
+                        conn.execute("UPDATE agent_messages SET status='cancelled' WHERE id=?", (mid,))
+                        _agent_add_message(conn, tid, user_id, "assistant", "Отменено учеником.")
+                        conn.commit()
+                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        self.send_json({"ok": True, "approved": False, "final": "Отменено учеником.",
+                                        "steps": [], "quota": quota}, token=token); return
+                    # approve: применяем действие, затем resume цикла без нового жетона.
+                    if not _agent_busy_acquire(tid):
+                        wait = _agent_busy_retry_after(tid)
+                        self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
+                                        "retryAfter": wait}, 400, token=token,
+                                       headers={"Retry-After": str(wait)}); return
+                    try:
+                        try:
+                            applied = _AGENT.apply_action(conn, int(user_id), subject,
+                                                          str(msg["tool_name"] or ""), proposal if isinstance(proposal, dict) else {})
+                        except ValueError as exc:
+                            conn.rollback()
+                            self.send_json({"error": f"Не удалось применить: {exc}"}, 400, token=token); return
+                        conn.execute("UPDATE agent_messages SET status='applied', result_json=? WHERE id=?",
+                                     (json.dumps({"proposal": proposal, "applied": applied}, ensure_ascii=False)[:16000], mid))
+                        conn.commit()
+                        if _AI is None:
+                            self.send_json({"error": "ИИ временно недоступен"}, 503, token=token); return
+                        history = _agent_history_for_model(conn, tid)
+                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history[:-2] if len(history) >= 2 else history, "")
+                        # Убираем пустой trailing user (confirm — не новый вопрос): модель продолжает с результатом.
+                        if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
+                            messages.pop()
+                        cost = {"n": 0}
+                        def _chat_cf(msgs, tools):
+                            cost["n"] += 1
+                            return _AI.chat_with_tools(msgs, tools, temperature=0.0)
+                        try:
+                            steps2, final2, pending2 = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_cf)
+                        except _AI.AIUnavailable as exc:
+                            rid = log_request_error("agent-confirm", exc)
+                            self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
+                        except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError, Exception) as exc:
+                            # Статус уже 'applied', а ответа нет: откатываем шаг в
+                            # needs_confirm, иначе повторный confirm упрётся в
+                            # «Шаг уже обработан» и продолжить будет нечем.
+                            try:
+                                conn.execute("UPDATE agent_messages SET status='needs_confirm' WHERE id=?", (mid,))
+                                conn.commit()
+                            except sqlite3.Error:
+                                try:
+                                    conn.rollback()
+                                except sqlite3.Error:
+                                    pass
+                            rid = log_request_error("agent-confirm", exc)
+                            self.send_json({"error": "Не удалось завершить ход, попробуй ещё раз.", "ref": rid},
+                                           502, token=token); return
+                        out_steps = []
+                        for st in steps2:
+                            mid2 = _agent_add_message(conn, tid, user_id, "tool", "",
+                                                      tool_name=st.get("name"), tool_args=st.get("args"),
+                                                      status="needs_confirm" if st.get("status") == "needs_confirm" else "done",
+                                                      result=st.get("proposal") if st.get("status") == "needs_confirm" else st.get("result"))
+                            item = {"id": mid2, "tool": st.get("name"), "args": st.get("args"),
+                                    "label": st.get("label"), "kind": st.get("kind"), "status": st.get("status")}
+                            if st.get("status") == "needs_confirm":
+                                item["proposal"] = st.get("proposal")
+                            else:
+                                item["result"] = st.get("result")
+                            out_steps.append(item)
+                        if pending2 is not None:
+                            conn.commit()
+                            quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            self.send_json({"ok": True, "approved": True, "steps": out_steps,
+                                            "final": None, "pending": True, "quota": quota,
+                                            "usage": {"cost": cost["n"]}}, token=token); return
+                        final_text = (final2 or "").strip()[:8000] or "Готово."
+                        _agent_add_message(conn, tid, user_id, "assistant", final_text)
+                        conn.commit()
+                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        self.send_json({"ok": True, "approved": True, "steps": out_steps,
+                                        "final": final_text, "quota": quota,
+                                        "usage": {"cost": cost["n"]}}, token=token); return
+                    finally:
+                        _agent_busy_release(tid)
+                    return
+                # POST /api/agent/turns — начать ход {threadId, text}.
+                if path == "/api/agent/turns":
+                    raw_tid = payload.get("threadId", payload.get("thread_id", payload.get("thread")))
+                    try:
+                        tid = int(raw_tid)
+                    except (TypeError, ValueError):
+                        self.send_json({"error": "Нужен threadId"}, 400, token=token); return
+                    thread = _agent_thread_owned(conn, tid, user_id)
+                    if thread is None:
+                        self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    subject = str(thread["subject"] or current_subject_for(conn, user_id))
+                    try:
+                        text = _AGENT.validate_turn_text(payload.get("text", ""))
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400, token=token); return
+                    if not _agent_busy_acquire(tid):
+                        wait = _agent_busy_retry_after(tid)
+                        self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
+                                        "retryAfter": wait}, 400, token=token,
+                                       headers={"Retry-After": str(wait)}); return
+                    usage_spent = False
+                    try:
+                        # Повторный ход кэшируется: тот же текст последним — отдаём готовое без модели и без жетона.
+                        # force:true от клиента (кнопка «Попробовать снова») обходит кэш: явный повтор = новый шанс.
+                        if payload.get("force") is not True:
+                            last_user = conn.execute("SELECT content, seq FROM agent_messages WHERE thread_id=? AND role='user' ORDER BY seq DESC LIMIT 1",
+                                                     (tid,)).fetchone()
+                            if last_user is not None and (last_user["content"] or "").strip() == text:
+                                after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at"
+                                                     " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
+                                                     (tid, int(last_user["seq"]))).fetchall()
+                                has_assistant = any(r["role"] == "assistant" and (r["content"] or "").strip() for r in after)
+                                has_pending = any(r["status"] == "needs_confirm" for r in after)
+                                if has_assistant and not has_pending:
+                                    steps_cached = [_agent_public_message(r) for r in after if r["role"] == "tool"]
+                                    finals = [r["content"] for r in after if r["role"] == "assistant" and (r["content"] or "").strip()]
+                                    quota = _AGENT.agent_quota_status(conn, int(user_id))
+                                    self.send_json({"ok": True, "cached": True, "steps": [
+                                        {"id": s["id"], "tool": s.get("tool"), "args": s.get("args"),
+                                         "label": _AGENT.describe_step(s.get("tool") or "", s.get("args") or {}, s.get("result")),
+                                         "kind": "read", "status": s.get("status"), "result": s.get("result")} for s in steps_cached],
+                                        "final": finals[-1] if finals else "", "quota": quota,
+                                        "usage": {"cost": 0}}, token=token); return
+                        # Анти-лавиновая сетка (пользователь + сеть): скрипт не проходит.
+                        try:
+                            ip = support_client_ip(self)
+                        except Exception:
+                            ip = "?"
+                        if _AI is not None:
+                            allowed, retry_after = _AI.ai_take(
+                                [(f"agent-user:{user_id}", _AI.AI_RATE_MAX), (f"agent-ip:{ip}", _AI.AI_NET_RATE_MAX)], 1)
+                            if not allowed:
+                                self.send_json({"error": "Слишком много запросов. Попробуй позже.",
+                                                "retryAfter": retry_after}, 429, token=token,
+                                               headers={"Retry-After": str(retry_after)})
+                                return
+                        # Жетон хода — транзакцией до модели; возврат при любом неуспехе.
+                        if not _AGENT.agent_quota_reserve(conn, int(user_id)):
+                            st = _AGENT.agent_quota_status(conn, int(user_id))
+                            retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
+                            self.send_json({"error": "Ходы наставника на сегодня закончились. Дождись таймера.",
+                                            "code": AI_LIMIT_CODE, "limit": st["limit"],
+                                            "remaining": st["remaining"], "resetInSec": st["resetInSec"],
+                                            "retryAfter": retry},
+                                           429, token=token, headers={"Retry-After": str(retry)})
+                            return
+                        usage_spent = True
+                        if _AI is None:
+                            raise _AI.AIUnavailable("AI не настроен") if False else RuntimeError("no ai")
+                        # Заголовок треда — детерминированно, без модели.
+                        # Commit СРАЗУ: иначе открытая write-транзакция висит весь
+                        # вызов модели (до 90 с) и сериализует чужие запросы —
+                        # каждый authenticated запрос пишет last_seen_at и ждёт
+                        # busy_timeout (замер: bootstrap 0.02 с → 7.5 с).
+                        if (thread["title"] or "") in ("Новый чат", ""):
+                            try:
+                                conn.execute("UPDATE agent_threads SET title=? WHERE id=?",
+                                             (_AGENT.thread_title_for(text), tid))
+                                conn.commit()
+                            except sqlite3.Error:
+                                try:
+                                    conn.rollback()
+                                except sqlite3.Error:
+                                    pass
+                        # Заголовок для ответа (клиент обновляет список без
+                        # лишнего GET /api/agent/threads после каждого хода).
+                        thread_title = (str(thread["title"] or "")
+                                        if str(thread["title"] or "") not in ("Новый чат", "")
+                                        else _AGENT.thread_title_for(text))
+                        history = _agent_history_for_model(conn, tid)
+                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
+                        cost = {"n": 0}
+                        def _chat_fn(msgs, tools):
+                            cost["n"] += 1
+                            # Один невидимый повтор для сбоев, которые повторяются сами:
+                            # AIFormatError (модель ответила не по контракту — живой
+                            # случай 28.09) и AIError (транспорт/402). Как у сочинений:
+                            # повтор не тратит жетон (жетон возвращается через finally).
+                            for attempt in range(2):
+                                try:
+                                    return _AI.chat_with_tools(msgs, tools, temperature=0.0)
+                                except (_AI.AIFormatError, _AI.AIError):
+                                    if attempt == 0:
+                                        continue
+                                    raise
+                        try:
+                            steps, final, pending = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_fn)
+                        except _AI.AIUnavailable as exc:
+                            rid = log_request_error("agent-unavailable", exc)
+                            self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
+                        except _AGENT.AgentInputError as exc:
+                            # Детерминированная ошибка инструментов (нет урока/задания,
+                            # цель не из шкалы): повторять бессмысленно — 400 с текстом.
+                            # Жетон вернётся через finally (usage_spent ещё True).
+                            self.send_json({"error": str(exc) or "Наставник не смог подобрать данные.",
+                                            "code": "AGENT_TOOL_ERROR"}, 400, token=token); return
+                        except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError) as exc:
+                            rid = log_request_error("agent-model", exc)
+                            self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
+                        except Exception as exc:
+                            # Любой сбой вне контракта (обрыв провайдера не-AIError,
+                            # ошибка сериализации): JSON вместо рваного соединения.
+                            rid = log_request_error("agent-model", exc)
+                            self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
+                        # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
+                        _agent_add_message(conn, tid, user_id, "user", text)
+                        out_steps = []
+                        for st in steps:
+                            if st.get("status") == "needs_confirm":
+                                mid = _agent_add_message(conn, tid, user_id, "tool", "",
+                                                         tool_name=st.get("name"), tool_args=st.get("args"),
+                                                         status="needs_confirm", result=st.get("proposal"))
+                                out_steps.append({"id": mid, "tool": st.get("name"), "args": st.get("args"),
+                                                  "label": st.get("label"), "kind": st.get("kind"),
+                                                  "status": "needs_confirm", "proposal": st.get("proposal")})
+                            else:
+                                mid = _agent_add_message(conn, tid, user_id, "tool", "",
+                                                         tool_name=st.get("name"), tool_args=st.get("args"),
+                                                         status="done", result=st.get("result"))
+                                out_steps.append({"id": mid, "tool": st.get("name"), "args": st.get("args"),
+                                                  "label": st.get("label"), "kind": st.get("kind"),
+                                                  "status": "done", "result": st.get("result")})
+                        if pending is not None:
+                            conn.commit()
+                            usage_spent = False
+                            quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            self.send_json({"ok": True, "steps": out_steps, "final": None,
+                                            "pending": True, "quota": quota,
+                                            "thread": {"id": tid, "title": thread_title},
+                                            "usage": {"cost": cost["n"]}}, token=token); return
+                        final_text = (final or "").strip()[:8000] or "Не смог подобрать ответ — уточни вопрос."
+                        _agent_add_message(conn, tid, user_id, "assistant", final_text)
+                        conn.commit()
+                        usage_spent = False
+                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        self.send_json({"ok": True, "steps": out_steps, "final": final_text,
+                                        "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
+                                        "thread": {"id": tid, "title": thread_title},
+                                        "usage": {"cost": cost["n"]}}, token=token); return
+                    except (RuntimeError,) as exc:
+                        rid = log_request_error("agent", exc)
+                        self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
+                    finally:
+                        _agent_busy_release(tid)
+                        if usage_spent:
+                            # Точка невозврата — успешная фиксация хода выше (commit).
+                            # Здесь проверяем: если ответ уже ушёл (commit был), возврат не нужен.
+                            # Простой маркер: usage_spent сбрасывается только на commit-ветках.
+                            # Раз commit-ветки возвращают раньше, сюда попадаем только при неуспехе.
+                            try:
+                                _AGENT.agent_quota_refund(conn, int(user_id))
+                            except sqlite3.Error:
+                                pass
+                    return
+                self.send_json({"error": "Not found"}, 404, token=token); return
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("agent", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         self.send_json({"error": "Not found"}, 404)
 
     def do_GET(self):
@@ -8997,6 +9555,76 @@ class Handler(BaseHTTPRequestHandler):
                     fp_key, fp_net = ai_usage_device_fp(conn, self)
                     self.send_json(ai_usage_status(conn, user_id, fp_key, fp_net), token=token)
                     return
+                if path == "/api/agent/limits" or path == "/api/agent/threads":
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    if _AGENT is None:
+                        self.send_json({"error": "Раздел временно недоступен"}, 503, token=token); return
+                    try:
+                        _AGENT.ensure_agent_schema(conn)
+                    except sqlite3.Error:
+                        pass
+                    if path == "/api/agent/limits":
+                        self.send_json(_AGENT.agent_quota_status(conn, int(user_id)), token=token); return
+                    rows = conn.execute("SELECT id, subject, title, created_at, updated_at FROM agent_threads"
+                                        " WHERE user_id=? ORDER BY updated_at DESC LIMIT 100",
+                                        (int(user_id),)).fetchall()
+                    self.send_json({"ok": True, "threads": [
+                        {"id": int(r["id"]), "subject": r["subject"], "title": r["title"],
+                         "createdAt": int(r["created_at"]), "updatedAt": int(r["updated_at"])} for r in rows],
+                        # Квота в том же ответе: первый экран строится за 2 RTT
+                        # (треды+квота → сообщения), а не за 3.
+                        "quota": _AGENT.agent_quota_status(conn, int(user_id))},
+                        token=token); return
+                if path == "/api/agent/context":
+                    # Лёгкий контекст для единой шапки (уровень/XP/серия) без
+                    # тяжёлого bootstrap: один SELECT из user_stats, формула
+                    # уровня — та же level_from_xp, что у клиента levelInfo.
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    if _AGENT is None:
+                        self.send_json({"error": "Раздел временно недоступен"}, 503, token=token); return
+                    subject = current_subject_for(conn, user_id)
+                    stats = conn.execute("SELECT xp, streak FROM user_stats WHERE user_id=? AND subject=?",
+                                         (int(user_id), subject)).fetchone()
+                    xp = max(0, int(stats["xp"] or 0)) if stats else 0
+                    streak = max(0, int(stats["streak"] or 0)) if stats else 0
+                    li = level_from_xp(xp)
+                    need = max(1, int(li["need"]))
+                    self.send_json({"ok": True, "subject": subject, "xp": xp,
+                                    "level": int(li["level"]), "current": int(li["intoLevel"]),
+                                    "need": need,
+                                    "pct": max(0, min(100, round(int(li["intoLevel"]) / need * 100))),
+                                    "streak": streak}, token=token); return
+                if path.startswith("/api/agent/threads/"):
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    if _AGENT is None:
+                        self.send_json({"error": "Раздел временно недоступен"}, 503, token=token); return
+                    try:
+                        _AGENT.ensure_agent_schema(conn)
+                    except sqlite3.Error:
+                        pass
+                    parts = path.split("/")
+                    try:
+                        tid = int(parts[4])
+                    except (TypeError, ValueError, IndexError):
+                        self.send_json({"error": "Некорректный идентификатор"}, 400, token=token); return
+                    thread = _agent_thread_owned(conn, tid, user_id)
+                    if thread is None:
+                        self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
+                                        " result_json, seq, created_at FROM agent_messages"
+                                        " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
+                    self.send_json({"ok": True,
+                                    "thread": {"id": int(thread["id"]), "subject": thread["subject"],
+                                               "title": thread["title"],
+                                               "createdAt": int(thread["created_at"]),
+                                               "updatedAt": int(thread["updated_at"])},
+                                    "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
                         return
@@ -9033,6 +9661,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "main.html"
         elif path == '/dashboard':
             file_path = ROOT / "index.html"
+        elif path == '/agent' or path == '/ai':
+            # ИИ-наставник: канонический адрес — /agent (алиас /ai для коротких
+            # ссылок). Тот же agent.html, что лежал бы под /agent.html.
+            file_path = ROOT / "agent.html"
         elif path == '/admin':
             file_path = ROOT / "admin.html"
         elif path == '/status':
@@ -9123,7 +9755,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
         # Приватные зоны не индексируются: дублируем meta robots HTTP-заголовком,
         # чтобы и прямые запросы /index.html и /admin.html были закрыты.
-        if path in ("/dashboard", "/admin", "/contacts") or file_path.name in ("index.html", "admin.html", "status.html", "contacts.html", "about.html", "404.html"):
+        if path in ("/dashboard", "/admin", "/contacts") or file_path.name in ("index.html", "admin.html", "status.html", "contacts.html", "about.html", "404.html", "agent.html"):
             self.send_header("X-Robots-Tag", "noindex, nofollow")
         if file_path.name == "contacts.html":
             self.send_support_form_cookie()

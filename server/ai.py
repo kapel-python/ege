@@ -490,9 +490,183 @@ def last_used_provider() -> str | None:
     return getattr(_chat_state, "provider", None)
 
 
+# ---------------------------------------------------------------------------
+# Tool-calling для ИИ-наставника (server/agent.py).
+#
+# Обычный OpenAI-совместимый вызов с `tools`: модель либо отвечает текстом,
+# либо просит вызвать инструменты — одновременно оба варианта запрещены.
+# Контракт ответа разбирает parse_tool_message: текст + tool_calls вместе —
+# это AIFormatError (модель нарушила контракт, нужен повтор/502, а не
+# «угадать» половину ответа). Формат wire — OpenAI:
+# tools=[{"type":"function","function":{"name","description","parameters"}}],
+# ответ — choices[0].message = {"content": str|None, "tool_calls": [...]}.
+# ---------------------------------------------------------------------------
+def _clean_tool_calls(raw) -> list:
+    """Нормализовать tool_calls провайдера к виду [{id,name,arguments}]."""
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise AIFormatError("tool_calls не список")
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AIFormatError("вызов инструмента не объект")
+        fn = item.get("function") if isinstance(item.get("function"), dict) else item
+        name = fn.get("name") if isinstance(fn, dict) else None
+        args_raw = (fn.get("arguments") if isinstance(fn, dict) else None)
+        if not isinstance(name, str) or not name.strip():
+            raise AIFormatError("вызов инструмента без имени")
+        if args_raw is None or args_raw == "":
+            args = {}
+        elif isinstance(args_raw, dict):
+            args = args_raw
+        elif isinstance(args_raw, str):
+            try:
+                args = json.loads(args_raw) if args_raw.strip() else {}
+            except ValueError as exc:
+                raise AIFormatError(f"аргументы {name} не JSON: {exc}") from None
+            if not isinstance(args, dict):
+                raise AIFormatError(f"аргументы {name} не объект")
+        else:
+            raise AIFormatError(f"аргументы {name} не объект")
+        out.append({"id": str(item.get("id") or ""), "name": name.strip(), "arguments": args})
+    return out
+
+
+def parse_tool_message(message: dict) -> dict:
+    """Разобрать ответ модели с tools: либо текст, либо вызовы — не оба сразу.
+
+    Возвращает {"text": str|None, "tool_calls": [...]}. Пустой ответ (ни текста,
+    ни вызовов) — тоже AIFormatError: молчание модели не является ответом.
+    """
+    if not isinstance(message, dict):
+        raise AIFormatError("ответ модели не объект")
+    content = message.get("content")
+    if content is None:
+        text: str | None = None
+    elif isinstance(content, str):
+        text = content.strip() or None
+        if text is not None:
+            text = content.strip()[:8000]
+    else:
+        raise AIFormatError("текст ответа не строка")
+    calls = _clean_tool_calls(message.get("tool_calls"))
+    if text is not None and calls:
+        raise AIFormatError("модель вернула текст и вызовы инструментов одновременно")
+    if text is None and not calls:
+        raise AIFormatError("пустой ответ модели")
+    return {"text": text, "tool_calls": calls}
+
+
+def _chat_via_message(provider: str, messages: list[dict], *, model: str | None = None,
+                      timeout: float | None = None, max_tokens: int | None = None,
+                      temperature: float | None = None,
+                      tools: list | None = None, tool_choice=None) -> dict:
+    """Один HTTP-вызов, возвращающий сырое message (content + tool_calls)."""
+    spec = PROVIDERS[provider]
+    key = spec["key"]()
+    if not key:
+        raise AIUnavailable("AI не настроен")
+
+    body: dict[str, Any] = {
+        "model": model or spec["model"](),
+        "messages": _wire_messages(provider, messages),
+    }
+    body.update(spec.get("extra_body") or {})
+    if max_tokens:
+        body["max_tokens"] = int(max_tokens)
+    body["temperature"] = float(
+        DEFAULT_TEMPERATURE if temperature is None else temperature)
+    if tools is not None:
+        if not isinstance(tools, list) or not tools:
+            raise AIInputError("tools должен быть непустым списком")
+        body["tools"] = tools
+        body["tool_choice"] = tool_choice if tool_choice is not None else "auto"
+
+    request = urllib.request.Request(
+        f"{spec['base_url']()}/chat/completions",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": key if spec.get("auth") == "raw" else f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
+    try:
+        with urllib.request.urlopen(request, timeout=deadline) as response:
+            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise _http_error(exc) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AIError(f"провайдер недоступен: {type(exc).__name__}") from None
+
+    if len(raw) > MAX_UPSTREAM_BYTES:
+        raise AIError("ответ провайдера слишком большой")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise AIError("провайдер вернул не-JSON") from None
+
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        raise AIError("неожиданная структура ответа провайдера") from None
+    if not isinstance(message, dict):
+        raise AIError("неожиданная структура ответа провайдера")
+    return message
+
+
+def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = None,
+                    timeout: float | None = None, max_tokens: int | None = None,
+                    temperature: float | None = None, tool_choice=None,
+                    state: dict | None = None) -> dict:
+    """chat() для цикла агента: failover + слот + строгий парсер tool-ответа.
+
+    Возвращает {"text": str|None, "tool_calls": [...]} — ровно один вариант.
+    Ошибка формата (текст+вызовы, пусто, битые аргументы) — AIFormatError и
+    НЕ переключает провайдера: провайдер жив, небрежна модель.
+    """
+    if not isinstance(messages, list) or not messages:
+        raise AIError("пустой список сообщений")
+    if not isinstance(tools, list) or not tools:
+        raise AIInputError("tools должен быть непустым списком")
+    names = _ordered_providers()
+    if not names:
+        raise AIUnavailable("AI не настроен")
+    if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
+        raise AIError("ИИ занят, попробуй через несколько секунд")
+    try:
+        last_exc: Exception | None = None
+        for index, name in enumerate(names):
+            try:
+                message = _chat_via_message(name, messages, model=model, timeout=timeout,
+                                            max_tokens=max_tokens, temperature=temperature,
+                                            tools=tools, tool_choice=tool_choice)
+            except (AIError, AIUnavailable) as exc:
+                last_exc = exc
+                switch_to = names[index + 1] if index + 1 < len(names) else None
+                _note_provider_failure(name, exc, switch_to)
+                continue
+            # Парсер — после успеха транспорта: форматная ошибка не failover.
+            parsed = parse_tool_message(message)
+            _note_provider_success(name)
+            _chat_state.provider = name
+            if state is not None:
+                state["provider"] = name
+            return parsed
+        _notify_system({"kind": "provider_outage", "providers": list(names),
+                        "reason": f"{type(last_exc).__name__}: {last_exc}"[:200],
+                        "at": int(time.time() * 1000)})
+        raise last_exc
+    finally:
+        _ai_slots.release()
+
+
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
          max_tokens: int | None = None, temperature: float | None = None,
-         state: dict | None = None) -> str:
+         state: dict | None = None, tools: list | None = None,
+         tool_choice=None):
     """Send a chat completion and return the assistant text.
 
     `messages` is the OpenAI shape ([{"role": ..., "content": ...}, ...]) and is
@@ -506,7 +680,14 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     так что следующие запросы сразу идут на живого. Ошибка ФОРМАТА
     (AIFormatError) здесь не ловится: она всплывает позже, в chat_json, и
     означает живой, но небрежный ответ модели, а не недоступность провайдера.
+
+    С tools — режим агента: возвращается {"text","tool_calls"} (см.
+    chat_with_tools), текст и вызовы одновременно запрещены парсером.
     """
+    if tools is not None:
+        return chat_with_tools(messages, tools, model=model, timeout=timeout,
+                               max_tokens=max_tokens, temperature=temperature,
+                               tool_choice=tool_choice, state=state)
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
     names = _ordered_providers()
@@ -547,54 +728,26 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
 
 def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
               timeout: float | None = None, max_tokens: int | None = None,
-              temperature: float | None = None) -> str:
+              temperature: float | None = None,
+              tools: list | None = None, tool_choice=None):
     """Один HTTP-вызов конкретного провайдера. Без failover и без слота —
-    это забота chat() (и проба probe_tick зовёт напрямую сюда)."""
-    spec = PROVIDERS[provider]
-    key = spec["key"]()
-    if not key:
-        raise AIUnavailable("AI не настроен")
+    это забота chat() (и проба probe_tick зовёт напрямую сюда).
 
-    body: dict[str, Any] = {
-        "model": model or spec["model"](),
-        "messages": _wire_messages(provider, messages),
-    }
-    body.update(spec.get("extra_body") or {})
-    if max_tokens:
-        body["max_tokens"] = int(max_tokens)
-    body["temperature"] = float(
-        DEFAULT_TEMPERATURE if temperature is None else temperature)
-
-    request = urllib.request.Request(
-        f"{spec['base_url']()}/chat/completions",
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            # gptunnel ждёт сырой ключ (quirk), остальные — стандартный Bearer.
-            "Authorization": key if spec.get("auth") == "raw" else f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
+    С tools возвращает разобранный {"text","tool_calls"} (парсер запрещает оба
+    сразу), без — сырой текст (legacy путь проверок сочинений).
+    """
+    message = _chat_via_message(provider, messages, model=model, timeout=timeout,
+                                max_tokens=max_tokens, temperature=temperature,
+                                tools=tools, tool_choice=tool_choice)
+    if tools is not None:
+        return parse_tool_message(message)
     try:
-        with urllib.request.urlopen(request, timeout=deadline) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
-    except urllib.error.HTTPError as exc:
-        raise _http_error(exc) from None
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise AIError(f"провайдер недоступен: {type(exc).__name__}") from None
-
-    if len(raw) > MAX_UPSTREAM_BYTES:
-        raise AIError("ответ провайдера слишком большой")
-    try:
-        data = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
-        raise AIError("провайдер вернул не-JSON") from None
-
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
+        content = message.get("content")
+    except AttributeError:
         raise AIError("неожиданная структура ответа провайдера") from None
+    if not isinstance(content, str):
+        raise AIError("неожиданная структура ответа провайдера")
+    return content
 
 
 def _http_error(exc: urllib.error.HTTPError) -> Exception:

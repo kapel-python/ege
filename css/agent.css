@@ -1,0 +1,410 @@
+/* Экран «ИИ-наставник» (#/ai) — часть SPA: только layout чата и пузыри.
+   Шапка, сайдбар, тема, тосты и модалки — общие (styles.css / dlg.css).
+   Всё скоупировано под .agent, наружу ничего не течёт. */
+/* Раздел агента — единая поверхность без карточки: сверху шапка приложения,
+   снизу нижнее меню, а между ними сам раздел (тулбар, лента, композер),
+   прижатый к краям экрана. Скроллится только лента. */
+/* flex: 1 — колонка обязана ТЯНУТЬСЯ на всю высоту экрана. Без этого остаётся
+   flex: 0 1 auto (по умолчанию), колонка занимает высоту по контенту, и низ
+   экрана под ней остаётся пустым: любой резерв под нижнее меню просто
+   некуда был деться, и композер висел над меню с зазором. */
+.agent { display: flex; flex: 1 1 auto; min-height: 0; }
+/* Резерв под фиксированное нижнее меню — на экране: колонка заканчивается
+   ровно там, где начинается меню, поэтому композер прижат к его верхнему краю
+   и под ним не остаётся пустой полосы. Клавиатура этот резерв снимает
+   (--agent-bottom: 0), а её высоту снижает --agent-kb-inset у .app. */
+.screen--agent {
+  max-width: none; margin: 0;
+  padding: 0 12px var(--agent-bottom, var(--bottomnav-h, 0px));
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0;
+}
+/* Пока открыт раздел агента, страница не скроллится вообще: контейнер
+   прижат к краям окна, и любой скролл документа уводил бы шапку и поднимал
+   бы весь раздел вверх.
+   Именно КРАЯ, а не высота: 100dvh на телефоне меньше layout viewport (у
+   него своя высота, от которой считают position:fixed — в том числе нижнее
+   меню), поэтому контейнер по высоте всегда оставался чуть ВЫШЕ низа экрана,
+   а поле для ввода висело над меню с зазором. bottom:0 привязывает низ к
+   тому же краю, где стоит меню, — зазор невозможен по построению.
+   Вниз отступ снимает только клавиатура (--agent-kb-inset, её высота):
+   dvh/fixed на неё не реагируют, а она перекрывает низ экрана. */
+.app:has(.screen--agent) {
+  position: fixed; top: 0; left: 0; right: 0;
+  bottom: var(--agent-kb-inset, 0px);
+  min-height: 0; overflow: hidden;
+}
+.agent__threads {
+  width: 264px; flex: none;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  min-height: 0; position: relative;
+}
+.agent__threads-head { display: flex; align-items: center; gap: 8px; }
+.agent__threads-head .section-title { flex: 1; }
+.agent__list {
+  list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+}
+/* Строка чата: кнопка + меню действий по долгому нажатию (и по «⋯»). */
+.agent__thread-row { position: relative; }
+.agent__thread {
+  position: relative; display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 10px 40px 10px 16px; border: 0; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text); transition: background .15s, transform .15s;
+}
+.agent__thread:active { transform: scale(.99); }
+.agent__thread:hover { background: var(--soft-hover); }
+.agent__thread b { display: block; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent__thread span { display: block; font-size: 12px; color: var(--muted); }
+.agent__thread[aria-current="true"] { background: var(--accent-soft); }
+.agent__thread[aria-current="true"]::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 3px;
+  background: var(--accent); box-shadow: 0 0 12px var(--accent-glow);
+  animation: agentStrip .25s ease both;
+}
+/* Меню действий открывается долгим нажатием на телефоне и кнопкой «⋯» на
+   десктопе. Сама кнопка на телефоне не показывается — там её роль играет
+   долгое нажатие, чтобы не было двух одинаковых входов в одну дверь. */
+.agent__more {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+  cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, color .15s;
+}
+.agent__more svg { width: 18px; height: 18px; }
+.agent__thread-row:hover .agent__more,
+.agent__more:focus-visible,
+.agent__more[aria-expanded="true"] { opacity: 1; }
+.agent__more:hover { background: var(--surface-3); color: var(--text); }
+.agent__ctx {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); z-index: 40;
+  min-width: 172px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: var(--surface); box-shadow: 0 18px 40px -12px var(--shadow);
+  animation: agentRise .16s ease both;
+}
+.agent__ctx[hidden] { display: none; }
+.agent__ctx-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.agent__ctx-item svg { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.agent__ctx-item:hover { background: var(--soft-hover); }
+.agent__ctx-item--danger { color: var(--danger-ink); }
+.agent__ctx-item--danger svg { color: var(--danger); }
+.agent__ctx-item--danger:hover { background: var(--danger-soft); }
+.agent__thread--loading { cursor: default; pointer-events: none; }
+.agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.agent__foot small { font-size: 12px; color: var(--muted); }
+.agent__del {
+  display: grid; place-items: center; width: 38px; height: 38px; flex: none; cursor: pointer;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--muted);
+  transition: background .15s, color .15s, transform .15s;
+}
+.agent__del svg { width: 18px; height: 18px; }
+.agent__del:hover { background: var(--danger-soft); color: var(--danger-ink); }
+.agent__del:active { transform: scale(.98); }
+/* Список тредов: появление нового чата и его удаление — движением высоты,
+   иначе список дёргается на месте. */
+.agent__list li { transition: height .22s ease, opacity .2s ease; overflow: hidden; }
+.agent__list li.new { animation: agentRise .28s ease both; }
+.agent__list li.leaving { opacity: 0; }
+
+.agent__main {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.agent__toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); flex: none; }
+.agent__menu { display: none; }
+.agent__title { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent__quota { position: relative; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; flex: none; transition: transform .15s; }
+.agent__quota:active { transform: scale(.96); }
+.agent__quota svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.agent__quota .q-track, .agent__quota .q-ring { fill: none; stroke-width: 3; }
+.agent__quota .q-track { stroke: var(--surface-3); }
+.agent__quota .q-ring { stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 94.25px; transition: stroke-dashoffset .5s ease, stroke .3s; }
+.agent__quota.low { color: var(--warn-ink); }
+.agent__quota.low .q-ring { stroke: var(--warn); }
+.agent__quota.zero { color: var(--danger-ink); }
+.agent__quota.zero .q-ring { stroke: var(--danger); }
+/* Подсказка про остаток — наведение/фокус, сам клик по кольцу остаётся
+   действием (обновить квоту / открыть окно лимита). */
+.agent__quota-wrap { position: relative; flex: none; }
+.agent__quota-tip {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 15; white-space: nowrap; padding: 6px 12px;
+  border-radius: var(--radius-sm); background: var(--surface-3); border: 1px solid var(--border-strong);
+  font-size: 12px; font-weight: 600; color: var(--text); box-shadow: 0 8px 20px -8px var(--shadow);
+  opacity: 0; visibility: hidden; transform: translateY(-4px); pointer-events: none;
+  transition: opacity .18s, transform .18s, visibility .18s;
+}
+.agent__quota-wrap:hover .agent__quota-tip,
+.agent__quota-wrap.tip .agent__quota-tip,
+.agent__quota:focus-visible + .agent__quota-tip { opacity: 1; visibility: visible; transform: none; }
+
+.agent__feed {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; padding: 20px;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+}
+.agent__feed-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.agent__feed-inner .agent__feed-inner { width: 100%; max-width: none; margin: 0; }
+.agent__msg-user {
+  align-self: flex-end; max-width: 85%; padding: 10px 16px; border-radius: var(--radius);
+  background: var(--accent-soft); border: 1px solid var(--accent-ring); overflow-wrap: anywhere;
+}
+.agent__ai { display: flex; flex-direction: column; gap: 10px; }
+.agent__ai, .agent__msg-user, .agent__step, .agent__answer, .agent__trace-toggle { text-align: left; }
+.agent__answer { margin: 0; overflow-wrap: anywhere; }
+/* Курсор во время печати ответа: текст появляется по словам. */
+.agent__answer.typing::after {
+  content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px;
+  background: var(--accent); animation: agentBlink 1s steps(2) infinite;
+}
+.agent__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.agent__qr {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600;
+  transition: background .15s, border-color .15s, transform .15s;
+  animation: agentRise .35s cubic-bezier(.2, .7, .2, 1) both;
+  animation-delay: calc(.07s * var(--i, 0));
+}
+.agent__qr svg { width: 14px; height: 14px; flex: none; color: var(--accent-ink); transition: transform .2s ease; }
+.agent__qr:hover { border-color: var(--accent); background: var(--accent-soft); }
+.agent__qr:hover svg { transform: scale(1.15); }
+.agent__qr:active { transform: scale(.97); }
+
+/* Ход работы: лоадер шага вырастает, гаснет и на его месте раскрывается
+   результат; после конца хода вся лента сворачивается под «Показать шаги». */
+.agent__trace-toggle {
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 6px;
+  max-height: 0; opacity: 0; visibility: hidden; overflow: hidden;
+  padding: 0 10px 0 6px; margin: 0 0 -10px -6px; border: 0; border-radius: 20px; background: transparent;
+  color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s, max-height .3s ease, margin .3s ease, padding .3s ease, opacity .3s ease, visibility .3s;
+}
+.agent__trace-toggle:hover { background: var(--soft-hover); color: var(--text); }
+.agent__trace-toggle svg { width: 14px; height: 14px; flex: none; transition: transform .25s ease; }
+.agent__trace-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.agent__ai.done .agent__trace-toggle { max-height: 44px; opacity: 1; visibility: visible; padding-top: 6px; padding-bottom: 6px; margin-bottom: 0; }
+.agent__trace { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .35s ease, opacity .3s ease; }
+.agent__trace.open { grid-template-rows: 1fr; opacity: 1; }
+/* visibility через задержку: колонка схлопнута по высоте, но её содержимое
+   не должно ловить фокус и не должно рисоваться поверх соседей. */
+.agent__trace-in { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s .35s; }
+.agent__trace.open .agent__trace-in { visibility: visible; transition-delay: 0s; }
+.agent__steps { list-style: none; margin: 0; padding: 2px 0 4px; display: flex; flex-direction: column; gap: 0; }
+.agent__step { position: relative; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+.agent__step + .agent__step { padding-top: 12px; }
+.agent__step::before { content: ""; position: absolute; left: 7px; top: 20px; bottom: -12px; width: 1px; background: var(--border-strong); animation: agentFade .4s ease both; }
+.agent__step + .agent__step::before { top: 32px; }
+.agent__step:last-child::before { display: none; }
+/* Блок содержимого шага — то, что меняет высоту: пустой контейнер, в который
+   вырастает лоадер, потом он гаснет и на его месте раскрывается результат. */
+.agent__tbody { padding-left: 26px; overflow: hidden; transition: height .38s cubic-bezier(.3, .7, .2, 1); }
+.agent__tbody > * { animation: agentFade .35s ease both; }
+.agent__tbody.is-out > * { animation: none; opacity: 0; transition: opacity .18s ease; }
+.agent__tbody .agent__loader { margin-left: -24px; gap: 14px; }
+.agent__step b { display: block; font-weight: 600; color: var(--text); }
+.agent__step p { margin: 0; }
+.agent__step code { display: block; margin-top: 2px; font: 12px/1.5 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.agent__step-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.agent__step-detail { margin-top: 6px; }
+.agent__step-detail summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 600; }
+.agent__step-detail code { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
+.agent__step.is-action b { color: var(--warn-ink); }
+.agent__step.is-applied b { color: var(--success-ink); }
+.agent__mark {
+  position: absolute; left: 0; top: 2px; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--success-soft); color: var(--success-ink); animation: agentPop .3s ease both;
+}
+.agent__mark svg { width: 9px; height: 9px; }
+.agent__step + .agent__step .agent__mark { top: 14px; }
+/* Чтение — нейтральная галочка, действие применено — зелёная, действие в
+   ожидании подтверждения — предупреждение с часиками. */
+.agent__mark.is-read { background: var(--surface-3); color: var(--text-2); }
+.agent__mark.is-wait { background: var(--warn-soft); color: var(--warn-ink); }
+
+/* Лоадер хода: точка с расходящимся кольцом и «бегущий» текст под текущий шаг. */
+.agent__loader { display: inline-flex; align-items: center; gap: 10px; }
+.agent__loader-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--accent); animation: agentPulse 1.6s ease-out infinite; }
+.agent__loader-text {
+  font-size: 14px; font-weight: 700;
+  background: linear-gradient(100deg, var(--muted) 30%, var(--accent-ink) 44%, var(--text) 50%, var(--accent-ink) 56%, var(--muted) 70%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  filter: drop-shadow(0 0 10px var(--accent-glow));
+  animation: agentShimmer 3.2s linear infinite;
+}
+.agent__skel { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; width: 100%; }
+.agent__skel i { display: block; height: 14px; border-radius: 7px; background: var(--surface-3); }
+.agent__skel i + i { max-width: 45%; height: 11px; }
+
+.agent__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; color: var(--muted); font-size: 14px; }
+/* Без этого hidden не работает: display:flex выше перебивает UA-стиль
+   [hidden]{display:none}, а своего правила в SPA нет — пустой блок
+   оставался видимым всегда, даже с сообщениями. */
+.agent__empty[hidden] { display: none; }
+.agent__empty-badge {
+  width: 56px; height: 56px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: linear-gradient(135deg, #22c07a, var(--accent)); color: #fff;
+  box-shadow: 0 0 0 6px var(--accent-soft), 0 12px 28px -10px var(--accent-glow);
+  animation: agentRise .4s cubic-bezier(.2, .7, .2, 1) both;
+}
+.agent__empty-badge svg { width: 28px; height: 28px; }
+.agent__empty h2 { margin: 16px 0 6px; font-size: 20px; font-weight: 800; color: var(--text); }
+.agent__empty p { margin: 0; max-width: 34ch; }
+.agent__suggest { width: 100%; max-width: 420px; margin-top: 24px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.agent__suggest-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text);
+  box-shadow: var(--card-shadow); transition: border-color .15s, transform .15s;
+  animation: agentRise .4s cubic-bezier(.2, .7, .2, 1) both;
+  animation-delay: calc(.08s * var(--i, 0) + .1s);
+}
+.agent__suggest-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.agent__suggest-card:active { transform: scale(.99); }
+.agent__suggest-ic { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.agent__suggest-ic svg { width: 18px; height: 18px; }
+.agent__suggest-tx { flex: 1; min-width: 0; }
+.agent__suggest-tx b { display: block; font-size: 14px; font-weight: 600; color: var(--text); }
+.agent__suggest-tx span { display: block; font-size: 12px; color: var(--muted); }
+.agent__suggest-go { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .15s, color .15s; }
+.agent__suggest-go svg { width: 16px; height: 16px; }
+.agent__suggest-card:hover .agent__suggest-go { transform: translateX(3px); color: var(--accent-ink); }
+
+/* Поле ввода — последний flex-ребёнок колонки высотой ровно в экран: при
+   открытии клавиатуры dvh сжимается, и композер остаётся над ней. Никаких
+   px-фиксаций на focus (именно они уводили страницу и не возвращали её).
+   Резерв под нижнее меню живёт на .screen--agent, а не здесь: иначе поле
+   отрывалось от меню на высоту самого резерва. */
+.agent__composer-zone {
+  position: relative; flex: none;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border);
+}
+.agent__to-bottom {
+  position: absolute; right: 20px; top: -52px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-2);
+  box-shadow: 0 8px 20px -8px var(--shadow);
+  opacity: 0; visibility: hidden; transform: translateY(8px) scale(.9);
+  transition: opacity .2s, transform .2s, visibility .2s, border-color .15s;
+}
+.agent__to-bottom.show { opacity: 1; visibility: visible; transform: none; }
+.agent__to-bottom:hover { border-color: var(--accent); }
+.agent__to-bottom svg { width: 18px; height: 18px; }
+.agent__composer {
+  display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 20px; border-radius: 28px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  transition: background-color .25s, border-color .2s, box-shadow .2s;
+}
+.agent__composer:focus-within { border-color: var(--accent-ring); box-shadow: 0 0 0 3px var(--accent-soft), 0 12px 30px -14px var(--accent-glow); }
+.agent__composer textarea {
+  flex: 1; resize: none; border: 0; background: transparent; padding: 8px 0; max-height: 140px;
+  line-height: 1.55; min-height: 40px; color: var(--text); font: inherit;
+}
+/* Фокус подсвечивается рамкой всего композера, а не обводкой textarea. */
+.agent__composer textarea:focus, .agent__composer textarea:focus-visible { outline: none; }
+.agent__composer textarea::placeholder { color: var(--muted); }
+.agent__send, .agent__stop {
+  flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--btn-primary-bg); color: #fff;
+  transition: background .15s, color .15s, transform .15s;
+}
+.agent__send svg, .agent__stop svg { width: 18px; height: 18px; transition: transform .2s ease; }
+.agent__send:not(:disabled) { animation: agentSendIn .25s ease; }
+.agent__send:not(:disabled):hover svg { transform: translateY(-2px); }
+.agent__send:disabled, .agent__stop:disabled { background: var(--surface-3); color: var(--muted); cursor: default; transform: none; }
+.agent__composer.busy .agent__stop { display: inline-flex; }
+.agent__composer.busy .agent__send { display: none; }
+.agent__composer:not(.busy) .agent__stop { display: none; }
+.agent__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+
+.agent__scrim { display: none; }
+
+@keyframes agentRise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes agentFade { from { opacity: 0; } }
+@keyframes agentStrip { from { transform: scaleY(.2); opacity: 0; } }
+@keyframes agentPop { from { transform: scale(.4); opacity: 0; } }
+@keyframes agentSendIn { from { transform: scale(.85); } }
+@keyframes agentBlink { 50% { opacity: 0; } }
+@keyframes agentPulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-glow); opacity: 1; }
+  70% { box-shadow: 0 0 0 9px transparent; opacity: .75; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+}
+@keyframes agentShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .3s ease both; }
+
+@media (max-width: 900px) {
+  /* Резерв под нижнее меню — на экране (тот же --agent-bottom/--bottomnav-h):
+     колонка агента тянется на всю высоту, поэтому низ экрана приходится
+     ровно на верх меню, и композер к нему прижат без зазора. Правило
+     `.screen` из styles.css (110px под меню) здесь перебито своим
+     padding-bottom — иначе осталась бы пустая полоса под композером. */
+  .screen--agent { padding: 0 8px var(--agent-bottom, var(--bottomnav-h, 0px)); }
+  .agent { flex-direction: column; }
+  /* Drawer — плотная панель, а не прозрачная накладка: без фона он просвечивал
+     сквозь себя и склеивался с лентой и тулбаром. Свой слой (60) держит его
+     ВЫШЕ position:fixed нижнего меню (50 в styles.css), иначе меню лежало
+     поверх открытого списка чатов. */
+  .agent__threads {
+    position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: min(86vw, 320px);
+    border-radius: 0 var(--radius) var(--radius) 0; border-right: 1px solid var(--border-strong);
+    background: var(--surface); box-shadow: 24px 0 48px -18px var(--shadow);
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    transform: translateX(-100%); visibility: hidden;
+    transition: transform .25s ease, visibility .25s;
+  }
+  .agent.nav-open .agent__threads { transform: none; visibility: visible; }
+  .agent__scrim {
+    display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim);
+    opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s;
+  }
+  .agent.nav-open .agent__scrim { opacity: 1; visibility: visible; }
+  .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); }
+  .agent__menu svg { width: 20px; height: 20px; }
+  .agent__title { font-size: 16px; }
+  .agent__feed { padding: 16px 12px; }
+  .agent__msg-user { max-width: 92%; }
+  /* safe-area снизу НЕ прибавляем: под комозером теперь сама полоса меню,
+     а под меню — системный отступ. Дублировали бы и оставляли зазор. */
+  .agent__composer-zone {
+    padding: 8px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px));
+  }
+  .agent__hint { display: none; }
+  /* Тулбар на телефоне ниже: бургер и кольцо квоты уменьшены по высоте, но
+     их тач-зоны остаются 44px (padding внутрь, а не рост кнопки). */
+  .agent__toolbar { padding: 4px 10px; gap: 6px; }
+  .agent__menu { width: 44px; height: 44px; }
+  .agent__quota { width: 30px; height: 30px; font-size: 12px; }
+  .agent__quota .q-track, .agent__quota .q-ring { stroke-width: 3.4; }
+  /* Тач-цели и шрифт поля: 16px не даёт iOS зумить страницу при фокусе. */
+  .agent__thread, .agent__send, .agent__stop, .agent__del, .agent__menu { min-height: 44px; }
+  .agent__del { width: 44px; height: 44px; }
+  /* На телефоне вход в меню чата один — долгое нажатие, поэтому «⋯» скрыта,
+     но остаётся доступной с клавиатуры (фокус) и не занимает место в тапе. */
+  .agent__more { display: none; }
+  .agent__ctx { min-width: 200px; }
+  .agent__ctx-item { min-height: 44px; }
+  .agent__composer { padding: 5px 5px 5px 18px; }
+  .agent__composer textarea { font-size: 16px; min-height: 44px; padding: 10px 0; }
+  .agent__send, .agent__stop { width: 44px; height: 44px; }
+  .agent__to-bottom { right: 12px; top: -56px; width: 44px; height: 44px; }
+  .agent__ai.done .agent__trace-toggle { padding-top: 12px; padding-bottom: 12px; max-height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter,
+  .agent__qr, .agent__suggest-card, .agent__empty-badge, .agent__list li.new { animation: none; }
+  .agent__mark, .agent__step::before { animation: none; }
+  .agent__loader-dot, .agent__loader-text { animation: none; }
+  .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--text-2); filter: none; }
+  .agent__tbody { transition: none; }
+}

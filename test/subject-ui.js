@@ -149,7 +149,7 @@ sandbox.Footer = null;
 
 vm.createContext(sandbox);
 vm.runInContext(
-  [read("js/data.js"), read("js/state.js"), read("js/app.js")].join("\n"),
+  [read("js/data.js"), read("js/state.js"), read("js/agent-spa.js"), read("js/app.js")].join("\n"),
   sandbox,
   { filename: "subject-ui-bundle.js" }
 );
