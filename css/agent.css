@@ -135,6 +135,24 @@
 .agent__ctx-item--danger svg { color: var(--danger); }
 .agent__ctx-item--danger:hover { background: var(--danger-soft); }
 .agent__thread--loading { cursor: default; pointer-events: none; }
+/* Меню сообщения (клик по своему вопросу или ответу наставника):
+   fixed у точки клика, одна кнопка закрывает его кликом мимо/Esc. */
+.agent__msgmenu {
+  position: fixed; z-index: 90; min-width: 196px; padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: var(--surface); box-shadow: 0 18px 40px -12px var(--shadow);
+  animation: agentRise .14s ease both;
+}
+.agent__msgmenu-i {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.agent__msgmenu-i svg { width: 16px; height: 16px; flex: none; color: var(--agent-ink-3); }
+.agent__msgmenu-i:hover { background: var(--soft-hover); }
+.agent__msg-user, .agent__answer { cursor: default; }
 .agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .agent__foot small { font-size: 12px; color: var(--agent-ink-3); }
 .agent__del {
@@ -210,6 +228,24 @@
    абзаца без него схлопывался — «1) то 2) то 3) то» одной простынёй.
    Абзацы режет сервер (пустая строка), лишних отступов не бывает. */
 .agent__answer { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+/* Markdown-ответ (marked + DOMPurify): блоки уже расставлены HTML-ом,
+   pre-line здесь добавил бы пустые строки от переводов строк в разметке. */
+.agent__md { white-space: normal; }
+.agent__md p { margin: 0 0 8px; }
+.agent__md p:last-child { margin-bottom: 0; }
+.agent__md ul, .agent__md ol { margin: 4px 0 8px; padding-left: 22px; }
+.agent__md li { margin: 2px 0; }
+.agent__md li::marker { color: var(--agent-ink-3); }
+.agent__md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em;
+  background: var(--surface-2, rgba(127,127,127,.12)); border-radius: 5px; padding: 1px 5px;
+}
+.agent__md strong { font-weight: 700; }
+.agent__md h1, .agent__md h2, .agent__md h3, .agent__md h4 {
+  margin: 10px 0 4px; font-size: 15px; font-weight: 700; line-height: 1.3;
+}
+.agent__md blockquote { margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border-strong); color: var(--agent-ink-2); }
+.agent__md a { color: var(--accent); }
 /* Печать ответа — приём лендинга ([data-type] в main.html, режим fade):
    слова проявляются на месте. Ни маски, ни курсора: маска с overflow резала
    глифы, а курсор отдельной строкой давал синюю полоску под текстом и

@@ -75,7 +75,11 @@ check("авто-рост textarea", spaCode.includes("scrollHeight"));
 check("Стоп через AbortController", spaCode.includes("AbortController") && spaCode.includes("abort"));
 check("один обработчик data-ask",
   (spaCode.match(/\[data-ask\]/g) || []).length === 1);
-check("подсказка не фокусирует поле ввода", !spaCode.includes("input.focus") && !spaCode.includes("ui.input.focus"));
+/* Подсказки ([data-ask]) отправляются без фокуса поля. Исключение — меню
+   сообщения «Изменить и отправить»: там фокус сознательный, человек правит
+   текст руками. Поэтому смотрим только на обработчик подсказок. */
+check("подсказка не фокусирует поле ввода",
+  !/data-ask[\s\S]{0,200}?\.focus\(/.test(spaCode));
 check("ошибка хода — карточка с повтором", spaCode.includes("errorCard") && spaCode.includes("Попробовать снова"));
 check("повтор идёт с force (обход кэша)", spaCode.includes("force: true"));
 check("скелетон снимается и при AbortError", /AbortError[\s\S]{0,200}skel\.parentNode/.test(spaCode));
@@ -134,6 +138,30 @@ check("лента следует за растущим блоком (follow)", s
 check("ответ печатается по словам (buildTyped + printPara)",
   spaCode.includes("printPara") && spaCode.includes("buildTyped")
   && !spaCode.includes("agent__caret") && !spaCode.includes("agent__wm"));
+check("markdown ответа — библиотеками (marked + DOMPurify), innerHTML только после санитайза",
+  spaCode.includes("marked.parse") && spaCode.includes("DOMPurify.sanitize")
+  && /\.innerHTML = html/.test(spaCode) && spaCode.includes('html = window.DOMPurify')
+  && /vendor\/md\/marked\.min\.js/.test(indexHtml) && /vendor\/md\/purify\.min\.js/.test(indexHtml)
+  && /\.agent__md strong/.test(spaCss));
+/* Копирование ответа: Clipboard API + запасной путь execCommand (http/старые
+   браузеры), тот же приём, что в app.js. */
+check("копирование через Clipboard API с запасным путём",
+  spaCode.includes("navigator.clipboard") && spaCode.includes("writeText")
+  && spaCode.includes("execCommand") && spaCode.includes("isSecureContext"));
+/* Меню по клику на сообщение: своё — скопировать/изменить/повторить,
+   ответ — скопировать/повторить. Ответ копируется сырым markdown
+   (data-answer), а не textContent отрендеренного HTML. */
+check("меню сообщения по клику (своё и ответ), копирование сырого markdown",
+  spaCode.includes("openMsgMenu") && spaCode.includes("msgMenuFor")
+  && spaCode.includes("agent__msg-user, .agent__answer")
+  && spaCode.includes('card.setAttribute("data-answer"')
+  && spaCode.includes("card.dataset.answer") && /\.agent__msgmenu\b/.test(spaCss));
+/* Черновик ученика: одна строка localStorage на аккаунт, переживает
+   перезагрузку и смену чата; чистится при отправке. */
+check("черновик ученика живёт в localStorage по аккаунту",
+  spaCode.includes("ege_agent_draft:") && spaCode.includes("saveDraft")
+  && spaCode.includes("restoreDraft") && /restoreDraft\(\);/.test(spaCode)
+  && /localStorage\.removeItem\(draftKey\(\)\)/.test(spaCode));
 check("слово печати проявляется, не выезжая из-под маски",
   /\.agent__ww \{[^}]*opacity: 0[^}]*transform: translateY\(3px\)/.test(spaCss)
   && /\.agent__ww\.is-in \{[^}]*opacity: 1/.test(spaCss)
@@ -144,7 +172,7 @@ check("в печати ничего не меняет раскладку (нет
 check("текст не переписывается по кадрам (нет textContent в цикле печати)",
   !/textContent = words\.slice/.test(spaCode) && !/words\.slice\(0, n\)/.test(spaCode));
 check("короткий ход тоже печатается", /if \(built\) \{[\s\S]{0,120}revealTurn/.test(spaCode)
-  && /printPara\(p, p\.textContent, alive/.test(spaCode));
+  && /printPara\(p, alive/.test(spaCode));
 check("сворачивание ленты после хода", spaCode.includes('classList.remove("open")') && spaCss.includes(".agent__ai.done .agent__trace-toggle"));
 check("новый ход дорисовывает прерванный (bail)", spaCode.includes("pendingBail") && spaCode.includes("animGen"));
 check("ход переживает размонтирование (S.turn + reattach)",

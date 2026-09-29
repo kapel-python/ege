@@ -62,6 +62,142 @@
   var ARROW_D = "M9 6l6 6-6 6";
   function say(text) { try { toast(esc(String(text))); } catch (_) {} }
 
+  /* ---------- копирование ----------
+     Clipboard API + запасной путь через textarea (http/старые браузеры),
+     тот же приём, что в app.js. */
+  function copyText(text) {
+    text = String(text || "");
+    if (!text) return;
+    function legacy() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); say("Скопировано"); } catch (_) { say("Не удалось скопировать"); }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { say("Скопировано"); }, legacy);
+    } else legacy();
+  }
+
+  /* ---------- черновик ученика ----------
+     Недописанный вопрос переживает перезагрузку, уход в другой чат и
+     перемонтирование экрана: одна строка localStorage на аккаунт.
+     Ключ привязан к accountId, поэтому чужой черновик не показывается;
+     очистка — при отправке (send) и при стирании поля. */
+  function draftKey() { return "ege_agent_draft:" + (S.accountId || ""); }
+  function saveDraft() {
+    try {
+      var v = ui.input ? ui.input.value : "";
+      if (v) localStorage.setItem(draftKey(), v);
+      else localStorage.removeItem(draftKey());
+    } catch (_) {}
+  }
+  function restoreDraft() {
+    var v = "";
+    try { v = localStorage.getItem(draftKey()) || ""; } catch (_) {}
+    if (!v || !ui.input) return;
+    ui.input.value = v;
+    ui.input.style.height = "auto";
+    ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
+    syncInput();
+  }
+
+  /* ---------- меню сообщения ----------
+     Клик по сообщению (своё или ответ наставника) открывает маленькое меню:
+     скопировать, повторить, своё — ещё и «изменить и отправить снова».
+     Меню одно на ленту: position fixed у точки клика, закрывается кликом
+     мимо / Esc / прокруткой. Текст сообщения берётся из DOM (у ответа —
+     textContent уже отрендеренного markdown). */
+  var msgMenu = { node: null };
+  function closeMsgMenu() {
+    if (!msgMenu.node) return;
+    try { if (msgMenu.node.parentNode) msgMenu.node.parentNode.removeChild(msgMenu.node); } catch (_) {}
+    msgMenu.node = null;
+  }
+  function openMsgMenu(x, y, items) {
+    closeMsgMenu();
+    var m = el("div", "agent__msgmenu");
+    m.setAttribute("role", "menu");
+    items.forEach(function (it) {
+      var b = el("button", "agent__msgmenu-i", null);
+      b.type = "button";
+      b.innerHTML = svgRaw(it.icon, "2.2");
+      b.appendChild(document.createTextNode(it.label));
+      b.addEventListener("click", function () { closeMsgMenu(); it.run(); });
+      m.appendChild(b);
+    });
+    document.body.appendChild(m);
+    // Не вылезаем за экран: сначала меряем, потом ставим.
+    var w = m.offsetWidth, h = m.offsetHeight;
+    var left = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+    var top = y + h > window.innerHeight - 8 ? Math.max(8, y - h) : y;
+    m.style.left = left + "px";
+    m.style.top = top + "px";
+    msgMenu.node = m;
+  }
+  var ICON_COPY = "M9 9h10v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1";
+  var ICON_RETRY = "M3 12a9 9 0 1 0 3-6.7M3 4v5h5";
+  var ICON_EDIT = "M4 20h4L20 8l-4-4L4 16v4z";
+  function answerText(card) {
+    // Сырой markdown ответа: textContent уже отрендеренного HTML теряет
+    // ** и списки, а копировать человек хочет то, что написала модель.
+    if (card && card.dataset && card.dataset.answer) return card.dataset.answer;
+    var parts = [];
+    card.querySelectorAll(".agent__answer").forEach(function (n) {
+      var t = (n.textContent || "").trim();
+      if (t) parts.push(t);
+    });
+    return parts.join("\n\n");
+  }
+  function msgMenuFor(e, node) {
+    var isUser = node.classList.contains("agent__msg-user");
+    var text = isUser ? (node.textContent || "").trim() : answerText(node.closest(".agent__ai") || node);
+    if (!text) return;
+    var items = [{ label: "Скопировать", icon: ICON_COPY, run: function () { copyText(text); } }];
+    if (isUser) {
+      items.push({
+        label: "Изменить и отправить",
+        icon: ICON_EDIT,
+        run: function () {
+          if (!ui.input || S.busy) { ui.input && (ui.input.value = text); syncInput(); return; }
+          ui.input.value = text;
+          ui.input.style.height = "auto";
+          ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
+          syncInput();
+          try { ui.input.focus({ preventScroll: true }); } catch (_) {}
+        },
+      });
+    }
+    items.push({
+      label: "Повторить вопрос",
+      icon: ICON_RETRY,
+      run: function () {
+        var q = text;
+        if (!isUser) {
+          // Для ответа наставника повторяем последний вопрос ученика ДО этой карточки.
+          var card = node.closest(".agent__ai");
+          var prev = null;
+          if (card && ui.live) {
+            var kids = ui.live.childNodes;
+            for (var i = 0; i < kids.length; i++) {
+              if (kids[i] === card) break;
+              if (kids[i].classList && kids[i].classList.contains("agent__msg-user")) prev = kids[i];
+            }
+          }
+          q = prev ? (prev.textContent || "").trim() : "";
+        }
+        if (!q) { say("Вопрос не найден"); return; }
+        if (S.busy) { say("Наставник ещё отвечает"); return; }
+        send(q, { force: true });
+      },
+    });
+    openMsgMenu(e.clientX || 8, e.clientY || 8, items);
+  }
+
   /* ---------- движение ----------
      Ход наставника показывается как живой: пустой шаг, в который вырастает
      лоадер с названием дела, лоадер гаснет и на его месте раскрывается
@@ -940,6 +1076,56 @@
      дважды на ход). Теперь в печати нет ничего, что меняет раскладку:
      слова — обычные инлайн-блоки с opacity/transform, DOM собирается один
      раз, дальше на слово вешается класс. */
+  /* ---------- markdown ответа ----------
+     Модель отвечает markdown (**жирный**, списки, `код`); рендерят его
+     библиотеки из vendor/md (marked + DOMPurify), а не самописный парсер.
+     HTML проходит через DOMPurify, поэтому innerHTML здесь безопасен;
+     без санитайзера или без marked — откат на обычный текст. */
+  function mdBlocks(finalText) {
+    var text = String(finalText || "");
+    if (!text.trim()) return [];
+    var html = null;
+    if (window.marked && typeof window.marked.parse === "function") {
+      try {
+        var raw = window.marked.parse(text, { gfm: true, breaks: true });
+        html = window.DOMPurify
+          ? window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
+          : null;                 // без санитайзера чужой HTML не вставляем
+      } catch (_) { html = null; }
+    }
+    if (!html) {
+      var paras = [];
+      text.split(/\n\n+/).forEach(function (para) {
+        if (para.trim()) paras.push(el("p", "agent__answer", para.trim()));
+      });
+      return paras;
+    }
+    var box = el("div", "agent__answer agent__md");
+    box.setAttribute("data-md", "1");
+    box.innerHTML = html;
+    return [box];
+  }
+  /* Печать готового DOM: оборачиваем слова текстовых узлов в те же
+     .agent__ww, что и buildTyped, — раскладка и темп не меняются. */
+  function buildTypedDom(root) {
+    var words = [];
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var parts = node.nodeValue.split(/(\s+)/);
+      var frag = document.createDocumentFragment();
+      parts.forEach(function (part) {
+        if (!part) return;
+        if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(" ")); return; }
+        var word = el("span", "agent__ww", part);
+        frag.appendChild(word);
+        words.push(word);
+      });
+      node.parentNode.replaceChild(frag, node);
+    });
+    return words;
+  }
   function buildTyped(p, text) {
     p.textContent = "";
     var words = [];
@@ -958,9 +1144,9 @@
   }
   // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
   // на полминуты (шаг 900 мс на весь текст, но не медленнее 24 и не быстрее 45).
-  function printPara(p, text, isAlive, done) {
-    if (calm()) { p.textContent = text; if (done) done(); return; }
-    var words = buildTyped(p, text);
+  function printPara(p, isAlive, done) {
+    if (calm()) { if (done) done(); return; }   // контент уже собран в p
+    var words = p.getAttribute && p.getAttribute("data-md") ? buildTypedDom(p) : buildTyped(p, p.textContent);
     p.classList.add("typing");
     var step = Math.max(24, Math.min(45, Math.round(900 / Math.max(1, words.length))));
     var i = 0;
@@ -1044,7 +1230,7 @@
       // Раскладка абзаца готова сразу (все слова в DOM), поэтому ленту
       // достаточно подвести один раз — по ходу печати она не ползёт.
       scrollDown(false, true);
-      printPara(p, p.textContent, alive, function () { later(quiet ? 0 : 140, write); });
+      printPara(p, alive, function () { later(quiet ? 0 : 140, write); });
     }
     function actions() {
       if (!alive()) return;
@@ -1080,13 +1266,9 @@
   function assistantCard(steps, finalText, animate) {
     var g = S.mountGen;
     var card = el("article", "agent__ai");
+    if (finalText) card.setAttribute("data-answer", String(finalText));   // сырой markdown для «Скопировать»
     var built = renderSteps(card, steps);
-    var paras = [];
-    if (finalText) {
-      finalText.split(/\n\n+/).forEach(function (para) {
-        if (para.trim()) paras.push(el("p", "agent__answer", para.trim()));
-      });
-    }
+    var paras = finalText ? mdBlocks(finalText) : [];
     if (g !== S.mountGen || !ui.live) return card;
     ui.live.appendChild(card);
     showEmpty(false);
@@ -1130,7 +1312,7 @@
       var p = paras.shift();
       card.appendChild(p);
       scrollDown(false, true);
-      printPara(p, p.textContent, alive, function () { later(calm() ? 0 : 140, next); });
+      printPara(p, alive, function () { later(calm() ? 0 : 140, next); });
     })();
     return card;
   }
@@ -1269,6 +1451,7 @@
     showEmpty(false);
     var bubble = userBubble(text);
     if (ui.input) { ui.input.value = ""; ui.input.style.height = "auto"; }
+    try { localStorage.removeItem(draftKey()); } catch (_) {}
     syncInput();
     var skel = skeletonCard();
     var ctrl = ("AbortController" in window) ? new AbortController() : null;
@@ -1478,6 +1661,7 @@
     ui.input.addEventListener("input", function () {
       ui.input.style.height = "auto";
       ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
+      saveDraft();
       syncInput();
     });
     // Клавиатура телефона. Раньше здесь высоту колонки пинили в пикселях на
@@ -1500,6 +1684,29 @@
       }
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });
+    // Меню сообщения: клик по своему пузырьку или по тексту ответа.
+    // Только .agent__answer у наставника — шаги, тогглы и кнопки-подсказки
+    // остаются кликабельными без меню.
+    ui.feed.addEventListener("click", function (e) {
+      if (e.target.closest && (e.target.closest("button") || e.target.closest("a"))) return;
+      var node = e.target.closest ? e.target.closest(".agent__msg-user, .agent__answer") : null;
+      if (!node || !ui.feed.contains(node)) return;
+      e.preventDefault();
+      e.stopPropagation();               // иначе document-обработчик тут же закроет открытое меню
+      msgMenuFor(e, node);
+    });
+    // Один раз на документ (маунтов экрана может быть много): при отсутствии
+    // меню обработчики ничего не делают.
+    if (!msgMenu.wired) {
+      msgMenu.wired = true;
+      document.addEventListener("click", function (e) {
+        if (msgMenu.node && !msgMenu.node.contains(e.target)) closeMsgMenu();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeMsgMenu();
+      });
+    }
+    ui.feed.addEventListener("scroll", function () { closeMsgMenu(); }, { passive: true });
     ui.stopBtn.addEventListener("click", function () {
       // Текст хода запоминаем ДО аборта: он нужен, чтобы отличить наш вопрос
       // от уже записанного в треде и дождаться ответа, который сервер считает.
@@ -1618,6 +1825,7 @@
   function mountFrame() {
     buildLayout();
     renderCachedQuota();
+    restoreDraft();
     syncInput();
     syncViewport();
     if (cacheHasThreads()) { S.threads = S.cache.threads; renderThreads(); }
