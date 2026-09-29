@@ -188,6 +188,34 @@ check("колонка прижата к краям окна (fixed + top/bottom,
 check("колонка агента тянется на всю высоту экрана (flex: 1)",
   /\.agent \{[^}]*flex: 1 1 auto/.test(spaCss));
 
+/* --- загрузка и кэш раздела ---
+   Три требования к первому входу и возврату: экранная анимация приложения
+   держится до чата, пустой блок не показывается «на всякий случай», а на
+   возврат в раздел данные приходят из кэша, а сеть только сверяет их. */
+check("экранная анимация приложения, а не свой лоадер",
+  spaCode.includes("loaderHTML") && spaCode.includes("function screenLoader")
+  && spaCode.includes('screenLoader("Открываем чаты…")')
+  && spaCode.includes('feedLoader("Читаем переписку…")'));
+check("каркас строится после ответа списка, а не до",
+  /screenLoader\("Открываем чаты…"\);\s*\n\s*loadThreads\(function first/.test(spaCode)
+  && spaCode.includes("function mountFrame")
+  && /if \(cacheHasThreads\(\)\) \{[\s\S]{0,80}mountFrame\(\);\s*\n\s*loadThreads\(\);/.test(spaCode));
+check("пустой блок не показывается на всякий случай",
+  !/renderCachedQuota\(\);\s*\n\s*syncInput\(\);\s*\n\s*syncViewport\(\);\s*\n\s*showEmpty\(true\)/.test(spaCode)
+  && spaCode.includes("function paintMessages")
+  && (spaCode.match(/showEmpty\(true\)/g) || []).length === 3);   // только по факту: пустое сообщение / нет чата / чат удалён
+check("кэш раздела: список и переписка, привязан к аккаунту",
+  spaCode.includes("cacheHasThreads") && spaCode.includes("cachedMessages")
+  && spaCode.includes("cacheDrop") && spaCode.includes("MAX_CACHED_THREADS")
+  && /acc !== S\.accountId[\s\S]{0,220}cacheDrop\(\)/.test(spaCode));
+check("кэш рисуется сразу, сеть только сверяет (sameMessages не даёт лишней перерисовки)",
+  spaCode.includes("sameMessages") && /if \(cached\) paintMessages\(cached\)/.test(spaCode)
+  && /if \(!sameMessages\(cached, msgs\)\) paintMessages\(msgs\)/.test(spaCode));
+check("изменившийся тред выбрасывается из кэша (ход, confirm, удаление)",
+  (spaCode.match(/cacheForget\(/g) || []).length >= 4);
+check("свой лоадер раздела не заведён — стили общие",
+  spaCss.includes(".agent__boot") && !/ege-loader\s*\{[^}]*@keyframes/.test(spaCss));
+
 /* --- паритет с эталоном agent_preview.html ---
    Эталон — источник правды по вёрстке раздела: ритм ленты, ширина колонки,
    карточка поля с тенью, зелёная галочка шага, рейл с кнопкой во всю

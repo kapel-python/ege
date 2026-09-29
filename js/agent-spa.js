@@ -11,6 +11,7 @@
     quota: { limit: 10, remaining: 10, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null,
+    cache: { accountId: null, threads: null, messages: {} },
   };
   var RING = 94.25, QUOTA_FALLBACK = 10;
   /* Окно подхвата хода (после перемонтирования экрана) и параметры ожидания
@@ -21,6 +22,9 @@
      у человека уже есть кнопка «Обновить чат». */
   var REATTACH_MS = 300000;
   var WATCH_TRIES = 12, WATCH_EVERY_MS = 8000;
+  // Сколько тредов держим в кэше раздела: хватает для переходов туда-обратно
+  // и не даёт памяти вкладки расти с историей.
+  var MAX_CACHED_THREADS = 6;
   /* Значки подсказок — из эталона (agent_preview.html): у первого ответа
      «дай задачи» галочка, у второго «что дальше» — вопрос. Раньше обе
      кнопки рисовали одну иконку и читались одинаково. */
@@ -629,6 +633,7 @@
       return t;
     });
     if (!found) return;
+    cacheThreads(S.threads);           // заголовок из первого сообщения — тоже в кэш
     renderThreads();
     var cur = currentThread();
     if (cur && ui.title) ui.title.textContent = cur.title || "Новый чат";
@@ -651,33 +656,106 @@
     syncHash();
     loadThreadMessages();
   }
-  function loadThreads() {
+  /* ---------- кэш раздела ----------
+     Тот же приём, что на остальных экранах (AdminInbox): данные живут в
+     состоянии модуля, привязаны к аккаунту и при возврате на раздел рисуются
+     сразу, а сеть только тихо сверяет их на фоне. Без этого каждый переход
+     «Путь → ИИ → Путь → ИИ» начинался с пустой колонки и загрузки. */
+  function cacheOn() { return S.cache && S.cache.accountId === S.accountId; }
+  function cacheHasThreads() { return cacheOn() && Array.isArray(S.cache.threads) && S.cache.threads.length > 0; }
+  function cacheDrop() { S.cache = { accountId: S.accountId, threads: null, messages: {} }; }
+  function cacheThreads(list) { if (!cacheOn()) cacheDrop(); S.cache.threads = list; }
+  function cachedMessages(id) {
+    if (!cacheOn() || id == null) return null;
+    var hit = S.cache.messages[id];
+    return hit && Array.isArray(hit.msgs) ? hit.msgs : null;
+  }
+  function cacheMessages(id, msgs) {
+    if (id == null) return;
+    if (!cacheOn()) cacheDrop();
+    S.cache.messages[id] = { msgs: msgs, at: Date.now() };
+    var keys = Object.keys(S.cache.messages);
+    if (keys.length <= MAX_CACHED_THREADS) return;
+    keys.sort(function (a, b) { return S.cache.messages[a].at - S.cache.messages[b].at; });
+    for (var i = 0; i < keys.length - MAX_CACHED_THREADS; i++) delete S.cache.messages[keys[i]];
+  }
+  function sameMessages(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = a.length - 1; i >= 0; i--) {
+      if (Number(a[i].id) !== Number(b[i].id) || a[i].role !== b[i].role) return false;
+    }
+    return true;
+  }
+  // После хода переписку в кэше больше не переписываем вручную (ответ пришёл
+  // одним куском JSON) — просто выбрасываем: иначе возврат на раздел показал
+  // бы историю без последнего ответа, пока сеть догоняет.
+  function cacheForget(id) {
+    if (S.cache && S.cache.messages && id != null) delete S.cache.messages[id];
+  }
+  /* Экранная анимация приложения (та же, что на остальных разделах) держится
+     до ответа списка чатов: раньше кадр рисовался сразу и человек видел
+     «Здесь пока пусто» вместо загрузки. Своего лоадера у раздела нет. */
+  function screenLoader(sub) {
+    if (!root) return;
+    try {
+      if (typeof loaderHTML === "function") root.innerHTML = loaderHTML(sub || "Открываем чаты…");
+    } catch (_) {}
+  }
+  /* Пока едет переписка открытого чата, колонка не должна быть пустой — но и
+     пустой блок показывать рано: про него ещё неизвестно, пуст ли чат. */
+  function feedLoader(sub) {
+    if (!ui.live) return;
+    try {
+      if (typeof loaderHTML !== "function") return;
+      clearFeed();
+      var box = el("div", "agent__boot");
+      box.innerHTML = loaderHTML(sub || "Читаем переписку…");
+      ui.live.appendChild(box);
+      showEmpty(false);
+    } catch (_) {}
+  }
+  function selectCurrentThread() {
+    var want = readDeepLink();
+    var exists = want && S.threads.some(function (t) { return Number(t.id) === Number(want); });
+    if (exists) { selectThread(want); return; }
+    if (want) {
+      try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
+      S.currentId = null;
+    }
+    if (S.threads.length) selectThread(S.threads[0].id);
+    else selectThread(null);
+  }
+  function loadThreads(cb) {
     var g = S.mountGen;
-    renderThreadsSkeleton();
+    // Скелетон списка — только когда показывать нечего: при кэше он бы стёр
+    // готовые строки на ровном месте (а на холодном входе каркаса ещё нет,
+    // и ui.list пуст — скелетон просто некуда).
+    if (ui.list && !cacheHasThreads()) renderThreadsSkeleton();
     return api("GET", "/api/agent/threads").then(function (res) {
-      if (g !== S.mountGen) return;
+      if (g !== S.mountGen) return null;
       if (res.status === 200 && res.data && Array.isArray(res.data.threads)) {
         S.threads = res.data.threads;
         if (res.data.quota) setQuota(res.data.quota);
+        cacheThreads(res.data.threads);
+        if (cb) { cb(true); return res.data.threads; }
         renderThreads();
-        var want = readDeepLink();
-        var exists = want && S.threads.some(function (t) { return Number(t.id) === Number(want); });
-        if (exists) { selectThread(want); return; }
-        if (want && !exists) {
-          try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
-          S.currentId = null;
+        // Чат мог быть удалён с другого устройства — тогда переезжаем.
+        if (S.currentId == null || !S.threads.some(function (t) { return Number(t.id) === Number(S.currentId); })) {
+          selectCurrentThread();
         }
-        if (S.threads.length) selectThread(S.threads[0].id);
-        else selectThread(null);
-        return;
+        return res.data.threads;
       }
-      if (handleAuthError(res)) return;
+      if (handleAuthError(res)) { if (cb) cb(false); return null; }
       if (ui.list) ui.list.textContent = "";
-      errorCard("Не удалось загрузить чаты.", "Попробовать снова", function () { loadThreads(); });
+      if (cb) cb(false);
+      else errorCard("Не удалось загрузить чаты.", "Попробовать снова", function () { loadThreads(); });
+      return null;
     }).catch(function () {
-      if (g !== S.mountGen) return;
+      if (g !== S.mountGen) return null;
       if (ui.list) ui.list.textContent = "";
-      errorCard("Нет соединения.", "Попробовать снова", function () { loadThreads(); });
+      if (cb) cb(false);
+      else errorCard("Нет соединения.", "Попробовать снова", function () { loadThreads(); });
+      return null;
     });
   }
   function createThread() {
@@ -685,6 +763,7 @@
     S.creating = api("POST", "/api/agent/threads", {}).then(function (res) {
       if (res.status === 200 && res.data && res.data.thread) {
         S.threads.unshift(res.data.thread);
+        cacheThreads(S.threads);          // новый чат сразу виден и в кэше раздела
         // Новый чат отмечается, чтобы в списке он въехал, а не мигнул.
         S.newThreadId = res.data.thread.id;
         selectThread(res.data.thread.id);
@@ -728,7 +807,9 @@
     }
     function drop() {
       collapseThreadNode(t.id);
+      cacheForget(t.id);
       S.threads = S.threads.filter(function (x) { return Number(x.id) !== Number(t.id); });
+      cacheThreads(S.threads);          // удалённый чат не должен вернуться из кэша
       var next = S.threads[0] || null;
       if (!wasCurrent) { renderThreads(); return; }
       // Список ещё показывает чат — даём ему схлопнуться, и только потом
@@ -1088,40 +1169,54 @@
     scrollDown(true, true);
     return card;
   }
+  // Отрисовка переписки из готового массива: кэш раздела и ответ сервера идут
+  // в одну функцию, иначе кэш и сеть рисовали бы по-разному.
+  function paintMessages(msgs) {
+    clearFeed();
+    if (!msgs || !msgs.length) { showEmpty(true); return; }
+    var pending = [];
+    function flushSteps(finalText) {
+      if (!pending.length && !finalText) return;
+      // История открывается сразу целиком, без анимации.
+      assistantCard(pending.splice(0, pending.length), finalText || null, false);
+    }
+    msgs.forEach(function (m) {
+      if (m.role === "user") { flushSteps(null); userBubble(m.content || ""); }
+      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content);
+      else if (m.role === "tool") {
+        pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
+                       label: (m.tool || "Шаг"), kind: "read", status: m.status, proposal: m.result });
+      }
+    });
+    flushSteps(null);
+    showEmpty(false);
+    scrollDown(true, false);
+  }
   function loadThreadMessages() {
     var g = S.mountGen;
-    clearFeed();
-    if (!S.currentId) { showEmpty(true); return; }
     var wantId = S.currentId;
-    api("GET", "/api/agent/threads/" + wantId).then(function (res) {
+    if (wantId == null) { clearFeed(); showEmpty(true); return; }
+    // Кэш рисуется мгновенно, сеть не ждём; без кэша — экранная анимация
+    // внутри ленты (не пустой блок: про emptiness ещё не знаем).
+    var cached = cachedMessages(wantId);
+    if (cached) paintMessages(cached);
+    else feedLoader("Читаем переписку…");
+    return api("GET", "/api/agent/threads/" + wantId).then(function (res) {
       if (g !== S.mountGen || wantId !== S.currentId) return;
       if (res.status === 200 && res.data && Array.isArray(res.data.messages)) {
-        clearFeed();
         var msgs = res.data.messages;
-        if (!msgs.length) { showEmpty(true); reattachTurn(); return; }
-        var pending = [];
-        function flushSteps(finalText) {
-          if (!pending.length && !finalText) return;
-          // История открывается сразу целиком, без анимации.
-          assistantCard(pending.splice(0, pending.length), finalText || null, false);
-        }
-        msgs.forEach(function (m) {
-          if (m.role === "user") { flushSteps(null); userBubble(m.content || ""); }
-          else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content);
-          else if (m.role === "tool") {
-            pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
-                           label: (m.tool || "Шаг"), kind: "read", status: m.status, proposal: m.result });
-          }
-        });
-        flushSteps(null);
-        showEmpty(false);
-        scrollDown(true, false);
+        cacheMessages(wantId, msgs);
+        // Ничего не изменилось — не перерисовываем: у человека останутся
+        // раскрытые «Подробнее» и позиция ленты.
+        if (!sameMessages(cached, msgs)) paintMessages(msgs);
         reattachTurn();
         return;
       }
       if (res.status === 404) {
         try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
+        cacheForget(wantId);
         S.threads = S.threads.filter(function (x) { return Number(x.id) !== Number(wantId); });
+        cacheThreads(S.threads);
         renderThreads();
         var next = S.threads[0] || null;
         S.currentId = next ? Number(next.id) : null;
@@ -1135,10 +1230,12 @@
         return;
       }
       if (handleAuthError(res)) return;
+      if (!cached) clearFeed();
       errorCard("Не удалось открыть чат.", "Попробовать снова", function () { loadThreadMessages(); });
       reattachTurn();
     }).catch(function () {
       if (g === S.mountGen) {
+        if (!cached) clearFeed();
         errorCard("Нет соединения.", "Попробовать снова", function () { loadThreadMessages(); });
         reattachTurn();
       }
@@ -1245,6 +1342,7 @@
     setBusy(false);
     if (res.status === 200 && res.data) {
       if (res.data.quota) setQuota(res.data.quota);
+      cacheForget(turn.threadId);        // переписка изменилась — кэш больше не её
       var steps = res.data.steps || [];
       if (res.data.pending) {
         assistantCard(steps.map(function (s) {
@@ -1351,6 +1449,7 @@
       if (mg !== S.mountGen) return;
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
+        cacheForget(S.currentId);
         if (res.data.approved === false) {
           assistantCard([], res.data.final || "Отменено учеником.", true);
         } else if (res.data.final) {
@@ -1461,6 +1560,11 @@
   /* ---------- вход ---------- */
   function screenAgent(screenRoot) {
     S.mountGen++;
+    var mg = S.mountGen;
+    // Ссылки на узлы прошлого маунта выбрасываем сразу: до buildLayout каркаса
+    // ещё нет, и старые (уже отсоединённые роутером) узлы принимать нельзя —
+    // иначе скелетон/очистка списка уехали бы в никуда.
+    ui = {};
     // Летящий ход не рвём: его fetch переживает маунт, reattachTurn подхватит.
     if (S.abort && (!S.turn || S.turn.dead || S.abort !== S.turn.ctrl)) {
       try { S.abort.abort(); } catch (_) {}
@@ -1491,14 +1595,33 @@
       S.accountId = acc;
       S.threads = []; S.currentId = null;
       S.quota = { limit: QUOTA_FALLBACK, remaining: QUOTA_FALLBACK, resetInSec: null };
+      cacheDrop();                     // чужие чаты в кэше не показываем
     }
     root = screenRoot;
+    if (cacheHasThreads()) {
+      // Возврат на раздел в открытой вкладке: каркас и переписка рисуются из
+      // кэша мгновенно, сеть только сверяет их на фоне.
+      mountFrame();
+      loadThreads();
+      return;
+    }
+    // Холодный первый вход: экранная анимация приложения держится до ответа
+    // списка чатов, и только потом появляется раздел. Пустой блок внутри
+    // показать можно лишь когда мы уже знаем, что чатов нет.
+    screenLoader("Открываем чаты…");
+    loadThreads(function first(ok) {
+      if (S.mountGen !== mg) return;
+      mountFrame();
+      if (!ok) errorCard("Не удалось загрузить чаты.", "Попробовать снова", function () { loadThreads(); });
+    });
+  }
+  function mountFrame() {
     buildLayout();
     renderCachedQuota();
     syncInput();
     syncViewport();
-    showEmpty(true);
-    loadThreads();
+    if (cacheHasThreads()) { S.threads = S.cache.threads; renderThreads(); }
+    selectCurrentThread();
   }
 
   window.screenAgent = screenAgent;
