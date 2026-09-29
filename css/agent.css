@@ -203,29 +203,19 @@
    абзаца без него схлопывался — «1) то 2) то 3) то» одной простынёй.
    Абзацы режет сервер (пустая строка), лишних отступов не бывает. */
 .agent__answer { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
-/* Печать ответа — приём лендинга ([data-type] в main.html): слова выезжают
-   из-под невидимой маски. Разметку (.agent__wl / .agent__wm / .agent__ww)
-   строит agent-spa.js, движение — CSS. Старая версия переписывала
-   textContent каждые 34 мс: абзац перекладывался заново на каждом слове
-   (и на телефоне это ещё и дёргало ленту), а само появление текста
-   выглядело как прыжок, а не как печать. Здесь текст в DOM один раз, и
-   дальше едет только transform. */
+/* Печать ответа — приём лендинга ([data-type] в main.html, режим fade):
+   слова проявляются на месте. Ни маски, ни курсора: маска с overflow резала
+   глифы, а курсор отдельной строкой давал синюю полоску под текстом и
+   скак высоты (экран дёргался в начале и в конце печати). Вся печать не
+   меняет раскладку — раскладка готовая с первого кадра, поэтому лента
+   не дёргается и не нужно вести её по ходу. */
 .agent__wl { display: block; }                     /* строка ответа = блок */
-.agent__wm {
-  display: inline-block; overflow: hidden; vertical-align: bottom;
-  padding-bottom: .12em; margin-bottom: -.12em;   /* маска не режет хвосты букв */
-}
 .agent__ww {
-  display: inline-block; transform: translateY(115%);
-  transition: transform .34s cubic-bezier(.2, .7, .2, 1);
+  display: inline-block;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .26s ease, transform .3s cubic-bezier(.2, .7, .2, 1);
 }
-.agent__ww.is-in { transform: none; }
-/* Курсор печати едет по фронту: инлайн-элемент, который переносится за
-   каждое открытое слово (поэтому он элемент, а не ::after у абзаца). */
-.agent__caret {
-  display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px;
-  background: var(--accent); animation: agentBlink 1s steps(2) infinite;
-}
+.agent__ww.is-in { opacity: 1; transform: none; }
 .agent__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .agent__qr {
   display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; cursor: pointer;
@@ -479,7 +469,6 @@
   .agent__loader-dot, .agent__loader-text { animation: none; }
   .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--agent-ink-2); filter: none; }
   .agent__tbody { transition: none; }
-  /* Печать ответа без движения: слова на месте, курсор не мигает. */
-  .agent__ww { transition: none; transform: none; }
-  .agent__caret { animation: none; }
+  /* Печать ответа без движения: слова на месте. */
+  .agent__ww { transition: none; opacity: 1; transform: none; }
 }

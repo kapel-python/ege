@@ -126,18 +126,21 @@ check("шаг умеет переливаться по высоте (morph)", sp
 check("лоадер растёт в пустом шаге", spaCode.includes("agent__tbody") && spaCss.includes(".agent__tbody"));
 check("лоадер гаснет перед результатом", spaCode.includes('classList.add("is-out")') && spaCss.includes(".agent__tbody.is-out"));
 check("лента следует за растущим блоком (follow)", spaCode.includes("function follow") && spaCode.includes("follow("));
-/* Ответ печатается приёмом лендинга ([data-type] в main.html): слова
-   выезжают из-под масок, курсор — элемент, который едет по фронту. Старая
-   версия переписывала textContent каждые 34 мс (перекладка абзаца на
-   каждом слове) и пропускала анимацию для коротких ходов. */
-check("ответ печатается с курсором",
+/* Ответ печатается приёмом лендинга ([data-type] в main.html, режим fade):
+   слова проявляются на месте. Первая версия была по режиму mask (слово
+   выезжает из-под обрезающей маски) и с курсором — маска резала глифы, а
+   курсор вставал отдельной строкой под текстом и скакал высотой абзаца
+   (экран дёргался в начале и в конце печати). */
+check("ответ печатается по словам (buildTyped + printPara)",
   spaCode.includes("printPara") && spaCode.includes("buildTyped")
-  && spaCode.includes("agent__caret") && spaCss.includes(".agent__caret"));
-check("слово печати едет из-под маски (приём лендинга)",
-  /\.agent__wm \{[^}]*overflow: hidden/.test(spaCss)
-  && /\.agent__ww \{[^}]*translateY\(115%\)/.test(spaCss)
-  && /\.agent__ww\.is-in \{[^}]*transform: none/.test(spaCss)
-  && /\.agent__wl \{ display: block/.test(spaCss));
+  && !spaCode.includes("agent__caret") && !spaCode.includes("agent__wm"));
+check("слово печати проявляется, не выезжая из-под маски",
+  /\.agent__ww \{[^}]*opacity: 0[^}]*transform: translateY\(3px\)/.test(spaCss)
+  && /\.agent__ww\.is-in \{[^}]*opacity: 1/.test(spaCss)
+  && !spaCss.includes("agent__wm") && !spaCss.includes("agent__caret"));
+check("в печати ничего не меняет раскладку (нет курсора и высоты)",
+  !/height:\s*1em/.test(spaCss.match(/\.agent__ww[\s\S]*?\}/)[0] || true)
+  && !spaCode.includes("insertBefore(caret"));
 check("текст не переписывается по кадрам (нет textContent в цикле печати)",
   !/textContent = words\.slice/.test(spaCode) && !/words\.slice\(0, n\)/.test(spaCode));
 check("короткий ход тоже печатается", /if \(built\) \{[\s\S]{0,120}revealTurn/.test(spaCode)

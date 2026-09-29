@@ -849,14 +849,16 @@
     return { toggle: toggle, trace: trace, ol: ol, prepped: prepped };
   }
   /* ---------- печать ответа ----------
-     Приём взят с лендинга ([data-type] в main.html): текст раскладывается
-     на слова в масках, и слова выезжают из-под маски (transform, CSS).
-     Старая версия переписывала textContent каждые 34 мс — абзац целиком
-     перекладывался заново на каждом слове (дёргалась лента, особенно на
-     телефоне), а появление текста читалось как прыжок, а не как печать.
-     Здесь DOM собирается один раз, дальше едет только класс на слове.
-     Курсор — отдельный элемент: он переезжает за каждое открытое слово,
-     поэтому ::after у абзаца (стоял бы всегда в конце) не годится. */
+     Приём взят с лендинга ([data-type] в main.html) — режим fade: слова
+     проявляются на месте. Первый вариант был по режиму mask (слово выезжает
+     из-под обрезающей маски) и с курсором; обе вещи оказались плохими:
+     маска с overflow резала глифы по горизонтали, а курсор не удавалось
+     положить ВНУТРЬ строки (insertBefore с соседним узлом маски кидал его
+     в конец абзаца, где он вставал отдельной строкой — синяя полоска под
+     текстом и +23px высоты, которые исчезали в конце печати: экран дёргался
+     дважды на ход). Теперь в печати нет ничего, что меняет раскладку:
+     слова — обычные инлайн-блоки с opacity/transform, DOM собирается один
+     раз, дальше на слово вешается класс. */
   function buildTyped(p, text) {
     p.textContent = "";
     var words = [];
@@ -865,10 +867,8 @@
       line.split(" ").forEach(function (w, i) {
         if (!w) return;                       // подряд идущие пробелы схлопнутся сами
         if (i) row.appendChild(document.createTextNode(" "));   // разделитель между словами
-        var mask = el("span", "agent__wm");
         var word = el("span", "agent__ww", w);
-        mask.appendChild(word);
-        row.appendChild(mask);
+        row.appendChild(word);
         words.push(word);
       });
       p.appendChild(row);
@@ -876,33 +876,27 @@
     return words;
   }
   // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
-  // на полминуты (шаг 900 мс на весь текст, но не медленнее 12 и не быстрее 34).
+  // на полминуты (шаг 900 мс на весь текст, но не медленнее 24 и не быстрее 45).
   function printPara(p, text, isAlive, done) {
     if (calm()) { p.textContent = text; if (done) done(); return; }
     var words = buildTyped(p, text);
-    var caret = el("span", "agent__caret");
-    p.appendChild(caret);
     p.classList.add("typing");
-    var step = Math.max(12, Math.min(34, Math.round(900 / Math.max(1, words.length))));
+    var step = Math.max(24, Math.min(45, Math.round(900 / Math.max(1, words.length))));
     var i = 0;
     (function tick() {
       if (!isAlive()) {                       // ход перебит/размонтирован — дорисовываем текст
         p.classList.remove("typing");
-        if (caret.parentNode) caret.parentNode.removeChild(caret);
         words.forEach(function (w) { w.classList.add("is-in"); });
         return;
       }
-      if (i < words.length) {
-        words[i].classList.add("is-in");
-        if (caret.parentNode) caret.parentNode.insertBefore(caret, words[i].nextSibling);
-        i++;
-        scrollDown();
-        later(step, tick);
+      if (i >= words.length) {
+        p.classList.remove("typing");
+        if (done) done();
         return;
       }
-      if (caret.parentNode) caret.parentNode.removeChild(caret);
-      p.classList.remove("typing");
-      if (done) done();
+      words[i].classList.add("is-in");
+      i++;
+      later(step, tick);
     })();
   }
   // Подсказки под ответом: две кнопки с РАЗНЫМИ значками (галочка —
@@ -966,7 +960,9 @@
       if (!paras.length) { actions(); return; }
       var p = paras.shift();
       card.appendChild(p);
-      p.classList.add("enter");
+      // Раскладка абзаца готова сразу (все слова в DOM), поэтому ленту
+      // достаточно подвести один раз — по ходу печати она не ползёт.
+      scrollDown(false, true);
       printPara(p, p.textContent, alive, function () { later(quiet ? 0 : 140, write); });
     }
     function actions() {
@@ -1052,7 +1048,7 @@
       if (!paras.length) { quickActions(card, alive); return; }
       var p = paras.shift();
       card.appendChild(p);
-      p.classList.add("enter");
+      scrollDown(false, true);
       printPara(p, p.textContent, alive, function () { later(calm() ? 0 : 140, next); });
     })();
     return card;
