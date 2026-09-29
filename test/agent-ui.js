@@ -81,12 +81,33 @@ check("повтор идёт с force (обход кэша)", spaCode.includes("
 check("скелетон снимается и при AbortError", /AbortError[\s\S]{0,200}skel\.parentNode/.test(spaCode));
 check("протухший тред чистится локально", spaCode.includes("THREAD_NOT_FOUND"));
 check("AGENT_BUSY показывает retryAfter", spaCode.includes("retryAfter"));
+/* Отказоустойчивость хода. Три места, где человек раньше упирался в стену:
+   1) AGENT_BUSY был тупиком — кнопка повтора до освобождения слота давала тот
+      же 400; теперь ждём retryAfter и повторяем сами (текст тот же — сервер
+      отдаст кэш без жетона);
+   2) повтор не должен спрашивать заново, если сервер УЖЕ посчитал ответ
+      (после «Стоп» он считает ход до конца) — сперва спрашиваем тред;
+   3) окно подхвата хода было 120 с, а серверский ход живёт до 90 с цикла плюс
+      вызов финала: ответ приходил в обработчики прошлого монтажа и пропадал. */
+check("AGENT_BUSY не тупик: повтор сам, по времени от сервера",
+  spaCode.includes("retryWhenFree") && /retryWhenFree\(text, Math\.max/.test(spaCode)
+  && spaCode.includes("повторю через"));
+check("повтор не дублирует уже посчитанный ответ", spaCode.includes("turnAnswered"));
+check("окно подхвата хода шире потолка хода на сервере",
+  /REATTACH_MS = 300000/.test(spaCode) && !/startedAt > 120000/.test(spaCode));
+check("после обрыва дожидаемся ответа, а не обновляемся вслепую",
+  spaCode.includes("watchAnswer") && spaCode.includes("WATCH_TRIES")
+  && !/setTimeout\(function \(\) \{ if \(!S\.busy/.test(spaCode));
 check("размонтирование гасит асинхрон (mountGen)", spaCode.includes("mountGen"));
 check("смена аккаунта сбрасывает треды", spaCode.includes("Store.accountId") || spaCode.includes("Store"));
 
 /* --- CSS скоупирован, токены общие --- */
 check("CSS под .agent", spaCss.includes(".agent"));
-check("без своих CSS-переменных темы", !spaCss.includes(":root"));
+/* Своей темы у раздела нет и после правки читаемости: глобальные токены
+   дизайн-системы он не заводит. Реагирует он на ТОТ ЖЕ data-theme, что и весь
+   сайт, но переопределяет только свои --agent-ink-* внутри .agent. */
+check("без своих глобальных токенов темы",
+  !/:root\s*\{[^}]*--(bg|bg-2|text|text-2|muted|surface|surface-2|surface-3|accent|border|shadow)\s*:/.test(spaCss));
 check("цвета/токены общие с SPA (var(--…))",
   spaCss.includes("var(--surface)") && spaCss.includes("var(--accent)") && spaCss.includes("var(--text)")
   && spaCss.includes("var(--btn-primary-bg)") && spaCss.includes("var(--danger-soft)"));
@@ -148,6 +169,61 @@ check("колонка прижата к краям окна (fixed + top/bottom,
    некому: резерву просто некуда было уйти. */
 check("колонка агента тянется на всю высоту экрана (flex: 1)",
   /\.agent \{[^}]*flex: 1 1 auto/.test(spaCss));
+
+/* --- читаемость текста чата (свои чернила раздела) ---
+   Общие --text-2/--muted рассчитаны на белые карточки, а чат стоит на фоне
+   приложения: в светлой теме серый текст шагов читался «пыльным» (6.1:1 и
+   5.1:1), в тёмной --muted не дотягивал до AA (4.2:1). У раздела теперь свои
+   два оттенка, и контраст считается тут по-настоящему — чтобы правка видимости
+   не откатилась молча. */
+const srgb = (h) => {
+  const v = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [srgb(a), srgb(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+const token = (css, name, selector) => {
+  const re = new RegExp((selector || "") + "\\s*\\{[^}]*" + name + ":\\s*(#[0-9a-fA-F]{3,8})");
+  const m = css.match(re);
+  return m ? m[1].slice(0, 7) : null;
+};
+const stylesCss = read("css/styles.css");
+const themes = [
+  { name: "светлая", ink: "\\.agent", global: ":root", dark: false },
+  { name: "тёмная", ink: '\\[data-theme="dark"\\]\\s+\\.agent', global: ':root\\[data-theme="dark"\\]', dark: true },
+];
+for (const t of themes) {
+  for (const [ink, label] of [["--agent-ink-2", "пояснения"], ["--agent-ink-3", "мелкий текст"]]) {
+    const hex = token(spaCss, ink, t.ink);
+    const bg = token(stylesCss, "--bg", t.global);
+    const surface = token(stylesCss, "--surface", t.global);
+    const onBg = hex && bg ? contrast(hex, bg) : 0;
+    const onSurface = hex && surface ? contrast(hex, surface) : 0;
+    check(`${t.name}: ${label} (${ink}) AA 4.5 на фоне чата`,
+      !!hex && onBg >= 4.5 && onSurface >= 4.5, `${hex} → ${onBg.toFixed(2)} / ${onSurface.toFixed(2)}`);
+  }
+}
+/* Правка должна быть именно улучшением, а не ровно той же серостью: свои
+   чернила обязаны быть контрастнее общих токенов, которые они заменили. */
+for (const t of themes) {
+  const ink3 = token(spaCss, "--agent-ink-3", t.ink);
+  const oldMuted = token(stylesCss, "--muted", t.global);
+  const bg = token(stylesCss, "--bg", t.global);
+  const better = !!ink3 && !!oldMuted && contrast(ink3, bg) > contrast(oldMuted, bg);
+  check(`${t.name}: мелкий текст контрастнее прежнего --muted`, better,
+    `${ink3} vs ${oldMuted} на ${bg}`);
+}
+/* Чтобы где-то не вернулся общий серый (он и был причиной жалобы). */
+check("общий серый в раздела не используется",
+  !/var\(--muted\)/.test(spaCss) && !/var\(--text-2\)/.test(spaCss));
+check("свои чернила объявлены под .agent и для тёмной темы",
+  /\.agent\s*\{[^}]*--agent-ink-2:/.test(spaCss)
+  && /\[data-theme="dark"\]\s+\.agent\s*\{[^}]*--agent-ink-2:/.test(spaCss));
+/* Списки в ответе не должны слипаться в одну простыню. */
+check("переводы строк в ответе сохраняются", /\.agent__answer \{[^}]*white-space: pre-line/.test(spaCss));
 /* Резерв под меню держит ЭКРАН, а не композер: колонка заканчивается ровно
    там, где начинается меню, поэтому под полем ввода нет пустой полосы.
    В композере тот же резерв был бы вторым, суммировался с экранным и снова

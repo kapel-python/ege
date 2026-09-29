@@ -115,8 +115,11 @@ def _load_agent_module():
 _AGENT = _load_agent_module()
 
 # Параллельный ход в том же треде — 400 AGENT_BUSY. In-memory guard на процесс:
-# ход держит слот до 95 секунд (потолок цикла 90с + запас), ожидание
-# подтверждения слот не держит (цикл остановлен, ждём человека).
+# ход ДЕРЖИТ слот, пока он жив (продлевает его каждый вызов модели), а брошенный
+# освобождает по TTL. Раньше TTL был потолком всего хода (95 с = 90 + запас),
+# и длинный ход успевал его протухнуть: следующий вопрос в том же треде вставал
+# в цикл параллельно живому, а два писателя в один тред — это перепутанные
+# шаги в ленте. TTL теперь — окно жизни, а не длительность.
 _AGENT_BUSY: dict[int, float] = {}
 _AGENT_BUSY_LOCK = threading.Lock()
 _AGENT_BUSY_TTL_SEC = 95.0
@@ -135,6 +138,15 @@ def _agent_busy_acquire(thread_id: int) -> bool:
 def _agent_busy_release(thread_id: int) -> None:
     with _AGENT_BUSY_LOCK:
         _AGENT_BUSY.pop(int(thread_id), None)
+
+
+def _agent_busy_touch(thread_id: int) -> None:
+    """Продлить слот живого хода (окно жизни, а не потолок длительности)."""
+    now = time.monotonic()
+    with _AGENT_BUSY_LOCK:
+        key = int(thread_id)
+        if key in _AGENT_BUSY:
+            _AGENT_BUSY[key] = now + _AGENT_BUSY_TTL_SEC
 
 
 def _agent_busy_retry_after(thread_id: int) -> int:
@@ -253,6 +265,67 @@ def _agent_public_message(row) -> dict:
         out["args"] = args if isinstance(args, dict) else {}
         out["result"] = res if isinstance(res, dict) else {}
     return out
+
+
+# Температура невидимого повтора. Повтор при temperature 0 воспроизводит тот
+# же самый вырожденный ответ — ровно та ошибка формата, ради которой мы
+# повторяем. Чуть поднятая температура даёт шанс на другой ответ; числа
+# ученику по-прежнему приходят из инструментов, а не из фантазии модели.
+_AGENT_RETRY_TEMPERATURE = 0.3
+
+
+def _agent_call_timeout(budget) -> float | None:
+    """Потолок одного вызова провайдера из остатка бюджета хода.
+
+    None — «бери общий EGE_AI_TIMEOUT_SEC» (вне хода, например в тестах).
+    """
+    if budget is None:
+        return None
+    try:
+        left = float(budget)
+    except (TypeError, ValueError):
+        return None
+    if left <= 0:
+        return None
+    return max(1.0, min(float(_AI.DEFAULT_TIMEOUT_SEC), left))
+
+
+def _agent_chat_fn(cost: dict, thread_id: int | None = None):
+    """chat_fn для _AGENT.run_cycle: один вызов модели и один невидимый повтор.
+
+    Повторяются только сбои, которые повторяются сами: AIFormatError (модель
+    ответила не по контракту) и AIError (транспорт/402) — как у проверок
+    сочинений. Наш ввод (AIInputError) и недоступность инфраструктуры
+    (AIUnavailable) повтором не лечатся. Жетон хода при повторе не тратится:
+    резервация одна, а точка невозврата наступает только после записи ответа,
+    поэтому любой неуспех возвращает её целиком (finally в обоих endpoint'ах).
+
+    Один код на оба хода: раньше у resume после подтверждения повтора не было
+    вовсе, и одна форматная ошибка после уже применённого действия отдавала
+    502 с откатом шага.
+    """
+    def call(messages, tools, budget=None):
+        cost["n"] += 1
+        timeout = _agent_call_timeout(budget)
+        if thread_id is not None:
+            _agent_busy_touch(thread_id)
+        if not tools:
+            # Финал по потолку шагов (_AGENT._summarize): вызов БЕЗ
+            # инструментов — короткий текст по уже собранным данным.
+            text = _AI.chat(messages, temperature=0.0, timeout=timeout)
+            return {"text": (text or "").strip()[:8000] or None,
+                    "tool_calls": [], "preamble": None}
+        failure: Exception | None = None
+        for attempt in range(2):
+            temperature = 0.0 if attempt == 0 else _AGENT_RETRY_TEMPERATURE
+            try:
+                return _AI.chat_with_tools(messages, tools, temperature=temperature,
+                                           timeout=timeout)
+            except (_AI.AIFormatError, _AI.AIError) as exc:
+                failure = exc
+        raise failure  # noqa: B904 — повторяем ровно то, что поймали
+
+    return call
 
 
 def _ai_user_message(exc: BaseException) -> str:
@@ -9072,15 +9145,7 @@ class Handler(BaseHTTPRequestHandler):
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}
-                        def _chat_cf(msgs, tools):
-                            cost["n"] += 1
-                            if not tools:
-                                # Финал по потолку шагов (agent._summarize) — тот
-                                # же вызов без инструментов, что и в обычном ходе.
-                                text = _AI.chat(msgs, temperature=0.0)
-                                return {"text": (text or "").strip()[:8000] or None,
-                                        "tool_calls": [], "preamble": None}
-                            return _AI.chat_with_tools(msgs, tools, temperature=0.0)
+                        _chat_cf = _agent_chat_fn(cost, tid)
                         try:
                             steps2, final2, pending2 = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_cf)
                         except _AI.AIUnavailable as exc:
@@ -9222,26 +9287,7 @@ class Handler(BaseHTTPRequestHandler):
                         history = _agent_history_for_model(conn, tid)
                         messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
                         cost = {"n": 0}
-                        def _chat_fn(msgs, tools):
-                            cost["n"] += 1
-                            if not tools:
-                                # Финал по потолку шагов (agent._summarize):
-                                # вызов БЕЗ инструментов — короткий текст по
-                                # уже собранным данным, вместо отказа ученику.
-                                text = _AI.chat(msgs, temperature=0.0)
-                                return {"text": (text or "").strip()[:8000] or None,
-                                        "tool_calls": [], "preamble": None}
-                            # Один невидимый повтор для сбоев, которые повторяются сами:
-                            # AIFormatError (модель ответила не по контракту — живой
-                            # случай 28.09) и AIError (транспорт/402). Как у сочинений:
-                            # повтор не тратит жетон (жетон возвращается через finally).
-                            for attempt in range(2):
-                                try:
-                                    return _AI.chat_with_tools(msgs, tools, temperature=0.0)
-                                except (_AI.AIFormatError, _AI.AIError):
-                                    if attempt == 0:
-                                        continue
-                                    raise
+                        _chat_fn = _agent_chat_fn(cost, tid)
                         try:
                             steps, final, pending = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_fn)
                         except _AI.AIUnavailable as exc:

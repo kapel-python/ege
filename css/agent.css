@@ -8,7 +8,23 @@
    flex: 0 1 auto (по умолчанию), колонка занимает высоту по контенту, и низ
    экрана под ней остаётся пустым: любой резерв под нижнее меню просто
    некуда был деться, и композер висел над меню с зазором. */
-.agent { display: flex; flex: 1 1 auto; min-height: 0; }
+.agent {
+  display: flex; flex: 1 1 auto; min-height: 0;
+  /* Чернила раздела. Общие --text-2/--muted рассчитаны на белые карточки, а
+     чат стоит на фоне приложения (--bg), и там они и проседали: в светлой теме
+     серый текст шагов читался «пыльным» (6.1:1 у --text-2 и 5.1:1 у --muted),
+     в тёмной --muted вообще не дотягивал до AA (4.2:1 на --bg). Те же две
+     роли — пояснительный и мелкий (основной текст ответа остаётся общий
+     --text) — но с запасом по контрасту на фоне самого чата: 8.1:1 и 6.6:1
+     в светлой, 11.7:1 и 7.1:1 в тёмной. Свои токены, а не правка общих:
+     остальной сайт не трогаем. */
+  --agent-ink-2: #384563;   /* пояснения шага, «Показать шаги», код инструмента */
+  --agent-ink-3: #465270;   /* мелочь 12-13px: даты, «Подробнее», подсказки */
+}
+:root[data-theme="dark"] .agent {
+  --agent-ink-2: #c2c8da;
+  --agent-ink-3: #949cb0;
+}
 /* Резерв под фиксированное нижнее меню — на экране: колонка заканчивается
    ровно там, где начинается меню, поэтому композер прижат к его верхнему краю
    и под ним не остаётся пустой полосы. Клавиатура этот резерв снимает
@@ -58,7 +74,7 @@
 .agent__thread:active { transform: scale(.99); }
 .agent__thread:hover { background: var(--soft-hover); }
 .agent__thread b { display: block; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent__thread span { display: block; font-size: 12px; color: var(--muted); }
+.agent__thread span { display: block; font-size: 12px; color: var(--agent-ink-3); }
 .agent__thread[aria-current="true"] { background: var(--accent-soft); }
 .agent__thread[aria-current="true"]::before {
   content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 3px;
@@ -71,7 +87,7 @@
 .agent__more {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
-  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+  border: 0; border-radius: 8px; background: transparent; color: var(--agent-ink-3);
   cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, color .15s;
 }
 .agent__more svg { width: 18px; height: 18px; }
@@ -93,17 +109,17 @@
   color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
   transition: background .15s, color .15s;
 }
-.agent__ctx-item svg { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.agent__ctx-item svg { width: 16px; height: 16px; flex: none; color: var(--agent-ink-3); }
 .agent__ctx-item:hover { background: var(--soft-hover); }
 .agent__ctx-item--danger { color: var(--danger-ink); }
 .agent__ctx-item--danger svg { color: var(--danger); }
 .agent__ctx-item--danger:hover { background: var(--danger-soft); }
 .agent__thread--loading { cursor: default; pointer-events: none; }
 .agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
-.agent__foot small { font-size: 12px; color: var(--muted); }
+.agent__foot small { font-size: 12px; color: var(--agent-ink-3); }
 .agent__del {
   display: grid; place-items: center; width: 38px; height: 38px; flex: none; cursor: pointer;
-  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--muted);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-3);
   transition: background .15s, color .15s, transform .15s;
 }
 .agent__del svg { width: 18px; height: 18px; }
@@ -159,7 +175,10 @@
 }
 .agent__ai { display: flex; flex-direction: column; gap: 10px; }
 .agent__ai, .agent__msg-user, .agent__step, .agent__answer, .agent__trace-toggle { text-align: left; }
-.agent__answer { margin: 0; overflow-wrap: anywhere; }
+/* pre-line: модель отвечает списками, и одиночный перевод строки внутри
+   абзаца без него схлопывался — «1) то 2) то 3) то» одной простынёй.
+   Абзацы режет сервер (пустая строка), лишних отступов не бывает. */
+.agent__answer { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
 /* Курсор во время печати ответа: текст появляется по словам. */
 .agent__answer.typing::after {
   content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px;
@@ -184,7 +203,7 @@
   display: inline-flex; align-self: flex-start; align-items: center; gap: 6px;
   max-height: 0; opacity: 0; visibility: hidden; overflow: hidden;
   padding: 0 10px 0 6px; margin: 0 0 -10px -6px; border: 0; border-radius: 20px; background: transparent;
-  color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--agent-ink-2); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background .15s, color .15s, max-height .3s ease, margin .3s ease, padding .3s ease, opacity .3s ease, visibility .3s;
 }
 .agent__trace-toggle:hover { background: var(--soft-hover); color: var(--text); }
@@ -198,7 +217,7 @@
 .agent__trace-in { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s .35s; }
 .agent__trace.open .agent__trace-in { visibility: visible; transition-delay: 0s; }
 .agent__steps { list-style: none; margin: 0; padding: 2px 0 4px; display: flex; flex-direction: column; gap: 0; }
-.agent__step { position: relative; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+.agent__step { position: relative; font-size: 14px; line-height: 1.5; color: var(--agent-ink-2); }
 .agent__step + .agent__step { padding-top: 12px; }
 .agent__step::before { content: ""; position: absolute; left: 7px; top: 20px; bottom: -12px; width: 1px; background: var(--border-strong); animation: agentFade .4s ease both; }
 .agent__step + .agent__step::before { top: 32px; }
@@ -211,10 +230,10 @@
 .agent__tbody .agent__loader { margin-left: -24px; gap: 14px; }
 .agent__step b { display: block; font-weight: 600; color: var(--text); }
 .agent__step p { margin: 0; }
-.agent__step code { display: block; margin-top: 2px; font: 12px/1.5 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.agent__step code { display: block; margin-top: 2px; font: 12px/1.5 var(--mono); color: var(--agent-ink-3); overflow-wrap: anywhere; }
 .agent__step-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .agent__step-detail { margin-top: 6px; }
-.agent__step-detail summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 600; }
+.agent__step-detail summary { cursor: pointer; font-size: 13px; color: var(--agent-ink-3); font-weight: 600; }
 .agent__step-detail code { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
 .agent__step.is-action b { color: var(--warn-ink); }
 .agent__step.is-applied b { color: var(--success-ink); }
@@ -226,7 +245,7 @@
 .agent__step + .agent__step .agent__mark { top: 14px; }
 /* Чтение — нейтральная галочка, действие применено — зелёная, действие в
    ожидании подтверждения — предупреждение с часиками. */
-.agent__mark.is-read { background: var(--surface-3); color: var(--text-2); }
+.agent__mark.is-read { background: var(--surface-3); color: var(--agent-ink-2); }
 .agent__mark.is-wait { background: var(--warn-soft); color: var(--warn-ink); }
 
 /* Лоадер хода: точка с расходящимся кольцом и «бегущий» текст под текущий шаг. */
@@ -234,7 +253,7 @@
 .agent__loader-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--accent); animation: agentPulse 1.6s ease-out infinite; }
 .agent__loader-text {
   font-size: 14px; font-weight: 700;
-  background: linear-gradient(100deg, var(--muted) 30%, var(--accent-ink) 44%, var(--text) 50%, var(--accent-ink) 56%, var(--muted) 70%);
+  background: linear-gradient(100deg, var(--agent-ink-3) 30%, var(--accent-ink) 44%, var(--text) 50%, var(--accent-ink) 56%, var(--agent-ink-3) 70%);
   background-size: 220% 100%;
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
@@ -245,7 +264,7 @@
 .agent__skel i { display: block; height: 14px; border-radius: 7px; background: var(--surface-3); }
 .agent__skel i + i { max-width: 45%; height: 11px; }
 
-.agent__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; color: var(--muted); font-size: 14px; }
+.agent__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; color: var(--agent-ink-3); font-size: 14px; }
 /* Без этого hidden не работает: display:flex выше перебивает UA-стиль
    [hidden]{display:none}, а своего правила в SPA нет — пустой блок
    оставался видимым всегда, даже с сообщениями. */
@@ -273,8 +292,8 @@
 .agent__suggest-ic svg { width: 18px; height: 18px; }
 .agent__suggest-tx { flex: 1; min-width: 0; }
 .agent__suggest-tx b { display: block; font-size: 14px; font-weight: 600; color: var(--text); }
-.agent__suggest-tx span { display: block; font-size: 12px; color: var(--muted); }
-.agent__suggest-go { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .15s, color .15s; }
+.agent__suggest-tx span { display: block; font-size: 12px; color: var(--agent-ink-3); }
+.agent__suggest-go { width: 16px; height: 16px; flex: none; color: var(--agent-ink-3); transition: transform .15s, color .15s; }
 .agent__suggest-go svg { width: 16px; height: 16px; }
 .agent__suggest-card:hover .agent__suggest-go { transform: translateX(3px); color: var(--accent-ink); }
 
@@ -290,7 +309,7 @@
 }
 .agent__to-bottom {
   position: absolute; right: 20px; top: -52px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-  background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-2);
+  background: var(--surface); border: 1px solid var(--border-strong); color: var(--agent-ink-2);
   box-shadow: 0 8px 20px -8px var(--shadow);
   opacity: 0; visibility: hidden; transform: translateY(8px) scale(.9);
   transition: opacity .2s, transform .2s, visibility .2s, border-color .15s;
@@ -310,7 +329,7 @@
 }
 /* Фокус подсвечивается рамкой всего композера, а не обводкой textarea. */
 .agent__composer textarea:focus, .agent__composer textarea:focus-visible { outline: none; }
-.agent__composer textarea::placeholder { color: var(--muted); }
+.agent__composer textarea::placeholder { color: var(--agent-ink-3); }
 .agent__send, .agent__stop {
   flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
@@ -320,11 +339,11 @@
 .agent__send svg, .agent__stop svg { width: 18px; height: 18px; transition: transform .2s ease; }
 .agent__send:not(:disabled) { animation: agentSendIn .25s ease; }
 .agent__send:not(:disabled):hover svg { transform: translateY(-2px); }
-.agent__send:disabled, .agent__stop:disabled { background: var(--surface-3); color: var(--muted); cursor: default; transform: none; }
+.agent__send:disabled, .agent__stop:disabled { background: var(--surface-3); color: var(--agent-ink-3); cursor: default; transform: none; }
 .agent__composer.busy .agent__stop { display: inline-flex; }
 .agent__composer.busy .agent__send { display: none; }
 .agent__composer:not(.busy) .agent__stop { display: none; }
-.agent__hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+.agent__hint { margin: 8px 0 0; font-size: 12px; color: var(--agent-ink-3); text-align: center; }
 
 .agent__scrim { display: none; }
 
@@ -369,7 +388,7 @@
     opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s;
   }
   .agent.nav-open .agent__scrim { opacity: 1; visibility: visible; }
-  .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); }
+  .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-2); }
   .agent__menu svg { width: 20px; height: 20px; }
   .agent__title { font-size: 16px; }
   .agent__feed { padding: 16px 12px; }
@@ -405,6 +424,6 @@
   .agent__qr, .agent__suggest-card, .agent__empty-badge, .agent__list li.new { animation: none; }
   .agent__mark, .agent__step::before { animation: none; }
   .agent__loader-dot, .agent__loader-text { animation: none; }
-  .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--text-2); filter: none; }
+  .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--agent-ink-2); filter: none; }
   .agent__tbody { transition: none; }
 }

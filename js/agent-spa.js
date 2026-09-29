@@ -13,6 +13,14 @@
     timers: [], turn: null, pendingBail: null, newThreadId: null,
   };
   var RING = 94.25, QUOTA_FALLBACK = 10;
+  /* Окно подхвата хода (после перемонтирования экрана) и параметры ожидания
+     ответа, который сервер считает после обрыва на клиенте. REATTACH_MS
+     заведомо больше потолка хода на сервере (90 с цикла + вызов финала) —
+     иначе ответ приходит в обработчики прошлого монтажа и пропадает.
+     Ожидание после обрыва (~96 с) на тот же потолок: ждать дольше смысла нет,
+     у человека уже есть кнопка «Обновить чат». */
+  var REATTACH_MS = 300000;
+  var WATCH_TRIES = 12, WATCH_EVERY_MS = 8000;
   var ICON_QR = "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9";
   var root = null, ui = {};
 
@@ -1103,7 +1111,11 @@
   function reattachTurn() {
     var t = S.turn;
     if (!t || t.dead || t.claimedBy === S.mountGen) return;
-    if (Date.now() - t.startedAt > 120000) { if (S.turn === t) S.turn = null; return; }
+    // Окно подхвата должно быть ЗАКАЛЮЧАТЕЛЬНЕЕ потолка хода на сервере
+    // (90 с цикла + вызов финала): иначе ответ живого хода приходит в
+    // обработчики прошлого монтажа, их токены уже не совпадают — и ход
+    // пропадает молча, вместе с вопросом ученика.
+    if (Date.now() - t.startedAt > REATTACH_MS) { if (S.turn === t) S.turn = null; return; }
     if (Number(t.threadId) !== Number(S.currentId)) return;
     t.claimedBy = S.mountGen;
     var g = ++S.navGen, mg = S.mountGen;
@@ -1113,6 +1125,35 @@
     var skel = skeletonCard();
     t.promise.then(function (res) { settleTurn(t, g, mg, skel, bubble, t.text, res); })
               .catch(function (e) { failTurn(t, g, mg, skel, t.text, e); });
+  }
+  /* Ответил ли сервер на этот вопрос. Ход живёт и после аборта на клиенте
+     («Стоп», ушедшая сеть) — сервер считает его до конца, и тогда повторный
+     вопрос вернул бы то же самое ещё за жетон. Поэтому перед повтором
+     спрашиваем тред: если после нашего вопроса уже есть шаг или ответ —
+     показываем готовое, а не спрашиваем заново. */
+  function turnAnswered(tid, text) {
+    if (tid == null) return Promise.resolve(false);
+    return api("GET", "/api/agent/threads/" + Number(tid)).then(function (res) {
+      if (res.status !== 200 || !res.data || !Array.isArray(res.data.messages)) return false;
+      var msgs = res.data.messages, lastUser = -1, i;
+      for (i = 0; i < msgs.length; i++) if (msgs[i].role === "user") lastUser = i;
+      if (lastUser < 0) return false;
+      if (text != null && (msgs[lastUser].content || "").trim() !== String(text).trim()) return false;
+      return msgs.length - 1 > lastUser;   // после вопроса есть шаг или ответ
+    }).catch(function () { return false; });
+  }
+  /* Дождаться ответа, который сервер считает после обрыва. Раньше здесь был
+     один слепой setTimeout на 4 с: ход в 20 с успевал мимо, и человек оставался
+     с лентой, где ответ так и не появился. Теперь смотрим тред несколько раз
+     и останавливаемся, как только ответ (или шаг) появился. */
+  function watchAnswer(tid, text, tries) {
+    if (tid == null || tries <= 0 || Number(S.currentId) !== Number(tid)) return;
+    if (S.busy) { later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries); }); return; }
+    turnAnswered(tid, text).then(function (answered) {
+      if (Number(S.currentId) !== Number(tid)) return;
+      if (answered) { loadThreadMessages(); return; }
+      if (tries > 1) later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries - 1); });
+    });
   }
   function settleTurn(turn, g, mg, skel, bubble, text, res) {
     if (g !== S.navGen || mg !== S.mountGen) return;
@@ -1138,9 +1179,7 @@
     }
     if (res.status === 400 && res.data && res.data.code === "AGENT_BUSY") {
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
-      var wait = Math.max(1, Number(res.data.retryAfter) || 30);
-      errorCard("Ход уже выполняется — сервер ещё считает прошлый ответ. Подожди ~" + wait + " с и нажми повтор.",
-        "Попробовать снова", function () { send(text, { force: true }); });
+      retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30));
       return;
     }
     if (res.status === 404 && res.data && res.data.code === "THREAD_NOT_FOUND") {
@@ -1162,6 +1201,47 @@
     errorCard((res.data && res.data.error) || "Наставник не смог ответить.", "Попробовать снова",
       function () { send(text, { force: true }); });
   }
+  /* AGENT_BUSY — не тупик: сервер сам сказал, через сколько освободится слот.
+     Раньше здесь была только кнопка, и каждый клик до освобождения давал тот
+     же 400 — вопрос застревал в ручном цикле «нажать ещё раз». Теперь ждём это
+     время и повторяем сами; повтор по тому же тексту сервер отдаёт из кэша
+     (без жетона), а если ход всё же не успел — это уже новый ход, как просил
+     человек. Кнопка «сейчас» оставлена для нетерпеливых. */
+  function retryWhenFree(text, wait) {
+    var g = S.navGen, mg = S.mountGen;
+    var left = Math.max(1, Math.min(180, wait || 1));
+    var card = errorCard("Сервер ещё считает прошлый ответ — повторю через " + left + " с.");
+    var label = card.querySelector(".agent__answer");
+    var row = el("div", "agent__actions");
+    var btn = el("button", "agent__qr", "Повторить сейчас");
+    btn.type = "button";
+    row.appendChild(btn);
+    card.appendChild(row);
+    var started = false;
+    function fire() {
+      if (started || g !== S.navGen || mg !== S.mountGen) return;
+      if (S.busy) { say("Дождись текущего ответа"); return; }
+      turnAnswered(S.currentId, text).then(function (answered) {
+        if (g !== S.navGen || mg !== S.mountGen) return;
+        started = true;
+        // Ответ сервера уже есть — показываем его вместо нового вопроса.
+        if (answered) { if (card.parentNode) card.parentNode.removeChild(card); loadThreadMessages(); return; }
+        if (card.parentNode) card.parentNode.removeChild(card);
+        send(text, { force: true });
+      });
+    }
+    btn.addEventListener("click", fire);
+    later(1000, function tick() {
+      if (g !== S.navGen || mg !== S.mountGen) return;
+      left -= 1;
+      if (left > 0) {
+        label.textContent = "Сервер ещё считает прошлый ответ — повторю через " + left + " с.";
+        later(1000, tick);
+        return;
+      }
+      fire();
+    });
+  }
   function failTurn(turn, g, mg, skel, text, e) {
     if (g !== S.navGen || mg !== S.mountGen) return;
     if (e && e.name === "AbortError") {
@@ -1172,7 +1252,7 @@
       setBusy(false);
       errorCard("Остановлено. Если сервер уже считал ответ — он появится ниже.",
         "Обновить чат", function () { loadThreadMessages(); });
-      setTimeout(function () { if (!S.busy && g === S.navGen && mg === S.mountGen) loadThreadMessages(); }, 4000);
+      watchAnswer(turn.threadId, text, WATCH_TRIES);
       return;
     }
     turn.dead = true;
@@ -1241,10 +1321,14 @@
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });
     ui.stopBtn.addEventListener("click", function () {
-      var g = S.navGen, mg = S.mountGen;
+      // Текст хода запоминаем ДО аборта: он нужен, чтобы отличить наш вопрос
+      // от уже записанного в треде и дождаться ответа, который сервер считает.
+      var turn = S.turn;
+      var text = turn && !turn.dead ? turn.text : null;
+      var tid = turn && !turn.dead ? turn.threadId : S.currentId;
       if (S.abort) { try { S.abort.abort(); } catch (_) {} }
       setBusy(false);
-      setTimeout(function () { if (!S.busy && g === S.navGen && mg === S.mountGen) loadThreadMessages(); }, 4000);
+      watchAnswer(tid, text, WATCH_TRIES);
     });
     ui.feed.addEventListener("scroll", function () {
       if (Date.now() > S.lock) S.stick = dist() < 120;

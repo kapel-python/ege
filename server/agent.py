@@ -56,6 +56,10 @@ TURN_TIMEOUT_SEC = 90.0
 # инструментов (короткий ответ по уже собранным данным), и только если время
 # хода кончилось или модель снова полезла в инструменты — эта честная просьба.
 LONG_TURN_TEXT = "Собрал часть данных, но ход получился слишком длинным. Уточни вопрос — отвечу короче."
+# Столько секунд бюджета хода оставляем на один вызов модели: меньше — вызов
+# заведомо не вернётся, и мы сожгли бы остаток хода впустую. Лучше честно
+# закончить ход тем, что уже собрано (см. run_cycle).
+TURN_CALL_FLOOR_SEC = 5.0
 
 
 class AgentInputError(ValueError):
@@ -999,13 +1003,25 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
     steps — [{name, args, label, kind}] для ленты; final — текст ответа либо
     None, если ход встал на подтверждение; pending — {tool, args, proposal}
     для confirm при действии, иначе None. Бросает AI* при сбое модели.
+
+    chat_fn(messages, tools, budget) — budget это остаток времени хода в
+    секундах: им вызов ограничивает себя, иначе 90-секундный потолок держался
+    бы только «между шагами», а один зависший вызов провайдера растягивал ход
+    ещё на EGE_AI_TIMEOUT_SEC (45 с) сверх него.
     """
     deadline = deadline if deadline is not None else (time.monotonic() + TURN_TIMEOUT_SEC)
     steps: list = []
     for _ in range(MAX_TOOL_STEPS + 1):
-        if time.monotonic() > deadline:
+        budget = deadline - time.monotonic()
+        if budget <= TURN_CALL_FLOOR_SEC:
+            # Бюджета не осталось. Если что-то уже собрано — отдаём это (шаги
+            # видны в ленте, текст честный), потому что отказ с потерей всего
+            # хода хуже ответа «не успел». Нечего показать — 502 с бесплатным
+            # повтором (жетон вернётся в finally).
+            if steps:
+                return steps, _summarize(chat_fn, messages, deadline), None
             raise TimeoutError("ход превысил 90 секунд")
-        parsed = chat_fn(messages, AGENT_TOOLS)
+        parsed = chat_fn(messages, AGENT_TOOLS, budget)
         text = parsed.get("text")
         calls = parsed.get("tool_calls") or []
         # Модель часто пишет реплику («Сейчас соберу…») и зовёт инструменты в
@@ -1063,7 +1079,8 @@ def _summarize(chat_fn, messages: list, deadline: float) -> str:
     «собери всё» отказ вместо ответа. Время хода кончилось, модель снова
     полезла в инструменты или сломалось — тогда честная просьба уточнить.
     """
-    if time.monotonic() <= deadline:
+    budget = deadline - time.monotonic()
+    if budget > TURN_CALL_FLOOR_SEC:
         # Последнее сообщение истории — результат инструмента, а вызова без
         # tools такой хвост у провайдеров не ждут: закрываем его короткой
         # репликой ученика («дальше не лезь, ответь»), а не молчанием.
@@ -1071,7 +1088,7 @@ def _summarize(chat_fn, messages: list, deadline: float) -> str:
                                  "content": "Данных достаточно. Ответь коротко по тому, "
                                             "что уже собрано, и не вызывай новые инструменты."}]
         try:
-            parsed = chat_fn(ask, []) or {}
+            parsed = chat_fn(ask, [], budget) or {}
         except Exception:  # noqa: BLE001 — ответ без модели лучше 502
             return LONG_TURN_TEXT
         text = parsed.get("text")

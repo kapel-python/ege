@@ -450,9 +450,11 @@ def main():
                 calls["n"] = 0
 
             flaky = {"failed": False}
+            temps = {"seen": []}
             def flaky_chat(messages, tools, **kw):
                 with lock:
                     calls["n"] += 1
+                    temps["seen"].append((kw.get("temperature"), kw.get("timeout")))
                     if not flaky["failed"]:
                         flaky["failed"] = True
                         raise ai.AIFormatError("текст и вызовы одновременно")
@@ -464,6 +466,117 @@ def main():
             ai.chat_with_tools = mock_chat
             check("AIFormatError один раз -> 200", status == 200 and body.get("final"), f"{status} {body}")
             check("повтор был (2 вызова)", calls["n"] == 2, str(calls["n"]))
+            # Повтор при temperature 0 вернул бы ТОТ ЖЕ вырожденный ответ —
+            # ровно ту ошибку, ради которой повтор и делается. Второй вызов
+            # поэтому идёт с чуть другой температурой.
+            check("повтор идёт с другой температурой (иначе он бессмыслен)",
+                  len(temps["seen"]) == 2 and temps["seen"][0][0] == 0.0
+                  and temps["seen"][1][0] == server._AGENT_RETRY_TEMPERATURE
+                  and temps["seen"][1][0] != temps["seen"][0][0], str(temps["seen"]))
+            # Бюджет хода спускается вниз и ограничивает один вызов:
+            # 90-секундный потолок раньше проверялся только между шагами, и один
+            # зависший вызов провайдера тянул ход ещё на EGE_AI_TIMEOUT_SEC.
+            check("вызов ограничен остатком бюджета хода",
+                  all(isinstance(t, (int, float)) and 0 < t <= ai.DEFAULT_TIMEOUT_SEC
+                      for _, t in temps["seen"]), str(temps["seen"]))
+            # Сам потолок одного вызова: не больше общего таймаута провайдера и
+            # не больше того, что реально осталось от хода.
+            check("_agent_call_timeout: без бюджета — общий таймаут",
+                  server._agent_call_timeout(None) is None
+                  and server._agent_call_timeout(10.0) == 10.0
+                  and server._agent_call_timeout(1000.0) == ai.DEFAULT_TIMEOUT_SEC
+                  and server._agent_call_timeout(0) is None,
+                  f"{server._agent_call_timeout(None)} {server._agent_call_timeout(10.0)} "
+                  f"{server._agent_call_timeout(1000.0)} {server._agent_call_timeout(0)}")
+
+            section("повтор есть и в resume после подтверждения")
+            # Раньше у _chat_cf повтора не было вовсе: одна форматная ошибка
+            # после уже применённого действия отдавала 502 и откатывала шаг.
+            with lock:
+                script.clear()
+                script.append({"text": None, "tool_calls": [{"id": "cf1", "name": "update_profile",
+                                                            "arguments": {"selfLevel": "base"}}]})
+            status, body = turn(f, tid_f, "поставь базовый уровень")
+            check("действие -> pending", status == 200 and body.get("pending") is True, f"{status} {body}")
+            confirm_id = (body.get("steps") or [{}])[0].get("id")
+            flaky2 = {"failed": False, "n": 0}
+            def flaky_cf(messages, tools, **kw):
+                with lock:
+                    flaky2["n"] += 1
+                    if not flaky2["failed"]:
+                        flaky2["failed"] = True
+                        raise ai.AIFormatError("пустой ответ модели")
+                return {"text": "Уровень обновлён после повтора.", "tool_calls": []}
+            ai.chat_with_tools = flaky_cf
+            status, body = f.request(base, "POST", "/api/agent/turns/confirm",
+                                     {"messageId": confirm_id, "approve": True})
+            ai.chat_with_tools = mock_chat
+            check("resume с одной форматной ошибкой -> 200",
+                  status == 200 and (body.get("final") or "").startswith("Уровень обновлён"),
+                  f"{status} {body}")
+            check("resume позвал модель дважды", flaky2["n"] == 2, str(flaky2["n"]))
+            status, body = f.request(base, "GET", f"/api/agent/threads/{tid_f}", None)
+            done = [m for m in body.get("messages", []) if m.get("id") == confirm_id]
+            check("шаг применён, а не откатан", bool(done) and done[0].get("status") == "applied",
+                  str(done)[:160])
+
+            section("потолок хода: сетка взята с запасом, а не отказ")
+            # run_cycle напрямую: бюджет задаём сами, ждать 90 секунд не надо.
+            conn3 = server.connect()
+            conn3.row_factory = sqlite3.Row
+            try:
+                anya_id = int(conn3.execute("SELECT id FROM users WHERE name='Аня'").fetchone()["id"])
+
+                spent = {"b": []}
+
+                def budgeted(messages, tools, budget=None):
+                    spent["b"].append(budget)
+                    # Съедаем бюджет хода: мгновенный мок иначе успевает
+                    # выбить все 10 шагов, а тут проверяем именно обрыв.
+                    time.sleep(0.3)
+                    if tools:
+                        return {"text": None, "tool_calls": [
+                            {"id": "bt1", "name": "fold_web", "arguments": {"op": "progress"}}]}
+                    return {"text": "", "tool_calls": []}
+
+                steps, final, pending = agent.run_cycle(
+                    conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
+                    budgeted, deadline=time.monotonic() + agent.TURN_CALL_FLOOR_SEC + 0.25)
+                check("истёкший бюджет с собранными шагами -> честный ответ, не 502",
+                      len(steps) == 1 and isinstance(final, str) and "слишком длинным" in final
+                      and pending is None, f"{len(steps)} {final!r}")
+                check("бюджет уходил в вызовы", len(spent["b"]) == 1, str(spent["b"]))
+
+                # Бюджет убывает от шага к шагу — потолок один на весь ход,
+                # а не на каждый вызов с нуля.
+                two_budgets = []
+
+                def two_steps(messages, tools, budget=None):
+                    two_budgets.append(budget)
+                    if len(two_budgets) == 1:
+                        return {"text": None, "tool_calls": [
+                            {"id": "bt2", "name": "fold_web", "arguments": {"op": "progress"}}]}
+                    return {"text": "Второй ответ.", "tool_calls": []}
+
+                steps, final, pending = agent.run_cycle(
+                    conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
+                    two_steps, deadline=time.monotonic() + 30.0)
+                check("два шага -> бюджет уменьшился",
+                      len(two_budgets) == 2 and two_budgets[1] < two_budgets[0], str(two_budgets))
+                check("два шага -> обычный ответ", len(steps) == 1 and final == "Второй ответ.",
+                      f"{len(steps)} {final!r}")
+
+                def instant(messages, tools, budget=None):
+                    return {"text": "Готовый ответ.", "tool_calls": []}
+
+                try:
+                    agent.run_cycle(conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
+                                    instant, deadline=time.monotonic() - 1.0)
+                    check("истёкший бюджет без единого шага -> 502 (жетон вернётся)", False, "ответ вместо отказа")
+                except TimeoutError:
+                    check("истёкший бюджет без единого шага -> 502 (жетон вернётся)", True)
+            finally:
+                conn3.close()
 
             section("AGENT_BUSY на параллельный ход")
             e = Client("10.5.0.1")
