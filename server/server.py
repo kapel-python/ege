@@ -880,6 +880,12 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
         "WHERE session_token IS NOT NULL AND NOT EXISTS "
         "(SELECT 1 FROM user_sessions WHERE token = users.session_token)",
         (expiry,))
+    # Доисторические сессии (заведённые до хеширования) переводим на хэш.
+    # Поиск всегда хеширует предъявленный токен, поэтому живые куки продолжают
+    # работать: сырая строка в браузере даёт тот же sha256, что и в базе.
+    # В SQL функцию звать нельзя (SQLite о ней не знает) — перенос строк
+    # делается из Python, а выборка выше остаётся ровно как была.
+    hash_stored_tokens(conn)
     # Сырой User-Agent никогда не храним: только человекочитаемое название и
     # тип + метка последней активности. Старые строки получают нейтральный
     # дефолт без персональных данных.
@@ -1060,7 +1066,26 @@ def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[s
         "us.device_key AS device_key, us.device_net AS device_net, "
         "us.last_seen_at AS last_seen_at "
         "FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.token = ?",
-        (token,)).fetchone()
+        (token_digest(token),)).fetchone()
+    if row is None and not _is_token_digest(token):
+        # Строка, заведённая ДО хеширования (восстановленный бэкап, прямая
+        # вставка миграцией). Ищем по сырому токену и сразу переводим строку на
+        # хэш, чтобы второго раза не было. Основной путь — хэш; этот нужен
+        # лишь для совместимости и сам себя устраняет.
+        row = conn.execute(
+            "SELECT us.id AS session_pk, us.expires_at, u.id AS user_id, "
+            "us.device_name AS device_name, us.device_type AS device_type, "
+            "us.device_key AS device_key, us.device_net AS device_net, "
+            "us.last_seen_at AS last_seen_at "
+            "FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE us.token = ?",
+            (token,)).fetchone()
+        if row is not None:
+            try:
+                conn.execute("UPDATE user_sessions SET token=? WHERE id=?",
+                             (token_digest(token), int(row["session_pk"])))
+                conn.commit()
+            except sqlite3.Error:
+                conn.rollback()
     if not row:
         return None
     if int(row["expires_at"]) <= int(time.time() * 1000):
@@ -1118,6 +1143,67 @@ def session_row_for(conn: sqlite3.Connection, token: str | None, device: tuple[s
     return row
 
 
+def token_digest(token: str) -> str:
+    """Хранимое представление токена сессии — sha256, а не сам токен.
+
+    Отпечатки устройств и анти-лава ИИ давно хранятся только хэшами: сырые IP,
+    User-Agent и кука в базе не появляются. Токены сессий были исключением, и
+    это стоило дорого — чтение файла БД (или бэкапа) давало ГОТОВЫЕ куки.
+    Пара `ege_session` + `ege_admin` из файла открывала админку со всеми
+    аккаунтами (проверено на живой базе).
+
+    Ключа не нужно: сам токен — 256 бит энтропии из secrets.token_urlsafe(32),
+    то есть по sha256 его не восстановить даже тому, кто прочитал базу целиком.
+
+    Миграция не рвёт живые сессии: существующие строки хешируются на месте, а
+    поиск всегда хеширует ПРЕДЪЯВЛЕННЫЙ токен, поэтому старая кука (сырая)
+    даёт тот же хэш и продолжает работать.
+    """
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def _is_token_digest(value: str) -> bool:
+    """Уже захешированная строка: 64 hex-символа."""
+    text = str(value or "")
+    return len(text) == 64 and all(c in "0123456789abcdef" for c in text.lower())
+
+
+def hash_stored_tokens(conn: sqlite3.Connection) -> None:
+    """Разово перевести user_sessions/admin_sessions на хэши. Идемпотентно.
+
+    Идёт по малому числу строк и только там, где значение ещё сырое, поэтому
+    повторный запуск (в том числе на каждом старте) дешёв. Коллизия хэшей
+    невозможна (токены случайны и уникальны), так что UPDATE безусловный.
+    """
+    for table in ("user_sessions", "admin_sessions"):
+        try:
+            cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if "token" not in cols:
+                continue
+            rows = conn.execute(f"SELECT id, token FROM {table}").fetchall()
+            stale = [(r["id"], token_digest(r["token"])) for r in rows
+                     if not _is_token_digest(r["token"] or "")]
+            if not stale:
+                continue
+            for row_id, digest in stale:
+                conn.execute(f"UPDATE {table} SET token=? WHERE id=?", (digest, row_id))
+        except sqlite3.Error:
+            continue
+    # users.session_token — тот же легаси-столбец: сырой токен в нём означал
+    # бы и сырое значение в базе, и вторую сессию от бэкфилла выше.
+    try:
+        ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        if "session_token" in ucols:
+            rows = conn.execute(
+                "SELECT id, session_token FROM users WHERE session_token IS NOT NULL").fetchall()
+            stale = [(r["id"], token_digest(r["session_token"])) for r in rows
+                     if not _is_token_digest(r["session_token"] or "")]
+            for user_id, digest in stale:
+                conn.execute("UPDATE users SET session_token=? WHERE id=?", (digest, user_id))
+    except sqlite3.Error:
+        pass
+
+
 def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[str, str] | None = None,
                         device_identity: tuple[str | None, str | None] | None = None) -> tuple[str, int]:
     token = token_urlsafe(32)
@@ -1125,11 +1211,12 @@ def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[st
     name, dtype = device if device else ("Браузер", "desktop")
     now_ms = int(time.time() * 1000)
     key, net = device_identity if device_identity else (None, None)
+    digest = token_digest(token)
     try:
         conn.execute(
             "INSERT INTO user_sessions(user_id, token, created_at, expires_at, device_name, device_type, device_key, device_net, last_seen_at) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
-            (user_id, token, now_iso(), expires_at, name, dtype, key, net, now_ms),
+            (user_id, digest, now_iso(), expires_at, name, dtype, key, net, now_ms),
         )
         # Прежние сессии того же клиента (строки, заведённые до отпечатков)
         # привязываем к новой — иначе они навсегда остались бы вторым
@@ -1139,7 +1226,7 @@ def create_user_session(conn: sqlite3.Connection, user_id: int, device: tuple[st
         # Старая схема без device-колонок (двойная защита к миграции выше).
         conn.execute(
             "INSERT INTO user_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
-            (user_id, token, now_iso(), expires_at),
+            (user_id, digest, now_iso(), expires_at),
         )
     return token, expires_at
 
@@ -1156,7 +1243,7 @@ def rotate_user_session(conn: sqlite3.Connection, old_token: str | None, user_id
     тот же, что у прошлых входов с этой машины, — в «Устройствах» это одна
     строка, сколько бы раз человек ни входил и выходил."""
     if old_token:
-        conn.execute("DELETE FROM user_sessions WHERE token=?", (old_token,))
+        conn.execute("DELETE FROM user_sessions WHERE token=?", (token_digest(old_token),))
     token, expires_at = create_user_session(conn, user_id, device, device_identity)
     return token, expires_at
 
@@ -1405,7 +1492,7 @@ def create_admin_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, i
     expires_at = int(time.time() * 1000) + ADMIN_SESSION_MAX_AGE * 1000
     conn.execute(
         "INSERT INTO admin_sessions(user_id, token, created_at, expires_at) VALUES (?,?,?,?)",
-        (user_id, token, now_iso(), expires_at),
+        (user_id, token_digest(token), now_iso(), expires_at),
     )
     conn.commit()
     return token, expires_at
@@ -1434,8 +1521,22 @@ def admin_session_user(conn: sqlite3.Connection, user_id: int, admin_token: str 
         return None
     row = conn.execute(
         "SELECT id, expires_at FROM admin_sessions WHERE user_id=? AND token=?",
-        (user_id, admin_token),
+        (user_id, token_digest(admin_token)),
     ).fetchone()
+    if row is None and not _is_token_digest(admin_token):
+        # Совместимость со строкой, заведённой до хеширования: находим по сырому
+        # токену и сразу переводим на хэш (см. session_row_for).
+        row = conn.execute(
+            "SELECT id, expires_at FROM admin_sessions WHERE user_id=? AND token=?",
+            (user_id, admin_token),
+        ).fetchone()
+        if row is not None:
+            try:
+                conn.execute("UPDATE admin_sessions SET token=? WHERE id=?",
+                             (token_digest(admin_token), int(row["id"])))
+                conn.commit()
+            except sqlite3.Error:
+                conn.rollback()
     if not row:
         return None
     if int(row["expires_at"]) <= int(time.time() * 1000):
@@ -5922,11 +6023,16 @@ def provision_user(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) ->
     assign_account_id(conn, new_user_id)
     conn.execute("INSERT INTO user_stats(user_id) VALUES (?)", (new_user_id,))
     ensure_subject_rows(conn, new_user_id, DEFAULT_SUBJECT)
-    # users.session_token — legacy-колонка; пишем туда же стартовый токен,
-    # чтобы бэкфилл ensure_auth_schema не поднимал её обратно как новую сессию.
+    # users.session_token — legacy-колонка. Кладём туда ХЭШ стартового токена,
+    # а не сам токен: иначе сырая строка осталась бы в базе (принцип «в базе
+    # только хэши»), а бэкфилл ensure_auth_schema увидел бы её как ещё не
+    # перенесённую сессию и поднял вторую копию. Совпадение достигается тем,
+    # что выборка сверяет session_token с token из user_sessions, а там лежит
+    # тот же sha256.
     new_token, _ = create_user_session(conn, new_user_id, request_device_info(handler),
                                        request_device_identity(conn, handler, new_user_id))
-    conn.execute("UPDATE users SET session_token=? WHERE id=?", (new_token, new_user_id))
+    conn.execute("UPDATE users SET session_token=? WHERE id=?",
+                 (token_digest(new_token), new_user_id))
     conn.commit()
     return new_user_id, new_token
 
@@ -8363,10 +8469,11 @@ class Handler(BaseHTTPRequestHandler):
         admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
         user_id = None
         if token:
-            row = conn.execute("SELECT user_id FROM user_sessions WHERE token=?", (token,)).fetchone()
+            row = conn.execute("SELECT user_id FROM user_sessions WHERE token=?",
+                               (token_digest(token),)).fetchone()
             if row:
                 user_id = row["user_id"]
-            conn.execute("DELETE FROM user_sessions WHERE token=?", (token,))
+            conn.execute("DELETE FROM user_sessions WHERE token=?", (token_digest(token),))
         # Выход из аккаунта = полный выход: админ-права живут в паре кук,
         # привязанной к этой user-сессии, поэтому после её удаления admin-токен
         # уже ничего не значит — но хранить его в браузере незачем. Чистим и
