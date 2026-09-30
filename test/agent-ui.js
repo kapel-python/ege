@@ -332,6 +332,22 @@ check("история рисуется строго по порядку (воп�
   && /groups\.push\(\{ kind: "user", text:/.test(spaCode)
   && /groups\.forEach\(function \(g, i\) \{[\s\S]{0,120}?if \(g\.kind === "user"\) userBubble/.test(spaCode)
   && !/msgs\.forEach\(function \(m\) \{[\s\S]{0,200}?userBubble\(m\.content/.test(spaCode));
+/* --- открытие переписки встаёт в самый низ: раньше доводка была плавной и на
+   длинной истории не доезжала (замер на прод-треде из 90 строк: dist=674px,
+   «Скопировать» на 650px ниже края), а звали её ещё и на каждый пузырёк и
+   карточку — анимация начиналась заново десятки раз. Теперь история рисуется
+   молча, а низ держится settleBottom (мгновенный progWrite, пока лента не
+   перестанет расти). */
+check("открытие истории: рисуем молча, вниз — один раз, мгновенно",
+  /var painting = false;/.test(spaCode)
+  && /function userBubble\(text\)[\s\S]{0,220}?if \(!painting\) scrollDown\(true, true\);/.test(spaCode)
+  && /function paintMessages\(msgs\) \{\s*painting = true;/.test(spaCode)
+  && /painting = false;\s*showEmpty\(false\);\s*(?:\/\/[^\n]*\n\s*)*settleBottom\(\);/.test(spaCode)
+  && /function settleBottom\(\)/.test(spaCode)
+  && /progWrite\(ui\.feed\.scrollHeight\)/.test(spaCode)
+  && /S\.follow && S\.stick && !S\.busy && dist\(\) > 1/.test(spaCode));
+check("карточка истории не дёргает ленту плавным скроллом",
+  !/if \(!animate\) \{[\s\S]{0,700}?scrollDown\(true, true\);\s*\}/.test(spaCode));
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",

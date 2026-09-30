@@ -40,6 +40,10 @@
   // с текстом «Раздел бесплатный» читался как «закрыть панель».
   var TRASH_D = "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3";
   var root = null, ui = {};
+  /* Пока рисуется переписка из готового массива, внутренние вызовы доводки
+     не нужны: история доводится один раз в конце (settleBottom), а не на
+     каждый пузырёк и карточку. */
+  var painting = false;
 
   function $(s, r) { return (r || root || document).querySelector(s); }
   function $all(s, r) { return Array.prototype.slice.call((r || root || document).querySelectorAll(s)); }
@@ -1065,7 +1069,7 @@
     var d = el("div", "agent__msg-user enter", text);
     if (ui.live) ui.live.appendChild(d);
     showEmpty(false);
-    scrollDown(true, true);
+    if (!painting) scrollDown(true, true);
     return d;
   }
   // Шаг строится в двух состояниях: пустой контейнер (в него вырастает
@@ -1273,6 +1277,26 @@
   function finishBottom() {
     glideStop();
     if (S.follow) scrollDown(true, false);
+  }
+  /* Открытие переписки: встать в самый низ МГНОВЕННО и держать низ, пока
+     лента перестаёт расти. Один smooth-скролл на длинной истории (замер:
+     16 000px) заканчивался на 674px выше низа — после перезагрузки человек
+     оказывался на последнем абзаце ответа, а кнопки-продолжения и
+     «Скопировать» уезжали под край. Причина в том, что доводку звали и на
+     каждый пузырёк, и на каждую карточку: анимация начиналась заново
+     десятки раз и не доезжала. Здесь — прямой progWrite (своя запись, руке
+     человека не мешает) и несколько кадров подряд, пока dist() не станет
+     нулём; ушедшего вверх (S.follow/S.stick сняты) и начавшийся ход не
+     трогаем. */
+  function settleBottom() {
+    if (!ui.feed) return;
+    var left = 24, stable = 0;
+    (function tick() {
+      if (!ui.feed || left-- <= 0) return;
+      if (S.follow && S.stick && !S.busy && dist() > 1) { stable = 0; progWrite(ui.feed.scrollHeight); }
+      else if (dist() <= 1) { if (++stable >= 2) return; }
+      raf(tick);
+    })();
   }
   function printGlideTick() {
     var feed = S.glideFeed;
@@ -1579,13 +1603,11 @@
         // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
         // и после перезагрузки продолжение было только у ответов без шагов.
         cardFooter(card, null, asks);
-        scrollDown(true, true);
       } else {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
         syncBusy();
         paras.forEach(function (p) { card.appendChild(p); });
         cardFooter(card, null, asks);
-        scrollDown(true, true);
       }
       return card;
     }
@@ -1673,8 +1695,9 @@
   // Отрисовка переписки из готового массива: кэш раздела и ответ сервера идут
   // в одну функцию, иначе кэш и сеть рисовали бы по-разному.
   function paintMessages(msgs) {
+    painting = true;
     clearFeed();
-    if (!msgs || !msgs.length) { showEmpty(true); return; }
+    if (!msgs || !msgs.length) { painting = false; showEmpty(true); return; }
     var pending = [];
     // Кнопки-продолжения — только у ПОСЛЕДНЕГО ответа: в переписке они
     // относятся к тому, что на экране сейчас, и у каждого старого ответа
@@ -1710,8 +1733,11 @@
         else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : []);
       });
     }
+    painting = false;
     showEmpty(false);
-    scrollDown(true, false);
+    // Низ — после того как лента встанет (схлопываются ленты шагов, догружается
+    // шрифт): один smooth-скролл на такой высоте не доезжал.
+    settleBottom();
   }
   function loadThreadMessages() {
     var g = S.mountGen;
