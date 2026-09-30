@@ -856,12 +856,17 @@
   function selectThread(id) {
     var prev = S.currentId;
     S.navGen++;
+    var leaving = Number(prev) !== Number(id);
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
-    if (Number(prev) !== Number(id) && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
-    // Ход этого экрана закончен: недопечатанный ответ доигрываем разом, запрос
-    // больше не держит композер (его ответ придёт, когда чат откроют снова).
+    if (leaving && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
+    // Недопечатанный ответ доигрываем разом.
     if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
-    S.turn = null;
+    // Уходим в другой чат — его ход закрыт (fetch оборван, ответ допишется в
+    // базу и появится, когда чат откроют снова). Остаёмся в том же — ход
+    // доживает: S.turn нельзя терять, иначе следующий маунт/guard оборвёт
+    // запрос и ученик получит «Нет соединения» вместо ответа.
+    if (leaving) S.turn = null;
+    else if (S.turn && !S.turn.dead) S.turn.detached = true;
     S.printing = false;
     syncBusy();
     S.currentId = id != null ? Number(id) : null;
@@ -2176,7 +2181,14 @@
     }
     (S.timers || []).forEach(function (t) { try { clearTimeout(t); } catch (_) {} });
     S.timers = [];
-    S.turn = null;
+    // Живой ход на этом экране закрывается, но САМ ОН ОСТАЁТСЯ в S.turn: его
+    // fetch переживает пересборку экрана, ответ подхватит reattachTurn.
+    // Обнулять S.turn здесь нельзя — тогда на СЛЕДУЮЩЕМ маунте условие
+    // `S.abort && !S.turn` в abort-guard выше становится истиной и рвёт
+    // запрос на живом ходу: nginx пишет 499, ученик видит «Нет соединения»,
+    // а повтор упирается в AGENT_BUSY (400). Замерено вживую 30.09.
+    // Композер такой ход не держит — для этого detached, а не null.
+    if (S.turn && !S.turn.dead) S.turn.detached = true;
     S.printing = false;
     S.navGen++;
     // Незаконченная анимация хода не должна пережить размонтирование: её

@@ -388,6 +388,21 @@ check("у нижних строк меню переворачивается вв
 check("удаление чата — корзиной, а не крестиком",
   /ctxItem\("Удалить чат", svgRaw\(TRASH_D/.test(spaJs));
 
+/* --- пересборка экрана во время хода его не рвёт (регресс с прода 30.09) ---
+   Симптом: nginx 499 -> «Нет соединения», повтор -> 400 AGENT_BUSY. Причина:
+   screenAgent обнулял S.turn, и на СЛЕДУЮЩЕМ маунте abort-guard
+   (`S.abort && !S.turn`) видел контроллер без хода и рвал живой запрос, а
+   ответ уже никто не подхватывал (reattachTurn не находит хода). */
+const screenAgentBody = (spaJs.match(/function screenAgent\(screenRoot\) \{[\s\S]*?\n  \}/) || [""])[0];
+check("пересборка экрана не теряет живой ход (detached, а не S.turn = null)",
+  /if \(S\.turn && !S\.turn\.dead\) S\.turn\.detached = true;/.test(screenAgentBody)
+  && !/S\.turn = null;/.test(screenAgentBody), screenAgentBody.slice(0, 60));
+check("смена чата закрывает ход только ЧУЖОГО треда (свой — доживает)",
+  /var leaving = Number\(prev\) !== Number\(id\);/.test(spaCode)
+  && /if \(leaving\) S\.turn = null;\s*else if \(S\.turn && !S\.turn\.dead\) S\.turn\.detached = true;/.test(spaCode));
+check("abort-guard маунта на живой ходе не срабатывает (S.turn сохранён)",
+  /ui = \{\};\s*\/\/ Летящий ход не рвём[\s\S]{0,200}?if \(S\.abort && \(!S\.turn \|\| S\.turn\.dead \|\| S\.abort !== S\.turn\.ctrl\)\)/.test(spaJs));
+
 /* --- невидимый повтор сбоя сервера (клиент) --- */
 check("сбой сервера повторяется невидимо (500/502/503)",
   spaCode.includes("retrySilently") && spaCode.includes("TURN_CLIENT_RETRIES")
