@@ -237,8 +237,9 @@ def main() -> int:
             c = db()
             try:
                 tok = admin.cookie("ege_session")
+                # В базе лежит sha256 токена, а не сам токен (server.token_digest).
                 c.execute("UPDATE user_sessions SET expires_at=? WHERE token=?",
-                          (int(time.time() * 1000) - 1000, tok))
+                          (int(time.time() * 1000) - 1000, server.token_digest(tok)))
                 c.commit()
             finally:
                 c.close()

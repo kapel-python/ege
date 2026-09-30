@@ -393,12 +393,104 @@ def check_support_rebuild_keeps_rows() -> None:
         shutil.rmtree(db.parent, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Токены сессий в базе — только хэши
+# ---------------------------------------------------------------------------
+def check_token_hashing() -> None:
+    """В базе не должно быть готовых кук.
+
+    Пара `ege_session` + `ege_admin`, прочитанная из файла БД (или бэкапа),
+    открывала админку со всеми аккаунтами — это проверено на живой базе до
+    правки. Теперь в базе лежит sha256, восстановить токен из которого нельзя
+    (сам токен — 256 бит энтропии), а живая сессия продолжает работать.
+    """
+    print("\n== Токены сессий: в базе хэши, куки работают ==")
+    with tempfile.TemporaryDirectory(prefix="ege-db-tok-") as tmp:
+        server, base, httpd = boot(Path(tmp) / "tok.sqlite3", "ege_db_tok")
+        try:
+            class C:
+                def __init__(self, ip): self.ip, self.jar = ip, {}
+                def req(self, path, method="GET", body=None):
+                    data = json.dumps(body).encode() if body is not None else None
+                    r = urllib.request.Request(base + path, data=data, method=method)
+                    if data: r.add_header("Content-Type", "application/json")
+                    r.add_header("X-Forwarded-For", self.ip)
+                    for k, v in self.jar.items():
+                        r.add_header("Cookie", f"{k}={v}")
+                    try:
+                        with urllib.request.urlopen(r, timeout=15) as x:
+                            st, payload = x.status, x.read()
+                    except urllib.error.HTTPError as e:
+                        st, payload = e.code, e.read()
+                    for raw in x.headers.get_all("Set-Cookie") or []:
+                        nm, _, rest = raw.partition("=")
+                        if "Max-Age=0" in rest:
+                            self.jar.pop(nm.strip(), None)
+                        else:
+                            self.jar[nm.strip()] = rest.split(";")[0]
+                    try:
+                        return st, json.loads(payload or b"{}")
+                    except json.JSONDecodeError:
+                        return st, {}
+
+            c = C("10.20.0.1")
+            c.req("/api/profile/claim", "POST",
+                  {"subject": "profile_math", "onboarded": True, "name": "Токен"})
+            st, b = c.req("/api/bootstrap")
+            live_cookie = c.jar.get("ege_session")
+            t("гость получил живую куку", bool(live_cookie), b)
+
+            conn = server.connect()
+            try:
+                rows = conn.execute("SELECT token FROM user_sessions").fetchall()
+                raw_leaks = [r["token"] for r in rows if not server._is_token_digest(r["token"])]
+                t("в user_sessions нет сырых токенов", not raw_leaks, raw_leaks[:2])
+                t("в базе вообще есть сессия", len(rows) > 0, len(rows))
+                # Хэш токена НЕ равен самому токену и не содержит его.
+                t("в базе нет самого токена",
+                  all(r["token"] != live_cookie for r in rows),
+                  [r["token"][:12] for r in rows[:2]])
+                lego = conn.execute(
+                    "SELECT value_json FROM app_config WHERE key='device_fingerprint_secret'").fetchone()
+                t("секреты в app_config тоже не токены",
+                    lego is None or live_cookie not in str(lego["value_json"]), None)
+            finally:
+                conn.close()
+
+            # Старая (сырая) кука продолжает работать, а подделка — нет.
+            class Fake:
+                def __init__(self, tok): self.headers = {"X-Forwarded-For": "10.20.0.1",
+                                                         "Cookie": f"ege_session={tok}"}
+                def __repr__(self): return "Fake"
+            conn = server.connect()
+            try:
+                row = server.session_row_for(conn, live_cookie)
+                t("старая кука находит свою сессию после хеширования", row is not None, row)
+                t("подделанный токен отклонён",
+                   server.session_row_for(conn, "A" * 43) is None)
+                # Легаси-строка (заведённая до хеширования) тоже работает и чинится.
+                conn.execute("UPDATE user_sessions SET token=? WHERE id=?",
+                             (live_cookie, int(row["session_pk"])))
+                conn.commit()
+                legacy = server.session_row_for(conn, live_cookie)
+                t("легаси-строка по сырому токену находится", legacy is not None)
+                fixed = conn.execute("SELECT token FROM user_sessions WHERE id=?",
+                                     (int(row["session_pk"]),)).fetchone()["token"]
+                t("легаси-строка переведена на хэш при обращении",
+                   server._is_token_digest(fixed), fixed[:16])
+            finally:
+                conn.close()
+        finally:
+            httpd.shutdown()
+
+
 def main() -> int:
     check_agent_param_order()
     check_health_rate_and_cache()
     check_reset_completeness()
     check_index_self_heal()
     check_support_rebuild_keeps_rows()
+    check_token_hashing()
     print("\n" + "=" * 60)
     if FAILED:
         print(f"ПРОВАЛЕНО {len(FAILED)} из {PASSED + len(FAILED)}: db-integrity-security")
@@ -407,7 +499,7 @@ def main() -> int:
         return 1
     print(f"ЦЕЛОСТНОСТЬ БД OK: {PASSED} проверок "
           "(порядок параметров агента, лимит и кэш /api/health, полнота сброса, "
-          "самолечение индексов, сохранность обращений)")
+          "самолечение индексов, сохранность обращений, токены сессий как хэши)")
     return 0
 
 

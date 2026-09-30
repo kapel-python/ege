@@ -435,7 +435,9 @@ def main():
             tok = token_of(dev10.jar)
             conn = server.connect()
             try:
-                conn.execute("UPDATE user_sessions SET expires_at=0 WHERE token=?", (tok,))
+                # В базе лежит sha256 токена, а не сам токен (server.token_digest).
+                conn.execute("UPDATE user_sessions SET expires_at=0 WHERE token=?",
+                             (server.token_digest(tok),))
                 conn.commit()
             finally:
                 conn.close()

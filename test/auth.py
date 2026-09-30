@@ -266,8 +266,10 @@ def main():
             # 14. Истёкшая сессия: сервер выдаёт нового гостя и новую куку.
             conn = server.connect()
             try:
+                # Токен в базе хранится хэшем (server.token_digest), а не сырым:
+                # см. «Токены сессий — sha256 в базе» в AGENTS.md.
                 conn.execute("UPDATE user_sessions SET expires_at=? WHERE token=?",
-                             (0, cookie_token(jar_a)))
+                             (0, server.token_digest(cookie_token(jar_a))))
                 conn.commit()
             finally:
                 conn.close()
