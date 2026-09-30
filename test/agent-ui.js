@@ -138,6 +138,9 @@ check("лента следует за растущим блоком (follow)", s
 check("ответ печатается по словам (buildTyped + printPara)",
   spaCode.includes("printPara") && spaCode.includes("buildTyped")
   && !spaCode.includes("agent__caret") && !spaCode.includes("agent__wm"));
+check("markdown режется на блоки верхнего уровня (пустое будущее — один абзац)",
+  /tmp\.childNodes/.test(spaCode) && /box\.appendChild\(node\)/.test(spaCode)
+  && !/box\.innerHTML = html;\s*\n\s*return \[box\];/.test(spaCode));
 check("markdown ответа — библиотеками (marked + DOMPurify), innerHTML только после санитайза",
   spaCode.includes("marked.parse") && spaCode.includes("DOMPurify.sanitize")
   && /\.innerHTML = html/.test(spaCode) && spaCode.includes('html = window.DOMPurify')
@@ -368,10 +371,19 @@ check("плейсхолдер различает «отвечает» и «пи�
 /* --- лента идёт вровень с печатью, а не прыгает в конец неготовости --- */
 check("низ написанного — последнее проявившееся слово (followPrint)",
   spaCode.includes("function followPrint") && /followPrint\(words\[i\]\)/.test(spaCode)
-  && /if \(gap <= 6\) return;/.test(spaCode) && /if \(!word \|\| !ui\.feed \|\| !S\.stick\) return;/.test(spaCode));
-check("начало длинного абзаца подводится сверху, а не прокруткой в самый низ",
+  && /wr\.bottom - \(fr\.bottom - PRINT_GAP\)/.test(spaCode) && /if \(need <= 4\) return;/.test(spaCode)
+  && /if \(!word \|\| !ui\.feed \|\| !S\.stick\) return;/.test(spaCode));
+check("программная прокрутка печати не снимает S.stick (holdStick/S.lock)",
+  /function holdStick\(\)/.test(spaCode) && /S\.lock = Date\.now\(\) \+ 700/.test(spaCode)
+  && /holdStick\(\);\s*ui\.feed\.scrollTop \+=/.test(spaCode));
+check("начало абзаца встаёт на линию печати, а не наверх и не в самый низ",
   spaCode.includes("function parkParagraph") && /parkParagraph\(p\);\s*printPara/.test(spaCode)
+  && /targetTop = fr\.bottom - PRINT_GAP - Math\.min\(pr\.height, 28\)/.test(spaCode)
+  && /if \(delta <= 4 && delta >= -160\) return;/.test(spaCode)
+  && /behavior: "smooth"/.test(spaCode)
   && !/card\.appendChild\(p\);\s*\/\/ Раскладка[\s\S]{0,200}?scrollDown\(false, true\);\s*printPara/.test(spaCode));
+check("доводка сворачивания не спорит с первым абзацем (follow короче задержки write)",
+  /follow\(350\);\s*later\(quiet \? 0 : 420, write\);/.test(spaCode));
 
 /* --- меню чата на телефоне: вход видимый, плашка крупная, переворот вверх --- */
 check("на телефоне «⋯» видна (вход в меню не только удержанием)",

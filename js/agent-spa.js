@@ -1189,10 +1189,31 @@
       });
       return paras;
     }
-    var box = el("div", "agent__answer agent__md");
-    box.setAttribute("data-md", "1");
-    box.innerHTML = html;
-    return [box];
+    /* Один элемент на узел верхнего уровня (абзац, список, цитата), а не весь
+       ответ одним блоком: блоки дописываются в ленту по одному, и пустое
+       будущее никогда не занимает больше текущего абзаца. Раньше весь ответ
+       лежал одним .agent__md — park отрабатывал один раз на старте (а поднять
+       первую строку к краю тогда физически нельзя: выше начала контента уйти
+       некуда), и дальше вьюпорт стоял и показывал сотни пикселей
+       ненапечатанного на все секунды печати. */
+    var tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    var out = [];
+    Array.prototype.forEach.call(tmp.childNodes, function (node) {
+      if (node.nodeType === 3) {
+        if (!node.nodeValue || !node.nodeValue.trim()) return;
+        out.push(el("p", "agent__answer", node.nodeValue.trim()));
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (!node.textContent || !node.textContent.trim()) return;  // пустые <p></p> от разметки
+      var box = el("div", "agent__answer agent__md");
+      box.setAttribute("data-md", "1");
+      box.appendChild(node);
+      out.push(box);
+    });
+    if (!out.length) return [el("p", "agent__answer", text.trim())];
+    return out;
   }
   /* Печать готового DOM: оборачиваем слова текстовых узлов в те же
      .agent__ww, что и buildTyped, — раскладка и темп не меняются. */
@@ -1233,32 +1254,53 @@
   }
   /* Лента идёт вровень с ПЕЧАТАЮЩИМСЯ текстом, а не с его концом. Абзац
      занимает финальную высоту с первого кадра (все слова в DOM, невидимые —
-     opacity), поэтому старая «прокрутка вниз» на только что дописанном абзаце
-     показывала пустое место под текстом на все секунды печати: сайт кидал в
-     самый низ сообщения, которого ещё не было. Настоящий низ написанного —
-     нижняя граница последнего ПРОЯВИВШЕГОСЯ слова, её и держим у края ленты.
-     Вверх не тянем (человек ушёл читать — S.stick снят), шаг ограничен, чтобы
-     длинная строка не прыгала кадрами. */
+     opacity), поэтому прыжок «в самый низ» на только что дописанном абзаце
+     показывал пустое место будущих слов на все секунды печати: сайт кидал в
+     конец сообщения, которого ещё не было. Настоящий низ написанного —
+     нижняя граница последнего ПРОЯВИВШЕГОСЯ слова: её держим у края ленты
+     (PRINT_GAP от низа). Слово уже видно — стоим. Вверх не тянем (человек
+     ушёл читать — S.stick снят), шаг ограничен, чтобы длинная строка не
+     прыгала кадрами. Программный скролл держит S.lock, иначе обработчик
+     scroll принял бы наше же движение за «человек ушёл вверх» и снял бы
+     S.stick посреди печати. */
   var PRINT_GAP = 18;
+  function holdStick() { S.stick = true; S.lock = Date.now() + 700; }
   function followPrint(word) {
     if (!word || !ui.feed || !S.stick) return;
     var fr = ui.feed.getBoundingClientRect(), wr = word.getBoundingClientRect();
-    var gap = (fr.bottom - PRINT_GAP) - wr.bottom;   // >0: текст ушёл ниже края
-    if (gap <= 6) return;
-    ui.feed.scrollTop += Math.min(gap, Math.round(fr.height * 0.6));
+    // Слово ушло под край ленты — доводим ровно настолько, чтобы оно встало
+    // на PRINT_GAP от низа. Слово видно — ничего не делаем.
+    var need = wr.bottom - (fr.bottom - PRINT_GAP);
+    if (need <= 4) return;
+    holdStick();
+    ui.feed.scrollTop += Math.min(need, Math.round(fr.height * 0.6));
   }
-  /* Начало абзаца: показываем его ВЕРХ, а не низ ленты — иначе длинный абзац
-     печатался бы под краем экрана и человек смотрел бы в пустоту. Короткий
-     (влезает в две трети ленты) прижимаем к низу, как при обычной прокрутке. */
+  /* Начало абзаца: первая строка встаёт на линию печати (низ ленты минус
+     PRINT_GAP) — сразу, а не когда печать до неё доползёт. Абзац дописан
+     целиком (все слова уже в DOM), поэтому любая другая стоянка показывает
+     пустоту будущих слов: верх абзаца вверху ленты — сотни пикселей пустоты
+     под написанным на все секунды печати (замер: зазор 400px, вьюпорт стоит),
+     прыжок в самый низ — ту же пустоту. Дальше печать ведёт followPrint.
+     Ушёл читать (S.stick снят) — не трогаем. Маленькие доводки мгновенные,
+     большие (>120px) — плавным glide: он и есть «ехать вместе», а дёрганья
+     нет, потому что followPrint во время glide молчит (слово ещё выше края).
+     Верх виден и почти на линии (первые 160px сверху) — стоим: печать сама
+     спустится к краю за секунду, дёргать ленту ради неё незачем. */
   function parkParagraph(p) {
-    if (!ui.feed || !S.stick) return;
+    if (!ui.feed || !S.stick || !p) return;
     var fr = ui.feed.getBoundingClientRect(), pr = p.getBoundingClientRect();
-    var room = fr.height * 0.62;
-    if (pr.height <= room) { scrollDown(false, true); return; }
-    var delta = (fr.top + (fr.height - room)) - pr.top;
-    if (Math.abs(delta) < 8) return;
-    try { ui.feed.scrollTo({ top: ui.feed.scrollTop + delta, behavior: calm() ? "auto" : "smooth" }); }
-    catch (_) { ui.feed.scrollTop += delta; }
+    // Первая строка абзаца должна встать на линию печати.
+    var targetTop = fr.bottom - PRINT_GAP - Math.min(pr.height, 28);
+    var delta = pr.top - targetTop;
+    // На линии (или чуть ниже — доклеит followPrint) либо чуть выше (печать
+    // сама спустится к краю): стоим.
+    if (delta <= 4 && delta >= -160) return;
+    holdStick();
+    if (Math.abs(delta) > 120 && !calm()) {
+      try { ui.feed.scrollTo({ top: ui.feed.scrollTop + delta, behavior: "smooth" }); return; }
+      catch (_) {}
+    }
+    ui.feed.scrollTop += delta;
   }
   // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
   // на полминуты (шаг 900 мс на весь текст, но не медленнее 24 и не быстрее 45).
@@ -1439,7 +1481,10 @@
       if (!alive()) return;
       card.classList.add("done");
       built.trace.classList.remove("open");
-      follow(500);
+      // Доводка заканчивается ДО первого абзаца (write на 420 мс): иначе цикл
+      // follow тянул бы ленту в самый низ полного (ещё не напечатанного)
+      // абзаца и спорил бы с parkParagraph за скролл.
+      follow(350);
       later(quiet ? 0 : 420, write);
     }
     function write() {
