@@ -620,6 +620,16 @@ check("жест не перехватывается в поле ввода и г
   && /n\.tagName === "TEXTAREA" \|\| n\.tagName === "INPUT"/.test(spaCode)
   && /n\.scrollWidth > n\.clientWidth \+ 2/.test(spaCode)
   && /swipeSkips\(e\.target\)/.test(spaCode));
+/* --- удаление чата спрашивает общим диалогом приложения (openConfirmDialog,
+   та же .dlg-система, что выход из аккаунта и завершение сессии): раньше
+   корзина сносила переписку сразу и вернуть её было нельзя. */
+check("удаление чата — общий диалог подтверждения",
+  /function askDeleteThread\(t\)/.test(spaCode)
+  && /openConfirmDialog\(\{/.test(spaCode)
+  && /confirmText: "Удалить"/.test(spaCode)
+  && /onConfirm: function \(\) \{ doDeleteThread\(t\); \}/.test(spaCode)
+  && /function doDeleteThread\(t\)/.test(spaCode)
+  && /trash: '<svg/.test(appJs));
 check("футер скрыт на экране чата", read("js/footer.js").includes("ai: true"));
 
 /* --- старый адрес /agent — редирект в SPA --- */

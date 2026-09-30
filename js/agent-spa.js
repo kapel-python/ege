@@ -1031,8 +1031,30 @@
   function deleteThread(id) {
     var t = S.threads.filter(function (x) { return Number(x.id) === Number(id); })[0];
     if (!t) return;
+    if (Number(S.currentId) === Number(t.id) && S.busy) {
+      say("Дождись ответа — удаление во время хода потеряет его");
+      return;
+    }
+    askDeleteThread(t);
+  }
+  /* Подтверждение — общим диалогом приложения (openConfirmDialog, та же
+     .dlg-система, что выход из аккаунта и завершение сессии в профиле).
+     Раньше корзина сносила чат сразу, и вернуть переписку было нельзя. */
+  function askDeleteThread(t) {
+    if (typeof openConfirmDialog !== "function") { doDeleteThread(t); return; }
+    var title = String(t.title || "Новый чат").trim();
+    if (title.length > 48) title = title.slice(0, 47) + "…";
+    openConfirmDialog({
+      iconName: "trash",
+      eyebrow: "Чат с наставником",
+      title: "Удалить чат?",
+      text: `Переписка ${title ? "«<b>" + esc(title) + "</b>» " : ""}и все её шаги исчезнут безвозвратно. Прогресс и ошибки из профиля останутся на месте.`,
+      confirmText: "Удалить",
+      onConfirm: function () { doDeleteThread(t); },
+    });
+  }
+  function doDeleteThread(t) {
     var wasCurrent = Number(S.currentId) === Number(t.id);
-    if (wasCurrent && S.busy) { say("Дождись ответа — удаление во время хода потеряет его"); return; }
     if (wasCurrent) {
       S.navGen++;
       if (S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
