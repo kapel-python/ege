@@ -434,63 +434,70 @@
     function p(n) { return String(n).padStart(2, "0"); }
     return p(Math.floor(s / 3600)) + ":" + p(Math.floor((s % 3600) / 60)) + ":" + p(s % 60);
   }
-  var limitTimer = null, limitPrevFocus = null;
+  /* Модалка квоты наставника — общая из app.js (openAiLimitModal, та же
+     .dlg-система, что окно лимита проверки сочинений и инфо-диалог о модели
+     на ege-result): здесь меняются только текст, иконка и подпись таймера.
+     Своей сборки окна (как была) больше нет — вид, крестик, Esc, тап по фону
+     и живой таймер берутся оттуда же.
+     Режим «сколько осталось» (клик по кружку, лимит ещё есть) — то же окно
+     без таймера и с кнопкой «Закрыть», то есть ровно инфо-диалог о модели. */
+  var AGENT_QUOTA_OPTS = {
+    eyebrow: "ИИ-наставник",
+    icon: "clock",
+    plural: function (n) { return pluralQ(n); },
+    refresh: function (force) { return fetchQuota(force); },
+    fallbackLimit: QUOTA_FALLBACK,
+  };
+  function agentQuotaText(limit, left) {
+    return "Ход — это твой вопрос наставнику и его ответ. Сегодня доступно " +
+      "<b><span data-ai-limit-left>" + left + "</span> из " + limit + "</b> " +
+      pluralQ(limit) + ": каждый потраченный возвращается через 8 часов.";
+  }
   function openLimitModal(quota, burstRetry) {
-    closeLimitModal();
+    if (typeof openAiLimitModal !== "function") {
+      say(burstRetry != null ? "Слишком частые запросы" : "Ходы на сегодня закончились");
+      return;
+    }
     var burst = burstRetry != null;
     var limit = Math.max(1, Number(quota && quota.limit) || QUOTA_FALLBACK);
-    var left = burst ? Math.max(1, Math.floor(Number(burstRetry) || 60))
-                     : Math.max(0, Math.floor(Number(quota && quota.resetInSec) || 0));
-    var holder = null;
-    try { holder = deviceModalRoot(); } catch (_) { holder = null; }
-    if (!holder) { say(burst ? "Слишком частые запросы" : "Ходы на сегодня закончились"); return; }
-    limitPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    var back = el("div", "dlg-backdrop");
-    var dlg = el("div", "dlg");
-    dlg.setAttribute("role", "dialog"); dlg.setAttribute("aria-modal", "true"); dlg.setAttribute("aria-label", burst ? "Слишком частые запросы" : "Ходы закончились");
-    var close = el("button", "dlg__close"); close.type = "button"; close.setAttribute("aria-label", "Закрыть окно");
-    close.innerHTML = icon("x");
-    close.addEventListener("click", closeLimitModal);
-    var h = el("h3", "", burst ? "Слишком частые запросы" : "Ходы на сегодня закончились");
-    var p = el("p", "", burst
-      ? "Ты отправляешь запросы слишком часто. Подожди немного — черновик цел."
-      : "Лимит — " + limit + " ходов в день. Каждый ход возвращается через 8 часов. Сейчас доступно: 0 из " + limit + ".");
-    var timerRow = el("p", "num", (burst ? "Повтор через " : "Возврат через ") + fmtHMS(left));
-    timerRow.setAttribute("role", "status");
-    var actions = el("div", "dlg__actions");
-    var ok = el("button", "btn btn--primary btn--sm", "Понятно");
-    ok.type = "button";
-    ok.addEventListener("click", closeLimitModal);
-    actions.appendChild(ok);
-    dlg.appendChild(close); dlg.appendChild(h); dlg.appendChild(p); dlg.appendChild(timerRow); dlg.appendChild(actions);
-    back.appendChild(dlg);
-    back.addEventListener("click", function (e) { if (e.target === back) closeLimitModal(); });
-    back.id = "agent-limit-modal";
-    holder.appendChild(back);
-    document.addEventListener("keydown", limitEscHandler);
-    limitTimer = setInterval(function () {
-      left -= 1;
-      if (left > 0) { timerRow.textContent = (burst ? "Повтор через " : "Возврат через ") + fmtHMS(left); return; }
-      clearInterval(limitTimer); limitTimer = null;
-      if (burst) { closeLimitModal(); return; }
-      fetchQuota(true).then(function (st) {
-        if (st && Number(st.remaining) > 0) closeLimitModal();
-        else openLimitModal(st || quota, null);
-      });
-    }, 1000);
+    var left = Math.max(0, Math.min(limit, Number(quota && quota.remaining) || 0));
+    openAiLimitModal(quota || { limit: limit, remaining: left }, burst ? (Math.max(1, Math.floor(Number(burstRetry) || 60))) : null, Object.assign({}, AGENT_QUOTA_OPTS, {
+      icon: "clock",
+      name: burst ? "Слишком частые запросы"
+        : (left > 0 ? "Ходы ещё есть" : "Ходы на сегодня закончились"),
+      timerLabel: burst ? "Повторная попытка через" : "Возврат хода через",
+      ariaLabel: burst ? "Слишком частые запросы" : "Ходы наставника закончились",
+      text: burst
+        ? "Ты отправляешь вопросы наставнику слишком часто. Подожди немного — вопрос и ответ уже в переписке, ничего не потеряно."
+        : (left > 0
+          ? "Один ход — это твой вопрос наставнику вместе с его ответом. Ходов осталось <b>" + left + " из " + limit + "</b>."
+          : agentQuotaText(limit, left)),
+    }));
+  }
+  /* Справочное окно по клику на кружок квоты: сколько ходов осталось и как
+     они тратятся. Раньше на тап всплывал тост в углу — ненадёжно (его
+     перебивает другая подсказка, он живёт 2.6с и ничего не объясняет). */
+  function openQuotaInfoModal() {
+    if (typeof openAiLimitModal !== "function") return;
+    var limit = Math.max(1, Number(S.quota.limit) || QUOTA_FALLBACK);
+    var left = Math.max(0, Math.min(limit, Number(S.quota.remaining) || 0));
+    openAiLimitModal({ limit: limit, remaining: left, resetInSec: S.quota.resetInSec }, null, Object.assign({}, AGENT_QUOTA_OPTS, {
+      icon: "ai",
+      name: left > 0 ? "Осталось " + left + " из " + limit : "Ходов на сегодня нет",
+      timer: false,
+      closeText: "Закрыть",
+      ariaLabel: "Ходы наставника",
+      text: left > 0
+        ? "Ход — это твой вопрос наставнику и его ответ вместе с шагами. Сегодня доступно <b>" +
+          left + " из " + limit + "</b> " + pluralQ(limit) + ". Каждый потраченный ход возвращается через 8 часов, поэтому лимит восстанавливается сам."
+        : "Сегодня ходы закончились. Следующий вернётся по цепочке — таймер появляется здесь же.",
+    }));
   }
   function limitEscHandler(e) {
-    if (e.key === "Escape") closeLimitModal();
+    if (e.key === "Escape" && typeof closeAiLimitModal === "function") closeAiLimitModal();
   }
   function closeLimitModal() {
-    if (limitTimer) { clearInterval(limitTimer); limitTimer = null; }
-    try { document.removeEventListener("keydown", limitEscHandler); } catch (_) {}
-    var m = document.getElementById("agent-limit-modal");
-    if (m && m.parentNode) m.parentNode.removeChild(m);
-    if (limitPrevFocus && limitPrevFocus.focus) {
-      try { limitPrevFocus.focus({ preventScroll: true }); } catch (_) {}
-      limitPrevFocus = null;
-    }
+    if (typeof closeAiLimitModal === "function") closeAiLimitModal();
   }
   function fetchQuota(force) {
     return api("GET", "/api/agent/limits").then(function (res) {
@@ -592,13 +599,17 @@
     quotaTip.setAttribute("role", "tooltip");
     quotaWrap.appendChild(quota); quotaWrap.appendChild(quotaTip);
     var tipTimer = null;
+    // Тап по кружку — окно о квоте (тот же .dlg, что у проверки сочинений),
+    // а не всплывающий тост: тост живёт 2.6с, ничего не объясняет и
+    // перебивается другим. Сначала одна сверка с сервером, чтобы цифра в
+    // окне была честной.
     quota.addEventListener("click", function () {
       quotaWrap.classList.add("tip");
       if (tipTimer) clearTimeout(tipTimer);
       tipTimer = setTimeout(function () { quotaWrap.classList.remove("tip"); }, 2600);
       fetchQuota(true).then(function (st) {
         if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
-        say("Осталось " + S.quota.remaining + " из " + S.quota.limit + " " + pluralQ(S.quota.limit) + " сегодня");
+        openQuotaInfoModal();
       });
     });
     bar.appendChild(menu); bar.appendChild(title); bar.appendChild(quotaWrap);

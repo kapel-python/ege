@@ -49,10 +49,29 @@ check("нет innerHTML с сырыми строками",
   !/\.innerHTML\s*=\s*[^`]*\$\{/.test(spaCode) && !/\.innerHTML\s*\+=/.test(spaCode));
 check("экранирование через esc()", spaCode.includes("esc("));
 check("иконки через icon()", spaCode.includes("icon("));
-check("модалка лимита на общей dlg-системе",
-  spaCode.includes("deviceModalRoot") && spaCode.includes("dlg-backdrop") && spaCode.includes("dlg__close"));
-check("модалка закрывается по Esc и возвращает фокус",
-  spaCode.includes("limitEscHandler") && spaCode.includes("limitPrevFocus"));
+/* --- окно квоты наставника = общая модалка приложения (openAiLimitModal из
+   app.js), а не своя сборка .dlg: тот же вид, что у окна лимита проверки
+   сочинений и инфо-диалога о модели на ege-result, меняются только текст,
+   иконка и подпись таймера. */
+check("окно квоты — общая модалка лимита, а не своя сборка",
+  /openAiLimitModal\(/.test(spaCode)
+  && /function openQuotaInfoModal\(\)/.test(spaCode)
+  && /function openLimitModal\(quota, burstRetry\)/.test(spaCode)
+  && !/el\("div", "dlg-backdrop"\)/.test(spaCode)
+  && !/el\("div", "dlg"\)/.test(spaCode)
+  && /AGENT_QUOTA_OPTS/.test(spaCode));
+check("справочный режим без таймера, кнопка «Закрыть» (как инфо о модели)",
+  /timer: false/.test(spaCode) && /closeText: "Закрыть"/.test(spaCode)
+  && /icon: "ai"/.test(spaCode) && /eyebrow: "ИИ-наставник"/.test(spaCode));
+check("тап по кружку открывает окно, а не тост",
+  /quota\.addEventListener\("click"[\s\S]{0,700}?openQuotaInfoModal\(\);/.test(spaCode)
+  && !/quota\.addEventListener\("click"[\s\S]{0,700}?say\("Осталось/.test(spaCode));
+check("общая модалка закрывается по Esc и возвращает фокус",
+  /function limitEscHandler\(e\)/.test(spaCode)
+  && /closeAiLimitModal/.test(spaCode)
+  && /deviceModalEscHandler/.test(appJs)
+  && /deviceModalPrevFocus = document\.activeElement/.test(appJs)
+  && /deviceModalPrevFocus && deviceModalPrevFocus\.isConnected[\s\S]{0,200}?deviceModalPrevFocus\.focus/.test(appJs));
 check("бан через showAccountBlocked", spaCode.includes("showAccountBlocked"));
 
 /* --- поведение чата (портировано из старой страницы) --- */
@@ -63,7 +82,7 @@ check("кнопки подтверждения", spaCode.includes("Примен�
   && spaCode.includes("needs_confirm") && spaCode.includes("confirmStep"));
 check("confirm без даблклика", spaCode.includes("disabled = true"));
 check("квота с plural", spaCode.includes("setQuota") && spaCode.includes("pluralQ"));
-check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат через"));
+check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат хода через"));
 check("список тредов + Новый чат", spaCode.includes("agent__list") && spaCode.includes("Новый чат"));
 check("тред из localStorage с ключом аккаунта", spaCode.includes("ege_agent_thread:"));
 check("квота переживает перезагрузку", spaCode.includes("ege_agent_quota:"));

@@ -4816,7 +4816,14 @@ function aiLimitsNoteSpend() {
    кончился лимит — тот видит продуктовый 429 AI_LIMIT. Окно burst нужно ровно
    тем, кто шлёт запросы чаще, чем может прожить человек.
    Других мест про лимит нет: внутри практики оба 429 идут сюда, отдельных
-   inline-блоков «Проверка не удалась / Слишком часто» больше нет. */
+   inline-блоков «Проверка не удалась / Слишком часто» больше нет.
+
+   Третий аргумент opts — тот же вид окна для ДРУГОГО продукта: раздел ИИ
+   открывает его кликом по кружку квоты (справочный режим: timer:false и
+   closeText "Закрыть" — ровно инфо-диалог о модели на ege-result) и по
+   исчерпании ходов (свои текст, своё склонение, refresh: fetchQuota).
+   Отдельной модалки у наставника больше нет: вид и поведение (крестик, Esc,
+   тап по фону, живой таймер, перезапуск по нулю) — одни и те же. */
 let aiLimitTickTimer = null;
 
 function aiLimitStopTick() {
@@ -4831,41 +4838,53 @@ function aiLimitFmt(totalSec) {
   return `${hh}:${mm}:${ss}`;
 }
 
-function openAiLimitModal(status, burstRetryAfterSec) {
+function openAiLimitModal(status, burstRetryAfterSec, opts) {
   const root = deviceModalRoot();
   if (!root) return;
   aiLimitStopTick();
+  const o = opts || {};
   const burst = burstRetryAfterSec != null;
-  const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
+  const limit = Math.max(1, Number(status && status.limit) || Number(o.fallbackLimit) || AI_LIMIT_FALLBACK);
   const remaining = Math.max(0, Math.min(limit, Number(status && status.remaining) || 0));
   let left = burst
     ? Math.max(1, Math.floor(Number(burstRetryAfterSec) || 60))
     : Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
   const hasBalance = status && status.remaining != null;
+  // Имя НЕ plural: локальная константа перекрыла бы глобальную функцию в
+  // своём же инициализаторе (рекурсия до переполнения стека).
+  const pluralFn = typeof o.plural === "function"
+    ? o.plural
+    : (n) => plural(n, "проверка", "проверки", "проверок");
+  const essayText = burst
+    ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
+    : `Лимит — ${limit} ${pluralFn(limit)} сочинения в день на аккаунт:
+          каждая потраченная возвращается через 8 часов.
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.`;
+  const name = o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились");
+  const text = typeof o.text === "function"
+    ? o.text({ remaining, limit, burst, left, plural: pluralFn })
+    : (o.text || essayText);
+  const withTimer = o.timer !== false;
+  const timerLabel = o.timerLabel || (burst ? "Повторная попытка через" : "Обновление лимита через");
   try {
     deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   } catch (_) {}
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeAiLimitModal()">
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="${burst ? "Слишком частые запросы" : "Лимит проверок сочинений исчерпан"}">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(o.ariaLabel || (burst ? "Слишком частые запросы" : "Лимит исчерпан"))}">
         <button class="dlg__close" type="button" onclick="closeAiLimitModal()" aria-label="Закрыть окно">${icon("x")}</button>
-        <div class="dlg__eyebrow">Проверка сочинения</div>
+        <div class="dlg__eyebrow">${esc(o.eyebrow || "Проверка сочинения")}</div>
         <div class="dlg-device">
-          <div class="dlg-device__icon" aria-hidden="true">${icon("clock")}</div>
-          <div class="dlg-device__name">${burst ? "Слишком частые запросы" : "Проверки на сегодня закончились"}</div>
+          <div class="dlg-device__icon" aria-hidden="true">${icon(o.icon || "clock")}</div>
+          <div class="dlg-device__name">${esc(name)}</div>
         </div>
-        <div class="dlg__text">
-          ${burst
-            ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
-            : `Лимит — ${limit} ${plural(limit, "проверка", "проверки", "проверок")} сочинения в день на аккаунт:
-          каждая потраченная возвращается через 8 часов.
-          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.`}
-        </div>
+        <div class="dlg__text">${text}</div>
+        ${withTimer ? `
         <div class="dlg-kv">
-          <div class="dlg-kv__row"><span>${burst ? "Повторная попытка через" : "Обновление лимита через"}</span><span class="mono" data-ai-limit-timer>${aiLimitFmt(left)}</span></div>
-        </div>
+          <div class="dlg-kv__row"><span>${esc(timerLabel)}</span><span class="mono" data-ai-limit-timer>${aiLimitFmt(left)}</span></div>
+        </div>` : ""}
         <div class="dlg__actions">
-          <button class="btn btn--primary" type="button" onclick="closeAiLimitModal()">Понятно</button>
+          <button class="btn btn--primary" type="button" onclick="closeAiLimitModal()">${esc(o.closeText || "Понятно")}</button>
         </div>
       </div>
     </div>`;
@@ -4873,6 +4892,8 @@ function openAiLimitModal(status, burstRetryAfterSec) {
   document.addEventListener("keydown", deviceModalEscHandler);
   const dlg = root.querySelector(".dlg");
   if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+  if (!withTimer) return;   // справочное окно (кружок квоты): таймер не нужен
+  const refresh = typeof o.refresh === "function" ? o.refresh : (force) => aiLimitsFetch(force);
   aiLimitTickTimer = setInterval(() => {
     const el = root.querySelector("[data-ai-limit-timer]");
     if (!el || !el.isConnected) { aiLimitStopTick(); return; } // окно закрыто (Esc/фон) — тикаем в никуда
@@ -4883,12 +4904,12 @@ function openAiLimitModal(status, burstRetryAfterSec) {
     if (burst) { closeAiLimitModal(); return; } // burst-бакет отпустил — окно гаснет, отправка повторяется кнопкой
     // Время вышло — сверяемся с сервером. Вернувшаяся проверка закрывает окно
     // (черновик цел, отправка повторяется кнопкой); иначе перезапускаем таймер.
-    aiLimitsFetch(true).then((st) => {
+    refresh(true).then((st) => {
       if (!st) return;
       if (Number(st.remaining) > 0) {
         closeAiLimitModal();
       } else {
-        openAiLimitModal(st); // сервер сказал ждать ещё — перезапускаем таймер
+        openAiLimitModal(st, null, o); // сервер сказал ждать ещё — перезапускаем таймер
       }
     });
   }, 1000);
