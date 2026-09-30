@@ -1266,6 +1266,14 @@
       raf(printGlideTick);
     }
   }
+  // Финал хода: встать ровно в самый низ, чтобы кнопки и «Скопировать» были
+  // в кадре, а не обрезанные ниже края. Glide-loop гасим, идём мгновенно:
+  // плавный scrollTo из follow() спорил с циклом за ленту, и конец замирал
+  // качелями выше низа. Ушедшего вверх (S.follow снят) не трогаем.
+  function finishBottom() {
+    glideStop();
+    if (S.follow) scrollDown(true, false);
+  }
   function printGlideTick() {
     var feed = S.glideFeed;
     if (!feed || feed !== ui.feed || !S.follow || S.printTarget == null) { S.gliding = false; return; }
@@ -1512,7 +1520,7 @@
       finished = true;
       if (S.pendingBail === bail) S.pendingBail = null;
       syncBusy();          // ответ дописан — композер снова свободен
-      follow(350);
+      finishBottom();
     }
     // Новый ход перебил незаконченный: дорисовываем остаток разом, карточка
     // не должна остаться с лоадером или с полупустым блоком шага.
@@ -1612,6 +1620,11 @@
         cardFooter(card, alive, asks);
         S.pendingBail = null;
         syncBusy();
+        // Доводка в самый низ — своей, а не из quickActions: когда модель не
+        // дала блок suggest, кнопок нет и quickActions выходит раньше своей
+        // доводки, и конец замирал бы на уровне текста с обрезанной кнопкой
+        // «Скопировать» ниже.
+        finishBottom();
         return;
       }
       var p = paras.shift();
@@ -2178,11 +2191,18 @@
       if (!S.pendingBail) watchAnswer(tid, text, WATCH_TRIES);
     });
     ui.feed.addEventListener("scroll", function () {
-      if (Date.now() > S.lock) S.stick = dist() < 120;
-      // Вернулся к самому низу во время хода — снова едем вместе с текстом.
-      // (Уход вверх ловится ниже по wheel/touch: сам scroll отличить не может —
-      // программная доводка тоже двигает ленту.)
-      if (S.busy && !S.follow && dist() < 120) S.follow = true;
+      // Своя доводка печати (значение сошлось точь-в-точь с progWrite) — это
+      // не рука человека: S.stick/S.follow не трогаем. Иначе glide посреди
+      // печати сам гасил бы следование (там dist>120 — обычное дело), и
+      // финальная доводка в самый низ уже не работала бы: конец оставался бы
+      // на уровне текста, а кнопки ниже обрезались.
+      var own = S.progTop != null && Math.abs(ui.feed.scrollTop - S.progTop) <= 2;
+      if (!own) {
+        if (Date.now() > S.lock) S.stick = dist() < 120;
+        // Вернулся к самому низу во время хода — снова едем вместе с текстом.
+        // (Уход вверх ловится ниже по wheel/touch.)
+        if (S.busy && !S.follow && dist() < 120) S.follow = true;
+      }
       if (ui.downBtn) ui.downBtn.classList.toggle("show", dist() > 200);
     });
     // Рука человека во время хода: колесо/палец вверх — «я почитаю выше»,

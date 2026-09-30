@@ -401,6 +401,9 @@ check("начало абзаца встаёт на линию печати, а �
   && !/card\.appendChild\(p\);\s*\/\/ Раскладка[\s\S]{0,200}?scrollDown\(false, true\);\s*printPara/.test(spaCode));
 check("доводка сворачивания не спорит с первым абзацем (follow короче задержки write)",
   /follow\(350\);\s*later\(quiet \? 0 : 420, write\);/.test(spaCode));
+check("финал хода встаёт ровно в низ: глайд гасится, дальше мгновенно (finishBottom)",
+  /function finishBottom\(\)/.test(spaCode) && /glideStop\(\);\s*if \(S\.follow\) scrollDown\(true, false\);/.test(spaCode)
+  && /syncBusy\(\);\s*finishBottom\(\);/.test(spaCode));
 /* --- рука человека во время хода: вверх — дальше без него, к низу — снова
    вместе. Раньше holdStick() на каждое слово стирал волю человека: lock не
    истекал всю печать, и подняться было невозможно — сайт дёргал обратно. */
