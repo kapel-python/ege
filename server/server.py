@@ -7895,7 +7895,7 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
 def _is_blocked_static(file_path: Path) -> bool:
     """True для служебных файлов: БД и её хвосты, бэкапы, временные файлы."""
     name = file_path.name.lower()
-    if any(s in BLOCKED_STATIC_SUFFIXES for s in file_path.suffixes):
+    if any(s.lower() in BLOCKED_STATIC_SUFFIXES for s in file_path.suffixes):
         return True
     return name.endswith(BLOCKED_STATIC_TAILS)
 
@@ -8363,16 +8363,22 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
             self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
             return
-        user_id, minted = provision_user(conn, self)  # регистрация = явное намерение, профиль заводим
-        if self.reject_if_blocked(conn, user_id):
-            return
-        current = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
-        if current and current["email"]:
-            self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
-            return
+        # Проверки дубля — ДО заведения строки: иначе каждая заявка с занятым
+        # email оставляла бы в базе orphan-строку (users + сессии), а скрипт
+        # без кук раздувал бы таблицы. Текст обоих 409 одинаковый, чтобы ответ
+        # не раскрывал, какие адреса зарегистрированы.
+        existing = existing_user_for(conn, self)
+        if existing is not None:
+            current = conn.execute("SELECT email FROM users WHERE id=?", (existing,)).fetchone()
+            if current and current["email"]:
+                self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
+                return
         if conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
             auth_login_failed(ip)
             self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
+            return
+        user_id, minted = provision_user(conn, self)  # регистрация = явное намерение, профиль заводим
+        if self.reject_if_blocked(conn, user_id):
             return
         name = sanitize_name(payload.get("name"))
         # Гард email IS NULL в самом UPDATE: при конкурентной регистрации
@@ -8385,8 +8391,19 @@ class Handler(BaseHTTPRequestHandler):
                 (email, hash_password(password), now_iso(), name, user_id),
             )
             if cur.rowcount != 1:
+                # Гонку за email проиграли: чужой запрос прикрепил адрес первым.
+                # Откатываемся, а только что заведённую строку (minted) удаляем —
+                # иначе проигравший гонку оставляет orphan (каскад сносит сессии
+                # и статистику вместе со строкой).
                 conn.rollback()
-                self.send_json({"error": "Этот аккаунт уже зарегистрирован"}, 409)
+                if minted is not None:
+                    try:
+                        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+                        conn.commit()
+                    except sqlite3.Error:
+                        try: conn.rollback()
+                        except sqlite3.Error: pass
+                self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
                 return
             # Токен, который только что выдали посреди этой же регистрации,
             # тоже гасим: иначе у первого входа остаётся осиротевшая строка
@@ -8398,8 +8415,16 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
         except sqlite3.IntegrityError:
             # Гонка двух разных гостей за один email: unique-индекс отверг
-            # вторую запись — честный 409 вместо 500.
+            # вторую запись — честный 409 вместо 500. Заведённую строку
+            # проигравшего (minted) удаляем, чтобы не плодить orphan.
             conn.rollback()
+            if minted is not None:
+                try:
+                    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+                    conn.commit()
+                except sqlite3.Error:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
             auth_login_failed(ip)
             self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
             return
@@ -8423,6 +8448,12 @@ class Handler(BaseHTTPRequestHandler):
         password = payload.get("password")
         if not email or not isinstance(password, str) or not password:
             self.send_json({"error": "Введите email и пароль"}, 400)
+            return
+        if len(password) > AUTH_PASSWORD_MAX_LENGTH:
+            # Заведомо чужой: регистрация режет 8..72, такого пароля в базе
+            # нет. Быстрый 401 тем же текстом — не кормим PBKDF2 мегабайтами.
+            auth_login_failed(ip)
+            self.send_json({"error": "Неверный email или пароль"}, 401)
             return
         row = conn.execute("SELECT id, password_hash FROM users WHERE email=?", (email,)).fetchone()
         # Считаем PBKDF2 ВСЕГДА: для неизвестного email и для профиля без
@@ -8480,7 +8511,9 @@ class Handler(BaseHTTPRequestHandler):
         # строку admin_sessions, и куку: старый токен не переживает logout, а
         # вкладка/браузер не остаётся с «висящими» правами.
         if user_id is not None and admin_token:
-            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?", (user_id, admin_token))
+            # Храним хэш (см. create_admin_session), сырая кука тут не матчится.
+            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?",
+                         (user_id, token_digest(admin_token)))
         conn.commit()
         self.send_json({"ok": True}, clear_session=True,
                        admin_cookie=self.admin_cookie_attrs(None, 0))
@@ -8550,8 +8583,9 @@ class Handler(BaseHTTPRequestHandler):
             # чтобы в браузере не осталось пары «живая user-сессия + ege_admin».
             admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
             if admin_token:
+                # Храним хэш (см. create_admin_session), сырая кука тут не матчится.
                 conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?",
-                             (row["user_id"], admin_token))
+                             (row["user_id"], token_digest(admin_token)))
                 conn.commit()
             self.send_json({"ok": True, "current": True}, clear_session=True,
                            admin_cookie=self.admin_cookie_attrs(None, 0))
@@ -8571,6 +8605,12 @@ class Handler(BaseHTTPRequestHandler):
         password = payload.get("password")
         if not isinstance(password, str) or not password:
             self.send_json({"error": "Введите пароль"}, 400)
+            return
+        if len(password) > AUTH_PASSWORD_MAX_LENGTH:
+            # Заведомо чужой: такой пароль нигде не зарегистрирован, а PBKDF2
+            # от мегабайтной строки вешает поток. Быстрый 401 тем же текстом.
+            admin_login_failed(ip)
+            self.send_json({"error": "Неверный пароль"}, 401)
             return
         if not verify_admin_password(password):
             admin_login_failed(ip)
@@ -8592,7 +8632,10 @@ class Handler(BaseHTTPRequestHandler):
         user_id = existing_user_for(conn, self)
         admin_token = cookie_value(self, ADMIN_COOKIE_NAME)
         if user_id is not None and admin_token:
-            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?", (user_id, admin_token))
+            # В admin_sessions лежит token_digest, а не сырой токен: удаляем по
+            # хэшу, иначе DELETE бьёт в 0 строк и украденная кука живёт дальше.
+            conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token=?",
+                         (user_id, token_digest(admin_token)))
             conn.commit()
             admin_audit(conn, user_id, "admin-logout", user_id)
         self.send_json({"ok": True}, admin_cookie=self.admin_cookie_attrs(None, 0))
@@ -8801,6 +8844,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard_csrf(path):
             return
         if path == "/api/support/messages":
+            # Анонимный пишущий эндпоинт: общий per-IP бакет + свой лимит попыток.
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 self.handle_support_message(conn)
@@ -8862,6 +8907,9 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path == "/api/admin/login" or path == "/api/admin/logout":
+            # Общий per-IP бакет поверх узкого admin_login_allowed: без него
+            # флуд переборами/мусором шёл мимо глобальных 300/мин.
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/admin/login": self.handle_admin_login(conn)
@@ -10585,7 +10633,9 @@ if __name__ == "__main__":
             return 0
 
         # ВАЖНО: Порт 2026 — это постоянный порт для EGE CORE (ЕГЭ-2026/2027)
-        host = os.environ.get("EGE_HOST", "0.0.0.0")
+        # Дефолт — loopback: наружу торчит только nginx. Ручной запуск без env
+        # раньше слушал 0.0.0.0 напрямую — мимо TLS, HSTS и лимитов фронтенда.
+        host = os.environ.get("EGE_HOST", "127.0.0.1")
         port = int(os.environ.get("EGE_PORT", "2026"))
         with ServerInstance():
             mod = backup_mod()
