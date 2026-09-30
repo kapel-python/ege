@@ -255,6 +255,17 @@ check("изменившийся тред выбрасывается из кэш�
   (spaCode.match(/cacheForget\(/g) || []).length >= 4);
 check("свой лоадер раздела не заведён — стили общие",
   spaCss.includes(".agent__boot") && !/ege-loader\s*\{[^}]*@keyframes/.test(spaCss));
+/* Ширина общей анимации загрузки задана явно. Иначе на экране агента карточка
+   прыгала: #screen здесь flex-колонка (.screen--agent), а предмет с auto-margin
+   по кросс-оси не растягивается (align-self: stretch не действует) — бокс
+   становился shrink-to-fit, то есть 155px вместо 340px, и подпись переносилась
+   (замер: 340 → 155 → 340 за один вход в раздел). */
+const loaderDecl = (read("css/styles.css").replace(/\/\*[\s\S]*?\*\//g, "")
+  .match(/(?:^|\})\s*\.ege-loader\s*\{([^}]*)\}/) || [, ""])[1];
+check("анимация загрузки не схлопывается в flex-экране (width: 100% + max-width: 340px)",
+  /(^|;)\s*width:\s*100%/.test(loaderDecl) && /max-width:\s*340px/.test(loaderDecl)
+  && /\.screen--agent \{[^}]*display: flex; flex-direction: column/.test(spaCss),
+  loaderDecl.trim());
 
 /* --- паритет с эталоном agent_preview.html ---
    Эталон — источник правды по вёрстке раздела: ритм ленты, ширина колонки,
