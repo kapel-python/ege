@@ -11,6 +11,7 @@
     quota: { limit: 10, remaining: 10, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
+    follow: true, printTarget: null, gliding: false, glideFeed: null, progTop: null,
     cache: { accountId: null, threads: null, messages: {} },
   };
   var RING = 94.25, QUOTA_FALLBACK = 10;
@@ -1264,16 +1265,41 @@
      scroll принял бы наше же движение за «человек ушёл вверх» и снял бы
      S.stick посреди печати. */
   var PRINT_GAP = 18;
-  function holdStick() { S.stick = true; S.lock = Date.now() + 700; }
+  /* Плавная доводка за печатью. Слова проявляются каждые 24–45 мс, и прямой
+     scrollTop += на каждое слово давал микродёрганье — глаз видит отдельные
+     рывки. Вместо этого слово лишь двигает ЦЕЛЬ (S.printTarget), а один rAF-
+     цикл тянет ленту к цели (~22% дистанции за кадр): рывки сливаются в ровное
+     движение с лёгким отставанием от рубежа печати. Цикл один на весь ответ;
+     спокойный режим (calm) — мгновенно, без анимации. Все программные записи
+     идут через progWrite, который запоминает выставленное значение: по нему
+     scroll-хендлер отличает нашу доводку от руки человека. */
+  function progWrite(v) { S.progTop = v; ui.feed.scrollTop = v; }
+  function printGlideTo(top) {
+    if (!ui.feed) return;
+    S.printTarget = Math.max(0, Math.min(top, ui.feed.scrollHeight));
+    if (calm()) { progWrite(S.printTarget); S.printTarget = null; return; }
+    if (!S.gliding || S.glideFeed !== ui.feed) {
+      S.gliding = true; S.glideFeed = ui.feed;
+      raf(printGlideTick);
+    }
+  }
+  function printGlideTick() {
+    var feed = S.glideFeed;
+    if (!feed || feed !== ui.feed || !S.follow || S.printTarget == null) { S.gliding = false; return; }
+    var d = S.printTarget - feed.scrollTop;
+    if (Math.abs(d) <= 1) { S.printTarget = null; S.gliding = false; return; }
+    progWrite(feed.scrollTop + d * 0.22);
+    raf(printGlideTick);
+  }
+  function glideStop() { S.printTarget = null; }
   function followPrint(word) {
-    if (!word || !ui.feed || !S.stick) return;
+    if (!word || !ui.feed || !S.follow) return;
     var fr = ui.feed.getBoundingClientRect(), wr = word.getBoundingClientRect();
-    // Слово ушло под край ленты — доводим ровно настолько, чтобы оно встало
-    // на PRINT_GAP от низа. Слово видно — ничего не делаем.
+    // Слово ушло под край ленты — цель доводки двигается так, чтобы слово
+    // встало на PRINT_GAP от низа. Слово видно — ничего не делаем.
     var need = wr.bottom - (fr.bottom - PRINT_GAP);
     if (need <= 4) return;
-    holdStick();
-    ui.feed.scrollTop += Math.min(need, Math.round(fr.height * 0.6));
+    printGlideTo(ui.feed.scrollTop + Math.min(need, Math.round(fr.height * 0.6)));
   }
   /* Начало абзаца: первая строка встаёт на линию печати (низ ленты минус
      PRINT_GAP) — сразу, а не когда печать до неё доползёт. Абзац дописан
@@ -1287,7 +1313,7 @@
      Верх виден и почти на линии (первые 160px сверху) — стоим: печать сама
      спустится к краю за секунду, дёргать ленту ради неё незачем. */
   function parkParagraph(p) {
-    if (!ui.feed || !S.stick || !p) return;
+    if (!ui.feed || !S.follow || !p) return;
     var fr = ui.feed.getBoundingClientRect(), pr = p.getBoundingClientRect();
     // Первая строка абзаца должна встать на линию печати.
     var targetTop = fr.bottom - PRINT_GAP - Math.min(pr.height, 28);
@@ -1295,12 +1321,7 @@
     // На линии (или чуть ниже — доклеит followPrint) либо чуть выше (печать
     // сама спустится к краю): стоим.
     if (delta <= 4 && delta >= -160) return;
-    holdStick();
-    if (Math.abs(delta) > 120 && !calm()) {
-      try { ui.feed.scrollTo({ top: ui.feed.scrollTop + delta, behavior: "smooth" }); return; }
-      catch (_) {}
-    }
-    ui.feed.scrollTop += delta;
+    printGlideTo(ui.feed.scrollTop + delta);
   }
   // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
   // на полминуты (шаг 900 мс на весь текст, но не медленнее 24 и не быстрее 45).
@@ -1519,6 +1540,7 @@
     function bail() {
       if (stopped || finished) return;
       stopped = true;
+      glideStop();
       // Показываем все шаги, даже не доигранные: свёрнутая лента и счётчик
       // на тоггле должны сходиться, иначе ход выглядит оборванным.
       prepped.forEach(function (p) { if (!p.li.parentNode) built.ol.appendChild(p.li); stepFill(p); });
@@ -1602,6 +1624,7 @@
     function bailPlain() {
       if (stopped) return;
       stopped = true;
+      glideStop();
       paras.forEach(function (p) { if (!p.parentNode) card.appendChild(p); p.classList.remove("typing"); });
       scrollDown(true, false);
     }
@@ -1779,6 +1802,9 @@
     // Отправка из «Изменить и отправить» всегда заменяет последний вопрос.
     var replaceLast = !!((opts && opts.replaceLast) || editTarget !== null);
     editTarget = null;
+    // Явный вопрос — человек хочет ответ: следование включается заново.
+    // Невидимый повтор (quiet) идёт фоном и чужой выбор «я ушёл читать» чтит.
+    if (!quiet) { S.follow = true; S.printTarget = null; S.progTop = null; }
     if (!S.currentId) {
       var mg0 = S.mountGen;
       createThread().then(function (t) { if (t && S.mountGen === mg0) send(text, replaceLast ? { force: force, replaceLast: true } : opts); });
@@ -2166,8 +2192,29 @@
     });
     ui.feed.addEventListener("scroll", function () {
       if (Date.now() > S.lock) S.stick = dist() < 120;
+      // Вернулся к самому низу во время хода — снова едем вместе с текстом.
+      // (Уход вверх ловится ниже по wheel/touch: сам scroll отличить не может —
+      // программная доводка тоже двигает ленту.)
+      if (S.busy && !S.follow && dist() < 120) S.follow = true;
       if (ui.downBtn) ui.downBtn.classList.toggle("show", dist() > 200);
     });
+    // Рука человека во время хода: колесо/палец вверх — «я почитаю выше»,
+    // дальше печать идёт без доводки. Программные скроллы таких событий не
+    // дают, только живой жест, поэтому путать не с чем.
+    ui.feed.addEventListener("wheel", function (e) {
+      if (S.busy && e.deltaY < 0) S.follow = false;
+    }, { passive: true });
+    var touchY = null;
+    ui.feed.addEventListener("touchstart", function (e) {
+      try { touchY = e.touches[0].clientY; } catch (_) { touchY = null; }
+    }, { passive: true });
+    ui.feed.addEventListener("touchmove", function (e) {
+      if (!S.busy || touchY == null) return;
+      try {
+        if (e.touches[0].clientY > touchY + 8) S.follow = false;  // палец вниз = лента вверх
+        touchY = e.touches[0].clientY;
+      } catch (_) {}
+    }, { passive: true });
     // Один обработчик: и тоггл шагов, и карточки-подсказки (сразу отправка,
     // без фокуса и без дубля текста в поле ввода).
     ui.feed.addEventListener("click", function (e) {

@@ -372,18 +372,35 @@ check("плейсхолдер различает «отвечает» и «пи�
 check("низ написанного — последнее проявившееся слово (followPrint)",
   spaCode.includes("function followPrint") && /followPrint\(words\[i\]\)/.test(spaCode)
   && /wr\.bottom - \(fr\.bottom - PRINT_GAP\)/.test(spaCode) && /if \(need <= 4\) return;/.test(spaCode)
-  && /if \(!word \|\| !ui\.feed \|\| !S\.stick\) return;/.test(spaCode));
-check("программная прокрутка печати не снимает S.stick (holdStick/S.lock)",
-  /function holdStick\(\)/.test(spaCode) && /S\.lock = Date\.now\(\) \+ 700/.test(spaCode)
-  && /holdStick\(\);\s*ui\.feed\.scrollTop \+=/.test(spaCode));
+  && /if \(!word \|\| !ui\.feed \|\| !S\.follow\) return;/.test(spaCode));
+check("доводка плавная: слово двигает цель, rAF-цикл тянет (без рывка на слово)",
+  spaCode.includes("function printGlideTick") && spaCode.includes("function progWrite")
+  && /d \* 0\.22/.test(spaCode) && /if \(calm\(\)\) \{ progWrite/.test(spaCode)
+  && !/ui\.feed\.scrollTop \+= Math\.min\(need/.test(spaCode)
+  && !spaCode.includes("holdStick"));
+check("цикл доводки один на ответ и глохнет при уходе человека",
+  /if \(!S\.gliding \|\| S\.glideFeed !== ui\.feed\)/.test(spaCode)
+  && /feed !== ui\.feed \|\| !S\.follow/.test(spaCode));
 check("начало абзаца встаёт на линию печати, а не наверх и не в самый низ",
   spaCode.includes("function parkParagraph") && /parkParagraph\(p\);\s*printPara/.test(spaCode)
   && /targetTop = fr\.bottom - PRINT_GAP - Math\.min\(pr\.height, 28\)/.test(spaCode)
   && /if \(delta <= 4 && delta >= -160\) return;/.test(spaCode)
-  && /behavior: "smooth"/.test(spaCode)
+  && /printGlideTo\(ui\.feed\.scrollTop \+ delta\);/.test(spaCode)
   && !/card\.appendChild\(p\);\s*\/\/ Раскладка[\s\S]{0,200}?scrollDown\(false, true\);\s*printPara/.test(spaCode));
 check("доводка сворачивания не спорит с первым абзацем (follow короче задержки write)",
   /follow\(350\);\s*later\(quiet \? 0 : 420, write\);/.test(spaCode));
+/* --- рука человека во время хода: вверх — дальше без него, к низу — снова
+   вместе. Раньше holdStick() на каждое слово стирал волю человека: lock не
+   истекал всю печать, и подняться было невозможно — сайт дёргал обратно. */
+check("колесо/палец вверх во время хода отписывает от доводки",
+  /ui\.feed\.addEventListener\("wheel"[\s\S]{0,160}?if \(S\.busy && e\.deltaY < 0\) S\.follow = false;/.test(spaJs)
+  && /ui\.feed\.addEventListener\("touchmove"[\s\S]{0,320}?S\.follow = false;/.test(spaJs));
+check("возврат к низу во время хода возобновляет следование",
+  /if \(S\.busy && !S\.follow && dist\(\) < 120\) S\.follow = true;/.test(spaCode));
+check("явный вопрос включает следование заново, тихий повтор — нет",
+  /if \(!quiet\) \{ S\.follow = true; S\.printTarget = null; S\.progTop = null; \}/.test(spaCode));
+check("bail останавливает доводку (иначе тянула бы назад)",
+  (spaCode.match(/glideStop\(\);/g) || []).length >= 2);
 
 /* --- меню чата на телефоне: вход видимый, плашка крупная, переворот вверх --- */
 check("на телефоне «⋯» видна (вход в меню не только удержанием)",
