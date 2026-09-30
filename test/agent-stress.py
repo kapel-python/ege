@@ -303,6 +303,23 @@ def analyze_answer(answer: str, steps: list, seed: set, skill_names: dict,
             issues.append(f"ЗАПРЕЩЁННОЕ ОТКРЫТИЕ: «{w}»")
     if re.search(r"```suggest", text):
         issues.append("СЛУЖЕБНЫЙ БЛОК suggest попал в текст ответа (не вырезан)")
+    # Таблицы в ленте чата не стилизованы и разъезжаются на телефоне, поэтому
+    # промпт их запрещает (правило 5a). Ловим markdown-таблицу по настоящему
+    # признаку GFM: строка-разделитель из `|`, `-` и `:` (ведущие `|` не
+    # обязательны — «Критерий | Балл» + «---|---» тоже таблица), плюс сырой HTML.
+    lines = [ln.strip() for ln in text.splitlines()]
+    for i, ln in enumerate(lines):
+        if not re.match(r"^\|?[\s:|-]{3,}\|[\s:|-]*$", ln):
+            continue
+        if i == 0:
+            continue  # разделитель без строки заголовка — не таблица
+        head = lines[i - 1]
+        if "|" in head and head:
+            issues.append("ТАБЛИЦА в ответе (промпт запрещает, в ленте ломается на телефоне): "
+                          + f"{head[:60]} / {ln[:40]}")
+            break
+    if re.search(r"<table\b", text, re.IGNORECASE):
+        issues.append("СЫРОЙ HTML <table> в ответе")
     grounded = collect_grounded_numbers(steps, seed)
     unknown = []
     for m in NUM_RE.finditer(text):
