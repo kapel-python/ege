@@ -951,6 +951,19 @@ Store.on("dailydone", ({ xp }) => toast(`Ежедневная задача вы�
 Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", (err) => {
   if (isBlockedError(err)) return; // бан показывает модалку, тост не нужен
+  try {
+    const status = err && err.status ? ` (${err.status})` : "";
+    const code = err && (err.code || (err.payload && err.payload.code)) ? ` [${err.code || err.payload.code}]` : "";
+    const msg = err && err.message ? String(err.message).slice(0, 160) : "";
+    console.warn("[save failed]", status, code, msg, err);
+    try {
+      localStorage.setItem("ege_last_save_error", JSON.stringify({ status: err && err.status || 0, code: err && (err.code || (err.payload && err.payload.code)) || "", message: msg, at: Date.now() }));
+    } catch (_) {}
+    if (status || code) {
+      toast(`Не удалось сохранить прогресс${status}${code}. Попробуй ещё раз.`, "toast--error", "x");
+      return;
+    }
+  } catch (_) {}
   toast("Не удалось сохранить прогресс. Попробуй ещё раз.", "toast--error", "x");
 });
 // Синхронизация вкладок — внутренний механизм. Обычному пользователю не
@@ -7193,6 +7206,9 @@ const Onboarding = {
     this.diagResults = [];
     this.diagAnswered = false;
     this._picking = false;
+    // Какой предмет открывается прямо сейчас: на его кнопке крутится
+    // спиннер, остальные погашены (см. stepSubject).
+    this._pickingSubject = null;
     this.step = 0;
     this.subject = null;
     this.subjectSkipped = false;
@@ -7212,6 +7228,9 @@ const Onboarding = {
         try { ready = !!(info && info.status === "ready" && DataAPI.diagnosticTasks().length); } catch (_) {}
         if (ready) {
           this.step = 1;
+          // Явный выбор предмета (из профиля или пикера входа) — тот же путь,
+          // поэтому и детали с вендором греем здесь, а не на первом вопросе.
+          this.warmSubjectAssets();
         } else if (existingName) {
           // Пустой предмет + имя уже есть: спрашивать нечего —
           // сразу заводим профиль без показа оверлея.
@@ -7357,15 +7376,35 @@ const Onboarding = {
   // предмета и не должен его определять.
   stepSubject(body) {
     const subjects = asSafeArray(DataAPI.subjects());
+    // Открываем предмет — это запрос POST /api/subject плюс пересборка
+    // состояния (десятки мс, на мобильном сети — секунды). Раньше экран в это
+    // время просто стоял, и выбор предмета выглядел зависшим на палец. Теперь
+    // все кнопки погашены (повторные клики всё равно отбивает _picking), а
+    // на выбранной — спиннер и «Открываем…».
+    const picking = this._picking ? this._pickingSubject : null;
     body.innerHTML = `
       <div class="onboard-title">Какой предмет готовим?</div>
       <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
       <div class="choice-list">
         ${subjects.map((s) => {
           const status = subjectAvailabilityLabel(s);
-          return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
+          const loading = !!(picking && s.id === picking);
+          const name = esc(subjectDisplayName(s));
+          const line = loading
+            ? "Открываем…"
+            : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
+          return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
         }).join("")}
       </div>`;
+  },
+
+  // Детали каталога (тексты заданий) и матвендор (katex/jsxgraph) — большой
+  // вес (~0.5 МБ + ~1.2 МБ), который по умолчанию тянется на первом вопросе
+  // диагностики, в момент когда человек уже ждёт. Тянем заранее, пока он
+  // читает уровень и цель. Ошибки не показываем: у экрана свой лоадер.
+  warmSubjectAssets() {
+    try { Store.ensureDetails().catch(() => {}); } catch (_) {}
+    try { Vendor.ensureMath().catch(() => {}); } catch (_) {}
   },
 
   pickSubject(v) {
@@ -7378,14 +7417,35 @@ const Onboarding = {
     this.goal = null;
     if (this._picking) return;
     this._picking = true;
+    this._pickingSubject = v;
+    // Индикатор ждёт ровно сетевую фазу: пока ответ не пришёл, список стоит
+    // с крутилкой, а не выглядит мёртвым.
+    try { this.render(); } catch (_) {}
     // Шаги ниже (цели, диагностика) — предметные данные из каталога. Переключаем
     // каталог сразу, а не в finish(): иначе цель и диагностика показываются от
     // старого предмета, а выбранная чужая цель не сохраняется сервером.
     // finish() после этого видит свой предмет текущим и просто применяет профиль.
-    Store.switchSubject(v).catch(() => {}).then(() => {
+    // Ошибку переключения НЕ глотаем молча: без нового каталога следующий шаг
+    // показал бы чужие цели/диагностику, а finish() упёрся бы в
+    // SUBJECT_CATALOG_MISMATCH с общим тостом «не удалось сохранить».
+    Store.switchSubject(v).catch((e) => e).then((err) => {
       this._picking = false;
+      this._pickingSubject = null;
+      if (err instanceof Error) {
+        try { this.subject = DataAPI.currentSubject() || null; } catch (_) {}
+        this.render();
+        try {
+          const code = err && (err.code || (err.payload && err.payload.code)) ? ` [${err.code || err.payload.code}]` : "";
+          toast(`Не удалось открыть предмет${err && err.status ? ` (${err.status})` : ""}${code}. Проверь соединение и выбери ещё раз.`, "toast--error", "x");
+        } catch (_) {}
+        return;
+      }
       const info = DataAPI.subjectInfo(v);
       const ready = info && info.status === "ready" && DataAPI.diagnosticTasks().length;
+      // Детали каталога и матвендер нужны сразу на первом вопросе
+      // диагностики — тянем их здесь, пока человек читает уровень и цель,
+      // вместо ожидания в момент показа задания.
+      if (ready) this.warmSubjectAssets();
       // Пустой предмет: уровень/цель/диагностика бессмысленны без контента —
       // сразу к имени, профиль предмета заведётся пустым. Имя едино для
       // аккаунта: если уже указано — не показываем шаг имени, а завершаем.

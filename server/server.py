@@ -4603,7 +4603,7 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
 # install_catalog (старт сервера). Ключ — mtime catalog.json + generation,
 # который растёт при каждом install_catalog в этом процессе. Пейлоады лежат
 # отдельно на предмет — предметы не пересекаются по данным.
-_CATALOG_CACHE: dict = {"key": None, "payloads": {}, "generation": 0}
+_CATALOG_CACHE: dict = {"key": None, "payloads": {}, "slices": {}, "generation": 0}
 
 
 def _catalog_cache_key() -> tuple:
@@ -4623,6 +4623,9 @@ def catalog_payload(conn: sqlite3.Connection, subject: str | None = None) -> dic
     if _CATALOG_CACHE["key"] != key:
         _CATALOG_CACHE["key"] = key
         _CATALOG_CACHE["payloads"] = {}
+        # Срезы (tasks/lessons) несут валидаторы для If-None-Match, поэтому
+        # при смене каталога сбрасываются вместе с payload'ами.
+        _CATALOG_CACHE["slices"] = {}
     cached = _CATALOG_CACHE["payloads"].get(subject)
     if cached is None:
         cached = _build_catalog_payload(conn, subject)
@@ -4633,6 +4636,7 @@ def catalog_payload(conn: sqlite3.Connection, subject: str | None = None) -> dic
 def invalidate_catalog_cache() -> None:
     _CATALOG_CACHE["key"] = None
     _CATALOG_CACHE["payloads"] = {}
+    _CATALOG_CACHE["slices"] = {}
 
 
 def catalog_summary_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
@@ -4677,6 +4681,26 @@ def catalog_lessons_payload(conn: sqlite3.Connection, subject: str | None = None
     return {"subject": full["subject"], "status": full["status"],
             "locked": full["locked"], "comingSoon": full["comingSoon"],
             "lessons": full["lessons"]}
+
+
+def catalog_slice_etag(payload: dict) -> bytes:
+    """Валидатор среза каталога — sha1 от стабильной сериализации.
+
+    Считается один раз на срез и кладётся рядом с самим payload в
+    _CATALOG_CACHE: и тело, и валидатор меняются только вместе
+    (install_catalog сбрасывает оба). Ключ кэша среза — общий ключ каталога
+    плюс имя среза, поэтому между предметами валидаторы не путаются.
+    """
+    slice_name = "tasks" if "tasks" in payload else "lessons"
+    key = (slice_name, _catalog_cache_key())
+    cached = _CATALOG_CACHE["slices"].get(key)
+    if cached is not None and cached[0] is payload:
+        return cached[1]
+    digest = hashlib.sha1(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                   separators=(",", ":")).encode("utf-8")).hexdigest()[:27].encode("ascii")
+    _CATALOG_CACHE["slices"][key] = (payload, digest)
+    return digest
 
 
 def _plural_ru(count: int, one: str, few: str, many: str) -> str:
@@ -8052,8 +8076,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, payload: dict, status: int = 200, token: str | None = None,
                   admin_cookie: str | None = None, clear_session: bool = False,
-                  headers: dict[str, str] | None = None):
+                  headers: dict[str, str] | None = None,
+                  cache_control: str | None = None, body_etag: bytes | None = None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        # Валидатор — по СЫРОМ json, до gzip: браузер шлёт If-None-Match из
+        # того, что видел, независимо от кодирования ответа.
+        etag = f'"{hashlib.sha1(body_etag).hexdigest()[:27]}"' if body_etag else None
+        if etag and self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            # Тот же Cache-Control и те же куки, что у полного ответа: 304 без
+            # них браузер всё равно перезапросит содержимое.
+            self.send_header("Cache-Control", cache_control or "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_security_headers()
+            if token:
+                self.ensure_device_cookie()
+                self.send_header("Set-Cookie", self.session_cookie_attrs(token))
+            if admin_cookie: self.send_header("Set-Cookie", admin_cookie)
+            device_cookie = getattr(self, "_device_cookie", None)
+            if device_cookie: self.send_header("Set-Cookie", self.device_cookie_attrs(device_cookie))
+            for name, value in (headers or {}).items():
+                self.send_header(name, str(value))
+            self.send_header("Vary", "Accept-Encoding")
+            self.end_headers(); return
         # Каталог и состояние — самый тяжёлый JSON (~280 КБ): gzip сжимает
         # его в ~4 раза. Клиенты без Accept-Encoding получают как раньше.
         encoding = None
@@ -8063,7 +8109,11 @@ class Handler(BaseHTTPRequestHandler):
             encoding = "gzip"
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        # По умолчанию — no-store (состояние ученика). Для публичных срезов
+        # каталога вызывающий передаёт cache_control + body_etag: детали
+        # предметов одинаковы у всех и меняются только install_catalog.
+        self.send_header("Cache-Control", cache_control or "no-store")
+        if etag: self.send_header("ETag", etag)
         self.send_header("X-Robots-Tag", "noindex, nofollow")
         self.send_security_headers()
         if token:
@@ -8277,10 +8327,10 @@ class Handler(BaseHTTPRequestHandler):
         Единственный обычный (не регистрационный и не админский) путь, который
         создаёт строку в users. Идемпотентен: у кого сессия уже есть, ничего не
         меняется и возвращается тот же аккаунт — повтор после потерянного ответа
-        не плодит второго человека. Ничего, кроме самой строки и сессии, здесь
-        не пишется: настройки профиля (имя, уровень, цель) приезжают своим
-        доменным запросом PATCH /api/settings, то есть тем же путём и с той же
-        валидацией, что и у давно заведённого пользователя.
+        не плодит второго человека. Заявка самодостаточна: профиль предмета
+        применяется тем же patch_settings, что и доменный PATCH /api/settings,
+        поэтому потерянный следующий запрос не оставляет человека
+        «онбордившимся» локально и «не онбордившимся» в базе.
         """
         if not self.support_request_is_same_origin():
             self.send_json({"error": "Cross-site request rejected"}, 403)
@@ -8314,22 +8364,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.reject_if_blocked(conn, user_id):
             return
         created = token is not None
-        if created:
-            # Заявка самодостаточна: профиль ПРЕДМЕТА (онбординг, имя, уровень,
-            # цель) применяется тем же patch_settings, что и доменный запрос, —
-            # одна валидация на оба пути и никакой зависимости от того, дойдёт
-            # ли следующий PATCH: иначе потерянный ответ оставил бы человека
-            # «онбордившимся» локально и «не онбордившимся» в базе.
-            set_current_subject(conn, user_id, subject)
-            patch_settings(conn, user_id, subject, {
-                "onboarded": True,
-                "selfLevel": payload.get("selfLevel"),
-                "goal": goal,
-                "name": payload.get("name"),
-            })
-            conn.commit()
-        else:
-            subject = current_subject_for(conn, user_id)
+        # Заявка самодостаточна: профиль ПРЕДМЕТА (онбординг, имя, уровень,
+        # цель) применяется тем же patch_settings, что и доменный запрос, —
+        # одна валидация на оба пути и никакой зависимости от того, дойдёт
+        # ли следующий PATCH: иначе потерянный ответ оставил бы человека
+        # «онбордившимся» локально и «не онбордившимся» в базе. Это верно и
+        # для повторной заявки уже существующего пользователя (потерянный
+        # ответ, второй предмет): идемпотентный повтор тех же значений.
+        set_current_subject(conn, user_id, subject)
+        patch_settings(conn, user_id, subject, {
+            "onboarded": True,
+            "selfLevel": payload.get("selfLevel"),
+            "goal": goal,
+            "name": payload.get("name"),
+        })
+        conn.commit()
         self.send_json({"ok": True, "created": created, "subject": subject,
                         "accountId": account_id_for(conn, user_id),
                         "user": auth_user_payload(conn, user_id),
@@ -10069,8 +10118,25 @@ class Handler(BaseHTTPRequestHandler):
                 # (POST /api/profile/claim), регистрации или входа администратора.
                 # Обходить user_for() здесь всё равно нельзя: он больше ничего не
                 # создаёт, и это свойство не должно снова потеряться.
-                if path == "/api/catalog-tasks": self.send_json(catalog_tasks_payload(conn, req_subject)); return
-                if path == "/api/catalog-lessons": self.send_json(catalog_lessons_payload(conn, req_subject)); return
+                # Детали каталога — общий публичный статичный контент: одинаковы
+                # у всех учеников и меняются только install_catalog. Раньше
+                # no-store заставлял браузер качать ~0.5 МБ заново на каждой
+                # загрузке страницы и перед каждым вопросом диагностики.
+                # Теперь это приватный кэш с ревалидацией по ETag: повтор
+                # отдаётся 304 без тела, поэтому перезагрузка/смена предмета
+                # больше не стоят полного скачивания. Тот же ключ кэша, что и у
+                # in-memory _CATALOG_CACHE, — тело построено из catalog_payload,
+                # то есть смена каталога меняет и валидатор.
+                if path == "/api/catalog-tasks":
+                    payload = catalog_tasks_payload(conn, req_subject)
+                    self.send_json(payload, cache_control="private, no-cache",
+                                   body_etag=catalog_slice_etag(payload))
+                    return
+                if path == "/api/catalog-lessons":
+                    payload = catalog_lessons_payload(conn, req_subject)
+                    self.send_json(payload, cache_control="private, no-cache",
+                                   body_etag=catalog_slice_etag(payload))
+                    return
                 # Публичный срез для страницы /status: аккаунт не заводится,
                 # ничего не пишется — только безопасные счётчики каталога.
                 # Мягкий лимит 60/мин с IP: живые пользователи его не замечают,

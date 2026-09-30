@@ -798,26 +798,64 @@ const Store = {
     const subject = String(snapshot && snapshot.subject || "").trim();
     assertSubjectCatalog(subject);
     if (this.subject) assertSubjectCatalog(this.subject);
+    // Гость, который онбординг ещё не прошёл: серверного профиля нет и
+    // записывать некуда. Локальные данные копятся в памяти до заявки — в сеть
+    // не ходим и тост не показываем. lastSyncedState НЕ подтягиваем: иначе
+    // набранное до онбординга (попытка, daily) посчиталось бы отправленным и
+    // не ушло бы в первой же записи после заявки.
+    if (!this.accountId && !(snapshot && snapshot.onboarded)) {
+      return { ok: true, stateVersion: snapshot.stateVersion, guest: true };
+    }
     const base = this.lastSyncedState || {};
     let version = snapshot.stateVersion;
     // Первая запись от гостя обязана начинаться с заявки профиля. Иначе сервер
     // честно ответит 401 GUEST_PENDING (записывать некуда) и данные ученика,
     // набранные при регистрации, потерялись бы. accountId == null — это ровно
     // «в базе меня ещё нет»; у кого профиль уже есть, заявки не будет вовсе.
-    if (!this.accountId && snapshot && snapshot.onboarded) {
-      if (!this.claimPromise) {
-        this.claimPromise = this.claimServerProfile(snapshot)
-          .finally(() => { this.claimPromise = null; });
+    // Если кука не сохранилась (блок cookie) — accountId локально есть, а
+    // сервер гостя не узнаёт: следующий запрос вернёт 401 GUEST_PENDING.
+    // Тогда сбрасываем accountId и заявляем профиль заново один раз, иначе
+    // все будущие сейвы вечно падают без повторной заявки.
+    const ensureClaim = async () => {
+      if (!this.accountId && snapshot && snapshot.onboarded) {
+        if (!this.claimPromise) {
+          this.claimPromise = this.claimServerProfile(snapshot)
+            .finally(() => { this.claimPromise = null; });
+        }
+        await this.claimPromise;
       }
-      await this.claimPromise;
-    }
-    const request = async (method, path, body) => {
+    };
+    await ensureClaim();
+    const isGuestPending = (e) => Number(e && e.status) === 401
+      && ((e && e.code) === "GUEST_PENDING" || (e && e.payload && e.payload.code) === "GUEST_PENDING");
+    const request = async (method, path, body, retried = false) => {
       // Каталог может смениться между доменными запросами. Проверяем перед
       // каждым POST/PATCH, чтобы очередной запрос не ушёл уже по чужому id.
       assertSubjectCatalog(subject);
       if (this.subject) assertSubjectCatalog(this.subject);
       const payload = { subject, expectedVersion: version, ...body };
-      const result = await ApiClient[method](path, payload);
+      let result;
+      try {
+        result = await ApiClient[method](path, payload);
+      } catch (e) {
+        // Кука не сохранилась, а accountId уже выставлен: сервер видит гостя.
+        // Один раз сбрасываемся и заявляем профиль заново — иначе все будущие
+        // сейвы вечно падают с GUEST_PENDING без повторной заявки.
+        if (!retried && snapshot && snapshot.onboarded && isGuestPending(e)) {
+          this.accountId = null;
+          this.claimPromise = null;
+          await ensureClaim();
+          // Сервер уже применил профиль в claim: версия могла вырасти —
+          // перечитываем состояние, чтобы expectedVersion сошёлся.
+          try {
+            await this.load(subject);
+            version = (this.state && this.state.stateVersion) || version;
+            snapshot.stateVersion = version;
+          } catch (_) {}
+          return request(method, path, body, true);
+        }
+        throw e;
+      }
       assertSubjectCatalog(subject);
       if (this.subject) assertSubjectCatalog(this.subject);
       if (!Number.isInteger(result.stateVersion) || result.stateVersion < 1) throw new Error("Сервер не вернул версию состояния");

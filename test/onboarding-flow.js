@@ -97,6 +97,7 @@ t("next: обычный инкремент шага", !!nextBody && /this\.step\
   const storeStub = { switchSubject: () => ({ catch() { return this; }, then(fn) { fn(); return this; } }) };
   const makeOb = (api) => new Function("DataAPI", "Store",
     `"use strict"; return ({ step: 0, mode: "subject", diagIdx: 0, subject: null, name: null, render(){}, finish(){}, ` +
+    `warmSubjectAssets(){}, ` +
     `STEPS() {${bSteps}}, pickSubject(v) {${bPick}}, ` +
     `nextDiag() {${bNextDiag}}, next() {${bNext}} });`)(api, storeStub);
   const readyAPI = {
