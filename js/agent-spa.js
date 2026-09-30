@@ -664,6 +664,25 @@
     wireEvents();
   }
 
+  /* Свайп по разделу: вправо — открыть список чатов, влево — закрыть. На
+     телефоне бургер в тулбаре мелкая цель, а список чатов нужен часто; жест
+     не перехватываем там, где он означает другое: поле ввода (выделение
+     текста) и блоки с горизонтальной прокруткой. Порог тот же, что у
+     обычных шторок: 56px по горизонтали, вертикаль отбрасывается, жест до
+     0.9с — иначе «свайп» получается при перетаскивании полосы прокрутки. */
+  function swipeSkips(node) {
+    var n = node;
+    while (n && n !== document.body) {
+      if (n.tagName === "TEXTAREA" || n.tagName === "INPUT" || n.isContentEditable) return true;
+      if (n.scrollWidth > n.clientWidth + 2) {
+        var ox = "";
+        try { ox = window.getComputedStyle(n).overflowX; } catch (_) {}
+        if (ox && ox !== "visible") return true;
+      }
+      n = n.parentNode;
+    }
+    return false;
+  }
   function nav(open) {
     if (!ui.wrap) return;
     if (!open) closeThreadMenu();
@@ -2148,6 +2167,26 @@
       }
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });
+    // Свайп открывает/закрывает список чатов. Слушатели на каркасе раздела:
+    // узел пересоздаётся на каждом маунте, поэтому старые обработчики уходят вместе
+    // с ним (глобальных touch-листенеров у экрана нет).
+    var sw = { on: false, x0: 0, y0: 0, t0: 0 };
+    ui.wrap.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1 || swipeSkips(e.target)) { sw.on = false; return; }
+      sw.on = true;
+      sw.x0 = e.touches[0].clientX; sw.y0 = e.touches[0].clientY; sw.t0 = Date.now();
+    }, { passive: true });
+    ui.wrap.addEventListener("touchend", function (e) {
+      if (!sw.on) return;
+      sw.on = false;
+      if (e.touches.length) return;
+      var t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      var dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
+      if (Date.now() - sw.t0 > 900) return;
+      if (Math.abs(dx) < 56 || Math.abs(dy) > 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+      if (dx > 0) nav(true); else nav(false);
+    }, { passive: true });
     // Меню сообщения: ДОЛГОЕ нажатие (500 мс) на свой пузырёк или текст
     // ответа — как у списка чатов. Обычный клик/выделение текста не трогаем;
     // правый клик на десктопе — тот же вход в меню. Отмена: отпускание,

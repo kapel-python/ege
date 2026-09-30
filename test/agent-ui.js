@@ -605,6 +605,21 @@ check("скроллится только лента", /\.agent__feed \{[^}]*over
   && /\.agent__toolbar \{[^}]*flex: none/.test(spaCss)
   && /\.agent__composer-zone \{[^}]*flex: none/.test(spaCss));
 check("свой тред не абортит ход", spaCode.includes("Number(prev) !== Number(id)"));
+/* --- свайп по разделу: вправо открывает список чатов, влево закрывает ---
+   Бургер в тулбаре на телефоне мелкая цель, а список чатов нужен часто. Жест
+   не перехватывается в поле ввода (там это выделение текста) и в блоках с
+   горизонтальной прокруткой. */
+check("свайп вправо открывает список чатов, влево закрывает",
+  /ui\.wrap\.addEventListener\("touchstart"/.test(spaCode)
+  && /ui\.wrap\.addEventListener\("touchend"/.test(spaCode)
+  && /if \(dx > 0\) nav\(true\); else nav\(false\);/.test(spaCode)
+  && /Math\.abs\(dx\) < 56/.test(spaCode)
+  && /passive: true/.test(spaCode));
+check("жест не перехватывается в поле ввода и горизонтальном скролле",
+  /function swipeSkips\(node\)/.test(spaCode)
+  && /n\.tagName === "TEXTAREA" \|\| n\.tagName === "INPUT"/.test(spaCode)
+  && /n\.scrollWidth > n\.clientWidth \+ 2/.test(spaCode)
+  && /swipeSkips\(e\.target\)/.test(spaCode));
 check("футер скрыт на экране чата", read("js/footer.js").includes("ai: true"));
 
 /* --- старый адрес /agent — редирект в SPA --- */
