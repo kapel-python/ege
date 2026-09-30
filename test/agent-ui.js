@@ -320,7 +320,7 @@ check("в истории кнопки только у последнего от�
   && /assistantCard\(g\.steps, g\.final, false, g\.last \? null : \[\]\)/.test(spaCode)
   && /if \(!asks\.length && suggests == null\) asks = suggestsFromSteps\(steps\)/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
-  /classList\.add\("done"\);\s*\}\);[\s\S]{0,220}?quickActions\(card, null, asks\)/.test(spaJs));
+  /classList\.add\("done"\);\s*\}\);[\s\S]{0,220}?cardFooter\(card, null, asks\)/.test(spaJs));
 check("нажатие убирает кнопку и сдвигает соседние",
   spaCode.includes("collapseAsk") && /is-gone/.test(spaCss)
   && /\.agent__qr\.is-gone \{[^}]*overflow: hidden/.test(spaCss)
@@ -330,6 +330,63 @@ check("фокус с кнопки снимается (обводка не ост
   && /\.agent__qr:focus-visible \{[^}]*outline: 2px solid/.test(spaCss));
 check("кнопка не исчезает впустую, пока идёт ход",
   /b\.addEventListener\("click", function \(\) \{[^}]*if \(S\.busy\) return;[^}]*blur\(\)/.test(spaJs));
+
+/* --- копирование ответа: своей кнопкой под ответом, а не в меню по
+   удержанию. На телефоне меню надо дождаться, а кнопку видно сразу. --- */
+check("кнопка «Скопировать» под ответом (все ответы, включая историю)",
+  spaCode.includes("function addCopyRow") && spaCode.includes("agent__copy-row")
+  && /var row = quickActions\(card, isAlive, asks\);\s*addCopyRow\(card\);/.test(spaCode)
+  && /\.agent__copy \{[^}]*min-height: 36px/.test(spaCss));
+check("копируется сырой markdown ответа (data-answer), кнопка подтверждает сама",
+  /function addCopyRow\(card\) \{[^}]*answerText\(card\)/.test(spaJs)
+  && spaCode.includes('lbl.textContent = "Скопировано"')
+  && /\.agent__copy\.is-done/.test(spaCss));
+check("в меню по удержанию копирование осталось только у СВОЕГО вопроса",
+  /if \(isUser\) items\.push\(\{ label: "Скопировать"/.test(spaJs)
+  && /if \(!items\.length\) return;/.test(spaJs));
+
+/* --- блокировка композера держится до конца ВИДИМОГО хода ---
+   Ответ приходит из сети целиком, а печать идёт ещё секунды: раньше флаг
+   снимался по приходу ответа, и второе сообщение можно было отправить поверх
+   недописанного (а «Стоп» исчезал после первого шага). Теперь флаг выводится
+   из состояния: держит живой запрос (S.turn) или недопечатанный ответ
+   (S.pendingBail). */
+check("блокировка хода выводится из состояния, а не ставится руками",
+  spaCode.includes("function turnHeld") && /S\.turn && !S\.turn\.dead && !S\.turn\.detached/.test(spaCode)
+  && /\|\| !!S\.pendingBail/.test(spaCode)
+  && !spaCode.includes("setBusy"));
+check("печать ответа тоже держит композер (beginPrinting + syncBusy в actions)",
+  spaCode.includes("function beginPrinting") && /beginPrinting\(\);\s*parkParagraph\(p\);/.test(spaCode)
+  && /if \(S\.pendingBail === bail\) S\.pendingBail = null;\s*syncBusy\(\);/.test(spaCode));
+check("«Стоп» работает на обоих этапах: обрыв запроса ИЛИ доигрывание печати",
+  (spaJs.match(/ui\.stopBtn\.addEventListener\("click"[\s\S]{0,700}?if \(S\.pendingBail\) \{[\s\S]{0,160}?try \{ bail\(\); \} catch \(_\) \{\}/) || []).length === 1
+  && (spaJs.match(/ui\.stopBtn\.addEventListener\("click"[\s\S]{0,700}?turn\.detached = true;/) || []).length === 1
+  && /watchAnswer\(tid, text, WATCH_TRIES\)/.test(spaCode));
+check("плейсхолдер различает «отвечает» и «пишет ответ»",
+  spaCode.includes("Наставник пишет ответ…") && spaCode.includes("Наставник отвечает…"));
+
+/* --- лента идёт вровень с печатью, а не прыгает в конец неготовости --- */
+check("низ написанного — последнее проявившееся слово (followPrint)",
+  spaCode.includes("function followPrint") && /followPrint\(words\[i\]\)/.test(spaCode)
+  && /if \(gap <= 6\) return;/.test(spaCode) && /if \(!word \|\| !ui\.feed \|\| !S\.stick\) return;/.test(spaCode));
+check("начало длинного абзаца подводится сверху, а не прокруткой в самый низ",
+  spaCode.includes("function parkParagraph") && /parkParagraph\(p\);\s*printPara/.test(spaCode)
+  && !/card\.appendChild\(p\);\s*\/\/ Раскладка[\s\S]{0,200}?scrollDown\(false, true\);\s*printPara/.test(spaCode));
+
+/* --- меню чата на телефоне: вход видимый, плашка крупная, переворот вверх --- */
+check("на телефоне «⋯» видна (вход в меню не только удержанием)",
+  /@media \(max-width: 900px\)[\s\S]*?\.agent__more \{ display: grid; width: 44px; height: 44px/.test(spaCss)
+  && !/@media \(max-width: 900px\)[\s\S]*?\.agent__more \{ display: none/.test(spaCss)
+  && /\.agent__thread \{ padding-right: 52px/.test(spaCss));
+check("меню чата на телефоне — широкая плашка с крупными пунктами",
+  /\.agent__ctx \{\s*top: 100%; bottom: auto; transform: none; left: 8px; right: 8px/.test(spaCss)
+  && /\.agent__ctx-item \{ min-height: 48px/.test(spaCss));
+check("у нижних строк меню переворачивается вверх (openThreadMenu меряет)",
+  /ctx\.classList\.remove\("up"\)/.test(spaCode)
+  && /rowBox\.top \+ ctx\.offsetHeight > listBox\.bottom - 4/.test(spaCode)
+  && /\.agent__ctx\.up \{ top: auto; bottom: 100%; \}/.test(spaCss));
+check("удаление чата — корзиной, а не крестиком",
+  /ctxItem\("Удалить чат", svgRaw\(TRASH_D/.test(spaJs));
 
 /* --- невидимый повтор сбоя сервера (клиент) --- */
 check("сбой сервера повторяется невидимо (500/502/503)",

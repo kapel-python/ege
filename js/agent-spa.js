@@ -10,7 +10,7 @@
     threads: [], currentId: null, busy: false, mountGen: 0, navGen: 0, animGen: 0,
     quota: { limit: 10, remaining: 10, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
-    timers: [], turn: null, pendingBail: null, newThreadId: null,
+    timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
     cache: { accountId: null, threads: null, messages: {} },
   };
   var RING = 94.25, QUOTA_FALLBACK = 10;
@@ -131,13 +131,16 @@
      Долгое нажатие (500 мс) на своё сообщение или ответ наставника открывает
      меню у точки нажатия; тап в любом другом месте, Esc и прокрутка его
      закрывают. Действия зависят от места в ленте:
-     - ЛЮБОЕ сообщение: «Скопировать».
-     - только ПОСЛЕДНИЙ вопрос ученика: + «Изменить и отправить» (замена
-       существующего сообщения, не новое) ;
-     - только ПОСЛЕДНИЙ ответ наставника (или последний вопрос до ответа):
-       + «Перегенерировать» — тот же вопрос уходит с replaceLast, сервер
-       ЗАМЕНЯЕТ пару «вопрос+ответ» и модель даёт новый ответ.
-     У более ранних сообщений — только копирование: «изменить» середину
+     - свой вопрос: «Скопировать» + (если он последний) «Изменить и отправить»
+       (замена существующего сообщения, не новое);
+     - ответ наставника: только у последней пары «Перегенерировать» — тот же
+       вопрос уходит с replaceLast, сервер ЗАМЕНЯЕТ пару «вопрос+ответ» и
+       модель даёт новый ответ.
+     Копирование ОТВЕТА в меню больше не держим: под каждым ответом наставника
+     есть своя кнопка «Скопировать» (addCopyRow) — на телефоне её видно сразу,
+     а меню по удержанию приходилось ещё и угадывать. Свой вопрос копируется
+     только тут — под ним своей кнопки нет. У более ранних сообщений наставника
+     пунктов не остаётся, и меню просто не открывается: «изменить» середину
      переписки означало бы переписать всю историю после неё. */
   var msgMenu = { node: null, timer: null };
   function closeMsgMenu() {
@@ -187,7 +190,8 @@
     if (!text) return;
     var last = isUser ? lastUserBubble() : lastAssistantCard();
     var isLast = (isUser ? node === last : !!card && card === last);
-    var items = [{ label: "Скопировать", icon: ICON_COPY, run: function () { copyText(text); } }];
+    var items = [];
+    if (isUser) items.push({ label: "Скопировать", icon: ICON_COPY, run: function () { copyText(text); } });
     if (isLast) {
       if (isUser) {
         items.push({
@@ -207,6 +211,9 @@
         },
       });
     }
+    // Пунктов нет (старый ответ наставника: копирование — кнопкой под ответом) —
+    // пустое меню не показываем.
+    if (!items.length) return;
     openMsgMenu(e.clientX || 8, e.clientY || 8, items);
   }
   // Последний пузырёк ученика и последняя карточка ответа в ленте.
@@ -720,6 +727,15 @@
     closeThreadMenu();
     if (wasOpen) return;                       // повтор по тому же чату — закрыть
     ctx.hidden = false;
+    // На телефоне плашка меню раскрывается ПОД строкой (её видно целиком), и у
+    // нижних строк списка снизу для неё места нет — тогда открываем вверх.
+    // Меряем после показа: скрытый блок не имеет размеров.
+    ctx.classList.remove("up");
+    var listBox = ui.list ? ui.list.getBoundingClientRect() : null;
+    if (listBox) {
+      var rowBox = row.getBoundingClientRect();
+      if (rowBox.top + ctx.offsetHeight > listBox.bottom - 4) ctx.classList.add("up");
+    }
     if (more) more.setAttribute("aria-expanded", "true");
     // Ссылки на открытое меню и его кнопку: без них Esc и клик мимо закрывали
     // бы «в никуда» — само меню оставалось висеть поверх списка.
@@ -797,7 +813,9 @@
       ctx.setAttribute("role", "menu");
       ctx.hidden = true;
       ctx.appendChild(ctxItem("Открыть чат", icon("arrow"), "", function () { selectThread(t.id); }));
-      ctx.appendChild(ctxItem("Удалить чат", icon("x"), "agent__ctx-item--danger", function () { deleteThread(t.id); }));
+      // Корзина, а не крестик: «×» рядом с «Открыть чат» читался как «закрыть
+      // панель» (та же путаница, что была с кнопкой удаления в подвале рейла).
+      ctx.appendChild(ctxItem("Удалить чат", svgRaw(TRASH_D, "2.2"), "agent__ctx-item--danger", function () { deleteThread(t.id); }));
       li.appendChild(b); li.appendChild(more); li.appendChild(ctx);
       li._armed = armLongPress(li, t.id);
       ui.list.appendChild(li);
@@ -840,7 +858,12 @@
     S.navGen++;
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
     if (Number(prev) !== Number(id) && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
-    setBusy(false);
+    // Ход этого экрана закончен: недопечатанный ответ доигрываем разом, запрос
+    // больше не держит композер (его ответ придёт, когда чат откроют снова).
+    if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
+    S.turn = null;
+    S.printing = false;
+    syncBusy();
     S.currentId = id != null ? Number(id) : null;
     saveCurrent();
     renderThreads();
@@ -1203,6 +1226,35 @@
     });
     return words;
   }
+  /* Лента идёт вровень с ПЕЧАТАЮЩИМСЯ текстом, а не с его концом. Абзац
+     занимает финальную высоту с первого кадра (все слова в DOM, невидимые —
+     opacity), поэтому старая «прокрутка вниз» на только что дописанном абзаце
+     показывала пустое место под текстом на все секунды печати: сайт кидал в
+     самый низ сообщения, которого ещё не было. Настоящий низ написанного —
+     нижняя граница последнего ПРОЯВИВШЕГОСЯ слова, её и держим у края ленты.
+     Вверх не тянем (человек ушёл читать — S.stick снят), шаг ограничен, чтобы
+     длинная строка не прыгала кадрами. */
+  var PRINT_GAP = 18;
+  function followPrint(word) {
+    if (!word || !ui.feed || !S.stick) return;
+    var fr = ui.feed.getBoundingClientRect(), wr = word.getBoundingClientRect();
+    var gap = (fr.bottom - PRINT_GAP) - wr.bottom;   // >0: текст ушёл ниже края
+    if (gap <= 6) return;
+    ui.feed.scrollTop += Math.min(gap, Math.round(fr.height * 0.6));
+  }
+  /* Начало абзаца: показываем его ВЕРХ, а не низ ленты — иначе длинный абзац
+     печатался бы под краем экрана и человек смотрел бы в пустоту. Короткий
+     (влезает в две трети ленты) прижимаем к низу, как при обычной прокрутке. */
+  function parkParagraph(p) {
+    if (!ui.feed || !S.stick) return;
+    var fr = ui.feed.getBoundingClientRect(), pr = p.getBoundingClientRect();
+    var room = fr.height * 0.62;
+    if (pr.height <= room) { scrollDown(false, true); return; }
+    var delta = (fr.top + (fr.height - room)) - pr.top;
+    if (Math.abs(delta) < 8) return;
+    try { ui.feed.scrollTo({ top: ui.feed.scrollTop + delta, behavior: calm() ? "auto" : "smooth" }); }
+    catch (_) { ui.feed.scrollTop += delta; }
+  }
   // Темп под длину: короткий ответ печатается внятно, длинный не растягивается
   // на полминуты (шаг 900 мс на весь текст, но не медленнее 24 и не быстрее 45).
   function printPara(p, isAlive, done) {
@@ -1223,6 +1275,7 @@
         return;
       }
       words[i].classList.add("is-in");
+      followPrint(words[i]);
       i++;
       later(step, tick);
     })();
@@ -1308,6 +1361,44 @@
     if (isAlive) follow(350);
     return row;
   }
+  /* Копирование ответа — своей кнопкой ПОД ответом, а не в меню по
+     удержанию: на телефоне меню надо ещё дождаться, а кнопку видно сразу и
+     промахнуться по ней нельзя. Текст берём сырым (data-answer), чтобы в
+     буфер ушли markdown и списки, а не текст отрендеренного HTML. */
+  function addCopyRow(card) {
+    if (!card || !card.querySelector(".agent__answer")) return null;
+    var row = el("div", "agent__copy-row");
+    var btn = el("button", "agent__copy", null);
+    btn.type = "button";
+    var lbl = el("span", "agent__copy-lbl", "Скопировать");
+    btn.appendChild(svgIcon(ICON_COPY, "2.2"));
+    btn.appendChild(lbl);
+    btn.addEventListener("click", function () {
+      var text = answerText(card);
+      if (!text) { say("Нечего копировать"); return; }
+      copyText(text);
+      // Короткое подтверждение прямо на кнопке: тост про то, что копия ушла,
+      // здесь лишний (копирование — обычное дело, а не событие).
+      if (btn.classList.contains("is-done")) return;
+      btn.classList.add("is-done");
+      lbl.textContent = "Скопировано";
+      later(1600, function () {
+        if (!btn.parentNode) return;
+        btn.classList.remove("is-done");
+        lbl.textContent = "Скопировать";
+      });
+    });
+    row.appendChild(btn);
+    card.appendChild(row);
+    return row;
+  }
+  // Подпись ответ + кнопки-продолжения + копирование — в одном месте, чтобы
+  // порядок не разъезжался между ветками анимации и истории.
+  function cardFooter(card, isAlive, asks) {
+    var row = quickActions(card, isAlive, asks);
+    addCopyRow(card);
+    return row;
+  }
   // Показать результат хода: пустые шаги -> лоадер -> содержимое, затем
   // сворачиваем ленту и печатаем ответ по словам. Анимация всегда уступает
   // новому ходу (animGen): два одновременных раскрытия путают и ленту, и
@@ -1351,9 +1442,11 @@
       if (!paras.length) { actions(); return; }
       var p = paras.shift();
       card.appendChild(p);
-      // Раскладка абзаца готова сразу (все слова в DOM), поэтому ленту
-      // достаточно подвести один раз — по ходу печати она не ползёт.
-      scrollDown(false, true);
+      // Раскладка абзаца готова с первого кадра (все слова в DOM), поэтому
+      // подводим ленту один раз — к началу абзаца, а по ходу печати она идёт
+      // за последним проявившимся словом (followPrint).
+      beginPrinting();
+      parkParagraph(p);
       printPara(p, alive, function () { later(quiet ? 0 : 140, write); });
     }
     function actions() {
@@ -1361,13 +1454,14 @@
       // Кнопки рисуем один раз на карточку: bail() может позвать actions()
       // повторно, а второй набор на той же карточке — это дубль кнопок.
       if (!built.actions) {
-        built.actions = quickActions(card, alive, built.suggests) || true;
+        built.actions = cardFooter(card, alive, built.suggests) || true;
       }
       // Ход доигран целиком: карточку больше нечего дорисовывать, и новый
       // ход не должен трогать её шаги (иначе у пользователя сбросится
       // раскрытое «Подробнее»).
       finished = true;
       if (S.pendingBail === bail) S.pendingBail = null;
+      syncBusy();          // ответ дописан — композер снова свободен
       follow(350);
     }
     // Новый ход перебил незаконченный: дорисовываем остаток разом, карточка
@@ -1419,6 +1513,7 @@
     if (!animate) {
       if (built) {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
+        syncBusy();
         paintAll();
         // Лента появляется раскрытой и тут же сворачивается: кадр между
         // ними делает сворачивание плавным, без мигания тоггла.
@@ -1426,11 +1521,13 @@
         raf(function () { built.trace.classList.remove("open"); card.classList.add("done"); });
         // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
         // и после перезагрузки продолжение было только у ответов без шагов.
-        quickActions(card, null, asks);
+        cardFooter(card, null, asks);
         scrollDown(true, true);
       } else {
+        if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
+        syncBusy();
         paras.forEach(function (p) { card.appendChild(p); });
-        quickActions(card, null, asks);
+        cardFooter(card, null, asks);
         scrollDown(true, true);
       }
       return card;
@@ -1439,21 +1536,38 @@
     // будет мешать новой (у обеих один токен S.animGen).
     if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
     if (built) {
+      // revealTurn сам собирает bail (built.bail) — блокировку печати ставим
+      // сразу за ним, в том же кадре: между этими строками браузер не рисует.
       revealTurn(built, paras, g);
       S.pendingBail = built.bail;
+      syncBusy();
       return card;
     }
     // Ответ без шагов (короткий ход: поздороваться, уточнить) печатается
     // так же, как после шагов. Раньше он выпадал разом — и именно это
     // выглядело «дёргано»: у человека глаз уже привык к печати по ходу.
-    var ag = ++S.animGen;
-    function alive() { return g === S.mountGen && ag === S.animGen && card.parentNode; }
+    var ag = ++S.animGen, stopped = false;
+    function alive() { return !stopped && g === S.mountGen && ag === S.animGen && card.parentNode; }
+    // Свой bail: «Стоп»/новый ход во время печати выкладывают остаток разом.
+    function bailPlain() {
+      if (stopped) return;
+      stopped = true;
+      paras.forEach(function (p) { if (!p.parentNode) card.appendChild(p); p.classList.remove("typing"); });
+      scrollDown(true, false);
+    }
+    S.pendingBail = bailPlain;      // своя блокировка печати (общая уже снята выше)
     (function next() {
       if (!alive()) return;
-      if (!paras.length) { quickActions(card, alive, asks); return; }
+      if (!paras.length) {
+        cardFooter(card, alive, asks);
+        S.pendingBail = null;
+        syncBusy();
+        return;
+      }
       var p = paras.shift();
       card.appendChild(p);
-      scrollDown(false, true);
+      beginPrinting();
+      parkParagraph(p);
       printPara(p, alive, function () { later(calm() ? 0 : 140, next); });
     })();
     return card;
@@ -1583,11 +1697,30 @@
     if (ui.stopBtn) ui.stopBtn.hidden = !S.busy;
     if (ui.composer) ui.composer.classList.toggle("busy", S.busy);
   }
-  function setBusy(b) {
-    S.busy = b;
-    if (ui.input) ui.input.setAttribute("placeholder", b ? "Наставник отвечает…" : "Спроси что-нибудь…");
+  /* Ход «в процессе» — это ИЛИ запрос, который считает сервер, ИЛИ печать уже
+     полученного ответа. Раньше флаг ставили и снимали руками в семи местах, и
+     снимали слишком рано: ответ приходит из сети целиком (стриминга нет), а
+     печать идёт ещё несколько секунд — композер успевал разблокироваться, и
+     человек отправлял второе сообщение, пока первое ещё дописывалось (а
+     «Стоп» исчезал уже после первого шага). Теперь флаг ВЫВОДИТСЯ из
+     состояния: держат либо живой запрос (S.turn), либо недопечатанный ответ
+     (S.pendingBail). Отвязанный «Стоп»-ом запрос (detached) держит уже не
+     композер, а только подхват ответа после обрыва. */
+  function turnHeld() {
+    return (!!S.turn && !S.turn.dead && !S.turn.detached) || !!S.pendingBail;
+  }
+  function syncBusy() {
+    var held = turnHeld();
+    S.busy = held;
+    if (!held) S.printing = false;
+    if (ui.input) {
+      ui.input.setAttribute("placeholder", S.printing ? "Наставник пишет ответ…"
+        : (held ? "Наставник отвечает…" : "Спроси что-нибудь…"));
+    }
     syncInput();
   }
+  // Ответ получен, печать ещё идёт: композер остаётся закрытым до её конца.
+  function beginPrinting() { S.printing = true; syncBusy(); }
   function send(text, opts) {
     text = (text || "").trim();
     if (!text || S.busy) return;
@@ -1603,7 +1736,6 @@
     }
     var g = ++S.navGen;
     var mg = S.mountGen;
-    setBusy(true);
     showEmpty(false);
     // Заменяющий ход: старая пара «вопрос+ответ» уходит из ленты СРАЗУ —
     // сервер снесёт её в базе только при успехе, но показывать и дубль,
@@ -1638,11 +1770,12 @@
                  startedAt: Date.now(), dead: false, claimedBy: -1, replaceLast: replaceLast,
                  retries: quiet ? (opts && opts.retries) || 0 : 0 };
     S.abort = ctrl;
+    S.turn = turn;                 // держит композер до конца хода (см. turnHeld)
     var payload = { threadId: S.currentId, text: text };
     if (force) payload.force = true;
     if (replaceLast) payload.replaceLast = true;
     turn.promise = api("POST", "/api/agent/turns", payload, ctrl ? ctrl.signal : undefined);
-    S.turn = turn;
+    syncBusy();
     turn.promise.then(function (res) { settleTurn(turn, g, mg, skel, bubble, text, res); })
                 .catch(function (e) { failTurn(turn, g, mg, skel, text, e); });
   }
@@ -1680,7 +1813,7 @@
     if (Number(t.threadId) !== Number(S.currentId)) return;
     t.claimedBy = S.mountGen;
     var g = ++S.navGen, mg = S.mountGen;
-    setBusy(true);
+    syncBusy();
     showEmpty(false);
     var bubble = userBubble(t.text);
     var skel = skeletonCard();
@@ -1722,7 +1855,6 @@
     if (S.turn === turn) S.turn = null;
     if (skel && skel.parentNode) skel.parentNode.removeChild(skel);
     if (S.abort === turn.ctrl) S.abort = null;
-    setBusy(false);
     if (res.status === 200 && res.data) {
       if (res.data.quota) setQuota(res.data.quota);
       cacheForget(turn.threadId);        // переписка изменилась — кэш больше не её
@@ -1737,6 +1869,8 @@
         assistantCard(steps, res.data.final || "", true, res.data.suggests);
       }
       if (res.data.thread) applyThreadTitle(res.data.thread);
+      // Печать ответа держит композер закрытым (S.pendingBail) и снимет его
+      // сама, когда допечатает последнее слово.
       return;
     }
     if (res.status === 400 && res.data && res.data.code === "AGENT_BUSY") {
@@ -1775,6 +1909,7 @@
     if (turn.replaceLast) loadThreadMessages();
     errorCard((res.data && res.data.error) || "Наставник не смог ответить.", "Попробовать снова",
       function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
+    syncBusy();          // ни запроса, ни печати — композер разблокирован
   }
   /* AGENT_BUSY — не тупик: сервер сам сказал, через сколько освободится слот.
      Раньше здесь была только кнопка, и каждый клик до освобождения давал тот
@@ -1824,7 +1959,10 @@
       // тот же промис, ответ придёт в ленту сам.
       if (skel && skel.parentNode) skel.parentNode.removeChild(skel);
       if (S.abort === turn.ctrl) S.abort = null;
-      setBusy(false);
+      // Запрос отвязан от композера: ответ ещё придёт (watchAnswer), но человек
+      // уже не должен ждать его гвоздя в поле ввода.
+      turn.detached = true;
+      syncBusy();
       errorCard("Остановлено. Если сервер уже считал ответ — он появится ниже.",
         "Обновить чат", function () { loadThreadMessages(); });
       watchAnswer(turn.threadId, text, WATCH_TRIES);
@@ -1834,7 +1972,7 @@
     if (S.turn === turn) S.turn = null;
     if (skel && skel.parentNode) skel.parentNode.removeChild(skel);
     if (S.abort === turn.ctrl) S.abort = null;
-    setBusy(false);
+    syncBusy();
     // Ход перебит/размонтирован, повтор в воздухе. Обрыв соединения — тот же
     // сбой, что и 502: запрос мог не дойти, а мог дойти и потерять ответ. Обе
     // ветки лечит повтор: если сервер ход считает, ответ придёт кэшем или
@@ -1958,14 +2096,23 @@
     }
     ui.feed.addEventListener("scroll", function () { closeMsgMenu(); }, { passive: true });
     ui.stopBtn.addEventListener("click", function () {
-      // Текст хода запоминаем ДО аборта: он нужен, чтобы отличить наш вопрос
-      // от уже записанного в треде и дождаться ответа, который сервер считает.
+      // «Стоп» работает на обоих этапах хода. Пока считает сервер — обрываем
+      // запрос; пока печатается уже полученный ответ — выкладываем остаток
+      // текста разом (bail), потому что останавливать тут нечего.
       var turn = S.turn;
       var text = turn && !turn.dead ? turn.text : null;
       var tid = turn && !turn.dead ? turn.threadId : S.currentId;
-      if (S.abort) { try { S.abort.abort(); } catch (_) {} }
-      setBusy(false);
-      watchAnswer(tid, text, WATCH_TRIES);
+      if (S.pendingBail) {
+        var bail = S.pendingBail;
+        S.pendingBail = null;
+        try { bail(); } catch (_) {}
+      } else if (turn && !turn.dead) {
+        turn.detached = true;   // композер разблокируется, ответ ещё подхватим
+        if (S.abort) { try { S.abort.abort(); } catch (_) {} }
+      }
+      S.printing = false;
+      syncBusy();
+      if (!S.pendingBail) watchAnswer(tid, text, WATCH_TRIES);
     });
     ui.feed.addEventListener("scroll", function () {
       if (Date.now() > S.lock) S.stick = dist() < 120;
@@ -2029,7 +2176,8 @@
     }
     (S.timers || []).forEach(function (t) { try { clearTimeout(t); } catch (_) {} });
     S.timers = [];
-    S.busy = false;
+    S.turn = null;
+    S.printing = false;
     S.navGen++;
     // Незаконченная анимация хода не должна пережить размонтирование: её
     // токен сбрасываем, карточка при следующем показе рисуется заново.
