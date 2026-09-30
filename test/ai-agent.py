@@ -94,6 +94,129 @@ class Client:
         return status, payload
 
 
+def _resolve_error_rejects_conflicting_ids(server) -> bool:
+    """resolve_error не должен доверять выдуманному errorId.
+
+    Живой случай (стресс-тест): ученик «разобрался с ошибкой по теме
+    “Производная”», модель позвала resolve_error(errorId=7, taskId=n09_p1).
+    Число 7 было выдумано моделью и попало в СОВСЕМ другую ошибку — ученик
+    подтвердил карточку, и чужая ошибка исчезла из его списка. Контракт: если
+    названы и id, и задание, они обязаны указывать на одну строку.
+    """
+    conn = server.connect()
+    try:
+        row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return False
+        uid = int(row["id"])
+        subj = "profile_math"
+        tasks = [r[0] for r in conn.execute(
+            "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=? LIMIT 2", (subj,))]
+        if len(tasks) < 2:
+            return False
+        now = str(int(time.time() * 1000))
+        ids = []
+        for i, task in enumerate(tasks[:2], start=1):
+            cur = conn.execute(
+                "INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved,subject,client_id,kind)"
+                " VALUES(?,?,'n01_planimetry',?,?,0,?,?,'minor')",
+                (uid, task, f"конфликт-{i}", now, subj, f"conflict-{uid}-{i}"))
+            ids.append(int(cur.lastrowid))
+        conn.commit()
+        agent = server._AGENT
+        try:
+            agent.propose_action(conn, uid, subj, "resolve_error",
+                                 {"errorId": str(ids[0]), "taskId": tasks[1]})
+            return False  # принял противоречивый вызов — дыра осталась
+        except ValueError:
+            pass
+        prop = agent.propose_action(conn, uid, subj, "resolve_error",
+                                    {"errorId": str(ids[0]), "taskId": tasks[0]})
+        return int(prop["errorId"]) == ids[0] and bool(prop.get("topic"))
+    finally:
+        conn.close()
+
+
+def _essay_and_reset_probes(server):
+    """Остальные проверки слоя инструментов на своей базе (без HTTP)."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        subj = "profile_math"
+        row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
+        uid = int(row["id"]) if row else None
+        out = {}
+
+        # 1. reset_progress обязан обнулить user_stats: fold_web(progress) читает
+        #    именно его, иначе наставник цитирует стёртые цифры.
+        conn.execute("INSERT OR REPLACE INTO user_stats(user_id,subject,xp,streak,last_active_date,"
+                     "total_solved,total_correct,total_time_sec,hints_used,correct_series,"
+                     "best_series,errors_resolved) VALUES(?,?,777,9,'2026-01-01',12,5,0,0,0,0,3)",
+                     (uid, subj))
+        conn.commit()
+        before = dict(conn.execute("SELECT xp, streak, total_solved FROM user_stats WHERE user_id=? AND subject=?",
+                                   (uid, subj)).fetchone())
+        agent.apply_action(conn, uid, subj, "reset_progress", {"action": "reset_progress"})
+        after = dict(conn.execute("SELECT xp, streak, total_solved FROM user_stats WHERE user_id=? AND subject=?",
+                                  (uid, subj)).fetchone())
+        out["reset_stats"] = before["xp"] == 777 and after["xp"] == 0 and after["total_solved"] == 0
+        out["reset_tool_view"] = agent.fold_web(conn, uid, subj, {"op": "progress"})
+
+        # 2. Результат инструмента в контекст модели — всегда валидный JSON.
+        payload = agent._tool_payload({"attempts": [{"taskId": f"n01_p{i}", "correct": True,
+                                                     "topic": "тема " * 20} for i in range(60)]}, 4000)
+        try:
+            parsed = json.loads(payload)
+            out["payload_json"] = bool(parsed.get("truncated")) and len(payload) <= 4000
+        except ValueError:
+            out["payload_json"] = False
+
+        # 3. Прогноз: вилка не выходит за шкалу предмета.
+        fc = agent.fold_web(conn, uid, subj, {"op": "forecast"})
+        out["forecast_clamped"] = (fc.get("scaleMax") is None
+                                   or (fc.get("high") or 0) <= fc["scaleMax"]
+                                   and (fc.get("low") or 0) >= 0)
+        out["forecast_note"] = bool(fc.get("note"))
+
+        # 4. Навыки отдают mastery рядом с client-progress.
+        sk = agent.fold_web(conn, uid, subj, {"op": "skills"})
+        first = (sk.get("skills") or [{}])[0]
+        out["skills_mastery"] = "mastery" in first and bool(sk.get("note"))
+        return out
+    finally:
+        conn.close()
+
+
+def _resolve_error_refuses_resolved(server) -> bool:
+    """Уже разобранная ошибка не должна получать «готово» вхолостую."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        subj = "profile_math"
+        row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return False
+        uid = int(row["id"])
+        task = conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                            " WHERE s.subject=? LIMIT 1", (subj,)).fetchone()
+        if not task:
+            return False
+        cid = f"resolved-probe-{uid}"
+        conn.execute("DELETE FROM user_errors WHERE client_id=?", (cid,))
+        conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved,"
+                     "subject,client_id,kind) VALUES(?,?,'n01_planimetry','Проба','1',1,?,?,'minor')",
+                     (uid, task["id"], subj, cid))
+        conn.commit()
+        eid = conn.execute("SELECT id FROM user_errors WHERE client_id=?", (cid,)).fetchone()["id"]
+        try:
+            agent.propose_action(conn, uid, subj, "resolve_error", {"errorId": str(eid)})
+            return False  # принял уже разобранную — ученику покажут ложную галочку
+        except ValueError:
+            return True
+    finally:
+        conn.close()
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-ai-agent-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -474,18 +597,81 @@ def main():
                   any(r["role"] == "tool" for r in rows) and not any(r["content"] == "другой вопрос" for r in rows),
                   str([(r["role"], r["content"][:20]) for r in rows]))
 
-            section("детерминированная ошибка инструментов -> 400, не 502")
+            section("ошибка инструмента -> модель чинит вызов, ход не теряется")
+            # Раньше первая же ошибка инструмента убивала ход: 400 AGENT_TOOL_ERROR
+            # ученику. Живой стресс-тест (test/agent-stress.py) показал, что это
+            # не редкий край, а 6 ходов из 20: «объясни тему производные» →
+            # 400 «уроки по скиллу не найдены», «поменяй цель на 95+» → 400
+            # «цель не из шкалы предмета». Теперь ошибка уходит обратно в
+            # контекст с подсказками, и модель повторяет вызов сама.
+            cfix = Client("10.9.0.2")
+            claim(cfix, "Ева-починка")
+            _, tf = new_thread(cfix)
+            tid_f = tf["thread"]["id"]
             with lock:
                 script.clear()
                 script.append({"text": None, "tool_calls": [{"id": "bad1", "name": "fold_web",
                                                              "arguments": {"op": "no_such_op"}}]})
-            _, quota_before = a.request(base, "GET", "/api/agent/limits", None)
-            status, body = turn(a, tid_a, "сломай инструмент")
-            check("битый op -> 400 AGENT_TOOL_ERROR",
-                  status == 400 and body.get("code") == "AGENT_TOOL_ERROR", f"{status} {body}")
-            _, quota_after = a.request(base, "GET", "/api/agent/limits", None)
-            check("400 за инструмент возвращает жетон",
-                  quota_after.get("remaining") == quota_before.get("remaining"), f"{quota_before} -> {quota_after}")
+                script.append({"text": None, "tool_calls": [{"id": "bad2", "name": "fold_web",
+                                                             "arguments": {"op": "profile"}}]})
+                script.append({"text": "Разобрался, вот твой профиль.", "tool_calls": []})
+            _, quota_before = cfix.request(base, "GET", "/api/agent/limits", None)
+            status, body = turn(cfix, tid_f, "сломай инструмент")
+            check("битый op не убивает ход — модель чинит и отвечает",
+                  status == 200 and body.get("final") and "no_such_op" not in json.dumps(body.get("steps")),
+                  f"{status} {str(body)[:300]}")
+            check("в ленте виден только успешный вызов",
+                  [s.get("args", {}).get("op") for s in body.get("steps") or []] == ["profile"],
+                  str([s.get("args") for s in body.get("steps") or []]))
+            _, quota_after = cfix.request(base, "GET", "/api/agent/limits", None)
+            check("ход с починкой инструмента стоит ровно один жетон",
+                  quota_after.get("remaining") == (quota_before.get("remaining") or 0) - 1,
+                  f"{quota_before} -> {quota_after}")
+
+            section("ошибка инструмента исчерпала попытки -> честный ответ, не 400")
+            _, tf2 = new_thread(cfix)
+            tid_f2 = tf2["thread"]["id"]
+            with lock:
+                script.clear()
+                for i in range(agent.MAX_TOOL_RETRIES + 2):
+                    script.append({"text": None, "tool_calls": [{"id": f"loop{i}", "name": "lesson_get",
+                                                                 "arguments": {"skillId": "нет_такого"}}]})
+            status, body = turn(cfix, tid_f2, "объясни несуществующий урок")
+            check("ход выживает после серии неверных вызовов",
+                  status == 200 and bool(body.get("final")), f"{status} {str(body)[:300]}")
+            check("в ленте нет ни одного неверного вызова",
+                  len(body.get("steps") or []) == 0, str(len(body.get("steps") or [])))
+
+            section("update_profile принимает человеческую формулировку цели")
+            with lock:
+                script.clear()
+                script.append({"text": None, "tool_calls": [{"id": "g1", "name": "update_profile",
+                                                             "arguments": {"goal": "95+ баллов"}}]})
+            status, body = turn(cfix, tid_f2, "хочу набрать 95+")
+            step_g = (body.get("steps") or [{}])[0] or {}
+            prop = step_g.get("proposal") or {}
+            check("«95+ баллов» -> id цели g95",
+                  body.get("pending") is True and (prop.get("patch") or {}).get("goal") == "g95",
+                  f"{status} {body}")
+            check("подпись подтверждения человеческая, без id",
+                  "g95" not in str(step_g.get("label") or ""), str(step_g.get("label")))
+            check("resolve_error не доверяет выдуманному errorId",
+                  _resolve_error_rejects_conflicting_ids(server))
+            check("resolve_error честно отказывает по уже разобранной ошибке",
+                  _resolve_error_refuses_resolved(server))
+
+            section("инструменты отдают данные, а не обрывки")
+            probes = _essay_and_reset_probes(server)
+            check("reset_progress обнуляет user_stats",
+                  probes["reset_stats"], str(probes["reset_tool_view"]))
+            check("после сброса fold_web(progress) пустой",
+                  all((probes["reset_tool_view"].get(k) or 0) == 0
+                      for k in ("xp", "streak", "solved")), str(probes["reset_tool_view"]))
+            check("большой результат режется по элементам, JSON остаётся валидным",
+                  probes["payload_json"])
+            check("вилка прогноза не выходит за шкалу предмета",
+                  probes["forecast_clamped"], str(probes.get("forecast_note")))
+            check("в skills есть mastery и подпись", probes["skills_mastery"])
 
             section("квота: 10 ходов, 11-й 429, 502 возвращает жетон")
             c = Client("10.3.0.1")
@@ -727,6 +913,26 @@ def main():
                   f"{ai.AI_REPLY_MAX} vs {agent.AGENT_REPLY_MAX}")
             check("потолок ответа действительно шире прежних 8000",
                   agent.AGENT_REPLY_MAX > 8000, str(agent.AGENT_REPLY_MAX))
+
+            section("кнопки-продолжения: блок вырезается всегда")
+            # Живой случай: ответ провайдера обрезался по лимиту, закрывающая
+            # ограда ```suggest не пришла — и весь служебный блок остался в
+            # ответе ученику вместе с «Извини, последняя кнопка кривая».
+            cut = "Ответ нормальный.\n\nИзвини, кнопка кривая:\n\n```suggest\n[{\"label\":\"Дай\",\"ask\":\"Дай ещё\"},{\"label\":\"Отм"
+            text_out, items_out = agent.split_suggestions(cut)
+            check("обрезанный блок не попадает в ответ ученику",
+                  "suggest" not in text_out.lower() and "```" not in text_out,
+                  repr(text_out[:120]))
+            check("слова ответа до блока сохранены",
+                  "Ответ нормальный" in text_out, repr(text_out[:120]))
+            check("кнопок из обрезанного блока нет (лучше нет, чем мусор)", items_out == [],
+                  str(items_out))
+            two_blocks = ("Разберём.\n```suggest\n[{\"label\":\"Ещё\",\"ask\":\"Дай ещё задачу\"}]\n```\n"
+                          "Между.\n```suggest\n[{\"label\":\"План\",\"ask\":\"Собери план\"}]\n```")
+            text_two, items_two = agent.split_suggestions(two_blocks)
+            check("два блока: оба вырезаны, обе кнопки взяты",
+                  "suggest" not in text_two.lower() and len(items_two) == 2,
+                  f"{text_two!r} {[i['label'] for i in items_two]}")
 
             section("«сейчас посмотрю» без вызова -> инструмент зовётся")
             # Живой случай: «посмотри мой профиль» → «Сейчас посмотрю твой

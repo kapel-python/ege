@@ -45,6 +45,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Лимиты хода
@@ -60,6 +61,14 @@ AGENT_TEXT_MAX = 2000
 # ответ провайдера) — расхождение означало бы, что блок срезан ещё на приёме.
 AGENT_REPLY_MAX = 9000
 MAX_TOOL_STEPS = 10
+# Сколько раз за ход инструмент может вернуть ошибку, прежде чем мы перестанем
+# давать модели шанс её исправить. Раньше первая же ошибка убивала ход (400
+# ученику), а это самый частый живой исход: модель вызывает lesson_get с
+# угаданным skillId, task_get с несуществующим taskId или update_profile с
+# человеческим «95+ баллов» вместо id — 6 из 20 реальных ходов в стресс-тесте.
+# Теперь ошибка уходит обратно в контекст (с подсказками, что допустимо), и
+# модель чинит свой вызов сама; ход при этом не теряется.
+MAX_TOOL_RETRIES = 4
 TURN_TIMEOUT_SEC = 90.0
 # Потолок шагов не должен отдавать ученику отказ: сначала один вызов БЕЗ
 # инструментов (короткий ответ по уже собранным данным), и только если время
@@ -81,7 +90,11 @@ TURN_SUMMARY_EXTRA_SEC = 15.0
 class AgentInputError(ValueError):
     """Детерминированная ошибка инструментов (не найден урок/задание,
     цель не из шкалы, неизвестная операция): повторять бессмысленно —
-    сервер маппит её в 400, а не в 502."""
+    сервер маппит её в 400, а не в 502.
+
+    ВНУТРИ хода такие ошибки больше не поднимаются: run_cycle кормит ими модель
+    (см. MAX_TOOL_RETRIES), чтобы она починила вызов. Этот класс остался для
+    случаев, когда чинить нечего и ход всё-таки надо оборвать."""
 
 
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
@@ -131,6 +144,19 @@ AGENT_SYSTEM = (
     "Никогда не пересказывай сырые JSON инструментов и не показывай внутренние id без нужды.\n"
     "5a. Ответ форматируй markdown: **жирный** для главного, `код` для названий, списки для перечислений, "
     "короткие абзацы. Таблицы, заголовки и простыни не нужны.\n"
+    "5в. В task_get есть поле `answer` — это ЭТАЛОННЫЙ ответ задания, а не подсказка. "
+    "Если ты решил задачу сам и разошёлся с эталоном — не выдавай своё: скажи, что по "
+    "эталону столько-то, и разбери, где именно твоё решение разошлось. Своё решение "
+    "в этом случае молчишь. answerIsAuthoritative=true.\n"
+    "5г. Прогноз (fold_web op=forecast) приходит в двух шкалах: mid/low/high — по шкале "
+    "0..scaleMax (у профильной это проценты, у базовой — первичные баллы), а primary/total — "
+    "первичные баллы. Читай поле `unit`/`note` и называй ту шкалу, о которой говоришь; "
+    "«mid 6» — это не «6 баллов».\n"
+    "5д. Освоение навыка — это mastery, а не progress: progress присылает приложение и к "
+    "освоению отношения не имеет (у нерешённых тем он бывает 40).\n"
+    "5e. id заданий и уроков (taskId, skillId) бери ТОЛЬКО из результатов инструментов. "
+    "Если нужного нет — позови fold_web(op=\"attempts\") или op=\"errors\", а не угадывай: "
+    "инструмент вернёт тебе ошибку со списком допустимых id.\n"
     "5b. Внутренние коды ученику лучше не показывать: вместо «задание re_3_4», «n01_planimetry», "
     "«fold_web», «lesson_get» говори словами, которые понимает человек — «задание на отрезки», "
     "«урок по производным», «твои ошибки». Код уместен, только если ученик сам его прислал или "
@@ -565,6 +591,20 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+def _day_of(value) -> str:
+    """Миллисекунды/секунды/строка -> дата ISO. created_at в базе смешанный."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return str(value or "")[:10]
+    if n > 10_000_000_000:
+        n //= 1000
+    try:
+        return datetime.fromtimestamp(n).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
 def _forecast_weights(conn: sqlite3.Connection, subject: str) -> tuple[dict, int, list]:
     """Веса/шкала прогноза: сначала app_config (install_catalog), иначе subjects/*.json."""
     try:
@@ -647,8 +687,19 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str) -> d
         mid = 0
     gains = sorted(scored, key=lambda s: (s["weight"] * (100 - s["mastery"]), s["weight"]),
                    reverse=True)[:3]
-    return {"available": True, "mid": mid, "low": max(0, mid - 5), "high": mid + 5,
-            "primary": round(primary, 2), "total": total,
+    # Вилку кламим в шкалу предмета: раньше high = mid + 5 вслепую, и при
+    # полном освоении профиля (шкала кончается на 100) наставник мог сказать
+    # «прогноз до 105». Плюс подписи единиц: без них модель читала mid профиля
+    # («6») как баллы, а это проценты, и в восьми живых чатах прогноз был
+    # пересказан неверно.
+    top = int(scale[-1]) if scale else (mid + 5)
+    low = max(int(scale[0]), mid - 5)
+    high = min(top, mid + 5)
+    return {"available": True, "mid": mid, "low": low, "high": high,
+            "primary": round(primary, 2), "total": total, "scaleMax": top,
+            "unit": "percent" if top > total else "points",
+            "note": (f"mid/low/high — по шкале 0..{top} ({'проценты' if top > total else 'первичные баллы'}), "
+                     f"primary/total — первичные баллы из {total}. Не путай шкалы."),
             "topGains": [{"skillId": g["skillId"], "name": g["name"],
                           "mastery": g["mastery"]} for g in gains]}
 
@@ -665,10 +716,20 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         prof = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
                             (user_id, subject)).fetchone()
         user = conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()
+        goals = _goal_scale(conn, subject)
+        goal_id = prof["goal_id"] if prof else None
         return {"op": op, "name": (user["name"] if user else None),
                 "onboarded": bool(prof["onboarded"]) if prof else False,
                 "selfLevel": prof["self_level"] if prof else None,
-                "goal": prof["goal_id"] if prof else None, "subject": subject}
+                "selfLevelLabel": SELF_LEVEL_LABELS.get(str(prof["self_level"] or ""), None) if prof else None,
+                "goal": goal_id, "goalLabel": next((str(g.get("label") or "") for g in goals
+                                                    if str(g.get("id")) == str(goal_id or "")), None),
+                # Шкала цели и уровней — иначе модель вынуждена УГАДЫВАТЬ id, а
+                # живой прогон показал: «поменяй цель на 95+» → 400 «цель не из
+                # шкалы предмета», потому что легенды негде взять.
+                "goals": [{"id": str(g.get("id")), "label": str(g.get("label") or "")} for g in goals],
+                "levels": [{"id": lid, "label": lab} for lid, lab in SELF_LEVEL_LABELS.items()],
+                "subject": subject}
     if op == "progress":
         stats = conn.execute("SELECT xp, streak, total_solved, total_correct, errors_resolved FROM user_stats WHERE user_id=? AND subject=?",
                              (user_id, subject)).fetchone()
@@ -682,9 +743,16 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                             " FROM skills s LEFT JOIN user_progress p ON p.skill_id=s.id AND p.user_id=? AND p.subject=?"
                             " WHERE s.subject=? ORDER BY s.display_order LIMIT 100",
                             (user_id, subject, subject)).fetchall()
-        return {"op": op, "skills": [{"id": r["id"], "name": r["name"], "solved": _safe_int(r["solved"]),
-                                      "correct": _safe_int(r["correct"]), "progress": _safe_int(r["progress"])}
-                                     for r in rows]}
+        # mastery — честная мера (объём × точность), progress — число, ПРИСЛАННОЕ
+        # браузером, к освоению отношения не имеет. Оба назывались похоже и лежали
+        # в одном ответе: на живых данных у навыка с 0 решённых стоял progress 40,
+        # и наставник объяснял это как «40% освоения» (мастерство там 0).
+        return {"op": op, "note": ("mastery — освоение по твоим попыткам; progress — "
+                                   "отметка из приложения, за освоение не отвечает."),
+                "skills": [{"id": r["id"], "name": r["name"], "solved": _safe_int(r["solved"]),
+                            "correct": _safe_int(r["correct"]), "progress": _safe_int(r["progress"]),
+                            "mastery": _skill_mastery(conn, user_id, subject, r["id"])}
+                           for r in rows]}
     if op == "errors":
         total = conn.execute("SELECT COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=?",
                              (user_id, subject)).fetchone()
@@ -693,26 +761,56 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         by_skill = conn.execute("SELECT skill_id, COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=? AND resolved=0"
                                 " GROUP BY skill_id ORDER BY c DESC LIMIT 10",
                                 (user_id, subject)).fetchall()
-        last = conn.execute("SELECT id, task_id, skill_id, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
+        last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
                             (user_id, subject, limit)).fetchall()
+        names = dict(_skill_names(conn, subject))
+        # Название навыка и тема задания — обязательны: без них модель вынуждена
+        # писать ученику `n08_expressions` (живой баг, правило 5b промпта
+        # существует именно из-за этого) и не может отличить «ошибку по векторам»
+        # от «ошибки по оптимизации» — а именно на этом строится resolve_error.
         return {"op": op, "total": _safe_int(total["c"]) if total else 0,
                 "open": _safe_int(open_n["c"]) if open_n else 0,
-                "bySkill": [{"skill": r["skill_id"], "count": _safe_int(r["c"])} for r in by_skill],
+                "bySkill": [{"skill": r["skill_id"], "name": names.get(r["skill_id"], r["skill_id"]),
+                             "count": _safe_int(r["c"])} for r in by_skill],
                 "last": [{"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"],
-                          "resolved": bool(r["resolved"])} for r in last]}
+                          "skillName": names.get(r["skill_id"], r["skill_id"]),
+                          "topic": r["topic"] or "", "resolved": bool(r["resolved"])} for r in last]}
     if op == "attempts":
         task_id = str((args or {}).get("taskId") or "").strip()
-        if task_id:
-            rows = conn.execute("SELECT task_id, skill_id, correct, hint_level, created_at FROM task_attempts"
-                                " WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ?",
-                                (user_id, subject, task_id, limit)).fetchall()
-        else:
-            rows = conn.execute("SELECT task_id, skill_id, correct, hint_level, created_at FROM task_attempts"
-                                " WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
-                                (user_id, subject, limit)).fetchall()
-        return {"op": op, "taskId": task_id or None,
+        names = dict(_skill_names(conn, subject))
+        if not task_id:
+            # Без taskId «последние попытки» — это каша из РАЗНЫХ заданий, и
+            # модель на ней строила выводы о темах, которых ученик не касался
+            # (живой чат: попытки без b07, а вывод «по графикам ошибался»).
+            # Ответ на вопрос «где я ошибаюсь» — агрегат по навыкам, а не хвост
+            # разнородных строк.
+            agg = conn.execute("SELECT skill_id, COUNT(*) AS n, SUM(CASE WHEN correct=0 THEN 1 ELSE 0 END) AS wrong"
+                               " FROM task_attempts WHERE user_id=? AND subject=? GROUP BY skill_id"
+                               " ORDER BY wrong DESC, n DESC LIMIT 12",
+                               (user_id, subject)).fetchall()
+            return {"op": op, "taskId": None, "bySkill": [
+                {"skill": r["skill_id"], "skillName": names.get(r["skill_id"], r["skill_id"]),
+                 "attempts": _safe_int(r["n"]), "wrong": _safe_int(r["wrong"])} for r in agg],
+                "note": ("taskId не задан: это сводка по навыкам, а не список отдельных "
+                         "попыток. Для разбора одного задания передай taskId.")}
+        rows = conn.execute("SELECT task_id, skill_id, correct, hint_level, created_at FROM task_attempts"
+                            " WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ?",
+                            (user_id, subject, task_id, limit)).fetchall()
+        topics = {}
+        try:
+            tids = {r["task_id"] for r in rows}
+            if tids:
+                q = ",".join("?" * len(tids))
+                for tr in conn.execute(f"SELECT id, topic FROM tasks WHERE id IN ({q})", tuple(tids)):
+                    topics[tr["id"]] = tr["topic"]
+        except sqlite3.Error:
+            topics = {}
+        return {"op": op, "taskId": task_id,
                 "attempts": [{"taskId": r["task_id"], "skill": r["skill_id"],
-                              "correct": bool(r["correct"]), "hint": _safe_int(r["hint_level"])} for r in rows]}
+                              "skillName": names.get(r["skill_id"], r["skill_id"]),
+                              "topic": topics.get(r["task_id"], ""),
+                              "correct": bool(r["correct"]), "hint": _safe_int(r["hint_level"]),
+                              "at": _day_of(r["created_at"])} for r in rows]}
     if op == "daily":
         rows = conn.execute("SELECT progress_date, solved, done FROM daily_progress WHERE user_id=? AND subject=? ORDER BY progress_date DESC LIMIT 14",
                             (user_id, subject)).fetchall()
@@ -776,14 +874,22 @@ def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
     task_id = str((args or {}).get("taskId") or "").strip()
     if not task_id:
         raise ValueError("нужен taskId")
-    row = conn.execute("SELECT t.id, t.skill_id, t.topic, t.exam_number, t.statement, t.answer FROM tasks t"
+    row = conn.execute("SELECT t.id, t.skill_id, t.topic, t.exam_number, t.statement, t.answer,"
+                       " t.explanation, t.hint, s.name AS skill_name FROM tasks t"
                        " JOIN skills s ON s.id=t.skill_id WHERE t.id=? AND s.subject=?",
                        (task_id, subject)).fetchone()
     if not row:
         raise ValueError("задание не найдено")
-    return {"taskId": row["id"], "skill": row["skill_id"], "topic": row["topic"],
-            "exam": row["exam_number"], "statement": str(row["statement"])[:1500],
-            "answer": str(row["answer"])[:200]}
+    # Разбор задания без author's explanation и подсказки — это работа модели
+    # по памяти: в задании ответ есть, а «как решать» нет. Живой вопрос
+    # «объясни задание 17 с параметрами» уходил в lesson_get и падал.
+    return {"taskId": row["id"], "skill": row["skill_id"], "skillName": row["skill_name"],
+            "topic": row["topic"], "exam": row["exam_number"],
+            "statement": str(row["statement"])[:1500],
+            "answer": str(row["answer"])[:200],
+            "explanation": str(row["explanation"] or "")[:1200],
+            "hint": str(row["hint"] or "")[:600],
+            "answerIsAuthoritative": True}
 
 
 def essay_history(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
@@ -797,19 +903,72 @@ def essay_history(conn: sqlite3.Connection, user_id: int, subject: str, args: di
     rows = conn.execute("SELECT id, task_id, word_count, evaluation_status, evaluation_result, created_at"
                         " FROM essay_submissions WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
                         (user_id, subject, limit)).fetchall()
+    # Название работы вместо re27_4: тема задания в каталоге человеческая
+    # («Сочинение по тексту», «Итоговое сочинение»), а без неё модель писала
+    # ученику внутренний код — ровно то, что запрещает правило 5b.
+    topics = {}
+    try:
+        tids = {r["task_id"] for r in rows}
+        if tids:
+            q = ",".join("?" * len(tids))
+            for tr in conn.execute(f"SELECT id, topic FROM tasks WHERE id IN ({q})", tuple(tids)):
+                topics[tr["id"]] = tr["topic"]
+    except sqlite3.Error:
+        topics = {}
     out = []
     for r in rows:
         score = None
-        try:
-            if r["evaluation_result"]:
-                blob = json.loads(r["evaluation_result"])
-                score = blob.get("total_score")
-        except (ValueError, TypeError, AttributeError):
-            score = None
-        out.append({"submissionId": int(r["id"]), "taskId": r["task_id"],
-                    "words": _safe_int(r["word_count"]), "status": r["evaluation_status"],
-                    "score": score})
-    return {"essays": out}
+        item = {"submissionId": int(r["id"]), "taskId": r["task_id"],
+                "topic": topics.get(r["task_id"], ""),
+                "words": _safe_int(r["word_count"]), "status": r["evaluation_status"],
+                "score": score}
+        # Максимум, критерии и комментарии проверяющего лежат в
+        # evaluation_result — раньше инструмент их выбрасывал, и модель писала
+        # ученику «баллы из 21» (в ключе 22) и разбор «что почти наверняка
+        # слетело по К3» без единого числа из базы. Теперь данные есть.
+        blob = {}
+        if r["evaluation_result"]:
+            try:
+                parsed = json.loads(r["evaluation_result"])
+                if isinstance(parsed, dict):
+                    blob = parsed
+            except (ValueError, TypeError, AttributeError):
+                blob = {}
+        if blob:
+            item["score"] = blob.get("total_score")
+            item["maxScore"] = blob.get("max_score")
+            crits = blob.get("criteria")
+            if isinstance(crits, list):
+                item["criteria"] = [{"id": c.get("id"), "name": c.get("name"),
+                                     "score": c.get("score"), "maxScore": c.get("max_score"),
+                                     "comment": str(c.get("comment") or "")[:220]}
+                                    for c in crits if isinstance(c, dict)]
+            improve = blob.get("what_to_improve")
+            if improve:
+                item["whatToImprove"] = (improve if isinstance(improve, str) else json.dumps(improve, ensure_ascii=False))[:600]
+            verdict = blob.get("short_verdict")
+            if verdict:
+                item["verdict"] = str(verdict)[:300]
+        item["statusNote"] = _essay_status_note(item)
+        item["at"] = _day_of(r["created_at"])
+        out.append(item)
+    return {"essays": out, "note": ("maxScore — максимум по ключу этого задания (обычно 22). "
+                                    "criteria — как проверяющий оценил работу; опирайся на них, "
+                                    "а не на догадки." if out else "")}
+
+
+def _essay_status_note(item: dict) -> str:
+    """Статус словами: `failed` — это упавшая ИИ-проверка, а не «не приняли»."""
+    status = str(item.get("status") or "")
+    if status == "ready" and item.get("maxScore"):
+        return f"проверено: {item.get('score')} из {item['maxScore']}"
+    if status == "ready":
+        return "проверено, балл есть"
+    if status == "failed":
+        return "проверка не удалась, работу можно отправить заново"
+    if status == "pending":
+        return "написано, ждёт проверки"
+    return "написано, но ещё не проверено"
 
 
 def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
@@ -820,13 +979,34 @@ def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
         weeks = 1
     fc = _compute_forecast(conn, user_id, subject)
     gains = fc.get("topGains") or []
+    names = dict(_skill_names(conn, subject))
     if not gains:
         rows = conn.execute("SELECT skill_id, COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=? AND resolved=0"
                             " GROUP BY skill_id ORDER BY c DESC LIMIT 3", (user_id, subject)).fetchall()
-        gains = [{"skillId": r["skill_id"], "name": r["skill_id"], "mastery": 0} for r in rows]
-    plan = [{"week": w + 1, "focus": [g["skillId"] for g in gains[:2]],
-             "tasks": f"Неделя {w + 1}: " + (", ".join(g.get('name') or g['skillId'] for g in gains[:2]) or "повторение")}
-            for w in range(weeks)]
+        gains = [{"skillId": r["skill_id"], "name": names.get(r["skill_id"], r["skill_id"]),
+                  "mastery": 0} for r in rows]
+    else:
+        gains = [dict(g, name=names.get(g.get("skillId"), g.get("name") or g.get("skillId")))
+                 for g in gains]
+    # Раньше каждая неделя получала ОДИН И ТОТ ЖЕ список focus — план на 4 недели
+    # был четыре раза одно и то же, и модель честно пересказывала это ученику.
+    # Теперь недели различаются: сначала закрываем самые слабые навыки, дальше
+    # берём следующие по счёту, а на хвосте — закрепление и повторение.
+    order = [g["skillId"] for g in gains]
+    focus_pool = order or []
+    plan = []
+    for w in range(weeks):
+        start = (w * 2) % max(len(focus_pool), 1)
+        focus = [focus_pool[(start + i) % len(focus_pool)] for i in range(min(2, len(focus_pool)))] \
+            if focus_pool else []
+        focus = list(dict.fromkeys(focus))
+        titles = [next((g["name"] for g in gains if g["skillId"] == s), s) for s in focus]
+        if w >= len(focus_pool) and focus_pool:
+            tasks = (f"Неделя {w + 1}: повторение и закрепление — "
+                     + ", ".join(titles) + "; разбор ошибок по этим темам")
+        else:
+            tasks = f"Неделя {w + 1}: " + (", ".join(titles) or "повторение")
+        plan.append({"week": w + 1, "focus": focus, "focusNames": titles, "tasks": tasks})
     return {"weeks": weeks, "forecast": fc.get("mid"), "plan": plan}
 
 
@@ -834,6 +1014,99 @@ def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
 # Действия: сначала proposal (без записи), потом apply после подтверждения
 # ---------------------------------------------------------------------------
 SELF_LEVELS = {"zero", "base", "confident"}
+# Человеческие названия уровня: модель и ученик говорят «средний», а в базе
+# лежит base. Без этой таблицы update_profile принимал ТОЛЬКО внутренний id, а
+# ученик формулирует цель и уровень обычными словами («хочу 95+», «уровень
+# средний»): живой прогон — 400 «цель не из шкалы предмета» на живом ходу.
+SELF_LEVEL_LABELS = {"zero": "с нуля / не понимаю", "base": "средний",
+                     "confident": "уверенно / решаю легко"}
+SELF_LEVEL_SYNONYMS = {
+    "zero": {"zero", "снуля", "с нуля", "нулевой", "нулевая", "нулевое", "нулевые",
+             "непонимаю", "не понимаю", "ничего не понимаю", "начал", "начать",
+             "плохо", "тяжело", "тяжелое", "плохое", "неуверенно", "неуверен",
+             "пока плохо", "с трудом"},
+    "base": {"base", "базовый", "базовая", "базовое", "средний", "среднее", "средняя",
+             "нормальный", "нормальная", "нормально", "норма", "норм",
+             "более-менее", "более менее", "ок", "обычно", "средний уровень"},
+    "confident": {"confident", "уверенно", "уверен", "уверенный", "уверенная",
+                  "хорошо", "хороший", "хорошо понимаю", "легко", "легко дается",
+                  "свободно", "решаю легко"},
+}
+# Обвязка, которую ученик добавляет вокруг значения («хочу уровень средний»):
+# без её снятия фраза не совпадёт ни с одним синонимом.
+_LEVEL_NOISE = ("хочу", "поставь", "поставить", "давай", "уровень", "самооценка",
+                "мне", "у", "на", "пожалуйста")
+
+
+def _goal_scale(conn: sqlite3.Connection, subject: str) -> list:
+    """Шкала целей предмета (app_config), как список {id, label}."""
+    try:
+        cfg = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                           (f"goals:{subject}",)).fetchone()
+        goals = json.loads(cfg["value_json"]) if cfg else None
+    except (sqlite3.Error, ValueError, TypeError):
+        goals = None
+    if isinstance(goals, list):
+        return [g for g in goals if isinstance(g, dict) and g.get("id")]
+    return []
+
+
+def _norm_goal(value) -> str:
+    """«95+ баллов» / «хочу набрать 95» / «g95» → «95»: сравниваем без шумов."""
+    text = str(value or "").strip().lower()
+    for noise in ("баллов", "балла", "балл", "набрать", "хочу", "хочу набрать",
+                  "поставь", "давай", "цель", "мне", "пожалуйста", "g"):
+        text = text.replace(noise, " ")
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _match_goal(goals: list, raw) -> str | None:
+    """Человеческая формулировка цели → id шкалы. None = не угадали."""
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    for g in goals:
+        if str(g.get("id")) == value:
+            return str(g["id"])
+    want = _norm_goal(value)
+    if not want:
+        return None
+    exact = []
+    loose = []
+    for g in goals:
+        gid = str(g.get("id") or "")
+        label = str(g.get("label") or "")
+        nlabel = _norm_goal(label)
+        nid = _norm_goal(gid)
+        if not nid:
+            continue
+        if want in (nlabel, nid):
+            exact.append(gid)
+        elif nlabel and (nlabel in want or want in nlabel) and len(want) >= 2:
+            loose.append(gid)
+    pool = exact or loose
+    if len(pool) == 1:
+        return pool[0]
+    # «g95» входит в «g95» и в «g95x»? Нет. А вот «60» не должно подходить к
+    # «g60» наоборот — уже покрыто точным совпадением. Несколько кандидатов —
+    # не угадываем: пусть модель выберет сама по подсказке из goals.
+    return None
+
+
+def _match_self_level(raw) -> str | None:
+    value = str(raw or "").strip().lower()
+    if value in SELF_LEVELS:
+        return value
+    variants = {_norm_goal(value)}
+    stripped = value
+    for _ in range(3):  # снимаем обвязку вроде «хочу уровень средний»
+        for noise in _LEVEL_NOISE:
+            stripped = stripped.replace(noise, " ")
+        stripped = " ".join(stripped.split())
+        variants.add(_norm_goal(stripped))
+    hits = [lid for lid, words in SELF_LEVEL_SYNONYMS.items()
+            if any(v in words or (v and v in {_norm_goal(w) for w in words}) for v in variants if v)]
+    return hits[0] if len(hits) == 1 else None
 
 
 def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
@@ -841,36 +1114,46 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
     args = dict(args or {})
     if name == "update_profile":
         patch = {}
+        human = {}
         if "name" in args and args["name"] is not None:
             clean = " ".join(str(args["name"]).split())[:60]
             if not clean:
                 raise ValueError("пустое имя")
             patch["name"] = clean
+            human["name"] = clean
         if "selfLevel" in args and args["selfLevel"] is not None:
-            if str(args["selfLevel"]) not in SELF_LEVELS:
+            level = _match_self_level(args["selfLevel"])
+            if level is None:
                 raise ValueError("неизвестный уровень")
-            patch["selfLevel"] = str(args["selfLevel"])
+            patch["selfLevel"] = level
+            human["selfLevel"] = SELF_LEVEL_LABELS[level]
         if "goal" in args and args["goal"] is not None:
-            goal = str(args["goal"]).strip()[:64]
-            if not goal:
+            raw_goal = str(args["goal"]).strip()[:64]
+            if not raw_goal:
                 raise ValueError("пустая цель")
-            # Цель проверяем по шкале предмета, если она есть в app_config.
-            try:
-                cfg = conn.execute("SELECT value_json FROM app_config WHERE key=?",
-                                   (f"goals:{subject}",)).fetchone()
-                goals = json.loads(cfg["value_json"]) if cfg else None
-                if isinstance(goals, list) and goals:
-                    ids = {g.get("id") for g in goals if isinstance(g, dict)}
-                    if goal not in ids:
-                        raise ValueError("цель не из шкалы предмета")
-            except (sqlite3.Error, ValueError, TypeError) as exc:
-                if isinstance(exc, ValueError) and "шкалы" in str(exc):
-                    raise
+            goals = _goal_scale(conn, subject)
+            if goals:
+                goal = _match_goal(goals, raw_goal)
+                if goal is None:
+                    raise ValueError("цель не из шкалы предмета")
+            else:
+                # У предмета нет шкалы целей (например russian), и ОСНОВНОЙ путь
+                # (validate_profile_settings) такую цель отбрасывает. Раньше
+                # наставник писал её в goal_id, и следующий же PATCH /api/settings
+                # тихо её стирал — то есть ученику говорили «готово» про то, что не
+                # сохранилось. Теперь это честная ошибка с подсказкой, а модель
+                # скажет, что цель тут не настраивается.
+                raise ValueError("у этого предмета не настраивается цель — скажи об этом ученику")
             patch["goal"] = goal
+            human["goal"] = next((str(g.get("label") or g.get("id")) for g in goals
+                                  if str(g.get("id")) == goal), goal)
         if not patch:
             raise ValueError("нечего менять")
-        bits = ", ".join(f"{k}={v}" for k, v in patch.items())
-        return {"action": name, "patch": patch, "label": f"Меняю профиль: {bits}"}
+        # Подпись показывается ученику в карточке подтверждения: там должны быть
+        # ЛЮДИ, а не id («goal=g95» ничего не значит для человека).
+        bits = ", ".join(f"{human.get(k, v)}" for k, v in patch.items())
+        return {"action": name, "patch": patch, "label": f"Меняю профиль: {bits}",
+                "human": human}
     if name == "resolve_error":
         error_id = str(args.get("errorId") or "").strip()
         task_id = str(args.get("taskId") or "").strip()
@@ -881,11 +1164,21 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
             except (TypeError, ValueError):
                 numeric = None
             if numeric is not None:
-                row = conn.execute("SELECT id, task_id FROM user_errors WHERE id=? AND user_id=? AND subject=?",
+                row = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE id=? AND user_id=? AND subject=?",
                                    (numeric, user_id, subject)).fetchone()
             if row is None:
-                row = conn.execute("SELECT id, task_id FROM user_errors WHERE client_id=? AND user_id=? AND subject=?",
+                row = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE client_id=? AND user_id=? AND subject=?",
                                    (error_id[:128], user_id, subject)).fetchone()
+            # Если модель назвала И id, И задание — они обязаны указывать на ОДНУ
+            # строку. Живой случай (стресс-тест): ученик «разобрался с ошибкой по
+            # теме “Производная и первообразная”», модель позвала
+            # resolve_error(errorId=7, taskId=n09_p1) — где 7 был выдуманным
+            # числом, попавшим в СОВСЕМ другую ошибку (навык «Прикладная
+            # оптимизация»). Раньше id выигрывал молча, ученик подтвердил карточку
+            # без названия — и чужая ошибка исчезла из его списка. Теперь
+            # расхождение — ошибка, модель чинит вызов в том же ходу.
+            if row is not None and task_id and str(row["task_id"]) != task_id:
+                raise ValueError("errorId и taskId указывают на разные задания — уточни, какое")
         elif task_id:
             # Порядок ЗНАЧЕНИЙ должен совпадать с порядком плейсхолдеров
             # (task_id, user_id, subject). Раньше здесь стояло
@@ -894,12 +1187,22 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
             # ничего никогда. Хуже того, как только subject смог бы оказаться
             # числом, запрос выбрал бы ЧУЖУЮ ошибку, а apply_action (с верным
             # порядком) пометил бы её разобранной.
-            row = conn.execute("SELECT id, task_id FROM user_errors WHERE task_id=? AND user_id=? AND subject=? AND resolved=0 ORDER BY id LIMIT 1",
+            row = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE task_id=? AND user_id=? AND subject=? AND resolved=0 ORDER BY id LIMIT 1",
                                (task_id, user_id, subject)).fetchone()
         if row is None:
             raise ValueError("ошибка не найдена")
-        return {"action": name, "errorId": int(row["id"]),
-                "label": f"Отмечаю ошибку по заданию {row['task_id']} разобранной"}
+        # Уже разобранную ошибку повторно «разбирать» незачем. Раньше apply_action
+        # отвечал «resolved: true» и ученик видел зелёную галочку вхолостую, а
+        # модель рапортовала «готово». Теперь это честный отказ с объяснением —
+        # пусть она скажет ученику, что ошибка уже закрыта.
+        if int(row["resolved"] or 0):
+            where = str(row["topic"] or "") or f"заданию {row['task_id']}"
+            raise ValueError(f"ошибка по теме «{where}» уже разобрана — нечего подтверждать")
+        topic = str(row["topic"] or "").strip()
+        where = topic or f"заданию {row['task_id']}"
+        return {"action": name, "errorId": int(row["id"]), "taskId": str(row["task_id"]),
+                "topic": topic, "skill": row["skill_id"],
+                "label": f"Отмечаю разобранной ошибку по теме «{where}»"}
     if name == "reset_progress":
         return {"action": name, "label": "Сбрасываю весь прогресс предмета"}
     raise ValueError(f"неизвестное действие: {name}")
@@ -937,10 +1240,13 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
         error_id = int(proposal.get("errorId") or 0)
         if error_id <= 0:
             raise ValueError("битое предложение")
-        cur = conn.execute("UPDATE user_errors SET resolved=1 WHERE id=? AND user_id=? AND subject=?",
+        # WHERE resolved=0: строка, которую уже закрыли (или чужой предмет),
+        # больше не «применяется» — apply честно отказывает, а не рапортует
+        # «готово» вхолостую (зелёная галочка в ленте была ложью).
+        cur = conn.execute("UPDATE user_errors SET resolved=1 WHERE id=? AND user_id=? AND subject=? AND resolved=0",
                            (error_id, user_id, subject))
         if cur.rowcount == 0:
-            raise ValueError("ошибка не найдена")
+            raise ValueError("ошибка уже разобрана или не найдена — скажи ученику честно")
         conn.commit()
         return {"errorId": error_id, "resolved": True}
     if name == "reset_progress":
@@ -949,7 +1255,8 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
                       "completed_lessons", "user_missions", "user_bosses", "user_achievements",
                       "timeline", "diagnostics", "daily_progress", "activity_history",
                       "activity_events", "forecast_history", "essay_submissions",
-                      "essay_checks", "essay_check_history"):
+                      "essay_checks", "essay_check_history", "user_hint_levels",
+                      "user_xp_adjustments"):
             try:
                 if table in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
                     cols = _table_cols(conn, table)
@@ -959,6 +1266,22 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
                         conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
             except sqlite3.Error:
                 pass
+        # user_stats — СЧИТНАЯ таблица, а не журнал: её нельзя «удалить»,
+        # только обнулить. Без этого сброс оставлял наставнику цифры, которых
+        # уже нет: замерено на копии живой БД — после сброса
+        # fold_web(op="progress") отдавал xp=5000, solved=46, streak=7, и
+        # следующим вопросом ученик получал «46 решено, XP 5000» про стёртый
+        # прогресс. Список таблиц выше этот случай не покрывал.
+        try:
+            if "user_stats" in {r["name"] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}:
+                conn.execute(
+                    "UPDATE user_stats SET xp=0, streak=0, last_active_date=NULL, total_solved=0,"
+                    " total_correct=0, total_time_sec=0, hints_used=0, correct_series=0,"
+                    " best_series=0, errors_resolved=0 WHERE user_id=? AND subject=?",
+                    (user_id, subject))
+        except sqlite3.Error:
+            pass
         try:
             conn.execute("UPDATE user_subjects SET state_version=state_version+1 WHERE user_id=? AND subject=?",
                          (user_id, subject))
@@ -983,14 +1306,89 @@ def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name
     raise ValueError(f"неизвестный инструмент: {name}")
 
 
+# ---------------------------------------------------------------------------
+# Ошибка инструмента как ПОДСКАЗКА, а не как приговор ходу
+# ---------------------------------------------------------------------------
+def _norm(s) -> str:
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+
+def _skill_names(conn: sqlite3.Connection, subject: str) -> list:
+    try:
+        return [(r["id"], r["name"]) for r in conn.execute(
+            "SELECT id, name FROM skills WHERE subject=? ORDER BY display_order", (subject,))]
+    except sqlite3.Error:
+        return []
+
+
+def _hints_for_tool(conn: sqlite3.Connection, subject: str, name: str, args: dict) -> dict:
+    """Что модель должна знать, чтобы починить свой вызов.
+
+    Раньше неверный аргумент означал «ход окончен, 400 ученику». Теперь ошибка
+    возвращается в контекст вместе с тем, что ДОПУСТИМО: без этого модель
+    повторяет ту же ошибочную попытку (и в стресс-тесте так и вышло).
+    """
+    args = args or {}
+    out = {}
+    if name == "lesson_get":
+        want = _norm(args.get("skillId") or args.get("lessonId") or "")
+        rows = _skill_names(conn, subject)
+        hit = [f"{sid} — {nm}" for sid, nm in rows
+               if want and (_norm(sid) == want or want in _norm(sid) or want in _norm(nm))]
+        if not hit:
+            hit = [f"{sid} — {nm}" for sid, nm in rows
+                   if any(len(tok) >= 4 and tok in _norm(nm) for tok in want.split())][:6]
+        out["available"] = hit[:8] or [f"{sid} — {nm}" for sid, nm in rows[:8]]
+        out["hint"] = ("Вызови lesson_get с одним из этих skillId (или с lessonId урока). "
+                       "skillId — ровно id навыка из списка.")
+    elif name == "task_get":
+        tid = _norm(args.get("taskId") or "")
+        try:
+            rows = conn.execute("SELECT t.id, t.topic FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                                " WHERE s.subject=? ORDER BY t.id LIMIT 400", (subject,)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        hit = [f"{r['id']} — {r['topic']}" for r in rows
+               if tid and (tid in _norm(r["id"]) or tid in _norm(r["topic"]))]
+        out["taskNotFound"] = [f"{r['id']} — {r['topic']}" for r in rows
+                               if r["topic"] and any(len(tok) >= 4 and tok in _norm(r["topic"])
+                                                     for tok in tid.split())][:6]
+        out["sample"] = hit[:6] or [f"{r['id']} — {r['topic']}" for r in rows[:6]]
+        out["hint"] = ("Вызови task_get с taskId, который РЕАЛЬНО существует (список ниже), "
+                       "либо сначала fold_web(op=\"attempts\")/fold_web(op=\"errors\"), "
+                       "чтобы взять id из базы.")
+    elif name == "resolve_error":
+        out["hint"] = ("errorId бери из fold_web(op=\"errors\") — целым числом, "
+                       "как там в last[].id; либо передай taskId задания. "
+                       "Не выдумывай id.")
+    elif name == "update_profile":
+        goals = _goal_scale(conn, subject)
+        out["goals"] = [f"{g['id']} — {g.get('label')}" for g in goals]
+        out["levels"] = [f"{lid} — {SELF_LEVEL_LABELS.get(lid, lid)}" for lid in sorted(SELF_LEVEL_LABELS)]
+        out["hint"] = ("goal — это id из goals (например g95) или ТОЧНАЯ подпись из goals; "
+                       "selfLevel — zero/base/confident.")
+    return out
+
+
+def _tool_failure(conn: sqlite3.Connection, subject: str, name: str, args: dict, exc: Exception) -> dict:
+    payload = {"error": str(exc) or "инструмент не сработал"}
+    try:
+        payload.update(_hints_for_tool(conn, subject, name, args))
+    except sqlite3.Error:
+        pass
+    return payload
+
+
 def describe_step(name: str, args: dict, result: dict | None = None) -> str:
     """Человеческая строка шага для ленты («Смотрю твои ошибки…»)."""
     args = args or {}
     if name == "fold_web":
         op = str(args.get("op") or "")
         if op == "forecast":
-            mid = (result or {}).get("mid")
-            return f"Смотрю прогноз — сейчас {mid}" if mid is not None else "Смотрю прогноз"
+            # Без числа: шаг читает ученик, а «сейчас 6» на шкале профиля
+            # означает 6 процентов — число без единицы вводит в заблуждение
+            # (восемь живых чатов пересказали прогноз неверно именно так).
+            return "Смотрю прогноз по баллам"
         if op == "errors":
             n = (result or {}).get("open")
             return f"Смотрю твои ошибки — {n} штук" if n is not None else "Смотрю твои ошибки"
@@ -998,8 +1396,15 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
             n = len((result or {}).get("skills") or [])
             return f"Смотрю навыки — {n} тем"
         if op == "attempts":
-            tid = args.get("taskId")
-            return f"Смотрю попытки по заданию {tid}" if tid else "Смотрю последние попытки"
+            # Тема задания, если инструмент её вернул: шаг читает ученик, а не
+            # модель, и «n01_p3» в ленте — это ровно тот код, который запрещает
+            # правило 5b.
+            topic = ""
+            if result and result.get("attempts"):
+                topic = str((result["attempts"][0] or {}).get("topic") or "")
+            return (f"Смотрю попытки по теме «{topic}»" if topic
+                    else ("Смотрю последние попытки" if not args.get("taskId")
+                          else "Смотрю попытки по этому заданию"))
         if op == "profile":
             return "Смотрю твой профиль"
         if op == "progress":
@@ -1011,9 +1416,13 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         return "Смотрю прогресс"
     if name == "lesson_get":
         lid = args.get("lessonId") or args.get("skillId") or ""
-        return f"Открываю урок {lid}" if lid else "Открываю урок"
+        title = (result or {}).get("title")
+        return f"Открываю урок «{title}»" if title else (f"Открываю урок {lid}" if lid else "Открываю урок")
     if name == "task_get":
-        return f"Открываю задание {args.get('taskId') or ''}".strip()
+        # Название задания вместо id: строка шага пишется СЕРВЕРОМ, модель её
+        # не контролирует, а ученику нечего делать в «n17_p3» (правило 5b).
+        topic = (result or {}).get("topic")
+        return f"Открываю задание «{topic}»" if topic else f"Открываю задание {args.get('taskId') or ''}".strip()
     if name == "essay_history":
         return "Смотрю твои сочинения"
     if name == "plan_draft":
@@ -1190,6 +1599,48 @@ def fallback_tool_for(text: str) -> tuple[str, dict]:
     return "fold_web", {"op": "progress"}
 
 
+def _tool_payload(data: dict, cap: int = 4000) -> str:
+    """JSON результата инструмента в контекст модели — ВСЕГДА валидный.
+
+    Раньше здесь стояло `json.dumps(data)[:4000]`: обрезка по символам режет
+    JSON посреди объекта, и модель получала нечитаемый хвост (замерено на живой
+    базе: fold_web(op=attempts, limit=50) = 7973 симв. → в модель уходило 4000 с
+    обрывом `..."taskId": "n01`). Теперь режем ПО ЭЛЕМЕНТАМ списка и честно
+    говорим, что показано не всё.
+    """
+    try:
+        blob = json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "результат не сериализуется"}, ensure_ascii=False)
+    if len(blob) <= cap:
+        return blob
+    # Длинные списки укорачиваем поштучно, пока не влезем.
+    trimmed = dict(data)
+    for key in ("attempts", "last", "skills", "days", "criteria", "bySkill", "essays"):
+        seq = trimmed.get(key)
+        if not isinstance(seq, list) or len(seq) < 2:
+            continue
+        cut = list(seq)
+        while len(cut) > 1:
+            cut = cut[:len(cut) // 2]
+            trimmed[key] = cut
+            trimmed["truncated"] = {"field": key, "shown": len(cut), "total": len(seq),
+                                    "note": "показана часть списка"}
+            try:
+                if len(json.dumps(trimmed, ensure_ascii=False)) <= cap:
+                    return json.dumps(trimmed, ensure_ascii=False)
+            except (TypeError, ValueError):
+                break
+    # Не список — режем строковые поля, но метку обрезки ставим ДО обрезки.
+    trimmed = dict(data)
+    trimmed["truncated"] = {"note": "результат обрезан по размеру"}
+    blob = json.dumps(trimmed, ensure_ascii=False)
+    if len(blob) <= cap:
+        return blob
+    return json.dumps({"error": "результат слишком большой, попроси меньше",
+                       "hint": "уменьши limit"}, ensure_ascii=False)
+
+
 def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: list,
               chat_fn, *, deadline: float | None = None) -> tuple[list, str | None, dict | None]:
     """Один проход модель↔инструменты. Возвращает (steps, final, pending).
@@ -1218,7 +1669,8 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
     # вызова, и только тогда сервер имеет право позвать инструмент сам.
     asked_for_data = asks_for_data(asked)
     recently_read = False
-    for _ in range(MAX_TOOL_STEPS + 1):
+    failed = 0
+    for _ in range(MAX_TOOL_STEPS + MAX_TOOL_RETRIES + 1):
         budget = deadline - time.monotonic()
         if budget <= TURN_CALL_FLOOR_SEC:
             # Бюджета не осталось. Если что-то уже собрано — отдаём это (шаги
@@ -1280,16 +1732,57 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 try:
                     proposal = propose_action(conn, user_id, subject, name, call_args)
                 except ValueError as exc:
-                    raise AgentInputError(str(exc)) from exc
+                    # Действие с неверными аргументами (выдуманный errorId,
+                    # цель не из шкалы) больше не убивает ход: ошибка уходит
+                    # обратно в контекст, модель чинит вызов и повторяет.
+                    # Пара assistant+tool обязательна для провайдера, поэтому
+                    # пишем её ДО продолжения цикла, иначе следующий запрос
+                    # придёт с «висящим» вызовом без ответа.
+                    failed += 1
+                    messages.append({"role": "assistant", "content": preamble or None,
+                                     "tool_calls": [{"id": call_id, "type": "function",
+                                                     "function": {"name": name,
+                                                                  "arguments": json.dumps(call_args, ensure_ascii=False)}}]})
+                    messages.append({"role": "tool", "tool_call_id": call_id,
+                                     "content": json.dumps(_tool_failure(conn, subject, name, call_args, exc),
+                                                           ensure_ascii=False)[:4000]})
+                    preamble = None
+                    if failed >= MAX_TOOL_RETRIES:
+                        return steps, _summarize(chat_fn, messages), None
+                    continue
                 label = proposal.get("label") or describe_step(name, call_args)
                 steps.append({"name": name, "args": call_args, "label": label, "kind": "action",
                               "status": "needs_confirm", "call_id": call_id, "proposal": proposal})
-                return steps, None, {"tool": name, "args": call_args, "proposal": proposal,
-                                     "call_id": call_id}
+                # final=None: ход встал на подтверждение, и всё, что ученик должен
+                # узнать, живёт в подписи шага — она теперь человеческая
+                # («Отмечаю разобранной ошибку по теме «…»»), а не «по заданию
+                # n02_p1». Отдельный assistant-текст здесь не хранится и клиент
+                # его не рисует, поэтому выдумывать второй носитель смысла нет.
+                return steps, None, {"tool": name, "args": call_args,
+                                     "proposal": proposal, "call_id": call_id}
             try:
                 data = execute_read_tool(conn, user_id, subject, name, call_args)
             except ValueError as exc:
-                raise AgentInputError(str(exc)) from exc
+                # ГЛАВНОЕ: неверный аргумент — это ответ инструмента модели, а
+                # не приговор ходу. Раньше отсюда летел AgentInputError → 400
+                # ученику: живой прогон 20 сценариев — 6 ходов из 20 умерли так
+                # («уроки по скиллу не найдены», «задание не найдено», «цель не
+                # из шкалы»), причём все вопросы были обычными. Теперь модель
+                # получает ошибку с подсказками (что за id существуют) и
+                # пробует снова; лимит — MAX_TOOL_RETRIES, дальше честный ответ
+                # по тому, что уже собрано.
+                failed += 1
+                messages.append({"role": "assistant", "content": preamble or None,
+                                 "tool_calls": [{"id": call_id, "type": "function",
+                                                 "function": {"name": name,
+                                                              "arguments": json.dumps(call_args, ensure_ascii=False)}}]})
+                messages.append({"role": "tool", "tool_call_id": call_id,
+                                 "content": json.dumps(_tool_failure(conn, subject, name, call_args, exc),
+                                                       ensure_ascii=False)[:4000]})
+                preamble = None
+                if failed >= MAX_TOOL_RETRIES:
+                    return steps, _summarize(chat_fn, messages), None
+                continue
             recently_read = True
             label = describe_step(name, call_args, data)
             steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
@@ -1298,7 +1791,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                              "tool_calls": [{"id": call_id, "type": "function",
                                               "function": {"name": name, "arguments": json.dumps(call_args, ensure_ascii=False)}}]})
             messages.append({"role": "tool", "tool_call_id": call_id,
-                             "content": json.dumps(data, ensure_ascii=False)[:4000]})
+                             "content": _tool_payload(data)})
             # Реплика принадлежит первому вызову пачки: дальше в пачке она уже
             # была бы переигровкой того же сообщения.
             preamble = None
@@ -1332,7 +1825,7 @@ def _force_read(conn: sqlite3.Connection, user_id: int, subject: str, name: str,
                          "function": {"name": name,
                                       "arguments": json.dumps(call_args, ensure_ascii=False)}}]},
         {"role": "tool", "tool_call_id": call_id,
-         "content": json.dumps(data, ensure_ascii=False)[:4000]},
+         "content": _tool_payload(data)},
     ]
     return _summarize(chat_fn, local)
 
@@ -1359,6 +1852,12 @@ def _final_or_summary(chat_fn, messages: list, text: str) -> str:
 # же кнопки, что ученик видел вживую.
 # ---------------------------------------------------------------------------
 SUGGEST_BLOCK_RE = re.compile(r"```\s*suggest\s*\n?(.*?)\n?```", re.DOTALL | re.IGNORECASE)
+# Блок БЕЗ закрывающей ограды: ответ провайдера обрезался по лимиту, и ```` ```suggest ````
+# остался висеть открытым. Основной regex требует закрытия и такой блок не
+# находит — служебный блок целиком попадал в ответ ученика (живой случай:
+# «Извини, последняя кнопка кривая — вот исправленный блок:» + обрывок JSON).
+# Отрезаем от открытой ограды до конца ответа.
+SUGGEST_OPEN_RE = re.compile(r"```\s*suggest\b[^\n]*\n?.*\Z", re.DOTALL | re.IGNORECASE)
 MAX_SUGGESTIONS = 3
 # Потолок «вопроса» кнопки: короткий, иначе кнопка перестаёт быть кнопкой.
 SUGGEST_ASK_MAX = 160
@@ -1385,10 +1884,15 @@ def split_suggestions(text: str) -> tuple[str, list]:
     """
     body = str(text or "")
     items: list = []
-    match = SUGGEST_BLOCK_RE.search(body)
-    if match:
-        inner = match.group(1).strip()
-        body = (body[:match.start()] + body[match.end():]).strip()
+    # ВСЕ закрытые блоки, а не только первый: модель может дать два (правка
+    # «кнопки кривые» — как в живом чате), и раньше второй блок оставался в
+    # тексте ответа ученику целиком. Смещения берём у списка совпадений и режем
+    # С КОНЦА: при поочерёдной правке строки ранние смещения «уезжают».
+    matches = list(SUGGEST_BLOCK_RE.finditer(body))
+    inners = [m.group(1).strip() for m in matches]
+    for m in reversed(matches):
+        body = (body[:m.start()] + body[m.end():]).strip()
+    for inner in inners:
         parsed = None
         try:
             parsed = json.loads(inner)
@@ -1423,6 +1927,12 @@ def split_suggestions(text: str) -> tuple[str, list]:
             continue
         seen.add(key)
         unique.append(item)
+    # Страховка: СЛУЖЕБНЫЙ блок не должен попасть в ленту ни при каком разборе —
+    # даже обрезанный ответ провайдера. Кнопок в этом случае не будет (правильно:
+    # блок не разобран), но ученик не увидит «```suggest» и извинения модели.
+    if "```suggest" in body.lower():
+        body = SUGGEST_OPEN_RE.sub("", body).strip()
+        unique = []
     return body.strip(), unique[:MAX_SUGGESTIONS]
 
 
