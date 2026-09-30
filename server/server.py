@@ -9696,9 +9696,21 @@ class Handler(BaseHTTPRequestHandler):
                         conn.commit()
                         if _AI is None:
                             self.send_json({"error": "ИИ временно недоступен"}, 503, token=token); return
+                        # Результат применения (assistant с вызовом + tool с
+                        # {proposal, applied}) ОБЯЗАН остаться в истории: именно он
+                        # говорит модели, что действие уже выполнено. Раньше здесь
+                        # стояло `history[:-2]` с комментарием «модель продолжает с
+                        # результатом» — но эти два сообщения как раз ОТРЕЗАЛИСЬ, и
+                        # модель видела только просьбу ученика без следов выполнения.
+                        # Живой случай (чат 52): «Смени мое имя на Артем» → первое
+                        # подтверждение применяет «Артём», resume зовёт модель без
+                        # результата, модель снова зовёт update_profile → ученику
+                        # приходилось подтверждать одно и то же действие ВТОРОЙ раз,
+                        # и имя менялось только после этого.
                         history = _agent_history_for_model(conn, tid)
-                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history[:-2] if len(history) >= 2 else history, "")
-                        # Убираем пустой trailing user (confirm — не новый вопрос): модель продолжает с результатом.
+                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, "")
+                        # Убираем пустой trailing user (confirm — не новый вопрос):
+                        # модель продолжает с результатом инструмента.
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}

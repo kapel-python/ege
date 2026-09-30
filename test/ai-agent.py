@@ -94,6 +94,27 @@ class Client:
         return status, payload
 
 
+def _user_id_by_name(server, who: str):
+    conn = server.connect()
+    try:
+        row = conn.execute("SELECT id FROM users WHERE name=? ORDER BY id DESC LIMIT 1", (who,)).fetchone()
+        return int(row["id"]) if row else None
+    finally:
+        conn.close()
+
+
+def _profile_name(server, user_id: int):
+    """Текущее имя пользователя по его users.id (имя само меняется — искать по
+    нему бессмысленно: после update_profile запрос «где Жена-52» уже ничего не
+    найдёт)."""
+    conn = server.connect()
+    try:
+        row = conn.execute("SELECT name FROM users WHERE id=?", (int(user_id),)).fetchone()
+        return row["name"] if row else None
+    finally:
+        conn.close()
+
+
 def _resolve_error_rejects_conflicting_ids(server) -> bool:
     """resolve_error не должен доверять выдуманному errorId.
 
@@ -234,10 +255,29 @@ def main():
         calls = {"n": 0}
         script: list = []
         lock = threading.Lock()
+        # Модель, ПОВТОРЯЮЩАЯ действие, если не видит его результата (живой
+        # случай, чат 52). Обычная очередь сценариев для этого не годится: там
+        # ответ задан заранее, и тест проходил бы даже с багом — потому что
+        # мок не повторял вызов. Здесь повтор вызывается САМ, по contents
+        # messages: если результата применения в контексте нет, модель снова
+        # просит то же действие (так вела себя боевая модель).
+        repeat_if_no_result = {"name": None, "args": None, "calls": 0}
+
+        def _applied_visible(messages) -> bool:
+            for m in messages or []:
+                if m.get("role") == "tool" and "applied" in str(m.get("content") or ""):
+                    return True
+            return False
 
         def mock_chat(messages, tools, **kw):
             with lock:
                 calls["n"] += 1
+                want = repeat_if_no_result["name"]
+                if want and not _applied_visible(messages):
+                    repeat_if_no_result["calls"] += 1
+                    return {"text": None, "tool_calls": [{"id": f"rep{repeat_if_no_result['calls']}",
+                                                         "name": want,
+                                                         "arguments": repeat_if_no_result["args"] or {}}]}
                 if script:
                     return script.pop(0)
             return {"text": "Финальный ответ.", "tool_calls": []}
@@ -913,6 +953,60 @@ def main():
                   f"{ai.AI_REPLY_MAX} vs {agent.AGENT_REPLY_MAX}")
             check("потолок ответа действительно шире прежних 8000",
                   agent.AGENT_REPLY_MAX > 8000, str(agent.AGENT_REPLY_MAX))
+
+            section("одно подтверждение на действие (живой случай: чат 52)")
+            # Ученик: «Смени мое имя на Артем». Модель зовёт update_profile,
+            # ученик подтверждает — и resume цикла ОБЯЗАН видеть, что действие
+            # уже применено. Раньше `history[:-2]` отрезал ровно эти два
+            # сообщения (assistant с вызовом + tool с {proposal, applied}), и
+            # модель снова звала update_profile: ученику приходилось
+            # подтверждать одно и то же ВТОРОЙ раз, а имя менялось только
+            # после этого второго подтверждения.
+            c2 = Client("10.9.0.3")
+            claim(c2, "Жена-52")
+            uid2 = _user_id_by_name(server, "Жена-52")
+            _, tf3 = new_thread(c2)
+            tid_f3 = tf3["thread"]["id"]
+            with lock:
+                script.clear()
+                # Модель повторяет действие, пока не увидит результат
+                # применения, — как в боевом чате 52.
+                repeat_if_no_result["name"] = "update_profile"
+                repeat_if_no_result["args"] = {"name": "Артем"}
+                repeat_if_no_result["calls"] = 0
+            status, body = turn(c2, tid_f3, "смени моё имя на Артем")
+            step_n = (body.get("steps") or [{}])[0] or {}
+            check("действие встало на подтверждение",
+                  body.get("pending") is True and step_n.get("tool") == "update_profile",
+                  f"{status} {body}")
+            check("имя ещё НЕ применено до подтверждения",
+                  _profile_name(server, uid2) != "Артем",
+                  str(_profile_name(server, uid2)))
+            status, body = c2.request(base, "POST", "/api/agent/turns/confirm",
+                                      {"messageId": step_n.get("id"), "approve": True})
+            check("подтверждение -> 200 с ответом", status == 200 and body.get("final"),
+                  f"{status} {str(body)[:200]}")
+            check("после ОДНОГО подтверждения имя применено",
+                  _profile_name(server, uid2) == "Артем",
+                  str(_profile_name(server, uid2)))
+            check("второго подтверждения не требуется (pending не вернулся)",
+                  not body.get("pending") and not any(s.get("status") == "needs_confirm"
+                                                      for s in body.get("steps") or []),
+                  str(body.get("steps")))
+            check("resume не звал то же действие снова",
+                  not any(s.get("tool") == "update_profile" for s in body.get("steps") or []),
+                  str([s.get("tool") for s in body.get("steps") or []]))
+            check("модель увидела результат применения и не стала повторять",
+                  repeat_if_no_result["calls"] <= 1,
+                  f"повторов вызова: {repeat_if_no_result['calls']}")
+            with lock:
+                repeat_if_no_result["name"] = None
+            # Ровно одно сообщение-действие в базе на этот вопрос.
+            rows_c2 = c2.request(base, "GET", f"/api/agent/threads/{tid_f3}", None)[1]
+            applied_msgs = [m for m in (rows_c2.get("messages") or [])
+                            if m.get("role") == "tool" and m.get("tool") == "update_profile"]
+            check("в переписке ровно ОДИН шаг update_profile",
+                  len(applied_msgs) == 1, str(len(applied_msgs)))
 
             section("кнопки-продолжения: блок вырезается всегда")
             # Живой случай: ответ провайдера обрезался по лимиту, закрывающая

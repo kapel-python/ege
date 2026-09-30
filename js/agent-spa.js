@@ -1152,7 +1152,11 @@
     if (old && old.parentNode) old.parentNode.removeChild(old);
     li.insertBefore(stepMark(st), body);
     body.appendChild(el("b", "", st.label || st.tool || "Шаг"));
-    if (st.tool) body.appendChild(el("code", "", st.tool));
+    // Сырое имя инструмента (`update_profile`, `fold_web`) в карточке шага НЕ
+    // показываем: это внутренний код, а правило 5b промпта прямо запрещает
+    // такое ученику («вместо fold_web говори словами»). Подпись шага уже
+    // человеческая («Меняю профиль: 95+ баллов»), а технические детали —
+    // в раскрытом «Подробнее» с аргументами, куда им и место.
     if (st.status === "needs_confirm") {
       body.appendChild(el("p", "", "Нужно твоё подтверждение — без него ничего не меняю."));
       var acts = el("div", "agent__step-actions");
@@ -1564,7 +1568,13 @@
     function collapse() {
       if (!alive()) return;
       card.classList.add("done");
-      built.trace.classList.remove("open");
+      // Ход, ЖДУЩИЙ подтверждения, сворачивать нельзя: лента с кнопками
+      // «Применить/Отмена» — это то, что человек сейчас должен нажать, а
+      // раньше карточка через ~4 с сама схлопывалась («Показать шаги»), и
+      // приходилось снова её раскрывать, чтобы найти кнопку. Карточка без
+      // действий сворачивается по-прежнему.
+      var waitsConfirm = prepped.some(function (p) { return p.st && p.st.status === "needs_confirm"; });
+      if (!waitsConfirm) built.trace.classList.remove("open");
       // Доводка заканчивается ДО первого абзаца (write на 420 мс): иначе цикл
       // follow тянул бы ленту в самый низ полного (ещё не напечатанного)
       // абзаца и спорил бы с parkParagraph за скролл.
@@ -1651,7 +1661,14 @@
         // Лента появляется раскрытой и тут же сворачивается: кадр между
         // ними делает сворачивание плавным, без мигания тоггла.
         built.trace.classList.add("open");
-        raf(function () { built.trace.classList.remove("open"); card.classList.add("done"); });
+        // То же правило и для истории: карточка, где действие ещё ждёт
+        // подтверждения, остаётся раскрытой — иначе после перезагрузки чата
+        // кнопки «Применить/Отмена» спрятаны под «Показать шаги».
+        var historyWaits = built.prepped.some(function (p) { return p.st && p.st.status === "needs_confirm"; });
+        raf(function () {
+          card.classList.add("done");
+          if (!historyWaits) built.trace.classList.remove("open");
+        });
         // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
         // и после перезагрузки продолжение было только у ответов без шагов.
         cardFooter(card, null, asks);
@@ -2144,7 +2161,28 @@
   function confirmStep(messageId, approve, btns) {
     var mg = S.mountGen;
     if (btns) btns.forEach(function (b) { b.disabled = true; });
-    api("POST", "/api/agent/turns/confirm", { messageId: messageId, approve: !!approve }).then(function (res) {
+    // Подтверждение — это ТОЖЕ ход: сервер применяет действие и зовёт модель
+    // (до 90 с). Раньше композер на это время оставался свободным: «Стоп»
+    // пропадал, поле принимало текст, и ученик успевал отправить следующий
+    // вопрос — который сервер отбивал как занятый (400 AGENT_BUSY), а человек
+    // видел ошибку на ровном месте. Держим блокировку тем же S.turn, что и
+    // обычный ход, поэтому «Стоп» работает и здесь.
+    var ctrl = ("AbortController" in window) ? new AbortController() : null;
+    var turn = { threadId: S.currentId, text: "", ctrl: ctrl, promise: null,
+                 startedAt: Date.now(), dead: false, claimedBy: S.mountGen, detached: false,
+                 replaceLast: false, retries: 0, isConfirm: true };
+    S.abort = ctrl;
+    S.turn = turn;
+    syncBusy();
+    function settle() {
+      if (S.turn === turn) { turn.dead = true; S.turn = null; }
+      if (S.abort === ctrl) S.abort = null;
+      syncBusy();
+    }
+    turn.promise = api("POST", "/api/agent/turns/confirm",
+      { messageId: messageId, approve: !!approve }, ctrl ? ctrl.signal : undefined);
+    turn.promise.then(function (res) {
+      settle();
       if (mg !== S.mountGen) return;
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
@@ -2162,8 +2200,12 @@
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard((res.data && res.data.error) || "Не удалось подтвердить.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });
-    }).catch(function () {
+    }).catch(function (e) {
+      settle();
       if (mg !== S.mountGen) return;
+      // Обрыв по «Стоп» — это не ошибка, а решение человека; сервер ход всё
+      // равно досчитает, а ответ подхватит watchAnswer.
+      if (turn.detached) { watchAnswer(S.currentId, "", WATCH_TRIES); return; }
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard("Нет соединения. Подтверждение не ушло — повтори.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });

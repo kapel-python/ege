@@ -370,7 +370,24 @@ check("карточка истории не дёргает ленту плавн
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
-  /classList\.add\("done"\);\s*\}\);[\s\S]{0,220}?cardFooter\(card, null, asks\)/.test(spaJs));
+  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks\)/.test(spaJs));
+// Карточка, ЖДУЩАЯ подтверждения, не должна сворачиваться: иначе кнопки
+// «Применить/Отмена» прячутся под «Показать шаги» и приходится раскрывать
+// заново (жалоба ученика). Живой ход и история — обе ветки.
+check("лента с ожидающим подтверждением остаётся раскрытой (ход)",
+  /var waitsConfirm = prepped\.some[\s\S]{0,320}?if \(!waitsConfirm\) built\.trace\.classList\.remove\("open"\)/.test(spaJs));
+check("история с ожидающим подтверждением тоже не сворачивается",
+  /var historyWaits = built\.prepped\.some[\s\S]{0,260}?if \(!historyWaits\)/.test(spaJs));
+// Сырое имя инструмента (`update_profile`) в карточке шага — внутренний код,
+// правило 5b промпта его запрещает; технические детали живут в «Подробнее».
+check("в карточке шага нет сырого имени инструмента",
+  !/appendChild\(el\("code", "", st\.tool\)\)/.test(spaJs));
+// Подтверждение — тоже ход: сервер применяет действие и зовёт модель, поэтому
+// композер должен быть заблокирован (иначе «Стоп» пропадает, а следующий
+// вопрос упирается в AGENT_BUSY).
+check("подтверждение держит блокировку хода",
+  /function confirmStep[\s\S]{0,900}?S\.turn = turn;/.test(spaJs)
+  && /function confirmStep[\s\S]{0,1200}?syncBusy\(\);/.test(spaJs));
 check("нажатие убирает кнопку и сдвигает соседние",
   spaCode.includes("collapseAsk") && /is-gone/.test(spaCss)
   && /\.agent__qr\.is-gone \{[^}]*overflow: hidden/.test(spaCss)
