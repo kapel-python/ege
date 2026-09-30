@@ -52,8 +52,8 @@ jobs:
                    guest-onboarding onboard-subject subject-profile subject-contract \
                    subject-auth domain-state occ backup-hygiene http-edges \
                    essay-submission store-save-e2e admin-inbox admin-block \
-                   admin-inbox-security perimeter-security adversarial ai-essay \
-                   ai-failover ai-limits essay-pipeline; do
+                   admin-inbox-security perimeter-security db-integrity-security \
+                   adversarial ai-essay ai-failover ai-limits essay-pipeline; do
             echo "--- python test/$t.py"
             python3 "test/$t.py"
           done

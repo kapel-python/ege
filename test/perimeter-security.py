@@ -450,12 +450,59 @@ def check_static_and_host() -> None:
             httpd.shutdown()
 
 
+# ---------------------------------------------------------------------------
+# 12. Целостность базы: эксплуатируемые дефекты из аудита
+# ---------------------------------------------------------------------------
+def check_db_integrity() -> None:
+    """Заведомо-зелёные заглушки для F1/F4: полные проверки живут в
+    test/db-integrity-security.py, здесь — дёшево проверяем, что лимит
+    /api/health и порядок параметров агента не откатились."""
+    print("\n== F. Целостность базы (сводно) ==")
+    with tempfile.TemporaryDirectory(prefix="ege-perimeter-f-") as tmp:
+        server = load_server(Path(tmp) / "f.sqlite3", trusted_proxy="0")
+        conn = server.connect()
+        try:
+            server.install_catalog(conn)
+        finally:
+            conn.close()
+        httpd = server.create_http_server("127.0.0.1", 0)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            # /api/health обязан быть под лимитом: он анонимный и читает базу.
+            server.HEALTH_RATE_MAX = 4
+            server._health_hits.clear()
+            codes = [raw_request(base, "/api/health")[0] for _ in range(7)]
+            t("/api/health под лимитом (иначе анонимный скан всей базы)",
+              429 in codes, codes)
+            # Целостность кэшируется: пачка вызовов не читает базу пачкой раз.
+            calls = {"n": 0}
+            real = sqlite3.connect
+            class Counting:
+                def __init__(self, *a, **k):
+                    calls["n"] += 1
+                    self._c = real(*a, **k)
+                def execute(self, *a, **k):
+                    return self._c.execute(*a, **k)
+                def close(self):
+                    self._c.close()
+            server.sqlite3.connect = Counting
+            for _ in range(40):
+                server.health_payload()
+            server.sqlite3.connect = real
+            t("quick_check кэшируется, а не сканирует базу на каждый вызов",
+              calls["n"] <= 2, f"соединений: {calls['n']}")
+        finally:
+            httpd.shutdown()
+
+
 def main() -> int:
     check_forwarded_spoofing()
     check_auth_rate_limit()
     check_csrf()
     check_login_timing()
     check_static_and_host()
+    check_db_integrity()
     print("\n" + "=" * 60)
     if FAILED:
         print(f"ПРОВАЛЕНО {len(FAILED)} из {PASSED + len(FAILED)}: perimeter-security")

@@ -2596,6 +2596,25 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
                 " ON essay_submissions(user_id, subject, created_at)"
             )
+        else:
+            # Индексы для ON CONFLICT создаём НЕ только при первом создании
+            # таблицы: она могла достаться от старой версии без них, и тогда
+            # каждая отправка сочинения падала бы с «ON CONFLICT clause does
+            # not match any PRIMARY KEY or UNIQUE constraint» — навсегда.
+            # Тот же самовосстанавливающийся приём, что в
+            # _backfill_append_client_ids: sqlite3.Error глотается (значит,
+            # данные конфликтуют — это разбирает backfill, а молчаливый отказ
+            # от миграции хуже).
+            for ddl in (
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_submissions_user_subject_client"
+                " ON essay_submissions(user_id, subject, client_id)",
+                "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
+                " ON essay_submissions(user_id, subject, created_at)",
+            ):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.Error:
+                    pass
         if "essay_checks" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
             # Серверная запись о реальном вызове модели: единственный источник
             # оценки для evaluation 'ready'. Ключ — хэш нормализованного
@@ -2629,6 +2648,16 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "ALTER TABLE essay_checks ADD COLUMN rubric_version INTEGER NOT NULL DEFAULT 1")
                 conn.commit()
+            # Тот же случай, что у essay_submissions: кэш проверок держится на
+            # UNIQUE(user_id, subject, text_sha256), и без индекса ON CONFLICT
+            # в store_essay_check падал бы на каждой проверке.
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_text"
+                    " ON essay_checks(user_id, subject, text_sha256)"
+                )
+            except sqlite3.Error:
+                pass
         # История проверок текста для блока «Было → стало» на ege-result.html:
         # каждая успешная проверка дописывается сюда (включая первую), а
         # essay_checks держит только последнюю. Блок переживает перезагрузку,
@@ -3368,6 +3397,17 @@ def _ensure_mutable_subject_pks(conn: sqlite3.Connection) -> None:
                     select = ["user_id", f"'{DEFAULT_SUBJECT}'"] + [c for c in rest_old if c != "user_id"]
                     conn.execute(f"INSERT OR IGNORE INTO {table}_new ({', '.join(names_new)}) "
                                  f"SELECT {', '.join(select)} FROM {table}")
+            # DROP и RENAME обязаны быть одной транзакцией. В режиме
+            # автофиксации Python каждая DDL-команда коммитится сама, то есть
+            # падение (сбой питания, kill) между этими двумя строками оставляло
+            # таблицу УДАЛЁННОЙ, а {table}_new — лежащей. Следующий старс на
+            # CREATE TABLE {table}_new спотыкался о «already exists», что
+            # _DB_RECOVERY_HINTS не узнаёт, и каждый запрос отдавал 500 до
+            # ручного ремонта. С BEGIN оба шага откатываются вместе.
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.Error:
+                pass
             conn.execute(f"DROP TABLE {table}")
             conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
             try:
@@ -3513,9 +3553,33 @@ def _support_relax_source_check(conn: sqlite3.Connection) -> None:
         if names:
             # Всё, что не contacts, — contacts: чужих значений в старой БД быть не может.
             source = "'contacts'" if "source" in columns else "'contacts'"
-            select = ", ".join(source if c == "source" else c for c in names)
+            # INSERT OR IGNORE молча пропускает строки, нарушающие NOT NULL и
+            # CHECK. Если в старой таблице нет request_key/message_digest, то в
+            # names их не будет, новая таблица требует их NOT NULL — и OR IGNORE
+            # отбросит ВСЕ строки, после чего DROP уничтожит оригинал вместе с
+            # лентой обращений. Поэтому недостающие ключи досыпаем здесь, а не
+            # «где-то дальше по коду».
+            for required in ("request_key", "message_digest"):
+                if required not in columns:
+                    names.append(required)
+            select = ", ".join(
+                (source if c == "source"
+                 else "lower(hex(randomblob(32)))" if c in ("request_key", "message_digest")
+                 else c)
+                for c in names
+            )
+            # Считаем до и после: если перенос что-то потерял, честнее оставить
+            # старую таблицу, чем «успешно» её удалить.
+            before = conn.execute("SELECT COUNT(*) FROM support_messages").fetchone()[0]
             conn.execute(f"INSERT OR IGNORE INTO {SUPPORT_REBUILD_TABLE} ({', '.join(names)}) "
                          f"SELECT {select} FROM support_messages")
+            after = conn.execute(f"SELECT COUNT(*) FROM {SUPPORT_REBUILD_TABLE}").fetchone()[0]
+            if before and after < before:
+                # Откатываем перенос и НЕ трогаем оригинал: следующий вызов
+                # ensure_support_schema разберётся (или поднимет бэкап).
+                raise sqlite3.IntegrityError(
+                    f"support_messages rebuild would lose rows ({after} < {before}); "
+                    "original table left intact")
         conn.execute("DROP TABLE support_messages")
         conn.execute(f"ALTER TABLE {SUPPORT_REBUILD_TABLE} RENAME TO support_messages")
         conn.commit()
@@ -3542,6 +3606,11 @@ def ensure_support_schema(conn: sqlite3.Connection) -> None:
         if "message" not in columns:
             raise RuntimeError("support_messages is incompatible: message column is missing")
         _support_relax_source_check(conn)
+        # Состав колонок читаем ЗДЕСЬ, а не выше: пересборка выше создаёт
+        # таблицу заново уже с полным набором (включая source), и старый
+        # снимок считал source отсутствующим — следующий шаг добавлял его
+        # повторно и падал с «duplicate column name».
+        columns = _table_columns(conn, "support_messages")
 
         # Presence-based expand/backfill, consistent with the project's other
         # migrations. Legacy rows are preserved and get private random dedupe
@@ -4728,6 +4797,36 @@ STATUS_RATE_MAX = 60
 STATUS_RATE_WINDOW_SEC = 60.0
 _status_hits: dict[str, list[float]] = {}
 _status_lock = threading.Lock()
+
+# /api/health — тоже анонимный и тоже читает базу, но заметно дороже:
+# PRAGMA quick_check проходит по ВСЕМ таблицам и индексам. Раньше он был
+# единственным /api/, снятым с общего per-IP бакета («оставляем мониторингу»),
+# то есть один адрес мог запускать полное сканирование базы 30 раз в секунду
+# (столько держит limit_req в nginx), а ботнет из многих адресов — десятки
+# параллельных сканов. Теперь у мониторинга свой мягкий предел: 30/мин с
+# адреса хватает и uptime-роботу, и проверке вручную, а флуд упирается в
+# число, а не в размер базы.
+HEALTH_RATE_MAX = 30
+HEALTH_RATE_WINDOW_SEC = 60.0
+_health_hits: dict[str, list[float]] = {}
+_health_lock = threading.Lock()
+
+
+def health_rate_ok(ip: str) -> bool:
+    """True, если с IP ещё можно отдать /api/health. Никогда не бросает."""
+    try:
+        now = time.time()
+        key = str(ip or "?")
+        with _health_lock:
+            recent = [t for t in _health_hits.get(key, []) if now - t < HEALTH_RATE_WINDOW_SEC]
+            if len(recent) >= HEALTH_RATE_MAX:
+                _health_hits[key] = recent
+                return False
+            recent.append(now)
+            _health_hits[key] = recent
+        return True
+    except Exception:
+        return True
 
 
 def status_rate_ok(ip: str) -> bool:
@@ -7297,7 +7396,17 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
                        # Без essay_submissions «весь прогресс» оставлял ученику
                        # его прежний отчёт о сочинении: evaluation_result и
                        # оценка оставались видны и открывались заново.
-                       "essay_submissions"],
+                       "essay_submissions",
+                       # ...и без essay_checks сброс был неполным вдвойне:
+                       # load_essay_check ищет ответ по (user_id, subject,
+                       # sha256 текста) и НЕ требует essay_submissions, то
+                       # есть пересланный заново тот же текст получал бы
+                       # готовую оценку из кэша — и навсегда, без жетона.
+                       "essay_checks", "essay_check_history",
+                       # activity_events читает наставник (fold_web op=history),
+                       # поэтому после сброса ИИ продолжал бы рассказывать
+                       # ученику про активность, которой уже нет.
+                       "activity_events"],
             "stats": "UPDATE user_stats SET xp=0, streak=0, last_active_date=NULL, total_solved=0, total_correct=0, total_time_sec=0, hints_used=0, correct_series=0, best_series=0, errors_resolved=0 WHERE user_id=?",
             "label": "Весь прогресс сброшен",
         },
@@ -7654,6 +7763,40 @@ def backup_mod():
     return _BACKUP_MOD or None
 
 
+# Полная проверка целостности дорогая (quick_check читает все таблицы и
+# индексы), а битая база не «чинится» сама за секунду: результат кэшируем на
+# короткий срок, чтобы пачка запросов не превращалась в пачку сканов.
+INTEGRITY_CACHE_SEC = 30.0
+_integrity_cache: tuple[float, str] | None = None
+_integrity_lock = threading.Lock()
+
+
+def db_integrity() -> str:
+    """PRAGMA quick_check с коротким кэшем: 'ok' | 'corrupt' | 'missing'."""
+    global _integrity_cache
+    try:
+        with _integrity_lock:
+            hit = _integrity_cache
+        now = time.time()
+        if hit and now - hit[0] < INTEGRITY_CACHE_SEC:
+            return hit[1]
+        if not DB_PATH.exists():
+            return "missing"
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5.0)
+        try:
+            row = conn.execute("PRAGMA quick_check").fetchone()
+            verdict = "ok" if row and row[0] == "ok" else "corrupt"
+        finally:
+            conn.close()
+        with _integrity_lock:
+            _integrity_cache = (now, verdict)
+        return verdict
+    except sqlite3.Error:
+        return "corrupt"
+    except Exception:
+        return "unknown"
+
+
 def health_payload() -> dict:
     """Срез для /api/health: только чтение, аккаунт не заводится, не пишет."""
     uptime = 0
@@ -7670,12 +7813,7 @@ def health_payload() -> dict:
                 db["sizeBytes"] = DB_PATH.stat().st_size
             except OSError:
                 pass
-            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5.0)
-            try:
-                row = conn.execute("PRAGMA quick_check").fetchone()
-                db["integrity"] = "ok" if row and row[0] == "ok" else "corrupt"
-            finally:
-                conn.close()
+            db["integrity"] = db_integrity()
         else:
             db["integrity"] = "missing"
     except sqlite3.Error:
@@ -9354,6 +9492,13 @@ class Handler(BaseHTTPRequestHandler):
                             pend = conn.execute("SELECT COUNT(*) FROM agent_messages WHERE thread_id=? AND seq>? AND status='needs_confirm'",
                                                 (tid, int(lu["seq"]))).fetchone()[0]
                             if pend:
+                                # Ранний return ЗДЕСЬ оставлял слот взят: слот
+                                # освобождает только finally ниже, а до него ещё
+                                # несколько строк. Тред блокировался на весь TTL
+                                # (95 с), и ученик не мог ни повторить вопрос, ни
+                                # подтвердить действие (оно тоже берёт слот).
+                                # Снимаем слот сами перед ответом — 400 тот же.
+                                _agent_busy_release(tid)
                                 self.send_json({"error": "Прошлый ход ждёт подтверждения действия — сначала реши его.",
                                                 "code": "AGENT_PENDING"}, 400, token=token); return
                             replace_from = int(lu["seq"])
@@ -9637,6 +9782,17 @@ class Handler(BaseHTTPRequestHandler):
                 # каждой проверке, двойной вызов считался бы за два запроса.
                 if path not in ("/api/status", "/api/health"):
                     if self.api_rate_limited(): return
+                elif path == "/api/health" and not health_rate_ok(client_ip(self)):
+                    # Анонимный и читает базу: свой мягкий предел вместо
+                    # полного доступа без счёта (см. HEALTH_RATE_MAX).
+                    body = json.dumps({"error": "Слишком много запросов"}, ensure_ascii=False).encode("utf-8")
+                    self.send_response(429)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Retry-After", "60")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers(); self.wfile.write(body); return
                 from urllib.parse import parse_qs
                 query = parse_qs(urlparse(self.path).query)
                 req_subject = query.get("subject", [None])[0]

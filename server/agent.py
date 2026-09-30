@@ -825,8 +825,15 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
                 row = conn.execute("SELECT id, task_id FROM user_errors WHERE client_id=? AND user_id=? AND subject=?",
                                    (error_id[:128], user_id, subject)).fetchone()
         elif task_id:
+            # Порядок ЗНАЧЕНИЙ должен совпадать с порядком плейсхолдеров
+            # (task_id, user_id, subject). Раньше здесь стояло
+            # (task_id, subject, user_id): user_id получал предмет, а предмет —
+            # user_id, и инструмент «разобрать ошибку по taskId» не находил
+            # ничего никогда. Хуже того, как только subject смог бы оказаться
+            # числом, запрос выбрал бы ЧУЖУЮ ошибку, а apply_action (с верным
+            # порядком) пометил бы её разобранной.
             row = conn.execute("SELECT id, task_id FROM user_errors WHERE task_id=? AND user_id=? AND subject=? AND resolved=0 ORDER BY id LIMIT 1",
-                               (task_id, subject, user_id)).fetchone()
+                               (task_id, user_id, subject)).fetchone()
         if row is None:
             raise ValueError("ошибка не найдена")
         return {"action": name, "errorId": int(row["id"]),
