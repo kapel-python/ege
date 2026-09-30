@@ -190,7 +190,13 @@
 .agent__title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Кольцо квоты — как в эталоне: 36px на карточной подложке (в 32px на
    телефоне под тач-цель тулбара). */
-.agent__quota { position: relative; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; flex: none; transition: transform .15s; }
+/* Кружок квоты: 42px вместо 36px и цифра 15px вместо 13px. Замер на живом
+   экране: при 36px зазор от цифры до внутреннего края кольца был 4.5px по
+   бокам и 3.4px сверху/снизу — цифра «10» упиралась в кольцо и читалась
+   плохо. Кольцо и цифра выросли вместе (svg тянется на весь кружок, поэтому
+   радиус, обводка и dasharray масштабируются сами), так что зазор стал
+   5.3px по бокам и 4.3px сверху/снизу — и цифра крупнее, и кольцо дальше. */
+.agent__quota { position: relative; width: 42px; height: 42px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 15px; font-weight: 700; cursor: pointer; flex: none; transition: transform .15s; }
 .agent__quota:active { transform: scale(.96); }
 .agent__quota svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
 .agent__quota .q-track, .agent__quota .q-ring { fill: none; stroke-width: 3; }
@@ -535,7 +541,9 @@
      их тач-зоны остаются 44px (padding внутрь, а не рост кнопки). */
   .agent__toolbar { padding: 4px 10px; gap: 6px; }
   .agent__menu { width: 44px; height: 44px; }
-  .agent__quota { width: 32px; height: 32px; font-size: 12px; }
+  /* Телефон: 40px и 13.5px — зазор 5.6px по бокам, 5.0px сверху/снизу
+     (было 3.5/2.5 при 32px и 12px). Тач-зона остаётся 44px по высоте. */
+  .agent__quota { width: 40px; height: 40px; font-size: 13.5px; }
   .agent__quota .q-track, .agent__quota .q-ring { stroke-width: 3.4; }
   /* Тач-цели и шрифт поля: 16px не даёт iOS зумить страницу при фокусе. */
   .agent__thread, .agent__send, .agent__stop, .agent__del, .agent__menu, .agent__new, .agent__copy { min-height: 44px; }

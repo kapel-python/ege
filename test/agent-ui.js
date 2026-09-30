@@ -630,6 +630,13 @@ check("удаление чата — общий диалог подтвержд�
   && /onConfirm: function \(\) \{ doDeleteThread\(t\); \}/.test(spaCode)
   && /function doDeleteThread\(t\)/.test(spaCode)
   && /trash: '<svg/.test(appJs));
+/* --- кружок квоты: цифра крупнее и кольцо дальше от неё. Замер на живом
+   экране: было 13px/36px с зазором 4.5px по бокам и 3.4px сверху, стало
+   15px/42px с зазором 5.3/4.1 (на телефоне 12px/32px → 13.5px/40px,
+   зазор 3.5/2.5 → 5.4/4.3). */
+check("кружок квоты: цифра крупнее, кольцо дальше",
+  /\.agent__quota \{[^}]*width: 42px; height: 42px;[^}]*font-size: 15px/.test(spaCss)
+  && /\.agent__quota \{ width: 40px; height: 40px; font-size: 13.5px; \}/.test(spaCss));
 check("футер скрыт на экране чата", read("js/footer.js").includes("ai: true"));
 
 /* --- старый адрес /agent — редирект в SPA --- */
