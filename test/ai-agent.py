@@ -307,7 +307,7 @@ def main():
                                                                  "arguments": {"op": "progress"}}]})
             status, body = turn(a, tid_a, "расскажи всё подробно")
             check("длинный цикл -> 200 с финалом",
-                  status == 200 and isinstance(body.get("final"), str) and "слишком длинным" in body["final"],
+                  status == 200 and isinstance(body.get("final"), str) and "не успел" in body["final"],
                   f"{status} {str(body)[:200]}")
             check("шагов не больше MAX",
                   len(body.get("steps") or []) <= agent.MAX_TOOL_STEPS, str(len(body.get("steps") or [])))
@@ -599,11 +599,180 @@ def main():
             check("resume с одной форматной ошибкой -> 200",
                   status == 200 and (body.get("final") or "").startswith("Уровень обновлён"),
                   f"{status} {body}")
-            check("resume позвал модель дважды", flaky2["n"] == 2, str(flaky2["n"]))
+            check("resume позвал модель дважды (один повтор)", flaky2["n"] == 2, str(flaky2["n"]))
             status, body = f.request(base, "GET", f"/api/agent/threads/{tid_f}", None)
             done = [m for m in body.get("messages", []) if m.get("id") == confirm_id]
             check("шаг применён, а не откатан", bool(done) and done[0].get("status") == "applied",
                   str(done)[:160])
+
+            section("кнопки-продолжения: модель даёт свои, сервер режет блок из текста")
+            # Свой клиент с большим грантом: у Ани к этому месту жетоны
+            # предыдущих секций уже на исходе, а тут каждый ход платит.
+            k = Client("10.11.0.1")
+            claim(k, "Кира-кнопки")
+            conn_k = server.connect()
+            conn_k.row_factory = sqlite3.Row
+            try:
+                uid_k = conn_k.execute("SELECT id FROM users WHERE name='Кира-кнопки'").fetchone()["id"]
+                agent.admin_agent_quota_set(conn_k, uid_k, {"remaining": 200})
+            finally:
+                conn_k.close()
+            _, body = new_thread(k)
+            tid_k = body["thread"]["id"]
+            # Формат блока — часть контракта: если он утечёт в final, ученик
+            # увидит в ленте кусок служебного JSON.
+            raw, sugg = agent.split_suggestions(
+                "Держи разбор.\n\n```suggest\n"
+                '[{"label":"Дай задачу","ask":"Дай задачу на производную, простую."},'
+                '{"label":"Проще","ask":"Объясни то же самое проще."}]\n'
+                "```")
+            check("блок вырезан из текста, варианты разобраны",
+                  raw == "Держи разбор." and len(sugg) == 2
+                  and sugg[0]["label"] == "Дай задачу" and sugg[0]["ask"].startswith("Дай задачу"),
+                  f"{raw!r} {sugg}")
+            check("построчный формат блока тоже принимается (label | ask)",
+                  agent.split_suggestions("Текст.\n```suggest\nРазбери ошибку | Разбери мою ошибку по шагам.\n```")[1]
+                  == [{"label": "Разбери ошибку", "ask": "Разбери мою ошибку по шагам."}])
+            check("мусор в блоке не ломает ответ и не даёт пустых кнопок",
+                  agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[0] == "Ответ."
+                  and agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[1] == [])
+            check("больше трёх вариантов не берём, дубли по ask схлопываются",
+                  len(agent.split_suggestions("x\n```suggest\n"
+                                              + json.dumps([{"label": f"L{i}", "ask": f"вопрос {i}"} for i in range(6)])
+                                              + "\n```")[1]) == agent.MAX_SUGGESTIONS
+                  and len(agent.split_suggestions("x\n```suggest\n"
+                                                  + json.dumps([{"label": "A", "ask": "тот же"},
+                                                                {"label": "B", "ask": "тот же"}])
+                                                  + "\n```")[1]) == 1)
+
+            with lock:
+                script.clear()
+                script.append({"text": "Собрал по тебе.\n\n```suggest\n"
+                                       '[{"label":"Разбери ошибку","ask":"Разбери мою ошибку по шагам."},'
+                                       '{"label":"Дай задачу","ask":"Дай задачу на слабую тему."}]\n'
+                                       "```", "tool_calls": []})
+            status, body = turn(k, tid_k, "расскажи про прогресс")
+            check("ход отдаёт suggests клиенту",
+                  status == 200 and [s["label"] for s in (body.get("suggests") or [])]
+                  == ["Разбери ошибку", "Дай задачу"], f"{status} {body.get('suggests')}")
+            check("служебный блок не попал в текст ответа",
+                  body.get("final") == "Собрал по тебе.", repr(body.get("final")))
+            status, body = k.request(base, "GET", f"/api/agent/threads/{tid_k}", None)
+            last = [m for m in body.get("messages", []) if m["role"] == "assistant"][-1]
+            check("в базе тоже чистый текст (блок в историю не уходит)",
+                  last["content"] == "Собрал по тебе." and "suggest" not in last["content"],
+                  repr(last["content"]))
+
+            with lock:
+                script.clear()
+                script.append({"text": "Просто ответ без блока.", "tool_calls": []})
+            status, body = turn(k, tid_k, "ещё вопрос")
+            check("без блока модель даёт запасные кнопки (не пусто)",
+                  status == 200 and len(body.get("suggests") or []) == 2
+                  and all(s.get("label") and s.get("ask") for s in body["suggests"]),
+                  str(body.get("suggests")))
+
+            # Длинный ответ: блок кнопок стоит В КОНЦЕ, за прежним потолком в
+            # 8000 знаков. Раньше текст резался до разбора блока, и у длинного
+            # ответа кнопки пропадали совсем.
+            long_answer = ("Разбираю твои ошибки по шагам. " * 320).strip()
+            with lock:
+                script.clear()
+                script.append({"text": long_answer + "\n\n```suggest\n"
+                               '[{"label":"Дай задачу","ask":"Дай задачу на производную."}]\n```',
+                               "tool_calls": []})
+            status, body = turn(k, tid_k, "разбери мои ошибки подробно")
+            check("кнопки выживают у длинного ответа (блок не срезан потолком)",
+                  status == 200 and len(body.get("final") or "") > 8000
+                  and [s["label"] for s in (body.get("suggests") or [])] == ["Дай задачу"]
+                  and "suggest" not in (body.get("final") or ""),
+                  f"{status} len={len(body.get('final') or '')} {body.get('suggests')}")
+            status, body = k.request(base, "GET", f"/api/agent/threads/{tid_k}", None)
+            stored = [m for m in body.get("messages", []) if m["role"] == "assistant"][-1]["content"]
+            check("в базе длинный ответ тоже без блока и в пределах потолка",
+                  "suggest" not in stored and len(stored) <= agent.AGENT_REPLY_MAX,
+                  f"len={len(stored)}")
+
+            check("потолки ответа согласованы (ai.AI_REPLY_MAX == agent.AGENT_REPLY_MAX)",
+                  ai.AI_REPLY_MAX == agent.AGENT_REPLY_MAX,
+                  f"{ai.AI_REPLY_MAX} vs {agent.AGENT_REPLY_MAX}")
+            check("потолок ответа действительно шире прежних 8000",
+                  agent.AGENT_REPLY_MAX > 8000, str(agent.AGENT_REPLY_MAX))
+
+            section("«сейчас посмотрю» без вызова -> инструмент зовётся")
+            # Живой случай: «посмотри мой профиль» → «Сейчас посмотрю твой
+            # профиль» и НИ ОДНОГО вызова. Правило в промпте лечит не всех,
+            # поэтому цикл переспрашивает, а потом зовёт инструмент сам.
+            with lock:
+                script.clear()
+                script.append({"text": "Сейчас посмотрю твой профиль", "tool_calls": []})
+                script.append({"text": None, "tool_calls": [
+                    {"id": "s1", "name": "fold_web", "arguments": {"op": "profile"}}]})
+                script.append({"text": "Ты Иван, уровень base.", "tool_calls": []})
+            status, body = turn(k, tid_k, "посмотри мой профиль")
+            check("обещание без вызова -> ход всё равно с шагом",
+                  status == 200 and len(body.get("steps") or []) == 1
+                  and body["steps"][0]["tool"] == "fold_web"
+                  and body.get("final") == "Ты Иван, уровень base.", f"{status} {str(body)[:200]}")
+
+            # Модель упрямится и после переспроса: сервер зовёт инструмент сам,
+            # выбирая его по вопросу, и отвечает по данным — без блока кнопок
+            # «сейчас посмотрю» на экране.
+            with lock:
+                script.clear()
+                script.append({"text": "Сейчас проверю твои ошибки.", "tool_calls": []})
+                script.append({"text": "Сейчас проверю твои ошибки.", "tool_calls": []})
+                script.append({"text": "Вот что видно по ошибкам.", "tool_calls": []})
+            status, body = turn(k, tid_k, "где я ошибаюсь?")
+            check("упрямое обещание -> сервер зовёт инструмент сам",
+                  status == 200 and len(body.get("steps") or []) == 1
+                  and body["steps"][0]["tool"] == "fold_web"
+                  and body["steps"][0]["args"].get("op") == "errors"
+                  and body.get("final") == "Вот что видно по ошибкам.", f"{status} {str(body)[:240]}")
+
+            # Обычный короткий ответ (приветствие) переспросом не ломается:
+            # вопрос не про данные — лишнего вызова быть не должно.
+            with lock:
+                script.clear()
+                script.append({"text": "Привет! Чем помочь?", "tool_calls": []})
+                calls["n"] = 0
+            status, body = turn(k, tid_k, "привет")
+            check("приветствие отвечает сразу, без вызова и переспроса",
+                  status == 200 and body.get("final") == "Привет! Чем помочь?"
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
+
+            section("невидимые повторы переживают серию сбоев")
+            # Три подряд неудачных вызова модели раньше давали 502 (два повтора
+            # и всё): теперь температура растёт 0 → 0.3 → 0.6 и попыток хватает.
+            h = Client("10.10.0.1")
+            claim(h, "Егор-серия")
+            _, body = new_thread(h)
+            tid_h = body["thread"]["id"]
+            temps_h = {"seen": []}
+
+            def always_fail(messages, tools, **kw):
+                with lock:
+                    temps_h["seen"].append(kw.get("temperature"))
+                raise ai.AIError("upstream 500")
+
+            saved_chat = ai.chat_with_tools
+            ai.chat_with_tools = always_fail
+            try:
+                status, body = turn(h, tid_h, "сбойный вопрос")
+            finally:
+                ai.chat_with_tools = saved_chat
+            check("три попытки с растущей температурой",
+                  temps_h["seen"][:3] == [0.0, server._AGENT_RETRY_TEMPERATURE, 0.6], str(temps_h["seen"]))
+            check("серия сбоев -> 502 (жетон вернётся)", status == 502, f"{status} {body}")
+
+            with lock:
+                script.clear()
+                script.append({"text": "Ответ со второй попытки.", "tool_calls": []})
+            status, quota = h.request(base, "GET", "/api/agent/limits", None)
+            check("502 не списал жетон", quota.get("remaining") == 10, str(quota))
+            status, body = turn(h, tid_h, "нормальный вопрос")
+            check("после сбоя ход идёт как обычно", status == 200 and body.get("final"), f"{status} {body}")
 
             section("потолок хода: сетка взята с запасом, а не отказ")
             # run_cycle напрямую: бюджет задаём сами, ждать 90 секунд не надо.
@@ -628,9 +797,18 @@ def main():
                     conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
                     budgeted, deadline=time.monotonic() + agent.TURN_CALL_FLOOR_SEC + 0.25)
                 check("истёкший бюджет с собранными шагами -> честный ответ, не 502",
-                      len(steps) == 1 and isinstance(final, str) and "слишком длинным" in final
+                      len(steps) == 1 and isinstance(final, str) and "не успел" in final
                       and pending is None, f"{len(steps)} {final!r}")
-                check("бюджет уходил в вызовы", len(spent["b"]) == 1, str(spent["b"]))
+                # Вызовы хода ограничены остатком бюджета, а финал по собранным
+                # данным (_summarize) получает СВОЁ окно TURN_SUMMARY_EXTRA_SEC:
+                # к этому моменту бюджет хода обычно исчерпан, и без своего окна
+                # честный ответ подменялся бы просьбой уточнить вопрос — ровно
+                # тогда, когда все данные уже на руках (так и было: «не успел»
+                # вместо ответа приходил даже при живом провайдере).
+                check("шаг хода ограничен остатком бюджета, финал — своим окном",
+                      len(spent["b"]) >= 2 and spent["b"][0] <= agent.TURN_CALL_FLOOR_SEC + 0.3
+                      and spent["b"][-1] <= agent.TURN_SUMMARY_EXTRA_SEC,
+                      str(spent["b"]))
 
                 # Бюджет убывает от шага к шагу — потолок один на весь ход,
                 # а не на каждый вызов с нуля.

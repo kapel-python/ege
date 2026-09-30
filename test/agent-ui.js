@@ -290,6 +290,46 @@ check("у подсказок разные значки (эталон: галоч
 check("у карточек подсказок свои значки",
   /"Разберу твои решения по теме", "errors"/.test(spaCode)
   && /"Соберу задания под твой уровень", "compass"/.test(spaCode));
+
+/* --- кнопки-продолжения под ответом ---
+   Раньше это были две кнопки-заглушки с прибитыми текстами («Хочу разбор»,
+   «Что дальше?») — они не имели отношения ни к ответу, ни к вопросу. Теперь
+   варианты приходят от модели (сервер режет служебный блок ```suggest и
+   отдаёт готовые {label, ask}): label — короткое название кнопки, ask — сам
+   вопрос, он и уходит на сервер. Нажатие убирает кнопку (соседние уезжают на
+   её место), фокус снимается руками. */
+check("кнопки берутся из ответа сервера (suggests), а не из заглушек",
+  spaCode.includes("normalizeSuggests") && spaCode.includes("res.data.suggests")
+  && !spaCode.includes('"Хочу разбор"')
+  && !/data-ask[\s\S]{0,80}"Разбери подробнее"/.test(spaCode));
+check("есть запасной набор кнопок (история из базы не хранит варианты)",
+  spaCode.includes("SUGGEST_FALLBACK") && spaCode.includes("suggestsFromSteps"));
+check("в истории кнопки только у последнего ответа (лента не поле кнопок)",
+  spaCode.includes("groups[groups.length - 1].last = true")
+  && /assistantCard\(g\.steps, g\.final, false, g\.last \? null : \[\]\)/.test(spaCode)
+  && /if \(!asks\.length && suggests == null\) asks = suggestsFromSteps\(steps\)/.test(spaCode));
+check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
+  /classList\.add\("done"\);\s*\}\);[\s\S]{0,220}?quickActions\(card, null, asks\)/.test(spaJs));
+check("нажатие убирает кнопку и сдвигает соседние",
+  spaCode.includes("collapseAsk") && /is-gone/.test(spaCss)
+  && /\.agent__qr\.is-gone \{[^}]*overflow: hidden/.test(spaCss)
+  && /\.agent__qr\.is-gone \{[^}]*width/.test(spaCss));
+check("фокус с кнопки снимается (обводка не остаётся висеть)",
+  /b\.blur\(\)/.test(spaCode) && /\.agent__qr:focus \{ outline: none/.test(spaCss)
+  && /\.agent__qr:focus-visible \{[^}]*outline: 2px solid/.test(spaCss));
+check("кнопка не исчезает впустую, пока идёт ход",
+  /b\.addEventListener\("click", function \(\) \{[^}]*if \(S\.busy\) return;[^}]*blur\(\)/.test(spaJs));
+
+/* --- невидимый повтор сбоя сервера (клиент) --- */
+check("сбой сервера повторяется невидимо (500/502/503)",
+  spaCode.includes("retrySilently") && spaCode.includes("TURN_CLIENT_RETRIES")
+  && /res\.status === 502/.test(spaCode) && spaCode.includes("quiet: true"));
+check("невидимый повтор не рисует второй пузырёк и второй скелетон",
+  /if \(quiet && ui\.live\)/.test(spaCode)
+  && !/var skel = quiet \? null/.test(spaCode));
+check("обрыв соединения тоже повторяется невидимо",
+  /function online\(\)/.test(spaCode) && /S\.currentId != null && online\(\)/.test(spaCode)
+  && /turn\.retries/.test(spaCode));
 /* --- лента ведёт себя как в эталоне: плавно на резком прыжке и за растущим
    блоком, а человек, ушедший вверх, не вытаскивается силой --- */
 check("плавная доводка на резком прыжке (не каждый кадр)",
@@ -353,6 +393,32 @@ check("свои чернила объявлены под .agent и для тём
   && /\[data-theme="dark"\]\s+\.agent\s*\{[^}]*--agent-ink-2:/.test(spaCss));
 /* Списки в ответе не должны слипаться в одну простыню. */
 check("переводы строк в ответе сохраняются", /\.agent__answer \{[^}]*white-space: pre-line/.test(spaCss));
+/* --- видимость текста в светлой теме: почему чистый цвет не помог ---
+   Жалоба была «текст агента плохо видно в светлой теме», и правка ТОЛЬКО цвета
+   её не сняла. Замер в живом браузере это объяснил: контраст ответа и так
+   13.5:1 (то есть с запасом выше AA), а затемнение цвета двигает плотность
+   знака на +0.04% — глазом ноль. Реальные рычаги другие:
+   (1) grayscale-сглаживание на светлом фоне делает штрихи тоньше, чем цвет,
+       поэтому в светлой теме нужно субпиксельное (auto), а в тёмной —
+       наоборот antialiased (субпиксель даёт цветные каёмки);
+   (2) кегль ответа: 16px против унаследованных 15px (+0.37% ink).
+   Оба правила проверяются, чтобы правка не откатилась молча. */
+const lightSmoothing = prop(rule(spaCss, ".agent"), "-webkit-font-smoothing");
+const darkSmoothing = prop(rule(spaCss, ':root[data-theme="dark"] .agent'), "-webkit-font-smoothing");
+check("в светлой теме у раздела субпиксельное сглаживание (штрихи не тоньше цвета)",
+  lightSmoothing === "auto", `сейчас: ${lightSmoothing || "не задано"}`);
+check("в тёмной теме сглаживание остаётся antialiased (без цветных каёмок)",
+  darkSmoothing === "antialiased", `сейчас: ${darkSmoothing || "не задано"}`);
+/* Ответ наставника — длинный текст для чтения; 15px на фоне приложения он
+   читался мелким. Проверяем именно кегль ОТВЕТА, а не всего раздела. */
+const answerSize = parseFloat(prop(rule(spaCss, ".agent__answer"), "font-size"));
+check("ответ наставника не меньше 16px (кегль, а не цвет, делает его заметнее)",
+  answerSize >= 16, `сейчас: ${answerSize || "не задан"}px`);
+/* Общее правило темы на весь сайт не трогаем: правка видимости — локальная
+   раздела, иначе менялся бы рендер всех экранов. */
+check("сглаживание темы не менялось глобально (правка только в разделе)",
+  /-webkit-font-smoothing:\s*antialiased/.test(stylesCss)
+  && !/-webkit-font-smoothing:\s*auto/.test(stylesCss));
 /* Резерв под меню держит ЭКРАН, а не композер: колонка заканчивается ровно
    там, где начинается меню, поэтому под полем ввода нет пустой полосы.
    В композере тот же резерв был бы вторым, суммировался с экранным и снова
