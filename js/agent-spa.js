@@ -1669,14 +1669,18 @@
     // Варианты — сохранённые слова модели (suggests из базы): история
     // показывает те же кнопки, что были вживую. Нет сохранённых — нет
     // кнопок, а не дежурный набор.
+    // Строго по порядку ленты: раньше пузыри пользователя рисовались сразу
+    // по ходу цикла, а карточки ответов — пачкой после него, и при нескольких
+    // ходах все вопросы сбивались в кучу наверх, а все ответы — вниз. Теперь
+    // группы идут в том порядке, в каком сообщения лежат в базе.
     var groups = [];
     function flushSteps(finalText, suggests) {
       if (!pending.length && !finalText) return;
-      groups.push({ steps: pending.splice(0, pending.length), final: finalText || null,
-                    suggests: suggests || [] });
+      groups.push({ kind: "answer", steps: pending.splice(0, pending.length),
+                    final: finalText || null, suggests: suggests || [] });
     }
     msgs.forEach(function (m) {
-      if (m.role === "user") { flushSteps(null); userBubble(m.content || ""); }
+      if (m.role === "user") { flushSteps(null); groups.push({ kind: "user", text: m.content || "" }); }
       else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests);
       else if (m.role === "tool") {
         pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
@@ -1686,8 +1690,12 @@
     flushSteps(null);
     if (groups.length) {
       // История открывается сразу целиком, без анимации.
-      groups[groups.length - 1].last = true;
-      groups.forEach(function (g) { assistantCard(g.steps, g.final, false, g.last ? g.suggests : []); });
+      var lastAnswer = -1;
+      groups.forEach(function (g, i) { if (g.kind === "answer") lastAnswer = i; });
+      groups.forEach(function (g, i) {
+        if (g.kind === "user") userBubble(g.text);
+        else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : []);
+      });
     }
     showEmpty(false);
     scrollDown(true, false);

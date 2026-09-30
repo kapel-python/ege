@@ -320,9 +320,18 @@ check("шаблонных кнопок нет: ни запасника, ни п�
   && !spaCode.includes("FALLBACK_SUGGESTIONS") && !spaCode.includes("DEFAULT_SUGGESTIONS")
   && !spaCode.includes("default_suggestions"));
 check("история показывает сохранённые кнопки модели (suggests из базы)",
-  spaCode.includes("groups[groups.length - 1].last = true")
+  /var lastAnswer = -1;/.test(spaCode)
   && /flushSteps\(m\.content, m\.suggests\)/.test(spaCode)
-  && /assistantCard\(g\.steps, g\.final, false, g\.last \? g\.suggests : \[\]\)/.test(spaCode));
+  && /assistantCard\(g\.steps, g\.final, false, i === lastAnswer \? g\.suggests : \[\]\)/.test(spaCode));
+/* --- порядок истории строго по ленте: раньше пузыри пользователя рисовались
+   сразу по ходу цикла, а карточки ответов — пачкой после него, и при N ходах
+   все вопросы сбивались в кучу наверх, а все ответы — вниз (живой баг:
+   UUU…AAA… вместо UAUA…). Теперь группы идут в порядке сообщений из базы. */
+check("история рисуется строго по порядку (вопросы не сбиваются наверх)",
+  /groups\.push\(\{ kind: "answer"/.test(spaCode)
+  && /groups\.push\(\{ kind: "user", text:/.test(spaCode)
+  && /groups\.forEach\(function \(g, i\) \{[\s\S]{0,120}?if \(g\.kind === "user"\) userBubble/.test(spaCode)
+  && !/msgs\.forEach\(function \(m\) \{[\s\S]{0,200}?userBubble\(m\.content/.test(spaCode));
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
