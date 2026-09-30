@@ -633,6 +633,11 @@ def main():
             check("построчный формат блока тоже принимается (label | ask)",
                   agent.split_suggestions("Текст.\n```suggest\nРазбери ошибку | Разбери мою ошибку по шагам.\n```")[1]
                   == [{"label": "Разбери ошибку", "ask": "Разбери мою ошибку по шагам."}])
+            check("свободное содержимое кнопок проходит как есть (хоть «я умный»)",
+                  agent.split_suggestions("Текст.\n```suggest\n"
+                                          '[{"label":"я умный","ask":"Докажи, что ты умнее меня, наставник."}]\n'
+                                          "```")[1]
+                  == [{"label": "я умный", "ask": "Докажи, что ты умнее меня, наставник."}])
             check("мусор в блоке не ломает ответ и не даёт пустых кнопок",
                   agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[0] == "Ответ."
                   and agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[1] == [])
@@ -662,15 +667,39 @@ def main():
             check("в базе тоже чистый текст (блок в историю не уходит)",
                   last["content"] == "Собрал по тебе." and "suggest" not in last["content"],
                   repr(last["content"]))
+            check("история отдаёт НАСТОЯЩИЕ кнопки ответа (слова модели, не шаблон)",
+                  last.get("suggests") == [{"label": "Разбери ошибку", "ask": "Разбери мою ошибку по шагам."},
+                                           {"label": "Дай задачу", "ask": "Дай задачу на слабую тему."}],
+                  repr(last.get("suggests")))
+            # Кэшированный повтор того же вопроса: кнопки — те же, из базы.
+            status, body = turn(k, tid_k, "расскажи про прогресс")
+            check("кэшированный ход отдаёт сохранённые кнопки",
+                  status == 200 and body.get("cached") is True
+                  and [x["label"] for x in (body.get("suggests") or [])]
+                  == ["Разбери ошибку", "Дай задачу"], f"{status} {body.get('suggests')}")
 
             with lock:
                 script.clear()
                 script.append({"text": "Просто ответ без блока.", "tool_calls": []})
             status, body = turn(k, tid_k, "ещё вопрос")
-            check("без блока модель даёт запасные кнопки (не пусто)",
-                  status == 200 and len(body.get("suggests") or []) == 2
-                  and all(s.get("label") and s.get("ask") for s in body["suggests"]),
-                  str(body.get("suggests")))
+            check("без блока кнопок нет (а не дежурный набор)",
+                  status == 200 and body.get("suggests") == [],
+                  f"{status} {body.get('suggests')}")
+            with lock:
+                script.clear()
+                script.append({"text": "Дерзкий ответ.\n\n```suggest\n"
+                                       '[{"label":"я умный","ask":"Докажи, что ты умнее меня, наставник."},'
+                                       '{"label":"ещё дерзче","ask":"Придумай вопрос посложнее."}]\n'
+                                       "```", "tool_calls": []})
+            status, body = turn(k, tid_k, "дерзни")
+            check("свободные названия кнопок доходят до клиента как есть",
+                  status == 200 and [x["label"] for x in (body.get("suggests") or [])]
+                  == ["я умный", "ещё дерзче"], f"{status} {body.get('suggests')}")
+            status, body = k.request(base, "GET", f"/api/agent/threads/{tid_k}", None)
+            last = [m for m in body.get("messages", []) if m["role"] == "assistant"][-1]
+            check("свободные кнопки переживают перезагрузку (лежат в базе)",
+                  [x["label"] for x in (last.get("suggests") or [])] == ["я умный", "ещё дерзче"],
+                  repr(last.get("suggests")))
 
             # Длинный ответ: блок кнопок стоит В КОНЦЕ, за прежним потолком в
             # 8000 знаков. Раньше текст резался до разбора блока, и у длинного

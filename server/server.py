@@ -174,8 +174,9 @@ def _agent_final_payload(final: str, steps: list, fallback: str) -> tuple[str, l
     Одно место на оба хода (обычный и resume после подтверждения): служебный
     блок ```suggest вырезается из текста до записи в базу, потому что в ленте и
     в истории ему делать нечего — это контракт с моделью, а не часть ответа.
-    Кнопки обязаны быть: модель блок не дала — берём детерминированный набор по
-    последнему шагу, потому что по кнопке человек и идёт дальше.
+    Кнопки — только слова модели: блока нет — кнопок нет (пустой список), а не
+    дежурный набор. Хранятся они рядом с ответом (suggests_json), поэтому
+    история показывает те же кнопки, что были вживую.
     """
     text = (final or "").strip() or fallback
     clean, suggests = _AGENT.split_suggestions(text)
@@ -183,7 +184,7 @@ def _agent_final_payload(final: str, steps: list, fallback: str) -> tuple[str, l
         # Блок был единственным содержимым ответа: показываем исходный текст,
         # иначе человек получил бы пустую карточку.
         clean = text
-    return clean[:AGENT_REPLY_MAX()], suggests or _AGENT.default_suggestions(steps)
+    return clean[:AGENT_REPLY_MAX()], suggests
 
 
 def _agent_thread_owned(conn: sqlite3.Connection, thread_id: int, user_id: int):
@@ -214,17 +215,36 @@ def _agent_next_seq(conn: sqlite3.Connection, thread_id: int) -> int:
 
 def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, role: str,
                        content: str = "", *, tool_name=None, tool_args=None,
-                       status: str = "done", result=None) -> int:
+                       status: str = "done", result=None, suggests=None) -> int:
     seq = _agent_next_seq(conn, thread_id)
     now_ms = int(time.time() * 1000)
-    conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
-                 " tool_args_json, status, result_json, seq, created_at)"
-                 " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                 (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
-                  tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
-                  status, json.dumps(result if result is not None else {},
-                                     ensure_ascii=False)[:16000],
-                  seq, now_ms))
+    try:
+        suggests_json = json.dumps([{"label": str(it.get("label") or "")[:40],
+                                     "ask": str(it.get("ask") or "")[:160]}
+                                    for it in (suggests or []) if isinstance(it, dict)],
+                                   ensure_ascii=False)[:2000]
+    except (TypeError, ValueError):
+        suggests_json = "[]"
+    try:
+        conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
+                     " tool_args_json, status, result_json, seq, created_at, suggests_json)"
+                     " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                     (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
+                      tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
+                      status, json.dumps(result if result is not None else {},
+                                         ensure_ascii=False)[:16000],
+                      seq, now_ms, suggests_json))
+    except sqlite3.Error:
+        # Старая база без suggests_json (миграция не применена): строка пишется
+        # без кнопок, а не падает весь ход.
+        conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
+                     " tool_args_json, status, result_json, seq, created_at)"
+                     " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
+                      tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
+                      status, json.dumps(result if result is not None else {},
+                                         ensure_ascii=False)[:16000],
+                      seq, now_ms))
     conn.execute("UPDATE agent_threads SET updated_at=? WHERE id=?", (now_ms, int(thread_id)))
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
@@ -298,6 +318,18 @@ def _agent_public_message(row) -> dict:
     out = {"id": int(row["id"]), "role": row["role"], "content": row["content"] or "",
            "seq": int(row["seq"]), "status": row["status"],
            "createdAt": int(row["created_at"])}
+    if row["role"] == "assistant":
+        # Настоящие кнопки этого ответа (слова модели из suggests_json), а не
+        # подстановка: история показывает то же, что было вживую.
+        try:
+            raw_sug = row["suggests_json"] if "suggests_json" in row.keys() else "[]"
+            stored = json.loads(raw_sug or "[]")
+        except (ValueError, TypeError, IndexError):
+            stored = []
+        out["suggests"] = [{"label": str(it.get("label") or ""),
+                            "ask": str(it.get("ask") or "")}
+                           for it in (stored if isinstance(stored, list) else [])
+                           if isinstance(it, dict) and str(it.get("ask") or "").strip()][:3]
     if row["tool_name"]:
         out["tool"] = row["tool_name"]
         out["args"] = args if isinstance(args, dict) else {}
@@ -9591,10 +9623,11 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_add_message(conn, tid, user_id, "assistant", "Отменено учеником.")
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
-                        # Кнопки и здесь: после отмены человеку нужен путь дальше,
-                        # а не тупик. Набор общий (шагов в этом ходу нет).
+                        # После отмены — без кнопок-шаблонов: их неоткуда взять
+                        # (модель тут не отвечала), а дежурный набор — это и
+                        # есть заглушка.
                         self.send_json({"ok": True, "approved": False, "final": "Отменено учеником.",
-                                        "steps": [], "suggests": _AGENT.default_suggestions([]),
+                                        "steps": [], "suggests": [],
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла без нового жетона.
                     if not _agent_busy_acquire(tid):
@@ -9665,7 +9698,8 @@ class Handler(BaseHTTPRequestHandler):
                         # текста ДО записи, поэтому в ленту и в базу уходит
                         # чистый ответ, а варианты едут клиенту отдельным полем.
                         final_clean, suggests = _agent_final_payload(final_text, steps2, final_text)
-                        _agent_add_message(conn, tid, user_id, "assistant", final_clean)
+                        _agent_add_message(conn, tid, user_id, "assistant", final_clean,
+                                           suggests=suggests)
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
@@ -9727,20 +9761,29 @@ class Handler(BaseHTTPRequestHandler):
                             last_user = conn.execute("SELECT content, seq FROM agent_messages WHERE thread_id=? AND role='user' ORDER BY seq DESC LIMIT 1",
                                                      (tid,)).fetchone()
                             if last_user is not None and (last_user["content"] or "").strip() == text:
-                                after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at"
-                                                     " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
-                                                     (tid, int(last_user["seq"]))).fetchall()
+                                try:
+                                    after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at, suggests_json"
+                                                         " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
+                                                         (tid, int(last_user["seq"]))).fetchall()
+                                except sqlite3.Error:
+                                    after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at"
+                                                         " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
+                                                         (tid, int(last_user["seq"]))).fetchall()
                                 has_assistant = any(r["role"] == "assistant" and (r["content"] or "").strip() for r in after)
                                 has_pending = any(r["status"] == "needs_confirm" for r in after)
                                 if has_assistant and not has_pending:
-                                    steps_cached = [_agent_public_message(r) for r in after if r["role"] == "tool"]
-                                    finals = [r["content"] for r in after if r["role"] == "assistant" and (r["content"] or "").strip()]
+                                    public = [_agent_public_message(r) for r in after]
+                                    steps_cached = [s for s in public if s["role"] == "tool"]
+                                    finals = [(s["content"], s.get("suggests") or []) for s in public
+                                              if s["role"] == "assistant" and (s["content"] or "").strip()]
                                     quota = _AGENT.agent_quota_status(conn, int(user_id))
                                     self.send_json({"ok": True, "cached": True, "steps": [
                                         {"id": s["id"], "tool": s.get("tool"), "args": s.get("args"),
                                          "label": _AGENT.describe_step(s.get("tool") or "", s.get("args") or {}, s.get("result")),
                                          "kind": "read", "status": s.get("status"), "result": s.get("result")} for s in steps_cached],
-                                        "final": finals[-1] if finals else "", "quota": quota,
+                                        "final": finals[-1][0] if finals else "",
+                                        "suggests": finals[-1][1] if finals else [],
+                                        "quota": quota,
                                         "usage": {"cost": 0}}, token=token); return
                         # Анти-лавиновая сетка (пользователь + сеть): ловит
                         # всплеск, а не «много за день» — числа и обоснование
@@ -9850,7 +9893,8 @@ class Handler(BaseHTTPRequestHandler):
                         # вырезается из текста (в ленту он не попадает), а сами
                         # варианты уходят клиенту готовыми data-ask.
                         final_clean, suggests = _agent_final_payload(final_text, steps, final_text)
-                        _agent_add_message(conn, tid, user_id, "assistant", final_clean)
+                        _agent_add_message(conn, tid, user_id, "assistant", final_clean,
+                                           suggests=suggests)
                         conn.commit()
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
@@ -10213,9 +10257,14 @@ class Handler(BaseHTTPRequestHandler):
                     thread = _agent_thread_owned(conn, tid, user_id)
                     if thread is None:
                         self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
-                    rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
-                                        " result_json, seq, created_at FROM agent_messages"
-                                        " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
+                    try:
+                        rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
+                                            " result_json, seq, created_at, suggests_json FROM agent_messages"
+                                            " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
+                    except sqlite3.Error:
+                        rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
+                                            " result_json, seq, created_at FROM agent_messages"
+                                            " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
                     self.send_json({"ok": True,
                                     "thread": {"id": int(thread["id"]), "subject": thread["subject"],
                                                "title": thread["title"],

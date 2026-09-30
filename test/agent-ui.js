@@ -306,22 +306,25 @@ check("у карточек подсказок свои значки",
   && /"Соберу задания под твой уровень", "compass"/.test(spaCode));
 
 /* --- кнопки-продолжения под ответом ---
-   Раньше это были две кнопки-заглушки с прибитыми текстами («Хочу разбор»,
-   «Что дальше?») — они не имели отношения ни к ответу, ни к вопросу. Теперь
-   варианты приходят от модели (сервер режет служебный блок ```suggest и
-   отдаёт готовые {label, ask}): label — короткое название кнопки, ask — сам
-   вопрос, он и уходит на сервер. Нажатие убирает кнопку (соседние уезжают на
-   её место), фокус снимается руками. */
+   Кнопки — это слова модели, а не форма: сервер режет служебный блок
+   ```suggest и отдаёт готовые {label, ask} (label — любой текст, хоть
+   «я умный»), ask — сам вопрос, он и уходит на сервер. Шаблонных подстановок
+   нет нигде: нет блока — нет кнопок. Нажатие убирает кнопку (соседние уезжают
+   на её место), фокус снимается руками. */
 check("кнопки берутся из ответа сервера (suggests), а не из заглушек",
   spaCode.includes("normalizeSuggests") && spaCode.includes("res.data.suggests")
   && !spaCode.includes('"Хочу разбор"')
   && !/data-ask[\s\S]{0,80}"Разбери подробнее"/.test(spaCode));
-check("есть запасной набор кнопок (история из базы не хранит варианты)",
-  spaCode.includes("SUGGEST_FALLBACK") && spaCode.includes("suggestsFromSteps"));
-check("в истории кнопки только у последнего ответа (лента не поле кнопок)",
+check("шаблонных кнопок нет: ни запасника, ни подстановки по шагам",
+  !spaCode.includes("SUGGEST_FALLBACK") && !spaCode.includes("suggestsFromSteps")
+  && !spaCode.includes("FALLBACK_SUGGESTIONS") && !spaCode.includes("DEFAULT_SUGGESTIONS")
+  && !spaCode.includes("default_suggestions"));
+check("история показывает сохранённые кнопки модели (suggests из базы)",
   spaCode.includes("groups[groups.length - 1].last = true")
-  && /assistantCard\(g\.steps, g\.final, false, g\.last \? null : \[\]\)/.test(spaCode)
-  && /if \(!asks\.length && suggests == null\) asks = suggestsFromSteps\(steps\)/.test(spaCode));
+  && /flushSteps\(m\.content, m\.suggests\)/.test(spaCode)
+  && /assistantCard\(g\.steps, g\.final, false, g\.last \? g\.suggests : \[\]\)/.test(spaCode));
+check("нет списка — нет кнопок (без дежурного набора)",
+  /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
   /classList\.add\("done"\);\s*\}\);[\s\S]{0,220}?cardFooter\(card, null, asks\)/.test(spaJs));
 check("нажатие убирает кнопку и сдвигает соседние",

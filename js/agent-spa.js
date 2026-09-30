@@ -31,27 +31,10 @@
      кнопки рисовали одну иконку и читались одинаково. */
   var ICON_TASKS = "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9";
   var ICON_HELP = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 17h.01";
-  /* Запасные кнопки-продолжения. Сервер отдаёт готовый список (модель сама
-     придумывает варианты по своему ответу), а эти нужны там, где списка нет:
-     история из базы (варианты в ней не хранятся) и старый ответ без поля. */
-  var SUGGEST_FALLBACK = {
-    errors: [{ label: "Разбери ошибку", ask: "Разбери одну мою ошибку по шагам." },
-             { label: "Что подтянуть", ask: "Что мне подтянуть в первую очередь?" }],
-    forecast: [{ label: "Что подтянуть", ask: "Что мне подтянуть в первую очередь, чтобы вырос балл?" },
-               { label: "Дай задачу", ask: "Дай задачу по самой слабой теме." }],
-    plan_draft: [{ label: "Дай задачу", ask: "Дай первую задачу из плана." },
-                 { label: "Короче план", ask: "Сделай план на три дня, а не на неделю." }],
-    essay_history: [{ label: "Разбор сочинения", ask: "Что мне исправить в сочинении?" },
-                    { label: "Критерии", ask: "Объясни, за что снимают баллы в сочинении." }],
-    lesson_get: [{ label: "Проще", ask: "Объясни то же самое проще, как для пятиклассника." },
-                 { label: "Дай задачу", ask: "Дай задачу на эту тему, чтобы закрепить." }],
-    task_get: [{ label: "Разбери шаг", ask: "Разбери решение этого задания по шагам." },
-               { label: "Похожие", ask: "Дай похожее задание, чтобы проверить себя." }],
-    profile: [{ label: "Что подтянуть", ask: "Что мне подтянуть в первую очередь?" },
-              { label: "План на неделю", ask: "Составь план подготовки на неделю." }],
-    _: [{ label: "Что дальше?", ask: "Что мне делать дальше? Посмотри мой прогресс." },
-        { label: "План на неделю", ask: "Составь план подготовки на неделю." }],
-  };
+  /* Запасных шаблонных кнопок нет осознанно: кнопки — это слова модели, а не
+     форма. Сервер отдаёт готовый список (модель придумала его под свой ответ)
+     и хранит его в базе рядом с ответом, поэтому история показывает те же
+     кнопки, что были вживую. Нет списка — нет кнопок, а не дежурный набор. */
   var PLUS_D = "M12 5v14M5 12h14";
   // Корзина, а не крестик: в эталоне удаление чата — корзина, и «×» рядом
   // с текстом «Раздел бесплатный» читался как «закрыть панель».
@@ -1364,13 +1347,9 @@
   var SUGGEST_ICONS = [ICON_TASKS, ICON_HELP, ICON_TASKS];
   // Зазор .agent__actions (gap), который схлопывание гасит вместе с шириной.
   var GUTTER_PX = 8;
-  // Кнопки для истории (в базе вариант не сохранён — только для старых
-  // сообщений): по последнему шагу группы.
-  function suggestsFromSteps(steps) {
-    var last = (steps || [])[steps.length - 1] || {};
-    var key = last.tool === "fold_web" ? (last.args && last.args.op) || "" : last.tool;
-    return SUGGEST_FALLBACK[key] || SUGGEST_FALLBACK._;
-  }
+  // Нормализация серверного списка (структура, не содержимое): слова модели
+  // проходят как есть — хоть «я умный». Пустой список и null/undefined значат
+  // одно и то же: кнопок нет, подстановки не будет.
   function normalizeSuggests(raw) {
     var out = [];
     (raw || []).forEach(function (s) {
@@ -1568,13 +1547,11 @@
     showEmpty(false);
     scrollDown(true, true);
     if (built) built.card = card;
-    /* Кнопки-продолжения: серверные (модель придумала их по своему ответу) или
-       запасные по последнему шагу. Пустой массив — осознанное «кнопок нет»
-       (старые ответы в истории): запасной набор тогда не подставляем, иначе
-       лента превращалась бы в поле кнопок. null/undefined — «не задано»,
-       подставляем запасной, потому что без кнопок человеку некуда идти. */
+    /* Кнопки-продолжения — только слова модели из suggests (сервер вырезал
+       служебный блок ```suggest и хранит список рядом с ответом). Нет списка —
+       нет кнопок: дежурный набор был бы заглушкой, не имеющей отношения
+       к ответу. Пустой массив и null/undefined — одно и то же. */
     var asks = normalizeSuggests(suggests);
-    if (!asks.length && suggests == null) asks = suggestsFromSteps(steps);
     if (built) built.suggests = asks;
     function paintAll() {
       if (built) built.prepped.forEach(function (p) { built.ol.appendChild(p.li); stepFill(p); });
@@ -1689,16 +1666,18 @@
     // Кнопки-продолжения — только у ПОСЛЕДНЕГО ответа: в переписке они
     // относятся к тому, что на экране сейчас, и у каждого старого ответа
     // рисовать свои варианты значило бы превратить ленту в поле кнопок.
-    // Живому ответу (settleTurn/confirm) варианты даёт сервер; здесь — запасной
-    // набор по последнему шагу, потому что в базе вариантов нет.
+    // Варианты — сохранённые слова модели (suggests из базы): история
+    // показывает те же кнопки, что были вживую. Нет сохранённых — нет
+    // кнопок, а не дежурный набор.
     var groups = [];
-    function flushSteps(finalText) {
+    function flushSteps(finalText, suggests) {
       if (!pending.length && !finalText) return;
-      groups.push({ steps: pending.splice(0, pending.length), final: finalText || null });
+      groups.push({ steps: pending.splice(0, pending.length), final: finalText || null,
+                    suggests: suggests || [] });
     }
     msgs.forEach(function (m) {
       if (m.role === "user") { flushSteps(null); userBubble(m.content || ""); }
-      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content);
+      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests);
       else if (m.role === "tool") {
         pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
                        label: (m.tool || "Шаг"), kind: "read", status: m.status, proposal: m.result });
@@ -1708,7 +1687,7 @@
     if (groups.length) {
       // История открывается сразу целиком, без анимации.
       groups[groups.length - 1].last = true;
-      groups.forEach(function (g) { assistantCard(g.steps, g.final, false, g.last ? null : []); });
+      groups.forEach(function (g) { assistantCard(g.steps, g.final, false, g.last ? g.suggests : []); });
     }
     showEmpty(false);
     scrollDown(true, false);
