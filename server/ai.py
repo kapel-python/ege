@@ -72,6 +72,12 @@ DEFAULT_TIMEOUT_SEC = 45.0
 # именно случайность.
 DEFAULT_TEMPERATURE = 0.0
 MAX_INPUT_CHARS = 8000
+# Потолок ТЕКСТА ответа модели (tools-режим, наставник). Шире MAX_INPUT_CHARS
+# осознанно: ответ наставника несёт ещё и служебный блок ```suggest с
+# кнопками-продолжениями в самом конце, и рез ровно на 8000 отрывал его у
+# длинного ответа — кнопки пропадали там, где нужнее всего. Сочинения сюда не
+# ходят: у них свой входной контракт (MAX_INPUT_CHARS).
+AI_REPLY_MAX = 9000
 # A bad or hostile key must not burn the request budget on a long retry loop.
 MAX_UPSTREAM_BYTES = 256 * 1024
 
@@ -599,7 +605,12 @@ def parse_tool_message(message: dict) -> dict:
     elif isinstance(content, str):
         text = content.strip() or None
         if text is not None:
-            text = content.strip()[:8000]
+            # Потолок шире прежних 8000: ответ наставника несёт ещё и служебный
+            # блок кнопок-продолжений в САМОМ КОНЦЕ, и жёсткий рез отрывал его
+            # у длинного ответа — кнопок не было ровно там, где они нужнее.
+            # Потолок всё равно есть: неограниченный ответ модели не должен
+            # уезжать в базу и в ленту.
+            text = content.strip()[:AI_REPLY_MAX]
     else:
         raise AIFormatError("текст ответа не строка")
     calls = _clean_tool_calls(message.get("tool_calls"))

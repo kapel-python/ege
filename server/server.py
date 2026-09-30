@@ -115,6 +115,17 @@ def _load_agent_module():
 
 _AGENT = _load_agent_module()
 
+
+# Потолок текста, который вообще попадает в agent_messages (и оттуда в ленту).
+# Источник правды — модуль агента: там же живёт блок кнопок-продолжений, из-за
+# которого ответ длиннее прежних 8000. Без модуля (тогда весь раздел отдаёт
+# 503) берём разумную копию числа, а не падаем на импорте.
+def AGENT_REPLY_MAX() -> int:
+    try:
+        return int(getattr(_AGENT, "AGENT_REPLY_MAX", 9000))
+    except (TypeError, ValueError):
+        return 9000
+
 # Параллельный ход в том же треде — 400 AGENT_BUSY. In-memory guard на процесс:
 # ход ДЕРЖИТ слот, пока он жив (продлевает его каждый вызов модели), а брошенный
 # освобождает по TTL. Раньше TTL был потолком всего хода (95 с = 90 + запас),
@@ -157,6 +168,24 @@ def _agent_busy_retry_after(thread_id: int) -> int:
     return max(1, int(until - time.monotonic()) + 1) if until else 1
 
 
+def _agent_final_payload(final: str, steps: list, fallback: str) -> tuple[str, list]:
+    """Текст ответа и кнопки-продолжения для клиента.
+
+    Одно место на оба хода (обычный и resume после подтверждения): служебный
+    блок ```suggest вырезается из текста до записи в базу, потому что в ленте и
+    в истории ему делать нечего — это контракт с моделью, а не часть ответа.
+    Кнопки обязаны быть: модель блок не дала — берём детерминированный набор по
+    последнему шагу, потому что по кнопке человек и идёт дальше.
+    """
+    text = (final or "").strip() or fallback
+    clean, suggests = _AGENT.split_suggestions(text)
+    if not clean:
+        # Блок был единственным содержимым ответа: показываем исходный текст,
+        # иначе человек получил бы пустую карточку.
+        clean = text
+    return clean[:AGENT_REPLY_MAX()], suggests or _AGENT.default_suggestions(steps)
+
+
 def _agent_thread_owned(conn: sqlite3.Connection, thread_id: int, user_id: int):
     try:
         tid = int(thread_id)
@@ -191,7 +220,7 @@ def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, r
     conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
                  " tool_args_json, status, result_json, seq, created_at)"
                  " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                 (int(thread_id), int(user_id), role, str(content or "")[:8000],
+                 (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
                   tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
                   status, json.dumps(result if result is not None else {},
                                      ensure_ascii=False)[:16000],
@@ -281,6 +310,13 @@ def _agent_public_message(row) -> dict:
 # повторяем. Чуть поднятая температура даёт шанс на другой ответ; числа
 # ученику по-прежнему приходят из инструментов, а не из фантазии модели.
 _AGENT_RETRY_TEMPERATURE = 0.3
+# Шаги температуры по попыткам: 0 → 0.3 → 0.6. Повторов было ровно два, и
+# сбойная серия из двух подряд отдавала ученику 502, хотя бюджет хода ещё
+# был: третий шанс на другом «почерке» модели заметно дёшевле отказа.
+_AGENT_RETRY_TEMPERATURES = (0.0, _AGENT_RETRY_TEMPERATURE, 0.6)
+# Меньше этого остатка бюджета повтор бессмыслен: вызов не вернётся, и мы
+# просто сожжём остаток хода вместо честного ответа по собранным данным.
+_AGENT_RETRY_MIN_BUDGET_SEC = 8.0
 
 
 def _agent_call_timeout(budget) -> float | None:
@@ -300,7 +336,7 @@ def _agent_call_timeout(budget) -> float | None:
 
 
 def _agent_chat_fn(cost: dict, thread_id: int | None = None):
-    """chat_fn для _AGENT.run_cycle: один вызов модели и один невидимый повтор.
+    """chat_fn для _AGENT.run_cycle: один вызов модели и невидимые повторы.
 
     Повторяются только сбои, которые повторяются сами: AIFormatError (модель
     ответила не по контракту) и AIError (транспорт/402) — как у проверок
@@ -308,6 +344,13 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None):
     (AIUnavailable) повтором не лечатся. Жетон хода при повторе не тратится:
     резервация одна, а точка невозврата наступает только после записи ответа,
     поэтому любой неуспех возвращает её целиком (finally в обоих endpoint'ах).
+
+    Попыток три, температура растёт (0 → 0.3 → 0.6): одна и та же вырожденная
+    реплика при temperature 0 воспроизводится, поэтому второй вызов с тем же
+    нулём был бесполезен, а двух попыток на живых сбоях не всегда хватало —
+    ученик получал 502 при живом провайдере. Повтор не делается, если от
+    бюджета хода осталось мало: иначе вместо ответа по собранным данным мы
+    сожгли бы остаток на заведомо мёртвом вызове.
 
     Один код на оба хода: раньше у resume после подтверждения повтора не было
     вовсе, и одна форматная ошибка после уже применённого действия отдавала
@@ -320,21 +363,34 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None):
             _agent_busy_touch(thread_id)
         if not tools:
             # Финал по потолку шагов (_AGENT._summarize): вызов БЕЗ
-            # инструментов — короткий текст по уже собранным данным.
+            # инструментов — короткий текст по уже собранным данным. Потолок —
+            # AGENT_REPLY_MAX(), а не прежние 8000: ответ несёт ещё и блок
+            # кнопок-продолжений в конце, и жёсткий рез раньше отрывал его.
             text = _AI.chat(messages, temperature=0.0, timeout=timeout)
-            return {"text": (text or "").strip()[:8000] or None,
+            return {"text": (text or "").strip()[:AGENT_REPLY_MAX()] or None,
                     "tool_calls": [], "preamble": None}
         failure: Exception | None = None
-        for attempt in range(2):
-            temperature = 0.0 if attempt == 0 else _AGENT_RETRY_TEMPERATURE
+        for attempt, temperature in enumerate(_AGENT_RETRY_TEMPERATURES):
+            if attempt and not _agent_retry_worthwhile(budget):
+                break
             try:
                 return _AI.chat_with_tools(messages, tools, temperature=temperature,
-                                           timeout=timeout)
+                                           timeout=_agent_call_timeout(budget))
             except (_AI.AIFormatError, _AI.AIError) as exc:
                 failure = exc
         raise failure  # noqa: B904 — повторяем ровно то, что поймали
 
     return call
+
+
+def _agent_retry_worthwhile(budget) -> bool:
+    """Есть ли смысл в ещё одной попытке вызова (проверяет остаток хода)."""
+    if budget is None:
+        return True
+    try:
+        return float(budget) > _AGENT_RETRY_MIN_BUDGET_SEC
+    except (TypeError, ValueError):
+        return True
 
 
 def _ai_user_message(exc: BaseException) -> str:
@@ -4919,7 +4975,7 @@ _HOST_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}
 def _is_plain_host(host: str) -> bool:
     """DNS-имя без схемы, пути, пробелов и управляющих символов.
 
-    Значение уходит в заголовок Location, поэтому всё, что не похоже на
+    Значение уходит в заголовок Location, поэтому anything, что не похоже на
     имя хоста, отсекается целиком — вместе с попытками вставить \r\n.
     """
     if not host or len(host) > 253:
@@ -4939,7 +4995,8 @@ def _peer_is_trusted_proxy(handler) -> bool:
 
     Поэтому флаг теперь только разрешает доверие, а решение принимает СОКЕТ:
     заголовки читаются исключительно из loopback, где живёт наш nginx. Всё
-    остальное трактуется как прямой клиент без права на подмену.
+    остальное (любой другой адрес, в том числе 127.0.0.1 из контейнера с
+    другим владельцем) трактуется как прямой клиент без права на подмену.
     """
     if os.environ.get("EGE_TRUSTED_PROXY") != "1":
         return False
@@ -4987,7 +5044,7 @@ def client_ip(handler) -> str:
     first = trusted_forwarded(handler, "X-Forwarded-For")
     if first:
         try:
-            # Валидируем формат: в бакет идёт только настоящий IP-адрес,
+            # Валидируем формт: в бакет идёт только настоящий IP-адрес,
             # мусор вроде "unknown" или чужой строки не должен ехать в ключ.
             return str(ipaddress.ip_address(first.split("%", 1)[0]))[:64]
         except ValueError:
@@ -4995,10 +5052,7 @@ def client_ip(handler) -> str:
     return socket_ip(handler)
 
 
-# Старое имя живёт для существующих вызовов (support_check_rate, отпечатки
-# устройства и anti-лава ИИ). Это ИМЯ, а не отдельная реализация: иначе старая
-# функция, определённая ниже, перекрыла бы алиас и вернула доверие XFF
-# кому угодно.
+# Старое имя живёт для существующих вызовов (support_check_rate и др.).
 support_client_ip = client_ip
 
 
@@ -8680,7 +8734,7 @@ class Handler(BaseHTTPRequestHandler):
             # ограничения, а auth_login_allowed считает только неудачи и
             # очищается на успехе. Скрипт без кук, меняя email, получал
             # неограниченное число 200-ответов, а register успевал завести
-            # строку users ДО проверки дубла — то есть аккаунты-переростки.
+            # строку users ДО проверки дубля — то есть аккаунты-переростки.
             if self.api_rate_limited(): return
             conn = connect()
             try:
@@ -9382,8 +9436,11 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_add_message(conn, tid, user_id, "assistant", "Отменено учеником.")
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        # Кнопки и здесь: после отмены человеку нужен путь дальше,
+                        # а не тупик. Набор общий (шагов в этом ходу нет).
                         self.send_json({"ok": True, "approved": False, "final": "Отменено учеником.",
-                                        "steps": [], "quota": quota}, token=token); return
+                                        "steps": [], "suggests": _AGENT.default_suggestions([]),
+                                        "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла без нового жетона.
                     if not _agent_busy_acquire(tid):
                         wait = _agent_busy_retry_after(tid)
@@ -9448,12 +9505,16 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                             "final": None, "pending": True, "quota": quota,
                                             "usage": {"cost": cost["n"]}}, token=token); return
-                        final_text = (final2 or "").strip()[:8000] or "Готово."
-                        _agent_add_message(conn, tid, user_id, "assistant", final_text)
+                        final_text = (final2 or "").strip() or "Готово."
+                        # Кнопки-продолжения: блок ```suggest вырезается из
+                        # текста ДО записи, поэтому в ленту и в базу уходит
+                        # чистый ответ, а варианты едут клиенту отдельным полем.
+                        final_clean, suggests = _agent_final_payload(final_text, steps2, final_text)
+                        _agent_add_message(conn, tid, user_id, "assistant", final_clean)
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
-                                        "final": final_text, "quota": quota,
+                                        "final": final_clean, "suggests": suggests, "quota": quota,
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     finally:
                         _agent_busy_release(tid)
@@ -9629,12 +9690,17 @@ class Handler(BaseHTTPRequestHandler):
                                             "pending": True, "quota": quota,
                                             "thread": {"id": tid, "title": thread_title},
                                             "usage": {"cost": cost["n"]}}, token=token); return
-                        final_text = (final or "").strip()[:8000] or "Не смог подобрать ответ — уточни вопрос."
-                        _agent_add_message(conn, tid, user_id, "assistant", final_text)
+                        final_text = (final or "").strip() or "Что-то я потерял мысль — переформулируй вопрос, и отвечу."
+                        # Кнопки-продолжения: служебный блок ```suggest из ответа
+                        # вырезается из текста (в ленту он не попадает), а сами
+                        # варианты уходят клиенту готовыми data-ask.
+                        final_clean, suggests = _agent_final_payload(final_text, steps, final_text)
+                        _agent_add_message(conn, tid, user_id, "assistant", final_clean)
                         conn.commit()
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
-                        self.send_json({"ok": True, "steps": out_steps, "final": final_text,
+                        self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
+                                        "suggests": suggests,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
                                         "thread": {"id": tid, "title": thread_title},
                                         "usage": {"cost": cost["n"]}}, token=token); return
@@ -9681,7 +9747,8 @@ class Handler(BaseHTTPRequestHandler):
         # X-Forwarded-Host — через тот же гейт доверия, что и остальные
         # X-Forwarded-*: напрямую (мимо nginx) этот заголовок присылает клиент,
         # и без проверки "Host: www.чужой.дом" давал 301 на чужой домен —
-        # отражённый open redirect с настоящего домена.
+        # отражённый open redirect с настоящего домена. Правило www.*->apex
+        # само по себе сужает ущерб, но заголовок доверия здесь был лишним.
         host = (trusted_forwarded(self, "X-Forwarded-Host")
                 or self.headers.get("Host") or "").split(",")[0].strip().lower()
         bare, _, port = host.partition(":")
