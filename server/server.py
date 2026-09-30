@@ -13,6 +13,7 @@ import errno
 import gzip
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -720,6 +721,18 @@ def hash_password(password: str) -> str:
     iterations = 210000
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations)
     return f"pbkdf2_sha256${iterations}${salt}${dk.hex()}"
+
+
+# Хэш-равнялка: настоящая PBKDF2-запись с тем же числом итераций, что и у
+# живых паролей, но от пароля, которого ни у кого нет. Проверка входа всегда
+# тратит на неё ровно столько же, сколько на настоящий пароль, поэтому по
+# времени ответа нельзя отличить «email не зарегистрирован» (раньше: 0 мс,
+# БД возвращала None и PBKDF2 не считалась вовсе) от «неверный пароль»
+# (210k итераций). Без этого одинаковый текст 401 обесценивал сам себя.
+_TIMING_EQUALIZER_HASH = (
+    "pbkdf2_sha256$210000$cf2fe7e0e0da40dd027b0e08b1ddabc5"
+    "$0a7967933721e4e4ec4f8491693c20b7ee100e122eb21712b52acc0f969470d6"
+)
 
 
 def verify_password(candidate: str, stored: str | None) -> bool:
@@ -2058,6 +2071,13 @@ def public_base_url(handler) -> str:
         headers = handler.headers
         host = (trusted_forwarded(handler, "X-Forwarded-Host") or headers.get("Host") or "").split(",")[0].strip()
         if not host:
+            return "http://localhost:2026"
+        # Host приходит от клиента, а результат уходит в sitemap.xml и в
+        # абсолютные ссылки, поэтому пропускаем только настоящее DNS-имя
+        # (или IP:порт для локальной разработки). Иначе "Host: x/<url><loc>…"
+        # дописывал в карту сайта произвольный XML.
+        host_name, _, host_port = host.rpartition(":") if ":" in host else (host, "", "")
+        if not _is_plain_host(host_name or host) or (host_port and not host_port.isdigit()):
             return "http://localhost:2026"
         proto = trusted_forwarded(handler, "X-Forwarded-Proto").lower()
         if proto not in ("http", "https"):
@@ -4794,38 +4814,93 @@ def validate_support_form_token(token, secret: str, now: int, min_age: int, max_
         return False
 
 
+_HOST_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")
+
+
+def _is_plain_host(host: str) -> bool:
+    """DNS-имя без схемы, пути, пробелов и управляющих символов.
+
+    Значение уходит в заголовок Location, поэтому всё, что не похоже на
+    имя хоста, отсекается целиком — вместе с попытками вставить \r\n.
+    """
+    if not host or len(host) > 253:
+        return False
+    return bool(_HOST_RE.match(host))
+
+
+def _peer_is_trusted_proxy(handler) -> bool:
+    """Верю ли заголовкам X-Forwarded-* от этого соединения.
+
+    Одного флага EGE_TRUSTED_PROXY=1 мало: он говорит «у меня есть прокси», а не
+    «это соединение пришло из него». Пока приложение слушало 0.0.0.0, любой
+    клиент из интернета дотягивался до сокета мимо nginx и подставлял
+    X-Forwarded-For / -Proto / -Host сам — то есть выбирал себе IP-бакет
+    (обход всех лимитов, включая анти-лавиновую сетку ИИ), мог выключить
+    Secure-флаг кук и увести редирект на свой домен.
+
+    Поэтому флаг теперь только разрешает доверие, а решение принимает СОКЕТ:
+    заголовки читаются исключительно из loopback, где живёт наш nginx. Всё
+    остальное трактуется как прямой клиент без права на подмену.
+    """
+    if os.environ.get("EGE_TRUSTED_PROXY") != "1":
+        return False
+    try:
+        addr = handler.client_address[0] if handler.client_address else ""
+        return ipaddress.ip_address(str(addr).split("%", 1)[0]).is_loopback
+    except Exception:
+        return False
+
+
 def trusted_forwarded(handler, name: str) -> str:
-    """Заголовок X-Forwarded-* — только за доверенным прокси (EGE_TRUSTED_PROXY=1).
+    """Заголовок X-Forwarded-* — только за доверенным прокси.
 
     Без этого гейта любой прямой клиент подменяет себе proto/host: влияет на
     Secure-флаг кук, HSTS и абсолютные ссылки (public_base_url). Смысл тот же,
-    что у support_client_ip для X-Forwarded-For.
+    что у client_ip для X-Forwarded-For; доверие ограничено loopback-сокетом
+    (см. _peer_is_trusted_proxy).
     """
+    if not _peer_is_trusted_proxy(handler):
+        return ""
     try:
-        if os.environ.get("EGE_TRUSTED_PROXY") != "1":
-            return ""
         return (handler.headers.get(name, "") or "").split(",")[0].strip()
     except Exception:
         return ""
 
 
-def support_client_ip(handler) -> str:
-    """Socket IP by default; X-Forwarded-For only behind a trusted proxy.
-
-    Blindly trusting X-Forwarded-For lets any direct client pick its own
-    bucket. Set EGE_TRUSTED_PROXY=1 only when a proxy you control overwrites
-    the header — otherwise every NAT/proxy user shares one global bucket.
-    """
+def socket_ip(handler) -> str:
+    """IP сокета — единственный источник правды о том, кто перед нами."""
     try:
-        if os.environ.get("EGE_TRUSTED_PROXY") == "1":
-            first = (handler.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
-            if first:
-                return first[:64]
         if handler.client_address:
-            return str(handler.client_address[0])[:64]
+            return str(handler.client_address[0]).split("%", 1)[0][:64]
     except Exception:
         pass
     return "?"
+
+
+def client_ip(handler) -> str:
+    """IP клиента для лимитов и отпечатков.
+
+    За обратным прокси (nginx на этой же машине) — первый адрес из
+    X-Forwarded-For: без него ВСЕ пользователи сайта делили бы один бакет
+    «127.0.0.1», и лимит 300/мин выдавался бы всему сайту разом. Прямому
+    клиенту заголовок доверия не даёт — см. _peer_is_trusted_proxy.
+    """
+    first = trusted_forwarded(handler, "X-Forwarded-For")
+    if first:
+        try:
+            # Валидируем формат: в бакет идёт только настоящий IP-адрес,
+            # мусор вроде "unknown" или чужой строки не должен ехать в ключ.
+            return str(ipaddress.ip_address(first.split("%", 1)[0]))[:64]
+        except ValueError:
+            return socket_ip(handler)
+    return socket_ip(handler)
+
+
+# Старое имя живёт для существующих вызовов (support_check_rate, отпечатки
+# устройства и anti-лава ИИ). Это ИМЯ, а не отдельная реализация: иначе старая
+# функция, определённая ниже, перекрыла бы алиас и вернула доверие XFF
+# кому угодно.
+support_client_ip = client_ip
 
 
 def support_ident_hash(secret: str, ip: str) -> str:
@@ -7970,7 +8045,7 @@ class Handler(BaseHTTPRequestHandler):
     # never sees the password.
     # ------------------------------------------------------------------
     def handle_auth_register(self, conn: sqlite3.Connection) -> None:
-        ip = self.client_address[0] if self.client_address else "?"
+        ip = client_ip(self)
         if not auth_login_allowed(ip):
             self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
             return
@@ -8034,7 +8109,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)}, token=new_token)
 
     def handle_auth_login(self, conn: sqlite3.Connection) -> None:
-        ip = self.client_address[0] if self.client_address else "?"
+        ip = client_ip(self)
         if not auth_login_allowed(ip):
             self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
             return
@@ -8052,7 +8127,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Введите email и пароль"}, 400)
             return
         row = conn.execute("SELECT id, password_hash FROM users WHERE email=?", (email,)).fetchone()
-        if not row or not verify_password(password, row["password_hash"]):
+        # Считаем PBKDF2 ВСЕГДА: для неизвестного email и для профиля без
+        # пароля подставляем хэш-равнялку. Иначе «нет такого адреса» отвечал
+        # мгновенно, а «неверный пароль» — после 210k итераций, и по задержке
+        # адреса перебирались, хотя текст ошибки у обоих был одинаковый.
+        stored_hash = (row["password_hash"] if row and row["password_hash"]
+                       else _TIMING_EQUALIZER_HASH)
+        if not verify_password(password, stored_hash) or not row or not row["password_hash"]:
             # Одинаковый текст для несуществующего email и неверного пароля:
             # не подсвечиваем, какие адреса зарегистрированы.
             auth_login_failed(ip)
@@ -8179,7 +8260,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "current": False})
 
     def handle_admin_login(self, conn: sqlite3.Connection) -> None:
-        ip = self.client_address[0] if self.client_address else "?"
+        ip = client_ip(self)
         if not admin_login_allowed(ip):
             self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
             return
@@ -8234,6 +8315,29 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (TypeError, ValueError):
             return False
+
+    def guard_csrf(self, path: str) -> bool:
+        """Центральный CSRF-гейт для всех пишущих /api/ запросов.
+
+        Раньше та же проверка стояла только на трёх точках входа
+        (/api/profile/claim, /api/support/messages, /api/ai/*), а остальные
+        ~20 изменяющих состояние эндпоинтов — PATCH /api/settings,
+        DELETE /api/state, POST /api/auth/*, /api/admin/*, /api/agent/* и
+        прочие — держались ОДНОГО SameSite=Lax. Это единственная оборона,
+        и она живёт в браузере, а не на сервере: любой клиент, который её
+        не уважает, получил бы полный доступ к состоянию жертвы.
+
+        Теперь проверка одна и стоит у входа в каждый do_*: Sec-Fetch-Site
+        и Origin обязаны совпасть с нашим происхождением. Клиенты без
+        Origin (curl, тесты, мобильное приложение) пропускаются — у них нет
+        автоматической отправки кук чужой страницей, то есть вектора нет.
+        """
+        if not path.startswith("/api/"):
+            return True
+        if self.support_request_is_same_origin():
+            return True
+        self.send_json({"error": "Запрос отклонён"}, 403)
+        return False
 
     def support_form_cookie_attrs(self, value: str) -> str:
         # Cookie читается фронтом для double-submit, поэтому без HttpOnly.
@@ -8395,6 +8499,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.guard_csrf(path):
+            return
         if path == "/api/support/messages":
             conn = connect()
             try:
@@ -8432,6 +8538,12 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout"):
+            # Общий per-IP бакет: без него на /api/auth/* не было НИКАКОГО
+            # ограничения, а auth_login_allowed считает только неудачи и
+            # очищается на успехе. Скрипт без кук, меняя email, получал
+            # неограниченное число 200-ответов, а register успевал завести
+            # строку users ДО проверки дубла — то есть аккаунты-переростки.
+            if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/auth/register": self.handle_auth_register(conn)
@@ -9421,10 +9533,19 @@ class Handler(BaseHTTPRequestHandler):
         # пустой Host не затрагиваются. Location протокол-независимый (//...),
         # чтобы не ломать схему за обратным прокси: http->https уже делает
         # внешний фронтенд.
-        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").split(",")[0].strip().lower()
-        bare = host.split(":")[0]
-        if bare.startswith("www.") and "." in bare[4:]:
-            apex = bare[4:] + (":" + host.rsplit(":", 1)[1] if ":" in host else "")
+        # X-Forwarded-Host — через тот же гейт доверия, что и остальные
+        # X-Forwarded-*: напрямую (мимо nginx) этот заголовок присылает клиент,
+        # и без проверки "Host: www.чужой.дом" давал 301 на чужой домен —
+        # отражённый open redirect с настоящего домена.
+        host = (trusted_forwarded(self, "X-Forwarded-Host")
+                or self.headers.get("Host") or "").split(",")[0].strip().lower()
+        bare, _, port = host.partition(":")
+        # Хост обязан быть нормальным DNS-именем, а порт — числом: иначе
+        # «www.» + мусор попадал в Location как есть (до CRLF-фильтра это ещё
+        # и разрыв заголовка). Валидируем то, что реально попадёт в ответ.
+        if (bare.startswith("www.") and "." in bare[4:]
+                and _is_plain_host(bare[4:]) and (not port or port.isdigit())):
+            apex = bare[4:] + (":" + port if port else "")
             self.send_response(301)
             self.send_header("Location", "//" + apex + self.path)
             self.send_security_headers()
@@ -9534,7 +9655,7 @@ class Handler(BaseHTTPRequestHandler):
                 # а спам отсекается честным 429 (страница покажет уже
                 # загруженные данные, а не ошибку).
                 if path == "/api/status":
-                    ip = self.client_address[0] if self.client_address else "?"
+                    ip = client_ip(self)
                     if not status_rate_ok(ip):
                         body = json.dumps({"error": "Слишком много запросов. Попробуй через несколько секунд.",
                                            "retryAfter": 10}, ensure_ascii=False).encode("utf-8")
@@ -9798,7 +9919,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers(); self.wfile.write(body); return
         else:
-            file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
+            # NUL в пути не доходит до Path.resolve(): pathlib бросает
+            # ValueError("embedded null byte"), а он не ловится ни одним
+            # try ниже — запрос падал трейсбеком в stderr без ответа.
+            # Дешёвый 404 честнее: статика вне /api/ лимитом не покрыта,
+            # то есть это был ещё и усилитель мусора в логах.
+            if "\x00" in path:
+                self.serve_not_found_page(); return
+            try:
+                file_path = (ROOT / path.lstrip("/")).resolve() if path != "/" else ROOT / "index.html"
+            except (OSError, ValueError):
+                self.serve_not_found_page(); return
         # Static hosting must never leak the server tree: the SQLite file holds
         # every live session token, .git exposes history/remotes, and server/
         # contains the backend itself. Only the public web surface is served.
@@ -9818,11 +9949,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if file_path.stat().st_size > STATIC_MAX_BYTES:
                 self.serve_not_found_page(); return
-        except OSError:
+        except (OSError, ValueError):
             self.serve_not_found_page(); return
         if not file_path.is_file(): self.serve_not_found_page(); return
         content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
-        data = file_path.read_bytes()
+        try:
+            data = file_path.read_bytes()
+        except (OSError, ValueError):
+            # Файл мог исчезнуть или оказаться нечитаемым между stat и read —
+            # это 404, а не трейсбек на весь ответ.
+            self.serve_not_found_page(); return
         # ETag по хешу содержимого: повторные заходы отдают 304 без тела.
         # Раньше стоял безусловный no-cache без валидатора — каждый reload
         # заново качал ~1.5 МБ JS (jsxgraph 947 КБ + katex 269 КБ + app 141 КБ).
@@ -9863,6 +9999,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if not self.guard_csrf(path):
+            return
         # Неизвестный PATCH — тихий 404 независимо от того, кто его прислал.
         # Проверка пути идёт ДО гостевого отказа: «эндпоинта нет» и «профиля
         # нет» — разные ответы, и подменять один другим нельзя.
@@ -9931,6 +10069,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if not self.guard_csrf(path):
+            return
         if path.startswith("/api/admin/support-messages"):
             # Пишущий метод у inbox один — POST .../read. Явный 405 вместо
             # молчания (do_PUT иначе не отвечает на неизвестные пути).
@@ -9985,6 +10125,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if not self.guard_csrf(path):
+            return
         if path.startswith("/api/admin"):
             # No DELETE admin endpoints exist; require the session anyway so
             # probing returns 401, not a misleading 404/405 difference.

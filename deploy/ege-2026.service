@@ -18,7 +18,11 @@ RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=15
 
-Environment=EGE_HOST=0.0.0.0
+# Слушаем ТОЛЬКО loopback. Наружу торчит nginx (80/443) — и только он.
+# На 0.0.0.0 сокет приложения доставался из интернета напрямую, мимо TLS,
+# HSTS и лимитов nginx, а вместе с ним — заголовки X-Forwarded-*, которыми
+# клиент сам выбирал себе IP-бакет (обход всех rate-limit'ов).
+Environment=EGE_HOST=127.0.0.1
 Environment=EGE_PORT=2026
 Environment=EGE_QUIET=1
 Environment=EGE_SUPERVISED=1
@@ -40,6 +44,12 @@ LimitNOFILE=4096
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=yes
+
+# Всё, что приложение создаёт (БД, бэкапы, -wal/-shm), создаётся с правами
+# только для владельца. Раньше бэкапы и SQLite лежали 0644 прямо в корне
+# сайта: любой локальный процесс и всё, что когда-нибудь отдаст этот каталог,
+# получали сессии всех учеников и хеши паролей из файла.
+UMask=0077
 
 StandardOutput=append:/var/log/ege-2026.log
 StandardError=append:/var/log/ege-2026.log
