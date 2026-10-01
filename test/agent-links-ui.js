@@ -90,9 +90,12 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
 
   const out = await p.evaluate(() => {
     const text = [
-      "Первоисточник — [сайт ФИПИ](https://fipi.ru).",
+      "Первоисточник — [ФИПИ](https://fipi.ru).",
+      "Подпись со служебным словом: [открыть материалы ФИПИ](https://fipi.ru/ege).",
+      "Подпись с хвостом: [разбор темы — подробнее тут](https://ege.example/razbor).",
+      "Название со словом внутри: [оценка сочинения ФИПИ](https://fipi.ru/criteria).",
       "Голый адрес тоже ссылка: https://obrazovaka.sdamgia.ru/problem?id=1234",
-      "Внутренняя: [мой профиль](/dashboard#/profile).",
+      "Внутренняя: [МОЙ ПРОФИЛЬ](/dashboard#/profile).",
       "Опасная: [клик](javascript:alert(1))",
       "Курсив *вот так* и **жирный** работают.",
     ].join("\n\n");
@@ -130,10 +133,14 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
     };
   });
 
-  const md = out.links[0] || {};
-  const bare = out.links[1] || {};
-  const internal = out.links[2] || {};
-  const bad = out.links[3] || {};
+  const byHref = (h) => out.links.find((a) => a.href === h) || {};
+  const md = byHref("https://fipi.ru");
+  const noisePrefix = byHref("https://fipi.ru/ege");
+  const noiseSuffix = byHref("https://ege.example/razbor");
+  const bare = byHref("https://obrazovaka.sdamgia.ru/problem?id=1234");
+  const internal = byHref("/dashboard#/profile");
+  const inner = byHref("https://fipi.ru/criteria");
+  const bad = out.links.find((a) => !a.href && a.text) || {};
 
   check("markdown-ссылка стала плашкой фирменного стиля",
     md.cls === "agent__link" && out.style.display === "inline-block"
@@ -154,7 +161,18 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
     && /agent__link--int/.test(internal.cls || ""), JSON.stringify(internal));
   check("опасная схема вырезана, но текст остался",
     !bad.href && bad.text === "клик", JSON.stringify(bad));
-  check("подпись кнопки — ЗАГЛАВНЫМИ",
+  check("в подписи нет служебных слов «сайт/перейти» — только название",
+    out.links.every((a) => !/\b(сайт|страница|перейти|открыть|ссылка)\b/i.test(a.text || "")),
+    JSON.stringify(out.links.map((a) => a.text)));
+  check("служебное слово В НАЧАЛЕ подписи убрано — осталось название",
+    String(noisePrefix.text).toUpperCase() === "МАТЕРИАЛЫ ФИПИ" && noisePrefix.href === "https://fipi.ru/ege",
+    JSON.stringify(noisePrefix));
+  check("служебные слова В КОНЦЕ подписи убраны",
+    String(noiseSuffix.text).toUpperCase() === "РАЗБОР ТЕМЫ", JSON.stringify(noiseSuffix));
+  check("слово ВНУТРИ названия не вырезано (это часть названия, а не шум)",
+    String(inner.text).toUpperCase() === "ОЦЕНКА СОЧИНЕНИЯ ФИПИ",
+    `подпись: ${inner.text}`);
+  check("в подписи нет служебных слов «сайт/перейти» — только название",
     md.shown === "uppercase", md.shown);
   check("сырой длинный адрес НЕ капиталится (иначе нечитаем)",
     bare.shown === "none" && /agent__link--raw/.test(bare.cls || ""),
