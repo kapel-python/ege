@@ -7108,8 +7108,10 @@ function screenLogin(root) {
     <div class="auth-note">Гостевой прогресс на этом устройстве не переносится в существующий аккаунт.
       Чтобы сохранить его, <a href="#/register" onclick="go('register');return false">зарегистрируйтесь</a>.</div>
     <div class="auth-switch">Нет аккаунта? <a href="#/register" onclick="go('register');return false">Зарегистрироваться</a></div>`);
-  const first = root.querySelector("input[name=email]");
-  if (first) first.focus();
+  // Фокус намеренно НЕ ставим: на телефоне он поднимает клавиатуру сразу
+  // при открытии экрана, закрывает половину формы и выглядит как «сайт
+  // навалился». Человек и так сразу смотрит на поле и кликает его сам;
+  // автофокус остаётся только там, где поле — единственное действие.
 }
 
 function screenRegister(root) {
@@ -7139,8 +7141,7 @@ function screenRegister(root) {
     </form>
     ${googleSignInHTML("Зарегистрироваться через Google")}
     <div class="auth-switch">Уже есть аккаунт? <a href="#/login" onclick="go('login');return false">Войти</a></div>`);
-  const first = root.querySelector((Store.state && Store.state.name) ? "input[name=email]" : "input[name=name]");
-  if (first) first.focus();
+  // См. выше: без автофокуса, чтобы клавиатура не поднималась сама.
 }
 
 function screenLoginSubject(root) {

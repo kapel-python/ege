@@ -356,10 +356,12 @@ def main():
             check("у жертвы даже сессии не появилось", count_users(server) == 0)
 
             # ---------------------------------------------------------------
-            section("3b. Привязка из живого профиля: подсказка есть, интерфейс виден")
-            # Человек уже вошёл (почта аккаунта известна) — значит это запрос
-            # ПРИВЯЗАТЬ Google. Подсказываем его адрес, но выбор аккаунта Google
-            # оставляем человеку: prompt=none запрещал бы любой интерфейс.
+            section("3b. Привязка выглядит ТОЧНО как вход — те же параметры")
+            # Живой комментарий: на экране входа Google показывал все аккаунты,
+            # а на «Привязать Google» — ровно один (тот, что был подсказан).
+            # Причина — login_hint: он ограничивает выбор. Значит внешний вид
+            # привязки и входа обязан совпадать побайтно, иначе кнопка выглядит
+            # сломанной.
             linker, linker_jar = make_device()
             st, _, _ = request(linker, base, "/api/profile/claim", "POST",
                                {"subject": "profile_math", "onboarded": True, "name": "Привязывающий"})
@@ -367,12 +369,22 @@ def main():
                                  {"name": "Привязывающий", "email": "linker@example.com",
                                   "password": "super-pass-1"})
             check("аккаунт для привязки готов", st == 200, (st, reg))
-            st, hd, _ = request(linker, base, "/api/auth/google")
-            params2 = urllib.parse.parse_qs(urllib.parse.urlparse(location_of(hd)).query)
-            check("свой адрес подсказан Google", params2.get("login_hint", [""])[0] == "linker@example.com",
-                  params2.get("login_hint"))
-            check("но выбор аккаунта не отобран у человека",
-                  params2.get("prompt", [""])[0] == "select_account", params2.get("prompt"))
+
+            guest_g, guest_jar = make_device()
+            st, hd_guest, _ = request(guest_g, base, "/api/auth/google")
+            st, hd_link, _ = request(linker, base, "/api/auth/google")
+            guest_params = urllib.parse.parse_qs(urllib.parse.urlparse(location_of(hd_guest)).query)
+            link_params = urllib.parse.parse_qs(urllib.parse.urlparse(location_of(hd_link)).query)
+
+            check("привязка НЕ ограничивает выбор аккаунта (никакого login_hint)",
+                  "login_hint" not in link_params, link_params.get("login_hint"))
+            check("привязка показывает выбор аккаунта, как вход",
+                  link_params.get("prompt", [""])[0] == "select_account", link_params.get("prompt"))
+            # Все параметры, кроме подписи state, обязаны совпасть с входом.
+            comparable = {k: v for k, v in link_params.items() if k != "state"}
+            check("набор параметров привязки == набор параметров входа",
+                  comparable == {k: v for k, v in guest_params.items() if k != "state"},
+                  (comparable, {k: v for k, v in guest_params.items() if k != "state"}))
             check("привязка не создана до обратного прихода от Google",
                   len(rows(server, "SELECT 1 FROM auth_identities WHERE email='linker@example.com'")) == 0)
 

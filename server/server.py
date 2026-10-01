@@ -9105,20 +9105,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Слишком много попыток. Повторите через несколько минут.",
                             "retryAfter": 60}, 429)
             return
-        # Привязка к текущей сессии: если человек уже вошёл, это запрос
-        # ПРИВЯЗАТЬ Google к его аккаунту, а не новый вход. Иначе тот же
-        # клик при живом аккаунте молча переключил бы его на чужой.
-        current_id = existing_user_for(conn, self)
+        # Живая сессия здесь НЕ меняет внешний вид: выбор аккаунта у Google
+        # выглядит одинаково для входа и для привязки. Никакого login_hint —
+        # с ним Google показывал ровно один аккаунт, и «Привязать Google»
+        # выглядел сломанным. Разница ровно одна, и она на обратной стороне:
+        # адрес привязки проверяется в finish_google_login.
+        existing_user_for(conn, self)
         nonce = _OAUTH.new_nonce()
         state = _OAUTH.sign_state(oauth_state_secret(conn), nonce)
         cfg = dict(_OAUTH.settings())
         cfg["redirectUri"] = oauth_redirect_uri(self)
-        hint = None
-        if current_id is not None:
-            row = conn.execute("SELECT email FROM users WHERE id=?", (current_id,)).fetchone()
-            hint = row["email"] if row and row["email"] else None
         try:
-            target = _OAUTH.authorize_url(state=state, login_hint=hint, cfg=cfg)
+            target = _OAUTH.authorize_url(state=state, cfg=cfg)
         except _OAUTH.OAuthError:
             self.send_json({"error": "Вход через Google временно недоступен",
                             "code": "OAUTH_UNAVAILABLE"}, 503)
