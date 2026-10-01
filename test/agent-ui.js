@@ -116,6 +116,47 @@ check("AGENT_BUSY не тупик: повтор сам, по времени от
   spaCode.includes("retryWhenFree") && /retryWhenFree\(text, Math\.max/.test(spaCode)
   && spaCode.includes("повторю через"));
 check("повтор не дублирует уже посчитанный ответ", spaCode.includes("turnAnswered"));
+/* --- два живых бага: «повторю через 60 с» при исправлении сообщения и
+   пустота вместо первого сообщения (проверено на живом экране, регресс —
+   test/agent-send-race-ui.js; здесь — контракты по коду, чтобы правки нельзя
+   было тихо откатить):
+   1) повтор при занятости терял replaceLast: исправленный вопрос после
+      ожидания уходил НОВЫМ сообщением рядом со старой парой (дубль вместо
+      замены); retryAfter из AGENT_BUSY — окно жизни слота (до 95 с), а не
+      остаток хода, поэтому клиент опрашивает флаг busy треда и повторяет
+      сразу, как сервер свободен;
+   2) запоздавший GET треда сносил оптимистичный пузырёк/скелетон/ошибку
+      (первое сообщение в новом чате — всегда: GET летит раньше send, а
+      возвращается позже); тихий повтор, переживший новый вопрос, упирался
+      в чужой слот и сам вызывал модалку; клик по своему чату среди хода
+      сносил ленту, а ответ отбрасывался сторожем. */
+check("повтор при занятости сохраняет замену (replaceLast не теряется)",
+  /retryWhenFree\(text, Math\.max[\s\S]{0,160}?replaceLast: turn\.replaceLast/.test(spaCode)
+  && /send\(text, replaceLast \? \{ force: true, replaceLast: true \}/.test(spaCode));
+check("повтор при занятости опрашивает флаг busy, а не ждёт весь TTL",
+  spaCode.includes("res.data.busy === false") && spaCode.includes("pollBusy"));
+check("сервер отдаёт флаг занятости треда",
+  read("server/server.py").includes("_agent_busy_locked")
+  && read("server/server.py").includes('"busy": _agent_busy_locked(tid)'));
+check("запоздавший GET не затирает свежую ленту (поколение feedGen)",
+  spaCode.includes("feedTouch()") && /loadThreadMessages\(force\)/.test(spaCode)
+  && /if \(!force && fg !== \(S\.feedGen \|\| 0\)\)/.test(spaCode));
+check("восстановление после неудачной замены — принудительное",
+  spaCode.includes("loadThreadMessages(true)"));
+check("клик по своему чату среди хода — пустая операция, а не перезагрузка",
+  /if \(!leaving && S\.turn && !S\.turn\.dead/.test(spaCode));
+check("протухший тихий повтор не летит (поколение отправок sendGen)",
+  spaCode.includes("++S.sendGen") && spaCode.includes("sg !== (S.sendGen || 0)"));
+check("подхват хода не дублирует пузырёк (дорисовка только снесённого)",
+  spaCode.includes("if (!bubble) bubble = userBubble(t.text)")
+  && spaCode.includes('skel = loaders.length ? loaders[loaders.length - 1].closest(".agent__ai") : null'));
+check("композер при блокировке объясняет, а не глотает молча",
+  spaCode.includes('say("Дождись текущего ответа")'));
+check("мёртвый ход не держит композер (syncBusy на путях повтора)",
+  /removeChild\(bubble\);\s*syncBusy\(\);\s*retryWhenFree/.test(spaCode)
+  && /openLimitModal\(S\.quota[^;]*;\s*syncBusy\(\);/.test(spaCode)
+  && /syncBusy\(\);\s*retrySilently\(text, \{ retries/.test(spaCode)
+  && spaCode.includes("sendGen: 0"));
 check("окно подхвата хода шире потолка хода на сервере",
   /REATTACH_MS = 300000/.test(spaCode) && !/startedAt > 120000/.test(spaCode));
 check("после обрыва дожидаемся ответа, а не обновляемся вслепую",
@@ -189,7 +230,7 @@ check("перегенерировать и изменить идут через 
   && /payload\.replaceLast = true/.test(spaCode)
   && /if \(replaceLast\)/.test(spaCode));
 check("заменяющий ход на неуспехе перечитывает ленту (turn.replaceLast)",
-  /if \(turn\.replaceLast\) loadThreadMessages\(\)/.test(spaCode));
+  /if \(turn\.replaceLast\) loadThreadMessages\((true)?\)/.test(spaCode));
 /* Черновик ученика: одна строка localStorage на аккаунт, переживает
    перезагрузку и смену чата; чистится при отправке. */
 check("черновик ученика живёт в localStorage по аккаунту",

@@ -7,7 +7,7 @@
   "use strict";
 
   var S = {
-    threads: [], currentId: null, busy: false, mountGen: 0, navGen: 0, animGen: 0,
+    threads: [], currentId: null, busy: false, mountGen: 0, navGen: 0, animGen: 0, sendGen: 0,
     quota: { limit: 10, remaining: 10, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
@@ -958,8 +958,14 @@
       else return;
     } else id = null;
     var prev = S.currentId;
-    S.navGen++;
     var leaving = Number(prev) !== Number(id);
+    // Клик по уже открытому чату, пока в нём летит ход, — ничего не делает.
+    // Раньше здесь безусловно росли navGen и ехала перезагрузка сообщений:
+    // она сносила оптимистичный пузырёк и скелетон, а прилетевший ответ хода
+    // отбрасывался сторожем поколений — лента пустела молча, и при сбое
+    // модели перезагрузка показывала вообще ничего (вопрос нигде не записан).
+    if (!leaving && S.turn && !S.turn.dead && Number(S.turn.threadId) === Number(id)) return;
+    S.navGen++;
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
     if (leaving && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
     // Недопечатанный ответ доигрываем разом.
@@ -1252,8 +1258,18 @@
     ui.empty.style.display = visible ? "" : "none";
     if (visible && ui.live) ui.live.textContent = "";
   }
+  // Поколение ленты: каждая ЛОКАЛЬНАЯ отрисовка (пузырёк, скелетон, карточка)
+  // двигает счётчик. Ответ на loadThreadMessages, пришедший ПОСЛЕ того, как
+  // человек уже что-то нарисовал (отправил вопрос, получил ошибку), ленту
+  // перерисовывать НЕ должен: серверный снимок старше и не знает про ход,
+  // который ещё не записан (вопрос пишется в базу только после модели).
+  // Без этого первое сообщение в новом чате регулярно уходило в пустоту:
+  // createThread → selectThread → GET треда летит раньше, чем send рисует
+  // пузырёк, а возвращается позже — и сносит его вместе со скелетоном.
+  function feedTouch() { S.feedGen = (S.feedGen || 0) + 1; }
   function userBubble(text) {
     var d = el("div", "agent__msg-user enter", text);
+    feedTouch();
     if (ui.live) ui.live.appendChild(d);
     showEmpty(false);
     if (!painting) scrollDown(true, true);
@@ -1905,6 +1921,7 @@
     var built = renderSteps(card, steps);
     var paras = finalText ? mdBlocks(finalText) : [];
     if (g !== S.mountGen || !ui.live) return card;
+    feedTouch();
     ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
@@ -2008,6 +2025,7 @@
       acts.appendChild(btn);
       card.appendChild(acts);
     }
+    feedTouch();
     if (ui.live) ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
@@ -2024,6 +2042,7 @@
     li.appendChild(body); ol.appendChild(li);
     inner.appendChild(ol); trace.appendChild(inner);
     card.appendChild(trace);
+    feedTouch();
     if (ui.live) ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
@@ -2033,6 +2052,7 @@
   // в одну функцию, иначе кэш и сеть рисовали бы по-разному.
   function paintMessages(msgs) {
     painting = true;
+    feedTouch();
     clearFeed();
     if (!msgs || !msgs.length) { painting = false; showEmpty(true); return; }
     var pending = [];
@@ -2076,9 +2096,10 @@
     // шрифт): один smooth-скролл на такой высоте не доезжал.
     settleBottom();
   }
-  function loadThreadMessages() {
+  function loadThreadMessages(force) {
     var g = S.mountGen;
     var wantId = S.currentId;
+    var fg = S.feedGen || 0;
     if (wantId == null) { clearFeed(); showEmpty(true); return; }
     // Кэш рисуется мгновенно, сеть не ждём; без кэша — экранная анимация
     // внутри ленты (не пустой блок: про emptiness ещё не знаем).
@@ -2090,6 +2111,13 @@
       if (res.status === 200 && res.data && Array.isArray(res.data.messages)) {
         var msgs = res.data.messages;
         cacheMessages(wantId, msgs);
+        // Лента новее запроса (человек отправил вопрос или получил ошибку,
+        // пока GET летел) — серверный снимок её затрёт вместе с пузырём
+        // и скелетоном: пропускаем перерисовку, но ход подхватываем.
+        // Раньше здесь был безусловный paint — первое сообщение в новом чате
+        // регулярно превращалось в пустоту: пузырёк и «Думаю…» сносились,
+        // а при сбое модели перезагрузка показывала вообще ничего.
+        if (!force && fg !== (S.feedGen || 0)) { reattachTurn(); return; }
         // Ничего не изменилось — не перерисовываем: у человека останутся
         // раскрытые «Подробнее» и позиция ленты.
         if (!sameMessages(cached, msgs)) paintMessages(msgs);
@@ -2167,7 +2195,10 @@
   function beginPrinting() { S.printing = true; syncBusy(); }
   function send(text, opts) {
     text = (text || "").trim();
-    if (!text || S.busy) return;
+    if (!text) return;
+    // Композер занят (летит ход или допечатывается ответ): молча глотать
+    // вопрос нельзя — человек жмёт Enter и видит, что «ничего не происходит».
+    if (S.busy) { if (!(opts && opts.quiet)) say("Дождись текущего ответа"); return; }
     var force = !!(opts && opts.force);
     var quiet = !!(opts && opts.quiet);      // невидимый повтор сервера
     // Отправка из «Изменить и отправить» всегда заменяет последний вопрос.
@@ -2182,6 +2213,11 @@
       return;
     }
     var g = ++S.navGen;
+    // Поколение ОТПРАВОК (а не навигации): тихий повтор протухает, только
+    // если человек отправил что-то новее. Служебные скачки navGen (подхват
+    // хода под новую ленту в reattachTurn) повтор не убивают — иначе
+    // первое сообщение в новом чате теряло бы свои повторы и висело молча.
+    var sg = ++S.sendGen;
     var mg = S.mountGen;
     showEmpty(false);
     // Заменяющий ход: старая пара «вопрос+ответ» уходит из ленты СРАЗУ —
@@ -2236,10 +2272,10 @@
      перерисовывается. */
   var TURN_CLIENT_RETRIES = 2, TURN_RETRY_DELAY_MS = 1200;
   function retrySilently(text, opts) {
-    var mg = S.mountGen;
+    var mg = S.mountGen, sg = S.sendGen || 0;
     var tryNo = ((opts && opts.retries) || 0) + 1;
     later(TURN_RETRY_DELAY_MS, function () {
-      if (mg !== S.mountGen) return;
+      if (mg !== S.mountGen || sg !== (S.sendGen || 0)) return;
       // Повтор не должен обгонять живой ход: пока он идёт, вопрос уже
       // обрабатывается, и второй запрос сервер отвергнет как занятый.
       if (S.busy && S.turn && !S.turn.dead) { retrySilently(text, { retries: tryNo - 1 }); return; }
@@ -2262,8 +2298,22 @@
     var g = ++S.navGen, mg = S.mountGen;
     syncBusy();
     showEmpty(false);
-    var bubble = userBubble(t.text);
-    var skel = skeletonCard();
+    // Пузырёк и скелетон дорисовываем ТОЛЬКО если их снесли (перерисовка
+    // ленты поверх хода). Если они на месте — второй комплект дал бы дубль
+    // вопроса, а из-за дубля меню переставало узнавать «последний вопрос»
+    // и прятало «Изменить и отправить». Обработчики перецепляем всегда:
+    // старые токены уже не совпадают.
+    var bubble = null, skel = null;
+    if (ui.live) {
+      var kids = ui.live.querySelectorAll(".agent__msg-user");
+      for (var i = 0; i < kids.length; i++) {
+        if ((kids[i].textContent || "").trim() === String(t.text || "").trim()) { bubble = kids[i]; break; }
+      }
+      if (!bubble) bubble = userBubble(t.text);
+      var loaders = ui.live.querySelectorAll(".agent__loader");
+      skel = loaders.length ? loaders[loaders.length - 1].closest(".agent__ai") : null;
+      if (!skel) skel = skeletonCard();
+    }
     t.promise.then(function (res) { settleTurn(t, g, mg, skel, bubble, t.text, res); })
               .catch(function (e) { failTurn(t, g, mg, skel, t.text, e); });
   }
@@ -2322,7 +2372,9 @@
     }
     if (res.status === 400 && res.data && res.data.code === "AGENT_BUSY") {
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
-      retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30));
+      syncBusy();   // ход мёртв, ждёт модалка — её fire() сам проверит S.busy
+      retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30),
+                    { replaceLast: turn.replaceLast });
       return;
     }
     if (res.status === 400 && res.data && res.data.code === "THREAD_BAD_REF") {
@@ -2342,10 +2394,12 @@
     if (res.status === 429 && res.data && res.data.code === "AI_LIMIT") {
       openLimitModal({ limit: res.data.limit, remaining: res.data.remaining, resetInSec: res.data.resetInSec }, null);
       if (res.data.limit) setQuota(res.data);
+      syncBusy();   // дальше говорит модалка, а не блокировка
       return;
     }
     if (res.status === 429) {
       openLimitModal(S.quota, Number(res.data.retryAfter) || 60);
+      syncBusy();
       return;
     }
     if (handleAuthError(res)) return;
@@ -2356,12 +2410,13 @@
     // сервера, повтор их не изменит.
     var retryable = res.status === 500 || res.status === 502 || res.status === 503;
     if (retryable && (turn.retries || 0) < TURN_CLIENT_RETRIES && S.currentId != null) {
+      syncBusy();   // ход мёртв; без этого тихий повтор упирался в S.busy и умирал
       retrySilently(text, { retries: turn.retries || 0, replaceLast: turn.replaceLast });
       return;
     }
     // Заменяющий ход не записался: сервер старую пару НЕ сносил — вернём
     // ленту из базы, иначе вопрос и ответ пропадут с экрана.
-    if (turn.replaceLast) loadThreadMessages();
+    if (turn.replaceLast) loadThreadMessages(true);
     errorCard((res.data && res.data.error) || "Наставник не смог ответить.", "Попробовать снова",
       function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
     syncBusy();          // ни запроса, ни печати — композер разблокирован
@@ -2372,8 +2427,9 @@
      время и повторяем сами; повтор по тому же тексту сервер отдаёт из кэша
      (без жетона), а если ход всё же не успел — это уже новый ход, как просил
      человек. Кнопка «сейчас» оставлена для нетерпеливых. */
-  function retryWhenFree(text, wait) {
+  function retryWhenFree(text, wait, opts) {
     var g = S.navGen, mg = S.mountGen;
+    var replaceLast = !!(opts && opts.replaceLast);
     var left = Math.max(1, Math.min(180, wait || 1));
     var card = errorCard("Сервер ещё считает прошлый ответ — повторю через " + left + " с.");
     var label = card.querySelector(".agent__answer");
@@ -2392,10 +2448,26 @@
         // Ответ сервера уже есть — показываем его вместо нового вопроса.
         if (answered) { if (card.parentNode) card.parentNode.removeChild(card); loadThreadMessages(); return; }
         if (card.parentNode) card.parentNode.removeChild(card);
-        send(text, { force: true });
+        // Замена обязана остаться заменой: без replaceLast исправленный вопрос
+        // уходил бы НОВЫМ сообщением рядом со старой парой (дубль вместо замены).
+        send(text, replaceLast ? { force: true, replaceLast: true } : { force: true });
       });
     }
     btn.addEventListener("click", fire);
+    var BUSY_POLL_MS = 3000;
+    function pollBusy() {
+      if (started || g !== S.navGen || mg !== S.mountGen) return;
+      if (S.currentId == null) return;
+      api("GET", "/api/agent/threads/" + Number(S.currentId)).then(function (res) {
+        if (started || g !== S.navGen || mg !== S.mountGen) return;
+        // Сервер уже свободен — не ждём конец отсчёта, повторяем сразу.
+        if (res.status === 200 && res.data && res.data.busy === false) { fire(); return; }
+        later(BUSY_POLL_MS, pollBusy);
+      }).catch(function () {
+        if (!started && g === S.navGen && mg === S.mountGen) later(BUSY_POLL_MS, pollBusy);
+      });
+    }
+    later(BUSY_POLL_MS, pollBusy);
     later(1000, function tick() {
       if (g !== S.navGen || mg !== S.mountGen) return;
       left -= 1;
@@ -2438,7 +2510,7 @@
     }
     // Заменяющий ход не дошёл: старую пару клиент уже снял с ленты, а сервер
     // её НЕ сносил (снос — в транзакции успеха). Возвращаем ленту из базы.
-    if (turn.replaceLast) loadThreadMessages();
+    if (turn.replaceLast) loadThreadMessages(true);
     errorCard("Нет соединения. Текст цел — повтори, когда появится сеть.", "Попробовать снова",
       function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
   }

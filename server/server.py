@@ -152,6 +152,18 @@ def _agent_busy_release(thread_id: int) -> None:
         _AGENT_BUSY.pop(int(thread_id), None)
 
 
+def _agent_busy_locked(thread_id: int) -> bool:
+    """Держит ли тред слот прямо сейчас (подглядка, без взятия).
+
+    Нужно клиенту, упёршемуся в AGENT_BUSY: retryAfter из ответа — это окно
+    жизни слота (до 95 с), а не реальный остаток хода, и ждать его целиком —
+    значит смотреть на обратный отсчёт, когда сервер уже свободен. По этому
+    флагу клиент опрашивает тред и повторяет сразу, как слот освободился.
+    """
+    with _AGENT_BUSY_LOCK:
+        return _AGENT_BUSY.get(int(thread_id), 0) > time.monotonic()
+
+
 def _agent_busy_touch(thread_id: int) -> None:
     """Продлить слот живого хода (окно жизни, а не потолок длительности)."""
     now = time.monotonic()
@@ -10451,6 +10463,7 @@ class Handler(BaseHTTPRequestHandler):
                                             " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
                     self.send_json({"ok": True,
                                     "thread": _agent_thread_payload(thread),
+                                    "busy": _agent_busy_locked(tid),
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):

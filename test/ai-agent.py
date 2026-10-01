@@ -1027,6 +1027,32 @@ def main():
                   and "find_topics" in agent.READ_TOOLS,
                   str([t["function"]["name"] for t in agent.AGENT_TOOLS]))
 
+            section("project_info: справка о приложении вместо выдумок")
+            # База знаний — один файл agent_knowledge.md рядом с модулем: модель
+            # зовёт инструмент и получает ВЕСЬ текст. Проверяем и содержимое:
+            # ученику положено знать лимиты, но НЕ положено — техническое нутро.
+            names = [t["function"]["name"] for t in agent.AGENT_TOOLS]
+            check("project_info виден модели и отнесён к чтению",
+                  "project_info" in names and "project_info" in agent.READ_TOOLS, str(names))
+            res = agent.execute_read_tool(conn, 1, "profile_math", "project_info", {})
+            text = res.get("text") or ""
+            check("справка отдаётся целиком, с цифрами лимитов",
+                  "5" in text and "10" in text and "150" in text and "22" in text, text[:120])
+            check("справка влезает в потолок контекста целиком (резать нельзя)",
+                  len(__import__("json").dumps(res, ensure_ascii=False)) <= 4000,
+                  str(len(__import__("json").dumps(res, ensure_ascii=False))))
+            banned = [w for w in ("HMAC", "айпи", "ферм", "ai_take", "device_fp", "анти",
+                                  "провайдер", "failover", "таблиц", "SQL", "бюджет")
+                      if w.lower() in text.lower()]
+            check("в справке нет технического нутра (только то, что видит ученик)",
+                  not banned, str(banned))
+            check("fallback ведёт вопросы о лимитах в project_info, а не в историю",
+                  agent.fallback_tool_for("сколько проверок сочинений в день")[0] == "project_info"
+                  and agent.fallback_tool_for("как мне самому сбросить прогресс")[0] == "project_info",
+                  str(agent.fallback_tool_for("сколько проверок сочинений в день")))
+            check("текстовый вызов project_info() тоже исполняется",
+                  (agent.pseudo_call("project_info()") or (None,))[0] == "project_info")
+
             section("модель не имеет права сказать «инструмента нет» (живой случай: чат 54)")
             # «Подбери тему производная» → «Не хватает инструмента для поиска по
             # каталогу темы — у меня нет возможности его вызвать», при том что
