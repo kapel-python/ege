@@ -1710,6 +1710,47 @@ def link_auth_identity(conn: sqlite3.Connection, user_id: int, provider: str,
     )
 
 
+def set_user_email(conn: sqlite3.Connection, user_id: int, email: str) -> str | None:
+    """Перевести аккаунт на адрес, подтверждённый внешним провайдером.
+
+    Возвращает ПРЕЖНЮЮ почту, если она сменилась, иначе None.
+
+    Почему меняем, а не держим старую: адрес, который человек написал руками
+    при регистрации по паролю, мы не подтверждаем НИКАК — принимаем любой
+    свободный. Адрес, который вернул Google с email_verified=true, подтверждён.
+    Привязка Google с другим адресом — это прямое утверждение человека «вот
+    мой настоящий адрес», и оставлять в аккаунте непроверенный было бы
+    ровно тем расхождением, которое человек и заметил: в привязке одна почта,
+    в профиле другая.
+
+    Гонка за адрес честно отказывает: адрес уникален, и если параллельно его
+    занял другой аккаунт, молча откатываемся к прежней почте, а не падаем
+    500 и не оставляем аккаунт без почты.
+    """
+    row = conn.execute("SELECT email FROM users WHERE id=?", (int(user_id),)).fetchone()
+    previous = (row["email"] if row else None) or None
+    if previous == email:
+        return None
+    try:
+        cur = conn.execute("UPDATE users SET email=?, registered_at=COALESCE(registered_at, ?) "
+                           "WHERE id=? AND (email IS ? OR email=?)",
+                           (email, now_iso(), int(user_id), previous, previous))
+    except sqlite3.IntegrityError:
+        # Адрес только что заняли другим аккаунтом: наш остаётся как был.
+        return None
+    if cur.rowcount != 1:
+        return None
+    try:
+        conn.execute("INSERT INTO timeline(user_id, subject, created_at, text, client_id) "
+                     "VALUES (?,?,?,?,?)",
+                     (int(user_id), current_subject_for(conn, user_id), now_iso(),
+                      "Почта аккаунта обновлена при входе через Google", "auth-google"))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    return previous
+
+
 def touch_auth_identity(conn: sqlite3.Connection, provider: str, subject: str) -> None:
     try:
         conn.execute("UPDATE auth_identities SET last_login_at=? WHERE provider=? AND subject=?",
@@ -1744,15 +1785,27 @@ OAUTH_NONCE_COOKIE = "ege_oauth_nonce"
 OAUTH_NONCE_MAX_AGE = 900
 
 
-def oauth_nonce_cookie_attrs(value: str) -> str:
+def oauth_nonce_cookie_attrs(value: str, intent: str | None = None) -> str:
     """Кука с nonce для привязки state к этому браузеру.
 
     HttpOnly и Lax — Lax нужен именно для редиректа обратно от Google (это
     верхнеуровневый GET, Lax такие куки отправляет), а SameSite=Strict здесь
     просто сломал бы вход. Значение не секрет: оно защищено подписью state.
+
+    Хвост «|link» — намерение «привязать к текущему аккаунту». Оно едет в
+    HttpOnly-куке, а не в подписанном state: state Google возвращает как есть,
+    и дописывать туда своё поле нельзя (подпись перестанет совпадать).
     """
     secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" else ""
-    return f"{OAUTH_NONCE_COOKIE}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={OAUTH_NONCE_MAX_AGE}{secure}"
+    payload = f"{value}|link" if intent == "link" else value
+    return f"{OAUTH_NONCE_COOKIE}={payload}; Path=/; SameSite=Lax; HttpOnly; Max-Age={OAUTH_NONCE_MAX_AGE}{secure}"
+
+
+def oauth_nonce_intent(cookie_value_: str | None) -> str:
+    """Намерение из куки nonce: «link» или «login»."""
+    if cookie_value_ and "|" in cookie_value_:
+        return "link" if cookie_value_.rsplit("|", 1)[1] == "link" else "login"
+    return "login"
 
 
 def oauth_nonce_cookie_clear_attrs() -> str:
@@ -9108,9 +9161,20 @@ class Handler(BaseHTTPRequestHandler):
         # Живая сессия здесь НЕ меняет внешний вид: выбор аккаунта у Google
         # выглядит одинаково для входа и для привязки. Никакого login_hint —
         # с ним Google показывал ровно один аккаунт, и «Привязать Google»
-        # выглядел сломанным. Разница ровно одна, и она на обратной стороне:
-        # адрес привязки проверяется в finish_google_login.
-        existing_user_for(conn, self)
+        # выглядел сломанным.
+        #
+        # Разница — в НАМЕРЕНИИ, и её надо различать на сервере, а не угадывать
+        # по наличию сессии. Кнопка «Привязать Google» в профиле означает
+        # «добавь входу Google к МОЕМУ аккаунту»: такой вход не должен ни
+        # переключить человека на чужой аккаунт, ни отвязать его Google молча.
+        # Обычная кнопка входа, наоборот, обязана открыть аккаунт по адресу,
+        # как это делает вход по паролю.
+        from urllib.parse import parse_qs
+        intent = "link" if (parse_qs(urlparse(self.path).query).get("intent", [""])[0] == "link") else "login"
+        current_id = existing_user_for(conn, self)
+        if intent == "link" and current_id is None:
+            # Привязывать нечего: без сессии это обычный вход.
+            intent = "login"
         nonce = _OAUTH.new_nonce()
         state = _OAUTH.sign_state(oauth_state_secret(conn), nonce)
         cfg = dict(_OAUTH.settings())
@@ -9124,7 +9188,8 @@ class Handler(BaseHTTPRequestHandler):
         # Кука nonce уезжает вместе с 302: без неё подпись state ничего не
         # защищает, потому что любой, кто знает наш секрет... не знает его, но
         # состояние из чужого браузера всё равно не подойдёт.
-        self.send_redirect(target, extra_cookies=[oauth_nonce_cookie_attrs(nonce)])
+        self.send_redirect(target, extra_cookies=[oauth_nonce_cookie_attrs(
+            nonce, intent if intent == "link" else None)])
 
     def handle_auth_google_callback(self, conn: sqlite3.Connection) -> None:
         """GET /api/auth/google/callback — обмен кода и вход."""
@@ -9194,6 +9259,11 @@ class Handler(BaseHTTPRequestHandler):
         if touch:
             touch_auth_identity(conn, provider, subject)
         else:
+            # Аккаунт найден по этому адресу и привязки ещё не было — то есть
+            # человек пришёл с адресом, отличным от почты аккаунта (сменил
+            # почту в Google). Переводим аккаунт на подтверждённый адрес,
+            # иначе в привязке и в профиле будут разные почты.
+            set_user_email(conn, user_id, email)
             link_auth_identity(conn, user_id, provider, subject, email)
         new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id,
                                            request_device_info(self),
@@ -9210,6 +9280,7 @@ class Handler(BaseHTTPRequestHandler):
         email = identity["email"]
         clear_nonce = [oauth_nonce_cookie_clear_attrs()]
         current_id = existing_user_for(conn, self)
+        intent = oauth_nonce_intent(cookie_value(self, OAUTH_NONCE_COOKIE))
         linked_id = auth_identity_user(conn, provider, subject)
         if linked_id is not None:
             # Эта же личность уже привязана: обычный повторный вход.
@@ -9218,6 +9289,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         # Личность ещё не привязана, но адрес может быть занят.
         by_email = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if intent == "link" and current_id is not None and by_email is not None \
+                and by_email["id"] != current_id:
+            # Явная привязка к СВОЕМУ аккаунту, а адрес принадлежит другому.
+            # Обычный вход открыл бы чужой аккаунт — здесь это явная ошибка
+            # человека (перепутал аккаунт Google), и молча пересаживать его
+            # нельзя. Отказ с честным текстом, его аккаунт не трогаем.
+            self.send_redirect(oauth_return_url(self, "login", "error=conflict"),
+                               extra_cookies=clear_nonce)
+            return
         if by_email is not None and by_email["id"] != current_id:
             # У аккаунта по этому адресу УЖЕ есть привязка Google — значит,
             # это не наш вход: либо другой Google-аккаунт, либо человек сменил
@@ -9253,12 +9333,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_redirect(oauth_return_url(self, "login", "error=blocked"),
                                extra_cookies=clear_nonce)
             return
-        # Почту ставим только на пустую: у гостя с уже занятым адресом
-        # (зарегистрировался, потом вошёл через Google) чужой адрес не
-        # перетираем молча.
-        conn.execute("UPDATE users SET email=COALESCE(email, ?), "
-                     "registered_at=COALESCE(registered_at, ?), name=COALESCE(NULLIF(name,''), ?) "
-                     "WHERE id=?", (email, now_iso(), identity.get("name") or None, int(target_id)))
+        # Почта аккаунта становится подтверждённой провайдером — и новому
+        # гостю, и тому, кто пришёл с адресом, отличным от его прежнего.
+        set_user_email(conn, target_id, email)
+        conn.execute("UPDATE users SET registered_at=COALESCE(registered_at, ?), "
+                     "name=COALESCE(NULLIF(name,''), ?) WHERE id=?",
+                     (now_iso(), identity.get("name") or None, int(target_id)))
         link_auth_identity(conn, target_id, provider, subject, email)
         stale = minted or cookie_value(self, "ege_session")
         new_token, _ = rotate_user_session(conn, stale, target_id,

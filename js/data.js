@@ -949,8 +949,17 @@ const AuthAPI = {
   googleUrl() {
     return "/api/auth/google";
   },
+  /* intent=link — кнопка «Привязать Google» в профиле: привязать к ТЕКУЩЕМУ
+     аккаунту. Сервер различает это с обычным входом и не пересаживает
+     человека на чужой аккаунт, если адрес в Google принадлежит другому. */
+  googleLinkUrl() {
+    return "/api/auth/google?intent=link";
+  },
   startGoogle() {
     window.location.href = AuthAPI.googleUrl();
+  },
+  startGoogleLink() {
+    window.location.href = AuthAPI.googleLinkUrl();
   },
   unlinkGoogle() {
     return ApiClient.post("/api/auth/google/unlink", {});

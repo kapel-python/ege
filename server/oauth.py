@@ -170,12 +170,19 @@ def verify_state(secret: str, state: str, nonce_cookie: str | None, *,
                     login-CSRF (злоумышленник начинает вход в СВОЁМ браузере и
                     скармливает жертве свой callback — у жертвы нет cookie с
                     его nonce, поэтому подмена не проходит).
+
+    Cookie может нести служебный хвост «|link» (намерение «привязать к
+    текущему аккаунту»): сравнивается ТОЛЬКО nonce до «|». Хвост не участвует
+    в подписи state и не может её подделать — он живёт в HttpOnly-куке и
+    читается отдельно; сравнивать его целиком значило бы ломать вход по
+    причине, не относящейся к безопасности.
     """
     parts = str(state or "").split(".")
     if len(parts) != 4 or parts[0] != STATE_VERSION:
         raise OAuthBadState("malformed state")
     _, nonce, raw_ts, mac = parts
-    if not nonce or not nonce_cookie:
+    cookie_nonce = str(nonce_cookie).split("|", 1)[0] if nonce_cookie else ""
+    if not nonce or not cookie_nonce:
         raise OAuthBadState("state without browser nonce")
     ts = _int(raw_ts)
     if ts is None:
@@ -186,7 +193,7 @@ def verify_state(secret: str, state: str, nonce_cookie: str | None, *,
         raise OAuthBadState("state expired")
     if not hmac.compare_digest(_mac(secret, f"{STATE_VERSION}.{nonce}.{ts}"), mac):
         raise OAuthBadState("state signature mismatch")
-    if not hmac.compare_digest(nonce, str(nonce_cookie)):
+    if not hmac.compare_digest(nonce, cookie_nonce):
         raise OAuthBadState("state is bound to another browser")
     return nonce
 

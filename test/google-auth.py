@@ -486,6 +486,55 @@ def main():
             check("конфликт ничего не привязал",
                   len(rows(server, "SELECT 1 FROM auth_identities WHERE subject='google-sub-attacker'")) == 0)
 
+            section("6b. Смена почты Google меняет почту аккаунта")
+            # Живой случай: аккаунт заведён на ivanovartem… по паролю, человек
+            # отвязал Google и привязал другой адрес (kapel…) — почта аккаунта
+            # осталась прежней, потому что писалась через COALESCE(email, ?),
+            # то есть НИКОГДА не менялась. В привязке и в профиле были разные
+            # почты.
+            fake.identity = {"sub": "google-sub-newmail", "email": "newmail@example.com",
+                             "name": "Новая почта", "email_verified": True}
+            same, same_jar = make_device()
+            st, _, claim2 = request(same, base, "/api/profile/claim", "POST",
+                                    {"subject": "profile_math", "onboarded": True, "name": "Смена"})
+            st, _, reg2 = request(same, base, "/api/auth/register", "POST",
+                                  {"name": "Смена", "email": "oldmail@example.com",
+                                   "password": "super-pass-1"})
+            check("аккаунт со старой почтой готов", st == 200, (st, reg2))
+            st, hd, _ = request(same, base, "/api/auth/google?intent=link")
+            st, hd, _ = request_url(same, location_of(hd))
+            st, hd, _ = request_url(same, location_of(hd))
+            check("привязка нового Google прошла",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") is None,
+                  fragment_of(location_of(hd)))
+            st, _, session_s = request(same, base, "/api/auth/session")
+            check("остались в ТОМ ЖЕ аккаунте (новый не создан)",
+                  session_s["user"]["accountId"] == reg2["user"]["accountId"],
+                  (session_s.get("user"), reg2["user"]["accountId"]))
+            check("почта аккаунта стала почтой нового Google",
+                  session_s["user"]["email"] == "newmail@example.com", session_s.get("user"))
+            check("привязка записана с тем же адресом",
+                  rows(server, "SELECT email FROM auth_identities WHERE subject='google-sub-newmail'")[0]["email"]
+                  == "newmail@example.com")
+
+            # Явная привязка НЕ должна пересаживать человека на чужой аккаунт.
+            fake.identity = {"sub": "google-sub-stranger", "email": "pass@example.com",
+                             "name": "Чужой", "email_verified": True}
+            st, hd, _ = request(same, base, "/api/auth/google?intent=link")
+            st, hd, _ = request_url(same, location_of(hd))
+            st, hd, _ = request_url(same, location_of(hd))
+            check("привязка чужого адреса -> conflict, а не вход в чужой аккаунт",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") == "conflict",
+                  fragment_of(location_of(hd)))
+            st, _, session_after = request(same, base, "/api/auth/session")
+            check("остались в своём аккаунте",
+                  session_after["user"]["accountId"] == reg2["user"]["accountId"],
+                  session_after.get("user"))
+            check("чужая личность не привязана",
+                  len(rows(server, "SELECT 1 FROM auth_identities WHERE subject='google-sub-stranger'")) == 0)
+            check("почта своего аккаунта не тронута",
+                  session_after["user"]["email"] == "newmail@example.com", session_after.get("user"))
+
             section("7. Гость с прогрессом сохраняет профиль при входе")
             guest, guest_jar = make_device()
             st, _, claim = request(guest, base, "/api/profile/claim", "POST",
@@ -519,6 +568,7 @@ def main():
                 conn.commit()
             finally:
                 conn.close()
+            identities_before_block = len(rows(server, "SELECT 1 FROM auth_identities"))
             # Важно: именно тот Google-аккаунт, который привязан к
             # заблокированному (шаг 6 привязал google-sub-2 к парольному).
             fake.identity = {"sub": "google-sub-2", "email": "pass@example.com",
@@ -531,8 +581,11 @@ def main():
                   st == 302 and query_of_fragment(fragment_of(location_of(hd))).get("error") == "blocked",
                   (st, fragment_of(location_of(hd))))
             check("у заблокированного нет сессии", cookie_value(blocked_jar, "ege_session") is None)
+            # Привязок столько, сколько было до блокировки: заблокированный
+            # вход не должен ни привязываться, ни отвязываться.
             check("привязка заблокированного не тронута",
-                  len(rows(server, "SELECT 1 FROM auth_identities")) == 3)
+                  len(rows(server, "SELECT 1 FROM auth_identities")) == identities_before_block,
+                  (identities_before_block, len(rows(server, "SELECT 1 FROM auth_identities"))))
             conn = server.connect()
             try:
                 conn.execute("DELETE FROM user_blocks WHERE user_id=?", (blocked_id,))

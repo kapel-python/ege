@@ -6968,7 +6968,7 @@ function startGoogleLink() {
   paintGoogleButton("Открываем Google…", true);
   // Небольшая пауза, чтобы кадр с погасшей кнопкой успело отрисоваться до
   // ухода со страницы: без неё переход выглядит как «ничего не нажали».
-  setTimeout(() => { try { AuthAPI.startGoogle(); } catch (_) {} }, 120);
+  setTimeout(() => { try { AuthAPI.startGoogleLink(); } catch (_) {} }, 120);
 }
 
 /* Отвязка намеренно недоступна аккаунту без пароля: иначе человек, зашедший
