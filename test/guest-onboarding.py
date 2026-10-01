@@ -93,6 +93,19 @@ def count_rows(server, table: str) -> int:
         conn.close()
 
 
+
+def auth_slice(payload):
+    """Значимая часть auth-среза: registered + email.
+
+    Срез вырос (providers, googleEnabled — вход через Google), и сравнивать
+    его целиком значит ломать тесты на каждом новом поле. Признаки входа
+    проверяем отдельно: providers — список, googleEnabled — булево.
+    """
+    auth = (payload or {}).get("auth") or {}
+    assert isinstance(auth.get("providers"), list), auth
+    assert isinstance(auth.get("googleEnabled"), bool), auth
+    return {"registered": auth.get("registered"), "email": auth.get("email")}
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-guest-onboarding-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -112,7 +125,7 @@ def main():
             status, boot = request(opener, base, "/api/bootstrap-lite")
             assert status == 200, (status, boot)
             assert boot["accountId"] is None, boot["accountId"]
-            assert boot["auth"] == {"registered": False, "email": None}, boot["auth"]
+            assert auth_slice(boot) == {"registered": False, "email": None}, boot["auth"]
             assert boot["state"]["onboarded"] is False, boot["state"]
             assert boot["state"]["name"] is None, boot["state"]
             assert boot["state"]["stateVersion"] == 1, boot["state"]

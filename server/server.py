@@ -116,6 +116,29 @@ def _load_agent_module():
 _AGENT = _load_agent_module()
 
 
+def _load_oauth_module():
+    """Load the external-login module (server/oauth.py).
+
+    Failure is not fatal and must stay that way: without a client id the
+    password login is the whole site, so the /api/auth/google* endpoints
+    answer 503 "not configured" and nothing else changes."""
+    import importlib.util
+
+    oauth_path = Path(__file__).resolve().parent / "oauth.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_oauth", oauth_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_OAUTH = _load_oauth_module()
+
+
 # Потолок текста, который вообще попадает в agent_messages (и оттуда в ленту).
 # Источник правды — модуль агента: там же живёт блок кнопок-продолжений, из-за
 # которого ответ длиннее прежних 8000. Без модуля (тогда весь раздел отдаёт
@@ -857,6 +880,11 @@ _support_schema_lock = threading.Lock()
 _SUPPORT_SECRET_FALLBACK = token_hex(32)
 _support_secret_cache: dict[str, str] = {}
 _support_secret_lock = threading.Lock()
+# Секрет подписи OAuth-state (см. oauth_state_secret). Тот же приём, отдельная
+# строка в app_config: ротация одного секрета не рвёт второй.
+_OAUTH_SECRET_FALLBACK = token_hex(32)
+_oauth_secret_cache: dict[str, str] = {}
+_oauth_secret_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Отпечаток устройства
@@ -999,6 +1027,26 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
                  "ON user_sessions(user_id, device_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_net "
                  "ON user_sessions(user_id, device_net)")
+    # Внешние личности (Google и будущие провайдеры). Ключ пары (provider,
+    # subject) — это ТОТ ЖЕ идентификатор, который отдаёт провайдер, поэтому
+    # переименование аккаунта в Google его не ломает, а смена почты на другую
+    # не приводит к «входу в чужой аккаунт». email здесь — копия для показа,
+    # источник истины о привязке — users.email и сама пара.
+    conn.execute("""CREATE TABLE IF NOT EXISTS auth_identities (
+      provider TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT,
+      created_at TEXT NOT NULL,
+      last_login_at TEXT,
+      PRIMARY KEY (provider, subject))""")
+    # UNIQUE-индекс нужен и для существующей базы: без него ON CONFLICT
+    # (вход в аккаунт, уже привязанный к Google) падал бы с "no matching
+    # constraint" ровно у тех людей, у которых привязка уже есть.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_pk "
+                 "ON auth_identities(provider, subject)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_identities_user "
+                 "ON auth_identities(user_id)")
     # UNIQUE допускает множество NULL: незарегистрированные гости не мешают.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     ensure_block_schema(conn)
@@ -1566,22 +1614,160 @@ def auth_device_session_ids(conn: sqlite3.Connection, user_id: int, session_id) 
 
 
 def auth_user_payload(conn: sqlite3.Connection, user_id: int) -> dict | None:
-    """Публичный профиль аккаунта для auth-эндпоинтов. registered = есть хеш."""
+    """Публичный профиль аккаунта для auth-эндпоинтов.
+
+    registered — «у аккаунта есть способ войти», а не «есть хеш пароля». С
+    появлением внешнего входа хеша может не быть вовсе (человек заходит только
+    через Google), и такой аккаунт обязан выглядеть зарегистрированным, иначе
+    UI предлагает «зарегистрироваться» тому, кто уже вошёл.
+    """
     row = conn.execute(
         "SELECT name, account_id, email, password_hash FROM users WHERE id=?", (user_id,)
     ).fetchone()
     if not row:
         return None
     return {"name": row["name"], "accountId": row["account_id"], "email": row["email"],
-            "registered": bool(row["password_hash"])}
+            "registered": bool(row["password_hash"]) or auth_has_provider(conn, user_id),
+            "providers": auth_provider_list(conn, user_id)}
 
 
 def auth_state_payload(conn: sqlite3.Connection, user_id: int) -> dict:
     """Auth-срез для bootstrap: фронт рисует «Гостевой профиль» или email."""
     row = conn.execute(
         "SELECT email, password_hash FROM users WHERE id=?", (user_id,)).fetchone()
-    registered = bool(row and row["password_hash"])
-    return {"registered": registered, "email": row["email"] if registered else None}
+    providers = auth_provider_list(conn, user_id)
+    registered = bool(row and row["password_hash"]) or bool(providers)
+    return {"registered": registered, "email": row["email"] if registered else None,
+            "providers": providers}
+
+
+# ---------------------------------------------------------------------------
+# Внешние личности (Google)
+#
+# Идентичность — это пара (провайдер, subject): subject стабилен у провайдера
+# и НЕ является почтой. Поэтому переименование в Google не ломает вход, а
+# смена почты на другую не приводит к входу в чужой аккаунт.
+#
+# Правило привязки — сознательно строгое. Никогда не привязываем внешний аккаунт
+# к существующему аккаунту молча, только по совпавшей почте: почта, отданная
+# провайдером, проверяется только им, и наша регистрация по паролю почту вообще
+# не подтверждает. Автоматическая склейка превратила бы вход в Google в
+# инструмент захвата чужой учётки (злоумышленник регистрирует чужую почту без
+# подтверждения и потом входит в неё через Google). Вместо этого:
+#   * привязка к ТЕКУЩЕЙ сессии — только из уже залогиненного профиля («Привязать
+#     Google» в профиле), то есть решение человека и его собственная сессия;
+#   * привязка нового адреса к существующему аккаунту — только после явного
+#     подтверждения паролем этого аккаунта (см. park/confirm);
+#   * новый адрес, которого у нас нет, — честная новая строка пользователя.
+# ---------------------------------------------------------------------------
+def auth_has_provider(conn: sqlite3.Connection, user_id: int | None) -> bool:
+    if user_id is None:
+        return False
+    try:
+        row = conn.execute("SELECT 1 FROM auth_identities WHERE user_id=? LIMIT 1",
+                           (int(user_id),)).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+def auth_provider_list(conn: sqlite3.Connection, user_id: int | None) -> list[str]:
+    """Список внешних провайдеров, привязанных к аккаунту (для UI)."""
+    if user_id is None:
+        return []
+    try:
+        rows = conn.execute("SELECT DISTINCT provider FROM auth_identities WHERE user_id=?",
+                            (int(user_id),)).fetchall()
+    except sqlite3.Error:
+        return []
+    return sorted({str(r["provider"]) for r in rows if r["provider"]})
+
+
+def auth_identity_user(conn: sqlite3.Connection, provider: str, subject: str) -> int | None:
+    """user_id по паре (провайдер, subject) или None. Без приведения строки."""
+    if not provider or not subject:
+        return None
+    try:
+        row = conn.execute("SELECT user_id FROM auth_identities WHERE provider=? AND subject=?",
+                           (provider, subject)).fetchone()
+    except sqlite3.Error:
+        return None
+    return int(row["user_id"]) if row else None
+
+
+def link_auth_identity(conn: sqlite3.Connection, user_id: int, provider: str,
+                       subject: str, email: str | None) -> None:
+    """Привязать (или обновить) внешнюю личность к аккаунту. Идемпотентно."""
+    conn.execute(
+        "INSERT INTO auth_identities(provider, subject, user_id, email, created_at, last_login_at) "
+        "VALUES (?,?,?,?,?,?) ON CONFLICT(provider, subject) DO UPDATE SET "
+        "email=excluded.email, last_login_at=excluded.last_login_at",
+        (provider, subject, int(user_id), email, now_iso(), now_iso()),
+    )
+
+
+def touch_auth_identity(conn: sqlite3.Connection, provider: str, subject: str) -> None:
+    try:
+        conn.execute("UPDATE auth_identities SET last_login_at=? WHERE provider=? AND subject=?",
+                     (now_iso(), provider, subject))
+    except sqlite3.Error:
+        pass
+
+
+def oauth_enabled() -> bool:
+    """Вход через Google включён только если есть и модуль, и ключи."""
+    return bool(_OAUTH is not None and _OAUTH.is_configured())
+
+
+def oauth_redirect_uri(handler) -> str:
+    """Абсолютный redirect_uri — ровно тот, что зарегистрирован у провайдера.
+
+    Явная переменная EGE_GOOGLE_REDIRECT_URI важнее вычисления по Host:
+    Google сверяет адрес символ в символ, и молчаливый выбор другого хоста
+    дал бы ошибку redirect_uri_mismatch с непонятной ученику диагностикой.
+    Запасной путь (EGE_PUBLIC_URL / заголовки) — для стендов без переменной.
+    """
+    cfg = _OAUTH.settings()
+    if cfg.get("redirectUri"):
+        return cfg["redirectUri"]
+    base = public_base_url(handler)
+    return f"{base.rstrip('/')}{OAUTH_CALLBACK_PATH}"
+
+
+OAUTH_START_PATH = "/api/auth/google"
+OAUTH_CALLBACK_PATH = "/api/auth/google/callback"
+OAUTH_NONCE_COOKIE = "ege_oauth_nonce"
+OAUTH_NONCE_MAX_AGE = 900
+
+
+def oauth_nonce_cookie_attrs(value: str) -> str:
+    """Кука с nonce для привязки state к этому браузеру.
+
+    HttpOnly и Lax — Lax нужен именно для редиректа обратно от Google (это
+    верхнеуровневый GET, Lax такие куки отправляет), а SameSite=Strict здесь
+    просто сломал бы вход. Значение не секрет: оно защищено подписью state.
+    """
+    secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" else ""
+    return f"{OAUTH_NONCE_COOKIE}={value}; Path=/; SameSite=Lax; HttpOnly; Max-Age={OAUTH_NONCE_MAX_AGE}{secure}"
+
+
+def oauth_nonce_cookie_clear_attrs() -> str:
+    secure = "; Secure" if os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1" else ""
+    return f"{OAUTH_NONCE_COOKIE}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
+
+
+def oauth_return_url(handler, route: str, query: str = "") -> str:
+    """Куда отправить браузер после входа: наш домен, наш путь, наш литерал.
+
+    Параметры возврата едут во ФРАГМЕНТЕ (#/login?confirm=...), а не в
+    query-строке: фрагмент браузер серверу не отправляет, поэтому подписанный
+    токен подтверждения (в нём адрес почты) не попадает ни в access-лог nginx,
+    ни в историю на стороне сервера. Маршрут проверяется по белому списку —
+    данных из запроса в Location не идёт, обратный open redirect невозможен.
+    """
+    safe_route = route if route in ("login", "subject", "profile") else "login"
+    base = f"{public_base_url(handler).rstrip('/')}/dashboard#/{safe_route}"
+    return f"{base}?{query}" if query else base
 
 
 def verify_admin_password(candidate: str) -> bool:
@@ -2868,6 +3054,7 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                      client_id TEXT NOT NULL DEFAULT '',
                      evaluation_status TEXT NOT NULL DEFAULT 'submitted',
                      evaluation_provider TEXT,
+                     evaluation_model TEXT,
                      evaluation_version INTEGER,
                      evaluation_result TEXT,
                      evaluation_file TEXT,
@@ -2914,6 +3101,7 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                      subject TEXT NOT NULL DEFAULT '',
                      text_sha256 TEXT NOT NULL,
                      provider TEXT NOT NULL DEFAULT '',
+                     model TEXT NOT NULL DEFAULT '',
                      result_json TEXT NOT NULL,
                      rubric_version INTEGER NOT NULL DEFAULT 1,
                      created_at TEXT NOT NULL)"""
@@ -2933,6 +3121,13 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
             if "rubric_version" not in columns:
                 conn.execute(
                     "ALTER TABLE essay_checks ADD COLUMN rubric_version INTEGER NOT NULL DEFAULT 1")
+                conn.commit()
+            if "model" not in columns:
+                # Какая ИМЕННО модель ответила: без неё экран результата обязан
+                # был держать вшитый словарь названий, и любая новая модель
+                # подписывалась бы старым именем (или никаким). Старые строки
+                # остаются с пустой моделью и разбираются по провайдеру.
+                conn.execute("ALTER TABLE essay_checks ADD COLUMN model TEXT NOT NULL DEFAULT ''")
                 conn.commit()
             # Тот же случай, что у essay_submissions: кэш проверок держится на
             # UNIQUE(user_id, subject, text_sha256), и без индекса ON CONFLICT
@@ -2955,6 +3150,7 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                  subject TEXT NOT NULL DEFAULT '',
                  text_sha256 TEXT NOT NULL,
                  provider TEXT NOT NULL DEFAULT '',
+                 model TEXT NOT NULL DEFAULT '',
                  result_json TEXT NOT NULL,
                  rubric_version INTEGER NOT NULL DEFAULT 1,
                  note TEXT NOT NULL DEFAULT '',
@@ -2968,6 +3164,13 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
             # Аудит замечаний к перепроверке: без него флип 3 → 20 по записке
             # ученика не расследовать — замечание уходило только в промпт.
             conn.execute("ALTER TABLE essay_check_history ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        if "model" not in {r["name"] for r in conn.execute("PRAGMA table_info(essay_check_history)")}:
+            conn.execute("ALTER TABLE essay_check_history ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        if "evaluation_model" not in _table_columns(conn, "essay_submissions"):
+            # Модель на submission: её читает экран результата подписи проверки.
+            conn.execute("ALTER TABLE essay_submissions ADD COLUMN evaluation_model TEXT")
             conn.commit()
         _ESSAY_SCHEMA_DONE.add(key)
 
@@ -3048,6 +3251,7 @@ def serialize_essay_row(row) -> dict:
         "createdAt": timestamp_value(row["created_at"]),
         "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
         "evaluationProvider": row["evaluation_provider"] if "evaluation_provider" in row.keys() else None,
+        "evaluationModel": row["evaluation_model"] if "evaluation_model" in row.keys() else None,
     }
 
 
@@ -3278,13 +3482,25 @@ def essay_result_view(submission: dict) -> dict | None:
         # грамотность не засчитана. Поле опционально: обычные работы его
         # не несут, шаблон его отсутствие спокойно переживает.
         view["calibration_note"] = str(calibration["note"])
+    # Чем подписать проверку на экране результата: фактическая модель,
+    # ответившая на этот запрос (failover мог молча переключить провайдера).
+    # Название берётся из конфигурации провайдеров — то, что админ задал
+    # в панели, — и только если его нет, показывается id модели. Раньше здесь
+    # стоял вшитый словарь {"closerouter": "Claude Sonnet 5", ...}: любая
+    # другая модель подписывалась старым именем, а свой провайдер — молчал.
     provider_key = str(submission.get("evaluationProvider") or "").strip()
-    provider_names = {"closerouter": "Claude Sonnet 5", "gptunnel": "Qwen Flash"}
-    if provider_key in provider_names:
-        # Чем подписать проверку на экране результата: фактический провайдер,
-        # ответивший на этот запрос (failover мог молча переключить модель).
-        # Неизвестные значения (старые записи «ai+grammar») не показываем.
-        view["provider"] = provider_names[provider_key]
+    model_key = str(submission.get("evaluationModel") or "").strip()
+    label = ""
+    if _AI is not None and provider_key:
+        try:
+            label = _AI.model_display_title(provider_key, model_key)
+        except Exception:
+            label = ""
+    if label:
+        view["provider"] = label
+        view["providerId"] = provider_key
+        if model_key:
+            view["model"] = model_key
     return view
 
 
@@ -3344,6 +3560,7 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
             "wordCount": data["wordCount"],
             "minWords": data["minWords"],
             "evaluationProvider": prev["provider"],
+            "evaluationModel": prev.get("model") or "",
         })
     return data
 
@@ -3467,7 +3684,8 @@ def _validated_essay_result(result) -> dict:
 
 
 def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
-                      text: str, provider: str, result: dict, note: str = "") -> None:
+                      text: str, provider: str, result: dict, note: str = "",
+                      model: str = "") -> None:
     """Записать факт проверки этого текста и версию правил, которыми он оценён.
 
     Вызывается из /api/ai/essay СРАЗУ после успешного ответа — это единственный
@@ -3475,28 +3693,55 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
     essay_checks, но прежние результаты не теряются: каждая запись дописывается
     в essay_check_history — по ней ege-result.html рисует «Было → стало».
     `note` — замечание ученика к перепроверке (аудит: без него флипы оценки
-    не расследовать).
-    """
+    не расследовать). `model` — id модели, которая ответила на ЭТОТ запрос:
+    он пишется рядом с провайдером, потому что подпись на экране результата
+    («проверено моделью …») собирается из пары (провайдер, модель) плюс
+    человеческое название, заданное админом. Пустая модель у старых строк —
+    там разбор идёт по провайдеру."""
     ensure_essay_schema(conn)
     blob = json.dumps(result, ensure_ascii=False)
     if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
         raise ValueError("result too large")
     key = (user_id, subject, essay_text_hash(text))
-    conn.execute(
-        "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
-        " VALUES(?,?,?,?,?,?,?)"
-        " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
-        " result_json=excluded.result_json, provider=excluded.provider,"
-        " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
-        (key[0], key[1], key[2], str(provider or "")[:64], blob,
-         int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
-    )
-    conn.execute(
-        "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, result_json, rubric_version, note, created_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
-        (key[0], key[1], key[2], str(provider or "")[:64], blob,
-         int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
-    )
+    provider_value = str(provider or "")[:64]
+    model_value = str(model or "")[:200]
+    # Колонка model могла не появиться (миграция не прошла на старой БД) —
+    # тогда пишем старую форму запроса, а не падаем на каждой проверке.
+    if "model" in _table_columns(conn, "essay_checks"):
+        conn.execute(
+            "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, model, result_json, rubric_version, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
+            " result_json=excluded.result_json, provider=excluded.provider,"
+            " model=excluded.model,"
+            " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
+            (key[0], key[1], key[2], provider_value, model_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, result_json, rubric_version, created_at)"
+            " VALUES(?,?,?,?,?,?,?)"
+            " ON CONFLICT(user_id, subject, text_sha256) DO UPDATE SET"
+            " result_json=excluded.result_json, provider=excluded.provider,"
+            " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
+            (key[0], key[1], key[2], provider_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
+        )
+    if "model" in _table_columns(conn, "essay_check_history"):
+        conn.execute(
+            "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, model, result_json, rubric_version, note, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (key[0], key[1], key[2], provider_value, model_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, result_json, rubric_version, note, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (key[0], key[1], key[2], provider_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
+        )
     # История — только для блока «Было → стало»: глубже не смотрим,
     # поэтому старые записи сверх лимита удаляем сразу.
     conn.execute(
@@ -3520,7 +3765,7 @@ def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
     """
     ensure_essay_schema(conn)
     rows = conn.execute(
-        "SELECT result_json, provider, rubric_version, note FROM essay_check_history"
+        "SELECT result_json, provider, model, rubric_version, note FROM essay_check_history"
         " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT 2",
         (user_id, subject, essay_text_hash(text)),
     ).fetchall()
@@ -3537,6 +3782,7 @@ def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
             result = None
         if isinstance(result, dict):
             previous = {"result": result, "provider": rows[1]["provider"] or "",
+                        "model": (rows[1]["model"] or "") if "model" in rows[1].keys() else "",
                         "rubric_version": int(rows[1]["rubric_version"] or 0),
                         "note": rows[1]["note"] if "note" in rows[1].keys() else ""}
     return {"previous": previous, "checks": checks}
@@ -3554,7 +3800,7 @@ def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text:
     """
     ensure_essay_schema(conn)
     row = conn.execute(
-        "SELECT result_json, provider, rubric_version FROM essay_checks"
+        "SELECT result_json, provider, model, rubric_version FROM essay_checks"
         " WHERE user_id=? AND subject=? AND text_sha256=?",
         (user_id, subject, essay_text_hash(text)),
     ).fetchone()
@@ -3566,7 +3812,8 @@ def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text:
         result = json.loads(row["result_json"])
     except (ValueError, TypeError):
         return None
-    return {"result": result, "provider": row["provider"]}
+    return {"result": result, "provider": row["provider"],
+            "model": (row["model"] or "") if "model" in row.keys() else ""}
 
 
 def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
@@ -3612,9 +3859,10 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
         # evaluation_result остаётся тем, что реально поставили при проверке.
         conn.execute(
             "UPDATE essay_submissions SET evaluation_status='ready', evaluation_result=?,"
-            " evaluation_provider=?, evaluation_version=?, evaluated_at=? WHERE id=?",
-            (blob, (check["provider"] or "ai+grammar")[:64], int(_AI.ESSAY_RUBRIC_VERSION),
-             int(time.time() * 1000), int(row["id"])),
+            " evaluation_provider=?, evaluation_model=?, evaluation_version=?, evaluated_at=?"
+            " WHERE id=?",
+            (blob, (check["provider"] or "ai+grammar")[:64], (check.get("model") or "")[:200],
+             int(_AI.ESSAY_RUBRIC_VERSION), int(time.time() * 1000), int(row["id"])),
         )
     else:
         conn.execute(
@@ -5188,6 +5436,43 @@ def support_token_secret(conn: sqlite3.Connection) -> str:
         return _SUPPORT_SECRET_FALLBACK
     with _support_secret_lock:
         _support_secret_cache[db] = secret
+    return secret
+
+
+def oauth_state_secret(conn: sqlite3.Connection) -> str:
+    """Секрет подписи state и парковочных токенов внешнего входа.
+
+    Отдельный от support-секрета и отдельная строка в app_config: у них разный
+    срок жизни и разные последствия утечки (здесь подписывается «можно ли
+    считать этот код своим»). Ключ из окружения важнее всего — им можно
+    ротировать, не теряя живые входы. Как и там, в базу попадает только сам
+    секрет в app_config, а в подписиstate уходит производное значение.
+    """
+    env = (os.environ.get("EGE_OAUTH_SECRET") or "").strip()
+    if env:
+        return env
+    db = _db_key(conn)
+    with _oauth_secret_lock:
+        cached = _oauth_secret_cache.get(db)
+        if cached:
+            return cached
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        row = conn.execute("SELECT value_json FROM app_config WHERE key='oauth_state_secret'").fetchone()
+        secret = json.loads(row["value_json"]) if row else None
+        if not isinstance(secret, str) or not secret:
+            secret = token_hex(32)
+            conn.execute("INSERT OR IGNORE INTO app_config(key, value_json) VALUES ('oauth_state_secret', ?)",
+                         (json.dumps(secret),))
+            conn.commit()
+            row = conn.execute("SELECT value_json FROM app_config WHERE key='oauth_state_secret'").fetchone()
+            secret = json.loads(row["value_json"]) if row else secret
+        if not isinstance(secret, str) or not secret:
+            return _OAUTH_SECRET_FALLBACK
+    except (sqlite3.Error, ValueError, TypeError):
+        return _OAUTH_SECRET_FALLBACK
+    with _oauth_secret_lock:
+        _oauth_secret_cache[db] = secret
     return secret
 
 
@@ -7369,6 +7654,8 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
                                   us.self_level AS subject_self_level, us.goal_id AS subject_goal_id,
                                   EXISTS(SELECT 1 FROM user_subjects a
                                           WHERE a.user_id = u.id AND a.onboarded = 1) AS onboarded_any,
+                                  EXISTS(SELECT 1 FROM auth_identities i
+                                          WHERE i.user_id = u.id) AS has_provider,
                                   COALESCE(s.xp,0) AS xp, COALESCE(s.streak,0) AS streak, s.last_active_date,
                                   COALESCE(s.total_solved,0) AS total_solved, COALESCE(s.total_correct,0) AS total_correct
                            FROM users u
@@ -7441,12 +7728,15 @@ def admin_users_list(conn: sqlite3.Connection, query: str | None) -> list[dict]:
             "block": blocks.get(r["id"]),
             "isAdmin": r["id"] in admin_ids,
         }
-        # Кто перед нами: человек зарегистрировался (есть хеш пароля) или
-        # пользуется гостевым аккаунтом. Тот же признак, что у
-        # auth_state_payload, и почта отдаётся только зарегистрированным —
-        # чтобы не показывать мусор из незавершённых регистраций.
-        item["registered"] = bool(r["password_hash"])
+        # Кто перед нами: у человека есть способ войти (хеш пароля ИЛИ
+        # внешний провайдер) или он пользуется гостевым аккаунтом. Тот же
+        # признак, что у auth_state_payload, и почта отдаётся только тем, кто
+        # зарегистрирован — чтобы не показывать мусор из незавершённых
+        # регистраций. Аккаунт «только через Google» здесь обязан быть виден
+        # с почтой: иначе поддержка не найдёт человека по его адресу.
+        item["registered"] = bool(r["password_hash"]) or bool(r["has_provider"])
         item["email"] = r["email"] if item["registered"] else None
+        item["providers"] = (["google"] if r["has_provider"] else [])
         item.update(admin_user_priority(item, today))
         if q:
             haystack = " ".join(str(x) for x in (
@@ -7500,8 +7790,11 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         # Почта и «зарегистрирован или гость» — как в auth_state_payload:
         # признак регистрации это наличие хеша пароля, почта показывается
         # только зарегистрированным.
-        "registered": bool(user["password_hash"]),
-        "email": user["email"] if user["password_hash"] else None,
+        # Тот же признак, что в auth_state_payload: хеш пароля ИЛИ внешний
+        # вход. Аккаунт «только через Google» виден поддержке по своей почте.
+        "registered": bool(user["password_hash"]) or auth_has_provider(conn, user_id),
+        "email": user["email"] if (user["password_hash"] or auth_has_provider(conn, user_id)) else None,
+        "providers": auth_provider_list(conn, user_id),
         "stats": {
             "xp": xp, "level": level_from_xp(xp), "streak": stats["streak"] if stats else 0,
             "lastActiveDate": stats["last_active_date"] if stats else None,
@@ -8142,6 +8435,43 @@ def health_payload() -> dict:
             "db": db, "backup": backup}
 
 
+# ---------------------------------------------------------------------------
+# Админские пробы провайдеров — троттлинг живых запросов.
+#
+# Ручная проверка («привет», 1 токен) — это настоящий внешний вызов за деньги
+# аккаунта провайдера: без паузы клик по «Проверить всё» превращался бы в
+# hammer. Паузы маленькие (3 с на провайдер, 15 с на «все сразу»), живому
+# админу незаметны, а очередь кликов режут. Состояние in-memory: рестарт
+# сбрасывает, это нормально — защита от случайного hammer, а не лимит.
+# ---------------------------------------------------------------------------
+_PROVIDERS_PROBE_AT: dict[str, float] = {}
+_PROVIDERS_PROBE_LOCK = threading.Lock()
+PROVIDERS_PROBE_SINGLE_SEC = 3.0
+PROVIDERS_PROBE_ALL_SEC = 15.0
+# Список моделей — GET <base>/models: у крупных шлюзов это сотни записей,
+# поэтому частое «обновить список» заметно грузит и шлюз, и наш поток. Пауза
+# между запросами списка к одному провайдеру — 5 с, по всем сразу — 20 с.
+PROVIDERS_MODELS_MIN_SEC = 5.0
+PROVIDERS_MODELS_ALL_MIN_SEC = 20.0
+# «Пинг всех моделей» — до PROBE_MODELS_MAX живых запросов подряд (ai.py),
+# поэтому пауза на эту кнопку длиннее, чем на одиночную проверку.
+PROVIDERS_MODELS_PROBE_SEC = 20.0
+
+
+def _providers_probe_allowed(key: str, interval: float) -> float:
+    """Остаток паузы до следующей пробы (0 — можно). Не бросает."""
+    try:
+        now = time.monotonic()
+        with _PROVIDERS_PROBE_LOCK:
+            ready_at = float(_PROVIDERS_PROBE_AT.get(key) or 0)
+            if now >= ready_at:
+                _PROVIDERS_PROBE_AT[key] = now + float(interval)
+                return 0.0
+            return max(1.0, ready_at - now)
+    except Exception:
+        return 0.0
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "EGE"
     sys_version = ""
@@ -8670,6 +9000,274 @@ class Handler(BaseHTTPRequestHandler):
                         "subjects": subjects_payload(),
                         "subject": current_subject_for(conn, account_id)}, token=new_token)
 
+    # ------------------------------------------------------------------
+    # Вход через внешний провайдер (Google)
+    #
+    # Поток ровно один и он серверный: GET /api/auth/google отдаёт 302 на
+    # провайдера с подписанным state, GET /api/auth/google/callback проверяет
+    # state, меняет код на токен и либо входит, либо паркует адрес для
+    # подтверждения. Браузер никаких секретов не видит, а кука сессии ставится
+    # только после успешного обмена.
+    #
+    # Чего здесь нет намеренно: автоматической склейки с аккаунтом по совпавшей
+    # почте (см. комментарий у auth_identity_user) и создания пользователя без
+    # согласия. Строка users появляется здесь так же явно, как в register, и
+    # только когда человек закончил вход у провайдера.
+    # ------------------------------------------------------------------
+    def send_redirect(self, location: str, *, token: str | None = None,
+                      extra_cookies: list[str] | None = None) -> None:
+        """302 с куками. Location собирается только из серверных литералов."""
+        try:
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_security_headers()
+            if token:
+                self.ensure_device_cookie()
+                self.send_header("Set-Cookie", self.session_cookie_attrs(token))
+            for cookie in (extra_cookies or []):
+                self.send_header("Set-Cookie", cookie)
+            device_cookie = getattr(self, "_device_cookie", None)
+            if device_cookie:
+                self.send_header("Set-Cookie", self.device_cookie_attrs(device_cookie))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except (OSError, ValueError):
+            pass
+
+    def handle_auth_google_start(self, conn: sqlite3.Connection) -> None:
+        """GET /api/auth/google — 302 на страницу согласия провайдера.
+
+        Ничего не создаём: ни строки в users, ни сессии. Человек может
+        передумать и закрыть окно — следов не остаётся. Лимит здесь общий
+        per-IP бакет /api/ плюс отдельный на неудачные входы.
+        """
+        if not oauth_enabled():
+            self.send_json({"error": "Вход через Google временно недоступен",
+                            "code": "OAUTH_UNCONFIGURED"}, 503)
+            return
+        ip = client_ip(self)
+        if not auth_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут.",
+                            "retryAfter": 60}, 429)
+            return
+        # Привязка к текущей сессии: если человек уже вошёл, это запрос
+        # ПРИВЯЗАТЬ Google к его аккаунту, а не новый вход. Иначе тот же
+        # клик при живом аккаунте молча переключил бы его на чужой.
+        current_id = existing_user_for(conn, self)
+        nonce = _OAUTH.new_nonce()
+        state = _OAUTH.sign_state(oauth_state_secret(conn), nonce)
+        cfg = dict(_OAUTH.settings())
+        cfg["redirectUri"] = oauth_redirect_uri(self)
+        hint = None
+        if current_id is not None:
+            row = conn.execute("SELECT email FROM users WHERE id=?", (current_id,)).fetchone()
+            hint = row["email"] if row and row["email"] else None
+        try:
+            target = _OAUTH.authorize_url(state=state, login_hint=hint, cfg=cfg)
+        except _OAUTH.OAuthError:
+            self.send_json({"error": "Вход через Google временно недоступен",
+                            "code": "OAUTH_UNAVAILABLE"}, 503)
+            return
+        # Кука nonce уезжает вместе с 302: без неё подпись state ничего не
+        # защищает, потому что любой, кто знает наш секрет... не знает его, но
+        # состояние из чужого браузера всё равно не подойдёт.
+        self.send_redirect(target, extra_cookies=[oauth_nonce_cookie_attrs(nonce)])
+
+    def handle_auth_google_callback(self, conn: sqlite3.Connection) -> None:
+        """GET /api/auth/google/callback — обмен кода и вход."""
+        from urllib.parse import parse_qs
+        if not oauth_enabled():
+            self.send_json({"error": "Вход через Google временно недоступен",
+                            "code": "OAUTH_UNCONFIGURED"}, 503)
+            return
+        ip = client_ip(self)
+        query = parse_qs(urlparse(self.path).query)
+        state = (query.get("state") or [""])[0]
+        code = (query.get("code") or [""])[0]
+        denied = (query.get("error") or [""])[0]
+        if denied:
+            # Человек нажал «Отмена» — это его решение, а не поломка: молча
+            # возвращаем на экран входа с честным текстом.
+            auth_login_success(ip)
+            self.send_redirect(oauth_return_url(self, "login", "error=denied"),
+                               extra_cookies=[oauth_nonce_cookie_clear_attrs()])
+            return
+        # Три независимые проверки state (подпись, возраст, привязка к браузеру)
+        # — в oauth.verify_state. Подделанный или протухший state не проходит
+        # ни одну, поэтому чужим кодом войти нельзя.
+        nonce_cookie = cookie_value(self, OAUTH_NONCE_COOKIE)
+        try:
+            _OAUTH.verify_state(oauth_state_secret(conn), state, nonce_cookie)
+        except _OAUTH.OAuthError:
+            auth_login_failed(ip)
+            self.send_redirect(oauth_return_url(self, "login", "error=state"),
+                               extra_cookies=[oauth_nonce_cookie_clear_attrs()])
+            return
+        cfg = dict(_OAUTH.settings())
+        cfg["redirectUri"] = oauth_redirect_uri(self)
+        try:
+            identity = _OAUTH.fetch_identity(code, cfg=cfg)
+        except _OAUTH.OAuthDenied:
+            self.send_redirect(oauth_return_url(self, "login", "error=denied"),
+                               extra_cookies=[oauth_nonce_cookie_clear_attrs()])
+            return
+        except _OAUTH.OAuthError as exc:
+            auth_login_failed(ip)
+            reason = getattr(exc, "reason", "failed")
+            self.send_redirect(oauth_return_url(self, "login", f"error={reason}"),
+                               extra_cookies=[oauth_nonce_cookie_clear_attrs()])
+            return
+        self.finish_google_login(conn, identity, ip)
+
+    def finish_google_login(self, conn: sqlite3.Connection, identity: dict, ip: str) -> None:
+        """Общая часть: решить, в кого входить, и отдать браузеру сессию."""
+        provider = "google"
+        subject = identity["subject"]
+        email = identity["email"]
+        clear_nonce = [oauth_nonce_cookie_clear_attrs()]
+        current_id = existing_user_for(conn, self)
+        linked_id = auth_identity_user(conn, provider, subject)
+        if linked_id is not None:
+            # Уже привязанный адрес: обычный вход в свой же аккаунт.
+            if get_active_block(conn, linked_id):
+                # Браузерный редирект, а не JSON: человек нажал кнопку входа и
+                # должен увидеть приложение с честным объяснением, а не сырой
+                # ответ сервера посреди цепочки редиректов.
+                self.send_redirect(oauth_return_url(self, "login", "error=blocked"),
+                                   extra_cookies=clear_nonce)
+                return
+            touch_auth_identity(conn, provider, subject)
+            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), linked_id,
+                                               request_device_info(self),
+                                               request_device_identity(conn, self, linked_id))
+            conn.commit()
+            auth_login_success(ip)
+            self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+            return
+        # Адрес у нас есть, но не привязан.
+        by_email = conn.execute("SELECT id, name FROM users WHERE email=?", (email,)).fetchone()
+        if by_email is not None and by_email["id"] != current_id:
+            # Чужой (или просто не наш) аккаунт с тем же адресом. Молча
+            # склеивать нельзя — это ровно тот путь, которым угоняют чужую
+            # учётку, поэтому просим пароль этого аккаунта.
+            pending = _OAUTH.sign_pending(oauth_state_secret(conn), {
+                "provider": provider, "subject": subject, "email": email,
+                "name": identity.get("name") or "",
+            })
+            self.send_redirect(oauth_return_url(self, "login", f"confirm={pending}"),
+                               extra_cookies=clear_nonce)
+            return
+        # Адреса у нас нет: это новый человек. Если он уже что-то наguestил
+        # в этой сессии, привязываем к его же строке (весь учебный след
+        # сохраняется), иначе заводим новую — как при регистрации.
+        target_id = current_id
+        minted = None
+        if target_id is None:
+            target_id, minted = provision_user(conn, self)
+        if get_active_block(conn, target_id):
+            # Заведённую строку убираем: человек не смог войти, и оставлять
+            # после себя профиль без входа — ровно тот мусор, которого мы
+            # добиваемся словом «гость». Каскад сносит и его сессию.
+            if minted is not None:
+                try:
+                    conn.execute("DELETE FROM users WHERE id=?", (target_id,))
+                    conn.commit()
+                except sqlite3.Error:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+            self.send_redirect(oauth_return_url(self, "login", "error=blocked"),
+                               extra_cookies=clear_nonce)
+            return
+        # Почту ставим только на пустую: у гостя с уже занятым адресом
+        # (зарегистрировался, потом вошёл через Google) чужой адрес не
+        # перетираем молча.
+        conn.execute("UPDATE users SET email=COALESCE(email, ?), "
+                     "registered_at=COALESCE(registered_at, ?), name=COALESCE(NULLIF(name,''), ?) "
+                     "WHERE id=?", (email, now_iso(), identity.get("name") or None, int(target_id)))
+        link_auth_identity(conn, target_id, provider, subject, email)
+        stale = minted or cookie_value(self, "ege_session")
+        new_token, _ = rotate_user_session(conn, stale, target_id,
+                                           request_device_info(self),
+                                           request_device_identity(conn, self, target_id))
+        conn.commit()
+        auth_login_success(ip)
+        self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+
+    def handle_auth_google_confirm(self, conn: sqlite3.Connection) -> None:
+        """POST /api/auth/google/confirm — привязка к существующему аккаунту.
+
+        Сценарий: адрес уже занят парольным аккаунтом. Никакой молчаливой
+        склейки — человек подтверждает пароль того аккаунта, и только тогда
+        личность к нему привязывается. Токен из ссылки одноразовый по времени
+        (10 минут) и подписан, поэтому подсунуть свой нельзя.
+        """
+        ip = client_ip(self)
+        if not auth_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        password = payload.get("password")
+        try:
+            pending = _OAUTH.read_pending(oauth_state_secret(conn), payload.get("pending"))
+        except _OAUTH.OAuthError:
+            self.send_json({"error": "Ссылка устарела. Войди через Google заново."}, 400)
+            return
+        row = conn.execute("SELECT id, password_hash FROM users WHERE email=?",
+                           (pending.get("email"),)).fetchone()
+        if not row or not row["password_hash"] or not isinstance(password, str) \
+                or not verify_password(password, row["password_hash"]):
+            auth_login_failed(ip)
+            self.send_json({"error": "Неверный пароль"}, 401)
+            return
+        account_id = int(row["id"])
+        if self.reject_if_blocked(conn, account_id):
+            return
+        link_auth_identity(conn, account_id, pending.get("provider") or "google",
+                           pending.get("subject") or "", pending.get("email"))
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id,
+                                           request_device_info(self),
+                                           request_device_identity(conn, self, account_id))
+        conn.commit()
+        auth_login_success(ip)
+        self.send_json({"ok": True, "user": auth_user_payload(conn, account_id),
+                        "requireSubjectChoice": True, "subjects": subjects_payload(),
+                        "subject": current_subject_for(conn, account_id)}, token=new_token)
+
+    def handle_auth_google_unlink(self, conn: sqlite3.Connection) -> None:
+        """POST /api/auth/google/unlink — отвязать Google от своего аккаунта.
+
+        Отвязка доступна только когда есть пароль: иначе человек, вошедший
+        исключительно через Google, потерял бы единственный вход в свой же
+        аккаунт вместе с всем прогрессом. Это осознанное ограничение, а не
+        недоработка — восстановить доступ без пароля нечем.
+        """
+        user_id, _ = user_for(conn, self)
+        if not self.require_user(user_id):
+            return
+        if self.reject_if_blocked(conn, user_id):
+            return
+        row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row or not row["password_hash"]:
+            self.send_json({"error": "Сначала задай пароль — иначе вход останется только через Google",
+                            "code": "NO_PASSWORD"}, 400)
+            return
+        try:
+            self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            pass
+        conn.execute("DELETE FROM auth_identities WHERE user_id=? AND provider='google'", (user_id,))
+        conn.commit()
+        self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)})
+
     def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid/absent cookie: drop whatever
         # session row this token had and clear the cookie. Never mint a user.
@@ -8817,6 +9415,436 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             admin_audit(conn, user_id, "admin-logout", user_id)
         self.send_json({"ok": True}, admin_cookie=self.admin_cookie_attrs(None, 0))
+
+    # ------------------------------------------------------------------
+    # Провайдеры ИИ (админка, раздел «Провайдеры»).
+    #
+    # GET — только метки времени: живого опроса провайдеров тут нет, статус
+    # «используется» считается по последнему успеху трафика учеников (<60 с),
+    # остальное — результат последней ручной пробы. POST/PUT/DELETE — мутации
+    # за require_admin + CSRF-гейтом do_*; ключ в ответах не отдаётся никогда
+    # (только keySet/keyHint из providers_overview).
+    # ------------------------------------------------------------------
+    def handle_admin_providers_list(self, conn: sqlite3.Connection) -> None:
+        auth = self.require_admin(conn)
+        if not auth:
+            return
+        if _AI is None:
+            self.send_json({"error": "Раздел временно недоступен"}, 503)
+            return
+        try:
+            self.send_json(_AI.providers_overview())
+        except (ValueError, KeyError) as exc:
+            self.send_json({"error": f"Request failed: {exc}"}, 400)
+
+    def handle_admin_providers_post(self, conn: sqlite3.Connection, path: str) -> bool:
+        """POST-ветка провайдеров. Возвращает True, если путь наш."""
+        if not (path == "/api/admin/providers"
+                or path.startswith("/api/admin/providers/")):
+            return False
+        auth = self.require_admin(conn)
+        if not auth:
+            return True
+        actor_id, _ = auth
+        if _AI is None:
+            self.send_json({"error": "Раздел временно недоступен"}, 503)
+            return True
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный JSON"}, 400)
+            return True
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный JSON"}, 400)
+            return True
+        rest = path[len("/api/admin/providers"):]
+        try:
+            if rest in ("", "/"):
+                # Создать своего провайдера. Проба — best-effort ДО сохранения
+                # не делается (ключа ещё нет в базе и гонка не нужна): сначала
+                # валидация и сохранение, затем живой запрос уже по записи.
+                # Недоступная модель добавлению НЕ мешает — вернётся warning.
+                try:
+                    clean = _AI.validate_custom_payload(payload)
+                except ValueError as exc:
+                    msg = str(exc)
+                    self.send_json({"error": msg},
+                                   409 if "уже существует" in msg or "уже занят" in msg else 400)
+                    return True
+                try:
+                    entry = _AI.custom_provider_create(clean)
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 409)
+                    return True
+                admin_audit(conn, actor_id, "ai-provider-create", None, entry["id"][:64])
+                try:
+                    probe = _AI.probe_provider(entry["id"])
+                except (KeyError, ValueError) as exc:
+                    probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
+                card = _AI._public_provider_card(entry["id"])
+                out = {"ok": True, "provider": card, "probe": probe}
+                if not probe.get("ok"):
+                    out["warning"] = ("Провайдер сохранён, но модель недоступна: "
+                                      + str(probe.get("error") or "неизвестная ошибка"))
+                self.send_json(out)
+                return True
+            if rest == "/probe":
+                # Проверить черновик БЕЗ сохранения (кнопка «Проверить» в форме).
+                wait = _providers_probe_allowed("draft", PROVIDERS_PROBE_SINGLE_SEC)
+                if wait:
+                    self.send_json({"error": "Подожди пару секунд перед следующей проверкой.",
+                                    "retryAfter": int(wait)}, 429,
+                                   headers={"Retry-After": str(int(wait))})
+                    return True
+                try:
+                    probe = _AI.probe_draft(payload)
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 400)
+                    return True
+                self.send_json({"ok": True, "probe": probe})
+                return True
+            if rest in ("/probe-all", "/models-all"):
+                # Разом по всем настроенным (последовательно, не параллелью:
+                # слоты модели и так заняты живым трафиком учеников).
+                want_models = rest == "/models-all"
+                wait = _providers_probe_allowed(
+                    "models-all" if want_models else "all",
+                    PROVIDERS_MODELS_ALL_MIN_SEC if want_models else PROVIDERS_PROBE_ALL_SEC)
+                if wait:
+                    self.send_json({"error": "Проверка всех недавно запускалась. Подожди немного.",
+                                    "retryAfter": int(wait)}, 429,
+                                   headers={"Retry-After": str(int(wait))})
+                    return True
+                try:
+                    order = _AI.effective_priority()
+                except Exception:
+                    order = []
+                results: dict = {}
+                for pid in order:
+                    try:
+                        if want_models:
+                            models = _AI.list_models(pid)
+                            results[pid] = {"ok": True, "models": models.get("models") or [],
+                                            "total": models.get("total") or 0,
+                                            "latencyMs": models.get("latencyMs") or 0}
+                        else:
+                            results[pid] = _AI.probe_provider(pid)
+                    except (KeyError, ValueError) as exc:
+                        results[pid] = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
+                self.send_json({"ok": True, "results": results,
+                                "mode": "models" if want_models else "probe",
+                                "checkedAt": int(time.time() * 1000)})
+                return True
+            if rest == "/slots":
+                # Выставить приоритеты разом: {slots: {high, medium, low}}.
+                slots = payload.get("slots")
+                if not isinstance(slots, dict):
+                    self.send_json({"error": "Нужен объект slots {high, medium, low}"}, 400)
+                    return True
+                try:
+                    saved = _AI.providers_set_slots(slots)
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 400)
+                    return True
+                admin_audit(conn, actor_id, "ai-provider-slots", None,
+                            json.dumps(saved, ensure_ascii=False)[:200])
+                self.send_json({"ok": True, **_AI.providers_overview()})
+                return True
+            parts = rest.strip("/").split("/")
+            if len(parts) == 2 and parts[1] in ("probe", "probe-model", "probe-models",
+                                                "apply", "reset"):
+                pid = parts[0].strip().lower()
+                action = parts[1]
+                if not pid:
+                    self.send_json({"error": "Некорректный идентификатор"}, 400)
+                    return True
+                # Смена модели и сброс — это запись, а не опрос: троттлинг
+                # им не нужен (и не должен мешать), пауза стоит только на
+                # пробах, которые реально ходят в провайдера.
+                if action in ("apply", "reset"):
+                    try:
+                        if action == "reset":
+                            _AI.provider_reset(pid)
+                            admin_audit(conn, actor_id, "ai-provider-reset", None, pid[:64])
+                            self.send_json({"ok": True, "provider": _AI._public_provider_card(pid)})
+                            return True
+                        patch = {k: v for k, v in payload.items()
+                                 if k in ("model", "base_url", "baseUrl", "api_key", "apiKey",
+                                          "auth", "use_wallet_balance", "useWalletBalance",
+                                          "merge_system", "mergeSystem", "model_title", "modelTitle")}
+                        try:
+                            _AI.provider_set_override(pid, patch)
+                        except KeyError:
+                            self.send_json({"error": "Провайдер не найден"}, 404)
+                            return True
+                        if "slot" in payload:
+                            # Приоритет — часть той же кнопки «Сохранить»: в
+                            # модалке это сегмент-контрол, и отдельный запрос
+                            # после сохранения означал бы, что модель и слот
+                            # применяются в разные моменты (между ними запрос
+                            # ученика ушёл бы на старый порядок).
+                            cur = dict(_AI.providers_overview().get("slots") or {})
+                            want = payload.get("slot")
+                            want = None if want in (None, "", "none", "null") else str(want).strip().lower()
+                            for slot_name in ("high", "medium", "low"):
+                                if cur.get(slot_name) == pid:
+                                    cur[slot_name] = None
+                            if want:
+                                if want not in ("high", "medium", "low"):
+                                    self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
+                                    return True
+                                cur[want] = pid
+                            try:
+                                _AI.providers_set_slots(cur)
+                            except ValueError as exc:
+                                self.send_json({"error": str(exc)}, 400)
+                                return True
+                        admin_audit(conn, actor_id, "ai-provider-apply", None, pid[:64])
+                        # Проверка применённого — сразу по новой модели, чтобы
+                        # админ увидел работоспособность того, что сохранил.
+                        try:
+                            probe = _AI.probe_provider(pid)
+                        except (KeyError, ValueError) as exc:
+                            probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
+                        out = {"ok": True, "provider": _AI._public_provider_card(pid),
+                               "probe": probe}
+                        if not probe.get("ok"):
+                            out["warning"] = ("Сохранено, но модель не отвечает: "
+                                              + str(probe.get("error") or "неизвестная ошибка"))
+                        self.send_json(out)
+                        return True
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                # Разные кнопки — разные бакеты: «проверить провайдера» и
+                # «проверить выбранную модель» идут в ОДНОМ окне, иначе две
+                # соседние кнопки в модалке давали бы 429 друг другу, хотя это
+                # разные вопросы к провайдеру. Каждая кнопка защищена отдельно.
+                # «Пинг всех моделей» — это до PROBE_MODELS_MAX живых запросов
+                # подряд, поэтому пауза на него заметно длиннее.
+                if action == "probe-models":
+                    wait = _providers_probe_allowed(f"probe-models:{pid}",
+                                                    PROVIDERS_MODELS_PROBE_SEC)
+                    if wait:
+                        self.send_json({"error": "Модели только что проверяли. Подожди немного.",
+                                        "retryAfter": int(wait)}, 429,
+                                       headers={"Retry-After": str(int(wait))})
+                        return True
+                    wanted = payload.get("models")
+                    if wanted is not None and not isinstance(wanted, list):
+                        self.send_json({"error": "models должен быть списком"}, 400)
+                        return True
+                    try:
+                        out = _AI.probe_models(pid, wanted)
+                    except KeyError:
+                        self.send_json({"error": "Провайдер не найден"}, 404)
+                        return True
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                    self.send_json({"id": pid, **out})
+                    return True
+                wait = _providers_probe_allowed(
+                    (f"probe-model:{pid}" if action == "probe-model" else f"one:{pid}"),
+                    PROVIDERS_PROBE_SINGLE_SEC)
+                if wait:
+                    self.send_json({"error": "Подожди пару секунд перед следующей проверкой.",
+                                    "retryAfter": int(wait)}, 429,
+                                   headers={"Retry-After": str(int(wait))})
+                    return True
+                try:
+                    if action == "probe-model":
+                        wanted = str(payload.get("model") or "").strip()
+                        probe = _AI.probe_model(pid, wanted)
+                    else:
+                        probe = _AI.probe_provider(pid)
+                except KeyError:
+                    self.send_json({"error": "Провайдер не найден"}, 404)
+                    return True
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 400)
+                    return True
+                self.send_json({"ok": True, "id": pid, "probe": probe})
+                return True
+        except sqlite3.Error as exc:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            rid = log_request_error("admin-providers", exc)
+            self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                            "ref": rid}, 500)
+            return True
+        self.send_json({"error": "Not found"}, 404)
+        return True
+
+    def handle_admin_provider_put(self, conn: sqlite3.Connection, path: str) -> bool:
+        """PUT /api/admin/providers/<id>. Возвращает True, если путь наш."""
+        if not path.startswith("/api/admin/providers/"):
+            return False
+        auth = self.require_admin(conn)
+        if not auth:
+            return True
+        actor_id, _ = auth
+        if _AI is None:
+            self.send_json({"error": "Раздел временно недоступен"}, 503)
+            return True
+        pid = path[len("/api/admin/providers/"):].strip().lower().split("/")[0]
+        if not pid:
+            self.send_json({"error": "Некорректный идентификатор"}, 400)
+            return True
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный JSON"}, 400)
+            return True
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный JSON"}, 400)
+            return True
+        try:
+            builtin_ids = set(getattr(_AI, "PROVIDERS", {}) or {})
+            if pid in builtin_ids:
+                # Встроенный: слот, выключатель и поля поверх окружения
+                # (модель из списка моделей, при необходимости ключ/URL).
+                # Сброс к стандартным — отдельным POST .../reset.
+                allowed = {"slot", "enabled", "model", "base_url", "baseUrl",
+                           "api_key", "apiKey", "auth", "use_wallet_balance",
+                           "useWalletBalance", "merge_system", "mergeSystem"}
+                unknown = set(payload) - allowed
+                if unknown:
+                    self.send_json({"error": "У встроенного провайдера меняются приоритет, выключатель и значения поверх окружения"}, 400)
+                    return True
+                override_fields = {"model", "base_url", "baseUrl", "api_key", "apiKey", "auth",
+                                "use_wallet_balance", "useWalletBalance",
+                                "merge_system", "mergeSystem"}
+                if "enabled" in payload:
+                    _AI.provider_set_enabled(pid, bool(payload.get("enabled")))
+                if set(payload) & override_fields:
+                    # Поля поверх окружения (модель из списка моделей и т.п.).
+                    # Пустая модель = снять переопределение, т.е. вернуть
+                    # значение из окружения, а не «модель не задана».
+                    try:
+                        _AI.provider_set_override(
+                            pid, {k: v for k, v in payload.items() if k in override_fields})
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                if "slot" in payload:
+                    _cur = dict(_AI.providers_overview().get("slots") or {})
+                    want = payload.get("slot")
+                    want = None if want in (None, "", "none", "null") else str(want).strip().lower()
+                    # Снять слот с того, кто его держал: один приоритет — один
+                    # провайдер, молчаливая смена вместо ошибки.
+                    for slot in ("high", "medium", "low"):
+                        if _cur.get(slot) == pid:
+                            _cur[slot] = None
+                    if want:
+                        if want not in ("high", "medium", "low"):
+                            self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
+                            return True
+                        _cur[want] = pid
+                    _AI.providers_set_slots(_cur)
+                admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
+                card = _AI._public_provider_card(pid)
+                probe = None
+                if set(payload) & override_fields:
+                    # Модель сменилась — старая проверка больше не про текущую
+                    # конфигурацию, поэтому честно меряем заново.
+                    try:
+                        probe = _AI.probe_provider(pid)
+                    except (KeyError, ValueError) as exc:
+                        probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
+                out = {"ok": True, "provider": card, "slots": _AI.providers_overview().get("slots") or {}}
+                if probe is not None:
+                    out["probe"] = probe
+                    if not probe.get("ok"):
+                        out["warning"] = ("Сохранено, но модель не отвечает: "
+                                          + str(probe.get("error") or "неизвестная ошибка"))
+                self.send_json(out)
+                return True
+            try:
+                patch = _AI.validate_custom_payload(payload, is_update=True, existing_id=pid)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return True
+            try:
+                _AI.custom_provider_update(pid, patch)
+            except KeyError:
+                self.send_json({"error": "Провайдер не найден"}, 404)
+                return True
+            if "slot" in patch and patch.get("slot") is not None:
+                cur = dict(_AI.providers_overview().get("slots") or {})
+                for slot in ("high", "medium", "low"):
+                    if cur.get(slot) == pid:
+                        cur[slot] = None
+                cur[patch["slot"]] = pid
+                try:
+                    _AI.providers_set_slots(cur)
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 400)
+                    return True
+            elif "slot" in payload and payload.get("slot") in (None, "", "none", "null"):
+                cur = dict(_AI.providers_overview().get("slots") or {})
+                for slot in ("high", "medium", "low"):
+                    if cur.get(slot) == pid:
+                        cur[slot] = None
+                _AI.providers_set_slots(cur)
+            admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
+            try:
+                probe = _AI.probe_provider(pid)
+            except (KeyError, ValueError) as exc:
+                probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
+            out = {"ok": True, "provider": _AI._public_provider_card(pid), "probe": probe}
+            if not probe.get("ok"):
+                out["warning"] = ("Изменения сохранены, но модель недоступна: "
+                                  + str(probe.get("error") or "неизвестная ошибка"))
+            self.send_json(out)
+            return True
+        except sqlite3.Error as exc:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            rid = log_request_error("admin-providers", exc)
+            self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                            "ref": rid}, 500)
+            return True
+
+    def handle_admin_provider_delete(self, conn: sqlite3.Connection, path: str) -> bool:
+        """DELETE /api/admin/providers/<id>. Возвращает True, если путь наш."""
+        if not path.startswith("/api/admin/providers/"):
+            return False
+        auth = self.require_admin(conn)
+        if not auth:
+            return True
+        actor_id, _ = auth
+        if _AI is None:
+            self.send_json({"error": "Раздел временно недоступен"}, 503)
+            return True
+        pid = path[len("/api/admin/providers/"):].strip().lower().split("/")[0]
+        if not pid:
+            self.send_json({"error": "Некорректный идентификатор"}, 400)
+            return True
+        try:
+            _AI.custom_provider_delete(pid)
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, 400)
+            return True
+        except KeyError:
+            self.send_json({"error": "Провайдер не найден"}, 404)
+            return True
+        except sqlite3.Error as exc:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            rid = log_request_error("admin-providers", exc)
+            self.send_json({"error": "Не удалось удалить. Попробуй ещё раз.",
+                            "ref": rid}, 500)
+            return True
+        admin_audit(conn, actor_id, "ai-provider-delete", None, pid[:64])
+        self.send_json({"ok": True, "id": pid})
+        return True
 
     def support_request_is_same_origin(self) -> bool:
         """Reject browser cross-site posts while allowing non-browser clients."""
@@ -9059,17 +10087,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
-        if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout"):
+        if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout",
+                    "/api/auth/google/confirm", "/api/auth/google/unlink"):
             # Общий per-IP бакет: без него на /api/auth/* не было НИКАКОГО
             # ограничения, а auth_login_allowed считает только неудачи и
             # очищается на успехе. Скрипт без кук, меняя email, получал
             # неограниченное число 200-ответов, а register успевал завести
             # строку users ДО проверки дубля — то есть аккаунты-переростки.
+            # Внешний вход стоит в том же списке: confirm подтверждает пароль,
+            # unlink меняет доступ, и оба обязаны быть под тем же пределом.
             if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/auth/register": self.handle_auth_register(conn)
                 elif path == "/api/auth/login": self.handle_auth_login(conn)
+                elif path == "/api/auth/google/confirm": self.handle_auth_google_confirm(conn)
+                elif path == "/api/auth/google/unlink": self.handle_auth_google_unlink(conn)
                 else: self.handle_auth_logout(conn)
             except sqlite3.Error as exc:
                 try: conn.rollback()
@@ -9097,6 +10130,25 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
                                 "ref": rid}, 500)
             except (ValueError, KeyError) as exc:
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path == "/api/admin/providers" or path.startswith("/api/admin/providers/"):
+            # Провайдеры ИИ: создание, слоты, ручные пробы. За require_admin,
+            # как весь /admin; CSRF — общий guard_csrf в начале do_POST.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                self.handle_admin_providers_post(conn, path)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-providers", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
@@ -9394,7 +10446,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "catalog": catalog_summary_payload(conn, subject),
                                     "state": pending_state(conn, subject),
                                     "accountId": None,
-                                    "auth": {"registered": False, "email": None},
+                                    "auth": {"registered": False, "email": None, "providers": [],
+                                                 "googleEnabled": oauth_enabled()},
                                     "isAdmin": False})
                     return
                 subject = set_current_subject(conn, user_id, wanted)
@@ -9402,7 +10455,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "catalog": catalog_summary_payload(conn, subject),
                                 "state": read_state(conn, user_id, subject),
                                 "accountId": account_id_for(conn, user_id),
-                                "auth": auth_state_payload(conn, user_id),
+                                "auth": {**auth_state_payload(conn, user_id), "googleEnabled": oauth_enabled()},
                                 "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))}, token=token)
             except sqlite3.Error as exc:
                 try: conn.rollback()
@@ -9626,7 +10679,8 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             store_essay_check(conn, user_id, subject_now, payload.get("text"),
                                               _AI.last_used_provider() or "ai+grammar", result,
-                                              note=note)
+                                              note=note,
+                                              model=_AI.last_used_model() or "")
                             conn.commit()
                         except (sqlite3.Error, ValueError) as exc:
                             # Не записали — значит evaluation позже честно скажет
@@ -10185,6 +11239,44 @@ class Handler(BaseHTTPRequestHandler):
                     if status != "all" and status not in SUPPORT_INBOX_STATUSES:
                         self.send_json({"error": "Некорректный статус"}, 400); return
                     self.send_json(admin_support_inbox(conn, limit, offset, status)); return
+                if path == "/api/admin/providers":
+                    try:
+                        self.handle_admin_providers_list(conn)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("admin-get", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500)
+                    return
+                # GET /api/admin/providers/<id>/models — список моделей
+                # ПРОВАЙДЕРА, а не локальный список: единственный честный
+                # источник имён, и он требует живого GET <base>/models.
+                mparts = path.split("/")
+                if len(mparts) == 6 and mparts[3] == "providers" and mparts[5] == "models":
+                    pid = unquote(mparts[4]).strip().lower()
+                    if not pid or _AI is None:
+                        self.send_json({"error": "Раздел временно недоступен"}, 503)
+                        return
+                    wait = _providers_probe_allowed(f"models:{pid}", PROVIDERS_MODELS_MIN_SEC)
+                    if wait:
+                        self.send_json({"error": "Список моделей недавно запрашивали. Подожди немного.",
+                                        "retryAfter": int(wait)}, 429,
+                                       headers={"Retry-After": str(int(wait))})
+                        return
+                    try:
+                        models = _AI.list_models(pid)
+                    except KeyError:
+                        self.send_json({"error": "Провайдер не найден"}, 404)
+                        return
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 502)
+                        return
+                    except (TimeoutError, OSError) as exc:
+                        rid = log_request_error("admin-providers-models", exc)
+                        self.send_json({"error": "Провайдер не ответил. Попробуй ещё раз.",
+                                        "ref": rid}, 502)
+                        return
+                    self.send_json({"ok": True, "id": pid, **models})
+                    return
                 parts = path.split("/")
                 if len(parts) == 5 and parts[3] == "users":
                     target_id = resolve_admin_target(conn, parts[4])
@@ -10277,13 +11369,36 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_header("Content-Length", str(len(body)))
                         self.end_headers(); self.wfile.write(body); return
                     self.send_json(public_status_payload(conn)); return
+                # Внешний вход: два редиректа, оба без записи в базу, кроме
+                # успешного callback. Логины живут под общим per-IP бакетом
+                # /api/ (он уже списан выше), а неудачи считает
+                # auth_login_allowed — тот же антибрутфорс, что у пароля.
+                if path == OAUTH_START_PATH:
+                    try:
+                        self.handle_auth_google_start(conn)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("oauth-start", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500)
+                    return
+                if path == OAUTH_CALLBACK_PATH:
+                    try:
+                        self.handle_auth_google_callback(conn)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("oauth-callback", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500)
+                    return
                 # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
                     if auth_uid is not None and self.reject_if_blocked(conn, auth_uid):
                         return
                     self.send_json({"user": auth_user_payload(conn, auth_uid) if auth_uid is not None else None,
-                                    "isAdmin": is_admin_session(conn, auth_uid, cookie_value(self, ADMIN_COOKIE_NAME))}); return
+                                    "isAdmin": is_admin_session(conn, auth_uid, cookie_value(self, ADMIN_COOKIE_NAME)),
+                                    # Кнопка входа скрывается сама, если ключей нет:
+                                    # клиенту не нужно знать, настроен ли провайдер.
+                                    "google": oauth_enabled()}); return
                 # Устройства: только свои активные сессии, без минта аккаунта.
                 if path == "/api/auth/devices":
                     try:
@@ -10482,11 +11597,12 @@ class Handler(BaseHTTPRequestHandler):
                         # Строка в users появится только после заявки
                         # /api/profile/claim, то есть после пройденного онбординга.
                         self.send_json({"catalog": catalog, "state": pending_state(conn, eff),
-                                        "accountId": None, "auth": {"registered": False, "email": None},
+                                        "accountId": None, "auth": {"registered": False, "email": None, "providers": [],
+                                                 "googleEnabled": oauth_enabled()},
                                         "isAdmin": False, "guestPending": True})
                         return
                     self.send_json({"catalog": catalog, "state": read_state(conn, user_id, eff), "accountId": account_id_for(conn, user_id),
-                                    "auth": auth_state_payload(conn, user_id),
+                                    "auth": {**auth_state_payload(conn, user_id), "googleEnabled": oauth_enabled()},
                                     "isAdmin": is_admin_session(conn, user_id, cookie_value(self, ADMIN_COOKIE_NAME))}, token=token); return
                 self.send_json({"error": "Not found"}, 404); return
             except sqlite3.Error as exc:
@@ -10735,6 +11851,27 @@ class Handler(BaseHTTPRequestHandler):
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
+        if path == "/api/admin/providers" or path.startswith("/api/admin/providers/"):
+            # PUT /api/admin/providers/<id> — правка провайдера (слот/выключатель
+            # у встроенного, поля + проба у своего). POST /api/admin/providers
+            # без id создаёт нового — он живёт в do_POST выше, а не здесь.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                if not self.handle_admin_provider_put(conn, path):
+                    self.send_json({"error": "Not found"}, 404)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-providers", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            except (ValueError, KeyError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path == "/api/state":
             # Полные снапшоты были источником DELETE+INSERT всех таблиц и
             # могли терять чужую историю. Клиент использует доменные endpoints:
@@ -10753,6 +11890,9 @@ class Handler(BaseHTTPRequestHandler):
             # probing returns 401, not a misleading 404/405 difference.
             conn = connect()
             try:
+                if path.startswith("/api/admin/providers/"):
+                    self.handle_admin_provider_delete(conn, path)
+                    return
                 if not self.require_admin(conn): return
                 self.send_json({"error": "Not found"}, 404)
             finally: conn.close()

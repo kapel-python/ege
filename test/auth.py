@@ -88,6 +88,19 @@ def conn_count_users(server) -> int:
         conn.close()
 
 
+
+def auth_slice(payload):
+    """Значимая часть auth-среза: registered + email.
+
+    Срез вырос (providers, googleEnabled — вход через Google), и сравнивать
+    его целиком значит ломать тесты на каждом новом поле. Признаки входа
+    проверяем отдельно: providers — список, googleEnabled — булево.
+    """
+    auth = (payload or {}).get("auth") or {}
+    assert isinstance(auth.get("providers"), list), auth
+    assert isinstance(auth.get("googleEnabled"), bool), auth
+    return {"registered": auth.get("registered"), "email": auth.get("email")}
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-auth-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -160,7 +173,7 @@ def main():
 
             status, boot = request(opener_a, base, "/api/bootstrap")
             assert boot["accountId"] == account_a, boot["accountId"]
-            assert boot["auth"] == {"registered": True, "email": "user-a@example.com"}, boot["auth"]
+            assert auth_slice(boot) == {"registered": True, "email": "user-a@example.com"}, boot["auth"]
             assert boot["state"]["name"] == "Пользователь А", boot["state"]["name"]
             assert boot["state"]["onboarded"] is True, boot["state"]
             assert "Гостевой прогресс А" in [i["text"] for i in boot["state"]["timeline"]], boot["state"]["timeline"]
@@ -208,7 +221,7 @@ def main():
             account_b = reg_b["user"]["accountId"]
             assert account_b != account_a, (account_a, account_b)
             status, boot_b = request(opener_b, base, "/api/bootstrap-lite")
-            assert boot_b["auth"] == {"registered": True, "email": "user-b@example.com"}, boot_b["auth"]
+            assert auth_slice(boot_b) == {"registered": True, "email": "user-b@example.com"}, boot_b["auth"]
 
             # 7. Занятый email со второго устройства -> 409.
             status, dup = request(opener_b, base, "/api/auth/register", "POST", {

@@ -146,11 +146,19 @@ const revokeBody = fnBody(src, "async function revokeDeviceSession(");
 const chooseBody = fnBody(src, "async function chooseLoginSubject(");
 const setTrue = src.match(/pendingSubjectChoice\s*=\s*true/g) || [];
 const bootBody = fnBody(src, "function bootstrapApp(");
-t("флаг включается только входом и восстановлением пикера после перезагрузки",
-  setTrue.length === 2
-    && !!loginBody && /pendingSubjectChoice\s*=\s*true/.test(loginBody)
+/* Поднимать флаг могут только входы и восстановление пикера после
+   перезагрузки: парольный вход, подтверждение привязки Google и тот же
+   пикер предмета, куда сервер возвращает человека после входа через Google
+   (в том числе по прямой ссылке #/subject). Список назван явно, потому что
+   простое «сколько раз встретилось» перестало значить: новый способ входа
+   ломал бы тест без всякой причины. */
+const googleConfirmBody = fnBody(src, "async function submitGoogleConfirm(");
+t("флаг включается входами и восстановлением пикера после перезагрузки",
+  !!loginBody && /pendingSubjectChoice\s*=\s*true/.test(loginBody)
+    && !!googleConfirmBody && /pendingSubjectChoice\s*=\s*true/.test(googleConfirmBody)
     && !!bootBody && /pendingSubjectChoice\s*=\s*true/.test(bootBody)
-    && /sessionStorage\.getItem\("ege_login_subject_pending"\)/.test(bootBody),
+    && /sessionStorage\.getItem\("ege_login_subject_pending"\)/.test(bootBody)
+    && /currentRoute\(\)\s*===\s*"subject"/.test(bootBody),
   `найдено ${setTrue.length}`);
 t("submitLogin найден", !!loginBody);
 t("флаг включается именно в submitLogin",

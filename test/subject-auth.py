@@ -59,6 +59,19 @@ def make_device():
     return opener, jar
 
 
+
+def auth_slice(payload):
+    """Значимая часть auth-среза: registered + email.
+
+    Срез вырос (providers, googleEnabled — вход через Google), и сравнивать
+    его целиком значит ломать тесты на каждом новом поле. Признаки входа
+    проверяем отдельно: providers — список, googleEnabled — булево.
+    """
+    auth = (payload or {}).get("auth") or {}
+    assert isinstance(auth.get("providers"), list), auth
+    assert isinstance(auth.get("googleEnabled"), bool), auth
+    return {"registered": auth.get("registered"), "email": auth.get("email")}
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-subj-auth-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -91,7 +104,7 @@ def main():
             assert status == 200, (status, switched)
             assert switched["subject"] == "basic_math", switched["subject"]
             assert switched["accountId"] == account, (switched["accountId"], account)
-            assert switched["auth"] == {"registered": True, "email": "auth-user@example.com"}, switched["auth"]
+            assert auth_slice(switched) == {"registered": True, "email": "auth-user@example.com"}, switched["auth"]
 
             # 2. Быстрые повторные смены туда-обратно: auth не теряется ни разу.
             for expected in ("profile_math", "basic_math", "profile_math"):
@@ -108,7 +121,7 @@ def main():
             assert status == 200, (status, reloaded)
             assert reloaded["state"]["subject"] == "profile_math", reloaded["state"]["subject"]
             assert reloaded["catalog"]["subject"] == "profile_math", reloaded["catalog"]["subject"]
-            assert reloaded["auth"] == {"registered": True, "email": "auth-user@example.com"}, reloaded["auth"]
+            assert auth_slice(reloaded) == {"registered": True, "email": "auth-user@example.com"}, reloaded["auth"]
             assert reloaded["accountId"] == account, reloaded["accountId"]
 
             # 4. Гость, меняющий предмет, остаётся гостем — auth не выдумывается.
@@ -123,7 +136,7 @@ def main():
             status, guest_switch = request(guest_opener, base, "/api/subject", "POST", {"subject": "basic_math"})
             assert status == 200, (status, guest_switch)
             assert guest_switch["subject"] == "basic_math", guest_switch["subject"]
-            assert guest_switch["auth"] == {"registered": False, "email": None}, guest_switch["auth"]
+            assert auth_slice(guest_switch) == {"registered": False, "email": None}, guest_switch["auth"]
             assert guest_switch["accountId"] is None, guest_switch["accountId"]
             status, guest_reload = request(guest_opener, base, "/api/bootstrap-lite")
             assert guest_reload["auth"]["registered"] is False, guest_reload["auth"]

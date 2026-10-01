@@ -1011,6 +1011,48 @@ function currentRoute() {
   return h.split("/")[0] || "dashboard";
 }
 
+/* Параметры ВОЗВРАТА из внешнего входа живут во фрагменте адреса
+   (#/login?confirm=…&error=…) — их кладёт туда сервер редиректом после
+   Google. Фрагмент, а не query: его браузер серверу не отправляет, поэтому
+   подписанный токен подтверждения не попадает в access-лог nginx.
+   currentRoute() такой адрес не узнаёт («login?confirm=…»), поэтому
+   параметры читаются здесь и сразу снимаются replaceState — перезагрузка
+   страницы не должна снова показывать ту же просроченную просьбу. */
+function hashQueryValue(key) {
+  const h = String(location.hash || "");
+  const i = h.indexOf("?");
+  if (i < 0) return "";
+  const raw = h.slice(i + 1).split("&");
+  for (const part of raw) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (part.slice(0, eq) !== key) continue;
+    try { return decodeURIComponent(part.slice(eq + 1)); } catch (_) { return part.slice(eq + 1); }
+  }
+  return "";
+}
+
+function clearHashQuery() {
+  const h = String(location.hash || "");
+  const i = h.indexOf("?");
+  if (i < 0) return;
+  const next = h.slice(0, i) || "#/dashboard";
+  try { history.replaceState(null, "", next); } catch (_) {}
+}
+
+/* Возврат из внешнего входа разбирается ОДИН раз на загрузку страницы: если
+   в адресе есть наши параметры, а человек оказался не на экране входа —
+   ведём его туда, иначе сообщение «ссылка устарела» потерялось бы на
+   главной. */
+function routeGoogleReturn() {
+  const confirmToken = hashQueryValue("confirm");
+  const error = hashQueryValue("error");
+  if (!confirmToken && !error) return;
+  if (currentRoute() === "login") return;
+  const query = confirmToken ? `confirm=${encodeURIComponent(confirmToken)}` : `error=${encodeURIComponent(error)}`;
+  location.hash = `#/login?${query}`;
+}
+
 /* Параметр глубокого маршрута: #/lesson/<id>, #/practice/<missionId>,
    #/boss/<bossId>, #/skill/<skillId>. После перезагрузки страницы
    пользователь возвращается ровно туда, где был. */
@@ -6858,20 +6900,49 @@ async function revokeDeviceSession(id) {
    ============================================================ */
 
 function accountAuthHTML() {
-  const auth = Store.auth || { registered: false, email: null };
+  const auth = Store.auth || { registered: false, email: null, providers: [] };
+  const googleLinked = !!(auth.providers && auth.providers.indexOf("google") >= 0);
+  const googleRow = (auth.registered && auth.googleEnabled) ? `
+    <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
+      ${googleLinked
+        ? `<button class="btn btn--sm" onclick="unlinkGoogle()">Отвязать Google</button>`
+        : `<button class="btn btn--sm" onclick="AuthAPI.startGoogle()">Привязать Google</button>`}
+    </div>` : "";
   if (auth.registered) {
     return `
       <div class="auth-status" style="margin-top:8px">
         <span class="chip chip--success">${icon("check")} привязан</span>
         <span class="auth-status__email mono">${esc(auth.email || "")}</span>
       </div>
-      <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>`;
+      <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>
+      ${googleRow}`;
   }
   return `
     <div class="settings-row__sub">Гостевой профиль — прогресс привязан к этому устройству.</div>
     <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="btn btn--primary btn--sm" onclick="go('register')">Войти или зарегистрироваться</button>
     </div>`;
+}
+
+/* Отвязка Google намеренно недоступна аккаунту без пароля: иначе человек,
+   зашедший только через Google, одним кликом лишил бы себя единственного
+   входа в свой же аккаунт вместе со всем прогрессом, а восстановить доступ
+   было бы нечем. Сервер отдаёт 400 NO_PASSWORD — тот же ответ рисуем здесь
+   заранее, чтобы кнопка не выглядела рабочей. */
+async function unlinkGoogle() {
+  try { await AuthAPI.unlinkGoogle(); }
+  catch (error) {
+    const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
+    if (code === "NO_PASSWORD") {
+      toast("Сначала задай пароль — иначе вход останется только через Google", "toast--error", "x");
+      return;
+    }
+    toast(authFormError(error, "Не удалось отвязать Google. Попробуй ещё раз."));
+    return;
+  }
+  await Store.refreshAfterAuth();
+  toast("Google отвязан", "", "check");
 }
 
 /* Выбор предмета при входе. Флаг живёт в памяти вкладки (+ дублируется в
@@ -6895,7 +6966,47 @@ function authScreenShell(title, sub, body) {
     </div>`;
 }
 
+/* Кнопка внешнего входа рисуется ТОЛЬКО когда сервер сказал, что вход через
+   Google настроен (Store.auth.googleEnabled из bootstrap). Иначе человек
+   увидел бы кнопку, которая ведёт в 503, а проверить это можно было бы
+   только кликом. Значок — фирменный Google, подпись наша. */
+function googleSignInHTML(label) {
+  if (!(Store.auth && Store.auth.googleEnabled)) return "";
+  return `
+    <div class="auth-sep"><span>или</span></div>
+    <button class="auth-google" type="button" onclick="AuthAPI.startGoogle()">
+      <svg class="auth-google__logo" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      <span>${esc(label || "Войти через Google")}</span>
+    </button>`;
+}
+
+/* Тексты отказа внешнего входа — по reason'у, который кладёт сервер.
+   Причина одна и та же для ученика (ничего не вышло) и разная для нас в
+   комментарии: подробности провайдера наружу не идут. */
+const GOOGLE_ERROR_TEXT = {
+  denied: "Вход через Google отменён.",
+  state: "Ссылка входа устарела. Попробуй ещё раз.",
+  code: "Google не принял код входа. Попробуй ещё раз.",
+  identity: "Google не подтвердил этот адрес. Войди паролем.",
+  blocked: "Аккаунт заблокирован.",
+  unavailable: "Google сейчас недоступен. Попробуй позже.",
+  unconfigured: "Вход через Google временно недоступен.",
+  failed: "Не удалось войти через Google. Попробуй ещё раз.",
+};
+
+/* Подтверждение привязки: адрес уже занят парольным аккаунтом. Молча
+   склеивать их нельзя (это путь к угону чужой учётки), поэтому спрашиваем
+   пароль ИМЕННО ЭТОГО аккаунта. Токен из ссылки живёт 10 минут и подписан
+   сервером — подсунуть свой нельзя. */
 function screenLogin(root) {
+  const pending = hashQueryValue("confirm");
+  const errorReason = hashQueryValue("error");
+  clearHashQuery();
   if (Store.auth && Store.auth.registered) {
     root.innerHTML = authScreenShell("Вы уже вошли",
       `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
@@ -6904,6 +7015,26 @@ function screenLogin(root) {
        </div>`);
     return;
   }
+  if (pending) {
+    root.innerHTML = authScreenShell("Подтверди вход",
+      "Аккаунт с этим адресом уже есть на сайте. Введи его пароль — и Google привяжется к нему.",
+      `
+    <form class="auth-form" onsubmit="submitGoogleConfirm(event)">
+      <input type="hidden" name="pending" value="${esc(pending)}">
+      <label class="auth-field"><span>Пароль существующего аккаунта</span>
+        <input class="answer-input" type="password" name="password" autocomplete="current-password" required autofocus>
+      </label>
+      <div class="auth-form__error" id="auth-error" role="alert"></div>
+      <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Войти и привязать Google</button>
+    </form>
+    <div class="auth-note">Пароль проверяется на сервере и никуда не сохраняется. Без него Google
+      не привяжется: адрес может принадлежать другому человеку.</div>
+    <div class="auth-switch">Привязка не нужна? <a href="#/login" onclick="go('login');return false">Войти паролем</a></div>`);
+    return;
+  }
+  const banner = errorReason
+    ? `<div class="auth-form__error is-visible" role="alert">${esc(GOOGLE_ERROR_TEXT[errorReason] || GOOGLE_ERROR_TEXT.failed)}</div>`
+    : "";
   root.innerHTML = authScreenShell("Вход",
     "Войди в существующий аккаунт — весь прогресс и настройки вернутся.",
     `
@@ -6917,11 +7048,35 @@ function screenLogin(root) {
       <div class="auth-form__error" id="auth-error" role="alert"></div>
       <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Войти</button>
     </form>
+    ${googleSignInHTML("Войти через Google")}
     <div class="auth-note">Гостевой прогресс на этом устройстве не переносится в существующий аккаунт.
       Чтобы сохранить его, <a href="#/register" onclick="go('register');return false">зарегистрируйтесь</a>.</div>
     <div class="auth-switch">Нет аккаунта? <a href="#/register" onclick="go('register');return false">Зарегистрироваться</a></div>`);
   const first = root.querySelector("input[name=email]");
   if (first) first.focus();
+}
+
+/* Подтверждение привязки внешнего адреса к парольному аккаунту. После
+   успеха — тот же путь, что у обычного входа: сброс чужих сессий/уроков,
+   refreshAfterAuth и явный выбор предмета. */
+async function submitGoogleConfirm(event) {
+  event.preventDefault();
+  authFormBusy();
+  const form = event.target;
+  try {
+    await AuthAPI.confirmGoogle(form.pending.value, form.password.value);
+    try { Session.cur = null; } catch (_) {}
+    try { deactivateLessonClock(); } catch (_) {}
+    try { Lesson.cur = null; } catch (_) {}
+    try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+    await Store.refreshAfterAuth();
+    pendingSubjectChoice = true;
+    try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
+    toast("Вы вошли в аккаунт", "", "check");
+    go("subject");
+  } catch (error) {
+    authFormFail(authFormError(error, "Не удалось войти. Проверь пароль."));
+  }
 }
 
 function screenRegister(root) {
@@ -6949,6 +7104,7 @@ function screenRegister(root) {
       <div class="auth-form__error" id="auth-error" role="alert"></div>
       <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Создать аккаунт</button>
     </form>
+    ${googleSignInHTML("Зарегистрироваться через Google")}
     <div class="auth-switch">Уже есть аккаунт? <a href="#/login" onclick="go('login');return false">Войти</a></div>`);
   const first = root.querySelector((Store.state && Store.state.name) ? "input[name=email]" : "input[name=name]");
   if (first) first.focus();
@@ -7842,6 +7998,20 @@ function bootstrapApp() {
       try {
         if (sessionStorage.getItem("ege_login_subject_pending") === "1"
             && Store.auth && Store.auth.registered) pendingSubjectChoice = true;
+      } catch (_) {}
+      // Возврат из внешнего входа: сервер редиректит на #/login?confirm=…
+      // или #/login?error=…. Если человек оказался на другом разделе —
+      // ведём на экран входа, иначе причина отказа потерялась бы молча.
+      try { routeGoogleReturn(); } catch (_) {}
+      // Вход через Google возвращает на #/subject — это тот же выбор
+      // предмета, что и после парольного входа, поэтому блокировка
+      // навигации ставится тем же флагом (иначе после выбора предмета
+      // можно было бы уйти в профиль, не выбрав его).
+      try {
+        if (currentRoute() === "subject" && Store.auth && Store.auth.registered) {
+          pendingSubjectChoice = true;
+          try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
+        }
       } catch (_) {}
       // Кросс-таб синк: соседняя вкладка после каждого save оставляет маяк.
       // Увидели более свежий маяк (событие storage, возврат во вкладку) —

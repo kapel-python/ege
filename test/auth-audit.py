@@ -222,6 +222,19 @@ def db_query(server, sql, args=()):
         conn.close()
 
 
+
+def auth_slice(payload):
+    """Значимая часть auth-среза: registered + email.
+
+    Срез вырос (providers, googleEnabled — вход через Google), и сравнивать
+    его целиком значит ломать тесты на каждом новом поле. Признаки входа
+    проверяем отдельно: providers — список, googleEnabled — булево.
+    """
+    auth = (payload or {}).get("auth") or {}
+    assert isinstance(auth.get("providers"), list), auth
+    assert isinstance(auth.get("googleEnabled"), bool), auth
+    return {"registered": auth.get("registered"), "email": auth.get("email")}
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-audit-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
@@ -251,7 +264,7 @@ def main():
             check("S1: имя из формы регистрации применилось", boot["state"]["name"] == "Пользователь А",
                   boot["state"]["name"])
             check("S1: auth.registered=true, email выставлен",
-                  boot["auth"] == {"registered": True, "email": "a@ex.com"}, str(boot["auth"]))
+                  auth_slice(boot) == {"registered": True, "email": "a@ex.com"}, str(boot["auth"]))
             check("S1: XP/уровень живы после привязки", boot["state"]["xp"] > 0 and boot["state"]["totalSolved"] == 2)
             fp_a = fp(boot["state"])
 

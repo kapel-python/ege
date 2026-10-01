@@ -907,7 +907,8 @@ const ApiClient = {
     // (catalog, status, health) never check blocks, so they must not clear it.
     try {
       const enforcePaths = ["/api/bootstrap", "/api/bootstrap-lite", "/api/subjects",
-        "/api/auth/session", "/api/auth/devices", "/api/subject"];
+        "/api/auth/session", "/api/auth/devices", "/api/subject",
+        "/api/auth/google/unlink"];
       if (window.__egeBlocked && typeof path === "string"
           && enforcePaths.some((p) => path === p || path.indexOf(p + "?") === 0)) {
         window.__egeBlocked = null;
@@ -939,6 +940,26 @@ const AuthAPI = {
   },
   logout() {
     return ApiClient.post("/api/auth/logout", {});
+  },
+  /* Вход через Google. Поток серверный и с перезагрузкой страницы:
+     браузер уходит на 302 /api/auth/google, Google возвращает человека на
+     /api/auth/google/callback, и тот уже ставит HttpOnly-куку сессии и
+     отдаёт 302 в приложение. Поэтому здесь нет fetch — только переход,
+     и клиенту НИКОГДА не достаётся ни код, ни токен, ни client_secret. */
+  googleUrl() {
+    return "/api/auth/google";
+  },
+  startGoogle() {
+    window.location.href = AuthAPI.googleUrl();
+  },
+  /* Подтверждение привязки: адрес уже занят парольным аккаунтом, поэтому
+     личность к нему привязывается только после проверки пароля. pending —
+     подписанный сервером токен из ссылки (10 минут жизни). */
+  confirmGoogle(pending, password) {
+    return ApiClient.post("/api/auth/google/confirm", { pending, password });
+  },
+  unlinkGoogle() {
+    return ApiClient.post("/api/auth/google/unlink", {});
   },
   session() {
     return ApiClient.get("/api/auth/session");

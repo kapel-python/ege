@@ -121,7 +121,10 @@ const Store = {
   // Auth-срез текущего аккаунта из bootstrap: гость или зарегистрированный
   // пользователь (registered + email). Только для отображения в UI — никаких
   // решений на его основе, идентичность всегда определяется сервером по куке.
-  auth: { registered: false, email: null },
+  // providers — внешние способы входа ("google"); googleEnabled — настроен ли
+  // вход через Google на сервере: без него кнопка входа не рисуется вовсе,
+  // и клиенту не нужно знать ни про ключи, ни про провайдера.
+  auth: { registered: false, email: null, providers: [], googleEnabled: false },
   // Серверный признак администратора из того же bootstrap (isAdmin: true/false).
   // Решает только backend через admin_sessions; фронт его лишь отображает:
   // показывает/скрывает admin-блок и решает, запрашивать ли inbox. Никогда не
@@ -273,10 +276,19 @@ const Store = {
       // accountId сохраняем известную сессию, но при смене accountId отсутствие
       // auth fail-closed — иначе UI старого аккаунта утекает в новый.
       this.auth = auth && typeof auth === "object"
-        ? { registered: !!auth.registered, email: auth.email || null }
+        ? { registered: !!auth.registered, email: auth.email || null,
+            providers: Array.isArray(auth.providers) ? auth.providers.map(String) : [],
+            googleEnabled: auth.googleEnabled === true }
         : (accountChanged
-          ? { registered: false, email: null }
-          : (this.auth || { registered: false, email: null }));
+          ? { registered: false, email: null, providers: [], googleEnabled: false }
+          : (this.auth || { registered: false, email: null, providers: [], googleEnabled: false }));
+      // Признак «вход через Google настроен» едет отдельным полем bootstrap и
+      // доживает смену аккаунта: при смене он сбрасывается, при обычном
+      // refresh — сохраняется (иначе кнопка входа мигала бы на каждом
+      // обновлении вкладки).
+      if (auth && typeof auth === "object" && auth.googleEnabled === true) {
+        this.auth.googleEnabled = true;
+      }
       // Fail-closed: нет явного true от сервера — не админ. Поле приходит из
       // bootstrap/bootstrap-lite/POST /api/subject; старые ответы без него
       // сбрасывают флаг, а не сохраняют чужой.
@@ -789,7 +801,9 @@ const Store = {
     }
     this.accountId = result.accountId;
     const user = result.user && typeof result.user === "object" ? result.user : {};
-    this.auth = { registered: !!user.registered, email: user.email || null };
+    this.auth = { registered: !!user.registered, email: user.email || null,
+      providers: Array.isArray(user.providers) ? user.providers.map(String) : this.auth.providers,
+      googleEnabled: this.auth.googleEnabled === true };
     this.isAdmin = result.isAdmin === true;
     return result;
   },
