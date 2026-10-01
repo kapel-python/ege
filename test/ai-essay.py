@@ -1445,6 +1445,14 @@ def test_off_task(ai) -> None:
 
 def main() -> int:
     print("AI-оценка сочинения: офлайн-регрессия" + (" + LIVE" if LIVE else ""))
+    # БД — ДО загрузки модуля ИИ. Конфиг провайдеров живёт в app_config
+    # (ai_custom_providers/ai_provider_slots), поэтому без temp-БД здесь
+    # модуль читал бы ПРОДАКТИВНУЮ базу: юнит-тест «без ключа» перестал бы
+    # быть без ключа (в проде есть свой провайдер), и хуже — тест читал бы
+    # боевые ключи провайдеров. То же касается server-части ниже.
+    os.environ["EGE_DB_PATH"] = str(Path(tempfile.mkdtemp(prefix="ege-ai-test-")) / "ege.sqlite3")
+    os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    os.environ["EGE_SUPPORT_SECRET"] = "ege-test-ai-secret-0123456789abcdef"
     ai = load_module("ege_ai_unit", AI_PATH)
     test_extract_json(ai)
     test_validate(ai)
@@ -1460,9 +1468,6 @@ def main() -> int:
     test_caps_and_tolerance(ai)
     test_config_and_transport(ai)
 
-    os.environ["EGE_DB_PATH"] = str(Path(tempfile.mkdtemp(prefix="ege-ai-test-")) / "ege.sqlite3")
-    os.environ["EGE_DISABLE_SYSTEMD"] = "1"
-    os.environ["EGE_SUPPORT_SECRET"] = "ege-test-ai-secret-0123456789abcdef"
     server = load_module("ege_ai_endpoint_test", SERVER_PATH)
     conn = server.connect()
     try:

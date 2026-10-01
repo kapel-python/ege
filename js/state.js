@@ -124,7 +124,7 @@ const Store = {
   // providers — внешние способы входа ("google"); googleEnabled — настроен ли
   // вход через Google на сервере: без него кнопка входа не рисуется вовсе,
   // и клиенту не нужно знать ни про ключи, ни про провайдера.
-  auth: { registered: false, email: null, providers: [], googleEnabled: false },
+  auth: { registered: false, email: null, providers: [], googleEnabled: false, hasPassword: false },
   // Серверный признак администратора из того же bootstrap (isAdmin: true/false).
   // Решает только backend через admin_sessions; фронт его лишь отображает:
   // показывает/скрывает admin-блок и решает, запрашивать ли inbox. Никогда не
@@ -278,10 +278,11 @@ const Store = {
       this.auth = auth && typeof auth === "object"
         ? { registered: !!auth.registered, email: auth.email || null,
             providers: Array.isArray(auth.providers) ? auth.providers.map(String) : [],
-            googleEnabled: auth.googleEnabled === true }
+            googleEnabled: auth.googleEnabled === true,
+            hasPassword: auth.hasPassword === true }
         : (accountChanged
-          ? { registered: false, email: null, providers: [], googleEnabled: false }
-          : (this.auth || { registered: false, email: null, providers: [], googleEnabled: false }));
+          ? { registered: false, email: null, providers: [], googleEnabled: false, hasPassword: false }
+          : (this.auth || { registered: false, email: null, providers: [], googleEnabled: false, hasPassword: false }));
       // Признак «вход через Google настроен» едет отдельным полем bootstrap и
       // доживает смену аккаунта: при смене он сбрасывается, при обычном
       // refresh — сохраняется (иначе кнопка входа мигала бы на каждом
@@ -803,7 +804,8 @@ const Store = {
     const user = result.user && typeof result.user === "object" ? result.user : {};
     this.auth = { registered: !!user.registered, email: user.email || null,
       providers: Array.isArray(user.providers) ? user.providers.map(String) : this.auth.providers,
-      googleEnabled: this.auth.googleEnabled === true };
+      googleEnabled: this.auth.googleEnabled === true,
+      hasPassword: user.hasPassword === true };
     this.isAdmin = result.isAdmin === true;
     return result;
   },

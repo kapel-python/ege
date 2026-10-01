@@ -289,7 +289,13 @@ function parseHash() {
   return { name: parts[0] || "dashboard", param: parts[1] || null };
 }
 
-function navigate(path) { location.hash = path; }
+function navigate(path) {
+  const next = `#${String(path || "").replace(/^#?\/?/, "")}`;
+  // Тот же адрес не даёт события hashchange: без этого «добавить провайдера»
+  // дважды подряд или возврат на себя же молча ничего не делали.
+  if (location.hash === next) { render(); return; }
+  location.hash = next;
+}
 
 /* ---------------- рендер-каркас ---------------- */
 
@@ -1807,6 +1813,24 @@ const Prov = {
   ping: null, // последний «пинг всех»: {results, at} — рисуется в разделе
 };
 
+/* Состояние СТРАНИЦЫ одного провайдера (#/providers/<id>). Держим отдельно от
+   Prov: список провайдеров и настройка одного — разные экраны, и раньше их
+   состояние жило в одном объекте модалки, из-за чего перерисовка списка
+   сбрасывала открытую панель. */
+const ProvDetail = {
+  id: null,
+  data: null,        // карточка провайдера (свежая из overview)
+  models: null,      // {models, total, current, latencyMs, truncated}
+  loading: false,    // грузится список моделей
+  probing: false,    // идёт проверка одной модели
+  pinging: false,    // идёт живой пинг моделей
+  model: null,       // выбранная в поле модель
+  error: null,
+  verdict: "",       // вердикт проверки/применения (в DOM его терять нельзя)
+  ping: null,        // состояние живого пинга: results/order/okCount/done
+  current: { model: "", modelTitle: "" },  // что уже сохранено на сервере
+};
+
 const PROV_SLOT_OPTIONS = [
   { id: "", title: "Без приоритета" },
   { id: "high", title: "Высокий — первый" },
@@ -1817,6 +1841,16 @@ const PROV_SLOT_OPTIONS = [
    подсказок. PROV_SLOT_OPTIONS длинные (для выпадающего списка на карточке),
    в панели они не помещались и читались как «Высокий — первый» в кнопке. */
 const PROV_SLOT_LABELS = { high: "Высокий", medium: "Средний", low: "Низкий" };
+
+/* Сегмент-контрол на странице провайдера: короткие подписи + пояснение, зачем
+   слот нужен. PROV_SLOT_OPTIONS длиннее — они для выпадающего списка на
+   карточке, где места мало, а пояснение не помещается. */
+const PROV_SLOT_SEGMENTS = [
+  { id: "high", label: "Высокий", hint: "пробуем первым" },
+  { id: "medium", label: "Средний", hint: "если первый отказал" },
+  { id: "low", label: "Низкий", hint: "в самом конце" },
+  { id: "", label: "Без приоритета", hint: "вне очереди" },
+];
 
 function provRel(ts) {
   if (!ts) return "—";
@@ -1847,13 +1881,14 @@ function provCardHTML(p) {
   const busy = !!Prov.probing[p.id];
   return `
   <div class="a-prov-card${p.active ? " a-prov-card--active" : ""}">
-    <button type="button" class="a-prov-card__open" onclick="openProviderDetail('${esc(p.id)}')" title="Настройки провайдера и список моделей">
+    <button type="button" class="a-prov-card__open" onclick="navigate('/providers/${esc(p.id)}')" title="Настройки провайдера и список моделей">
       <div class="a-prov-top">
         <span class="a-dot a-dot--${dot}" title="${esc(dotLabel)}"></span>
         <span class="a-prov-title">${esc(p.title || p.id)}</span>
         ${p.builtin ? `<span class="a-chip" title="Стандартные значения — из окружения сервера">встроенный</span>` : `<span class="a-chip a-chip--accent">свой</span>`}
         ${p.active ? `<span class="a-chip a-chip--success" title="Запросы учеников идут сюда первым">активный</span>` : ""}
         ${p.modelOverridden ? `<span class="a-chip a-chip--warn" title="Модель изменена из админки">модель изменена</span>` : ""}
+        ${p.modelTitleMissing ? `<span class="a-chip a-chip--warn" title="Без названия ученик не увидит, какой моделью проверено сочинение — задайте его в панели">нет названия</span>` : ""}
         <span class="spacer"></span>
         <span class="a-prov-card__more" aria-hidden="true">${aicon("chevron")}</span>
       </div>
@@ -1916,7 +1951,7 @@ function drawProviders() {
         <span class="spacer"></span>
         <button class="btn btn--soft btn--sm" onclick="screenProviders(true)" title="Перечитать список без запросов к провайдерам">Обновить</button>
         <button class="btn btn--soft btn--sm" id="provProbeAllBtn" onclick="probeAllProviders()"${Prov.checkingAll ? " disabled" : ""}>${Prov.checkingAll ? "Проверяем…" : `${aicon("pulse")} Проверить всех`}</button>
-        <button class="btn btn--primary btn--sm" onclick="openProviderModal()">+ Добавить</button>
+        <button class="btn btn--primary btn--sm" onclick="navigate('/providers-new')">+ Добавить</button>
       </div>
       <div class="a-prov-order">${order.length ? order.map((id, i) => `${i ? '<span class="a-prov-arrow">→</span>' : ""}<span class="a-chip${i === 0 ? " a-chip--success" : ""}" title="${esc(names[id] || id)}">${i + 1}. ${esc(names[id] || id)}</span>`).join("") : `<span class="a-card__sub">Нет настроенных провайдеров — проверки сочинений и наставник отвечают 503.</span>`}</div>
       <div class="a-card__sub" style="margin-top:8px">Активный${d.active ? `: <b>${esc(names[d.active] || d.active)}</b> — новые запросы идут сюда первым` : ": нет"}. Статус «Используется» — успех живого трафика за последние ${Number(d.recentWindowSec) || 60} с, холостых запросов ради него нет. «Пинг всех» — живой запрос «привет» каждому провайдеру с задержкой.</div>
@@ -1929,8 +1964,13 @@ function drawProviders() {
 }
 
 async function screenProviders(quiet) {
+  // `quiet` — «обновить данные, не пересобирая экран». Это важно со СТРАНИЦЫ
+  // провайдера: там нет узла provBody, и общий путь перерисовки выбрасывал
+  // человека обратно в список, стирая вердикт проверки и напечатанные поля.
   if (!quiet) renderShell("providers", `<div id="provBody"></div>`);
-  if (!document.getElementById("provBody")) renderShell("providers", `<div id="provBody"></div>`);
+  if (!document.getElementById("provBody") && !document.getElementById("provModelsBtn")) {
+    renderShell("providers", `<div id="provBody"></div>`);
+  }
   if (!quiet) { Prov.loading = true; Prov.error = null; drawProviders(); }
   try {
     Prov.data = await AdminApi.get("/api/admin/providers");
@@ -1940,7 +1980,10 @@ async function screenProviders(quiet) {
     Prov.error = e.message || "неизвестная ошибка";
   }
   Prov.loading = false;
-  drawProviders();
+  // Если открыта страница провайдера — рисуем только список (он в другой
+  // вкладке/разделе) , а карточку на странице обновляет её собственный код.
+  if (document.getElementById("provBody")) drawProviders();
+  else if (ProvDetail.id) provDetailSyncFromCard(provById(ProvDetail.id) || {});
 }
 
 async function probeProvider(id) {
@@ -2001,13 +2044,18 @@ async function toggleProvider(id, enabled) {
 
 async function deleteProvider(id) {
   if (!confirm(`Удалить провайдера «${id}»? Из ротации он уйдёт сразу.`)) return;
+  let ok = false;
   try {
     await AdminApi.request(`/api/admin/providers/${encodeURIComponent(id)}`, { method: "DELETE" });
     toast("Провайдер удалён");
+    ok = true;
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     toast(`Не удалось удалить: ${e.message || "ошибка"}`, "err");
   }
+  // Со страницы провайдера уходим в список: настраивать удалённого больше
+  // нечего, а «обновить» оставило бы человека на карточке-призраке.
+  if (ok && ProvDetail.id === id) { navigate("/providers"); return; }
   await screenProviders(true);
 }
 
@@ -2016,77 +2064,186 @@ function provField(id) {
   return el ? el.value : "";
 }
 
-async function draftProbeFromModal() {
+/* ---------------- Добавление провайдера: СТРАНИЦА, а не модалка ----------------
+
+   Была модалка `.a-modal` — узкий блок с полями в один столбик поверх списка.
+   Настроек у провайдера много, и они не помещались: на телефоне низ срезался,
+   а «проверить» и «добавить» жили в одном ряду с полями. Теперь это страница
+   `#/providers-new` на той же сетке, что и страница существующего провайдера:
+   левая колонка — подключение и модель, правая — приоритет, quirks и что
+   будет после сохранения. */
+
+function provNewSlotSegHTML() {
+  return `<div class="a-seg2" role="group" aria-label="Приоритет провайдера в очереди">
+    ${PROV_SLOT_SEGMENTS.map((s) => `<button type="button" class="a-seg2__btn${s.id === "high" ? " a-seg2__btn--on" : ""}"
+        data-slot="${s.id}" onclick="setNewSlot('${s.id}')" title="${esc(s.hint)}">
+      ${esc(s.label)}<span class="a-seg2__hint">${esc(s.hint)}</span>
+    </button>`).join("")}
+  </div>`;
+}
+
+function setNewSlot(slot) {
+  const box = document.getElementById("provNewSlotSeg");
+  if (!box) return;
+  box.querySelectorAll(".a-seg2__btn").forEach((b) => {
+    b.classList.toggle("a-seg2__btn--on", (b.dataset.slot || "") === (slot || ""));
+  });
+  const note = document.getElementById("provNewSlotNote");
+  if (note) {
+    const d = Prov.data || {};
+    const held = Object.entries(d.slots || {}).filter(([, v]) => v);
+    const want = slot ? (PROV_SLOT_LABELS[slot] || slot) : "без приоритета";
+    note.textContent = slot
+      ? `Провайдер встанет в слот «${want}»` +
+        (held.some(([k]) => k === slot) ? ` — его сейчас держит ${provName(held.find(([k]) => k === slot)[1])}.` : " (слот свободен).")
+      : "Провайдер войдёт вне очереди по приоритету — работать будет, если остальные недоступны.";
+  }
+}
+
+function screenProviderNew() {
+  ProvDetail.id = null;
+  ProvDetail.models = null;
+  const d = Prov.data || {};
+  const held = Object.entries(d.slots || {}).filter(([, v]) => v)
+    .map(([k, v]) => `<span class="a-chip">${esc(k)}: ${esc(provName(v))}</span>`).join(" ");
+  renderShell("providers", `
+    <div class="a-page-head">
+      <a class="a-back" href="#/providers" title="К списку провайдеров">${aicon("chevron")} <span>Провайдеры</span></a>
+      <div class="a-page-head__main">
+        <span class="a-dot a-dot--idle"></span>
+        <div class="a-page-title-wrap">
+          <h1 class="a-page-title">Новый провайдер</h1>
+          <div class="a-page-sub">Обычный OpenAI-совместимый API: адрес, ключ, модель</div>
+        </div>
+      </div>
+      <div class="a-page-status">
+        <span class="a-page-status__item">${held ? `Занятые слоты: ${held}` : "Слоты приоритета свободны"}</span>
+      </div>
+    </div>
+
+    <div class="a-page-grid">
+      <div class="a-page-col">
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">Подключение</span></div>
+          <div class="a-form-grid">
+            <div class="a-field">
+              <label for="provId">ID латиницей</label>
+              <input class="a-input mono" id="provId" placeholder="openrouter" autocomplete="off" spellcheck="false">
+              <span class="a-field__hint">Короткий код провайдера в админке и в ротации. Латиница, цифры, дефис.</span>
+            </div>
+            <div class="a-field">
+              <label for="provTitle">Название</label>
+              <input class="a-input" id="provTitle" placeholder="OpenRouter" autocomplete="off">
+              <span class="a-field__hint">Как провайдер называется в списке.</span>
+            </div>
+          </div>
+          <div class="a-field">
+            <label for="provBaseUrl">Base URL</label>
+            <input class="a-input mono" id="provBaseUrl" placeholder="https://openrouter.ai/api/v1" autocomplete="off" spellcheck="false">
+            <span class="a-field__hint">Адрес API без завершающего слэша. Модели и проверка ходят туда.</span>
+          </div>
+          <div class="a-field">
+            <label for="provKey">API-ключ</label>
+            <input class="a-input mono" id="provKey" type="password" placeholder="sk-…" autocomplete="off">
+            <span class="a-field__hint">Хранится в базе (файл 0600) и никогда не отдаётся в браузер целиком.</span>
+          </div>
+          <div class="a-field">
+            <label for="provAuth">Авторизация</label>
+            <select class="a-select" id="provAuth">
+              <option value="bearer">Bearer (обычно)</option>
+              <option value="raw">Сырой ключ (как gptunnel)</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="a-card">
+          <div class="a-card__head">
+            <span class="a-card__title">Модель</span>
+            <span class="spacer"></span>
+            <button class="btn btn--soft btn--sm" id="provDraftBtn" type="button">${aicon("pulse")} Проверить без сохранения</button>
+          </div>
+          <div class="a-field">
+            <label for="provModel">ID модели у провайдера</label>
+            <input class="a-input mono" id="provModel" placeholder="openai/gpt-4o-mini" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="a-field">
+            <label for="provModelTitle">Название для ученика</label>
+            <input class="a-input" id="provModelTitle" placeholder="например: топ модель" autocomplete="off">
+            <span class="a-field__hint">Это увидит ученик на странице результата вместо технического ID. Пусто — строка не появится.</span>
+          </div>
+          <div id="provDraftResult"></div>
+        </section>
+      </div>
+
+      <div class="a-page-col a-page-col--side">
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">Место в очереди</span></div>
+          <div id="provNewSlotSeg">${provNewSlotSegHTML()}</div>
+          <div class="a-field__hint" id="provNewSlotNote">Провайдер встанет в слот «Высокий» (слот свободен).</div>
+        </section>
+
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">Особенности шлюза</span></div>
+          <label class="a-check"><input type="checkbox" id="provWallet"> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
+          <label class="a-check"><input type="checkbox" id="provMerge"> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label>
+          <div class="a-pnl__note">Оставьте пустым, если шлюз ведёт себя как обычный OpenAI API. Ошибка в этой настройке ломает все запросы, поэтому «проверить без сохранения» — правильный способ убедиться до добавления.</div>
+        </section>
+
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">Что будет после сохранения</span></div>
+          <div class="a-card__sub">Сохранение мгновенное: сервер ничего не спрашивает у шлюза. Проверить живым запросом можно на странице провайдера — «Проверить» или «Пинг всех моделей». Недоступная модель добавлению не мешает: она войдёт в ротацию, когда заработает.</div>
+        </section>
+      </div>
+    </div>
+
+    <div class="a-sticky-actions">
+      <span class="a-modal__error" id="provFormError" hidden></span>
+      <span class="spacer"></span>
+      <a class="btn btn--soft btn--sm" href="#/providers">Отмена</a>
+      <button class="btn btn--primary btn--sm" id="provSave" type="button">Добавить провайдера</button>
+    </div>`);
+  document.getElementById("provDraftBtn").onclick = draftProbeFromPage;
+  document.getElementById("provSave").onclick = saveProviderFromPage;
+}
+
+async function draftProbeFromPage() {
   const box = document.getElementById("provDraftResult");
   const btn = document.getElementById("provDraftBtn");
   if (btn) btn.disabled = true;
   if (box) box.innerHTML = `<span class="a-card__sub">Проверяем живым запросом «привет»…</span>`;
-  Prov.draftChecking = true;
   try {
     const r = await AdminApi.post("/api/admin/providers/probe", {
       base_url: provField("provBaseUrl"), model: provField("provModel"),
       api_key: provField("provKey"), auth: provField("provAuth"),
-      model_title: provField("provModelTitle"),
       useWalletBalance: document.getElementById("provWallet")?.checked,
     });
     const p = r && r.probe;
     if (box) box.innerHTML = p && p.ok
-      ? `<div class="a-prov-checkok">Модель отвечает (${fmtNum(p.latencyMs)} мс). Можно добавлять.</div>`
+      ? `<div class="a-prov-checkok">Модель отвечает (${fmtNum(p.latencyMs)} мс) — можно добавлять.</div>`
       : `<div class="a-prov-checkbad">Модель недоступна: ${esc((p && p.error) || "ошибка")}. Добавить можно — в ротацию войдёт, когда заработает.</div>`;
   } catch (e) {
+    if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     if (box) box.innerHTML = `<div class="a-prov-checkbad">${esc(e.message || "ошибка проверки")}</div>`;
   } finally {
-    Prov.draftChecking = false;
     if (btn) btn.disabled = false;
   }
 }
 
-function openProviderModal() {
-  const root = A.modalRoot;
-  root.innerHTML = `
-  <div class="a-modal-backdrop" id="provBackdrop">
-    <div class="a-modal" role="dialog" aria-label="Новый провайдер">
-      <div class="a-modal__title">Новый провайдер</div>
-      <div class="a-modal__desc">Обычный OpenAI-совместимый API (как CloseRouter): base URL + модель + ключ. Перед сохранением можно проверить живым запросом «привет» — недоступная модель добавлению не мешает, в ротацию войдёт, когда заработает.</div>
-      <div class="a-modal__form">
-        <div class="a-form-grid">
-          <div class="a-field"><label for="provId">ID латиницей</label><input class="a-input" id="provId" placeholder="openrouter" autocomplete="off"></div>
-          <div class="a-field"><label for="provTitle">Название</label><input class="a-input" id="provTitle" placeholder="OpenRouter" autocomplete="off"></div>
-        </div>
-        <div class="a-field"><label for="provBaseUrl">Base URL</label><input class="a-input mono" id="provBaseUrl" placeholder="https://openrouter.ai/api/v1" autocomplete="off"></div>
-        <div class="a-field"><label for="provModel">Модель (ID у провайдера)</label><input class="a-input mono" id="provModel" placeholder="openai/gpt-4o-mini" autocomplete="off" spellcheck="false"></div>
-        <div class="a-field"><label for="provModelTitle">Название для ученика</label><input class="a-input" id="provModelTitle" placeholder="например: топ модель" autocomplete="off"><span class="a-field__hint">Это увидит ученик на странице результата вместо технического ID. Пусто — покажем ID.</span></div>
-        <div class="a-field"><label for="provKey">API-ключ</label><input class="a-input mono" id="provKey" type="password" placeholder="sk-…" autocomplete="off"></div>
-        <div class="a-form-grid">
-          <div class="a-field"><label for="provAuth">Авторизация</label><select class="a-select" id="provAuth"><option value="bearer">Bearer (обычно)</option><option value="raw">Сырой ключ (как gptunnel)</option></select></div>
-          <div class="a-field"><label for="provSlot">Приоритет</label><select class="a-select" id="provSlot"><option value="">Без приоритета</option><option value="high">Высокий — первый</option><option value="medium">Средний — второй</option><option value="low">Низкий — последний</option></select></div>
-        </div>
-        <label class="a-check"><input type="checkbox" id="provWallet"> <span>useWalletBalance (только для gptunnel-подобных)</span></label>
-        <label class="a-check"><input type="checkbox" id="provMerge"> <span>Подклеивать system к user (маршруты вроде anthropic)</span></label>
-        <div id="provDraftResult"></div>
-        <div class="a-modal__error" id="provFormError" hidden></div>
-      </div>
-      <div class="a-modal__actions">
-        <button class="btn btn--soft btn--sm" id="provDraftBtn" type="button">Проверить без сохранения</button>
-        <span style="flex:1"></span>
-        <button class="btn btn--soft btn--sm" id="provCancel" type="button">Отмена</button>
-        <button class="btn btn--primary btn--sm" id="provSave" type="button">Добавить</button>
-      </div>
-    </div>
-  </div>`;
-  document.getElementById("provCancel").onclick = closeProviderModal;
-  document.getElementById("provBackdrop").onclick = (e) => { if (e.target.id === "provBackdrop") closeProviderModal(); };
-  document.getElementById("provDraftBtn").onclick = draftProbeFromModal;
-  document.getElementById("provSave").onclick = saveProviderFromModal;
-}
-
-function closeProviderModal() { A.modalRoot.innerHTML = ""; }
-
-async function saveProviderFromModal() {
+async function saveProviderFromPage() {
   const err = document.getElementById("provFormError");
   const btn = document.getElementById("provSave");
+  const say = (msg) => { if (err) { err.textContent = msg; err.hidden = false; } };
   if (err) { err.hidden = true; err.textContent = ""; }
+  const onSlot = document.querySelector("#provNewSlotSeg .a-seg2__btn--on");
+  const slot = onSlot ? (onSlot.dataset.slot || "") : "";
+  // Проверяем только то, без чего сервер всё равно откажет: так админ видит
+  // ошибку у себя в поле, а не в ответе API после нажатия.
+  if (!provField("provId").trim()) { say("Впиши ID провайдера латиницей"); return; }
+  if (!provField("provBaseUrl").trim()) { say("Впиши Base URL — без него запросы некуда слать"); return; }
+  if (!provField("provModel").trim()) { say("Впиши ID модели"); return; }
+  if (!provField("provKey").trim()) { say("Впиши API-ключ"); return; }
   if (btn) { btn.disabled = true; btn.textContent = "Добавляем…"; }
+  let created = null;
   try {
     const r = await AdminApi.post("/api/admin/providers", {
       id: provField("provId"), title: provField("provTitle"),
@@ -2095,115 +2252,24 @@ async function saveProviderFromModal() {
       model_title: provField("provModelTitle"),
       useWalletBalance: document.getElementById("provWallet")?.checked,
       mergeSystem: document.getElementById("provMerge")?.checked,
-      slot: provField("provSlot") || null,
+      slot: slot || null,
     });
-    closeProviderModal();
-    if (r && r.warning) toast(r.warning, "err");
-    else if (r && r.probe && r.probe.ok) toast(`«${r.provider.id}» добавлен и отвечает (${r.probe.latencyMs} мс)`);
-    else toast("Провайдер добавлен");
+    created = (r && r.provider && r.provider.id) || provField("provId").trim();
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
-    if (err) { err.textContent = e.message || "ошибка"; err.hidden = false; }
+    say(e.message || "ошибка");
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Добавить"; }
+    if (btn) { btn.disabled = false; btn.textContent = "Добавить провайдера"; }
   }
+  if (!created) return;
+  toast("Провайдер добавлен");
+  // Сразу на его страницу: там можно задать название для ученика, проверить
+  // модель и посмотреть пинг всех моделей — всё, ради чего форма и писалась.
+  ProvDetail.id = created;
+  ProvDetail.data = null;
   await screenProviders(true);
-}
-
-/* ---------------- Детальная настройка провайдера ----------------
-   Открывается кликом по карточке. Внутри: текущие значения, список моделей
-   провайдера (GET <base>/models — единственный честный источник имён),
-   выбор модели, её проверка до применения и сброс к стандартным значениям.
-   Список моделей и проба — это ЖИВЫЕ запросы к провайдеру, поэтому идут
-   через POST /api/admin/providers/<id>/models и /probe-model с троттлингом
-   на сервере; на клиенте они помечены, чтобы не казались мгновенными. */
-
-const ProvDetail = {
-  id: null, models: null, loading: false, probing: false, pinging: false,
-  model: null, error: null, meta: null, verdict: "", modelPing: null,
-  // Что сервер уже знает (модель и её название): по этому полям панели
-  // показывается «не применено».
-  current: { model: "", modelTitle: "" },
-};
-
-/* Вердикт (проверки/применения) держим в состоянии, а не только в DOM: после
-   сохранения карточки перерисовываются, а перерисовка модалки раньше стирала
-   сообщение — человек видел «сохранено» без внятного ответа. */
-function provDetailSetVerdict(html) {
-  ProvDetail.verdict = html || "";
-  const box = document.getElementById("provModelProbeResult");
-  if (box) box.innerHTML = ProvDetail.verdict;
-}
-
-function provVerdictOk(html) { provDetailSetVerdict(`<div class="a-prov-checkok">${html}</div>`); }
-function provVerdictBad(html) { provDetailSetVerdict(`<div class="a-prov-checkbad">${html}</div>`); }
-
-function provDetailModelInput() {
-  const el = document.getElementById("provDetailModel");
-  return el ? el.value.trim() : "";
-}
-
-function provDetailRenderList() {
-  const box = document.getElementById("provModelList");
-  if (!box) return;
-  const d = ProvDetail;
-  if (d.loading) {
-    box.innerHTML = `<div class="a-prov-models__empty">Список загружается у провайдера…</div>`;
-    return;
-  }
-  if (!d.models) {
-    box.innerHTML = `<div class="a-prov-models__empty">Список ещё не получен — он берётся у провайдера живым запросом.<br>Нажми «Список моделей» или впиши модель вручную.</div>`;
-    return;
-  }
-  const list = d.models.models || [];
-  const total = d.models.total || list.length;
-  if (!list.length) {
-    box.innerHTML = `<div class="a-prov-checkbad">Провайдер вернул пустой список моделей.</div>`;
-    return;
-  }
-  // Фильтр по подстроке — список у шлюзов бывает на сотни позиций, а
-  // прокручивать его вручную бессмысленно. Сравнение регистронезависимое,
-  // пустая строка показывает всё.
-  const query = (document.getElementById("provModelFilter")?.value || "").trim().toLowerCase();
-  const shown = query ? list.filter((m) => m.toLowerCase().includes(query)) : list;
-  const cur = provDetailModelInput() || d.models.current || "";
-  const rows = shown.map((m) => {
-    const isCur = m === d.models.current;
-    const isPicked = m === cur;
-    // Вердикт пинга всех моделей виден прямо в списке: после проверки не надо
-    // гадать, где модель работает — точка слева уже отвечает на это.
-    const pinged = d.modelPing && d.modelPing.results ? d.modelPing.results[m] : null;
-    const dot = pinged ? `<span class="a-dot a-dot--${pinged.ok ? "ok" : "bad"}" title="${esc(pinged.ok ? `Задержка ${pinged.latencyMs} мс` : (pinged.error || "недоступна"))}"></span>` : "";
-    // Модель идёт в data-атрибут, а не в onclick: id модели в кавычках
-    // (владелец → "модель") ломал бы атрибут и всю страницу до ошибки JS.
-    return `<li><button type="button" class="a-prov-model${isPicked ? " a-prov-model--picked" : ""}"
-        data-model="${esc(m)}" onclick="pickProviderModel(this.dataset.model)"
-        title="${esc(m)}">
-      ${dot}
-      <span class="a-prov-model__name">${esc(m)}</span>
-      ${isCur ? `<span class="a-chip a-chip--accent">сейчас</span>` : ""}
-      ${isPicked ? `<span class="a-prov-model__tick">${aicon("check")}</span>` : ""}
-    </button></li>`;
-  }).join("");
-  box.innerHTML = `
-    <div class="a-prov-models__list">
-      ${rows || `<div class="a-prov-models__empty">Ничего не найдено по запросу «${esc(query)}».</div>`}
-    </div>
-    <div class="a-prov-models__foot">
-      <span>${query ? `Найдено ${fmtNum(shown.length)} из ${fmtNum(list.length)}` : `Моделей у провайдера: ${fmtNum(list.length)}${total > list.length ? ` (показаны первые ${fmtNum(list.length)} из ${fmtNum(total)})` : ""}`}</span>
-      ${d.models.latencyMs != null ? `<span>список получен за ${fmtNum(d.models.latencyMs)} мс</span>` : ""}
-    </div>`;
-}
-
-function pickProviderModel(model) {
-  ProvDetail.model = model;
-  const el = document.getElementById("provDetailModel");
-  if (el) el.value = model;
-  // Список перерисовывается, чтобы галочка «выбрано» уехала на новую строку,
-  // а вердикт прошлой проверки не остался висеть у другой модели.
-  provDetailRenderList();
-  provDetailSetVerdict("");
-  provDetailMarkDirty();
+  navigate(`/providers/${encodeURIComponent(created)}`);
+  if (location.hash === `#/providers/${encodeURIComponent(created)}`) render();
 }
 
 /* Проверка ВСЕХ провайдеров разом (кнопка в разделе): живой запрос «привет»
@@ -2263,97 +2329,275 @@ function probeAllProviders() {
     .finally(() => { Prov.checkingAll = false; });
 }
 
-/* ---------------- Пинг ВСЕХ МОДЕЛЕЙ одного провайдера ----------------
-   У шлюза список моделей бывает на сотни позиций, доступны из них единицы:
-   модель снята, нет доступа к региону, политика шлюза. Ручной перебор по одной
-   — минуты работы, поэтому сервер проверяет их пачкой (POST
-   .../probe-models, кап ai.PROBE_MODELS_MAX) и отдаёт вердикт по каждой.
-   Список моделей для проверки сервер берёт САМ у провайдера: клиент мог бы
-   прислать что угодно, а проверять надо реальные модели. */
-function provModelPingHTML(ping) {
-  if (!ping) return "";
-  const res = ping.results || {};
-  const order = (ping.order && ping.order.length) ? ping.order : Object.keys(res);
-  if (!order.length) return "";
-  // Порядок приходит с сервера и он по скорости: сперва самые быстрые живые
-  // модели, потом остальные живые, и только потом недоступные. Рейтинг на
-  // экране повторяет его же, иначе «сначала самые быстрые» было бы обещанием
-  // без правды.
-  const maxLatency = order.reduce((acc, m) => {
-    const r = res[m] || {};
-    return r.ok && r.latencyMs > acc ? r.latencyMs : acc;
-  }, 1);
-  const rows = order.map((m, i) => {
-    const p = res[m] || {};
-    const cur = (ProvDetail.models && ProvDetail.models.current) === m;
-    const width = p.ok ? Math.max(6, Math.round((p.latencyMs / maxLatency) * 100)) : 0;
-    return `<button type="button" class="a-rank${p.ok ? " a-rank--ok" : " a-rank--bad"}"
-        data-model="${esc(m)}" onclick="pickProviderModel(this.dataset.model)"
-        title="${p.ok ? `Задержка ${p.latencyMs} мс — нажми, чтобы выбрать` : esc(p.error || "недоступна")}">
-      <span class="a-rank__no">${i + 1}</span>
-      <span class="a-dot a-dot--${p.ok ? "ok" : "bad"}"></span>
-      <span class="a-rank__name mono">${esc(m)}</span>
-      ${cur ? `<span class="a-chip a-chip--accent">сейчас</span>` : ""}
-      ${p.ok ? `<span class="a-rank__bar"><i style="width:${width}%"></i></span>` : ""}
-      <span class="a-rank__ms">${esc(p.ok ? `${fmtNum(p.latencyMs)} мс` : (p.error || "недоступна"))}</span>
-    </button>`;
-  }).join("");
-  const head = `Проверено ${fmtNum(ping.checked)} из ${fmtNum(ping.total)}: работающих ${fmtNum(ping.okCount)}`
-    + (ping.skipped ? `, не проверено ${fmtNum(ping.skipped)} (потолок ${fmtNum(ping.limit)} за нажатие)` : "");
-  return `<div class="a-prov-hint" style="margin:10px 0 6px">${esc(head)} · ${esc(provRel(ping.at))}. Отсортировано по скорости, нажми на модель, чтобы выбрать её.</div>
-    <div class="a-ranks">${rows}</div>`;
+/* ---------------- Страница провайдера: модели и живой пинг ----------------
+
+   Была модалка — широкий блок поверх списка, в котором на телефоне не
+   помещалось ничего, а «пинг всех моделей» отдавал один ответ через
+   30-90 секунд пустого экрана. Теперь это ОТДЕЛЬНАЯ СТРАНИЦА со своим адресом
+   (#/providers/<id>) и живым потоком результатов: строка появляется, как
+   только модель ответила.
+
+   Поток — NDJSON (не SSE): EventSource не умеет ни POST, ни заголовки, ни
+   нормальную куку, а нам нужен ровно один админский запрос. Читаем через
+   fetch + response.body.getReader(), строки разбираем по мере прихода. */
+
+const PROV_STREAM_BUDGET_MS = 10500;   // чуть больше серверных 10 с
+const PROV_MODEL_RENDER_MAX = 60;      // сколько строк списка рисуем за раз
+
+/* Рейтинг моделей: рисуется И из пакетного ответа, И из живого потока.
+   Одна разметка на оба пути — иначе «живой» список и итоговый разъезжались
+   бы видом (а именно это и было в модалке: живой список + финальная
+   перерисовка). */
+function provRankRowHTML(model, res, index, opts) {
+  const p = res || {};
+  const o = opts || {};
+  const cur = o.current === model;
+  const maxLatency = o.maxLatency || 1;
+  const width = p.ok ? Math.max(6, Math.round(((p.latencyMs || 0) / maxLatency) * 100)) : 0;
+  const wait = p.pending === true;
+  return `<button type="button" class="a-rank${p.ok ? " a-rank--ok" : (wait ? " a-rank--wait" : " a-rank--bad")}"
+      data-model="${esc(model)}" onclick="pickProviderModel(this.dataset.model)"
+      title="${p.ok ? `Задержка ${p.latencyMs} мс — нажми, чтобы выбрать`
+        : (wait ? "Ещё проверяется…" : esc(p.error || "недоступна"))}">
+    <span class="a-rank__no">${wait ? '<span class="a-spin a-spin--xs"></span>' : index}</span>
+    <span class="a-dot a-dot--${p.ok ? "ok" : (wait ? "idle" : "bad")}"></span>
+    <span class="a-rank__name mono">${esc(model)}</span>
+    ${cur ? '<span class="a-chip a-chip--accent">сейчас</span>' : ""}
+    ${p.ok ? `<span class="a-rank__bar"><i style="width:${width}%"></i></span>` : '<span class="a-rank__bar a-rank__bar--empty"></span>'}
+    <span class="a-rank__ms">${esc(p.ok ? `${fmtNum(p.latencyMs)} мс` : (wait ? "проверяем…" : (p.error || "недоступна")))}</span>
+  </button>`;
 }
 
+function provRankListHTML(state, opts) {
+  const res = state.results || {};
+  const order = state.order && state.order.length ? state.order : Object.keys(res);
+  if (!order.length) return "";
+  const o = Object.assign({}, opts, { current: state.current || "" });
+  o.maxLatency = order.reduce((acc, m) => {
+    const r = res[m] || {};
+    return r.ok && (r.latencyMs || 0) > acc ? r.latencyMs : acc;
+  }, 1);
+  return `<div class="a-ranks">${order.map((m, i) => provRankRowHTML(m, res[m], i + 1, o)).join("")}</div>`;
+}
+
+/* Шапка отчёта: сколько проверено, сколько живых, где мы по времени. */
+function provPingSummaryHTML(state) {
+  if (!state || !state.total) return "";
+  const live = Number(state.okCount || 0);
+  const parts = [state.done || live
+    ? `<b class="a-ping__live">${fmtNum(live)}</b> из ${fmtNum(state.checked || 0)} ответили`
+    : `идёт проверка ${fmtNum(state.checked || 0)} моделей`];
+  if (state.total > (state.checked || 0)) {
+    parts.push(`не проверено ${fmtNum(state.total - (state.checked || 0))} (потолок ${fmtNum(state.limit || 0)} за нажатие)`);
+  }
+  if (state.done) {
+    if (state.timedOut) parts.push(`${fmtNum(state.timedOut)} не ответили за ${fmtNum(Math.round((state.budgetMs || 0) / 1000))} с`);
+    else parts.push(`за ${(state.budgetMs / 1000).toFixed(1)} с`);
+  } else {
+    parts.push(`<span class="a-ping__timer" id="provPingTimer">0.0 с</span> из ${fmtNum(Math.round(PROV_STREAM_BUDGET_MS / 1000))} с`);
+  }
+  return parts.join(" · ");
+}
+
+/* Живой пинг моделей: читает NDJSON и дорисовывает строки по мере прихода.
+   Порядок строк ВО ВРЕМЯ проверки — порядок ответов (человек видит, как
+   приходят результаты), а по завершении список пересобирается по скорости:
+   это и есть обещанный «от быстрых к остальным». */
 async function pingProviderModels() {
   const id = ProvDetail.id;
   if (!id || ProvDetail.pinging) return;
   ProvDetail.pinging = true;
   const btn = document.getElementById("provPingModelsBtn");
   const box = document.getElementById("provModelPingResult");
-  const idle = btn ? btn.innerHTML : "";
-  if (btn) { btn.disabled = true; btn.textContent = "Пингуем модели…"; }
-  if (box) box.innerHTML = `<div class="a-prov-hint">Проверяем модели провайдера по очереди, каждая — живой запрос «привет»…</div>`;
+  if (btn) { btn.disabled = true; btn.innerHTML = `${aicon("pulse")} Пингуем…`; }
+  ProvDetail.ping = { results: {}, order: [], total: 0, checked: 0, okCount: 0,
+                      limit: 0, done: false, timedOut: 0, budgetMs: 0,
+                      current: (ProvDetail.models && ProvDetail.models.current) || ProvDetail.model || "" };
+  if (box) box.innerHTML = provPingBoxHTML(false);
+  const started = Date.now();
+  let ticker = null;
+  const paintElapsed = () => {
+    const el = document.getElementById("provPingTimer");
+    if (el) el.textContent = `${((Date.now() - started) / 1000).toFixed(1)} с`;
+  };
+  ticker = setInterval(paintElapsed, 100);
+  let finished = false;
   try {
-    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe-models`, {});
-    ProvDetail.modelPing = { results: (r && r.results) || {}, total: (r && r.total) || 0,
-                             checked: (r && r.checked) || 0, skipped: (r && r.skipped) || 0,
-                             okCount: (r && r.okCount) || 0, limit: (r && r.limit) || 0,
-                             order: (r && r.order) || [],
-                             at: (r && r.checkedAt) || Date.now() };
-    if (r && r.results && !ProvDetail.models) {
-      // Список на сервере мог уйти дальше первых MODELS_LIST_MAX — тогда в
-      // клиентском списке часть моделей не будет, а вердикты по ним есть.
-      ProvDetail.models = { models: Object.keys(r.results), current: r.current || "", latencyMs: null };
-      provDetailRenderList();
+    const resp = await fetch(`/api/admin/providers/${encodeURIComponent(id)}/probe-models-stream`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (resp.status === 401) { A.session = null; renderLogin(); return; }
+    if (!resp.ok || !resp.body) {
+      const payload = await resp.json().catch(() => ({}));
+      throw Object.assign(new Error(payload.error || `Поток недоступен (${resp.status})`),
+                          { retryAfter: Number(payload.retryAfter) || 0 });
     }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      let nl = buffered.indexOf("\n");
+      while (nl >= 0) {
+        const line = buffered.slice(0, nl).trim();
+        buffered = buffered.slice(nl + 1);
+        if (line) {
+          let evt = null;
+          try { evt = JSON.parse(line); } catch (e) { evt = null; }
+          if (evt) applyProvPingEvent(evt);
+        }
+        nl = buffered.indexOf("\n");
+      }
+    }
+    if (buffered.trim()) {
+      try { applyProvPingEvent(JSON.parse(buffered.trim())); } catch (e) { /* хвост обрезан */ }
+    }
+    finished = true;
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
-    ProvDetail.modelPing = null;
-    if (box) {
+    const state = ProvDetail.ping;
+    if (state && state.checked) {
+      // Часть результатов уже пришла — не выбрасываем их из-за обрыва.
+      toast("Поток прервался, показываю то, что успело прийти", "err");
+    } else if (box) {
       box.innerHTML = e.retryAfter
         ? `<div class="a-prov-hint">Модели только что проверяли — повтори через ${e.retryAfter} с.</div>`
         : `<div class="a-prov-checkbad">${esc(e.message || "ошибка проверки")}</div>`;
     }
   } finally {
+    clearInterval(ticker);
+    paintElapsed();
     ProvDetail.pinging = false;
-    if (btn) { btn.disabled = false; btn.innerHTML = idle; }
-    if (ProvDetail.id === id) {
-      const res = document.getElementById("provModelPingResult");
-      if (res && ProvDetail.modelPing) res.innerHTML = provModelPingHTML(ProvDetail.modelPing);
+    if (btn) { btn.disabled = false; btn.innerHTML = `${aicon("pulse")} Пинг всех моделей`; }
+    if (ProvDetail.id === id && ProvDetail.ping) {
+      ProvDetail.ping.done = true;
+      drawProvPing(true);
+      if (finished) {
+        const st = ProvDetail.ping;
+        toast(st.okCount
+          ? `Модели проверены: живых ${st.okCount} из ${st.checked}`
+          : "Ни одна модель не ответила");
+      }
     }
   }
 }
 
-/* Сегмент-контрол приоритета. Выпадающий список здесь врал: человек не видел,
-   что слот РОВНО ОДИН и что он освобождает прежнего держателя. Четыре кнопки
-   показывают всю шкалу сразу, а занятость видно из подписи. */
-const PROV_SLOT_SEGMENTS = [
-  { id: "high", label: "Высокий", hint: "пробуем первым" },
-  { id: "medium", label: "Средний", hint: "если первый отказал" },
-  { id: "low", label: "Низкий", hint: "в самом конце" },
-  { id: "", label: "Без приоритета", hint: "вне очереди" },
-];
+/* Обработка одного события потока. События приходят по мере готовности —
+   экран перерисовывается ТОЛЬКО внутри списка, чтобы не терять фокус и не
+   мигать всей страницей. */
+function applyProvPingEvent(evt) {
+  const st = ProvDetail.ping;
+  if (!st || !evt || !evt.kind) return;
+  if (evt.kind === "start") {
+    st.total = evt.total || 0;
+    st.checked = evt.checked || 0;
+    st.limit = evt.limit || 0;
+    st.pending = Array.isArray(evt.models) ? evt.models.slice() : [];
+    st.order = st.pending.slice();
+    st.results = {};
+    // Пока ответа нет — строка есть и она «проверяется»: пустой экран не
+    // отвечает на главный вопрос «идёт ли вообще проверка».
+    st.pending.forEach((m) => { st.results[m] = { ok: false, latencyMs: 0, error: "", pending: true }; });
+  } else if (evt.kind === "result") {
+    st.results[evt.model] = { ok: !!evt.ok, latencyMs: evt.latencyMs || 0, error: evt.error || "" };
+    if (st.order.indexOf(evt.model) < 0) st.order.push(evt.model);
+    st.okCount = Object.values(st.results).filter((r) => r.ok).length;
+    const still = Object.values(st.results).filter((r) => r.pending).length;
+    // Порядок живого списка: сперва то, что уже ответило (быстрые сверху), а
+    // неответившие — внизу. Иначе строка прыгала бы вверх через весь список.
+    const rows = st.order.filter((m) => !st.results[m].pending);
+    rows.sort((a, b) => {
+      const ra = st.results[a], rb = st.results[b];
+      if (ra.ok !== rb.ok) return ra.ok ? -1 : 1;
+      return (ra.latencyMs || 0) - (rb.latencyMs || 0);
+    });
+    st.order = rows.concat(st.order.filter((m) => st.results[m].pending));
+    if (!still) st.waiting = false;
+  } else if (evt.kind === "done") {
+    st.order = evt.order && evt.order.length ? evt.order.slice() : st.order;
+    st.okCount = evt.okCount || 0;
+    st.timedOut = evt.timedOut || 0;
+    st.budgetMs = evt.budgetMs || 0;
+    st.done = true;
+    st.at = evt.checkedAt || Date.now();
+    Object.keys(st.results).forEach((m) => { delete st.results[m].pending; });
+    // Список моделей у провайдера мог ещё не загружаться: пинг сам по себе
+    // знает имена всех проверенных моделей, и вердикт должен быть виден в
+    // списке, а не только в рейтинге (иначе после пинга «Список моделей»
+    // приходилось бы жать второй раз, чтобы увидеть точки).
+    if (!ProvDetail.models) {
+      ProvDetail.models = { models: st.order.slice(), current: st.current || "", latencyMs: null };
+      provDetailRenderList();
+    }
+  } else if (evt.kind === "error") {
+    const box = document.getElementById("provModelPingResult");
+    if (box) {
+      box.innerHTML = evt.retryAfter
+        ? `<div class="a-prov-hint">${esc(evt.error || "подожди")}</div>`
+        : `<div class="a-prov-checkbad">${esc(evt.error || "ошибка проверки")}</div>`;
+    }
+    ProvDetail.ping = null;
+    return;
+  }
+  drawProvPing(false);
+}
 
+/* Оболочка блока пинга: шапка-сводка + список + прогресс. Перерисовывается
+   целиком только когда меняется состав строк, иначе — точечно по строкам. */
+function provPingBoxHTML(done) {
+  const st = ProvDetail.ping;
+  if (!st) return "";
+  const head = done
+    ? `Проверено ${fmtNum(st.checked)} моделей: ${provPingSummaryHTML(st)} · ${esc(provRel(st.at || Date.now()))}. Отсортировано по скорости — нажми на модель, чтобы выбрать её.`
+    : `Идёт живая проверка: ${provPingSummaryHTML(st)}. Строки появляются по мере ответа.`;
+  return `<div class="a-ping${done ? " a-ping--done" : ""}">
+    <div class="a-ping__head">
+      <span class="a-ping__live-dot"></span>
+      <span class="a-ping__text">${head}</span>
+    </div>
+    <div class="a-ping__body" id="provPingRows">${provRankListHTML(st)}</div>
+  </div>`;
+}
+
+/* Точечная перерисовка: строки обновляются на месте, а не блоком, поэтому
+   прокрутка и фокус не слетают, пока список растёт. */
+function drawProvPing(done) {
+  const box = document.getElementById("provModelPingResult");
+  if (!box || !ProvDetail.ping) return;
+  const st = ProvDetail.ping;
+  const rowsBox = document.getElementById("provPingRows");
+  const headText = box.querySelector(".a-ping__text");
+  if (headText) {
+    headText.innerHTML = done
+      ? `Проверено ${fmtNum(st.checked)} моделей: ${provPingSummaryHTML(st)} · ${esc(provRel(st.at || Date.now()))}. Отсортировано по скорости — нажми на модель, чтобы выбрать её.`
+      : `Идёт живая проверка: ${provPingSummaryHTML(st)}. Строки появляются по мере ответа.`;
+  }
+  if (!rowsBox) { box.innerHTML = provPingBoxHTML(done); return; }
+  // Класс «готово» — на сам блок .a-ping (он ВНУТРИ обёртки): раньше он вешался
+  // на обёртку, и завершение проверки визуально не наступало никогда.
+  const panel = box.querySelector(".a-ping");
+  if (panel) panel.classList.toggle("a-ping--done", !!done);
+  rowsBox.innerHTML = provRankListHTML(st);
+}
+
+/* ---------------- Страница провайдера: вёрстка ----------------
+
+   Это ОТДЕЛЬНАЯ СТРАНИЦА (#/providers/<id>), а не модалка. Причина простая:
+   настроек у провайдера много (модель, название, адрес, ключ, quirks,
+   приоритет, список моделей, живой пинг), и в широком блоке поверх списка они
+   не помещались — на телефоне модалка превращалась в одну длинную колонку с
+   обрезанным низом. Страница даёт нормальную сетку, свой адрес (можно
+   отправить ссылку, работает «назад»), и живой пинг на всю ширину. */
+
+/* Кусок «подпись → значение» для карточек со сводкой. */
+/* Сегмент приоритета: четыре состояния видны сразу, включая «без приоритета».
+   Выпадающий список врал — человек не видел, что слот РОВНО ОДИН и что выбор
+   освобождает прежнего держателя слота. */
 function provSlotSegHTML(current) {
   return `<div class="a-seg2" role="group" aria-label="Приоритет провайдера в очереди">
     ${PROV_SLOT_SEGMENTS.map((s) => `<button type="button" class="a-seg2__btn${(s.id || "") === (current || "") ? " a-seg2__btn--on" : ""}"
@@ -2375,11 +2619,26 @@ function setDetailSlot(slot) {
       ? `Провайдер встанет в слот «${PROV_SLOT_LABELS[slot] || slot}» — прежний держатель слота освободится.`
       : "Провайдер останется вне очереди по приоритету (работать будет, если остальные недоступны).";
   }
+  provDetailMarkDirty();
 }
 
-function openProviderDetail(id) {
+function provKvHTML(label, value, mono) {
+  return `<div class="a-kv"><span>${esc(label)}</span><b${mono ? ' class="mono"' : ""}>${value}</b></div>`;
+}
+
+function screenProviderPage(id) {
   const p = provById(id);
-  if (!p) { toast("Провайдер не найден в списке", "err"); return; }
+  if (!p) {
+    // Прямая ссылка на удалённого провайдера — честная карточка, а не пустая
+    // страница: адрес мог остаться в закладках.
+    renderShell("providers", `
+      <div class="a-card">
+        <div class="a-card__title">Провайдер не найден</div>
+        <div class="a-card__sub" style="margin:8px 0 14px">«${esc(id)}» нет в списке: его удалили или ссылка устарела.</div>
+        <a class="btn btn--primary btn--sm" href="#/providers">К провайдерам</a>
+      </div>`);
+    return;
+  }
   ProvDetail.id = id;
   ProvDetail.models = null;
   ProvDetail.loading = false;
@@ -2388,141 +2647,175 @@ function openProviderDetail(id) {
   ProvDetail.model = p.model || "";
   ProvDetail.error = null;
   ProvDetail.verdict = "";
-  ProvDetail.modelPing = null;
-  // Сохранённые значения — по ним панель понимает, что поле изменено и ждёт
-  // кнопки «Сохранить». Без этого правка модели (в том числе выбором из
-  // списка или из рейтинга) выглядела бы уже применённой.
+  ProvDetail.ping = null;
   ProvDetail.current = { model: p.model || "", modelTitle: p.modelTitle || "" };
+  ProvDetail.data = p;
+
   const [dot, dotLabel] = provHealth(p);
-  const [checkDot, checkLabel] = p.lastCheck
-    ? (p.lastCheck.ok ? ["ok", `Живой ответ за ${fmtNum(p.lastCheck.latencyMs)} мс`] : ["bad", `Недоступен: ${p.lastCheck.error || "—"}`])
-    : ["idle", "Ручной проверки ещё не было"];
+  const check = p.lastCheck;
+  const checkLine = check
+    ? (check.ok ? `живой ответ за ${fmtNum(check.latencyMs)} мс · ${provRel(check.at)}`
+                : `недоступен: ${check.error || "—"} · ${provRel(check.at)}`)
+    : "ручной проверки ещё не было";
   const title = p.modelTitle || "";
-  const root = A.modalRoot;
-  root.innerHTML = `
-  <div class="a-modal-backdrop" id="provDetailBackdrop">
-    <div class="a-modal a-modal--panel" role="dialog" aria-label="Управление провайдером ${esc(p.title || p.id)}">
-      <div class="a-pnl">
-        <div class="a-pnl__head">
-          <span class="a-dot a-dot--${dot}"></span>
-          <div class="a-pnl__title-wrap">
-            <div class="a-pnl__title">${esc(p.title || p.id)}</div>
-            <div class="a-pnl__sub mono">${esc(p.id)}</div>
-          </div>
-          <div class="a-pnl__badges">
-            ${p.builtin ? `<span class="a-chip">встроенный</span>` : `<span class="a-chip a-chip--accent">свой</span>`}
-            ${p.active ? `<span class="a-chip a-chip--success">активный</span>` : ""}
-            ${p.enabled ? "" : `<span class="a-chip a-chip--warn">выключен</span>`}
-            ${p.modelOverridden ? `<span class="a-chip a-chip--warn">модель изменена</span>` : ""}
-          </div>
-          <button type="button" class="a-icon-btn" id="provDetailX" title="Закрыть" aria-label="Закрыть">${aicon("x")}</button>
+
+  renderShell("providers", `
+    <div class="a-page-head">
+      <a class="a-back" href="#/providers" title="К списку провайдеров">${aicon("chevron")} <span>Провайдеры</span></a>
+      <div class="a-page-head__main">
+        <span class="a-dot a-dot--${dot}"></span>
+        <div class="a-page-title-wrap">
+          <h1 class="a-page-title">${esc(p.title || p.id)}</h1>
+          <div class="a-page-sub mono">${esc(p.id)}</div>
         </div>
-        <div class="a-pnl__status">
-          <span class="a-pnl__status-item"><i class="a-dot a-dot--${dot}"></i> ${esc(dotLabel)}</span>
-          <span class="a-pnl__status-item"><i class="a-dot a-dot--${checkDot}"></i> ${esc(checkLabel)}</span>
-          <span class="a-pnl__status-item">${p.recent ? "сейчас отвечает ученикам" : "сейчас не используется"}</span>
+        <div class="a-page-badges">
+          ${p.builtin ? '<span class="a-chip">встроенный</span>' : '<span class="a-chip a-chip--accent">свой</span>'}
+          ${p.active ? '<span class="a-chip a-chip--success">активный</span>' : ""}
+          ${p.enabled ? "" : '<span class="a-chip a-chip--warn">выключен</span>'}
+          ${p.modelOverridden ? '<span class="a-chip a-chip--warn">модель изменена</span>' : ""}
+          ${p.modelTitleMissing ? '<span class="a-chip a-chip--warn" title="Без названия ученик не увидит, какой моделью проверено сочинение">нет названия</span>' : ""}
         </div>
+      </div>
+      <div class="a-page-status">
+        <span class="a-page-status__item"><i class="a-dot a-dot--${dot}"></i> ${esc(dotLabel)}</span>
+        <span class="a-page-status__item">${esc(checkLine)}</span>
+        <span class="a-page-status__item">${p.recent ? "сейчас отвечает ученикам" : "сейчас не используется"}</span>
+      </div>
+    </div>
 
-        <div class="a-pnl__body">
-          <section class="a-pnl__sec">
-            <div class="a-pnl__sec-title">Модель</div>
-            <div class="a-form-grid">
-              <div class="a-field">
-                <label for="provDetailModel">ID модели у провайдера</label>
-                <input class="a-input mono" id="provDetailModel" value="${esc(p.model || "")}" autocomplete="off" spellcheck="false">
-                <span class="a-field__hint" id="provModelHint">Сейчас: <span class="mono">${esc(p.model || "—")}</span>${p.defaultModel && p.model !== p.defaultModel ? ` · в окружении: <span class="mono">${esc(p.defaultModel)}</span>` : ""}</span>
-              </div>
-              <div class="a-field">
-                <label for="provDetailModelTitle">Название для ученика</label>
-                <input class="a-input" id="provDetailModelTitle" value="${esc(title)}" placeholder="например: топ модель" autocomplete="off">
-                <span class="a-field__hint" id="provTitleHint">Это увидит ученик на странице результата вместо технического ID. Пусто — покажем ID модели.</span>
-              </div>
+    <div class="a-page-grid">
+      <div class="a-page-col">
+        <section class="a-card">
+          <div class="a-card__head">
+            <span class="a-card__title">Модель для проверок</span>
+            <span class="spacer"></span>
+            <button class="btn btn--soft btn--sm" id="provModelsBtn" type="button">${aicon("list")} Список моделей</button>
+            <button class="btn btn--soft btn--sm" id="provModelProbeBtn" type="button">${aicon("pulse")} Проверить</button>
+          </div>
+          <div class="a-form-grid">
+            <div class="a-field">
+              <label for="provDetailModel">ID модели у провайдера</label>
+              <input class="a-input mono" id="provDetailModel" value="${esc(p.model || "")}" autocomplete="off" spellcheck="false">
+              <span class="a-field__hint" id="provModelHint"></span>
             </div>
-            <div class="a-pnl__row">
-              <button class="btn btn--soft btn--sm" id="provModelsBtn" type="button">${aicon("list")} Список моделей</button>
-              <button class="btn btn--soft btn--sm" id="provModelProbeBtn" type="button">${aicon("pulse")} Проверить выбранную</button>
-              <button class="btn btn--soft btn--sm" id="provPingModelsBtn" type="button">${aicon("pulse")} Пинг всех моделей</button>
+            <div class="a-field">
+              <label for="provDetailModelTitle">Название для ученика</label>
+              <input class="a-input" id="provDetailModelTitle" value="${esc(title)}" placeholder="например: топ модель" autocomplete="off">
+              <span class="a-field__hint" id="provTitleHint"></span>
             </div>
-            <div id="provModelProbeResult">${ProvDetail.verdict}</div>
-          </section>
+          </div>
+          <div id="provModelProbeResult">${ProvDetail.verdict}</div>
+        </section>
 
-          <section class="a-pnl__sec">
-            <div class="a-pnl__sec-title">Модели провайдера</div>
-            <div class="a-prov-models">
-              <div class="a-prov-models__bar">
-                <input class="a-input a-prov-models__filter" id="provModelFilter" placeholder="Поиск по названию…" autocomplete="off" spellcheck="false">
-              </div>
-              <div id="provModelList"></div>
+        <section class="a-card">
+          <div class="a-card__head">
+            <span class="a-card__title">Модели провайдера</span>
+            <span class="spacer"></span>
+            <input class="a-input a-input--search" id="provModelFilter" placeholder="Поиск по названию…" autocomplete="off" spellcheck="false">
+            <button class="btn btn--primary btn--sm" id="provPingModelsBtn" type="button">${aicon("pulse")} Пинг всех моделей <span class="a-btn__note">10 с</span></button>
+          </div>
+          <div id="provModelPingResult">${provPingBoxHTML(false)}</div>
+          <div id="provModelList" class="a-models"></div>
+        </section>
+
+        <section class="a-card">
+          <div class="a-card__head">
+            <span class="a-card__title">Место в очереди</span>
+            <span class="spacer"></span>
+            <span class="a-card__sub" id="provSlotNote"></span>
+          </div>
+          <div id="provSlotSeg">${provSlotSegHTML(p.slot || "")}</div>
+        </section>
+      </div>
+
+      <div class="a-page-col a-page-col--side">
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">Подключение</span></div>
+          ${provKvHTML("Адрес", esc(p.baseHost || p.baseUrl || "—"), true)}
+          ${provKvHTML("Ключ", p.keySet ? `задан <span class="mono">${esc(p.keyHint || "")}</span>` : "не задан")}
+          ${provKvHTML("Авторизация", p.auth === "raw" ? "сырой ключ" : "Bearer")}
+          <details class="a-fold"${p.builtin ? "" : " open"}>
+            <summary>Изменить адрес, ключ и quirks</summary>
+            <div class="a-field">
+              <label for="provDetailBaseUrl">Base URL</label>
+              <input class="a-input mono" id="provDetailBaseUrl" value="${esc(p.baseUrl || "")}" autocomplete="off" spellcheck="false">
             </div>
-            <div id="provModelPingResult">${provModelPingHTML(ProvDetail.modelPing)}</div>
-          </section>
-
-          <section class="a-pnl__sec">
-            <div class="a-pnl__sec-title">Подключение</div>
-            <div class="a-form-grid">
-              <div class="a-field">
-                <label for="provDetailBaseUrl">Base URL</label>
-                <input class="a-input mono" id="provDetailBaseUrl" value="${esc(p.baseUrl || "")}" autocomplete="off" spellcheck="false">
-                <span class="a-field__hint">${esc(p.baseHost || "")}</span>
-              </div>
-              <div class="a-field">
-                <label for="provDetailKey">API-ключ</label>
-                <input class="a-input mono" id="provDetailKey" type="password" placeholder="${p.keySet ? esc(`задан ${p.keyHint || ""} — пусто = не менять`) : "не задан"}" autocomplete="off">
-                <span class="a-field__hint">${p.keySet ? "Ключ хранится в базе и никогда не отдаётся в браузер целиком." : "Без ключа провайдер не участвует в ротации."}</span>
-              </div>
+            <div class="a-field">
+              <label for="provDetailKey">API-ключ</label>
+              <input class="a-input mono" id="provDetailKey" type="password" placeholder="${p.keySet ? esc(`задан ${p.keyHint || ""} — пусто = не менять`) : "не задан"}" autocomplete="off">
+              <span class="a-field__hint">Ключ никогда не отдаётся в браузер целиком.</span>
             </div>
-          </section>
-
-          <section class="a-pnl__sec">
-            <div class="a-pnl__sec-title">Место в очереди</div>
-            <div id="provSlotSeg">${provSlotSegHTML(p.slot || "")}</div>
-            <div class="a-field__hint" id="provSlotNote">${p.slot ? `Провайдер в слоте «${esc(p.slotLabel || p.slot)}».` : "Провайдер вне очереди по приоритету."} Один приоритет — один провайдер: выбранный слот освободится от прежнего.</div>
-          </section>
-
+            <label class="a-check"><input type="checkbox" id="provWallet"${p.useWalletBalance ? " checked" : ""}> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
+            <label class="a-check"><input type="checkbox" id="provMerge"${p.mergeSystem ? " checked" : ""}> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label>
+          </details>
           <div class="a-pnl__note">${p.builtin
             ? "Стандартные значения встроенного провайдера берутся из окружения сервера. Здесь можно наложить свои — они переживут рестарт, а «Сбросить» вернёт окружение."
             : "Стандартные значения — те, с которыми провайдер был добавлен. «Сбросить» вернёт их вместе с моделью и названием."}</div>
-          <div class="a-modal__error" id="provDetailError" hidden></div>
-        </div>
+        </section>
 
-        <footer class="a-pnl__foot">
-          <button class="btn btn--soft btn--sm" id="provResetBtn" type="button">${aicon("reset")} Сбросить к стандартным</button>
-          ${p.builtin ? "" : `<button class="btn btn--soft btn--sm" id="provDetailDelete" type="button">${aicon("trash")} Удалить</button>`}
-          <span class="spacer"></span>
-          <button class="btn btn--soft btn--sm" id="provDetailClose" type="button">Отмена</button>
-          <button class="btn btn--primary btn--sm" id="provDetailApply" type="button">Сохранить и проверить</button>
-        </footer>
+        <section class="a-card">
+          <div class="a-card__head"><span class="a-card__title">В ротации</span></div>
+          ${provKvHTML("Приоритет", p.slot ? esc(p.slotLabel || p.slot) : "без приоритета")}
+          ${provKvHTML("Активный", p.active ? "да — новые запросы идут сюда" : (Prov.data && Prov.data.active ? esc(provName(Prov.data.active)) : "нет"))}
+          ${provKvHTML("Успех", p.lastOkAt ? esc(provRel(p.lastOkAt)) : "—")}
+          ${p.lastError ? provKvHTML("Последняя ошибка", `<span class="a-prov-err">${esc(p.lastError)}</span>`) : ""}
+          ${(p.warnings || []).map((w) => `<div class="a-prov-warn">${esc(w)}</div>`).join("")}
+        </section>
+
+        <section class="a-card a-card--danger">
+          <div class="a-card__head"><span class="a-card__title">Опасная зона</span></div>
+          <div class="a-card__sub">Сброс возвращает стандартные значения, удаление убирает провайдера из ротации.</div>
+          <div class="a-actions-row">
+            <button class="btn btn--soft btn--sm" id="provResetBtn" type="button">${aicon("reset")} Сбросить к стандартным</button>
+            ${p.builtin ? "" : `<button class="btn btn--soft btn--sm" id="provDetailDelete" type="button">${aicon("trash")} Удалить провайдера</button>`}
+          </div>
+        </section>
       </div>
-  </div>`;
-  document.getElementById("provDetailBackdrop").onclick = (e) => { if (e.target.id === "provDetailBackdrop") closeProviderDetail(); };
-  document.getElementById("provDetailX").onclick = closeProviderDetail;
-  document.getElementById("provDetailClose").onclick = closeProviderDetail;
-  document.getElementById("provModelsBtn").onclick = loadProviderModels;
-  document.getElementById("provModelProbeBtn").onclick = probeProviderModel;
-  document.getElementById("provPingModelsBtn").onclick = pingProviderModels;
+    </div>
+
+    <div class="a-sticky-actions">
+      <span class="a-modal__error" id="provDetailError" hidden></span>
+      <span class="a-sticky-actions__state" id="provApplyState"></span>
+      <span class="spacer"></span>
+      <a class="btn btn--soft btn--sm" href="#/providers">Отмена</a>
+      <button class="btn btn--primary btn--sm" id="provDetailApply" type="button">Сохранить</button>
+    </div>`);
+
+  // --- обработчики ---
+  const bind = (elId, handler) => {
+    const el = document.getElementById(elId);
+    if (el) el.onclick = handler;
+  };
+  bind("provModelsBtn", loadProviderModels);
+  bind("provModelProbeBtn", probeProviderModel);
+  bind("provPingModelsBtn", pingProviderModels);
+  bind("provDetailApply", applyProviderDetail);
+  // Именно обёртка: напрямую `onclick = resetProvider` передало бы СОБЫТИЕ в
+  // аргумент id, и сброс ушёл бы на провайдера «[object PointerEvent]».
+  bind("provResetBtn", () => resetProvider());
+  bind("provDetailDelete", () => deleteProvider(id));
   const filter = document.getElementById("provModelFilter");
   if (filter) filter.oninput = () => provDetailRenderList();
-  // Именно обёртка: напрямую `onclick = resetProvider` передало бы СОБЫТИЕ
-  // в аргумент id, и сброс ушёл бы на провайдера «[object PointerEvent]».
-  document.getElementById("provResetBtn").onclick = () => resetProvider();
-  document.getElementById("provDetailApply").onclick = applyProviderDetail;
-  const del = document.getElementById("provDetailDelete");
-  if (del) del.onclick = () => { closeProviderDetail(); deleteProvider(id); };
-  const input = document.getElementById("provDetailModel");
-  if (input) input.oninput = () => { ProvDetail.model = input.value.trim(); provDetailMarkDirty(); };
+  const modelInput = document.getElementById("provDetailModel");
+  if (modelInput) modelInput.oninput = () => { ProvDetail.model = modelInput.value.trim(); provDetailRenderList(); provDetailMarkDirty(); };
   const titleInput = document.getElementById("provDetailModelTitle");
   if (titleInput) titleInput.oninput = provDetailMarkDirty;
   provDetailRenderList();
   provDetailMarkDirty();
 }
 
-/* Подсказки под полями модели и названия. Кроме «сейчас/в окружении» они
-   показывают, что поле изменено и ещё не сохранено: правка модели (в том числе
-   выбором из списка или из рейтинга) иначе выглядела бы уже применённой —
-   человек закрывал бы панель и получал бы не то, что собирался настроить. */
+function provName(id) {
+  const p = provById(id);
+  return (p && (p.title || p.id)) || id;
+}
+
+/* Подсказки под полями модели и названия: «сейчас/в окружении» + честная
+   отметка «не применено». Без неё выбор модели из списка или из рейтинга
+   выглядел бы уже применённым, и человек уходил бы со страницы, не сохранив
+   правку. */
 function provDetailMarkDirty() {
   const cur = ProvDetail.current || { model: "", modelTitle: "" };
-  const card = provById(ProvDetail.id) || {};
+  const card = ProvDetail.data || provById(ProvDetail.id) || {};
   const model = (document.getElementById("provDetailModel") || {}).value || "";
   const title = (document.getElementById("provDetailModelTitle") || {}).value || "";
   const modelDirty = model.trim() !== cur.model;
@@ -2538,16 +2831,20 @@ function provDetailMarkDirty() {
   const thint = document.getElementById("provTitleHint");
   if (thint) {
     thint.innerHTML = titleDirty
-      ? `Не применено. Ученик увидит: <b>${esc(title.trim() || "ID модели")}</b>`
-      : "Это увидит ученик на странице результата вместо технического ID. Пусто — покажем ID модели.";
+      ? `Не применено. Ученик увидит: <b>${esc(title.trim() || "ничего — строка не появится")}</b>`
+      : "Это увидит ученик на странице результата вместо технического ID. Пусто — строка не появится.";
     thint.classList.toggle("a-field__hint--dirty", titleDirty);
   }
-}
-
-function closeProviderDetail() {
-  A.modalRoot.innerHTML = "";
-  ProvDetail.id = null;
-  ProvDetail.models = null;
+  const state = document.getElementById("provApplyState");
+  if (state) {
+    const key = (document.getElementById("provDetailKey") || {}).value || "";
+    const address = (document.getElementById("provDetailBaseUrl") || {}).value || "";
+    const slotBtn = document.querySelector("#provSlotSeg .a-seg2__btn--on");
+    const slotChanged = (card.slot || "") !== ((slotBtn && slotBtn.dataset.slot) || "");
+    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged)
+      ? "Есть несохранённые изменения" : "";
+    state.classList.toggle("a-sticky-actions__state--on", !!state.textContent);
+  }
 }
 
 function provDetailError(msg) {
@@ -2560,12 +2857,87 @@ function provDetailError(msg) {
 
 function provDetailSetLoading(which, busy, label) {
   const map = which === "models"
-    ? ["provModelsBtn", ProvDetail.loading, "Загрузить список"]
-    : ["provModelProbeBtn", ProvDetail.probing, "Проверить выбранную модель"];
+    ? ["provModelsBtn", "Список моделей"]
+    : ["provModelProbeBtn", "Проверить"];
   const btn = document.getElementById(map[0]);
   if (!btn) return;
   btn.disabled = busy;
-  btn.textContent = busy ? label : map[2];
+  btn.innerHTML = busy ? `${aicon("pulse")} ${esc(label)}` : `${aicon(which === "models" ? "list" : "pulse")} ${esc(map[1])}`;
+}
+
+function provDetailSetVerdict(html) {
+  ProvDetail.verdict = html || "";
+  const box = document.getElementById("provModelProbeResult");
+  if (box) box.innerHTML = ProvDetail.verdict;
+}
+
+function provVerdictOk(html) { provDetailSetVerdict(`<div class="a-prov-checkok">${html}</div>`); }
+function provVerdictBad(html) { provDetailSetVerdict(`<div class="a-prov-checkbad">${html}</div>`); }
+
+function provDetailModelInput() {
+  const el = document.getElementById("provDetailModel");
+  return el ? el.value.trim() : "";
+}
+
+/* Список моделей: карточками-строками с точкой вердикта и задержкой, а не
+   нативным <select size=8> — тот выглядел в админке как чужой старый дизайн и
+   не давал ни фильтра, ни отметки выбранного. */
+function provDetailRenderList() {
+  const box = document.getElementById("provModelList");
+  if (!box) return;
+  const d = ProvDetail;
+  if (d.loading) {
+    box.innerHTML = `<div class="a-skeleton" style="height:38px"></div><div class="a-skeleton" style="height:38px;margin-top:8px"></div><div class="a-skeleton" style="height:38px;margin-top:8px"></div>`;
+    return;
+  }
+  if (!d.models) {
+    box.innerHTML = `<div class="a-models__empty">Список берётся у провайдера живым запросом: нажми «Список моделей» или впиши модель вручную.</div>`;
+    return;
+  }
+  const filter = ((document.getElementById("provModelFilter") || {}).value || "").trim().toLowerCase();
+  const ping = (d.ping && d.ping.results) || {};
+  const all = d.models.models || [];
+  const list = filter ? all.filter((m) => String(m).toLowerCase().includes(filter)) : all;
+  if (!all.length) {
+    box.innerHTML = `<div class="a-prov-checkbad">Провайдер вернул пустой список моделей.</div>`;
+    return;
+  }
+  const head = `<div class="a-models__bar">
+      <span class="a-card__sub">${list.length === all.length
+        ? `${fmtNum(all.length)} моделей от провайдера${d.models.latencyMs ? ` · список пришёл за ${fmtNum(d.models.latencyMs)} мс` : ""}`
+        : `найдено ${fmtNum(list.length)} из ${fmtNum(all.length)}`}${d.models.truncated ? " · список обрезан" : ""}</span>
+    </div>`;
+  if (!list.length) {
+    box.innerHTML = head + `<div class="a-models__empty">Ничего не нашлось по «${esc(filter)}».</div>`;
+    return;
+  }
+  const skip = new Set();   // отсекаем хвост ради скорости отрисовки, честно сообщая об этом
+  const shown = list.slice(0, PROV_MODEL_RENDER_MAX);
+  box.innerHTML = head + shown.map((m) => {
+    const mid = String(m);
+    const isCur = (d.models.current === mid) || (d.model === mid);
+    const v = ping[mid];
+    const dot = v ? (v.ok ? "ok" : (v.pending ? "idle" : "bad")) : "idle";
+    const note = v ? (v.ok ? `${fmtNum(v.latencyMs)} мс` : (v.pending ? "проверяем…" : (v.error || "недоступна"))) : "";
+    return `<button type="button" class="a-model${isCur ? " a-model--picked" : ""}"
+        data-model="${esc(mid)}" onclick="pickProviderModel(this.dataset.model)" title="${esc(mid)}">
+      <span class="a-dot a-dot--${dot}"></span>
+      <span class="a-model__name mono">${esc(mid)}</span>
+      ${v && !v.pending ? `<span class="a-chip a-chip--accent">${esc(note)}</span>` : ""}
+      ${isCur ? '<span class="a-chip a-chip--success">сейчас</span>' : '<span class="a-model__pick">выбрать</span>'}
+    </button>`;
+  }).join("") + (list.length > shown.length
+    ? `<div class="a-models__empty">Показаны первые ${fmtNum(shown.length)} — уточни поиск, чтобы увидеть остальные.</div>`
+    : "");
+}
+
+function pickProviderModel(model) {
+  ProvDetail.model = model;
+  const el = document.getElementById("provDetailModel");
+  if (el) el.value = model;
+  provDetailRenderList();
+  provDetailSetVerdict("");
+  provDetailMarkDirty();
 }
 
 async function loadProviderModels() {
@@ -2578,23 +2950,21 @@ async function loadProviderModels() {
   try {
     const r = await AdminApi.get(`/api/admin/providers/${encodeURIComponent(id)}/models`);
     ProvDetail.models = { models: (r && r.models) || [], total: r && r.total, truncated: !!(r && r.truncated), current: (r && r.current) || "", latencyMs: r && r.latencyMs };
-    // Текущая модель — первая в списке (так возвращает сервер), но если её
-    // в списке нет (шлюз её не отдаёт) — всё равно показываем её вручную.
     if (!ProvDetail.models.models.length && ProvDetail.model) {
+      // Шлюз не отдаёт текущую модель в списке — показываем её вручную, иначе
+      // список выглядел бы пустым у рабочего провайдера.
       ProvDetail.models.models = [ProvDetail.model];
       ProvDetail.models.manualOnly = true;
     }
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     ProvDetail.error = e.message || "ошибка";
-    // Троттлинг — не поломка: список у провайдера уже запрашивали недавно,
-    // поэтому это «подожди», а не «не удалось получить».
     provDetailError(e.retryAfter
       ? `Список у провайдера недавно запрашивали — повтори через ${e.retryAfter} с.`
       : `Список моделей не получен: ${ProvDetail.error}. Модель можно вписать вручную.`);
   } finally {
     ProvDetail.loading = false;
-    provDetailSetLoading("models", false, "Загрузить список");
+    provDetailSetLoading("models", false, "");
     provDetailRenderList();
   }
 }
@@ -2607,23 +2977,19 @@ async function probeProviderModel() {
   provDetailError("");
   ProvDetail.probing = true;
   provDetailSetLoading("probe", true, "Проверяем…");
-  const res = document.getElementById("provModelProbeResult");
-  if (res) res.innerHTML = `<div class="a-card__sub">Проверяем модель живым запросом «привет»…</div>`;
+  provDetailSetVerdict(`<div class="a-card__sub">Проверяем модель живым запросом «привет»…</div>`);
   try {
     const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe-model`, { model });
     const p = r && r.probe;
-    if (p && p.ok) {
-      provVerdictOk(`Модель <span class="mono">${esc(model)}</span> отвечает (${fmtNum(p.latencyMs)} мс). Её можно применять.`);
-    } else {
-      provVerdictBad(`Модель <span class="mono">${esc(model)}</span> не отвечает: ${esc((p && p.error) || "ошибка")}. Применить её можно, но проверки работать не будут.`);
-    }
+    if (p && p.ok) provVerdictOk(`Модель <span class="mono">${esc(model)}</span> отвечает (${fmtNum(p.latencyMs)} мс). Её можно применять.`);
+    else provVerdictBad(`Модель <span class="mono">${esc(model)}</span> не отвечает: ${esc((p && p.error) || "ошибка")}. Применить её можно, но проверки работать не будут.`);
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     if (e.retryAfter) provDetailSetVerdict(`<div class="a-prov-hint">Модель только что проверяли — повтори через ${e.retryAfter} с.</div>`);
     else provVerdictBad(esc(e.message || "ошибка проверки"));
   } finally {
     ProvDetail.probing = false;
-    provDetailSetLoading("probe", false, "Проверить выбранную модель");
+    provDetailSetLoading("probe", false, "");
   }
 }
 
@@ -2637,51 +3003,68 @@ async function applyProviderDetail() {
     base_url: (document.getElementById("provDetailBaseUrl") || {}).value || "",
     model_title: ((document.getElementById("provDetailModelTitle") || {}).value || "").trim(),
   };
-  // Приоритет едет той же кнопкой: иначе модель применилась бы мгновенно, а
-  // слот — только после второго запроса, и между ними ученик получил бы
-  // провайдера по старому порядку.
+  // Приоритет, quirks и адрес едут ТОЙ ЖЕ кнопкой: иначе модель применилась бы
+  // мгновенно, а слот — только после второго запроса, и между ними ученик
+  // получил бы провайдера по старому порядку.
   const onSlot = document.querySelector("#provSlotSeg .a-seg2__btn--on");
   payload.slot = onSlot ? (onSlot.dataset.slot || "") : "";
   const key = (document.getElementById("provDetailKey") || {}).value;
   if (key && key.trim()) payload.api_key = key.trim();
-  if (!payload.model && !payload.base_url && !payload.api_key && !payload.model_title) {
-    provDetailError("Нет изменений — заполни модель, название или адрес");
-    return;
-  }
+  payload.use_wallet_balance = !!(document.getElementById("provWallet") || {}).checked;
+  payload.merge_system = !!(document.getElementById("provMerge") || {}).checked;
+  if (!payload.model) { provDetailError("Впиши ID модели — без нее провайдер не сможет отвечать"); return; }
   if (btn) { btn.disabled = true; btn.textContent = "Сохраняем…"; }
+  let ok = false;
   try {
-    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/apply`, payload);
-    if (r && r.warning) { provDetailError(r.warning); }
-    if (r && r.probe) {
-      if (r.probe.ok) provVerdictOk(`Сохранено. Модель <span class="mono">${esc(payload.model)}</span> отвечает (${fmtNum(r.probe.latencyMs)} мс).`);
-      else provVerdictBad(`Сохранено, но модель не отвечает: ${esc(r.probe.error || "ошибка")}`);
-    }
-    toast(r && r.warning ? "Сохранено, модель не отвечает" : "Сохранено и проверено");
+    // Сервер НЕ дёргает модель после сохранения: сохранение мгновенное.
+    // Проверка — отдельная кнопка выше («Проверить» или «Пинг всех моделей»).
+    await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/apply`, payload);
+    ok = true;
+    toast("Сохранено");
+    provDetailSetVerdict("");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     provDetailError(e.message || "ошибка");
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Сохранить и проверить"; }
+    if (btn) { btn.disabled = false; btn.textContent = "Сохранить"; }
   }
-  // Карточки перерисовываются, панель — НЕТ: перерисовка стирала бы вердикт и
-  // напечатанные поля. Обновляем точечно из свежей карточки.
+  if (!ok) return;
+  // Список провайдеров перечитываем, страницу НЕ перерисовываем: перерисовка
+  // стёрла бы вердикт проверки и напечатанные поля. Обновляем точечно.
   await screenProviders(true);
   const fresh = provById(id);
   if (fresh && ProvDetail.id === id) provDetailSyncFromCard(fresh);
 }
 
-/* Точечное обновление полей панели из свежей карточки: значения, подписи
-   «сейчас/в окружении» и название для ученика. Без этого после сохранения
-   панель показывала бы старые данные (замер: после смены модели подпись
-   «сейчас» оставалась прежней до переоткрытия). */
+/* Точечное обновление полей страницы из свежей карточки: значения, подписи
+   «сейчас/в окружении» и название для ученика. Без него после сохранения
+   страница показывала бы старые данные. */
 function provDetailSyncFromCard(fresh) {
+  if (!fresh || !fresh.id) {
+    // Провайдера больше нет (удалили в другой вкладке) — честно говорим об
+    // этом, а не оставляем страницу с полями удалённой конфигурации.
+    toast("Провайдер исчез — возможно, его удалили в другой вкладке", "err");
+    navigate("/providers");
+    return;
+  }
+  ProvDetail.data = fresh;
   const model = document.getElementById("provDetailModel");
   if (model) model.value = fresh.model || "";
   const title = document.getElementById("provDetailModelTitle");
   if (title) title.value = fresh.modelTitle || "";
+  const base = document.getElementById("provDetailBaseUrl");
+  if (base) base.value = fresh.baseUrl || "";
+  const key = document.getElementById("provDetailKey");
+  if (key) key.value = "";
+  const wallet = document.getElementById("provWallet");
+  if (wallet) wallet.checked = !!fresh.useWalletBalance;
+  const merge = document.getElementById("provMerge");
+  if (merge) merge.checked = !!fresh.mergeSystem;
+  const slotBox = document.getElementById("provSlotSeg");
+  if (slotBox) slotBox.innerHTML = provSlotSegHTML(fresh.slot || "");
   ProvDetail.model = fresh.model || "";
-  // Сохранённое обновляем ДО отметки «не применено»: после успешного сохранения
-  // полей расходиться с сервером нечему, и подсказка должна погаснуть сама.
+  // Сохранённое обновляем ДО отметки «не применено»: расходиться с сервером
+  // после успешного сохранения нечему, и подсказка должна погаснуть сама.
   ProvDetail.current = { model: fresh.model || "", modelTitle: fresh.modelTitle || "" };
   provDetailMarkDirty();
 }
@@ -2694,12 +3077,12 @@ async function resetProvider(id) {
   try {
     await AdminApi.post(`/api/admin/providers/${encodeURIComponent(target)}/reset`, {});
     toast("Возвращены стандартные значения");
-    closeProviderDetail();
-  } catch (e) {
+      } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     provDetailError(e.message || "ошибка");
   }
   await screenProviders(true);
+  provDetailSetVerdict("");
 }
 
 /* ---------------- корневой рендер ---------------- */
@@ -2750,8 +3133,13 @@ async function render() {
     await screenAudit();
   } else if (route.name === "inbox") {
     await screenInbox();
+  } else if (route.name === "providers-new") {
+    // Для честной подсказки про занятые слоты нужен актуальный список.
+    if (!Prov.data) await screenProviders(true);
+    screenProviderNew();
   } else if (route.name === "providers") {
-    await screenProviders();
+    if (route.param) await screenProviderPage(safeDecode(route.param));
+    else await screenProviders();
   } else if (route.name === "blocked") {
     await screenBlocked();
   } else {

@@ -136,11 +136,410 @@ PROVIDERS: dict[str, dict] = {
 # после отказа приоритетного запросы сразу идут на запасной.
 PROVIDER_PRIORITY: tuple[str, ...] = ("closerouter", "gptunnel")
 
+# Слоты приоритета для админки: высокий идёт первым, средний вторым, низкий
+# третьим. Каждый слот держит максимум ОДИН провайдер (уникальность enforced
+# providers_set_slots), провайдер без слота — вне ротации по приоритету, но в
+# самой ротации участвует (идёт после слотовых). Пустые слоты на свежей базе
+# маппятся на legacy-пару closerouter/gptunnel (см. effective_priority).
+PROVIDER_SLOTS: tuple[str, ...] = ("high", "medium", "low")
+PROVIDER_SLOT_LABELS = {"high": "Высокий", "medium": "Средний", "low": "Низкий"}
+PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+# Статус «используется прямо сейчас»: последний успех от живого трафика
+# учеников моложе этого окна. Не опрос, а метка времени — холостых запросов
+# ради статуса нет, свежие данные приезжают с обычным GET списка.
+PROVIDER_RECENT_SEC = 60.0
+# Ручная проба («привет», 1 токен) — дешёвый живой запрос мимо бюджета.
+PROBE_MANUAL_TIMEOUT_SEC = 20.0
+
+_CUSTOM_KEY = "ai_custom_providers"
+_SLOTS_KEY = "ai_provider_slots"
+_ENABLED_KEY = "ai_provider_enabled"
+# Переопределения полей ВСТРОЕННЫХ провайдеров из админки (модель прежде
+# всего). Ключ/модель/URL встроенных берутся из окружения — там их правит
+# деплой; админка может наложить поверх свою модель (выбранную из списка
+# моделей провайдера) и вернуть стандартную кнопкой сброса. Пустой сброс
+# означает «снова из окружения», а не «удалить провайдер».
+_OVERRIDES_KEY = "ai_provider_overrides"
+# Человеческие названия моделей: {providerId: {modelId: "название"}}. Именно
+# это название видит ученик на экране результата («проверено моделью …»), и
+# задаёт его админ в панели провайдеров. Раньше там стоял вшитый словарь
+# {"closerouter": "Claude Sonnet 5", "gptunnel": "Qwen Flash"}: любая другая
+# модель подписывалась чужим именем, а свой провайдер не подписывался вовсе.
+_MODEL_TITLES_KEY = "ai_model_titles"
+# Сколько моделей отдаём в списке выбора: у крупных шлюзов их сотни, а список
+# на 400 позициях бесполезен в выпадающем поле. Порядок — как у провайдера,
+# текущая модель всегда первая, чтобы её не искать в середине.
+MODELS_LIST_MAX = 400
+# Потолок моделей, которые можно проверить одним нажатием «пинг всех моделей».
+# Каждая проверка — живой запрос провайдеру (1 токен ответа), и у шлюза список
+# бывает на сотни позиций: без потолка одна кнопка превратилась бы в 300
+# запросов подряд и долгий ответ. Проверяем по порядку провайдера, а в ответе
+# честно говорим, сколько проверено и сколько осталось за кадром.
+PROBE_MODELS_MAX = 30
+# Сколько моделей проверяем ОДНОВРЕМЕННО. Замер: 4 модели на фейковом шлюзе
+# по очереди давали сумму их же задержек (то есть ждали дольше самой
+# медленной), параллельно — задержку самой медленной. Больше шести не берём:
+# провайдер параллельно обслуживает проверки сочинений учеников, и лавина из
+# 30 одновременных запросов ему не полезна.
+PROBE_MODELS_WORKERS = 6
+# Таймаут ОДНОЙ модели и общий бюджет живого пинга. 10 секунд — требование
+# админки: список должен появляться на глазах, а не «когда-нибудь». Модель,
+# не ответившая за общий бюджет, получает честную причину «не ответил за N с»,
+# а не тишину: у любого шлюза найдётся висящая модель, и без бюджета «пинг»
+# превращался бы в ожидание неизвестной длины.
+PROBE_MODELS_TIMEOUT_SEC = 10.0
+PROBE_MODELS_BUDGET_SEC = 10.0
+
+_provider_health_lock = threading.Lock()
+# Последний успех живого трафика по провайдеру (ms epoch) — пишет только
+# _note_provider_success. Ручная проба из админки сюда тоже попадает.
+_provider_last_ok: dict[str, int] = {}
+# Последний отказ по провайдеру (ms epoch, короткий текст) — пишет только
+# _note_provider_failure. Текста ключа тут нет: только класс + сообщение.
+_provider_last_err: dict[str, tuple[int, str]] = {}
+# Последняя РУЧНАЯ проверка из админки: {id: {ok, at, latencyMs, error}}.
+_provider_last_check: dict[str, dict] = {}
+
+_admin_cache_lock = threading.Lock()
+_admin_cache: dict = {"path": None, "customs": None, "slots": None, "enabled": None}
+
+
+def _app_config_read(key: str):
+    try:
+        conn = sqlite3.connect(f"file:{_router_db_path()}?mode=ro", uri=True, timeout=3.0)
+        try:
+            row = conn.execute("SELECT value_json FROM app_config WHERE key=?", (key,)).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return json.loads(row[0])
+    except (sqlite3.Error, OSError, ValueError):
+        return None
+
+
+def _app_config_write(key: str, value) -> None:
+    conn = sqlite3.connect(_router_db_path(), timeout=5.0)
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config "
+                     "(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (key, json.dumps(value, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
+    """(customs, slots, enabled, overrides) с кэшем на процесс. Не бросает."""
+    global _admin_cache
+    path = _router_db_path()
+    with _admin_cache_lock:
+        if (_admin_cache.get("path") == path and _admin_cache.get("customs") is not None):
+            return (_admin_cache["customs"], _admin_cache["slots"],
+                    _admin_cache["enabled"], _admin_cache["overrides"])
+    customs, slots, enabled, overrides = {}, {"high": None, "medium": None, "low": None}, {}, {}
+    try:
+        raw_customs = _app_config_read(_CUSTOM_KEY)
+        if isinstance(raw_customs, dict):
+            for pid, entry in raw_customs.items():
+                if isinstance(pid, str) and isinstance(entry, dict):
+                    customs[pid] = entry
+        raw_slots = _app_config_read(_SLOTS_KEY)
+        if isinstance(raw_slots, dict):
+            for slot in PROVIDER_SLOTS:
+                val = raw_slots.get(slot)
+                slots[slot] = val if isinstance(val, str) and val else None
+        raw_enabled = _app_config_read(_ENABLED_KEY)
+        if isinstance(raw_enabled, dict):
+            for pid, val in raw_enabled.items():
+                if isinstance(pid, str):
+                    enabled[pid] = bool(val)
+        raw_overrides = _app_config_read(_OVERRIDES_KEY)
+        if isinstance(raw_overrides, dict):
+            for pid, entry in raw_overrides.items():
+                if isinstance(pid, str) and isinstance(entry, dict):
+                    overrides[pid] = entry
+    except Exception:
+        pass
+    with _admin_cache_lock:
+        _admin_cache = {"path": path, "customs": customs, "slots": slots,
+                        "enabled": enabled, "overrides": overrides}
+    return customs, slots, enabled, overrides
+
+
+def _admin_invalidate() -> None:
+    global _admin_cache
+    with _admin_cache_lock:
+        _admin_cache = {"path": _admin_cache.get("path"), "customs": None,
+                        "slots": None, "enabled": None, "overrides": None}
+
+
+def reset_providers_cache() -> None:
+    """Тестовый хук: забыть кэш кастомных провайдеров и слотов."""
+    _admin_invalidate()
+
+
+# ---------------------------------------------------------------------------
+# Человеческие названия моделей — то, что видит ученик
+# ---------------------------------------------------------------------------
+
+def model_title(provider: str, model: str) -> str:
+    """Название модели, заданное админом ('' — не задано). Не бросает."""
+    pid = str(provider or "")
+    mid = str(model or "")
+    if not pid or not mid:
+        return ""
+    try:
+        raw = _app_config_read(_MODEL_TITLES_KEY)
+    except Exception:
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    for_model = raw.get(pid)
+    if not isinstance(for_model, dict):
+        return ""
+    return str(for_model.get(mid) or "").strip()[:120]
+
+
+def set_model_title(provider: str, model: str, title: str) -> str:
+    """Задать (или снять пустой строкой) название модели. Возвращает итог."""
+    pid = str(provider or "")
+    mid = str(model or "")
+    if not pid or not mid:
+        raise ValueError("Нужны провайдер и модель для названия")
+    try:
+        raw = _app_config_read(_MODEL_TITLES_KEY)
+    except Exception:
+        raw = None
+    store = dict(raw) if isinstance(raw, dict) else {}
+    for_model = dict(store.get(pid)) if isinstance(store.get(pid), dict) else {}
+    clean = str(title or "").strip()[:120]
+    if clean:
+        for_model[mid] = clean
+    else:
+        for_model.pop(mid, None)
+    if for_model:
+        store[pid] = for_model
+    else:
+        store.pop(pid, None)
+    _app_config_write(_MODEL_TITLES_KEY, store)
+    return clean
+
+
+def model_display_title(provider: str, model: str = "") -> str:
+    """Подпись модели для АДМИНА: название → id модели → '' (всё, что известно).
+
+    Никаких вшитых имён: что админ назвал, то и подписываем. Если название не
+    задано, показывается id модели — админу это полезно (видно, что именно
+    настроено), ученику такую строку показывать нельзя, для него есть
+    `model_student_label`."""
+    pid = str(provider or "")
+    mid = str(model or "")
+    title = model_title(pid, mid)
+    if title:
+        return title
+    if mid:
+        return mid
+    # Старые записи без модели: подписываем текущей моделью провайдера, а не
+    # выдуманным именем. Неизвестный провайдер (легаси «ai+grammar» — это не
+    # провайдер, а пометка «ответила и грамматика») — пусто: строка на экране
+    # не рисуется, как и раньше, и выдуманное имя вместо неё тоже не нужно.
+    if not pid:
+        return ""
+    try:
+        spec = _spec_for(pid)
+        return str(spec["model"]())[:200]
+    except Exception:
+        return ""
+
+
+def model_student_label(provider: str, model: str = "") -> str:
+    """Подпись для УЧЕНИКА: только то, что админ назвал сам, иначе ''.
+
+    Отличие от `model_display_title` намеренное: там откат на id модели —
+    диагностика для админа, здесь строка «Сочинение проверено моделью
+    grok-chat-fast» была бы шумом из технического id. Лучше не показать строку,
+    чем показать служебное; зато админ не пропустит это молча — в панели у
+    модели без названия горит чип «нет названия для ученика»."""
+    return model_title(str(provider or ""), str(model or ""))
+
+
+def _custom_spec(entry: dict, overrides: dict | None = None) -> dict:
+    ov = overrides if isinstance(overrides, dict) else {}
+    title = str(entry.get("title") or entry.get("id") or "").strip()
+    base_url = str(ov.get("base_url") or entry.get("base_url") or "").strip().rstrip("/")
+    model = str(ov.get("model") or entry.get("model") or "").strip()
+    key = str(ov.get("api_key") or entry.get("api_key") or "")
+    auth = str(ov.get("auth") or entry.get("auth") or "bearer").strip().lower()
+    if auth not in ("bearer", "raw"):
+        auth = "bearer"
+    extra: dict = {}
+    wallet = ov.get("use_wallet_balance", entry.get("use_wallet_balance"))
+    merge = ov.get("merge_system", entry.get("merge_system"))
+    if wallet:
+        extra = {"useWalletBalance": True}
+    return {
+        "title": title,
+        "key": (lambda k=key: k),
+        "base_url": (lambda u=base_url: u),
+        "model": (lambda m=model: m),
+        "auth": auth,
+        "extra_body": extra,
+        "merge_system": bool(merge),
+        "enabled": entry.get("enabled", True) is not False,
+        "builtin": False,
+        "entry": entry,
+    }
+
+
+def _builtin_overrides(pid: str) -> dict:
+    """Поля встроенного, наложенные админкой поверх окружения (модель и т.п.).
+
+    Пустое переопределение = «как в окружении», поэтому сброс возвращает
+    провайдер к деплою, а не ломает его."""
+    _customs, _slots, _enabled, overrides = _admin_snapshot()
+    entry = overrides.get(pid)
+    clean: dict = {}
+    if not isinstance(entry, dict):
+        return clean
+    for field in ("model", "base_url", "api_key", "auth", "use_wallet_balance", "merge_system"):
+        val = entry.get(field)
+        if field in ("use_wallet_balance", "merge_system"):
+            if isinstance(val, bool):
+                clean[field] = val
+        elif isinstance(val, str) and val.strip():
+            clean[field] = val.strip()
+    return clean
+
+
+def _spec_for(name: str) -> dict:
+    key = str(name or "")
+    builtin = PROVIDERS.get(key)
+    if builtin is not None:
+        spec = dict(builtin)
+        _customs, _slots, enabled, _ov = _admin_snapshot()
+        # Ключ/URL/модель встроенного — сначала окружение; сверху админское
+        # переопределение, но ТОЛЬКО для кастомных полей (модель, иногда
+        # ключ) — окружение по-прежнему может всё переопределить.
+        ov = _builtin_overrides(key)
+        base_model = spec["model"]
+        base_key = spec["key"]
+        base_url = spec["base_url"]
+        if ov.get("model"):
+            spec["model"] = (lambda m=ov["model"]: m)
+        if ov.get("base_url"):
+            spec["base_url"] = (lambda u=ov["base_url"].rstrip("/"): u)
+        if ov.get("api_key"):
+            spec["key"] = (lambda k=ov["api_key"]: k)
+        if "auth" in ov:
+            spec["auth"] = ov["auth"]
+        if "merge_system" in ov:
+            spec["merge_system"] = ov["merge_system"]
+        if "use_wallet_balance" in ov:
+            spec["extra_body"] = {"useWalletBalance": True} if ov["use_wallet_balance"] else {}
+        spec["defaultModel"] = base_model() if callable(base_model) else base_model
+        spec["defaultKey"] = base_key() if callable(base_key) else base_key
+        spec["defaultBaseUrl"] = base_url() if callable(base_url) else base_url
+        spec["overrides"] = ov
+        spec["enabled"] = bool(enabled.get(key, True))
+        spec["builtin"] = True
+        return spec
+    customs, _slots, enabled, _ov = _admin_snapshot()
+    entry = customs.get(key)
+    if entry is None:
+        raise KeyError(f"unknown provider {key!r}")
+    spec = _custom_spec(entry)
+    if key in enabled:
+        spec["enabled"] = bool(enabled[key])
+    return spec
+
+
+def known_provider_ids() -> list[str]:
+    """Все известные id: встроенные + кастомные из базы."""
+    customs, _slots, _enabled, _ov = _admin_snapshot()
+    return list(PROVIDER_PRIORITY) + sorted(customs.keys())
+
+
+def default_slots() -> dict:
+    """Стандартная раскладка слотов: closerouter — высокий, gptunnel — средний.
+
+    Именно она зашита в коде (PROVIDER_PRIORITY), поэтому «ничего не
+    настроено» должно выглядеть в админке так же, как это раскладывается на
+    самом деле. Пустые слоты были не просто неудобны: они означали «приоритет
+    не задан», а ротация при этом всё равно шла closerouter → gptunnel, то
+    есть карточки врали о порядке. Из этого же вытекала дыра: поставив СВОЕМУ
+    провайдеру «Высокий», админ получал двух претендентов на первый слот."""
+    out: dict = {}
+    if _provider_configured(PROVIDER_PRIORITY[0]):
+        out["high"] = PROVIDER_PRIORITY[0]
+    if len(PROVIDER_PRIORITY) > 1 and _provider_configured(PROVIDER_PRIORITY[1]):
+        out["medium"] = PROVIDER_PRIORITY[1]
+    out["low"] = None
+    return out
+
+
+def ensure_default_slots() -> dict:
+    """Материализовать стандартные слоты, если ни один не задан. Идемпотентно.
+
+    Пишем один раз — с этого момента порядок виден в админке буквально, и
+    смена приоритета любой карточкой честно освобождает прежний слот (уже не
+    неявно, а записью в слоты). Пишем только когда НИ ОДИН слот не занят: иначе
+    админ, который освободил слоты нарочно, потерял бы это решение."""
+    _customs, slots, _enabled, _ov = _admin_snapshot()
+    if any(slots.get(s) for s in PROVIDER_SLOTS):
+        return slots
+    defaults = default_slots()
+    if not any(defaults.get(s) for s in PROVIDER_SLOTS):
+        return slots
+    try:
+        _app_config_write(_SLOTS_KEY, defaults)
+    except (sqlite3.Error, OSError):
+        return slots
+    _admin_invalidate()
+    _customs, slots, _enabled, _ov = _admin_snapshot()
+    return slots
+
+
+def effective_priority() -> list[str]:
+    """Порядок ротации по слотам: high → medium → low, затем остальные.
+
+    Слот, указывающий на неизвестный/отключённый провайдер без ключа,
+    пропускается — ротация никогда не зовёт то, чего нет. Если слотов нет
+    вовсе (база до миграции, миграция не записалась) — работает кодовый
+    порядок PROVIDER_PRIORITY, то есть ровно стандартная раскладка слотов."""
+    customs, slots, _enabled, _ov = _admin_snapshot()
+    if not any(slots.get(s) for s in PROVIDER_SLOTS):
+        order = [n for n in PROVIDER_PRIORITY if _provider_configured(n)]
+        order += [pid for pid in sorted(customs.keys()) if _provider_configured(pid)]
+        return order
+    order: list[str] = []
+    for slot in PROVIDER_SLOTS:
+        pid = slots.get(slot)
+        if isinstance(pid, str) and pid and pid not in order and _provider_configured(pid):
+            order.append(pid)
+    for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()):
+        if pid not in order and _provider_configured(pid):
+            order.append(pid)
+    return order
+
+
+def _slot_of(pid: str) -> str | None:
+    _customs, slots, _enabled, _ov = _admin_snapshot()
+    for slot in PROVIDER_SLOTS:
+        if slots.get(slot) == pid:
+            return slot
+    return None
+
 
 def provider_title(name: str) -> str:
     """Человеческое имя провайдера для сообщений админу (fallback — сам id)."""
-    spec = PROVIDERS.get(str(name or "")) or {}
-    return str(spec.get("title") or name or "").strip()
+    try:
+        spec = _spec_for(str(name or ""))
+    except KeyError:
+        return str(name or "").strip()
+    title = spec.get("title") if isinstance(spec, dict) else ""
+    return str(title or name or "").strip()
 
 
 def api_key() -> str:
@@ -414,17 +813,33 @@ def reset_router() -> None:
 
 
 def _provider_configured(name: str) -> bool:
-    spec = PROVIDERS.get(name) or {}
+    try:
+        spec = _spec_for(name)
+    except KeyError:
+        return False
+    if spec.get("enabled") is False:
+        return False
     key_fn = spec.get("key")
-    return bool(key_fn and key_fn())
+    try:
+        return bool(key_fn and key_fn())
+    except Exception:
+        return False
+
+
+def _provider_enabled(name: str) -> bool:
+    try:
+        spec = _spec_for(name)
+    except KeyError:
+        return False
+    return spec.get("enabled") is not False
 
 
 def active_provider() -> str | None:
     """Кого звать первым: сохранённый активный, иначе приоритетный настроенный."""
     stored = str(_router_state().get("active") or "")
-    if stored in PROVIDERS and _provider_configured(stored):
+    if stored and _provider_configured(stored):
         return stored
-    for name in PROVIDER_PRIORITY:
+    for name in effective_priority():
         if _provider_configured(name):
             return name
     return None
@@ -435,7 +850,7 @@ def _ordered_providers() -> list:
     active = active_provider()
     if active is None:
         return []
-    return [active] + [name for name in PROVIDER_PRIORITY
+    return [active] + [name for name in effective_priority()
                        if name != active and _provider_configured(name)]
 
 
@@ -448,6 +863,8 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
     Отказ — это тоже свежая информация о здоровье: lastProbeAt двигается,
     и фоновая проба придёт не раньше чем через интервал после него."""
     now_ms = int(time.time() * 1000)
+    with _provider_health_lock:
+        _provider_last_err[name] = (now_ms, f"{type(exc).__name__}: {exc}"[:300])
     patch: dict[str, Any] = {"lastError": f"{name}: {type(exc).__name__}: {exc}"[:300],
                              "lastErrorAt": now_ms, "lastProbeAt": now_ms}
     current = str(_router_state().get("active") or "")
@@ -465,8 +882,11 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
 
 def _note_provider_success(name: str) -> None:
     """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления."""
+    now_ms = int(time.time() * 1000)
+    with _provider_health_lock:
+        _provider_last_ok[name] = now_ms
     if str(_router_state().get("active") or "") not in ("", name):
-        _router_update({"active": name, "updatedAt": int(time.time() * 1000)})
+        _router_update({"active": name, "updatedAt": now_ms})
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +932,7 @@ def _wire_messages(provider: str, messages: list) -> list:
     промпт подклеивается к первому user-сообщению. gptunnel системную роль
     выполняет — его сообщения не трогаем.
     """
-    spec = PROVIDERS.get(provider) or {}
+    spec = _spec_for(provider)
     if not spec.get("merge_system"):
         return messages
     if len(messages) >= 2 and messages[0].get("role") == "system":
@@ -530,9 +950,32 @@ def _wire_messages(provider: str, messages: list) -> list:
 _chat_state = threading.local()
 
 
+def _model_of(provider: str, requested: str | None = None) -> str:
+    """Id модели, по которой ПОНИМАЕМ уйти провайдеру (явный аргумент важнее
+    настроек: chat(model=...) зовут с конкретной моделью)."""
+    if requested:
+        return str(requested)[:200]
+    try:
+        spec = _spec_for(provider)
+        return str(spec["model"]())[:200]
+    except Exception:
+        return ""
+
+
 def last_used_provider() -> str | None:
     """Ключ провайдера, ответившего на последний chat() в этом потоке, или None."""
     return getattr(_chat_state, "provider", None)
+
+
+def last_used_model() -> str | None:
+    """Id модели, ответившей на последний chat() в этом потоке, или None.
+
+    Пишется рядом с провайдером, потому что подпись проверки на экране
+    результата собирается из пары (провайдер, модель): один и тот же шлюз умеет
+    несколько моделей, и «проверено моделью X» должно называть ту, что
+    реально ответила, а не текущую по конфигурации (failover мог переключить
+    и модель тоже)."""
+    return getattr(_chat_state, "model", None)
 
 
 # ---------------------------------------------------------------------------
@@ -625,13 +1068,29 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
                       temperature: float | None = None,
                       tools: list | None = None, tool_choice=None) -> dict:
     """Один HTTP-вызов, возвращающий сырое message (content + tool_calls)."""
-    spec = PROVIDERS[provider]
-    key = spec["key"]()
+    try:
+        spec = _spec_for(provider)
+    except KeyError:
+        raise AIUnavailable("AI не настроен") from None
+    try:
+        key = spec["key"]()
+    except Exception:
+        key = ""
     if not key:
         raise AIUnavailable("AI не настроен")
 
+    try:
+        model_value = spec["model"]()
+    except Exception:
+        model_value = ""
+    try:
+        base_value = spec["base_url"]()
+    except Exception:
+        base_value = ""
+    if not base_value:
+        raise AIUnavailable("AI не настроен")
     body: dict[str, Any] = {
-        "model": model or spec["model"](),
+        "model": model or model_value,
         "messages": _wire_messages(provider, messages),
     }
     body.update(spec.get("extra_body") or {})
@@ -653,7 +1112,7 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
             body["tool_choice"] = tool_choice
 
     request = urllib.request.Request(
-        f"{spec['base_url']()}/chat/completions",
+        f"{base_value.rstrip('/')}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
             "Authorization": key if spec.get("auth") == "raw" else f"Bearer {key}",
@@ -722,6 +1181,7 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
             parsed = parse_tool_message(message)
             _note_provider_success(name)
             _chat_state.provider = name
+            _chat_state.model = _model_of(name, model)
             if state is not None:
                 state["provider"] = name
             return parsed
@@ -783,6 +1243,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 continue
             _note_provider_success(name)
             _chat_state.provider = name
+            _chat_state.model = _model_of(name, model)
             if state is not None:
                 state["provider"] = name
             return answer
@@ -867,6 +1328,1014 @@ def balance() -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Провайдеры для админки: кастомные записи, слоты, статусы, ручные пробы
+#
+# Встроенные (closerouter/gptunnel) живут в PROVIDERS и настраиваются
+# окружением — ключ/модель/URL у них не правится из админки, только слот и
+# выключатель. Свои провайдеры хранятся в app_config (ключ ai_custom_providers,
+# JSON {id: entry}): обычный OpenAI-совместимый формат (как closerouter),
+# quirks — только auth raw/bearer, useWalletBalance (исключение gptunnel) и
+# merge_system (маршруты вроде anthropic, роняющие роль system).
+# Ключи кастома лежат в БД открытым текстом — иначе их не подписать в
+# Authorization; файл БД и так 0600 и хранит все сессии, это осознанная цена
+# фичи. Клиенту ключ не отдаётся никогда: только keySet + keyHint (4 символа).
+# ---------------------------------------------------------------------------
+
+def _normalize_provider_id(raw) -> str:
+    return str(raw or "").strip().lower()
+
+
+def _base_host(base_url: str) -> str:
+    try:
+        return urllib.parse.urlparse(base_url).netloc[:120]
+    except Exception:
+        return ""
+
+
+def validate_custom_payload(payload: dict, *, is_update: bool = False,
+                            existing_id: str | None = None) -> dict:
+    """Проверить поля кастомного провайдера. Возвращает clean dict.
+
+    Бросает ValueError с человеческим текстом. При update отсутствующие поля
+    означают «не менять» (ключ: пустая строка = не менять тоже)."""
+    if not isinstance(payload, dict):
+        raise ValueError("Некорректный запрос")
+    clean: dict = {}
+    if not is_update:
+        pid = _normalize_provider_id(payload.get("id"))
+        if not pid:
+            raise ValueError("Укажи id провайдера латиницей (например, openrouter)")
+        if not PROVIDER_ID_RE.match(pid):
+            raise ValueError("id — латиница/цифры/дефис/подчёркивание, 2–32 символа")
+        if pid in PROVIDERS:
+            raise ValueError(f"id «{pid}» уже занят встроенным провайдером")
+        customs, _slots, _enabled, _ov = _admin_snapshot()
+        if pid in customs:
+            raise ValueError(f"Провайдер «{pid}» уже существует")
+        clean["id"] = pid
+    else:
+        clean["id"] = str(existing_id or "")
+    if "title" in payload or not is_update:
+        title = str(payload.get("title") or "").strip()[:80]
+        clean["title"] = title or clean["id"]
+    if "base_url" in payload or "baseUrl" in payload or not is_update:
+        base_url = str(payload.get("base_url", payload.get("baseUrl")) or "").strip().rstrip("/")[:500]
+        if not base_url:
+            raise ValueError("Укажи base URL (например, https://openrouter.ai/api/v1)")
+        low = base_url.lower()
+        if not (low.startswith("http://") or low.startswith("https://")):
+            raise ValueError("base URL должен начинаться с http:// или https://")
+        if not _base_host(base_url):
+            raise ValueError("В base URL нет хоста")
+        clean["base_url"] = base_url
+    if "model" in payload or not is_update:
+        model = str(payload.get("model") or "").strip()[:200]
+        if not model:
+            raise ValueError("Укажи модель (например, openai/gpt-4o-mini)")
+        clean["model"] = model
+    if "api_key" in payload or "apiKey" in payload or not is_update:
+        key = payload.get("api_key", payload.get("apiKey"))
+        key = str(key or "")
+        if not is_update and not key.strip():
+            raise ValueError("Укажи API-ключ провайдера")
+        if key.strip():
+            if len(key) > 2000:
+                raise ValueError("API-ключ слишком длинный")
+            clean["api_key"] = key.strip()
+    auth = str(payload.get("auth") or "").strip().lower()
+    if auth or not is_update:
+        if auth not in ("", "bearer", "raw"):
+            raise ValueError("auth — bearer или raw")
+        clean["auth"] = auth or "bearer"
+    if "use_wallet_balance" in payload or "useWalletBalance" in payload or not is_update:
+        clean["use_wallet_balance"] = bool(payload.get("use_wallet_balance",
+                                                        payload.get("useWalletBalance", False)))
+    if "merge_system" in payload or "mergeSystem" in payload or not is_update:
+        clean["merge_system"] = bool(payload.get("merge_system",
+                                                 payload.get("mergeSystem", False)))
+    if "enabled" in payload or not is_update:
+        clean["enabled"] = bool(payload.get("enabled", True))
+    if "model_title" in payload or "modelTitle" in payload or not is_update:
+        # Человеческое название модели для экрана результата. Пустое = не
+        # задано, тогда показывается id (см. model_display_title).
+        clean["model_title"] = str(payload.get("model_title",
+                                                payload.get("modelTitle") or ""))[:120].strip()
+    slot = payload.get("slot")
+    if slot is not None or not is_update:
+        if slot in (None, "", "none", "null"):
+            clean["slot"] = None
+        else:
+            slot = str(slot).strip().lower()
+            if slot not in PROVIDER_SLOTS:
+                raise ValueError("Приоритет — high, medium, low или пусто")
+            clean["slot"] = slot
+    return clean
+
+
+def custom_provider_create(clean: dict) -> dict:
+    """Сохранить нового провайдера. clean — из validate_custom_payload."""
+    ensure_default_slots()  # иначе «Высокий» новому тихо отнял бы слот у closerouter
+    customs, slots, _enabled, _ov = _admin_snapshot()
+    pid = clean["id"]
+    if pid in PROVIDERS or pid in customs:
+        raise ValueError(f"Провайдер «{pid}» уже существует")
+    now_ms = int(time.time() * 1000)
+    entry = {
+        "id": pid,
+        "title": clean.get("title") or pid,
+        "base_url": clean["base_url"],
+        "model": clean["model"],
+        "api_key": clean.get("api_key") or "",
+        "auth": clean.get("auth") or "bearer",
+        "use_wallet_balance": bool(clean.get("use_wallet_balance")),
+        "merge_system": bool(clean.get("merge_system")),
+        "enabled": bool(clean.get("enabled", True)),
+        "created_at": now_ms,
+        "updated_at": now_ms,
+    }
+    # Снимок исходных значений — то, к чему возвращает кнопка сброса.
+    # Без него «вернуть стандартные» у своего провайдера означало бы «вернуть
+    # последнее изменённое», то есть ничего: правка модели затирала бы
+    # эталон, и кнопка сброса стала бы декоративной.
+    entry["defaults"] = {
+        "base_url": entry["base_url"], "model": entry["model"],
+        "api_key": entry["api_key"], "auth": entry["auth"],
+        "use_wallet_balance": entry["use_wallet_balance"],
+        "merge_system": entry["merge_system"],
+    }
+    customs[pid] = entry
+    # Название модели живёт отдельной картой (model_title), а не в записи
+    # провайдера: то же самое название нужно и для переопределённой модели
+    # встроенного провайдера, и при переключении модели оно не должно
+    # затирать ничего, кроме самой пары (провайдер, модель).
+    try:
+        set_model_title(pid, entry["model"], clean.get("model_title") or "")
+    except (sqlite3.Error, OSError):
+        pass
+    slot = clean.get("slot")
+    if slot:
+        for other in PROVIDER_SLOTS:
+            if slots.get(other) == pid:
+                slots[other] = None
+        for other in PROVIDER_SLOTS:
+            if other != slot and slots.get(other) == pid:
+                slots[other] = None
+        slots[slot] = pid
+    _app_config_write(_CUSTOM_KEY, customs)
+    _app_config_write(_SLOTS_KEY, slots)
+    _admin_invalidate()
+    return entry
+
+
+def custom_provider_update(pid: str, patch: dict) -> dict:
+    """Частично обновить кастомного провайдера. Пустой ключ = оставить старый."""
+    customs, _slots, _enabled, _ov = _admin_snapshot()
+    entry = customs.get(pid)
+    if entry is None:
+        raise KeyError(f"unknown provider {pid!r}")
+    if "title" in patch:
+        entry["title"] = str(patch["title"] or pid).strip()[:80] or pid
+    if "base_url" in patch:
+        entry["base_url"] = patch["base_url"]
+    if "model" in patch:
+        entry["model"] = patch["model"]
+    if "api_key" in patch and str(patch["api_key"] or "").strip():
+        entry["api_key"] = str(patch["api_key"]).strip()
+    if "auth" in patch:
+        entry["auth"] = patch["auth"] or "bearer"
+    if "use_wallet_balance" in patch:
+        entry["use_wallet_balance"] = bool(patch["use_wallet_balance"])
+    if "merge_system" in patch:
+        entry["merge_system"] = bool(patch["merge_system"])
+    if "enabled" in patch:
+        entry["enabled"] = bool(patch["enabled"])
+    entry["updated_at"] = int(time.time() * 1000)
+    customs[pid] = entry
+    _app_config_write(_CUSTOM_KEY, customs)
+    _admin_invalidate()
+    return entry
+
+
+def custom_provider_delete(pid: str) -> None:
+    customs, slots, _enabled, overrides = _admin_snapshot()
+    if pid in PROVIDERS:
+        raise ValueError("Встроенный провайдер удалить нельзя — его можно только отключить")
+    if pid not in customs:
+        raise KeyError(f"unknown provider {pid!r}")
+    customs.pop(pid, None)
+    for slot in PROVIDER_SLOTS:
+        if slots.get(slot) == pid:
+            slots[slot] = None
+    _app_config_write(_CUSTOM_KEY, customs)
+    _app_config_write(_SLOTS_KEY, slots)
+    # Переопределение удалённого провайдера — мёртвая запись, её тоже сносим:
+    # иначе id можно было бы заново занять, и новый провайдер молча унаследовал
+    # бы чужую модель из прошлой «жизни» того же id.
+    if overrides.pop(pid, None) is not None:
+        _app_config_write(_OVERRIDES_KEY, overrides)
+    with _provider_health_lock:
+        _provider_last_ok.pop(pid, None)
+        _provider_last_err.pop(pid, None)
+        _provider_last_check.pop(pid, None)
+    _admin_invalidate()
+
+
+def provider_set_enabled(pid: str, enabled: bool) -> None:
+    """Выключатель для любого провайдера (встроенного тоже)."""
+    try:
+        _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    _customs, _slots, stored, _ov = _admin_snapshot()
+    stored = dict(stored)
+    stored[pid] = bool(enabled)
+    _app_config_write(_ENABLED_KEY, stored)
+    _admin_invalidate()
+
+
+def provider_set_override(pid: str, patch: dict) -> dict:
+    """Наложить/снять поля поверх стандартных — для ЛЮБОГО провайдера.
+
+    Для встроенного это отдельная карта переопределений (модель прежде
+    всего), потому что его значения приходят из окружения, и запись поверх
+    окружения не должна его менять. Для кастомного «стандартные значения» —
+    это просто сохранённая запись, и сброс просто её восстанавливает.
+
+    Пустая строка в patch означает «снять переопределение» (для встроенного —
+    вернуться к окружению), а не «записать пустое значение»."""
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    if not isinstance(patch, dict):
+        raise ValueError("Некорректный запрос")
+    builtin = bool(spec.get("builtin"))
+    customs, _slots, _enabled, overrides = _admin_snapshot()
+    if builtin:
+        current = dict(overrides.get(pid) or {})
+    else:
+        entry = customs.get(pid)
+        if entry is None:
+            raise KeyError(f"unknown provider {pid!r}")
+        current = None  # кастомного правим напрямую
+    clean: dict = {}
+    if "model" in patch:
+        model = str(patch.get("model") or "").strip()[:200]
+        clean["model"] = model
+    if "base_url" in patch or "baseUrl" in patch:
+        base_url = str(patch.get("base_url", patch.get("baseUrl")) or "").strip().rstrip("/")[:500]
+        if base_url:
+            low = base_url.lower()
+            if not (low.startswith("http://") or low.startswith("https://")):
+                raise ValueError("base URL должен начинаться с http:// или https://")
+            if not _base_host(base_url):
+                raise ValueError("В base URL нет хоста")
+        clean["base_url"] = base_url
+    if "api_key" in patch or "apiKey" in patch:
+        key = str(patch.get("api_key", patch.get("apiKey")) or "").strip()
+        if len(key) > 2000:
+            raise ValueError("API-ключ слишком длинный")
+        clean["api_key"] = key
+    if "auth" in patch:
+        auth = str(patch.get("auth") or "").strip().lower()
+        if auth not in ("", "bearer", "raw"):
+            raise ValueError("auth — bearer или raw")
+        clean["auth"] = auth
+    for field, key in (("use_wallet_balance", "use_wallet_balance"),
+                       ("useWalletBalance", "use_wallet_balance"),
+                       ("merge_system", "merge_system"),
+                       ("mergeSystem", "merge_system")):
+        if field in patch:
+            clean[key] = bool(patch.get(field))
+    if "model_title" in patch or "modelTitle" in patch:
+        clean["model_title"] = str(patch.get("model_title", patch.get("modelTitle") or ""))[:120].strip()
+    if not clean:
+        raise ValueError("Нечего менять")
+    if not builtin:
+        entry = customs[pid]
+        if clean.get("model"):
+            entry["model"] = clean["model"]
+        if "model_title" in clean:
+            # Название пишется для ТЕКУЩЕЙ модели, даже если модель в этом
+            # запросе не меняли (правка только подписи). Если модель сменилась,
+            # подпись задаётся для НЕЁ: иначе новая модель осталась бы с чужим
+            # старым названием — ровно то, ради чего это и заводилось.
+            target_model = clean.get("model") or entry.get("model") or ""
+            try:
+                set_model_title(pid, target_model, clean["model_title"])
+            except (sqlite3.Error, OSError):
+                pass
+        if clean.get("base_url"):
+            entry["base_url"] = clean["base_url"]
+        if clean.get("api_key"):
+            entry["api_key"] = clean["api_key"]
+        if clean.get("auth"):
+            entry["auth"] = clean["auth"]
+        if "use_wallet_balance" in clean:
+            entry["use_wallet_balance"] = clean["use_wallet_balance"]
+        if "merge_system" in clean:
+            entry["merge_system"] = clean["merge_system"]
+        entry["updated_at"] = int(time.time() * 1000)
+        customs[pid] = entry
+        _app_config_write(_CUSTOM_KEY, customs)
+        _admin_invalidate()
+        return entry
+    # Название модели у встроенного — тоже часть «значений поверх окружения»:
+    # пишем его для модели, которая реально станет текущей (явная из patch,
+    # иначе конфигурация после сброса/переопределения).
+    if "model_title" in clean:
+        target_model = clean.get("model") or ""
+        if not target_model:
+            try:
+                target_model = str(spec["model"]())[:200]
+            except Exception:
+                target_model = ""
+        if target_model:
+            try:
+                set_model_title(pid, target_model, clean["model_title"])
+            except (sqlite3.Error, OSError):
+                pass
+        clean.pop("model_title", None)
+    # Пустое значение = снять. Незаполненных ключей после снятия в карте не
+    # оставляем: иначе «сброс» выглядел бы как запись с пустыми полями.
+    for field, value in clean.items():
+        if value in ("", None):
+            current.pop(field, None)
+        else:
+            current[field] = value
+    if current:
+        overrides[pid] = current
+    else:
+        overrides.pop(pid, None)
+    _app_config_write(_OVERRIDES_KEY, overrides)
+    _admin_invalidate()
+    return current
+
+
+def provider_reset(pid: str) -> dict:
+    """Вернуть провайдер к стандартным значениям.
+
+    Встроенный: сносятся ВСЕ переопределения — значения снова из окружения
+    (деплой остаётся источником истины, кнопка лишь отменяет правку).
+    Свой: возвращается снимок исходных значений, сделанный при добавлении
+    (entry["defaults"]) — «вернуть как было», а не «вернуть последнюю
+    правку». Метка ручной проверки гасится: она измеряла другое состояние."""
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    if not spec.get("builtin"):
+        # У своего провайдера «стандартные значения» — снимок, сделанный при
+        # добавлении (entry["defaults"]). Возврат к нему осмыслен: правка
+        # модели/ключа не затирает эталон, и кнопка сброса честно откатывает.
+        customs, _slots, _enabled, _ov = _admin_snapshot()
+        entry = customs.get(pid)
+        if entry is None:
+            raise KeyError(f"unknown provider {pid!r}")
+        previous_model = str(entry.get("model") or "")
+        defaults = entry.get("defaults") if isinstance(entry.get("defaults"), dict) else None
+        if defaults:
+            for field in ("base_url", "model", "api_key", "auth",
+                          "use_wallet_balance", "merge_system"):
+                if field in defaults:
+                    entry[field] = defaults[field]
+        # Название снятой модели — тоже часть возврата к стандарту: иначе
+        # подпись «временная» продолжала бы висеть на модели, которой у
+        # провайдера больше нет.
+        if previous_model and previous_model != str(entry.get("model") or ""):
+            try:
+                set_model_title(pid, previous_model, "")
+            except (sqlite3.Error, OSError):
+                pass
+        entry["updated_at"] = int(time.time() * 1000)
+        customs[pid] = entry
+        _app_config_write(_CUSTOM_KEY, customs)
+        with _provider_health_lock:
+            _provider_last_check.pop(pid, None)
+        _admin_invalidate()
+        return entry
+    customs, _slots, _enabled, overrides = _admin_snapshot()
+    overrides.pop(pid, None)
+    _app_config_write(_OVERRIDES_KEY, overrides)
+    # Название модели — часть того, что сброс возвращает к стандарту: без его
+    # снятия подпись со старой модели осталась бы висеть на новой.
+    try:
+        restored = str(_spec_for(pid)["model"]())[:200]
+    except Exception:
+        restored = ""
+    if restored:
+        try:
+            set_model_title(pid, restored, "")
+        except (sqlite3.Error, OSError):
+            pass
+    with _provider_health_lock:
+        _provider_last_check.pop(pid, None)
+    _admin_invalidate()
+    return _spec_for(pid)
+
+
+def providers_set_slots(slots: dict) -> dict:
+    """Атомно выставить слоты {high, medium, low} (значения — id или null).
+
+    Один слот — один провайдер, один провайдер — один слот: дубли внутри
+    карты отвергаются, старый держатель слота молча освобождается.
+    Стандартная раскладка ensure_default_slots() отрабатывает ДО записи, чтобы
+    освобождённый слот не остался неявно занятым старым (иначе «приоритет не
+    задан» вернулся бы ровно в том виде, который мы убираем)."""
+    ensure_default_slots()
+    if not isinstance(slots, dict):
+        raise ValueError("Нужен объект slots")
+    customs, current, _enabled, _ov = _admin_snapshot()
+    known = set(PROVIDER_PRIORITY) | set(customs.keys())
+    # Запись несуществующего id вместо опечатки создавала бы «мёртвый» слот,
+    # который ротация пропускала бы молча — поэтому строгая проверка.
+    cleaned: dict[str, str | None] = {}
+    for slot in PROVIDER_SLOTS:
+        val = slots.get(slot)
+        if val in (None, "", "none", "null"):
+            cleaned[slot] = None
+            continue
+        pid = str(val).strip()
+        if pid not in known:
+            raise ValueError(f"Неизвестный провайдер «{pid}»")
+        cleaned[slot] = pid
+    seen: dict[str, str] = {}
+    for slot, pid in cleaned.items():
+        if pid and pid in seen:
+            raise ValueError(f"Провайдер «{pid}» уже стоит в слоте «{PROVIDER_SLOT_LABELS[seen[pid]]}» — один приоритет на провайдер")
+        if pid:
+            seen[pid] = slot
+    _app_config_write(_SLOTS_KEY, cleaned)
+    _admin_invalidate()
+    return cleaned
+
+
+def _public_provider_card(pid: str) -> dict:
+    spec = _spec_for(pid)
+    key_fn = spec.get("key")
+    try:
+        key = key_fn() if key_fn else ""
+    except Exception:
+        key = ""
+    try:
+        base_value = spec.get("base_url")()
+    except Exception:
+        base_value = ""
+    try:
+        model_value = spec.get("model")()
+    except Exception:
+        model_value = ""
+    enabled = spec.get("enabled") is not False
+    configured = bool(enabled and key)
+    slot = _slot_of(pid)
+    now_ms = int(time.time() * 1000)
+    with _provider_health_lock:
+        ok_at = int(_provider_last_ok.get(pid) or 0)
+        err = _provider_last_err.get(pid)
+        check = dict(_provider_last_check.get(pid) or {}) if _provider_last_check.get(pid) else None
+    last_err_text, last_err_at = "", 0
+    if err:
+        last_err_at, last_err_text = int(err[0] or 0), str(err[1] or "")
+    recent = bool(ok_at and (now_ms - ok_at) < PROVIDER_RECENT_SEC * 1000)
+    order = effective_priority()
+    try:
+        active = active_provider()
+    except Exception:
+        active = None
+    warnings: list[str] = []
+    if not enabled:
+        warnings.append("Отключён — в ротации не участвует")
+    elif not key:
+        warnings.append("Нет ключа — в ротации пропускается")
+    if slot and not configured:
+        warnings.append(f"Стоит в слоте «{PROVIDER_SLOT_LABELS[slot]}», но не настроен — ротация его пропустит")
+    builtin = bool(spec.get("builtin"))
+    # Стандартная модель — ровно то, что вернёт кнопка сброса: у встроенного
+    # значение из окружения, у своего — снимок из defaults (с него начинали).
+    if builtin:
+        default_model = str(spec.get("defaultModel") or "")
+        overrides = spec.get("overrides") or {}
+    else:
+        entry = spec.get("entry") or {}
+        defaults = entry.get("defaults") if isinstance(entry.get("defaults"), dict) else {}
+        default_model = str(defaults.get("model") or model_value)
+        overrides = {}
+    overridden = bool(overrides)
+    if overridden:
+        warnings.append("Значения изменены из админки — сброс вернёт стандартные")
+    title = model_title(pid, model_value)
+    return {
+        "id": pid,
+        "title": str(spec.get("title") or pid),
+        "builtin": builtin,
+        "enabled": enabled,
+        "configured": configured,
+        "keySet": bool(key),
+        "keyHint": ("…" + key[-4:]) if key and len(key) > 4 else ("…" if key else ""),
+        "baseUrl": base_value,
+        "baseHost": _base_host(base_value or ""),
+        "model": model_value,
+        "defaultModel": default_model,
+        "modelTitle": title,
+        "displayTitle": title or model_value or str(spec.get("title") or pid),
+        # Ученику показывается только название (model_student_label), поэтому
+        # его отсутствие — не мелочь, а «строка на экране результата не
+        # появится». Админ должен видеть это на карточке, а не узнавать от
+        # ученика, который спросит «а кто это проверял».
+        "modelTitleMissing": bool(model_value and not title),
+        "modelOverridden": bool(model_value and default_model and model_value != default_model),
+        "overridden": overridden,
+        "auth": "raw" if spec.get("auth") == "raw" else "bearer",
+        "useWalletBalance": bool((spec.get("extra_body") or {}).get("useWalletBalance")),
+        "mergeSystem": bool(spec.get("merge_system")),
+        "slot": slot,
+        "slotLabel": PROVIDER_SLOT_LABELS.get(slot or "", ""),
+        "active": pid == active,
+        "isPreferred": bool(order[:1] == [pid]),
+        "recent": recent,
+        "lastOkAt": ok_at or None,
+        "lastError": last_err_text or "",
+        "lastErrorAt": last_err_at or None,
+        "lastCheck": check,
+        "warnings": warnings,
+    }
+
+
+def providers_overview() -> dict:
+    """Весь экран админки одним ответом: карточки + порядок + активный.
+
+    Тяжёлых запросов тут нет — только метки времени живого трафика и
+    последних ручных проб. Статус «используется» = успех за последние 60 с.
+
+    Здесь же ensure_default_slots(): раздел — то место, где человек видит
+    порядок, поэтому стандартная раскладка (closerouter высокий, gptunnel
+    средний) материализуется при первом открытии, а не остаётся неявной."""
+    ensure_default_slots()
+    customs, slots, _enabled, _ov = _admin_snapshot()
+    slotted = [slots[s] for s in PROVIDER_SLOTS if slots.get(s)]
+    rest = [pid for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()) if pid not in slotted]
+    ids = slotted + rest
+    # Слот мог указывать на удалённого — такого id уже нет, не показываем.
+    ids = [pid for pid in ids if pid in PROVIDERS or pid in customs]
+    cards = []
+    for pid in ids:
+        try:
+            cards.append(_public_provider_card(pid))
+        except KeyError:
+            continue
+    try:
+        order = effective_priority()
+        active = active_provider()
+    except Exception:
+        order, active = [], None
+    return {
+        "ok": True,
+        "providers": cards,
+        "order": order,
+        "active": active,
+        "preferred": order[0] if order else None,
+        "slots": {s: slots.get(s) for s in PROVIDER_SLOTS},
+        "slotLabels": dict(PROVIDER_SLOT_LABELS),
+        "recentWindowSec": int(PROVIDER_RECENT_SEC),
+        "checkedAt": int(time.time() * 1000),
+    }
+
+
+def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+    """Список моделей провайдера: GET <base>/models (OpenAI-совместимый).
+
+    Это единственный способ узнать реальные имена моделей: админка их не
+    выдумывает и не держит свой список, поэтому после провайдера с другой
+    связкой id не пришлось бы угадывать. Тело стандартное — {"data":[{"id"}]},
+    у всех шлюзов OpenAI; ключ в запрос не попадает в ответ и в лог."""
+    pid = str(name or "")
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    try:
+        key = spec["key"]()
+    except Exception:
+        key = ""
+    try:
+        base_value = spec["base_url"]()
+    except Exception:
+        base_value = ""
+    if not key or not base_value:
+        raise ValueError("Провайдер не настроен: нужен base URL и ключ")
+    auth = "raw" if spec.get("auth") == "raw" else "bearer"
+    deadline = min(30.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC)))
+    started = time.monotonic()
+    request = urllib.request.Request(
+        f"{base_value.rstrip('/')}/models",
+        headers={
+            "Authorization": key if auth == "raw" else f"Bearer {key}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=deadline) as response:
+            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        latency = int((time.monotonic() - started) * 1000)
+        try:
+            exc.read()
+        except Exception:
+            pass
+        status = getattr(exc, "code", 0) or 0
+        if status in (401, 403):
+            raise ValueError("Неверный API-ключ (401/403)") from None
+        if status == 402:
+            raise ValueError("На балансе нет средств (402)") from None
+        if status == 404:
+            raise ValueError("Провайдер не отдаёт список моделей (404) — впиши модель вручную") from None
+        raise ValueError(f"Провайдер ответил {status}") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ValueError(f"Недоступен: {type(exc).__name__}") from None
+    latency = int((time.monotonic() - started) * 1000)
+    if len(raw) > MAX_UPSTREAM_BYTES:
+        raise ValueError("Список моделей слишком большой")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("Ответ не-JSON — это не OpenAI-совместимый /models") from None
+    items = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("В ответе нет списка моделей")
+    models: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        mid = ""
+        if isinstance(item, dict):
+            mid = str(item.get("id") or item.get("name") or "").strip()
+        elif isinstance(item, str):
+            mid = item.strip()
+        if mid and mid not in seen and len(mid) <= 200:
+            seen.add(mid)
+            models.append(mid)
+    if not models:
+        raise ValueError("Провайдер вернул пустой список моделей")
+    try:
+        current = spec["model"]()
+    except Exception:
+        current = ""
+    # Текущая модель первой: в выпадающем поле именно её ищут чаще всего.
+    if current in seen:
+        models = [current] + [m for m in models if m != current]
+    truncated = len(models) > MODELS_LIST_MAX
+    if truncated:
+        models = models[:MODELS_LIST_MAX]
+    return {"ok": True, "models": models, "total": len(seen),
+            "truncated": truncated, "current": current,
+            "latencyMs": latency, "checkedAt": int(time.time() * 1000)}
+
+
+def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
+                       extra: dict, merge_system: bool,
+                       timeout: float) -> tuple[bool, int, str]:
+    """Один живой запрос «привет» (1 токен). Возвращает (ok, latencyMs, error).
+
+    Ключ в ошибку не попадает никогда — только класс и короткий текст."""
+    started = time.monotonic()
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": "привет"}],
+        "max_tokens": 1,
+        "temperature": 0.0,
+    }
+    body.update(extra or {})
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": key if auth == "raw" else f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        latency = int((time.monotonic() - started) * 1000)
+        try:
+            exc.read()
+        except Exception:
+            pass
+        status = getattr(exc, "code", 0) or 0
+        if status in (401, 403):
+            return False, latency, "Неверный API-ключ (401/403)"
+        if status == 402:
+            return False, latency, "На балансе нет средств (402)"
+        if status == 429:
+            return False, latency, "Провайдер перегружен (429)"
+        return False, latency, f"Провайдер ответил {status}"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        latency = int((time.monotonic() - started) * 1000)
+        if isinstance(exc, TimeoutError) or "timed out" in type(exc).__name__.lower():
+            return False, latency, "Превышено время ожидания"
+        return False, latency, f"Недоступен: {type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 — проба не роняет админку
+        return False, int((time.monotonic() - started) * 1000), f"Ошибка проверки: {type(exc).__name__}"
+    latency = int((time.monotonic() - started) * 1000)
+    try:
+        data = json.loads(raw)
+        message = data["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise ValueError("bad message")
+    except (ValueError, KeyError, IndexError, TypeError, UnicodeDecodeError):
+        return False, latency, "Ответ не похож на OpenAI-формат"
+    return True, latency, ""
+
+
+def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+    """Проверить КОНКРЕТНУЮ модель, не переключая провайдера на неё.
+
+    Это то, что нужно перед применением: выбранная из списка модель может
+    быть недоступна именно у этого шлюза (нет доступа, снята с обслуживания).
+    Проверка идёт по фактическим настройкам провайдера (ключ, auth, quirks),
+    но модель берётся из аргумента."""
+    pid = str(name or "")
+    wanted = str(model or "").strip()[:200]
+    if not wanted:
+        raise ValueError("Выбери модель для проверки")
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    try:
+        key = spec["key"]()
+    except Exception:
+        key = ""
+    try:
+        base_value = spec["base_url"]()
+    except Exception:
+        base_value = ""
+    if not key or not base_value:
+        result = {"ok": False, "latencyMs": 0, "model": wanted,
+                  "error": "Провайдер не настроен (нет ключа)",
+                  "checkedAt": int(time.time() * 1000)}
+        return result
+    ok, latency, error = _run_probe_request(
+        base_url=base_value, key=key, model=wanted,
+        auth="raw" if spec.get("auth") == "raw" else "bearer",
+        extra=spec.get("extra_body") or {}, merge_system=bool(spec.get("merge_system")),
+        timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
+    return {"ok": ok, "latencyMs": latency, "error": error, "model": wanted,
+            "checkedAt": int(time.time() * 1000)}
+
+
+def probe_models_plan(name: str, models: list | None = None) -> dict:
+    """Подготовка проверки моделей: что проверять и куда ходить.
+
+    Общая для пакетной проверки (`probe_models`) и живого потока
+    (`probe_models_stream`): список моделей, адрес, ключ, quirks. Oба пути
+    обязаны смотреть на ОДИН и тот же провайдер одинаково, иначе кнопка и
+    поток разошлись бы в том, какие модели вообще проверяются."""
+    pid = str(name or "")
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    try:
+        key = spec["key"]()
+    except Exception:
+        key = ""
+    try:
+        base_value = spec["base_url"]()
+    except Exception:
+        base_value = ""
+    if not key or not base_value:
+        raise ValueError("Провайдер не настроен: нужен base URL и ключ")
+    if models is None:
+        # Список берём сами, а не берём из тела запроса: клиент мог бы прислать
+        # что угодно, а проверять надо реальные модели этого провайдера.
+        listed = list_models(pid)
+        wanted = [str(m) for m in (listed.get("models") or [])]
+    else:
+        wanted = []
+        seen: set[str] = set()
+        for item in models:
+            mid = str(item or "").strip()[:200]
+            if mid and mid not in seen:
+                seen.add(mid)
+                wanted.append(mid)
+    if not wanted:
+        raise ValueError("Список моделей пуст — проверять нечего")
+    return {
+        "id": pid,
+        "base_url": base_value,
+        "key": key,
+        "auth": "raw" if spec.get("auth") == "raw" else "bearer",
+        "extra": spec.get("extra_body") or {},
+        "merge_system": bool(spec.get("merge_system")),
+        "wanted": wanted,
+        "total": len(wanted),
+        "checked": wanted[:PROBE_MODELS_MAX],
+        "limit": PROBE_MODELS_MAX,
+    }
+
+
+def probe_one(plan: dict, model: str, timeout: float = PROBE_MODELS_TIMEOUT_SEC) -> dict:
+    """Живой «привет» одной модели. Результат — всегда словарь, не исключение."""
+    ok, latency, error = _run_probe_request(
+        base_url=plan["base_url"], key=plan["key"], model=str(model),
+        auth=plan["auth"], extra=plan["extra"],
+        merge_system=plan["merge_system"], timeout=timeout)
+    return {"ok": bool(ok), "latencyMs": latency, "error": error}
+
+
+def _probe_order(results: dict) -> list:
+    """Ключи результата в порядке рейтинга: быстрые живые → медленные живые → мёртвые."""
+    ordered = sorted(results.items(), key=lambda kv: (0 if kv[1].get("ok") else 1,
+                                                      kv[1].get("latencyMs") or 0,
+                                                      kv[0]))
+    return [mid for mid, _ in ordered]
+
+
+def probe_models(name: str, models: list | None = None,
+                 timeout: float = PROBE_MODELS_TIMEOUT_SEC) -> dict:
+    """Проверить доступность КАЖДОЙ модели провайдера (пакетно, одним ответом).
+
+    Смысл один в одном: список моделей у шлюза может быть на сотни позиций,
+    доступны из них единицы (модель снята, нет доступа к региону, у шлюза своя
+    политика). Перебирать их по одной вручную — работа на минуты, поэтому
+    сервер делает это сам и отдаёт результат по каждой.
+
+    Порядок проверки — как у провайдера, текущая модель идёт первой (она в
+    списке уже первая), дальше до PROBE_MODELS_MAX. Ограничение названо в
+    ответе явно, а не молча обрезано: человек должен знать, что 240 моделей
+    проверены не все."""
+    plan = probe_models_plan(name, models)
+    checked = plan["checked"]
+    deadline = min(60.0, max(1.0, float(timeout or PROBE_MODELS_TIMEOUT_SEC)))
+    results: dict = {}
+    # ПАРАЛЛЕЛЬНО, а не по очереди: 30 моделей по очереди — это 30 полных
+    # round-trip'ов подряд (минуты ожидания), а проверки копеечные и уходят
+    # на разные модели одного шлюза. Потолок потоков небольшой: провайдер и так
+    # обслуживает живые проверки учеников, и лавина из 30 одновременных
+    # запросов ему не нужна.
+    workers = max(1, min(PROBE_MODELS_WORKERS, len(checked)))
+    if workers > 1:
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(probe_one, plan, mid, deadline): mid for mid in checked}
+                for fut in concurrent.futures.as_completed(futures):
+                    mid = futures[fut]
+                    try:
+                        results[mid] = fut.result()
+                    except Exception:  # noqa: BLE001 — сеть шлюза, не наша поломка
+                        results[mid] = {"ok": False, "latencyMs": 0, "error": "проверка не удалась"}
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"не удалось проверить модели: {type(exc).__name__}") from None
+    else:
+        for mid in checked:
+            results[mid] = probe_one(plan, mid, deadline)
+    ok_count = sum(1 for r in results.values() if r.get("ok"))
+    return {"ok": True, "results": results, "order": _probe_order(results),
+            "total": plan["total"], "checked": len(checked),
+            "skipped": max(0, plan["total"] - len(checked)), "okCount": ok_count,
+            "limit": plan["limit"],
+            "checkedAt": int(time.time() * 1000)}
+
+
+def probe_models_stream(name: str, models: list | None = None,
+                        budget: float = PROBE_MODELS_BUDGET_SEC):
+    """Живой поток проверки моделей: отдаёт результаты ПО МЕРЕ ГОТОВНОСТИ.
+
+    Генератор отдаёт словари-события:
+      {"kind": "start",  "total", "checked", "skipped", "limit", "models"}
+      {"kind": "result", "model", "ok", "latencyMs", "error"}   — по одному
+      {"kind": "done",   "order", "okCount", "checked", "budgetMs", "timedOut"}
+
+    Зачем поток вместо одного ответа: проверка 30 моделей — это 10–90 секунд
+    ожидания пустого экрана, и человек не понимает, работает ли кнопка вообще.
+    Здесь строка появляется сразу, как только модель ответила, поэтому
+    доступные модели видны на первой секунде, а не в конце.
+
+    Жёсткий потолок — `budget` секунд (клиент показывает 10): что не успело
+    ответить, получает `timedOut: true` и честную причину, а не молчание.
+    Потолок нужен потому, что у шлюза всегда найдётся модель, которая висит до
+    таймаута, и без него «пинг» превращался бы в ожидание неизвестной длины."""
+    plan = probe_models_plan(name, models)
+    checked = plan["checked"]
+    limit_sec = max(0.5, float(budget or PROBE_MODELS_BUDGET_SEC))
+    per_call = max(0.5, min(PROBE_MODELS_TIMEOUT_SEC, limit_sec))
+    started = time.monotonic()
+    yield {
+        "kind": "start", "total": plan["total"], "checked": len(checked),
+        "skipped": max(0, plan["total"] - len(checked)), "limit": plan["limit"],
+        "models": list(checked), "budgetMs": int(limit_sec * 1000),
+    }
+    results: dict = {}
+    timed_out: list = []
+    workers = max(1, min(PROBE_MODELS_WORKERS, len(checked)))
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = {pool.submit(probe_one, plan, mid, per_call): mid for mid in checked}
+        pending = set(futures)
+        while pending:
+            left = limit_sec - (time.monotonic() - started)
+            if left <= 0.05:
+                break
+            done, pending = concurrent.futures.wait(
+                pending, timeout=left,
+                return_when=concurrent.futures.FIRST_COMPLETED)
+            for fut in done:
+                mid = futures[fut]
+                try:
+                    payload = fut.result()
+                except Exception:  # noqa: BLE001 — сеть шлюза, не наша поломка
+                    payload = {"ok": False, "latencyMs": 0, "error": "проверка не удалась"}
+                results[mid] = payload
+                yield {"kind": "result", "model": mid, **payload}
+        for fut in pending:
+            # Бюджет кончился: честно помечаем, а не ждём до таймаута шлюза.
+            mid = futures[fut]
+            timed_out.append(mid)
+            payload = {"ok": False, "latencyMs": 0,
+                       "error": f"не ответил за {int(limit_sec)} с"}
+            results[mid] = payload
+            yield {"kind": "result", "model": mid, **payload}
+    finally:
+        # Потоки не ждём: их запросы ограничены per_call и всё равно закроются
+        # сами, а держать генератор (и HTTP-соединение) до последнего нельзя —
+        # именно это и делало «пинг» долгим.
+        pool.shutdown(wait=False, cancel_futures=True)
+    ok_count = sum(1 for r in results.values() if r.get("ok"))
+    yield {
+        "kind": "done", "order": _probe_order(results), "okCount": ok_count,
+        "checked": len(checked), "timedOut": len(timed_out),
+        "budgetMs": int((time.monotonic() - started) * 1000),
+        "checkedAt": int(time.time() * 1000),
+    }
+
+
+def probe_draft(params: dict, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+    """Проверить НЕсохранённый черновик (форма «добавить») живым запросом."""
+    if not isinstance(params, dict):
+        raise ValueError("Некорректный запрос")
+    base_url = str(params.get("base_url", params.get("baseUrl")) or "").strip().rstrip("/")
+    model = str(params.get("model") or "").strip()
+    key = str(params.get("api_key", params.get("apiKey")) or "").strip()
+    auth = str(params.get("auth") or "bearer").strip().lower() or "bearer"
+    if not base_url or not model or not key:
+        raise ValueError("Для проверки нужны base URL, модель и ключ")
+    if auth not in ("bearer", "raw"):
+        auth = "bearer"
+    extra: dict = {}
+    if params.get("use_wallet_balance", params.get("useWalletBalance")):
+        extra = {"useWalletBalance": True}
+    ok, latency, error = _run_probe_request(
+        base_url=base_url, key=key, model=model, auth=auth, extra=extra,
+        merge_system=False, timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
+    return {"ok": ok, "latencyMs": latency, "error": error,
+            "checkedAt": int(time.time() * 1000)}
+
+
+def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+    """Ручная проверка сохранённого провайдера. Пишет lastCheck (и lastOk при успехе)."""
+    pid = str(name or "")
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    try:
+        key = spec["key"]()
+    except Exception:
+        key = ""
+    try:
+        base_value = spec["base_url"]()
+    except Exception:
+        base_value = ""
+    try:
+        model_value = spec["model"]()
+    except Exception:
+        model_value = ""
+    if not key or not base_value or not model_value:
+        result = {"ok": False, "latencyMs": 0, "error": "Провайдер не настроен (нет ключа)",
+                  "checkedAt": int(time.time() * 1000)}
+        with _provider_health_lock:
+            _provider_last_check[pid] = dict(result)
+        return result
+    ok, latency, error = _run_probe_request(
+        base_url=base_value, key=key, model=model_value,
+        auth="raw" if spec.get("auth") == "raw" else "bearer",
+        extra=spec.get("extra_body") or {}, merge_system=bool(spec.get("merge_system")),
+        timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
+    result = {"ok": ok, "latencyMs": latency, "error": error,
+              "checkedAt": int(time.time() * 1000)}
+    with _provider_health_lock:
+        _provider_last_check[pid] = dict(result)
+        if ok:
+            _provider_last_ok[pid] = result["checkedAt"]
+        else:
+            _provider_last_err[pid] = (result["checkedAt"], error[:300])
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Probe — возврат приоритетного провайдера
 #
 # Пока активен запасной, раз в 15 минут (EGE_AI_PROBE_INTERVAL_SEC)
@@ -893,7 +2362,8 @@ PROBE_WAKE_SEC = 60.0
 
 def probe_tick(now: float | None = None) -> bool:
     """Одна проверка приоритетного провайдера. True — он восстановлен и активен."""
-    preferred = PROVIDER_PRIORITY[0]
+    order = effective_priority()
+    preferred = order[0] if order else PROVIDER_PRIORITY[0]
     if not _provider_configured(preferred):
         return False
     current = active_provider()

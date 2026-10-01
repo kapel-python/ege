@@ -1636,9 +1636,18 @@ def auth_state_payload(conn: sqlite3.Connection, user_id: int) -> dict:
     row = conn.execute(
         "SELECT email, password_hash FROM users WHERE id=?", (user_id,)).fetchone()
     providers = auth_provider_list(conn, user_id)
-    registered = bool(row and row["password_hash"]) or bool(providers)
+    has_password = bool(row and row["password_hash"])
+    registered = has_password or bool(providers)
     return {"registered": registered, "email": row["email"] if registered else None,
-            "providers": providers}
+            "providers": providers,
+            # hasPassword нужен клиенту отдельно от registered. Разница
+            # видна ровно после отвязки Google: аккаунт остаётся, сессия
+            # остаётся, но registered становится false — и вместе с ним
+            # исчезала кнопка «Привязать Google», которой нельзя было
+            # воспользоваться, чтобы вернуть вход. То есть признак «есть ли
+            # способ войти с другого устройства» нельзя использовать там,
+            # где спрашивают «есть ли вообще аккаунт».
+            "hasPassword": has_password}
 
 
 # ---------------------------------------------------------------------------
@@ -9381,10 +9390,15 @@ class Handler(BaseHTTPRequestHandler):
     def handle_auth_google_unlink(self, conn: sqlite3.Connection) -> None:
         """POST /api/auth/google/unlink — отвязать Google от своего аккаунта.
 
-        Отвязка доступна только когда есть пароль: иначе человек, вошедший
-        исключительно через Google, потерял бы единственный вход в свой же
-        аккаунт вместе с всем прогрессом. Это осознанное ограничение, а не
-        недоработка — восстановить доступ без пароля нечем.
+        Отвязка доступна ЛЮБОМУ залогиненному человеку и не выкидывает его из
+        аккаунта: сессия живёт своей строкой в user_sessions, её удаление не
+        касается. Прежняя проверка «сначала задай пароль» была бессмысленной —
+        у аккаунта, который вошёл через Google, пароля всё равно нет, то есть
+        отвязать было бы нельзя НИКОГДА.
+
+        Что действительно верно: после отвязки единственного способа входа с
+        другого устройства уже не зайти. Поэтому ответ предупреждает об этом
+        (warning), а не отказывает.
         """
         user_id, _ = user_for(conn, self)
         if not self.require_user(user_id):
@@ -9616,16 +9630,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": str(exc)}, 409)
                     return True
                 admin_audit(conn, actor_id, "ai-provider-create", None, entry["id"][:64])
-                try:
-                    probe = _AI.probe_provider(entry["id"])
-                except (KeyError, ValueError) as exc:
-                    probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-                card = _AI._public_provider_card(entry["id"])
-                out = {"ok": True, "provider": card, "probe": probe}
-                if not probe.get("ok"):
-                    out["warning"] = ("Провайдер сохранён, но модель недоступна: "
-                                      + str(probe.get("error") or "неизвестная ошибка"))
-                self.send_json(out)
+                # Без живой проверки: добавление должно завершаться мгновенно.
+                # Работоспособность проверяется на странице провайдера («Проверить»
+                # или «Пинг всех моделей»), а в самой форме остаётся «Проверить
+                # до сохранения» — но это явный выбор админа, а не побочный
+                # эффект кнопки «Добавить».
+                self.send_json({"ok": True, "provider": _AI._public_provider_card(entry["id"])})
                 return True
             if rest == "/probe":
                 # Проверить черновик БЕЗ сохранения (кнопка «Проверить» в форме).
@@ -9739,18 +9749,14 @@ class Handler(BaseHTTPRequestHandler):
                                 self.send_json({"error": str(exc)}, 400)
                                 return True
                         admin_audit(conn, actor_id, "ai-provider-apply", None, pid[:64])
-                        # Проверка применённого — сразу по новой модели, чтобы
-                        # админ увидел работоспособность того, что сохранил.
-                        try:
-                            probe = _AI.probe_provider(pid)
-                        except (KeyError, ValueError) as exc:
-                            probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-                        out = {"ok": True, "provider": _AI._public_provider_card(pid),
-                               "probe": probe}
-                        if not probe.get("ok"):
-                            out["warning"] = ("Сохранено, но модель не отвечает: "
-                                              + str(probe.get("error") or "неизвестная ошибка"))
-                        self.send_json(out)
+                        # БЕЗ живой проверки модели: сохранение должно быть
+                        # мгновенным. Проба — это отдельный вопрос админа, и на
+                        # странице провайдера для него есть «Проверить» и живой
+                        # «Пинг всех моделей». Раньше каждое сохранение ждало
+                        # ответа провайдера (до 20 с на мёртвой модели), то есть
+                        # подтверждать настройку можно было только дождавшись
+                        # шлюза — ровно тогда, когда он не нужен.
+                        self.send_json({"ok": True, "provider": _AI._public_provider_card(pid)})
                         return True
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)

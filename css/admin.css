@@ -606,3 +606,293 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 @media (prefers-reduced-motion: reduce) {
   .a-msg { transition: none; }
 }
+
+/* ---------- providers: ИИ-провайдеры ---------- */
+
+.a-prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.a-prov-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.a-prov-card--active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+/* Клик по карточке открывает детальную настройку, поэтому сама карточка —
+   кнопка без рамки. Вложенные select/button внутри НЕ находятся: блок с
+   инфо закрыт в <button>, действия живут ниже отдельной строкой, иначе
+   клик по «Проверить» открывал бы ещё и модалку. */
+.a-prov-card__open {
+  display: block; width: 100%;
+  border: 0; background: transparent; color: inherit; font: inherit;
+  text-align: left; padding: 0; margin: 0; cursor: pointer;
+}
+.a-prov-card__open:hover .a-prov-title { color: var(--accent); }
+.a-prov-card__open:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+.a-prov-card__more { color: var(--muted); display: inline-flex; align-items: center; }
+.a-prov-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.a-prov-top .spacer { flex: 1; }
+.a-modal--wide { max-width: 620px; }
+
+/* ================= Страница провайдера (#/providers/<id>) =================
+
+   Раньше настройка жила в модалке: широкий блок поверх списка, который на
+   телефоне не помещался, а «пинг всех моделей» показывал пустой экран
+   10–90 секунд. Теперь это страница: своя шапка с состоянием, сетка из двух
+   колонок (на телефоне — одна), и живой список моделей. */
+
+.a-page-head { margin-bottom: 18px; }
+.a-page-head__main {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 10px;
+}
+.a-page-title-wrap { min-width: 0; }
+.a-page-title { font-size: 24px; font-weight: 780; letter-spacing: -0.02em; margin: 2px 0 0; }
+.a-page-sub { font-size: 12.5px; color: var(--muted); }
+.a-page-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.a-page-status {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  margin-top: 10px; font-size: 12.5px; color: var(--text-2);
+}
+.a-page-status__item { display: inline-flex; align-items: center; gap: 6px; }
+.a-back {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; color: var(--muted); text-decoration: none;
+}
+.a-back svg { width: 14px; height: 14px; transform: rotate(90deg); }
+.a-back:hover { color: var(--accent-ink); }
+
+/* Две колонки: настройки слева, состояние подключения справа. На телефоне —
+   одна колонка, и «опасная зона» уезжает в самый низ. */
+.a-page-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.a-page-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 1080px) { .a-page-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.a-card--danger { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
+.a-actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+.a-kv {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 0; border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.a-kv:last-of-type { border-bottom: 0; }
+.a-kv > span { color: var(--muted); flex: 0 0 auto; }
+.a-kv > b { margin-left: auto; text-align: right; font-weight: 600; word-break: break-word; }
+
+.a-fold { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.a-fold > summary {
+  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2);
+  list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.a-fold > summary::-webkit-details-marker { display: none; }
+.a-fold > summary::before { content: "▸"; color: var(--muted); }
+.a-fold[open] > summary::before { content: "▾"; }
+.a-fold > *:not(summary) { margin-top: 12px; }
+.a-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
+.a-check input { margin-top: 2px; }
+.a-input--search { max-width: 240px; }
+
+/* Закреплённая панель действий: страница длинная, а «сохранить» должно быть
+   под рукой в любой её точке. */
+.a-sticky-actions {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 18px; padding: 12px 16px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-2, var(--shadow));
+}
+.a-sticky-actions .spacer { flex: 1; }
+.a-sticky-actions__state {
+  font-size: 12.5px; color: var(--muted);
+}
+.a-sticky-actions__state--on { color: var(--warn-ink); font-weight: 600; }
+.a-btn__note {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22); font-size: 11px; font-weight: 600;
+}
+
+/* ---- Список моделей провайдера ---- */
+.a-models { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.a-models__bar { display: flex; align-items: center; gap: 10px; }
+.a-models__empty { font-size: 12.5px; color: var(--muted); padding: 8px 0; }
+.a-model {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 10px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 12.5px; text-align: left;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.a-model:hover { border-color: var(--accent); background: var(--surface); }
+.a-model:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.a-model--picked { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.a-model__name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-model__pick { font-size: 11.5px; color: var(--muted); opacity: 0; transition: opacity 0.12s; }
+.a-model:hover .a-model__pick { opacity: 1; }
+
+/* Сегмент приоритета: четыре состояния видны сразу, включая «без приоритета».
+   Выпадающий список врал — человек не видел, что слот РОВНО ОДИН и что он
+   освобождает прежнего держателя. */
+.a-seg2 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.a-seg2__btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 9px 11px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 13px; font-weight: 600;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.a-seg2__btn:hover { border-color: var(--border-strong); background: var(--surface); }
+.a-seg2__btn--on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.a-seg2__hint { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+@media (max-width: 640px) { .a-seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- Живой пинг моделей ---- */
+.a-ping {
+  margin: 4px 0 12px; border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  background: var(--surface-2);
+}
+.a-ping__head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px; font-size: 12.5px; color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.a-ping__text { min-width: 0; }
+.a-ping__live-dot {
+  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  animation: aPingPulse 1.1s ease-in-out infinite;
+}
+.a-ping--done .a-ping__live-dot { background: var(--success); animation: none; }
+@keyframes aPingPulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a-ping__live-dot { animation: none; }
+}
+.a-ping__live { color: var(--success-ink); }
+.a-ping__timer { font-family: var(--mono); color: var(--text); }
+.a-ping__body { padding: 8px; max-height: 420px; overflow-y: auto; }
+
+.a-ranks { display: flex; flex-direction: column; gap: 4px; }
+.a-rank {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 10px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 12.5px; text-align: left;
+  /* Появление строки: список растёт в реальном времени, и без анимации
+     «приехавшая» строка дёргала бы весь блок. */
+  animation: aRankIn 0.22s ease-out both;
+  transition: border-color 0.12s, background 0.12s;
+}
+.a-rank:hover { border-color: var(--accent); }
+.a-rank:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.a-rank--ok { border-color: color-mix(in srgb, var(--success) 30%, var(--border)); }
+.a-rank--bad { opacity: 0.86; }
+.a-rank--wait .a-rank__ms { color: var(--muted); }
+@keyframes aRankIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a-rank { animation: none; }
+}
+.a-rank__no { flex: 0 0 22px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.a-rank__name { flex: 0 1 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-rank__bar { flex: 1 1 auto; min-width: 40px; height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.a-rank__bar > i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, #2bb886, var(--success));
+  animation: aRankGrow 0.4s ease-out both;
+}
+@keyframes aRankGrow { from { width: 0 !important; } }
+.a-rank__ms { flex: 0 0 auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.a-rank--ok .a-rank__ms { color: var(--success-ink); font-weight: 600; }
+.a-rank--bad .a-rank__ms { color: var(--danger); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Маленький спиннер для строк, которые ещё проверяются. */
+.a-spin {
+  display: inline-block; width: 12px; height: 12px; vertical-align: -1px;
+  border: 2px solid var(--surface-3); border-top-color: var(--accent);
+  border-radius: 50%; animation: aSpin 0.7s linear infinite;
+}
+.a-spin--xs { width: 10px; height: 10px; border-width: 2px; }
+@keyframes aSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .a-spin { animation-duration: 2s; } }
+
+.a-prov-hint { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+/* Несохранённая правка в панели: подсказка под полем горит и говорит, что
+   сервер ещё ничего не принял. */
+.a-field__hint--dirty { color: var(--accent-ink); }
+.a-field__hint--dirty b { font-weight: 700; }
+
+/* Пинг: строка на провайдера (точка, имя, слот, задержка) И строка на модель
+   (точка, имя модели, задержка). Модельная строка — кнопка: ею выбирают модель
+   прямо из результата проверки, поэтому у неё свои hover/focus-состояния. */
+.a-prov-pings { display: flex; flex-direction: column; gap: 6px; }
+.a-prov-ping {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+button.a-prov-ping {
+  width: 100%; font: inherit; color: inherit; text-align: left;
+  cursor: pointer; transition: border-color 0.12s, background 0.12s;
+}
+button.a-prov-ping:hover { border-color: var(--accent); background: var(--surface); }
+button.a-prov-ping:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.a-prov-ping__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.a-prov-ping__ms { font-family: var(--mono); font-size: 12px; color: var(--muted); flex: 0 0 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-prov-ping--ok .a-prov-ping__ms { color: var(--success-ink); font-weight: 600; }
+.a-prov-ping--bad .a-prov-ping__ms { color: var(--danger); }
+.a-prov-title { font-weight: 750; font-size: 15.5px; letter-spacing: -0.01em; }
+.a-prov-id { font-size: 12px; color: var(--muted); }
+.a-prov-id b { color: var(--accent); }
+.a-prov-meta { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.a-prov-kv { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.a-prov-kv > span { flex: 0 0 74px; color: var(--muted); font-size: 12px; }
+.a-prov-kv > b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.a-prov-err { color: var(--danger); font-weight: 500; }
+.a-prov-warn {
+  background: var(--warn-soft);
+  border: 1px solid rgba(255, 196, 107, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.a-prov-flags { display: flex; gap: 6px; flex-wrap: wrap; }
+.a-prov-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.a-prov-slot { width: auto; flex: 1 1 150px; font-size: 13px; padding: 7px 10px; }
+.a-prov-order { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.a-prov-arrow { color: var(--muted); font-weight: 700; }
+.a-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; background: var(--surface-3); border: 1px solid var(--border-strong); }
+.a-dot--ok { background: var(--success); border-color: var(--success); }
+.a-dot--bad { background: var(--danger); border-color: var(--danger); }
+.a-dot--idle { background: var(--surface-3); }
+.a-dot--live { background: var(--success); border-color: var(--success); animation: aDotPulse 1.6s infinite; }
+@keyframes aDotPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(61, 220, 151, 0.5); } 50% { box-shadow: 0 0 0 5px rgba(61, 220, 151, 0); } }
+.a-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.a-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.a-check input { margin-top: 2px; }
+.a-prov-checkok { background: var(--success-soft); color: var(--success-ink); border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
+.a-prov-checkbad { background: var(--warn-soft); border: 1px solid rgba(255, 196, 107, 0.3); color: var(--text-2); border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
+.mono { font-family: var(--mono); }
+
+@media (max-width: 768px) {
+  .a-prov-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .a-prov-card { padding: 13px 14px; }
+  .a-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a-dot--live { animation: none; }
+}

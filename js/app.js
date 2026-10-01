@@ -6948,14 +6948,24 @@ function googleLinked() {
 
 function googleRowHTML() {
   const auth = Store.auth || {};
-  if (!(auth.registered && auth.googleEnabled)) return "";
+  // Условие — «есть ли аккаунт», а НЕ «есть ли способ войти» (registered).
+  // Эти два признака расходятся ровно после отвязки единственного Google:
+  // аккаунт и сессия живы, а registered становится false, и блок исчезал
+  // вместе с кнопкой «Привязать Google» — то есть вернуть вход после
+  // отвязки было нечем. Привязка предлагается любому залогиненному.
+  if (!(Store.accountId && auth.googleEnabled)) return "";
   const linked = googleLinked();
   const label = linked
     ? (googleBusy ? "Отвязываем…" : "Отвязать Google")
     : (googleBusy ? "Открываем Google…" : "Привязать Google");
-  const sub = linked
-    ? "Вход через Google привязан. Отвязать можно в любой момент — ты останешься в аккаунте на этом устройстве; учти, что если пароля у аккаунта нет, зайти с другого устройства уже не получится."
+  let sub = linked
+    ? "Вход через Google привязан. Отвязать можно в любой момент — ты останешься в аккаунте на этом устройстве."
     : "Вход через Google. При переходе выбери аккаунт Google, который хочешь привязать.";
+  // Честная оговорка там, где она уместна: пароля нет и Google отвязан —
+  // зайти с другого устройства уже не выйдет. Это подсказка, а не запрет.
+  if (!linked && !auth.hasPassword) {
+    sub = "Вход через Google. Привяжи его сейчас: пароля у аккаунта нет, поэтому это единственный способ зайти с другого устройства.";
+  }
   return `
     <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
     <div class="settings-row__sub" style="margin-top:4px">${esc(sub)}</div>
