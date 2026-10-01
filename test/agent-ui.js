@@ -690,8 +690,17 @@ check("свайп вправо открывает список чатов, вл�
   /ui\.wrap\.addEventListener\("touchstart"/.test(spaCode)
   && /ui\.wrap\.addEventListener\("touchend"/.test(spaCode)
   && /if \(dx > 0\) nav\(true\); else nav\(false\);/.test(spaCode)
-  && /Math\.abs\(dx\) < 56/.test(spaCode)
+  && /Math\.abs\(dx\) < 28/.test(spaCode)
+  && /Math\.abs\(dy\) > 70/.test(spaCode)
+  && /sw\.t0 > 2500/.test(spaCode)
   && /passive: true/.test(spaCode));
+/* --- список чатов не сжимается и листается. Список — flex-колонка, а её
+   элементы по умолчанию сжимаются: при 24 чатах строки наезжали друг на
+   друга (замер: высота кнопки 60.3px, зазор −36.3px, наложений 23 из 23) и
+   список не прокручивался (scrollHeight == clientHeight). */
+check("список чатов: строки своей высоты, зазор фиксирован, список листается",
+  /\.agent__list \{[^}]*overflow-y: auto/.test(spaCss)
+  && /\.agent__list li \{ flex: 0 0 auto;/.test(spaCss));
 check("жест не перехватывается в поле ввода и горизонтальном скролле",
   /function swipeSkips\(node\)/.test(spaCode)
   && /n\.tagName === "TEXTAREA" \|\| n\.tagName === "INPUT"/.test(spaCode)
