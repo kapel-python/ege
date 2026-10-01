@@ -256,6 +256,7 @@ def collect(turns_out, threads):
     for t in turns_out:
         applied.extend(t.get("applied") or [])
     return dict(answers=answers, answer=answer, tools=tools, actions=actions,
+                tools_actions=actions,
                 steps=steps_all, turns=turns_out, applied=applied,
                 tools_status=tools_status)
 
@@ -328,7 +329,8 @@ def run_scen(cli, base, scen, seed_numbers, tasks_by_skill):
         r"план|шаг|недел|начн|сначала|затем|дн[яе]|раз в|каждый день|подтян", r["answer"], re.IGNORECASE))
     out["advice_given"] = bool(re.search(
         r"добав|назови|связ|пример|аргумент|комментар|позици|опор|примерн", r["answer"], re.IGNORECASE))
-    out["all_three_fields"] = bool({"name", "selfLevel", "goal"} <= set(prop or {}))
+    _patch = (prop or {}).get("patch") or prop or {}
+    out["all_three_fields"] = bool({"name", "selfLevel", "goal"} <= set(_patch))
     out["offers_step"] = bool(re.search(
         r"давай|начать|первым|шаг|сначала|попробу|реши|начни|одно задание|задание",
         r["answer"], re.IGNORECASE))
@@ -511,7 +513,7 @@ def main() -> int:
                 lines.append(f"  - коды в ответе: {x['codes']}")
             if x.get("table"):
                 lines.append("  - в ответе markdown-таблица")
-            lines.append(f"  - ответ: {(x.get('answer') or '(пусто)')[:700]}")
+            lines.append(f"  - ответ: {(x.get('answer') or '(пусто)')[:3000]}")
             lines.append("")
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text("\n".join(lines), encoding="utf-8")

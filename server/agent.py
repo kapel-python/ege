@@ -234,12 +234,14 @@ def _tool(name: str, description: str, parameters: dict, *, action: bool = False
 
 AGENT_TOOLS: list = [
     _tool("fold_web",
-          "Срез прогресса ученика. op: progress|profile|skills|errors|attempts|daily|history|forecast.",
+          "Срез прогресса ученика. op: progress|profile|skills|errors|attempts|daily|history|forecast."
+          " Для resolve_error нужен errorId: ищи его через errors (без taskId — открытые первыми,"
+          " с taskId — только по этому заданию).",
           {"type": "object",
            "properties": {
                "op": {"type": "string", "enum": ["progress", "profile", "skills", "errors",
                                                 "attempts", "daily", "history", "forecast"]},
-               "taskId": {"type": "string", "description": "для attempts: конкретное задание"},
+               "taskId": {"type": "string", "description": "для attempts и errors: конкретное задание"},
                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                "days": {"type": "integer", "minimum": 1, "maximum": 90},
            },
@@ -892,20 +894,41 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         by_skill = conn.execute("SELECT skill_id, COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=? AND resolved=0"
                                 " GROUP BY skill_id ORDER BY c DESC LIMIT 10",
                                 (user_id, subject)).fetchall()
-        last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
-                            (user_id, subject, limit)).fetchall()
+        # Точечный поиск ошибки по заданию: resolve_error требует ПАРУ
+        # (errorId, taskId), а errorId без этого было неоткуда взять, кроме
+        # списка свежих — старая открытая ошибка (id=1 из 12) в него не
+        # попадала, и модель честно отвечала «такой ошибки нет» (живой замер
+        # agent-hard: вопрос про n01_p1 при 12 ошибках).
+        task_id = str((args or {}).get("taskId") or "").strip()
+        note = None
+        if task_id:
+            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ?",
+                                (user_id, subject, task_id, limit)).fetchall()
+            note = ("по этому заданию ошибок нет — так и скажи, не выдумывай"
+                      if not last else None)
+        else:
+            # Открытые — первыми: разбирать предстоит именно их, а свежие
+            # разобранные внизу списка модели не нужны (раньше старые открытые
+            # вытеснялись за LIMIT и становились «невидимыми»).
+            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY resolved ASC, id DESC LIMIT ?",
+                                (user_id, subject, limit)).fetchall()
         names = dict(_skill_names(conn, subject))
         # Название навыка и тема задания — обязательны: без них модель вынуждена
         # писать ученику `n08_expressions` (живой баг, правило 5b промпта
         # существует именно из-за этого) и не может отличить «ошибку по векторам»
         # от «ошибки по оптимизации» — а именно на этом строится resolve_error.
-        return {"op": op, "total": _safe_int(total["c"]) if total else 0,
-                "open": _safe_int(open_n["c"]) if open_n else 0,
-                "bySkill": [{"skill": r["skill_id"], "name": names.get(r["skill_id"], r["skill_id"]),
-                             "count": _safe_int(r["c"])} for r in by_skill],
-                "last": [{"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"],
-                          "skillName": names.get(r["skill_id"], r["skill_id"]),
-                          "topic": r["topic"] or "", "resolved": bool(r["resolved"])} for r in last]}
+        out = {"op": op, "total": _safe_int(total["c"]) if total else 0,
+                 "open": _safe_int(open_n["c"]) if open_n else 0,
+                 "bySkill": [{"skill": r["skill_id"], "name": names.get(r["skill_id"], r["skill_id"]),
+                              "count": _safe_int(r["c"])} for r in by_skill],
+                 "last": [{"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"],
+                           "skillName": names.get(r["skill_id"], r["skill_id"]),
+                           "topic": r["topic"] or "", "resolved": bool(r["resolved"])} for r in last]}
+        if task_id:
+            out["taskId"] = task_id
+            if note:
+                out["note"] = note
+        return out
     if op == "attempts":
         task_id = str((args or {}).get("taskId") or "").strip()
         names = dict(_skill_names(conn, subject))

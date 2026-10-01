@@ -171,6 +171,45 @@ def _find_topics_probes(server) -> dict:
         conn.close()
 
 
+def _errors_probes(server) -> dict:
+    """Старая открытая ошибка обязана быть ВИДНА модели (живой замер
+    agent-hard: вопрос «отметь ошибку по n01_p1» при 12 ошибках — модель
+    честно ответила «такой ошибки нет», потому что список свежих из 10 строк
+    её не содержал). Проверяем на живых данных каталога: сеем 12 ошибок и
+    смотрим, что первая открытая видна и находится точечно."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        subj = "profile_math"
+        out = {}
+        # Чистим и сеем 12 ошибок: первая открытая — самая старая.
+        conn.execute("DELETE FROM user_errors WHERE user_id=? AND subject=?", (uid, subj))
+        tids = [r[0] for r in conn.execute(
+            "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+            " WHERE s.subject='profile_math' ORDER BY t.id LIMIT 12")]
+        assert len(tids) == 12, f"нужно 12 заданий, есть {len(tids)}"
+        skid = conn.execute("SELECT skill_id FROM tasks WHERE id=?", (tids[0],)).fetchone()[0]
+        for i, tid in enumerate(tids):
+            conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved,subject,client_id,kind)"
+                         " VALUES(?,?,?,?,?,?,?,?,?)",
+                         (uid, tid, skid, "топик", str(i), 1 if i >= 8 else 0,
+                          subj, f"probe-{uid}-{i}", "minor"))
+        conn.commit()
+        first_open = tids[0]
+        dflt = agent.fold_web(conn, uid, subj, {"op": "errors"})
+        out["old_visible"] = any(e.get("taskId") == first_open for e in dflt.get("last", []))
+        out["open_first"] = all(e.get("resolved") is False for e in dflt.get("last", [])[:8])
+        one = agent.fold_web(conn, uid, subj, {"op": "errors", "taskId": first_open})
+        out["lookup"] = [(e.get("id"), e.get("taskId")) for e in one.get("last", [])]
+        out["lookup_ok"] = any(t == first_open for _, t in out["lookup"])
+        none = agent.fold_web(conn, uid, subj, {"op": "errors", "taskId": "n99_p9"})
+        out["empty_ok"] = none.get("last") == [] and bool(none.get("note")) and bool(none.get("bySkill"))
+        return out
+    finally:
+        conn.close()
+
+
 def _resolve_error_rejects_conflicting_ids(server) -> bool:
     """resolve_error не должен доверять выдуманному errorId.
 
@@ -1022,6 +1061,15 @@ def main():
                   cap["rank_ok"], str(cap["rank"]))
             check("на несуществующую тему — честный пустой ответ, а не весь каталог",
                   cap["empty_ok"], str(cap["empty_found"]))
+            section("errors: старая открытая ошибка видна + точечный поиск")
+            cap = _errors_probes(server)
+            check("первая открытая ошибка видна в списке по умолчанию", cap["old_visible"],
+                  str([e for e in cap.get("lookup", [])]))
+            check("открытые идут первыми (разбирать предстоит их)",
+                  cap["open_first"])
+            check("точечный поиск по taskId находит её", cap["lookup_ok"], str(cap["lookup"]))
+            check("по несуществующему заданию — честное пусто с тем же форматом",
+                  cap["empty_ok"])
             check("find_topics виден модели и отнесён к чтению",
                   "find_topics" in [t["function"]["name"] for t in agent.AGENT_TOOLS]
                   and "find_topics" in agent.READ_TOOLS,
