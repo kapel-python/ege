@@ -8,9 +8,11 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script>
 // ИИ-наставник живёт в SPA: /dashboard#/ai. Старые ссылки /agent#/thread/<id>
-// везут id треда в хэше — сервер его не видит, поэтому перекладываем здесь.
+// везут ref треда в хэше — сервер его не видит, поэтому перекладываем здесь.
+// Ref — числовой id старых ссылок или внешний public_id новых (10 символов
+// [A-Za-z0-9]): пробрасываем как есть, разбирает уже SPA.
 try {
-  var m = (location.hash || "").match(/thread\/(\d+)/);
+  var m = (location.hash || "").match(/thread\/([A-Za-z0-9]+)/);
   var target = "/dashboard#/ai" + (m ? "/" + m[1] : "");
   location.replace(target);
 } catch (e) {

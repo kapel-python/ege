@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import sqlite3
 import time
 from datetime import datetime
@@ -174,6 +175,13 @@ AGENT_SYSTEM = (
     "6. Действия (сменить уровень/цель/имя, отметить ошибку разобранной, сбросить прогресс) — только через "
     "инструменты действий: они сами попросят подтверждение, сам ничего не меняй и не обещай «сейчас поменяю».\n"
     "5f. ССЫЛКИ. Когда ученику полезно куда-то пойти — первоисточник (сайт ФИПИ, материалы экзамена), разбор темы, его собственный результат — дай ссылку обычной разметкой: [текст ссылки](https://…). Это тот же markdown, что жирный и курсив; ученику она покажется синей кнопкой. Правила: (1) ссылка должна быть ТОЧНОЙ и рабочей — не выдумывай адреса, не указывай «примерно на fipi.ru/…», не ссылайся на то, чего не знаешь; (2) подпись — ЗАГЛАВНЫМИ словами и ТОЛЬКО НАЗВАНИЕМ, без слова «сайт» и без «перейти/открыть»: «ФИПИ», «ОЦЕНКА СОЧИНЕНИЯ», «РАЗБОР ТЕМЫ» — а не «САЙТ ФИПИ» и не сам адрес; кнопка сама показывает, что это ссылка; (3) не сыпь ссылками без нужды: одна-две на ответ хватит, иначе это шум; (4) если уверенного адреса нет — честно скажи это словами и не оставляй пустую ссылку.\n"
+    "5g. ВОПРОСЫ О ПРИЛОЖЕНИИ — НЕ ПРО УЧЁБУ. «Сколько проверок в день», "
+       "«что такое XP», «где сбросить прогресс», «что ты умеешь», «как отозвать "
+       "устройство» — это НЕ данные ученика, и в fold_web их нет. Сначала ЗОВИ "
+       "project_info и отвечай ТОЛЬКО по нему: цифры (5 проверок, 10 вопросов, "
+       "150 слов, 22 балла) — оттуда, а не из головы. Технического нутра там нет "
+       "и быть не должно: ученику не рассказываешь ни про какие внутренние "
+       "механизмы, бюджеты и защиты — только то, что написано в справке.\n"
     "6a. «Зови меня Катя», «назови меня…», «поменяй имя на…», «хочу, чтобы ты меня так называл» — это ТОЖЕ "
     "запрос на изменение профиля: зови update_profile(name=…). Молча поздороваться новым именем нельзя: "
     "человеку кажется, что имя сменилось, а в профиле старое.\n"
@@ -258,6 +266,12 @@ AGENT_TOOLS: list = [
           {"type": "object", "properties": {
               "weeks": {"type": "integer", "minimum": 1, "maximum": 8}},
            "additionalProperties": False}),
+    _tool("project_info",
+      "СПРАВКА о приложении: лимиты, опыт, устройства, сброс, поддержка. "
+      "ЗОВИ ПЕРВЫМ на вопросы НЕ про учёбу («сколько проверок в день», "
+      "«что такое XP», «где сбросить прогресс», «что ты умеешь») — цифры и "
+      "правила бери ТОЛЬКО отсюда, не выдумывай. Возвращает весь текст целиком.",
+      {"type": "object", "properties": {}, "additionalProperties": False}),
     _tool("update_profile", "Изменить имя/уровень/цель. Требует подтверждения ученика.",
           {"type": "object", "properties": {
               "name": {"type": "string", "maxLength": 60},
@@ -274,7 +288,7 @@ AGENT_TOOLS: list = [
 
 ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress"})
 READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_draft",
-                        "find_topics"})
+                        "find_topics", "project_info"})
 
 
 def is_action_tool(name: str) -> bool:
@@ -294,6 +308,62 @@ def _db_key(conn: sqlite3.Connection) -> str:
         return str(id(conn))
 
 
+# Внешний идентификатор треда: 10 символов [A-Za-z0-9] (~60 бит). 10 выбрано
+# как в задаче: короткая ссылка, перебор при лимитах невозможен. Символы
+# (-_~ и т.п.) не используем осознанно: в хэше #/ai/<ref> они требуют
+# кодирования и ломаются при копипасте, а выигрыша к энтропии не дают.
+THREAD_PUBLIC_ID_LEN = 10
+THREAD_PUBLIC_ALPHABET = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "abcdefghijklmnopqrstuvwxyz0123456789")
+THREAD_PUBLIC_ID_RE = re.compile(r"^[A-Za-z0-9]{10}$")
+
+
+def generate_thread_public_id() -> str:
+    return "".join(secrets.choice(THREAD_PUBLIC_ALPHABET)
+                   for _ in range(THREAD_PUBLIC_ID_LEN))
+
+
+def is_thread_public_ref(raw) -> bool:
+    return isinstance(raw, str) and bool(THREAD_PUBLIC_ID_RE.match(raw))
+
+
+def create_thread_row(conn: sqlite3.Connection, user_id: int, subject: str,
+                      title: str = "Новый чат") -> tuple[int, str]:
+    """Вставить тред с уникальным public_id. Возвращает (id, public_id)."""
+    now_ms = int(time.time() * 1000)
+    last_exc: Exception | None = None
+    for _ in range(20):
+        cand = generate_thread_public_id()
+        try:
+            cur = conn.execute("INSERT INTO agent_threads(user_id, subject, title,"
+                               " created_at, updated_at, public_id)"
+                               " VALUES(?,?,?,?,?,?)",
+                               (int(user_id), subject, title, now_ms, now_ms, cand))
+            conn.commit()
+            return int(cur.lastrowid), cand
+        except sqlite3.Error as exc:
+            last_exc = exc
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            # Коллизия public_id (UNIQUE) — пробуем следующий; остальное наружу.
+            if "public_id" not in str(exc).lower() and "unique" not in str(exc).lower():
+                # Старая база без колонки: пишем по старой схеме без public_id.
+                try:
+                    cur = conn.execute("INSERT INTO agent_threads(user_id, subject, title,"
+                                       " created_at, updated_at)"
+                                       " VALUES(?,?,?,?,?)",
+                                       (int(user_id), subject, title, now_ms, now_ms))
+                    conn.commit()
+                    return int(cur.lastrowid), ""
+                except sqlite3.Error:
+                    pass
+                raise
+            continue
+    raise last_exc if last_exc is not None else RuntimeError("no thread id")
+
+
 def ensure_agent_schema(conn: sqlite3.Connection) -> None:
     """Треды/сообщения агента + поле подписки (задел, подписки пока нет)."""
     key = _db_key(conn)
@@ -301,7 +371,9 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("SELECT id FROM agent_threads LIMIT 1")
             conn.execute("SELECT id FROM agent_messages LIMIT 1")
-            return
+            cols_cached = {r["name"] for r in conn.execute("PRAGMA table_info(agent_threads)")}
+            if "public_id" in cols_cached:
+                return
         except sqlite3.Error:
             pass
     conn.execute("""
@@ -311,7 +383,8 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
           subject TEXT NOT NULL DEFAULT 'profile_math',
           title TEXT NOT NULL DEFAULT 'Новый чат',
           created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL)""")
+          updated_at INTEGER NOT NULL,
+          public_id TEXT)""")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_messages (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,6 +399,33 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
           seq INTEGER NOT NULL,
           created_at INTEGER NOT NULL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_threads_user ON agent_threads(user_id, updated_at)")
+    # Внешний идентификатор треда для ссылок: неперебираемый, в URL вместо
+    # последовательного id (тот остаётся внутренним ключом базы). Только
+    # латиница+цифры — без символов: в хэше они ломали бы копипаст и decode.
+    try:
+        tcols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_threads)")}
+        if tcols and "public_id" not in tcols:
+            conn.execute("ALTER TABLE agent_threads ADD COLUMN public_id TEXT")
+            tcols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_threads)")}
+        if "public_id" in (tcols or set()):
+            missing = conn.execute("SELECT id FROM agent_threads WHERE public_id IS NULL OR public_id=''").fetchall()
+            for mrow in missing:
+                for _ in range(20):
+                    cand = generate_thread_public_id()
+                    exists = conn.execute("SELECT 1 FROM agent_threads WHERE public_id=?",
+                                          (cand,)).fetchone()
+                    if exists:
+                        continue
+                    try:
+                        conn.execute("UPDATE agent_threads SET public_id=? WHERE id=?",
+                                     (cand, int(mrow["id"])))
+                        break
+                    except sqlite3.Error:
+                        continue
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_threads_public_id"
+                         " ON agent_threads(public_id)")
+    except sqlite3.Error:
+        pass
     try:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_messages)")}
         if cols and "suggests_json" not in cols:
@@ -1423,6 +1523,31 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     return found
 
 
+def _knowledge_text() -> str:
+    """Текст базы знаний о проекте. Файл лежит рядом с модулем, правится без
+    правки кода. Отдаётся целиком: он короткий (~2.4К в JSON) и влезает в
+    потолок контекста; резать его по секциям нельзя — модель тогда отвечала бы
+    по огрызку."""
+    global _KNOWLEDGE_CACHE
+    try:
+        return _KNOWLEDGE_CACHE
+    except NameError:
+        pass
+    try:
+        from pathlib import Path as _P
+        _KNOWLEDGE_CACHE = (_P(__file__).resolve().parent / "agent_knowledge.md").read_text(encoding="utf-8")
+    except OSError:
+        _KNOWLEDGE_CACHE = ""
+    return _KNOWLEDGE_CACHE
+
+
+def project_info(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    text = _knowledge_text()
+    if not text.strip():
+        raise ValueError("справка о приложении недоступна")
+    return {"text": text}
+
+
 def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
     if name == "fold_web":
         return fold_web(conn, user_id, subject, args)
@@ -1436,6 +1561,8 @@ def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name
         return plan_draft(conn, user_id, subject, args)
     if name == "find_topics":
         return find_topics(conn, user_id, subject, args)
+    if name == "project_info":
+        return project_info(conn, user_id, subject, args)
     raise ValueError(f"неизвестный инструмент: {name}")
 
 
@@ -1563,6 +1690,8 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         return f"Ищу по каталогу: {q}" if q else "Ищу по каталогу"
     if name == "plan_draft":
         return "Составляю черновик плана"
+    if name == "project_info":
+        return "Смотрю справку о приложении"
     if name == "update_profile":
         return "Меняю профиль (жду подтверждения)"
     if name == "resolve_error":
@@ -1655,6 +1784,13 @@ STALL_NUDGE = ("Стоп. Не пиши, что сейчас посмотриш�
 # важен: первое совпадение выигрывает, поэтому частное (сочинения, план) стоит
 # перед общим (прогресс).
 FALLBACK_TOOL_RULES: list = [
+    (re.compile(r"(?:лимит|сколько\s+(?:раз|провер)|провер\w*\s+в\s+день|"
+                r"что\s+такое\s+(?:xp|опыт)|как\s+получить\s+(?:xp|опыт)|"
+                r"где\s+(?:мне\s+)?(?:посмотреть|найти|сбросить|отозвать)|"
+                r"как\s+(?:мне\s+)?(?:самому\s+)?сбросить|устройств|отозвать|"
+                r"что\s+ты\s+умеешь|что\s+умеешь|поддержк|контакт|администратор|"
+                r"сброс\s+прогресс|удали\w*\s+(?:мой\s+)?аккаунт)", re.IGNORECASE),
+     ("project_info", {})),
     (re.compile(r"(?:сочинени|эссе|к1|критери)", re.IGNORECASE), ("essay_history", {})),
     (re.compile(r"(?:план|расписани|график|недел)", re.IGNORECASE), ("plan_draft", {})),
     (re.compile(r"(?:прогноз|балл|сколько\s+набер|подтянуть|поднять|потян)", re.IGNORECASE),
@@ -1787,7 +1923,7 @@ def fallback_tool_for(text: str) -> tuple[str, dict]:
 # ответ ученику уезжали строки «task_get(id="<id из find_topics>")», шагов не
 # было вовсе, и человек видел служебный синтаксис вместо ответа.
 PSEUDO_CALL_RE = re.compile(
-    r"\b(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
+    r"\b(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|project_info|"
     r"update_profile|resolve_error)\s*\(([^)]{0,200})\)", re.IGNORECASE)
 
 

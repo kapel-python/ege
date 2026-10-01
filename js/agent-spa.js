@@ -518,18 +518,94 @@
       else localStorage.removeItem(threadCacheKey());
     } catch (_) {}
   }
-  function readDeepLink() {
+  /* Ссылки на чаты — внешние неперебираемые id (10 символов [A-Za-z0-9] в
+     хэше #/ai/<ref>), внутри — прежний числовой id треда. Без символов:
+     в хэше они требуют кодирования и ломаются при копипасте. Старые
+     числовые ссылки (#/ai/56) работают как раньше и переписываются на
+     внешнюю автоматически (syncHash), когда свой чат найден в списке. */
+  var THREAD_PUBLIC_RE = /^[A-Za-z0-9]{10}$/;
+  function isPublicThreadRef(s) { return typeof s === "string" && THREAD_PUBLIC_RE.test(s); }
+  function isNumericThreadRef(s) {
+    return typeof s === "string" && /^\d+$/.test(s) && Number(s) > 0;
+  }
+  function isThreadRef(s) { return isPublicThreadRef(s) || isNumericThreadRef(s); }
+  function findThreadByRef(ref) {
+    if (ref == null) return null;
+    var s = String(ref);
+    for (var i = 0; i < S.threads.length; i++) {
+      var t = S.threads[i];
+      if (String(t.id) === s || (t.publicId && String(t.publicId) === s)) return t;
+    }
+    return null;
+  }
+  function threadUrlRef(t) {
+    if (!t) return S.currentId ? String(S.currentId) : "";
+    return t.publicId ? String(t.publicId) : String(t.id);
+  }
+  /* Человеческие объяснения проблем с открытием чата — общей модалкой
+     приложения (openConfirmDialog, та же .dlg-система, что удаление чата),
+     а не тостом: чужой чат по ссылке «открывался» молча (пустой список), и
+     человек не понимал, куда делся чат. Своей сборки .dlg у раздела нет.
+     kinds: bad — мусор в адресе; foreign — чужая/удалённая ссылка;
+     deleted — свой чат удалён (например, с другого устройства). */
+  function openThreadProblem(kind) {
+    var map = {
+      bad: { icon: "info", title: "Ссылка сломана",
+             text: "В адресе чата что-то не так — такой чат открыть нельзя. Проверь ссылку или выбери чат из списка: твои чаты на месте." },
+      foreign: { icon: "lock", title: "Это не твой чат",
+             text: "Ссылка ведёт в чужой или удалённый чат. Чужие переписки не открываем даже по прямой ссылке — показываю твои чаты." },
+      deleted: { icon: "info", title: "Чат удалён",
+             text: "Этот чат уже удалён — может, с другого устройства. Показываю оставшиеся чаты, прогресс и ошибки на месте." },
+    };
+    var m = map[kind] || map.foreign;
+    try {
+      if (typeof openConfirmDialog !== "function") { say(m.title + ". " + m.text); return; }
+      // Один показ на адрес: фоновая сверка и повторный маунт не должны
+      // складывать окна друг на друга. Ключ с аккаунтом: та же ссылка под
+      // другим аккаунтом — другой показ (иначе смена аккаунта гасила бы
+      // модалку «это не твой чат» ровно там, где она нужнее всего).
+      var key = String(S.accountId || "") + ":" + String(kind) + ":"
+        + String(S.threadProblemShownFor || "");
+      if (S.threadProblemShown === key) return;
+      S.threadProblemShown = key;
+      openConfirmDialog({
+        iconName: m.icon,
+        eyebrow: "Чат с наставником",
+        title: m.title,
+        text: m.text,
+        cancelText: "Закрыть",
+        confirmText: "Понятно",
+        onConfirm: function () { try { closeDeviceModal(); } catch (_) {} },
+      });
+    } catch (_) { say(m.title); }
+  }
+  function readDeepLinkRaw() {
     try {
       var p = (typeof routeParam === "function" ? routeParam() : "");
-      if (p && /^\d+$/.test(p)) return Number(p);
+      return String(p || "");
+    } catch (_) { return ""; }
+  }
+  function readDeepLink() {
+    // Совместимость: числовой id из старых ссылок и сохранёнок, внешний
+    // public_id из новых. Возвращаем строкой — сравнение идёт по обеим
+    // колонкам (findThreadByRef), а не Number(), иначе внешний id — NaN.
+    try {
+      var p = readDeepLinkRaw();
+      if (p && isThreadRef(p)) return p;
       var saved = localStorage.getItem(threadCacheKey());
-      if (saved && /^\d+$/.test(saved)) return Number(saved);
+      if (saved && isThreadRef(String(saved))) return String(saved);
     } catch (_) {}
     return null;
   }
   function syncHash() {
     try {
-      var h = S.currentId ? "#/ai/" + S.currentId : "#/ai";
+      var cur = null;
+      try { cur = currentThread(); } catch (_) { cur = null; }
+      var ref = cur ? threadUrlRef(cur) : (S.currentId ? String(S.currentId) : "");
+      // Свой чат по старой числовой ссылке — переписываем адрес на внешний
+      // id сразу: внутренняя ссылка в адресной строке больше не живёт.
+      if (cur && S.currentId && String(S.currentId) !== String(cur.id)) S.currentId = Number(cur.id);
+      var h = ref ? "#/ai/" + ref : "#/ai";
       if ((location.hash || "") !== h) history.replaceState(null, "", h);
     } catch (_) {}
   }
@@ -860,7 +936,8 @@
     S.threads = S.threads.map(function (t) {
       if (Number(t.id) === Number(thread.id)) {
         found = true;
-        return { id: t.id, subject: t.subject, title: thread.title || t.title,
+        return { id: t.id, publicId: thread.publicId || t.publicId,
+                 subject: t.subject, title: thread.title || t.title,
                  createdAt: t.createdAt, updatedAt: Date.now() };
       }
       return t;
@@ -872,6 +949,14 @@
     if (cur && ui.title) ui.title.textContent = cur.title || "Новый чат";
   }
   function selectThread(id) {
+    // Принимаем и внешний ref из ссылки: свой чат маппим на внутренний id.
+    // Чужого здесь нет (его ловит selectCurrentThread/resolve с модалкой).
+    if (id != null) {
+      var known = findThreadByRef(id);
+      if (known) id = Number(known.id);
+      else if (isNumericThreadRef(String(id))) id = Number(id);
+      else return;
+    } else id = null;
     var prev = S.currentId;
     S.navGen++;
     var leaving = Number(prev) !== Number(id);
@@ -887,7 +972,7 @@
     else if (S.turn && !S.turn.dead) S.turn.detached = true;
     S.printing = false;
     syncBusy();
-    S.currentId = id != null ? Number(id) : null;
+    S.currentId = id;
     saveCurrent();
     renderThreads();
     // Подсветка «нового чата» одноразовая: второй перерисовкой она бы
@@ -958,15 +1043,65 @@
     } catch (_) {}
   }
   function selectCurrentThread() {
-    var want = readDeepLink();
-    var exists = want && S.threads.some(function (t) { return Number(t.id) === Number(want); });
-    if (exists) { selectThread(want); return; }
-    if (want) {
-      try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
-      S.currentId = null;
+    var raw = readDeepLinkRaw();
+    if (raw) {
+      // Явный адрес чата: битый — модалка сразу, без похода в сеть.
+      if (!isThreadRef(raw)) {
+        try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
+        S.threadProblemShownFor = raw;
+        S.currentId = null;
+        if (S.threads.length) selectThread(S.threads[0].id);
+        else selectThread(null);
+        openThreadProblem("bad");
+        return;
+      }
+      var local = findThreadByRef(raw);
+      if (local) { selectThread(local.id); return; }
+      // В списке нет: свой старый за пределом сотни, чужой или удалённый.
+      // Спрашиваем сервер напрямую тем же ref — он разберёт и числовой, и
+      // внешний. Модалку показываем по итогу, а не вслепую.
+      resolveDeepLinkFromServer(raw);
+      return;
     }
+    var want = readDeepLink();
+    var exists = want && findThreadByRef(want);
+    if (exists) { selectThread(exists.id); return; }
     if (S.threads.length) selectThread(S.threads[0].id);
     else selectThread(null);
+  }
+  /* Прямая проверка явной ссылки у сервера: свой (но вне сотни в списке) —
+     подхватываем и открываем, чужой/удалённый — модалка + свои чаты. */
+  function resolveDeepLinkFromServer(raw) {
+    var g = S.mountGen;
+    S.threadProblemShownFor = String(raw);
+    feedLoader("Читаем переписку…");
+    api("GET", "/api/agent/threads/" + encodeURIComponent(String(raw))).then(function (res) {
+      if (g !== S.mountGen) return;
+      if (res.status === 200 && res.data && res.data.thread) {
+        var th = res.data.thread;
+        if (!findThreadByRef(th.id) && !findThreadByRef(th.publicId)) {
+          S.threads.unshift(th);
+          cacheThreads(S.threads);
+        }
+        selectThread(th.id);
+        return;
+      }
+      if (handleAuthError(res)) return;
+      // Битый ref сервер тоже отбивает 400 — текст тот же, что для мусора
+      // в адресе. 404 — чужой или удалённый: сервер их не различает
+      // специально (иначе перебором id было бы видно, чей чат жив).
+      var kind = (res.status === 400) ? "bad" : "foreign";
+      try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
+      S.currentId = null;
+      if (S.threads.length) selectThread(S.threads[0].id);
+      else selectThread(null);
+      openThreadProblem(kind);
+    }).catch(function () {
+      if (g !== S.mountGen) return;
+      if (S.threads.length) selectThread(S.threads[0].id);
+      else selectThread(null);
+      errorCard("Нет соединения.", "Попробовать снова", function () { selectCurrentThread(); });
+    });
   }
   function loadThreads(cb) {
     var g = S.mountGen;
@@ -1961,6 +2096,13 @@
         reattachTurn();
         return;
       }
+      if (res.status === 400 && res.data && res.data.code === "THREAD_BAD_REF") {
+        S.threadProblemShownFor = String(wantId);
+        if (!cached) clearFeed();
+        errorCard("Ссылка на чат сломана.", "К моим чатам", function () { selectCurrentThread(); });
+        openThreadProblem("bad");
+        return;
+      }
       if (res.status === 404) {
         try { localStorage.removeItem(threadCacheKey()); } catch (_) {}
         cacheForget(wantId);
@@ -1975,7 +2117,8 @@
         syncHash();
         if (t) { loadThreadMessages(); return; }
         clearFeed(); showEmpty(true);
-        say("Чат не найден");
+        S.threadProblemShownFor = String(wantId);
+        openThreadProblem("deleted");
         return;
       }
       if (handleAuthError(res)) return;
@@ -2182,9 +2325,17 @@
       retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30));
       return;
     }
+    if (res.status === 400 && res.data && res.data.code === "THREAD_BAD_REF") {
+      if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      S.threadProblemShownFor = String((turn && turn.threadId) || "");
+      openThreadProblem("bad");
+      loadThreads();
+      return;
+    }
     if (res.status === 404 && res.data && res.data.code === "THREAD_NOT_FOUND") {
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
-      say("Чат не найден — открываю актуальный список");
+      S.threadProblemShownFor = String((turn && turn.threadId) || "");
+      openThreadProblem("deleted");
       loadThreads();
       return;
     }

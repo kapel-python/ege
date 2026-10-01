@@ -31,7 +31,7 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import choice, token_hex, token_urlsafe
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 try:
     import fcntl
@@ -187,21 +187,106 @@ def _agent_final_payload(final: str, steps: list, fallback: str) -> tuple[str, l
     return clean[:AGENT_REPLY_MAX()], suggests
 
 
-def _agent_thread_owned(conn: sqlite3.Connection, thread_id: int, user_id: int):
-    try:
-        tid = int(thread_id)
-    except (TypeError, ValueError):
-        return None
+def _agent_thread_owned(conn: sqlite3.Connection, thread_ref, user_id: int):
+    """Свой тред по ссылке: числовой id (совместимость) или внешний public_id.
+
+    Чужой/удалённый/битый ref — None (выше отдаём общий 404 THREAD_NOT_FOUND,
+    чтобы перебором id нельзя было понять, существует ли чужой чат)."""
     if _AGENT is not None:
         try:
             _AGENT.ensure_agent_schema(conn)
         except sqlite3.Error:
             pass
+    raw = thread_ref.strip() if isinstance(thread_ref, str) else thread_ref
+    # Внешний public_id — сначала он: 10-значная чисто цифровая строка
+    # теоретически бывает и тем, и другим, а public невзламываем — проверяем
+    # его первым, числовой fallback ниже подхватит только своё.
+    if isinstance(raw, str) and _AGENT is not None:
+        try:
+            if _AGENT.is_thread_public_ref(raw):
+                try:
+                    row = conn.execute("SELECT id, user_id, subject, title, created_at, updated_at,"
+                                       " public_id FROM agent_threads"
+                                       " WHERE public_id=? AND user_id=?",
+                                       (raw, int(user_id))).fetchone()
+                except sqlite3.Error:
+                    try:
+                        row = conn.execute("SELECT id, user_id, subject, title, created_at, updated_at"
+                                           " FROM agent_threads WHERE public_id=? AND user_id=?",
+                                           (raw, int(user_id))).fetchone()
+                    except sqlite3.Error:
+                        row = None
+                if row is not None:
+                    return row
+                # Чисто цифровой public_id, не найденный выше, может быть
+                # легаси-числом — падаем ниже на числовой поиск.
+                if not raw.isdigit():
+                    return None
+        except (TypeError, ValueError):
+            pass
     try:
-        return conn.execute("SELECT id, user_id, subject, title, created_at, updated_at"
-                            " FROM agent_threads WHERE id=? AND user_id=?", (tid, int(user_id))).fetchone()
+        tid = int(raw) if not isinstance(raw, bool) else -1
+    except (TypeError, ValueError):
+        return None
+    try:
+        try:
+            return conn.execute("SELECT id, user_id, subject, title, created_at, updated_at,"
+                                " public_id FROM agent_threads WHERE id=? AND user_id=?",
+                                (tid, int(user_id))).fetchone()
+        except sqlite3.Error:
+            return conn.execute("SELECT id, user_id, subject, title, created_at, updated_at"
+                                " FROM agent_threads WHERE id=? AND user_id=?", (tid, int(user_id))).fetchone()
     except sqlite3.Error:
         return None
+
+
+def _agent_thread_public_id(row) -> str:
+    """Внешний id строки треда ('' для доисторических строк без колонки)."""
+    if row is None:
+        return ""
+    try:
+        keys = row.keys()
+    except (AttributeError, ValueError):
+        keys = ()
+    if "public_id" in keys:
+        try:
+            return str(row["public_id"] or "")
+        except (TypeError, ValueError, KeyError):
+            return ""
+    return ""
+
+
+def _agent_thread_payload(row) -> dict:
+    """Публичная форма треда: внутренний id (совместимость) + внешний publicId."""
+    return {"id": int(row["id"]), "publicId": _agent_thread_public_id(row),
+            "subject": row["subject"], "title": row["title"],
+            "createdAt": int(row["created_at"]), "updatedAt": int(row["updated_at"])}
+
+
+def _agent_thread_ref_is_bad(raw) -> bool:
+    """Битый ref: ни легаси-число, ни внешний public_id. Такой id нельзя даже
+    искать в базе — отвечаем 400, а не 404."""
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return True
+    if isinstance(raw, int):
+        return raw <= 0
+    s = str(raw).strip()
+    if not s:
+        return True
+    if s.isdigit():
+        try:
+            return int(s) <= 0
+        except (TypeError, ValueError):
+            return True
+    if _AGENT is not None:
+        try:
+            if _AGENT.is_thread_public_ref(s):
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def _agent_next_seq(conn: sqlite3.Connection, thread_id: int) -> int:
@@ -9617,27 +9702,32 @@ class Handler(BaseHTTPRequestHandler):
                     subj_raw = payload.get("subject")
                     subject = resolve_subject(subj_raw) if is_known_subject(subj_raw) else current_subject_for(conn, user_id)
                     now_ms = int(time.time() * 1000)
-                    cur = conn.execute("INSERT INTO agent_threads(user_id, subject, title, created_at, updated_at)"
-                                       " VALUES(?,?,?, ?,?)", (int(user_id), subject, "Новый чат", now_ms, now_ms))
-                    conn.commit()
-                    tid = int(cur.lastrowid)
-                    self.send_json({"ok": True, "thread": {"id": tid, "subject": subject,
+                    tid, public_id = _AGENT.create_thread_row(conn, int(user_id), subject, "Новый чат")
+                    self.send_json({"ok": True, "thread": {"id": tid, "publicId": public_id,
+                                                            "subject": subject,
                                                             "title": "Новый чат", "createdAt": now_ms,
                                                             "updatedAt": now_ms}}, token=token); return
-                # POST /api/agent/threads/<id>/delete — удалить свой тред.
+                # POST /api/agent/threads/<ref>/delete — удалить свой тред.
+                # <ref> — числовой id (старые клиенты) или внешний public_id.
                 if path.startswith("/api/agent/threads/") and path.endswith("/delete"):
                     parts = path.split("/")
+                    raw_ref = parts[4] if len(parts) > 4 else ""
                     try:
-                        tid = int(parts[4])
-                    except (TypeError, ValueError, IndexError):
-                        self.send_json({"error": "Некорректный идентификатор"}, 400, token=token); return
-                    row = _agent_thread_owned(conn, tid, user_id)
+                        raw_ref = unquote(str(raw_ref or ""))
+                    except Exception:
+                        raw_ref = str(raw_ref or "")
+                    if _agent_thread_ref_is_bad(raw_ref):
+                        self.send_json({"error": "Некорректный идентификатор",
+                                        "code": "THREAD_BAD_REF"}, 400, token=token); return
+                    row = _agent_thread_owned(conn, raw_ref, user_id)
                     if row is None:
                         self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    tid = int(row["id"])
                     conn.execute("DELETE FROM agent_messages WHERE thread_id=?", (tid,))
                     conn.execute("DELETE FROM agent_threads WHERE id=? AND user_id=?", (tid, int(user_id)))
                     conn.commit()
-                    self.send_json({"ok": True, "id": tid}, token=token); return
+                    self.send_json({"ok": True, "id": tid,
+                                    "publicId": _agent_thread_public_id(row)}, token=token); return
                 # POST /api/agent/turns/confirm — {messageId, approve}.
                 if path == "/api/agent/turns/confirm":
                     raw_mid = payload.get("messageId", payload.get("message_id", payload.get("id")))
@@ -9770,15 +9860,20 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_busy_release(tid)
                     return
                 # POST /api/agent/turns — начать ход {threadId, text}.
+                # threadId — числовой id (старые клиенты) или внешний public_id.
                 if path == "/api/agent/turns":
                     raw_tid = payload.get("threadId", payload.get("thread_id", payload.get("thread")))
-                    try:
-                        tid = int(raw_tid)
-                    except (TypeError, ValueError):
-                        self.send_json({"error": "Нужен threadId"}, 400, token=token); return
-                    thread = _agent_thread_owned(conn, tid, user_id)
+                    if isinstance(raw_tid, str):
+                        raw_tid = raw_tid.strip()
+                    if raw_tid is None or (isinstance(raw_tid, str) and not raw_tid):
+                        self.send_json({"error": "Нужен threadId", "code": "THREAD_BAD_REF"}, 400, token=token); return
+                    if _agent_thread_ref_is_bad(raw_tid):
+                        self.send_json({"error": "Некорректный идентификатор чата",
+                                        "code": "THREAD_BAD_REF"}, 400, token=token); return
+                    thread = _agent_thread_owned(conn, raw_tid, user_id)
                     if thread is None:
                         self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    tid = int(thread["id"])
                     subject = str(thread["subject"] or current_subject_for(conn, user_id))
                     try:
                         text = _AGENT.validate_turn_text(payload.get("text", ""))
@@ -9947,7 +10042,8 @@ class Handler(BaseHTTPRequestHandler):
                             quota = _AGENT.agent_quota_status(conn, int(user_id))
                             self.send_json({"ok": True, "steps": out_steps, "final": None,
                                             "pending": True, "quota": quota,
-                                            "thread": {"id": tid, "title": thread_title},
+                                            "thread": {"id": tid, "title": thread_title,
+                                                       "publicId": _agent_thread_public_id(thread)},
                                             "usage": {"cost": cost["n"]}}, token=token); return
                         final_text = (final or "").strip() or "Что-то я потерял мысль — переформулируй вопрос, и отвечу."
                         # Кнопки-продолжения: служебный блок ```suggest из ответа
@@ -9962,7 +10058,8 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
                                         "suggests": suggests,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
-                                        "thread": {"id": tid, "title": thread_title},
+                                        "thread": {"id": tid, "title": thread_title,
+                                                   "publicId": _agent_thread_public_id(thread)},
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     except (RuntimeError,) as exc:
                         rid = log_request_error("agent", exc)
@@ -10286,12 +10383,16 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     if path == "/api/agent/limits":
                         self.send_json(_AGENT.agent_quota_status(conn, int(user_id)), token=token); return
-                    rows = conn.execute("SELECT id, subject, title, created_at, updated_at FROM agent_threads"
-                                        " WHERE user_id=? ORDER BY updated_at DESC LIMIT 100",
-                                        (int(user_id),)).fetchall()
-                    self.send_json({"ok": True, "threads": [
-                        {"id": int(r["id"]), "subject": r["subject"], "title": r["title"],
-                         "createdAt": int(r["created_at"]), "updatedAt": int(r["updated_at"])} for r in rows],
+                    try:
+                        rows = conn.execute("SELECT id, subject, title, created_at, updated_at,"
+                                            " public_id FROM agent_threads"
+                                            " WHERE user_id=? ORDER BY updated_at DESC LIMIT 100",
+                                            (int(user_id),)).fetchall()
+                    except sqlite3.Error:
+                        rows = conn.execute("SELECT id, subject, title, created_at, updated_at FROM agent_threads"
+                                            " WHERE user_id=? ORDER BY updated_at DESC LIMIT 100",
+                                            (int(user_id),)).fetchall()
+                    self.send_json({"ok": True, "threads": [_agent_thread_payload(r) for r in rows],
                         # Квота в том же ответе: первый экран строится за 2 RTT
                         # (треды+квота → сообщения), а не за 3.
                         "quota": _AGENT.agent_quota_status(conn, int(user_id))},
@@ -10328,13 +10429,18 @@ class Handler(BaseHTTPRequestHandler):
                     except sqlite3.Error:
                         pass
                     parts = path.split("/")
+                    raw_ref = parts[4] if len(parts) > 4 else ""
                     try:
-                        tid = int(parts[4])
-                    except (TypeError, ValueError, IndexError):
-                        self.send_json({"error": "Некорректный идентификатор"}, 400, token=token); return
-                    thread = _agent_thread_owned(conn, tid, user_id)
+                        raw_ref = unquote(str(raw_ref or ""))
+                    except Exception:
+                        raw_ref = str(raw_ref or "")
+                    if _agent_thread_ref_is_bad(raw_ref):
+                        self.send_json({"error": "Некорректный идентификатор чата",
+                                        "code": "THREAD_BAD_REF"}, 400, token=token); return
+                    thread = _agent_thread_owned(conn, raw_ref, user_id)
                     if thread is None:
                         self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    tid = int(thread["id"])
                     try:
                         rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
                                             " result_json, seq, created_at, suggests_json FROM agent_messages"
@@ -10344,10 +10450,7 @@ class Handler(BaseHTTPRequestHandler):
                                             " result_json, seq, created_at FROM agent_messages"
                                             " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
                     self.send_json({"ok": True,
-                                    "thread": {"id": int(thread["id"]), "subject": thread["subject"],
-                                               "title": thread["title"],
-                                               "createdAt": int(thread["created_at"]),
-                                               "updatedAt": int(thread["updated_at"])},
+                                    "thread": _agent_thread_payload(thread),
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
