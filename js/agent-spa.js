@@ -1242,6 +1242,8 @@
        ненапечатанного на все секунды печати. */
     var tmp = document.createElement("div");
     tmp.innerHTML = html;
+    autolinkBareUrls(tmp);
+    hardenLinks(tmp);
     var out = [];
     Array.prototype.forEach.call(tmp.childNodes, function (node) {
       if (node.nodeType === 3) {
@@ -1259,13 +1261,81 @@
     if (!out.length) return [el("p", "agent__answer", text.trim())];
     return out;
   }
+  /* ---------- ссылки в ответе наставника ----------
+     Разметка та же, что у жирного и курсива: модель пишет обычный markdown
+     `[текст](ссылка)`, а ученику это должно выглядеть частью нашего интерфейса,
+     а не чужой веб-страницей. Поэтому DOMPurify мы НЕ ограничиваем
+     (она по умолчанию режет `target`, а без него ссылка открывается поверх
+     приложения и человек теряет переписку), а обрабатываем ссылки сами:
+     внешним — `target=_blank` + `rel=noopener`, внутренним — ничего лишнего. */
+  var SAFE_SCHEME = /^(https?:|\/|\.\/|#)/i;
+  function hardenLinks(root) {
+    var links = (root.querySelectorAll ? root.querySelectorAll("a[href]") : []);
+    Array.prototype.forEach.call(links, function (a) {
+      var href = (a.getAttribute("href") || "").trim();
+      // Схема, которой быть не должно (javascript:, data:), — ссылку убираем
+      // совсем, текст оставляем: наставнику нельзя отдавать ученику клик,
+      // выполняющий код от его имени.
+      if (!SAFE_SCHEME.test(href)) { a.removeAttribute("href"); return; }
+      var internal = href.charAt(0) === "/" || href.charAt(0) === "#";
+      a.className = "agent__link" + (internal ? " agent__link--int" : "");
+      if (!internal) {
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+      }
+    });
+  }
+  /* Голый адрес в тексте (`https://fipi.ru`) marked превращает в ссылку только
+     для www.; «честный адрес» без разметки оставался обычным текстом и
+     наставник выглядел бы ненадёжно. Схема разрешена ровно одна — http(s). */
+  var BARE_URL_RE = /\bhttps?:\/\/[^\s<>()\u00ab\u00bb\[\]{}]+[^\s<>()\u00ab\u00bb\[\]{}.,;:!?'"]/gi;
+  function autolinkBareUrls(root) {
+    if (root.querySelectorAll === undefined) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) {
+      var p = walker.currentNode.parentNode;
+      // Внутри уже готовой ссылки/кода не лезем.
+      if (!p || p.nodeName === "A" || p.nodeName === "CODE") continue;
+      nodes.push(walker.currentNode);
+    }
+    nodes.forEach(function (node) {
+      var text = node.nodeValue || "";
+      BARE_URL_RE.lastIndex = 0;
+      if (!BARE_URL_RE.test(text)) return;
+      var frag = document.createDocumentFragment();
+      var last = 0, m;
+      BARE_URL_RE.lastIndex = 0;
+      while ((m = BARE_URL_RE.exec(text)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        var a = document.createElement("a");
+        a.setAttribute("href", m[0]);
+        a.textContent = m[0];
+        frag.appendChild(a);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
   /* Печать готового DOM: оборачиваем слова текстовых узлов в те же
      .agent__ww, что и buildTyped, — раскладка и темп не меняются. */
   function buildTypedDom(root) {
     var words = [];
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     var nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
+    while (walker.nextNode()) {
+      // Текст ВНУТРИ ссылки печатать по словам нельзя: у ссылки своя форма
+      // (плашка с полями и рамкой), и отдельные слова внутри неё расползаются
+      // по своей базовой линии. Поэтому ссылка печатается ЦЕЛИКОМ — одним
+      // элементом в общем темпе с остальным текстом.
+      if (walker.currentNode.parentNode &&
+          walker.currentNode.parentNode.nodeName === "A") {
+        words.push(walker.currentNode.parentNode);
+        continue;
+      }
+      nodes.push(walker.currentNode);
+    }
     nodes.forEach(function (node) {
       var parts = node.nodeValue.split(/(\s+)/);
       var frag = document.createDocumentFragment();
