@@ -1278,7 +1278,16 @@
       // выполняющий код от его имени.
       if (!SAFE_SCHEME.test(href)) { a.removeAttribute("href"); return; }
       var internal = href.charAt(0) === "/" || href.charAt(0) === "#";
-      a.className = "agent__link" + (internal ? " agent__link--int" : "");
+      // Класс дописываем, а не переписываем: у ссылки, созданной
+      // autolinkBareUrls, уже есть --raw (длинный адрес не капиталится), и
+      // перезапись здесь молча его сносила — проверка на живом рендере это поймала.
+      // Ссылка, ПОДПИСЬЮ которой служит сам адрес, заглавными не пишется
+      // («HTTPS://OBRAZOVAKA.SDAMGIA.RU/...» нечитаем). Признак — по тексту,
+      // а не по классу: такие ссылки создаёт ещё и сам markdown (проверено:
+      // marked с gfm делает ссылку из голого адреса), и своего класса у них нет.
+      var raw = /\bagent__link--raw\b/.test(a.className || "")
+                || /^\s*https?:\/\//i.test(a.textContent || "");
+      a.className = "agent__link" + (internal ? " agent__link--int" : "") + (raw ? " agent__link--raw" : "");
       if (!internal) {
         a.setAttribute("target", "_blank");
         a.setAttribute("rel", "noopener noreferrer");
@@ -1310,6 +1319,8 @@
         if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
         var a = document.createElement("a");
         a.setAttribute("href", m[0]);
+        // Помечаем: сырой адрес длинный, и заглавными он нечитаем (см. CSS).
+        a.className = "agent__link agent__link--raw";
         a.textContent = m[0];
         frag.appendChild(a);
         last = m.index + m[0].length;

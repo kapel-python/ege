@@ -109,6 +109,9 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
         rel: a.getAttribute("rel"),
         cls: a.className,
         text: a.textContent,
+        // Что реально ВИДИТ человек: text-transform в computedStyle отражает
+        // подпись после капитализации, а textContent остаётся исходным.
+        shown: getComputedStyle(a).textTransform,
       })),
       linkCount: links.length,
       typedCount: typed.length,
@@ -151,6 +154,13 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
     && /agent__link--int/.test(internal.cls || ""), JSON.stringify(internal));
   check("опасная схема вырезана, но текст остался",
     !bad.href && bad.text === "клик", JSON.stringify(bad));
+  check("подпись кнопки — ЗАГЛАВНЫМИ",
+    md.shown === "uppercase", md.shown);
+  check("сырой длинный адрес НЕ капиталится (иначе нечитаем)",
+    bare.shown === "none" && /agent__link--raw/.test(bare.cls || ""),
+    JSON.stringify({ shown: bare.shown, cls: bare.cls }));
+  check("внутренняя ссылка тоже заглавными",
+    internal.shown === "uppercase", internal.shown);
   check("ссылка печатается ЦЕЛИКОМ, а не по словам",
     out.typedCount > 0, `элементов печати: ${out.typedCount}`);
   check("остальная разметка не сломалась",

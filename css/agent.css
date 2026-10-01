@@ -290,8 +290,15 @@
   text-decoration: none;
   vertical-align: baseline;
   overflow-wrap: anywhere;
+  /* Подпись заглавными: плашка — это кнопка, и в таком виде она читается как
+     действие, а не как строчка текста. Ссылка на раздел — короткая, влезет. */
+  text-transform: uppercase;
+  letter-spacing: .01em;
   transition: background .15s ease, color .15s ease;
 }
+/* Голый адрес капиталить нельзя: «HTTPS://OBRAZOVAKA.SDAMGIA.RU/...» нечитаем.
+   Такие ссылки получают --raw и остаются как есть. */
+a.agent__link--raw { text-transform: none; letter-spacing: normal; }
 .agent__md a:hover, a.agent__link:hover { background: var(--accent-ink); color: var(--surface); }
 .agent__md a:focus-visible, a.agent__link:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 /* Внутренняя ссылка (наш же раздел) — без «уехать в новое окно»: человек
