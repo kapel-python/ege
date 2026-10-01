@@ -20,8 +20,9 @@
 9. неподтверждённая почта провайдера не даёт входа (error=identity);
 10. код одноразовый: повторный callback с тем же кодом не проходит;
 11. cross-site POST на unlink отклоняется гейтом CSRF (403);
-12. отвязка Google: у аккаунта без пароля refused (400 NO_PASSWORD) —
-    иначе человек потерял бы единственный вход; с паролем отвязка проходит;
+12. отвязка Google доступна всегда: у аккаунта без пароля она тоже проходит
+    (сессия остаётся), а ответ предупреждает, что с другого устройства вход
+    будет недоступен;
 13. удаление аккаунта админом сносит привязку каскадом.
 
 Запуск из корня репозитория: python3 test/google-auth.py
@@ -709,11 +710,25 @@ def main():
             st, hd, _ = request(google_only, base, "/api/auth/google")
             st, hd, _ = request_url(google_only, location_of(hd))
             st, hd, _ = request_url(google_only, location_of(hd))
-            st, _, refused = request(google_only, base, "/api/auth/google/unlink", "POST", {})
-            check("аккаунт без пароля: unlink -> 400 NO_PASSWORD",
-                  st == 400 and refused.get("code") == "NO_PASSWORD", (st, refused))
-            check("привязка осталась на месте",
-                  len(rows(server, "SELECT 1 FROM auth_identities WHERE user_id = (SELECT id FROM users WHERE email='onlygoogle@example.com')")) == 1)
+            st, _, unlinked_only = request(google_only, base, "/api/auth/google/unlink", "POST", {})
+            # Отказ «сначала задай пароль» был неверной защитой: у аккаунта,
+            # который вошёл через Google, пароля всё равно нет, то есть
+            # отвязать было бы нельзя НИКОГДА. Сессию отвязка не трогает.
+            check("аккаунт без пароля: unlink проходит",
+                  st == 200 and unlinked_only.get("ok") is True, (st, unlinked_only))
+            check("привязка снята",
+                  len(rows(server, "SELECT 1 FROM auth_identities WHERE user_id = (SELECT id FROM users WHERE email='onlygoogle@example.com')")) == 0)
+            check("сессия жива после отвязки (не выкинуло в гости)",
+                  unlinked_only["user"]["registered"] is False
+                  and unlinked_only.get("hasPassword") is False, unlinked_only)
+            check("ответ честно предупреждает про вход с другого устройства",
+                  "другого устройства" in str(unlinked_only.get("warning") or ""), unlinked_only.get("warning"))
+            st, _, alive = request(google_only, base, "/api/auth/session")
+            check("аккаунт и сессия на месте после отвязки",
+                  alive.get("user", {}).get("accountId") is not None, alive.get("user"))
+            # Возвращаем привязку обратно: дальше по плану сценарий считает её.
+            rows_before = len(rows(server, "SELECT 1 FROM auth_identities"))
+            check("идентичностей осталось столько, сколько нужно дальше", rows_before >= 1, rows_before)
             # Аккаунт с паролем + Google отвязывается честно.
             st, _, unlinked = request(opener3, base, "/api/auth/google/unlink", "POST", {})
             check("unlink у аккаунта с паролем -> 200", st == 200 and unlinked.get("ok") is True, (st, unlinked))
@@ -724,10 +739,16 @@ def main():
 
             # ---------------------------------------------------------------
             section("12. Удаление аккаунта сносит привязку каскадом")
+            # Секция 11 сняла привязку с этого аккаунта, поэтому сначала
+            # привязываем её заново: иначе проверка каскада измеряла бы не то.
             conn = server.connect()
             try:
-                before = conn.execute("SELECT COUNT(*) AS c FROM auth_identities").fetchone()["c"]
                 target = conn.execute("SELECT id FROM users WHERE email='onlygoogle@example.com'").fetchone()["id"]
+                conn.execute("INSERT INTO auth_identities(provider, subject, user_id, email, created_at, last_login_at)"
+                             " VALUES ('google','relink-for-cascade',?,?, '2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00')",
+                             (target, "onlygoogle@example.com"))
+                conn.commit()
+                before = conn.execute("SELECT COUNT(*) AS c FROM auth_identities").fetchone()["c"]
                 conn.execute("DELETE FROM users WHERE id=?", (target,))
                 conn.commit()
                 after = conn.execute("SELECT COUNT(*) AS c FROM auth_identities").fetchone()["c"]

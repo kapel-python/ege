@@ -9391,18 +9391,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.reject_if_blocked(conn, user_id):
             return
-        row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
-        if not row or not row["password_hash"]:
-            self.send_json({"error": "Сначала задай пароль — иначе вход останется только через Google",
-                            "code": "NO_PASSWORD"}, 400)
-            return
         try:
             self.read_json()
         except (json.JSONDecodeError, ValueError):
             pass
         conn.execute("DELETE FROM auth_identities WHERE user_id=? AND provider='google'", (user_id,))
         conn.commit()
-        self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)})
+        row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        has_password = bool(row and row["password_hash"])
+        self.send_json({"ok": True, "user": auth_user_payload(conn, user_id),
+                        "hasPassword": has_password,
+                        # Не запрет, а честное предупреждение: сессия на этом
+                        # устройстве остаётся, но если пароля у аккаунта нет,
+                        # то с другого устройства зайти уже не выйдет.
+                        "warning": None if has_password else
+                        "Пароля у аккаунта нет — вход с другого устройства будет недоступен."})
 
     def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid/absent cookie: drop whatever

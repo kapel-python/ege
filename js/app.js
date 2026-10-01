@@ -6954,7 +6954,7 @@ function googleRowHTML() {
     ? (googleBusy ? "Отвязываем…" : "Отвязать Google")
     : (googleBusy ? "Открываем Google…" : "Привязать Google");
   const sub = linked
-    ? "Вход через Google привязан. Отвязать можно, только если у аккаунта есть пароль — иначе вход останется только через Google."
+    ? "Вход через Google привязан. Отвязать можно в любой момент — ты останешься в аккаунте на этом устройстве; учти, что если пароля у аккаунта нет, зайти с другого устройства уже не получится."
     : "Вход через Google. При переходе выбери аккаунт Google, который хочешь привязать.";
   return `
     <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
@@ -6988,24 +6988,26 @@ function startGoogleLink() {
   setTimeout(() => { try { AuthAPI.startGoogleLink(); } catch (_) {} }, 120);
 }
 
-/* Отвязка намеренно недоступна аккаунту без пароля: иначе человек, зашедший
-   только через Google, одним кликом лишил бы себя единственного входа в свой
-   же аккаунт вместе со всем прогрессом, а восстановить доступ было бы нечем.
-   Сервер отдаёт 400 NO_PASSWORD — тот же ответ рисуем здесь заранее. */
+/* Отвязка Google всегда доступна залогиненному человеку. Раньше здесь стоял
+   отказ «сначала задай пароль», но он был неверной защитой: у аккаунта,
+   который вошёл через Google, пароля всё равно нет, то есть отвязать было бы
+   нельзя НИКОГДА — и человек уходил с вкладки, решив, что кнопка сломана.
+   Сессия живёт своей строкой в user_sessions и отвязки Google не касается:
+   ты остаёшься в аккаунте и в этой сессии.
+
+   Что действительно стоит сказать честно — сервер возвращает warning, когда
+   пароля у аккаунта нет: на этом устройстве вход останется, а с другого уже
+   не войти. Это предупреждение, а не отказ. */
 async function unlinkGoogle() {
   if (googleBusy) return;
   googleBusy = true;
   paintGoogleButton("Отвязываем…", true);
+  let result = null;
   try {
-    await AuthAPI.unlinkGoogle();
+    result = await AuthAPI.unlinkGoogle();
   } catch (error) {
     googleBusy = false;
     paintGoogleButton("Отвязать Google", false);
-    const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
-    if (code === "NO_PASSWORD") {
-      toast("Сначала задай пароль — иначе вход останется только через Google", "toast--error", "x");
-      return;
-    }
     toast(authFormError(error, "Не удалось отвязать Google. Попробуй ещё раз."), "toast--error", "x");
     return;
   }
@@ -7014,7 +7016,8 @@ async function unlinkGoogle() {
   // Кнопка сразу показывает следующее состояние — «Привязать Google», то
   // есть раздел честен до того, как прогрузится профиль.
   replaceGoogleRow();
-  toast("Google отвязан — вход по паролю", "", "check");
+  const warning = result && result.warning ? String(result.warning) : "";
+  toast(warning || "Google отвязан", warning ? "" : "", warning ? "x" : "check");
 }
 
 function accountAuthHTML() {
