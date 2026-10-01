@@ -175,7 +175,15 @@
 .agent__del:active { transform: scale(.98); }
 /* Список тредов: появление нового чата и его удаление — движением высоты,
    иначе список дёргается на месте. */
-.agent__list li { transition: height .22s ease, opacity .2s ease; overflow: hidden; }
+/* flex: 0 0 auto — ЖИЗНЕННО. Список сделан flex-колонкой, а его элементы по
+   умолчанию сжимаются (flex-shrink:1): как только чатов больше, чем влезает
+   в рейл, каждый li сжимался, а сама кнопка `.agent__thread` сохраняла
+   свою высоту — строки наезжали друг на друга (замер на 24 чатах: высота
+   кнопки 60.3px, зазор между соседними −36.3px, наложений 23 из 23, и
+   список НЕ прокручивался: scrollHeight == clientHeight). Теперь строки
+   имеют свою высоту, зазор фиксирован, а лишнее просто листается
+   (overflow-y: auto у .agent__list). */
+.agent__list li { flex: 0 0 auto; transition: height .22s ease, opacity .2s ease; overflow: hidden; }
 .agent__list li.new { animation: agentRise .28s ease both; }
 .agent__list li.leaving { opacity: 0; }
 
