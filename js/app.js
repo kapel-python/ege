@@ -6906,16 +6906,102 @@ async function revokeDeviceSession(id) {
    устройстве. Идентичность всегда решает сервер по сессии.
    ============================================================ */
 
+/* Блок «Вход через Google» в профиле.
+
+   Обратная связь мгновенная и ЛОКАЛЬНАЯ: кнопка меняет подпись и гаснет
+   сразу, не дожидаясь ни ответа, ни перерисовки всего экрана. Иначе человек
+   кликает «Отвязать» и видит ту же кнопку — а потом ещё успевает кликнуть
+   второй раз, и второй запрос падает на уже отвязанном (сервер честно
+   ответит «ничего не отвязано»). Двойной клик блокируется флагом
+   googleBusy, а ошибка возвращает кнопку в исходное состояние, чтобы можно
+   было повторить.
+
+   «Привязать Google» — это переход на страницу согласия Google: там человек
+   видит, какой аккаунт привязывает, и может выбрать другой. Отдельного
+   подтверждения на нашей стороне нет СОЗНАТЕЛЬНО: это тот же вход по почте,
+   только почту подтверждает провайдер, и лишний вопрос только путает.
+   Кнопка тоже гаснет на время перехода, иначе двойной клик отправлял бы
+   две сессии согласия. */
+let googleBusy = false;
+
+function googleLinked() {
+  const providers = (Store.auth && Store.auth.providers) || [];
+  return providers.indexOf("google") >= 0;
+}
+
+function googleRowHTML() {
+  const auth = Store.auth || {};
+  if (!(auth.registered && auth.googleEnabled)) return "";
+  const linked = googleLinked();
+  const label = linked
+    ? (googleBusy ? "Отвязываем…" : "Отвязать Google")
+    : (googleBusy ? "Открываем Google…" : "Привязать Google");
+  const sub = linked
+    ? "Вход через Google привязан. Отвязать можно, только если у аккаунта есть пароль — иначе вход останется только через Google."
+    : "Вход через Google. При переходе выбери аккаунт Google, который хочешь привязать.";
+  return `
+    <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
+    <div class="settings-row__sub" style="margin-top:4px">${esc(sub)}</div>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn--sm" id="google-action-btn"${googleBusy ? " disabled" : ""}
+              onclick="${linked ? "unlinkGoogle()" : "startGoogleLink()"}">${esc(label)}</button>
+    </div>`;
+}
+
+/* Точечное обновление кнопки: меняем только её, весь экран не трогаем —
+   иначе прыгала бы прокрутка и мигал бы остальной профиль. */
+function paintGoogleButton(label, busy) {
+  const btn = document.getElementById("google-action-btn");
+  if (!btn) return;
+  btn.textContent = label;
+  btn.disabled = !!busy;
+}
+
+function replaceGoogleRow() {
+  const holder = document.getElementById("google-row-holder");
+  if (holder) holder.innerHTML = googleRowHTML();
+}
+
+function startGoogleLink() {
+  if (googleBusy) return;
+  googleBusy = true;
+  paintGoogleButton("Открываем Google…", true);
+  // Небольшая пауза, чтобы кадр с погасшей кнопкой успело отрисоваться до
+  // ухода со страницы: без неё переход выглядит как «ничего не нажали».
+  setTimeout(() => { try { AuthAPI.startGoogle(); } catch (_) {} }, 120);
+}
+
+/* Отвязка намеренно недоступна аккаунту без пароля: иначе человек, зашедший
+   только через Google, одним кликом лишил бы себя единственного входа в свой
+   же аккаунт вместе со всем прогрессом, а восстановить доступ было бы нечем.
+   Сервер отдаёт 400 NO_PASSWORD — тот же ответ рисуем здесь заранее. */
+async function unlinkGoogle() {
+  if (googleBusy) return;
+  googleBusy = true;
+  paintGoogleButton("Отвязываем…", true);
+  try {
+    await AuthAPI.unlinkGoogle();
+  } catch (error) {
+    googleBusy = false;
+    paintGoogleButton("Отвязать Google", false);
+    const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
+    if (code === "NO_PASSWORD") {
+      toast("Сначала задай пароль — иначе вход останется только через Google", "toast--error", "x");
+      return;
+    }
+    toast(authFormError(error, "Не удалось отвязать Google. Попробуй ещё раз."), "toast--error", "x");
+    return;
+  }
+  googleBusy = false;
+  await Store.refreshAfterAuth();
+  // Кнопка сразу показывает следующее состояние — «Привязать Google», то
+  // есть раздел честен до того, как прогрузится профиль.
+  replaceGoogleRow();
+  toast("Google отвязан — вход по паролю", "", "check");
+}
+
 function accountAuthHTML() {
   const auth = Store.auth || { registered: false, email: null, providers: [] };
-  const googleLinked = !!(auth.providers && auth.providers.indexOf("google") >= 0);
-  const googleRow = (auth.registered && auth.googleEnabled) ? `
-    <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
-    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
-      ${googleLinked
-        ? `<button class="btn btn--sm" onclick="unlinkGoogle()">Отвязать Google</button>`
-        : `<button class="btn btn--sm" onclick="AuthAPI.startGoogle()">Привязать Google</button>`}
-    </div>` : "";
   if (auth.registered) {
     return `
       <div class="auth-status" style="margin-top:8px">
@@ -6923,33 +7009,13 @@ function accountAuthHTML() {
         <span class="auth-status__email mono">${esc(auth.email || "")}</span>
       </div>
       <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>
-      ${googleRow}`;
+      <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   return `
     <div class="settings-row__sub">Гостевой профиль — прогресс привязан к этому устройству.</div>
     <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="btn btn--primary btn--sm" onclick="go('register')">Войти или зарегистрироваться</button>
     </div>`;
-}
-
-/* Отвязка Google намеренно недоступна аккаунту без пароля: иначе человек,
-   зашедший только через Google, одним кликом лишил бы себя единственного
-   входа в свой же аккаунт вместе со всем прогрессом, а восстановить доступ
-   было бы нечем. Сервер отдаёт 400 NO_PASSWORD — тот же ответ рисуем здесь
-   заранее, чтобы кнопка не выглядела рабочей. */
-async function unlinkGoogle() {
-  try { await AuthAPI.unlinkGoogle(); }
-  catch (error) {
-    const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
-    if (code === "NO_PASSWORD") {
-      toast("Сначала задай пароль — иначе вход останется только через Google", "toast--error", "x");
-      return;
-    }
-    toast(authFormError(error, "Не удалось отвязать Google. Попробуй ещё раз."));
-    return;
-  }
-  await Store.refreshAfterAuth();
-  toast("Google отвязан", "", "check");
 }
 
 /* Выбор предмета при входе. Флаг живёт в памяти вкладки (+ дублируется в

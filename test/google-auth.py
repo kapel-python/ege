@@ -313,6 +313,12 @@ def main():
                   params.get("redirect_uri"))
             check("scope запрошен openid email profile",
                   params.get("scope", [""])[0] == "openid email profile", params.get("scope"))
+            # prompt=none был настоящей ошибкой: он запрещает ЛЮБОЙ интерфейс
+            # Google, и «Привязать Google» у человека, залогиненного в Google
+            # с другим адресом, молча упирался в отказ (видно в логах живого
+            # сайта). Выбор аккаунта человек должен видеть всегда.
+            check("Google всегда показывает выбор аккаунта",
+                  params.get("prompt", [""])[0] == "select_account", params.get("prompt"))
             check("кука nonce выдана", bool(cookie_value(jar, "ege_oauth_nonce")))
             check("куки сессии нет", cookie_value(jar, "ege_session") is None)
             check("старт не завёл ни строки, ни сессии", count_users(server) == 0)
@@ -350,13 +356,37 @@ def main():
             check("у жертвы даже сессии не появилось", count_users(server) == 0)
 
             # ---------------------------------------------------------------
+            section("3b. Привязка из живого профиля: подсказка есть, интерфейс виден")
+            # Человек уже вошёл (почта аккаунта известна) — значит это запрос
+            # ПРИВЯЗАТЬ Google. Подсказываем его адрес, но выбор аккаунта Google
+            # оставляем человеку: prompt=none запрещал бы любой интерфейс.
+            linker, linker_jar = make_device()
+            st, _, _ = request(linker, base, "/api/profile/claim", "POST",
+                               {"subject": "profile_math", "onboarded": True, "name": "Привязывающий"})
+            st, _, reg = request(linker, base, "/api/auth/register", "POST",
+                                 {"name": "Привязывающий", "email": "linker@example.com",
+                                  "password": "super-pass-1"})
+            check("аккаунт для привязки готов", st == 200, (st, reg))
+            st, hd, _ = request(linker, base, "/api/auth/google")
+            params2 = urllib.parse.parse_qs(urllib.parse.urlparse(location_of(hd)).query)
+            check("свой адрес подсказан Google", params2.get("login_hint", [""])[0] == "linker@example.com",
+                  params2.get("login_hint"))
+            check("но выбор аккаунта не отобран у человека",
+                  params2.get("prompt", [""])[0] == "select_account", params2.get("prompt"))
+            check("привязка не создана до обратного прихода от Google",
+                  len(rows(server, "SELECT 1 FROM auth_identities WHERE email='linker@example.com'")) == 0)
+
+            # ---------------------------------------------------------------
             section("4. Успешный вход нового адреса")
             opener, jar = make_device()
+            before_users = count_users(server)
             st, hd, body = full_google_login(opener, base, fake, expect_fragment="/subject")
             check("вход -> 302 в приложение", st == 302, st)
             check("сессия выдана", bool(cookie_value(jar, "ege_session")))
             check("nonce сгорел", cookie_value(jar, "ege_oauth_nonce") in (None, ""))
-            check("одна строка users", count_users(server) == 1, count_users(server))
+            # Ровно одна новая строка: вход нового адреса заводит ОДИН аккаунт.
+            check("вход завёл ровно одну строку users", count_users(server) == before_users + 1,
+                  (before_users, count_users(server)))
             identity = rows(server, "SELECT provider, subject, user_id, email FROM auth_identities")
             check("привязка создана", len(identity) == 1 and identity[0]["provider"] == "google", identity)
             check("привязка указывает на ту же строку, что и сессия",
@@ -383,7 +413,8 @@ def main():
             st, _, session2 = request(opener2, base, "/api/auth/session")
             check("второе устройство вошло", session2.get("user", {}).get("accountId") == google_account,
                   session2.get("user"))
-            check("строк users по-прежнему одна", count_users(server) == 1, count_users(server))
+            check("повторный вход не завёл второго человека", count_users(server) == before_users + 1,
+                  count_users(server))
             check("привязка одна", len(rows(server, "SELECT 1 FROM auth_identities")) == 1)
 
             # ---------------------------------------------------------------
