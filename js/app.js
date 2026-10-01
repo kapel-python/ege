@@ -1050,9 +1050,22 @@ function clearHashQuery() {
    главной. */
 function routeGoogleReturn() {
   const error = hashQueryValue("error");
-  if (!error) return;
-  if (currentRoute() === "login") return;
-  location.hash = `#/login?error=${encodeURIComponent(error)}`;
+  if (error) {
+    if (currentRoute() === "login") return;
+    location.hash = `#/login?error=${encodeURIComponent(error)}`;
+    return;
+  }
+  // fresh=1 — сервер только что ЗАВЁЛ новый аккаунт (человек впервые вошёл
+  // через Google). Такому человеку нужен онбординг, который сам начинается с
+  // выбора предмета, а не пикер перед ним.
+  //
+  // Несколько строк назад тот же новый аккаунт отправлялся на «#/subject»,
+  // и это давало бесконечный цикл: выбрал предмет → выбирать предмет снова.
+  // Причина в том, что адрес оставался «/subject», а этот маршрут рисует
+  // пикер при ЛЮБОМ значении флага выбора предмета.
+  if (hashQueryValue("fresh") === "1" && currentRoute() !== "dashboard") {
+    location.hash = "#/dashboard";
+  }
 }
 
 /* Параметр глубокого маршрута: #/lesson/<id>, #/practice/<missionId>,
@@ -1218,7 +1231,11 @@ async function render() {
   // Смена адреса закрывает старое модальное окно (справка helpDot адрес не
   // меняет и потому не страдает; окно навыка для #/skill открывает конец render).
   if (location.hash !== lastHash) {
+    const previousRoute = currentRoute();
     lastHash = location.hash;
+    // Уход с пикера выбора предмета гасит «предмет только что выбрали»:
+    // вернуться сюда позже — уже новая ситуация, а не та же перерисовка.
+    if (previousRoute === "subject" && currentRoute() !== "subject") loginSubjectChosen = false;
     try { closeModal(); } catch (_) {}
     try { closeDeviceModal(); } catch (_) {}
   }
@@ -7028,6 +7045,17 @@ let pendingSubjectChoice = false;
 // параллельных POST устроят гонку каталогов и двойной save.
 let subjectSwitching = false;
 
+// Предмет только что выбрали в пикере входа. Держится до ухода с этого
+// маршрута и нужен для одной вещи: отличить ПЕРВЫЙ показ «какой предмет
+// открываем?» от перерисовки того же экрана. Без него render() на маршруте
+// /subject показывал пикер снова и снова — человек выбирал предмет и
+// возвращался к тому же вопросу.
+let loginSubjectChosen = false;
+
+function subjectWasJustChosen() {
+  try { return loginSubjectChosen; } catch (_) { return false; }
+}
+
 function authScreenShell(title, sub, body) {
   return `
     <div class="auth-screen">
@@ -7153,6 +7181,16 @@ function screenLoginSubject(root) {
        </div>`);
     return;
   }
+  // Предмет УЖЕ выбирали в этом входе, а флаг выбора предмета сброшен —
+  // значит это перерисовка того же самого экрана, а не новый заход. Ещё раз
+  // спрашивать тут нечего: человека увело бы в круг «выбрал предмет → снова
+  // выбирать». Уводим туда, куда он пришёл: в онбординг неонбордившегося
+  // предмета или в содержимое готового.
+  if (!pendingSubjectChoice && !isSubjectChoiceLocked() && subjectWasJustChosen()) {
+    if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
+    render();
+    return;
+  }
   const subjects = asSafeArray(DataAPI.subjects());
   const cur = DataAPI.currentSubject();
   root.innerHTML = authScreenShell("Какой предмет открываем?",
@@ -7186,6 +7224,7 @@ async function chooseLoginSubject(id) {
     // всё равно засчитан явно.
     await Store.switchSubject(id);
     subjectSwitching = false;
+    loginSubjectChosen = true;
     pendingSubjectChoice = false;
     try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
     // Предмет выбран явно в пикере входа: онбординг не переспрашивает его.
@@ -7195,9 +7234,19 @@ async function chooseLoginSubject(id) {
         try { sessionStorage.setItem("ege_onboard_preset_subject", id); } catch (_) {}
       }
     } catch (_) {}
-    // Новый для аккаунта предмет может быть не onboarded — render сам
-    // покажет онбординг этого предмета; иначе открываем сайт с выбором.
-    if (!Store.state.onboarded) { render(); return; }
+    // Новый для аккаунта предмет ещё не пройден онбордингом — открываем его.
+    // Адрес обязательно уводим с «#/subject»: оставаясь на нём, render()
+    // рисовал бы пикер выбора предмета ЗАНОВО, и человек уходил в
+    // бесконечный цикл «выбрал предмет → снова выбор предмета». Именно это
+    // происходило после входа через Google на странице входа: Google заводит
+    // новый аккаунт (неонбордивленный), пикер предлагал предмет, а после
+    // выбора открывался снова. Смена предмета состоялась — маршрут обязан
+    // уйти на контентный, иначе экран входа остаётся главным сам себе.
+    if (!Store.state.onboarded) {
+      if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
+      render();
+      return;
+    }
     if (location.hash && location.hash !== "#/dashboard") location.hash = "#/dashboard";
     render();
   } catch (error) {
@@ -8042,7 +8091,10 @@ function bootstrapApp() {
       // навигации ставится тем же флагом (иначе после выбора предмета
       // можно было бы уйти в профиль, не выбрав его).
       try {
-        if (currentRoute() === "subject" && Store.auth && Store.auth.registered) {
+        // Только что заведённый аккаунт (fresh=1) сюда не доходит: его маршрут
+        // уже сменён на /dashboard, а его ждёт онбординг с выбором предмета.
+        if (currentRoute() === "subject" && Store.auth && Store.auth.registered
+            && hashQueryValue("fresh") !== "1") {
           pendingSubjectChoice = true;
           try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
         }

@@ -392,7 +392,10 @@ def main():
             section("4. Успешный вход нового адреса")
             opener, jar = make_device()
             before_users = count_users(server)
-            st, hd, body = full_google_login(opener, base, fake, expect_fragment="/subject")
+            # Первый вход нового адреса заводит НОВЫЙ аккаунт, а новому
+            # аккаунту нужен онбординг (он и начинается с выбора предмета),
+            # поэтому возврата к пикеру выбора предмета тут быть не должно.
+            st, hd, body = full_google_login(opener, base, fake, expect_fragment="/dashboard")
             check("вход -> 302 в приложение", st == 302, st)
             check("сессия выдана", bool(cookie_value(jar, "ege_session")))
             check("nonce сгорел", cookie_value(jar, "ege_oauth_nonce") in (None, ""))
@@ -534,6 +537,44 @@ def main():
                   len(rows(server, "SELECT 1 FROM auth_identities WHERE subject='google-sub-stranger'")) == 0)
             check("почта своего аккаунта не тронута",
                   session_after["user"]["email"] == "newmail@example.com", session_after.get("user"))
+
+            section("6c. Новый аккаунт с входа идёт в онбординг, а не в пикер")
+            # Живой цикл: вход через Google на странице входа ЗАВОДИТ новый
+            # аккаунт, но сервер отправлял его на «выбери предмет» — тот же
+            # экран, что у существующего аккаунта. Выбор предмета состоялся,
+            # адрес оставался /subject, и пикер спрашивал снова, и снова.
+            fake.identity = {"sub": "google-sub-newacc", "email": "newacc@example.com",
+                             "name": "Новый", "email_verified": True}
+            fresh_dev, fresh_jar = make_device()
+            before_fresh = count_users(server)
+            st, hd, _ = request(fresh_dev, base, "/api/auth/google")
+            st, hd, _ = request_url(fresh_dev, location_of(hd))
+            st, hd, _ = request_url(fresh_dev, location_of(hd))
+            fragment = fragment_of(location_of(hd))
+            check("новый аккаунт: сразу в приложение, без пикера выбора предмета",
+                  fragment.startswith("/dashboard") and "fresh=1" in fragment, fragment)
+            check("аккаунт действительно заведён", count_users(server) == before_fresh + 1,
+                  count_users(server))
+            st, _, fresh_boot = request(fresh_dev, base, "/api/bootstrap-lite")
+            check("у нового аккаунта онбординга ещё нет — нужен онбординг",
+                  fresh_boot["state"]["onboarded"] is False, fresh_boot["state"]["onboarded"])
+            check("онбординг не пройден ни по одному предмету",
+                  len(rows(server, "SELECT 1 FROM user_subjects WHERE user_id=(SELECT id FROM users WHERE email='newacc@example.com') AND onboarded=1")) == 0)
+
+            # Существующий (онбордившийся) аккаунт — пикер выбора предмета, как
+            # при входе по паролю: у человека уже есть прогресс по нескольким
+            # предметам, молча открывать один из них нельзя.
+            onboarder, ob_jar = make_device()
+            st, _, cl = request(onboarder, base, "/api/profile/claim", "POST",
+                                {"subject": "profile_math", "onboarded": True, "name": "Давний"})
+            fake.identity = {"sub": "google-sub-old", "email": "old@example.com",
+                             "name": "Давний", "email_verified": True}
+            st, hd, _ = request(onboarder, base, "/api/auth/google")
+            st, hd, _ = request_url(onboarder, location_of(hd))
+            st, hd, _ = request_url(onboarder, location_of(hd))
+            fragment = fragment_of(location_of(hd))
+            check("существующий аккаунт по-прежнему получает выбор предмета",
+                  fragment.startswith("/subject") and "fresh" not in fragment, fragment)
 
             section("7. Гость с прогрессом сохраняет профиль при входе")
             guest, guest_jar = make_device()

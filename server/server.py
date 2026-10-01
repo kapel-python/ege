@@ -1813,6 +1813,31 @@ def oauth_nonce_cookie_clear_attrs() -> str:
     return f"{OAUTH_NONCE_COOKIE}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0{secure}"
 
 
+def oauth_after_login_route(conn: sqlite3.Connection, user_id: int) -> tuple[str, str]:
+    """Куда вести после успешного входа: выбор предмета или сразу в онбординг.
+
+    Разница принципиальная, и раньше её не было:
+      * СУЩЕСТВУЮЩИЙ аккаунт → экран «Какой предмет открываем?»: у человека
+        уже есть прогресс по нескольким предметам, и молча открывать один из
+        них — угадывание.
+      * ТОЛЬКО ЧТО ЗАВЕДЁННЫЙ (Google зарегистрировал нового человека на
+        странице входа) → сразу в онбординг. Онбординг и начинается с выбора
+        предмета, поэтому лишний пикер перед ним был не нужен и, хуже того,
+        зацикливал: выбрал предмет → снова «выбери предмет».
+
+    Признак — онбординг по ХОДЯЩЕМУ предмету: у нового аккаунта его нет, у
+    давно работающего он есть (предмет могли открыть и раньше).
+    """
+    try:
+        row = conn.execute("SELECT onboarded FROM user_subjects WHERE user_id=? AND subject=?",
+                           (int(user_id), current_subject_for(conn, user_id))).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row is not None and row["onboarded"]:
+        return "subject", ""
+    return "dashboard", "fresh=1"
+
+
 def oauth_return_url(handler, route: str, query: str = "") -> str:
     """Куда отправить браузер после входа: наш домен, наш путь, наш литерал.
 
@@ -1822,7 +1847,7 @@ def oauth_return_url(handler, route: str, query: str = "") -> str:
     ни в историю на стороне сервера. Маршрут проверяется по белому списку —
     данных из запроса в Location не идёт, обратный open redirect невозможен.
     """
-    safe_route = route if route in ("login", "subject", "profile") else "login"
+    safe_route = route if route in ("login", "subject", "profile", "dashboard") else "login"
     base = f"{public_base_url(handler).rstrip('/')}/dashboard#/{safe_route}"
     return f"{base}?{query}" if query else base
 
@@ -9270,7 +9295,8 @@ class Handler(BaseHTTPRequestHandler):
                                            request_device_identity(conn, self, user_id))
         conn.commit()
         auth_login_success(ip)
-        self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+        route, query = oauth_after_login_route(conn, user_id)
+        self.send_redirect(oauth_return_url(self, route, query), token=new_token, extra_cookies=clear_nonce)
         return True
 
     def finish_google_login(self, conn: sqlite3.Connection, identity: dict, ip: str) -> None:
@@ -9346,7 +9372,11 @@ class Handler(BaseHTTPRequestHandler):
                                            request_device_identity(conn, self, target_id))
         conn.commit()
         auth_login_success(ip)
-        self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+        # Гость, который вошёл через Google и только что получил профиль, идёт
+        # в онбординг (он и начинается с выбора предмета). Уже онбордившийся
+        # гость с прогрессом — в пикер, как при входе по паролю.
+        route, query = oauth_after_login_route(conn, target_id)
+        self.send_redirect(oauth_return_url(self, route, query), token=new_token, extra_cookies=clear_nonce)
 
     def handle_auth_google_unlink(self, conn: sqlite3.Connection) -> None:
         """POST /api/auth/google/unlink — отвязать Google от своего аккаунта.

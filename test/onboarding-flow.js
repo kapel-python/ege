@@ -159,6 +159,26 @@ t("флаг включается входом и восстановлением 
     && /currentRoute\(\)\s*===\s*"subject"/.test(bootBody)
     && !/submitGoogleConfirm/.test(src),
   `найдено ${setTrue.length}`);
+/* Бесконечный цикл «выбрал предмет → снова выбирать предмет» (живой баг на
+   входе через Google). Пикер рисуется на маршруте /subject при ЛЮБОМ значении
+   флага выбора предмета, поэтому защита обязана быть в самом экране: если
+   предмет уже выбирали в этом заходе, а флаг сброшен — это перерисовка, а не
+   новый заход, и уходить надо в содержимое. */
+const subjectScreen = fnBody(src, "function screenLoginSubject(");
+const chooseBody2 = fnBody(src, "async function chooseLoginSubject(");
+t("screenLoginSubject найден", !!subjectScreen);
+t("screenLoginSubject уводит из пикера, если предмет уже выбирали",
+  !!subjectScreen && /subjectWasJustChosen\(\)/.test(subjectScreen)
+    && /location\.hash\s*!==\s*"#\/dashboard"/.test(subjectScreen));
+t("флаг «предмет только что выбрали» ставится при выборе и гасится при уходе",
+  !!chooseBody2 && /loginSubjectChosen\s*=\s*true/.test(chooseBody2)
+    && /function subjectWasJustChosen\(/.test(src)
+    && /loginSubjectChosen\s*=\s*false/.test(src));
+t("выбор предмета всегда уводит с маршрута /subject",
+  !!chooseBody2 && !/if \(!Store\.state\.onboarded\) \{ render\(\); return; \}/.test(chooseBody2));
+t("свежий аккаунт (fresh=1) не поднимает флаг выбора предмета",
+  /hashQueryValue\("fresh"\)\s*!==\s*"1"/.test(bootBody));
+
 t("submitLogin найден", !!loginBody);
 t("флаг включается именно в submitLogin",
   !!loginBody && /pendingSubjectChoice\s*=\s*true/.test(loginBody));
