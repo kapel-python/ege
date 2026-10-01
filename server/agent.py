@@ -1781,6 +1781,33 @@ def fallback_tool_for(text: str) -> tuple[str, dict]:
     return "fold_web", {"op": "progress"}
 
 
+# Модель написала вызов инструмента ТЕКСТОМ, а не вызвала его:
+# «find_topics(query="логарифмы")» вместо настоящего tool_call. Живой замер: в
+# ответ ученику уезжали строки «task_get(id="<id из find_topics>")», шагов не
+# было вовсе, и человек видел служебный синтаксис вместо ответа.
+PSEUDO_CALL_RE = re.compile(
+    r"\b(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
+    r"update_profile|resolve_error)\s*\(([^)]{0,200})\)", re.IGNORECASE)
+
+
+def pseudo_call(text: str):
+    """(имя инструмента, аргументы) из вызова, написанного текстом, — либо None."""
+    m = PSEUDO_CALL_RE.search(str(text or ""))
+    if not m:
+        return None
+    name = m.group(1)
+    if name not in READ_TOOLS:
+        return None
+    args = {}
+    try:
+        blob = json.loads("{" + m.group(2).strip().rstrip(",") + "}")
+        if isinstance(blob, dict):
+            args = {k: v for k, v in blob.items() if isinstance(v, (str, int, float, bool))}
+    except (ValueError, TypeError):
+        args = {}
+    return name, args
+
+
 def _args_for_tool(name: str, asked: str) -> dict:
     """Аргументы для принудительного вызова инструмента по вопросу ученика.
 
@@ -1895,12 +1922,23 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             # инструмент, которого здесь нет. Зовём его САМИ — данные всё
             # равно лежат в базе, а вопрос без ответа хуже ответа из данных.
             missing = claims_missing_tool(text)
+            guessed_args = {}
+            if not missing:
+                # Вызов, НАПИСАННЫЙ ТЕКСТОМ («find_topics(query="…")»), — модель
+                # показала ученику служебный синтаксис и ничего не получила.
+                guess = pseudo_call(text)
+                if guess:
+                    missing, guessed_args = guess[0], dict(guess[1])
             if missing and not steps and not recently_read:
                 # Имя инструмента модель могла и не назвать («не хватает
                 # инструмента для поиска») — тогда берём его по вопросу ученика.
                 if missing == "?":
                     missing = fallback_tool_for(asked)[0]
-                call_args = _args_for_tool(missing, asked)
+                # Аргументы из текста модели полезнее пересборки по вопросу:
+                # она сама назвала нужный запрос.
+                call_args = dict(guessed_args) if guessed_args else _args_for_tool(missing, asked)
+                if not call_args:
+                    call_args = _args_for_tool(missing, asked)
                 forced = _force_read(conn, user_id, subject, missing, call_args, messages,
                                      steps, chat_fn)
                 if forced:

@@ -1056,6 +1056,22 @@ def main():
                       for s in body.get("steps") or [] if s.get("tool") == "find_topics"),
                   str([s.get("args") for s in body.get("steps") or []]))
 
+            # Вызов, написанный ТЕКСТОМ: модель показала ученику служебный
+            # синтаксис («find_topics(query="логарифмы")») и ничего не получила.
+            with lock:
+                script.clear()
+                script.append({"text": 'find_topics(query="логарифмы")\n\nСейчас возьму задание.',
+                               "tool_calls": []})
+                script.append({"text": "Вот задание на логарифмы.", "tool_calls": []})
+            status, body = turn(c3, tid_f4, "дай мне задание на логарифмы")
+            check("текстовый вызов разобран и выполнен по-настоящему",
+                  any(s.get("tool") == "find_topics" for s in body.get("steps") or []),
+                  str([s.get("tool") for s in body.get("steps") or []]))
+            check("в ответе ученику нет служебного синтаксиса",
+                  not re.search(r"(fold_web|find_topics|task_get|lesson_get)\s*\(",
+                                body.get("final") or ""),
+                  (body.get("final") or "")[:140])
+
             section("одно подтверждение на действие (живой случай: чат 52)")
             # Ученик: «Смени мое имя на Артем». Модель зовёт update_profile,
             # ученик подтверждает — и resume цикла ОБЯЗАН видеть, что действие
