@@ -1661,8 +1661,55 @@ FALLBACK_TOOL_RULES: list = [
     (re.compile(r"(?:профил|кто\s+я|как\s+меня|цел[ьия]|уровен)", re.IGNORECASE),
      ("fold_web", {"op": "profile"})),
     (re.compile(r"(?:ошибк|ошиба|разобра)", re.IGNORECASE), ("fold_web", {"op": "errors"})),
+    # Поиск задания/урока по смыслу — ПЕРЕД общим «тем/урок»: иначе «подбери
+    # тему производная» уходило в fold_web(skills), то есть в список ВСЕХ тем
+    # вместо конкретных заданий по производной.
+    (re.compile(r"(?:подбер|найди|выдай|дай|подкинь|подскажи|сделай|разбер|"
+                r"задани|задач|задачу|урок|конспект|практик).{0,40}?"
+                r"(?:по|на|для|из)\s+[а-яё]{3,}"
+                r"|(?:тема|тему|теме|урок|урока|задани\w*|задачу|конспект).{0,30}?"
+                r"(?:производн|логарифм|вектор|планиметр|стереометр|вероятност|тригонометр|"
+                r"уравнени|выражен|функци|текст|сочинени|график)", re.IGNORECASE),
+     ("find_topics", {})),
     (re.compile(r"(?:навык|тем[аыу]|урок)", re.IGNORECASE), ("fold_web", {"op": "skills"})),
 ]
+
+# Модель объявляет инструмент недоступным, хотя он У НЕЁ ЕСТЬ.
+# Живой случай (чат 54): «Подбери тему производная» → «Не хватает инструмента для
+# поиска по каталогу темы — у меня нет возможности его вызвать», при том что
+# find_topics был в списке инструментов и на том же провайдере отвечал верно на
+# соседние вопросы. Это ЗЕРКАЛО «обещания вместо вызова»: там модель говорит
+# «сейчас посмотрю» и не зовёт, здесь — «не могу» и не зовёт. Лечится так же.
+MISSING_TOOL_RE = re.compile(
+    r"(?:не\s+хватает|нет\s+(?:доступа|возможности|такого\s+инструмента)|"
+    r"недоступен|не\s+могу\s+(?:вызвать|найти|открыть|сделать)|"
+    r"отсутствует|не\s+предусмотрен)"
+    r"[^.]{0,80}?(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
+    r"update_profile|resolve_error)", re.IGNORECASE)
+# Порядок слов бывает обратным («find_topics у меня недоступен»).
+MISSING_TOOL_REV_RE = re.compile(
+    r"(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
+    r"update_profile|resolve_error)[^.]{0,80}?"
+    r"(?:не\s+хватает|недоступен|нет\s+доступа|не\s+могу|отсутствует|не\s+предусмотрен)",
+    re.IGNORECASE)
+
+
+def claims_missing_tool(text: str):
+    """Инструмент, который модель объявила недоступным, — либо None.
+
+    Живой случай (чат 54): «Не хватает инструмента для поиска по каталогу темы —
+    у меня нет возможности его вызвать». Имя инструмента модель НЕ назвала, поэтому
+    по имени поймать нельзя — ловим по смыслу («не хватает инструмента») и
+    отдаём вопрос на догадку: какой инструмент здесь нужен."""
+    clean = str(text or "")
+    for rx in (MISSING_TOOL_RE, MISSING_TOOL_REV_RE):
+        m = rx.search(clean)
+        if m and m.group(1) in READ_TOOLS:
+            return m.group(1)
+    if re.search(r"(?:не\s+хватает|нет\s+(?:доступа|возможности|такого\s+инструмента)|"
+                 r"инструмент\s+не|не\s+предусмотрен|отсутствует|не\s+работает)", clean, re.IGNORECASE):
+        return "?"   # инструмент не назван — разбираемся по вопросу ученика
+    return None
 
 
 def looks_like_promise(text: str) -> bool:
@@ -1732,6 +1779,25 @@ def fallback_tool_for(text: str) -> tuple[str, dict]:
         if pattern.search(clean):
             return call[0], dict(call[1])
     return "fold_web", {"op": "progress"}
+
+
+def _args_for_tool(name: str, asked: str) -> dict:
+    """Аргументы для принудительного вызова инструмента по вопросу ученика.
+
+    Для `find_topics` запрос — это сами слова вопроса без служебных («подбери»,
+    «дай»): иначе в поиск уйдёт мусор вроде «найди», который ничего не найдёт."""
+    if name == "find_topics":
+        words = [w for w in re.split(r"[^\w]+", str(asked or "").lower())
+                 if len(w) >= 3 and w not in ("подбери", "подобрать", "найди", "найти", "дай",
+                                             "выдай", "подскажи", "сделай", "разбери", "тему",
+                                             "тема", "задание", "задания", "задачу", "урок",
+                                             "темы", "уроки", "практику", "конспект")]
+        query = " ".join(words).strip() or str(asked or "").strip()
+        return {"query": query[:80]}
+    if name == "fold_web":
+        fallback, call_args = fallback_tool_for(asked)
+        return dict(call_args) if fallback == "fold_web" else {"op": "progress"}
+    return {}
 
 
 def _tool_payload(data: dict, cap: int = 4000) -> str:
@@ -1823,6 +1889,22 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
         # переигрываем в том же assistant-сообщении (см. parse_tool_message).
         preamble = parsed.get("preamble")
         if text is not None and not calls:
+            # Модель объявила инструмент НЕДОСТУПНЫМ, хотя он у неё есть
+            # (живой случай: «Подбери тему производная» → «не хватает
+            # find_topics»). Отдавать это ученику нельзя: он уйдёт искать
+            # инструмент, которого здесь нет. Зовём его САМИ — данные всё
+            # равно лежат в базе, а вопрос без ответа хуже ответа из данных.
+            missing = claims_missing_tool(text)
+            if missing and not steps and not recently_read:
+                # Имя инструмента модель могла и не назвать («не хватает
+                # инструмента для поиска») — тогда берём его по вопросу ученика.
+                if missing == "?":
+                    missing = fallback_tool_for(asked)[0]
+                call_args = _args_for_tool(missing, asked)
+                forced = _force_read(conn, user_id, subject, missing, call_args, messages,
+                                     steps, chat_fn)
+                if forced:
+                    return steps, forced, None
             # Обещание посмотреть вместо вызова. Один раз переспрашиваем
             # жёстко, потом зовём инструмент сами — ученик не должен получать
             # «сейчас посмотрю» вместо цифр.

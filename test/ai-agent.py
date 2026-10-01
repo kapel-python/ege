@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -1025,6 +1026,35 @@ def main():
                   "find_topics" in [t["function"]["name"] for t in agent.AGENT_TOOLS]
                   and "find_topics" in agent.READ_TOOLS,
                   str([t["function"]["name"] for t in agent.AGENT_TOOLS]))
+
+            section("модель не имеет права сказать «инструмента нет» (живой случай: чат 54)")
+            # «Подбери тему производная» → «Не хватает инструмента для поиска по
+            # каталогу темы — у меня нет возможности его вызвать», при том что
+            # find_topics в списке был. Ученику такое отвечать нельзя: он уйдёт
+            # искать несуществующий инструмент. Сервер зовёт инструмент сам.
+            c3 = Client("10.9.0.4")
+            claim(c3, "Кузя-54")
+            _, tf4 = new_thread(c3)
+            tid_f4 = tf4["thread"]["id"]
+            with lock:
+                script.clear()
+                script.append({"text": "Не хватает инструмента для поиска по каталогу темы — "
+                                       "у меня нет возможности его вызвать.", "tool_calls": []})
+                script.append({"text": "Вот производные: задания и урок.", "tool_calls": []})
+            status, body = turn(c3, tid_f4, "Подбери тему производная")
+            check("ход не прошёл пустым: сервер позвал инструмент сам",
+                  status == 200 and body.get("steps"), f"{status} {str(body)[:220]}")
+            check("ответ ученику больше НЕ содержит «инструмента нет»",
+                  not re.search(r"не хватает инструмента|нет возможности его вызвать",
+                                body.get("final") or "", re.IGNORECASE),
+                  (body.get("final") or "")[:160])
+            check("ответ по данным, а не отказ",
+                  "производн" in (body.get("final") or "").lower(),
+                  (body.get("final") or "")[:120])
+            check("поиск отработал по вопросу, а не наугад",
+                  any((s.get("args") or {}).get("query") == "производная"
+                      for s in body.get("steps") or [] if s.get("tool") == "find_topics"),
+                  str([s.get("args") for s in body.get("steps") or []]))
 
             section("одно подтверждение на действие (живой случай: чат 52)")
             # Ученик: «Смени мое имя на Артем». Модель зовёт update_profile,
