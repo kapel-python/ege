@@ -9580,7 +9580,7 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             parts = rest.strip("/").split("/")
             if len(parts) == 2 and parts[1] in ("probe", "probe-model", "probe-models",
-                                                "apply", "reset"):
+                                                "probe-models-stream", "apply", "reset"):
                 pid = parts[0].strip().lower()
                 action = parts[1]
                 if not pid:
@@ -9651,6 +9651,9 @@ class Handler(BaseHTTPRequestHandler):
                 # «Пинг всех моделей» — это до PROBE_MODELS_MAX живых запросов
                 # подряд, поэтому пауза на него заметно длиннее.
                 if action == "probe-models":
+                    # Пауза общая для потока и пакетной проверки: это одна и та
+                    # же работа, и разрешать её вдвое чаще только из-за другой
+                    # кнопки было бы дырой в защите шлюза.
                     wait = _providers_probe_allowed(f"probe-models:{pid}",
                                                     PROVIDERS_MODELS_PROBE_SEC)
                     if wait:
@@ -9671,6 +9674,48 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": str(exc)}, 400)
                         return True
                     self.send_json({"id": pid, **out})
+                    return True
+                if action == "probe-models-stream":
+                    # Живой поток: строка появляется, как только модель
+                    # ответила, а не в конце проверки всех. Бюджет — 10 с,
+                    # тот же, что показывает кнопка (см. ai.PROBE_MODELS_BUDGET_SEC).
+                    wait = _providers_probe_allowed(f"probe-models:{pid}",
+                                                    PROVIDERS_MODELS_PROBE_SEC)
+                    if wait:
+                        # Здесь ответ уже не 429-телом: клиент читает поток,
+                        # поэтому «подожди» приезжает обычным событием, а не
+                        # ошибкой HTTP — иначе он показал бы «ошибка сети».
+                        self.send_event_stream(iter([{
+                            "kind": "error",
+                            "error": f"Модели только что проверяли — повтори через {int(wait)} с",
+                            "retryAfter": int(wait)}]))
+                        return True
+                    wanted = payload.get("models")
+                    if wanted is not None and not isinstance(wanted, list):
+                        self.send_event_stream(iter([{
+                            "kind": "error", "error": "models должен быть списком"}]))
+                        return True
+                    try:
+                        stream = _AI.probe_models_stream(pid, wanted)
+                    except KeyError:
+                        self.send_event_stream(iter([{"kind": "error",
+                                                      "error": "Провайдер не найден"}]))
+                        return True
+                    except ValueError as exc:
+                        self.send_event_stream(iter([{"kind": "error", "error": str(exc)}]))
+                        return True
+                    except Exception as exc:  # noqa: BLE001
+                        rid = log_request_error("probe-models-stream", exc)
+                        self.send_event_stream(iter([{
+                            "kind": "error",
+                            "error": f"не удалось начать проверку (ref {rid})"}]))
+                        return True
+                    try:
+                        self.send_event_stream(stream)
+                    except Exception as exc:  # noqa: BLE001
+                        # Стрим уже начался: тело ответа могло уехать частично,
+                        # второй статус отправить нельзя — пишем в лог.
+                        log_request_error("probe-models-stream-body", exc)
                     return True
                 wait = _providers_probe_allowed(
                     (f"probe-model:{pid}" if action == "probe-model" else f"one:{pid}"),

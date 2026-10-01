@@ -1008,12 +1008,10 @@ function go(route, param) {
 
 function currentRoute() {
   const h = location.hash.replace(/^#\//, "");
-  // Хвост «?…» во фрагменте — это ПАРАМЕТРЫ возврата (сервер кладёт туда
-  // результат внешнего входа), а не часть имени раздела. Без обрезки
-  // «#/login?confirm=…» давал маршрут «login?confirm=…», ни один экран не
-  // совпадал, приложение падало в dashboard, а там неонбордившийся гость
-  // видел онбординг — то есть возврат из Google выглядел как «ничего не
-  // произошло». Параметры читает hashQueryValue(), он хвост и разбирает.
+  // Хвост «?…» — ПАРАМЕТРЫ возврата (результат внешнего входа), а не часть
+  // имени раздела. Без обрезки «#/login?error=…» давал маршрут
+  // «login?error=…», экран не совпадал, приложение падало в dashboard, и
+  // возврат из Google выглядел как «вход не сработал».
   return h.split("?")[0].split("/")[0] || "dashboard";
 }
 
@@ -1207,15 +1205,12 @@ async function render() {
   if (pendingSubjectChoice && route !== "subject" && route !== "login" && route !== "register") { go("subject"); return; }
   // Экраны входа/регистрации доступны и до онбординга: после logout свежий
   // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
-  // Экран выбора предмета — тоже, и это не мелочь: вход (любой — паролем или
-  // через Google) обязан вести именно туда. `onboarded` в состоянии — признак
-  // ТЕКУЩЕГО предмета, а у вошедшего человека он может быть не пройден, хотя
-  // онбординг давно пройден по другим предметам; без этой оговорки такого
-  // человека отправляли проходить онбординг заново прямо после входа.
+  // Выбор предмета — первый шаг входа, и онбординг его не перехватывает:
+  // `onboarded` — признак ТЕКУЩЕГО предмета, поэтому вошедший человек с
+  // пройденным онбордингом по другим предметам не должен проходить его
+  // заново (живой баг входа через Google).
   const postLoginRoute = route === "subject" && Store.auth && Store.auth.registered;
-  if (!Store.state.onboarded && !postLoginRoute && route !== "login" && route !== "register") {
-    Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return;
-  }
+  if (!Store.state.onboarded && !postLoginRoute && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
   // Убираем старый футер сразу, ещё до ленивой загрузки формул. На фокусных
   // маршрутах это не даёт старому контенту мигнуть во время перехода.
@@ -7012,6 +7007,10 @@ const GOOGLE_ERROR_TEXT = {
   failed: "Не удалось войти через Google. Попробуй ещё раз.",
 };
 
+/* Подтверждение привязки: адрес уже занят парольным аккаунтом. Молча
+   склеивать их нельзя (это путь к угону чужой учётки), поэтому спрашиваем
+   пароль ИМЕННО ЭТОГО аккаунта. Токен из ссылки живёт 10 минут и подписан
+   сервером — подсунуть свой нельзя. */
 function screenLogin(root) {
   const errorReason = hashQueryValue("error");
   clearHashQuery();
@@ -7047,47 +7046,35 @@ function screenLogin(root) {
   if (first) first.focus();
 }
 
-async function submitLogin(event) {
-  event.preventDefault();
-  authFormBusy();
-  const form = event.target;
-  try {
-    await AuthAPI.login(form.email.value.trim(), form.password.value);
-    // Сессии и уроки гостя недействительны под новым аккаунтом — сбрасываем
-    // до смены, иначе чужые задания/позиция (и localStorage) пережили бы вход.
-    try { Session.cur = null; } catch (_) {}
-    try { deactivateLessonClock(); } catch (_) {}
-    try { Lesson.cur = null; } catch (_) {}
-    try { localStorage.removeItem("ege_core_session"); } catch (_) {}
-    await Store.refreshAfterAuth();
-    // Вход всегда ведёт через явный выбор предмета: один аккаунт может
-    // открываться с разных устройств, поэтому сайт открывается с выбранным
-    // предметом, а не с угаданным current_subject. Флаг дублируется в
-    // sessionStorage, чтобы перезагрузка посреди пикера не теряла его;
-    // обычный refresh после выбора флага уже не видит.
-    pendingSubjectChoice = true;
-    try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
-    toast("Вы вошли в аккаунт", "", "check");
-    go("subject");
-  } catch (error) {
-    authFormFail(authFormError(error, "Не удалось войти. Попробуй ещё раз."));
+function screenRegister(root) {
+  if (Store.auth && Store.auth.registered) {
+    root.innerHTML = authScreenShell("Аккаунт уже создан",
+      `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
+      `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+         <button class="btn btn--primary" onclick="go('profile')">В профиль</button>
+       </div>`);
+    return;
   }
-}
-
-async function submitRegister(event) {
-  event.preventDefault();
-  authFormBusy();
-  const form = event.target;
-  const password = form.password.value;
-  if (password.length < 8) { authFormFail("Пароль — минимум 8 символов"); return; }
-  try {
-    await AuthAPI.register(form.name.value.trim(), form.email.value.trim(), password);
-    await Store.refreshAfterAuth();
-    toast("Аккаунт создан — весь прогресс сохранён", "", "check");
-    go("profile");
-  } catch (error) {
-    authFormFail(authFormError(error, "Не удалось создать аккаунт. Попробуй ещё раз."));
-  }
+  root.innerHTML = authScreenShell("Регистрация",
+    "Текущий гостевой профиль целиком переедет в аккаунт: XP, уровень, прогресс, ошибки и достижения.",
+    `
+    <form class="auth-form" onsubmit="submitRegister(event)">
+      <label class="auth-field"><span>Имя</span>
+        <input class="answer-input" type="text" name="name" autocomplete="name" maxlength="${NAME_MAX_LENGTH}" required value="${esc((Store.state && Store.state.name) || "")}">
+      </label>
+      <label class="auth-field"><span>Email</span>
+        <input class="answer-input" type="email" name="email" autocomplete="email" required>
+      </label>
+      <label class="auth-field"><span>Пароль (минимум 8 символов)</span>
+        <input class="answer-input" type="password" name="password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <div class="auth-form__error" id="auth-error" role="alert"></div>
+      <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Создать аккаунт</button>
+    </form>
+    ${googleSignInHTML("Зарегистрироваться через Google")}
+    <div class="auth-switch">Уже есть аккаунт? <a href="#/login" onclick="go('login');return false">Войти</a></div>`);
+  const first = root.querySelector((Store.state && Store.state.name) ? "input[name=email]" : "input[name=name]");
+  if (first) first.focus();
 }
 
 function screenLoginSubject(root) {
@@ -7971,11 +7958,6 @@ function bootstrapApp() {
   bootPromise = (async () => {
     try {
       await Store.load();
-      // Возврат из внешнего входа разбирается СРАЗУ после загрузки состояния,
-      // до первой отрисовки: на #/login?confirm=… сервер уже поставил сессию
-      // (или ждёт подтверждения), и успеть показать онбординг нельзя — гость
-      // с живой сессией выглядел бы как «вход не сработал».
-      try { routeGoogleReturn(); } catch (_) {}
       await Store.initTabLeader();
       stopBootMsgs();
       // Перезагрузка посреди пикера входа: выбор ещё не применён, сессия
