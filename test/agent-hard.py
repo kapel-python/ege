@@ -514,6 +514,9 @@ def main() -> int:
             if x.get("table"):
                 lines.append("  - в ответе markdown-таблица")
             lines.append(f"  - ответ: {(x.get('answer') or '(пусто)')[:3000]}")
+            for ti, t in enumerate(x.get("turns") or [], start=1):
+                lines.append(f"  - ход {ti} «{(t.get('text') or '')[:90]}» -> HTTP {t.get('http')}: "
+                             f"{(t.get('answer') or '(пусто)')[:1200]}")
             lines.append("")
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text("\n".join(lines), encoding="utf-8")
