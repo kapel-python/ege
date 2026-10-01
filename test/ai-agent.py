@@ -115,6 +115,61 @@ def _profile_name(server, user_id: int):
         conn.close()
 
 
+def _find_topics_probes(server) -> dict:
+    """Проверки нового поискового инструмента: он должен выдавать только
+    СУЩЕСТВУЮЩИЕ id и понимать человеческие словоформы.
+
+    Замена ему — угадывание id: легенды id не было ни в одном ответе, поэтому
+    «дай задание на производную» кончалось либо ошибкой, либо выдуманным id."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        out = {}
+
+        deriv = agent.find_topics(conn, uid, "profile_math", {"query": "производная"})
+        out["deriv"] = [t["id"] for t in deriv.get("tasks", [])][:4]
+        out["deriv_ok"] = bool(out["deriv"]) and all(
+            t.startswith("n09") for t in out["deriv"][:2])
+        # Совпадение по названию навыка должно поднимать его задания над
+        # «произведением векторов» (то же начало слова).
+        out["rank"] = out["deriv"][:3]
+        # «Произведение векторов» и «производная» начинаются одинаково: приоритет
+        # должен отдавать задания по названию НАВЫКА, а не по слову внутри темы.
+        out["rank_ok"] = bool(out["rank"]) and not out["rank"][0].startswith("n02")
+
+        stem = agent.find_topics(conn, uid, "profile_math", {"query": "логарифмы"})
+        out["stem"] = [t["topic"] for t in stem.get("tasks", [])][:3]
+        out["stem_ok"] = any("огарифм" in t for t in out["stem"])
+
+        num = agent.find_topics(conn, uid, "russian", {"query": "задание 27"})
+        out["num"] = [t["id"] for t in num.get("tasks", [])][:3]
+        out["num_ok"] = bool(out["num"]) and all(t.startswith("re27") for t in out["num"])
+
+        empty = agent.find_topics(conn, uid, "profile_math", {"query": "квантовая хромодинамика"})
+        out["empty_found"] = empty.get("found")
+        out["empty_ok"] = not empty.get("found") and "нет ничего похожего" in (empty.get("note") or "")
+
+        phantom = []
+        for q, subj in (("производная", "profile_math"), ("логарифмы", "profile_math"),
+                        ("векторы", "profile_math"), ("вероятность", "profile_math"),
+                        ("сочинение", "russian")):
+            found = agent.find_topics(conn, uid, subj, {"query": q})
+            for t in found.get("tasks", []):
+                if not conn.execute("SELECT COUNT(*) FROM tasks WHERE id=?", (t["id"],)).fetchone()[0]:
+                    phantom.append(t["id"])
+            for s in found.get("skills", []):
+                if not conn.execute("SELECT COUNT(*) FROM skills WHERE id=?", (s["id"],)).fetchone()[0]:
+                    phantom.append(s["id"])
+            for l in found.get("lessons", []):
+                if not conn.execute("SELECT COUNT(*) FROM lessons WHERE id=?", (l["id"],)).fetchone()[0]:
+                    phantom.append(l["id"])
+        out["phantom"] = phantom
+        return out
+    finally:
+        conn.close()
+
+
 def _resolve_error_rejects_conflicting_ids(server) -> bool:
     """resolve_error не должен доверять выдуманному errorId.
 
@@ -953,6 +1008,23 @@ def main():
                   f"{ai.AI_REPLY_MAX} vs {agent.AGENT_REPLY_MAX}")
             check("потолок ответа действительно шире прежних 8000",
                   agent.AGENT_REPLY_MAX > 8000, str(agent.AGENT_REPLY_MAX))
+
+            section("find_topics: поиск по каталогу вместо угадывания id")
+            cap = _find_topics_probes(server)
+            check("поиск по теме находит существующие задания", cap["deriv_ok"], str(cap["deriv"]))
+            check("выданные id РЕАЛЬНО существуют (галлюцинаций нет)",
+                  not cap["phantom"], str(cap["phantom"]))
+            check("словоформа учитывается («логарифмы» → «Логарифмическое»)",
+                  cap["stem_ok"], str(cap["stem"]))
+            check("запрос только с номером находит re27_*", cap["num_ok"], str(cap["num"]))
+            check("тема по названию навыка приоритетнее, чем по тексту задания",
+                  cap["rank_ok"], str(cap["rank"]))
+            check("на несуществующую тему — честный пустой ответ, а не весь каталог",
+                  cap["empty_ok"], str(cap["empty_found"]))
+            check("find_topics виден модели и отнесён к чтению",
+                  "find_topics" in [t["function"]["name"] for t in agent.AGENT_TOOLS]
+                  and "find_topics" in agent.READ_TOOLS,
+                  str([t["function"]["name"] for t in agent.AGENT_TOOLS]))
 
             section("одно подтверждение на действие (живой случай: чат 52)")
             # Ученик: «Смени мое имя на Артем». Модель зовёт update_profile,

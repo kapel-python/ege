@@ -163,12 +163,26 @@ AGENT_SYSTEM = (
     "5e. id заданий и уроков (taskId, skillId) бери ТОЛЬКО из результатов инструментов. "
     "Если нужного нет — позови fold_web(op=\"attempts\") или op=\"errors\", а не угадывай: "
     "инструмент вернёт тебе ошибку со списком допустимых id.\n"
+    "5e2. Найденные id нужны ТОЛЬКО для последующих вызовов. В тексте ответа ученику их быть "
+    "не должно: вместо «n09_p1» пиши «задание про точки минимума по графику производной». "
+    "Тот же запрет на внутренние id из названий навыков — но номер задания ЕГЭ из названия "
+    "(«№15») ученику полезен, его оставляй.\n"
     "5b. Внутренние коды ученику лучше не показывать: вместо «задание re_3_4», «n01_planimetry», "
     "«fold_web», «lesson_get» говори словами, которые понимает человек — «задание на отрезки», "
     "«урок по производным», «твои ошибки». Код уместен, только если ученик сам его прислал или "
     "просит найти именно его, — и тогда рядом с человеческим названием.\n"
     "6. Действия (сменить уровень/цель/имя, отметить ошибку разобранной, сбросить прогресс) — только через "
     "инструменты действий: они сами попросят подтверждение, сам ничего не меняй и не обещай «сейчас поменяю».\n"
+    "6a. «Зови меня Катя», «назови меня…», «поменяй имя на…», «хочу, чтобы ты меня так называл» — это ТОЖЕ "
+    "запрос на изменение профиля: зови update_profile(name=…). Молча поздороваться новым именем нельзя: "
+    "человеку кажется, что имя сменилось, а в профиле старое.\n"
+    "6a2. «Хочу набрать 95+», «цель — 80», «уровень средний» — это ТОЖЕ запрос изменить профиль: "
+    "предложи update_profile(goal=…/selfLevel=…) и спроси подтверждение. Одного разбора «сколько до цели "
+    "не хватает» мало: человек сказал, чего хочет. Порядок — сначала инструмент, потом слова о том, "
+    "что цель выставится.\n"
+    "6b. Разрушительное (сброс прогресса) не отговаривай словами вместо действия: кратко назни, что "
+    "сотрётся, и вызови reset_progress — карточка подтверждения сама спросит ученика. Отказ «без действия» "
+    "оставляет человека в тупике: он не понимает, что нажать.\n"
     "7. Если ученик грубит, злится или пишет «я тупой» — не морализируй и не читай лекций: признай сложность "
     "и предложи один маленький шаг. Никогда не унижай и не высмеивай.\n"
     "СЦЕНАРИИ (какой инструмент под какой вопрос).\n"
@@ -178,7 +192,9 @@ AGENT_SYSTEM = (
     "- «как мои успехи / сколько решено / что пройдено» → fold_web(op=\"progress\"), при нужде skills.\n"
     "- «план на неделю» → plan_draft, затем коротко перескажи своими словами.\n"
     "- «посмотри профиль / кто я» → fold_web(op=\"profile\").\n"
-    "- «что такое логарифм / объясни тему» → lesson_get, если есть подходящий skillId; иначе объясни сам.\n"
+    "- «что такое логарифм / объясни тему» → find_topics по словам из вопроса, затем lesson_get по найденному id.\n"
+    "- «дай задание на X / что порешать по X» → find_topics, затем task_get по найденному id. НЕ выдумывай id.\n"
+    "- Не нашёл в каталоге — скажи честно и предложи близкую тему (fold_web op=\"skills\").\n"
     "- «поменяй цель/уровень/имя» → update_profile (потребует подтверждения).\n"
     "- «отметь ошибку разобранной» → resolve_error (потребует подтверждения).\n"
     "Если инструментов для честного ответа не хватило — скажи это прямо и предложи, что спросить.\n"
@@ -230,6 +246,13 @@ AGENT_TOOLS: list = [
           {"type": "object", "properties": {
               "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
            "additionalProperties": False}),
+    _tool("find_topics",
+      "ПОИСК по каталогу предмета по словам: темы, задания, уроки. ЗОВИ ПЕРВЫМ, когда нужно найти "
+      "задание или урок по смыслу («на производную», «на площадь») — id заданий и уроков приходят "
+      "только отсюда и из fold_web. Возвращает существующие объекты с id и человеческими названиями.",
+      {"type": "object", "properties": {
+          "query": {"type": "string", "description": "что ищем: тема, ключевое слово или фраза"}},
+       "required": ["query"], "additionalProperties": False}),
     _tool("plan_draft", "Черновик плана подготовки на основе прогноза.",
           {"type": "object", "properties": {
               "weeks": {"type": "integer", "minimum": 1, "maximum": 8}},
@@ -249,7 +272,8 @@ AGENT_TOOLS: list = [
 ]
 
 ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress"})
-READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_draft"})
+READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_draft",
+                        "find_topics"})
 
 
 def is_action_tool(name: str) -> bool:
@@ -1298,6 +1322,106 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
     raise ValueError(f"неизвестное действие: {name}")
 
 
+def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """ПОИСК по каталогу предмета: темы, задания и уроки — ПО СЛОВАМ.
+
+    Зачем: до этого инструмента модель обязана была УГАДЫВАТЬ `skillId`/`taskId`.
+    Легенды id не было ни в одном ответе, поэтому «объясни тему производные» или
+    «дай задание на планиметрию» кончались либо ошибкой, либо выдуманным id, и
+    вопрос «что мне подтянуть» нельзя было превратить в конкретное задание.
+
+    Слово «поиск» здесь буквальное: ученик говорит человеческими словами, а
+    инструмент возвращает существующие объекты с их id и ЧЕЛОВЕЧЕСКИМИ
+    названиями — дальше модель открывает нужный через `task_get`/`lesson_get`.
+    Ничего не выдумывает и не пишет: только то, что реально есть в каталоге.
+    """
+    query = str((args or {}).get("query") or (args or {}).get("q") or "").strip()
+    if not query:
+        raise ValueError("нужен query — что ищем (например «производная» или «площадь»)")
+    # Слова-крючки («на», «тема», «задача», «урок», «разобрать») не различают
+    # объекты: с ними в выдачу попадало всё подряд. Отбрасываем их и требуем,
+    # чтобы СОВПАЛИ ВСЕ оставшиеся слова — иначе «несуществующая тема» находит
+    # полкаталога.
+    hooks = {"тема", "темы", "задача", "задачи", "задание", "задания", "урок", "уроки",
+             "разобрать", "разбор", "объясни", "объяснить", "научи", "практика",
+             "подтянуть", "повторить", "теория", "домашка", "домашнее"}
+    words = [w for w in re.split(r"[^\w]+", query.lower())
+             if len(w) >= 3 and w not in hooks]
+    digits = re.findall(r"\d+", query)
+    if not words and not digits:
+        raise ValueError(f"в запросе «{query}» нет слов длиной от 3 символов — нечего искать")
+
+    def hit(*fields, bonus_field=None) -> int:
+        """Все содержательные слова должны совпасть; возвращаем их число.
+
+        Совпадение по ОСНОВЕ, а не по целому слову: ученик пишет «логарифмы»,
+        а в каталоге «Логарифмическое уравнение» — словоформы разные, и строгий
+        поиск молча возвращал пустоту. Основа = первые 6 букв (короче — слово
+        целиком), и она должна быть началом какого-то слова в каталоге.
+
+        `bonus_field` — название темы: совпадение с НЕЙ весит вдвое больше,
+        иначе «производная» тянула задания про скалярное произведение (то же
+        начало слова), а задания по производной уходили в хвост.
+        """
+        blob = " ".join(str(f or "") for f in fields).lower()
+        if digits and not any(d in blob for d in digits):
+            return 0
+        if not words:
+            # Запрос только с номером («задание 27») — совпадение по цифрам уже
+            # проверено выше, это полноценная находка.
+            return 1 if digits else 0
+        tokens = re.split(r"[^\w]+", blob)
+        for w in words:
+            stem = w[:6] if len(w) > 6 else w
+            if not any(t.startswith(stem) for t in tokens if t):
+                return 0
+        score = len(words)
+        if bonus_field is not None:
+            bonus_tokens = re.split(r"[^\w]+", str(bonus_field or "").lower())
+            for w in words:
+                stem = w[:6] if len(w) > 6 else w
+                if any(t.startswith(stem) for t in bonus_tokens if t):
+                    score += 2
+        return score
+
+    skills = conn.execute("SELECT id, name FROM skills WHERE subject=? ORDER BY display_order",
+                          (subject,)).fetchall()
+    tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname FROM tasks t"
+                         " JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT 600",
+                         (subject,)).fetchall()
+    lessons = conn.execute("SELECT l.id, l.title FROM lessons l JOIN skills s ON s.id=l.skill_id"
+                           " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
+
+    def rank(rows, score, take, render):
+        scored = [(score(r), r) for r in rows]
+        scored = [(n, r) for n, r in scored if n > 0]
+        scored.sort(key=lambda p: (-p[0], p[1]["id"]))
+        return [render(n, r) for n, r in scored[:take]]
+
+    found = {
+        "query": query,
+        "skills": rank(skills, lambda r: hit(r["name"]), 6,
+                       lambda n, r: {"id": r["id"], "name": r["name"], "match": n}),
+        # id включён в поиск: «задание 27» находит re27_* (в теме номера нет,
+        # а ученик называет именно номер задания из ключа).
+        "tasks": rank(tasks, lambda r: hit(r["topic"], r["exam_number"], r["sname"], r["id"],
+                                           bonus_field=r["sname"]), 8,
+                      lambda n, r: {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
+                                    "skillName": r["sname"], "match": n}),
+        "lessons": rank(lessons, lambda r: hit(r["title"], r["id"]), 6,
+                        lambda n, r: {"id": r["id"], "title": r["title"], "match": n}),
+    }
+    total = sum(len(v) for v in found.values() if isinstance(v, list))
+    found["note"] = ("Это то, что реально есть в каталоге предмета. Найденное открывай "
+                     "через task_get (id) или lesson_get (id) — и не выдумывай id, которых "
+                     "здесь нет. id — ТЕХНИЧЕСКИЙ, для последующих вызовов: ученику показывай темы и "
+                     "формулировки заданий, но НЕ коды вроде n09_p1." if total else
+                     "В каталоге предмета нет ничего похожего. Скажи ученику честно и предложи "
+                     "ближайшую по смыслу тему из списка тем (fold_web op=\"skills\").")
+    found["found"] = total
+    return found
+
+
 def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
     if name == "fold_web":
         return fold_web(conn, user_id, subject, args)
@@ -1309,6 +1433,8 @@ def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name
         return essay_history(conn, user_id, subject, args)
     if name == "plan_draft":
         return plan_draft(conn, user_id, subject, args)
+    if name == "find_topics":
+        return find_topics(conn, user_id, subject, args)
     raise ValueError(f"неизвестный инструмент: {name}")
 
 
@@ -1431,6 +1557,9 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         return f"Открываю задание «{topic}»" if topic else f"Открываю задание {args.get('taskId') or ''}".strip()
     if name == "essay_history":
         return "Смотрю твои сочинения"
+    if name == "find_topics":
+        q = str((args or {}).get("query") or "")[:60]
+        return f"Ищу по каталогу: {q}" if q else "Ищу по каталогу"
     if name == "plan_draft":
         return "Составляю черновик плана"
     if name == "update_profile":
