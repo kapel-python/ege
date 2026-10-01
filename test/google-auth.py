@@ -12,13 +12,14 @@
    сессию, и клиентский bootstrap видит registered=true и googleEnabled=true;
 5. повторный вход с того же Google-аккаунта с ДРУГОГО устройства попадает в
    тот же users.id — второй строки не появляется;
-6. адрес, уже занятый парольным аккаунтом, НЕ склеивается молча: клиент
-   получает confirm-токен, пароль проверяется, неверный пароль — 401;
+6. адрес, уже занятый парольным аккаунтом, открывает его так же, как вход по
+   паролю (Google подтвердил владение почтой), но второй Google-аккаунт в уже
+   привязанный профиль не пускается (error=conflict);
 7. гость с прогрессом, вошедший через Google, сохраняет свой accountId;
 8. заблокированный аккаунт не получает сессию (403 ACCOUNT_BLOCKED);
 9. неподтверждённая почта провайдера не даёт входа (error=identity);
 10. код одноразовый: повторный callback с тем же кодом не проходит;
-11. cross-site POST на confirm отклоняется гейтом CSRF (403);
+11. cross-site POST на unlink отклоняется гейтом CSRF (403);
 12. отвязка Google: у аккаунта без пароля refused (400 NO_PASSWORD) —
     иначе человек потерял бы единственный вход; с паролем отвязка проходит;
 13. удаление аккаунта админом сносит привязку каскадом.
@@ -386,51 +387,62 @@ def main():
             check("привязка одна", len(rows(server, "SELECT 1 FROM auth_identities")) == 1)
 
             # ---------------------------------------------------------------
-            section("6. Занятый адрес: молчаливой склейки нет, нужен пароль")
+            section("6. Занятый адрес = обычный вход, как по паролю")
             reg, reg_jar = make_device()
             st, _, _ = request(reg, base, "/api/profile/claim", "POST",
                                {"subject": "profile_math", "onboarded": True, "name": "Парольный"})
             st, _, registered = request(reg, base, "/api/auth/register", "POST",
                                         {"name": "Парольный", "email": "guy@example.com",
                                          "password": "super-pass-1"})
-            check("регистрация занятого адреса -> 409", st == 409, (st, registered))
-            # Освобождаем адрес: делаем парольный аккаунт на ДРУГОМ адресе.
+            check("занятый адрес не даёт зарегистрироваться дважды", st == 409, (st, registered))
             st, _, registered = request(reg, base, "/api/auth/register", "POST",
                                         {"name": "Парольный", "email": "pass@example.com",
                                          "password": "super-pass-1"})
             check("парольный аккаунт заведён", st == 200, (st, registered))
             password_account = registered["user"]["accountId"]
-            # Теперь тот же адрес, что у парольного аккаунта:
+
+            # Тот же адрес, что у парольного аккаунта, и НИ ОДНОЙ привязки у
+            # него нет: почта подтверждена Google, а наша регистрация почту не
+            # подтверждает вообще — значит это более сильное доказательство
+            # владения адресом, чем пароль. Вход обязан состояться сразу.
             fake.identity = {"sub": "google-sub-2", "email": "pass@example.com",
-                             "name": "Кто-то", "email_verified": True}
+                             "name": "Артём", "email_verified": True}
             opener3, jar3 = make_device()
             st, hd, _ = request(opener3, base, "/api/auth/google")
             st, hd, _ = request_url(opener3, location_of(hd))
             st, hd, _ = request_url(opener3, location_of(hd))
-            fragment = fragment_of(location_of(hd))
-            pending = query_of_fragment(fragment).get("confirm")
-            check("занятый адрес -> confirm, а не вход", bool(pending), fragment)
-            check("сессия не выдана", cookie_value(jar3, "ege_session") is None)
-            check("привязка не создана", len(rows(server, "SELECT 1 FROM auth_identities")) == 1)
-            st, _, wrong = request(opener3, base, "/api/auth/google/confirm", "POST",
-                                   {"pending": pending, "password": "wrong-password"})
-            check("неверный пароль -> 401", st == 401, (st, wrong))
-            check("после неверного пароля входа нет", cookie_value(jar3, "ege_session") is None)
-            st, _, forged = request(opener3, base, "/api/auth/google/confirm", "POST",
-                                    {"pending": "abc.def", "password": "super-pass-1"})
-            check("подделанный confirm-токен -> 400", st == 400, (st, forged))
-            st, _, ok = request(opener3, base, "/api/auth/google/confirm", "POST",
-                                {"pending": pending, "password": "super-pass-1"})
-            check("верный пароль -> 200 и вход", st == 200 and ok.get("ok") is True, (st, ok))
-            check("вошёл в парольный аккаунт, а не в новый",
-                  ok.get("user", {}).get("accountId") == password_account, ok.get("user"))
-            check("привязка появилась у парольного аккаунта",
-                  len(rows(server, "SELECT 1 FROM auth_identities")) == 2)
+            check("занятый адрес сразу ведёт в приложение, без экрана пароля",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") is None
+                  and fragment_of(location_of(hd)).startswith("/subject"),
+                  fragment_of(location_of(hd)))
             st, _, session3 = request(opener3, base, "/api/auth/session")
-            check("providers теперь два у того же аккаунта",
-                  session3["user"]["providers"] == ["google"], session3["user"])
+            check("вошёл именно в свой парольный аккаунт",
+                  session3["user"]["accountId"] == password_account, session3.get("user"))
+            check("сессия выдана", cookie_value(jar3, "ege_session") is not None)
+            check("личность привязана к тому же аккаунту",
+                  rows(server, "SELECT user_id FROM auth_identities WHERE subject='google-sub-2'")[0]["user_id"]
+                  == rows(server, "SELECT id FROM users WHERE account_id=?", (password_account,))[0]["id"])
+            check("провайдеры видны клиенту", session3["user"]["providers"] == ["google"], session3["user"])
+            check("пароль при этом не потерян",
+                  rows(server, "SELECT password_hash FROM users WHERE account_id=?",
+                       (password_account,))[0]["password_hash"] is not None)
 
-            # ---------------------------------------------------------------
+            # Аккаунт уже привязан к ДРУГОМУ Google: это не вход, а захват
+            # чужой личности — второй Google-аккаунт в тот же профиль не
+            # пускаем и ничего не перепривязываем.
+            fake.identity = {"sub": "google-sub-attacker", "email": "pass@example.com",
+                             "name": "Кто-то", "email_verified": True}
+            attacker, attacker_jar = make_device()
+            st, hd, _ = request(attacker, base, "/api/auth/google")
+            st, hd, _ = request_url(attacker, location_of(hd))
+            st, hd, _ = request_url(attacker, location_of(hd))
+            check("второй Google в тот же аккаунт -> error=conflict",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") == "conflict",
+                  fragment_of(location_of(hd)))
+            check("конфликт не выдал сессию", cookie_value(attacker_jar, "ege_session") is None)
+            check("конфликт ничего не привязал",
+                  len(rows(server, "SELECT 1 FROM auth_identities WHERE subject='google-sub-attacker'")) == 0)
+
             section("7. Гость с прогрессом сохраняет профиль при входе")
             guest, guest_jar = make_device()
             st, _, claim = request(guest, base, "/api/profile/claim", "POST",
@@ -532,15 +544,12 @@ def main():
             check("повтор не завёл нового человека", count_users(server) == before, count_users(server))
 
             # ---------------------------------------------------------------
-            section("10. CSRF-гейт на confirm и unlink")
+            section("10. CSRF-гейт на unlink")
             cross, cross_jar = make_device()
-            st, _, blocked_post = request(cross, base, "/api/auth/google/confirm", "POST",
-                                          {"pending": "x.y", "password": "z"})
             # Без Origin клиент (curl/тест) проходит — это осознанное правило
             # проекта; проверяем именно чужой Origin.
-            req = urllib.request.Request(base + "/api/auth/google/confirm",
-                                         data=json.dumps({"pending": "x.y", "password": "z"}).encode(),
-                                         method="POST")
+            req = urllib.request.Request(base + "/api/auth/google/unlink",
+                                         data=b"{}", method="POST")
             req.add_header("Content-Type", "application/json")
             req.add_header("Origin", "https://evil.example")
             req.add_header("Sec-Fetch-Site", "cross-site")

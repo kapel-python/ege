@@ -952,12 +952,6 @@ const AuthAPI = {
   startGoogle() {
     window.location.href = AuthAPI.googleUrl();
   },
-  /* Подтверждение привязки: адрес уже занят парольным аккаунтом, поэтому
-     личность к нему привязывается только после проверки пароля. pending —
-     подписанный сервером токен из ссылки (10 минут жизни). */
-  confirmGoogle(pending, password) {
-    return ApiClient.post("/api/auth/google/confirm", { pending, password });
-  },
   unlinkGoogle() {
     return ApiClient.post("/api/auth/google/unlink", {});
   },

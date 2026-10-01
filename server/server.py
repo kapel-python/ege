@@ -1648,17 +1648,21 @@ def auth_state_payload(conn: sqlite3.Connection, user_id: int) -> dict:
 # и НЕ является почтой. Поэтому переименование в Google не ломает вход, а
 # смена почты на другую не приводит к входу в чужой аккаунт.
 #
-# Правило привязки — сознательно строгое. Никогда не привязываем внешний аккаунт
-# к существующему аккаунту молча, только по совпавшей почте: почта, отданная
-# провайдером, проверяется только им, и наша регистрация по паролю почту вообще
-# не подтверждает. Автоматическая склейка превратила бы вход в Google в
-# инструмент захвата чужой учётки (злоумышленник регистрирует чужую почту без
-# подтверждения и потом входит в неё через Google). Вместо этого:
-#   * привязка к ТЕКУЩЕЙ сессии — только из уже залогиненного профиля («Привязать
-#     Google» в профиле), то есть решение человека и его собственная сессия;
-#   * привязка нового адреса к существующему аккаунту — только после явного
-#     подтверждения паролем этого аккаунта (см. park/confirm);
-#   * новый адрес, которого у нас нет, — честная новая строка пользователя.
+# Правило входа: адрес, подтверждённый провайдером, открывает существующий
+# аккаунт с этим адресом — ровно как вход по паролю открывает его по адресу и
+# паролю. Это НЕ компромисс, а последовательность: собственную почту мы не
+# подтверждаем вообще никак (регистрация принимает любой свободный адрес), то
+# есть пароль доказывает знание пароля, а не владение почтой. Google с
+# email_verified=true доказывает именно владение адресом — более сильное
+# утверждение, чем наше собственное. Требовать сверх этого ещё и пароль
+# значило бы сделать внешний вход строже обычного без всякой причины.
+#
+# Границы, которые остаются жёсткими:
+#   * неподтверждённая почта провайдера не принимается вовсе (email_verified);
+#   * аккаунт, уже привязанный к ДРУГОМУ Google-аккаунту, не захватывается —
+#     это была бы смена личности, а не вход;
+#   * заблокированный аккаунт сессии не получает;
+#   * чужой state/код не проходит (см. oauth.verify_state).
 # ---------------------------------------------------------------------------
 def auth_has_provider(conn: sqlite3.Connection, user_id: int | None) -> bool:
     if user_id is None:
@@ -3484,23 +3488,27 @@ def essay_result_view(submission: dict) -> dict | None:
         view["calibration_note"] = str(calibration["note"])
     # Чем подписать проверку на экране результата: фактическая модель,
     # ответившая на этот запрос (failover мог молча переключить провайдера).
-    # Название берётся из конфигурации провайдеров — то, что админ задал
-    # в панели, — и только если его нет, показывается id модели. Раньше здесь
-    # стоял вшитый словарь {"closerouter": "Claude Sonnet 5", ...}: любая
-    # другая модель подписывалась старым именем, а свой провайдер — молчал.
+    # Подпись — ТОЛЬКО та, что админ задал в панели: строка «проверено моделью
+    # grok-chat-fast» была бы шумом из технического id. Раньше здесь стоял
+    # вшитый словарь {"closerouter": "Claude Sonnet 5", ...}: любая другая
+    # модель подписывалась старым именем, а свой провайдер — молчал. Теперь
+    # без названия строка просто не рисуется (в панели у такой модели горит
+    # чип «нет названия для ученика»), а служебные id уходят в `model` —
+    # они нужны только для диагностики, не для показа.
     provider_key = str(submission.get("evaluationProvider") or "").strip()
     model_key = str(submission.get("evaluationModel") or "").strip()
     label = ""
     if _AI is not None and provider_key:
         try:
-            label = _AI.model_display_title(provider_key, model_key)
+            label = _AI.model_student_label(provider_key, model_key)
         except Exception:
             label = ""
-    if label:
-        view["provider"] = label
+    if provider_key:
         view["providerId"] = provider_key
         if model_key:
             view["model"] = model_key
+    if label:
+        view["provider"] = label
     return view
 
 
@@ -8454,8 +8462,14 @@ PROVIDERS_PROBE_ALL_SEC = 15.0
 PROVIDERS_MODELS_MIN_SEC = 5.0
 PROVIDERS_MODELS_ALL_MIN_SEC = 20.0
 # «Пинг всех моделей» — до PROBE_MODELS_MAX живых запросов подряд (ai.py),
-# поэтому пауза на эту кнопку длиннее, чем на одиночную проверку.
-PROVIDERS_MODELS_PROBE_SEC = 20.0
+# поэтому пауза на эту кнопку длиннее, чем на одиночную проверку. Она чуть
+# больше бюджета самого пинга (10 с): повторить сразу после того, как поток
+# закончился, человек имеет право, а долбить кнопку подряд — нет.
+PROVIDERS_MODELS_PROBE_SEC = 12.0
+# Жёсткий потолок жизни ЛЮБОГО потокового ответа (NDJSON). Генератор
+# ограничивает себя сам, но если он почему-то не остановится, соединение
+# закроет эта проверка, а не таймаут обратного прокси.
+STREAM_HARD_DEADLINE_SEC = 25.0
 
 
 def _providers_probe_allowed(key: str, interval: float) -> float:
@@ -8605,6 +8619,45 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers(); self.wfile.write(data)
+
+    def send_event_stream(self, events) -> None:
+        """Отдать поток событий (NDJSON) по мере готовности.
+
+        Не SSE: SSE требует `EventSource`, а он не умеет ни заголовки, ни
+        POST, ни куку админки «по-человечески» — а нам нужен ровно один
+        админский запрос со своим cookie. NDJSON читается обычным `fetch` +
+        `response.body.getReader()`: те же «строка — как появилась», но без
+        ограничений EventSource.
+
+        Потолок времени здесь ОБЯЗАТЕЛЕН: генератор сам себя ограничивает
+        бюджетом (10 с у пинга моделей), но если он почему-то не остановится,
+        соединение закроется по этой проверке, а не повиснет до таймаута
+        прокси. Ничего не бросаем: клиент мог отвалиться."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Robots-Tag", "noindex, nofollow")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_security_headers()
+        # Без Content-Length: длина неизвестна, поток закрывается концом генератора.
+        self.send_header("Connection", "close")
+        self.end_headers()
+        started = time.monotonic()
+        try:
+            for event in events:
+                if time.monotonic() - started > STREAM_HARD_DEADLINE_SEC:
+                    last = {"kind": "error", "error": "поток прерван по времени"}
+                    self.wfile.write(json.dumps(last, ensure_ascii=False).encode("utf-8") + b"\n")
+                    break
+                line = json.dumps(event, ensure_ascii=False).encode("utf-8")
+                self.wfile.write(line + b"\n")
+                self.wfile.flush()
+        except (OSError, ValueError):
+            return
+        try:
+            self.wfile.flush()
+        except (OSError, ValueError):
+            pass
 
     def send_rate_limited(self) -> None:
         """Честный 429 для API-флуда. Никогда не бросает."""
@@ -9121,6 +9174,37 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.finish_google_login(conn, identity, ip)
 
+    def finish_login_into(self, conn: sqlite3.Connection, user_id: int, provider: str,
+                          subject: str, email: str, ip: str, clear_nonce: list[str],
+                          *, touch: bool = False) -> bool:
+        """Посадить человека в аккаунт и отдать браузеру сессию.
+
+        Одна реализация на все пути входа (уже привязанная личность и вход в
+        найденный по адресу аккаунт): расходиться им нельзя, иначе заблоки-
+        рованный человек проходил бы одним путём и не проходил другим.
+
+        Возвращает True, если ответ уже отправлен (успех или отказ).
+        """
+        block = get_active_block(conn, user_id)
+        if block:
+            # Браузерный редирект, а не JSON: человек нажал кнопку входа и
+            # должен увидеть приложение с честным объяснением, а не сырой
+            # ответ сервера посреди цепочки редиректов.
+            self.send_redirect(oauth_return_url(self, "login", "error=blocked"),
+                               extra_cookies=clear_nonce)
+            return True
+        if touch:
+            touch_auth_identity(conn, provider, subject)
+        else:
+            link_auth_identity(conn, user_id, provider, subject, email)
+        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), user_id,
+                                           request_device_info(self),
+                                           request_device_identity(conn, self, user_id))
+        conn.commit()
+        auth_login_success(ip)
+        self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+        return True
+
     def finish_google_login(self, conn: sqlite3.Connection, identity: dict, ip: str) -> None:
         """Общая часть: решить, в кого входить, и отдать браузеру сессию."""
         provider = "google"
@@ -9130,36 +9214,27 @@ class Handler(BaseHTTPRequestHandler):
         current_id = existing_user_for(conn, self)
         linked_id = auth_identity_user(conn, provider, subject)
         if linked_id is not None:
-            # Уже привязанный адрес: обычный вход в свой же аккаунт.
-            if get_active_block(conn, linked_id):
-                # Браузерный редирект, а не JSON: человек нажал кнопку входа и
-                # должен увидеть приложение с честным объяснением, а не сырой
-                # ответ сервера посреди цепочки редиректов.
-                self.send_redirect(oauth_return_url(self, "login", "error=blocked"),
+            # Эта же личность уже привязана: обычный повторный вход.
+            self.finish_login_into(conn, linked_id, provider, subject, email, ip, clear_nonce,
+                                   touch=True)
+            return
+        # Личность ещё не привязана, но адрес может быть занят.
+        by_email = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if by_email is not None and by_email["id"] != current_id:
+            # У аккаунта по этому адресу УЖЕ есть привязка Google — значит,
+            # это не наш вход: либо другой Google-аккаунт, либо человек сменил
+            # почту в Google. Захватывать чужую личность нельзя.
+            if "google" in auth_provider_list(conn, by_email["id"]):
+                self.send_redirect(oauth_return_url(self, "login", "error=conflict"),
                                    extra_cookies=clear_nonce)
                 return
-            touch_auth_identity(conn, provider, subject)
-            new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), linked_id,
-                                               request_device_info(self),
-                                               request_device_identity(conn, self, linked_id))
-            conn.commit()
-            auth_login_success(ip)
-            self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
+            # Аккаунт с паролем (привязки нет). Адрес подтверждён провайдером,
+            # то есть доказано владение почтой — этого достаточно, чтобы войти
+            # в свой аккаунт, ровно как это делает вход по паролю. Привязываем
+            # личность, чтобы следующий вход был прямой.
+            self.finish_login_into(conn, by_email["id"], provider, subject, email, ip, clear_nonce)
             return
-        # Адрес у нас есть, но не привязан.
-        by_email = conn.execute("SELECT id, name FROM users WHERE email=?", (email,)).fetchone()
-        if by_email is not None and by_email["id"] != current_id:
-            # Чужой (или просто не наш) аккаунт с тем же адресом. Молча
-            # склеивать нельзя — это ровно тот путь, которым угоняют чужую
-            # учётку, поэтому просим пароль этого аккаунта.
-            pending = _OAUTH.sign_pending(oauth_state_secret(conn), {
-                "provider": provider, "subject": subject, "email": email,
-                "name": identity.get("name") or "",
-            })
-            self.send_redirect(oauth_return_url(self, "login", f"confirm={pending}"),
-                               extra_cookies=clear_nonce)
-            return
-        # Адреса у нас нет: это новый человек. Если он уже что-то наguestил
+        # Этого адреса у нас нет: новый человек. Если он уже что-то наработал
         # в этой сессии, привязываем к его же строке (весь учебный след
         # сохраняется), иначе заводим новую — как при регистрации.
         target_id = current_id
@@ -9194,53 +9269,6 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         auth_login_success(ip)
         self.send_redirect(oauth_return_url(self, "subject"), token=new_token, extra_cookies=clear_nonce)
-
-    def handle_auth_google_confirm(self, conn: sqlite3.Connection) -> None:
-        """POST /api/auth/google/confirm — привязка к существующему аккаунту.
-
-        Сценарий: адрес уже занят парольным аккаунтом. Никакой молчаливой
-        склейки — человек подтверждает пароль того аккаунта, и только тогда
-        личность к нему привязывается. Токен из ссылки одноразовый по времени
-        (10 минут) и подписан, поэтому подсунуть свой нельзя.
-        """
-        ip = client_ip(self)
-        if not auth_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
-            return
-        try:
-            payload = self.read_json()
-        except (json.JSONDecodeError, ValueError):
-            self.send_json({"error": "Некорректный запрос"}, 400)
-            return
-        if not isinstance(payload, dict):
-            self.send_json({"error": "Некорректный запрос"}, 400)
-            return
-        password = payload.get("password")
-        try:
-            pending = _OAUTH.read_pending(oauth_state_secret(conn), payload.get("pending"))
-        except _OAUTH.OAuthError:
-            self.send_json({"error": "Ссылка устарела. Войди через Google заново."}, 400)
-            return
-        row = conn.execute("SELECT id, password_hash FROM users WHERE email=?",
-                           (pending.get("email"),)).fetchone()
-        if not row or not row["password_hash"] or not isinstance(password, str) \
-                or not verify_password(password, row["password_hash"]):
-            auth_login_failed(ip)
-            self.send_json({"error": "Неверный пароль"}, 401)
-            return
-        account_id = int(row["id"])
-        if self.reject_if_blocked(conn, account_id):
-            return
-        link_auth_identity(conn, account_id, pending.get("provider") or "google",
-                           pending.get("subject") or "", pending.get("email"))
-        new_token, _ = rotate_user_session(conn, cookie_value(self, "ege_session"), account_id,
-                                           request_device_info(self),
-                                           request_device_identity(conn, self, account_id))
-        conn.commit()
-        auth_login_success(ip)
-        self.send_json({"ok": True, "user": auth_user_payload(conn, account_id),
-                        "requireSubjectChoice": True, "subjects": subjects_payload(),
-                        "subject": current_subject_for(conn, account_id)}, token=new_token)
 
     def handle_auth_google_unlink(self, conn: sqlite3.Connection) -> None:
         """POST /api/auth/google/unlink — отвязать Google от своего аккаунта.
@@ -10088,20 +10116,19 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout",
-                    "/api/auth/google/confirm", "/api/auth/google/unlink"):
+                    "/api/auth/google/unlink"):
             # Общий per-IP бакет: без него на /api/auth/* не было НИКАКОГО
             # ограничения, а auth_login_allowed считает только неудачи и
             # очищается на успехе. Скрипт без кук, меняя email, получал
             # неограниченное число 200-ответов, а register успевал завести
             # строку users ДО проверки дубля — то есть аккаунты-переростки.
-            # Внешний вход стоит в том же списке: confirm подтверждает пароль,
-            # unlink меняет доступ, и оба обязаны быть под тем же пределом.
+            # Внешний вход стоит в том же списке: unlink меняет доступ и
+            # обязан быть под тем же пределом.
             if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/auth/register": self.handle_auth_register(conn)
                 elif path == "/api/auth/login": self.handle_auth_login(conn)
-                elif path == "/api/auth/google/confirm": self.handle_auth_google_confirm(conn)
                 elif path == "/api/auth/google/unlink": self.handle_auth_google_unlink(conn)
                 else: self.handle_auth_logout(conn)
             except sqlite3.Error as exc:

@@ -75,6 +75,36 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
   t('no-slash param still empty', sb.routeParam() === '');
 }
 
+/* ---- 3b. currentRoute must ignore the return-parameter tail ----
+   Живой баг: сервер возвращает человека из Google на #/subject, а при
+   ошибке — на #/login?error=state. Хвост «?…» — это ПАРАМЕТРЫ, а не часть
+   имени раздела, но currentRoute() резал только по «/», поэтому маршрут
+   получался «login?error=state», ни один экран не совпадал, и render()
+   падал в dashboard. Там неонбордившийся человек видел онбординг — то есть
+   возврат из внешнего входа выглядел как «вход не сработал». */
+{
+  const loc = { hash: '' };
+  const sb = { location: loc, console };
+  vm.createContext(sb);
+  vm.runInContext(block(app, 'function currentRoute('), sb);
+  const cases = [
+    ['#/dashboard', 'dashboard'],
+    ['#/login', 'login'],
+    ['#/login?error=state', 'login'],
+    ['#/subject', 'subject'],
+    ['#/login?error=conflict&x=1', 'login'],
+    ['#/lesson/abc', 'lesson'],
+    ['#/lesson/abc?from=path', 'lesson'],
+    ['', 'dashboard'],
+    ['#/', 'dashboard'],
+  ];
+  for (const [hash, want] of cases) {
+    loc.hash = hash;
+    t(`currentRoute(${JSON.stringify(hash)}) === ${want}`, sb.currentRoute() === want,
+      `got ${JSON.stringify(sb.currentRoute())}`);
+  }
+}
+
 /* ---- 4. admin safeDecode ---- */
 {
   const sb = { console };

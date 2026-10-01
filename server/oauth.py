@@ -35,9 +35,8 @@ TOKEN_URL_DEFAULT = "https://oauth2.googleapis.com/token"
 USERINFO_URL_DEFAULT = "https://openidconnect.googleapis.com/v1/userinfo"
 # openid нужен для id_token, email — для адреса, profile — для имени.
 SCOPE = "openid email profile"
-# Сколько живёт state и «парковочный» токен ожидания подтверждения.
+# Сколько живёт state: вход должен укладываться в десять минут.
 STATE_TTL_SEC = 600
-PENDING_TTL_SEC = 600
 # Потолок одной сетевой операции к провайдеру. Вход не должен висеть дольше,
 # чем терпит человек, и тем более не должен блокировать поток сервера.
 HTTP_TIMEOUT_SEC = 12
@@ -190,44 +189,6 @@ def verify_state(secret: str, state: str, nonce_cookie: str | None, *,
     if not hmac.compare_digest(nonce, str(nonce_cookie)):
         raise OAuthBadState("state is bound to another browser")
     return nonce
-
-
-def sign_pending(secret: str, payload: dict, now: int | None = None) -> str:
-    """Подписанный «парковочный» токен: к кому привязывать, если нужен выбор.
-
-    Нужен для одного случая — Google вернул адрес, который уже занят
-    парольным аккаунтом. Тогда вход не выполняется, а токен уходит в адрес
-    приложения: человек подтверждает пароль, и только тогда идентичность
-    привязывается. В токене нет ничего, что стоило бы украсть по ту сторону
-    браузера: подпись без секрета не подделать, срок 10 минут.
-    """
-    if not secret:
-        raise OAuthBadState("no pending secret")
-    ts = int(now if now is not None else time.time())
-    body_dict = {"iat": ts, "p": payload}
-    body = _b64e(json.dumps(body_dict, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    return f"{body}.{_mac(secret, body)}"
-
-
-def read_pending(secret: str, token: str, *, max_age: int = PENDING_TTL_SEC,
-                 now: int | None = None) -> dict:
-    """Разобрать и проверить парковочный токен. Бросает OAuthBadState."""
-    raw, _, mac = str(token or "").partition(".")
-    if not raw or not mac:
-        raise OAuthBadState("malformed pending token")
-    if not hmac.compare_digest(_mac(secret, raw), mac):
-        raise OAuthBadState("pending token signature mismatch")
-    try:
-        parsed = json.loads(_b64d(raw).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, base64.binascii.Error) as exc:
-        raise OAuthBadState("pending token is not readable") from exc
-    if not isinstance(parsed, dict) or not isinstance(parsed.get("p"), dict):
-        raise OAuthBadState("pending token payload is broken")
-    issued = _int(parsed.get("iat"))
-    current = int(now if now is not None else time.time())
-    if issued is None or abs(current - issued) > max_age:
-        raise OAuthBadState("pending token expired")
-    return parsed["p"]
 
 
 # ---------------------------------------------------------------------------
