@@ -420,6 +420,14 @@ def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int,
             elif r["status"] == "cancelled":
                 history.append({"role": "tool", "tool_call_id": call_id,
                                 "content": "Отменено учеником."})
+            elif r["status"] == "dropped":
+                # Ученик не нажал «Применить», а задал другой вопрос: действие
+                # НЕ применено. Модели это обязано быть видно явно — иначе в её
+                # контексте остаётся вызов без результата («Ожидает
+                # подтверждения»), и она повторяет то же действие снова (ровно
+                # тот случай, что давал двойное подтверждение в чате 52).
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": "Ученик не подтвердил и задал другой вопрос — действие не применено."})
             else:
                 history.append({"role": "tool", "tool_call_id": call_id,
                                 "content": json.dumps(res, ensure_ascii=False)[:4000]})
@@ -11375,6 +11383,36 @@ class Handler(BaseHTTPRequestHandler):
                                         "suggests": finals[-1][1] if finals else [],
                                         "quota": quota,
                                         "usage": {"cost": 0}}, token=token); return
+                        # Брошенное подтверждение. Ученик нажал «Применить» не сразу
+                        # (или вообще ушёл), а задал НОВЫЙ вопрос — значит это
+                        # предложение больше неактуально. Раньше такой шаг висел
+                        # needs_confirm НАВСЕГДА: следующий обычный вопрос проходил
+                        # (блокировался только replaceLast), и модель в каждом
+                        # следующем ходе получала tool-вызов без результата
+                        # («Ожидает подтверждения») — то есть висящий вызов в
+                        # контексте, на который она отвечает повторным вызовом
+                        # того же действия. Это ровно тот механизм, что давал
+                        # двойное подтверждение в чате 52, только молча и на
+                        # все последующие ходы чата. Закрываем шаг сами: действие
+                        # НЕ применяется (ученик его не подтвердил), а история
+                        # получает честный результат. Кэш повтора тоже перестаёт
+                        # блокироваться (has_pending).
+                        dropped_ids = []
+                        try:
+                            pend_rows = conn.execute(
+                                "SELECT id FROM agent_messages"
+                                " WHERE thread_id=? AND status='needs_confirm'", (tid,)).fetchall()
+                            if pend_rows:
+                                dropped_ids = [int(r["id"]) for r in pend_rows]
+                                conn.execute("UPDATE agent_messages SET status='dropped'"
+                                             " WHERE thread_id=? AND status='needs_confirm'", (tid,))
+                                conn.commit()
+                        except sqlite3.Error:
+                            try:
+                                conn.rollback()
+                            except sqlite3.Error:
+                                pass
+                            dropped_ids = []
                         # Анти-лавиновая сетка (пользователь + сеть): ловит
                         # всплеск, а не «много за день» — числа и обоснование
                         # в server/ai.py. Продуктовая квота ходов (agent_quota_
@@ -11490,7 +11528,7 @@ class Handler(BaseHTTPRequestHandler):
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
-                                        "suggests": suggests,
+                                        "suggests": suggests, "dropped": dropped_ids,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
                                         "thread": {"id": tid, "title": thread_title,
                                                    "publicId": _agent_thread_public_id(thread)},

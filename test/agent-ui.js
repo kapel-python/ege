@@ -320,6 +320,15 @@ check("«Новый чат» не плодит пустые чаты (клиен
   // сервер вправе вернуть уже существующий пустой чат — в список он второй раз
   // не вставляется (иначе дубль строки)
   && /var known = findThreadByRef\(th\.id\)/.test(spaCode));
+check("брошенное подтверждение гасится на карточке, а не висит кнопками",
+  // data-step-id нужен, чтобы перерисовать карточку НА МЕСТЕ: перечитывать всю
+  // ленту нельзя — потерялась бы позиция прокрутки и только что напечатанный ответ.
+  spaCode.includes('li.setAttribute("data-step-id", String(st.id))')
+  && spaCode.includes("function markStepDropped")
+  && /\(res\.data\.dropped \|\| \[\]\)\.forEach\(function \(id\) \{ markStepDropped\(id\); \}\)/.test(spaCode)
+  // погашенный шаг — честная подпись, а не мёртвые «Применить/Отмена»
+  && /st\.status === "dropped"[\s\S]{0,200}Не применил/.test(spaCode)
+  && !/status === "dropped"[\s\S]{0,300}confirmStep\(st\.id, true/.test(spaCode));
 check("кэш раздела: список и переписка, привязан к аккаунту",
   spaCode.includes("cacheHasThreads") && spaCode.includes("cachedMessages")
   && spaCode.includes("cacheDrop") && spaCode.includes("MAX_CACHED_THREADS")

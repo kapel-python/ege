@@ -1315,6 +1315,11 @@
   // лоадер) и готовое содержимое (галочка, название, кнопки, «Подробнее»).
   function stepShell(st) {
     var li = el("li", "agent__step");
+    // id шага в разметке: ход, гасящий брошенное подтверждение, приходит с
+    // списком dropped, и карточку надо перерисовать НА МЕСТЕ — мёртвые кнопки
+    // «Применить/Отмена» на экране ждать бы нельзя (сервер уже ответит «Шаг
+    // уже обработан»).
+    if (st && st.id != null) li.setAttribute("data-step-id", String(st.id));
     var body = el("div", "agent__tbody");
     li.appendChild(body);
     return { li: li, body: body, st: st };
@@ -1329,6 +1334,24 @@
     mark = el("span", "agent__mark" + (st.kind === "action" ? "" : " is-read"));
     mark.appendChild(svgIcon(CHECK_D));
     return mark;
+  }
+  // Шаг, который ученик не подтвердил и ушёл задавать другой вопрос: действие
+  // НЕ применено. Раньше карточка навсегда оставалась с часиком и кнопками —
+  // и нажатие давало «Шаг уже обработан».
+  function stepDropped(st) {
+    var p = stepShell(st);
+    stepFill(p);
+    return p;
+  }
+  function markStepDropped(id, kind, label, args, result) {
+    if (!ui.live || id == null) return;
+    var node = ui.live.querySelector('.agent__step[data-step-id="' + Number(id) + '"]');
+    if (!node) return;
+    try {
+      stepFill({ li: node, body: node.querySelector(".agent__tbody"),
+                 st: { id: Number(id), kind: kind || "action", label: label || "",
+                       args: args || {}, result: result || {}, status: "dropped" } });
+    } catch (_) {}
   }
   function stepFill(p) {
     var st = p.st, body = p.body, li = p.li;
@@ -1355,6 +1378,10 @@
       cancel.addEventListener("click", function () { confirmStep(st.id, false, [apply, cancel]); });
       acts.appendChild(apply); acts.appendChild(cancel);
       body.appendChild(acts);
+    } else if (st.status === "dropped") {
+      // Честная подпись вместо кнопок: предложение не применено, потому что
+      // ученик его не подтвердил и задал другой вопрос.
+      body.appendChild(el("p", "", "Не применил — ты задал другой вопрос."));
     }
     var det = document.createElement("details");
     det.className = "agent__step-detail";
@@ -2402,6 +2429,12 @@
         assistantCard(steps, res.data.final || "", true, res.data.suggests);
       }
       if (res.data.thread) applyThreadTitle(res.data.thread);
+      // Ход погасил брошенные подтверждения (сервер закрыл шаг needs_confirm, на
+      // который ученик не нажал) — карточки перерисовываем на месте, иначе на
+      // экране остались бы живые кнопки «Применить», которые дают «Шаг уже
+      // обработан». Переписку не перечитываем: это потеряло бы позицию прокрутки
+      // и только что допечатанный ответ.
+      (res.data.dropped || []).forEach(function (id) { markStepDropped(id); });
       // Печать ответа держит композер закрытым (S.pendingBail) и снимет его
       // сама, когда допечатает последнее слово.
       return;

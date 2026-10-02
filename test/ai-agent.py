@@ -752,6 +752,87 @@ def main():
             finally:
                 conn5.close()
 
+            section("брошенное подтверждение не висит и не повторяет действие")
+            # Живой случай: ход просит действие, ученик НЕ жмёт «Применить», а
+            # задаёт новый вопрос. Раньше шаг оставался needs_confirm НАВСЕГДА, и
+            # модель в каждом следующем ходе получала tool-вызов без результата
+            # («Ожидает подтверждения») — то есть висящий вызов, на который она
+            # отвечает ПОВТОРНЫМ вызовом того же действия. Замер на моке, который
+            # повторяет действие, пока не увидит результат (как вела себя боевая
+            # модель в чате 52): без фикса — три одинаковые карточки «Применить»
+            # в ленте и три потраченных жетона, действие не применено.
+            cso = Client("10.12.0.30")
+            claim(cso, "Сирота")
+            stid = cso.request(base, "POST", "/api/agent/threads", {})[1]["thread"]["id"]
+
+            def orphan_repeat_chat(messages, tools, **kw):
+                """Повторяет действие, пока не увидит результата своего вызова."""
+                action_seen = False
+                resolved = False
+                for m in messages or []:
+                    if m.get("role") == "assistant":
+                        for tc in (m.get("tool_calls") or []):
+                            if (tc.get("function") or {}).get("name") == "update_profile":
+                                action_seen = True
+                    if m.get("role") == "tool":
+                        txt = str(m.get("content") or "")
+                        if "applied" in txt or "не применено" in txt or "Отменено" in txt:
+                            resolved = True
+                if action_seen and not resolved:
+                    return {"text": None, "tool_calls": [
+                        {"id": "orp", "name": "update_profile",
+                         "arguments": {"selfLevel": "base"}}]}
+                if not action_seen:
+                    return {"text": None, "tool_calls": [
+                        {"id": "oa", "name": "update_profile",
+                         "arguments": {"selfLevel": "base"}}]}
+                return {"text": "Профиль обновлён.", "tool_calls": []}
+
+            with lock:
+                keep_chat, keep_plain = ai.chat_with_tools, ai.chat
+                ai.chat_with_tools, ai.chat = orphan_repeat_chat, mock_plain
+            try:
+                st, bo1 = cso.request(base, "POST", "/api/agent/turns",
+                                      {"threadId": stid, "text": "зови меня Артём"})
+                check("ход 1 просит действие и ждёт подтверждения",
+                      st == 200 and bo1.get("pending") is True, f"{st} {str(bo1)[:160]}")
+                orphan_step = (bo1.get("steps") or [{}])[0].get("id")
+                st, bo2 = cso.request(base, "POST", "/api/agent/turns",
+                                      {"threadId": stid, "text": "а сколько я решаю?"})
+                check("новый вопрос НЕ предлагает действие снова",
+                      st == 200 and bo2.get("pending") is not True, f"{st} {str(bo2)[:200]}")
+                check("сервер говорит, какой шаг погас (dropped)",
+                      (bo2.get("dropped") or []) == [orphan_step],
+                      f"{bo2.get('dropped')} ждём {orphan_step}")
+                st, bo3 = cso.request(base, "POST", "/api/agent/turns",
+                                      {"threadId": stid, "text": "и ещё вопрос"})
+                check("и следующий ход тоже чист",
+                      st == 200 and bo3.get("pending") is not True, f"{st} {str(bo3)[:160]}")
+                conn6 = server.connect()
+                try:
+                    rows = conn6.execute(
+                        "SELECT id, status FROM agent_messages"
+                        " WHERE thread_id=? AND role='tool' ORDER BY seq", (stid,)).fetchall()
+                    stat = [dict(r) for r in rows]
+                    lvl = conn6.execute("SELECT self_level FROM user_subjects"
+                                        " WHERE user_id=(SELECT id FROM users WHERE name='Сирота')"
+                                        " AND subject='profile_math'").fetchone()
+                finally:
+                    conn6.close()
+                check("в базе ровно один шаг, и он погашен, а не ждёт подтверждения",
+                      len(stat) == 1 and stat[0]["status"] == "dropped", str(stat))
+                check("действие не применено (профиль не тронут)",
+                      lvl is None or not lvl["self_level"], str(dict(lvl) if lvl else None))
+                # «Применить» у погашенного шага честно отказывает, а не применяет
+                # действие задним числом.
+                st, boc = cso.request(base, "POST", "/api/agent/turns/confirm",
+                                      {"messageId": orphan_step, "approve": True})
+                check("«Применить» у погашенного шага -> 400, а не тихое применение",
+                      st == 400 and bool(boc.get("error")), f"{st} {str(boc)[:160]}")
+            finally:
+                with lock:
+                    ai.chat_with_tools, ai.chat = keep_chat, keep_plain
+
             section("ответ без tools: финал + одно списание")
             with lock:
                 script.clear()
