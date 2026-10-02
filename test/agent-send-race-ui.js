@@ -15,6 +15,15 @@
  * перезагрузка показывала вообще ничего (вопрос нигде не записан).
  * Фикс: поколение ленты feedGen — запоздавший GET не затирает свежую ленту.
  *
+ * БАГ 3 «сервер ещё считает» про СВОЙ ход (живой случай 02.10, чат
+ * OromZaL0DH, 13:08:52: POST 499, следом POST 400 AGENT_BUSY, ответ сервер
+ * дописал в 13:08:58). Клиент оборвал свой запрос, сервер считал дальше, ученик
+ * отправил тот же вопрос снова — и вместо тихого ожидания получал карточку
+ * «Сервер ещё считает, подождите 95 с», а готовый ответ можно было увидеть
+ * только после перезагрузки страницы. Фикс: AGENT_BUSY сначала трактуется как
+ * наш собственный ход — вопрос остаётся в ленте, ответ дорисовывается сам;
+ * карточка ожидания появляется, только если за окно watchAnswer ответа нет.
+ *
  * Требует playwright-core и Chromium (EGE_CHROME, ищется сам).
  */
 const fs = require("fs");
@@ -243,6 +252,82 @@ async function firstThreadId(jar) {
       await page.close();
       srv.proc.kill();
     }
+    /* ============ БАГ 3: свой же ход назван «сервер ещё считает» ============ */
+    /* Живой случай 02.10, чат OromZaL0DH (13:08:52). Клиент оборвал СВОЙ
+     * запрос (nginx 499 — телефон ушёл в фон или экран пересобрался), сервер
+     * продолжил считать. Ученик отправил тот же вопрос ещё раз и получил
+     * 400 AGENT_BUSY — а клиент вместо тихого ожидания показывал карточку
+     * «Сервер ещё считает, подождите 95 с» и снимал пузырёк вопроса. Ответ
+     * сервер дописал через 6 с, но увидеть его можно было только после
+     * перезагрузки страницы.
+     *
+     * Ожидание: пока слот держит наш собственный ход, «сервер считает» НЕ
+     * показывается, вопрос остаётся в ленте, а ответ дорисовывается сам. */
+    {
+      const srv = await startServer("slow");
+      BASE = `http://127.0.0.1:${srv.port}`;
+      const claim = await raw("POST", "/api/profile/claim",
+        { subject: "profile_math", onboarded: true, name: "Тест-СвойХод" }, "");
+      const jar = (claim.setCookie || []).map((c) => c.split(";")[0]).join("; ");
+      const { page, sel, errors } = await openAgent(browser, jar);
+      const TEXT = "поменяй мой профиль";
+      // Считаем POST'ы ходов: правильное поведение — ответ УЖЕ считался на
+      // сервере, поэтому повторный запрос не нужен. Старый код после карточки
+      // ожидания отправлял вопрос заново (и ждал весь остаток слота).
+      let turnsPosts = 0;
+      page.on("request", (r) => {
+        if (r.method() === "POST" && /\/api\/agent\/turns$/.test(new URL(r.url()).pathname)) turnsPosts++;
+      });
+      await page.fill(sel, TEXT);
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".agent__loader", { timeout: 15000 });
+      // Ровно то, что делает телефон: запрос жив, клиент от него отвязывается
+      // (499 в логах nginx), а сервер продолжает считать.
+      await page.click(".agent__stop");
+      // Ученик не понимает, что произошло, и отправляет тот же вопрос снова.
+      await page.fill(sel, TEXT);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(3000);
+      const mid = await page.evaluate(() => ({
+        busyModal: Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
+          (n) => /Сервер ещё считает/.test(n.textContent || "")),
+        bubbles: Array.prototype.map.call(document.querySelectorAll(".agent__msg-user"), (n) => n.textContent),
+      }));
+      check("БАГ3: свой же ход не назван «сервер ещё считает»", !mid.busyModal,
+        `карточка ожидания показана: ${mid.busyModal}`);
+      check("БАГ3: вопрос ученика остался в ленте", mid.bubbles.length >= 1,
+        JSON.stringify(mid.bubbles).slice(0, 160));
+      // Ответ обязан появиться САМ, без перезагрузки страницы.
+      const t0 = Date.now();
+      let appeared = true;
+      try {
+        await page.waitForFunction(() => Array.prototype.some.call(
+          document.querySelectorAll(".agent__ai"), (n) => /Первый ответ готов/.test(n.textContent || "")),
+          null, { timeout: 40000 });
+      } catch (_) { appeared = false; }
+      const took = Math.round((Date.now() - t0) / 1000);
+      check("БАГ3: ответ появился сам, без обновления страницы", appeared, `через ${took} с`);
+      // Ключевое отличие от старого поведения: сервер УЖЕ считал этот ответ, так
+      // что второй запрос не отправлялся. Старый код ждал остаток слота и
+      // спрашивал заново — это и есть «ничего не работает, помогает только
+      // перезагрузка».
+      check("БАГ3: вопрос НЕ переспрашивался заново (ответ был уже в работе)",
+        turnsPosts === 2, `POST /api/agent/turns: ${turnsPosts} (ожидаем 2 — первый оборван, второй отбит AGENT_BUSY)`);
+      check("БАГ3: ответ вернулся быстро, не дожидаясь остатка слота (~95 с)",
+        took < 25, `ушло ${took} с`);
+      const end = await page.evaluate(() => ({
+        bubbles: Array.prototype.map.call(document.querySelectorAll(".agent__msg-user"), (n) => n.textContent),
+        busyModal: Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
+          (n) => /Сервер ещё считает/.test(n.textContent || "")),
+      }));
+      check("БАГ3: вопрос в ленте ОДИН (без дубля)", end.bubbles.length === 1,
+        JSON.stringify(end.bubbles).slice(0, 200));
+      check("БАГ3: карточка ожидания так и не появлялась", !end.busyModal);
+      check("БАГ3: без JS-ошибок", errors.length === 0, errors.slice(0, 2).join(" | "));
+      await page.close();
+      srv.proc.kill();
+    }
+
   } catch (e) {
     console.error("ОШИБКА ХАРНЕССА:", (e && e.message) || e);
     process.exit(2);

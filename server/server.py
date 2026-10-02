@@ -155,18 +155,30 @@ def AGENT_REPLY_MAX() -> int:
 # и длинный ход успевал его протухнуть: следующий вопрос в том же треде вставал
 # в цикл параллельно живому, а два писателя в один тред — это перепутанные
 # шаги в ленте. TTL теперь — окно жизни, а не длительность.
-_AGENT_BUSY: dict[int, float] = {}
+_AGENT_BUSY: dict[int, tuple] = {}
 _AGENT_BUSY_LOCK = threading.Lock()
 _AGENT_BUSY_TTL_SEC = 95.0
+_AGENT_BUSY_TEXT_MAX = 400
 
 
-def _agent_busy_acquire(thread_id: int) -> bool:
+def _agent_busy_acquire(thread_id: int, text: str = "") -> bool:
+    """Взять слот треда. text — вопрос этого хода (обрезанный).
+
+    Текст лежит рядом со слотом не для красоты: по нему клиент отличает
+    «слот держит МОЙ собственный ход» от «слот держит чужой ход». Живой случай
+    02.10: клиент оборвал свой запрос (499), сервер считал дальше, ученик
+    отправил тот же вопрос снова и получил 400 AGENT_BUSY — а клиент показывал
+    «сервер ещё считает, подождите 95 с» и снимал пузырёк вопроса, хотя
+    собственный ответ приходил через несколько секунд. С текстом хода в
+    ответе AGENT_BUSY первый случай опознаётся точно, и клиент молча ждёт
+    ответа вместо вранья про чужой занятый сервер."""
     now = time.monotonic()
+    keep = str(text or "")[:_AGENT_BUSY_TEXT_MAX]
     with _AGENT_BUSY_LOCK:
-        until = _AGENT_BUSY.get(int(thread_id), 0)
-        if until > now:
+        entry = _AGENT_BUSY.get(int(thread_id))
+        if entry is not None and entry[0] > now:
             return False
-        _AGENT_BUSY[int(thread_id)] = now + _AGENT_BUSY_TTL_SEC
+        _AGENT_BUSY[int(thread_id)] = (now + _AGENT_BUSY_TTL_SEC, keep)
         return True
 
 
@@ -184,7 +196,17 @@ def _agent_busy_locked(thread_id: int) -> bool:
     флагу клиент опрашивает тред и повторяет сразу, как слот освободился.
     """
     with _AGENT_BUSY_LOCK:
-        return _AGENT_BUSY.get(int(thread_id), 0) > time.monotonic()
+        entry = _AGENT_BUSY.get(int(thread_id))
+        return bool(entry) and entry[0] > time.monotonic()
+
+
+def _agent_busy_text(thread_id: int) -> str:
+    """Вопрос хода, который держит слот (пусто — слот свободен или ход без текста)."""
+    with _AGENT_BUSY_LOCK:
+        entry = _AGENT_BUSY.get(int(thread_id))
+    if not entry or entry[0] <= time.monotonic():
+        return ""
+    return entry[1]
 
 
 def _agent_busy_touch(thread_id: int) -> None:
@@ -192,14 +214,16 @@ def _agent_busy_touch(thread_id: int) -> None:
     now = time.monotonic()
     with _AGENT_BUSY_LOCK:
         key = int(thread_id)
-        if key in _AGENT_BUSY:
-            _AGENT_BUSY[key] = now + _AGENT_BUSY_TTL_SEC
+        entry = _AGENT_BUSY.get(key)
+        if entry is not None:
+            _AGENT_BUSY[key] = (now + _AGENT_BUSY_TTL_SEC, entry[1])
 
 
 def _agent_busy_retry_after(thread_id: int) -> int:
     """Сколько секунд ждать до освобождения слота (для ответа AGENT_BUSY)."""
     with _AGENT_BUSY_LOCK:
-        until = _AGENT_BUSY.get(int(thread_id), 0)
+        entry = _AGENT_BUSY.get(int(thread_id))
+        until = entry[0] if entry else 0
     return max(1, int(until - time.monotonic()) + 1) if until else 1
 
 
@@ -11211,10 +11235,11 @@ class Handler(BaseHTTPRequestHandler):
                                         "steps": [], "suggests": [],
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла без нового жетона.
-                    if not _agent_busy_acquire(tid):
+                    if not _agent_busy_acquire(tid, "подтверждение действия"):
                         wait = _agent_busy_retry_after(tid)
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
-                                        "retryAfter": wait}, 400, token=token,
+                                        "retryAfter": wait, "busyText": _agent_busy_text(tid)},
+                                       400, token=token,
                                        headers={"Retry-After": str(wait)}); return
                     try:
                         try:
@@ -11321,10 +11346,11 @@ class Handler(BaseHTTPRequestHandler):
                         text = _AGENT.validate_turn_text(payload.get("text", ""))
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400, token=token); return
-                    if not _agent_busy_acquire(tid):
+                    if not _agent_busy_acquire(tid, text):
                         wait = _agent_busy_retry_after(tid)
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
-                                        "retryAfter": wait}, 400, token=token,
+                                        "retryAfter": wait, "busyText": _agent_busy_text(tid)},
+                                       400, token=token,
                                        headers={"Retry-After": str(wait)}); return
                     # replaceLast:true — «перегенерировать ответ» / «изменить и
                     # отправить» из меню последнего сообщения: ход ЗАМЕНЯЕТ

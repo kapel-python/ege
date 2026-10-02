@@ -320,6 +320,19 @@ check("«Новый чат» не плодит пустые чаты (клиен
   // сервер вправе вернуть уже существующий пустой чат — в список он второй раз
   // не вставляется (иначе дубль строки)
   && /var known = findThreadByRef\(th\.id\)/.test(spaCode));
+check("AGENT_BUSY про свой же ход не пугает «сервер ещё считает»",
+  // busyText — вопрос, который держит слот: совпал с нашим, значит считается
+  // НАШ ответ и ждать надо молча (живой случай 02.10, чат OromZaL0DH).
+  /var busyText = String\(\(res\.data && res\.data\.busyText\) \|\| ""\)\.trim\(\)/.test(spaCode)
+  && /var mineBusy = !!busyText && busyText === String\(text \|\| ""\)\.trim\(\)/.test(spaCode)
+  && /if \(mineBusy\) \{[\s\S]{0,220}watchAnswer\(/.test(spaCode)
+  // watchAnswer умеет честно сдаться: окно истекло, ответа нет — вот тогда
+  // карточка ожидания и повтор уместны
+  && spaCode.includes("function watchAnswer(tid, text, tries, onGiveUp)")
+  && /else if \(onGiveUp\) onGiveUp\(\);/.test(spaCode)
+  // S.turn обнуляется ВМЕСТЕ с S.abort: иначе abort-guard на следующем маунте
+  // видит «контроллер есть, хода нет» и рвёт живой запрос (nginx 499)
+  && /Date\.now\(\) - t\.startedAt > REATTACH_MS\) \{[\s\S]{0,220}if \(S\.abort === t\.ctrl\) S\.abort = null;/.test(spaCode));
 check("брошенное подтверждение гасится на карточке, а не висит кнопками",
   // data-step-id нужен, чтобы перерисовать карточку НА МЕСТЕ: перечитывать всю
   // ленту нельзя — потерялась бы позиция прокрутки и только что напечатанный ответ.

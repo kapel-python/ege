@@ -2355,7 +2355,18 @@
     // (90 с цикла + вызов финала): иначе ответ живого хода приходит в
     // обработчики прошлого монтажа, их токены уже не совпадают — и ход
     // пропадает молча, вместе с вопросом ученика.
-    if (Date.now() - t.startedAt > REATTACH_MS) { if (S.turn === t) S.turn = null; return; }
+    // Окно подхвата истекло — ход оставляем. S.turn обнуляем ВМЕСТЕ с S.abort:
+    // иначе на следующем маунте abort-guard увидит «контроллер есть, хода нет»
+    // и сам порвёт ещё живой запрос (nginx 499) — ровно та ловушка, что описана
+    // в screenAgent. Раз мы от хода отказались, рвём его сами и честно.
+    if (Date.now() - t.startedAt > REATTACH_MS) {
+      if (S.turn === t) {
+        S.turn = null;
+        if (S.abort === t.ctrl) S.abort = null;
+        try { if (t.ctrl) t.ctrl.abort(); } catch (_) {}
+      }
+      return;
+    }
     if (Number(t.threadId) !== Number(S.currentId)) return;
     t.claimedBy = S.mountGen;
     var g = ++S.navGen, mg = S.mountGen;
@@ -2400,13 +2411,18 @@
      один слепой setTimeout на 4 с: ход в 20 с успевал мимо, и человек оставался
      с лентой, где ответ так и не появился. Теперь смотрим тред несколько раз
      и останавливаемся, как только ответ (или шаг) появился. */
-  function watchAnswer(tid, text, tries) {
-    if (tid == null || tries <= 0 || Number(S.currentId) !== Number(tid)) return;
-    if (S.busy) { later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries); }); return; }
+  function watchAnswer(tid, text, tries, onGiveUp) {
+    if (tid == null || Number(S.currentId) !== Number(tid)) return;
+    if (S.busy) {
+      if (tries <= 0) { if (onGiveUp) onGiveUp(); return; }
+      later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries, onGiveUp); });
+      return;
+    }
     turnAnswered(tid, text).then(function (answered) {
       if (Number(S.currentId) !== Number(tid)) return;
       if (answered) { loadThreadMessages(); return; }
-      if (tries > 1) later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries - 1); });
+      if (tries > 1) later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries - 1, onGiveUp); });
+      else if (onGiveUp) onGiveUp();
     });
   }
   function settleTurn(turn, g, mg, skel, bubble, text, res) {
@@ -2440,6 +2456,31 @@
       return;
     }
     if (res.status === 400 && res.data && res.data.code === "AGENT_BUSY") {
+      // Слот чата держит ход. Если это НАШ СОБСТВЕННЫЙ ход с тем же текстом —
+      // ждать и показывать нечего: считается наш ответ, он придёт через пару
+      // секунд. Живой случай 02.10, чат OromZaL0DH, 13:08:52: POST 499 (клиент
+      // оборвал свой запрос — телефон ушёл в фон или экран пересобрался), следом
+      // POST 400 AGENT_BUSY, ответ сервер дописал в 13:08:58. Раньше здесь
+      // снимался пузырёк вопроса и показывалась карточка «Сервер ещё считает,
+      // подождите 95 с» — враньё про собственный ответ, из-за которого готовый
+      // ответ был виден только после перезагрузки страницы.
+      //
+      // busyText — вопрос, который держит слот (его кладёт сервер). Совпал с
+      // нашим — это наш ход: молча ждём и дорисовываем ответ. Не совпал (или
+      // сервер не сказал) — слот держит чужой ход, и «сервер занят» сказать
+      // честно, сразу.
+      var busyText = String((res.data && res.data.busyText) || "").trim();
+      var mineBusy = !!busyText && busyText === String(text || "").trim();
+      if (mineBusy) {
+        syncBusy();
+        watchAnswer(turn.threadId, text, WATCH_TRIES, function () {
+          if (Number(S.currentId) !== Number(turn.threadId)) return;
+          if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+          retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30),
+                        { replaceLast: turn.replaceLast });
+        });
+        return;
+      }
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
       syncBusy();   // ход мёртв, ждёт модалка — её fire() сам проверит S.busy
       retryWhenFree(text, Math.max(1, Number(res.data.retryAfter) || 30),
