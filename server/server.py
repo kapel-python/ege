@@ -9548,7 +9548,7 @@ class Handler(BaseHTTPRequestHandler):
         # Отказ при явной привязке возвращает человека ТУДА, откуда он нажал
         # кнопку, — в профиль. Экран входа для этого случая врал бы дважды:
         # он принадлежит другому аккаунту и на залогиненном человеке вообще
-        # рисует «Вы уже вошли», то есть молча съедал бы причину отказа.
+        # рисует «Ты уже в аккаунте», то есть молча съедал бы причину отказа.
         refusal_route = "profile" if intent == "link" and current_id is not None else "login"
         if linked_id is not None and intent == "link" and current_id is not None \
                 and linked_id != current_id:
@@ -10489,7 +10489,8 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(ref, str):
                 ref = ref.strip()
             return _SUB.confirm_payment(conn, ref, _SUB.PROVIDER_MOCK,
-                                        _SUB.PLUS_ESSAY_LIMIT, _SUB.PLUS_AGENT_LIMIT)
+                                        _SUB.PLUS_ESSAY_LIMIT, _SUB.PLUS_AGENT_LIMIT,
+                                        int(user_id))
         if path == "/api/subscription/cancel":
             return _SUB.cancel_subscription(conn, int(user_id))
         if path == "/api/subscription/resume":

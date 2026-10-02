@@ -360,7 +360,7 @@ async function logout() {
   A.usersCache = null;
   location.hash = "";
   renderLogin();
-  toast("Вы вышли из админ-панели");
+  toast("Сессия админки завершена");
 }
 
 /* ---------------- экран входа ---------------- */
@@ -371,12 +371,12 @@ function renderLogin(error = "") {
       <div class="admin-login__card">
         <span class="admin-login__mark">ege <em>easy</em></span>
         <div class="admin-login__title">Админ-панель</div>
-        <div class="admin-login__sub">Закрытый раздел управления платформой. Введите админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к вашему аккаунту.</div>
+        <div class="admin-login__sub">Закрытый раздел управления платформой. Введите админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к твоему аккаунту.</div>
         <form class="admin-login__form" id="loginForm">
           <input class="a-input" type="password" id="pwInput" placeholder="Админ-пароль" autocomplete="current-password" autofocus required>
           ${error ? `<div class="admin-login__error" id="loginError">${esc(error)}</div>` : ""}
           <button class="btn btn--primary btn--lg" type="submit" id="loginBtn" style="justify-content:center">Войти</button>
-          <div class="admin-login__hint">Текущий аккаунт: <span class="mono" id="whoami">проверяем…</span>.<br>Если нужно войти под другим аккаунтом — сначала выйдите в основном приложении.</div>
+          <div class="admin-login__hint">Текущий аккаунт: <span class="mono" id="whoami">проверяем…</span>.<br>Если нужно войти под другим аккаунтом — сначала выйди в основном приложении.</div>
         </form>
       </div>
     </div>`;
@@ -1145,7 +1145,7 @@ function openDeleteUserModal(p) {
     <div class="a-modal__title" style="color:var(--danger)">Удалить аккаунт ${esc(p.accountId || "")}?</div>
     <div class="a-modal__desc">Будут удалены сам аккаунт и ВСЕ его данные: ${progressSummary}, а также admin-сессии. Действие необратимо.</div>
     <div class="a-modal__form">
-      <div class="a-modal__warn"><b>Подтверждение:</b> введите Account ID <span class="mono">${esc(p.accountId || "")}</span></div>
+      <div class="a-modal__warn"><b>Подтверждение:</b> введи Account ID <span class="mono">${esc(p.accountId || "")}</span></div>
       <input class="a-input mono" id="fDel" placeholder="${esc(p.accountId || "")}" autocomplete="off">
       <div id="mErr"></div>
     </div>
@@ -1677,11 +1677,11 @@ async function screenAudit() {
       <tbody>
         ${entries.map((e) => {
           const [label, cls] = AUDIT_LABELS[e.action] || [e.action, ""];
-          const target = e.targetAccount ? `<a href="#/users/${esc(e.targetAccount)}" class="mono" style="color:var(--accent)">${esc(e.targetAccount)}</a>${e.targetId === A.session?.user?.id ? " (вы)" : ""}` : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
+          const target = e.targetAccount ? `<a href="#/users/${esc(e.targetAccount)}" class="mono" style="color:var(--accent)">${esc(e.targetAccount)}</a>${e.targetId === A.session?.user?.id ? " (ты)" : ""}` : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
           return `<tr>
             <td style="white-space:nowrap">${fmtDateTime(e.ts)}</td>
             <td><span class="a-chip ${cls}">${esc(label)}</span></td>
-            <td class="mono">${esc(e.actorAccount || "—")}${e.actorId === A.session?.user?.id ? " (вы)" : ""}</td>
+            <td class="mono">${esc(e.actorAccount || "—")}${e.actorId === A.session?.user?.id ? " (ты)" : ""}</td>
             <td>${target}</td>
             <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis" class="mono">${esc(e.detail || "")}</td>
           </tr>`;

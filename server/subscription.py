@@ -74,6 +74,33 @@ PROVIDER_MOCK = "mock"
 PLUS_ESSAY_LIMIT = 20
 PLUS_AGENT_LIMIT = 40
 
+# Публичный id платежа: 10 символов A–Z/a–z/0–9, как public_id тредов
+# наставника (та же узнаваемая форма). Последовательные INTEGER id наружу
+# не отдаём: они перечисляются (1, 2, 3…) и выдают масштаб биллинга.
+# На входе принимаем обе формы (public_id — основная, int — легаси),
+# но только со сверкой владельца. Проверка владельца при этом остаётся —
+# public_id это второй слой защиты, а не замена ей.
+PAY_PUBLIC_ID_LEN = 10
+PAY_PUBLIC_ID_ALPHABET = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "abcdefghijklmnopqrstuvwxyz"
+                          "0123456789")
+
+
+def _new_payment_public_id() -> str:
+    """Свежий кандидат в public_id. Только цифры не допускаем: HTTP-слой
+    приводит цифровые строки к int (легаси-форма id), и такой public_id
+    уехал бы не в ту ветку разбора."""
+    while True:
+        cand = "".join(secrets.choice(PAY_PUBLIC_ID_ALPHABET)
+                        for _ in range(PAY_PUBLIC_ID_LEN))
+        if not cand.isdigit():
+            return cand
+
+
+def is_payment_public_id(raw) -> bool:
+    return (isinstance(raw, str) and len(raw) == PAY_PUBLIC_ID_LEN
+            and all(c in PAY_PUBLIC_ID_ALPHABET for c in raw))
+
 
 def _env_int(name: str, default: int, minimum: int = 0) -> int:
     try:
@@ -172,6 +199,15 @@ def ensure_subscription_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_payments_user"
                  " ON subscription_payments(user_id)")
     try:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(subscription_payments)")}
+        if "public_id" not in cols:
+            conn.execute("ALTER TABLE subscription_payments ADD COLUMN public_id TEXT")
+    except sqlite3.Error:
+        pass
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_payments_public"
+                 " ON subscription_payments(public_id)")
+    _backfill_payment_public_ids(conn)
+    try:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
         if "subscription" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN subscription TEXT")
@@ -188,6 +224,69 @@ def ensure_subscription_schema(conn: sqlite3.Connection) -> None:
 
 
 def _row_to_dict(row) -> dict | None:
+    if row is None:
+        return None
+    try:
+        return dict(row)
+    except (TypeError, ValueError):
+        return None
+
+
+def _backfill_payment_public_ids(conn: sqlite3.Connection) -> None:
+    """Выдать public_id строкам, заведённым до колонки. Идемпотентно:
+    трогает только NULL. Присоединяется к чужой транзакции, как остальные
+    мутаторы (коммит/откат за вызывателем); свою неявную — коммитит сам,
+    иначе финальный `if not in_transaction` в ensure решит, что писать
+    нечего, и close откатит UPDATE."""
+    try:
+        rows = conn.execute("SELECT id FROM subscription_payments"
+                            " WHERE public_id IS NULL").fetchall()
+    except sqlite3.Error:
+        return
+    if not rows:
+        return
+    own = not conn.in_transaction
+    try:
+        for (pid,) in rows:
+            for _ in range(20):
+                try:
+                    conn.execute("UPDATE subscription_payments SET public_id=?"
+                                 " WHERE id=? AND public_id IS NULL",
+                                 (_new_payment_public_id(), int(pid)))
+                    break
+                except sqlite3.IntegrityError:
+                    continue
+        if own:
+            conn.commit()
+    except Exception:
+        if own:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        raise
+
+
+def _insert_payment(conn: sqlite3.Connection, user_id: int, amount: int,
+                    period: str, provider: str, provider_payment_id: str,
+                    key: str | None, now_ms: int) -> tuple[int, str]:
+    """Вставить pending-платёж, вернуть (id, public_id). Коллизия public_id
+    (UNIQUE) практически невозможна, но обрабатывается повтором, а не 500:
+    неуникальным здесь бывает только чужой ключ — а он отфильтрован раньше."""
+    for _ in range(20):
+        public_id = _new_payment_public_id()
+        try:
+            cur = conn.execute("""INSERT INTO subscription_payments
+                            (user_id, subscription_id, amount_kopecks, currency, period,
+                             status, provider, provider_payment_id, idempotency_key,
+                             public_id, payload_json, created_at_ms, paid_at_ms)
+                            VALUES (?,NULL,?,'RUB',?, 'pending',?,?,?, ?, '{}',?,NULL)""",
+                         (int(user_id), amount, period, provider,
+                          provider_payment_id, key, public_id, now_ms))
+            return int(cur.lastrowid), public_id
+        except sqlite3.IntegrityError:
+            continue
+    raise ValueError("не удалось завести платёж")
     if row is None:
         return None
     try:
@@ -330,16 +429,17 @@ def _top_up_buckets(conn: sqlite3.Connection, user_id: int, essay_limit: int,
                     agent_limit: int, now_ms: int) -> None:
     """Долить карманы до полного при активации: «лимиты уже увеличены».
     Трогаем только аккаунтные бакеты (u:/agent:); device-бакеты антиабуза
-    не трогаем сознательно — иначе одна покупка отмывала бы ферму."""
+    не трогаем сознательно — иначе одна покупка отмывала бы ферму.
+    Только вверх: грант админа выше Plus покупка не срезает (лимит считается
+    как max, остаток обязан ему соответствовать)."""
     ensure_ai_usage_table(conn)
-    conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                 " VALUES (?,?,NULL)", (f"u:{int(user_id)}", essay_limit))
-    conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL WHERE owner=?",
-                 (essay_limit, f"u:{int(user_id)}"))
-    conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                 " VALUES (?,?,NULL)", (f"agent:{int(user_id)}", agent_limit))
-    conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL WHERE owner=?",
-                 (agent_limit, f"agent:{int(user_id)}"))
+    for owner, level in ((f"u:{int(user_id)}", int(essay_limit)),
+                         (f"agent:{int(user_id)}", int(agent_limit))):
+        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                     " VALUES (?,?,NULL)", (owner, level))
+        conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL"
+                     " WHERE owner=? AND count<?",
+                     (level, owner, level))
 
 
 def _activate_row(conn: sqlite3.Connection, user_id: int, period: str,
@@ -416,19 +516,13 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
                 _end(conn, own, True)
                 return _payment_payload(existing)
         provider_payment_id = f"{provider}_{secrets.token_hex(12)}"
-        cur = conn.execute("""INSERT INTO subscription_payments
-                        (user_id, subscription_id, amount_kopecks, currency, period,
-                         status, provider, provider_payment_id, idempotency_key,
-                         payload_json, created_at_ms, paid_at_ms)
-                        VALUES (?,NULL,?,'RUB',?, 'pending',?,?,?, '{}',?,NULL)""",
-                     (int(user_id), amount, period, provider,
-                      provider_payment_id, key, now_ms))
-        pid = int(cur.lastrowid)
+        pid, public_id = _insert_payment(conn, int(user_id), amount, period,
+                                         provider, provider_payment_id, key, now_ms)
         _end(conn, own, True)
     except Exception:
         _end(conn, own, False)
         raise
-    return {"ok": True, "paymentId": pid, "providerPaymentId": provider_payment_id,
+    return {"ok": True, "paymentId": public_id, "providerPaymentId": provider_payment_id,
             "amountKopecks": amount, "currency": "RUB", "period": period,
             "status": PAY_PENDING, "provider": provider, "mock": provider == PROVIDER_MOCK}
 
@@ -436,10 +530,17 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
 def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
                     provider: str = PROVIDER_MOCK,
                     essay_limit: int = PLUS_ESSAY_LIMIT,
-                    agent_limit: int = PLUS_AGENT_LIMIT) -> dict:
+                    agent_limit: int = PLUS_AGENT_LIMIT,
+                    expected_user_id: int | None = None) -> dict:
     """Подтвердить платёж и активировать/продлить подписку. Повторный вызов
     по тому же платежу — идемпотентный no-op (срок дважды не растёт).
-    Mock-подтверждения запрещены без EGE_SUBSCRIPTION_MOCK=1."""
+    Mock-подтверждения запрещены без EGE_SUBSCRIPTION_MOCK=1.
+    С expected_user_id чужой платёж неотличим от несуществующего (404):
+    без проверки любой вошедший подтверждал бы чужой pending и активировал
+    чужую подписку. Ссылка — public_id (10 символов, как у тредов
+    наставника): последовательные INTEGER id наружу не отдаём и в первую
+    очередь не принимаем. Легаси-форма (int id) оставлена для совместимости
+    и тоже требует владельца."""
     ensure_subscription_schema(conn)
     if provider == PROVIDER_MOCK and not subscription_mock_enabled():
         raise PermissionError("mock-оплата выключена (EGE_SUBSCRIPTION_MOCK=1)")
@@ -451,13 +552,23 @@ def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
     own = _begin(conn)
     try:
         if isinstance(payment_ref, int) or str(payment_ref).isdigit():
+            # Легаси-форма: INTEGER id. Перечислима (1, 2, 3…), поэтому
+            # без expected_user_id её принимает только внутренний вызов.
+            if expected_user_id is None:
+                raise KeyError("payment not found")
             row = conn.execute("SELECT * FROM subscription_payments WHERE id=?",
                                (int(payment_ref),)).fetchone()
+        elif is_payment_public_id(payment_ref):
+            row = conn.execute("SELECT * FROM subscription_payments WHERE public_id=?",
+                               (payment_ref,)).fetchone()
         else:
             row = conn.execute("SELECT * FROM subscription_payments WHERE provider_payment_id=?",
                                (str(payment_ref),)).fetchone()
         pay = _row_to_dict(row)
         if not pay:
+            raise KeyError("payment not found")
+        if (expected_user_id is not None
+                and int(pay.get("user_id") or 0) != int(expected_user_id)):
             raise KeyError("payment not found")
         if pay.get("provider") != provider:
             raise ValueError("provider не совпадает с платежом")
@@ -465,7 +576,7 @@ def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
             _end(conn, own, True)
             sub = get_subscription(conn, int(pay["user_id"]))
             return {"ok": True, "already": True,
-                    "paymentId": int(pay["id"]), "status": PAY_SUCCEEDED,
+                    "paymentId": pay.get("public_id"), "status": PAY_SUCCEEDED,
                     "expiresAt": (sub or {}).get("expires_at_ms")}
         if pay.get("status") != PAY_PENDING:
             raise ValueError(f"платёж уже {pay.get('status')}, подтвердить нельзя")
@@ -484,12 +595,12 @@ def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
     except Exception:
         _end(conn, own, False)
         raise
-    return {"ok": True, "already": False, "paymentId": int(pay["id"]),
+    return {"ok": True, "already": False, "paymentId": pay.get("public_id"),
             "status": PAY_SUCCEEDED, **act}
 
 
 def _payment_payload(pay: dict) -> dict:
-    return {"ok": True, "paymentId": int(pay["id"]),
+    return {"ok": True, "paymentId": pay.get("public_id"),
             "providerPaymentId": pay.get("provider_payment_id"),
             "amountKopecks": int(pay.get("amount_kopecks") or 0),
             "currency": pay.get("currency") or "RUB",
@@ -587,14 +698,24 @@ def webhook_recurring(conn: sqlite3.Connection, user_id: int, provider_payment_i
     now_ms = NOW_MS()
     own = _begin(conn)
     try:
-        cur = conn.execute("""INSERT INTO subscription_payments
-                        (user_id, subscription_id, amount_kopecks, currency, period,
-                         status, provider, provider_payment_id, idempotency_key,
-                         payload_json, created_at_ms, paid_at_ms)
-                        VALUES (?,NULL,?,'RUB',?, 'succeeded',?,?,NULL,'{}',?,?)""",
-                     (int(user_id), int(amount_kopecks), period, provider,
-                      provider_payment_id, now_ms, now_ms))
-        pid = int(cur.lastrowid)
+        pid = None
+        public_id = ""
+        for _ in range(20):
+            public_id = _new_payment_public_id()
+            try:
+                cur = conn.execute("""INSERT INTO subscription_payments
+                                (user_id, subscription_id, amount_kopecks, currency, period,
+                                 status, provider, provider_payment_id, idempotency_key,
+                                 public_id, payload_json, created_at_ms, paid_at_ms)
+                                VALUES (?,NULL,?,'RUB',?, 'succeeded',?,?,NULL,?,'{}',?,?)""",
+                             (int(user_id), int(amount_kopecks), period, provider,
+                              provider_payment_id, public_id, now_ms, now_ms))
+                pid = int(cur.lastrowid)
+                break
+            except sqlite3.IntegrityError:
+                continue
+        if pid is None:
+            raise ValueError("не удалось записать платёж")
         act = _activate_row(conn, int(user_id), period, provider, now_ms,
                             essay_limit, agent_limit)
         conn.execute("UPDATE subscription_payments SET subscription_id=? WHERE id=?",
@@ -603,7 +724,7 @@ def webhook_recurring(conn: sqlite3.Connection, user_id: int, provider_payment_i
     except Exception:
         _end(conn, own, False)
         raise
-    return {"ok": True, "already": False, "paymentId": pid, **act}
+    return {"ok": True, "already": False, "paymentId": public_id, **act}
 
 
 def cancel_subscription(conn: sqlite3.Connection, user_id: int,
@@ -664,14 +785,22 @@ def admin_grant(conn: sqlite3.Connection, user_id: int, period: str,
     try:
         act = _activate_row(conn, int(user_id), period, PROVIDER_MANUAL,
                             now_ms, essay_limit, agent_limit)
-        conn.execute("""INSERT INTO subscription_payments
-                        (user_id, subscription_id, amount_kopecks, currency, period,
-                         status, provider, provider_payment_id, idempotency_key,
-                         payload_json, created_at_ms, paid_at_ms)
-                        VALUES (?,?,0,'RUB',?, 'succeeded','manual',NULL,NULL,?,?,?)""",
-                     (int(user_id), act["subscriptionId"], period,
-                      json.dumps({"note": str(note)[:200]}, ensure_ascii=False),
-                      now_ms, now_ms))
+        for _ in range(20):
+            try:
+                conn.execute("""INSERT INTO subscription_payments
+                                (user_id, subscription_id, amount_kopecks, currency, period,
+                                 status, provider, provider_payment_id, idempotency_key,
+                                 public_id, payload_json, created_at_ms, paid_at_ms)
+                                VALUES (?,?,0,'RUB',?, 'succeeded','manual',NULL,NULL,?,?,?,?)""",
+                             (int(user_id), act["subscriptionId"], period,
+                              _new_payment_public_id(),
+                              json.dumps({"note": str(note)[:200]}, ensure_ascii=False),
+                              now_ms, now_ms))
+                break
+            except sqlite3.IntegrityError:
+                continue
+        else:
+            raise ValueError("не удалось записать платёж")
         _end(conn, own, True)
     except Exception:
         _end(conn, own, False)
@@ -701,29 +830,41 @@ def admin_revoke(conn: sqlite3.Connection, user_id: int,
 
 
 def admin_refund(conn: sqlite3.Connection, user_id: int,
-                 payment_id: int | None = None,
+                 payment_id: int | str | None = None,
                  now_ms: int | None = None) -> dict:
     """Возврат денег: помечает платёж refunded и гасит подписку (возврат без
     отзыва доступа — это подарок, а не возврат). Без payment_id берётся
-    последний успешный платёж; явный id обязан быть succeeded — повторный
-    возврат того же платежа невозможен. История хранит refunded вечно:
-    деньги видны в аудите как возвращённые, а не как доход."""
+    последний успешный платёж; явный id (INTEGER легаси или public_id)
+    обязан быть succeeded — повторный возврат того же платежа невозможен.
+    История хранит refunded вечно: деньги видны в аудите как возвращённые,
+    а не как доход."""
     ensure_subscription_schema(conn)
     now_ms = int(now_ms) if now_ms is not None else NOW_MS()
+    public_ref: str | None = None
     if payment_id is not None:
         if isinstance(payment_id, bool):
             raise ValueError("paymentId должен быть числом")
-        try:
-            payment_id = int(payment_id)
-        except (TypeError, ValueError):
-            raise ValueError("paymentId должен быть числом")
+        if isinstance(payment_id, str) and not payment_id.isdigit():
+            if not is_payment_public_id(payment_id):
+                raise ValueError("paymentId должен быть числом")
+            public_ref = payment_id
+            payment_id = None
+        else:
+            try:
+                payment_id = int(payment_id)
+            except (TypeError, ValueError):
+                raise ValueError("paymentId должен быть числом")
     own = _begin(conn)
     try:
-        if payment_id is None:
+        if payment_id is None and public_ref is None:
             row = conn.execute("""SELECT * FROM subscription_payments
                                   WHERE user_id=? AND status=?
                                   ORDER BY id DESC LIMIT 1""",
                                (int(user_id), PAY_SUCCEEDED)).fetchone()
+        elif public_ref is not None:
+            row = conn.execute("SELECT * FROM subscription_payments"
+                               " WHERE public_id=? AND user_id=?",
+                               (public_ref, int(user_id))).fetchone()
         else:
             row = conn.execute("SELECT * FROM subscription_payments WHERE id=? AND user_id=?",
                                (payment_id, int(user_id))).fetchone()
@@ -766,14 +907,15 @@ def payment_history(conn: sqlite3.Connection, user_id: int, limit: int = 50,
         raise ValueError("limit должен быть 1..200")
     if not 0 <= offset <= 1_000_000_000:
         raise ValueError("offset вне диапазона")
-    rows = conn.execute("""SELECT id, amount_kopecks, currency, period, status,
+    rows = conn.execute("""SELECT id, public_id, amount_kopecks, currency, period, status,
                                   provider, provider_payment_id, created_at_ms, paid_at_ms
                            FROM subscription_payments WHERE user_id=?
                            ORDER BY id DESC LIMIT ? OFFSET ?""",
                         (int(user_id), limit, offset)).fetchall()
     total = conn.execute("SELECT COUNT(*) AS c FROM subscription_payments WHERE user_id=?",
                          (int(user_id),)).fetchone()
-    items = [{"id": r["id"], "amountKopecks": r["amount_kopecks"],
+    items = [{"id": r["id"], "publicId": r["public_id"],
+              "amountKopecks": r["amount_kopecks"],
               "currency": r["currency"], "period": r["period"], "status": r["status"],
               "provider": r["provider"],
               "providerPaymentId": r["provider_payment_id"],

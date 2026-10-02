@@ -1759,7 +1759,7 @@ function subjectStateCardHTML(state = subjectContentState(), options = {}) {
     ? `В разделе «${name}» уже заведён отдельный прогресс. Уроки, задания и прогноз появятся после подключения материалов.`
     : topic
       ? `Тема «${topicDisplayName(topic)}» зарегистрирована в курсе, но её урок и практика ещё не подключены. Мы не показываем пустые переходы — карта и профиль уже работают.`
-      : `В разделе «${name}» пока нет доступных уроков или заданий. Выберите другой предмет или загляните позже.`;
+      : `В разделе «${name}» пока нет доступных уроков или заданий. Выбери другой предмет или загляни позже.`;
   const compact = options.compact ? " subject-state-card--compact" : "";
   return `<section class="subject-state-card subject-state-card--${state.empty ? "empty" : "locked"}${compact}" role="status" aria-live="polite">
     <div class="subject-state-card__icon">${icon(state.empty ? "clock" : "lock")}</div>
@@ -6931,7 +6931,7 @@ function openInfoDialog(opts) {
    перерисовке профиля (сверка auth, возврат из соседней вкладки, повторный
    render) окно не выскакивает заново — как и любая другая причина отказа
    внешнего входа. Вызывается из screenProfile: экран входа этот случай
-   показать не может (на залогиненном человеке он рисует «Вы уже вошли»). */
+   показать не может (на залогиненном человеке он рисует «Ты уже в аккаунте»). */
 function showGoogleLinkRefusal() {
   const reason = hashQueryValue("error");
   const refusal = GOOGLE_LINK_REFUSALS[reason];
@@ -7049,7 +7049,7 @@ async function revokeDeviceSession(id) {
       try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
       try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}
       await Store.refreshAfterAuth();
-      toast("Вы вышли из аккаунта на этом устройстве.", "", "check");
+      toast("Сессия на этом устройстве завершена.", "", "check");
       go("login");
       return;
     }
@@ -7299,7 +7299,7 @@ const GOOGLE_ERROR_TEXT = {
    Это НЕ отказ во входе: человек нажал «добавь вход к моему аккаунту», его
    аккаунт и сессия целы, ничего не переключилось. Поэтому причина
    показывается не полосой на экране входа (он про чужой аккаунт и на
-   залогиненном человеке рисует «Вы уже вошли», то есть молча съедает
+   залогиненном человеке рисует «Ты уже в аккаунте», то есть молча съедает
    объяснение), а окном в профиле — там, где живёт кнопка. */
 const GOOGLE_LINK_REFUSALS = {
   taken: {
@@ -7333,7 +7333,7 @@ function screenLogin(root) {
     return;
   }
   if (Store.auth && Store.auth.registered) {
-    root.innerHTML = authScreenShell("Вы уже вошли",
+    root.innerHTML = authScreenShell("Ты уже в аккаунте",
       `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
       `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
          <button class="btn btn--primary" onclick="go('profile')">В профиль</button>
@@ -7358,7 +7358,7 @@ function screenLogin(root) {
     </form>
     ${googleSignInHTML("Войти через Google")}
     <div class="auth-note">Гостевой прогресс на этом устройстве не переносится в существующий аккаунт.
-      Чтобы сохранить его, <a href="#/register" onclick="go('register');return false">зарегистрируйтесь</a>.</div>
+      Чтобы сохранить его, <a href="#/register" onclick="go('register');return false">зарегистрируйся</a>.</div>
     <div class="auth-switch">Нет аккаунта? <a href="#/register" onclick="go('register');return false">Зарегистрироваться</a></div>`);
   // Фокус намеренно НЕ ставим: на телефоне он поднимает клавиатуру сразу
   // при открытии экрана, закрывает половину формы и выглядит как «сайт
@@ -7527,7 +7527,7 @@ async function submitLogin(event) {
     // обычный refresh после выбора флага уже не видит.
     pendingSubjectChoice = true;
     try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
-    toast("Вы вошли в аккаунт", "", "check");
+    toast("Ты в аккаунте", "", "check");
     go("subject");
   } catch (error) {
     authFormFail(authFormError(error, "Не удалось войти. Попробуй ещё раз."));
@@ -7576,7 +7576,7 @@ async function logoutAccount() {
   // свежего bootstrap через refreshAfterAuth — fail-closed.
   try { AdminInbox.reset(); } catch (_) {}
   await Store.refreshAfterAuth();
-  toast("Вы вышли из аккаунта. Прогресс сохранён.", "", "check");
+  toast("Сессия завершена. Прогресс сохранён.", "", "check");
   go("login");
 }
 

@@ -170,6 +170,10 @@ def main():
               s == 200 and co["status"] == "pending" and co["amountKopecks"] == 9900
               and co["currency"] == "RUB" and co["mock"] is True, co)
         pid = co["paymentId"]
+        check("paymentId — публичный id (10 символов, не число)",
+              isinstance(pid, str) and len(pid) == 10 and not pid.isdigit()
+              and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+                      for c in pid), pid)
         s, co2 = request(user, base, "/api/subscription/checkout", "POST",
                           {"period": "year", "idempotencyKey": "k-1"})
         check("повтор с тем же ключом — тот же платёж",
@@ -195,6 +199,12 @@ def main():
                           {"paymentId": pid})
         check("повторный confirm идемпотентен",
               s == 200 and ok2.get("already") is True and ok2["expiresAt"] == exp1, ok2)
+        legacy = db("SELECT id FROM subscription_payments WHERE public_id=?", (pid,))
+        s, ok3 = request(user, base, "/api/subscription/confirm", "POST",
+                         {"paymentId": legacy[0]["id"] if legacy else -1})
+        check("легаси-confirm по int id работает у владельца",
+              s == 200 and ok3.get("already") is True
+              and ok3.get("paymentId") == pid, ok3)
         s, body = request(user, base, "/api/subscription/checkout", "POST",
                            {"period": "month", "idempotencyKey": "k-1"})
         check("ключ завершённого платежа 409, а не старый счёт",
@@ -309,6 +319,10 @@ def main():
         check("у записи есть деньги и провайдер",
               all(set(p) >= {"amountKopecks", "currency", "period", "status", "provider"}
                   for p in hist["payments"]), hist["payments"])
+        s, full = request(user, base, "/api/subscription/payments?limit=50&offset=0")
+        check("история отдаёт publicId того же платежа",
+              s == 200 and any(p.get("publicId") == pid for p in full["payments"]),
+              [p.get("publicId") for p in full["payments"]][:5])
         s, hist2 = request(user2, base, "/api/subscription/payments", "GET", None, "10.9.0.2")
         check("чужие платежи не видны", s == 200 and hist2["payments"] == [], hist2)
         s, body = request(user, base, "/api/subscription/payments?limit=500")
@@ -342,6 +356,13 @@ def main():
         s, body = request(admin, base, f"/api/admin/users/{target2}/subscription", "POST",
                            {"action": "zap"})
         check("неизвестное админ-действие 400", s == 400, f"{s} {body}")
+        manual_pub = db("SELECT public_id FROM subscription_payments WHERE user_id="
+                        "(SELECT id FROM users WHERE account_id=?) AND provider='manual'",
+                        (target2,))
+        s, res = request(admin, base, f"/api/admin/users/{target2}/subscription", "POST",
+                         {"action": "refund", "paymentId": manual_pub[0]["public_id"]})
+        check("refund по publicId работает",
+              s == 200 and res["subscription"]["active"] is False, res)
         # Доливка при активации не зависит от того, трогал ли пользователь
         # лимитные endpoints раньше: таблицы бакетов может не быть вовсе.
         db_exec("DROP TABLE ai_usage")
