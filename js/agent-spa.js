@@ -964,7 +964,26 @@
     // она сносила оптимистичный пузырёк и скелетон, а прилетевший ответ хода
     // отбрасывался сторожем поколений — лента пустела молча, и при сбое
     // модели перезагрузка показывала вообще ничего (вопрос нигде не записан).
-    if (!leaving && S.turn && !S.turn.dead && Number(S.turn.threadId) === Number(id)) return;
+    // Возврат на раздел из другого экрана — другой случай: каркас только что
+    // пересобран (buildLayout) и лента пуста, поэтому «ничего не делать»
+    // оставляло человека с пустым чатом посреди живого хода (а после
+    // перезагрузки страницы — с видом «можно отправлять», будто вопрос
+    // пропал). Пустую ленту восстанавливаем: история из кэша + пузырёк и
+    // скелетон через reattachTurn, ход остаётся своим (detached=false),
+    // чтобы композер был занят до ответа.
+    if (!leaving && S.turn && !S.turn.dead && Number(S.turn.threadId) === Number(id)) {
+      if (ui.live && ui.live.childNodes.length) return;
+      S.turn.detached = false;
+      syncBusy();
+      var _cur = currentThread();
+      if (ui.title) ui.title.textContent = _cur ? (_cur.title || "Новый чат") : "Нет чатов";
+      syncHash();
+      var _cached = cachedMessages(id);
+      if (_cached) paintMessages(_cached);
+      else feedLoader("Читаем переписку…");
+      reattachTurn();
+      return;
+    }
     S.navGen++;
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
     if (leaving && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
@@ -2180,11 +2199,12 @@
         // Раньше здесь был безусловный paint — первое сообщение в новом чате
         // регулярно превращалось в пустоту: пузырёк и «Думаю…» сносились,
         // а при сбое модели перезагрузка показывала вообще ничего.
-        if (!force && fg !== (S.feedGen || 0)) { reattachTurn(); return; }
+        if (!force && fg !== (S.feedGen || 0)) { reattachTurn(); showServerBusy(wantId, res); return; }
         // Ничего не изменилось — не перерисовываем: у человека останутся
         // раскрытые «Подробнее» и позиция ленты.
         if (!sameMessages(cached, msgs)) paintMessages(msgs);
         reattachTurn();
+        showServerBusy(wantId, res);
         return;
       }
       if (res.status === 400 && res.data && res.data.code === "THREAD_BAD_REF") {
@@ -2406,6 +2426,37 @@
       if (text != null && (msgs[lastUser].content || "").trim() !== String(text).trim()) return false;
       return msgs.length - 1 > lastUser;   // после вопроса есть шаг или ответ
     }).catch(function () { return false; });
+  }
+  /* Перезагрузка страницы посреди хода: локального S.turn уже нет (состояние
+     вкладки сброшено), а вопрос в базе появится только после ответа модели —
+     без подстраховки лента выглядела бы как «вопрос пропал, можно отправлять».
+     Сервер держит слот хода (busy + busyText) — показываем его как пузырёк и
+     скелетон и ждём ответ polling-ом, вместо пустого вида. Свой живой ход
+     (S.turn) уже подхвачен reattachTurn — его не трогаем. */
+  function showServerBusy(wantId, res) {
+    if (!res || !res.data || !res.data.busy) { S._busyWatch = null; return; }
+    var t = S.turn;
+    if (t && !t.dead && Number(t.threadId) === Number(wantId)) { S._busyWatch = null; return; }
+    if (!ui.live) return;
+    var bt = String((res.data && res.data.busyText) || "").trim();
+    if (bt) {
+      var hasBubble = false, users = ui.live.querySelectorAll(".agent__msg-user");
+      for (var i = 0; i < users.length; i++) {
+        if ((users[i].textContent || "").trim() === bt) { hasBubble = true; break; }
+      }
+      if (!hasBubble) userBubble(bt);
+    }
+    if (!ui.live.querySelector(".agent__loader")) skeletonCard();
+    showEmpty(false);
+    // Один цикл ожидания на (чат, текст): повторные заходы loadThreadMessages,
+    // пока слот занят, не должны плодить параллельные опросы.
+    var wk = String(wantId) + "\n" + bt;
+    if (S._busyWatch === wk) return;
+    S._busyWatch = wk;
+    // Композер остаётся свободным (локального хода нет), но повторная
+    // отправка упрётся в AGENT_BUSY — там уже есть ветка mineBusy с молчаливым
+    // ожиданием, а не враньём про «сервер занят».
+    watchAnswer(wantId, bt || null, WATCH_TRIES, function () { loadThreadMessages(true); });
   }
   /* Дождаться ответа, который сервер считает после обрыва. Раньше здесь был
      один слепой setTimeout на 4 с: ход в 20 с успевал мимо, и человек оставался

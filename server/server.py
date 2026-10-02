@@ -12400,6 +12400,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True,
                                     "thread": _agent_thread_payload(thread),
                                     "busy": _agent_busy_locked(tid),
+                                    "busyText": _agent_busy_text(tid) if _agent_busy_locked(tid) else "",
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
