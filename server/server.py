@@ -1823,21 +1823,36 @@ def set_user_email(conn: sqlite3.Connection, user_id: int, email: str) -> str | 
         return None
     if cur.rowcount != 1:
         return None
+    # Запись в ленту — best-effort и БЕЗ commit: коммитит вызывающий одним
+    # пакетом вместе с привязкой и сессией. Внутренний commit здесь когда-то
+    # был, и он фиксировал смену почты РАНЬШЕ привязки: при отказе дальше
+    # (замок БД, обрыв) аккаунт оставался с новой почтой, но без личности —
+    # половина входа.
     try:
         conn.execute("INSERT INTO timeline(user_id, subject, created_at, text, client_id) "
                      "VALUES (?,?,?,?,?)",
                      (int(user_id), current_subject_for(conn, user_id), now_iso(),
                       "Почта аккаунта обновлена при входе через Google", "auth-google"))
-        conn.commit()
     except sqlite3.Error:
         pass
     return previous
 
 
-def touch_auth_identity(conn: sqlite3.Connection, provider: str, subject: str) -> None:
+def touch_auth_identity(conn: sqlite3.Connection, provider: str, subject: str,
+                        email: str | None = None) -> None:
+    """Отметить вход по уже привязанной личности. С адресом — ещё и
+    синхронизировать его: человек мог сменить почту в Google (тот же
+    аккаунт, новый адрес), и без этого users.email и email привязки
+    протухали бы молча — та же пара разных почт, ради которой заводили
+    set_user_email, только на повторных входах."""
     try:
-        conn.execute("UPDATE auth_identities SET last_login_at=? WHERE provider=? AND subject=?",
-                     (now_iso(), provider, subject))
+        if email:
+            conn.execute("UPDATE auth_identities SET last_login_at=?, email=? "
+                         "WHERE provider=? AND subject=?",
+                         (now_iso(), email, provider, subject))
+        else:
+            conn.execute("UPDATE auth_identities SET last_login_at=? WHERE provider=? AND subject=?",
+                         (now_iso(), provider, subject))
     except sqlite3.Error:
         pass
 
@@ -9402,7 +9417,11 @@ class Handler(BaseHTTPRequestHandler):
                                extra_cookies=clear_nonce)
             return True
         if touch:
-            touch_auth_identity(conn, provider, subject)
+            # Повторный вход по той же личности: время — всегда, адрес — тоже
+            # (в Google его могли сменить). Почта аккаунта следует за
+            # подтверждённой, как и при первой привязке.
+            set_user_email(conn, user_id, email)
+            touch_auth_identity(conn, provider, subject, email)
         else:
             # Аккаунт найден по этому адресу и привязки ещё не было — то есть
             # человек пришёл с адресом, отличным от почты аккаунта (сменил

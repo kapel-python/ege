@@ -1244,8 +1244,10 @@ async function render() {
   // Выбор предмета — первый шаг входа, и онбординг его не перехватывает:
   // `onboarded` — признак ТЕКУЩЕГО предмета, поэтому вошедший человек с
   // пройденным онбордингом по другим предметам не должен проходить его
-  // заново (живой баг входа через Google).
-  const postLoginRoute = route === "subject" && Store.auth && Store.auth.registered;
+  // заново (живой баг входа через Google). Гейт — живая сессия (accountId),
+  // а не registered: после отвязки единственного входа registered=false при
+  // живой сессии, и такой человек тоже должен видеть пикер, а не онбординг.
+  const postLoginRoute = route === "subject" && !!Store.accountId;
   if (!Store.state.onboarded && !postLoginRoute && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
   // Убираем старый футер сразу, ещё до ленивой загрузки формул. На фокусных
@@ -6566,8 +6568,13 @@ function revalidateProfileAuth() {
     const u = (session && session.user) || null;
     const reg = !!(u && u.registered);
     const email = (u && u.email) || null;
+    const providers = Array.isArray(u && u.providers) ? u.providers.map(String) : null;
     const cur = Store.auth || { registered: false, email: null };
-    if (!!cur.registered === reg && (cur.email || null) === email) {
+    const curProviders = Array.isArray(cur.providers) ? cur.providers.map(String) : [];
+    const sameProviders = providers !== null
+      && providers.length === curProviders.length
+      && providers.every((p) => curProviders.indexOf(p) >= 0);
+    if (!!cur.registered === reg && (cur.email || null) === email && sameProviders) {
       // Auth-срез совпал, но серверный isAdmin мог измениться в другой вкладке
       // (вход в /admin): синхронизируем молча, без перерисовки посреди профиля.
       if (session && typeof session.isAdmin === "boolean" && Store.isAdmin !== session.isAdmin) {
@@ -6582,8 +6589,11 @@ function revalidateProfileAuth() {
     // экранов входа и регистрации после любого пересчёта профиля (например
     // после смены аккаунта в соседней вкладке или выхода из аккаунта).
     // Признак «вход настроен» задаёт сервер, и клиент не имеет права его
-    // выбрасывать вместе с несовпавшими полями.
-    Store.auth = { ...cur, registered: reg, email };
+    // выбрасывать вместе с несовпавшими полями. Привязку (providers) тоже
+    // подтягиваем, когда сервер её отдал: иначе чип «Google» в профиле
+    // протухал после привязки/отвязки в соседней вкладке.
+    Store.auth = { ...cur, registered: reg, email,
+                   ...(providers !== null ? { providers } : {}) };
     if (session && typeof session.isAdmin === "boolean" && Store.isAdmin !== session.isAdmin) {
       Store.isAdmin = session.isAdmin;
       if (!session.isAdmin) { try { AdminInbox.reset(); } catch (_) {} }
@@ -7365,7 +7375,10 @@ function screenRegister(root) {
 }
 
 function screenLoginSubject(root) {
-  if (!Store.auth || !Store.auth.registered) {
+  // Гейт — наличие СЕССИИ (accountId), а не способа входа (registered):
+  // человек, отвязавший единственный Google, остаётся залогиненным
+  // (аккаунт и сессия живы), и «Сначала войди» ему врал бы.
+  if (!Store.accountId) {
     root.innerHTML = authScreenShell("Сначала войди",
       "Выбор предмета доступен после входа в аккаунт.",
       `<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
@@ -8285,7 +8298,9 @@ function bootstrapApp() {
       try {
         // Только что заведённый аккаунт (fresh=1) сюда не доходит: его маршрут
         // уже сменён на /dashboard, а его ждёт онбординг с выбором предмета.
-        if (currentRoute() === "subject" && Store.auth && Store.auth.registered
+        // Гейт — живая сессия (accountId): registered гаснет после отвязки
+        // единственного входа при живой сессии.
+        if (currentRoute() === "subject" && Store.accountId
             && hashQueryValue("fresh") !== "1") {
           pendingSubjectChoice = true;
           try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}

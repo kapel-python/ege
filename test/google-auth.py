@@ -434,6 +434,49 @@ def main():
             check("привязка одна", len(rows(server, "SELECT 1 FROM auth_identities")) == 1)
 
             # ---------------------------------------------------------------
+            # ---------------------------------------------------------------
+            section("5b. Смена почты в Google синхронизируется при повторном входе")
+            # Та же личность (тот же sub), но Google отдал новый адрес: человек
+            # сменил почту в Google. Раньше touch-ветка обновляла только время
+            # входа, и users.email вместе с email привязки протухали молча —
+            # та же пара разных почт, ради которой заводили set_user_email,
+            # только на повторных входах.
+            fake.identity = {"sub": "google-sub-1", "email": "guy-new@example.com",
+                             "name": "Гай Кей", "email_verified": True}
+            renamer, renamer_jar = make_device()
+            st, hd, _ = request(renamer, base, "/api/auth/google")
+            st, hd, _ = request_url(renamer, location_of(hd))
+            st, hd, _ = request_url(renamer, location_of(hd))
+            check("вход с новой почтой того же Google проходит",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") is None,
+                  fragment_of(location_of(hd)))
+            st, _, session_renamed = request(renamer, base, "/api/auth/session")
+            check("это тот же аккаунт, а не новый",
+                  session_renamed["user"]["accountId"] == google_account,
+                  session_renamed.get("user"))
+            check("почта аккаунта обновлена на новую подтверждённую",
+                  session_renamed["user"]["email"] == "guy-new@example.com",
+                  session_renamed.get("user"))
+            check("почта привязки обновлена тоже",
+                  rows(server, "SELECT email FROM auth_identities WHERE subject='google-sub-1'")[0]["email"]
+                  == "guy-new@example.com")
+            check("новых строк users нет", count_users(server) == before_users + 1,
+                  count_users(server))
+            # Возвращаем прежний адрес тем же путём (ещё один повторный вход):
+            # секция 6 ниже рассчитывает, что guy@example.com занят именно
+            # этим аккаунтом, и ждёт 409 на повторную регистрацию.
+            fake.identity = {"sub": "google-sub-1", "email": "guy@example.com",
+                             "name": "Гай Кей", "email_verified": True}
+            restorer, restorer_jar = make_device()
+            st, hd, _ = request(restorer, base, "/api/auth/google")
+            st, hd, _ = request_url(restorer, location_of(hd))
+            st, hd, _ = request_url(restorer, location_of(hd))
+            st, _, session_restored = request(restorer, base, "/api/auth/session")
+            check("адрес вернулся обратно тем же путём",
+                  session_restored["user"]["email"] == "guy@example.com"
+                  and session_restored["user"]["accountId"] == google_account,
+                  session_restored.get("user"))
+
             section("6. Занятый адрес = обычный вход, как по паролю")
             reg, reg_jar = make_device()
             st, _, _ = request(reg, base, "/api/profile/claim", "POST",

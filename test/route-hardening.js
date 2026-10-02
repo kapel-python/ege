@@ -192,6 +192,27 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
   const row = block(app, 'function googleRowHTML(');
   t('блок в профиле показывается по наличию аккаунта, а не registered',
     !!row && /Store\.accountId && auth\.googleEnabled/.test(row) && !/auth\.registered &&/.test(row));
+
+  // Экраны после отвязки единственного входа (живая сессия, registered=false):
+  // гейт везде — accountId, иначе залогиненный видел бы «Сначала войди».
+  const subj = block(app, 'function screenLoginSubject(');
+  t('пикер предмета доступен по живой сессии, а не по registered',
+    !!subj && /if \(!Store\.accountId\)/.test(subj));
+  t('пикер после входа не зависит от registered',
+    !!subj && !/Store\.auth && Store\.auth\.registered/.test(subj));
+  t('флаг выбора предмета поднимается по живой сессии',
+    /currentRoute\(\) === "subject" && Store\.accountId/.test(app));
+  t('онбординг не перехватывает выбор предмета у живой сессии',
+    /postLoginRoute = route === "subject" && !!Store\.accountId/.test(app));
+
+  // Пересчёт профиля в соседней вкладке обязан замечать смену привязки:
+  // раньше сравнение шло только по registered/email, и providers протухал.
+  const reval = block(app, 'function revalidateProfileAuth(');
+  t('сверка профиля сравнивает и привязки, а не только registered/email',
+    !!reval && /sameProviders/.test(reval));
+  t('сверка профиля подтягивает привязки с сервера',
+    !!reval && /\.\.\.\(providers !== null \? \{ providers \} : \{\}\)/.test(reval)
+      || /providers !== null \? \{ providers \} :/.test(reval));
 }
 
 /* ---- 7. Отказ явной привязки Google: окно в профиле, а не тихий вход ----
