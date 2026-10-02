@@ -218,7 +218,7 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
 /* ---- 7. Отказ явной привязки Google: окно в профиле, а не тихий вход ----
    Живой случай: человек нажал «Привязать Google» и выбрал адрес, который уже
    привязан к ЧУЖОМУ профилю. Сервер отдавал error=conflict, но уводил на
-   #/login?error=…, где залогиненный человек видит «Вы уже вошли» — то есть
+   #/login?error=…, где залогиненный человек видит «Ты уже в аккаунте» — то есть
    причина съедалась молча (а ветка «личность уже привязана» и вовсе сажала
    его в чужой аккаунт). Здесь контракт: причина едет в профиль, там окно в
    общем стиле .dlg, и параметры возврата снимаются ровно один раз. */
@@ -320,6 +320,39 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
   t('bootstrap-срез отдаёт почту и без registered',
     /"email": row\["email"\] if row else None/.test(statePayload)
     && !/if registered else None/.test(statePayload));
+}
+
+/* ---- 8. Отвязка Google — только через окно, кнопка фирменная ----
+   Живое требование: кнопка «Отвязать Google» сразу ничего не делает — сначала
+   окно в общем .dlg-стиле объясняет, что будет. Длинного текста под кнопкой
+   нет, его сжатая версия живёт в окне. Кнопка в профиле — та же фирменная,
+   что на экранах входа (один логотип на всех кнопках). */
+{
+  t('логотип Google один на все кнопки (константа)',
+    /const GOOGLE_LOGO_SVG =/.test(app)
+    && (app.match(/\$\{GOOGLE_LOGO_SVG\}/g) || []).length >= 2);
+  const row2 = block(app, 'function googleRowHTML(');
+  t('кнопка в профиле — фирменная (.auth-google со знаком)',
+    !!row2 && /class="auth-google/.test(row2) && /GOOGLE_LOGO_SVG/.test(row2));
+  t('под кнопкой нет длинных пояснений (они переехали в окно)',
+    !!row2 && !/Отвязать можно в любой момент/.test(row2)
+    && !/При переходе выбери аккаунт/.test(row2)
+    && !/единственный способ зайти/.test(row2));
+  t('короткий статус остался (подключён / не подключён)',
+    !!row2 && /подключён/.test(row2));
+  const ask = block(app, 'function askUnlinkGoogle(');
+  t('клик открывает окно подтверждения, а не отвязывает сразу',
+    !!ask && /openConfirmDialog\(\{/.test(ask) && !/AuthAPI\.unlinkGoogle/.test(ask));
+  t('окно честно говорит: останешься в аккаунте, вход отключится',
+    !!ask && /останешься в этом аккаунте/.test(ask) && /отключится/.test(ask));
+  t('окно предупреждает, когда пароля нет',
+    !!ask && /hasPassword/.test(ask) && /с другого устройства/.test(ask));
+  t('подтверждение выполняет отвязку',
+    /onConfirm: doUnlinkGoogle/.test(ask));
+  t('старое имя unlinkGoogle ведёт в то же окно',
+    /function unlinkGoogle\(\) \{ askUnlinkGoogle\(\); \}/.test(app));
+  t('смена подписи не сносит логотип (только span)',
+    /caption\.textContent = label/.test(app));
 }
 
 console.log(fails ? fails + ' FAILURES' : 'ALL ROUTE-HARDENING OK');

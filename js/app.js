@@ -7099,23 +7099,18 @@ function googleRowHTML() {
   // отвязки было нечем. Привязка предлагается любому залогиненному.
   if (!(Store.accountId && auth.googleEnabled)) return "";
   const linked = googleLinked();
+  // Кнопка — та же фирменная, что на экранах входа: белый фон, знак Google.
+  // Длинных пояснений здесь нет осознанно: что будет при отвязке, объясняет
+  // окно подтверждения, а не подпись под кнопкой.
   const label = linked
     ? (googleBusy ? "Отвязываем…" : "Отвязать Google")
     : (googleBusy ? "Открываем Google…" : "Привязать Google");
-  let sub = linked
-    ? "Вход через Google привязан. Отвязать можно в любой момент — ты останешься в аккаунте на этом устройстве."
-    : "Вход через Google. При переходе выбери аккаунт Google, который хочешь привязать.";
-  // Честная оговорка там, где она уместна: пароля нет и Google отвязан —
-  // зайти с другого устройства уже не выйдет. Это подсказка, а не запрет.
-  if (!linked && !auth.hasPassword) {
-    sub = "Вход через Google. Привяжи его сейчас: пароля у аккаунта нет, поэтому это единственный способ зайти с другого устройства.";
-  }
+  const status = linked ? "Вход через Google подключён" : "Вход через Google не подключён";
   return `
-    <div class="settings-row__sub" style="margin-top:12px">Вход через Google</div>
-    <div class="settings-row__sub" style="margin-top:4px">${esc(sub)}</div>
+    <div class="settings-row__sub" style="margin-top:12px">Вход через Google · ${esc(status)}</div>
     <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
-      <button class="btn btn--sm" id="google-action-btn"${googleBusy ? " disabled" : ""}
-              onclick="${linked ? "unlinkGoogle()" : "startGoogleLink()"}">${esc(label)}</button>
+      <button class="auth-google auth-google--profile" type="button" id="google-action-btn"${googleBusy ? " disabled" : ""}
+              onclick="${linked ? "askUnlinkGoogle()" : "startGoogleLink()"}">${GOOGLE_LOGO_SVG}<span>${esc(label)}</span></button>
     </div>`;
 }
 
@@ -7124,7 +7119,11 @@ function googleRowHTML() {
 function paintGoogleButton(label, busy) {
   const btn = document.getElementById("google-action-btn");
   if (!btn) return;
-  btn.textContent = label;
+  // Кнопка фирменная (знак + подпись), поэтому меняем только подпись:
+  // textContent снёс бы и логотип.
+  const caption = btn.querySelector("span");
+  if (caption) caption.textContent = label;
+  else btn.textContent = label;
   btn.disabled = !!busy;
 }
 
@@ -7152,7 +7151,27 @@ function startGoogleLink() {
    Что действительно стоит сказать честно — сервер возвращает warning, когда
    пароля у аккаунта нет: на этом устройстве вход останется, а с другого уже
    не войти. Это предупреждение, а не отказ. */
-async function unlinkGoogle() {
+/* Отвязка Google — только через подтверждение. Кнопка сразу ничего не
+   делает: сначала окно в общем .dlg-стиле объясняет, что будет, и человек
+   решает осознанно. Длинного текста под кнопкой больше нет — его сжатая
+   версия живёт здесь. */
+function askUnlinkGoogle() {
+  if (googleBusy) return;
+  const hasPassword = !!(Store.auth && Store.auth.hasPassword);
+  openConfirmDialog({
+    eyebrow: "Вход через Google",
+    iconName: "info",
+    title: "Отвязать Google?",
+    text: "Ты останешься в этом аккаунте на этом устройстве — ничего не сотрётся. "
+        + "Вход через Google отключится."
+        + (hasPassword ? "" : " Пароля у аккаунта нет, поэтому с другого устройства зайти уже не выйдет."),
+    cancelText: "Отмена",
+    confirmText: "Отвязать",
+    onConfirm: doUnlinkGoogle,
+  });
+}
+
+async function doUnlinkGoogle() {
   if (googleBusy) return;
   googleBusy = true;
   paintGoogleButton("Отвязываем…", true);
@@ -7174,6 +7193,9 @@ async function unlinkGoogle() {
   toast(warning || "Google отвязан", warning ? "" : "", warning ? "x" : "check");
 }
 
+/* Старое имя сохраняем как синоним: кнопка и тесты знают unlinkGoogle. */
+function unlinkGoogle() { askUnlinkGoogle(); }
+
 function accountAuthHTML() {
   const auth = Store.auth || { registered: false, email: null, providers: [] };
   if (auth.registered) {
@@ -7182,7 +7204,6 @@ function accountAuthHTML() {
         <span class="chip chip--success">${icon("check")} привязан</span>
         <span class="auth-status__email mono">${esc(auth.email || "")}</span>
       </div>
-      <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   // Залогинен, но способа войти НЕТ (отвязал единственный Google, пароля не
@@ -7197,7 +7218,7 @@ function accountAuthHTML() {
         <span class="chip chip--warn">${icon("info")} нет способа входа</span>
         <span class="auth-status__email mono">${esc(auth.email)}</span>
       </div>
-      <div class="settings-row__sub" style="margin-top:6px">Ты в своём аккаунте, и весь прогресс на месте. Но с другого устройства в него уже не зайти: пароля нет, а вход через Google отвязан. Привяжи Google ниже — и вход вернётся.</div>
+      <div class="settings-row__sub" style="margin-top:6px">Привяжи Google ниже — и вход с другого устройства вернётся.</div>
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   return `
@@ -7243,19 +7264,16 @@ function authScreenShell(title, sub, body) {
    Google настроен (Store.auth.googleEnabled из bootstrap). Иначе человек
    увидел бы кнопку, которая ведёт в 503, а проверить это можно было бы
    только кликом. Значок — фирменный Google, подпись наша. */
+/* Фирменный знак Google: один на все кнопки входа (экраны входа/
+   регистрации и профиль). Дублировать SVG в каждой кнопке нельзя — рассинхрон
+   правится в одном месте. */
+const GOOGLE_LOGO_SVG = `<svg class="auth-google__logo" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+
 function googleSignInHTML(label) {
   if (!(Store.auth && Store.auth.googleEnabled)) return "";
   return `
     <div class="auth-sep"><span>или</span></div>
-    <button class="auth-google" type="button" onclick="AuthAPI.startGoogle()">
-      <svg class="auth-google__logo" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-      </svg>
-      <span>${esc(label || "Войти через Google")}</span>
-    </button>`;
+    <button class="auth-google" type="button" onclick="AuthAPI.startGoogle()">${GOOGLE_LOGO_SVG}<span>${esc(label || "Войти через Google")}</span></button>`;
 }
 
 /* Тексты отказа внешнего входа — по reason'у, который кладёт сервер.
