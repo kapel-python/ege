@@ -1528,11 +1528,15 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                         failed.add(name)
                         _note_provider_failure(name, exc, _next_plan_provider(plan, index))
                 continue
-            if as_judge and (name != names[0] or want_model != (plan[0][1] if plan else None)):
-                # Судья отказал, отвечает запасной (другой провайдер или другая
-                # модель той же цепочки): измерение сменило прибор.
-                # Пишем это в ленту — баллы после смены несравнимы (замеренная
-                # разница между моделями до 18 баллов из 22 на одном тексте).
+            if as_judge and name != names[0]:
+                # Судья отказал, отвечает ЗАПАСНОЙ ПРОВАЙДЕР: измерение сменило
+                # прибор. Пишем это в ленту — баллы после смены несравнимы
+                # (замеренная разница между моделями до 18 баллов из 22).
+                # Смена модели ВНУТРИ того же судьи (high упал, medium той же
+                # цепочки ответил) — штатная работа настроенной цепочки, а не
+                # смена прибора: auto-залипание здесь плодило бы вечный чип
+                # «подменён после отказа» при неизменном судье. Какая модель
+                # ответила, и так пишется рядом с каждой проверкой.
                 judge_failover(name)
             _note_provider_success(name)
             _chat_state.provider = name
@@ -2761,8 +2765,11 @@ def providers_overview() -> dict:
         judge = judge_provider()
         judge_pref = judge_preferred()
         judge_slot = _judge_slot()
+        judge_fallback_name = judge_fallback()
     except Exception:
-        judge, judge_pref, judge_slot = None, None, {}
+        judge, judge_pref, judge_slot, judge_fallback_name = None, None, {}, None
+    judge_auto = str((judge_slot or {}).get("auto") or "").strip()
+    judge_from = str((judge_slot or {}).get("from") or "").strip()
     return {
         "ok": True,
         "providers": cards,
@@ -2776,8 +2783,12 @@ def providers_overview() -> dict:
         "essayJudge": {
             "provider": judge,
             "preferred": judge_pref,
-            "explicit": bool(str(judge_slot.get("provider") or "").strip()),
-            "switched": bool(str(judge_slot.get("auto") or "").strip()),
+            "explicit": bool(str((judge_slot or {}).get("provider") or "").strip()),
+            # Подмена считается только если судья РЕАЛЬНО в другом месте:
+            # auto, равный текущему судье, — остаток старой эпохи, а не событие.
+            "switched": bool(judge_auto and judge_auto != judge),
+            "switchedFrom": judge_from if (judge_auto and judge_auto != judge) else "",
+            "fallback": judge_fallback_name,
         },
     }
 
@@ -3297,7 +3308,16 @@ def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
         auto = str(slot.get("auto") or "").strip()
         if not auto or str(slot.get("provider") or "").strip():
             return False       # судья не залипал или выбран вручную
-        if auto == preferred or not _provider_configured(preferred):
+        if auto == preferred:
+            # Залипание ни на кого: судья и так на месте (остаток эпохи, когда
+            # смена модели внутри цепочки тоже писала auto). Чистим молча —
+            # поведение не меняется, врёт только чип «подменён».
+            try:
+                _app_config_write(_JUDGE_KEY, {})
+            except Exception:
+                pass
+            return False
+        if not _provider_configured(preferred):
             return False
         moment = time.time() if now is None else float(now)
         last = float(slot.get("at") or 0) / 1000.0

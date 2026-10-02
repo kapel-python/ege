@@ -1960,7 +1960,7 @@ function drawProviders() {
       <div class="a-card__sub" style="margin-top:8px">Активный${d.active ? `: <b>${esc(names[d.active] || d.active)}</b> — новые запросы идут сюда первым` : ": нет"}. Статус «Используется» — успех живого трафика за последние ${Number(d.recentWindowSec) || 60} с, холостых запросов ради него нет. «Пинг всех» — живой запрос «привет» каждому провайдеру с задержкой.</div>
       <div id="provPingAllResult" style="margin-top:12px">${Prov.ping && Prov.ping.results ? provPingRowsHTML(Prov.ping.results) : ""}</div>
     </div>
-    ${provJudgeCardHTML(judge, list, names)}
+    ${provJudgeCardHTML(judge, list, names, order)}
     ${Prov.error ? `<div class="a-error-banner" style="margin-bottom:14px">Не удалось обновить: ${esc(Prov.error)}</div>` : ""}
     <div class="a-prov-grid">
       ${list.map(provCardHTML).join("")}
@@ -1972,47 +1972,102 @@ function drawProviders() {
    измерение: очередь отвечает «кто обслуживает запрос», судья — «чьим
    прибором измеряют». Смена прибора меняет сами баллы (замеренная разница
    между моделями — до 18 из 22 на одном тексте), поэтому она должна быть
-   видна и управляема явно, а не выясняться по расхождению оценок. */
-function provJudgeCardHTML(judge, list, names) {
+   видна и управляема явно, а не выясняться по расхождению оценок.
+   Выбор — радио-ряды (как модели в списке, а не сырой <select>): вариант
+   «По очереди» буквально показывает цепочку, ручной выбор и подмена после
+   отказа подписаны словами, а не угадываются по селекту. */
+function provJudgeCardHTML(judge, list, names, order) {
   const cur = judge.provider || "";
   const pref = judge.preferred || "";
-  const all = Array.isArray(list) ? list.filter((p) => p.id) : [];
+  const fallback = judge.fallback || "";
+  const chain = Array.isArray(order) ? order.filter(Boolean) : [];
+  const byId = Object.fromEntries((Array.isArray(list) ? list : []).filter((p) => p.id).map((p) => [p.id, p]));
   const willFallback = !cur && !pref;
-  const options = all.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? " selected" : ""}>${esc(p.title || p.id)}</option>`).join("");
+  const isDefault = !judge.explicit;
   const state = willFallback
     ? `<span class="a-chip a-chip--danger">не назначен</span>`
     : `<span class="a-chip a-chip--success">${esc(names[cur] || cur)}</span>`;
-  const switched = judge.switched
-    ? `<span class="a-chip a-chip--warn">подменён после отказа</span>` : "";
   const manual = judge.explicit ? `<span class="a-chip">выбран вручную</span>` : "";
+  const switched = judge.switched
+    ? `<span class="a-chip a-chip--warn" title="Судья отказал целиком, оценивает запасной — баллы несравнимы">подмена после отказа</span>` : "";
+  const switchNote = judge.switched
+    ? `<div class="a-prov-warn">«${esc(names[judge.switchedFrom] || judge.switchedFrom || "—") || "—"}» отказал — сейчас судит «${esc(names[cur] || cur)}».
+       <button type="button" class="a-linkbtn" onclick="resetJudge()">Вернуть к очереди</button></div>`
+    : "";
+  const chainChips = chain.length
+    ? chain.map((id, i) => `${i ? '<span class="a-prov-arrow">→</span>' : ""}<span class="a-chip${i === 0 ? " a-chip--success" : ""}">${i + 1}. ${esc(names[id] || id)}</span>`).join("")
+    : `<span class="a-card__sub">нет настроенных провайдеров</span>`;
+  const rows = chain.map((id) => {
+    const p = byId[id] || { id, title: id };
+    const off = p.enabled === false ? "выключен" : (!p.configured && !p.keySet ? "нет ключа" : "");
+    return `<label class="a-judge-opt${p.id === cur && !isDefault ? " a-judge-opt--on" : ""}${off ? " a-judge-opt--off" : ""}">
+      <input type="radio" name="provJudge" value="${esc(p.id)}"${p.id === cur && !isDefault ? " checked" : ""} onchange="judgePick(this)">
+      <span class="a-judge-opt__body">
+        <span class="a-judge-opt__title">${esc(p.title || p.id)}</span>
+        ${p.slot ? `<span class="a-chip">${esc(p.slotLabel || p.slot)}</span>` : ""}
+        ${p.id === fallback ? `<span class="a-chip a-chip--accent" title="Подключится при полном отказе судьи">запасной</span>` : ""}
+        ${off ? `<span class="a-chip">${esc(off)}</span>` : ""}
+        <span class="a-judge-opt__model mono">${esc(p.model || "—")}</span>
+      </span>
+    </label>`;
+  }).join("");
   return `
     <div class="a-card" style="margin-bottom:14px">
       <div class="a-card__head a-card__head--wrap">
         <span class="a-card__title">Судья проверки сочинений</span>
         <span class="spacer"></span>
-        <button class="btn btn--soft btn--sm" onclick="saveJudge()">Применить</button>
+        <button class="btn btn--primary btn--sm" id="provJudgeApply" onclick="saveJudge()" disabled>Применить</button>
       </div>
       <div class="a-judge-chips" style="margin-bottom:10px">${state}${manual}${switched}</div>
+      ${switchNote}
       <div class="a-card__sub" style="margin-bottom:10px">
-        Баллы за содержание (К1–К6) ставит эта модель. Проверка намеренно
-        закреплена: разные модели ставят за одну работу разные баллы (до 18 из
-        22), поэтому оценка не должна зависеть от того, какой шлюз сегодня жив.
-        Запасной подключается только при полном отказе судьи — и тогда об этом
-        появляется системное обращение: баллы разных судей несравнимы.
+        Баллы за содержание (К1–К6) ставит один закреплённый судья: разные модели
+        ставят за одну работу разные баллы (до 18 из 22). По умолчанию это первый
+        в очереди — перестановка очереди двигает и судью.
       </div>
-      <label class="a-card__sub" for="provJudgeSelect" style="display:block;margin-bottom:6px">Кто оценивает</label>
-      <select id="provJudgeSelect">${willFallback ? "" : `<option value="">— как в очерёдности (${esc(names[pref] || pref || "нет")}) —</option>`}${willFallback ? `<option value="">— не назначен —</option>` : ""}${options}</select>
+      <div class="a-judge-opts" role="radiogroup" aria-label="Кто оценивает сочинения">
+        <label class="a-judge-opt${isDefault && !willFallback ? " a-judge-opt--on" : ""}">
+          <input type="radio" name="provJudge" value=""${isDefault ? " checked" : ""} onchange="judgePick(this)">
+          <span class="a-judge-opt__body">
+            <span class="a-judge-opt__title">По очереди</span>
+            <span class="a-judge-opt__chain">${chainChips}</span>
+          </span>
+        </label>
+        ${rows}
+      </div>
       <div id="provJudgeResult" style="margin-top:10px"></div>
     </div>`;
 }
 
-async function saveJudge() {
-  const sel = document.getElementById("provJudgeSelect");
+function judgePick(input) {
+  document.querySelectorAll(".a-judge-opt").forEach((el) => {
+    el.classList.toggle("a-judge-opt--on", !!el.querySelector('input[name="provJudge"]:checked'));
+  });
+  const btn = document.getElementById("provJudgeApply");
+  if (btn) btn.disabled = false;
+}
+
+async function resetJudge() {
   const box = document.getElementById("provJudgeResult");
-  if (!sel || !box) return;
+  if (box) box.innerHTML = `<span class="a-card__sub">Возвращаем к очереди…</span>`;
+  try {
+    await AdminApi.post("/api/admin/providers/judge", { provider: "" });
+    toast("Судья — снова первый в очереди");
+  } catch (e) {
+    if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
+    if (box) box.innerHTML = `<div class="a-error-banner">${esc(e.message || "не удалось вернуть судью")}</div>`;
+    return;
+  }
+  await screenProviders(true);
+}
+
+async function saveJudge() {
+  const checked = document.querySelector('input[name="provJudge"]:checked');
+  const box = document.getElementById("provJudgeResult");
+  if (!checked || !box) return;
   box.innerHTML = `<span class="a-card__sub">Сохраняем…</span>`;
   try {
-    const r = await AdminApi.post("/api/admin/providers/judge", { provider: sel.value || "" });
+    const r = await AdminApi.post("/api/admin/providers/judge", { provider: checked.value || "" });
     box.innerHTML = `<span class="a-chip a-chip--success">Судья: ${esc(r.judge || "—")}</span>`;
     await screenProviders(true);
   } catch (e) {
