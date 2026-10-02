@@ -40,7 +40,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/footer.css?v=7">
+<link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/dlg.css?v=2">
 <style>
   :root,
@@ -497,7 +497,7 @@
 <div id="model-modal-root"></div>
 <!-- Абсолютный путь: страница живёт и на /ege-result.html, и на /essay/<sid> —
      относительный js/footer.js под вторым ломался бы в /essay/js/footer.js. -->
-<script defer src="/js/footer.js?v=2"></script>
+<script defer src="/js/footer.js?v=5"></script>
 <script defer src="/js/ai-limit.js?v=1"></script>
 
 <script>
@@ -1201,7 +1201,7 @@ function openRecheckLimit(status) {
         <div class="dlg__text">
           Лимит — ${limit} ${aiLimitPlural(limit, "проверка", "проверки", "проверок")} в день на аккаунт: каждая потраченная возвращается через 8 часов.
           Сейчас доступно: <b><span class="tnum">0 из ${limit}</span></b>.${limit <= 5 ? `
-          <span style="display:block;margin-top:10px;">Нужно больше? <a href="/subscription" style="font-weight:700;">ege easy Plus</a> — в 4 раза больше проверок.</span>` : ""}
+          <span style="display:block;margin-top:10px;">Нужно больше? <a href="/subscription" style="font-weight:700;">ege easy <span class="plus">Plus</span></a> — в 4 раза больше проверок.</span>` : ""}
         </div>
         ${left > 0 ? `
         <div class="dlg-kv">

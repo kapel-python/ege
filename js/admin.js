@@ -876,7 +876,7 @@ function subIsActive(sub) { return !!(sub && sub.active); }
 function subPill(sub) {
   if (!subIsActive(sub)) return "";
   const renewal = sub.cancelAtPeriodEnd ? " · без продления" : "";
-  return `<span class="a-chip a-chip--accent" title="Подписка Plus активна до ${esc(fmtDateTime(sub.expiresAt))}">${SUB_CROWN} Plus · до ${esc(fmtDate(sub.expiresAt))}${renewal}</span>`;
+  return `<span class="a-chip a-chip--accent" title="Подписка Plus активна до ${esc(fmtDateTime(sub.expiresAt))}">${SUB_CROWN} <span class="plus">Plus</span> · до ${esc(fmtDate(sub.expiresAt))}${renewal}</span>`;
 }
 
 function subStatusText(sub) {
@@ -906,7 +906,7 @@ function fmtMoney(kop) {
 function subCard(sub, payments) {
   const active = subIsActive(sub);
   const headSub = !sub || !sub.plan ? "бесплатный тариф"
-    : active ? `Plus · до ${esc(fmtDate(sub.expiresAt))}` : `Plus · ${esc(subStatusText(sub))}`;
+    : active ? `<span class="plus">Plus</span> · до ${esc(fmtDate(sub.expiresAt))}` : `<span class="plus">Plus</span> · ${esc(subStatusText(sub))}`;
   // Срок — одной полосой, а не двумя колонками: даты «02.10.2026, 22:19»
   // в узкой колонке рвались посередине числа.
   const range = active ? (() => {
@@ -920,7 +920,7 @@ function subCard(sub, payments) {
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
       </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
-        ? `Была Plus, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт.`
+        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт.`
         : "Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
   // Платежи — стопкой строк, а не таблицей: таблица на телефоне уезжала
   // за край карточки (горизонтальный скролл внутри — не чтение).
@@ -929,7 +929,7 @@ function subCard(sub, payments) {
       <div class="a-paylist">${payments.map((pm) => `
         <div class="a-payrow">
           <div class="a-payrow__main">
-            <div class="a-payrow__t">Plus · ${pm.period === "year" ? "год" : "месяц"}</div>
+            <div class="a-payrow__t"><span class="plus">Plus</span> · ${pm.period === "year" ? "год" : "месяц"}</div>
             <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</div>
           </div>
           <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
@@ -941,7 +941,7 @@ function subCard(sub, payments) {
         <button class="btn btn--soft btn--sm" id="subRefundBtn">Возврат…</button>
       </div>` : `
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
-        <button class="btn btn--soft btn--sm" id="subGrantBtn">Выдать Plus…</button>
+        <button class="btn btn--soft btn--sm" id="subGrantBtn">Выдать <span class="plus">Plus</span>…</button>
       </div>`;
   return `
     <div class="a-card" style="margin-top:16px;${active ? "border-color:var(--accent-ring)" : ""}">
@@ -1414,7 +1414,7 @@ function bindUserActions(p) {
     const cur = p.subscription || {};
     const isExtend = subIsActive(cur);
     openModal(`
-      <div class="a-modal__title">${isExtend ? "Продлить Plus" : "Выдать Plus"} — ${esc(p.accountId || "")}</div>
+      <div class="a-modal__title">${isExtend ? 'Продлить <span class="plus">Plus</span>' : 'Выдать <span class="plus">Plus</span>'} — ${esc(p.accountId || "")}</div>
       <div class="a-modal__desc">${isExtend
         ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
         : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 20 проверок сочинений и 40 ходов наставника в день."}</div>
@@ -1439,7 +1439,7 @@ function bindUserActions(p) {
   const subRevokeEl = document.getElementById("subRevokeBtn");
   if (subRevokeEl) subRevokeEl.onclick = () => {
     openModal(`
-      <div class="a-modal__title" style="color:var(--danger)">Отменить доступ Plus — ${esc(p.accountId || "")}?</div>
+      <div class="a-modal__title" style="color:var(--danger)">Отменить доступ <span class="plus">Plus</span> — ${esc(p.accountId || "")}?</div>
       <div class="a-modal__desc">Доступ закроется <b>сразу</b>, лимиты вернутся к бесплатным (5 проверок, наставник закрыт). История платежей сохранится — деньги в аудите останутся как доход. Для возврата денег есть отдельное действие «Возврат».</div>
       <div class="a-modal__actions">
         <button class="btn btn--soft" id="mCancel">Отмена</button>
@@ -1459,7 +1459,7 @@ function bindUserActions(p) {
       <button class="choice-item" data-payment="${pm.id}"><b>${fmtMoney(pm.amountKopecks)} · ${pm.period === "year" ? "год" : "месяц"}</b><span>${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</span></button>`).join("");
     openModal(`
       <div class="a-modal__title" style="color:var(--danger)">Возврат — ${esc(p.accountId || "")}</div>
-      <div class="a-modal__desc">Платёж пометится как возвращённый навсегда, доступ Plus закроется сразу. Повторно вернуть тот же платёж нельзя.</div>
+      <div class="a-modal__desc">Платёж пометится как возвращённый навсегда, доступ <span class="plus">Plus</span> закроется сразу. Повторно вернуть тот же платёж нельзя.</div>
       <div class="a-modal__form" style="gap:10px">
         ${options}
         <div id="mErr"></div>

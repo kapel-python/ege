@@ -32,7 +32,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
-<link rel="stylesheet" href="/css/footer.css?v=7">
+<link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -301,10 +301,10 @@
     <div class="wrap hero-content">
       <span class="chip">
         <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
-        ege easy Plus
+        ege easy <span class="plus">Plus</span>
       </span>
       <h1>Готовься <span class="grad">в 4 раза</span> активнее</h1>
-      <p class="hero-sub">Plus — это <b>20 проверок сочинений</b> и <b>40 ходов ИИ-наставника</b> в день вместо 5 и 10.
+      <p class="hero-sub"><span class="plus">Plus</span> — это <b>20 проверок сочинений</b> и <b>40 ходов ИИ-наставника</b> в день вместо 5 и 10.
         Задания, навыки, прогноз баллов и разборы остаются <b>бесплатными и без ограничений</b>.</p>
 
       <div class="price-row">
@@ -324,7 +324,7 @@
       <div class="active-banner" id="activeBanner" hidden>
         <span class="active-dot" aria-hidden="true"></span>
         <div style="min-width:0;flex:1;">
-          <div class="active-title">У тебя уже Plus</div>
+          <div class="active-title">У тебя уже <span class="plus">Plus</span></div>
           <div class="active-text" id="activeText">Подписка активна.</div>
           <a class="btn btn-ghost btn--sm" href="/dashboard#/profile">Управлять в профиле</a>
         </div>
@@ -407,7 +407,7 @@
           </ul>
         </div>
         <div class="card card--plus rv" id="plusCard" style="--d:100ms">
-          <div class="plan-name">Plus</div>
+          <div class="plan-name"><span class="plus">Plus</span></div>
           <div class="plan-price"><span class="num" data-price>99</span> <small data-price-suffix>₽ / мес</small></div>
           <div class="plan-period">990 ₽ в год · отмена в любой момент</div>
           <ul class="ticks">
@@ -452,7 +452,7 @@
 
 <div class="buybar" id="buybar" hidden>
   <span>
-    <span class="buybar__value num"><span id="stickyPrice">99</span> ₽<span class="buybar__hint" id="stickyPer">/мес · ege easy Plus</span></span>
+    <span class="buybar__value num"><span id="stickyPrice">99</span> ₽<span class="buybar__hint" id="stickyPer">/мес · ege easy <span class="plus">Plus</span></span></span>
   </span>
   <button class="buybar__btn" type="button" id="buybarBtn">Оформить</button>
 </div>
@@ -464,7 +464,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
     </span>
     <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Кому Plus уже выдали — у тех всё уже работает: лимиты и наставник включены.</p>
+    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Кому <span class="plus">Plus</span> уже выдали — у тех всё уже работает: лимиты и наставник включены.</p>
     <div class="modal__actions">
       <a class="btn btn-ghost btn--sm" href="/dashboard#/profile">Открыть профиль</a>
       <button class="btn btn-primary btn--sm" type="button" id="soonOk">Понятно</button>
@@ -473,7 +473,7 @@
 </div>
 
 <div data-ege-footer></div>
-<script defer src="/js/footer.js?v=7"></script>
+<script defer src="/js/footer.js?v=8"></script>
 
 <script>
 (function(){
@@ -517,8 +517,11 @@
 
   /* период оплаты: меняется только цена */
   var PLANS = {
-    month: { price: 99,  per: "в месяц", suffix: "₽ / мес", stick: "/мес · ege easy Plus", save: "" },
-    year:  { price: 990, per: "в год",    suffix: "₽ / год", stick: "/год · ege easy Plus", save: "выгода 198 ₽ — два месяца бесплатно" }
+    /* stick — без слова «Plus»: его подставляет PLUS_WORD, чтобы буква
+       осталась градиентной и после смены периода (текст ставится
+       innerHTML — строки внутренние, пользовательских данных тут нет). */
+    month: { price: 99,  per: "в месяц", suffix: "₽ / мес", stick: "/мес · ege easy ", save: "" },
+    year:  { price: 990, per: "в год",    suffix: "₽ / год", stick: "/год · ege easy ", save: "выгода 198 ₽ — два месяца бесплатно" }
   };
   var current = "month";
   var priceNum = document.getElementById("priceNum");
@@ -529,6 +532,7 @@
   var thumb = document.getElementById("billingThumb");
   var stickyPrice = document.getElementById("stickyPrice");
   var stickyPer = document.getElementById("stickyPer");
+  var PLUS_WORD = '<span class="plus">Plus</span>';
 
   function placeThumb(){
     if (!billing || !thumb) return;
@@ -572,7 +576,7 @@
     var sfx = document.querySelectorAll("[data-price-suffix]");
     for (var k = 0; k < sfx.length; k++) sfx[k].textContent = plan.suffix;
     if (stickyPrice) stickyPrice.textContent = String(plan.price);
-    if (stickyPer) stickyPer.textContent = plan.stick;
+    if (stickyPer) stickyPer.innerHTML = plan.stick + PLUS_WORD;
   }
 
   var billingOpts = document.querySelectorAll("[data-billing]");
@@ -661,7 +665,7 @@
           var plusCard = document.getElementById("plusCard");
           if (plusCard) {
             var name = plusCard.querySelector(".plan-name");
-            if (name) name.textContent = "Plus · твой план";
+            if (name) name.innerHTML = PLUS_WORD + " · твой план";
           }
           var buybar = document.getElementById("buybar");
           if (buybar) { buybar.hidden = true; buybar.classList.remove("is-on"); }

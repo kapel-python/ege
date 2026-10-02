@@ -69,7 +69,7 @@ var Subscription = (function () {
       <span class="sub-card__top">
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
-          <span class="sub-card__name">ege easy Plus</span>
+          <span class="sub-card__name">ege easy <span class="plus">Plus</span></span>
           <span class="sub-card__sub">В 4 раза больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
         </span>
         <span class="chip">бесплатно</span>
@@ -99,7 +99,7 @@ var Subscription = (function () {
       <span class="sub-card__top">
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
-          <span class="sub-card__name">ege easy Plus ${pill}</span>
+          <span class="sub-card__name">ege easy <span class="plus">Plus</span> ${pill}</span>
           <span class="sub-card__sub">${cancelled
             ? "Автопродление выключено — доступ до " + esc(fmtDate(st.expiresAt)) + "."
             : "Продление " + esc(fmtDate(st.expiresAt)) + " · " + esc(st.period === "year" ? "год" : "месяц") + "."}</span>
