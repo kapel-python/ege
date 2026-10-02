@@ -995,6 +995,8 @@
     // запрос и ученик получит «Нет соединения» вместо ответа.
     if (leaving) S.turn = null;
     else if (S.turn && !S.turn.dead) S.turn.detached = true;
+    // Чужой для вкладки ход жил в старом чате — новому композер не держим.
+    if (leaving) { S.serverBusy = null; S._busyWatch = null; }
     S.printing = false;
     syncBusy();
     S.currentId = id;
@@ -2261,8 +2263,15 @@
      состояния: держат либо живой запрос (S.turn), либо недопечатанный ответ
      (S.pendingBail). Отвязанный «Стоп»-ом запрос (detached) держит уже не
      композер, а только подхват ответа после обрыва. */
-  function turnHeld() {
+  function liveHeld() {
     return (!!S.turn && !S.turn.dead && !S.turn.detached) || !!S.pendingBail;
+  }
+  function turnHeld() {
+    // S.serverBusy — чужой для вкладки ход: после перезагрузки страницы
+    // посреди генерации локального S.turn уже нет, но сервер всё ещё считает.
+    // Композер и «Стоп» ведут себя как при живом ходе, а ожидание ответа
+    // (watchAnswer) смотрит только на liveHeld — иначе оно ждало бы само себя.
+    return liveHeld() || !!S.serverBusy;
   }
   function syncBusy() {
     var held = turnHeld();
@@ -2434,9 +2443,17 @@
      скелетон и ждём ответ polling-ом, вместо пустого вида. Свой живой ход
      (S.turn) уже подхвачен reattachTurn — его не трогаем. */
   function showServerBusy(wantId, res) {
-    if (!res || !res.data || !res.data.busy) { S._busyWatch = null; return; }
+    if (!res || !res.data || !res.data.busy) {
+      if (S.serverBusy) { S.serverBusy = null; syncBusy(); }
+      S._busyWatch = null;
+      return;
+    }
     var t = S.turn;
-    if (t && !t.dead && Number(t.threadId) === Number(wantId)) { S._busyWatch = null; return; }
+    if (t && !t.dead && Number(t.threadId) === Number(wantId)) {
+      if (S.serverBusy) { S.serverBusy = null; syncBusy(); }
+      S._busyWatch = null;
+      return;
+    }
     if (!ui.live) return;
     var bt = String((res.data && res.data.busyText) || "").trim();
     if (bt) {
@@ -2451,12 +2468,15 @@
     // Один цикл ожидания на (чат, текст): повторные заходы loadThreadMessages,
     // пока слот занят, не должны плодить параллельные опросы.
     var wk = String(wantId) + "\n" + bt;
-    if (S._busyWatch === wk) return;
-    S._busyWatch = wk;
-    // Композер остаётся свободным (локального хода нет), но повторная
+    // Ход чужой для вкладки (перезагрузка посреди генерации), но для человека
+    // он живой: держим композер и «Стоп», как при своём ходе. Повторная
     // отправка упрётся в AGENT_BUSY — там уже есть ветка mineBusy с молчаливым
     // ожиданием, а не враньём про «сервер занят».
-    watchAnswer(wantId, bt || null, WATCH_TRIES, function () { loadThreadMessages(true); });
+    S.serverBusy = { threadId: wantId, text: bt };
+    syncBusy();
+    if (S._busyWatch === wk) return;
+    S._busyWatch = wk;
+    watchAnswer(wantId, bt || null, WATCH_TRIES, function () { S._busyWatch = null; loadThreadMessages(true); });
   }
   /* Дождаться ответа, который сервер считает после обрыва. Раньше здесь был
      один слепой setTimeout на 4 с: ход в 20 с успевал мимо, и человек оставался
@@ -2464,7 +2484,7 @@
      и останавливаемся, как только ответ (или шаг) появился. */
   function watchAnswer(tid, text, tries, onGiveUp) {
     if (tid == null || Number(S.currentId) !== Number(tid)) return;
-    if (S.busy) {
+    if (liveHeld()) {
       if (tries <= 0) { if (onGiveUp) onGiveUp(); return; }
       later(WATCH_EVERY_MS, function () { watchAnswer(tid, text, tries, onGiveUp); });
       return;
@@ -2843,6 +2863,8 @@
       var turn = S.turn;
       var text = turn && !turn.dead ? turn.text : null;
       var tid = turn && !turn.dead ? turn.threadId : S.currentId;
+      // Цикл ожидания из showServerBusy уже бежит — второй не заводим.
+      var serverWait = !!S.serverBusy && !(turn && !turn.dead);
       if (S.pendingBail) {
         var bail = S.pendingBail;
         S.pendingBail = null;
@@ -2850,10 +2872,14 @@
       } else if (turn && !turn.dead) {
         turn.detached = true;   // композер разблокируется, ответ ещё подхватим
         if (S.abort) { try { S.abort.abort(); } catch (_) {} }
+      } else if (S.serverBusy) {
+        // Перезагрузка посреди хода: рвать нечего (запроса вкладки нет) —
+        // просто освобождаем композер, ответ подхватит уже бегущий watchAnswer.
+        S.serverBusy = null;
       }
       S.printing = false;
       syncBusy();
-      if (!S.pendingBail) watchAnswer(tid, text, WATCH_TRIES);
+      if (!S.pendingBail && !serverWait) watchAnswer(tid, text, WATCH_TRIES);
     });
     ui.feed.addEventListener("scroll", function () {
       // Своя доводка печати (значение сошлось точь-в-точь с progWrite) — это
@@ -2945,6 +2971,9 @@
     }
     (S.timers || []).forEach(function (t) { try { clearTimeout(t); } catch (_) {} });
     S.timers = [];
+    // Цикл ожидания чужого хода жил в таймерах — вместе с ними и умер:
+    // при возврате showServerBusy заведёт новый, иначе ответ никто не ждёт.
+    S._busyWatch = null;
     // Живой ход на этом экране закрывается, но САМ ОН ОСТАЁТСЯ в S.turn: его
     // fetch переживает пересборку экрана, ответ подхватит reattachTurn.
     // Обнулять S.turn здесь нельзя — тогда на СЛЕДУЮЩЕМ маунте условие
@@ -2976,6 +3005,7 @@
       S.accountId = acc;
       S.threads = []; S.currentId = null;
       S.quota = { limit: QUOTA_FALLBACK, remaining: QUOTA_FALLBACK, resetInSec: null };
+      S.serverBusy = null; S._busyWatch = null;
       cacheDrop();                     // чужие чаты в кэше не показываем
     }
     root = screenRoot;
