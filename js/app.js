@@ -1051,6 +1051,29 @@ function clearHashQuery() {
 function routeGoogleReturn() {
   const error = hashQueryValue("error");
   if (error) {
+    // Отказ явной привязки («Привязать Google») — это сообщение про ТЕКУЩИЙ
+    // аккаунт, а не про вход: человек уже вошёл, его сессия цела, и уводить
+    // его на экран входа нельзя (там он увидел бы форму чужого входа и
+    // потерял бы причину). Возвращаем в профиль — там живёт кнопка и там
+    // окно с текстом. Признак — accountId (есть сессия), а НЕ registered:
+    // после отвязки единственного входа registered=false, хотя человек всё
+    // ещё залогинен, и проверка по registered уводила отказ на экран входа.
+    if (GOOGLE_LINK_REFUSALS[error]) {
+      if (Store.accountId) {
+        // Уже в профиле с причиной — ничего не трогаем: render отрисует
+        // профиль, и он сам покажет окно. Перезапись того же хэша не даёт
+        // события hashchange и только мешает.
+        if (currentRoute() === "profile") return;
+        location.hash = `#/profile?error=${encodeURIComponent(error)}`;
+        return;
+      }
+      // Без сессии такой отказ прийти не может (сервер без current_id его не
+      // ставит — там обычный вход): чистим чужой хвост, чтобы форма входа не
+      // пугала человека текстом про привязку.
+      clearHashQuery();
+      if (currentRoute() !== "login") location.hash = "#/login";
+      return;
+    }
     if (currentRoute() === "login") return;
     location.hash = `#/login?error=${encodeURIComponent(error)}`;
     return;
@@ -6498,12 +6521,14 @@ function screenProfile(root) {
           ${subjectState.empty ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : subjectState.locked ? `<div class="settings-row__sub">В реестре есть тема, но урок и практика пока не подключены. Пустые переходы скрыты.</div>` : ""}
         </div>
       </div>
-      ${Store.auth && Store.auth.registered ? `
+      ${Store.accountId ? `
       <button class="settings-row settings-row--danger" type="button" onclick="askLogoutAccount()">
         <span class="settings-row__icon" aria-hidden="true">${icon("logout")}</span>
         <span class="settings-row__body">
           <span class="settings-row__title">Выйти из аккаунта</span>
-          <span class="settings-row__sub">Прогресс не удалится и вернётся при следующем входе по email и паролю.</span>
+          <span class="settings-row__sub">${(Store.auth && Store.auth.registered)
+            ? "Прогресс не удалится и вернётся при следующем входе по email и паролю."
+            : "Осторожно: у аккаунта сейчас нет способа входа — после выхода зайти обратно не выйдет. Сначала привяжи Google выше."}</span>
         </span>
       </button>` : ""}
     </div>`;
@@ -6514,6 +6539,10 @@ function screenProfile(root) {
   // аккаунта» иногда отсутствует при живой сессии (или наоборот).
   try { loadDevicesSection(); } catch (_) {}
   try { revalidateProfileAuth(); } catch (_) {}
+  // Отказ привязки Google возвращает человека сюда (см. routeGoogleReturn):
+  // это единственный экран, где живёт кнопка «Привязать Google» и где окно
+  // про занятый аккаунт имеет смысл.
+  try { showGoogleLinkRefusal(); } catch (_) {}
 }
 
 /* Лёгкая сверка auth-среза профиля с сервером (GET /api/auth/session, без
@@ -6846,13 +6875,77 @@ function dlgConfirmOk() {
   if (fn) { try { fn(); } catch (_) {} }
 }
 
+/* Справочное окно на той же системе .dlg, что подтверждение и инфо-диалог
+   устройства: одна кнопка, потому что спрашивать тут нечего — объяснить
+   отказ и закрыть. Своей разметки не заводим, вид должен быть один везде. */
+function openInfoDialog(opts) {
+  const o = opts || {};
+  const root = deviceModalRoot();
+  if (!root) return;
+  const title = o.title || "";
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
+  const text = o.text || "";
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">${esc(o.eyebrow || "")}</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon(o.icon || "info")}</div>
+          <div class="dlg-device__name">${esc(title)}</div>
+        </div>
+        ${text ? `<div class="dlg__text">${text}</div>` : ""}
+        <div class="dlg__actions dlg__actions--single">
+          <button class="btn btn--primary" type="button" onclick="closeDeviceModal()">${esc(o.closeText || "Понятно")}</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+/* Отказ явной привязки Google («Привязать Google» → адрес уже занят на сайте)
+   приезжает редиректом как параметр возврата: #/profile?error=taken|conflict.
+
+   Параметры снимаются сразу через clearHashQuery, поэтому при любой
+   перерисовке профиля (сверка auth, возврат из соседней вкладки, повторный
+   render) окно не выскакивает заново — как и любая другая причина отказа
+   внешнего входа. Вызывается из screenProfile: экран входа этот случай
+   показать не может (на залогиненном человеке он рисует «Вы уже вошли»). */
+function showGoogleLinkRefusal() {
+  const reason = hashQueryValue("error");
+  const refusal = GOOGLE_LINK_REFUSALS[reason];
+  if (!refusal) return false;
+  clearHashQuery();
+  openInfoDialog({
+    eyebrow: "Вход через Google",
+    icon: "info",
+    title: refusal.title,
+    text: refusal.text,
+    closeText: "Понятно",
+  });
+  return true;
+}
+
 /* Выход из аккаунта через общий диалог (кнопка в профиле зовёт сюда,
    сам logoutAccount остаётся прямым выходом — его дёргает подтверждение). */
 function askLogoutAccount() {
+  // Без способа входа (ни пароля, ни Google) выход = потеря доступа: зайти
+  // обратно будет нечем. Не запрещаем (человеку может быть нужно сменить
+  // аккаунт), но говорим прямо — иначе текст «прогресс вернётся» врёт.
+  const noEntry = !(Store.auth && Store.auth.registered);
   openConfirmDialog({
     eyebrow: "Выход из аккаунта",
     title: "Выйти из аккаунта?",
-    text: "Прогресс не удалится и вернётся при следующем входе по email и паролю.",
+    text: noEntry
+      ? "Осторожно: у аккаунта сейчас <b>нет способа входа</b> — ни пароля, ни Google. После выхода зайти обратно не выйдет. Сначала привяжи Google выше, иначе прогресс останется без владельца."
+      : "Прогресс не удалится и вернётся при следующем входе по email и паролю.",
     iconName: "logout",
     cancelText: "Отмена",
     confirmText: "Выйти",
@@ -7078,6 +7171,21 @@ function accountAuthHTML() {
       <div class="settings-row__sub" style="margin-top:6px">На одном аккаунте можно учить сразу несколько предметов — прогресс по каждому сохраняется отдельно.</div>
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
+  // Залогинен, но способа войти НЕТ (отвязал единственный Google, пароля не
+  // задал): аккаунт и сессия живы, прогресс на месте. Показывать такому
+  // человеку «Гостевой профиль» — врать: он решит, что аккаунт пропал, и
+  // пойдёт «регистрироваться», хотя чинится всё одной кнопкой ниже.
+  // Почта здесь есть всегда (свой адрес сессии сервер отдаёт и без
+  // registered); нет почты — нет строки с адресом, это обычный гость.
+  if (Store.accountId && auth.email) {
+    return `
+      <div class="auth-status" style="margin-top:8px">
+        <span class="chip chip--warn">${icon("info")} нет способа входа</span>
+        <span class="auth-status__email mono">${esc(auth.email)}</span>
+      </div>
+      <div class="settings-row__sub" style="margin-top:6px">Ты в своём аккаунте, и весь прогресс на месте. Но с другого устройства в него уже не зайти: пароля нет, а вход через Google отвязан. Привяжи Google ниже — и вход вернётся.</div>
+      <div id="google-row-holder">${googleRowHTML()}</div>`;
+  }
   return `
     <div class="settings-row__sub">Гостевой профиль — прогресс привязан к этому устройству.</div>
     <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
@@ -7145,10 +7253,36 @@ const GOOGLE_ERROR_TEXT = {
   code: "Google не принял код входа. Попробуй ещё раз.",
   identity: "Google не подтвердил этот адрес. Войди паролем.",
   blocked: "Аккаунт заблокирован.",
-  conflict: "К этому аккаунту уже привязан другой Google. Войди паролем и отвяжи старый.",
+  conflict: "Аккаунт с такой почтой уже есть на сайте. Привязка не выполнена.",
+  taken: "Этот Google-аккаунт уже привязан к другому профилю. Привязка не выполнена.",
   unavailable: "Google сейчас недоступен. Попробуй позже.",
   unconfigured: "Вход через Google временно недоступен.",
   failed: "Не удалось войти через Google. Попробуй ещё раз.",
+};
+
+/* Отказы явной привязки «Привязать Google»: выбранный адрес уже занят на
+   сайте — своим другим аккаунтом (taken — личность Google уже привязана к
+   чужому профилю, conflict — такая почта уже заведена в другом аккаунте).
+
+   Это НЕ отказ во входе: человек нажал «добавь вход к моему аккаунту», его
+   аккаунт и сессия целы, ничего не переключилось. Поэтому причина
+   показывается не полосой на экране входа (он про чужой аккаунт и на
+   залогиненном человеке рисует «Вы уже вошли», то есть молча съедает
+   объяснение), а окном в профиле — там, где живёт кнопка. */
+const GOOGLE_LINK_REFUSALS = {
+  taken: {
+    title: "Этот аккаунт уже занят",
+    text: "Google-аккаунт, который ты выбрал, уже привязан к другому профилю на сайте. "
+        + "«Привязать Google» добавляет вход к <b>твоему</b> аккаунту и никогда не переключает тебя на чужой, "
+        + "поэтому привязка отменена, а ты остался в своём аккаунте.<br><br>"
+        + "Если это твой второй аккаунт — сначала выйди из текущего и войди тем Google, а потом вернись сюда за привязкой.",
+  },
+  conflict: {
+    title: "Этот аккаунт уже занят",
+    text: "Аккаунт с такой почтой уже есть на сайте. «Привязать Google» привязывает вход к <b>твоему</b> аккаунту, "
+        + "поэтому привязка отменена, а ты остался в своём аккаунте — ничего не переключилось.<br><br>"
+        + "Если это твой второй аккаунт — сначала выйди из текущего и войди на него паролем или тем же Google.",
+  },
 };
 
 /* Подтверждение привязки: адрес уже занят парольным аккаунтом. Молча
@@ -7158,6 +7292,14 @@ const GOOGLE_ERROR_TEXT = {
 function screenLogin(root) {
   const errorReason = hashQueryValue("error");
   clearHashQuery();
+  // Отказ привязки — не про вход: если человек залогинен (есть сессия), а
+  // оказался на экране входа с такой причиной (старый хвост, ручной адрес),
+  // уводим его обратно в профиль — там окно с объяснением. Полосу входа под
+  // такой отказ не рисуем никогда: форма входа тут ни при чём.
+  if (errorReason && GOOGLE_LINK_REFUSALS[errorReason] && Store.accountId) {
+    location.hash = `#/profile?error=${encodeURIComponent(errorReason)}`;
+    return;
+  }
   if (Store.auth && Store.auth.registered) {
     root.innerHTML = authScreenShell("Вы уже вошли",
       `Текущая сессия привязана к ${esc(Store.auth.email || "аккаунту")}.`,
@@ -7166,7 +7308,7 @@ function screenLogin(root) {
        </div>`);
     return;
   }
-  const banner = errorReason
+  const banner = errorReason && !GOOGLE_LINK_REFUSALS[errorReason]
     ? `<div class="auth-form__error is-visible" role="alert">${esc(GOOGLE_ERROR_TEXT[errorReason] || GOOGLE_ERROR_TEXT.failed)}</div>`
     : "";
   root.innerHTML = authScreenShell("Вход",

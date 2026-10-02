@@ -546,6 +546,46 @@ def main():
             check("почта своего аккаунта не тронута",
                   session_after["user"]["email"] == "newmail@example.com", session_after.get("user"))
 
+            section("6d. Привязка Google, который уже занят другим профилем")
+            # Живой случай 02.10: человек отвязал свой Google, нажал «Привязать
+            # Google» и выбрал в Google адрес, который у нас УЖЕ был привязан к
+            # другому профилю. Раньше здесь стоял обычный повторный вход, то
+            # есть тихий переход на чужой аккаунт: человек нажал «добавь вход к
+            # моему аккаунту» и получил чужой профиль без единого слова.
+            fake.identity = {"sub": "google-sub-2", "email": "pass@example.com",
+                             "name": "Артём", "email_verified": True}
+            before_identities = len(rows(server, "SELECT 1 FROM auth_identities"))
+            st, hd, _ = request(same, base, "/api/auth/google?intent=link")
+            st, hd, _ = request_url(same, location_of(hd))
+            st, hd, _ = request_url(same, location_of(hd))
+            fragment_taken = fragment_of(location_of(hd))
+            check("привязка занятого Google -> taken, а не тихий вход в чужой аккаунт",
+                  query_of_fragment(fragment_taken).get("error") == "taken", fragment_taken)
+            check("отказ возвращает в профиль, где живёт кнопка «Привязать Google»",
+                  fragment_taken.startswith("/profile"), fragment_taken)
+            st, _, session_taken = request(same, base, "/api/auth/session")
+            check("остались в своём аккаунте",
+                  session_taken["user"]["accountId"] == reg2["user"]["accountId"],
+                  session_taken.get("user"))
+            check("чужая личность осталась у прежнего владельца",
+                  rows(server, "SELECT user_id FROM auth_identities WHERE subject='google-sub-2'")[0]["user_id"]
+                  == rows(server, "SELECT id FROM users WHERE account_id=?", (password_account,))[0]["id"])
+            check("привязок не добавилось", len(rows(server, "SELECT 1 FROM auth_identities")) == before_identities)
+            check("провайдеры своего аккаунта не изменились",
+                  session_taken["user"]["providers"] == ["google"], session_taken.get("user"))
+            # Обычный вход тем же Google по-прежнему открывает его аккаунт:
+            # намерение «привязать» не имеет права ломать вход.
+            plain, plain_jar = make_device()
+            st, hd, _ = request(plain, base, "/api/auth/google")
+            st, hd, _ = request_url(plain, location_of(hd))
+            st, hd, _ = request_url(plain, location_of(hd))
+            fragment_plain = fragment_of(location_of(hd))
+            check("обычный вход тем же Google работает как раньше",
+                  query_of_fragment(fragment_plain).get("error") is None, fragment_plain)
+            st, _, session_plain = request(plain, base, "/api/auth/session")
+            check("обычный вход открыл аккаунт владельца этого Google",
+                  session_plain["user"]["accountId"] == password_account, session_plain.get("user"))
+
             section("6c. Новый аккаунт с входа идёт в онбординг, а не в пикер")
             # Живой цикл: вход через Google на странице входа ЗАВОДИТ новый
             # аккаунт, но сервер отправлял его на «выбери предмет» — тот же
@@ -733,6 +773,19 @@ def main():
             st, _, alive = request(google_only, base, "/api/auth/session")
             check("аккаунт и сессия на месте после отвязки",
                   alive.get("user", {}).get("accountId") is not None, alive.get("user"))
+            # Живой случай 02.10: после отвязки единственного Google профиль
+            # выглядел «гостевым» без почты, а окно отказа привязки мигало и
+            # гасло. Причина — рассинхрон срезов: bootstrap прятал email при
+            # registered=false, а /api/auth/session отдавал. Клиент видел
+            # «расхождение», делал лишний render и гасил модалку.
+            st, _, boot_only = request(google_only, base, "/api/bootstrap-lite")
+            check("bootstrap после отвязки тоже знает почту (registered=false — не повод прятать)",
+                  boot_only["auth"]["registered"] is False
+                  and boot_only["auth"]["email"] == "onlygoogle@example.com", boot_only["auth"])
+            check("срезы совпадают — клиенту нечего пересчитывать и нечем гасить окно",
+                  boot_only["auth"]["email"] == alive["user"]["email"]
+                  and bool(boot_only["auth"]["registered"]) == bool(alive["user"]["registered"]),
+                  (boot_only["auth"], alive["user"]))
             # Возвращаем привязку обратно: дальше по плану сценарий считает её.
             rows_before = len(rows(server, "SELECT 1 FROM auth_identities"))
             check("идентичностей осталось столько, сколько нужно дальше", rows_before >= 1, rows_before)

@@ -194,5 +194,112 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
     !!row && /Store\.accountId && auth\.googleEnabled/.test(row) && !/auth\.registered &&/.test(row));
 }
 
+/* ---- 7. Отказ явной привязки Google: окно в профиле, а не тихий вход ----
+   Живой случай: человек нажал «Привязать Google» и выбрал адрес, который уже
+   привязан к ЧУЖОМУ профилю. Сервер отдавал error=conflict, но уводил на
+   #/login?error=…, где залогиненный человек видит «Вы уже вошли» — то есть
+   причина съедалась молча (а ветка «личность уже привязана» и вовсе сажала
+   его в чужой аккаунт). Здесь контракт: причина едет в профиль, там окно в
+   общем стиле .dlg, и параметры возврата снимаются ровно один раз. */
+{
+  const server = fs.readFileSync('server/server.py', 'utf8');
+
+  // Сервер: гейт ДО обычного повторного входа (порядок и был дырой).
+  const finish = block(server, 'def finish_google_login(');
+  const takenAt = finish.indexOf('error=taken');
+  const loginIntoAt = finish.indexOf('self.finish_login_into(');
+  t('сервер знает про отказ «аккаунт занят» (error=taken)', takenAt >= 0);
+  t('гейт занятого аккаунта стоит ДО обычного входа по уже привязанной личности',
+    takenAt >= 0 && loginIntoAt > takenAt, `taken=${takenAt} login=${loginIntoAt}`);
+  t('отказ привязки возвращает в профиль, а не на экран входа',
+    /refusal_route = "profile" if intent == "link"/.test(finish)
+    && finish.includes('oauth_return_url(self, refusal_route, "error=taken")')
+    && finish.includes('oauth_return_url(self, refusal_route, "error=conflict")'));
+  t('отказ привязки не трогает ни аккаунт, ни привязки (нет записи до возврата)',
+    takenAt >= 0 && !/link_auth_identity\([^)]*\)[\s\S]{0,400}error=taken/.test(finish));
+
+  // Клиент: у отказа есть и текст, и маршрут.
+  const refusals = app.slice(app.indexOf('const GOOGLE_LINK_REFUSALS = {'),
+    app.indexOf('\n};', app.indexOf('const GOOGLE_LINK_REFUSALS = {')) + 2);
+  for (const key of ['taken', 'conflict']) {
+    t(`есть текст отказа ${key}`, new RegExp(`\\b${key}:\\s*\\{`).test(refusals));
+    t(`отказ ${key} объясняет, что аккаунт уже занят`,
+      new RegExp(`${key}:[\\s\\S]*?already|${key}:[\\s\\S]*?уже`).test(refusals)
+      && refusals.includes('Этот аккаунт уже занят'));
+  }
+  t('тексты отказов не обещают переключение на другой аккаунт',
+    !/переключ(им|аем|ить) тебя на/.test(refusals) && !/войд(ём|и) в другой аккаунт/.test(refusals));
+
+  const route = block(app, 'function routeGoogleReturn(');
+  t('отказ привязки уводит в профиль, а не на экран входа',
+    /GOOGLE_LINK_REFUSALS\[error\]/.test(route) && route.includes('#/profile?error='));
+  // Признак — accountId (есть сессия), а НЕ registered: после отвязки
+  // единственного входа registered=false, хотя человек всё ещё залогинен, и
+  // проверка по registered уводила отказ на экран входа.
+  t('гейт отказа — наличие сессии (accountId), а не registered',
+    /Store\.accountId/.test(route) && !/Store\.auth && Store\.auth\.registered/.test(route));
+  t('уже в профиле — хэш не переписывают (иначе нет события и модалка не встанет)',
+    /уже в профиле/i.test(route) && /if \(currentRoute\(\) === "profile"\) return;/.test(route));
+  t('без сессии чужой хвост чистят, а не пугают формой входа',
+    /clearHashQuery\(\);/.test(route) && /без сессии/i.test(route));
+
+  // Экран входа отказы привязки не показывает никогда: залогиненного уводит
+  // обратно в профиль, разлогиненному полосу не рисует.
+  const login = block(app, 'function screenLogin(');
+  t('экран входа уводит залогиненного с отказом привязки обратно в профиль',
+    /GOOGLE_LINK_REFUSALS\[errorReason\]/.test(login) && login.includes('#/profile?error='));
+  t('экран входа не рисует полосу под отказ привязки',
+    /!GOOGLE_LINK_REFUSALS\[errorReason\]/.test(login));
+
+  const refusal = block(app, 'function showGoogleLinkRefusal(');
+  t('отказ показывается один раз (параметры возврата снимаются)',
+    refusal.indexOf('hashQueryValue("error")') >= 0
+    && refusal.indexOf('clearHashQuery()') > refusal.indexOf('if (!refusal) return false;')
+    && refusal.indexOf('clearHashQuery()') < refusal.indexOf('openInfoDialog('));
+  t('неизвестная причина не открывает окно', /if \(!refusal\) return false;/.test(refusal));
+  t('профиль зовёт показ отказа', /showGoogleLinkRefusal\(\)/.test(block(app, 'function screenProfile(')));
+
+  // Окно — общий .dlg-стиль (тот же контейнер и та же кнопка закрытия), а не
+  // своя разметка: единый вид здесь и есть требование.
+  const info = block(app, 'function openInfoDialog(');
+  t('справочное окно живёт в общем контейнере диалогов',
+    /deviceModalRoot\(\)/.test(info) && /closeDeviceModal\(\)/.test(info));
+  t('справочное окно в том же классе .dlg и закрывается по Esc',
+    /class="dlg"/.test(info) && /deviceModalEscHandler/.test(info));
+  t('у справочного окна одна кнопка «Понятно»',
+    /dlg__actions--single/.test(info) && /o\.closeText \|\| "Понятно"/.test(info));
+
+  // Профиль залогиненного без способа входа — не «гость»: после отвязки
+  // единственного Google аккаунт и сессия живы, и показывать «Гостевой
+  // профиль» значит убедить человека, что аккаунт пропал (живой случай:
+  // почта «пропала», кнопка «Привязать Google» исчезла после перезагрузки).
+  const account = block(app, 'function accountAuthHTML(');
+  t('профиль различает гостя и залогиненного без способа входа',
+    /Store\.accountId && auth\.email/.test(account));
+  t('состояние без способа входа показывает почту, а не «Гостевой профиль»',
+    /chip--warn/.test(account) && /нет способа входа/.test(account)
+    && /auth-status__email/.test(account));
+  t('кнопка «Привязать Google» живёт и в этом состоянии (перезагрузка её не съедает)',
+    (account.match(/google-row-holder/g) || []).length >= 2);
+  t('гостю по-прежнему предлагают войти/зарегистрироваться',
+    /Гостевой профиль/.test(account) && /Войти или зарегистрироваться/.test(account));
+
+  // Кнопка выхода видна любому залогиненному (раньше при registered=false её
+  // не было вовсе), а текст честен про отсутствие пути назад.
+  const profile = block(app, 'function screenProfile(');
+  t('кнопка выхода видна по наличию сессии, а не registered',
+    /\$\{Store\.accountId \?/.test(profile));
+  const askLogout = block(app, 'function askLogoutAccount(');
+  t('выход без способа входа честно предупреждает, что назад не зайти',
+    /noEntry/.test(askLogout) && /нет способа входа/.test(askLogout));
+
+  // Сервер не прячет свою же почту: bootstrap-срез обязан совпадать с
+  // /api/auth/session, иначе сверка клиента делает лишний render и гасит окно.
+  const statePayload = block(server, 'def auth_state_payload(');
+  t('bootstrap-срез отдаёт почту и без registered',
+    /"email": row\["email"\] if row else None/.test(statePayload)
+    && !/if registered else None/.test(statePayload));
+}
+
 console.log(fails ? fails + ' FAILURES' : 'ALL ROUTE-HARDENING OK');
 process.exit(fails ? 1 : 0);
