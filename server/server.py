@@ -1703,7 +1703,16 @@ def auth_state_payload(conn: sqlite3.Connection, user_id: int) -> dict:
     providers = auth_provider_list(conn, user_id)
     has_password = bool(row and row["password_hash"])
     registered = has_password or bool(providers)
-    return {"registered": registered, "email": row["email"] if registered else None,
+    # Почта отдаётся ВСЕГДА, когда строка есть — это СВОЯ почта владельца
+    # сессии (/api/auth/session отдаёт её через auth_user_payload в любом
+    # случае). Прятать её при registered=false давало живой рассинхрон:
+    # bootstrap говорил email=null, session — настоящий адрес, и сверка
+    # revalidateProfileAuth видела «расхождение», делала лишний render() и
+    # этим render'ом мгновенно гасила только что открытое окно отказа
+    # привязки Google (мигание модалки), а профиль выглядел «гостевым» без
+    # почты — хотя аккаунт и сессия были целы. Гость сюда не доходит: без
+    # строки вызывается другая ветка с готовым гостевым литералом.
+    return {"registered": registered, "email": row["email"] if row else None,
             "providers": providers,
             # hasPassword нужен клиенту отдельно от registered. Разница
             # видна ровно после отвязки Google: аккаунт остаётся, сессия
@@ -8019,6 +8028,19 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         detail["aiLimit"] = admin_ai_limit_status(conn, user_id)
     except (sqlite3.Error, KeyError, ValueError):
         detail["aiLimit"] = None
+    # Подписка для карточки пользователя: статус + последние 5 платежей
+    # (история для кнопок «продлить/отменить/возврат» и аудита глазами).
+    try:
+        if _SUB is not None:
+            detail["subscription"] = _SUB.subscription_status(conn, user_id)
+            detail["subscriptionPayments"] = _SUB.payment_history(
+                conn, user_id, 5, 0).get("payments", [])
+        else:
+            detail["subscription"] = None
+            detail["subscriptionPayments"] = []
+    except (sqlite3.Error, KeyError, ValueError):
+        detail["subscription"] = None
+        detail["subscriptionPayments"] = []
     for r in conn.execute("""SELECT up.skill_id, up.progress, up.solved, up.correct, up.time_sec, sk.name, t.name AS topic
                              FROM user_progress up JOIN skills sk ON sk.id=up.skill_id LEFT JOIN topics t ON t.id=sk.topic_id
                              WHERE up.user_id=? AND up.subject=? AND (up.solved>0 OR up.progress>0) ORDER BY up.progress DESC, up.solved DESC""", (user_id, detail_subject)):

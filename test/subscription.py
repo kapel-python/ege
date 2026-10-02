@@ -386,6 +386,12 @@ def main():
         s, st = request(user, base, "/api/subscription/status")
         check("сброс прогресса не трогает подписку",
               s == 200 and st["active"] is True, st)
+        s, detail = request(admin, base, f"/api/admin/users/{target}")
+        du = (detail.get("user") or {}) if s == 200 else {}
+        check("деталка отдаёт подписку и платежи для карточки",
+              s == 200 and (du.get("subscription") or {}).get("active") is True
+              and isinstance(du.get("subscriptionPayments"), list)
+              and len(du["subscriptionPayments"]) >= 1, du.get("subscription"))
         uid = db("SELECT id FROM users WHERE account_id=?", (target2,))[0]["id"]
         s, res = request(admin, base, f"/api/admin/users/{target2}/delete", "POST", {})
         assert s == 200, (s, res)

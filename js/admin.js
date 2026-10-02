@@ -866,6 +866,86 @@ async function screenUsers() {
 
 /* ---------------- Карточка пользователя ---------------- */
 
+/* Подписка Plus в карточке: платная видна таблеткой в шапке, управление —
+   карточкой внизу (там же, где «Доступ»). Бесплатному показывается только
+   нижняя карточка с кнопкой выдачи. */
+const SUB_CROWN = '<svg viewBox="0 0 24 24" width="1em" height="1em" style="vertical-align:-0.15em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7l4 4 5-7 5 7 4-4v11H3z"/></svg>';
+
+function subIsActive(sub) { return !!(sub && sub.active); }
+
+function subPill(sub) {
+  if (!subIsActive(sub)) return "";
+  const renewal = sub.cancelAtPeriodEnd ? " · без продления" : "";
+  return `<span class="a-chip a-chip--accent" title="Подписка Plus активна до ${esc(fmtDateTime(sub.expiresAt))}">${SUB_CROWN} Plus · до ${esc(fmtDate(sub.expiresAt))}${renewal}</span>`;
+}
+
+function subStatusText(sub) {
+  if (!sub || !sub.plan) return "нет";
+  if (sub.active) return sub.status === "cancelled" ? "активна · без продления" : "активна";
+  if (sub.status === "expired") return "истекла";
+  if (sub.status === "cancelled") return "отменена";
+  return sub.status || "нет";
+}
+
+function subPayChip(status) {
+  const known = {
+    succeeded: ["a-chip--success", "оплачено"],
+    refunded: ["a-chip--warn", "возврат"],
+    pending: ["a-chip--ghost", "ожидает"],
+    failed: ["a-chip--danger", "не прошёл"],
+    cancelled: ["a-chip--ghost", "отменён"],
+  };
+  const found = known[status] || ["a-chip--ghost", status || "—"];
+  return `<span class="a-chip ${found[0]}">${esc(found[1])}</span>`;
+}
+
+function fmtMoney(kop) {
+  return `${fmtNum((Number(kop) || 0) / 100)} ₽`;
+}
+
+function subCard(sub, payments) {
+  const active = subIsActive(sub);
+  const headSub = !sub || !sub.plan ? "бесплатный тариф"
+    : active ? `Plus · до ${esc(fmtDate(sub.expiresAt))}` : `Plus · ${esc(subStatusText(sub))}`;
+  const rows = active ? `
+      <div class="a-kv">
+        <div class="a-kv__item"><div class="a-kv__k">Статус</div><div class="a-kv__v" style="color:var(--success-ink);font-weight:600">${esc(subStatusText(sub))}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Период</div><div class="a-kv__v">${sub.period === "year" ? "год · 990 ₽" : "месяц · 99 ₽"}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Начало</div><div class="a-kv__v">${fmtDateTime(sub.startedAt)}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Окончание</div><div class="a-kv__v">${fmtDateTime(sub.expiresAt)}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
+      </div>` : `
+      <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
+        ? `Была Plus, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт.`
+        : "Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
+  const history = (payments && payments.length) ? `
+      <div class="a-card__head" style="margin-top:18px"><span class="a-card__title">Платежи</span><span class="a-card__sub">последние ${payments.length}</span></div>
+      <div class="a-table-wrap" style="border:none"><table class="a-table">
+        <thead><tr><th>Когда</th><th>Период</th><th class="num">Сумма</th><th>Способ</th><th>Статус</th></tr></thead>
+        <tbody>${payments.map((pm) => `
+          <tr>
+            <td>${fmtDateTime(pm.paidAt || pm.createdAt)}</td>
+            <td>${pm.period === "year" ? "год" : "месяц"}</td>
+            <td class="num">${fmtMoney(pm.amountKopecks)}</td>
+            <td>${pm.provider === "manual" ? "вручную" : esc(pm.provider || "—")}</td>
+            <td>${subPayChip(pm.status)}</td>
+          </tr>`).join("")}</tbody></table></div>` : "";
+  const actions = active ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+        <button class="btn btn--soft btn--sm" id="subGrantBtn">Продлить…</button>
+        <button class="btn btn--soft btn--sm" id="subRevokeBtn">Отменить доступ</button>
+        <button class="btn btn--soft btn--sm" id="subRefundBtn">Возврат…</button>
+      </div>` : `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+        <button class="btn btn--soft btn--sm" id="subGrantBtn">Выдать Plus…</button>
+      </div>`;
+  return `
+    <div class="a-card" style="margin-top:16px;${active ? "border-color:var(--accent-ring)" : ""}">
+      <div class="a-card__head"><span class="a-card__title">Подписка</span><span class="a-card__sub">${headSub}</span></div>
+      ${rows}${history}${actions}
+    </div>`;
+}
+
 async function screenUser(ref) {
   renderShell("users", `<div class="a-skeleton" style="height:120px"></div><div class="a-skeleton" style="height:300px;margin-top:16px"></div>`);
   let detail;
@@ -903,6 +983,7 @@ async function screenUser(ref) {
               ? `<span class="a-chip a-chip--warn">${esc(subjectName)} · материалы скоро</span>`
               : `<span>уровень ${st.level.level} · ${fmtNum(st.xp)} XP</span>`}
             ${onboardedBadge(p)}
+            ${subPill(p.subscription)}
             ${p.block ? `<span class="a-chip a-chip--danger">${esc(fmtBlockShort(p.block))}</span>` : `<span class="a-chip a-chip--success">активен</span>`}
             ${p.adminSessions > 0 ? `<span class="a-chip a-chip--accent">admin-сессия активна</span>` : ""}
           </div>
@@ -943,6 +1024,8 @@ async function screenUser(ref) {
         </div>` : `
         <div style="font-size:13.5px;color:var(--text-2)">Аккаунт активен. Блокировка отклонит все запросы пользователя на backend и покажет ему окно ограничения.</div>`}
     </div>
+
+    ${subCard(p.subscription, p.subscriptionPayments)}
 
     <div class="a-section-title">${locked ? "Статус предмета" : "Прогресс"}</div>
     ${locked
@@ -1299,6 +1382,90 @@ function bindUserActions(p) {
         if (!("limit" in body) && !("remaining" in body) && !body.agent) { err("Укажите, сколько выдать"); return; }
         await send(body, ev.target);
       };
+    });
+  };
+
+  /* Подписка Plus: выдача/продление (один и тот же грант — срок
+     складывается), отмена доступа и возврат. Кнопки рисуются карточкой
+     подписки внизу экрана: платному — три, бесплатному — одна выдача. */
+  const subPost = async (body, btn, okText) => {
+    if (btn) btn.disabled = true;
+    try {
+      const res = await AdminApi.post(`/api/admin/users/${encodeURIComponent(ref)}/subscription`, body);
+      closeModal();
+      const sub = res.subscription || {};
+      toast(`${okText}${sub.expiresAt ? ` до ${fmtDate(sub.expiresAt)}` : ""}`);
+      reload();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+      const errBox = document.querySelector(".a-modal #mErr") || document.getElementById("mErr");
+      if (errBox) errBox.innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      else toast(e.message, "err");
+    }
+  };
+
+  const subGrantEl = document.getElementById("subGrantBtn");
+  if (subGrantEl) subGrantEl.onclick = () => {
+    const cur = p.subscription || {};
+    const isExtend = subIsActive(cur);
+    openModal(`
+      <div class="a-modal__title">${isExtend ? "Продлить Plus" : "Выдать Plus"} — ${esc(p.accountId || "")}</div>
+      <div class="a-modal__desc">${isExtend
+        ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
+        : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 20 проверок сочинений и 40 ходов наставника в день."}</div>
+      <div class="a-modal__form" style="gap:10px">
+        <button class="choice-item" data-period="month"><b>Месяц — 99 ₽</b><span>30 суток доступа</span></button>
+        <button class="choice-item" data-period="year"><b>Год — 990 ₽</b><span>365 суток доступа, два месяца в подарок</span></button>
+        <div class="a-field"><label>Заметка (необязательно)</label><input class="a-input" id="fSubNote" placeholder="например: победитель олимпиады" autocomplete="off"></div>
+        <div id="mErr"></div>
+      </div>
+      <div class="a-modal__actions"><button class="btn btn--soft" id="mCancel">Отмена</button></div>`, (modal) => {
+      modal.querySelector("#mCancel").onclick = closeModal;
+      modal.querySelectorAll("[data-period]").forEach((btn) => {
+        btn.onclick = () => subPost({
+          action: "grant",
+          period: btn.dataset.period,
+          note: modal.querySelector("#fSubNote").value.trim(),
+        }, btn, isExtend ? "Plus продлён" : "Plus выдан");
+      });
+    });
+  };
+
+  const subRevokeEl = document.getElementById("subRevokeBtn");
+  if (subRevokeEl) subRevokeEl.onclick = () => {
+    openModal(`
+      <div class="a-modal__title" style="color:var(--danger)">Отменить доступ Plus — ${esc(p.accountId || "")}?</div>
+      <div class="a-modal__desc">Доступ закроется <b>сразу</b>, лимиты вернутся к бесплатным (5 проверок, наставник закрыт). История платежей сохранится — деньги в аудите останутся как доход. Для возврата денег есть отдельное действие «Возврат».</div>
+      <div class="a-modal__actions">
+        <button class="btn btn--soft" id="mCancel">Отмена</button>
+        <button class="btn btn--danger-soft" id="mDo">Отменить доступ</button>
+      </div>`, (modal) => {
+      modal.classList.add("a-modal--danger");
+      modal.querySelector("#mCancel").onclick = closeModal;
+      modal.querySelector("#mDo").onclick = (ev) => subPost({ action: "revoke" }, ev.target, "Доступ Plus отменён");
+    });
+  };
+
+  const subRefundEl = document.getElementById("subRefundBtn");
+  if (subRefundEl) subRefundEl.onclick = () => {
+    const succeeded = (p.subscriptionPayments || []).filter((pm) => pm.status === "succeeded");
+    if (!succeeded.length) { toast("Возвращать нечего: успешных платежей нет", "err"); return; }
+    const options = succeeded.map((pm) => `
+      <button class="choice-item" data-payment="${pm.id}"><b>${fmtMoney(pm.amountKopecks)} · ${pm.period === "year" ? "год" : "месяц"}</b><span>${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</span></button>`).join("");
+    openModal(`
+      <div class="a-modal__title" style="color:var(--danger)">Возврат — ${esc(p.accountId || "")}</div>
+      <div class="a-modal__desc">Платёж пометится как возвращённый навсегда, доступ Plus закроется сразу. Повторно вернуть тот же платёж нельзя.</div>
+      <div class="a-modal__form" style="gap:10px">
+        ${options}
+        <div id="mErr"></div>
+      </div>
+      <div class="a-modal__actions"><button class="btn btn--soft" id="mCancel">Отмена</button></div>`, (modal) => {
+      modal.classList.add("a-modal--danger");
+      modal.querySelector("#mCancel").onclick = closeModal;
+      modal.querySelectorAll("[data-payment]").forEach((btn) => {
+        btn.onclick = () => subPost({ action: "refund", paymentId: Number(btn.dataset.payment) }, btn, "Возврат оформлен");
+      });
     });
   };
 
