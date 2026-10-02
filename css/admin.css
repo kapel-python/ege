@@ -892,6 +892,17 @@ button.a-prov-ping:focus-visible { outline: 2px solid var(--accent); outline-off
 .a-prov-checkok { background: var(--success-soft); color: var(--success-ink); border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
 .a-prov-checkbad { background: var(--warn-soft); border: 1px solid rgba(255, 196, 107, 0.3); color: var(--text-2); border-radius: var(--radius-sm); padding: 10px 13px; font-size: 13px; }
 .mono { font-family: var(--mono); }
+/* Цепочка моделей: три слота high → medium → low с порядком попыток. */
+.a-chain-order { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.a-chain-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.a-chain-no { flex: 0 0 22px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.a-chain-badge { flex: 0 0 76px; font-size: 12px; font-weight: 700; }
+.a-chain-input { flex: 1 1 auto; min-width: 0; }
+.a-chain-btns { flex: 0 0 auto; display: flex; gap: 4px; }
+@media (max-width: 640px) {
+  .a-chain-row { flex-wrap: wrap; }
+  .a-chain-input { flex: 1 1 100%; order: 3; }
+}
 
 @media (max-width: 768px) {
   .a-prov-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }

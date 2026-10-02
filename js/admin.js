@@ -1896,6 +1896,7 @@ function provCardHTML(p) {
       <div class="a-prov-meta">
         <div class="a-prov-kv"><span>Модель</span><b class="mono">${esc(p.model || "—")}</b></div>
       ${p.modelTitle ? `<div class="a-prov-kv"><span>Для ученика</span><b>${esc(p.modelTitle)}</b></div>` : ""}
+      ${(p.modelOrder && p.modelOrder.length > 1) ? `<div class="a-prov-kv"><span>Цепочка</span><b class="mono" title="Порядок попыток внутри провайдера: высокий → средний → низкий">${esc(p.modelOrder.join(" → "))}</b></div>` : ""}
         <div class="a-prov-kv"><span>Адрес</span><b class="mono">${esc(p.baseHost || p.baseUrl || "—")}</b></div>
         <div class="a-prov-kv"><span>Ключ</span><b>${p.keySet ? `задан <span class="mono">${esc(p.keyHint || "")}</span>` : "не задан"}</b></div>
         <div class="a-prov-kv"><span>Статус</span><b>${esc(dotLabel)}</b></div>
@@ -2072,13 +2073,74 @@ async function probeAllProviders() {
   }
 }
 
-async function setProviderSlot(id, slot) {
-  try {
-    const cur = Object.assign({ high: null, medium: null, low: null }, (Prov.data && Prov.data.slots) || {});
-    Object.keys(cur).forEach((s) => { if (cur[s] === id) cur[s] = null; });
-    if (slot) cur[slot] = id;
-    await AdminApi.post("/api/admin/providers/slots", { slots: cur });
+/* Тосты про обмен приоритетами: занятый слот не вытесняет молча.
+   Сервер возвращает slotSwap/modelSwap {type, ...}, клиент называет событие
+   словами — иначе «поменялись местами» выглядело бы как «приоритет обновлён»
+   и было бы непонятно, куда делся прежний держатель слота. */
+function slotLabelOf(slot) {
+  return (PROV_SLOT_LABELS && PROV_SLOT_LABELS[slot]) || slot || "без приоритета";
+}
+
+function toastSlotSwap(swap) {
+  if (!swap || swap.type === "noop") return false;
+  const nameOf = (id) => provName(id);
+  if (swap.type === "swapped") {
+    toast(`«${nameOf(swap.provider)}» и «${nameOf(swap.other)}» поменялись местами: «${nameOf(swap.provider)}» теперь «${slotLabelOf(swap.slot)}», «${nameOf(swap.other)}» теперь «${slotLabelOf(swap.otherSlot)}»`);
+  } else if (swap.type === "evicted") {
+    toast(`«${nameOf(swap.provider)}» занял «${slotLabelOf(swap.slot)}» — «${nameOf(swap.other)}» больше не используется (без приоритета)`);
+  } else if (swap.type === "moved") {
+    if (swap.from && swap.to) toast(`«${nameOf(swap.provider)}»: было «${slotLabelOf(swap.from)}», стало «${slotLabelOf(swap.to)}»`);
+    else if (swap.to) toast(`«${nameOf(swap.provider)}» теперь «${slotLabelOf(swap.to)}»`);
+    else toast("Приоритет обновлён");
+  } else if (swap.type === "removed") {
+    toast(`«${nameOf(swap.provider)}» снят с «${slotLabelOf(swap.from)}» — теперь без приоритета`);
+  } else {
     toast("Приоритет обновлён");
+  }
+  return true;
+}
+
+function toastModelSwap(swap) {
+  if (!swap || swap.type === "noop") return false;
+  if (swap.type === "swapped") {
+    toast(`Модели поменялись местами: «${swap.model}» теперь «${slotLabelOf(swap.slot)}», «${swap.other}» теперь «${slotLabelOf(swap.otherSlot)}»`);
+  } else if (swap.type === "evicted") {
+    toast(`«${swap.model}» занял «${slotLabelOf(swap.slot)}» — «${swap.other}» больше не используется в цепочке`);
+  } else if (swap.type === "moved") {
+    if (swap.from && swap.to) toast(`Модель «${swap.model}»: было «${slotLabelOf(swap.from)}», стало «${slotLabelOf(swap.to)}»`);
+    else if (swap.to) toast(`Модель «${swap.model}» теперь «${slotLabelOf(swap.to)}»`);
+    else toast("Цепочка моделей обновлена");
+  } else if (swap.type === "removed") {
+    toast(`Модель «${swap.model}» убрана из «${slotLabelOf(swap.from)}»`);
+  } else {
+    toast("Цепочка моделей обновлена");
+  }
+  return true;
+}
+
+async function setProviderSlot(id, slot) {
+  let res = null;
+  try {
+    // Обмен считаем сами (сервер его подтвердит): занятый слот не вытесняет
+    // молча — у кого был свой приоритет, меняемся местами, у кого не было —
+    // прежний держатель уходит в «без приоритета» (см. toastSlotSwap).
+    const cur = Object.assign({ high: null, medium: null, low: null }, (Prov.data && Prov.data.slots) || {});
+    const old = Object.keys(cur).find((s) => cur[s] === id) || null;
+    const want = slot || null;
+    if (old !== want) {
+      const holder = want ? cur[want] : null;
+      if (!want) {
+        if (old) cur[old] = null;
+      } else if (holder && holder !== id) {
+        if (old) { cur[want] = id; cur[old] = holder; }
+        else { cur[want] = id; }
+      } else {
+        if (old) cur[old] = null;
+        cur[want] = id;
+      }
+    }
+    res = await AdminApi.post("/api/admin/providers/slots", { slots: cur });
+    if (!toastSlotSwap(res && res.slotSwap)) toast("Приоритет обновлён");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
     toast(`Не удалось: ${e.message || "ошибка"}`, "err");
@@ -2670,9 +2732,22 @@ function setDetailSlot(slot) {
   });
   const note = document.getElementById("provSlotNote");
   if (note) {
-    note.textContent = slot
-      ? `Провайдер встанет в слот «${PROV_SLOT_LABELS[slot] || slot}» — прежний держатель слота освободится.`
-      : "Провайдер останется вне очереди по приоритету (работать будет, если остальные недоступны).";
+    if (!slot) {
+      note.textContent = "Провайдер останется вне очереди по приоритету (работать будет, если остальные недоступны).";
+    } else {
+      // Честная подсказка ДО сохранения: занятый слот — это обмен или
+      // вытеснение, а не тихая замена (см. toastSlotSwap после сохранения).
+      const slots = (Prov.data && Prov.data.slots) || {};
+      const holder = slots[slot] || null;
+      const card = ProvDetail.data || provById(ProvDetail.id) || {};
+      const old = card.slot || null;
+      if (holder && holder !== ProvDetail.id) {
+        if (old) note.textContent = `«${provName(ProvDetail.id)}» и «${provName(holder)}» поменяются местами: «${provName(holder)}» уедет на «${slotLabelOf(old)}».`;
+        else note.textContent = `Слот «${slotLabelOf(slot)}» сейчас держит «${provName(holder)}» — он больше не будет использоваться.`;
+      } else {
+        note.textContent = `Провайдер встанет в слот «${slotLabelOf(slot)}».`;
+      }
+    }
   }
   provDetailMarkDirty();
 }
@@ -2704,6 +2779,13 @@ function screenProviderPage(id) {
   ProvDetail.verdict = "";
   ProvDetail.ping = null;
   ProvDetail.current = { model: p.model || "", modelTitle: p.modelTitle || "" };
+  ProvDetail.chain = Object.assign({ high: null, medium: null, low: null }, p.modelSlots || {});
+  // Нет записи цепочки (база до фичи) — показываем одиночную как high, чтобы
+  // вид совпадал с тем, что реально поедет в запросы.
+  if (!ProvDetail.chain.high && !ProvDetail.chain.medium && !ProvDetail.chain.low && p.model) {
+    ProvDetail.chain.high = p.model;
+  }
+  ProvDetail.chainSaved = Object.assign({}, ProvDetail.chain);
   ProvDetail.data = p;
 
   const [dot, dotLabel] = provHealth(p);
@@ -2760,6 +2842,18 @@ function screenProviderPage(id) {
             </div>
           </div>
           <div id="provModelProbeResult">${ProvDetail.verdict}</div>
+        </section>
+
+        <section class="a-card">
+          <div class="a-card__head">
+            <span class="a-card__title">Цепочка моделей</span>
+            <span class="spacer"></span>
+            <span class="a-card__sub" id="provChainNote"></span>
+          </div>
+          <div class="a-card__sub" style="margin-bottom:10px">Порядок попыток внутри провайдера: сначала «Высокий», затем «Средний», затем «Низкий». Пустой слот пропускается. Занятый приоритет не вытесняет молча — модели поменяются местами, а вытесненная без своего слота из цепочки уйдёт.</div>
+          <div class="a-chain-order" id="provChainOrder"></div>
+          <div id="provChainBox"></div>
+          <datalist id="provChainData"></datalist>
         </section>
 
         <section class="a-card">
@@ -2852,11 +2946,187 @@ function screenProviderPage(id) {
   const filter = document.getElementById("provModelFilter");
   if (filter) filter.oninput = () => provDetailRenderList();
   const modelInput = document.getElementById("provDetailModel");
-  if (modelInput) modelInput.oninput = () => { ProvDetail.model = modelInput.value.trim(); provDetailRenderList(); provDetailMarkDirty(); };
+  if (modelInput) modelInput.oninput = () => {
+    ProvDetail.model = modelInput.value.trim();
+    const high = document.getElementById("provChain_high");
+    if (high && high.value !== modelInput.value) high.value = modelInput.value;
+    provDetailRenderList(); provDetailMarkDirty();
+  };
   const titleInput = document.getElementById("provDetailModelTitle");
   if (titleInput) titleInput.oninput = provDetailMarkDirty;
+  provChainRender();
   provDetailRenderList();
   provDetailMarkDirty();
+}
+
+/* ---------------- Цепочка моделей: high → medium → low ----------------
+   Тот же принцип, что очередь провайдеров, но внутри одного шлюза: первой
+   пробуем модель из «Высокого», затем «Среднего», затем «Низкого». Слоты
+   рисуются тремя строками с полями ввода (datalist из списка моделей
+   провайдера), стрелками ↑/↓ для обмена соседних и крестиком для очистки.
+   Выбор из списка/рейтинга кладёт модель в первый пустой слот (а не затирает
+   верх): иначе один клик сносил бы настроенную цепочку. Сохранение — той же
+   кнопкой «Сохранить», дубли на сохранении превращаются в обмен, а не в
+   ошибку, если moved-модель пришла из другого слота. */
+
+const PROV_CHAIN_SLOTS = [
+  { id: "high", label: "Высокий", hint: "пробуем первой" },
+  { id: "medium", label: "Средний", hint: "если первая отказала" },
+  { id: "low", label: "Низкий", hint: "в самом конце" },
+];
+
+function provChainDraft() {
+  const out = { high: null, medium: null, low: null };
+  PROV_CHAIN_SLOTS.forEach((s) => {
+    const el = document.getElementById(`provChain_${s.id}`);
+    const v = el ? el.value.trim() : "";
+    out[s.id] = v || null;
+  });
+  return out;
+}
+
+function provChainResolveDuplicates(draft, saved) {
+  // Дубли на сохранении — это почти всегда «перенёс модель в другой слот,
+  // а старый не почистил»: если дублирующаяся модель пришла из другого слота
+  // сохранённой цепочки — меняем их местами, а не ругаемся. Новая модель в
+  // двух слотах сразу — честная ошибка (намерение не прочитать).
+  const out = Object.assign({}, draft);
+  const seen = {};
+  let dup = null;
+  PROV_CHAIN_SLOTS.forEach((s) => {
+    const v = out[s.id];
+    if (!v) return;
+    if (seen[v]) { dup = v; return; }
+    seen[v] = s.id;
+  });
+  if (!dup) return { slots: out, swapped: false };
+  const from = PROV_CHAIN_SLOTS.map((s) => s.id).find((k) => (saved || {})[k] === dup) || null;
+  const to = PROV_CHAIN_SLOTS.map((s) => s.id).find((k) => out[k] === dup) || null;
+  const holders = PROV_CHAIN_SLOTS.map((s) => s.id).filter((k) => out[k] === dup);
+  if (holders.length === 2 && from && holders.indexOf(from) >= 0) {
+    const other = holders.find((k) => k !== to);
+    const oldTop = (saved || {})[to] || null;
+    out[other] = oldTop;
+    return { slots: out, swapped: true };
+  }
+  return { slots: out, swapped: false, duplicate: dup };
+}
+
+function provChainRender() {
+  const box = document.getElementById("provChainBox");
+  if (!box) return;
+  const chain = (ProvDetail.chainSaved && ProvDetail.id) ? provChainDraft() : provChainDraft();
+  const saved = ProvDetail.chainSaved || {};
+  // Первый рендер: значения из сохранённой цепочки.
+  if (!box.dataset.built) {
+    box.dataset.built = "1";
+    box.innerHTML = PROV_CHAIN_SLOTS.map((s, i) => `
+      <div class="a-chain-row" data-chain-slot="${s.id}">
+        <span class="a-chain-no" title="Порядок попыток">${i + 1}</span>
+        <span class="a-chain-badge" title="${esc(s.hint)}">${esc(s.label)}</span>
+        <input class="a-input mono a-chain-input" id="provChain_${s.id}"
+          list="provChainData" autocomplete="off" spellcheck="false"
+          placeholder="модель для «${esc(s.label.toLowerCase())}» приоритета"
+          value="${esc((ProvDetail.chain && ProvDetail.chain[s.id]) || "")}">
+        <span class="a-chain-btns">
+          <button type="button" class="a-icon-btn" onclick="moveChainSlot('${s.id}', -1)" title="Выше (поменяться с соседом)">↑</button>
+          <button type="button" class="a-icon-btn" onclick="moveChainSlot('${s.id}', 1)" title="Ниже (поменяться с соседом)">↓</button>
+          <button type="button" class="a-icon-btn a-icon-btn--danger" onclick="clearChainSlot('${s.id}')" title="Очистить слот">✕</button>
+        </span>
+      </div>`).join("");
+    PROV_CHAIN_SLOTS.forEach((s) => {
+      const el = document.getElementById(`provChain_${s.id}`);
+      if (el) {
+        el.addEventListener("input", () => {
+          // Верх цепочки и поле модели — одно и то же: правим в обе стороны,
+          // чтобы сервер не отклонил сохранение как рассинхрон.
+          if (s.id === "high") {
+            const main = document.getElementById("provDetailModel");
+            if (main && main.value !== el.value) { main.value = el.value; ProvDetail.model = el.value.trim(); }
+          }
+          provChainPaintOrder(); provDetailMarkDirty(); provChainPaintData();
+        });
+        el.addEventListener("change", () => { provChainPaintOrder(); provDetailMarkDirty(); });
+      }
+    });
+  }
+  provChainPaintOrder();
+  provChainPaintData();
+}
+
+function provChainPaintOrder() {
+  const orderBox = document.getElementById("provChainOrder");
+  const note = document.getElementById("provChainNote");
+  const draft = provChainDraft();
+  const order = PROV_CHAIN_SLOTS.map((s) => s.id).map((k) => draft[k]).filter(Boolean);
+  if (orderBox) {
+    orderBox.innerHTML = order.length
+      ? order.map((m, i) => `${i ? '<span class="a-prov-arrow">→</span>' : ""}<span class="a-chip${i === 0 ? " a-chip--success" : ""}" title="Попытка ${i + 1}">${i + 1}. ${esc(m)}</span>`).join("")
+      : `<span class="a-card__sub">Цепочка пуста — проверки через провайдер не пойдут.</span>`;
+  }
+  if (note) {
+    const saved = ProvDetail.chainSaved || {};
+    const dirty = PROV_CHAIN_SLOTS.some((s) => (draft[s.id] || null) !== (saved[s.id] || null));
+    note.textContent = dirty ? "есть несохранённые изменения" : "";
+  }
+}
+
+function provChainPaintData() {
+  const data = document.getElementById("provChainData");
+  if (!data) return;
+  const seen = {};
+  const opts = [];
+  const push = (m) => {
+    const v = String(m || "").trim();
+    if (v && !seen[v]) { seen[v] = true; opts.push(v); }
+  };
+  Object.values(provChainDraft()).forEach(push);
+  Object.values(ProvDetail.chainSaved || {}).forEach(push);
+  ((ProvDetail.models && ProvDetail.models.models) || []).forEach(push);
+  Object.keys((ProvDetail.ping && ProvDetail.ping.results) || {}).forEach(push);
+  if (ProvDetail.model) push(ProvDetail.model);
+  data.innerHTML = opts.map((m) => `<option value="${esc(m)}">`).join("");
+}
+
+function moveChainSlot(slot, dir) {
+  const ids = PROV_CHAIN_SLOTS.map((s) => s.id);
+  const i = ids.indexOf(slot);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  const a = document.getElementById(`provChain_${ids[i]}`);
+  const b = document.getElementById(`provChain_${ids[j]}`);
+  if (!a || !b) return;
+  const tmp = a.value;
+  a.value = b.value;
+  b.value = tmp;
+  provChainPaintOrder();
+  provDetailMarkDirty();
+}
+
+function clearChainSlot(slot) {
+  const el = document.getElementById(`provChain_${slot}`);
+  if (!el) return;
+  el.value = "";
+  provChainPaintOrder();
+  provDetailMarkDirty();
+}
+
+function provChainFill(model) {
+  // Выбор из списка/рейтинга: в первый пустой слот, иначе — вместо «Низкого»
+  // (верх не трогаем: он уже настроен и проверен). Уже в цепочке — просто
+  // подсвечиваем порядок, дубли не создаём.
+  const mid = String(model || "").trim();
+  if (!mid) return;
+  const draft = provChainDraft();
+  const already = PROV_CHAIN_SLOTS.map((s) => s.id).find((k) => draft[k] === mid);
+  if (already) { provChainPaintOrder(); return; }
+  const empty = PROV_CHAIN_SLOTS.map((s) => s.id).find((k) => !draft[k]);
+  const target = empty || "low";
+  const el = document.getElementById(`provChain_${target}`);
+  if (el) el.value = mid;
+  provChainPaintOrder();
+  provDetailMarkDirty();
+  provChainPaintData();
 }
 
 function provName(id) {
@@ -2890,13 +3160,23 @@ function provDetailMarkDirty() {
       : "Это увидит ученик на странице результата вместо технического ID. Пусто — строка не появится.";
     thint.classList.toggle("a-field__hint--dirty", titleDirty);
   }
+  // Цепочка — часть той же кнопки «Сохранить»: её правка тоже зажигает
+  // «есть несохранённые изменения», иначе человек уходил бы, думая, что
+  // порядок уже действует.
+  const saved = ProvDetail.chainSaved || {};
+  let chainDirty = false;
+  try {
+    const draft = provChainDraft();
+    chainDirty = PROV_CHAIN_SLOTS.some((s) => (draft[s.id] || null) !== (saved[s.id] || null));
+  } catch (e) { chainDirty = false; }
+  provChainPaintOrder();
   const state = document.getElementById("provApplyState");
   if (state) {
     const key = (document.getElementById("provDetailKey") || {}).value || "";
     const address = (document.getElementById("provDetailBaseUrl") || {}).value || "";
     const slotBtn = document.querySelector("#provSlotSeg .a-seg2__btn--on");
     const slotChanged = (card.slot || "") !== ((slotBtn && slotBtn.dataset.slot) || "");
-    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged)
+    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged || chainDirty)
       ? "Есть несохранённые изменения" : "";
     state.classList.toggle("a-sticky-actions__state--on", !!state.textContent);
   }
@@ -2990,6 +3270,12 @@ function pickProviderModel(model) {
   ProvDetail.model = model;
   const el = document.getElementById("provDetailModel");
   if (el) el.value = model;
+  // Верх цепочки — та же модель: выбор из списка/рейтинга ставит приоритет
+  // «Высокий», а не просто правит поле (иначе цепочка и поле разъехались бы и
+  // сервер отклонил бы сохранение как «модель не совпадает с верхом»).
+  const high = document.getElementById("provChain_high");
+  if (high) high.value = model;
+  provChainPaintOrder();
   provDetailRenderList();
   provDetailSetVerdict("");
   provDetailMarkDirty();
@@ -3068,14 +3354,31 @@ async function applyProviderDetail() {
   payload.use_wallet_balance = !!(document.getElementById("provWallet") || {}).checked;
   payload.merge_system = !!(document.getElementById("provMerge") || {}).checked;
   if (!payload.model) { provDetailError("Впиши ID модели — без нее провайдер не сможет отвечать"); return; }
+  // Цепочка — той же кнопкой: верх обязан совпадать с полем модели (иначе
+  // сервер отклонит как рассинхрон), дубли от одного переноса — обмен.
+  let draft = null;
+  try { draft = provChainDraft(); } catch (e) { draft = null; }
+  if (draft) {
+    const resolved = provChainResolveDuplicates(draft, ProvDetail.chainSaved || {});
+    if (resolved.duplicate) { provDetailError(`Модель «${resolved.duplicate}» уже есть в цепочке — один приоритет на модель`); return; }
+    draft = resolved.slots;
+    // Поле модели — верх цепочки: правим молча до отправки, чтобы не
+    // требовать от человека править одно и то же в двух местах.
+    if (draft.high && draft.high !== payload.model) payload.model = draft.high;
+    if (!draft.high) draft.high = payload.model;
+    payload.model_slots = draft;
+  }
   if (btn) { btn.disabled = true; btn.textContent = "Сохраняем…"; }
-  let ok = false;
+  let res = null;
   try {
     // Сервер НЕ дёргает модель после сохранения: сохранение мгновенное.
     // Проверка — отдельная кнопка выше («Проверить» или «Пинг всех моделей»).
-    await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/apply`, payload);
-    ok = true;
-    toast("Сохранено");
+    res = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/apply`, payload);
+    if (!toastSlotSwap(res && res.slotSwap)) {
+      if (!toastModelSwap(res && res.modelSwap)) toast("Сохранено");
+    } else if (res && res.modelSwap && res.modelSwap.type !== "noop") {
+      toastModelSwap(res.modelSwap);
+    }
     provDetailSetVerdict("");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -3083,7 +3386,7 @@ async function applyProviderDetail() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Сохранить"; }
   }
-  if (!ok) return;
+  if (!res) return;
   // Список провайдеров перечитываем, страницу НЕ перерисовываем: перерисовка
   // стёрла бы вердикт проверки и напечатанные поля. Обновляем точечно.
   await screenProviders(true);
@@ -3121,6 +3424,21 @@ function provDetailSyncFromCard(fresh) {
   // Сохранённое обновляем ДО отметки «не применено»: расходиться с сервером
   // после успешного сохранения нечему, и подсказка должна погаснуть сама.
   ProvDetail.current = { model: fresh.model || "", modelTitle: fresh.modelTitle || "" };
+  ProvDetail.chainSaved = Object.assign({ high: null, medium: null, low: null }, fresh.modelSlots || {});
+  if (!ProvDetail.chainSaved.high && !ProvDetail.chainSaved.medium && !ProvDetail.chainSaved.low && fresh.model) {
+    ProvDetail.chainSaved.high = fresh.model;
+  }
+  ProvDetail.chain = Object.assign({}, ProvDetail.chainSaved);
+  const box = document.getElementById("provChainBox");
+  if (box) {
+    // Значения уже в DOM — обновляем точечно, чтобы не терять фокус.
+    PROV_CHAIN_SLOTS.forEach((s) => {
+      const el = document.getElementById(`provChain_${s.id}`);
+      if (el) el.value = ProvDetail.chainSaved[s.id] || "";
+    });
+  }
+  provChainPaintOrder();
+  provChainPaintData();
   provDetailMarkDirty();
 }
 
@@ -3137,6 +3455,8 @@ async function resetProvider(id) {
     provDetailError(e.message || "ошибка");
   }
   await screenProviders(true);
+  const fresh = provById(target);
+  if (fresh && ProvDetail.id === target) provDetailSyncFromCard(fresh);
   provDetailSetVerdict("");
 }
 

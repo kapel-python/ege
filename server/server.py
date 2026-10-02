@@ -9722,17 +9722,26 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "Нужен объект slots {high, medium, low}"}, 400)
                     return True
                 try:
+                    old_slots = dict(_AI.providers_overview().get("slots") or {})
+                except Exception:
+                    old_slots = {}
+                try:
                     saved = _AI.providers_set_slots(slots)
                 except ValueError as exc:
                     self.send_json({"error": str(exc)}, 400)
                     return True
+                try:
+                    swap = _AI.describe_slots_change(old_slots, saved)
+                except Exception:
+                    swap = {"type": "noop"}
                 admin_audit(conn, actor_id, "ai-provider-slots", None,
                             json.dumps(saved, ensure_ascii=False)[:200])
-                self.send_json({"ok": True, **_AI.providers_overview()})
+                self.send_json({"ok": True, "slotSwap": swap, **_AI.providers_overview()})
                 return True
             parts = rest.strip("/").split("/")
             if len(parts) == 2 and parts[1] in ("probe", "probe-model", "probe-models",
-                                                "probe-models-stream", "apply", "reset"):
+                                                "probe-models-stream", "apply", "reset",
+                                                "model-slots"):
                 pid = parts[0].strip().lower()
                 action = parts[1]
                 if not pid:
@@ -9748,32 +9757,69 @@ class Handler(BaseHTTPRequestHandler):
                             admin_audit(conn, actor_id, "ai-provider-reset", None, pid[:64])
                             self.send_json({"ok": True, "provider": _AI._public_provider_card(pid)})
                             return True
+                        # Цепочка моделей — отдельная запись (полная карта
+                        # {high, medium, low}): проверяем согласованность ДО
+                        # любой записи, чтобы 400 не оставляла частичного
+                        # применения (цепочка сохранена, а модель — нет).
+                        model_swap: dict = {"type": "noop"}
+                        pending_chain = None
+                        if "model_slots" in payload or "modelSlots" in payload:
+                            raw_slots = payload.get("model_slots", payload.get("modelSlots"))
+                            if not isinstance(raw_slots, dict):
+                                self.send_json({"error": "model_slots должен быть объектом {high, medium, low}"}, 400)
+                                return True
+                            want_high = str(raw_slots.get("high") or "").strip()[:200]
+                            patch_model = payload.get("model", payload.get("model"))
+                            if isinstance(patch_model, str) and patch_model.strip() and want_high and patch_model.strip()[:200] != want_high:
+                                self.send_json({"error": "Модель не совпадает с верхом цепочки — сохрани цепочку и модель вместе"}, 400)
+                                return True
+                            pending_chain = raw_slots
                         patch = {k: v for k, v in payload.items()
                                  if k in ("model", "base_url", "baseUrl", "api_key", "apiKey",
                                           "auth", "use_wallet_balance", "useWalletBalance",
                                           "merge_system", "mergeSystem", "model_title", "modelTitle")}
+                        if pending_chain is not None:
+                            try:
+                                old_chain = _AI.provider_model_slots(pid)
+                            except Exception:
+                                old_chain = {}
+                            try:
+                                _AI.providers_set_model_slots(pid, pending_chain)
+                            except KeyError:
+                                self.send_json({"error": "Провайдер не найден"}, 404)
+                                return True
+                            try:
+                                model_swap = _AI.describe_model_slots_change(
+                                    old_chain, _AI.provider_model_slots(pid))
+                            except Exception:
+                                model_swap = {"type": "noop"}
+                            admin_audit(conn, actor_id, "ai-provider-models", None,
+                                        json.dumps(pending_chain, ensure_ascii=False)[:200])
                         try:
                             _AI.provider_set_override(pid, patch)
                         except KeyError:
                             self.send_json({"error": "Провайдер не найден"}, 404)
                             return True
+                        slot_swap: dict = {"type": "noop"}
                         if "slot" in payload:
                             # Приоритет — часть той же кнопки «Сохранить»: в
                             # модалке это сегмент-контрол, и отдельный запрос
                             # после сохранения означал бы, что модель и слот
                             # применяются в разные моменты (между ними запрос
                             # ученика ушёл бы на старый порядок).
+                            # Занятый слот НЕ вытесняет молча: у кого был свой
+                            # приоритет — меняемся местами, у кого не было —
+                            # честно говорим, что он больше не используется.
                             cur = dict(_AI.providers_overview().get("slots") or {})
                             want = payload.get("slot")
-                            want = None if want in (None, "", "none", "null") else str(want).strip().lower()
-                            for slot_name in ("high", "medium", "low"):
-                                if cur.get(slot_name) == pid:
-                                    cur[slot_name] = None
-                            if want:
-                                if want not in ("high", "medium", "low"):
-                                    self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
-                                    return True
-                                cur[want] = pid
+                            try:
+                                cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, want)
+                            except Exception as exc:
+                                self.send_json({"error": str(exc) or "Приоритет — high, medium, low или пусто"}, 400)
+                                return True
+                            if isinstance(want, str) and want.strip().lower() not in ("", "none", "null", "high", "medium", "low"):
+                                self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
+                                return True
                             try:
                                 _AI.providers_set_slots(cur)
                             except ValueError as exc:
@@ -9787,11 +9833,42 @@ class Handler(BaseHTTPRequestHandler):
                         # ответа провайдера (до 20 с на мёртвой модели), то есть
                         # подтверждать настройку можно было только дождавшись
                         # шлюза — ровно тогда, когда он не нужен.
-                        self.send_json({"ok": True, "provider": _AI._public_provider_card(pid)})
+                        self.send_json({"ok": True, "provider": _AI._public_provider_card(pid),
+                                        "slotSwap": slot_swap, "modelSwap": model_swap,
+                                        "slots": _AI.providers_overview().get("slots") or {}})
                         return True
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)
                         return True
+                if action == "model-slots":
+                    # Полная карта цепочки {high, medium, low} — обмен уже
+                    # закодирован в ней (клиент его посчитал), сервер лишь
+                    # валидирует, пишет и называет событие для тоста.
+                    raw_slots = payload.get("slots", payload.get("model_slots", payload.get("modelSlots")))
+                    if not isinstance(raw_slots, dict):
+                        self.send_json({"error": "Нужен объект slots {high, medium, low} с моделями"}, 400)
+                        return True
+                    try:
+                        old_chain = _AI.provider_model_slots(pid)
+                    except Exception:
+                        old_chain = {}
+                    try:
+                        saved = _AI.providers_set_model_slots(pid, raw_slots)
+                    except KeyError:
+                        self.send_json({"error": "Провайдер не найден"}, 404)
+                        return True
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                    try:
+                        swap = _AI.describe_model_slots_change(old_chain, saved)
+                    except Exception:
+                        swap = {"type": "noop"}
+                    admin_audit(conn, actor_id, "ai-provider-models", None,
+                                json.dumps(saved, ensure_ascii=False)[:200])
+                    self.send_json({"ok": True, "provider": _AI._public_provider_card(pid),
+                                    "modelSwap": swap, "modelSlots": saved})
+                    return True
                 # Разные кнопки — разные бакеты: «проверить провайдера» и
                 # «проверить выбранную модель» идут в ОДНОМ окне, иначе две
                 # соседние кнопки в модалке давали бы 429 друг другу, хотя это
@@ -9953,18 +10030,21 @@ class Handler(BaseHTTPRequestHandler):
                 if "slot" in payload:
                     _cur = dict(_AI.providers_overview().get("slots") or {})
                     want = payload.get("slot")
-                    want = None if want in (None, "", "none", "null") else str(want).strip().lower()
-                    # Снять слот с того, кто его держал: один приоритет — один
-                    # провайдер, молчаливая смена вместо ошибки.
-                    for slot in ("high", "medium", "low"):
-                        if _cur.get(slot) == pid:
-                            _cur[slot] = None
-                    if want:
-                        if want not in ("high", "medium", "low"):
-                            self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
-                            return True
-                        _cur[want] = pid
-                    _AI.providers_set_slots(_cur)
+                    try:
+                        _cur, slot_swap = _AI.apply_provider_slot_move(_cur, pid, want)
+                    except Exception as exc:
+                        self.send_json({"error": str(exc) or "Приоритет — high, medium, low или пусто"}, 400)
+                        return True
+                    if isinstance(want, str) and want.strip().lower() not in ("", "none", "null", "high", "medium", "low"):
+                        self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
+                        return True
+                    try:
+                        _AI.providers_set_slots(_cur)
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                else:
+                    slot_swap = {"type": "noop"}
                 admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
                 card = _AI._public_provider_card(pid)
                 probe = None
@@ -9975,7 +10055,8 @@ class Handler(BaseHTTPRequestHandler):
                         probe = _AI.probe_provider(pid)
                     except (KeyError, ValueError) as exc:
                         probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-                out = {"ok": True, "provider": card, "slots": _AI.providers_overview().get("slots") or {}}
+                out = {"ok": True, "provider": card, "slots": _AI.providers_overview().get("slots") or {},
+                       "slotSwap": slot_swap}
                 if probe is not None:
                     out["probe"] = probe
                     if not probe.get("ok"):
@@ -9995,10 +10076,11 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             if "slot" in patch and patch.get("slot") is not None:
                 cur = dict(_AI.providers_overview().get("slots") or {})
-                for slot in ("high", "medium", "low"):
-                    if cur.get(slot) == pid:
-                        cur[slot] = None
-                cur[patch["slot"]] = pid
+                try:
+                    cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, patch.get("slot"))
+                except Exception as exc:
+                    self.send_json({"error": str(exc) or "Приоритет — high, medium, low или пусто"}, 400)
+                    return True
                 try:
                     _AI.providers_set_slots(cur)
                 except ValueError as exc:
@@ -10006,16 +10088,20 @@ class Handler(BaseHTTPRequestHandler):
                     return True
             elif "slot" in payload and payload.get("slot") in (None, "", "none", "null"):
                 cur = dict(_AI.providers_overview().get("slots") or {})
-                for slot in ("high", "medium", "low"):
-                    if cur.get(slot) == pid:
-                        cur[slot] = None
+                try:
+                    cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, None)
+                except Exception:
+                    cur, slot_swap = cur, {"type": "noop"}
                 _AI.providers_set_slots(cur)
+            else:
+                slot_swap = {"type": "noop"}
             admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
             try:
                 probe = _AI.probe_provider(pid)
             except (KeyError, ValueError) as exc:
                 probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-            out = {"ok": True, "provider": _AI._public_provider_card(pid), "probe": probe}
+            out = {"ok": True, "provider": _AI._public_provider_card(pid), "probe": probe,
+                   "slotSwap": slot_swap}
             if not probe.get("ok"):
                 out["warning"] = ("Изменения сохранены, но модель недоступна: "
                                   + str(probe.get("error") or "неизвестная ошибка"))

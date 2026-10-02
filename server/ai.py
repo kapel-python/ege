@@ -166,6 +166,12 @@ _OVERRIDES_KEY = "ai_provider_overrides"
 # {"closerouter": "Claude Sonnet 5", "gptunnel": "Qwen Flash"}: любая другая
 # модель подписывалась чужим именем, а свой провайдер не подписывался вовсе.
 _MODEL_TITLES_KEY = "ai_model_titles"
+# Цепочки моделей внутри провайдера: {providerId: {high, medium, low}}.
+# Тот же принцип, что слоты провайдеров, но на уровень ниже: внутри одного
+# шлюза первой пробуем модель из «Высокого», затем «Среднего», затем «Низкого».
+# Пустой слот пропускается. В отличие от провайдеров, модель вне слотов в
+# цепочку НЕ входит — она просто кандидат из списка, а не запасной вариант.
+_MODEL_SLOTS_KEY = "ai_provider_model_slots"
 # Сколько моделей отдаём в списке выбора: у крупных шлюзов их сотни, а список
 # на 400 позициях бесполезен в выпадающем поле. Порядок — как у провайдера,
 # текущая модель всегда первая, чтобы её не искать в середине.
@@ -202,6 +208,11 @@ _provider_last_check: dict[str, dict] = {}
 
 _admin_cache_lock = threading.Lock()
 _admin_cache: dict = {"path": None, "customs": None, "slots": None, "enabled": None}
+# Кэш цепочек моделей — отдельно от _admin_snapshot (у него фиксированный
+# кортеж из 4 элементов, который разбирают десятки мест): цепочки читаются
+# своей парой функций ниже и сбрасываются тем же _admin_invalidate.
+_model_slots_lock = threading.Lock()
+_model_slots_cache: dict = {"path": None, "data": None}
 
 
 def _app_config_read(key: str):
@@ -269,10 +280,12 @@ def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
 
 
 def _admin_invalidate() -> None:
-    global _admin_cache
+    global _admin_cache, _model_slots_cache
     with _admin_cache_lock:
         _admin_cache = {"path": _admin_cache.get("path"), "customs": None,
                         "slots": None, "enabled": None, "overrides": None}
+    with _model_slots_lock:
+        _model_slots_cache = {"path": _admin_cache.get("path"), "data": None}
 
 
 def reset_providers_cache() -> None:
@@ -1116,6 +1129,12 @@ def _model_of(provider: str, requested: str | None = None) -> str:
     if requested:
         return str(requested)[:200]
     try:
+        primary = provider_primary_model(str(provider or ""))
+        if primary:
+            return primary
+    except Exception:
+        pass
+    try:
         spec = _spec_for(provider)
         return str(spec["model"]())[:200]
     except Exception:
@@ -1305,6 +1324,50 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
     return message
 
 
+def _expand_chat_plan(names: list, explicit_model: str | None = None) -> list:
+    """Развернуть провайдеров в план (провайдер, модель) по цепочкам моделей.
+
+    Явная модель важнее цепочек: chat(model=...) зовут с конкретной моделью
+    (пробы, тесты) — тогда цепочка игнорируется. Иначе каждый провайдер даёт
+    столько попыток, сколько моделей в его цепочке (high → medium → low).
+    Провайдер с пустой цепочкой пропускается: «нет моделей» — честный пропуск,
+    а не молчаливый откат на старую одиночную модель."""
+    plan: list = []
+    for prov in names or []:
+        if explicit_model:
+            plan.append((prov, explicit_model))
+            continue
+        try:
+            chain = provider_model_chain(prov)
+        except Exception:
+            chain = []
+        if not chain:
+            continue
+        for mdl in chain:
+            plan.append((prov, mdl))
+    return plan
+
+
+def _is_provider_level_error(exc: BaseException) -> bool:
+    """Ошибка всего провайдера (а не одной модели): остальные его модели тоже
+    упадут, пробовать их — жечь бюджет. Ключ/баланс/сеть/перегруз — уровень
+    провайдера; «ответил 404/500» — уровень модели (снята, нет доступа)."""
+    if isinstance(exc, AIUnavailable):
+        return True
+    text = str(exc or "")
+    return ("недоступен" in text or "перегружен" in text or "занят" in text
+            or "не настроен" in text)
+
+
+def _next_plan_provider(plan: list, idx: int) -> str | None:
+    """Следующий ОТЛИЧНЫЙ провайдер в плане после позиции idx."""
+    cur = plan[idx][0] if 0 <= idx < len(plan) else None
+    for j in range(idx + 1, len(plan)):
+        if plan[j][0] != cur:
+            return plan[j][0]
+    return None
+
+
 def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = None,
                     timeout: float | None = None, max_tokens: int | None = None,
                     temperature: float | None = None, tool_choice=None,
@@ -1323,25 +1386,42 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
     names = _ordered_providers()
     if not names:
         raise AIUnavailable("AI не настроен")
+    plan = _expand_chat_plan(names, model)
+    if not plan:
+        raise AIUnavailable("AI не настроен")
     if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
         raise AIError("ИИ занят, попробуй через несколько секунд")
     try:
         last_exc: Exception | None = None
-        for index, name in enumerate(names):
+        failed: set[str] = set()
+        for index, (name, want_model) in enumerate(plan):
+            # Провайдер уже признан мёртвым на уровне сети/ключа — его
+            # остальные модели тоже мертвы, не жжём на них бюджет.
+            if name in failed:
+                continue
             try:
-                message = _chat_via_message(name, messages, model=model, timeout=timeout,
+                message = _chat_via_message(name, messages, model=want_model, timeout=timeout,
                                             max_tokens=max_tokens, temperature=temperature,
                                             tools=tools, tool_choice=tool_choice)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
-                switch_to = names[index + 1] if index + 1 < len(names) else None
-                _note_provider_failure(name, exc, switch_to)
+                if _is_provider_level_error(exc):
+                    failed.add(name)
+                    _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                else:
+                    # Ошибка уровня модели (404/500 по конкретной модели):
+                    # пробуем следующую модель того же провайдера, а провал
+                    # провайдера фиксируем, только когда его цепочка кончилась.
+                    rest_same = any(p == name for p, _ in plan[index + 1:] if p not in failed)
+                    if not rest_same:
+                        failed.add(name)
+                        _note_provider_failure(name, exc, _next_plan_provider(plan, index))
                 continue
             # Парсер — после успеха транспорта: форматная ошибка не failover.
             parsed = parse_tool_message(message)
             _note_provider_success(name)
             _chat_state.provider = name
-            _chat_state.model = _model_of(name, model)
+            _chat_state.model = _model_of(name, want_model)
             if state is not None:
                 state["provider"] = name
             return parsed
@@ -1364,10 +1444,11 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     only decides what to put in the list.
 
     Failover: провайдеры идут в порядке _ordered_providers() (активный
-    первым). Отказ одного (баланс, авторизация, таймаут, HTTP-ошибка) молча
-    переносит ЭТОТ ЖЕ запрос на следующего настроенного провайдера — ученик
-    ошибки не видит, максимум ждёт дольше; состояние роутера переключается,
-    так что следующие запросы сразу идут на живого. Ошибка ФОРМАТА
+    первым), внутри провайдера — его цепочка моделей (high → medium → low).
+    Отказ молча переносит ЭТОТ ЖЕ запрос на следующую модель/провайдера:
+    ошибка сети/ключа — сразу на следующего провайдера (остальные модели того
+    же шлюза тоже мертвы), ошибка одной модели (404/500) — на следующую модель
+    того же провайдера. Ошибка ФОРМАТА
     (AIFormatError) здесь не ловится: она всплывает позже, в chat_json, и
     означает живой, но небрежный ответ модели, а не недоступность провайдера.
 
@@ -1389,6 +1470,9 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     names = judge_providers_order() if as_judge else _ordered_providers()
     if not names:
         raise AIUnavailable("AI не настроен")
+    plan = _expand_chat_plan(names, model)
+    if not plan:
+        raise AIUnavailable("AI не настроен")
     # Слот — один на весь вызов, включая переключение провайдеров: это бюджет
     # конкурентных клиентских проверок, а не отдельных попыток. Занятость слота
     # — локальное состояние процесса: оно не переключает провайдера и не ждёт
@@ -1398,23 +1482,33 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
         raise AIError("ИИ занят, попробуй через несколько секунд")
     try:
         last_exc: Exception | None = None
-        for index, name in enumerate(names):
+        failed: set[str] = set()
+        for index, (name, want_model) in enumerate(plan):
+            if name in failed:
+                continue
             try:
-                answer = _chat_via(name, messages, model=model, timeout=timeout,
+                answer = _chat_via(name, messages, model=want_model, timeout=timeout,
                                    max_tokens=max_tokens, temperature=temperature)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
-                switch_to = names[index + 1] if index + 1 < len(names) else None
-                _note_provider_failure(name, exc, switch_to)
+                if _is_provider_level_error(exc):
+                    failed.add(name)
+                    _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                else:
+                    rest_same = any(p == name for p, _ in plan[index + 1:] if p not in failed)
+                    if not rest_same:
+                        failed.add(name)
+                        _note_provider_failure(name, exc, _next_plan_provider(plan, index))
                 continue
-            if as_judge and index > 0:
-                # Судья отказал, отвечает запасной: измерение сменило прибор.
+            if as_judge and (name != names[0] or want_model != (plan[0][1] if plan else None)):
+                # Судья отказал, отвечает запасной (другой провайдер или другая
+                # модель той же цепочки): измерение сменило прибор.
                 # Пишем это в ленту — баллы после смены несравнимы (замеренная
                 # разница между моделями до 18 баллов из 22 на одном тексте).
                 judge_failover(name)
             _note_provider_success(name)
             _chat_state.provider = name
-            _chat_state.model = _model_of(name, model)
+            _chat_state.model = _model_of(name, want_model)
             if state is not None:
                 state["provider"] = name
                 state["model"] = _chat_state.model
@@ -1678,6 +1772,14 @@ def custom_provider_create(clean: dict) -> dict:
     _app_config_write(_CUSTOM_KEY, customs)
     _app_config_write(_SLOTS_KEY, slots)
     _admin_invalidate()
+    # Новый провайдер сразу получает цепочку из своей модели (high) — иначе
+    # карточка показывала бы «цепочки нет», а запросы шли бы на одиночную.
+    try:
+        all_chains = _read_model_slots_all()
+        all_chains[pid] = {"high": entry["model"], "medium": None, "low": None}
+        _write_model_slots_all(all_chains)
+    except Exception:
+        pass
     return entry
 
 
@@ -1707,6 +1809,11 @@ def custom_provider_update(pid: str, patch: dict) -> dict:
     customs[pid] = entry
     _app_config_write(_CUSTOM_KEY, customs)
     _admin_invalidate()
+    if "model" in patch and patch.get("model"):
+        try:
+            _sync_chain_to_legacy_model(pid, str(patch["model"]))
+        except Exception:
+            pass
     return entry
 
 
@@ -1727,6 +1834,12 @@ def custom_provider_delete(pid: str) -> None:
     # бы чужую модель из прошлой «жизни» того же id.
     if overrides.pop(pid, None) is not None:
         _app_config_write(_OVERRIDES_KEY, overrides)
+    try:
+        all_chains = _read_model_slots_all()
+        if all_chains.pop(pid, None) is not None:
+            _write_model_slots_all(all_chains)
+    except Exception:
+        pass
     with _provider_health_lock:
         _provider_last_ok.pop(pid, None)
         _provider_last_err.pop(pid, None)
@@ -1833,6 +1946,11 @@ def provider_set_override(pid: str, patch: dict) -> dict:
         customs[pid] = entry
         _app_config_write(_CUSTOM_KEY, customs)
         _admin_invalidate()
+        if clean.get("model"):
+            try:
+                _sync_chain_to_legacy_model(pid, clean["model"])
+            except Exception:
+                pass
         return entry
     # Название модели у встроенного — тоже часть «значений поверх окружения»:
     # пишем его для модели, которая реально станет текущей (явная из patch,
@@ -1863,6 +1981,11 @@ def provider_set_override(pid: str, patch: dict) -> dict:
         overrides.pop(pid, None)
     _app_config_write(_OVERRIDES_KEY, overrides)
     _admin_invalidate()
+    if "model" in patch:
+        try:
+            _sync_chain_to_legacy_model(pid, _raw_provider_model(pid))
+        except Exception:
+            pass
     return current
 
 
@@ -1907,6 +2030,16 @@ def provider_reset(pid: str) -> dict:
         with _provider_health_lock:
             _provider_last_check.pop(pid, None)
         _admin_invalidate()
+        # Сброс возвращает и цепочку к исходной модели — иначе цепочка помнила
+        # бы снятую модель, а одиночная уже вернулась к стандарту.
+        try:
+            std_model = str(entry.get("model") or "")
+            if std_model:
+                all_chains = _read_model_slots_all()
+                all_chains[pid] = {"high": std_model, "medium": None, "low": None}
+                _write_model_slots_all(all_chains)
+        except Exception:
+            pass
         return entry
     customs, _slots, _enabled, overrides = _admin_snapshot()
     overrides.pop(pid, None)
@@ -1925,6 +2058,13 @@ def provider_reset(pid: str) -> dict:
     with _provider_health_lock:
         _provider_last_check.pop(pid, None)
     _admin_invalidate()
+    try:
+        if restored:
+            all_chains = _read_model_slots_all()
+            all_chains[pid] = {"high": restored, "medium": None, "low": None}
+            _write_model_slots_all(all_chains)
+    except Exception:
+        pass
     return _spec_for(pid)
 
 
@@ -1962,6 +2102,434 @@ def providers_set_slots(slots: dict) -> dict:
     _app_config_write(_SLOTS_KEY, cleaned)
     _admin_invalidate()
     return cleaned
+
+
+def _normalize_slot_name(value) -> str | None:
+    """high/medium/low или None. Пусто/мусор — None (снять слот)."""
+    if value in (None, "", "none", "null"):
+        return None
+    text = str(value).strip().lower()
+    return text if text in PROVIDER_SLOTS else None
+
+
+def apply_provider_slot_move(current: dict, pid: str, want) -> tuple[dict, dict]:
+    """Одно перемещение провайдера с ОБМЕНОМ местами вместо вытеснения.
+
+    Правила — ровно то, что просит админка:
+    - слот свободен → провайдер встаёт туда (старый его слот освобождается);
+    - слот занят ДРУГИМ, а у moving-привайдера свой слот есть → ОБМЕН:
+      moving забирает занятый, держатель уезжает на его старый;
+    - слот занят, а moving был без приоритета → держатель вытесняется в
+      «без приоритета» (больше не используется), moving занимает слот;
+    - want пусто → снять провайдер со слота.
+    Возвращает (новые_слоты, info) где info описывает событие для тоста:
+    noop / moved / swapped / evicted / removed.
+    """
+    cur = {s: (current.get(s) if current.get(s) else None) for s in PROVIDER_SLOTS}
+    pid = str(pid or "").strip()
+    want_slot = _normalize_slot_name(want)
+    old = next((s for s in PROVIDER_SLOTS if cur.get(s) == pid), None)
+    if want_slot is None:
+        if not old:
+            return cur, {"type": "noop", "provider": pid}
+        cur[old] = None
+        return cur, {"type": "removed", "provider": pid, "from": old,
+                     "fromLabel": PROVIDER_SLOT_LABELS.get(old, old)}
+    if old == want_slot:
+        return cur, {"type": "noop", "provider": pid, "slot": want_slot}
+    holder = cur.get(want_slot)
+    if not holder or holder == pid:
+        if old:
+            cur[old] = None
+        cur[want_slot] = pid
+        return cur, {"type": "moved", "provider": pid, "from": old, "to": want_slot,
+                     "fromLabel": PROVIDER_SLOT_LABELS.get(old or "", ""),
+                     "toLabel": PROVIDER_SLOT_LABELS.get(want_slot, want_slot)}
+    if old:
+        cur[want_slot] = pid
+        cur[old] = holder
+        return cur, {"type": "swapped", "provider": pid, "other": holder,
+                     "slot": want_slot, "otherSlot": old,
+                     "slotLabel": PROVIDER_SLOT_LABELS.get(want_slot, want_slot),
+                     "otherSlotLabel": PROVIDER_SLOT_LABELS.get(old, old)}
+    cur[want_slot] = pid
+    return cur, {"type": "evicted", "provider": pid, "other": holder,
+                 "slot": want_slot,
+                 "slotLabel": PROVIDER_SLOT_LABELS.get(want_slot, want_slot)}
+
+
+def describe_slots_change(old: dict, new: dict) -> dict:
+    """Описать разницу двух полных карт слотов для тоста (POST /slots).
+
+    Полная карта уже содержит обмен (клиент его посчитал), сервер лишь
+    называет событие словами: swapped / evicted / moved / noop.
+    """
+    old_n = {s: (old.get(s) or None) for s in PROVIDER_SLOTS}
+    new_n = {s: (new.get(s) or None) for s in PROVIDER_SLOTS}
+    if old_n == new_n:
+        return {"type": "noop"}
+    # Кто куда переехал: провайдер -> (было, стало).
+    moved: dict[str, list] = {}
+    holders = set([v for v in old_n.values() if v] + [v for v in new_n.values() if v])
+    for pid in holders:
+        before = next((s for s in PROVIDER_SLOTS if old_n.get(s) == pid), None)
+        after = next((s for s in PROVIDER_SLOTS if new_n.get(s) == pid), None)
+        if before != after:
+            moved[pid] = [before, after]
+    # Обмен: ровно два провайдера поменялись слотами.
+    if len(moved) == 2:
+        ids = list(moved.keys())
+        a_before, a_after = moved[ids[0]]
+        b_before, b_after = moved[ids[1]]
+        if a_before == b_after and b_before == a_after and a_after and b_after:
+            return {"type": "swapped", "provider": ids[0], "other": ids[1],
+                    "slot": a_after, "otherSlot": b_after,
+                    "slotLabel": PROVIDER_SLOT_LABELS.get(a_after, a_after),
+                    "otherSlotLabel": PROVIDER_SLOT_LABELS.get(b_after, b_after)}
+    # Вытеснение: кто-то потерял слот, а взамен пришёл тот, кто был без слота.
+    lost = [pid for pid, (b, a) in moved.items() if b and not a]
+    gained = [pid for pid, (b, a) in moved.items() if a and not b]
+    if len(lost) == 1 and len(gained) == 1:
+        slot = next((s for s in PROVIDER_SLOTS if new_n.get(s) == gained[0]), None)
+        return {"type": "evicted", "provider": gained[0], "other": lost[0],
+                "slot": slot, "slotLabel": PROVIDER_SLOT_LABELS.get(slot or "", slot or "")}
+    if len(moved) == 1:
+        pid = list(moved.keys())[0]
+        before, after = moved[pid]
+        if before and not after:
+            return {"type": "removed", "provider": pid, "from": before,
+                    "fromLabel": PROVIDER_SLOT_LABELS.get(before, before)}
+        return {"type": "moved", "provider": pid, "from": before, "to": after,
+                "fromLabel": PROVIDER_SLOT_LABELS.get(before or "", before or ""),
+                "toLabel": PROVIDER_SLOT_LABELS.get(after or "", after or "")}
+    return {"type": "moved", "changes": moved}
+
+
+# ---------------------------------------------------------------------------
+# Цепочки моделей внутри провайдера
+# ---------------------------------------------------------------------------
+
+def _read_model_slots_all() -> dict:
+    """Вся карта цепочек {providerId: {high, medium, low}}. Не бросает."""
+    global _model_slots_cache
+    path = _router_db_path()
+    with _model_slots_lock:
+        if _model_slots_cache.get("path") == path and _model_slots_cache.get("data") is not None:
+            return {k: dict(v) for k, v in _model_slots_cache["data"].items()}
+    data: dict[str, dict] = {}
+    try:
+        raw = _app_config_read(_MODEL_SLOTS_KEY)
+    except Exception:
+        raw = None
+    if isinstance(raw, dict):
+        for pid, entry in raw.items():
+            if not isinstance(pid, str) or not isinstance(entry, dict):
+                continue
+            clean = {}
+            for slot in PROVIDER_SLOTS:
+                val = entry.get(slot)
+                clean[slot] = str(val).strip()[:200] if isinstance(val, str) and val.strip() else None
+            data[pid] = clean
+    with _model_slots_lock:
+        _model_slots_cache = {"path": path, "data": {k: dict(v) for k, v in data.items()}}
+    return {k: dict(v) for k, v in data.items()}
+
+
+def _write_model_slots_all(data: dict) -> None:
+    clean_all: dict[str, dict] = {}
+    for pid, entry in (data or {}).items():
+        if not isinstance(pid, str) or not pid or not isinstance(entry, dict):
+            continue
+        clean_all[pid] = {s: (str(entry.get(s)).strip()[:200]
+                              if isinstance(entry.get(s), str) and str(entry.get(s)).strip()
+                              else None)
+                          for s in PROVIDER_SLOTS}
+    _app_config_write(_MODEL_SLOTS_KEY, clean_all)
+    _admin_invalidate()
+
+
+def _raw_provider_model(pid: str) -> str:
+    """Одиночная модель провайдера из настроек (без цепочки). Не бросает."""
+    try:
+        spec = _spec_for(str(pid or ""))
+        return str(spec["model"]())[:200]
+    except Exception:
+        return ""
+
+
+def provider_model_slots(pid: str) -> dict:
+    """Слоты цепочки провайдера {high, medium, low} (None — пусто)."""
+    pid = str(pid or "")
+    return _read_model_slots_all().get(pid, {"high": None, "medium": None, "low": None})
+
+
+def ensure_model_slots(pid: str) -> dict:
+    """Материализовать цепочку из одиночной модели, если её ещё нет.
+
+    Идемпотентно: срабатывает один раз на провайдер — дальше пустые слоты
+    уважаются (админ очистил цепочку нарочно). Без материализации карточка
+    врала бы «цепочки нет», а запросы всё равно шли бы на одиночную модель."""
+    pid = str(pid or "")
+    if not pid:
+        return {"high": None, "medium": None, "low": None}
+    all_slots = _read_model_slots_all()
+    if pid in all_slots:
+        return dict(all_slots[pid])
+    raw = _raw_provider_model(pid)
+    slots = {"high": (raw or None), "medium": None, "low": None}
+    # Провайдер без модели (нет ключа/не настроен) — цепочку не создаём из
+    # пустоты: нечего материализовывать, слоты останутся пустыми по чтению.
+    if raw:
+        all_slots[pid] = dict(slots)
+        try:
+            _write_model_slots_all(all_slots)
+        except (sqlite3.Error, OSError):
+            pass
+        return slots
+    return {"high": None, "medium": None, "low": None}
+
+
+def ensure_all_model_slots() -> None:
+    """Материализовать цепочки всех известных провайдеров (для overview)."""
+    try:
+        ids = known_provider_ids()
+    except Exception:
+        return
+    for pid in ids:
+        try:
+            ensure_model_slots(pid)
+        except Exception:
+            continue
+
+
+def provider_model_chain(pid: str) -> list[str]:
+    """Порядок попыток моделей внутри провайдера: high → medium → low.
+
+    Пустые слоты пропускаются. Если цепочки ещё нет (база до фичи) —
+    работает одиночная модель из настроек, то есть ровно прежнее поведение."""
+    pid = str(pid or "")
+    all_slots = _read_model_slots_all()
+    if pid not in all_slots:
+        raw = _raw_provider_model(pid)
+        return [raw] if raw else []
+    slots = all_slots[pid]
+    return [str(slots[s]) for s in PROVIDER_SLOTS if slots.get(s)]
+
+
+def provider_primary_model(pid: str) -> str:
+    """Первая модель цепочки (та, что идёт в запросы по умолчанию)."""
+    chain = provider_model_chain(pid)
+    if chain:
+        return chain[0]
+    return _raw_provider_model(pid)
+
+
+def apply_model_slot_move(current: dict, want_slot, want_model) -> tuple[dict, dict]:
+    """Одно перемещение модели в цепочке с ОБМЕНОМ (аналог провайдеров).
+
+    current — {high, medium, low} модели; want_model — ''/None значит
+    «очистить слот». Дубли запрещены: та же модель в двух слотах — это не
+    цепочка, а опечатка. Возвращает (новые_слоты, info для тоста)."""
+    cur = {s: (current.get(s) if isinstance(current.get(s), str) and current.get(s) else None)
+           for s in PROVIDER_SLOTS}
+    want = _normalize_slot_name(want_slot)
+    model = str(want_model or "").strip()[:200] if want_model not in (None, "") else ""
+    if want is None:
+        return cur, {"type": "noop"}
+    if not model:
+        if not cur.get(want):
+            return cur, {"type": "noop", "slot": want}
+        removed = cur[want]
+        cur[want] = None
+        return cur, {"type": "removed", "model": removed, "from": want,
+                     "fromLabel": PROVIDER_SLOT_LABELS.get(want, want)}
+    old = next((s for s in PROVIDER_SLOTS if cur.get(s) == model), None)
+    if old == want:
+        return cur, {"type": "noop", "model": model, "slot": want}
+    holder = cur.get(want)
+    if not holder:
+        if old:
+            cur[old] = None
+        cur[want] = model
+        return cur, {"type": "moved", "model": model, "from": old, "to": want,
+                     "fromLabel": PROVIDER_SLOT_LABELS.get(old or "", old or ""),
+                     "toLabel": PROVIDER_SLOT_LABELS.get(want, want)}
+    if old:
+        cur[want] = model
+        cur[old] = holder
+        return cur, {"type": "swapped", "model": model, "other": holder,
+                     "slot": want, "otherSlot": old,
+                     "slotLabel": PROVIDER_SLOT_LABELS.get(want, want),
+                     "otherSlotLabel": PROVIDER_SLOT_LABELS.get(old, old)}
+    cur[want] = model
+    return cur, {"type": "evicted", "model": model, "other": holder,
+                 "slot": want, "slotLabel": PROVIDER_SLOT_LABELS.get(want, want)}
+
+
+def describe_model_slots_change(old: dict, new: dict) -> dict:
+    """Описать разницу двух карт цепочки для тоста (полная карта)."""
+    old_n = {s: (old.get(s) or None) for s in PROVIDER_SLOTS}
+    new_n = {s: (new.get(s) or None) for s in PROVIDER_SLOTS}
+    if old_n == new_n:
+        return {"type": "noop"}
+    moved: dict[str, list] = {}
+    models = set([v for v in old_n.values() if v] + [v for v in new_n.values() if v])
+    for model in models:
+        before = next((s for s in PROVIDER_SLOTS if old_n.get(s) == model), None)
+        after = next((s for s in PROVIDER_SLOTS if new_n.get(s) == model), None)
+        if before != after:
+            moved[model] = [before, after]
+    if len(moved) == 2:
+        ids = list(moved.keys())
+        a_before, a_after = moved[ids[0]]
+        b_before, b_after = moved[ids[1]]
+        if a_before == b_after and b_before == a_after and a_after and b_after:
+            return {"type": "swapped", "model": ids[0], "other": ids[1],
+                    "slot": a_after, "otherSlot": b_after,
+                    "slotLabel": PROVIDER_SLOT_LABELS.get(a_after, a_after),
+                    "otherSlotLabel": PROVIDER_SLOT_LABELS.get(b_after, b_after)}
+    lost = [m for m, (b, a) in moved.items() if b and not a]
+    gained = [m for m, (b, a) in moved.items() if a and not b]
+    if len(lost) == 1 and len(gained) == 1:
+        slot = next((s for s in PROVIDER_SLOTS if new_n.get(s) == gained[0]), None)
+        return {"type": "evicted", "model": gained[0], "other": lost[0],
+                "slot": slot, "slotLabel": PROVIDER_SLOT_LABELS.get(slot or "", slot or "")}
+    if len(moved) == 1:
+        model = list(moved.keys())[0]
+        before, after = moved[model]
+        if before and not after:
+            return {"type": "removed", "model": model, "from": before,
+                    "fromLabel": PROVIDER_SLOT_LABELS.get(before, before)}
+        return {"type": "moved", "model": model, "from": before, "to": after,
+                "fromLabel": PROVIDER_SLOT_LABELS.get(before or "", before or ""),
+                "toLabel": PROVIDER_SLOT_LABELS.get(after or "", after or "")}
+    return {"type": "moved", "changes": moved}
+
+
+def providers_set_model_slots(pid: str, slots: dict) -> dict:
+    """Атомно выставить цепочку провайдера {high, medium, low} (модели/null).
+
+    Та же строгость, что у слотов провайдеров: дубли внутри цепочки
+    отвергаются, пустая цепочка разрешена (провайдер честно скажет «нет
+    моделей», а не будет молча работать на старой). После записи одиночная
+    модель провайдера синхронизируется с первой в цепочке — иначе старые пути
+    (проба, judge, legacy-чтения) видели бы вчерашнюю модель."""
+    pid = str(pid or "").strip()
+    if not pid:
+        raise ValueError("Нужен провайдер для цепочки моделей")
+    try:
+        _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    if not isinstance(slots, dict):
+        raise ValueError("Нужен объект slots {high, medium, low}")
+    cleaned: dict[str, str | None] = {}
+    for slot in PROVIDER_SLOTS:
+        val = slots.get(slot)
+        if val in (None, "", "none", "null"):
+            cleaned[slot] = None
+            continue
+        model = str(val).strip()[:200]
+        if not model:
+            cleaned[slot] = None
+        elif len(model) > 200:
+            raise ValueError("Название модели слишком длинное")
+        else:
+            cleaned[slot] = model
+    seen: dict[str, str] = {}
+    for slot, model in cleaned.items():
+        if model and model in seen:
+            raise ValueError(f"Модель «{model}» уже стоит в слоте «{PROVIDER_SLOT_LABELS[seen[model]]}» — один приоритет на модель")
+        if model:
+            seen[model] = slot
+    all_slots = _read_model_slots_all()
+    all_slots[pid] = dict(cleaned)
+    _write_model_slots_all(all_slots)
+    _sync_legacy_model_to_chain(pid, cleaned)
+    return cleaned
+
+
+def _sync_legacy_model_to_chain(pid: str, chain_slots: dict) -> None:
+    """Одиночная модель = первая в цепочке (для старых путей чтения).
+
+    Без синхронизации проба провайдера, judge и любой код, читающий
+    spec['model'], видели бы вчерашнюю модель после смены цепочки."""
+    chain = [str(chain_slots.get(s)) for s in PROVIDER_SLOTS if chain_slots.get(s)]
+    if not chain:
+        return
+    primary = chain[0]
+    try:
+        spec = _spec_for(pid)
+    except KeyError:
+        return
+    try:
+        current = str(spec["model"]())[:200]
+    except Exception:
+        current = ""
+    if current == primary:
+        return
+    try:
+        if spec.get("builtin"):
+            _customs, _slots, _enabled, overrides = _admin_snapshot()
+            entry = dict(overrides.get(pid) or {})
+            entry["model"] = primary
+            overrides[pid] = entry
+            _app_config_write(_OVERRIDES_KEY, overrides)
+        else:
+            customs, _slots, _enabled, _ov = _admin_snapshot()
+            entry = customs.get(pid)
+            if entry is None:
+                return
+            entry["model"] = primary
+            entry["updated_at"] = int(time.time() * 1000)
+            customs[pid] = entry
+            _app_config_write(_CUSTOM_KEY, customs)
+    except (sqlite3.Error, OSError):
+        return
+    finally:
+        _admin_invalidate()
+
+
+def _sync_chain_to_legacy_model(pid: str, model: str) -> None:
+    """Одиночная модель сменилась старым путём — отразить в цепочке.
+
+    Новая модель встаёт в «Высокий»; если она уже была в цепочке — обмен со
+    старым «Высоким», иначе старый «Высокий» вытесняется (остальные слоты не
+    трогаем). Пустая модель — ничего не делаем."""
+    model = str(model or "").strip()[:200]
+    if not model:
+        return
+    all_slots = _read_model_slots_all()
+    if pid not in all_slots:
+        # Цепочки ещё не было — материализуем сразу с новой моделью наверху.
+        raw_chain = [m for m in [model] if m]
+        all_slots[pid] = {"high": model, "medium": None, "low": None}
+        try:
+            _write_model_slots_all(all_slots)
+        except (sqlite3.Error, OSError):
+            pass
+        return
+    cur = dict(all_slots[pid])
+    if cur.get("high") == model:
+        return
+    old_high = cur.get("high")
+    old_slot = next((s for s in PROVIDER_SLOTS if cur.get(s) == model), None)
+    if old_slot:
+        cur[old_slot] = old_high
+    cur["high"] = model
+    # Дубли после сдвига невозможны по построению (модель была одна), но
+    # перестрахуемся: та же строка в двух слотах — не цепочка.
+    seen: set[str] = set()
+    for s in PROVIDER_SLOTS:
+        if cur.get(s) and cur[s] in seen:
+            cur[s] = None
+        elif cur.get(s):
+            seen.add(cur[s])
+    all_slots[pid] = cur
+    try:
+        _write_model_slots_all(all_slots)
+    except (sqlite3.Error, OSError):
+        pass
 
 
 def _public_provider_card(pid: str) -> dict:
@@ -2017,7 +2585,31 @@ def _public_provider_card(pid: str) -> dict:
     overridden = bool(overrides)
     if overridden:
         warnings.append("Значения изменены из админки — сброс вернёт стандартные")
-    title = model_title(pid, model_value)
+    # Цепочка моделей (high → medium → low). Читаем без записи: материализует
+    # её overview, карточка лишь показывает. Нет записи — показываем одиночную
+    # как high, чтобы вид совпадал с тем, что реально поедет в запросы.
+    try:
+        stored_chains = _read_model_slots_all()
+    except Exception:
+        stored_chains = {}
+    chain_slots = stored_chains.get(pid)
+    if chain_slots is None:
+        chain_slots = {"high": (model_value or None), "medium": None, "low": None}
+    else:
+        chain_slots = {s: chain_slots.get(s) for s in PROVIDER_SLOTS}
+    chain = [str(chain_slots[s]) for s in PROVIDER_SLOTS if chain_slots.get(s)]
+    if not chain and model_value:
+        chain = [model_value]
+    primary_model = chain[0] if chain else model_value
+    if not chain:
+        warnings.append("В цепочке нет моделей — проверки через провайдер не пойдут")
+    chain_titles = {}
+    try:
+        for mdl in chain:
+            chain_titles[mdl] = model_title(pid, mdl)
+    except Exception:
+        pass
+    title = model_title(pid, primary_model or model_value)
     return {
         "id": pid,
         "title": str(spec.get("title") or pid),
@@ -2028,22 +2620,25 @@ def _public_provider_card(pid: str) -> dict:
         "keyHint": ("…" + key[-4:]) if key and len(key) > 4 else ("…" if key else ""),
         "baseUrl": base_value,
         "baseHost": _base_host(base_value or ""),
-        "model": model_value,
+        "model": primary_model or model_value,
         "defaultModel": default_model,
         "modelTitle": title,
-        "displayTitle": title or model_value or str(spec.get("title") or pid),
+        "displayTitle": title or (primary_model or model_value) or str(spec.get("title") or pid),
         # Ученику показывается только название (model_student_label), поэтому
         # его отсутствие — не мелочь, а «строка на экране результата не
         # появится». Админ должен видеть это на карточке, а не узнавать от
         # ученика, который спросит «а кто это проверял».
-        "modelTitleMissing": bool(model_value and not title),
-        "modelOverridden": bool(model_value and default_model and model_value != default_model),
+        "modelTitleMissing": bool((primary_model or model_value) and not title),
+        "modelOverridden": bool((primary_model or model_value) and default_model and (primary_model or model_value) != default_model),
         "overridden": overridden,
         "auth": "raw" if spec.get("auth") == "raw" else "bearer",
         "useWalletBalance": bool((spec.get("extra_body") or {}).get("useWalletBalance")),
         "mergeSystem": bool(spec.get("merge_system")),
         "slot": slot,
         "slotLabel": PROVIDER_SLOT_LABELS.get(slot or "", ""),
+        "modelSlots": {s: chain_slots.get(s) for s in PROVIDER_SLOTS},
+        "modelOrder": list(chain),
+        "modelTitles": dict(chain_titles),
         "active": pid == active,
         "isPreferred": bool(order[:1] == [pid]),
         "recent": recent,
@@ -2065,6 +2660,10 @@ def providers_overview() -> dict:
     порядок, поэтому стандартная раскладка (closerouter высокий, gptunnel
     средний) материализуется при первом открытии, а не остаётся неявной."""
     ensure_default_slots()
+    try:
+        ensure_all_model_slots()
+    except Exception:
+        pass
     customs, slots, _enabled, _ov = _admin_snapshot()
     slotted = [slots[s] for s in PROVIDER_SLOTS if slots.get(s)]
     rest = [pid for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()) if pid not in slotted]
@@ -2520,7 +3119,7 @@ def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
     except Exception:
         base_value = ""
     try:
-        model_value = spec["model"]()
+        model_value = provider_primary_model(pid) or spec["model"]()
     except Exception:
         model_value = ""
     if not key or not base_value or not model_value:
