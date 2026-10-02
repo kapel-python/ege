@@ -3916,7 +3916,15 @@ function essayResultUrl(submission) {
 function openEssayResult(taskId) {
   const S = Session.cur;
   const submission = S && S.essayReadyByTask && S.essayReadyByTask[taskId];
-  const url = essayResultUrl(submission);
+  // Кнопка обязана вести на отчёт всегда, а не только когда submission уже
+  // лежит в памяти вкладки: после перезагрузки essayReadyByTask пуст
+  // (он не переживает F5 — в localStorage едут только метки), а отчёт уже
+  // готов на сервере. Раньше при пустой записи клик молча ничего не делал —
+  // кнопка «то работала, то нет» в зависимости от пути восстановления.
+  // Fallback — последний submission по заданию: его отдаёт тот же endpoint,
+  // что рисует restore-блоки, так что ведёт ровно туда, куда вёл бы и точный id.
+  const url = essayResultUrl(submission)
+    || `/ege-result.html?subject=${encodeURIComponent(Store.subject || "russian")}&taskId=${encodeURIComponent(taskId || "")}`;
   if (url) location.href = url;
 }
 
@@ -4524,6 +4532,7 @@ async function sessionEssayResume(taskId) {
       const evRes = await fetch("/api/essays/evaluation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(15000),
         body: JSON.stringify({ subject: Store.subject, clientId: saved.clientId, status: "ready" }),
       });
       const evData = await evRes.json().catch(() => ({}));
@@ -4572,6 +4581,16 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     aiRes = await fetch("/api/ai/essay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Потолок ожидания 120 с: сервер в худшем случае считает до ~90 с
+      // (судья 45 с + запасной 45 с при отказе, бюджет повтора 45 с). Без
+      // сигнала fetch висит бесконечно и экран остаётся на вечной анимации
+      // загрузки — ученик видит «ничего не произошло» и обновляет страницу
+      // (живой случай: проверка ytuzoh/sub52 добежала на сервере до ready,
+      // а клиент так и не дождался ответа). С сигналом висящая проверка
+      // превращается в обычную ошибку с кнопкой «Попробовать снова», а уже
+      // добежавший на сервере результат подхватывается дешёвым путём через
+      // sessionEssayResume (evaluation-first, без нового вызова модели).
+      signal: AbortSignal.timeout(120000),
       // taskId нужен серверу, чтобы выбрать рубрику: у заданий с исходным
       // текстом строгая (позиция автора + два примера ИЗ текста), у свободных
       // тем — «тезис + аргументы». Сам текст исходника уходит один раз, при
@@ -4644,6 +4663,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     savedRes = await fetch("/api/essays/evaluation", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({ subject: Store.subject, clientId, status: "ready", result: aiData.result }),
     });
     savedData = await savedRes.json().catch(() => ({}));
@@ -4739,6 +4759,16 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
 function essayRestoreReportBlock(t, sub) {
   const S = Session.cur;
   if (!S || !t || !sub || !sub.result) return;
+  // Кнопка «Посмотреть результат →» читает submission из essayReadyByTask —
+  // без этой записи клик молча ничего не делает (openEssayResult находит
+  // undefined и никуда не ведёт). После перезагрузки память вкладки пуста,
+  // поэтому кладём сюда то, что только что прочитали с сервера. Это НЕ метка
+  // визита: essayReadyByTask живёт только в памяти вкладки и никуда не
+  // сохраняется (в localStorage едут лишь essayWrittenByTask/черновик), так
+  // что на следующий заход она не переживает и «своим визитом» не притворяется. Метка essayWrittenByTask здесь уже есть (иначе мы бы сюда не
+  // попали — restore выше проверил sessionTaskWritten), её не трогаем.
+  if (!S.essayReadyByTask) S.essayReadyByTask = {};
+  S.essayReadyByTask[t.id] = sub;
   Session.stopTimer();
   essaySetFormVisible(false);
   essayMountReadonly(String(sub.text || ""), Number(sub.wordCount) || 0);

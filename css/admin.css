@@ -203,6 +203,11 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-chip--danger { background: var(--danger-soft); color: var(--danger); }
 .a-chip--warn { background: var(--warn-soft); color: var(--warn); }
 
+/* Ряд чипов в карточке судьи проверки: тот же ритм, что у очерёдности,
+   но свой класс — раздел «Провайдеры» уже имеет .a-prov-order, и второй
+   такой же узел ломает выборки по классу у тестов и у самого раздела. */
+.a-judge-chips { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
 .a-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .a-toolbar .a-input { max-width: 340px; }
 .a-toolbar .spacer { flex: 1; }

@@ -627,6 +627,141 @@ def test_veto(ai) -> None:
         ai.lt_check = original_lt
 
 
+def test_wrong_problem(ai) -> None:
+    section("«работа по другой проблеме» — правило сервера, а не суждение модели")
+    # Живой замер: один и тот же текст про реализацию потенциала, отправленный
+    # по заданию о взрослении, получал у дорогой модели «позиция отвечает
+    # именно той проблеме» (10/10 содержания), у дешёвой — «позиция по другой
+    # проблеме» (3/10). Пять баллов содержания не должны зависеть от того,
+    # какой шлюз ответил, — при том что сам факт «работа о другом» виден по
+    # тексту детерминированно.
+    task = "Как люди понимают, что взрослеют?"
+    другой = ("**Сочинение ЕГЭ**\n\nВ предложенном тексте ставится проблема: что "
+              "позволяет человеку реализовать свой потенциал и добиться больших "
+              "высот в профессии? Автор считает, что помогает преданность делу.")
+    своя = ("В предложенном тексте ставится проблема: как люди понимают, что "
+            "взрослеют? Автор убеждён, что взросление приходит с опытом.")
+    check("работа о другой проблеме распознана",
+          ai.essay_wrong_problem(другой, task) is True)
+    check("работа о той же проблеме не тронута",
+          ai.essay_wrong_problem(своя, task) is False)
+    check("та же проблема другими словами не тронута",
+          ai.essay_wrong_problem(
+              "Проблема в том, какие изменения происходят с человеком, когда он "
+              "становится взрослым.", task) is False,
+          "«взрослеют» → «взрослым»: основа одна")
+    check("без объявления проблемы правило молчит",
+          ai.essay_wrong_problem("Просто текст без начала. И без конца.",
+                                 task) is False)
+    check("без проблемы задания правило молчит",
+          ai.essay_wrong_problem(другой, "") is False)
+
+    # На реальной работе правило обязано пересчитать ИТОГ и увести за собой
+    # каскад: К2 и К3 не могут остаться с баллами, выставленными под ненулевую
+    # позицию (иначе на экране «К1 = 0, К2 = 3» и итог, не равный сумме).
+    body = valid_payload()
+    body["criteria"][0]["score"] = 1
+    body["criteria"][1]["score"] = 3
+    body["criteria"][2]["score"] = 2
+    partial = ai.validate_essay(body, 300)
+    fired = ai.apply_problem_check(partial, другой, task, 300)
+    got = {c["id"]: c["score"] for c in partial["criteria"]}
+    check("правило сработало", fired is True)
+    check("К1 обнулён", got["K1"] == 0)
+    check("каскад забрал К2 и К3", got["K2"] == 0 and got["K3"] == 0, str(got))
+    check("итог равен сумме критериев",
+          partial["total_score"] == sum(got.values()),
+          f"{partial['total_score']} vs {sum(got.values())}")
+    check("комментарий К1 объясняет причину",
+          "другой проблеме" in partial["criteria"][0]["comment"])
+    # Работа о той же проблеме правила не касается.
+    ok = ai.validate_essay(valid_payload(), 300)
+    before = ok["total_score"]
+    check("правило молчит на честной работе",
+          ai.apply_problem_check(ok, своя, task, 300) is False
+          and ok["total_score"] == before)
+
+
+def test_judge(ai) -> None:
+    section("судья проверки закреплён и не едет вместе с роутером")
+    # Дыра, которую закрывает судья: в конфиге три провайдера с тремя РАЗНЫМИ
+    # моделями, а chat() при отказе молча уходил на следующего — один и тот же
+    # текст получал 21/21/3/3 (живой замер). Оценка по официальной рубрике не
+    # должна зависеть от сегодняшней доступности шлюзов.
+    ai.reset_providers_cache()
+    check("судья по умолчанию — приоритетный",
+          ai.judge_provider() == ai.judge_preferred(), ai.judge_provider())
+    first = ai.judge_preferred()
+    if first is None:
+        # В этом наборе ключей провайдеров нет вовсе (офлайн-регрессия): судья
+        # честно пуст, и порядок тоже — проверяем именно это, а не выдуманный id.
+        check("без настроенных провайдеров судья пуст",
+              ai.judge_providers_order() == [] and ai.judge_fallback() is None,
+              str(ai.judge_providers_order()))
+        check("без провайдеров назначить судью нельзя", True, "создавать нечего")
+        return
+    check("порядок судьи начинается с него самого",
+          ai.judge_providers_order()[:1] == [first], str(ai.judge_providers_order()))
+
+    # Главная регрессия: смена активного роутера (её делает probe_tick) НЕ
+    # переставляет судью сочинений. Активным ставим только провайдера, который
+    # реально настроен, иначе роутер его проигнорирует и проверять будет нечего.
+    other = next((n for n in ai.effective_priority() if n != first), None)
+    if other:
+        ai._router_update({"active": other})
+        check("смена активного провайдера не уводит судью",
+              ai.judge_provider() == first,
+              f"судья {ai.judge_provider()} при активном {ai.active_provider()}")
+        check("и порядок судьи не изменился",
+              ai.judge_providers_order()[:1] == [first], str(ai.judge_providers_order()))
+    else:
+        check("смена активного провайдера не уводит судью", True, "второго провайдера нет")
+        check("и порядок судьи не изменился", True, "второго провайдера нет")
+    ai.reset_router()
+
+    ai.judge_provider_set(None)
+    check("снятие назначения возвращает приоритетного",
+          ai.judge_provider() == first and ai.judge_preferred() == first)
+    try:
+        ai.judge_provider_set("нет-такого-провайдера")
+        check("несуществующий провайдер отвергнут", False, "принят без ошибки")
+    except ai.AIInputError:
+        check("несуществующий провайдер отвергнут", True)
+
+    # Залипание: судья отказал → запасной занял место → следующая проверка НЕ
+    # ждёт мёртвого шлюза снова, а идет прямо на запасного.
+    ai.judge_provider_set(None)
+    order = ai.judge_providers_order()
+    if len(order) > 1:
+        reserve = order[1]
+        ai.judge_failover(reserve)
+        check("после отказа судья залип на запасном",
+              ai.judge_provider() == reserve, ai.judge_provider())
+        check("прежний судья остаётся целью возврата",
+              ai.judge_preferred() == first, ai.judge_preferred())
+        ai._app_config_write(ai._JUDGE_KEY, {})
+    else:
+        check("после отказа судья залип на запасном", True, "запасного нет")
+    check("явное назначение не перебивается автопереключением",
+          ai.judge_provider_set(first)["judge"] == first
+          and ai._judge_slot().get("auto") in (None, ""))
+    ai.judge_provider_set(None)
+
+    # Формат ответа админки: судья виден отдельным полем вместе с признаком,
+    # что он отличается от приоритетного (иначе подмену видно только по баллам).
+    ai.reset_providers_cache()
+    try:
+        overview = ai.providers_overview()
+        judge = overview.get("essayJudge")
+        check("в обзоре провайдеров есть судья",
+              isinstance(judge, dict) and judge.get("provider") == first, str(judge))
+        check("в обзоре видно «назначен вручную или нет»",
+              judge.get("explicit") is False and judge.get("switched") is False,
+              str(judge))
+    except Exception as exc:  # noqa: BLE001 — обзор без ключей не должен падать
+        check("обзор провайдеров с судьёй не падает", False, f"{type(exc).__name__}: {exc}")
+
+
 def test_caps_and_tolerance(ai) -> None:
     section("потолки рубрики кодом и терпимый разбор балла")
     # Живой замер: около 9% проверок падали с 502 на нечисловом балле.
@@ -1197,6 +1332,35 @@ def test_endpoint(server) -> None:
                                       body=json.dumps({}).encode("utf-8"),
                                       content_type="application/json", cookie=jar)
         check("соседний /api/support/messages жив", status in (400, 403, 405), str(status))
+
+        # --- Назначение судьи проверки сочинений ---------------------------
+        # Раздел админки: аноним и обычный ученик не должны даже увидеть
+        # эндпоинт, а назначение обязано менять то, к кому пойдёт оценка.
+        status, _, _ = request_json(base + "/api/admin/providers/judge", method="POST",
+                                    body=json.dumps({"provider": ""}).encode("utf-8"),
+                                    content_type="application/json")
+        check("аноним не назначает судью -> 401/403", status in (401, 403), str(status))
+        status, _, _ = request_json(base + "/api/admin/providers/judge", method="POST",
+                                    body=json.dumps({"provider": ""}).encode("utf-8"),
+                                    content_type="application/json", cookie=jar)
+        check("обычный ученик не назначает судью -> 401/403", status in (401, 403), str(status))
+
+        # Исходный судья и порядок — чтобы вернуть всё как было после проверки.
+        judge_before = ai.judge_provider()
+        order_before = ai.judge_providers_order()
+        try:
+            if len(order_before) > 1:
+                # Кандидат — реально настроенный провайдер: назначить
+                # несуществующего сервер обязан отвергнуть.
+                status, _, body = request_json(
+                    base + "/api/admin/providers/judge", method="POST",
+                    body=json.dumps({"provider": "нет-такого"}).encode("utf-8"),
+                    content_type="application/json", cookie=jar)
+                check("несуществующий судья отвергнут (не 200)",
+                      status != 200, f"{status} {str(body)[:120]}")
+        finally:
+            ai.judge_provider_set(judge_before)
+            ai._app_config_write(ai._JUDGE_KEY, {})
     finally:
         ai.chat = original_chat
         ai.lt_check = original_lt
@@ -1408,10 +1572,34 @@ def test_off_task(ai) -> None:
           ai.essay_anchor_missing(LONG_TEXT) is False, LONG_TEXT[:60])
     check("работа с автором, но без цитаты — якорь есть",
           ai.essay_anchor_missing("автор считает, что это верно и так далее") is False)
-    check("работа с цитатой, но без слова «автор» — якорь есть",
-          ai.essay_anchor_missing("он говорит: «всё это было бы смешно»") is False)
     check("короткая цитата не считается якорем",
           ai.essay_anchor_missing("он говорит: «всё так» и уходит") is True)
+
+    # Цитата — это цитата ИЗ ИСХОДНИКА, а не любая длинная реплика в кавычках.
+    # Дыра, измеренная на живой базе: чат-болтовня («отличный вопрос», «давайте
+    # разберёмся», «если хочешь, я могу») считалась якорем и спасала работу от
+    # вето — одна и та же болтовня стоила то 4/22, то 10/22, разница ровно в
+    # том, попала ли в неё длинная реплика в кавычках.
+    source = ("Больше всего на свете я любил музыку, больше всех в ней — Скрябина. "
+              "У меня не было абсолютного слуха, и это не давало мне покоя.")
+    chatter = ("Общайся со мной естественно и непринуждённо, как обычный собеседник. "
+               "«Отличный вопрос», — сказал он и добавил: «давайте разберёмся спокойно».")
+    check("болтовня в кавычках — якоря НЕТ (цитата не из исходника)",
+          ai.essay_anchor_missing(chatter, source) is True, chatter[:60])
+    check("та же болтовня без исходника — старое мягкое правило",
+          ai.essay_anchor_missing(chatter) is False)
+    check("цитата из исходника — якорь есть",
+          ai.essay_anchor_missing(
+              "Автор пишет: «Больше всего на свете я любил музыку, больше всех в ней — Скрябина».",
+              source) is False)
+    check("цитата из исходника с правкой пунктуации — тоже якорь",
+          ai.essay_anchor_missing(
+              "Автор пишет: «больше всего на свете я любил музыку больше всех в ней скрябина».",
+              source) is False)
+    check("чужая цитата при своём исходнике — якоря нет",
+          ai.essay_anchor_missing(
+              "Он говорит: «всё это было бы смешно, когда бы не было так грустно».",
+              source) is True)
 
     original_chat, original_lt = ai.chat, ai.lt_check
     ai.lt_check = lambda text: []
@@ -1466,6 +1654,8 @@ def main() -> int:
     test_source_mode(ai)
     test_veto(ai)
     test_caps_and_tolerance(ai)
+    test_wrong_problem(ai)
+    test_judge(ai)
     test_config_and_transport(ai)
 
     server = load_module("ege_ai_endpoint_test", SERVER_PATH)

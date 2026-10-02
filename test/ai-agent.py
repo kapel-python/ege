@@ -303,6 +303,160 @@ def _essay_and_reset_probes(server):
         conn.close()
 
 
+def _knowledge_and_paging_probes(server):
+    """База знаний по темам и пагинация ошибок/попыток (без HTTP)."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        subj = "profile_math"
+        row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
+        uid = int(row["id"]) if row else None
+        out = {}
+
+        # 1. Без topic — вся справка; с topic — только раздел (короче и точнее).
+        full = agent.project_info(conn, uid, subj, {})
+        part = agent.project_info(conn, uid, subj, {"topic": "проверки"})
+        out["knowledge_full"] = "Устройства" in full.get("text", "") and "matched" not in full
+        out["knowledge_part"] = (
+            part.get("matched") == ["Проверок сочинений в сутки: 5"]
+            and "Устройства" not in part.get("text", "")
+            and "5" in part.get("text", "")
+            and len(part["text"]) < len(full["text"]))
+        # Короткий код «XP» (2 буквы) находится, мусор — нет, пустая тема — вся.
+        xp = agent.project_info(conn, uid, subj, {"topic": "XP"})
+        miss = agent.project_info(conn, uid, subj, {"topic": "абракадабра"})
+        out["knowledge_xp"] = xp.get("matched") == ["Практика и опыт (XP)"]
+        out["knowledge_miss"] = (miss.get("matched") == []
+                                 and len(miss.get("text", "")) == len(full.get("text", "")))
+        # Тема «сочинение» не тянет чужие разделы (раньше тянула 5 из 7).
+        soch = agent.project_info(conn, uid, subj, {"topic": "сочинение"})
+        out["knowledge_narrow"] = (len(soch.get("matched") or []) <= 2
+                                   and "Устройства" not in soch.get("text", ""))
+        # Вопрос ученика -> тема для запасного вызова (иначе fallback несёт всё).
+        out["knowledge_args"] = (
+            agent._args_for_tool("project_info", "сколько проверок в день") == {"topic": "проверки сочинений в сутки"}
+            and agent._args_for_tool("project_info", "расскажи о приложении") == {})
+
+        # 2. Пагинация: сеем 4 ошибки и листаем их limit/offset.
+        task = conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                            " WHERE s.subject=? LIMIT 1", (subj,)).fetchone()
+        tid = task["id"]
+        for i in range(4):
+            conn.execute("DELETE FROM user_errors WHERE client_id=?", (f"paging-probe-{i}",))
+        for i in range(4):
+            conn.execute("INSERT INTO user_errors(user_id,task_id,skill_id,topic,created_at,resolved,"
+                         "subject,client_id,kind) VALUES(?,?,'n01_planimetry',?, '1',0,?,?,'major')",
+                         (uid, tid, f"Тема {i}", subj, f"paging-probe-{i}"))
+        conn.commit()
+        first = agent.fold_web(conn, uid, subj, {"op": "errors", "taskId": tid, "limit": 2})
+        second = agent.fold_web(conn, uid, subj, {"op": "errors", "taskId": tid, "limit": 2, "offset": 2})
+        ids_first = [r["id"] for r in first.get("last", [])]
+        ids_second = [r["id"] for r in second.get("last", [])]
+        out["paging_errors"] = (len(ids_first) == 2 and len(ids_second) == 2
+                                and not set(ids_first) & set(ids_second)
+                                and first.get("offset") == 0 and second.get("offset") == 2)
+        for i in range(4):
+            conn.execute("DELETE FROM user_errors WHERE client_id=?", (f"paging-probe-{i}",))
+        conn.commit()
+
+        # 3. Поиск и открытие через границу предметов.
+        other = agent.find_topics(conn, uid, subj, {"query": "задание 27"})
+        other_tasks = other.get("tasks") or []
+        out["find_other"] = (bool(other.get("otherSubject"))
+                             and any(x["id"].startswith("re27_") for x in other_tasks)
+                             and all("subject" in x for x in other_tasks))
+        out["find_other_detail"] = [x["id"] for x in other_tasks[:3]]
+        cross_task = agent.task_get(conn, uid, subj, {"taskId": "re27_1"})
+        try:
+            cross_lesson = agent.lesson_get(conn, uid, "russian", {"lessonId": "lesson_n01_opisannye"})
+            lesson_ok = cross_lesson.get("lessonId") == "lesson_n01_opisannye"
+        except ValueError:
+            lesson_ok = False
+        out["cross_open"] = (cross_task.get("subject") == "russian"
+                             and cross_task.get("taskId") == "re27_1" and lesson_ok)
+        # Бред по-прежнему пусто везде, а не «нашлось в другом».
+        none = agent.find_topics(conn, uid, subj, {"query": "абракадабра несуществующая"})
+        out["find_other"] = out["find_other"] and none.get("found") == 0 and not none.get("otherSubject")
+
+        # 4. Урок: хвост не отрезается молча.
+        lg = agent.lesson_get(conn, uid, subj, {"skillId": "n01_planimetry"})
+        pack_len = len(lg.get("text", ""))
+        out["lesson_pack_detail"] = (lg.get("stepsShown"), lg.get("stepsTotal"), pack_len)
+        total_steps = lg.get("stepsTotal")
+        out["lesson_pack"] = (pack_len <= 2000 and "subject" in lg
+                              and (total_steps is None  # влез целиком — хвоста нет
+                                   or ("note" in lg and lg.get("stepsShown", 0) < total_steps)))
+
+        # 5. Сложность, исходник, масштаб навыков, лента.
+        found_diff = agent.find_topics(conn, uid, subj, {"query": "производная"})
+        diffs = [x.get("difficulty") for x in found_diff.get("tasks", [])]
+        tg_diff = agent.task_get(conn, uid, subj, {"taskId": "n09_p1"})
+        out["difficulty"] = (all(isinstance(d, int) and 1 <= d <= 4 for d in diffs) and bool(diffs)
+                             and isinstance(tg_diff.get("difficulty"), int))
+        out["difficulty_detail"] = diffs[:4]
+        src = agent.task_get(conn, uid, subj, {"taskId": "re27_1"})
+        out["essay_source"] = (bool(src.get("problem")) and bool(src.get("sourceExcerpt"))
+                               and src.get("sourceTruncated") is True and bool(src.get("author")))
+        out["essay_source_detail"] = (src.get("problem") or "")[:60]
+        sk = agent.fold_web(conn, uid, subj, {"op": "skills"})
+        first = next((s for s in sk.get("skills", []) if s["id"] == "n01_planimetry"), {})
+        out["skills_scale"] = (first.get("totalTasks", 0) == 7
+                               and isinstance(first.get("tasksLeft"), int)
+                               and "lessonDone" in first)
+        out["skills_scale_detail"] = {k: first.get(k) for k in ("totalTasks", "tasksLeft", "lessonDone", "mastery")}
+        conn.execute("INSERT INTO timeline(user_id,subject,created_at,text,client_id)"
+                     " VALUES(?,?,?,?,?)", (uid, subj, "1700000000000", "Решено задание n01_p1", "probe-tl-1"))
+        conn.commit()
+        tl = agent.fold_web(conn, uid, subj, {"op": "timeline"})
+        empty = agent.fold_web(conn, uid, "russian", {"op": "timeline"})
+        out["timeline"] = (any("n01_p1" in e.get("text", "") for e in tl.get("events", []))
+                           and empty.get("events") == []
+                           and agent.fallback_tool_for("что я делал вчера")[0] == "fold_web"
+                           and agent.fallback_tool_for("что я делал вчера")[1] == {"op": "timeline"})
+        out["timeline_detail"] = [e.get("text") for e in tl.get("events", [])][:2]
+        conn.execute("DELETE FROM timeline WHERE client_id=?", ("probe-tl-1",))
+        conn.commit()
+
+        # 6. Сочинения по разным текстам различимы: автор/проблема на месте.
+        task = conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                            " WHERE s.subject='russian' AND t.id LIKE 're27_%' LIMIT 1").fetchone()
+        det = None
+        if task is not None:
+            conn.execute("INSERT INTO essay_submissions(user_id,subject,task_id,skill_id,text,word_count,"
+                         "client_id,evaluation_status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                         (uid, "russian", task["id"], "russian_essay_source", "текст " * 60, 160,
+                          "src-probe-1", "submitted", "1700000000000"))
+            conn.commit()
+            sub = conn.execute("SELECT id FROM essay_submissions WHERE client_id=?",
+                               ("src-probe-1",)).fetchone()
+            det = agent.essay_history(conn, uid, subj, {"submissionId": int(sub["id"])})
+            conn.execute("DELETE FROM essay_submissions WHERE client_id=?", ("src-probe-1",))
+            conn.commit()
+        out["essay_src"] = (det is not None and bool((det.get("essay") or {}).get("sourceAuthor"))
+                            and bool((det.get("essay") or {}).get("sourceProblem")))
+        out["essay_src_detail"] = ((det.get("essay") or {}).get("sourceAuthor"),
+                                   ((det.get("essay") or {}).get("sourceProblem") or "")[:50])
+
+        # 7. Поля «как сейчас» — не изменение: карточка не врёт.
+        cur = conn.execute("SELECT self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
+                           (uid, subj)).fetchone()
+        cur_level, cur_goal = cur["self_level"], cur["goal_id"]
+        try:
+            agent.propose_action(conn, uid, subj, "update_profile",
+                                 {"selfLevel": cur_level, "goal": cur_goal})
+            noop_same = False
+        except ValueError:
+            noop_same = True
+        mixed = agent.propose_action(conn, uid, subj, "update_profile",
+                                     {"selfLevel": cur_level,
+                                      "goal": "g95" if cur_goal != "g95" else "g60"})
+        out["noop"] = (noop_same and set(mixed.get("patch", {})) == {"goal"})
+        out["noop_detail"] = mixed.get("label")
+        return out
+    finally:
+        conn.close()
+
+
 def _resolve_error_refuses_resolved(server) -> bool:
     """Уже разобранная ошибка не должна получать «готово» вхолостую."""
     conn = server.connect()
@@ -807,6 +961,34 @@ def main():
             check("вилка прогноза не выходит за шкалу предмета",
                   probes["forecast_clamped"], str(probes.get("forecast_note")))
             check("в skills есть mastery и подпись", probes["skills_mastery"])
+            kprobes = _knowledge_and_paging_probes(server)
+            check("справка без topic — целиком", kprobes["knowledge_full"])
+            check("справка с topic — только раздел",
+                  kprobes["knowledge_part"], str(kprobes.get("knowledge_part")))
+            check("короткая тема XP находится, мусор даёт всё",
+                  kprobes["knowledge_xp"] and kprobes["knowledge_miss"])
+            check("«сочинение» не тянет чужие разделы", kprobes["knowledge_narrow"])
+            check("вопрос ученика превращается в topic", kprobes["knowledge_args"])
+            check("ошибки листаются limit/offset без пересечений",
+                  kprobes["paging_errors"])
+            check("поиск добирает из другого предмета («задание 27» из математики)",
+                  kprobes["find_other"], str(kprobes.get("find_other_detail")))
+            check("task_get и lesson_get открываются из чужого предмета",
+                  kprobes["cross_open"])
+            check("урок упаковывается до бюджета и честно говорит про хвост",
+                  kprobes["lesson_pack"], str(kprobes.get("lesson_pack_detail")))
+            check("у заданий видна сложность (find и task_get)",
+                  kprobes["difficulty"], str(kprobes.get("difficulty_detail")))
+            check("task_get сочинения несёт проблему и исходник",
+                  kprobes["essay_source"], str(kprobes.get("essay_source_detail")))
+            check("навыки знают масштаб темы и урок",
+                  kprobes["skills_scale"], str(kprobes.get("skills_scale_detail")))
+            check("лента событий отвечает на «что я делал»",
+                  kprobes["timeline"], str(kprobes.get("timeline_detail")))
+            check("сочинения различимы по исходнику, а не только по id",
+                  kprobes["essay_src"], str(kprobes.get("essay_src_detail")))
+            check("подтверждение не обещает то, что уже так",
+                  kprobes["noop"], str(kprobes.get("noop_detail")))
 
             section("квота: 10 ходов, 11-й 429, 502 возвращает жетон")
             c = Client("10.3.0.1")

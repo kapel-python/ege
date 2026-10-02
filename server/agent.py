@@ -178,8 +178,11 @@ AGENT_SYSTEM = (
     "5g. ВОПРОСЫ О ПРИЛОЖЕНИИ — НЕ ПРО УЧЁБУ. «Сколько проверок в день», "
        "«что такое XP», «где сбросить прогресс», «что ты умеешь», «как отозвать "
        "устройство» — это НЕ данные ученика, и в fold_web их нет. Сначала ЗОВИ "
-       "project_info и отвечай ТОЛЬКО по нему: цифры (5 проверок, 10 вопросов, "
-       "150 слов, 22 балла) — оттуда, а не из головы. Технического нутра там нет "
+       "project_info С ТЕМОЙ из вопроса (topic=«проверки» / «XP» / «устройства» / "
+       "«сброс» / «профиль» — что спросили, то и передай) и отвечай ТОЛЬКО по "
+       "вернувшемуся разделу: цифры (5 проверок, 10 вопросов, "
+       "150 слов, 22 балла) — оттуда, а не из головы. Всю справку проси только "
+       "на общий вопрос («что ты умеешь», «расскажи о приложении»). Технического нутра там нет "
        "и быть не должно: ученику не рассказываешь ни про какие внутренние "
        "механизмы, бюджеты и защиты — только то, что написано в справке.\n"
     "5h. НАШЁЛ — ОТКРОЙ, НЕ ПЕРЕСКАЗЫВАЙ. Поиск (find_topics) возвращает только "
@@ -207,9 +210,22 @@ AGENT_SYSTEM = (
     "- «разбери задание N» → fold_web(op=\"attempts\", taskId=...) + task_get.\n"
     "- «как мои успехи / сколько решено / что пройдено» → fold_web(op=\"progress\"), при нужде skills.\n"
     "- «план на неделю» → plan_draft, затем коротко перескажи своими словами.\n"
+    "- «что делать / с чего начать / распиши недели» → plan_draft (weeks=сколько назвали), затем коротко своими словами: вопрос про план, а не просьба «посмотреть».\n"
     "- «посмотри профиль / кто я» → fold_web(op=\"profile\").\n"
+    "- «что я недавно делал / чем занимался» → fold_web(op=\"timeline\") — это лента событий, а не числа.\n"
+    "- «как мои сочинения / сколько баллов / покажи работы» → essay_history БЕЗ submissionId "
+    "(оглавление: total, баллы). Это НЕ разбор — критерии там не лежат.\n"
+    "- «разбери / покажи ещё одно / что не так в работе №N» → essay_history(submissionId=N): "
+    "только этот вызов даёт критерии К1–К10, вердикт и отрывок текста. Фраза «вижу только "
+    "последнее» запрещена: не видишь деталей — зови инструмент, а не жалуйся.\n"
+    "- Разбирая сочинение, называй только критерии К1–К10 из его разбора — их ровно десять, других номеров нет.\n"
     "- «что такое логарифм / объясни тему» → find_topics по словам из вопроса, затем lesson_get по найденному id.\n"
     "- «дай задание на X / что порешать по X» → find_topics, затем task_get по найденному id. НЕ выдумывай id.\n"
+    "- «посложнее / полегче» → у находок find_topics есть difficulty 1–4: выбирай по нему, а не наугад.\n"
+    "- «разбери моё сочинение / о чём текст» → task_get по заданию: там problem, автор и начало исходника.\n"
+    "- «задание 27» и любой поиск без совпадений find_topics сам доберёт из ДРУГОГО "
+    "предмета (поле subject, пометка otherSubject): открывай находку task_get/lesson_get "
+    "по id — они работают из любого предмета. «Такого нет» говори, только если пусто везде.\n"
     "- Не нашёл в каталоге — скажи честно и предложи близкую тему (fold_web op=\"skills\").\n"
     "- «поменяй цель/уровень/имя» → update_profile (потребует подтверждения).\n"
     "- «отметь ошибку разобранной» → resolve_error (потребует подтверждения).\n"
@@ -241,15 +257,17 @@ def _tool(name: str, description: str, parameters: dict, *, action: bool = False
 
 AGENT_TOOLS: list = [
     _tool("fold_web",
-          "Срез прогресса ученика. op: progress|profile|skills|errors|attempts|daily|history|forecast."
-          " Для resolve_error нужен errorId: ищи его через errors (без taskId — открытые первыми,"
+          "Срез прогресса ученика. op: progress|profile|skills|errors|attempts|daily|history|timeline|forecast."
+          " timeline — лента событий («что я недавно делал»). Для resolve_error нужен errorId: ищи его через errors (без taskId — открытые первыми,"
           " с taskId — только по этому заданию).",
           {"type": "object",
            "properties": {
                "op": {"type": "string", "enum": ["progress", "profile", "skills", "errors",
-                                                "attempts", "daily", "history", "forecast"]},
+                                                "attempts", "daily", "history", "timeline", "forecast"]},
                "taskId": {"type": "string", "description": "для attempts и errors: конкретное задание"},
                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+               "offset": {"type": "integer", "minimum": 0, "maximum": 500,
+                          "description": "для attempts и errors: пропустить столько последних"},
                "days": {"type": "integer", "minimum": 1, "maximum": 90},
            },
            "required": ["op"], "additionalProperties": False}),
@@ -260,14 +278,29 @@ AGENT_TOOLS: list = [
     _tool("task_get", "Условие задания по id.",
           {"type": "object", "properties": {"taskId": {"type": "string"}},
            "required": ["taskId"], "additionalProperties": False}),
-    _tool("essay_history", "Мои сочинения с баллами и пометками.",
+    _tool("essay_history",
+          "Сочинения ученика: СНАЧАЛА оглавление (баллы без разбора), ПОТОМ разбор одного "
+          "по submissionId. Без submissionId — компактный список последних (submissionId, баллы, "
+          "статусы): это оглавление, а не разбор. Для подробностей (критерии К1-К10, вердикт, "
+          "отрывок текста, автор и проблема исходника) вызови ЕЩЁ РАЗ "
+          "с submissionId нужной работы. Не говори ученику "
+          "«видно только последнее» — детали ЛЮБОЙ работы есть по её submissionId. "
+          "Сочинения живут в русском предмете: инструмент сам найдёт их из любого предмета.",
           {"type": "object", "properties": {
-              "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
-           "additionalProperties": False}),
+              "limit": {"type": "integer", "minimum": 1, "maximum": 30,
+                        "description": "сколько последних показать в оглавлении (по умолчанию 10)"},
+              "offset": {"type": "integer", "minimum": 0, "maximum": 500,
+                         "description": "пропустить столько последних (для «покажи ещё», «более старые»)"},
+              "submissionId": {"type": "integer", "minimum": 1,
+                               "description": "разбор ОДНОГО сочинения: критерии, вердикт, отрывок текста"},
+              "taskId": {"type": "string",
+                         "description": "только работы по этому заданию"}},
+            "additionalProperties": False}),
     _tool("find_topics",
       "ПОИСК по каталогу предмета по словам: темы, задания, уроки. ЗОВИ ПЕРВЫМ, когда нужно найти "
       "задание или урок по смыслу («на производную», «на площадь») — id заданий и уроков приходят "
-      "только отсюда и из fold_web. Возвращает существующие объекты с id и человеческими названиями.",
+      "только отсюда и из fold_web. Возвращает существующие объекты с id и человеческими названиями; "
+      "у заданий есть difficulty 1–4 («посложнее» — бери выше, «полегче» — ниже).",
       {"type": "object", "properties": {
           "query": {"type": "string", "description": "что ищем: тема, ключевое слово или фраза"}},
        "required": ["query"], "additionalProperties": False}),
@@ -276,11 +309,16 @@ AGENT_TOOLS: list = [
               "weeks": {"type": "integer", "minimum": 1, "maximum": 8}},
            "additionalProperties": False}),
     _tool("project_info",
-      "СПРАВКА о приложении: лимиты, опыт, устройства, сброс, поддержка. "
-      "ЗОВИ ПЕРВЫМ на вопросы НЕ про учёбу («сколько проверок в день», "
-      "«что такое XP», «где сбросить прогресс», «что ты умеешь») — цифры и "
-      "правила бери ТОЛЬКО отсюда, не выдумывай. Возвращает весь текст целиком.",
-      {"type": "object", "properties": {}, "additionalProperties": False}),
+      "СПРАВКА о приложении: предметы, профиль, опыт, сочинение, проверки (5 в сутки), "
+      "наставник, устройства, сброс, поддержка. ЗОВИ ПЕРВЫМ на вопросы НЕ про учёбу "
+      "(«сколько проверок в день», «что такое XP», «где сбросить прогресс», «что ты умеешь») — "
+      "цифры и правила бери ТОЛЬКО отсюда, не выдумывай. Без topic возвращает всю справку; "
+      "с topic («проверки», «XP», «устройства», «сброс», «профиль») — только раздел по теме, "
+      "это короче и точнее. Вопрос про конкретное — всегда с topic.",
+      {"type": "object", "properties": {
+          "topic": {"type": "string",
+                    "description": "тема из вопроса (например «проверки», «XP», «устройства»)"}},
+       "additionalProperties": False}),
     _tool("update_profile", "Изменить имя/уровень/цель. Требует подтверждения ученика.",
           {"type": "object", "properties": {
               "name": {"type": "string", "maxLength": 60},
@@ -852,6 +890,11 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         limit = max(1, min(50, int(limit))) if limit is not None else 10
     except (TypeError, ValueError):
         limit = 10
+    offset = args.get("offset")
+    try:
+        offset = max(0, min(500, int(offset))) if offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
     if op == "profile":
         prof = conn.execute("SELECT onboarded, self_level, goal_id FROM user_subjects WHERE user_id=? AND subject=?",
                             (user_id, subject)).fetchone()
@@ -879,20 +922,57 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                 "solved": _safe_int(stats["total_solved"]), "correct": _safe_int(stats["total_correct"]),
                 "errorsResolved": _safe_int(stats["errors_resolved"])}
     if op == "skills":
-        rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct, COALESCE(p.progress,0) AS progress"
-                            " FROM skills s LEFT JOIN user_progress p ON p.skill_id=s.id AND p.user_id=? AND p.subject=?"
-                            " WHERE s.subject=? ORDER BY s.display_order LIMIT 100",
-                            (user_id, subject, subject)).fetchall()
+        # Масштаб темы и урок: раньше модель знала «решено 8», но не знала «из
+        # скольки» и «прошёл ли урок» — «что осталось» отвечала на глаз.
+        # totalTasks — заданий в теме по каталогу; tasksLeft — по РАЗЛИЧНЫМ
+        # верно решённым (solved считает попытки, а не задания: одно задание
+        # трижды — это solved 3 при tasksLeft 0). lessonDone — урок навыка
+        # пройден (completed_lessons); уроков нет только у русского.
+        try:
+            rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct,"
+                                " COALESCE(p.progress,0) AS progress,"
+                                " (SELECT COUNT(*) FROM tasks t WHERE t.skill_id=s.id) AS total_tasks,"
+                                " CASE WHEN EXISTS(SELECT 1 FROM completed_lessons c JOIN lessons l ON l.id=c.lesson_id"
+                                " AND l.skill_id=s.id WHERE c.user_id=? AND c.subject=?) THEN 1 ELSE 0 END AS lesson_done"
+                                " FROM skills s LEFT JOIN user_progress p ON p.skill_id=s.id AND p.user_id=? AND p.subject=?"
+                                " WHERE s.subject=? ORDER BY s.display_order LIMIT 100",
+                                (user_id, subject, user_id, subject, subject)).fetchall()
+            enriched = True
+        except sqlite3.Error:
+            rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct, COALESCE(p.progress,0) AS progress"
+                                " FROM skills s LEFT JOIN user_progress p ON p.skill_id=s.id AND p.user_id=? AND p.subject=?"
+                                " WHERE s.subject=? ORDER BY s.display_order LIMIT 100",
+                                (user_id, subject, subject)).fetchall()
+            enriched = False
+        distinct: dict = {}
+        if enriched:
+            try:
+                for dr in conn.execute("SELECT skill_id, COUNT(DISTINCT task_id) AS c FROM task_attempts"
+                                       " WHERE user_id=? AND subject=? AND correct=1 GROUP BY skill_id",
+                                       (user_id, subject)).fetchall():
+                    distinct[dr["skill_id"]] = _safe_int(dr["c"])
+            except sqlite3.Error:
+                pass
+        items = []
+        for r in rows:
+            item = {"id": r["id"], "name": r["name"], "solved": _safe_int(r["solved"]),
+                    "correct": _safe_int(r["correct"]), "progress": _safe_int(r["progress"]),
+                    "mastery": _skill_mastery(conn, user_id, subject, r["id"])}
+            if enriched:
+                total_tasks = _safe_int(r["total_tasks"])
+                item["totalTasks"] = total_tasks
+                item["tasksLeft"] = max(0, total_tasks - distinct.get(r["id"], 0))
+                item["lessonDone"] = bool(r["lesson_done"])
+            items.append(item)
         # mastery — честная мера (объём × точность), progress — число, ПРИСЛАННОЕ
         # браузером, к освоению отношения не имеет. Оба назывались похоже и лежали
         # в одном ответе: на живых данных у навыка с 0 решённых стоял progress 40,
         # и наставник объяснял это как «40% освоения» (мастерство там 0).
         return {"op": op, "note": ("mastery — освоение по твоим попыткам; progress — "
-                                   "отметка из приложения, за освоение не отвечает."),
-                "skills": [{"id": r["id"], "name": r["name"], "solved": _safe_int(r["solved"]),
-                            "correct": _safe_int(r["correct"]), "progress": _safe_int(r["progress"]),
-                            "mastery": _skill_mastery(conn, user_id, subject, r["id"])}
-                           for r in rows]}
+                                   "отметка из приложения, за освоение не отвечает."
+                                   + (" totalTasks — заданий в теме, tasksLeft — ещё не решённые,"
+                                      " lessonDone — урок пройден." if enriched else "")),
+                "skills": items}
     if op == "errors":
         total = conn.execute("SELECT COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=?",
                              (user_id, subject)).fetchone()
@@ -909,16 +989,16 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         task_id = str((args or {}).get("taskId") or "").strip()
         note = None
         if task_id:
-            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ?",
-                                (user_id, subject, task_id, limit)).fetchall()
+            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                                (user_id, subject, task_id, limit, offset)).fetchall()
             note = ("по этому заданию ошибок нет — так и скажи, не выдумывай"
                       if not last else None)
         else:
             # Открытые — первыми: разбирать предстоит именно их, а свежие
             # разобранные внизу списка модели не нужны (раньше старые открытые
             # вытеснялись за LIMIT и становились «невидимыми»).
-            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY resolved ASC, id DESC LIMIT ?",
-                                (user_id, subject, limit)).fetchall()
+            last = conn.execute("SELECT id, task_id, skill_id, topic, resolved FROM user_errors WHERE user_id=? AND subject=? ORDER BY resolved ASC, id DESC LIMIT ? OFFSET ?",
+                                (user_id, subject, limit, offset)).fetchall()
         names = dict(_skill_names(conn, subject))
         # Название навыка и тема задания — обязательны: без них модель вынуждена
         # писать ученику `n08_expressions` (живой баг, правило 5b промпта
@@ -930,7 +1010,8 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                               "count": _safe_int(r["c"])} for r in by_skill],
                  "last": [{"id": r["id"], "taskId": r["task_id"], "skill": r["skill_id"],
                            "skillName": names.get(r["skill_id"], r["skill_id"]),
-                           "topic": r["topic"] or "", "resolved": bool(r["resolved"])} for r in last]}
+                           "topic": r["topic"] or "", "resolved": bool(r["resolved"])} for r in last],
+                 "offset": offset, "limit": limit}
         if task_id:
             out["taskId"] = task_id
             if note:
@@ -955,8 +1036,8 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                 "note": ("taskId не задан: это сводка по навыкам, а не список отдельных "
                          "попыток. Для разбора одного задания передай taskId.")}
         rows = conn.execute("SELECT task_id, skill_id, correct, hint_level, created_at FROM task_attempts"
-                            " WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ?",
-                            (user_id, subject, task_id, limit)).fetchall()
+                            " WHERE user_id=? AND subject=? AND task_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                            (user_id, subject, task_id, limit, offset)).fetchall()
         topics = {}
         try:
             tids = {r["task_id"] for r in rows}
@@ -966,7 +1047,7 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                     topics[tr["id"]] = tr["topic"]
         except sqlite3.Error:
             topics = {}
-        return {"op": op, "taskId": task_id,
+        return {"op": op, "taskId": task_id, "offset": offset, "limit": limit,
                 "attempts": [{"taskId": r["task_id"], "skill": r["skill_id"],
                               "skillName": names.get(r["skill_id"], r["skill_id"]),
                               "topic": topics.get(r["task_id"], ""),
@@ -990,6 +1071,21 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                                 (user_id, subject, days)).fetchall()
         return {"op": op, "days": [{"date": r["activity_date"], "solved": _safe_int(r["solved"]),
                                     "correct": _safe_int(r["correct"]), "xp": _safe_int(r["xp"])} for r in rows]}
+    if op == "timeline":
+        # Лента событий приложения («решено задание N», «пройден урок»): ответ на
+        # «что я недавно делал». Агрегаты (daily/history) дают числа по дням, а
+        # здесь — сами события. Пустая лента — норма для нового аккаунта.
+        try:
+            rows = conn.execute("SELECT text, created_at FROM timeline"
+                                " WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
+                                (user_id, subject, limit)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        return {"op": op,
+                "events": [{"text": str(r["text"] or "")[:220], "at": _day_of(r["created_at"])}
+                           for r in rows],
+                "note": ("последние события приложения сверху вниз" if rows else
+                         "лента пока пуста — занятий в приложении ещё не было, так и скажи")}
     if op == "forecast":
         data = _compute_forecast(conn, user_id, subject)
         data["op"] = op
@@ -997,12 +1093,18 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
     raise ValueError(f"unknown op: {op}")
 
 
+LESSON_TEXT_BUDGET = 1800
+
+
 def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     skill_id = str((args or {}).get("skillId") or "").strip()
     lesson_id = str((args or {}).get("lessonId") or "").strip()
     if lesson_id:
-        row = conn.execute("SELECT l.id, l.title, l.skill_id, l.metadata_json FROM lessons l JOIN skills s ON s.id=l.skill_id"
-                           " WHERE l.id=? AND s.subject=?", (lesson_id, subject)).fetchone()
+        # Без фильтра по предмету треда: id уроков глобально уникальны, а урок
+        # из другого предмета (нашёл через find_topics) иначе было бы не открыть —
+        # модель получала бы «урок не найден» на реально существующий урок.
+        row = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject, l.metadata_json FROM lessons l"
+                           " JOIN skills s ON s.id=l.skill_id WHERE l.id=?", (lesson_id,)).fetchone()
         if not row:
             raise ValueError("урок не найден")
         meta = {}
@@ -1012,18 +1114,39 @@ def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
             meta = {}
         steps = meta.get("steps") if isinstance(meta, dict) else None
         text = ""
+        shown = 0
+        total_steps = len(steps) if isinstance(steps, list) else 0
         if isinstance(steps, list) and steps:
+            # Раньше брались ровно первые 6 шагов и хвост отрезался молча: урок
+            # из 9 шагов терял треть без единой пометки, и модель пересказывала
+            # огрызок как целое. Теперь упаковываем шаги до бюджета и честно
+            # говорим, сколько показано, — дальше модель знает, что видит начало.
             parts = []
-            for st in steps[:6]:
-                if isinstance(st, dict):
-                    parts.append(str(st.get("text") or st.get("title") or "")[:500])
-            text = "\n\n".join(p for p in parts if p)[:2000]
-        return {"lessonId": row["id"], "title": row["title"], "skill": row["skill_id"],
-                "text": text or str(meta)[:2000]}
+            used = 0
+            for st in steps:
+                if not isinstance(st, dict):
+                    continue
+                piece = str(st.get("text") or st.get("title") or "")[:500]
+                if not piece:
+                    continue
+                if used + len(piece) > LESSON_TEXT_BUDGET and parts:
+                    break
+                parts.append(piece)
+                used += len(piece)
+                shown += 1
+            text = "\n\n".join(parts)
+        out: dict = {"lessonId": row["id"], "title": row["title"], "skill": row["skill_id"],
+                     "subject": row["subject"],
+                     "text": text or str(meta)[:2000]}
+        if total_steps > shown:
+            out["stepsShown"] = shown
+            out["stepsTotal"] = total_steps
+            out["note"] = (f"показаны шаги 1–{shown} из {total_steps}: это начало урока, "
+                           "а не весь урок — не выдавай его за полный разбор")
+        return out
     if skill_id:
         rows = conn.execute("SELECT l.id, l.title FROM lessons l JOIN skills s ON s.id=l.skill_id"
-                            " WHERE s.id=? AND s.subject=? ORDER BY l.id LIMIT 5",
-                            (skill_id, subject)).fetchall()
+                            " WHERE s.id=? ORDER BY l.id LIMIT 5", (skill_id,)).fetchall()
         if not rows:
             raise ValueError("уроки по скиллу не найдены")
         first = rows[0]
@@ -1035,87 +1158,307 @@ def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
     task_id = str((args or {}).get("taskId") or "").strip()
     if not task_id:
         raise ValueError("нужен taskId")
-    row = conn.execute("SELECT t.id, t.skill_id, t.topic, t.exam_number, t.statement, t.answer,"
-                       " t.explanation, t.hint, s.name AS skill_name FROM tasks t"
-                       " JOIN skills s ON s.id=t.skill_id WHERE t.id=? AND s.subject=?",
-                       (task_id, subject)).fetchone()
+    # Без фильтра по предмету треда: id заданий глобально уникальны, изоляция —
+    # по пользователю, а не по предмету. С фильтром «задание 27» из математики
+    # было бы «не найдено», хотя это реальное русское сочинение.
+    # SELECT t.* вместо перечисления: старая БД без difficulty/task_type должна
+    # отдать задание, а не 502 — новые поля читаем по наличию в строке.
+    row = conn.execute("SELECT t.*, s.name AS skill_name, s.subject FROM tasks t"
+                       " JOIN skills s ON s.id=t.skill_id WHERE t.id=?",
+                       (task_id,)).fetchone()
     if not row:
         raise ValueError("задание не найдено")
     # Разбор задания без author's explanation и подсказки — это работа модели
     # по памяти: в задании ответ есть, а «как решать» нет. Живой вопрос
     # «объясни задание 17 с параметрами» уходил в lesson_get и падал.
-    return {"taskId": row["id"], "skill": row["skill_id"], "skillName": row["skill_name"],
-            "topic": row["topic"], "exam": row["exam_number"],
-            "statement": str(row["statement"])[:1500],
-            "answer": str(row["answer"])[:200],
-            "explanation": str(row["explanation"] or "")[:1200],
-            "hint": str(row["hint"] or "")[:600],
-            "answerIsAuthoritative": True}
-
-
-def essay_history(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
-    limit = args.get("limit") if isinstance(args, dict) else None
     try:
-        limit = max(1, min(20, int(limit))) if limit is not None else 5
+        difficulty = int(row["difficulty"] or 1) if "difficulty" in row.keys() else 1
     except (TypeError, ValueError):
-        limit = 5
-    if "essay_submissions" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
-        return {"essays": []}
-    rows = conn.execute("SELECT id, task_id, word_count, evaluation_status, evaluation_result, created_at"
-                        " FROM essay_submissions WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT ?",
-                        (user_id, subject, limit)).fetchall()
+        difficulty = 1
+    out = {"taskId": row["id"], "skill": row["skill_id"], "skillName": row["skill_name"],
+           "subject": row["subject"],
+           "topic": row["topic"], "exam": row["exam_number"],
+           "difficulty": difficulty,
+           "statement": str(row["statement"])[:1500],
+           "answer": str(row["answer"])[:200],
+           "explanation": str(row["explanation"] or "")[:1200],
+           "hint": str(row["hint"] or "")[:600],
+           "answerIsAuthoritative": True}
+    # Сочинение без исходника не разобрать: у long_text-заданий проблема и текст
+    # лежат в essay_source_texts (метаданные ссылаются по sourceTextId), а в
+    # самом задании их нет. Отдаём проблему, автора и начало текста: полный
+    # исходник (150–400 слов) вместе с разбором в контекст не влезет.
+    task_type = str(row["task_type"] or "") if "task_type" in row.keys() else ""
+    meta_json = row["metadata_json"] if "metadata_json" in row.keys() else "{}"
+    if task_type == "long_text":
+        try:
+            meta = json.loads(meta_json or "{}")
+            text_id = str((meta or {}).get("sourceTextId") or "").strip()
+        except (ValueError, TypeError):
+            text_id = ""
+        if text_id:
+            try:
+                src = conn.execute("SELECT author, work, problem, text FROM essay_source_texts"
+                                   " WHERE id=?", (text_id,)).fetchone()
+            except sqlite3.Error:
+                src = None
+            if src is not None:
+                raw = str(src["text"] or "")
+                out["problem"] = str(src["problem"] or "")[:300]
+                out["author"] = str(src["author"] or "")[:120]
+                out["sourceExcerpt"] = raw[:1200]
+                out["sourceTruncated"] = len(raw) > 1200
+    return out
+
+
+def _essay_blob_scores(blob: dict) -> tuple:
+    """Баллы из evaluation_result без тяжёлого разбора: для оглавления нужны
+    только итог и максимум, а не 10 критериев с комментариями."""
+    if not isinstance(blob, dict):
+        return None, None
+    try:
+        score = blob.get("total_score")
+        maximum = blob.get("max_score")
+        score = int(score) if score is not None else None
+        maximum = int(maximum) if maximum is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    return score, maximum
+
+
+def _essay_parse_blob(raw) -> dict:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError, AttributeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _essay_scope(conn: sqlite3.Connection, user_id: int, subject: str) -> tuple[str | None, int, int]:
+    """Где искать сочинения: сначала свой предмет, иначе — все предметы.
+
+    Сочинения живут в русском предмете (задание 27), а тред наставника может
+    быть открыт из математики: тогда фильтр по предмету давал бы пусто,
+    и модель честно говорила бы «сочинений нет» при живых 20 работах.
+    Возвращает (subject_filter или None = все предметы, total, checked)."""
+    try:
+        tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    except sqlite3.Error:
+        return subject, 0, 0
+    if "essay_submissions" not in tables:
+        return subject, 0, 0
+    try:
+        row = conn.execute("SELECT COUNT(*) AS c FROM essay_submissions WHERE user_id=? AND subject=?",
+                           (user_id, subject)).fetchone()
+        total_subj = int(row["c"]) if row else 0
+    except sqlite3.Error:
+        total_subj = 0
+    if total_subj > 0:
+        try:
+            row = conn.execute("SELECT COUNT(*) AS c FROM essay_submissions"
+                               " WHERE user_id=? AND subject=? AND evaluation_status='ready'",
+                               (user_id, subject)).fetchone()
+            checked = int(row["c"]) if row else 0
+        except sqlite3.Error:
+            checked = 0
+        return subject, total_subj, checked
+    try:
+        row = conn.execute("SELECT COUNT(*) AS c FROM essay_submissions WHERE user_id=?",
+                           (user_id,)).fetchone()
+        total_all = int(row["c"]) if row else 0
+        row = conn.execute("SELECT COUNT(*) AS c FROM essay_submissions"
+                           " WHERE user_id=? AND evaluation_status='ready'", (user_id,)).fetchone()
+        checked_all = int(row["c"]) if row else 0
+    except sqlite3.Error:
+        return subject, 0, 0
+    if total_all > 0:
+        return None, total_all, checked_all
+    return subject, 0, 0
+
+
+def _essay_sources(conn: sqlite3.Connection, task_ids: set) -> dict:
+    """Автор и проблема исходника по заданию: у всех сочинений topic одинаковый
+    («Сочинение по тексту»), и без автора модель не различает работы по разным
+    текстам — живой случай: Пастернак и Бутина слились в «один и тот же текст
+    про Скрябина». Возвращает {task_id: {"author": ..., "problem": ...}}."""
+    out: dict = {}
+    try:
+        tids = [str(x) for x in task_ids if x]
+        if not tids:
+            return out
+        q = ",".join("?" * len(tids))
+        metas = {r["id"]: r["metadata_json"]
+                 for r in conn.execute(f"SELECT id, metadata_json FROM tasks WHERE id IN ({q})", tuple(tids))}
+    except sqlite3.Error:
+        return out
+    want: dict = {}
+    for tid, raw in metas.items():
+        try:
+            text_id = str((json.loads(raw or "{}") or {}).get("sourceTextId") or "").strip()
+        except (ValueError, TypeError):
+            text_id = ""
+        if text_id:
+            want[tid] = text_id
+    if not want:
+        return out
+    try:
+        q = ",".join("?" * len(want))
+        rows = conn.execute(f"SELECT id, author, problem FROM essay_source_texts WHERE id IN ({q})",
+                            tuple(want.values())).fetchall()
+    except sqlite3.Error:
+        return out
+    by_id = {r["id"]: r for r in rows}
+    for tid, text_id in want.items():
+        r = by_id.get(text_id)
+        if r is not None:
+            out[tid] = {"author": str(r["author"] or "")[:120],
+                        "problem": str(r["problem"] or "")[:300]}
+    return out
+
+
+def _essay_topics(conn: sqlite3.Connection, task_ids: set) -> dict:
     # Название работы вместо re27_4: тема задания в каталоге человеческая
     # («Сочинение по тексту», «Итоговое сочинение»), а без неё модель писала
     # ученику внутренний код — ровно то, что запрещает правило 5b.
-    topics = {}
     try:
-        tids = {r["task_id"] for r in rows}
-        if tids:
-            q = ",".join("?" * len(tids))
-            for tr in conn.execute(f"SELECT id, topic FROM tasks WHERE id IN ({q})", tuple(tids)):
-                topics[tr["id"]] = tr["topic"]
+        tids = {str(t) for t in task_ids if t}
+        if not tids:
+            return {}
+        q = ",".join("?" * len(tids))
+        return {tr["id"]: tr["topic"]
+                for tr in conn.execute(f"SELECT id, topic FROM tasks WHERE id IN ({q})", tuple(tids))}
     except sqlite3.Error:
-        topics = {}
-    out = []
-    for r in rows:
-        score = None
-        item = {"submissionId": int(r["id"]), "taskId": r["task_id"],
-                "topic": topics.get(r["task_id"], ""),
-                "words": _safe_int(r["word_count"]), "status": r["evaluation_status"],
-                "score": score}
-        # Максимум, критерии и комментарии проверяющего лежат в
-        # evaluation_result — раньше инструмент их выбрасывал, и модель писала
-        # ученику «баллы из 21» (в ключе 22) и разбор «что почти наверняка
-        # слетело по К3» без единого числа из базы. Теперь данные есть.
-        blob = {}
-        if r["evaluation_result"]:
-            try:
-                parsed = json.loads(r["evaluation_result"])
-                if isinstance(parsed, dict):
-                    blob = parsed
-            except (ValueError, TypeError, AttributeError):
-                blob = {}
+        return {}
+
+
+def essay_history(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """Оглавление + разбор одного сочинения.
+
+    Живой баг: инструмент отдавал ПОЛНЫЙ разбор (10 критериев с комментариями)
+    по каждой работе — 5 работ весили ~11К символов, а в контекст модели влезает
+    4000 (`_tool_payload`). Обрезка резала список пополам до ОДНОЙ работы, и
+    модель честно говорила ученику: «в истории 20 сочинений, но подробно вижу
+    только последнее, остальные с баллами не видны». Теперь список — компактное
+    оглавление (баллы без критериев, ~150 символов на работу: 20 работ влезают
+    целиком), а разбор — отдельным вызовом с submissionId.
+    """
+    args = dict(args or {}) if isinstance(args, dict) else {}
+    if "essay_submissions" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+        return {"total": 0, "checked": 0, "essays": []}
+    scope, total, checked = _essay_scope(conn, user_id, subject)
+    subj_filter = " AND subject=?" if scope is not None else ""
+    subj_params: tuple = (scope,) if scope is not None else ()
+
+    # Разбор ОДНОЙ работы: критерии, вердикт и отрывок текста.
+    sub_raw = args.get("submissionId", args.get("submission_id", args.get("id")))
+    sub_id = None
+    if sub_raw is not None:
+        try:
+            sub_id = int(sub_raw)
+        except (TypeError, ValueError):
+            raise ValueError("submissionId должен быть целым числом из списка essays")
+    if sub_id is not None:
+        if sub_id <= 0:
+            raise ValueError("submissionId должен быть целым числом из списка essays")
+        # Детали ищем по всем предметам: submissionId из оглавления уже
+        # привязан к пользователю, а предмет треда мог смениться.
+        row = conn.execute("SELECT id, subject, task_id, word_count, text,"
+                           " evaluation_status, evaluation_result, created_at"
+                           " FROM essay_submissions WHERE id=? AND user_id=?",
+                           (sub_id, user_id)).fetchone()
+        if row is None:
+            raise ValueError("сочинение не найдено — возьми submissionId из списка essays")
+        blob = _essay_parse_blob(row["evaluation_result"])
+        score, maximum = _essay_blob_scores(blob)
+        topics = _essay_topics(conn, {row["task_id"]})
+        sources = _essay_sources(conn, {row["task_id"]})
+        item: dict = {"submissionId": int(row["id"]), "subject": row["subject"],
+                      "taskId": row["task_id"], "topic": topics.get(row["task_id"], ""),
+                      "words": _safe_int(row["word_count"]), "status": row["evaluation_status"],
+                      "score": score, "maxScore": maximum}
+        if row["task_id"] in sources:
+            item["sourceAuthor"] = sources[row["task_id"]]["author"]
+            item["sourceProblem"] = sources[row["task_id"]]["problem"]
         if blob:
-            item["score"] = blob.get("total_score")
-            item["maxScore"] = blob.get("max_score")
             crits = blob.get("criteria")
             if isinstance(crits, list):
+                # Комментарии ужаты до 180: полный разбор 10 критериев обязан
+                # влезть в 4000 контекста вместе с отрывком (см. _tool_payload).
                 item["criteria"] = [{"id": c.get("id"), "name": c.get("name"),
                                      "score": c.get("score"), "maxScore": c.get("max_score"),
-                                     "comment": str(c.get("comment") or "")[:220]}
+                                     "comment": str(c.get("comment") or "")[:180]}
                                     for c in crits if isinstance(c, dict)]
             improve = blob.get("what_to_improve")
             if improve:
-                item["whatToImprove"] = (improve if isinstance(improve, str) else json.dumps(improve, ensure_ascii=False))[:600]
+                item["whatToImprove"] = (improve if isinstance(improve, str)
+                                         else json.dumps(improve, ensure_ascii=False))[:400]
             verdict = blob.get("short_verdict")
             if verdict:
-                item["verdict"] = str(verdict)[:300]
+                item["verdict"] = str(verdict)[:250]
+        # Текст работы модель иначе не видит вообще: раньше инструмент его не
+        # отдавал, и «покажи ещё одно» было нечем показать, кроме баллов.
+        # Полный текст не отдаём (сочинение 300+ слов + критерии не влезли бы
+        # в 4000 контекста) — только начало для разговора о содержании.
+        raw_text = str(row["text"] or "")
+        excerpt = raw_text[:1000]
+        item["excerpt"] = excerpt
+        item["excerptTruncated"] = len(raw_text) > len(excerpt)
+        item["statusNote"] = _essay_status_note(item)
+        item["at"] = _day_of(row["created_at"])
+        return {"total": total, "checked": checked, "essay": item,
+                "note": ("maxScore — максимум по ключу (обычно 22). "
+                         "excerpt — начало текста работы.")}
+
+    # Оглавление: компактно, без критериев — иначе снова обрежется до одной.
+    limit = args.get("limit")
+    try:
+        limit = max(1, min(30, int(limit))) if limit is not None else 10
+    except (TypeError, ValueError):
+        limit = 10
+    offset = args.get("offset")
+    try:
+        offset = max(0, min(500, int(offset))) if offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
+    task_id = str(args.get("taskId") or "").strip()
+    where = "WHERE user_id=?" + subj_filter
+    params: list = [user_id, *subj_params]
+    if task_id:
+        where += " AND task_id=?"
+        params.append(task_id)
+    rows = conn.execute("SELECT id, subject, task_id, word_count, evaluation_status,"
+                        " evaluation_result, created_at"
+                        f" FROM essay_submissions {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                        (*params, limit, offset)).fetchall()
+    topics = _essay_topics(conn, {r["task_id"] for r in rows})
+    sources = _essay_sources(conn, {r["task_id"] for r in rows})
+    out = []
+    for r in rows:
+        blob = _essay_parse_blob(r["evaluation_result"])
+        score, maximum = _essay_blob_scores(blob)
+        item = {"submissionId": int(r["id"]), "subject": r["subject"],
+                "taskId": r["task_id"], "topic": topics.get(r["task_id"], ""),
+                "words": _safe_int(r["word_count"]), "status": r["evaluation_status"],
+                "score": score, "maxScore": maximum}
+        if r["task_id"] in sources and sources[r["task_id"]]["author"]:
+            item["sourceAuthor"] = sources[r["task_id"]]["author"]
         item["statusNote"] = _essay_status_note(item)
         item["at"] = _day_of(r["created_at"])
         out.append(item)
-    return {"essays": out, "note": ("maxScore — максимум по ключу этого задания (обычно 22). "
-                                    "criteria — как проверяющий оценил работу; опирайся на них, "
-                                    "а не на догадки." if out else "")}
+    note = ""
+    if out:
+        note = ("Оглавление: баллы без разбора. Для разбора вызови essay_history "
+                "с submissionId нужной работы — тогда придут критерии К1-К10, вердикт "
+                "и отрывок текста. Не говори «видно только последнее»: детали любой "
+                "работы есть по её submissionId.")
+        if scope is None:
+            note += " Показаны работы из другого предмета (в текущем их нет)."
+    elif task_id:
+        note = "по этому заданию работ нет — так и скажи, не выдумывай"
+    return {"total": total, "checked": checked, "essays": out,
+            "offset": offset, "limit": limit, "note": note}
 
 
 def _essay_status_note(item: dict) -> str:
@@ -1274,20 +1617,39 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
     """Проверить аргументы действия и вернуть человекочитаемое предложение."""
     args = dict(args or {})
     if name == "update_profile":
+        # Текущий профиль — чтобы отбросить поля, которые уже такие: модель любит
+        # досылать selfLevel=base «заодно», и карточка обещала бы изменение,
+        # которого нет («Меняю профиль: средний» при текущем среднем).
+        try:
+            cur_profile = conn.execute("SELECT self_level, goal_id FROM user_subjects"
+                                       " WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+        except sqlite3.Error:
+            cur_profile = None
+        try:
+            cur_name = (conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone() or {})["name"]
+        except (sqlite3.Error, TypeError, KeyError):
+            cur_name = None
         patch = {}
         human = {}
         if "name" in args and args["name"] is not None:
             clean = " ".join(str(args["name"]).split())[:60]
             if not clean:
                 raise ValueError("пустое имя")
-            patch["name"] = clean
-            human["name"] = clean
+            if clean == (cur_name or ""):
+                pass  # уже такое — не изменение
+            else:
+                patch["name"] = clean
+                human["name"] = clean
         if "selfLevel" in args and args["selfLevel"] is not None:
             level = _match_self_level(args["selfLevel"])
             if level is None:
                 raise ValueError("неизвестный уровень")
-            patch["selfLevel"] = level
-            human["selfLevel"] = SELF_LEVEL_LABELS[level]
+            cur_level = cur_profile["self_level"] if cur_profile is not None else None
+            if level == (cur_level or ""):
+                pass  # уже такой — не изменение
+            else:
+                patch["selfLevel"] = level
+                human["selfLevel"] = SELF_LEVEL_LABELS[level]
         if "goal" in args and args["goal"] is not None:
             raw_goal = str(args["goal"]).strip()[:64]
             if not raw_goal:
@@ -1305,11 +1667,15 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
                 # сохранилось. Теперь это честная ошибка с подсказкой, а модель
                 # скажет, что цель тут не настраивается.
                 raise ValueError("у этого предмета не настраивается цель — скажи об этом ученику")
-            patch["goal"] = goal
-            human["goal"] = next((str(g.get("label") or g.get("id")) for g in goals
-                                  if str(g.get("id")) == goal), goal)
+            cur_goal = cur_profile["goal_id"] if cur_profile is not None else None
+            if goal == (cur_goal or ""):
+                pass  # уже такая — не изменение
+            else:
+                patch["goal"] = goal
+                human["goal"] = next((str(g.get("label") or g.get("id")) for g in goals
+                                      if str(g.get("id")) == goal), goal)
         if not patch:
-            raise ValueError("нечего менять")
+            raise ValueError("уже так — подтверждать нечего, скажи ученику")
         # Подпись показывается ученику в карточке подтверждения: там должны быть
         # ЛЮДИ, а не id («goal=g95» ничего не значит для человека).
         bits = ", ".join(f"{human.get(k, v)}" for k, v in patch.items())
@@ -1515,12 +1881,18 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                     score += 2
         return score
 
-    skills = conn.execute("SELECT id, name FROM skills WHERE subject=? ORDER BY display_order",
+    skills = conn.execute("SELECT id, name, subject FROM skills WHERE subject=? ORDER BY display_order",
                           (subject,)).fetchall()
-    tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname FROM tasks t"
-                         " JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT 600",
-                         (subject,)).fetchall()
-    lessons = conn.execute("SELECT l.id, l.title FROM lessons l JOIN skills s ON s.id=l.skill_id"
+    # Старая БД может не знать difficulty: тогда ищем без неё, а не падаем.
+    try:
+        tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject FROM tasks t"
+                             " JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT 600",
+                             (subject,)).fetchall()
+    except sqlite3.Error:
+        tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject FROM tasks t"
+                             " JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT 600",
+                             (subject,)).fetchall()
+    lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l JOIN skills s ON s.id=l.skill_id"
                            " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
 
     def rank(rows, score, take, render):
@@ -1529,35 +1901,72 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         scored.sort(key=lambda p: (-p[0], p[1]["id"]))
         return [render(n, r) for n, r in scored[:take]]
 
-    found = {
-        "query": query,
-        "skills": rank(skills, lambda r: hit(r["name"]), 6,
-                       lambda n, r: {"id": r["id"], "name": r["name"], "match": n}),
-        # id включён в поиск: «задание 27» находит re27_* (в теме номера нет,
-        # а ученик называет именно номер задания из ключа).
-        "tasks": rank(tasks, lambda r: hit(r["topic"], r["exam_number"], r["sname"], r["id"],
-                                           bonus_field=r["sname"]), 8,
-                      lambda n, r: {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
-                                    "skillName": r["sname"], "match": n}),
-        "lessons": rank(lessons, lambda r: hit(r["title"], r["id"]), 6,
-                        lambda n, r: {"id": r["id"], "title": r["title"], "match": n}),
-    }
+    def search(skill_rows, task_rows, lesson_rows):
+        return {
+            "skills": rank(skill_rows, lambda r: hit(r["name"]), 6,
+                           lambda n, r: {"id": r["id"], "name": r["name"],
+                                         "subject": r["subject"], "match": n}),
+            # id включён в поиск: «задание 27» находит re27_* (в теме номера нет,
+            # а ученик называет именно номер задания из ключа).
+            "tasks": rank(task_rows, lambda r: hit(r["topic"], r["exam_number"], r["sname"], r["id"],
+                                                   bonus_field=r["sname"]), 8,
+                          lambda n, r: {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
+                                        "skillName": r["sname"], "subject": r["subject"],
+                                        "difficulty": _safe_int(r["difficulty"], 1)
+                                                      if "difficulty" in r.keys() else 1,
+                                        "match": n}),
+            "lessons": rank(lesson_rows, lambda r: hit(r["title"], r["id"]), 6,
+                            lambda n, r: {"id": r["id"], "title": r["title"],
+                                          "subject": r["subject"], "match": n}),
+        }
+
+    found = {"query": query, **search(skills, tasks, lessons)}
     total = sum(len(v) for v in found.values() if isinstance(v, list))
+    if total == 0:
+        # В своём предмете пусто — ищем по всем: «задание 27» из математики это
+        # реальное русское сочинение, а не «такого нет». Раньше инструмент врал,
+        # что в каталоге ничего нет, и модель уводила ученика в чужую тему.
+        try:
+            all_skills = conn.execute("SELECT id, name, subject FROM skills"
+                                      " ORDER BY display_order").fetchall()
+            try:
+                all_tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject"
+                                         " FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                                         " ORDER BY t.id LIMIT 1200").fetchall()
+            except sqlite3.Error:
+                all_tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject"
+                                         " FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                                         " ORDER BY t.id LIMIT 1200").fetchall()
+            all_lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l"
+                                       " JOIN skills s ON s.id=l.skill_id ORDER BY l.id LIMIT 800").fetchall()
+        except sqlite3.Error:
+            all_skills, all_tasks, all_lessons = [], [], []
+        alt = search(all_skills, all_tasks, all_lessons)
+        alt_total = sum(len(v) for v in alt.values() if isinstance(v, list))
+        if alt_total:
+            found.update(alt)
+            found["note"] = ("В этом предмете ничего нет, но нашлось в другом (поле subject): "
+                             "открывай через task_get/lesson_get по id — они работают из любого "
+                             "предмета. Ученику скажи, где это лежит, и не выдумывай id.")
+            found["found"] = alt_total
+            found["otherSubject"] = True
+            return found
     found["note"] = ("Это то, что реально есть в каталоге предмета. Найденное открывай "
                      "через task_get (id) или lesson_get (id) — и не выдумывай id, которых "
                      "здесь нет. id — ТЕХНИЧЕСКИЙ, для последующих вызовов: ученику показывай темы и "
                      "формулировки заданий, но НЕ коды вроде n09_p1." if total else
-                     "В каталоге предмета нет ничего похожего. Скажи ученику честно и предложи "
-                     "ближайшую по смыслу тему из списка тем (fold_web op=\"skills\").")
+                     "В каталоге нет ничего похожего — ни в этом предмете, ни в других. "
+                     "Скажи ученику честно и предложи ближайшую по смыслу тему из списка "
+                     "тем (fold_web op=\"skills\").")
     found["found"] = total
     return found
 
 
 def _knowledge_text() -> str:
     """Текст базы знаний о проекте. Файл лежит рядом с модулем, правится без
-    правки кода. Отдаётся целиком: он короткий (~2.4К в JSON) и влезает в
-    потолок контекста; резать его по секциям нельзя — модель тогда отвечала бы
-    по огрызку."""
+    правки кода. Без topic отдаётся целиком: он короткий (~2.8К) и влезает в
+    потолок контекста; резать его без спроса нельзя — модель тогда отвечала бы
+    по огрызку. С topic — только разделы по теме (см. _knowledge_match)."""
     global _KNOWLEDGE_CACHE
     try:
         return _KNOWLEDGE_CACHE
@@ -1571,11 +1980,113 @@ def _knowledge_text() -> str:
     return _KNOWLEDGE_CACHE
 
 
+def _knowledge_sections() -> tuple[str, list]:
+    """(шапка, [(заголовок, тело)]) — справка, разобранная по разделам `## `.
+
+    Кэш на процесс рядом с _KNOWLEDGE_CACHE: файл правится без правки кода,
+    разделы подхватываются сами — новых тем в коде прописывать не надо."""
+    global _KNOWLEDGE_SECTIONS_CACHE
+    try:
+        return _KNOWLEDGE_SECTIONS_CACHE
+    except NameError:
+        pass
+    text = _knowledge_text()
+    intro: str = text
+    sections: list = []
+    if text.strip():
+        parts = re.split(r"(?m)^##\s+", text)
+        intro = parts[0].strip()
+        for part in parts[1:]:
+            lines = part.splitlines()
+            title = (lines[0] if lines else "").strip()
+            body = "\n".join(lines[1:]).strip()
+            if title and body:
+                sections.append((title, body))
+    _KNOWLEDGE_SECTIONS_CACHE = (intro, sections)
+    return _KNOWLEDGE_SECTIONS_CACHE
+
+
+def _knowledge_match(topic: str) -> list:
+    """Разделы справки под тему: нечётко, по основе слов; заголовок весит втрое.
+
+    Та же основа-на-6-букв, что в find_topics: «проверки» находит «Проверок
+    сочинений в сутки», «XP» — «Практика и опыт». Совпадение хотя бы по одному
+    слову — раздел в выдаче; сортировка по весу. Если есть попадания в заголовок,
+    упоминания в чужом теле отбрасываются: иначе «сочинение» тянуло бы пять
+    разделов из семи. Пусто — тема не из справки."""
+    raw_words = re.split(r"[^\w]+", str(topic or "").lower())
+    # Двухбуквенные — только латиница/цифры («XP», «22»): «по» и «не» совпали бы
+    # с чем угодно, а короткие коды без этого не найти («XP» короче трёх букв).
+    words = [w for w in raw_words
+             if len(w) >= 3 or (len(w) == 2 and re.search(r"[a-z0-9]", w))]
+    if not words:
+        return []
+    stems = [w[:6] if len(w) > 6 else w for w in words]
+    _, sections = _knowledge_sections()
+    ranked = []
+    for title, body in sections:
+        title_tokens = re.split(r"[^\w]+", title.lower())
+        body_tokens = re.split(r"[^\w]+", body.lower())
+        score = 0
+        for stem in stems:
+            if any(tok.startswith(stem) for tok in title_tokens if tok):
+                score += 3
+            elif any(tok.startswith(stem) for tok in body_tokens if tok):
+                score += 1
+        if score > 0:
+            ranked.append((score, title, body))
+    if any(score >= 3 for score, _, _ in ranked):
+        ranked = [(score, title, body) for score, title, body in ranked if score >= 3]
+    ranked.sort(key=lambda item: -item[0])
+    return [(title, body) for _, title, body in ranked]
+
+
+# Вопрос ученика → тема справки. Порядок важен: частное («сколько проверок»)
+# раньше общего («сочинение»), иначе вопрос о лимите уходил бы в раздел про
+# сочинение вместо раздела про проверки.
+_KNOWLEDGE_TOPIC_RULES: tuple = (
+    (r"провер|лимит|запас|восстанов|сутки|\bдень\b", "проверки сочинений в сутки"),
+    (r"\bxp\b|опыт|наград|серия", "опыт XP практика"),
+    (r"устройств|отозвать|чуж.*вход|вошли", "устройства"),
+    (r"сброс|удали.*прогресс|начать заново|стереть", "сброс прогресса"),
+    (r"контакт|поддержк|администр|жалоб|поломк|сломал", "поддержка контакты"),
+    (r"профил|имя|уровен|\bцел", "профиль уровень цель"),
+    (r"предмет|математик|русский|переключ", "предметы"),
+    (r"наставник|кружок|вопрос.*час", "наставник"),
+    (r"сочинен|эссе|\bsлов\b|22 балл|критери|перепровер", "сочинение баллы"),
+)
+
+
+def _knowledge_topic_for(question: str) -> str:
+    """Тема справки по вопросу ученика — либо "" (вопрос не из справки)."""
+    asked = str(question or "").lower()
+    for pattern, topic in _KNOWLEDGE_TOPIC_RULES:
+        if re.search(pattern, asked):
+            return topic
+    return ""
+
+
 def project_info(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """Справка о приложении: целиком или разделом по теме.
+
+    Без topic — весь файл (2.8К, влезает в контекст). С topic — шапка + только
+    совпавшие разделы: ответ короче и точнее, модель не пересказывает лишнее.
+    Несовпадение — НЕ ошибка: отдаём всё с пометкой, иначе опечатка в теме
+    стоила бы хода («справка недоступна» вместо ответа)."""
     text = _knowledge_text()
     if not text.strip():
         raise ValueError("справка о приложении недоступна")
-    return {"text": text}
+    topic = str((args or {}).get("topic") or "").strip()
+    if not topic:
+        return {"text": text}
+    hits = _knowledge_match(topic)
+    if not hits:
+        return {"text": text, "topic": topic, "matched": [],
+                "note": "точного раздела по теме нет — вот вся справка целиком"}
+    intro, _ = _knowledge_sections()
+    body = ((intro + "\n\n") if intro else "") + "\n\n".join(f"## {title}\n{text}" for title, text in hits)
+    return {"text": body, "topic": topic, "matched": [title for title, _ in hits],
+            "note": "только разделы по теме; остальная справка к вопросу не относится"}
 
 
 def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
@@ -1620,7 +2131,10 @@ def _hints_for_tool(conn: sqlite3.Connection, subject: str, name: str, args: dic
     """
     args = args or {}
     out = {}
-    if name == "lesson_get":
+    if name == "fold_web":
+        out["hint"] = ("op — только progress|profile|skills|errors|attempts|daily|history|timeline|forecast. "
+                       "Для разбора одного задания добавь taskId (attempts, errors).")
+    elif name == "lesson_get":
         want = _norm(args.get("skillId") or args.get("lessonId") or "")
         rows = _skill_names(conn, subject)
         hit = [f"{sid} — {nm}" for sid, nm in rows
@@ -1647,6 +2161,10 @@ def _hints_for_tool(conn: sqlite3.Connection, subject: str, name: str, args: dic
         out["hint"] = ("Вызови task_get с taskId, который РЕАЛЬНО существует (список ниже), "
                        "либо сначала fold_web(op=\"attempts\")/fold_web(op=\"errors\"), "
                        "чтобы взять id из базы.")
+    elif name == "essay_history":
+        out["hint"] = ("submissionId бери из списка essays (поле submissionId) — целым числом. "
+                       "Сначала вызови essay_history без submissionId (оглавление), "
+                       "потом с submissionId нужной работы. Не выдумывай id.")
     elif name == "resolve_error":
         out["hint"] = ("errorId бери из fold_web(op=\"errors\") — целым числом, "
                        "как там в last[].id; либо передай taskId задания. "
@@ -1693,7 +2211,7 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
             if result and result.get("attempts"):
                 topic = str((result["attempts"][0] or {}).get("topic") or "")
             return (f"Смотрю попытки по теме «{topic}»" if topic
-                    else ("Смотрю последние попытки" if not args.get("taskId")
+                    else ("Смотрю попытки по навыкам" if not args.get("taskId")
                           else "Смотрю попытки по этому заданию"))
         if op == "profile":
             return "Смотрю твой профиль"
@@ -1703,6 +2221,8 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
             return "Смотрю дни занятий"
         if op == "history":
             return "Смотрю историю за период"
+        if op == "timeline":
+            return "Смотрю ленту твоих занятий"
         return "Смотрю прогресс"
     if name == "lesson_get":
         lid = args.get("lessonId") or args.get("skillId") or ""
@@ -1714,6 +2234,11 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         topic = (result or {}).get("topic")
         return f"Открываю задание «{topic}»" if topic else f"Открываю задание {args.get('taskId') or ''}".strip()
     if name == "essay_history":
+        sub = (args or {}).get("submissionId", (args or {}).get("submission_id"))
+        if sub is not None:
+            return f"Открываю сочинение №{sub}"
+        if (args or {}).get("taskId"):
+            return "Смотрю сочинения по этому заданию"
         return "Смотрю твои сочинения"
     if name == "find_topics":
         q = str((args or {}).get("query") or "")[:60]
@@ -1828,6 +2353,8 @@ FALLBACK_TOOL_RULES: list = [
     (re.compile(r"(?:профил|кто\s+я|как\s+меня|цел[ьия]|уровен)", re.IGNORECASE),
      ("fold_web", {"op": "profile"})),
     (re.compile(r"(?:ошибк|ошиба|разобра)", re.IGNORECASE), ("fold_web", {"op": "errors"})),
+    (re.compile(r"(?:что\s+я\s+(?:недавно\s+)?делал|чем\s+занимался|последние\s+события|лента)", re.IGNORECASE),
+     ("fold_web", {"op": "timeline"})),
     # Поиск задания/урока по смыслу — ПЕРЕД общим «тем/урок»: иначе «подбери
     # тему производная» уходило в fold_web(skills), то есть в список ВСЕХ тем
     # вместо конкретных заданий по производной.
@@ -1991,6 +2518,11 @@ def _args_for_tool(name: str, asked: str) -> dict:
     if name == "fold_web":
         fallback, call_args = fallback_tool_for(asked)
         return dict(call_args) if fallback == "fold_web" else {"op": "progress"}
+    if name == "project_info":
+        # Запасной вызов по вопросу ученика тоже точный: «сколько проверок» —
+        # сразу раздел про проверки, а не вся справка целиком.
+        topic = _knowledge_topic_for(asked)
+        return {"topic": topic} if topic else {}
     return {}
 
 
@@ -2011,6 +2543,29 @@ def _tool_payload(data: dict, cap: int = 4000) -> str:
         return blob
     # Длинные списки укорачиваем поштучно, пока не влезем.
     trimmed = dict(data)
+    # Разбор одного сочинения: criteria лежат ВНУТРИ essay, резать их пополам
+    # нельзя (нужны все К1-К10) — ужимаем комментарии и отрывок, а не строки.
+    ess = trimmed.get("essay")
+    if isinstance(ess, dict) and isinstance(ess.get("criteria"), list):
+        ess = dict(ess)
+        for comment_cap, excerpt_cap, keep_improve in ((100, 500, False), (50, 200, False)):
+            crits = [dict(c) for c in ess.get("criteria") or [] if isinstance(c, dict)]
+            for c in crits:
+                c["comment"] = str(c.get("comment") or "")[:comment_cap]
+            ess["criteria"] = crits
+            if not keep_improve:
+                ess.pop("whatToImprove", None)
+            if isinstance(ess.get("excerpt"), str):
+                ess["excerpt"] = ess["excerpt"][:excerpt_cap]
+                ess["excerptTruncated"] = True
+            trimmed["essay"] = ess
+            trimmed["truncated"] = {"field": "essay.criteria",
+                                    "note": "комментарии и отрывок ужаты по размеру"}
+            try:
+                if len(json.dumps(trimmed, ensure_ascii=False)) <= cap:
+                    return json.dumps(trimmed, ensure_ascii=False)
+            except (TypeError, ValueError):
+                break
     for key in ("attempts", "last", "skills", "days", "criteria", "bySkill", "essays"):
         seq = trimmed.get(key)
         if not isinstance(seq, list) or len(seq) < 2:
@@ -2127,6 +2682,8 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 if (not steps and not recently_read and asked_for_data
                         and is_empty_promise(text)):
                     name, call_args = fallback_tool_for(asked)
+                    if name == "project_info" and not call_args.get("topic"):
+                        call_args = _args_for_tool(name, asked) or call_args
                     forced = _force_read(conn, user_id, subject, name, call_args, messages, steps,
                                          chat_fn)
                     if forced:

@@ -1944,6 +1944,7 @@ function drawProviders() {
   const list = Array.isArray(d.providers) ? d.providers : [];
   const order = Array.isArray(d.order) ? d.order : [];
   const names = Object.fromEntries(list.map((p) => [p.id, p.title || p.id]));
+  const judge = (d.essayJudge && typeof d.essayJudge === "object") ? d.essayJudge : {};
   body.innerHTML = `
     <div class="a-card" style="margin-bottom:14px">
       <div class="a-card__head a-card__head--wrap">
@@ -1957,10 +1958,64 @@ function drawProviders() {
       <div class="a-card__sub" style="margin-top:8px">Активный${d.active ? `: <b>${esc(names[d.active] || d.active)}</b> — новые запросы идут сюда первым` : ": нет"}. Статус «Используется» — успех живого трафика за последние ${Number(d.recentWindowSec) || 60} с, холостых запросов ради него нет. «Пинг всех» — живой запрос «привет» каждому провайдеру с задержкой.</div>
       <div id="provPingAllResult" style="margin-top:12px">${Prov.ping && Prov.ping.results ? provPingRowsHTML(Prov.ping.results) : ""}</div>
     </div>
+    ${provJudgeCardHTML(judge, list, names)}
     ${Prov.error ? `<div class="a-error-banner" style="margin-bottom:14px">Не удалось обновить: ${esc(Prov.error)}</div>` : ""}
     <div class="a-prov-grid">
       ${list.map(provCardHTML).join("")}
     </div>`;
+}
+
+/* Судья проверки сочинений: какая модель ставит баллы за содержание.
+   Отдельная карточка, а не чип в «Очерёдности», потому что это другое
+   измерение: очередь отвечает «кто обслуживает запрос», судья — «чьим
+   прибором измеряют». Смена прибора меняет сами баллы (замеренная разница
+   между моделями — до 18 из 22 на одном тексте), поэтому она должна быть
+   видна и управляема явно, а не выясняться по расхождению оценок. */
+function provJudgeCardHTML(judge, list, names) {
+  const cur = judge.provider || "";
+  const pref = judge.preferred || "";
+  const all = Array.isArray(list) ? list.filter((p) => p.id) : [];
+  const willFallback = !cur && !pref;
+  const options = all.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? " selected" : ""}>${esc(p.title || p.id)}</option>`).join("");
+  const state = willFallback
+    ? `<span class="a-chip a-chip--danger">не назначен</span>`
+    : `<span class="a-chip a-chip--success">${esc(names[cur] || cur)}</span>`;
+  const switched = judge.switched
+    ? `<span class="a-chip a-chip--warn">подменён после отказа</span>` : "";
+  const manual = judge.explicit ? `<span class="a-chip">выбран вручную</span>` : "";
+  return `
+    <div class="a-card" style="margin-bottom:14px">
+      <div class="a-card__head a-card__head--wrap">
+        <span class="a-card__title">Судья проверки сочинений</span>
+        <span class="spacer"></span>
+        <button class="btn btn--soft btn--sm" onclick="saveJudge()">Применить</button>
+      </div>
+      <div class="a-judge-chips" style="margin-bottom:10px">${state}${manual}${switched}</div>
+      <div class="a-card__sub" style="margin-bottom:10px">
+        Баллы за содержание (К1–К6) ставит эта модель. Проверка намеренно
+        закреплена: разные модели ставят за одну работу разные баллы (до 18 из
+        22), поэтому оценка не должна зависеть от того, какой шлюз сегодня жив.
+        Запасной подключается только при полном отказе судьи — и тогда об этом
+        появляется системное обращение: баллы разных судей несравнимы.
+      </div>
+      <label class="a-card__sub" for="provJudgeSelect" style="display:block;margin-bottom:6px">Кто оценивает</label>
+      <select id="provJudgeSelect">${willFallback ? "" : `<option value="">— как в очерёдности (${esc(names[pref] || pref || "нет")}) —</option>`}${willFallback ? `<option value="">— не назначен —</option>` : ""}${options}</select>
+      <div id="provJudgeResult" style="margin-top:10px"></div>
+    </div>`;
+}
+
+async function saveJudge() {
+  const sel = document.getElementById("provJudgeSelect");
+  const box = document.getElementById("provJudgeResult");
+  if (!sel || !box) return;
+  box.innerHTML = `<span class="a-card__sub">Сохраняем…</span>`;
+  try {
+    const r = await AdminApi.post("/api/admin/providers/judge", { provider: sel.value || "" });
+    box.innerHTML = `<span class="a-chip a-chip--success">Судья: ${esc(r.judge || "—")}</span>`;
+    await screenProviders(true);
+  } catch (e) {
+    box.innerHTML = `<div class="a-error-banner">${esc(e.message || "не удалось назначить судью")}</div>`;
+  }
 }
 
 async function screenProviders(quiet) {

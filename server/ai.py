@@ -854,6 +854,166 @@ def _ordered_providers() -> list:
                        if name != active and _provider_configured(name)]
 
 
+# ---------------------------------------------------------------------------
+# Судья проверки сочинения — один на всю систему, а не «тот, кто ответил»
+#
+# Дыра, которая здесь закрыта, измерена живьём. В конфиге было три
+# настроенных провайдера с ТРЕМЯ РАЗНЫМИ моделями (kimi-k3, claude-opus-5.5,
+# anthropic/claude-opus-4.6), а `chat()` при отказе молча уходит на
+# следующего. Рубрика одна, а судья — какой успел ответить, поэтому один и
+# тот же текст одного и того же ученика получал:
+#
+#   sub49, 4 прогона подряд на живом коде: 21, 21, 3, 3 из 22.
+#
+# Смена судьи видна в комментарии К1: дороже всего поймал ту же проблему
+# «сформулирована ясно и отвечает именно той проблеме» (10/10 содержания),
+# дешёвый — «сформулирована по другой проблеме» (3/10). Разброс в 18 баллов
+# даёт не стохастика модели — стохастика здесь ±1 балл (замер: 22/22/22,
+# 21/21/21/21), а бесшовная смена МОДЕЛИ-СУДЬИ. Failover обязан сохранять
+# доступность, но не имеет права менять измерительный прибор: балл за
+# содержание — это измерение по официальной рубрике, и он не должен зависеть
+# от того, какой шлюз сегодня жив.
+#
+# Поэтому у проверки сочинения своя ротация, независимая от `ai_router`:
+# первым идёт `ai_essay_judge` (админский выбор, по умолчанию — приоритетный
+# провайдер), и только его полный отказ уводит запрос на следующего. Запасной
+# нужен по-прежнему — без него отказ единственного настроенного шлюза стоил бы
+# ученику проверки целиком, — но теперь это осознанный выбор админа, а не
+# побочный эффект чужой пробы: `probe_tick` ротирует основной `ai_router` и
+# больше не переставляет судью сочинений у ученика на ходу.
+#
+# Смена судьи — событие, а не тишина: о ней пишется и в лог, и в ленту
+# системных обращений (см. _note_judge_switch), потому что после неё
+# накопленные баллы разных работ становятся несравнимы, и это должно быть
+# видно админу, а не выясняться по расхождению в 18 баллов.
+# ---------------------------------------------------------------------------
+_JUDGE_KEY = "ai_essay_judge"
+
+
+def _judge_slot() -> dict:
+    """Что записано про судью сочинений: {} — не назначали. Не бросает."""
+    try:
+        raw = _app_config_read(_JUDGE_KEY)
+    except Exception:
+        return {}
+    if isinstance(raw, str):
+        raw = {"provider": raw}
+    return raw if isinstance(raw, dict) else {}
+
+
+def judge_preferred() -> str | None:
+    """Кого админ считает судьёй по умолчанию: явный выбор, иначе приоритет.
+
+    Значение читается из слота «Высокий» (`effective_priority()[0]`), то есть
+    из того же места, откуда берёт порядок весь роутер: отдельной настройки
+    «кто главный» в проекте нет и не должно появиться.
+    """
+    explicit = str(_judge_slot().get("provider") or "").strip()
+    if explicit:
+        return explicit
+    priority = effective_priority()
+    return priority[0] if priority else active_provider()
+
+
+def judge_provider() -> str | None:
+    """Провайдер, который СЕЙЧАС оценивает содержание сочинений.
+
+    Порядок: явное назначение админа → автопереключение после отказа судьи
+    (тот же провайдер, что был выбран, пока не доказано, что он снова жив) →
+    судья по умолчанию. Автопереключение нужно, чтобы отказ судьи не стоил
+    КАЖДОЙ следующей проверке полного таймаута на мёртвый шлюз: оно залипает
+    до успешной пробы (`probe_tick`), как и у роутера. Отменённый, выключенный
+    или удалённый провайдер молча игнорируется — судья никогда не «не
+    настроен» из-за битой строки в базе.
+    """
+    slot = _judge_slot()
+    explicit = str(slot.get("provider") or "").strip()
+    if explicit and _provider_configured(explicit):
+        return explicit
+    if explicit:
+        # Явно назначенного больше нет — работаем на судье по умолчанию.
+        return judge_preferred()
+    auto = str(slot.get("auto") or "").strip()
+    if auto and _provider_configured(auto):
+        return auto
+    return judge_preferred()
+
+
+def judge_fallback() -> str | None:
+    """Запасной судья: первый настроенный провайдер, кроме назначенного.
+
+    Нужен ровно для одного случая — судья недоступен целиком. Пустой ответ
+    означает «запасного нет»: проверку честнее отдать ошибкой, чем считать
+    другим прибором молча."""
+    chosen = judge_provider()
+    for name in effective_priority():
+        if name != chosen and _provider_configured(name):
+            return name
+    return None
+
+
+def judge_provider_set(provider: str | None) -> dict:
+    """Назначить судью сочинений ('' или None — снять назначение).
+
+    Пишет строку в app_config и возвращает, что получилось: админке нужно
+    показать последствие сразу, а не после следующей проверки. Снятие
+    назначения заодно убирает автопереключение: админ явно вернулся к
+    настройке по умолчанию, и старое «судья падал вчера» не должно её
+    подменять."""
+    value = str(provider or "").strip()
+    if value and not _provider_configured(value):
+        raise AIInputError("провайдер не настроен или отключён")
+    if value:
+        _app_config_write(_JUDGE_KEY, {"provider": value})
+    else:
+        _app_config_write(_JUDGE_KEY, {})
+    return {"judge": judge_provider(), "explicit": bool(value)}
+
+
+def judge_providers_order() -> list:
+    """Порядок попыток для проверки сочинения: судья, затем запасной."""
+    names: list[str] = []
+    for name in (judge_provider(), judge_fallback()):
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def judge_failover(to: str) -> None:
+    """Судья отказал и его место занял запасной: запомнить и объявить.
+
+    Залипание (`auto`) снимает таймаут на мёртвый шлюз у следующих проверок,
+    а `probe_tick` вернёт прежнего судью, как только тот ответит. Не бросает:
+    оценка ученика важнее записи в конфиг."""
+    preferred = judge_preferred()
+    try:
+        if not _judge_slot().get("provider"):
+            _app_config_write(_JUDGE_KEY, {"auto": str(to or ""),
+                                           "from": str(preferred or ""),
+                                           "at": int(time.time() * 1000)})
+    except Exception:
+        pass
+    _note_judge_switch(str(preferred or ""), str(to or ""), "судья недоступен")
+
+
+def _note_judge_switch(frm: str, to: str, reason: str) -> None:
+    """Смена судьи проверки — событие уровня системы, а не строчка в отчёте.
+
+    Пишем и в лог, и в ленту обращений (таблетка «Система»): после смены
+    модели баллы за содержание несравнимы между собой, и админ должен узнать
+    об этом в момент события. Не бросает — проверка ученика важнее ленты."""
+    try:
+        print(f"EGE CORE ai: судья сочинений сменён {frm or '—'} → {to} ({reason})",
+              file=sys.stderr)
+    except Exception:
+        pass
+    try:
+        _notify_system({"kind": "judge_switch", "from": frm, "to": to,
+                        "reason": reason[:200], "at": int(time.time() * 1000)})
+    except Exception:
+        pass
+
+
 def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None) -> None:
     """Отказ провайдера: записать и, если сломался активный, переключить его.
 
@@ -1196,7 +1356,7 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
          max_tokens: int | None = None, temperature: float | None = None,
          state: dict | None = None, tools: list | None = None,
-         tool_choice=None):
+         tool_choice=None, as_judge: bool = False):
     """Send a chat completion and return the assistant text.
 
     `messages` is the OpenAI shape ([{"role": ..., "content": ...}, ...]) and is
@@ -1211,6 +1371,12 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     (AIFormatError) здесь не ловится: она всплывает позже, в chat_json, и
     означает живой, но небрежный ответ модели, а не недоступность провайдера.
 
+    `as_judge=True` меняет ровно один шаг — ОТКУДА берётся первый провайдер:
+    не из активного роутера, а из закреплённого судьи (judge_providers_order).
+    Это нужно оценке по официальной рубрике, где смена модели меняет сам
+    балл (см. блок «Судья проверки сочинения»); наставнику и пробам — не нужно,
+    и они по-прежнему идут общим порядком.
+
     С tools — режим агента: возвращается {"text","tool_calls"} (см.
     chat_with_tools), текст и вызовы одновременно запрещены парсером.
     """
@@ -1220,7 +1386,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                                tool_choice=tool_choice, state=state)
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
-    names = _ordered_providers()
+    names = judge_providers_order() if as_judge else _ordered_providers()
     if not names:
         raise AIUnavailable("AI не настроен")
     # Слот — один на весь вызов, включая переключение провайдеров: это бюджет
@@ -1241,11 +1407,17 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 switch_to = names[index + 1] if index + 1 < len(names) else None
                 _note_provider_failure(name, exc, switch_to)
                 continue
+            if as_judge and index > 0:
+                # Судья отказал, отвечает запасной: измерение сменило прибор.
+                # Пишем это в ленту — баллы после смены несравнимы (замеренная
+                # разница между моделями до 18 баллов из 22 на одном тексте).
+                judge_failover(name)
             _note_provider_success(name)
             _chat_state.provider = name
             _chat_state.model = _model_of(name, model)
             if state is not None:
                 state["provider"] = name
+                state["model"] = _chat_state.model
             return answer
         # Все настроенные провайдеры отказали: это уже авария, а не «попробуй
         # запасного» — сообщаем один раз на случай (дедупль на стороне сервера).
@@ -1255,6 +1427,28 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
         raise last_exc
     finally:
         _ai_slots.release()
+
+
+def chat_as_judge(messages: list[dict], **kwargs):
+    """`chat` для ОЦЕНКИ СОДЕРЖАНИЯ сочинения: судья фиксирован.
+
+    Тонкая обёртка над тем же транспортом (`as_judge=True`), а не второй
+    HTTP-путь: транспорт один, значит и моки, и невидимый повтор, и слот
+    работают ровно так же — меняется только ПОРЯДОК провайдеров.
+
+    Почему это важно именно здесь: порядок начинается с `judge_provider()`, а
+    не с активного роутера, поэтому оценка не зависит от того, кто сегодня жив
+    и кто последним менял `ai_router`. Запасной подключается только при полном
+    отказе судьи, и это событие пишется в ленту (`judge_failover`) — после него
+    баллы работ становятся несравнимы.
+
+    Флаг, а не отдельная функция-транспорт, ещё и потому, что судья нужен
+    ТОЛЬКО оценке по официальной рубрике: наставник (`chat_with_tools`) и
+    служебные пробы идут обычным путём и сохраняют бесшовный failover — им
+    важна доступность, а не воспроизводимость измерения.
+    """
+    kwargs.pop("as_judge", None)
+    return chat(messages, as_judge=True, **kwargs)
 
 
 def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
@@ -1888,6 +2082,16 @@ def providers_overview() -> dict:
         active = active_provider()
     except Exception:
         order, active = [], None
+    # Судья проверки сочинений — отдельное поле, а не «первый в порядке»:
+    # админке нужно видеть, какая модель СЕЙЧАС ставит баллы за содержание, и
+    # отличается ли она от приоритетной (подмена после отказа залипает до
+    # пробы). Без этого поля смена судьи видна только по расхождению баллов.
+    try:
+        judge = judge_provider()
+        judge_pref = judge_preferred()
+        judge_slot = _judge_slot()
+    except Exception:
+        judge, judge_pref, judge_slot = None, None, {}
     return {
         "ok": True,
         "providers": cards,
@@ -1898,6 +2102,12 @@ def providers_overview() -> dict:
         "slotLabels": dict(PROVIDER_SLOT_LABELS),
         "recentWindowSec": int(PROVIDER_RECENT_SEC),
         "checkedAt": int(time.time() * 1000),
+        "essayJudge": {
+            "provider": judge,
+            "preferred": judge_pref,
+            "explicit": bool(str(judge_slot.get("provider") or "").strip()),
+            "switched": bool(str(judge_slot.get("auto") or "").strip()),
+        },
     }
 
 
@@ -2361,33 +2571,38 @@ PROBE_WAKE_SEC = 60.0
 
 
 def probe_tick(now: float | None = None) -> bool:
-    """Одна проверка приоритетного провайдера. True — он восстановлен и активен."""
+    """Одна проверка приоритетного провайдера. True — он восстановлен и активен.
+
+    Кроме основного роутера, возвращает на место судью проверки сочинений:
+    он тоже залипает на запасном после отказа (см. judge_failover), и без этой
+    же пробы ученики остались бы считать запасным прибором навсегда."""
     order = effective_priority()
     preferred = order[0] if order else PROVIDER_PRIORITY[0]
     if not _provider_configured(preferred):
         return False
+    judge_restored = _probe_judge_return(preferred, now)
     current = active_provider()
     if current == preferred:
-        return False  # уже на приоритетном — проверять нечего
+        return judge_restored  # уже на приоритетном — проверять нечего
     moment = time.time() if now is None else float(now)
     try:
         last_probe = float(_router_state().get("lastProbeAt") or 0) / 1000.0
     except (TypeError, ValueError):
         last_probe = 0.0
     if moment - last_probe < PROBE_INTERVAL_SEC:
-        return False
+        return judge_restored
     now_ms = int(moment * 1000)
     # Сервер занят проверками — проба не горит, попробуем на следующем тике.
     # Это локальное условие, а не отказ провайдера: lastProbeAt не трогаем.
     if not _ai_slots.acquire(timeout=1.0):
-        return False
+        return judge_restored
     try:
         _chat_via(preferred, [{"role": "user", "content": "привет"}],
                   timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
     except Exception as exc:  # noqa: BLE001 — любой отказ: ждём ещё интервал
         _router_update({"lastProbeAt": now_ms,
                         "lastProbeError": f"{type(exc).__name__}: {exc}"[:300]})
-        return False
+        return judge_restored
     finally:
         _ai_slots.release()
     _router_update({"active": preferred, "updatedAt": now_ms,
@@ -2396,6 +2611,44 @@ def probe_tick(now: float | None = None) -> bool:
                     "to": preferred, "reason": "проба прошла", "at": now_ms})
     print(f"EGE CORE ai: приоритетный провайдер {preferred} восстановлен — снова активен",
           flush=True)
+    return True
+
+
+def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
+    """Вернуть судью сочинений, если он залип на запасном, а прежний ожил.
+
+    Тот же интервал, что у роутера, и отдельная отметка времени: проба судьи
+    не должна ни стоить запроса, пока он и так на месте, ни дёргать шлюз чаще
+    общего расписания. Не бросает — фоновая проба не повод падать.
+    """
+    try:
+        slot = _judge_slot()
+        auto = str(slot.get("auto") or "").strip()
+        if not auto or str(slot.get("provider") or "").strip():
+            return False       # судья не залипал или выбран вручную
+        if auto == preferred or not _provider_configured(preferred):
+            return False
+        moment = time.time() if now is None else float(now)
+        last = float(slot.get("at") or 0) / 1000.0
+        if moment - last < PROBE_INTERVAL_SEC:
+            return False
+        if not _ai_slots.acquire(timeout=1.0):
+            return False
+        try:
+            _chat_via(preferred, [{"role": "user", "content": "привет"}],
+                      timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
+        except Exception:  # noqa: BLE001 — не ожил, ждём следующего интервала
+            return False
+        finally:
+            _ai_slots.release()
+    except Exception:  # noqa: BLE001 — фоновая проба не роняет поток
+        return False
+    try:
+        _app_config_write(_JUDGE_KEY, {})
+    except Exception:
+        return False
+    print(f"EGE CORE ai: судья сочинений возвращён на {preferred}", flush=True)
+    _note_judge_switch(auto, preferred, "прежний судья снова доступен")
     return True
 
 
@@ -2476,6 +2729,18 @@ def chat_json(system: str, user: str, **kwargs) -> dict:
                               {"role": "user", "content": user}], **kwargs))
 
 
+def chat_json_as_judge(system: str, user: str, **kwargs) -> dict:
+    """`chat_json` для оценки по официальной рубрике: судья фиксирован.
+
+    Отдельная точка входа, а не флаг у `chat_json`, чтобы пинить судью нельзя
+    было случайно: тот, кто зовёт эту функцию, осознанно просит измерение
+    (см. chat_as_judge), а всё остальное — наставник, пробы, будущие форматы —
+    идёт обычным `chat_json` и сохраняет бесшовный failover.
+    """
+    return extract_json(chat_as_judge([{"role": "system", "content": system},
+                                       {"role": "user", "content": user}], **kwargs))
+
+
 # ---------------------------------------------------------------------------
 # Formats
 #
@@ -2536,7 +2801,15 @@ ESSAY_MIN_WORDS = 150
 #       на выборке целиком объясняются словами из исходника;
 #   4 — veto_off_task: К1 = 0 при отсутствии указания на автора и цитаты
 #       обнуляет работу целиком (рекламный текст больше не стоит 4 балла).
-ESSAY_RUBRIC_VERSION = 4
+#   5 — судья проверки закреплён (chat_as_judge), а «работа по другой проблеме»
+#       стала правилом сервера (apply_problem_check): балл за содержание больше
+#       не зависит от того, какая модель-шлюз ответила. Замер: один текст давал
+#       21/21/3/3 на трёх провайдерах в конфиге.
+#   6 — якорь off_task сверяется с ИСХОДНИКОМ (essay_quote_from_source): цитата
+#       в кавычках больше не доказательство сама по себе. Замер: чат-болтовня
+#       («отличный вопрос», «давайте разберёмся») стоила то 4/22, то 10/22 —
+#       разница была ровно в том, попала ли в неё длинная реплика в кавычках.
+ESSAY_RUBRIC_VERSION = 6
 
 
 # Подсчёт слов — ровно тот же алгоритм, что на приёме работы
@@ -3570,19 +3843,197 @@ _OFF_TASK_VERDICT = (" Баллы не начислены по всем крит
                      "по прочитанному тексту.")
 
 
-def essay_anchor_missing(text: str) -> bool:
-    """Нет ни указания на автора/героя/произведение, ни цитаты из текста."""
+def essay_anchor_missing(text: str, source_text: str = "") -> bool:
+    """Нет ни указания на автора/героя/произведение, ни цитаты ИЗ исходника.
+
+    Цитата проверяется по самому исходному тексту, а не по одним кавычкам.
+    Прежнее правило считало доказательством любую строку в кавычках от 15
+    знаков — и на живых работах это оказалось дырой: чат-болтовня («отличный
+    вопрос», «давайте разберёмся», «если хочешь, я могу») спасала её от вето,
+    и работа без единого слова о тексте получала баллы за «отсутствие ошибок».
+    Замер по базе: одна и та же болтовня стоила то 4/22, то 10/22 — разница
+    ровно в том, попала ли в неё длинная реплика в кавычках.
+
+    `source_text` пустой (путь без исходника) — откат к старому правилу: там
+    сверять не с чем, и обнулять работу за недоказуемое нельзя.
+    """
     body = text or ""
-    return not (ESSAY_AUTHOR_HINT_RE.search(body) or ESSAY_QUOTE_RE.search(body))
+    if ESSAY_AUTHOR_HINT_RE.search(body):
+        return False
+    quotes = ESSAY_QUOTE_RE.findall(body)
+    if not quotes:
+        return True
+    if not source_text:
+        return False       # старое правило: цитата есть — якорь есть
+    return not any(essay_quote_from_source(q, source_text) for q in quotes)
 
 
-def veto_off_task(merged: dict, partial: dict, text: str, words: int) -> bool:
-    """К1 = 0 + ни автора, ни цитаты → работа не по исходнику → 0 по всем.
+def essay_quote_from_source(quote: str, source_text: str) -> bool:
+    """Взята ли цитата из исходного текста (а не просто набрана в кавычках).
+
+    Правило мягкое с обеих сторон, потому что обе ошибки дороги:
+      - 3-граммы, а не точная строка: ученик мог поправить пунктуацию, вставить
+        пропуск или взять цитату с сокращением — это всё ещё цитата из текста;
+      - порог 0.5, а не «всё совпало»: половина слов цитаты обязана найтись в
+        исходнике, иначе это чужое высказывание в кавычках.
+    Мало цитаты (короче 3 слов) — сверять нечего: короткая кавычка не
+    доказательство и раньше якорем не считалась (ESSAY_QUOTE_RE требует 15
+    знаков).
+    """
+    inner = str(quote or "").strip("«»\"“”").strip()
+    if not inner or not source_text:
+        return False
+    grams = _gate_ngrams(_gate_tokens(inner), 3)
+    if not grams:
+        # Совсем короткая цитата: сверяем как одно слово-строку.
+        return _gate_tokens(inner) and " ".join(_gate_tokens(inner)) in " ".join(_gate_tokens(source_text))
+    source_grams = set(_gate_ngrams(_gate_tokens(source_text), 3))
+    if not source_grams:
+        return False
+    hit = sum(1 for gram in grams if gram in source_grams)
+    return hit / len(grams) >= 0.5
+
+
+# ---------------------------------------------------------------------------
+# «Сочинение по другому исходнику» — правило, а не суждение модели
+#
+# Пять баллов содержания (К1, а с ним каскадом К2 и К3) висели на одном
+# суждении модели: «та ли это проблема». Замер на живых работах показывает,
+# что суждение это лотерея между судьями, а не измерение: один и тот же текст
+# про реализацию потенциала (задание про взросление) получил у дорогой модели
+# «позиция сформулирована ясно и отвечает именно той проблеме, которую ты сам
+# заявил» (10/10 содержания), у дешёвой — «позиция по другой проблеме» (3/10).
+# Ученик при этом не менял ни строчки.
+#
+# При этом сам факт «работа про другое» определяется по ТЕКСТУ детерминированно:
+# задание даёт проблему словами («Как люди понимают, что взрослеют?»), ученик
+# объявляет свою проблему в начале работы, и если эти формулировки не
+# пересекаются даже по основам слов — работа написана не по этому исходнику.
+# Порог не подбирается: у честных работ пересечение 0.6–1.0 (задание и работа
+# говорят об одном одними словами), у «не по тому тексту» — ровно 0.0, между
+# ними пусто. Проверено на всех 27 готовых работах базы: правило срабатывает на
+# одной (та самая, где и дорогая модель, и дешёвая поставили К1 = 0) и НИ РАЗУ
+# не спорит с моделью там, где та поставила К1 = 1.
+#
+# Границы, за которыми правило молчит (и это осознанно):
+#   - работа вообще не объявляет проблему (короткая, пересказ, мусор) — там
+#     К1 = 0 ставит модель, а работа без опоры на текст снимается veto_off_task;
+#   - формулировка совпала хоть одним содержательным словом — правило молчит:
+#     «другая проблема» и «та же проблема другими словами» по словам не
+#     различить, а наказывать за формулировку нельзя.
+# ---------------------------------------------------------------------------
+# Стоп-слова для сравнения проблем: служебные и вопросительные слова, которые
+# есть в ЛЮБОЙ формулировке проблемы («что», «как», «человек», «жизнь»).
+# Оставлены только смысловые: без фильтра «Что надо человеку, чтобы жить
+# спокойно?» совпадёт с чем угодно по слову «человек».
+_PROBLEM_STOP = frozenset("""
+что чтобы как какой какая какие чем чём кто где когда это этот эта эти тот та те
+свой своя своё свои всё весь вся все она он они мы вы ты я
+есть было был была были будет надо нужно можно нельзя ли же бы или и а но да не
+ни же вот только лишь очень самый более менее таком такие такой
+человек люди человеку людям жизни жизнь в жизни мир мире дело деле
+почему зачем который которая которые которых
+""".split())
+# Указание в тексте работы, что она объявляет проблему: «проблема…», «вопрос
+# о…». Ищем только в начале (первые четыре предложения) — дальше это уже
+# рассуждение, где слово «проблема» всплывает по ходу.
+_ESSAY_PROBLEM_RE = re.compile(r"проблем[аыуе]|вопрос\w*\s+(?:о|об)\b", re.IGNORECASE)
+_ESSAY_PROBLEM_HEAD_SENTENCES = 4
+# Длина общей основы при сравнении формулировок. Шесть знаков разводят
+# «взросл»/«реализ»/«памят» и при этом склеивают «взрослеют» с «взрослым».
+_PROBLEM_STEM_LEN = 6
+
+
+def _problem_content_words(text: str) -> set:
+    """Содержательные основы слов формулировки проблемы.
+
+    Основа берётся усечением до общего корня: «взрослеют» и «взрослым» — одно
+    слово одной проблемы, «реализовать» и «реализация» тоже, а «память» и
+    «музыка» — нет. Усечение до первых `_PROBLEM_STEM_LEN` знаков, а не
+    отбрасывание окончаний по списку букв: русские формы меняют не только
+    хвост («взрослеют» → «взрослым» ломается о любую такую эвристику), и
+    проверять надо корень, а не флексию.
+    """
+    out = set()
+    for word in ESSAY_WORD_RE.findall(text or ""):
+        token = word.lower().replace("ё", "е")
+        if len(token) < 4 or token in _PROBLEM_STOP:
+            continue
+        out.add(token[:_PROBLEM_STEM_LEN])
+    return out
+
+
+def essay_declared_problem(text: str) -> str:
+    """Что работа сама называет проблемой ('' — не называет)."""
+    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    hit = [s for s in sentences[:_ESSAY_PROBLEM_HEAD_SENTENCES]
+           if _ESSAY_PROBLEM_RE.search(s)]
+    return " ".join(hit).strip()
+
+
+def essay_wrong_problem(text: str, problem: str) -> bool:
+    """Работа объявляет проблему, не пересекающуюся с заданной.
+
+    True — формулировки не делят ни одного содержательного слова, то есть
+    работа написана по другой проблеме. Молчит (False), если проблема задания
+    не передана, если работа свою не объявляет, или если хоть одно
+    содержательное слово общее: «другая» и «та же другими словами» по словам
+    не различаются, а наказывать за формулировку нельзя.
+    """
+    declared = essay_declared_problem(text)
+    if not declared or not problem:
+        return False
+    want = _problem_content_words(problem)
+    got = _problem_content_words(declared)
+    # Пустая сторона = нет содержательных слов = сравнивать нечего.
+    if not want or not got:
+        return False
+    return not (want & got)
+
+
+_WRONG_PROBLEM_NOTE = ("Работа написана по другой проблеме, а не по той, что "
+                       "поставлена в исходном тексте. Позиция автора по "
+                       "указанной проблеме не сформулирована, поэтому К1, а "
+                       "вместе с ним К2 и К3 не начисляются.")
+
+
+def apply_problem_check(partial: dict, text: str, problem: str, words: int) -> bool:
+    """К1 = 0, если работа явно о другом. Возвращает True, если сработало.
+
+    Серверное правило перед каскадом: балл К1 — это «позиция автора ПО
+    УКАЗАННОЙ проблеме», и если работа заявляет совсем другую, ноль здесь не
+    суждение, а факт. Итог и каскад пересчитываются здесь же: `validate_essay`
+    уже применил потолки, и после смены К1 их надо применить заново — иначе
+    К2 и К3 остались бы с баллами, выставленными под ненулевую позицию.
+    Короткая работа сюда не попадает — её уже обнулил объём.
+    """
+    if words < ESSAY_MIN_WORDS or not essay_wrong_problem(text, problem):
+        return False
+    by_id = {str(item.get("id")): item for item in partial.get("criteria") or []
+             if isinstance(item, dict)}
+    k1 = by_id.get("K1")
+    if k1 is None or int(k1.get("score") or 0) == 0:
+        return False       # уже ноль — переписывать объяснение нечем
+    k1["score"] = 0
+    k1["comment"] = _WRONG_PROBLEM_NOTE
+    total = sum(int(item.get("score") or 0) for item in partial["criteria"]
+                if isinstance(item, dict))
+    partial["total_score"] = _apply_rubric_caps(partial["criteria"], total)
+    return True
+
+
+def veto_off_task(merged: dict, partial: dict, text: str, words: int,
+                  source_text: str = "") -> bool:
+    """К1 = 0 + ни автора, ни цитаты ИЗ исходника → работа не по исходнику → 0.
 
     Правило сервера, применяется после вето на грамотность: обнуляет всё,
     включая содержание, и переписывает пометку на ту, что честнее звучит для
     ученика. Короткая работа сюда не попадает — её обнулил объём, и причина
     другая.
+
+    `source_text` нужен, чтобы «цитата» означала цитату из текста, а не любую
+    длинную реплику в кавычках: именно на этом ломалась чат-болтовня (см.
+    essay_anchor_missing).
     """
     if words < ESSAY_MIN_WORDS:
         return False
@@ -3592,7 +4043,7 @@ def veto_off_task(merged: dict, partial: dict, text: str, words: int) -> bool:
         k1 = int((by_id.get("K1") or {}).get("score", 1))
     except (TypeError, ValueError, AttributeError):
         return False
-    if k1 != 0 or not essay_anchor_missing(text):
+    if k1 != 0 or not essay_anchor_missing(text, source_text):
         return False
     was = int(merged.get("total_score") or 0)
     for item in merged["criteria"]:
@@ -3650,6 +4101,12 @@ FORMATS: dict[str, dict] = {
         # merge склеивает обе части в ответ на 22 балла.
         "grammar": score_grammar,
         "merge": merge_essay,
+        # Содержание оценивает СУДЬЯ (закреплённый провайдер), а не тот, кто
+        # первым ответил в общем роутере: иначе оценка по официальной рубрике
+        # зависела от сегодняшней доступности шлюзов — замеренный разброс на
+        # одном тексте 21/21/3/3 при трёх разных моделях в конфиге
+        # (см. блок «Судья проверки сочинения» рядом с chat_as_judge).
+        "chat": chat_json_as_judge,
         # Вето на баллы грамотности, когда работа не ответила на задание
         # (К1 = 0). Правило сервера, без второго вызова модели: см.
         # veto_unrelated_literacy и комментарий блока выше.
@@ -3741,26 +4198,42 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
         return _zero_essay_result(verdict["reason"])
     words = count_words(body)
     grammar_fn = spec.get("grammar")
+    # Чат для оценки: у сочинения это судья (chat_json_as_judge), у остальных
+    # форматов — обычный роутер. Реестр форматов решает, а не ветка по id:
+    # новый формат с официальной рубрикой просто кладёт сюда судью.
+    chat_fn = spec.get("chat") or chat_json
     if grammar_fn is None:
-        return spec["validate"](chat_json(system_prompt, user_prompt(body)), words, registry)
+        return spec["validate"](chat_fn(system_prompt, user_prompt(body)), words, registry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         holder: dict = {}
-        model_future = pool.submit(chat_json, system_prompt, user_prompt(body), state=holder)
+        model_future = pool.submit(chat_fn, system_prompt, user_prompt(body), state=holder)
         grammar_future = pool.submit(grammar_fn, body, source_text)
         # Результат грамотности забираем ПЕРВЫМ: авария LanguageTool не должна
         # выбрасывать уже оплаченный ответ модели.
         grammar = grammar_future.result()
         partial = spec["validate"](model_future.result(), words, registry)
+    # «Работа по другой проблеме» — правило сервера, а не суждение модели:
+    # пять баллов содержания (К1 + каскад К2/К3) не должны зависеть от того,
+    # какой шлюз ответил. Стоит ДО merge: обнулённый К1 обязан увести за собой
+    # и баллы грамотности (veto ниже), иначе мусор снова начнёт их собирать.
+    apply_problem_check(partial, body, problem, words)
     merged = spec["merge"](partial, grammar, words)
     veto_fn = spec.get("veto")
     if callable(veto_fn):
         veto_fn(merged, partial)
     # Последний фильтр: работа, которая не опирается на исходный текст вовсе,
     # не оценивается по правилу ФИПИ целиком, а не только по содержанию.
-    veto_off_task(merged, partial, body, words)
+    # Исходник передаём: без него «цитата» — это любая реплика в кавычках, и
+    # чат-болтовня спасалась от вето собственной же болтовнёй.
+    veto_off_task(merged, partial, body, words, source_text)
     if holder.get("provider"):
         # Подпись итога — модель, выставившая баллы (holder вернул из пула
         # потоков, где реально шёл chat). Вето второй инстанцией шло в нашем
         # потоке и перезаписало thread-local — возвращаем сюда проверяющую.
+        # Модель возвращаем вместе с провайдером: без неё подпись на экране
+        # результата пустует (model_student_label ищет название по паре
+        # «провайдер+модель»), и failover вообще не отличить от штатной работы.
         _chat_state.provider = holder["provider"]
+        if holder.get("model"):
+            _chat_state.model = holder["model"]
     return merged

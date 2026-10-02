@@ -640,6 +640,25 @@ async function main() {
       again.curNull === false && again.html.includes("Проверка завершена"), again.html.slice(0, 120));
     check("после повторной перезагрузки «Завершить →» тоже на месте",
       again.nav.includes("Завершить →"), again.nav.slice(0, 120));
+    // Живой баг: после перезагрузки блок отчёта показывался, а кнопка
+    // «Посмотреть результат →» молча ничего не делала — restore-блок не клал
+    // submission в essayReadyByTask, а openEssayResult при пустой записи
+    // никуда не вёл. Кнопка обязана вести всегда.
+    const btnState = run(sandbox, `({
+      hasSubmission: !!(Session.cur && Session.cur.essayReadyByTask && Session.cur.essayReadyByTask["${taskId}"]),
+    })`);
+    check("восстановленный отчёт кладёт submission в память (кнопке есть куда вести)",
+      btnState.hasSubmission === true, JSON.stringify(btnState));
+    run(sandbox, `openEssayResult("${taskId}")`);
+    const went = run(sandbox, `location.href`);
+    check("кнопка «Посмотреть результат» ведёт на отчёт после перезагрузки",
+      /\/essay\/|\/ege-result\.html.*taskId=/.test(went), went);
+    // Даже если restore ещё не добежал (гонка с картой сервера), кнопка не
+    // умирает молча: ведёт на последний отчёт по заданию через taskId.
+    run(sandbox, `Session.cur.essayReadyByTask = {}; location.href = "http://localhost/"; openEssayResult("${taskId}")`);
+    const fallbackWent = run(sandbox, `location.href`);
+    check("кнопка работает и без записи в памяти (fallback на taskId)",
+      fallbackWent.includes("taskId=" + taskId), fallbackWent);
   }
 
   /* ---------- 8. Гость и офлайн ---------- */
