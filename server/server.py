@@ -9777,7 +9777,8 @@ class Handler(BaseHTTPRequestHandler):
                         patch = {k: v for k, v in payload.items()
                                  if k in ("model", "base_url", "baseUrl", "api_key", "apiKey",
                                           "auth", "use_wallet_balance", "useWalletBalance",
-                                          "merge_system", "mergeSystem", "model_title", "modelTitle")}
+                                          "merge_system", "mergeSystem", "model_title", "modelTitle",
+                                          "model_titles", "modelTitles")}
                         if pending_chain is not None:
                             try:
                                 old_chain = _AI.provider_model_slots(pid)
@@ -10007,7 +10008,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Сброс к стандартным — отдельным POST .../reset.
                 allowed = {"slot", "enabled", "model", "base_url", "baseUrl",
                            "api_key", "apiKey", "auth", "use_wallet_balance",
-                           "useWalletBalance", "merge_system", "mergeSystem"}
+                           "useWalletBalance", "merge_system", "mergeSystem",
+                           "model_titles", "modelTitles"}
                 unknown = set(payload) - allowed
                 if unknown:
                     self.send_json({"error": "У встроенного провайдера меняются приоритет, выключатель и значения поверх окружения"}, 400)
@@ -10026,6 +10028,14 @@ class Handler(BaseHTTPRequestHandler):
                             pid, {k: v for k, v in payload.items() if k in override_fields})
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)
+                        return True
+                if "model_titles" in payload or "modelTitles" in payload:
+                    try:
+                        _AI.provider_set_override(
+                            pid, {"model_titles": payload.get("model_titles", payload.get("modelTitles"))})
+                    except (KeyError, ValueError) as exc:
+                        self.send_json({"error": str(exc) if isinstance(exc, ValueError) else "Провайдер не найден"},
+                                       400 if isinstance(exc, ValueError) else 404)
                         return True
                 if "slot" in payload:
                     _cur = dict(_AI.providers_overview().get("slots") or {})

@@ -340,6 +340,34 @@ def set_model_title(provider: str, model: str, title: str) -> str:
     return clean
 
 
+def set_model_titles(provider: str, mapping: dict) -> dict:
+    """Пакетно задать названия моделей провайдера {modelId: title}.
+
+    Пустое название снимает подпись с модели. Нужно цепочке: у каждого слота
+    (high/medium/low) своё название для ученика, а одиночное поле model_title
+    покрывает только верх. Без названия строка «проверено моделью» на экране
+    результата не рисуется вовсе (см. model_student_label), поэтому цепочка
+    без названий — это невидимые проверки. Возвращает {modelId: итог}."""
+    pid = str(provider or "").strip()
+    if not pid:
+        raise ValueError("Нужен провайдер для названий моделей")
+    if not isinstance(mapping, dict):
+        raise ValueError("Названия моделей — объект {модель: название}")
+    try:
+        _spec_for(pid)
+    except KeyError:
+        raise KeyError(f"unknown provider {pid!r}")
+    out: dict[str, str] = {}
+    for model, title in mapping.items():
+        mid = str(model or "").strip()[:200]
+        if not mid:
+            continue
+        if len(mapping) > 60:
+            raise ValueError("Слишком много названий за раз")
+        out[mid] = set_model_title(pid, mid, title)
+    return out
+
+
 def model_display_title(provider: str, model: str = "") -> str:
     """Подпись модели для АДМИНА: название → id модели → '' (всё, что известно).
 
@@ -1708,6 +1736,15 @@ def validate_custom_payload(payload: dict, *, is_update: bool = False,
         # задано, тогда показывается id (см. model_display_title).
         clean["model_title"] = str(payload.get("model_title",
                                                 payload.get("modelTitle") or ""))[:120].strip()
+    if "model_titles" in payload or "modelTitles" in payload:
+        titles_map = payload.get("model_titles", payload.get("modelTitles"))
+        if not isinstance(titles_map, dict):
+            raise ValueError("Названия моделей — объект {модель: название}")
+        if len(titles_map) > 60:
+            raise ValueError("Слишком много названий за раз")
+        clean["model_titles"] = {
+            str(m or "").strip()[:200]: str(t or "").strip()[:120]
+            for m, t in titles_map.items() if str(m or "").strip()}
     slot = payload.get("slot")
     if slot is not None or not is_update:
         if slot in (None, "", "none", "null"):
@@ -1814,6 +1851,11 @@ def custom_provider_update(pid: str, patch: dict) -> dict:
             _sync_chain_to_legacy_model(pid, str(patch["model"]))
         except Exception:
             pass
+    if "model_titles" in patch and isinstance(patch["model_titles"], dict):
+        try:
+            set_model_titles(pid, patch["model_titles"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError(str(exc) or "Не удалось сохранить названия")
     return entry
 
 
@@ -1916,6 +1958,17 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             clean[key] = bool(patch.get(field))
     if "model_title" in patch or "modelTitle" in patch:
         clean["model_title"] = str(patch.get("model_title", patch.get("modelTitle") or ""))[:120].strip()
+    titles_map = patch.get("model_titles", patch.get("modelTitles"))
+    if titles_map is not None:
+        # Пакет названий для моделей цепочки (каждый слот подписывается
+        # отдельно — одиночное поле model_title покрывает только верх).
+        if not isinstance(titles_map, dict):
+            raise ValueError("Названия моделей — объект {модель: название}")
+        if len(titles_map) > 60:
+            raise ValueError("Слишком много названий за раз")
+        clean["model_titles"] = {
+            str(m or "").strip()[:200]: str(t or "").strip()[:120]
+            for m, t in titles_map.items() if str(m or "").strip()}
     if not clean:
         raise ValueError("Нечего менять")
     if not builtin:
@@ -1951,6 +2004,11 @@ def provider_set_override(pid: str, patch: dict) -> dict:
                 _sync_chain_to_legacy_model(pid, clean["model"])
             except Exception:
                 pass
+        if "model_titles" in clean:
+            try:
+                set_model_titles(pid, clean["model_titles"])
+            except (KeyError, ValueError) as exc:
+                raise ValueError(str(exc) or "Не удалось сохранить названия")
         return entry
     # Название модели у встроенного — тоже часть «значений поверх окружения»:
     # пишем его для модели, которая реально станет текущей (явная из patch,
@@ -1968,6 +2026,7 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             except (sqlite3.Error, OSError):
                 pass
         clean.pop("model_title", None)
+    titles_for_chain = clean.pop("model_titles", None)
     # Пустое значение = снять. Незаполненных ключей после снятия в карте не
     # оставляем: иначе «сброс» выглядел бы как запись с пустыми полями.
     for field, value in clean.items():
@@ -1986,6 +2045,11 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             _sync_chain_to_legacy_model(pid, _raw_provider_model(pid))
         except Exception:
             pass
+    if titles_for_chain is not None:
+        try:
+            set_model_titles(pid, titles_for_chain)
+        except (KeyError, ValueError) as exc:
+            raise ValueError(str(exc) or "Не удалось сохранить названия")
     return current
 
 
@@ -2042,17 +2106,20 @@ def provider_reset(pid: str) -> dict:
             pass
         return entry
     customs, _slots, _enabled, overrides = _admin_snapshot()
+    # Снятую переопределённую модель запоминаем ДО сноса: её название уходит
+    # вместе с ней, а название восстановленной (из окружения) обязано уцелеть —
+    # иначе после сброса строка «проверено моделью» на экране результата
+    # пропадала бы ровно тогда, когда её настроили.
+    dropped_model = str((overrides.get(pid) or {}).get("model") or "").strip()[:200]
     overrides.pop(pid, None)
     _app_config_write(_OVERRIDES_KEY, overrides)
-    # Название модели — часть того, что сброс возвращает к стандарту: без его
-    # снятия подпись со старой модели осталась бы висеть на новой.
     try:
         restored = str(_spec_for(pid)["model"]())[:200]
     except Exception:
         restored = ""
-    if restored:
+    if dropped_model and dropped_model != restored:
         try:
-            set_model_title(pid, restored, "")
+            set_model_title(pid, dropped_model, "")
         except (sqlite3.Error, OSError):
             pass
     with _provider_health_lock:
@@ -2609,6 +2676,10 @@ def _public_provider_card(pid: str) -> dict:
             chain_titles[mdl] = model_title(pid, mdl)
     except Exception:
         pass
+    # Модели цепочки без названия для ученика: их проверки пройдут, но строка
+    # «проверено моделью» на экране результата не появится — админ должен
+    # видеть это на карточке до жалоб учеников.
+    titles_missing = [m for m in chain if m and not chain_titles.get(m)]
     title = model_title(pid, primary_model or model_value)
     return {
         "id": pid,
@@ -2639,6 +2710,7 @@ def _public_provider_card(pid: str) -> dict:
         "modelSlots": {s: chain_slots.get(s) for s in PROVIDER_SLOTS},
         "modelOrder": list(chain),
         "modelTitles": dict(chain_titles),
+        "modelTitlesMissing": list(titles_missing),
         "active": pid == active,
         "isPreferred": bool(order[:1] == [pid]),
         "recent": recent,

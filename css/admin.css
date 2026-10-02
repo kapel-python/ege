@@ -897,8 +897,11 @@ button.a-prov-ping:focus-visible { outline: 2px solid var(--accent); outline-off
 .a-chain-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .a-chain-no { flex: 0 0 22px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .a-chain-badge { flex: 0 0 76px; font-size: 12px; font-weight: 700; }
-.a-chain-input { flex: 1 1 auto; min-width: 0; }
+.a-chain-input { flex: 3 1 180px; min-width: 0; }
+.a-chain-title { flex: 2 1 140px; min-width: 0; }
 .a-chain-btns { flex: 0 0 auto; display: flex; gap: 4px; }
+.a-chain-sub { font-size: 11.5px; color: var(--muted); margin: -4px 0 8px 30px; }
+.a-linkbtn { background: none; border: none; padding: 0; color: var(--accent-ink); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 @media (max-width: 640px) {
   .a-chain-row { flex-wrap: wrap; }
   .a-chain-input { flex: 1 1 100%; order: 3; }

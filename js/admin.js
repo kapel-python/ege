@@ -1889,6 +1889,7 @@ function provCardHTML(p) {
         ${p.active ? `<span class="a-chip a-chip--success" title="Запросы учеников идут сюда первым">активный</span>` : ""}
         ${p.modelOverridden ? `<span class="a-chip a-chip--warn" title="Модель изменена из админки">модель изменена</span>` : ""}
         ${p.modelTitleMissing ? `<span class="a-chip a-chip--warn" title="Без названия ученик не увидит, какой моделью проверено сочинение — задайте его в панели">нет названия</span>` : ""}
+        ${(p.modelTitlesMissing && p.modelTitlesMissing.length) ? `<span class="a-chip a-chip--warn" title="Проверки этих моделей пройдут, но строка «проверено моделью» не появится: ${esc(p.modelTitlesMissing.join(", "))}">нет названия: ${esc(p.modelTitlesMissing[0])}${p.modelTitlesMissing.length > 1 ? ` +${p.modelTitlesMissing.length - 1}` : ""}</span>` : ""}
         <span class="spacer"></span>
         <span class="a-prov-card__more" aria-hidden="true">${aicon("chevron")}</span>
       </div>
@@ -2786,6 +2787,7 @@ function screenProviderPage(id) {
     ProvDetail.chain.high = p.model;
   }
   ProvDetail.chainSaved = Object.assign({}, ProvDetail.chain);
+  ProvDetail.chainSavedTitles = Object.assign({}, p.modelTitles || {});
   ProvDetail.data = p;
 
   const [dot, dotLabel] = provHealth(p);
@@ -2953,7 +2955,11 @@ function screenProviderPage(id) {
     provDetailRenderList(); provDetailMarkDirty();
   };
   const titleInput = document.getElementById("provDetailModelTitle");
-  if (titleInput) titleInput.oninput = provDetailMarkDirty;
+  if (titleInput) titleInput.oninput = () => {
+    const high = document.getElementById("provChainTitle_high");
+    if (high && high.value !== titleInput.value) high.value = titleInput.value;
+    provDetailMarkDirty();
+  };
   provChainRender();
   provDetailRenderList();
   provDetailMarkDirty();
@@ -3020,6 +3026,7 @@ function provChainRender() {
   // Первый рендер: значения из сохранённой цепочки.
   if (!box.dataset.built) {
     box.dataset.built = "1";
+    const savedTitles = ProvDetail.chainSavedTitles || {};
     box.innerHTML = PROV_CHAIN_SLOTS.map((s, i) => `
       <div class="a-chain-row" data-chain-slot="${s.id}">
         <span class="a-chain-no" title="Порядок попыток">${i + 1}</span>
@@ -3028,12 +3035,17 @@ function provChainRender() {
           list="provChainData" autocomplete="off" spellcheck="false"
           placeholder="модель для «${esc(s.label.toLowerCase())}» приоритета"
           value="${esc((ProvDetail.chain && ProvDetail.chain[s.id]) || "")}">
+        <input class="a-input a-chain-title" id="provChainTitle_${s.id}"
+          autocomplete="off" placeholder="Название для ученика"
+          title="Что увидит ученик в строке «проверено моделью» — без названия строка не появится"
+          value="${esc(savedTitles[(ProvDetail.chain && ProvDetail.chain[s.id]) || ""] || "")}">
         <span class="a-chain-btns">
           <button type="button" class="a-icon-btn" onclick="moveChainSlot('${s.id}', -1)" title="Выше (поменяться с соседом)">↑</button>
           <button type="button" class="a-icon-btn" onclick="moveChainSlot('${s.id}', 1)" title="Ниже (поменяться с соседом)">↓</button>
           <button type="button" class="a-icon-btn a-icon-btn--danger" onclick="clearChainSlot('${s.id}')" title="Очистить слот">✕</button>
         </span>
-      </div>`).join("");
+      </div>
+      <div class="a-chain-sub" id="provChainSub_${s.id}"></div>`).join("");
     PROV_CHAIN_SLOTS.forEach((s) => {
       const el = document.getElementById(`provChain_${s.id}`);
       if (el) {
@@ -3046,12 +3058,51 @@ function provChainRender() {
           }
           provChainPaintOrder(); provDetailMarkDirty(); provChainPaintData();
         });
-        el.addEventListener("change", () => { provChainPaintOrder(); provDetailMarkDirty(); });
+        el.addEventListener("change", () => {
+          // Подтягиваем известное название модели, пустое не затираем:
+          // человек мог уже вписать своё.
+          const t = document.getElementById(`provChainTitle_${s.id}`);
+          if (t && !t.value.trim()) {
+            const known = (ProvDetail.data && ProvDetail.data.modelTitles) || {};
+            if (known[el.value.trim()]) t.value = known[el.value.trim()];
+          }
+          if (s.id === "high") syncHighTitle();
+          provChainPaintOrder(); provDetailMarkDirty();
+        });
+      }
+      const tel = document.getElementById(`provChainTitle_${s.id}`);
+      if (tel) {
+        tel.addEventListener("input", () => {
+          if (s.id === "high") {
+            const main = document.getElementById("provDetailModelTitle");
+            if (main && main.value !== tel.value) main.value = tel.value;
+          }
+          provDetailMarkDirty();
+        });
       }
     });
   }
   provChainPaintOrder();
   provChainPaintData();
+}
+
+/* Верх цепочки и поле «Название для ученика» — одно и то же: правим в обе
+   стороны, иначе сохранение повезёт рассинхрон. */
+function syncHighTitle() {
+  const high = document.getElementById("provChainTitle_high");
+  const main = document.getElementById("provDetailModelTitle");
+  if (high && main && main.value !== high.value) main.value = high.value;
+}
+
+function provChainDraftTitles() {
+  const out = {};
+  PROV_CHAIN_SLOTS.forEach((s) => {
+    const m = document.getElementById(`provChain_${s.id}`);
+    const t = document.getElementById(`provChainTitle_${s.id}`);
+    const model = m ? m.value.trim() : "";
+    if (model) out[model] = t ? t.value.trim() : "";
+  });
+  return out;
 }
 
 function provChainPaintOrder() {
@@ -3069,6 +3120,35 @@ function provChainPaintOrder() {
     const dirty = PROV_CHAIN_SLOTS.some((s) => (draft[s.id] || null) !== (saved[s.id] || null));
     note.textContent = dirty ? "есть несохранённые изменения" : "";
   }
+  // Под каждым слотом — честная подсказка про название: без него проверка этой
+  // моделью пройдёт, но строка «проверено моделью» ученику не покажется.
+  const savedTitles = ProvDetail.chainSavedTitles || {};
+  const draftTitles = provChainDraftTitles();
+  PROV_CHAIN_SLOTS.forEach((s) => {
+    const sub = document.getElementById(`provChainSub_${s.id}`);
+    if (!sub) return;
+    const model = draft[s.id];
+    if (!model) { sub.textContent = ""; return; }
+    const title = (draftTitles[model] || "").trim();
+    const was = (savedTitles[model] || "").trim();
+    if (!title) {
+      sub.innerHTML = `Без названия строка на экране результата не появится. <button type="button" class="a-linkbtn" onclick="provChainUseSavedTitle('${s.id}')">Взять «${esc(was || "—")}»</button>`;
+      if (!was) sub.textContent = "Без названия строка на экране результата не появится.";
+    } else if (title !== was) {
+      sub.textContent = `Ученик увидит: «${title}» (было: «${was || "—"}»)`;
+    } else {
+      sub.textContent = `Ученик увидит: «${title}»`;
+    }
+  });
+}
+
+function provChainUseSavedTitle(slot) {
+  const t = document.getElementById(`provChainTitle_${slot}`);
+  const m = document.getElementById(`provChain_${slot}`);
+  if (!t || !m) return;
+  t.value = ((ProvDetail.chainSavedTitles || {})[m.value.trim()] || "");
+  if (slot === "high") syncHighTitle();
+  provDetailMarkDirty();
 }
 
 function provChainPaintData() {
@@ -3099,6 +3179,16 @@ function moveChainSlot(slot, dir) {
   const tmp = a.value;
   a.value = b.value;
   b.value = tmp;
+  // Названия едут вместе с моделями — иначе подпись прилипла бы к чужому слоту.
+  const ta = document.getElementById(`provChainTitle_${ids[i]}`);
+  const tb = document.getElementById(`provChainTitle_${ids[j]}`);
+  if (ta && tb) { const t = ta.value; ta.value = tb.value; tb.value = t; }
+  if (ids[i] === "high" || ids[j] === "high") {
+    const main = document.getElementById("provDetailModel");
+    const high = document.getElementById("provChain_high");
+    if (main && high) { main.value = high.value; ProvDetail.model = high.value.trim(); }
+    syncHighTitle();
+  }
   provChainPaintOrder();
   provDetailMarkDirty();
 }
@@ -3107,6 +3197,13 @@ function clearChainSlot(slot) {
   const el = document.getElementById(`provChain_${slot}`);
   if (!el) return;
   el.value = "";
+  const t = document.getElementById(`provChainTitle_${slot}`);
+  if (t) t.value = "";
+  if (slot === "high") {
+    const main = document.getElementById("provDetailModel");
+    if (main) { main.value = ""; ProvDetail.model = ""; }
+    syncHighTitle();
+  }
   provChainPaintOrder();
   provDetailMarkDirty();
 }
@@ -3162,13 +3259,18 @@ function provDetailMarkDirty() {
   }
   // Цепочка — часть той же кнопки «Сохранить»: её правка тоже зажигает
   // «есть несохранённые изменения», иначе человек уходил бы, думая, что
-  // порядок уже действует.
+  // порядок уже действует. Названия — туда же: без них строка «проверено
+  // моделью» не появится, и это тоже несохранённое изменение.
   const saved = ProvDetail.chainSaved || {};
+  const savedTitles = ProvDetail.chainSavedTitles || {};
   let chainDirty = false;
+  let titlesDirty = false;
   try {
     const draft = provChainDraft();
     chainDirty = PROV_CHAIN_SLOTS.some((s) => (draft[s.id] || null) !== (saved[s.id] || null));
-  } catch (e) { chainDirty = false; }
+    const draftTitles = provChainDraftTitles();
+    titlesDirty = Object.keys(draftTitles).some((m) => (draftTitles[m] || "") !== (savedTitles[m] || ""));
+  } catch (e) { chainDirty = false; titlesDirty = false; }
   provChainPaintOrder();
   const state = document.getElementById("provApplyState");
   if (state) {
@@ -3176,7 +3278,7 @@ function provDetailMarkDirty() {
     const address = (document.getElementById("provDetailBaseUrl") || {}).value || "";
     const slotBtn = document.querySelector("#provSlotSeg .a-seg2__btn--on");
     const slotChanged = (card.slot || "") !== ((slotBtn && slotBtn.dataset.slot) || "");
-    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged || chainDirty)
+    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged || chainDirty || titlesDirty)
       ? "Есть несохранённые изменения" : "";
     state.classList.toggle("a-sticky-actions__state--on", !!state.textContent);
   }
@@ -3275,6 +3377,13 @@ function pickProviderModel(model) {
   // сервер отклонил бы сохранение как «модель не совпадает с верхом»).
   const high = document.getElementById("provChain_high");
   if (high) high.value = model;
+  // Название вводится заново под каждую модель: известное подставляем, иначе
+  // поле пустеет — иначе новая модель унаследовала бы чужую подпись.
+  const known = ((ProvDetail.data && ProvDetail.data.modelTitles) || {})[model] || "";
+  const titleEl = document.getElementById("provDetailModelTitle");
+  if (titleEl) titleEl.value = known;
+  const highTitle = document.getElementById("provChainTitle_high");
+  if (highTitle) highTitle.value = known;
   provChainPaintOrder();
   provDetailRenderList();
   provDetailSetVerdict("");
@@ -3356,6 +3465,8 @@ async function applyProviderDetail() {
   if (!payload.model) { provDetailError("Впиши ID модели — без нее провайдер не сможет отвечать"); return; }
   // Цепочка — той же кнопкой: верх обязан совпадать с полем модели (иначе
   // сервер отклонит как рассинхрон), дубли от одного переноса — обмен.
+  // Названия едут картой {модель: название} — у каждого слота своя подпись
+  // для ученика, без неё строка «проверено моделью» не появится.
   let draft = null;
   try { draft = provChainDraft(); } catch (e) { draft = null; }
   if (draft) {
@@ -3367,6 +3478,7 @@ async function applyProviderDetail() {
     if (draft.high && draft.high !== payload.model) payload.model = draft.high;
     if (!draft.high) draft.high = payload.model;
     payload.model_slots = draft;
+    try { payload.model_titles = provChainDraftTitles(); } catch (e) { /* без названий — сервер оставит как было */ }
   }
   if (btn) { btn.disabled = true; btn.textContent = "Сохраняем…"; }
   let res = null;
@@ -3429,12 +3541,16 @@ function provDetailSyncFromCard(fresh) {
     ProvDetail.chainSaved.high = fresh.model;
   }
   ProvDetail.chain = Object.assign({}, ProvDetail.chainSaved);
+  ProvDetail.chainSavedTitles = Object.assign({}, fresh.modelTitles || {});
+  ProvDetail.data = Object.assign({}, ProvDetail.data, { modelTitles: fresh.modelTitles || {} });
   const box = document.getElementById("provChainBox");
   if (box) {
     // Значения уже в DOM — обновляем точечно, чтобы не терять фокус.
     PROV_CHAIN_SLOTS.forEach((s) => {
       const el = document.getElementById(`provChain_${s.id}`);
       if (el) el.value = ProvDetail.chainSaved[s.id] || "";
+      const tel = document.getElementById(`provChainTitle_${s.id}`);
+      if (tel) tel.value = ProvDetail.chainSavedTitles[ProvDetail.chainSaved[s.id] || ""] || "";
     });
   }
   provChainPaintOrder();
