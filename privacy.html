@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Политика конфиденциальности — ege easy</title>
+<meta name="description" content="Политика конфиденциальности ege easy: какие данные мы собираем, зачем они нужны, чего мы не делаем, кому передаём данные и как их удалить. Простыми словами.">
+<link rel="canonical" href="https://egeeasy.ru/privacy">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
+<meta name="color-scheme" content="light dark">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:site_name" content="ege easy">
+<meta property="og:title" content="Политика конфиденциальности — ege easy">
+<meta property="og:description" content="Какие данные собирает ege easy, зачем они нужны и как их удалить. Простыми словами.">
+<meta property="og:url" content="https://egeeasy.ru/privacy">
+<script>
+  /* Та же тема, что у лендинга и приложения: сохранённый выбор
+     (общий ключ ege_core_theme) → иначе системная. Без мигания. */
+  (function(){
+    try{
+      var saved=null;
+      try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
+      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
+      document.documentElement.setAttribute('data-theme',theme);
+    }catch(e){}
+  })();
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="stylesheet" href="css/footer.css?v=6">
+<link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<script>document.documentElement.classList.add('js');</script>
+<style>
+  @font-face{
+    font-family:'Inter';
+    font-style:normal;
+    font-weight:400 700;
+    font-display:swap;
+    src:url('vendor/fonts/inter-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+  }
+  @font-face{
+    font-family:'Inter';
+    font-style:normal;
+    font-weight:400 700;
+    font-display:swap;
+    src:url('vendor/fonts/inter-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+  }
+  @font-face{
+    font-family:'Manrope';
+    font-style:normal;
+    font-weight:400 800;
+    font-display:swap;
+    src:url('vendor/fonts/manrope-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+  }
+  @font-face{
+    font-family:'Manrope';
+    font-style:normal;
+    font-weight:400 800;
+    font-display:swap;
+    src:url('vendor/fonts/manrope-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+  }
+  :root,
+  :root[data-theme="light"]{
+    --surface-0:#F3F5FA;
+    --surface-1:#FFFFFF;
+    --surface-2:#FFFFFF;
+    --text:#0E1526;
+    --text-dim:#48536B;
+    --text-faint:#5B6579;
+    --accent:#0277B6;
+    --accent-dim:rgba(2,119,182,0.10);
+    --green:#16a34a;
+    --green-dim:rgba(21,128,61,0.10);
+    --brand:#16a34a;
+    --header-bg:rgba(255,255,255,0.85);
+    --hairline:rgba(15,23,42,0.08);
+    --card-border:rgba(15,23,42,0.10);
+    --card-border-hover:rgba(15,23,42,0.20);
+    --sheen:rgba(15,23,42,0.03);
+    --inset-line:rgba(15,23,42,0.05);
+    --ghost-ring:rgba(15,23,42,0.18);
+    --ghost-ring-hover:rgba(15,23,42,0.32);
+    --muted-bg:rgba(15,23,42,0.06);
+    --muted-border:rgba(15,23,42,0.12);
+    --glow-green:rgba(22,163,74,0.14);
+    --glow-accent:rgba(2,119,182,0.14);
+    --shadow-sm:0 1px 2px rgba(15,23,42,0.06),0 16px 32px -20px rgba(15,23,42,0.22);
+    --shadow-lg:0 1px 2px rgba(15,23,42,0.06),0 24px 48px -24px rgba(15,23,42,0.25);
+    --radius-pill:999px;
+    --radius-xl:28px;
+    --radius-lg:20px;
+    --radius-md:14px;
+    --font-body:'Inter',-apple-system,system-ui,sans-serif;
+    --font-display:'Manrope',var(--font-body);
+    --ease-out:cubic-bezier(0.16,1,0.3,1);
+  }
+  :root[data-theme="dark"]{
+    --surface-0:#05070C;
+    --surface-1:#0A0D12;
+    --surface-2:#0F131C;
+    --text:#F8F9FB;
+    --text-dim:#A0A6B8;
+    --text-faint:#666D82;
+    --accent:#38BDF8;
+    --accent-dim:rgba(56,189,248,0.15);
+    --green:#6EE7B7;
+    --green-dim:rgba(110,231,183,0.15);
+    --brand:#6EE7B7;
+    --header-bg:rgba(5,7,12,0.85);
+    --hairline:rgba(255,255,255,0.06);
+    --card-border:rgba(255,255,255,0.08);
+    --card-border-hover:rgba(255,255,255,0.12);
+    --sheen:rgba(255,255,255,0.04);
+    --inset-line:rgba(255,255,255,0.06);
+    --ghost-ring:rgba(255,255,255,0.12);
+    --ghost-ring-hover:rgba(255,255,255,0.22);
+    --muted-bg:rgba(255,255,255,0.06);
+    --muted-border:rgba(255,255,255,0.1);
+    --glow-green:rgba(110,231,183,0.12);
+    --glow-accent:rgba(56,189,248,0.15);
+    --shadow-sm:0 20px 40px -20px rgba(0,0,0,0.5);
+    --shadow-lg:0 24px 48px -16px rgba(0,0,0,0.6);
+    --radius-pill:999px;
+    --radius-xl:28px;
+    --radius-lg:20px;
+    --radius-md:14px;
+    --font-body:'Inter',-apple-system,system-ui,sans-serif;
+    --font-display:'Manrope',var(--font-body);
+    --ease-out:cubic-bezier(0.16,1,0.3,1);
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html{scroll-behavior:smooth;color-scheme:light;-webkit-font-smoothing:antialiased;}
+  html[data-theme="dark"]{color-scheme:dark;}
+  body{
+    margin:0;background:var(--surface-0);color:var(--text);
+    font-family:var(--font-body);font-size:clamp(15px,1.8vw,17px);
+    line-height:1.6;overflow-x:hidden;min-width:0;
+  }
+  a{color:inherit;text-decoration:none;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
+  header{
+    position:sticky;top:0;z-index:100;background:var(--header-bg);
+    backdrop-filter:blur(12px) saturate(180%);-webkit-backdrop-filter:blur(12px) saturate(180%);
+    border-bottom:1px solid var(--hairline);
+  }
+  .header-inner{
+    display:flex;align-items:center;justify-content:space-between;
+    gap:12px;padding-block:clamp(12px,2vw,18px);min-width:0;
+  }
+  .logo{display:flex;align-items:center;gap:12px;font-family:var(--font-display);font-weight:700;font-size:clamp(16px,2.2vw,19px);letter-spacing:-0.02em;white-space:nowrap;min-width:0;}
+  .logo-badge{width:clamp(32px,5vw,42px);height:clamp(32px,5vw,42px);border-radius:50%;background:linear-gradient(135deg,#22c07a 0%,#38BDF8 100%);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px -8px rgba(56,189,248,0.5);flex-shrink:0;position:relative;}
+  .logo-badge svg{width:20px;height:20px;position:relative;z-index:1;}
+  .logo-text em{font-style:normal;color:var(--brand);}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:10px;
+    padding:clamp(11px,2vw,14px) clamp(20px,4vw,28px);border-radius:var(--radius-pill);
+    font-weight:600;font-size:clamp(13px,1.8vw,15px);cursor:pointer;border:none;white-space:nowrap;
+    transition:transform 0.3s var(--ease-out),box-shadow 0.3s var(--ease-out);font-family:var(--font-body);
+  }
+  .btn-primary{background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 50%,#2563EB 100%);color:#fff;box-shadow:0 16px 32px -12px rgba(56,189,248,0.5);}
+  .btn-primary:hover{transform:translateY(-2px);}
+  .btn-primary:active{transform:translateY(0) scale(0.98);}
+  .btn-ghost{background:transparent;color:var(--text-dim);box-shadow:0 0 0 1px var(--ghost-ring) inset;}
+  .btn-ghost:hover{color:var(--text);box-shadow:0 0 0 1px var(--ghost-ring-hover) inset;}
+  main{padding-bottom:clamp(48px,8vw,80px);}
+  .hero{position:relative;padding:clamp(48px,8vw,88px) 0 clamp(24px,4vw,36px);overflow:hidden;}
+  .hero::before{content:'';position:absolute;top:-20%;left:10%;width:600px;height:600px;background:radial-gradient(circle,var(--glow-green) 0%,transparent 70%);filter:blur(80px);pointer-events:none;}
+  .hero-content{position:relative;z-index:1;max-width:720px;}
+  .chip{
+    display:inline-flex;align-items:center;gap:10px;padding:10px 20px;border-radius:var(--radius-pill);
+    background:var(--accent-dim);border:1px solid var(--muted-border);color:var(--accent);
+    font-size:clamp(13px,1.6vw,14px);font-weight:600;margin-bottom:clamp(20px,3vw,28px);
+  }
+  h1{font-family:var(--font-display);font-size:clamp(30px,6.5vw,52px);font-weight:700;line-height:1.12;letter-spacing:-0.03em;margin:0 0 clamp(14px,2.5vw,20px);overflow-wrap:anywhere;}
+  .hero-sub{font-size:clamp(15px,2vw,18px);color:var(--text-dim);line-height:1.7;margin:0;max-width:640px;overflow-wrap:anywhere;}
+  .doc-meta{
+    display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:clamp(18px,3vw,24px);
+    color:var(--text-faint);font-size:clamp(13px,1.6vw,14px);
+  }
+  .section{padding:clamp(28px,5vw,48px) 0 0;}
+  .toc{
+    background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
+    border:1px solid var(--card-border);border-radius:var(--radius-lg);
+    padding:clamp(18px,3vw,24px) clamp(18px,3vw,26px);
+    box-shadow:0 1px 0 var(--inset-line) inset,var(--shadow-sm);min-width:0;
+  }
+  .toc-title{font-family:var(--font-display);font-size:clamp(15px,2vw,17px);font-weight:700;margin:0 0 10px;letter-spacing:-0.01em;}
+  .toc ol{margin:0;padding-left:22px;display:grid;gap:6px;color:var(--text-dim);font-size:clamp(14px,1.8vw,15px);}
+  .toc a{color:var(--accent);font-weight:600;}
+  .toc a:hover{text-decoration:underline;}
+  .doc{
+    background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
+    border:1px solid var(--card-border);border-radius:var(--radius-lg);
+    padding:clamp(20px,3.5vw,30px) clamp(18px,3.5vw,30px);
+    box-shadow:0 1px 0 var(--inset-line) inset,var(--shadow-sm);min-width:0;
+    margin-bottom:clamp(14px,2.5vw,20px);overflow-wrap:anywhere;
+  }
+  .doc h2{
+    font-family:var(--font-display);font-size:clamp(18px,2.6vw,23px);font-weight:700;
+    letter-spacing:-0.01em;margin:0 0 10px;scroll-margin-top:90px;
+  }
+  .doc h2 .num{color:var(--accent);margin-right:8px;}
+  .doc p{color:var(--text-dim);margin:0 0 10px;font-size:clamp(14px,1.8vw,15.5px);line-height:1.7;}
+  .doc p:last-child{margin-bottom:0;}
+  .doc p strong{color:var(--text);}
+  .doc ul{margin:0 0 10px;padding-left:22px;display:grid;gap:6px;color:var(--text-dim);font-size:clamp(14px,1.8vw,15.5px);line-height:1.65;}
+  .doc ul:last-child{margin-bottom:0;}
+  .doc ul strong{color:var(--text);}
+  .doc code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.88em;
+    background:var(--muted-bg);border:1px solid var(--muted-border);
+    border-radius:6px;padding:1px 7px;white-space:nowrap;
+  }
+  .inline-link{color:var(--accent);font-weight:600;}
+  .inline-link:hover{text-decoration:underline;}
+  .cta-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:clamp(24px,4vw,36px);}
+  .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);transition-delay:var(--d,0ms);}
+  .js .rv.in{opacity:1;transform:none;}
+  @media (max-width:480px){
+    .header-inner .btn{padding:10px 16px;font-size:13px;}
+    .cta-row .btn{width:100%;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto;}
+    *,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important;}
+    .js .rv{opacity:1;transform:none;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap header-inner">
+    <a href="/" class="logo" aria-label="ege easy — на главную">
+      <span class="logo-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="logo-text">ege <em>easy</em></span>
+    </a>
+    <nav aria-label="Действия">
+      <a class="btn btn-primary" href="/dashboard">начать подготовку</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-content">
+      <span class="chip rv">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-2.9 8-7 9-4.1-1-7-4.6-7-9V7z"/><path d="m9 12 2 2 4-4"/></svg>
+        Ваши данные
+      </span>
+      <h1>Политика конфиденциальности</h1>
+      <p class="hero-sub">Какие данные собирает ege easy, зачем они нужны и что с ними происходит. Коротко и без юридического тумана: данные нужны, чтобы сервис работал, а не чтобы их кому-то отдавать.</p>
+      <div class="doc-meta rv" style="--d:80ms">
+        <span>Действует с 2 октября 2026 года</span>
+        <span>egeeasy.ru</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="toc rv" aria-label="Содержание">
+        <p class="toc-title">Содержание</p>
+        <ol>
+          <li><a href="#short">Коротко о главном</a></li>
+          <li><a href="#what">Какие данные мы собираем</a></li>
+          <li><a href="#not">Чего мы не делаем</a></li>
+          <li><a href="#cookies">Куки и данные в браузере</a></li>
+          <li><a href="#share">Кому мы передаём данные</a></li>
+          <li><a href="#keep">Сколько храним и как удалить</a></li>
+          <li><a href="#rights">Ваши права</a></li>
+          <li><a href="#kids">Данные детей</a></li>
+          <li><a href="#changes">Изменения и связь</a></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="doc rv" id="short">
+        <h2><span class="num">1.</span>Коротко о главном</h2>
+        <ul>
+          <li><strong>Собираем только то, без чего сервис не работает:</strong> аккаунт, учебный прогресс, сочинения, обращения в поддержку и технические идентификаторы сессий.</li>
+          <li><strong>Не храним пароли открытым текстом</strong> — только необратимый хэш (PBKDF2). Не храним в базе IP-адреса и тексты устройств — только их необратимые отпечатки для защиты от злоупотреблений.</li>
+          <li><strong>Не продаём данные и не отдаём их рекламщикам.</strong> Текст сочинения уходит только сервисам проверки, данные карт нам не передаются вовсе.</li>
+          <li><strong>Удаление аккаунта удаляет данные.</strong> Подробности — в разделе 6.</li>
+        </ul>
+      </div>
+
+      <div class="doc rv" id="what">
+        <h2><span class="num">2.</span>Какие данные мы собираем</h2>
+        <ul>
+          <li><strong>Аккаунт:</strong> email и хэш пароля (при регистрации), имя и настройки профиля (уровень, цель, предмет). При входе через Google — идентификатор Google-аккаунта и подтверждённый email.</li>
+          <li><strong>Учёба:</strong> решённые задания, ошибки, статистика, тексты сочинений и их проверки, переписка с ИИ-наставником, устройства и сессии для входа.</li>
+          <li><strong>Подписка Plus:</strong> статус, срок действия и история платежей внутри сервиса — сумма, период и идентификатор платежа, нужные для активации. Данные карт нам не передаются: они вводятся на стороне платёжного провайдера и к нам не попадают.</li>
+          <li><strong>Обращения:</strong> текст сообщений из формы на странице <a class="inline-link" href="/contacts">контактов</a> и служебные записи о работе сервиса. Обращения не привязаны к аккаунту — в них нет ни вашего id, ни почты, только текст и служебные хэши против спама.</li>
+          <li><strong>Технические данные:</strong> идентификаторы сессий и необратимые отпечатки устройства и сети — нужны для входа, лимитов и защиты от ферм аккаунтов. Сырые IP-адреса и тексты устройств в базе не хранятся.</li>
+        </ul>
+        <p>Гость, который только смотрит открытые страницы и не проходил онбординг, в базе не появляется вообще: ни профиля, ни сессий.</p>
+      </div>
+
+      <div class="doc rv" id="not">
+        <h2><span class="num">3.</span>Чего мы не делаем</h2>
+        <ul>
+          <li>Не храним пароли, токены сессий и секреты открытым текстом — только их хэши. Утечка базы не даёт готовый доступ к аккаунтам.</li>
+          <li>Не собираем точное местоположение, список контактов, файлы на устройстве и другие данные вне сервиса.</li>
+          <li>Не продаём данные, не передаём их рекламным сетям и не используем для чужой рекламы.</li>
+          <li>Не читаем переписку с наставником и сочинения людьми без необходимости — доступ есть только у администратора при разборе обращений и сбоев.</li>
+        </ul>
+      </div>
+
+      <div class="doc rv" id="cookies">
+        <h2><span class="num">4.</span>Куки и данные в браузере</h2>
+        <p>Сервис использует несколько кук и локальное хранилище браузера. Все они нужны для работы, рекламных трекеров нет:</p>
+        <ul>
+          <li><strong>Сессия</strong> (<code>ege_session</code>) — держит ваш вход. Удаляется при выходе.</li>
+          <li><strong>Устройство</strong> (<code>ege_device</code>) — отличает ваши устройства друг от друга для лимитов и списка входов.</li>
+          <li><strong>Тема оформления</strong> (<code>ege_core_theme</code>) — светлая или тёмная, хранится только в вашем браузере.</li>
+          <li><strong>Защита форм</strong> — временные куки формы обратной связи (до 2 часов) и входа через Google (10 минут). После этого живут только сессия и устройство.</li>
+          <li><strong>localStorage</strong> — черновики, выбранный предмет, кэш прогресса. Очищается вместе с данными сайта в браузере.</li>
+        </ul>
+      </div>
+
+      <div class="doc rv" id="share">
+        <h2><span class="num">5.</span>Кому мы передаём данные</h2>
+        <ul>
+          <li><strong>Провайдеры ИИ-проверки и наставника.</strong> Текст сочинения уходит на проверку вместе с поставленной проблемой, вашим замечанием (при перепроверке) и именем из профиля — иначе оценить его невозможно. Вопрос наставнику уходит вместе с выдержками из прогресса, которые наставник сам запрашивает для ответа. Всю историю аккаунта целиком туда не отправляем — только нужное для конкретного запроса.</li>
+          <li><strong>Сервис проверки грамотности (LanguageTool).</strong> Текст сочинения уходит на проверку орфографии и пунктуации — так считаются баллы за грамотность. Имя и остальные данные аккаунта туда не передаются.</li>
+          <li><strong>Платёжный провайдер</strong> — при оплате Plus: сумма и идентификатор платежа, нужные для активации. Данные карты остаются у провайдера, к нам не попадают.</li>
+          <li><strong>Google</strong> — только при входе через Google и только в объёме, нужном для входа.</li>
+          <li>Государственным органам — только по закону и только в установленном порядке.</li>
+        </ul>
+        <p>Больше данные не уходят никому. Аналитики со сторонними трекерами на сайте нет.</p>
+      </div>
+
+      <div class="doc rv" id="keep">
+        <h2><span class="num">6.</span>Сколько храним и как удалить</h2>
+        <ul>
+          <li><strong>Пока пользуетесь.</strong> Учебные данные хранятся, пока существует аккаунт.</li>
+          <li><strong>Сброс прогресса</strong> удаляет учебные данные, но оставляет аккаунт, подписку и историю платежей.</li>
+          <li><strong>Удаление аккаунта</strong> (по вашей просьбе через поддержку) удаляет всё разом: профиль, прогресс, сочинения, переписку с наставником, подписку и историю платежей.</li>
+          <li>Резервные копии обновляются по циклу: удалённое исчезает из бэкапов вместе с их ротацией.</li>
+        </ul>
+      </div>
+
+      <div class="doc rv" id="rights">
+        <h2><span class="num">7.</span>Ваши права</h2>
+        <p>Вы вправе знать, какие данные о вас хранятся, исправлять их и требовать удаления. Большая часть доступна прямо в сервисе: профиль, устройства и сессии — в личном кабинете, прогресс — в дашборде.</p>
+        <p>Остальное — через страницу <a class="inline-link" href="/contacts">контактов</a>: ответим и либо сделаем, либо объясним, почему это невозможно (например, данные уже удалены или их требует хранить закон). Специально подтверждать личность сверх входа в аккаунт не просим.</p>
+      </div>
+
+      <div class="doc rv" id="kids">
+        <h2><span class="num">8.</span>Данные детей</h2>
+        <p>Сервис рассчитан на школьников, поэтому отдельных «детских» данных мы не выделяем и не собираем ничего сверх разделов 2–4. Если пользователю нет 14 лет, аккаунтом управляет родитель или законный представитель: запрос на удаление данных ребёнка от родителя выполняется в первую очередь.</p>
+      </div>
+
+      <div class="doc rv" id="changes">
+        <h2><span class="num">9.</span>Изменения и связь</h2>
+        <p>При существенных изменениях новая версия появится на этой странице с обновлённой датой, а продолжение использования сервиса будет означать согласие с ней.</p>
+        <p>Вопросы о данных — через страницу <a class="inline-link" href="/contacts">контактов</a>. Общие правила сервиса — в <a class="inline-link" href="/terms">пользовательских условиях</a>.</p>
+      </div>
+
+      <div class="cta-row rv">
+        <a class="btn btn-primary" href="/dashboard">Вернуться к подготовке</a>
+        <a class="btn btn-ghost" href="/terms">Пользовательские условия</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div data-ege-footer></div>
+<script defer src="js/footer.js?v=1"></script>
+
+<script>
+(function(){
+  "use strict";
+  try{
+    var els = document.querySelectorAll(".rv");
+    if(!("IntersectionObserver" in window) || !els.length){
+      for(var i=0;i<els.length;i++){els[i].classList.add("in");}
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      for(var k=0;k<entries.length;k++){
+        var e = entries[k];
+        if(e.isIntersecting){
+          e.target.classList.add("in");
+          io.unobserve(e.target);
+        }
+      }
+    },{threshold:0.12,rootMargin:"0px 0px -8% 0px"});
+    for(var j=0;j<els.length;j++){io.observe(els[j]);}
+  }catch(e){}
+})();
+</script>
+</body>
+</html>

@@ -12451,6 +12451,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "contacts.html"
         elif path == '/about':
             file_path = ROOT / "about.html"
+        elif path == '/terms':
+            file_path = ROOT / "terms.html"
+        elif path == '/privacy':
+            file_path = ROOT / "privacy.html"
         elif path == '/subscription':
             # Публичная страница тарифа Plus (доступна без авторизации,
             # как /status). Технической витрины здесь нет — только то,
@@ -12566,7 +12570,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()
         # Приватные зоны не индексируются: дублируем meta robots HTTP-заголовком,
         # чтобы и прямые запросы /index.html и /admin.html были закрыты.
-        if path in ("/dashboard", "/admin", "/contacts") or file_path.name in ("index.html", "admin.html", "status.html", "contacts.html", "about.html", "404.html", "agent.html"):
+        if path in ("/dashboard", "/admin", "/contacts") or file_path.name in ("index.html", "admin.html", "status.html", "contacts.html", "about.html", "terms.html", "privacy.html", "subscription-manage.html", "ege-result.html", "404.html", "agent.html"):
             self.send_header("X-Robots-Tag", "noindex, nofollow")
         if file_path.name == "contacts.html":
             self.send_support_form_cookie()

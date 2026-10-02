@@ -1,8 +1,9 @@
 # ege easy — правила обхода для поисковых роботов.
-# В индексе нужен только публичный лендинг (/). Приложение (/dashboard),
-# админка и API — приватные зоны. Служебные страницы (/about, /status,
-# /contacts, /404.html, отчёт по сочинению) обходиться могут — они закрыты
-# от индекса самим сервером через X-Robots-Tag: noindex, см. ниже.
+# В индексе нужны только лендинг (/) и тариф (/subscription). Приложение
+# (/dashboard), админка и API — приватные зоны. Служебные страницы (/about,
+# /status, /contacts, /terms, /privacy, /subscription/manage, /agent,
+# /ege-result.html, /404.html, отчёт по сочинению) обходиться могут — они
+# закрыты от индекса самим сервером через X-Robots-Tag: noindex, см. ниже.
 
 User-agent: *
 Allow: /$
@@ -21,8 +22,9 @@ Disallow: /dashboard
 Disallow: /index.html
 Disallow: /admin
 Disallow: /admin.html
-# Служебные страницы (/about, /status, /contacts, /404.html, /ege-result.html,
-# /essay/*) намеренно НЕ закрыты здесь: сервер отдаёт их с
+# Служебные страницы (/about, /status, /contacts, /terms, /privacy,
+# /subscription/manage, /agent, /404.html, /ege-result.html, /essay/*)
+# намеренно НЕ закрыты здесь: сервер отдаёт их с
 # X-Robots-Tag: noindex, nofollow. Закрывать их в robots.txt нельзя — робот
 # не сможет прочитать noindex, и страница останется в индексе как «без
 # описания». Запрет в robots.txt и noindex несовместимы.

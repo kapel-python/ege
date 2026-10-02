@@ -94,8 +94,13 @@ t("сервер: X-Robots-Tag noindex для /dashboard, /admin и /contacts",
   server.includes('path in ("/dashboard", "/admin", "/contacts")') && server.includes('"X-Robots-Tag", "noindex, nofollow"'));
 t("сервер: www-дубль клеится 301 на apex", server.includes('bare.startswith("www.")') &&
   server.includes('self.send_response(301)') && server.includes('"Location", "//" + apex'));
-t("сервер: маршрут /about отдаёт about.html", server.includes('path == \'/about\'') &&
+t("сервер: маршрут /about отдаёт about.html", server.includes("path == '/about'") &&
   server.includes('ROOT / "about.html"'));
+t("сервер: маршруты /terms и /privacy отдают свои файлы", server.includes("path == '/terms'") &&
+  server.includes('ROOT / "terms.html"') && server.includes("path == '/privacy'") &&
+  server.includes('ROOT / "privacy.html"') && exists("terms.html") && exists("privacy.html"));
+t("сервер: noindex-список покрывает terms/privacy/manage/ege-result", ["terms.html", "privacy.html",
+  "subscription-manage.html", "ege-result.html"].every((f) => server.includes('"' + f + '"')));
 t("сервер: несуществующие URL отдают фирменную 404", server.includes("serve_not_found_page") &&
   server.includes('ROOT / "404.html"') && exists("404.html") && exists("about.html"));
 
