@@ -11084,11 +11084,63 @@ class Handler(BaseHTTPRequestHandler):
                     subj_raw = payload.get("subject")
                     subject = resolve_subject(subj_raw) if is_known_subject(subj_raw) else current_subject_for(conn, user_id)
                     now_ms = int(time.time() * 1000)
-                    tid, public_id = _AGENT.create_thread_row(conn, int(user_id), subject, "Новый чат")
-                    self.send_json({"ok": True, "thread": {"id": tid, "publicId": public_id,
-                                                            "subject": subject,
-                                                            "title": "Новый чат", "createdAt": now_ms,
-                                                            "updatedAt": now_ms}}, token=token); return
+                    # «Новый чат» не плодит пустые строки. Раньше чат создавался
+                    # здесь сразу, до первого вопроса, и десять нажатий без
+                    # вопроса давали десять пустых чатов в списке. Те верхний из
+                    # уже пустых ПЕРЕИСПОЛЬЗУЕМ (чистый лист он и так), остальные
+                    # пустые — мусор прежнего поведения — удаляем: в них нет ни
+                    # одного сообщения. Первое сообщение делает чат непустым, и
+                    # следующий «Новый чат» создаст новый честно. Клиент эту же
+                    # проверку делает у себя (лишнего запроса не бывает), а
+                    # строка в базе остаётся одна — это подстраховка для старой
+                    # вкладки и для чужих клиентов.
+                    rows = _AGENT.empty_threads(conn, int(user_id))
+                    # Чат с ЖИВЫМ ходом (слот занят) трогать нельзя: сообщения
+                    # хода ещё не записаны, и такой чат выглядит пустым. Иначе
+                    # «Новый чат» с другого устройства отдал бы его в
+                    # переиспользование, и первый вопрос ученика упёрся бы в
+                    # AGENT_BUSY чужого хода.
+                    rows = [r for r in rows if not _agent_busy_locked(int(r["id"]))]
+                    tid = None
+                    public_id = ""
+                    created_at = now_ms
+                    reused = False
+                    if rows:
+                        keep = rows[0]
+                        tid = int(keep["id"])
+                        public_id = str(keep["public_id"] or "")
+                        created_at = int(keep["created_at"] or now_ms)
+                        reused = True
+                        try:
+                            # Предмет мог поменяться, и переиспользованный чат
+                            # обязан быть СВЕЖИМ в списке (сортировка по
+                            # updated_at): «Новый чат» только что нажали.
+                            conn.execute("UPDATE agent_threads SET subject=?, updated_at=? WHERE id=? AND user_id=?",
+                                         (subject, now_ms, tid, int(user_id)))
+                            for extra in rows[1:]:
+                                eid = int(extra["id"])
+                                conn.execute("DELETE FROM agent_messages WHERE thread_id=?", (eid,))
+                                conn.execute("DELETE FROM agent_threads WHERE id=? AND user_id=?", (eid, int(user_id)))
+                            conn.commit()
+                        except sqlite3.Error:
+                            # Чистка — утешительная, создание важнее: на отказе
+                            # просто делаем новый чат, как раньше.
+                            try:
+                                conn.rollback()
+                            except sqlite3.Error:
+                                pass
+                            tid = None
+                            public_id = ""
+                            reused = False
+                    if tid is None:
+                        tid, public_id = _AGENT.create_thread_row(conn, int(user_id), subject, "Новый чат")
+                        now_ms = int(time.time() * 1000)
+                        created_at = now_ms
+                    self.send_json({"ok": True, "reused": reused,
+                                    "thread": {"id": tid, "publicId": public_id,
+                                               "subject": subject,
+                                               "title": "Новый чат", "createdAt": created_at,
+                                               "updatedAt": now_ms}}, token=token); return
                 # POST /api/agent/threads/<ref>/delete — удалить свой тред.
                 # <ref> — числовой id (старые клиенты) или внешний public_id.
                 if path.startswith("/api/agent/threads/") and path.endswith("/delete"):

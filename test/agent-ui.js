@@ -306,7 +306,20 @@ check("каркас строится после ответа списка, а н
 check("пустой блок не показывается на всякий случай",
   !/renderCachedQuota\(\);\s*\n\s*syncInput\(\);\s*\n\s*syncViewport\(\);\s*\n\s*showEmpty\(true\)/.test(spaCode)
   && spaCode.includes("function paintMessages")
-  && (spaCode.match(/showEmpty\(true\)/g) || []).length === 3);   // только по факту: пустое сообщение / нет чата / чат удалён
+  // только по факту: пустое сообщение / нет чата / чат удалён / «Новый чат»
+  // поверх уже пустого чата (тот же чистый лист, второй чат не заводим)
+  && (spaCode.match(/showEmpty\(true\)/g) || []).length === 4);
+check("«Новый чат» не плодит пустые чаты (клиент зря не ходит в сеть)",
+  spaCode.includes("function currentChatEmpty") && spaCode.includes("function newChat")
+  && /function currentChatEmpty\(\)[\s\S]{0,220}cachedMessages\(S\.currentId\)[\s\S]{0,80}length === 0/.test(spaCode)
+  && /function newChat\(\) \{[\s\S]{0,200}if \(currentChatEmpty\(\)\)/.test(spaCode)
+  && /newBtn\.addEventListener\("click", newChat\)/.test(spaCode)
+  // живой ход в пустом чате — не «пустой»: иначе «Новый чат» отдал бы его
+  // в переиспользование и первый вопрос упёрся бы в AGENT_BUSY
+  && /function currentChatEmpty\(\) \{[\s\S]{0,160}turnHeld\(\)/.test(spaCode)
+  // сервер вправе вернуть уже существующий пустой чат — в список он второй раз
+  // не вставляется (иначе дубль строки)
+  && /var known = findThreadByRef\(th\.id\)/.test(spaCode));
 check("кэш раздела: список и переписка, привязан к аккаунту",
   spaCode.includes("cacheHasThreads") && spaCode.includes("cachedMessages")
   && spaCode.includes("cacheDrop") && spaCode.includes("MAX_CACHED_THREADS")

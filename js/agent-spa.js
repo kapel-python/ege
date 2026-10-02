@@ -634,7 +634,7 @@
     newBtn.type = "button"; newBtn.id = "agent-new";
     newBtn.innerHTML = svgRaw(PLUS_D, "2.4");
     newBtn.appendChild(document.createTextNode("Новый чат"));
-    newBtn.addEventListener("click", function () { createThread(); nav(false); });
+    newBtn.addEventListener("click", newChat);
     var list = el("ul", "agent__list");
     list.id = "agent-threads";
     var foot = el("div", "agent__foot");
@@ -1142,16 +1142,52 @@
       return null;
     });
   }
+  /* Открытый чат заведомо ПУСТ? Отвечаем только когда знаем наверняка — снимок
+     переписки в кэше пустой. Просто «нет сообщений на экране» не годится: во
+     время хода в пустом чате оптимистичный пузырёк ещё не в кэше, и проверка
+     решила бы, что чат пуст, хотя наставник там уже работает. */
+  function currentChatEmpty() {
+    if (S.currentId == null) return true;
+    if (turnHeld()) return false;
+    var msgs = cachedMessages(S.currentId);
+    return Array.isArray(msgs) && msgs.length === 0;
+  }
+  /* «Новый чат». Если открытый чат пуст, новый не нужен — это тот же самый
+     чистый лист, и второй раз показывать то же самое незачем. Раньше кнопка
+     писала строку в базу на КАЖДОЕ нажатие, и десять нажатий без вопроса
+     оставляли десять пустых чатов в списке: мусор, который нечего открывать и
+     нечем объяснить. Поле не трогаем — недописанный вопрос не должен пропасть
+     оттого, что человек нажал «Новый чат». Сервер переиспользует пустой чат и
+     сам (подстраховка для старой вкладки и чужих клиентов), здесь запрос и
+     строка в списке не появляются вовсе. */
+  function newChat() {
+    if (currentChatEmpty()) {
+      showEmpty(true);
+      if (ui.title) ui.title.textContent = "Новый чат";
+      nav(false);
+      try { if (ui.input) ui.input.focus({ preventScroll: true }); } catch (_) {}
+      return;
+    }
+    createThread();
+    nav(false);
+  }
   function createThread() {
     if (S.creating) return S.creating;
     S.creating = api("POST", "/api/agent/threads", {}).then(function (res) {
       if (res.status === 200 && res.data && res.data.thread) {
-        S.threads.unshift(res.data.thread);
+        var th = res.data.thread;
+        // Сервер отдаёт уже существующий ПУСТОЙ чат вместо нового — тогда он
+        // уже есть в списке, и вставлять его второй раз нельзя (был бы дубль
+        // строки). Въезжать в списке тоже незачем: он там уже стоит.
+        var known = findThreadByRef(th.id) || findThreadByRef(th.publicId);
+        if (!known) {
+          S.threads.unshift(th);
+          // Новый чат отмечается, чтобы в списке он въехал, а не мигнул.
+          S.newThreadId = th.id;
+        }
         cacheThreads(S.threads);          // новый чат сразу виден и в кэше раздела
-        // Новый чат отмечается, чтобы в списке он въехал, а не мигнул.
-        S.newThreadId = res.data.thread.id;
-        selectThread(res.data.thread.id);
-        return res.data.thread;
+        selectThread(Number(th.id));
+        return th;
       }
       if (handleAuthError(res)) return null;
       say("Не удалось создать чат");

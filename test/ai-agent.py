@@ -615,6 +615,64 @@ def main():
             status, body = b.request(base, "POST", f"/api/agent/threads/{tid_a}/delete", {})
             check("чужое удаление -> 404", status == 404, f"{status} {body}")
 
+            section("«Новый чат» не плодит пустые чаты")
+            # Кнопка «Новый чат» раньше писала строку в базу на КАЖДОЕ нажатие, до
+            # первого вопроса: десять нажатий подряд без вопроса оставляли десять
+            # пустых чатов в списке — мусор, который нечего открывать. Теперь
+            # верхний из пустых переиспользуется (чистый лист он и так), лишние
+            # пустые удаляются, а первое сообщение делает чат непустым, и
+            # следующий «Новый чат» создаёт новый честно.
+            ce = Client("10.1.0.9")
+            claim(ce, "Пустой")
+            ids = []
+            for _ in range(5):
+                st, bd = new_thread(ce)
+                ids.append((bd.get("thread") or {}).get("id"))
+            check("пять нажатий без вопроса -> один и тот же чат",
+                  len(set(ids)) == 1 and bool(ids[0]), str(ids))
+            st, bd = new_thread(ce)
+            check("сервер честно помечает переиспользование",
+                  bd.get("reused") is True and (bd.get("thread") or {}).get("id") == ids[0], str(bd))
+            st, lst = ce.request(base, "GET", "/api/agent/threads", None)
+            check("в списке ровно один чат", len(lst.get("threads") or []) == 1,
+                  str([t.get("id") for t in (lst.get("threads") or [])]))
+            with lock:
+                script.clear()
+                script.append({"text": "Готов.", "tool_calls": []})
+            st, bd = turn(ce, ids[0], "первый вопрос")
+            check("ход в переиспользованный чат -> 200", st == 200, f"{st} {str(bd)[:200]}")
+            st, bd2 = new_thread(ce)
+            check("после вопроса «Новый чат» создаёт НОВЫЙ чат",
+                  st == 200 and (bd2.get("thread") or {}).get("id") != ids[0]
+                  and bd2.get("reused") is not True, str(bd2))
+            st, lst = ce.request(base, "GET", "/api/agent/threads", None)
+            check("в списке два чата (старый не тронут)",
+                  len(lst.get("threads") or []) == 2,
+                  str([t.get("id") for t in (lst.get("threads") or [])]))
+            # Мусор прежнего поведения (пустые строки в базе) убирается тем же
+            # запросом: пустой чат не содержит ничего, терять нечего.
+            conn3 = server.connect()
+            try:
+                empty_user = conn3.execute("SELECT id FROM users WHERE name='Пустой'").fetchone()
+                junk = []
+                for k in range(3):
+                    cur = conn3.execute(
+                        "INSERT INTO agent_threads(user_id, subject, title, created_at, updated_at, public_id)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (int(empty_user["id"]), "profile_math", "Новый чат", "1", "1",
+                         f"JUNK{k}{abs(hash((k, ids[0]))) % 10 ** 8:08d}"))
+                    junk.append(int(cur.lastrowid))
+                conn3.commit()
+            finally:
+                conn3.close()
+            st, bd3 = new_thread(ce)
+            st, lst = ce.request(base, "GET", "/api/agent/threads", None)
+            left = {t.get("id") for t in (lst.get("threads") or [])}
+            check("накопленный мусор из пустых чатов убран",
+                  not (left & set(junk)), f"остались: {sorted(left & set(junk))}")
+            check("непустой чат и новый — на месте",
+                  (bd2.get("thread") or {}).get("id") in left, str(sorted(left)))
+
             section("ответ без tools: финал + одно списание")
             with lock:
                 script.clear()
