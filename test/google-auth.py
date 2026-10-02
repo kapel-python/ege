@@ -14,7 +14,7 @@
    тот же users.id — второй строки не появляется;
 6. адрес, уже занятый парольным аккаунтом, открывает его так же, как вход по
    паролю (Google подтвердил владение почтой), но второй Google-аккаунт в уже
-   привязанный профиль не пускается (error=conflict);
+   второй Google с той же подтверждённой почтой добавляется к тому же аккаунту;
 7. гость с прогрессом, вошедший через Google, сохраняет свой accountId;
 8. заблокированный аккаунт не получает сессию (403 ACCOUNT_BLOCKED);
 9. неподтверждённая почта провайдера не даёт входа (error=identity);
@@ -474,21 +474,28 @@ def main():
                   rows(server, "SELECT password_hash FROM users WHERE account_id=?",
                        (password_account,))[0]["password_hash"] is not None)
 
-            # Аккаунт уже привязан к ДРУГОМУ Google: это не вход, а захват
-            # чужой личности — второй Google-аккаунт в тот же профиль не
-            # пускаем и ничего не перепривязываем.
-            fake.identity = {"sub": "google-sub-attacker", "email": "pass@example.com",
+            # Второй Google-аккаунт с той же подтверждённой почтой — это тот же
+            # владелец (чужой Gmail с тем же адресом не бывает). Раньше здесь
+            # был отказ error=conflict, и живой вход своим же адресом упирался
+            # в страницу входа без объяснений. Теперь личность добавляется к
+            # тому же аккаунту, и вход проходит.
+            fake.identity = {"sub": "google-sub-second", "email": "pass@example.com",
                              "name": "Кто-то", "email_verified": True}
             attacker, attacker_jar = make_device()
             st, hd, _ = request(attacker, base, "/api/auth/google")
             st, hd, _ = request_url(attacker, location_of(hd))
             st, hd, _ = request_url(attacker, location_of(hd))
-            check("второй Google в тот же аккаунт -> error=conflict",
-                  query_of_fragment(fragment_of(location_of(hd))).get("error") == "conflict",
+            check("второй Google с той же почтой входит в тот же аккаунт",
+                  query_of_fragment(fragment_of(location_of(hd))).get("error") is None
+                  and fragment_of(location_of(hd)).startswith("/subject"),
                   fragment_of(location_of(hd)))
-            check("конфликт не выдал сессию", cookie_value(attacker_jar, "ege_session") is None)
-            check("конфликт ничего не привязал",
-                  len(rows(server, "SELECT 1 FROM auth_identities WHERE subject='google-sub-attacker'")) == 0)
+            st, _, session_attacker = request(attacker, base, "/api/auth/session")
+            check("это тот же парольный аккаунт, а не новый",
+                  session_attacker["user"]["accountId"] == password_account,
+                  session_attacker.get("user"))
+            check("вторая личность привязана к тому же аккаунту",
+                  rows(server, "SELECT user_id FROM auth_identities WHERE subject='google-sub-second'")[0]["user_id"]
+                  == rows(server, "SELECT id FROM users WHERE account_id=?", (password_account,))[0]["id"])
 
             section("6b. Смена почты Google меняет почту аккаунта")
             # Живой случай: аккаунт заведён на ivanovartem… по паролю, человек

@@ -5824,6 +5824,7 @@ _AI_SYSTEM_EVENT_TITLES = {
     "provider_switch": "Смена ИИ-провайдера",
     "provider_restored": "ИИ-провайдер восстановлен",
     "provider_outage": "ИИ-провайдеры недоступны",
+    "judge_switch": "Смена судьи проверки сочинений",
 }
 
 
@@ -5854,6 +5855,14 @@ def _ai_system_text(event: dict) -> str | None:
                 parts.append(f"Провайдер «{source}» отказал, запросы переведены на «{target}».")
             elif kind == "provider_restored" and target:
                 parts.append(f"Провайдер «{target}» снова доступен, запросы возвращены на него.")
+            elif kind == "judge_switch" and source and target:
+                # Сочинения оценивает закреплённый судья, и его подмена —
+                # событие, а не подробность: баллы за содержание после неё
+                # несравнимы с уже выставленными (замеренная разница между
+                # моделями — до 18 баллов из 22 на одном и том же тексте).
+                parts.append(f"Проверку сочинений ведёт «{source}», он отказал — "
+                             f"оценку продолжил «{target}». Баллы, выставленные "
+                             f"разными моделями, напрямую несравнимы.")
         if kind == "provider_outage":
             failed = event.get("providers") or []
             names = ", ".join(str(name) for name in failed) if isinstance(failed, (list, tuple)) else ""
@@ -9334,17 +9343,19 @@ class Handler(BaseHTTPRequestHandler):
                                extra_cookies=clear_nonce)
             return
         if by_email is not None and by_email["id"] != current_id:
-            # У аккаунта по этому адресу УЖЕ есть привязка Google — значит,
-            # это не наш вход: либо другой Google-аккаунт, либо человек сменил
-            # почту в Google. Захватывать чужую личность нельзя.
-            if "google" in auth_provider_list(conn, by_email["id"]):
-                self.send_redirect(oauth_return_url(self, "login", "error=conflict"),
-                                   extra_cookies=clear_nonce)
-                return
-            # Аккаунт с паролем (привязки нет). Адрес подтверждён провайдером,
-            # то есть доказано владение почтой — этого достаточно, чтобы войти
-            # в свой аккаунт, ровно как это делает вход по паролю. Привязываем
-            # личность, чтобы следующий вход был прямой.
+            # Обычный вход по адресу, подтверждённому провайдером. Сюда же
+            # попадает второй Google-аккаунт с той же подтверждённой почтой:
+            # это тот же владелец (чужой Gmail с тем же адресом не бывает),
+            # поэтому личность просто добавляется к аккаунту — у одного
+            # аккаунта может быть несколько входов Google. Отдельного отказа
+            # здесь НЕТ: раньше он был, и живой вход упирался в
+            # «error=conflict» ровно тогда, когда человек входил своим же
+            # адресом. Защита от пересадки на чужой аккаунт при явной
+            # привязке — веткой выше (intent=link).
+            # Адрес подтверждён провайдером, то есть доказано владение почтой
+            # — этого достаточно, чтобы войти в свой аккаунт, ровно как это
+            # делает вход по паролю. Привязываем личность, чтобы следующий
+            # вход был прямой.
             self.finish_login_into(conn, by_email["id"], provider, subject, email, ip, clear_nonce)
             return
         # Этого адреса у нас нет: новый человек. Если он уже что-то наработал
@@ -9612,6 +9623,26 @@ class Handler(BaseHTTPRequestHandler):
             return True
         rest = path[len("/api/admin/providers"):]
         try:
+            if rest == "/judge":
+                # Кто оценивает содержание сочинений. Отдельный путь, а не
+                # поле карточки: судья один на систему, и его смена — не
+                # настройка шлюза, а переключение измерительного прибора
+                # (замеренная разница между моделями — до 18 баллов из 22).
+                provider = payload.get("provider")
+                if provider is not None and not isinstance(provider, str):
+                    self.send_json({"error": "Некорректный провайдер"}, 400)
+                    return True
+                try:
+                    before = _AI.judge_provider()
+                    after = _AI.judge_provider_set(provider)
+                except (_AI.AIInputError, ValueError) as exc:
+                    self.send_json({"error": str(exc) or "Не удалось назначить судью"}, 400)
+                    return True
+                admin_audit(conn, actor_id, "providers.judge", None,
+                            f"{before or '—'} → {after.get('judge') or '—'}")
+                self.send_json({"ok": True, "judge": after.get("judge"),
+                                "explicit": after.get("explicit"), "previous": before})
+                return True
             if rest in ("", "/"):
                 # Создать своего провайдера. Проба — best-effort ДО сохранения
                 # не делается (ключа ещё нет в базе и гонка не нужна): сначала
