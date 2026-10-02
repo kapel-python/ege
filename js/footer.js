@@ -42,6 +42,7 @@
             "<h3>Компания</h3>" +
             "<ul>" +
               '<li><a class="ef-link" href="/about">О нас <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
+              '<li><a class="ef-link" href="/subscription">Plus <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
               '<li><a class="ef-link" href="/contacts">Контакты <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
               '<li><a class="ef-link" href="/status">Статус <span class="ef-mini ef-mini--live">live</span></a></li>' +
             "</ul>" +

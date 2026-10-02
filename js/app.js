@@ -4993,7 +4993,7 @@ function openAiLimitModal(status, burstRetryAfterSec, opts) {
     ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
     : `Лимит — ${limit} ${pluralFn(limit)} сочинения в день на аккаунт:
           каждая потраченная возвращается через 8 часов.
-          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.`;
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy Plus</a> — в 4 раза больше проверок.</div>` : ""}`;
   const name = o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились");
   const text = typeof o.text === "function"
     ? o.text({ remaining, limit, burst, left, plural: pluralFn })
@@ -6480,6 +6480,9 @@ function screenProfile(root) {
       ${profileProgressHTML}
     </div>
 
+    <div class="section-title" style="margin-top:34px">Подписка</div>
+    <div id="sub-card"><div class="card"><div class="empty">Загружаем подписку…</div></div></div>
+
     ${profileLearningHTML}
 
     <div class="grid grid--2" style="margin-top:34px">
@@ -6540,6 +6543,7 @@ function screenProfile(root) {
   // вкладке меняет куку мимо этого таба, и без сверки кнопка «Выйти из
   // аккаунта» иногда отсутствует при живой сессии (или наоборот).
   try { loadDevicesSection(); } catch (_) {}
+  try { if (typeof Subscription !== "undefined") Subscription.mountCard(); } catch (_) {}
   try { revalidateProfileAuth(); } catch (_) {}
   // Отказ привязки Google возвращает человека сюда (см. routeGoogleReturn):
   // это единственный экран, где живёт кнопка «Привязать Google» и где окно

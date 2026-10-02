@@ -398,6 +398,44 @@ def is_action_tool(name: str) -> bool:
     return str(name or "") in ACTION_TOOLS
 
 
+def public_agent_health() -> dict:
+    """Только чтение, без БД и без сети: жив ли движок наставника и покрыт
+    ли каждый инструмент из AGENT_TOOLS реализацией.
+
+    Read-инструмент покрыт одноимённой функцией модуля, action-инструмент —
+    парой propose_action/apply_action. Расхождение реестра и реализации
+    означало бы, что модель зовёт то, что сервер не исполнит, поэтому
+    страница статуса показывает его честно, а не «всё хорошо»."""
+    names: list[str] = []
+    try:
+        for tool in AGENT_TOOLS:
+            fn = (tool or {}).get("function") or {}
+            name = fn.get("name")
+            if name:
+                names.append(str(name))
+    except Exception:
+        names = []
+    missing: list[str] = []
+    try:
+        can_propose = callable(globals().get("propose_action"))
+        can_apply = callable(globals().get("apply_action"))
+    except Exception:
+        can_propose = can_apply = False
+    for name in names:
+        if name in ACTION_TOOLS:
+            if not (can_propose and can_apply):
+                missing.append(name)
+        elif name in READ_TOOLS:
+            try:
+                if not callable(globals().get(name)):
+                    missing.append(name)
+            except Exception:
+                missing.append(name)
+        else:
+            missing.append(name)
+    return {"available": True, "tools": names, "missing": missing}
+
+
 # ---------------------------------------------------------------------------
 # Схема: треды, сообщения, поле подписки
 # ---------------------------------------------------------------------------

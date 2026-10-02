@@ -2726,6 +2726,69 @@ def _public_provider_card(pid: str) -> dict:
     }
 
 
+def public_ai_health() -> dict:
+    """Только чтение, без единого сетевого вызова: последнее известное
+    здоровье ИИ-слоя для публичной страницы статуса.
+
+    Источники — только записи о прошлом: in-memory метки последнего успеха
+    (`_provider_last_ok`) и последней ошибки (`_provider_last_err`) живого
+    трафика, ручных и фоновых проб, плюс переживающее рестарт
+    `ai_router.lastErrorAt`. Никаких проб при чтении: страница статуса
+    обязана показывать последнее известное, а не будить шлюзы каждым
+    визитом.
+
+    Наружу — ни ключей, ни адресов, ни моделей, ни текстов ошибок: только
+    факты «настроен/включён» и метки времени. Возраст меток подписывает
+    сервер в /api/status — клиент время не считает."""
+    try:
+        ids = list(known_provider_ids())
+    except Exception:
+        ids = []
+    try:
+        with _provider_health_lock:
+            ok_map = dict(_provider_last_ok)
+            err_map = {k: v[0] for k, v in _provider_last_err.items()}
+    except Exception:
+        ok_map, err_map = {}, {}
+    try:
+        router = _router_state()
+    except Exception:
+        router = {}
+    try:
+        router_err_at = int(router.get("lastErrorAt") or 0) or None
+    except (TypeError, ValueError):
+        router_err_at = None
+    providers = []
+    for pid in ids:
+        try:
+            title = provider_title(pid)
+        except Exception:
+            title = str(pid)
+        try:
+            enabled = bool(_provider_enabled(pid))
+        except Exception:
+            enabled = False
+        try:
+            configured = bool(_provider_configured(pid))
+        except Exception:
+            configured = False
+        try:
+            ok_at = int(ok_map.get(pid) or 0) or None
+        except (TypeError, ValueError):
+            ok_at = None
+        try:
+            err_at = int(err_map.get(pid) or 0) or None
+        except (TypeError, ValueError):
+            err_at = None
+        providers.append({"id": str(pid), "title": str(title or pid),
+                          "enabled": enabled, "configured": configured,
+                          "lastOkAt": ok_at, "lastErrorAt": err_at})
+    return {"providers": providers,
+            "router": {"active": str(router.get("active") or "") or None,
+                       "lastErrorAt": router_err_at},
+            "now": int(time.time() * 1000)}
+
+
 def providers_overview() -> dict:
     """Весь экран админки одним ответом: карточки + порядок + активный.
 

@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Управление подпиской — ege easy Plus</title>
+<meta name="description" content="Управление подпиской ege easy Plus: статус, лимиты, история платежей, продление и отмена.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
+<meta name="color-scheme" content="light dark">
+<script>
+  /* Та же тема, что у лендинга и приложения: сохранённый выбор
+     (общий ключ ege_core_theme) → иначе системная. Без мигания. */
+  (function(){
+    try{
+      var saved=null;
+      try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
+      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
+      document.documentElement.setAttribute('data-theme',theme);
+    }catch(e){}
+  })();
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="stylesheet" href="/css/footer.css?v=7">
+<link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<script>document.documentElement.classList.add('js');</script>
+<style>
+  @font-face{
+    font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
+    src:url('/vendor/fonts/inter-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+  }
+  @font-face{
+    font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
+    src:url('/vendor/fonts/inter-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+  }
+  @font-face{
+    font-family:'Manrope';font-style:normal;font-weight:400 800;font-display:swap;
+    src:url('/vendor/fonts/manrope-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+  }
+  @font-face{
+    font-family:'Manrope';font-style:normal;font-weight:400 800;font-display:swap;
+    src:url('/vendor/fonts/manrope-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+  }
+  :root,
+  :root[data-theme="light"]{
+    --surface-0:#F3F5FA;--surface-1:#FFFFFF;--surface-2:#FFFFFF;--surface-3:#E7ECF4;
+    --text:#0E1526;--text-dim:#48536B;--text-faint:#5B6579;
+    --accent:#0277B6;--accent-dim:rgba(2,119,182,0.10);
+    --green:#16a34a;--green-dim:rgba(21,128,61,0.10);--brand:#16a34a;
+    --gold:#8a5f1f;--gold-dim:rgba(138,95,31,0.10);
+    --amber:#B45309;--amber-dim:rgba(180,83,9,0.12);
+    --header-bg:rgba(255,255,255,0.85);--hairline:rgba(15,23,42,0.08);
+    --card-border:rgba(15,23,42,0.10);--card-border-hover:rgba(15,23,42,0.20);
+    --sheen:rgba(15,23,42,0.03);--inset-line:rgba(15,23,42,0.05);
+    --ghost-ring:rgba(15,23,42,0.18);--ghost-ring-hover:rgba(15,23,42,0.32);
+    --ring-track:rgba(15,23,42,0.10);
+    --glow-accent:rgba(2,119,182,0.14);--glow-green:rgba(21,128,61,0.12);
+    --shadow-sm:0 1px 2px rgba(15,23,42,0.06),0 16px 32px -20px rgba(15,23,42,0.22);
+    --shadow-lg:0 1px 2px rgba(15,23,42,0.06),0 24px 48px -24px rgba(15,23,42,0.25);
+    --radius-pill:999px;--radius-xl:28px;--radius-lg:20px;--radius-md:14px;
+    --font-body:'Inter',-apple-system,system-ui,sans-serif;
+    --font-display:'Manrope',var(--font-body);
+    --ease-out:cubic-bezier(0.16,1,0.3,1);
+  }
+  :root[data-theme="dark"]{
+    --surface-0:#05070C;--surface-1:#0A0D12;--surface-2:#0F131C;--surface-3:#161D2B;
+    --text:#F8F9FB;--text-dim:#A0A6B8;--text-faint:#666D82;
+    --accent:#38BDF8;--accent-dim:rgba(56,189,248,0.15);
+    --green:#6EE7B7;--green-dim:rgba(110,231,183,0.15);--brand:#6EE7B7;
+    --gold:#E3C07A;--gold-dim:rgba(227,192,122,0.12);
+    --amber:#F59E0B;--amber-dim:rgba(245,158,11,0.15);
+    --header-bg:rgba(5,7,12,0.85);--hairline:rgba(255,255,255,0.06);
+    --card-border:rgba(255,255,255,0.08);--card-border-hover:rgba(255,255,255,0.12);
+    --sheen:rgba(255,255,255,0.04);--inset-line:rgba(255,255,255,0.06);
+    --ghost-ring:rgba(255,255,255,0.12);--ghost-ring-hover:rgba(255,255,255,0.22);
+    --ring-track:rgba(255,255,255,0.10);
+    --glow-accent:rgba(56,189,248,0.15);--glow-green:rgba(110,231,183,0.12);
+    --shadow-sm:0 20px 40px -20px rgba(0,0,0,0.5);
+    --shadow-lg:0 24px 48px -16px rgba(0,0,0,0.6);
+    --radius-pill:999px;--radius-xl:28px;--radius-lg:20px;--radius-md:14px;
+    --font-body:'Inter',-apple-system,system-ui,sans-serif;
+    --font-display:'Manrope',var(--font-body);
+    --ease-out:cubic-bezier(0.16,1,0.3,1);
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html{scroll-behavior:smooth;color-scheme:light;-webkit-font-smoothing:antialiased;}
+  html[data-theme="dark"]{color-scheme:dark;}
+  body{margin:0;background:var(--surface-0);color:var(--text);font-family:var(--font-body);
+    font-size:clamp(15px,1.8vw,17px);line-height:1.6;overflow-x:hidden;min-width:0;
+    padding-bottom:calc(32px + env(safe-area-inset-bottom,0px));}
+  a{color:inherit;text-decoration:none;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
+  .num{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
+  header{position:sticky;top:0;z-index:100;background:var(--header-bg);
+    backdrop-filter:blur(12px) saturate(180%);-webkit-backdrop-filter:blur(12px) saturate(180%);
+    border-bottom:1px solid var(--hairline);}
+  .header-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding-block:clamp(12px,2vw,18px);min-width:0;}
+  .logo{display:flex;align-items:center;gap:12px;font-family:var(--font-display);font-weight:700;
+    font-size:clamp(16px,2.2vw,19px);letter-spacing:-0.02em;white-space:nowrap;min-width:0;}
+  .logo-badge{width:clamp(32px,5vw,42px);height:clamp(32px,5vw,42px);border-radius:50%;
+    background:linear-gradient(135deg,#22c07a 0%,#38BDF8 100%);display:flex;align-items:center;
+    justify-content:center;box-shadow:0 8px 24px -8px rgba(56,189,248,0.5);flex-shrink:0;}
+  .logo-badge svg{width:20px;height:20px;}
+  .logo-text em{font-style:normal;color:var(--brand);}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;
+    padding:clamp(13px,2vw,16px) clamp(24px,4vw,32px);border-radius:var(--radius-pill);
+    font-weight:600;font-size:clamp(14px,1.8vw,16px);cursor:pointer;border:none;white-space:nowrap;
+    transition:transform 0.3s var(--ease-out),box-shadow 0.3s var(--ease-out);font-family:var(--font-body);}
+  .btn-primary{background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 50%,#2563EB 100%);color:#fff;
+    box-shadow:0 16px 32px -12px rgba(56,189,248,0.5);}
+  .btn-primary:hover{transform:translateY(-2px);}
+  .btn-primary:active{transform:translateY(0) scale(0.98);}
+  .btn-ghost{background:transparent;color:var(--text-dim);box-shadow:0 0 0 1px var(--ghost-ring) inset;}
+  .btn-ghost:hover{color:var(--text);box-shadow:0 0 0 1px var(--ghost-ring-hover) inset;}
+  .btn--sm{padding:10px 18px;font-size:14px;}
+  .btn:disabled{opacity:0.5;cursor:wait;}
+  main{padding-bottom:clamp(16px,3vw,28px);}
+  .crumbs{padding:clamp(20px,3vw,28px) 0 0;}
+  .crumbs a{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text-dim);}
+  .crumbs a:hover{color:var(--text);}
+  .crumbs svg{width:16px;height:16px;}
+  .hero{padding:clamp(16px,3vw,24px) 0 clamp(20px,3vw,28px);}
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:var(--radius-pill);
+    font-size:13px;font-weight:700;letter-spacing:0.04em;margin-bottom:14px;}
+  .chip--gold{background:var(--gold-dim);border:1px solid var(--card-border);color:var(--gold);}
+  .chip--ok{background:var(--green-dim);border:1px solid var(--card-border);color:var(--green);}
+  .chip--warn{background:var(--amber-dim);border:1px solid var(--card-border);color:var(--amber);}
+  .chip--muted{background:var(--surface-2);border:1px solid var(--card-border);color:var(--text-dim);}
+  h1{font-family:var(--font-display);font-size:clamp(28px,6vw,46px);font-weight:700;line-height:1.12;
+    letter-spacing:-0.03em;margin:0 0 10px;overflow-wrap:anywhere;}
+  h1 .grad{background:linear-gradient(120deg,var(--accent) 0%,var(--green) 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;}
+  .hero-sub{font-size:clamp(15px,2vw,17px);color:var(--text-dim);margin:0;max-width:640px;}
+  .grid{display:grid;gap:clamp(12px,2vw,20px);min-width:0;}
+  .grid--2{grid-template-columns:1fr 1fr;}
+  .card{background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
+    border:1px solid var(--card-border);border-radius:var(--radius-lg);
+    padding:clamp(20px,3vw,28px);box-shadow:0 1px 0 var(--inset-line) inset,var(--shadow-sm);min-width:0;}
+  .card--hero{border-color:var(--accent);position:relative;overflow:hidden;}
+  .card--hero::before{content:'';position:absolute;top:0;left:9%;right:9%;height:1px;
+    background:linear-gradient(90deg,transparent,var(--glow-accent) 50%,transparent);}
+  .card--plus{border-color:var(--green);}
+  .card-title{font-family:var(--font-display);font-size:clamp(17px,2.4vw,21px);font-weight:700;
+    letter-spacing:-0.01em;margin:0 0 4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .card-sub{font-size:13.5px;color:var(--text-dim);margin:0 0 6px;}
+  .meter{height:8px;border-radius:999px;background:var(--surface-3);overflow:hidden;margin-top:14px;}
+  .meter__fill{display:block;height:100%;width:0;border-radius:inherit;
+    background:linear-gradient(90deg,var(--accent),var(--green));transition:width 1.2s var(--ease-out);}
+  .meter--plus .meter__fill{background:linear-gradient(90deg,#2bb886,var(--green));}
+  .meter-label{font-size:12.5px;color:var(--text-faint);margin-top:8px;}
+  .meter-label b{color:var(--text-dim);}
+  /* кольца лимитов */
+  .ring-card{display:grid;justify-items:center;gap:6px;text-align:center;
+    padding:clamp(20px,3vw,28px) 16px;}
+  .ring{width:120px;height:120px;transform:rotate(-90deg);}
+  .ring__track{fill:none;stroke:var(--ring-track);stroke-width:9;}
+  .ring__bar{fill:none;stroke:url(#ringGrad);stroke-width:9;stroke-linecap:round;
+    stroke-dasharray:289;stroke-dashoffset:289;transition:stroke-dashoffset 1.4s var(--ease-out);}
+  .ring-card__val{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:-0.03em;
+    font-variant-numeric:tabular-nums;margin-top:-78px;height:78px;display:flex;align-items:baseline;gap:4px;}
+  .ring-card__val small{font-size:13px;font-weight:600;color:var(--text-faint);}
+  .ring-card__label{font-weight:700;font-size:15px;margin-top:2px;}
+  .ring-card__sub{font-size:12.5px;color:var(--text-faint);}
+  .ring-card__reset{font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-dim);
+    border-radius:999px;padding:3px 12px;margin-top:6px;}
+  /* преимущества */
+  .perks{list-style:none;margin:14px 0 0;padding:0;display:grid;}
+  .perks li{display:flex;gap:12px;align-items:flex-start;padding:12px 0;font-size:14px;color:var(--text-dim);}
+  .perks li + li{border-top:1px solid var(--hairline);}
+  .perks svg{width:17px;height:17px;color:var(--green);flex:0 0 auto;margin-top:3px;}
+  .perks b{color:var(--text);}
+  /* история */
+  .hist{display:grid;margin-top:6px;}
+  .hist__row{display:flex;align-items:center;gap:12px;padding:12px 0;font-size:13.5px;}
+  .hist__row + .hist__row{border-top:1px solid var(--hairline);}
+  .hist__ico{width:34px;height:34px;border-radius:10px;background:var(--surface-3);color:var(--text-faint);
+    display:grid;place-items:center;flex:0 0 auto;}
+  .hist__ico svg{width:15px;height:15px;}
+  .hist__ico--ok{color:var(--green);}
+  .hist__what{flex:1;min-width:0;}
+  .hist__title{font-weight:650;color:var(--text);}
+  .hist__date{font-size:11.5px;color:var(--text-faint);}
+  .hist__sum{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .hist__sum small{color:var(--text-faint);font-weight:500;}
+  .hist__empty{font-size:13.5px;color:var(--text-faint);padding:10px 0;}
+  /* действия */
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
+  .tariff-link{margin-top:16px;font-size:13.5px;color:var(--text-dim);}
+  .tariff-link a{color:var(--accent);font-weight:650;}
+  .confirm{margin-top:16px;padding:14px 16px;border-radius:var(--radius-md);background:var(--surface-3);
+    border:1px solid var(--card-border);font-size:13.5px;color:var(--text-dim);display:grid;gap:12px;}
+  .confirm__actions{display:flex;gap:8px;flex-wrap:wrap;}
+  .section{padding:clamp(20px,4vw,32px) 0 0;}
+  .section-label{display:inline-flex;align-items:center;gap:8px;font-size:clamp(12px,1.5vw,13px);font-weight:700;
+    letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:12px;}
+  /* гость и загрузка */
+  .state-card{text-align:center;padding:clamp(32px,6vw,56px) clamp(20px,4vw,32px);}
+  .state-card p{color:var(--text-dim);margin:0 0 20px;}
+  .spin{width:44px;height:44px;border-radius:50%;margin:0 auto 16px;border:3px solid var(--accent-dim);
+    border-top-color:var(--accent);animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  /* модалка «скоро» */
+  .modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;
+    background:rgba(8,10,16,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+  .modal.is-open{display:flex;}
+  .modal__box{position:relative;width:100%;max-width:420px;max-height:86dvh;overflow-y:auto;
+    padding:28px 24px 22px;border-radius:20px;background:var(--surface-2);
+    border:1px solid var(--card-border-hover);box-shadow:var(--shadow-lg);text-align:center;}
+  .modal__close{position:absolute;top:12px;right:12px;width:34px;height:34px;border:0;border-radius:50%;
+    background:var(--surface-0);color:var(--text-faint);cursor:pointer;font-size:18px;line-height:1;}
+  .modal__mark{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;margin:0 auto 14px;
+    background:var(--gold-dim);color:var(--gold);}
+  .modal__mark svg{width:26px;height:26px;}
+  .modal__title{font-family:var(--font-display);font-size:20px;font-weight:700;margin:0 0 8px;}
+  .modal__text{font-size:14px;color:var(--text-dim);line-height:1.65;margin:0 0 18px;}
+  .modal__actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));
+    z-index:120;background:var(--surface-2);border:1px solid var(--card-border-hover);border-radius:14px;
+    padding:12px 18px;font-size:13.5px;box-shadow:var(--shadow-lg);max-width:min(92vw,420px);text-align:center;}
+  .toast[hidden]{display:none;}
+  .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);
+    transition-delay:var(--d,0ms);}
+  .js .rv.in{opacity:1;transform:none;}
+  @media (max-width:720px){
+    .grid--2{grid-template-columns:1fr;}
+    .header-inner .btn{padding:10px 16px;font-size:13px;}
+  }
+  @media (min-width:721px){.grid--2{grid-template-columns:1fr 1fr;}}
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto;}
+    *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important;}
+    .js .rv{opacity:1;transform:none;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap header-inner">
+    <a href="/" class="logo" aria-label="ege easy — на главную">
+      <span class="logo-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="logo-text">ege <em>easy</em></span>
+    </a>
+    <nav aria-label="Действия">
+      <a class="btn btn-primary" href="/dashboard#/profile">открыть приложение</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+  <div class="crumbs">
+    <a href="/dashboard#/profile">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+      Назад в профиль
+    </a>
+  </div>
+  <div class="hero">
+    <span class="chip chip--gold" id="heroChip">ege easy Plus</span>
+    <h1 id="heroTitle">Управление <span class="grad">подпиской</span></h1>
+    <p class="hero-sub" id="heroSub">Загружаем статус…</p>
+  </div>
+
+  <!-- загрузка -->
+  <div class="card state-card" id="loadingCard">
+    <div class="spin" aria-hidden="true"></div>
+    <p>Загружаем подписку…</p>
+  </div>
+
+  <!-- гость -->
+  <div class="card state-card" id="guestCard" hidden>
+    <h2 class="card-title" style="justify-content:center;">Сначала войди</h2>
+    <p>Управлять подпиской можно только со своим аккаунтом: без него подписку не к чему привязать.</p>
+    <a class="btn btn-primary" href="/dashboard#/profile">Открыть профиль</a>
+  </div>
+
+  <div id="content" hidden>
+    <!-- статус -->
+    <section class="card card--hero rv" id="statusCard">
+      <h2 class="card-title"><span id="statusPill" class="chip chip--muted">…</span></h2>
+      <p class="card-sub" id="statusMeta">…</p>
+      <div class="meter meter--plus" id="periodMeter" hidden>
+        <span class="meter__fill" id="periodFill"></span>
+      </div>
+      <div class="meter-label" id="periodLabel" hidden></div>
+    </section>
+
+    <!-- лимиты сегодня -->
+    <section class="section">
+      <div class="section-label rv">лимиты сегодня</div>
+      <div class="grid grid--2">
+        <div class="card ring-card rv">
+          <svg class="svg-defs" width="0" height="0" aria-hidden="true"><defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#38BDF8"/><stop offset="100%" stop-color="#6EE7B7"/>
+            </linearGradient>
+          </defs></svg>
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring__track" cx="60" cy="60" r="46"/>
+            <circle class="ring__bar" id="essayRing" cx="60" cy="60" r="46"/>
+          </svg>
+          <div class="ring-card__val"><span id="essayLeft">–</span><small id="essayOf">/день</small></div>
+          <div class="ring-card__label">Проверок сочинений</div>
+          <div class="ring-card__sub" id="essaySub">…</div>
+          <div class="ring-card__reset" id="essayReset" hidden></div>
+        </div>
+        <div class="card ring-card rv" style="--d:100ms">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring__track" cx="60" cy="60" r="46"/>
+            <circle class="ring__bar" id="agentRing" cx="60" cy="60" r="46"/>
+          </svg>
+          <div class="ring-card__val"><span id="agentLeft">–</span><small id="agentOf">/день</small></div>
+          <div class="ring-card__label">Ходов наставника</div>
+          <div class="ring-card__sub" id="agentSub">…</div>
+          <div class="ring-card__reset" id="agentReset" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- преимущества -->
+    <section class="section">
+      <div class="section-label rv">что входит</div>
+      <div class="card rv">
+        <ul class="perks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Лимиты в 4 раза больше</b> — <span id="perkLimits">20 проверок сочинений и 40 ходов наставника в день</span>.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>ИИ-наставник</b> — разбор ошибок, план на неделю и ответы по твоему прогрессу.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Без очереди</b> — проверка и ответы не ждут свободный шлюз.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Ранний доступ</b> — новые предметы и задания на неделю раньше.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- списания -->
+    <section class="section">
+      <div class="section-label rv">списания</div>
+      <div class="card rv">
+        <h2 class="card-title">История платежей</h2>
+        <p class="card-sub">Каждый платёж и каждая выдача — своей строкой. Возвраты помечаются отдельно.</p>
+        <div class="hist" id="payHist"></div>
+      </div>
+    </section>
+
+    <!-- действия -->
+    <section class="section">
+      <div class="section-label rv">действия</div>
+      <div class="card rv">
+        <h2 class="card-title">Подписка</h2>
+        <p class="card-sub" id="actionsSub">…</p>
+        <div class="actions" id="actionsRow"></div>
+        <div id="confirmSlot"></div>
+        <p class="tariff-link">Подробнее о тарифе — на <a href="/subscription">странице Plus</a>.</p>
+      </div>
+    </section>
+  </div>
+</div>
+</main>
+
+<div class="modal" id="soonModal" role="dialog" aria-modal="true" aria-label="Оплата пока недоступна">
+  <div class="modal__box">
+    <button class="modal__close" type="button" id="soonClose" aria-label="Закрыть">×</button>
+    <span class="modal__mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
+    </span>
+    <h2 class="modal__title">Оплата пока недоступна</h2>
+    <p class="modal__text">Подписка находится в разработке: платёжный провайдер ещё подключается. Кому Plus уже выдали — у тех всё уже работает: лимиты и наставник включены.</p>
+    <div class="modal__actions">
+      <button class="btn btn-primary btn--sm" type="button" id="soonOk">Понятно</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<div data-ege-footer></div>
+<script defer src="/js/footer.js?v=7"></script>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var PRICE_MONTH = 99, PRICE_YEAR = 990;
+
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function plural(n, one, few, many){
+    n = Math.abs(Number(n) || 0);
+    var l2 = n % 100, l = n % 10;
+    if (l === 1 && l2 !== 11) return one;
+    if (l >= 2 && l <= 4 && (l2 < 12 || l2 > 14)) return few;
+    return many;
+  }
+  function fmtDate(ms){
+    try { return new Date(Number(ms)).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }); }
+    catch(e){ return ""; }
+  }
+  function fmtDur(sec){
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var h = String(Math.floor(sec / 3600)).padStart(2, "0");
+    var m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+    var s = String(sec % 60).padStart(2, "0");
+    return h + ":" + m + ":" + s;
+  }
+  function daysLeft(expiresAt){
+    var ms = Number(expiresAt) - Date.now();
+    return ms > 0 ? Math.ceil(ms / 86400000) : 0;
+  }
+
+  /* появление при скролле */
+  try {
+    var nodes = [].slice.call(document.querySelectorAll(".rv"));
+    if (reduce || !("IntersectionObserver" in window)) {
+      nodes.forEach(function(n){ n.classList.add("in"); });
+    } else {
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if (!en.isIntersecting) return;
+          en.target.classList.add("in");
+          io.unobserve(en.target);
+        });
+      }, { threshold: 0.1 });
+      nodes.forEach(function(n){ io.observe(n); });
+    }
+  } catch(e){}
+
+  var toastTimer = null;
+  function toast(text){
+    var el = document.getElementById("toast");
+    el.textContent = text;
+    el.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ el.hidden = true; }, 3400);
+  }
+
+  function api(path, body){
+    var opts = { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" };
+    if (body !== undefined) {
+      opts.method = "POST";
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function(resp){
+      return resp.json().catch(function(){ return {}; }).then(function(data){
+        if (!resp.ok) {
+          var err = new Error((data && data.error) || ("HTTP " + resp.status));
+          err.status = resp.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  /* кольца: доля остатка + досчёт числа */
+  var CIRC = 2 * Math.PI * 46;
+  function countTo(node, to, dur){
+    if (!node) return;
+    if (reduce) { node.textContent = String(to); return; }
+    var from = 0, t0 = null;
+    dur = dur || 900;
+    function tick(now){
+      if (t0 === null) t0 = now;
+      var p = Math.min(1, (now - t0) / dur);
+      var e = 1 - Math.pow(1 - p, 3);
+      node.textContent = String(Math.round(from + (to - from) * e));
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  function paintRing(barId, leftId, ofId, subId, resetId, data, label){
+    var limit = Math.max(1, Number(data && data.limit) || 0);
+    var left = Math.max(0, Math.min(limit, Number(data && data.remaining) || 0));
+    var bar = document.getElementById(barId);
+    if (bar) bar.style.strokeDashoffset = String(CIRC * (1 - left / limit));
+    countTo(document.getElementById(leftId), left);
+    var of = document.getElementById(ofId);
+    if (of) of.textContent = "из " + limit + " /день";
+    var sub = document.getElementById(subId);
+    if (sub) sub.textContent = "Потрачено сегодня: " + (limit - left) + " " + plural(limit - left, label[0], label[1], label[2]);
+    var reset = document.getElementById(resetId);
+    var secs = data && data.resetInSec;
+    if (reset) {
+      if (secs != null && left < limit) {
+        reset.hidden = false;
+        reset.textContent = "обновление через " + fmtDur(secs);
+      } else {
+        reset.hidden = true;
+      }
+    }
+  }
+
+  function payStatusLabel(p){
+    if (p.status === "succeeded") return "оплачено";
+    if (p.status === "pending") return "ожидает";
+    if (p.status === "refunded") return "возвращено";
+    if (p.status === "failed") return "не прошло";
+    if (p.status === "cancelled") return "отменён";
+    return String(p.status || "—");
+  }
+  function renderHistory(list){
+    var box = document.getElementById("payHist");
+    if (!list.length) {
+      box.innerHTML = '<div class="hist__empty">Платежей пока нет — здесь появятся чеки после первой оплаты.</div>';
+      return;
+    }
+    box.innerHTML = list.slice(0, 50).map(function(p){
+      var ok = p.status === "succeeded";
+      var sum = (Number(p.amountKopecks) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+      var title = (p.provider === "manual" && Number(p.amountKopecks) === 0)
+        ? "Plus · выдано вручную"
+        : "Plus · " + (p.period === "year" ? "год" : "месяц");
+      return '<div class="hist__row">'
+        + '<span class="hist__ico' + (ok ? " hist__ico--ok" : "") + '" aria-hidden="true">'
+        + (ok
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>')
+        + '</span>'
+        + '<span class="hist__what"><span class="hist__title">' + esc(title) + '</span><br>'
+        + '<span class="hist__date">' + esc(fmtDate(p.paidAt || p.createdAt)) + '</span></span>'
+        + '<span class="hist__sum num">' + esc(sum) + ' ₽ <small>' + esc(payStatusLabel(p)) + '</small></span>'
+        + '</div>';
+    }).join("");
+  }
+
+  function setBusy(btn, busy, label){
+    if (!btn) return;
+    if (busy) { btn.disabled = true; btn.setAttribute("data-label", btn.textContent); btn.textContent = label; }
+    else { btn.disabled = false; var l = btn.getAttribute("data-label"); if (l) btn.textContent = l; }
+  }
+
+  function renderAll(st, hist, essayLim, agentLim){
+    var plus = !!(st && st.active);
+    var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
+    var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 20 : 5);
+    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 40 : 10);
+
+    /* герой */
+    var pill = document.getElementById("statusPill");
+    var meta = document.getElementById("statusMeta");
+    var heroSub = document.getElementById("heroSub");
+    var meter = document.getElementById("periodMeter");
+    var fill = document.getElementById("periodFill");
+    var plabel = document.getElementById("periodLabel");
+    if (plus) {
+      var left = daysLeft(st.expiresAt);
+      pill.className = "chip " + (cancelled ? "chip--warn" : "chip--ok");
+      pill.textContent = cancelled ? "без продления" : "Plus активен";
+      var periodText = st.period === "year" ? "год · " + PRICE_YEAR + " ₽" : "месяц · " + PRICE_MONTH + " ₽";
+      meta.textContent = "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
+      heroSub.textContent = cancelled
+        ? "Автопродление выключено — доступ сохранится до конца оплаченного срока."
+        : "Подписка активна, лимиты уже увеличены. Следующее продление — " + fmtDate(st.expiresAt) + ".";
+      meter.hidden = false;
+      plabel.hidden = false;
+      var total = Number(st.expiresAt) - Number(st.startedAt);
+      var frac = total > 0 ? Math.min(1, Math.max(0, (Number(st.expiresAt) - Date.now()) / total)) : 0;
+      requestAnimationFrame(function(){ fill.style.width = Math.round(frac * 100) + "%"; });
+      plabel.innerHTML = "Осталось <b>" + esc(left <= 0 ? "срок вышел" : left + " " + plural(left, "день", "дня", "дней")) + "</b> подписки";
+      var perk = document.getElementById("perkLimits");
+      if (perk) perk.textContent = essay + " проверок сочинений и " + agent + " ходов наставника в день";
+    } else {
+      pill.className = "chip chip--muted";
+      pill.textContent = "бесплатный план";
+      meta.textContent = "5 проверок сочинений и 10 ходов наставника в день · Plus: " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год.";
+      heroSub.textContent = "Задания, прогноз и разборы бесплатны. Plus увеличивает только лимиты и открывает наставника.";
+      meter.hidden = true;
+      plabel.hidden = true;
+    }
+
+    /* кольца: живые остатки, best-effort */
+    if (essayLim) paintRing("essayRing", "essayLeft", "essayOf", "essaySub", "essayReset",
+      essayLim, ["проверка", "проверки", "проверок"]);
+    else document.getElementById("essaySub").textContent = "Остаток подтянется при следующем визите";
+    if (agentLim) paintRing("agentRing", "agentLeft", "agentOf", "agentSub", "agentReset",
+      agentLim, ["ход", "хода", "ходов"]);
+    else document.getElementById("agentSub").textContent = "Остаток подтянется при следующем визите";
+
+    renderHistory((hist && hist.payments) || []);
+
+    /* действия */
+    var sub = document.getElementById("actionsSub");
+    var row = document.getElementById("actionsRow");
+    var slot = document.getElementById("confirmSlot");
+    slot.innerHTML = "";
+    row.innerHTML = "";
+    function btn(cls, text, act){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn " + cls;
+      b.textContent = text;
+      b.setAttribute("data-act", act);
+      row.appendChild(b);
+      return b;
+    }
+    if (plus && !cancelled) {
+      sub.textContent = "Продление держит доступ без перерывов. Отмена сохраняет доступ до конца оплаченного срока.";
+      btn("btn-primary btn--sm", "Продлить Plus", "soon");
+      btn("btn-ghost btn--sm", "Отменить продление", "ask-cancel");
+    } else if (plus && cancelled) {
+      sub.textContent = "Автопродление выключено. Верни его — доступ продлится сам, ничего доплачивать не нужно.";
+      btn("btn-primary btn--sm", "Вернуть продление", "resume");
+    } else {
+      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут.";
+      btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "soon");
+    }
+    if (!row.getAttribute("data-bound")) {
+      row.setAttribute("data-bound", "1");
+      row.addEventListener("click", function(e){
+        var b = e.target.closest("[data-act]");
+        if (!b || b.disabled) return;
+        var act = b.getAttribute("data-act");
+        if (act === "soon") { openSoon(); return; }
+        if (act === "resume") { doPost("/api/subscription/resume", b, "Возвращаем…", "Автопродление снова включено"); return; }
+        if (act === "ask-cancel") { askCancel(); return; }
+      });
+    }
+  }
+
+  function askCancel(){
+    var slot = document.getElementById("confirmSlot");
+    if (slot.firstChild) return;
+    var box = document.createElement("div");
+    box.className = "confirm";
+    box.innerHTML = "<span>Отменить автопродление? Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план.</span>";
+    var actions = document.createElement("div");
+    actions.className = "confirm__actions";
+    var yes = document.createElement("button");
+    yes.type = "button";
+    yes.className = "btn btn--sm btn-ghost";
+    yes.textContent = "Да, отменить";
+    yes.onclick = function(){ doPost("/api/subscription/cancel", yes, "Отменяем…", "Автопродление выключено — доступ до конца срока сохранён"); };
+    var no = document.createElement("button");
+    no.type = "button";
+    no.className = "btn btn--sm btn-ghost";
+    no.textContent = "Назад";
+    no.onclick = function(){ slot.innerHTML = ""; };
+    actions.appendChild(yes);
+    actions.appendChild(no);
+    box.appendChild(actions);
+    slot.appendChild(box);
+  }
+
+  function doPost(path, btn, busyLabel, okText){
+    setBusy(btn, true, busyLabel);
+    api(path, {}).then(function(){
+      toast(okText);
+      reload();
+    }).catch(function(err){
+      setBusy(btn, false);
+      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
+    });
+  }
+
+  function reload(){
+    document.getElementById("content").hidden = true;
+    document.getElementById("loadingCard").hidden = false;
+    boot();
+  }
+
+  /* soon-модалка */
+  var soonModal = document.getElementById("soonModal");
+  function openSoon(){
+    if (!soonModal) return;
+    soonModal.classList.add("is-open");
+    try { document.body.style.overflow = "hidden"; } catch(e){}
+  }
+  function closeSoon(){
+    if (!soonModal) return;
+    soonModal.classList.remove("is-open");
+    try { document.body.style.overflow = ""; } catch(e){}
+  }
+  document.getElementById("soonClose").addEventListener("click", closeSoon);
+  document.getElementById("soonOk").addEventListener("click", closeSoon);
+  soonModal.addEventListener("click", function(e){ if (e.target === soonModal) closeSoon(); });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeSoon(); });
+
+  function boot(){
+    api("/api/auth/session").then(function(sess){
+      if (!sess || !sess.user) {
+        document.getElementById("loadingCard").hidden = true;
+        document.getElementById("guestCard").hidden = false;
+        document.getElementById("heroSub").textContent = "Войди, чтобы увидеть свою подписку.";
+        return;
+      }
+      return api("/api/subscription/status").then(function(st){
+        /* платежи и остатки — best-effort, статус важнее */
+        return Promise.all([
+          api("/api/subscription/payments?limit=50&offset=0").catch(function(){ return null; }),
+          api("/api/ai/limits").catch(function(){ return null; }),
+          api("/api/agent/limits").catch(function(){ return null; })
+        ]).then(function(res){
+          document.getElementById("loadingCard").hidden = true;
+          document.getElementById("content").hidden = false;
+          renderAll(st, res[0], res[1], res[2]);
+        });
+      });
+    }).catch(function(){
+      document.getElementById("loadingCard").hidden = true;
+      document.getElementById("guestCard").hidden = false;
+      document.getElementById("guestCard").querySelector("p").textContent =
+        "Не удалось связаться с сервером. Проверь соединение и обнови страницу.";
+    });
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

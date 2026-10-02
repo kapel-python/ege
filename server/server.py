@@ -5254,6 +5254,100 @@ def _status_file_mtime_ms(path: Path) -> int:
         return 0
 
 
+def _age_ru(ts_ms: int, now_ms: int) -> str:
+    """Возраст метки словами («только что», «5 мин назад») для страницы
+    статуса. Никогда не бросает; будущее — это «только что»."""
+    try:
+        sec = max(0, (int(now_ms) - int(ts_ms)) // 1000)
+    except (TypeError, ValueError):
+        return ""
+    if sec < 60:
+        return "только что"
+    minutes = sec // 60
+    if minutes < 60:
+        return f"{minutes} {_plural_ru(minutes, 'минуту', 'минуты', 'минут')} назад"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')} назад"
+    days = hours // 24
+    return f"{days} {_plural_ru(days, 'день', 'дня', 'дней')} назад"
+
+
+def _agent_status_service() -> dict:
+    """Строки статуса про наставника: движок, инструменты. Только чтение
+    памяти — ни БД, ни сети. Подписку (биллинг) сюда не добавляем
+    осознанно: это про заработок, а не про работу сервиса."""
+    if _AGENT is None:
+        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
+                 "detail": "Модуль наставника недоступен"},
+                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
+                 "detail": "Модуль наставника недоступен"})
+    try:
+        health = _AGENT.public_agent_health()
+    except Exception:
+        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
+                 "detail": "Не удалось проверить"},
+                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
+                 "detail": "Не удалось проверить"})
+    tools = [t for t in (health.get("tools") or []) if t]
+    missing = [t for t in (health.get("missing") or []) if t]
+    if missing:
+        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
+                 "detail": "Часть возможностей недоступна"},
+                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
+                 "detail": f"{len(tools) - len(missing)} из {len(tools)} подключены"})
+    count = len(tools)
+    return ({"id": "agent", "label": "ИИ-наставник", "ok": True,
+             "detail": "Готов отвечать на вопросы"},
+            {"id": "agent-tools", "label": "Инструменты наставника", "ok": True,
+             "detail": f"{count} {_plural_ru(count, 'инструмент', 'инструмента', 'инструментов')} подключены"})
+
+
+def _provider_status_service(now_ms: int) -> dict:
+    """Строка статуса про ИИ-провайдеры: последнее известное по записям
+    о прошлом, без живых проб. Побеждает последняя запись: успех новее
+    ошибки — «успешно», иначе — «ошибка». Записей нет — честное «пока
+    не знаем», а не зелёное «всё хорошо»."""
+    if _AI is None:
+        return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": False,
+                "detail": "Модуль ИИ недоступен"}
+    try:
+        health = _AI.public_ai_health()
+    except Exception:
+        return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": False,
+                "detail": "Не удалось проверить"}
+    providers = [p for p in (health.get("providers") or []) if isinstance(p, dict)]
+    configured = [p for p in providers if p.get("configured")]
+    if not configured:
+        return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": False,
+                "detail": "Провайдеры не настроены"}
+    last_ok = 0
+    for p in configured:
+        try:
+            last_ok = max(last_ok, int(p.get("lastOkAt") or 0))
+        except (TypeError, ValueError):
+            pass
+    last_err = 0
+    for p in configured:
+        try:
+            last_err = max(last_err, int(p.get("lastErrorAt") or 0))
+        except (TypeError, ValueError):
+            pass
+    try:
+        router_err = int(((health.get("router") or {}).get("lastErrorAt")) or 0)
+        last_err = max(last_err, router_err)
+    except (TypeError, ValueError):
+        pass
+    if last_err > last_ok:
+        return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": False,
+                "detail": f"Последняя ошибка {_age_ru(last_err, now_ms)}"}
+    if last_ok > 0:
+        return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": True,
+                "detail": f"Последний запрос успешен · {_age_ru(last_ok, now_ms)}"}
+    return {"id": "ai-providers", "label": "ИИ-провайдеры", "ok": False,
+            "detail": "Нет данных с перезапуска — покажет первый запрос"}
+
+
 def _build_public_status(conn: sqlite3.Connection) -> dict:
     """Честный публичный срез для страницы /status.
 
@@ -5485,12 +5579,16 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
         total_missions += subj_missions
         total_bosses += subj_bosses
     content_updated = max(_status_file_mtime_ms(path) for path in _subject_catalog_paths())
+    agent_service, agent_tools_service = _agent_status_service()
     services = [
         {"id": "api", "label": "API", "ok": True, "detail": "Отвечает"},
         {"id": "database", "label": "База данных", "ok": db_ok,
          "detail": "Доступна" if db_ok else "Не удалось проверить"},
         {"id": "auth", "label": "Авторизация", "ok": auth_ok,
          "detail": "Доступна" if auth_ok else "Не удалось проверить"},
+        agent_service,
+        agent_tools_service,
+        _provider_status_service(now_ms),
         {"id": "tasks", "label": "Задания", "ok": db_ok and total_tasks > 0,
          "detail": f"Доступно: {total_tasks} {_plural_ru(total_tasks, 'задание', 'задания', 'заданий')}"
                    if db_ok and total_tasks > 0 else "Не удалось проверить"},
@@ -12351,10 +12449,24 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "contacts.html"
         elif path == '/about':
             file_path = ROOT / "about.html"
-        elif path == '/subscription' or path == '/subscription/preview':
-            # Витрина подписки Plus. Временный адрес с превью (/subscription/preview);
-            # когда превью уберут, останется /subscription на том же файле.
-            file_path = ROOT / "subscription-preview.html"
+        elif path == '/subscription':
+            # Публичная страница тарифа Plus (доступна без авторизации,
+            # как /status). Технической витрины здесь нет — только то,
+            # что важно пользователю: цена, лимиты, сравнение, FAQ.
+            file_path = ROOT / "subscription.html"
+        elif path == '/subscription/manage':
+            # Страница управления подпиской: статус, лимиты, списания,
+            # продление и отмена. Гостей встречает приглашением войти —
+            # решение о редиректе принимает сама страница.
+            file_path = ROOT / "subscription-manage.html"
+        elif path == '/subscription/preview':
+            # Старый адрес превью: превью убрано, остался канонический
+            # /subscription. Location — серверный литерал, open redirect
+            # невозможен.
+            self.send_response(302)
+            self.send_header("Location", "/subscription")
+            self.send_security_headers()
+            self.end_headers(); return
         elif path == '/essay' or path.startswith('/essay/'):
             # Красивая ссылка на результат: /essay/<sid> отдаёт тот же
             # ege-result.html; sid страница берёт из пути сама. Старые
