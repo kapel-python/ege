@@ -105,6 +105,48 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
         return default
 
 
+def _load_subscription_module():
+    """Движок подписки (server/subscription.py) для потолков Plus.
+
+    Без него — обычные бесплатные квоты, раздел работает как раньше."""
+    import importlib.util
+    from pathlib import Path as _Path
+
+    sub_path = _Path(__file__).resolve().parent / "subscription.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_agent_subscription", sub_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_SUB = _load_subscription_module()
+
+
+def subscription_is_plus(conn: sqlite3.Connection, user_id: int) -> bool:
+    if _SUB is None:
+        return False
+    try:
+        return bool(_SUB.subscription_active(conn, int(user_id)))
+    except sqlite3.Error:
+        return False
+
+
+def agent_access_allowed(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Доступен ли раздел наставника. Пока флаг выключен — всем
+    зарегистрированным, как раньше; с флагом — только Plus."""
+    if _SUB is None:
+        return True
+    try:
+        return bool(_SUB.agent_access_allowed(conn, int(user_id)))
+    except sqlite3.Error:
+        return True
+
+
 def agent_quota_max() -> int:
     return _env_int("EGE_AGENT_QUOTA_MAX", AGENT_QUOTA_MAX_DEFAULT)
 
@@ -363,10 +405,17 @@ _AGENT_SCHEMA_DONE: set[str] = set()
 
 
 def _db_key(conn: sqlite3.Connection) -> str:
+    # Ключ — ПУТЬ базы, а не id(conn): id переиспользуется после GC, и memo
+    # начинало врать (ensure пропускался на новой базе/новом соединении).
+    # Пустой путь (чистый :memory:) — отдельная база на соединение.
+    # PRAGMA транзакцию не открывает — безопасно в любом контексте.
     try:
-        return str(getattr(conn, "database", "") or id(conn))
-    except Exception:
-        return str(id(conn))
+        row = conn.execute("PRAGMA database_list").fetchone()
+        if row and row[2]:
+            return str(row[2])
+        return f"memory:{id(conn)}"
+    except sqlite3.Error:
+        return f"memory:{id(conn)}"
 
 
 # Внешний идентификатор треда: 10 символов [A-Za-z0-9] (~60 бит). 10 выбрано
@@ -606,9 +655,18 @@ def agent_custom_limit(conn: sqlite3.Connection, user_id: int) -> int | None:
 
 
 def agent_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
-    """Потолок ходов, который реально действует на пользователя."""
+    """Потолок ходов, который реально действует на пользователя.
+
+    База — персональный грант админа или общий EGE_AGENT_QUOTA_MAX;
+    активный Plus поднимает итог до 40 (max, а не замена)."""
     custom = agent_custom_limit(conn, user_id)
-    return custom if custom is not None else agent_quota_max()
+    base = custom if custom is not None else agent_quota_max()
+    if subscription_is_plus(conn, user_id) and _SUB is not None:
+        try:
+            return max(base, int(_SUB.PLUS_AGENT_LIMIT))
+        except (TypeError, ValueError):
+            pass
+    return base
 
 
 def agent_quota_status(conn: sqlite3.Connection, user_id: int, now_ms: int | None = None) -> dict:
@@ -715,7 +773,12 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
     ensure_agent_user_limit_schema(conn)
     now_ms = int(time.time() * 1000)
     window_ms = agent_quota_window_ms()
-    conn.execute("BEGIN")
+    # Сеттер зовут и напрямую (тесты, скрипты) на соединении с незакрытой
+    # транзакцией после прямых INSERT: тогда присоединяемся к ней, а не рвём
+    # всё вторым BEGIN. На свежем соединении поведение прежнее: свой BEGIN.
+    own_txn = not conn.in_transaction
+    if own_txn:
+        conn.execute("BEGIN")
     try:
         if has_limit:
             if raw_limit is None:
@@ -774,12 +837,14 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
                 timer = int(timer)
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
                          (count, timer, owner))
-        conn.commit()
+        if own_txn:
+            conn.commit()
     except Exception:
-        try:
-            conn.rollback()
-        except sqlite3.Error:
-            pass
+        if own_txn:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
         raise
     return admin_agent_quota_status(conn, user_id)
 

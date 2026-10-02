@@ -139,6 +139,39 @@ def _load_oauth_module():
 _OAUTH = _load_oauth_module()
 
 
+def _load_subscription_module():
+    """Load the subscription engine (server/subscription.py).
+
+    Failure is not fatal: without it the /api/subscription/* endpoints
+    answer 503, and essay/agent quotas fall back to their free defaults —
+    the rest of the site works."""
+    import importlib.util
+
+    sub_path = Path(__file__).resolve().parent / "subscription.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_subscription", sub_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_SUB = _load_subscription_module()
+
+
+def subscription_is_plus(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Активна ли Plus-подписка. Без модуля — всегда False (free)."""
+    if _SUB is None:
+        return False
+    try:
+        return bool(_SUB.subscription_active(conn, int(user_id)))
+    except sqlite3.Error:
+        return False
+
+
 # Потолок текста, который вообще попадает в agent_messages (и оттуда в ленту).
 # Источник правды — модуль агента: там же живёт блок кнопок-продолжений, из-за
 # которого ответ длиннее прежних 8000. Без модуля (тогда весь раздел отдаёт
@@ -6162,9 +6195,18 @@ def ai_custom_limit(conn: sqlite3.Connection, user_id: int) -> int | None:
 
 
 def ai_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
-    """Потолок, который реально действует на пользователя."""
+    """Потолок, который реально действует на пользователя.
+
+    База — персональный грант админа или общий EGE_AI_USAGE_MAX; активный
+    Plus поднимает итог до 20 (max, а не замена: грант выше Plus живёт)."""
     custom = ai_custom_limit(conn, user_id)
-    return custom if custom is not None else ai_usage_max()
+    base = custom if custom is not None else ai_usage_max()
+    if _SUB is not None and subscription_is_plus(conn, user_id):
+        try:
+            return max(base, int(_SUB.PLUS_ESSAY_LIMIT))
+        except (TypeError, ValueError):
+            pass
+    return base
 
 
 def ai_limit_for_owner(conn: sqlite3.Connection, owner: str) -> int:
@@ -6488,7 +6530,11 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
         return admin_ai_limit_status(conn, user_id)
     now_ms = int(time.time() * 1000)
     window_ms = ai_usage_window_ms()
-    conn.execute("BEGIN")
+    # Как в agent.admin_agent_quota_set: прямой вызов на соединении с
+    # незакрытой транзакцией присоединяется к ней, а не падает на BEGIN.
+    own_txn = not conn.in_transaction
+    if own_txn:
+        conn.execute("BEGIN")
     try:
         if has_limit:
             if raw_limit is None:
@@ -6547,12 +6593,14 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
                 timer = int(timer)
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
                          (count, timer, owner))
-        conn.commit()
+        if own_txn:
+            conn.commit()
     except Exception:
-        try:
-            conn.rollback()
-        except sqlite3.Error:
-            pass
+        if own_txn:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
         raise
     return admin_ai_limit_status(conn, user_id)
 
@@ -9358,6 +9406,23 @@ class Handler(BaseHTTPRequestHandler):
         current_id = existing_user_for(conn, self)
         intent = oauth_nonce_intent(cookie_value(self, OAUTH_NONCE_COOKIE))
         linked_id = auth_identity_user(conn, provider, subject)
+        # Отказ при явной привязке возвращает человека ТУДА, откуда он нажал
+        # кнопку, — в профиль. Экран входа для этого случая врал бы дважды:
+        # он принадлежит другому аккаунту и на залогиненном человеке вообще
+        # рисует «Вы уже вошли», то есть молча съедал бы причину отказа.
+        refusal_route = "profile" if intent == "link" and current_id is not None else "login"
+        if linked_id is not None and intent == "link" and current_id is not None \
+                and linked_id != current_id:
+            # Живой случай: человек нажал «Привязать Google», отвязал прежний
+            # адрес и выбрал в Google тот, что у нас уже привязан к ДРУГОМУ
+            # профилю. Раньше здесь стоял обычный повторный вход, то есть тихий
+            # переход на чужой аккаунт: человек нажал «добавь вход к моему
+            # аккаунту» и получил чужой профиль вместо своего, без единого
+            # слова. Намерение «привязать» разрешает привязать ТОЛЬКО свой
+            # аккаунт, поэтому это отказ с объяснением, а не вход.
+            self.send_redirect(oauth_return_url(self, refusal_route, "error=taken"),
+                               extra_cookies=clear_nonce)
+            return
         if linked_id is not None:
             # Эта же личность уже привязана: обычный повторный вход.
             self.finish_login_into(conn, linked_id, provider, subject, email, ip, clear_nonce,
@@ -9371,7 +9436,7 @@ class Handler(BaseHTTPRequestHandler):
             # Обычный вход открыл бы чужой аккаунт — здесь это явная ошибка
             # человека (перепутал аккаунт Google), и молча пересаживать его
             # нельзя. Отказ с честным текстом, его аккаунт не трогаем.
-            self.send_redirect(oauth_return_url(self, "login", "error=conflict"),
+            self.send_redirect(oauth_return_url(self, refusal_route, "error=conflict"),
                                extra_cookies=clear_nonce)
             return
         if by_email is not None and by_email["id"] != current_id:
@@ -10259,6 +10324,71 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    def handle_subscription_action(self, conn: sqlite3.Connection, user_id: int,
+                                       path: str, payload: dict) -> dict:
+        """Пишущие действия подписки от лица ученика. Бросает ValueError (400),
+        KeyError (404), PermissionError (503: mock выключен)."""
+        assert _SUB is not None
+        if path == "/api/subscription/checkout":
+            period = payload.get("period", "month")
+            if not isinstance(period, str):
+                raise ValueError("period должен быть month или year")
+            period = period.strip().lower()
+            key = payload.get("idempotencyKey", payload.get("idempotency_key"))
+            if key is not None and not isinstance(key, str):
+                raise ValueError("idempotencyKey должен быть строкой")
+            return _SUB.create_checkout(conn, int(user_id), period,
+                                        _SUB.PROVIDER_MOCK, key)
+        if path == "/api/subscription/confirm":
+            ref = payload.get("paymentId", payload.get("providerPaymentId"))
+            if isinstance(ref, bool):
+                raise ValueError("нужен paymentId")
+            if isinstance(ref, str) and ref.strip().isdigit():
+                ref = int(ref.strip())
+            if not isinstance(ref, int) and not (isinstance(ref, str) and ref.strip()):
+                raise ValueError("нужен paymentId")
+            if isinstance(ref, str):
+                ref = ref.strip()
+            return _SUB.confirm_payment(conn, ref, _SUB.PROVIDER_MOCK,
+                                        _SUB.PLUS_ESSAY_LIMIT, _SUB.PLUS_AGENT_LIMIT)
+        if path == "/api/subscription/cancel":
+            return _SUB.cancel_subscription(conn, int(user_id))
+        if path == "/api/subscription/resume":
+            return _SUB.resume_subscription(conn, int(user_id))
+        raise ValueError("Неизвестное действие подписки")
+
+    def handle_subscription_webhook(self, conn: sqlite3.Connection) -> None:
+        """Входящий вебхук платёжного шлюза: без сессии, только HMAC-подпись.
+        Секрет не задан — 503 «не настроено», а не тихий отказ."""
+        assert _SUB is not None
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный JSON"}, 400); return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный JSON"}, 400); return
+        if not _SUB.webhook_secret():
+            self.send_json({"error": "Приём платежей не настроен"}, 503); return
+        provider_payment_id = payload.get("providerPaymentId", "")
+        status = payload.get("status", "")
+        signature = payload.get("signature", "")
+        if not isinstance(provider_payment_id, str) or not provider_payment_id.strip():
+            self.send_json({"error": "Нужен providerPaymentId"}, 400); return
+        if not isinstance(status, str) or not status.strip():
+            self.send_json({"error": "Нужен status"}, 400); return
+        if not isinstance(signature, str) or not _SUB.webhook_signature_valid(
+                provider_payment_id.strip(), status.strip(), signature):
+            self.send_json({"error": "Неверная подпись"}, 403); return
+        try:
+            result = _SUB.webhook_payment(
+                conn, provider_payment_id.strip(), status.strip(),
+                essay_limit=_SUB.PLUS_ESSAY_LIMIT, agent_limit=_SUB.PLUS_AGENT_LIMIT)
+        except KeyError:
+            self.send_json({"error": "Платёж не найден"}, 404); return
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, 400); return
+        self.send_json(result)
+
     def handle_support_message(self, conn: sqlite3.Connection) -> None:
         """Store one anonymous/public short note; there is deliberately no GET API."""
         if not self.support_request_is_same_origin():
@@ -10416,6 +10546,62 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return
+        if path == "/api/subscription/checkout" or path == "/api/subscription/confirm" \
+                or path == "/api/subscription/cancel" or path == "/api/subscription/resume" \
+                or path == "/api/subscription/webhook":
+            # Подписка Plus: покупка, продление, отмена, вебхук шлюза.
+            # Всё состояние — в server/subscription.py; здесь только HTTP:
+            # общий per-IP бакет, гость 401, бан 403. Мутаторы движка
+            # присоединяются к открытой транзакции или открывают свою.
+            if self.api_rate_limited(): return
+            if _SUB is None:
+                self.send_json({"error": "Подписки временно недоступны"}, 503); return
+            if path == "/api/subscription/webhook":
+                conn = connect()
+                try:
+                    self.handle_subscription_webhook(conn)
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("sub-webhook", exc)
+                    self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                    "ref": rid}, 503)
+                finally:
+                    conn.close()
+                return
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
+                try:
+                    result = self.handle_subscription_action(conn, user_id, path, payload)
+                except PermissionError as exc:
+                    self.send_json({"error": str(exc)}, 503, token=token); return
+                except KeyError:
+                    self.send_json({"error": "Не найдено"}, 404, token=token); return
+                except _SUB.PaymentConflictError as exc:
+                    self.send_json({"error": str(exc)}, 409, token=token); return
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, 400, token=token); return
+                self.send_json(result, token=token)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("subscription", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            finally:
+                conn.close()
+            return
         if path == "/api/profile/claim":
             # Заявка «онбординг пройден» — единственный обычный путь, который
             # заводит пользователя из гостя. Всё остальное молча не создаёт
@@ -10535,7 +10721,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
-            if len(parts) != 6 or parts[5] not in ("xp", "reset", "delete", "block", "unblock", "ailimit"):
+            if len(parts) != 6 or parts[5] not in ("xp", "reset", "delete", "block", "unblock", "ailimit", "subscription"):
                 # Ветка не должна проваливаться в общий 404 «Not found» в конце
                 # do_POST: неизвестное действие или лишний сегмент выглядели бы
                 # так же, как отсутствие самого endpoint'а (именно это и показал
@@ -10545,7 +10731,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if not self.require_admin(conn): return
                     self.send_json({"error": "Неизвестный маршрут админ-панели. "
-                                             "Действия: xp, reset, delete, block, unblock, ailimit"}, 404)
+                                             "Действия: xp, reset, delete, block, unblock, ailimit, subscription"}, 404)
                 finally: conn.close()
                 return
             conn = connect()
@@ -10590,6 +10776,35 @@ class Handler(BaseHTTPRequestHandler):
                                 (f"limit={result['limit']} remaining={result['remaining']}"
                                  + agent_note)[:200])
                     result = {"ok": True, "aiLimit": result}
+                elif action == "subscription":
+                    if _SUB is None:
+                        raise ValueError("Движок подписки недоступен")
+                    op = payload.get("action", "")
+                    if not isinstance(op, str):
+                        raise ValueError("action должен быть grant или revoke")
+                    op = op.strip().lower()
+                    if op == "grant":
+                        period = payload.get("period", "month")
+                        if not isinstance(period, str):
+                            raise ValueError("period должен быть month или year")
+                        result = _SUB.admin_grant(conn, target_id, period.strip().lower(),
+                                                  note=payload.get("note", ""))
+                        admin_audit(conn, actor_id, "subscription-grant", target_id,
+                                    f"{period} until {result.get('expiresAt')}"[:200])
+                    elif op == "revoke":
+                        result = _SUB.admin_revoke(conn, target_id)
+                        admin_audit(conn, actor_id, "subscription-revoke", target_id, "")
+                    elif op == "refund":
+                        ref = payload.get("paymentId")
+                        if ref is not None and isinstance(ref, bool):
+                            raise ValueError("paymentId должен быть числом")
+                        result = _SUB.admin_refund(conn, target_id, ref)
+                        admin_audit(conn, actor_id, "subscription-refund", target_id,
+                                    f"payment={result['refund']['paymentId']} "
+                                    f"{result['refund']['amountKopecks']}"[:200])
+                    else:
+                        raise ValueError("action должен быть grant, revoke или refund")
+                    result = {"ok": True, "subscription": result}
                 else:
                     result = admin_delete_user(conn, target_id, actor_id)
                 self.send_json(result)
@@ -11196,6 +11411,12 @@ class Handler(BaseHTTPRequestHandler):
                                     "publicId": _agent_thread_public_id(row)}, token=token); return
                 # POST /api/agent/turns/confirm — {messageId, approve}.
                 if path == "/api/agent/turns/confirm":
+                    if _AGENT is not None and not _AGENT.agent_access_allowed(conn, int(user_id)):
+                        # Флаг EGE_AGENT_REQUIRES_PLUS: наставник только для Plus.
+                        # По умолчанию выключен — бесплатные пользователи ходят
+                        # как раньше, проверка ниже их не касается.
+                        self.send_json({"error": "Раздел доступен по подписке Plus",
+                                        "code": "SUBSCRIPTION_REQUIRED"}, 403, token=token); return
                     raw_mid = payload.get("messageId", payload.get("message_id", payload.get("id")))
                     try:
                         mid = int(raw_mid)
@@ -11329,6 +11550,9 @@ class Handler(BaseHTTPRequestHandler):
                 # POST /api/agent/turns — начать ход {threadId, text}.
                 # threadId — числовой id (старые клиенты) или внешний public_id.
                 if path == "/api/agent/turns":
+                    if _AGENT is not None and not _AGENT.agent_access_allowed(conn, int(user_id)):
+                        self.send_json({"error": "Раздел доступен по подписке Plus",
+                                        "code": "SUBSCRIPTION_REQUIRED"}, 403, token=token); return
                     raw_tid = payload.get("threadId", payload.get("thread_id", payload.get("thread")))
                     if isinstance(raw_tid, str):
                         raw_tid = raw_tid.strip()
@@ -11930,6 +12154,31 @@ class Handler(BaseHTTPRequestHandler):
                     fp_key, fp_net = ai_usage_device_fp(conn, self)
                     self.send_json(ai_usage_status(conn, user_id, fp_key, fp_net), token=token)
                     return
+                if path == "/api/subscription/status" or path == "/api/subscription/payments":
+                    # Подписка Plus: свой статус/сроки/лимиты и история платежей.
+                    # Личные данные — гостю 401, как всем доменам ученика.
+                    if _SUB is None:
+                        self.send_json({"error": "Подписки временно недоступны"}, 503, token=token); return
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    if path == "/api/subscription/status":
+                        self.send_json(_SUB.subscription_status(conn, int(user_id)), token=token); return
+                    query = urlparse(self.path).query
+                    from urllib.parse import parse_qs
+                    args = parse_qs(query)
+                    try:
+                        raw_limit = args.get("limit", [None])[0]
+                        raw_offset = args.get("offset", [None])[0]
+                        limit = 50 if raw_limit is None else int(str(raw_limit).strip())
+                        offset = 0 if raw_offset is None else int(str(raw_offset).strip())
+                    except (TypeError, ValueError, AttributeError):
+                        self.send_json({"error": "Некорректные параметры пагинации"}, 400, token=token); return
+                    try:
+                        self.send_json(_SUB.payment_history(conn, int(user_id), limit, offset), token=token)
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400, token=token)
+                    return
                 if path == "/api/agent/limits" or path == "/api/agent/threads":
                     if not self.require_user(user_id): return
                     if self.reject_if_blocked(conn, user_id):
@@ -12061,6 +12310,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "contacts.html"
         elif path == '/about':
             file_path = ROOT / "about.html"
+        elif path == '/subscription' or path == '/subscription/preview':
+            # Витрина подписки Plus. Временный адрес с превью (/subscription/preview);
+            # когда превью уберут, останется /subscription на том же файле.
+            file_path = ROOT / "subscription-preview.html"
         elif path == '/essay' or path.startswith('/essay/'):
             # Красивая ссылка на результат: /essay/<sid> отдаёт тот же
             # ege-result.html; sid страница берёт из пути сама. Старые
