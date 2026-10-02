@@ -673,6 +673,85 @@ def main():
             check("непустой чат и новый — на месте",
                   (bd2.get("thread") or {}).get("id") in left, str(sorted(left)))
 
+            section("параллельные ходы в РАЗНЫХ чатах не съедают лишние жетоны")
+            # Жалоба: «написать агенту в разных чатах — можно потратить 2 жетона,
+            # когда есть один, потому что жетон списывается только после успешного
+            # ответа». Проверяем ровно это. Замер (test/ai-agent.py, этот блок) на
+            # коде БЕЗ резерва до модели даёт 5×200 при одном жетоне; с резервом
+            # (agent_quota_reserve, CAS `UPDATE ... WHERE count > 0`) — ровно один.
+            #
+            # Пять РАЗНЫХ чатов вставляем прямо в базу: через API пять пустых
+            # схлопнулись бы в один (переиспользование пустых), а для проверки
+            # нужны именно пять независимых слотов _agent_busy.
+            cr = Client("10.1.0.11")
+            claim(cr, "Гонка")
+            conn4 = server.connect()
+            try:
+                ruser = int(conn4.execute("SELECT id FROM users WHERE name='Гонка' ORDER BY id DESC LIMIT 1").fetchone()["id"])
+                agent.ensure_agent_schema(conn4)
+                race_tids = []
+                for k in range(5):
+                    cur = conn4.execute(
+                        "INSERT INTO agent_threads(user_id, subject, title, created_at, updated_at, public_id)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (ruser, "profile_math", f"чат {k}", "1", "1", f"RACE{k}{ruser}"))
+                    race_tids.append(int(cur.lastrowid))
+                    # История в чате: без неё первый вопрос попал бы в кэш повтора.
+                    conn4.execute(
+                        "INSERT INTO agent_messages(thread_id, user_id, role, content, seq, created_at)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (race_tids[-1], ruser, "user", f"старый вопрос {k}", 1, "1"))
+                agent.admin_agent_quota_set(conn4, ruser, {"limit": 1, "remaining": 1})
+                conn4.commit()
+            finally:
+                conn4.close()
+            # Модель спит, пока тест не отпустит: иначе гонку решил бы джиттер.
+            race_gate = threading.Event()
+            real_chat, real_plain = ai.chat_with_tools, ai.chat
+            def slow_chat(messages, tools, **kw):
+                race_gate.wait(10)
+                time.sleep(0.3)
+                return {"text": "Гонка.", "tool_calls": []}
+            def slow_plain(messages, **kw):
+                race_gate.wait(10)
+                time.sleep(0.3)
+                return "Гонка."
+            ai.chat_with_tools, ai.chat = slow_chat, slow_plain
+            race_results = {}
+            race_barrier = threading.Barrier(5)
+            def race_fire(idx, tid):
+                race_barrier.wait(10)
+                st, bd = cr.request(base, "POST", "/api/agent/turns",
+                                    {"threadId": tid, "text": f"вопрос {idx}"})
+                race_results[idx] = (st, (bd or {}).get("code") or "")
+            race_threads = [threading.Thread(target=race_fire, args=(i, t)) for i, t in enumerate(race_tids)]
+            for th in race_threads:
+                th.start()
+            time.sleep(0.7)          # все пять внутри и висят на моке
+            race_gate.set()          # пускаем модель разом
+            for th in race_threads:
+                th.join(30)
+            ai.chat_with_tools, ai.chat = real_chat, real_plain
+            race_ok = [i for i, (st, _) in race_results.items() if st == 200]
+            race_429 = {i: code for i, (st, code) in race_results.items() if st == 429}
+            check("при одном жетоне из 5 параллельных ходов проходит РОВНО ОДИН",
+                  len(race_ok) == 1, f"200={sorted(race_ok)} 429={sorted(race_429)} коды={set(race_429.values())}")
+            check("остальные отбиты лимитом (AI_LIMIT), а не чем-то ещё",
+                  len(race_429) == 4 and set(race_429.values()) == {server.AI_LIMIT_CODE},
+                  str(race_429))
+            st, rq = cr.request(base, "GET", "/api/agent/limits", None)
+            check("после гонки карман пуст, перерасхода нет",
+                  rq.get("remaining") == 0 and rq.get("limit") == 1, str(rq))
+            conn5 = server.connect()
+            try:
+                wrote = conn5.execute(
+                    "SELECT COUNT(*) FROM agent_messages WHERE role='user' AND thread_id IN (%s)"
+                    % ",".join("?" * len(race_tids)), race_tids).fetchone()[0]
+                # 5 старых + 1 новый: четыре лишних хода в базу не попали.
+                check("в базу записан ровно один новый вопрос", wrote == 6, str(wrote))
+            finally:
+                conn5.close()
+
             section("ответ без tools: финал + одно списание")
             with lock:
                 script.clear()
