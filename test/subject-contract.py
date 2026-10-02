@@ -206,7 +206,7 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice"} for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice", "lessons"} for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
@@ -223,37 +223,50 @@ def main() -> int:
 
             russian_tasks = payloads[("/api/catalog-tasks", "russian")]
             served_russian_tasks = russian_tasks.get("tasks") or []
-            # Свободные темы (итоговое) и работа с текстом (задание 27): у
-            # вторых обязан быть sourceTextId, у первых — не бывает.
+            # Тестовая часть (задания №1–26, короткий ответ) и работа с текстом
+            # (задание 27): у вторых обязан быть sourceTextId, у первых — не бывает.
             russian_re27 = [t for t in served_russian_tasks if t.get("skill") == "russian_essay_source"]
+            russian_short = [t for t in served_russian_tasks if t.get("type") == "short_answer"]
+            short_skills: dict[str, int] = {}
+            for t in russian_short:
+                short_skills[t.get("skill")] = short_skills.get(t.get("skill"), 0) + 1
             check(
                 "RUSSIAN CONTENT task details",
-                len(served_russian_tasks) == 8
+                len(served_russian_tasks) == 138
                 and len(russian_re27) == 8
-                and all(t.get("type") == "long_text" for t in served_russian_tasks)
+                and len(russian_short) == 130
+                and all(t.get("type") == "long_text" for t in russian_re27)
                 and all(t.get("sourceTextId") for t in russian_re27)
+                and all(not t.get("sourceTextId") for t in russian_short)
+                and set(short_skills) == {f"r{i:02d}" for i in range(1, 27)}
+                and all(v == 5 for v in short_skills.values())
                 and russian_tasks.get("visualAssets") == []
                 and isinstance(russian_tasks.get("visualAudit"), dict),
-                f"tasks={len(served_russian_tasks)} (re27={len(russian_re27)}), "
+                f"tasks={len(served_russian_tasks)} (re27={len(russian_re27)}, short={len(russian_short)}), "
                 f"visualAssets={len(russian_tasks.get('visualAssets') or [])}, "
                 f"visualAudit={type(russian_tasks.get('visualAudit')).__name__}",
             )
 
             russian_lessons = payloads[("/api/catalog-lessons", "russian")]
+            served_russian_lessons = russian_lessons.get("lessons") or []
             check(
-                "RUSSIAN CONTENT lesson details (no lessons yet)",
-                russian_lessons.get("lessons") == [],
-                f"lessons={len(russian_lessons.get('lessons') or [])}",
+                "RUSSIAN CONTENT lesson details (one lesson per test topic)",
+                len(served_russian_lessons) == 26
+                and {x.get("skill") for x in served_russian_lessons} == {f"r{i:02d}" for i in range(1, 27)}
+                and all(isinstance(x.get("steps"), list) and x.get("steps") for x in served_russian_lessons),
+                f"lessons={len(served_russian_lessons)}",
             )
 
             russian_boot = payloads[("/api/bootstrap", "russian")]
             russian_catalog = russian_boot.get("catalog") or {}
             russian_missions = russian_catalog.get("missions") or []
-            empty_catalog_keys = ("lessons", "bosses", "achievements", "goals", "diagnosticTasks")
+            empty_catalog_keys = ("bosses", "achievements", "goals", "diagnosticTasks")
             catalog_shape_ok = (
                 russian_catalog.get("forecast") is None
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
-                and len(russian_catalog.get("tasks") or []) == 8
+                and len(russian_catalog.get("tasks") or []) == 138
+                and len(russian_catalog.get("lessons") or []) == 26
+                and len(russian_catalog.get("skills") or []) == 27
                 and russian_missions == []
                 and isinstance(russian_catalog.get("daily"), dict)
                 and (russian_catalog.get("daily") or {}).get("target") == 0
@@ -269,8 +282,9 @@ def main() -> int:
             empty_daily = {"date": None, "solved": 0, "done": False, "taskIds": []}
             skill_stats = russian_state.get("skillStats") or {}
             zero_bucket = {"progress": 0, "solved": 0, "correct": 0, "timeSec": 0}
+            expected_russian_skills = {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}
             state_isolated = (
-                set(skill_stats) == {"russian_essay_source"}
+                set(skill_stats) == expected_russian_skills
                 and all(v == zero_bucket for v in skill_stats.values())
                 and russian_state.get("achievements") == {}
                 and russian_state.get("forecastHistory") == []
@@ -283,7 +297,7 @@ def main() -> int:
             check(
                 "RUSSIAN ISOLATION bootstrap state",
                 state_isolated,
-                "skillStats=zero bucket for russian_essay_source only, achievements={}, histories/attempts/errors=[], xp=0, daily=[]",
+                f"skillStats=zero buckets for 27 skills ({len(skill_stats)}), achievements={{}}, histories/attempts/errors=[], xp=0, daily=[]",
             )
 
             scanned_russian = list(scan_without_registry(russian_boot))
@@ -310,12 +324,15 @@ def main() -> int:
             )
             # Открытый предмет честно отдаёт тексты своих заданий: поля
             # text/answer/solution допустимы ТОЛЬКО внутри catalog.tasks, а
-            # поля steps (шаги уроков) не должны встречаться нигде.
-            content_fields_in_tasks = {p for p in forbidden_paths if p.startswith("$.catalog.tasks[")}
-            steps_paths = [p for p in forbidden_paths if p.endswith(".steps")]
+            # поля steps (шаги уроков) и всё их содержимое — ТОЛЬКО внутри
+            # catalog.lessons.
+            allowed_prefixes = ("$.catalog.tasks[", "$.catalog.lessons[")
+            stray_fields = sorted(
+                p for p in forbidden_paths if not p.startswith(allowed_prefixes)
+            )
             check(
                 "RUSSIAN CONTENT task content fields",
-                forbidden_paths == sorted(content_fields_in_tasks) and not steps_paths,
+                not stray_fields,
                 f"text/answer/solution/steps={forbidden_paths or 'none'}; registry excluded",
             )
 

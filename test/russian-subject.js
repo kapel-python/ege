@@ -1,5 +1,6 @@
-/* Client-side regression: an opened russian subject exposes its real topic
-   «Итоговое сочинение» with long-text practice and no lessons. */
+/* Client-side regression: an opened russian subject exposes its real topics:
+   test part №1–26 (short-answer practice + lessons) and «Сочинение по тексту»
+   (задание 27) with long-text practice. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_russian.json", "utf8"));
@@ -7,7 +8,7 @@ catalog.subject = "russian";
 catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
-  { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: false, practice: true, missions: true, path: true } },
+  { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: true, practice: true, missions: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -24,6 +25,9 @@ const check = (name, condition) => { console.log(`${condition ? "ok  " : "FAIL"}
 vm.runInContext(`
   globalThis.russianChecks = {
     topic: DataAPI.skills().find((item) => item.id === "russian_essay_source"),
+    skillIds: DataAPI.skills().map((item) => item.id),
+    testTopics: DataAPI.skills().filter((item) => item.id !== "russian_essay_source").length,
+    testTasks: DataAPI.tasks().filter((t) => t.type !== "long_text").length,
     skills: DataAPI.skills().length,
     sourceTasks: DataAPI.practiceTasksBySkill("russian_essay_source").length,
     sourceTasksHaveText: DataAPI.practiceTasksBySkill("russian_essay_source").every((t) => !!t.sourceTextId),
@@ -47,14 +51,15 @@ const result = sandbox.russianChecks;
 check("русский предмет зарегистрирован и открыт", result.locked === false && result.available === true);
 check("тема «Сочинение по тексту» доступна", !!result.topic && result.topic.id === "russian_essay_source" && result.topic.locked !== true);
 check("категория темы видна", !!result.category);
-check("практика есть, урока нет", result.content === true && result.tasks === 8 && result.practice === 8 && result.lessons === 0 && result.missions === 0 && result.diagnostics === 0);
-check("одна тема — работа с текстом, у всех заданий есть исходник",
-  result.skills === 1 && result.sourceTasks === 8 && result.sourceTasksHaveText === true);
+check("тестовая часть и сочинение: практика и уроки на месте",
+  result.content === true && result.tasks === 138 && result.practice === 138 && result.lessons === 26 && result.missions === 0 && result.diagnostics === 0);
+check("26 тем тестовой части по 5 заданий + сочинение с исходниками",
+  result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 8 && result.sourceTasksHaveText === true);
 check("нет daily/достижений для предмета без них", result.daily === 0 && result.achievements === 0);
 check("рекомендации предлагают реальную практику", Array.isArray(result.next) && result.next.length > 0);
 check("подсчёт слов совпадает с серверным алгоритмом", result.wordCount === 6);
 vm.runInContext(`applyOnboarding("russian", null, null, [], "Тест"); globalThis.russianState = { xp: Store.state.xp, solved: Store.state.totalSolved, stats: Store.state.skillStats, attempts: Store.state.taskAttempts, timeline: Store.state.timeline, daily: Store.state.daily, lessons: Store.state.completedLessons, missions: Store.state.missionsDone, achievements: Store.state.achievements, adjustments: Store.state.xpAdjustments };`, sandbox);
-check("онбординг не создаёт XP или фиктивную статистику", sandbox.russianState.xp === 0 && sandbox.russianState.solved === 0 && Object.keys(sandbox.russianState.stats).every((k) => k === "russian_essay_source"));
+check("онбординг не создаёт XP или фиктивную статистику", sandbox.russianState.xp === 0 && sandbox.russianState.solved === 0 && JSON.stringify(Object.keys(sandbox.russianState.stats).sort()) === JSON.stringify(result.skillIds.slice().sort()) && result.skillIds.includes("russian_essay_source"));
 check("профиль без событий: попыток/таймлайна/daily нет", sandbox.russianState.attempts.length === 0 && sandbox.russianState.timeline.length === 0 && sandbox.russianState.daily.taskIds.length === 0 && Object.keys(sandbox.russianState.lessons).length === 0 && Object.keys(sandbox.russianState.missions).length === 0 && Object.keys(sandbox.russianState.achievements).length === 0 && sandbox.russianState.adjustments.length === 0);
 /* Parity with the two published math subjects: a ready catalog keeps its
    per-skill zero buckets and can recommend real work; only the Russian

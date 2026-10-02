@@ -277,7 +277,7 @@ function buildSandbox(options) {
     subjects: [
       { id: "profile_math", title: "Профильная математика", status: "ready", features: { lessons: true, practice: true } },
       { id: "basic_math", title: "Базовая математика", status: "ready", features: { lessons: true, practice: true } },
-      { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: false, practice: true, missions: true, path: true } },
+      { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: true, practice: true, missions: true, path: true } },
     ],
   };
   vm.createContext(sandbox);

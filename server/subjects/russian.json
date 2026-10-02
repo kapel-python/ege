@@ -2,7 +2,7 @@
   "id": "russian",
   "title": "Русский язык",
   "short": "Русский",
-  "description": "Русский язык: работа с текстом (задание 27) — реальные тексты ЕГЭ и проверка сочинения по критериям ФИПИ.",
+  "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
   "status": "ready",
   "locked": false,
   "comingSoon": false,
@@ -11,11 +11,11 @@
   "catalogFile": "catalog_russian.json",
   "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
   "forecast": null,
-  "features": {"lessons": false, "practice": true, "forecast": false, "diagnostics": false, "missions": false, "bosses": false, "daily": false, "path": true},
+  "features": {"lessons": true, "practice": true, "forecast": false, "diagnostics": false, "missions": false, "bosses": false, "daily": false, "path": true},
   "metadata": {
     "availability": "ready",
-    "topic": "Сочинение по тексту",
-    "topicCount": 1
+    "topic": "Задания №1–26 и сочинение по тексту",
+    "topicCount": 27
   },
   "content": {
     "topics": {"source": "catalog", "keys": ["categories", "skills"]},

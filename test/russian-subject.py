@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Интеграционная регрессия предмета «Русский язык».
 
-Предмет открыт: тема «Итоговое сочинение» доступна для практики с реальными
-заданиями из официального банка ФИПИ, урока нет (practice available /
-lesson unavailable). Проверяются API, каталог, unlocked-состояние и изоляция
-состояния при переключении туда-обратно.
+Предмет открыт: полная программа ЕГЭ — задания №1–26 (короткий ответ,
+практика по 26 темам + уроки) и сочинение (задание 27) с реальными текстами.
+Проверяются API, каталог, unlocked-состояние и изоляция состояния при
+переключении туда-обратно.
 """
 from __future__ import annotations
 
@@ -75,20 +75,30 @@ def main():
             assert russian.get("locked") is False, russian
             assert set(russian.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}, russian
             assert russian["features"]["practice"] is True and russian["features"]["missions"] is False, russian
-            assert not any(russian["features"][k] for k in ("lessons", "forecast", "diagnostics", "bosses", "daily")), russian
+            assert russian["features"]["lessons"] is True, russian
+            assert not any(russian["features"][k] for k in ("forecast", "diagnostics", "bosses", "daily")), russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")
             assert status == 200, (status, boot)
             catalog, state = boot["catalog"], boot["state"]
             assert catalog["subject"] == rid and state["subject"] == rid
             tasks = catalog.get("tasks", [])
-            # Два вида практики: свободные темы (итоговое) и работа с текстом
-            # (задание 27, у каждого задания есть исходник).
+            # Два вида практики: тестовая часть (задания №1–26, короткий ответ)
+            # и работа с текстом (задание 27, у каждого задания есть исходник).
             source_tasks = [t for t in tasks if t.get("skill") == "russian_essay_source"]
             assert len(source_tasks) == 8, len(source_tasks)
-            assert len(tasks) == 8, "в предмете одна тема — работа с текстом"
-            assert all(t.get("type") == "long_text" for t in tasks), catalog
+            short_tasks = [t for t in tasks if t.get("type") == "short_answer"]
+            assert len(short_tasks) == 130, len(short_tasks)
+            assert len(tasks) == 138, "26 тем по 5 заданий + 8 сочинений"
+            assert all(t.get("type") == "long_text" for t in source_tasks), catalog
             assert all(t.get("sourceTextId") for t in source_tasks), "у задания 27 без исходника"
+            # Каждая из 26 тем тестовой части представлена ровно 5 заданиями.
+            per_skill = {}
+            for t in short_tasks:
+                per_skill.setdefault(t.get("skill"), 0)
+                per_skill[t.get("skill")] += 1
+            assert set(per_skill) == {f"r{i:02d}" for i in range(1, 27)}, sorted(per_skill)
+            assert all(v == 5 for v in per_skill.values()), per_skill
 
             # Исходники читаются сервером и содержат текст без разбора.
             status, source_detail = request(opener, base, f"/api/catalog-tasks?subject={rid}")
@@ -117,21 +127,28 @@ def main():
                 assert spoiler not in src["text"], spoiler
             status, no_source = request(opener, base, f"/api/essay-text?subject={rid}&id=nope")
             assert status == 404, (status, no_source)
-            assert catalog.get("lessons", []) == [], catalog
             missions = catalog.get("missions", [])
             assert missions == [], "миссий нет: практика идёт по теме"
             assert catalog.get("bosses", []) == [], catalog
             assert catalog.get("diagnosticTasks", []) == [], catalog
+            # Уроки: по одному на каждую тему №1–26.
+            lessons = catalog.get("lessons", [])
+            assert len(lessons) == 26, len(lessons)
+            assert {x.get("skill") for x in lessons} == {f"r{i:02d}" for i in range(1, 27)}, lessons
+            assert all(x.get("steps") for x in lessons), lessons
             topics = [x for x in catalog.get("skills", []) if x.get("id") == "russian_essay_source"]
             assert len(topics) == 1 and topics[0].get("ege") == "27", topics
+            test_topics = [x for x in catalog.get("skills", []) if x.get("id").startswith("r") and x.get("id") != "russian_essay_source"]
+            assert len(test_topics) == 26, len(test_topics)
+            assert len(catalog.get("skills", [])) == 27, len(catalog.get("skills", []))
             assert not topics[0].get("locked") and topics[0].get("status", "ready") == "ready", topics[0]
             assert not [x for x in catalog.get("skills", []) if x.get("id") == "russian_essay"], \
                 "свободное сочинение без исходника убрано"
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={rid}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 8, (status, len(task_details.get("tasks", [])))
+            assert status == 200 and len(task_details.get("tasks", [])) == 138, (status, len(task_details.get("tasks", [])))
             status, lessons = request(opener, base, f"/api/catalog-lessons?subject={rid}")
-            assert status == 200 and lessons.get("lessons") == [], (status, lessons)
+            assert status == 200 and len(lessons.get("lessons", [])) == 26, (status, lessons)
 
             # Переключение и запись в профиль не смешиваются с новым предметом.
             # Онбординг профиля пройден (заявка /api/profile/claim) — только
@@ -288,10 +305,10 @@ def main():
             public_russian = next((s for s in public.get("subjects", []) if s.get("id") == rid), None)
             assert public_russian, public
             public_counts = public_russian.get("counts", {})
-            assert public_counts.get("tasks") == 8, public_russian
-            assert public_counts.get("skills") == 1, public_russian
+            assert public_counts.get("tasks") == 138, public_russian
+            assert public_counts.get("skills") == 27, public_russian
             assert public_counts.get("missions") == 0, public_russian
-            assert public_counts.get("lessons") == 0 and public_counts.get("bosses") == 0, public_russian
+            assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 0, public_russian
 
             # Наследие старой системы сочинений (skill russian_essay, миссия
             # russian_essay_practice, задания re_1_*/re_2_*/re_3_*) остаётся в
