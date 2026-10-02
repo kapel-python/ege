@@ -76,3 +76,6 @@ Thumbs.db
 # Local one-off preview/agent scratch pages
 /agent-loader-preview.html
 /agent_preview.html
+
+# Raw content drafts (промежуточное сырьё от внешних агентов, в коммит не идёт)
+/draft/
