@@ -205,6 +205,9 @@ t("render уводит на выбор предмета пока флаг вис
   /if\s*\(pendingSubjectChoice/.test(src));
 t("перезагрузка посреди пикера восстанавливает флаг из sessionStorage",
   /sessionStorage\.getItem\("ege_login_subject_pending"\)/.test(src));
+t("восстановление флага пикера — по живой сессии, а не по registered",
+  /getItem\("ege_login_subject_pending"\)[^;]*&& Store\.accountId/.test(
+    src.replace(/\n/g, " ")));
 
 console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
 process.exit(fails ? 1 : 0);

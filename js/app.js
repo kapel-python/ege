@@ -8283,9 +8283,11 @@ function bootstrapApp() {
       stopBootMsgs();
       // Перезагрузка посреди пикера входа: выбор ещё не применён, сессия
       // авторизована — возвращаем экран выбора, а не угаданный предмет.
+      // Гейт — живая сессия (accountId): registered гаснет после отвязки
+      // единственного входа при живой сессии.
       try {
         if (sessionStorage.getItem("ege_login_subject_pending") === "1"
-            && Store.auth && Store.auth.registered) pendingSubjectChoice = true;
+            && Store.accountId) pendingSubjectChoice = true;
       } catch (_) {}
       // Возврат из внешнего входа: сервер редиректит на #/login?confirm=…
       // или #/login?error=…. Если человек оказался на другом разделе —
