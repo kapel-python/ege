@@ -141,5 +141,58 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
   t('esc is used in a data-id attribute', /data-id="\$\{esc\(/.test(result));
 }
 
+/* ---- 6. auth-срез нельзя терять при перезаписи ----
+   Живой баг: в профиле есть пересчёт по /api/auth/session, который
+   переписывал Store.auth парой {registered, email}. Флаги providers,
+   googleEnabled и hasPassword при этом исчезали, и кнопка «Войти через
+   Google» пропадала с экранов входа и регистрации — при том, что настройка
+   на сервере была в порядке. Присваивания многострочные, поэтому режем их
+   по «;», а не по строкам. */
+{
+  const state = fs.readFileSync('js/state.js', 'utf8');
+  const FIELDS = ['providers', 'googleEnabled', 'hasPassword'];
+  t('в Store.auth по умолчанию есть все признаки',
+    FIELDS.every((f) => state.includes(f + ':')));
+
+  const writes = (src, re) => {
+    const out = [];
+    for (const m of src.matchAll(re)) {
+      let i = m.index, depth = 0, seen = false;
+      for (; i < src.length; i++) {
+        const ch = src[i];
+        if (ch === '{') { depth++; seen = true; }
+        else if (ch === '}') { depth--; if (seen && depth === 0) { i++; break; } }
+      }
+      out.push(src.slice(m.index, i));
+    }
+    return out;
+  };
+  const appW = writes(app, /(?:Store|this)\.auth\s*=\s*\{/g);
+  t('в app.js один писатель Store.auth (пересчёт профиля)', appW.length === 1,
+    `найдено ${appW.length}`);
+  t('пересчёт профиля сохраняет остальные поля (...cur)',
+    !!appW[0] && /\.\.\.cur/.test(appW[0]), (appW[0] || '').slice(0, 60));
+  for (const f of FIELDS) {
+    t(`писатель в app.js не выбрасывает ${f}`,
+      !appW[0] || new RegExp(f).test(appW[0]) || /\.\.\.cur/.test(appW[0]));
+  }
+
+  const stateW = writes(state, /this\.auth\s*=\s*[\{a-z]/g);
+  t('в state.js два писателя auth-среза', stateW.length === 2, `найдено ${stateW.length}`);
+  for (const w of stateW) {
+    const keepsAll = FIELDS.every((f) => w.includes(f)) || /\.\.\.this\.auth/.test(w);
+    t(`писатель в state.js сохраняет все признаки: ${w.slice(0, 34)}…`, keepsAll);
+  }
+
+  // Кнопка входа обязана зависеть от googleEnabled, а не от registered:
+  // registered гаснет после отвязки единственного способа входа.
+  const signIn = block(app, 'function googleSignInHTML(');
+  t('кнопка «Войти через Google» рисуется по googleEnabled',
+    !!signIn && /Store\.auth\.googleEnabled/.test(signIn) && !/Store\.auth\.registered/.test(signIn));
+  const row = block(app, 'function googleRowHTML(');
+  t('блок в профиле показывается по наличию аккаунта, а не registered',
+    !!row && /Store\.accountId && auth\.googleEnabled/.test(row) && !/auth\.registered &&/.test(row));
+}
+
 console.log(fails ? fails + ' FAILURES' : 'ALL ROUTE-HARDENING OK');
 process.exit(fails ? 1 : 0);

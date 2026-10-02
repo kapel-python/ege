@@ -6517,7 +6517,14 @@ function revalidateProfileAuth() {
       }
       return;
     }
-    Store.auth = { registered: reg, email };
+    // Сохраняем ВСЕ поля auth-среза, а не только registered/email. Здесь
+    // раньше терялись providers/googleEnabled/hasPassword: срез
+    // переписывался попарой, и кнопка «Войти через Google» исчезала с
+    // экранов входа и регистрации после любого пересчёта профиля (например
+    // после смены аккаунта в соседней вкладке или выхода из аккаунта).
+    // Признак «вход настроен» задаёт сервер, и клиент не имеет права его
+    // выбрасывать вместе с несовпавшими полями.
+    Store.auth = { ...cur, registered: reg, email };
     if (session && typeof session.isAdmin === "boolean" && Store.isAdmin !== session.isAdmin) {
       Store.isAdmin = session.isAdmin;
       if (!session.isAdmin) { try { AdminInbox.reset(); } catch (_) {} }
