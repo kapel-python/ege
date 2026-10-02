@@ -907,29 +907,33 @@ function subCard(sub, payments) {
   const active = subIsActive(sub);
   const headSub = !sub || !sub.plan ? "бесплатный тариф"
     : active ? `Plus · до ${esc(fmtDate(sub.expiresAt))}` : `Plus · ${esc(subStatusText(sub))}`;
+  // Срок — одной полосой, а не двумя колонками: даты «02.10.2026, 22:19»
+  // в узкой колонке рвались посередине числа.
+  const range = active ? (() => {
+    const days = Math.round(((Number(sub.expiresAt) || 0) - (Number(sub.startedAt) || 0)) / 86400000);
+    return `<div class="a-sub-range"><span class="a-sub-range__k">Срок</span><span class="a-sub-range__v">${fmtDateTime(sub.startedAt)} → ${fmtDateTime(sub.expiresAt)}</span>${Number.isFinite(days) && days > 0 ? `<span class="a-sub-range__days">· ${days} ${plural(days, "день", "дня", "дней")}</span>` : ""}</div>`;
+  })() : "";
   const rows = active ? `
       <div class="a-kv">
         <div class="a-kv__item"><div class="a-kv__k">Статус</div><div class="a-kv__v" style="color:var(--success-ink);font-weight:600">${esc(subStatusText(sub))}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Период</div><div class="a-kv__v">${sub.period === "year" ? "год · 990 ₽" : "месяц · 99 ₽"}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Начало</div><div class="a-kv__v">${fmtDateTime(sub.startedAt)}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Окончание</div><div class="a-kv__v">${fmtDateTime(sub.expiresAt)}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
-      </div>` : `
+      </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
         ? `Была Plus, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт.`
         : "Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
+  // Платежи — стопкой строк, а не таблицей: таблица на телефоне уезжала
+  // за край карточки (горизонтальный скролл внутри — не чтение).
   const history = (payments && payments.length) ? `
       <div class="a-card__head" style="margin-top:18px"><span class="a-card__title">Платежи</span><span class="a-card__sub">последние ${payments.length}</span></div>
-      <div class="a-table-wrap" style="border:none"><table class="a-table">
-        <thead><tr><th>Когда</th><th>Период</th><th class="num">Сумма</th><th>Способ</th><th>Статус</th></tr></thead>
-        <tbody>${payments.map((pm) => `
-          <tr>
-            <td>${fmtDateTime(pm.paidAt || pm.createdAt)}</td>
-            <td>${pm.period === "year" ? "год" : "месяц"}</td>
-            <td class="num">${fmtMoney(pm.amountKopecks)}</td>
-            <td>${pm.provider === "manual" ? "вручную" : esc(pm.provider || "—")}</td>
-            <td>${subPayChip(pm.status)}</td>
-          </tr>`).join("")}</tbody></table></div>` : "";
+      <div class="a-paylist">${payments.map((pm) => `
+        <div class="a-payrow">
+          <div class="a-payrow__main">
+            <div class="a-payrow__t">Plus · ${pm.period === "year" ? "год" : "месяц"}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</div>
+          </div>
+          <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
+        </div>`).join("")}</div>` : "";
   const actions = active ? `
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
         <button class="btn btn--soft btn--sm" id="subGrantBtn">Продлить…</button>
@@ -2976,7 +2980,7 @@ function setDetailSlot(slot) {
 }
 
 function provKvHTML(label, value, mono) {
-  return `<div class="a-kv"><span>${esc(label)}</span><b${mono ? ' class="mono"' : ""}>${value}</b></div>`;
+  return `<div class="a-kvline"><span>${esc(label)}</span><b${mono ? ' class="mono"' : ""}>${value}</b></div>`;
 }
 
 function screenProviderPage(id) {

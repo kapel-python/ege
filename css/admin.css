@@ -315,10 +315,15 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-icon-btn svg { width: 15px; height: 15px; }
 .a-icon-btn--danger:hover { color: var(--danger); border-color: var(--danger); background: rgba(255, 107, 107, 0.08); }
 
-.a-kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 16px; }
+.a-kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 16px; }
 .a-kv__item { min-width: 0; }
 .a-kv__k { font-size: 11.5px; color: var(--muted); font-weight: 500; }
 .a-kv__v { font-size: 14.5px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+/* На телефоне — строго две колонки: авто-подбор при 150px давал бы то же,
+   но явно зафиксировать надёжнее, чем зависеть от ширины карточки. */
+@media (max-width: 640px) {
+  .a-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .a-skill-row { display: grid; grid-template-columns: minmax(120px, 1.4fr) minmax(80px, 1fr) 44px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .a-skill-row:last-child { border-bottom: none; }
@@ -679,14 +684,56 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-card--danger { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
 .a-actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
-.a-kv {
+/* Карточка подписки в профиле пользователя: срок одной строкой и платежи
+   стопкой вместо таблицы — на телефоне таблица уезжала за край карточки. */
+.a-sub-range {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 10px);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.a-sub-range__k { color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.a-sub-range__v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.a-sub-range__days { color: var(--muted); font-weight: 500; }
+.a-paylist { margin-top: 6px; }
+.a-payrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.a-payrow:last-child { border-bottom: 0; }
+.a-payrow__main { flex: 1; min-width: 0; }
+.a-payrow__t { font-size: 13.5px; font-weight: 600; }
+.a-payrow__d { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.a-payrow__r {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Строка «подпись слева — значение справа» для страниц провайдеров.
+   Отдельный класс, а не .a-kv: у .a-kv другая разметка (сетка из __item) и
+   общее имя уже ломало карточку пользователя — флекс перебивал сетку. */
+.a-kvline {
   display: flex; align-items: baseline; gap: 10px;
   padding: 7px 0; border-bottom: 1px dashed var(--border);
   font-size: 13px;
 }
-.a-kv:last-of-type { border-bottom: 0; }
-.a-kv > span { color: var(--muted); flex: 0 0 auto; }
-.a-kv > b { margin-left: auto; text-align: right; font-weight: 600; word-break: break-word; }
+.a-kvline:last-of-type { border-bottom: 0; }
+.a-kvline > span { color: var(--muted); flex: 0 0 auto; }
+.a-kvline > b { margin-left: auto; text-align: right; font-weight: 600; word-break: break-word; }
 
 .a-fold { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
 .a-fold > summary {
