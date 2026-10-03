@@ -3792,6 +3792,103 @@ def essay_status_map(conn: sqlite3.Connection, user_id: int | None, subject: str
     return out
 
 
+ESSAY_HISTORY_LIST_MAX = 100
+
+
+def essay_history_list(conn: sqlite3.Connection, user_id: int | None, subject: str,
+                       limit: int = ESSAY_HISTORY_LIST_MAX,
+                       offset: int = 0) -> dict:
+    """Вся история сочинений пользователя по предмету — для экрана
+    «Мои сочинения»: новые сверху, с баллами и оценками по критериям.
+
+    Лёгкий срез: без текста работы и без комментариев критериев (тяжёлые
+    поля подгружаются точечно через GET /api/essays?sid= при раскрытии
+    карточки). Только свои строки (user_id) и только своего предмета.
+    `hasEssayTasks` — есть ли в предмете задания-сочинения вообще: без
+    него клиент не отличит «ещё ничего не написано» от «писать нечего».
+    """
+    if user_id is None:
+        return {"ok": True, "subject": subject, "items": [], "total": 0,
+                "hasEssayTasks": False}
+    ensure_essay_schema(conn)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise ValueError("limit должен быть числом")
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        raise ValueError("offset должен быть числом")
+    if not 1 <= limit <= 200:
+        raise ValueError("limit должен быть 1..200")
+    if not 0 <= offset <= 1_000_000_000:
+        raise ValueError("offset вне диапазона")
+    has_essay = conn.execute(
+        "SELECT 1 FROM tasks t JOIN skills s ON s.id=t.skill_id"
+        " WHERE s.subject=? AND t.task_type='long_text' LIMIT 1",
+        (subject,)).fetchone() is not None
+    essay_skills = [r["skill_id"] for r in conn.execute(
+        "SELECT DISTINCT t.skill_id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+        " WHERE s.subject=? AND t.task_type='long_text' LIMIT 20",
+        (subject,)).fetchall()] if has_essay else []
+    rows = conn.execute(
+        "SELECT s.id, s.task_id, s.word_count, s.client_id, s.evaluation_status,"
+        " s.evaluation_result, s.created_at, s.evaluated_at,"
+        " t.topic AS task_topic, t.exam_number AS exam_number"
+        " FROM essay_submissions s LEFT JOIN tasks t ON t.id=s.task_id"
+        " WHERE s.user_id=? AND s.subject=? ORDER BY s.id DESC LIMIT ? OFFSET ?",
+        (user_id, subject, limit, offset)).fetchall()
+    total_row = conn.execute(
+        "SELECT COUNT(*) AS c FROM essay_submissions WHERE user_id=? AND subject=?",
+        (user_id, subject)).fetchone()
+    items = []
+    for row in rows:
+        total_score, max_score, verdict, criteria = None, None, "", []
+        raw = row["evaluation_result"] if "evaluation_result" in row.keys() else None
+        if raw:
+            try:
+                result = json.loads(raw)
+            except (ValueError, TypeError):
+                result = None
+            if isinstance(result, dict):
+                try:
+                    total_score = int(result.get("total_score"))
+                    max_score = int(result.get("max_score"))
+                except (TypeError, ValueError):
+                    total_score, max_score = None, None
+                verdict = str(result.get("short_verdict") or "")[:280]
+                seen = result.get("criteria")
+                if isinstance(seen, list):
+                    for item in seen:
+                        if not isinstance(item, dict) or not item.get("id"):
+                            continue
+                        try:
+                            score, maximum = int(item.get("score")), int(item.get("max_score"))
+                        except (TypeError, ValueError):
+                            continue
+                        criteria.append({"id": str(item.get("id")),
+                                         "score": score, "max": maximum})
+        items.append({
+            "submissionId": int(row["id"]),
+            "taskId": row["task_id"],
+            "taskTopic": row["task_topic"] if "task_topic" in row.keys() else None,
+            "examNumber": row["exam_number"] if "exam_number" in row.keys() else None,
+            "wordCount": int(row["word_count"] or 0),
+            "clientId": str(row["client_id"] or ""),
+            "status": str(row["evaluation_status"] or "submitted"),
+            "totalScore": total_score,
+            "maxScore": max_score,
+            "verdict": verdict,
+            "criteria": criteria,
+            "createdAt": timestamp_value(row["created_at"]),
+            "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
+        })
+    return {"ok": True, "subject": subject, "items": items,
+            "total": int(total_row["c"]) if total_row else 0,
+            "limit": limit, "offset": offset, "hasEssayTasks": has_essay,
+            "essaySkills": essay_skills}
+
+
 def essay_text_hash(text: str) -> str:
     """Хэш нормализованного текста — ключ связки submission ↔ проверка ИИ."""
     return hashlib.sha256(normalize_essay_text(text).encode("utf-8")).hexdigest()
@@ -12329,13 +12426,31 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         sid = 0
                     if (query.get("statuses", [None])[0] or "").strip() in ("1", "true"):
-                        if task_id or client_id or sid > 0:
-                            self.send_json({"error": "statuses не принимает sid, taskId или clientId"}, 400, token=token); return
+                        if task_id or client_id or sid > 0 or (query.get("history", [None])[0] or "").strip() in ("1", "true"):
+                            self.send_json({"error": "statuses не принимает sid, taskId, clientId или history"}, 400, token=token); return
                         self.send_json({"ok": True, "subject": eff,
                                         "statuses": essay_status_map(conn, user_id, eff)}, token=token)
                         return
+                    if (query.get("history", [None])[0] or "").strip() in ("1", "true"):
+                        # ?history=1 — вся история сочинений для экрана
+                        # «Мои сочинения»: новые сверху, с баллами (см.
+                        # essay_history_list). Со statuses не совмещается.
+                        if task_id or client_id or sid > 0 or (query.get("statuses", [None])[0] or "").strip():
+                            self.send_json({"error": "history не принимает sid, taskId, clientId или statuses"}, 400, token=token); return
+                        try:
+                            raw_limit = (query.get("limit", [None])[0] or "").strip()
+                            raw_offset = (query.get("offset", [None])[0] or "").strip()
+                            limit = int(raw_limit) if raw_limit else ESSAY_HISTORY_LIST_MAX
+                            offset = int(raw_offset) if raw_offset else 0
+                        except (TypeError, ValueError, AttributeError):
+                            self.send_json({"error": "Некорректные параметры пагинации"}, 400, token=token); return
+                        try:
+                            self.send_json(essay_history_list(conn, user_id, eff, limit, offset), token=token)
+                        except ValueError as exc:
+                            self.send_json({"error": str(exc)}, 400, token=token)
+                        return
                     if not task_id and not client_id and sid <= 0:
-                        self.send_json({"error": "Нужен sid, taskId, clientId или statuses=1"}, 400, token=token); return
+                        self.send_json({"error": "Нужен sid, taskId, clientId, statuses=1 или history=1"}, 400, token=token); return
                     if sid > 0 and not is_known_subject(req_subject):
                         # /essay/<sid>: предмет из пути не приходит — ищем по
                         # всем своим предметам, чужое всё равно не найдётся.

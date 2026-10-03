@@ -44,6 +44,7 @@ const ICONS = {
   desktop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
 };
 
 function icon(name) {
@@ -1348,6 +1349,7 @@ async function render() {
     errors: screenErrors,
     trials: screenTrials,
     stats: screenStats,
+    essays: screenEssays,
     ai: screenAgent,
     profile: screenProfile,
     login: screenLogin,
@@ -1393,7 +1395,7 @@ const ROUTE_TITLES = {
   dashboard: "Главная", path: "Путь", skill: "Тема", training: "Тренировка",
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
-  errors: "Ошибки", trials: "Испытания", stats: "Статистика", ai: "ИИ-наставник", profile: "Профиль",
+  errors: "Ошибки", trials: "Испытания", stats: "Статистика", essays: "Мои сочинения", ai: "ИИ-наставник", profile: "Профиль",
   login: "Вход", register: "Регистрация", subject: "Выбор предмета",
 };
 
@@ -1430,7 +1432,7 @@ function updateDocumentTitle(route) {
 const TOPIC_LOCKED_VALUES = new Set(["locked", "unavailable", "disabled", "hidden"]);
 const SUBJECT_CONTENT_ROUTES = new Set([
   "training", "session", "practice", "boss", "daily", "review", "lesson",
-  "errors", "trials", "stats",
+  "errors", "trials", "stats", "essays",
 ]);
 
 function asSafeArray(value) {
@@ -1803,6 +1805,11 @@ const SUBJECT_SECTION_COPY = {
     empty: "Графики активности и прогноза появятся после первых заданий.",
     help: "skills",
   },
+  essays: {
+    title: "Мои сочинения",
+    sub: "Все написанные сочинения: баллы, разборы и динамика.",
+    empty: "История сочинений появится после первой написанной работы.",
+  },
   // У по-настоящему пустого предмета (без единой темы) Path/skill тоже
   // должны выглядеть разделом, а не голой карточкой без заголовка.
   path: {
@@ -1902,7 +1909,7 @@ function screenSubjectUnavailable(root, locked = false, route = null) {
 // показываем заглушку «Материалы пока готовятся».
 const EMPTY_SUBJECT_ROUTES = new Set([
   "path", "skill", "training", "session", "practice", "boss", "daily",
-  "review", "lesson", "errors", "trials", "stats",
+  "review", "lesson", "errors", "trials", "stats", "essays",
 ]);
 
 function subjectSwitcherHTML() {
@@ -2091,7 +2098,7 @@ function screenEmptySubject(root, route = null) {
 function navRouteForRoute(route) {
   const mapped = route === "practice" ? "training"
     : route === "boss" || route === "daily" || route === "review" ? "trials"
-    : route === "skill" || route === "lesson" ? "path" : route;
+    : route === "skill" || route === "lesson" || route === "essays" ? "path" : route;
   // Прямая ссылка на закрытый контент не должна оставлять меню без активного
   // пункта. Если вычисленный пункт скрыт урезанным chrome (пустой предмет без
   // единой темы) — подсвечиваем карту тем. У locked-предмета с темами chrome
@@ -3022,8 +3029,14 @@ function screenPath(root) {
       <div class="tree-connector-v"></div>
       <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
     </div>
+    <div id="essayPathSlot"></div>
     ${lockedCount ? `<div class="path-locked-note">${icon("lock")} ${lockedTopicCountLabel(lockedCount)}: карта сохраняет её название, но не показывает несуществующие уроки и задания.</div>` : ""}`;
-  // Лимит ИИ-проверок здесь не гейтим: окно темы открывается всегда,
+  // Вход в историю сочинений — в самом конце Пути, рядом с заданием 27:
+  // есть ли сочинения в предмете, решает сервер (hasEssayTasks), поэтому
+  // новый предмет с long_text подхватится без правок. Нет сочинений —
+  // слота как не было (тихо, без сдвига вёрстки).
+  try { essayPathSlotLoad(); } catch (_) {}
+  // Лимит ИИ-проверок здесь не гейтим: окно темы открывается всегда, окно темы открывается всегда,
   // лимит решает только сервер при отправке (429 внутри практики и на
   // перепроверке — единая модалка openAiLimitModal).
 }
@@ -6361,6 +6374,418 @@ function forecastChart() {
     <text x="${X(points.length - 1)}" y="${Y(last.mid) - 10}" font-size="11" fill="var(--text-2)" text-anchor="end" class="mono">${last.low}–${last.high}</text>
     ${labels}
   </svg>`;
+}
+
+/* ============================================================
+   Screen: Мои сочинения — вся история + динамика
+   Вход — карточка в конце Пути (essayPathSlotLoad), сам экран —
+   роут #/essays. Данные — GET /api/essays?history=1: лёгкий срез без
+   текста и комментариев (тяжёлое догружается точечно по sid при
+   раскрытии карточки). Есть ли сочинения в предмете, говорит сервер
+   (hasEssayTasks) — новый предмет с long_text подхватится сам.
+   ============================================================ */
+
+const EssayHistory = { cache: null, subject: "", at: 0, promise: null };
+const ESSAY_HISTORY_FRESH_MS = 30000;
+const EssayDetail = new Map();
+
+async function essayHistoryFetch(force) {
+  const subject = (typeof Store !== "undefined" && Store.subject) || "russian";
+  if (!force && EssayHistory.cache && EssayHistory.subject === subject
+      && (Date.now() - EssayHistory.at) < ESSAY_HISTORY_FRESH_MS) {
+    return EssayHistory.cache;
+  }
+  if (!force && EssayHistory.promise && EssayHistory.subject === subject) {
+    return EssayHistory.promise;
+  }
+  EssayHistory.subject = subject;
+  const run = (async () => {
+    const res = await fetch(`/api/essays?history=1&limit=100&subject=${encodeURIComponent(subject)}`, {
+      headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error((data && data.error) || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const snap = {
+      items: Array.isArray(data.items) ? data.items : [],
+      total: Number(data.total) || 0,
+      hasEssayTasks: !!data.hasEssayTasks,
+      essaySkills: Array.isArray(data.essaySkills) ? data.essaySkills.filter((s) => typeof s === "string" && s) : [],
+      subject: data.subject || subject,
+    };
+    EssayHistory.cache = snap;
+    EssayHistory.at = Date.now();
+    return snap;
+  })();
+  EssayHistory.promise = run;
+  try {
+    return await run;
+  } finally {
+    if (EssayHistory.promise === run) EssayHistory.promise = null;
+  }
+}
+
+function essayReadyItems(snap) {
+  return (snap.items || []).filter((it) => it && it.status === "ready" && Number.isFinite(Number(it.totalScore)));
+}
+
+function essayScoreBand(score) {
+  const v = Number(score);
+  if (!Number.isFinite(v)) return "none";
+  if (v >= 17) return "good";
+  if (v >= 10) return "mid";
+  return "low";
+}
+
+function essayAvg1(values) {
+  if (!values.length) return null;
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+}
+
+function essayFmtDate(value) {
+  const t = Number(value);
+  if (!Number.isFinite(t) || t <= 0) return "";
+  try {
+    return new Date(t).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  } catch (_) {
+    return "";
+  }
+}
+
+function essayItemTitle(it) {
+  const exam = String(it.examNumber || "").trim();
+  if (exam) return `Задание ${exam}`;
+  const topic = String(it.taskTopic || "").trim();
+  if (topic) return topic;
+  return "Сочинение по тексту";
+}
+
+/* Карточка-вход в самом конце Пути. Нет сочинений в предмете, гость
+   или офлайн — слота как не было: Путь работает как раньше. */
+async function essayPathSlotLoad() {
+  const slot = document.getElementById("essayPathSlot");
+  if (!slot || slot.dataset.done) return;
+  let snap = null;
+  try {
+    snap = await essayHistoryFetch(false);
+  } catch (_) {
+    return;
+  }
+  const live = document.getElementById("essayPathSlot");
+  if (!live || live.dataset.done || !snap || !snap.hasEssayTasks) return;
+  try {
+    if ((Store.subject || "") !== (snap.subject || Store.subject)) return;
+  } catch (_) {}
+  live.dataset.done = "1";
+  const ready = essayReadyItems(snap);
+  const avg = essayAvg1(ready.map((it) => Number(it.totalScore)));
+  const sub = snap.total === 0
+    ? "Пока пусто — напиши первое, и здесь появится динамика баллов"
+    : `${snap.total} ${plural(snap.total, "сочинение", "сочинения", "сочинений")}`
+      + (avg != null ? ` · средний балл ${avg}` : "");
+  live.innerHTML = `
+    <div class="card essay-path-card" onclick="go('essays')" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('essays')}"
+      aria-label="Открыть историю сочинений">
+      <div class="essay-path-card__icon" aria-hidden="true">${icon("pen")}</div>
+      <div class="essay-path-card__body">
+        <div class="essay-path-card__title">Мои сочинения</div>
+        <div class="essay-path-card__sub">${esc(sub)}</div>
+      </div>
+      <div class="essay-path-card__go" aria-hidden="true">${icon("arrow")}</div>
+    </div>`;
+}
+
+function startFirstEssay() {
+  const snap = EssayHistory.cache;
+  const skill = snap && snap.essaySkills && snap.essaySkills[0];
+  if (!skill) { go("training"); return; }
+  try {
+    const p = startEssayPractice(skill);
+    if (p && typeof p.catch === "function") p.catch(() => go("training"));
+  } catch (_) {
+    go("training");
+  }
+}
+
+async function screenEssays(root) {
+  if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "essays");
+  root.innerHTML = `
+    <div class="page-head">
+      <div class="page-title">Мои сочинения</div>
+      <div class="page-sub">Все твои работы: баллы, разборы и динамика.</div>
+    </div>
+    <div id="essaysBody">${loaderHTML("Собираем твою историю…")}</div>`;
+  let snap;
+  try {
+    snap = await essayHistoryFetch(true);
+  } catch (err) {
+    if (currentRoute() !== "essays") return;
+    const body = document.getElementById("essaysBody");
+    if (!body) return;
+    body.innerHTML = `
+      <div class="card empty">Не удалось загрузить историю сочинений.<br>
+        <button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button>
+      </div>`;
+    return;
+  }
+  if (currentRoute() !== "essays") return;
+  const body = document.getElementById("essaysBody");
+  if (!body) return;
+  body.innerHTML = essaysBodyHTML(snap);
+}
+
+function essaysBodyHTML(snap) {
+  if (!snap.hasEssayTasks) {
+    return `
+      <div class="card empty">В этом предмете сочинений нет — писать и разбирать пока нечего.
+        <div style="margin-top:12px"><button class="btn btn--ghost btn--sm" onclick="go('path')">К карте тем</button></div>
+      </div>`;
+  }
+  if (!snap.total) {
+    const canStart = snap.essaySkills.length > 0;
+    return `
+      <div class="card essays-empty">
+        <div class="essays-empty__icon" aria-hidden="true">${icon("pen")}</div>
+        <div class="essays-empty__title">Ты ещё не написал ни одного сочинения</div>
+        <div class="essays-empty__sub">Напиши первое — после проверки оно появится здесь, а со второго заработает график динамики.</div>
+        <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          ${canStart ? `<button class="btn btn--primary" onclick="startFirstEssay()">Написать первое →</button>` : ""}
+          <button class="btn btn--ghost" onclick="go('path')">К карте тем</button>
+        </div>
+      </div>`;
+  }
+  const ready = essayReadyItems(snap);
+  const scores = ready.map((it) => Number(it.totalScore));
+  const avg = essayAvg1(scores);
+  const best = scores.length ? Math.max(...scores) : null;
+  const last = ready.length ? ready[0] : null;
+  const stats = `
+    <div class="grid grid--4" style="margin-top:18px">
+      <div class="card"><div class="stat-num mono">${snap.total}</div><div class="stat-label">написано</div></div>
+      <div class="card"><div class="stat-num mono">${ready.length}</div><div class="stat-label">проверено</div></div>
+      <div class="card"><div class="stat-num mono">${avg != null ? avg : "—"}</div><div class="stat-label">средний балл</div></div>
+      <div class="card"><div class="stat-num mono">${best != null ? `${best} / 22` : "—"}</div><div class="stat-label">лучший результат</div></div>
+    </div>`;
+  const dynamics = `
+    <div class="card chart-box" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <div style="font-weight:650">Динамика баллов</div>
+        ${essayDeltaChip(ready)}
+      </div>
+      ${essayDynamicsSVG(ready)}
+      <div class="chart-legend"><span><i style="background:var(--accent)"></i>итог проверки · шкала 0–22</span></div>
+    </div>`;
+  const criteria = essayCriteriaHTML(ready);
+  const items = snap.items.map((it, i) => essayItemHTML(it, snap.total - i)).join("");
+  const tail = snap.total > snap.items.length
+    ? `<div class="stat-label" style="margin-top:12px;text-align:center">Показаны последние ${snap.items.length} из ${snap.total} — старые работы уже в архиве.</div>`
+    : "";
+  return `${stats}${dynamics}${criteria}
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin:20px 0 12px;gap:10px;flex-wrap:wrap">
+      <div style="font-weight:650">Все работы · ${snap.total}</div>
+      ${last && last.submissionId ? `<a class="btn btn--ghost btn--sm" href="/essay/${Number(last.submissionId)}">Последний разбор →</a>` : ""}
+    </div>
+    <div class="essays-list">${items}</div>${tail}`;
+}
+
+function essayDeltaChip(readyAscNewFirst) {
+  if (readyAscNewFirst.length < 2) return "";
+  const first = Number(readyAscNewFirst[readyAscNewFirst.length - 1].totalScore);
+  const lastScore = Number(readyAscNewFirst[0].totalScore);
+  if (!Number.isFinite(first) || !Number.isFinite(lastScore)) return "";
+  const d = Math.round((lastScore - first) * 10) / 10;
+  if (d === 0) return `<span class="chip">без изменений с первой работы</span>`;
+  const cls = d > 0 ? "chip--success" : "chip--danger";
+  const sign = d > 0 ? "+" : "";
+  return `<span class="chip ${cls} mono">${sign}${d} с первой работы</span>`;
+}
+
+/* Прямая-линия динамики: шкала фиксирована 0–22, чтобы рост было видно
+   честно (без растягивания мелочей). Точек мало — подписываем первую
+   и последнюю, остальные видны по наведению. */
+function essayDynamicsSVG(readyNewFirst) {
+  const ready = readyNewFirst.slice().reverse();
+  if (ready.length < 2) {
+    return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">График оживёт со второй проверенной работой: одна точка — это пока факт, а не динамика.</div>`;
+  }
+  const W = 560, H = 190, padL = 30, padR = 16, padT = 16, padB = 24;
+  const X = (i) => padL + (ready.length === 1 ? 0.5 : i / (ready.length - 1)) * (W - padL - padR);
+  const Y = (v) => padT + (1 - Math.max(0, Math.min(22, v)) / 22) * (H - padT - padB);
+  const line = ready.map((it, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(Number(it.totalScore)).toFixed(1)}`).join(" ");
+  const area = `${line} L${X(ready.length - 1).toFixed(1)},${(H - padB).toFixed(1)} L${X(0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
+  const grid = [0, 11, 22].map((g) => `
+    <line x1="${padL}" y1="${Y(g).toFixed(1)}" x2="${W - padR}" y2="${Y(g).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+    <text x="${padL - 6}" y="${(Y(g) + 4).toFixed(1)}" font-size="10" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
+  const dots = ready.map((it, i) => {
+    const v = Number(it.totalScore);
+    const tip = `${essayFmtDate(it.createdAt) || "работа"}: ${v} из 22`;
+    const lastPt = i === ready.length - 1;
+    return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${lastPt ? 5 : 3.5}" fill="${lastPt ? "var(--accent)" : "var(--surface, #fff)"}" stroke="var(--accent)" stroke-width="2.5"><title>${esc(tip)}</title></circle>`;
+  }).join("");
+  const first = ready[0], last = ready[ready.length - 1];
+  const ends = `
+    <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 10).toFixed(1)}" font-size="11" fill="var(--muted)" text-anchor="start" class="mono">${Number(first.totalScore)}</text>
+    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 10).toFixed(1)}" font-size="12" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono">${Number(last.totalScore)} / 22</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика баллов за сочинения">
+    <defs><linearGradient id="essayDyn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="rgba(2,119,182,0.25)"/><stop offset="1" stop-color="rgba(2,119,182,0)"/>
+    </linearGradient></defs>
+    ${grid}<path d="${area}" fill="url(#essayDyn)"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${dots}${ends}
+  </svg>`;
+}
+
+/* Среднее по критериям: где системно теряются баллы. Считается только
+   по проверенным работам; критерия нет в выдаче — его не было в проверке. */
+function essayCriteriaHTML(ready) {
+  const sums = new Map();
+  for (const it of ready) {
+    for (const c of (it.criteria || [])) {
+      if (!c || !c.id || !Number.isFinite(Number(c.score)) || !Number.isFinite(Number(c.max)) || Number(c.max) <= 0) continue;
+      const cur = sums.get(c.id) || { sum: 0, n: 0, max: Number(c.max) };
+      cur.sum += Number(c.score);
+      cur.n += 1;
+      cur.max = Number(c.max);
+      sums.set(c.id, cur);
+    }
+  }
+  if (!sums.size) return "";
+  const order = [...sums.keys()].sort();
+  const rows = order.map((id) => {
+    const cur = sums.get(id);
+    const avg = cur.sum / cur.n;
+    const pct = Math.max(0, Math.min(100, (avg / cur.max) * 100));
+    const weak = pct < 50;
+    return `<div class="essay-k">
+      <div class="essay-k__head"><span class="mono">${esc(id)}</span><span class="mono" style="color:var(--muted)">${(Math.round(avg * 10) / 10)} / ${cur.max}</span></div>
+      <div class="essay-k__bar${weak ? " essay-k__bar--weak" : ""}"><i style="width:${Math.round(pct)}%"></i></div>
+    </div>`;
+  }).join("");
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="font-weight:650">Среднее по критериям</div>
+      <div class="stat-label" style="margin:4px 0 12px">Где баллы теряются чаще всего — туда и целимся дальше.</div>
+      <div class="essay-ks">${rows}</div>
+    </div>`;
+}
+
+function essayStatusChip(status) {
+  if (status === "ready") return `<span class="chip chip--success">проверено</span>`;
+  if (status === "failed") return `<span class="chip chip--danger">проверка не удалась</span>`;
+  return `<span class="chip">без проверки</span>`;
+}
+
+function essayItemHTML(it, num) {
+  const sid = Number(it.submissionId);
+  const score = Number(it.totalScore);
+  const hasScore = it.status === "ready" && Number.isFinite(score);
+  const band = essayScoreBand(hasScore ? score : NaN);
+  const date = essayFmtDate(it.createdAt);
+  const sub = [date, it.wordCount ? `${it.wordCount} ${essayWordsLabel(it.wordCount)}` : ""].filter(Boolean).join(" · ");
+  const verdict = String(it.verdict || "").trim();
+  return `
+  <article class="card essay-item">
+    <div class="essay-item__head">
+      <div class="essay-item__score essay-item__score--${band}">
+        <span class="essay-item__num mono">${hasScore ? score : "–"}</span><span class="essay-item__den">/ 22</span>
+      </div>
+      <div class="essay-item__main">
+        <div class="essay-item__title">Сочинение №${num} · ${esc(essayItemTitle(it))}</div>
+        <div class="essay-item__sub">${esc(sub || "дата неизвестна")}</div>
+      </div>
+      ${essayStatusChip(it.status)}
+    </div>
+    ${verdict && hasScore ? `<div class="essay-item__verdict">${esc(verdict.length > 220 ? verdict.slice(0, 220) + "…" : verdict)}</div>` : ""}
+    <div class="essay-item__foot">
+      <button class="btn btn--ghost btn--sm" type="button" onclick="toggleEssayItem(${sid}, this)" aria-expanded="false">Подробнее</button>
+      ${hasScore && Number.isFinite(sid) ? `<a class="btn btn--primary btn--sm" href="/essay/${sid}">Разбор →</a>` : ""}
+    </div>
+    <div class="essay-item__detail" data-sid="${Number.isFinite(sid) ? sid : 0}" hidden></div>
+  </article>`;
+}
+
+/* Раскрытие карточки: текст + все критерии с комментариями + что
+   улучшить. Тяжёлый submission читается один раз и кэшируется. */
+async function toggleEssayItem(sid, btn) {
+  sid = Number(sid);
+  if (!Number.isFinite(sid) || sid <= 0) return;
+  const box = document.querySelector(`.essay-item__detail[data-sid="${sid}"]`);
+  if (!box) return;
+  const open = box.hidden;
+  if (!open) {
+    box.hidden = true;
+    if (btn) { btn.textContent = "Подробнее"; btn.setAttribute("aria-expanded", "false"); }
+    return;
+  }
+  box.hidden = false;
+  if (btn) { btn.setAttribute("aria-expanded", "true"); }
+  if (box.dataset.loaded) {
+    if (btn) btn.textContent = "Скрыть";
+    return;
+  }
+  if (btn) btn.textContent = "Загружаем…";
+  try {
+    const subject = (typeof Store !== "undefined" && Store.subject) || "russian";
+    let sub = EssayDetail.get(sid);
+    if (!sub) {
+      const res = await fetch(`/api/essays?sid=${sid}&subject=${encodeURIComponent(subject)}`, {
+        headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.submission) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      sub = data.submission;
+      EssayDetail.set(sid, sub);
+    }
+    const live = document.querySelector(`.essay-item__detail[data-sid="${sid}"]`);
+    if (!live) return;
+    live.innerHTML = essayDetailHTML(sub);
+    live.dataset.loaded = "1";
+    if (btn) btn.textContent = "Скрыть";
+  } catch (_) {
+    const live = document.querySelector(`.essay-item__detail[data-sid="${sid}"]`);
+    if (live) live.innerHTML = `<div class="empty">Не удалось загрузить разбор. Проверь соединение и попробуй ещё раз.</div>`;
+    if (btn) btn.textContent = "Подробнее";
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    if (document.querySelector(`.essay-item__detail[data-sid="${sid}"]`)) {
+      document.querySelector(`.essay-item__detail[data-sid="${sid}"]`).hidden = true;
+    }
+  }
+}
+
+function essayDetailHTML(sub) {
+  const result = (sub && sub.result) || {};
+  const status = String((sub && sub.status) || "");
+  const criteria = Array.isArray(result.criteria) ? result.criteria : [];
+  const improve = Array.isArray(result.what_to_improve) ? result.what_to_improve.filter((x) => String(x || "").trim()) : [];
+  const verdict = String(result.short_verdict || "").trim();
+  const reco = String(result.recommendation || "").trim();
+  const text = String((sub && sub.text) || "").trim();
+  const crit = criteria.map((c) => {
+    const id = String(c.id || "");
+    const name = String(c.name || id).trim();
+    const score = Number(c.score), max = Number(c.max_score);
+    const pct = Number.isFinite(score) && Number.isFinite(max) && max > 0
+      ? Math.max(0, Math.min(100, (score / max) * 100)) : 0;
+    const comment = String(c.comment || "").trim();
+    return `<div class="essay-crit">
+      <div class="essay-crit__head"><b>${esc(name || id)}</b><span class="mono">${Number.isFinite(score) ? score : "–"} / ${Number.isFinite(max) ? max : "–"}</span></div>
+      <div class="essay-crit__bar"><i style="width:${Math.round(pct)}%"></i></div>
+      ${comment ? `<p class="essay-crit__comment">${esc(comment)}</p>` : ""}
+    </div>`;
+  }).join("");
+  return `
+    ${verdict ? `<p class="essay-detail__verdict">${esc(verdict)}</p>` : ""}
+    ${crit ? `<div class="essay-detail__crits">${crit}</div>` : status === "ready"
+      ? `<div class="empty">Разбор по критериям недоступен для этой работы.</div>`
+      : `<div class="empty">Проверки по этой работе пока нет — разбор появится здесь, как только проверка завершится.</div>`}
+    ${improve.length ? `<div class="essay-detail__label">Что улучшить</div><ul class="essay-detail__list">${improve.map((x) => `<li>${esc(String(x))}</li>`).join("")}</ul>` : ""}
+    ${reco ? `<div class="essay-detail__label">Следующий шаг</div><p class="essay-detail__reco">${esc(reco)}</p>` : ""}
+    ${text ? `<details class="essay-detail__text"><summary>Мой текст (${sub.wordCount || text.split(/\s+/).filter(Boolean).length} ${essayWordsLabel(sub.wordCount || 0)})</summary><div class="essay-detail__body">${esc(text)}</div></details>` : ""}`;
 }
 
 /* ============================================================
