@@ -249,6 +249,72 @@
   .recheck-load-sub { text-align: center; font-size: 13px; color: var(--text-soft); margin: 8px 0 0; }
   .mono { font-variant-numeric: tabular-nums; font-weight: 800; }
 
+  /* --- поделиться результатом (только ege-result) ---
+     Кнопка второстепенная (ghost), а не вторая синяя/фиолетовая: сверху в
+     шапке уже стоит синяя «← К практике», а рядом — фиолетовая
+     «Перепроверить». Решение о шаринге приходит ПОСЛЕ прочтения результата,
+     поэтому кнопка живёт внизу, под перепроверкой, и не спорит ни с кем. */
+  .share-wrap { margin: 14px 0 0; text-align: center; }
+  .share-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 20px;
+    font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
+    transition: border-color .15s ease, transform .1s ease, background .2s ease;
+  }
+  .share-btn:hover { border-color: var(--purple-border); }
+  .share-btn:active { transform: scale(.98); }
+  .share-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .share-btn:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+  .share-btn svg { width: 16px; height: 16px; flex: none; }
+  .share-public {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--purple-soft); border: 1px solid var(--purple-border);
+    border-radius: 14px; padding: 12px 14px; margin-bottom: 14px;
+    font-size: 13.5px; line-height: 1.55; color: var(--text);
+  }
+  .share-public svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--purple); }
+  .share-public b { font-weight: 800; }
+  .share-public a { font-weight: 800; color: var(--purple); }
+  /* --- модалка шаринга: поле ссылки + опасная зона ---
+     Та же .dlg-система, что у перепроверки. Крестика и закрытия по фону/
+     Esc здесь НЕТ осознанно: ссылка остаётся в открытом доступе, и закрыть
+     окно можно только явной кнопкой «Готово» — иначе её легко потерять,
+     а доступ останется открытым. */
+  .share-link-box { display: flex; gap: 8px; margin-top: 14px; }
+  .share-link-input {
+    flex: 1; min-width: 0; padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .share-link-input:focus { outline: 2px solid var(--purple); outline-offset: 1px; border-color: var(--purple-border); }
+  .share-copy-btn {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    background: var(--purple); color: #fff; border: none; border-radius: 12px;
+    padding: 10px 16px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+  }
+  .share-copy-btn:active { transform: scale(.98); }
+  .share-copy-btn svg { width: 15px; height: 15px; }
+  .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
+  .share-danger { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px; }
+  .share-danger-btn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font: inherit; font-size: 13.5px; font-weight: 700; color: var(--red);
+  }
+  .share-danger-btn:hover { text-decoration: underline; }
+  .share-danger-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); }
+  .share-confirm-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .share-revoke-btn {
+    background: var(--red); color: #fff; border: none; border-radius: 12px;
+    padding: 9px 16px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+  }
+  .share-revoke-btn:disabled { opacity: .5; cursor: not-allowed; }
+  @media (max-width: 480px) {
+    .share-link-box { flex-direction: column; }
+    .share-copy-btn { justify-content: center; }
+  }
+
   /* --- было → стало (история перепроверок, только ege-result) ---
      Тот же язык, что у остальной страницы: .card, .pill, .crit-dot,
      табличные цифры. Переключение темы — через CSS-переменные, отдельных
@@ -390,6 +456,12 @@
 
   <!-- Готовый результат -->
   <div id="resultState" hidden aria-live="polite">
+    <!-- Публичный просмотр (/s/<token>): виден всем без входа, действий
+         владельца нет — только пометка, что это копия по ссылке. -->
+    <div class="share-public" id="sharePublicBanner" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>
+      <span><b>Публичная ссылка.</b> Этот результат открыли по ссылке — имени и аккаунта автора здесь нет. Хочешь так же? <a href="/dashboard">Проверь своё сочинение →</a></span>
+    </div>
     <div class="top-row">
       <div class="card score-tint rv-scale" id="scoreCard" style="--d:0ms">
         <p class="stat-label">Общий результат</p>
@@ -437,9 +509,21 @@
          (подтверждение, загрузка, лимит, ошибка) — единая .dlg-модалка,
          отдельных блоков нет. Кнопка без .rv: она должна быть видна сразу
          после готового результата, а не ждать скролла reveal-анимации. -->
-    <div class="recheck-wrap">
+    <div class="recheck-wrap" id="recheckWrap">
       <button class="retry-btn" id="recheckBtn" type="button">Перепроверить сочинение</button>
       <p class="recheck-meta">Не согласен с оценкой? ИИ проверит работу ещё раз — это потратит 1 проверку из лимита.</p>
+    </div>
+
+    <!-- Поделиться: второстепенная кнопка под перепроверкой (см. CSS —
+         почему не справа от таблетки и не синяя). Текст зависит от
+         состояния: ссылки нет — «Поделиться результатом», есть —
+         «Моя ссылка». Гостям и публичным зрителям не показывается. -->
+    <div class="share-wrap" id="shareWrap" hidden>
+      <button class="share-btn" id="shareBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>
+        <span id="shareBtnLabel">Поделиться результатом</span>
+      </button>
+      <p class="recheck-meta" id="shareMeta">Откроется ссылка, которую можно отправить кому угодно.</p>
     </div>
   </div>
 
@@ -768,6 +852,16 @@ function render(data) {
   // переживает перезагрузку. Нет прошлого — контейнер остаётся пустым.
   renderDynHistory(document.getElementById("dynContainer"), data.previous, data.checkCount, data);
   showResult();
+  if (shareState.mode === "shared") {
+    // Публичный зритель: чужих действий нет — ни перепроверки за чужой
+    // лимит, ни шаринга чужой работы. Только пометка-копия сверху.
+    const rw = document.getElementById('recheckWrap');
+    const sw = document.getElementById('shareWrap');
+    const banner = document.getElementById('sharePublicBanner');
+    if (rw) rw.hidden = true;
+    if (sw) sw.hidden = true;
+    if (banner) banner.hidden = false;
+  }
   observeReveals(resultEl);
 }
 
@@ -882,26 +976,94 @@ document.getElementById("aiModelName").addEventListener("click", openModelInfo);
 // схему выше серверной функцией essay_result_view). Никаких mock-данных:
 // без готового результата — честное состояние ошибки.
 // Точный submission — по clientId; fallback — последний по taskId.
+// Состояние шаринга страницы: приватный контекст владельца (sid/pub)
+// и публичный токен. Токен знает только владелец из ответа сервера;
+// публичный маршрут его никому не отдаёт, кроме ссылки целиком.
+const shareState = {
+  mode: "owner",       // "owner" | "shared"
+  shareToken: "",      // чей-то /s/<token> из пути (режим shared)
+  token: "",           // публичный токен ЭТОГО сочинения (владелец)
+  publicId: "",        // приватный 10-значный id сочинения
+  busy: false,
+};
+
 function resultParams() {
   const q = new URLSearchParams(location.search);
-  // Красивая ссылка /essay/<sid>: sid из пути, subject не нужен — сервер
-  // найдёт submission по всем своим предметам. Старые ссылки с ?subject=
-  // и ?clientId/?taskId работают как раньше.
-  const m = location.pathname.match(/^\/essay\/(\d+)/);
+  // Публичная ссылка /s/<token>: входа не требует, грузится через
+  // GET /api/shared/essay?token=. Токен — 10 знаков из того же алфавита,
+  // что приватный public_id (см. сервер: is_essay_share_token).
+  const ms = location.pathname.match(/^\/s\/([A-Za-z0-9]{10})\/?$/);
+  if (ms) return { shared: true, shareToken: ms[1] };
+  const qs = (q.get('share') || q.get('token') || '').trim();
+  if (qs && /^[A-Za-z0-9]{10}$/.test(qs) && !/^\d+$/.test(qs)) {
+    return { shared: true, shareToken: qs };
+  }
+  // Красивая ссылка /essay/<sid|public_id>: число — легаси sid, 10 знаков —
+  // приватный public_id владельца. subject не нужен — сервер найдёт
+  // submission по всем своим предметам. Старые ссылки с ?subject=
+  // и ?clientId/?taskId/?sid= работают как раньше.
+  const m = location.pathname.match(/^\/essay\/([^\/]+)\/?$/);
+  let sid = (q.get('sid') || '').trim();
+  let pub = (q.get('pub') || q.get('publicId') || '').trim();
+  if (m && m[1]) {
+    const ref = decodeURIComponent(m[1]);
+    if (/^\d+$/.test(ref)) { if (!sid) sid = ref; }
+    else if (/^[A-Za-z0-9]{10}$/.test(ref) && !/^\d+$/.test(ref)) { if (!pub) pub = ref; }
+  }
   return {
     subject: (q.get('subject') || '').trim(),
-    sid: (q.get('sid') || '').trim() || (m ? m[1] : ''),
+    sid, pub,
     clientId: (q.get('clientId') || '').trim(),
     taskId: (q.get('taskId') || '').trim(),
   };
 }
 
+// Публичный fetcher (/s/<token>): входа нет, перепроверки и шаринга нет —
+// только готовый отчёт. Текст работы показываем: им делятся осознанно, а
+// без него цитаты критериев висят в воздухе. Личного (user_id, clientId,
+// числовой submissionId) сервер не отдаёт вовсе.
+async function fetchShared() {
+  const p = resultParams();
+  const token = (p && p.shareToken) || "";
+  if (!token) throw kinded("noid");
+  let res;
+  try {
+    res = await fetch('/api/shared/essay?token=' + encodeURIComponent(token),
+      { signal: AbortSignal.timeout(15000) });
+  } catch (err) {
+    throw kinded("offline");
+  }
+  if (res.status === 404) throw kinded("missing");
+  if (!res.ok) throw kinded("server");
+  let body;
+  try {
+    body = await res.json();
+  } catch (err) {
+    throw kinded("corrupt");
+  }
+  const sub = body && body.submission;
+  const view = sub && sub.view;
+  if (!view) throw kinded("pending");
+  try {
+    validate(view);
+  } catch (err) {
+    throw kinded("corrupt");
+  }
+  shareState.mode = "shared";
+  shareState.shareToken = token;
+  view.previous = sub.previous || null;
+  view.checkCount = sub.checkCount || 0;
+  return view;
+}
+
 async function fetchFromApi() {
   const p = resultParams();
-  if (!p.sid && !p.clientId && !p.taskId) throw kinded("noid");
+  if (p && p.shared) return fetchShared();
+  if (!p.sid && !p.pub && !p.clientId && !p.taskId) throw kinded("noid");
   const params = new URLSearchParams();
   if (p.subject) params.set('subject', p.subject);
   if (p.sid) params.set('sid', p.sid);
+  else if (p.pub) params.set('pub', p.pub);
   else if (p.clientId) params.set('clientId', p.clientId);
   else params.set('taskId', p.taskId);
   const url = '/api/essays?' + params.toString();
@@ -942,7 +1104,37 @@ async function fetchFromApi() {
   // иначе render() их не увидит и блок будет вечно пуст.
   view.previous = body.submission.previous || null;
   view.checkCount = body.submission.checkCount || 0;
+  // Состояние шаринга для кнопки под перепроверкой: токен знает только
+  // владелец (поле приватного чтения). Нет токена — «Поделиться», есть —
+  // «Моя ссылка» с тем же окном, но без создания.
+  shareState.mode = "owner";
+  shareState.token = String(body.submission.shareToken || "");
+  shareState.publicId = String(body.submission.publicId || "");
+  updateShareUI();
   return view;
+}
+
+// Кнопка шаринга: видна только владельцу готового результата. Публичный
+// зритель (/s/<token>) и ошибка/скелетон её не видят никогда.
+function updateShareUI() {
+  const wrap = document.getElementById('shareWrap');
+  const label = document.getElementById('shareBtnLabel');
+  const meta = document.getElementById('shareMeta');
+  if (!wrap || !label) return;
+  if (shareState.mode !== "owner" || !recheckSubmission || !recheckSubmission.text) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  if (shareState.token) {
+    label.textContent = "Моя ссылка";
+    if (meta) meta.textContent = "Ссылка уже создана — открой и отправь кому угодно.";
+  } else {
+    label.textContent = "Поделиться результатом";
+    if (meta) meta.textContent = "Откроется ссылка, которую можно отправить кому угодно.";
+  }
+  const banner = document.getElementById('sharePublicBanner');
+  if (banner) banner.hidden = true;
 }
 
 // ---------- Перепроверка (только эта страница) ----------
@@ -1467,9 +1659,304 @@ function closeRecheckModalForce() {
   recheckPrevFocus = null;
 }
 
+// ---------- Поделиться результатом (только эта страница) ----------
+// Одна ссылка на сочинение (сервер: UNIQUE по submission_id). Нет ссылки —
+// кнопка «Поделиться результатом» создаёт её POST /api/essays/share; есть —
+// кнопка «Моя ссылка» открывает то же окно с существующим токеном.
+// Окно НЕ закрывается крестиком/фоном/Esc — только кнопкой «Готово»:
+// иначе ссылку легко потерять, а доступ останется открытым. Отзыв —
+// DELETE /api/essays/share?token= с подтверждением в два шага.
+const SHARE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>';
+const SHARE_COPY_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+
+function shareAbsUrl(token) {
+  try {
+    return location.origin + "/s/" + String(token || "");
+  } catch (e) {
+    return "/s/" + String(token || "");
+  }
+}
+
+function shareCopyFallback(text) {
+  // Clipboard API нет (http/старый браузер) — запасной путь через
+  // временное поле, тот же приём, что копирование в app.js.
+  const ta = document.createElement("textarea");
+  ta.value = String(text || "");
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  try { ta.select(); } catch (e) {}
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  try { document.body.removeChild(ta); } catch (e) {}
+  return !!ok;
+}
+
+async function shareCopyText(text) {
+  const s = String(text || "");
+  if (!s) return false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(s);
+      return true;
+    }
+  } catch (e) {}
+  return shareCopyFallback(s);
+}
+
+function shareOwnerRef() {
+  // Чем привязать создание к сочинению: точнее всего publicId, дальше
+  // числовой sid, дальше clientId. Один из них у владельца есть всегда.
+  const sub = recheckSubmission || {};
+  if (shareState.publicId) return { publicId: shareState.publicId };
+  if (sub.submissionId) return { sid: sub.submissionId };
+  if (sub.clientId) return { clientId: sub.clientId };
+  return null;
+}
+
+function openShareModal(html) {
+  // Без dismissable-ветки осознанно: ни крестика, ни закрытия по фону, ни
+  // Esc — только явные кнопки внутри окна (см. CSS-комментарий выше).
+  const root = document.getElementById("model-modal-root");
+  if (!root) return;
+  recheckStopTimers();
+  document.removeEventListener("keydown", modelModalEscHandler);
+  document.removeEventListener("keydown", recheckEscHandler);
+  root.innerHTML = `<div class="dlg-backdrop">${html}</div>`;
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+function closeShareModal() {
+  const root = document.getElementById("model-modal-root");
+  if (!root || !root.innerHTML) return;
+  if (recheckLoading) return;
+  root.innerHTML = "";
+}
+
+function openShareLinkModal(token) {
+  const url = shareAbsUrl(token);
+  openShareModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Ссылка на результат">
+        <div class="dlg__eyebrow">Доступ по ссылке</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${SHARE_SVG}</div>
+          <div class="dlg-device__name">Твой результат — по ссылке</div>
+        </div>
+        <div class="dlg__text">
+          Кто откроет ссылку, увидит те же баллы и разбор по критериям.
+          Имени и аккаунта там нет. Ссылку можно отозвать в любой момент —
+          доступ закроется сразу.
+        </div>
+        <div class="share-link-box">
+          <input class="share-link-input" id="shareLinkInput" readonly
+            value="${esc(url)}" onclick="this.select()" aria-label="Публичная ссылка на результат">
+          <button class="share-copy-btn" type="button" onclick="shareCopyLink()">
+            ${SHARE_COPY_SVG}<span id="shareCopyLabel">Копировать</span>
+          </button>
+        </div>
+        <p class="share-copied" id="shareCopied" hidden>Скопировано ✓</p>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeShareModal()">Готово</button>
+        </div>
+        <div class="share-danger" id="shareDanger">
+          <button class="share-danger-btn" type="button" onclick="shareArmRevoke()">Удалить ссылку</button>
+          <p class="share-danger-text">Доступ по ссылке закроется сразу и навсегда. Приватная ссылка сочинения не изменится.</p>
+          <div class="share-confirm-row" id="shareConfirmRow" hidden>
+            <button class="share-revoke-btn" type="button" id="shareRevokeBtn" onclick="shareDoRevoke()">Точно удалить</button>
+            <button class="btn btn--soft" type="button" onclick="shareDisarmRevoke()">Оставить</button>
+          </div>
+        </div>
+      </div>`);
+  openShareLinkModal._token = String(token || "");
+}
+
+async function shareCopyLink() {
+  const token = openShareLinkModal._token || shareState.token;
+  const ok = await shareCopyText(shareAbsUrl(token));
+  const label = document.getElementById("shareCopyLabel");
+  const note = document.getElementById("shareCopied");
+  const input = document.getElementById("shareLinkInput");
+  if (ok) {
+    if (label) label.textContent = "Скопировано ✓";
+    if (note) note.hidden = false;
+    setTimeout(() => { if (label) label.textContent = "Копировать"; }, 2000);
+  } else if (input) {
+    // Буфер недоступен — выделяем текст, чтобы скопировать вручную.
+    try { input.focus(); input.select(); } catch (e) {}
+  }
+}
+
+function shareArmRevoke() {
+  const row = document.getElementById("shareConfirmRow");
+  if (row) row.hidden = false;
+}
+
+function shareDisarmRevoke() {
+  const row = document.getElementById("shareConfirmRow");
+  if (row) row.hidden = true;
+}
+
+async function shareDoRevoke() {
+  const token = openShareLinkModal._token || shareState.token;
+  if (!token) return;
+  const btn = document.getElementById("shareRevokeBtn");
+  if (btn) btn.disabled = true;
+  let res = null;
+  try {
+    res = await fetch('/api/essays/share?token=' + encodeURIComponent(token), {
+      method: "DELETE",
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    openShareError("Нет связи с сервером",
+      "Проверь интернет и попробуй ещё раз. Ссылка пока действует.");
+    return;
+  }
+  if (res.status === 404) {
+    // Уже отозвана (вторая вкладка) — честно показываем то же состояние,
+    // что после удаления: ссылки нет, можно создать заново.
+    shareState.token = "";
+    openShareLinkModal._token = "";
+    updateShareUI();
+    openShareRevokedModal();
+    return;
+  }
+  if (!res.ok) {
+    if (btn) btn.disabled = false;
+    openShareError("Не получилось",
+      "Ссылка не отозвана. Попробуй ещё раз чуть позже.");
+    return;
+  }
+  shareState.token = "";
+  openShareLinkModal._token = "";
+  updateShareUI();
+  openShareRevokedModal();
+}
+
+function openShareRevokedModal() {
+  openShareModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Ссылка удалена">
+        <div class="dlg__eyebrow">Доступ по ссылке</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </div>
+          <div class="dlg-device__name">Ссылка удалена</div>
+        </div>
+        <div class="dlg__text">
+          Доступ закрыт: старая ссылка больше никого никуда не приведёт.
+          Если захочешь поделиться снова — создадим новую.
+        </div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeShareModal()">Закрыть</button>
+          <button class="retry-btn" type="button" onclick="shareRecreate()">Создать заново</button>
+        </div>
+      </div>`);
+}
+
+function openShareLoadingModal() {
+  openShareModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Создаём ссылку">
+        <div class="dlg__eyebrow">Доступ по ссылке</div>
+        <div style="padding:18px 0 4px">
+          <div class="recheck-spinner" aria-hidden="true"></div>
+          <p class="recheck-load-text">Создаём ссылку…</p>
+          <p class="recheck-load-sub">Окно закроется само, когда ссылка будет готова.</p>
+        </div>
+      </div>`);
+}
+
+function openShareError(title, text) {
+  openShareModal(`
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <div class="dlg__eyebrow">Доступ по ссылке</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 8v5M12 16.5v.5"/><path d="M10.3 3.8 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg>
+          </div>
+          <div class="dlg-device__name">${esc(title)}</div>
+        </div>
+        <div class="dlg__text">${esc(text)}</div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeShareModal()">Понятно</button>
+        </div>
+      </div>`);
+}
+
+async function shareRecreate() {
+  await onShareClick(true);
+}
+
+async function onShareClick(forceCreate) {
+  if (shareState.busy || recheckLoading) return;
+  if (shareState.mode !== "owner") return;
+  // Ссылка уже есть — то же окно с существующим токеном, создавать нечего.
+  if (shareState.token && !forceCreate) {
+    openShareLinkModal(shareState.token);
+    return;
+  }
+  const ref = shareOwnerRef();
+  if (!ref) {
+    openShareError("Нечем поделиться",
+      "Нет данных работы для ссылки. Открой результат кнопкой «Посмотреть результат →» из практики.");
+    return;
+  }
+  shareState.busy = true;
+  const btn = document.getElementById("shareBtn");
+  if (btn) btn.disabled = true;
+  openShareLoadingModal();
+  let res = null, data = {};
+  try {
+    res = await fetch("/api/essays/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ref),
+      signal: AbortSignal.timeout(15000),
+    });
+    data = await res.json().catch(() => ({}));
+  } catch (err) {
+    shareState.busy = false;
+    if (btn) btn.disabled = false;
+    openShareError("Нет связи с сервером",
+      "Проверь интернет и попробуй ещё раз. Ссылка не создана.");
+    return;
+  }
+  shareState.busy = false;
+  if (btn) btn.disabled = false;
+  if (!res.ok || !data.token) {
+    if (res.status === 401) {
+      openShareError("Нужно войти",
+        "Сессия истекла. Войди заново и открой результат из практики.");
+      return;
+    }
+    if (res.status === 409) {
+      openShareError("Рано делиться",
+        "Делиться можно только проверенным сочинением. Дождись готового результата.");
+      return;
+    }
+    if (res.status === 404) {
+      openShareError("Нечего показать",
+        "Сочинение не найдено. Открой результат кнопкой «Посмотреть результат →» из практики.");
+      return;
+    }
+    openShareError("Не получилось",
+      (data && data.error) || "Ссылка не создана. Попробуй ещё раз чуть позже.");
+    return;
+  }
+  shareState.token = String(data.token || "");
+  if (data.publicId) shareState.publicId = String(data.publicId || shareState.publicId);
+  updateShareUI();
+  openShareLinkModal(shareState.token);
+}
+
 observeReveals(document);
 document.getElementById('retryBtn').addEventListener('click', () => loadResult(fetchFromApi));
 document.getElementById('recheckBtn').addEventListener('click', onRecheckClick);
+const shareBtnEl = document.getElementById('shareBtn');
+if (shareBtnEl) shareBtnEl.addEventListener('click', () => onShareClick(false));
 // Reload во время незакрываемого окна загрузки: показываем то же окно снова
 // и ждём готовый отчёт (без повторного POST — жетон уже мог быть списан).
 (function recheckBoot() {

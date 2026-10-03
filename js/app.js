@@ -4014,9 +4014,14 @@ function essayAiErrorText(status, data) {
 function essayResultUrl(submission) {
   if (!submission) return "";
   const subject = Store.subject || "russian";
-  // Короткая ссылка — числовой sid (~50 символов). Перебор чужого не
-  // работает: сервер отдаёт submission только его автору, остальным 404.
+  // Приватная ссылка — неперебираемый public_id (10 знаков). Числовой sid
+  // оставлен для старых ссылок: сервер отдаёт submission только его автору,
+  // остальным 404 (и числом, и public_id). Публичная /s/<token> — только
+  // через «Поделиться» на ege-result.html, здесь её не строим.
   // Старые clientId/taskId-ссылки продолжают работать (fallback ниже).
+  if (submission.publicId) {
+    return `/essay/${submission.publicId}`;
+  }
   if (submission.submissionId) {
     return `/essay/${submission.submissionId}`;
   }
@@ -7150,7 +7155,7 @@ function essaysBodyHTML(snap) {
   return `${stats}${dynamics}${insight}${criteria}
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin:20px 0 12px;gap:10px;flex-wrap:wrap">
       <div style="font-weight:650">Все работы · ${snap.total}</div>
-      ${last && last.submissionId ? `<a class="btn btn--ghost btn--sm" href="/essay/${Number(last.submissionId)}">Последний разбор →</a>` : ""}
+      ${last && (last.publicId || last.submissionId) ? `<a class="btn btn--ghost btn--sm" href="/essay/${esc(last.publicId || Number(last.submissionId))}">Последний разбор →</a>` : ""}
     </div>
     <div class="essays-list">${items}</div>${tail}`;
 }
@@ -7362,10 +7367,11 @@ function essayInsightHTML(snap, readyNewFirst) {
   const ready = readyNewFirst.slice().reverse();
   const last = readyNewFirst[0] || null;
   const lastSid = last && Number.isFinite(Number(last.submissionId)) ? Number(last.submissionId) : 0;
+  const lastRef = (last && last.publicId) || lastSid || "";
   const actions = `
     <div class="essay-insight__actions">
       <button class="btn btn--primary btn--sm" type="button" onclick="startFirstEssay()">Написать следующее →</button>
-      ${lastSid ? `<a class="btn btn--ghost btn--sm" href="/essay/${lastSid}">Последний разбор →</a>` : ""}
+      ${lastRef ? `<a class="btn btn--ghost btn--sm" href="/essay/${esc(lastRef)}">Последний разбор →</a>` : ""}
     </div>`;
   // Есть работы, но ни одной проверки: динамике пока не из чего строиться.
   if (!ready.length) {
@@ -7444,7 +7450,7 @@ function essayItemHTML(it, num) {
     ${verdict && hasScore ? `<div class="essay-item__verdict">${esc(verdict.length > 220 ? verdict.slice(0, 220) + "…" : verdict)}</div>` : ""}
     <div class="essay-item__foot">
       <button class="btn btn--ghost btn--sm" type="button" onclick="toggleEssayItem(${sid}, this)" aria-expanded="false">Подробнее</button>
-      ${hasScore && Number.isFinite(sid) ? `<a class="btn btn--primary btn--sm" href="/essay/${sid}">Разбор →</a>` : ""}
+      ${hasScore && (it.publicId || Number.isFinite(sid)) ? `<a class="btn btn--primary btn--sm" href="/essay/${esc(it.publicId || sid)}">Разбор →</a>` : ""}
     </div>
     <div class="essay-item__detail" data-sid="${Number.isFinite(sid) ? sid : 0}" hidden></div>
   </article>`;

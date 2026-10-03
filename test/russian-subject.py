@@ -12,6 +12,7 @@ import http.cookiejar
 import importlib.util
 import json
 import os
+import re
 import tempfile
 import threading
 import urllib.error
@@ -239,8 +240,12 @@ def main():
             assert first_entry.get("wordCount") == 150, first_entry
             assert first_entry.get("clientId") == "essay-ok-1", first_entry
             assert isinstance(first_entry.get("submissionId"), int) and first_entry["submissionId"] > 0, first_entry
+            # Приватный public_id (10 знаков) — неперебираемая ссылка вида
+            # /essay/<public_id> для кнопок практики (числовой submissionId
+            # оставлен для старых ссылок).
+            assert isinstance(first_entry.get("publicId"), str) and re.fullmatch(r"[A-Za-z0-9]{10}", first_entry["publicId"] or "") and not (first_entry["publicId"] or "").isdigit(), first_entry
             # Лёгкий ответ: только факт, без текста сочинения и без разбора.
-            assert set(first_entry) == {"status", "submissionId", "clientId", "wordCount"}, first_entry
+            assert set(first_entry) == {"status", "submissionId", "publicId", "clientId", "wordCount"}, first_entry
             assert len(json.dumps(map1, ensure_ascii=False)) < 400, map1
 
             # По одному (последнему) submission на задание: вторая попытка по

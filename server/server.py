@@ -3264,6 +3264,44 @@ ESSAY_WORD_RE = getattr(_AI, "ESSAY_WORD_RE", None) or re.compile(
 _ESSAY_SCHEMA_DONE: set[str] = set()
 _essay_schema_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Приватные и публичные ссылки сочинений: неперебираемые 10-значные
+# идентификаторы (та же школа, что public_id тредов наставника и платежей
+# Plus). Приватный public_id лежит прямо в essay_submissions и виден только
+# владельцу (/essay/<public_id>, рядом с легаси /essay/<int>); публичный токен
+# живёт в отдельной таблице essay_share_links и открывается всем без входа
+# (/s/<token>). Чисто цифровые строки не выдаём: HTTP-слой приводит их к int
+# (легаси-форма id), и такой токен уехал бы не в ту ветку поиска.
+# ---------------------------------------------------------------------------
+ESSAY_PUBLIC_ID_LEN = 10
+ESSAY_PUBLIC_ALPHABET = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                         "abcdefghijklmnopqrstuvwxyz0123456789")
+ESSAY_PUBLIC_ID_RE = re.compile(r"^[A-Za-z0-9]{10}$")
+
+
+def generate_essay_public_id() -> str:
+    """Свежий кандидат в приватный public_id сочинения."""
+    while True:
+        cand = "".join(choice(ESSAY_PUBLIC_ALPHABET)
+                       for _ in range(ESSAY_PUBLIC_ID_LEN))
+        if not cand.isdigit():
+            return cand
+
+
+def is_essay_public_ref(raw) -> bool:
+    """Внешний 10-значный id (приватный public_id или токен шаринга)."""
+    return (isinstance(raw, str) and bool(ESSAY_PUBLIC_ID_RE.match(raw))
+            and not raw.isdigit())
+
+
+def generate_essay_share_token() -> str:
+    """Свежий кандидат в публичный токен. Пространство то же, таблица своя."""
+    return generate_essay_public_id()
+
+
+def is_essay_share_token(raw) -> bool:
+    return is_essay_public_ref(raw)
+
 
 def count_essay_words(text: str) -> int:
     """Число слов в развёрнутом текстовом ответе (см. регулярку выше)."""
@@ -3315,6 +3353,7 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                      evaluation_result TEXT,
                      evaluation_file TEXT,
                      evaluated_at INTEGER,
+                     public_id TEXT,
                      created_at TEXT NOT NULL)"""
             )
             conn.execute(
@@ -3324,6 +3363,10 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
                 " ON essay_submissions(user_id, subject, created_at)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_submissions_public_id"
+                " ON essay_submissions(public_id)"
             )
         else:
             # Индексы для ON CONFLICT создаём НЕ только при первом создании
@@ -3339,11 +3382,48 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 " ON essay_submissions(user_id, subject, client_id)",
                 "CREATE INDEX IF NOT EXISTS idx_essay_submissions_user_subject"
                 " ON essay_submissions(user_id, subject, created_at)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_submissions_public_id"
+                " ON essay_submissions(public_id)",
             ):
                 try:
                     conn.execute(ddl)
                 except sqlite3.Error:
                     pass
+            # Приватный неперебираемый id сочинения (см. блок констант выше):
+            # старые строки получают его задним числом, новые — при вставке.
+            # Без него приватная ссылка оставалась последовательным /essay/<int>.
+            if "public_id" not in _table_columns(conn, "essay_submissions"):
+                try:
+                    conn.execute("ALTER TABLE essay_submissions ADD COLUMN public_id TEXT")
+                    conn.commit()
+                except sqlite3.Error:
+                    pass
+            if "public_id" in _table_columns(conn, "essay_submissions"):
+                try:
+                    missing = conn.execute(
+                        "SELECT id FROM essay_submissions"
+                        " WHERE public_id IS NULL OR public_id=''").fetchall()
+                    for mrow in missing:
+                        for _ in range(20):
+                            cand = generate_essay_public_id()
+                            if conn.execute(
+                                    "SELECT 1 FROM essay_submissions WHERE public_id=?",
+                                    (cand,)).fetchone():
+                                continue
+                            try:
+                                conn.execute(
+                                    "UPDATE essay_submissions SET public_id=? WHERE id=?"
+                                    " AND (public_id IS NULL OR public_id='')",
+                                    (cand, int(mrow["id"])))
+                            except sqlite3.Error:
+                                continue
+                            break
+                    conn.commit()
+                except sqlite3.Error:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
         if "essay_checks" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
             # Серверная запись о реальном вызове модели: единственный источник
             # оценки для evaluation 'ready'. Ключ — хэш нормализованного
@@ -3492,6 +3572,24 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
             # Модель на submission: её читает экран результата подписи проверки.
             conn.execute("ALTER TABLE essay_submissions ADD COLUMN evaluation_model TEXT")
             conn.commit()
+        # Публичные ссылки «Поделиться»: один submission — одна ссылка
+        # (UNIQUE по submission_id). Токен из того же 10-значного пространства,
+        # что приватный public_id, но таблица и маршрут свои (/s/<token>),
+        # поэтому отзыв не трогает приватную ссылку и наоборот. Каскады:
+        # удаление сочинения и удаление аккаунта гасят ссылку сами.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS essay_share_links(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 submission_id INTEGER NOT NULL UNIQUE
+                   REFERENCES essay_submissions(id) ON DELETE CASCADE,
+                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                 token TEXT NOT NULL UNIQUE,
+                 created_at TEXT NOT NULL)"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_essay_share_links_user"
+            " ON essay_share_links(user_id)"
+        )
         _ESSAY_SCHEMA_DONE.add(key)
 
 
@@ -3525,20 +3623,88 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
         raise EssayTooShort(word_count)
     created = str(value.get("ts") or now_iso())
     client_id = _stable_client_id(value) or _fallback_client_id("essay", [task_id, skill_id, created])
-    conn.execute(
-        "INSERT INTO essay_submissions(user_id,subject,task_id,skill_id,text,word_count,client_id,created_at)"
-        " VALUES(?,?,?,?,?,?,?,?)"
-        " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
-        (user_id, subject, task["id"], task["skill_id"], text, word_count, client_id, created),
-    )
-    row = conn.execute(
-        "SELECT id, word_count, evaluation_status FROM essay_submissions"
-        " WHERE user_id=? AND subject=? AND client_id=?",
-        (user_id, subject, client_id),
-    ).fetchone()
+    has_pub = "public_id" in _table_columns(conn, "essay_submissions")
+    public_id = ""
+    inserted = False
+    if has_pub:
+        # Приватный неперебираемый id нового сочинения: последовательный
+        # INTEGER наружу больше не отдаём (см. essayResultUrl), но старые
+        # числовые ссылки продолжают работать. Коллизия UNIQUE — новый
+        # кандидат, дубль client_id — та же строка без перезаписи.
+        for _ in range(5):
+            cand = generate_essay_public_id()
+            try:
+                conn.execute(
+                    "INSERT INTO essay_submissions(user_id,subject,task_id,skill_id,text,word_count,client_id,public_id,created_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+                    (user_id, subject, task["id"], task["skill_id"], text, word_count, client_id, cand, created),
+                )
+                public_id = cand
+                inserted = True
+                break
+            except sqlite3.Error as exc:
+                msg = str(exc).lower()
+                if "public_id" in msg and "unique" in msg:
+                    continue
+                if "no such column" in msg or "no column" in msg:
+                    has_pub = False
+                    break
+                raise
+    if not inserted:
+        conn.execute(
+            "INSERT INTO essay_submissions(user_id,subject,task_id,skill_id,text,word_count,client_id,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
+            (user_id, subject, task["id"], task["skill_id"], text, word_count, client_id, created),
+        )
+    try:
+        row = conn.execute(
+            "SELECT id, word_count, evaluation_status, public_id FROM essay_submissions"
+            " WHERE user_id=? AND subject=? AND client_id=?",
+            (user_id, subject, client_id),
+        ).fetchone()
+    except sqlite3.Error:
+        row = conn.execute(
+            "SELECT id, word_count, evaluation_status FROM essay_submissions"
+            " WHERE user_id=? AND subject=? AND client_id=?",
+            (user_id, subject, client_id),
+        ).fetchone()
+    if row is not None and has_pub:
+        try:
+            keys = row.keys()
+            if "public_id" in keys and not (row["public_id"] or ""):
+                # Строка из эпохи до колонки (бэкфилл не добежал): чиним на
+                # месте, чтобы у каждого сочинения была приватная ссылка.
+                for _ in range(20):
+                    cand = generate_essay_public_id()
+                    if conn.execute(
+                            "SELECT 1 FROM essay_submissions WHERE public_id=?",
+                            (cand,)).fetchone():
+                        continue
+                    try:
+                        conn.execute(
+                            "UPDATE essay_submissions SET public_id=? WHERE id=?"
+                            " AND (public_id IS NULL OR public_id='')",
+                            (cand, int(row["id"])))
+                    except sqlite3.Error:
+                        continue
+                    break
+                row = conn.execute(
+                    "SELECT id, word_count, evaluation_status, public_id FROM essay_submissions"
+                    " WHERE user_id=? AND subject=? AND client_id=?",
+                    (user_id, subject, client_id),
+                ).fetchone()
+        except sqlite3.Error:
+            pass
+    try:
+        out_public = str(row["public_id"] or "") if row is not None and "public_id" in row.keys() else ""
+    except (sqlite3.Error, TypeError, ValueError, AttributeError):
+        out_public = ""
     return {"taskId": task["id"], "wordCount": int(row["word_count"]) if row else word_count,
             "minWords": ESSAY_MIN_WORDS, "clientId": client_id,
             "submissionId": int(row["id"]) if row else None,
+            "publicId": out_public,
             "evaluationStatus": row["evaluation_status"] if row else "submitted"}
 
 
@@ -3557,8 +3723,13 @@ def serialize_essay_row(row) -> dict:
             result = json.loads(raw)
         except (ValueError, TypeError):
             result = None
+    try:
+        pub = str(row["public_id"] or "") if "public_id" in row.keys() else ""
+    except (TypeError, ValueError, AttributeError):
+        pub = ""
     return {
         "submissionId": int(row["id"]),
+        "publicId": pub,
         "taskId": row["task_id"],
         "skill": row["skill_id"],
         "subject": row["subject"],
@@ -3572,6 +3743,192 @@ def serialize_essay_row(row) -> dict:
         "evaluatedAt": int(row["evaluated_at"]) if row["evaluated_at"] is not None else None,
         "evaluationProvider": row["evaluation_provider"] if "evaluation_provider" in row.keys() else None,
         "evaluationModel": row["evaluation_model"] if "evaluation_model" in row.keys() else None,
+    }
+
+
+def essay_share_token_for(conn: sqlite3.Connection, submission_id: int, user_id: int) -> str:
+    """Публичный токен сочинения или "": только своя строка (user_id)."""
+    try:
+        link = conn.execute(
+            "SELECT token FROM essay_share_links WHERE submission_id=? AND user_id=?",
+            (int(submission_id), int(user_id))).fetchone()
+    except sqlite3.Error:
+        return ""
+    if not link:
+        return ""
+    try:
+        return str(link["token"] or "")
+    except (TypeError, ValueError, AttributeError):
+        return ""
+
+
+def essay_share_create(conn: sqlite3.Connection, user_id: int, submission_id: int) -> dict:
+    """Выдать (или вернуть существующую) публичную ссылку на своё сочинение.
+
+    Идемпотентно по submission: повтор не плодит токены, а отдаёт тот же.
+    Гонка двух вкладок схлопывается UNIQUE(submission_id): вторая забирает
+    строку первой. Присоединяется к открытой транзакции (own), как мутаторы
+    подписки: проверять in_transaction обязан вызыватель через commit ниже.
+    """
+    ensure_essay_schema(conn)
+    own = not conn.in_transaction
+    try:
+        if own:
+            conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT id, user_id, evaluation_status, evaluation_result FROM essay_submissions"
+            " WHERE id=? AND user_id=?",
+            (int(submission_id), int(user_id))).fetchone()
+        if row is None:
+            raise KeyError("submission not found")
+        if str(row["evaluation_status"] or "") != "ready" or not (row["evaluation_result"] or ""):
+            raise EssayNotChecked()
+        have = conn.execute(
+            "SELECT token FROM essay_share_links WHERE submission_id=? AND user_id=?",
+            (int(submission_id), int(user_id))).fetchone()
+        if have and (have["token"] or ""):
+            if own:
+                conn.commit()
+            return {"ok": True, "token": str(have["token"]), "created": False}
+        token = ""
+        for _ in range(20):
+            cand = generate_essay_share_token()
+            try:
+                conn.execute(
+                    "INSERT INTO essay_share_links(submission_id, user_id, token, created_at)"
+                    " VALUES(?,?,?,?)",
+                    (int(submission_id), int(user_id), cand, now_iso()))
+                token = cand
+                break
+            except sqlite3.Error as exc:
+                msg = str(exc).lower()
+                if "unique" not in msg:
+                    raise
+                # Коллизия токена — новый кандидат; коллизия submission_id —
+                # гонка вкладок: ссылку уже создал сосед, забираем её.
+                dup = conn.execute(
+                    "SELECT token FROM essay_share_links WHERE submission_id=? AND user_id=?",
+                    (int(submission_id), int(user_id))).fetchone()
+                if dup and (dup["token"] or ""):
+                    if own:
+                        conn.commit()
+                    return {"ok": True, "token": str(dup["token"]), "created": False}
+                continue
+        if not token:
+            raise sqlite3.IntegrityError("share token collision")
+        if own:
+            conn.commit()
+        return {"ok": True, "token": token, "created": True}
+    except Exception:
+        if own:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        raise
+
+
+def essay_share_revoke(conn: sqlite3.Connection, user_id: int, *,
+                       token: str = "", submission_id: int = 0) -> dict:
+    """Отозвать публичную ссылку. По токену или по сочинению — только свою.
+
+    Ничего не найдено (чужой/битый токен, нет ссылки) — KeyError → 404 без
+    раскрытия, существует ли такая ссылка у кого-то ещё.
+    """
+    ensure_essay_schema(conn)
+    own = not conn.in_transaction
+    try:
+        if own:
+            conn.execute("BEGIN IMMEDIATE")
+        if isinstance(token, str) and token.strip():
+            if not is_essay_share_token(token.strip()):
+                raise KeyError("share not found")
+            cur = conn.execute(
+                "DELETE FROM essay_share_links WHERE token=? AND user_id=?",
+                (token.strip(), int(user_id)))
+        elif int(submission_id or 0) > 0:
+            cur = conn.execute(
+                "DELETE FROM essay_share_links WHERE submission_id=? AND user_id=?",
+                (int(submission_id), int(user_id)))
+        else:
+            raise ValueError("need token or submission")
+        if cur.rowcount <= 0:
+            raise KeyError("share not found")
+        if own:
+            conn.commit()
+        return {"ok": True, "revoked": True}
+    except Exception:
+        if own:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        raise
+
+
+def get_shared_essay_submission(conn: sqlite3.Connection, token: str) -> dict | None:
+    """Публичная копия результата по токену шаринга. Без входа и без user_id.
+
+    Отдаём то же view, что видит владелец (личных данных в нём нет: только
+    баллы, критерии, текст работы и тема задания), плюс минимум контекста.
+    Нет ссылки / не готово / битый результат — None (HTTP слой даст 404,
+    неотличимый от «нет такой ссылки»).
+    """
+    ensure_essay_schema(conn)
+    if not is_essay_share_token(token or ""):
+        return None
+    try:
+        link = conn.execute(
+            "SELECT submission_id, user_id FROM essay_share_links WHERE token=?",
+            ((token or "").strip(),)).fetchone()
+    except sqlite3.Error:
+        return None
+    if link is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT * FROM essay_submissions WHERE id=?", (int(link["submission_id"]),)).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    if str(row["evaluation_status"] or "") != "ready":
+        return None
+    data = serialize_essay_row(row)
+    view = essay_result_view(data)
+    if view is None:
+        return None
+    try:
+        hist = previous_essay_check(conn, int(row["user_id"]), data["subject"],
+                                    row["text"], row["task_id"])
+    except sqlite3.Error:
+        hist = {"previous": None, "checks": 0}
+    previous = None
+    prev = hist.get("previous")
+    if prev is not None:
+        previous = essay_result_view({
+            "result": prev["result"],
+            "wordCount": data["wordCount"],
+            "minWords": data["minWords"],
+            "evaluationProvider": prev["provider"],
+            "evaluationModel": prev.get("model") or "",
+        })
+    task_topic = None
+    try:
+        trow = conn.execute("SELECT topic FROM tasks WHERE id=?", (row["task_id"],)).fetchone()
+        task_topic = str(trow["topic"] or "") if trow else None
+    except sqlite3.Error:
+        task_topic = None
+    return {
+        "view": view,
+        "previous": previous,
+        "checkCount": int(hist.get("checks") or 0),
+        "taskId": row["task_id"],
+        "taskTopic": task_topic,
+        "subject": row["subject"],
+        "wordCount": int(row["word_count"]),
+        "text": row["text"],
+        "createdAt": timestamp_value(row["created_at"]),
     }
 
 
@@ -3830,7 +4187,7 @@ def essay_result_view(submission: dict) -> dict | None:
 
 def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
                           *, task_id: str = "", client_id: str = "",
-                          sid: int = 0) -> dict | None:
+                          sid: int = 0, pub: str = "") -> dict | None:
     """Один submission для повторного открытия: точный sid/client_id в
     приоритете, иначе последний по заданию. Только свои строки (user_id):
     числовой sid перебором чужого не достать — чужая строка просто не
@@ -3851,6 +4208,23 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
                 "SELECT * FROM essay_submissions WHERE user_id=? AND id=?",
                 (user_id, sid),
             ).fetchone()
+    if row is None and isinstance(pub, str) and pub.strip():
+        # Приватная неперебираемая ссылка /essay/<public_id>: тоже только
+        # своя строка. Битый формат здесь не найдётся никогда (fail-closed).
+        if is_essay_public_ref(pub.strip()):
+            try:
+                if subject:
+                    row = conn.execute(
+                        "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND public_id=?",
+                        (user_id, subject, pub.strip()),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT * FROM essay_submissions WHERE user_id=? AND public_id=?",
+                        (user_id, pub.strip()),
+                    ).fetchone()
+            except sqlite3.Error:
+                row = None
     if row is None and client_id:
         row = conn.execute(
             "SELECT * FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
@@ -3866,6 +4240,13 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
         return None
     data = serialize_essay_row(row)
     data["view"] = essay_result_view(data)
+    # Состояние шаринга для кнопки «Поделиться»/«Моя ссылка»: токен знает
+    # только владелец (поле приватного чтения), публичный маршрут его не
+    # отдаёт никому, кроме ссылки целиком.
+    try:
+        data["shareToken"] = essay_share_token_for(conn, int(row["id"]), int(user_id))
+    except (sqlite3.Error, TypeError, ValueError):
+        data["shareToken"] = ""
     # Прошлая проверка этого текста для блока «Было → стало»: адаптируем тем
     # же essay_result_view, чтобы критерии совпали с текущей схемой экрана.
     # Нет прошлого (первая проверка) или оно не адаптировалось — поле честно
@@ -3912,20 +4293,38 @@ def essay_status_map(conn: sqlite3.Connection, user_id: int | None, subject: str
     if user_id is None:
         return {}
     ensure_essay_schema(conn)
-    rows = conn.execute(
-        "SELECT s.task_id, s.id, s.client_id, s.word_count, s.evaluation_status"
-        "  FROM essay_submissions s"
-        "  JOIN (SELECT task_id, MAX(id) AS last_id FROM essay_submissions"
-        "         WHERE user_id=? AND subject=? GROUP BY task_id) latest"
-        "    ON latest.last_id = s.id"
-        " LIMIT ?",
-        (user_id, subject, ESSAY_STATUS_MAP_MAX),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT s.task_id, s.id, s.public_id, s.client_id, s.word_count, s.evaluation_status"
+            "  FROM essay_submissions s"
+            "  JOIN (SELECT task_id, MAX(id) AS last_id FROM essay_submissions"
+            "         WHERE user_id=? AND subject=? GROUP BY task_id) latest"
+            "    ON latest.last_id = s.id"
+            " LIMIT ?",
+            (user_id, subject, ESSAY_STATUS_MAP_MAX),
+        ).fetchall()
+        with_pub = True
+    except sqlite3.Error:
+        rows = conn.execute(
+            "SELECT s.task_id, s.id, s.client_id, s.word_count, s.evaluation_status"
+            "  FROM essay_submissions s"
+            "  JOIN (SELECT task_id, MAX(id) AS last_id FROM essay_submissions"
+            "         WHERE user_id=? AND subject=? GROUP BY task_id) latest"
+            "    ON latest.last_id = s.id"
+            " LIMIT ?",
+            (user_id, subject, ESSAY_STATUS_MAP_MAX),
+        ).fetchall()
+        with_pub = False
     out: dict = {}
     for row in rows:
+        try:
+            pub = str(row["public_id"] or "") if with_pub and "public_id" in row.keys() else ""
+        except (TypeError, ValueError, AttributeError):
+            pub = ""
         out[str(row["task_id"])] = {
             "status": str(row["evaluation_status"] or "submitted"),
             "submissionId": int(row["id"]),
+            "publicId": pub,
             "clientId": str(row["client_id"] or ""),
             "wordCount": int(row["word_count"] or 0),
         }
@@ -3986,18 +4385,32 @@ def essay_history_list(conn: sqlite3.Connection, user_id: int | None, subject: s
     if live_skills is not None:
         essay_skills = [s for s in essay_skills if s in live_skills]
     has_essay = bool(essay_skills)
-    rows = conn.execute(
-        "SELECT s.id, s.task_id, s.word_count, s.client_id, s.evaluation_status,"
-        " s.evaluation_result, s.created_at, s.evaluated_at,"
-        " t.topic AS task_topic, t.exam_number AS exam_number"
-        " FROM essay_submissions s LEFT JOIN tasks t ON t.id=s.task_id"
-        " WHERE s.user_id=? AND s.subject=? ORDER BY s.id DESC LIMIT ? OFFSET ?",
-        (user_id, subject, limit, offset)).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT s.id, s.public_id, s.task_id, s.word_count, s.client_id, s.evaluation_status,"
+            " s.evaluation_result, s.created_at, s.evaluated_at,"
+            " t.topic AS task_topic, t.exam_number AS exam_number"
+            " FROM essay_submissions s LEFT JOIN tasks t ON t.id=s.task_id"
+            " WHERE s.user_id=? AND s.subject=? ORDER BY s.id DESC LIMIT ? OFFSET ?",
+            (user_id, subject, limit, offset)).fetchall()
+    except sqlite3.Error:
+        # База эпохи до колонки public_id: тот же срез без неё.
+        rows = conn.execute(
+            "SELECT s.id, s.task_id, s.word_count, s.client_id, s.evaluation_status,"
+            " s.evaluation_result, s.created_at, s.evaluated_at,"
+            " t.topic AS task_topic, t.exam_number AS exam_number"
+            " FROM essay_submissions s LEFT JOIN tasks t ON t.id=s.task_id"
+            " WHERE s.user_id=? AND s.subject=? ORDER BY s.id DESC LIMIT ? OFFSET ?",
+            (user_id, subject, limit, offset)).fetchall()
     total_row = conn.execute(
         "SELECT COUNT(*) AS c FROM essay_submissions WHERE user_id=? AND subject=?",
         (user_id, subject)).fetchone()
     items = []
     for row in rows:
+        try:
+            pub = str(row["public_id"] or "") if "public_id" in row.keys() else ""
+        except (TypeError, ValueError, AttributeError):
+            pub = ""
         total_score, max_score, verdict, criteria = None, None, "", []
         raw = row["evaluation_result"] if "evaluation_result" in row.keys() else None
         if raw:
@@ -4025,6 +4438,7 @@ def essay_history_list(conn: sqlite3.Connection, user_id: int | None, subject: s
                                          "score": score, "max": maximum})
         items.append({
             "submissionId": int(row["id"]),
+            "publicId": pub,
             "taskId": row["task_id"],
             "taskTopic": row["task_topic"] if "task_topic" in row.keys() else None,
             "examNumber": row["exam_number"] if "exam_number" in row.keys() else None,
@@ -8708,6 +9122,10 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
                        # есть пересланный заново тот же текст получал бы
                        # готовую оценку из кэша — и навсегда, без жетона.
                        "essay_checks", "essay_check_history",
+                        # Публичная ссылка обязана умирать вместе с работой:
+                        # иначе сброшенный результат открывался бы по
+                        # /s/<token> и после «весь прогресс».
+                        "essay_share_links",
                        # activity_events читает наставник (fold_web op=history),
                        # поэтому после сброса ИИ продолжал бы рассказывать
                        # ученику про активность, которой уже нет.
@@ -11511,6 +11929,87 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback(); self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
+        if path == "/api/essays/share":
+            # POST /api/essays/share — создать публичную ссылку на СВОЁ
+            # проверенное сочинение («Поделиться»). Тело: {sid|publicId|
+            # clientId} (+ subject опционально). Идемпотентно: повтор отдаёт
+            # тот же токен (created:false), гонка вкладок схлопывается
+            # UNIQUE(submission_id). Делиться можно только готовым (ready):
+            # иначе публичная страница показала бы «проверка не завершена».
+            # Те же ворота, что у остальных доменов ученика: общий бакет,
+            # гость 401 (GUEST_PENDING), бан 403, CSRF — общий guard в do_POST.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                ensure_essay_schema(conn)
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                payload = self.read_json(max_bytes=16 * 1024, object_pairs_hook=strict_json_object,
+                                         parse_constant=reject_json_constant, utf8_only=True)
+                if not isinstance(payload, dict):
+                    raise ValueError("payload must be an object")
+                subject = resolve_subject(payload.get("subject") if is_known_subject(payload.get("subject")) else current_subject_for(conn, user_id))
+                raw_sid = payload.get("sid", payload.get("submissionId", 0))
+                try:
+                    sid = int(raw_sid or 0)
+                except (TypeError, ValueError):
+                    sid = 0
+                pub = str(payload.get("pub", payload.get("publicId", "")) or "").strip()
+                if sid <= 0 and isinstance(raw_sid, str) and is_essay_public_ref(raw_sid.strip()):
+                    pub = raw_sid.strip()
+                client_id = str(payload.get("clientId", payload.get("client_id", "")) or "").strip()
+                task_id = str(payload.get("taskId", "") or "").strip()
+                if sid <= 0 and not pub and not client_id:
+                    raise ValueError("need sid, publicId or clientId")
+                found = get_essay_submission(conn, int(user_id), subject, task_id=task_id,
+                                             client_id=client_id, sid=sid, pub=pub)
+                if not found:
+                    self.send_json({"error": "Сочинение не найдено"}, 404, token=token); return
+                try:
+                    res = essay_share_create(conn, int(user_id), int(found["submissionId"]))
+                except EssayNotChecked:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
+                    self.send_json({"error": "Делиться можно только проверенным сочинением",
+                                    "code": "ESSAY_NOT_READY"}, 409, token=token); return
+                self.send_json({"ok": True, "token": res["token"],
+                                "url": "/s/" + res["token"],
+                                "created": bool(res.get("created")),
+                                "submissionId": int(found["submissionId"]),
+                                "publicId": str(found.get("publicId") or "")}, token=token)
+            except SubjectLockedError as exc:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                self.send_json({"error": "Предмет пока заблокирован", "subject": exc.subject}, 423)
+            except KeyError:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                self.send_json({"error": "Сочинение не найдено"}, 404)
+            except sqlite3.Error as exc:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                rid = log_request_error("essay-share", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Ссылка не создана. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError, TypeError, AttributeError, OverflowError, json.JSONDecodeError) as exc:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path.startswith("/api/events/"):
             if self.api_rate_limited(): return
             conn = connect()
@@ -12750,6 +13249,24 @@ class Handler(BaseHTTPRequestHandler):
                     if not found:
                         self.send_json({"error": "Текст не найден"}, 404, token=token); return
                     self.send_json({"ok": True, "subject": eff, "sourceText": found}, token=token); return
+                if path == "/api/shared/essay":
+                    # Публичная копия результата по токену «Поделиться»
+                    # (/s/<token>): входа не требует — ссылку смотрят гости.
+                    # Общий per-IP бакет уже списан выше (один раз на запрос),
+                    # аккаунт не заводим, бан не проверяем (юзера нет).
+                    # Нет ссылки / не готово / битый результат — 404, как
+                    # чужой sid у приватного чтения: есть ли такая ссылка
+                    # у кого-то, по ответу не понять.
+                    share_token = (query.get("token", [None])[0] or "").strip()
+                    try:
+                        shared = get_shared_essay_submission(conn, share_token)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("shared-essay", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 503); return
+                    if not shared:
+                        self.send_json({"error": "Ссылка не найдена или отозвана"}, 404); return
+                    self.send_json({"ok": True, "shared": True, "submission": shared}); return
                 if path == "/api/essays":
                     # GET /api/essays?subject=&taskId= — последний submission
                     # для повторного открытия готового результата (перезагрузка,
@@ -12764,13 +13281,21 @@ class Handler(BaseHTTPRequestHandler):
                     eff = req_subject if is_known_subject(req_subject) else current_subject_for(conn, user_id)
                     task_id = (query.get("taskId", [None])[0] or "").strip()
                     client_id = (query.get("clientId", [None])[0] or "").strip()
+                    raw_sid = ((query.get("sid", [None])[0] or "").strip())
+                    pub = ((query.get("pub", [None])[0] or "").strip()
+                           or (query.get("publicId", [None])[0] or "").strip())
+                    # Терпимость к форме: 10-значный public_id в legacy-поле
+                    # sid (так ходят ссылки /essay/<public_id>) — это pub.
+                    if raw_sid and not pub and is_essay_public_ref(raw_sid):
+                        pub = raw_sid
+                        raw_sid = ""
                     try:
-                        sid = int((query.get("sid", [None])[0] or "").strip() or 0)
+                        sid = int(raw_sid or 0)
                     except (TypeError, ValueError):
                         sid = 0
                     if (query.get("statuses", [None])[0] or "").strip() in ("1", "true"):
-                        if task_id or client_id or sid > 0 or (query.get("history", [None])[0] or "").strip() in ("1", "true"):
-                            self.send_json({"error": "statuses не принимает sid, taskId, clientId или history"}, 400, token=token); return
+                        if task_id or client_id or sid > 0 or pub or (query.get("history", [None])[0] or "").strip() in ("1", "true"):
+                            self.send_json({"error": "statuses не принимает sid, taskId, clientId, pub или history"}, 400, token=token); return
                         self.send_json({"ok": True, "subject": eff,
                                         "statuses": essay_status_map(conn, user_id, eff)}, token=token)
                         return
@@ -12786,8 +13311,8 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"error": "Раздел доступен по подписке Plus",
                                             "code": "SUBSCRIPTION_REQUIRED"}, 403, token=token); return
                         # Со statuses не совмещается.
-                        if task_id or client_id or sid > 0 or (query.get("statuses", [None])[0] or "").strip():
-                            self.send_json({"error": "history не принимает sid, taskId, clientId или statuses"}, 400, token=token); return
+                        if task_id or client_id or sid > 0 or pub or (query.get("statuses", [None])[0] or "").strip():
+                            self.send_json({"error": "history не принимает sid, taskId, clientId, pub или statuses"}, 400, token=token); return
                         try:
                             raw_limit = (query.get("limit", [None])[0] or "").strip()
                             raw_offset = (query.get("offset", [None])[0] or "").strip()
@@ -12800,16 +13325,17 @@ class Handler(BaseHTTPRequestHandler):
                         except ValueError as exc:
                             self.send_json({"error": str(exc)}, 400, token=token)
                         return
-                    if not task_id and not client_id and sid <= 0:
-                        self.send_json({"error": "Нужен sid, taskId, clientId, statuses=1 или history=1"}, 400, token=token); return
-                    if sid > 0 and not is_known_subject(req_subject):
-                        # /essay/<sid>: предмет из пути не приходит — ищем по
-                        # всем своим предметам, чужое всё равно не найдётся.
+                    if not task_id and not client_id and sid <= 0 and not pub:
+                        self.send_json({"error": "Нужен sid, pub, taskId, clientId, statuses=1 или history=1"}, 400, token=token); return
+                    if (sid > 0 or pub) and not is_known_subject(req_subject):
+                        # /essay/<sid|public_id>: предмет из пути не приходит —
+                        # ищем по всем своим предметам, чужое всё равно не
+                        # найдётся (ни числом, ни 10-значным public_id).
                         found = get_essay_submission(conn, user_id, "", task_id=task_id,
-                                                     client_id=client_id, sid=sid)
+                                                     client_id=client_id, sid=sid, pub=pub)
                         eff = found["subject"] if found else current_subject_for(conn, user_id)
                     else:
-                        found = get_essay_submission(conn, user_id, eff, task_id=task_id, client_id=client_id, sid=sid)
+                        found = get_essay_submission(conn, user_id, eff, task_id=task_id, client_id=client_id, sid=sid, pub=pub)
                     if not found:
                         self.send_json({"error": "Сочинение не найдено"}, 404, token=token); return
                     self.send_json({"ok": True, "subject": eff, "submission": found}, token=token); return
@@ -13014,9 +13540,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_security_headers()
             self.end_headers(); return
         elif path == '/essay' or path.startswith('/essay/'):
-            # Красивая ссылка на результат: /essay/<sid> отдаёт тот же
-            # ege-result.html; sid страница берёт из пути сама. Старые
+            # Красивая ссылка на результат: /essay/<sid|public_id> отдаёт тот
+            # же ege-result.html; id страница берёт из пути сама (число —
+            # легаси sid, 10 знаков — приватный public_id владельца). Старые
             # /ege-result.html-ссылки продолжают работать как раньше.
+            file_path = ROOT / "ege-result.html"
+        elif path == '/s' or path.startswith('/s/'):
+            # Публичная ссылка «Поделиться»: /s/<token> отдаёт тот же
+            # ege-result.html, но страница грузит его без входа — через
+            # GET /api/shared/essay?token=. Токен из пути берёт сама.
+            # Без токена — та же страница с честной ошибкой «нет ссылки».
             file_path = ROOT / "ege-result.html"
         elif path == "/sitemap.xml":
             # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
@@ -13299,6 +13832,64 @@ class Handler(BaseHTTPRequestHandler):
                     try: conn.rollback()
                     except sqlite3.Error: pass
                     self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
+        if path == "/api/essays/share":
+            # DELETE /api/essays/share?token= — отозвать публичную ссылку.
+            # Токен — в query (тела у DELETE может не быть); рядом принимаем
+            # и привязку к сочинению (?sid= / ?publicId= / ?clientId=) для
+            # отзыва «по работе», а не «по токену». Чужой токен неотличим от
+            # несуществующего — 404 без раскрытия. Те же ворота: общий бакет,
+            # гость 401, бан 403, CSRF — общий guard в do_DELETE.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                from urllib.parse import parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                ensure_essay_schema(conn)
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                share_token = ((q.get("token", [None])[0] or "").strip())
+                raw_sid = ((q.get("sid", [None])[0] or "").strip())
+                pub = ((q.get("pub", [None])[0] or "").strip()
+                       or (q.get("publicId", [None])[0] or "").strip())
+                if raw_sid and not pub and is_essay_public_ref(raw_sid):
+                    pub = raw_sid
+                    raw_sid = ""
+                try:
+                    sid = int(raw_sid or 0)
+                except (TypeError, ValueError):
+                    sid = 0
+                client_id = ((q.get("clientId", [None])[0] or "").strip())
+                try:
+                    if share_token:
+                        res = essay_share_revoke(conn, int(user_id), token=share_token)
+                    elif sid > 0 or pub or client_id:
+                        subject = current_subject_for(conn, user_id)
+                        found = get_essay_submission(conn, int(user_id), subject,
+                                                     client_id=client_id, sid=sid, pub=pub)
+                        if not found:
+                            self.send_json({"error": "Ссылка не найдена"}, 404, token=token); return
+                        res = essay_share_revoke(conn, int(user_id),
+                                                 submission_id=int(found["submissionId"]))
+                    else:
+                        self.send_json({"error": "Нужен token, sid, publicId или clientId"}, 400, token=token); return
+                except KeyError:
+                    self.send_json({"error": "Ссылка не найдена"}, 404, token=token); return
+                except ValueError as exc:
+                    self.send_json({"error": f"Request failed: {exc}"}, 400, token=token); return
+                self.send_json(res, token=token)
+            except sqlite3.Error as exc:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                rid = log_request_error("essay-share-revoke", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Ссылка не отозвана. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
             finally: conn.close()
             return
         if path != "/api/state": self.send_json({"error": "Not found"}, 404); return
