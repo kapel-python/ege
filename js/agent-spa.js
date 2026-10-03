@@ -1300,6 +1300,18 @@
 
   /* ---------- сообщения ---------- */
   function clearFeed() { if (ui.live) ui.live.textContent = ""; }
+  /* Лоадер «Читаем переписку…» (.agent__boot) живёт только пока лента пуста:
+     первое сообщение в новом чате рисуется ПОВЕРХ летящего GET треда, и без
+     явного снятия лоадер оставался над пузырьком и скелетоном навсегда (GET
+     возвращается позже и по защите feedGen ленту уже не трогает). */
+  function clearBoot() {
+    if (!ui.live) return;
+    try {
+      ui.live.querySelectorAll(".agent__boot").forEach(function (n) {
+        if (n.parentNode) n.parentNode.removeChild(n);
+      });
+    } catch (_) {}
+  }
   function emptyVisible(show, hasMessages) {
     if (show === true) return true;
     if (show === false) return false;
@@ -1327,6 +1339,7 @@
   function userBubble(text) {
     var d = el("div", "agent__msg-user enter", text);
     feedTouch();
+    clearBoot();
     if (ui.live) ui.live.appendChild(d);
     showEmpty(false);
     if (!painting) scrollDown(true, true);
@@ -2006,6 +2019,7 @@
     var paras = finalText ? mdBlocks(finalText) : [];
     if (g !== S.mountGen || !ui.live) return card;
     feedTouch();
+    clearBoot();
     ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
@@ -2110,6 +2124,7 @@
       card.appendChild(acts);
     }
     feedTouch();
+    clearBoot();
     if (ui.live) ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
@@ -2127,6 +2142,7 @@
     inner.appendChild(ol); trace.appendChild(inner);
     card.appendChild(trace);
     feedTouch();
+    clearBoot();
     if (ui.live) ui.live.appendChild(card);
     showEmpty(false);
     scrollDown(true, true);
