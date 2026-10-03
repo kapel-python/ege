@@ -237,6 +237,9 @@
   .faq__item.is-open .faq__a{grid-template-rows:1fr;}
   .faq__a>div{overflow:hidden;}
   .faq__a p{font-size:13.5px;color:var(--text-dim);line-height:1.66;padding:2px 20px 18px;margin:0;max-width:72ch;}
+  /* PAYMENT-VERIFY-CSS: служебная пометка для согласования с банком.
+     Убрать вместе с блоком PAYMENT-VERIFY после регистрации кассы. */
+  .verify-note{font-size:12px;color:var(--text-faint);margin:0;}
   /* липкая панель покупки */
   .buybar{position:fixed;left:14px;right:14px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:60;
     display:none;align-items:center;gap:14px;padding:12px 12px 12px 18px;border-radius:18px;
@@ -448,6 +451,15 @@
       </div>
     </div>
   </section>
+  <!-- PAYMENT-VERIFY-START: служебная пометка для согласования с банком.
+       Убрать после регистрации кассы (удалить весь блок между маркерами
+       PAYMENT-VERIFY-START / PAYMENT-VERIFY-END и правило .verify-note в <style>). -->
+  <section class="section" aria-label="Служебная пометка">
+    <div class="wrap">
+      <p class="verify-note">Служебная пометка для проверки платежей: Платега тест</p>
+    </div>
+  </section>
+  <!-- PAYMENT-VERIFY-END -->
 </main>
 
 <div class="buybar" id="buybar" hidden>
