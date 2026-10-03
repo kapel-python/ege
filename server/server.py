@@ -11514,16 +11514,16 @@ class Handler(BaseHTTPRequestHandler):
                         # The model answered, but not with the contract we asked
                         # for. Not the student's fault and not worth a retry storm.
                         rid = log_request_error("ai-format", exc)
-                        self.send_json({"error": "Проверка не удалась, попробуй ещё раз.",
+                        self.send_json({"error": "Не удалось проверить сочинение: нейросеть ответила непонятно. Попробуй ещё раз чуть позже.",
                                         "ref": rid}, 502, token=token)
                         return
                     except _AI.AIUnavailable as exc:
                         rid = log_request_error("ai-unavailable", exc)
-                        self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token)
+                        self.send_json({"error": "Сервис проверки временно недоступен. Попробуй снова чуть позже.", "ref": rid}, 503, token=token)
                         return
                     except _AI.AIError as exc:
                         rid = log_request_error("ai-upstream", exc)
-                        self.send_json({"error": "Проверка не удалась, попробуй ещё раз.", "ref": rid}, 502, token=token)
+                        self.send_json({"error": "Не удалось проверить сочинение: нейросеть не ответила. Попробуй ещё раз чуть позже.", "ref": rid}, 502, token=token)
                         return
                     # Факт проверки фиксируем на сервере: только этой записи будет
                     # доверять /api/essays/evaluation. Присланный браузером result

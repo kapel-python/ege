@@ -1443,8 +1443,11 @@ async function doRecheck(note) {
     aiRes = await fetch("/api/ai/essay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Тот же потолок 150 с, что в практике: цепочка из трёх судей при
+      // зависших шлюзах считает до ~140 с (3 × 45 с), nginx на /api/ai/essay
+      // тоже держит 150 с.
       body: JSON.stringify(aiBody),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(150000),
     });
     aiData = await aiRes.json().catch(() => ({}));
   } catch (err) {
@@ -1468,7 +1471,7 @@ async function doRecheck(note) {
       return;
     }
     openRecheckError("Проверка не удалась",
-      (aiData && aiData.error) || "Сервер временно не отвечает. Проверка не списана — попробуй ещё раз.", cleanNote);
+      (aiData && aiData.error) || "Нейросеть не ответила. Проверка не списана — попробуй ещё раз чуть позже.", cleanNote);
     return;
   }
   // Флаг гейта от сервера: гарантированный 0 (модель не звалась, лимит не
