@@ -2645,7 +2645,7 @@ function provPingRowsHTML(res) {
 async function runPingAll(paint, btn, busyLabel) {
   const idleLabel = btn ? btn.innerHTML : "";
   if (btn) { btn.disabled = true; btn.textContent = busyLabel || "Пингуем…"; }
-  paint(`<div class="a-prov-hint">Отправляем «привет» каждому провайдеру по очереди (до 15 с на провайдера)…</div>`);
+  paint(`<div class="a-prov-hint">Отправляем «привет» каждому провайдеру по очереди (до 20 с на провайдера)…</div>`);
   try {
     const r = await AdminApi.post("/api/admin/providers/probe-all", {});
     const res = (r && r.results) || {};
@@ -2691,7 +2691,7 @@ function probeAllProviders() {
    нормальную куку, а нам нужен ровно один админский запрос. Читаем через
    fetch + response.body.getReader(), строки разбираем по мере прихода. */
 
-const PROV_STREAM_BUDGET_MS = 10500;   // чуть больше серверных 10 с
+const PROV_STREAM_BUDGET_MS = 20500;   // чуть больше серверных 20 с
 const PROV_MODEL_RENDER_MAX = 60;      // сколько строк списка рисуем за раз
 
 /* Рейтинг моделей: рисуется И из пакетного ответа, И из живого потока.
@@ -3095,7 +3095,7 @@ function screenProviderPage(id) {
             <span class="a-card__title">Модели провайдера</span>
             <span class="spacer"></span>
             <input class="a-input a-input--search" id="provModelFilter" placeholder="Поиск по названию…" autocomplete="off" spellcheck="false">
-            <button class="btn btn--primary btn--sm" id="provPingModelsBtn" type="button">${aicon("pulse")} Пинг всех моделей <span class="a-btn__note">10 с</span></button>
+            <button class="btn btn--primary btn--sm" id="provPingModelsBtn" type="button">${aicon("pulse")} Пинг всех моделей <span class="a-btn__note">20 с</span></button>
           </div>
           <div id="provModelPingResult">${provPingBoxHTML(false)}</div>
           <div id="provModelList" class="a-models"></div>

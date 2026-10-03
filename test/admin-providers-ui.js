@@ -654,7 +654,7 @@ async function shot(page, name) {
       pendingSeen > 0, `строк в ожидании: ${pendingSeen}`);
     t("живой пинг: первая строка появляется сразу", firstRowMs < 3000, `${firstRowMs} мс`);
     t("живой пинг: первый живой ответ — до бюджета", firstOkMs < 10000, `${firstOkMs} мс`);
-    t("живой пинг укладывается в 10 секунд", pingMs < 13000, `${pingMs} мс`);
+    t("живой пинг укладывается в бюджет с запасом", pingMs < 13000, `${pingMs} мс`);
     t("живой пинг показывает время и итог по завершении",
       (await admin.locator("#provModelPingResult .a-ping__head").innerText()).includes("ответили"),
       await admin.locator("#provModelPingResult .a-ping__head").innerText());
