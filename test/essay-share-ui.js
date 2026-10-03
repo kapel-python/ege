@@ -271,9 +271,49 @@ async function main() {
     section("S5 отзыв закрывает доступ");
     await page.click("#shareBtn");
     await page.waitForSelector("#shareDanger .share-danger-btn", { timeout: 15000 });
+    // Карточка кликабельна целиком: клик по тексту (не по кнопке) тоже
+    // раскрывает подтверждение.
+    await page.click("#shareDanger .share-danger-text");
+    await sleep(300);
+    t("клик по карточке раскрывает подтверждение", (await page.$("#shareConfirmRow:not([hidden])")) !== null);
+    // «Не удалять» закрывает и не переоткрывается всплытием обратно.
+    await page.click(".share-confirm-row .btn--soft");
+    await sleep(300);
+    t("«Не удалять» скрывает подтверждение", (await page.$("#shareConfirmRow:not([hidden])")) === null);
+    // Компактные кнопки подтверждения стоят в один ряд.
     await page.click("#shareDanger .share-danger-btn");
     await sleep(300);
     t("удаление в два шага (подтверждение)", (await page.$("#shareConfirmRow:not([hidden])")) !== null);
+    const confirmH = await page.evaluate(() => {
+      const a = document.getElementById("shareRevokeBtn").getBoundingClientRect();
+      const b = document.querySelector(".share-confirm-row .btn--soft").getBoundingClientRect();
+      return { ah: a.height, bh: b.height, sameRow: Math.abs(a.top - b.top) < 4 };
+    });
+    t("кнопки подтверждения компактные и в один ряд",
+      confirmH.ah <= 44 && confirmH.bh <= 44 && confirmH.sameRow, JSON.stringify(confirmH));
+    // Телефон 390px: ряд не влезает — проверяем аккуратный столбик на всю
+    // ширину (каждая кнопка в одну строку, тач-высота 44px), а не рваный
+    // перенос посреди слов.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await sleep(400);
+    const confirmM = await page.evaluate(() => {
+      const row = document.getElementById("shareConfirmRow");
+      const a = document.getElementById("shareRevokeBtn").getBoundingClientRect();
+      const b = document.querySelector(".share-confirm-row .btn--soft").getBoundingClientRect();
+      const rw = row.getBoundingClientRect().width;
+      const oneLine = (el) => el.scrollHeight <= el.clientHeight + 2;
+      return {
+        stacked: Math.abs(a.top - b.top) > 30,
+        full: a.width > rw - 20 && b.width > rw - 20,
+        tall: a.height >= 40 && b.height >= 40,
+        single: oneLine(document.getElementById("shareRevokeBtn"))
+          && oneLine(document.querySelector(".share-confirm-row .btn--soft")),
+      };
+    });
+    t("на телефоне — столбик на всю ширину без переносов",
+      confirmM.stacked && confirmM.full && confirmM.tall && confirmM.single, JSON.stringify(confirmM));
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await sleep(300);
     await page.click("#shareRevokeBtn");
     await page.waitForFunction(() => {
       const el = document.querySelector(".dlg-device__name");

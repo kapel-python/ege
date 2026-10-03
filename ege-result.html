@@ -326,7 +326,11 @@
   .share-danger {
     margin-top: 18px;
     background: var(--surface-2); border: none; border-radius: 16px; padding: 14px 14px 14px;
+    cursor: pointer;
+    transition: background .15s ease;
   }
+  .share-danger:hover { background: var(--surface-3, var(--surface-2)); filter: brightness(0.99); }
+  .share-danger:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
   .share-danger__head { display: flex; align-items: center; gap: 8px; }
   .share-danger__head svg { width: 16px; height: 16px; flex: none; color: var(--red); }
   .share-danger-btn {
@@ -335,14 +339,26 @@
   }
   .share-danger-btn:hover { text-decoration: underline; }
   .share-danger-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); }
-  .share-confirm-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-  .share-confirm-row .btn--soft { flex: 1 1 auto; font-size: 15px; padding: 13px 18px; }
+  /* В ряд — только пока влезаем без переноса (окно ≤400px, ряд ~300px):
+     nowrap + компактный кегль. Уже — столбик на всю ширину с тач-высотой. */
+  .share-confirm-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: nowrap; }
+  .share-confirm-row .btn--soft {
+    flex: 1 1 0; min-width: 0; font-size: 13.5px; padding: 10px 14px; white-space: nowrap;
+    background: var(--surface); border: 1px solid var(--border);
+  }
   .share-revoke-btn {
-    flex: 2 1 140px;
+    flex: 1 1 0; min-width: 0;
     background: var(--red); color: #fff; border: none; border-radius: 999px;
-    padding: 13px 18px; font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
+    padding: 10px 14px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    white-space: nowrap;
   }
   .share-revoke-btn:disabled { opacity: .5; cursor: not-allowed; }
+  @media (max-width: 480px) {
+    .share-confirm-row { flex-direction: column; }
+    .share-confirm-row .btn--soft, .share-revoke-btn {
+      width: 100%; min-height: 44px; font-size: 14px; white-space: normal;
+    }
+  }
   .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
   @media (max-width: 480px) {
     .share-link-box { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 8px; }
@@ -1794,15 +1810,17 @@ function openShareLinkModal(token) {
         <div class="dlg__actions dlg__actions--single">
           <button class="btn btn--soft" type="button" onclick="closeShareModal()">Готово</button>
         </div>
-        <div class="share-danger" id="shareDanger">
+        <div class="share-danger" id="shareDanger" role="button" tabindex="0" aria-expanded="false"
+          aria-label="Удалить ссылку" title="Удалить ссылку"
+          onclick="shareDangerClick(event)" onkeydown="shareDangerKey(event)">
           <div class="share-danger__head">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
             <button class="share-danger-btn" type="button" onclick="shareArmRevoke()">Удалить ссылку</button>
           </div>
           <p class="share-danger-text">Доступ по ссылке закроется сразу и навсегда. Приватная ссылка сочинения не изменится.</p>
           <div class="share-confirm-row" id="shareConfirmRow" hidden>
-            <button class="share-revoke-btn" type="button" id="shareRevokeBtn" onclick="shareDoRevoke()">Удалить навсегда</button>
-            <button class="btn btn--soft" type="button" onclick="shareDisarmRevoke()">Не удалять</button>
+            <button class="share-revoke-btn" type="button" id="shareRevokeBtn" onclick="event.stopPropagation();shareDoRevoke()">Удалить навсегда</button>
+            <button class="btn btn--soft" type="button" onclick="event.stopPropagation();shareDisarmRevoke()">Не удалять</button>
           </div>
         </div>
       </div>`);
@@ -1825,14 +1843,38 @@ async function shareCopyLink() {
   }
 }
 
+// Клик по всей карточке удаления (а не только по тексту кнопки): внутренним
+// кнопкам подтверждения событие не всплывает (stopPropagation в разметке),
+// иначе «Не удалять» тут же переоткрывал бы ряд обратно.
+function shareDangerClick(e) {
+  if (e && e.target && e.target.closest
+      && e.target.closest("#shareConfirmRow")) return;
+  shareArmRevoke();
+}
+
+function shareDangerKey(e) {
+  if (!e || (e.key !== "Enter" && e.key !== " ")) return;
+  if (e.target && e.target.closest
+      && e.target.closest("#shareConfirmRow")) return;
+  try { e.preventDefault(); } catch (_) {}
+  shareArmRevoke();
+}
+
+function shareDangerExpanded(open) {
+  const card = document.getElementById("shareDanger");
+  if (card) card.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function shareArmRevoke() {
   const row = document.getElementById("shareConfirmRow");
   if (row) row.hidden = false;
+  shareDangerExpanded(true);
 }
 
 function shareDisarmRevoke() {
   const row = document.getElementById("shareConfirmRow");
   if (row) row.hidden = true;
+  shareDangerExpanded(false);
 }
 
 async function shareDoRevoke() {
