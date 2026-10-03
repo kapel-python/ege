@@ -202,7 +202,7 @@ async function main() {
     await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
     const loaderSub = await page.$eval("#screen [data-loader-sub]", (e) => e.textContent);
     t("pipeline: единый лоадер с текстом проверки",
-      /Подсчитываю баллы|Проверяю сочинение|Анализирую критерии|Собираю результат|Готовлю отчёт/.test(loaderSub), loaderSub);
+      /Проверяем сочинение|Считаем баллы|Сверяем критерии|Собираем результат|Готовим отчёт/.test(loaderSub), loaderSub);
     await page.waitForSelector("#screen .result-wrap, #feedbackSlot .feedback--bad", { timeout: 180000 });
     const finished = await page.$("#screen .result-wrap");
     if (finished) {

@@ -351,7 +351,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
     </span>
     <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text">Подписка находится в разработке: платёжный провайдер ещё подключается. Оставь заявку — сообщим, как только оплату включат.</p>
+    <p class="modal__text">Мы ещё подключаем оплату. Оставь заявку — сообщим, как только всё заработает.</p>
     <div class="modal__actions">
       <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
       <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
@@ -497,7 +497,7 @@
   function renderHistory(list){
     var box = document.getElementById("payHist");
     if (!list.length) {
-      box.innerHTML = '<div class="hist__empty">Платежей пока нет — здесь появятся чеки после первой оплаты.</div>';
+      box.innerHTML = '<div class="hist__empty">Платежей пока нет — история появится после первой оплаты.</div>';
       return;
     }
     box.innerHTML = list.slice(0, 50).map(function(p){
@@ -567,10 +567,10 @@
     /* кольца: живые остатки, best-effort */
     if (essayLim) paintRing("essayRing", "essayLeft", "essayOf", "essaySub", "essayReset",
       essayLim, ["проверка", "проверки", "проверок"]);
-    else document.getElementById("essaySub").textContent = "Остаток подтянется при следующем визите";
+    else document.getElementById("essaySub").textContent = "Остаток обновится при следующем визите";
     if (agentLim) paintRing("agentRing", "agentLeft", "agentOf", "agentSub", "agentReset",
       agentLim, ["ход", "хода", "ходов"]);
-    else document.getElementById("agentSub").textContent = "Остаток подтянется при следующем визите";
+    else document.getElementById("agentSub").textContent = "Остаток обновится при следующем визите";
 
     renderHistory((hist && hist.payments) || []);
 

@@ -8,13 +8,13 @@
 
   var S = {
     threads: [], currentId: null, busy: false, mountGen: 0, navGen: 0, animGen: 0, sendGen: 0,
-    quota: { limit: 10, remaining: 10, resetInSec: null },
+    quota: { limit: 5, remaining: 5, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
     follow: true, printTarget: null, gliding: false, glideFeed: null, progTop: null,
     cache: { accountId: null, threads: null, messages: {} },
   };
-  var RING = 94.25, QUOTA_FALLBACK = 10;
+  var RING = 94.25, QUOTA_FALLBACK = 5;
   /* Окно подхвата хода (после перемонтирования экрана) и параметры ожидания
      ответа, который сервер считает после обрыва на клиенте. REATTACH_MS
      заведомо больше потолка хода на сервере (90 с цикла + вызов финала) —
@@ -430,7 +430,7 @@
       ui.quotaBtn.classList.toggle("zero", remaining === 0);
     }
     if (ui.quotaTip) {
-      ui.quotaTip.textContent = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit) + " сегодня";
+      ui.quotaTip.textContent = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit);
     }
     if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset = (RING * (1 - Math.min(remaining, limit) / limit)) + "px";
     if (!cached) { try { localStorage.setItem(quotaCacheKey(), JSON.stringify(S.quota)); } catch (_) {} }
@@ -461,13 +461,13 @@
     fallbackLimit: QUOTA_FALLBACK,
   };
   function agentQuotaText(limit, left) {
-    return "Ход — это твой вопрос наставнику и его ответ. Сегодня доступно " +
+    return "Ход — это твой вопрос наставнику и его ответ. Доступно " +
       "<b><span data-ai-limit-left>" + left + "</span> из " + limit + "</b> " +
-      pluralQ(limit) + ": каждый потраченный возвращается через 8 часов.";
+      pluralQ(limit) + ": израсходованные ходы возвращаются по одному каждые 8 часов.";
   }
   function openLimitModal(quota, burstRetry) {
     if (typeof openAiLimitModal !== "function") {
-      say(burstRetry != null ? "Слишком частые запросы" : "Ходы на сегодня закончились");
+      say(burstRetry != null ? "Слишком частые запросы" : "Ходы закончились");
       return;
     }
     var burst = burstRetry != null;
@@ -476,7 +476,7 @@
     openAiLimitModal(quota || { limit: limit, remaining: left }, burst ? (Math.max(1, Math.floor(Number(burstRetry) || 60))) : null, Object.assign({}, AGENT_QUOTA_OPTS, {
       icon: "clock",
       name: burst ? "Слишком частые запросы"
-        : (left > 0 ? "Ходы ещё есть" : "Ходы на сегодня закончились"),
+        : (left > 0 ? "Ходы ещё есть" : "Ходы закончились"),
       timerLabel: burst ? "Повторная попытка через" : "Возврат хода через",
       ariaLabel: burst ? "Слишком частые запросы" : "Ходы наставника закончились",
       text: burst
@@ -495,14 +495,14 @@
     var left = Math.max(0, Math.min(limit, Number(S.quota.remaining) || 0));
     openAiLimitModal({ limit: limit, remaining: left, resetInSec: S.quota.resetInSec }, null, Object.assign({}, AGENT_QUOTA_OPTS, {
       icon: "ai",
-      name: left > 0 ? "Осталось " + left + " из " + limit : "Ходов на сегодня нет",
+      name: left > 0 ? "Осталось " + left + " из " + limit : "Ходов пока нет",
       timer: false,
       closeText: "Закрыть",
       ariaLabel: "Ходы наставника",
       text: left > 0
-        ? "Ход — это твой вопрос наставнику и его ответ вместе с шагами. Сегодня доступно <b>" +
-          left + " из " + limit + "</b> " + pluralQ(limit) + ". Каждый потраченный ход возвращается через 8 часов, поэтому лимит восстанавливается сам."
-        : "Сегодня ходы закончились. Следующий вернётся по цепочке — таймер появляется здесь же.",
+        ? "Ход — это твой вопрос наставнику и его ответ вместе с шагами. Доступно <b>" +
+          left + " из " + limit + "</b> " + pluralQ(limit) + ". Израсходованные ходы возвращаются по одному каждые 8 часов."
+        : "Ходы закончились. Следующий вернётся сам — таймер появится здесь же.",
     }));
   }
   function limitEscHandler(e) {
@@ -563,9 +563,9 @@
   function openThreadProblem(kind) {
     var map = {
       bad: { icon: "info", title: "Ссылка сломана",
-             text: "В адресе чата что-то не так — такой чат открыть нельзя. Проверь ссылку или выбери чат из списка: твои чаты на месте." },
+             text: "Такой чат открыть нельзя — проверь ссылку или выбери чат из списка: твои чаты на месте." },
       foreign: { icon: "lock", title: "Это не твой чат",
-             text: "Ссылка ведёт в чужой или удалённый чат. Чужие переписки не открываем даже по прямой ссылке — показываю твои чаты." },
+             text: "Ссылка ведёт в чужой или удалённый чат. Чужие переписки не открываем — показываю твои чаты." },
       deleted: { icon: "info", title: "Чат удалён",
              text: "Этот чат уже удалён — может, с другого устройства. Показываю оставшиеся чаты, прогресс и ошибки на месте." },
     };
@@ -667,7 +667,7 @@
     var quota = el("button", "agent__quota", null);
     quota.type = "button"; quota.id = "agent-quota";
     quota.innerHTML = '<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="q-track" cx="18" cy="18" r="15"/><circle class="q-ring" cx="18" cy="18" r="15" style="stroke-dashoffset:0px"/></svg>';
-    var qn = el("span", "num", "10");
+    var qn = el("span", "num", "5");
     qn.id = "agent-quota-num";
     quota.appendChild(qn);
     // Подсказка про остаток — наведение/фокус (чистый CSS), клик по кольцу
@@ -705,11 +705,11 @@
     empty.setAttribute("hidden", "");
     empty.innerHTML =
       '<span class="agent__empty-badge" aria-hidden="true">' + icon("ai") + "</span>" +
-      '<h2>Здесь пока пусто</h2><p>Спроси про тему или свои ошибки, а я покажу, как искал ответ.</p>' +
+      '<h2>Здесь пока пусто</h2><p>Спроси про тему или свои ошибки — шаги поиска будут видны в ответе.</p>' +
       '<div class="agent__suggest">' +
       [["Почему я ошибаюсь в производных?", "Почему я ошибаюсь", "Разберу твои решения по теме", "errors"],
        ["Составь план подготовки на неделю", "План на неделю", "Соберу задания под твой уровень", "compass"],
-       ["Объясни задание 17 с параметрами", "Задание 17", "Объясню параметры простыми словами", "help"]
+       ["Объясни задание 17 с параметрами", "Задание 17", "Объясню параметры", "help"]
       ].map(function (s, i) {
         return '<button class="agent__suggest-card" type="button" style="--i:' + i + '" data-ask="' + esc(s[0]) + '">' +
           '<span class="agent__suggest-ic" aria-hidden="true">' + icon(s[3]) + "</span>" +
@@ -1413,7 +1413,7 @@
     } else if (st.status === "dropped") {
       // Честная подпись вместо кнопок: предложение не применено, потому что
       // ученик его не подтвердил и задал другой вопрос.
-      body.appendChild(el("p", "", "Не применил — ты задал другой вопрос."));
+      body.appendChild(el("p", "", "Не применено — ты задал другой вопрос."));
     }
     var det = document.createElement("details");
     det.className = "agent__step-detail";
@@ -2833,7 +2833,7 @@
     var g = S.navGen, mg = S.mountGen;
     var replaceLast = !!(opts && opts.replaceLast);
     var left = Math.max(1, Math.min(180, wait || 1));
-    var card = errorCard("Сервер ещё считает прошлый ответ — повторю через " + left + " с.");
+    var card = errorCard("Наставник ещё отвечает на прошлый вопрос — повторю через " + left + " с.");
     var label = card.querySelector(".agent__answer");
     var row = el("div", "agent__actions");
     var btn = el("button", "agent__qr", "Повторить сейчас");
@@ -2843,7 +2843,7 @@
     var started = false;
     function fire() {
       if (started || g !== S.navGen || mg !== S.mountGen) return;
-      if (S.busy) { say("Дождись текущего ответа"); return; }
+      if (S.busy) { say("Дождись ответа"); return; }
       turnAnswered(S.currentId, text).then(function (answered) {
         if (g !== S.navGen || mg !== S.mountGen) return;
         started = true;
@@ -2874,7 +2874,7 @@
       if (g !== S.navGen || mg !== S.mountGen) return;
       left -= 1;
       if (left > 0) {
-        label.textContent = "Сервер ещё считает прошлый ответ — повторю через " + left + " с.";
+        label.textContent = "Наставник ещё отвечает на прошлый вопрос — повторю через " + left + " с.";
         later(1000, tick);
         return;
       }
@@ -2895,7 +2895,7 @@
       // уже не должен ждать его гвоздя в поле ввода.
       turn.detached = true;
       syncBusy();
-      errorCard("Остановлено. Если сервер уже считал ответ — он появится ниже.",
+      errorCard("Остановлено. Если ответ уже готов — он появится ниже.",
         "Обновить чат", function () { loadThreadMessages(); });
       watchAnswer(turn.threadId, text, WATCH_TRIES);
       return;

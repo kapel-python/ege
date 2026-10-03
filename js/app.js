@@ -826,7 +826,7 @@ const HELP = {
     body: `
       <p><b>Опыт (XP)</b> — это очки за учёбу. Их дают за каждое задание — даже если ответ неправильный, без очков не останешься.</p>
       <p>За правильный ответ очков больше. А если брал подсказку или уже решал это задание раньше — получишь меньше.</p>
-      <p>Ещё очки дают за исправленные ошибки, пройденные уроки и тренировки, а за каждый новый уровень — бонус <b>+50</b>. Полоска «столько-то из столько-то» показывает, сколько осталось до следующего уровня.</p>`,
+      <p>Ещё очки дают за исправленные ошибки, пройденные уроки и тренировки, а за каждый новый уровень — бонус <b>+50</b>. Полоска показывает, сколько осталось до следующего уровня.</p>`,
   },
   streak: {
     title: "Серия дней",
@@ -834,7 +834,7 @@ const HELP = {
       <p>Серия — это сколько <b>дней подряд</b> ты занимаешься.</p>
       <p>Чтобы день засчитался, достаточно позаниматься: решить задание или пройти урок. Ошибаться можно — главное, что позанимался.</p>
       <p>Пропустил день — серия начнётся заново.</p>
-      <p>Огонёк растёт вместе с серией: от <b>7 дней</b> он красный, а от <b>31 дня</b> — фиолетовый, и искр становится больше.</p>`,
+      <p>Огонёк показывает длину серии: от <b>7 дней</b> он красный, а от <b>31 дня</b> — фиолетовый.</p>`,
   },
   nextstep: {
     title: "Что делать сейчас",
@@ -881,7 +881,7 @@ const HELP = {
     title: "Испытания",
     body: `
       <p><b>Ежедневная задача</b> — короткая подборка на сегодня. За выполнение дают очки, за повтор — нет.</p>
-      <p><b>Боссы</b> открываются, когда хорошо прокачана вся группа тем. Какая тема попадётся — заранее не видно, как на настоящем экзамене. Чтобы победить, реши правильно больше половины заданий. Победа даёт очки и усиливает всю группу тем.</p>`,
+      <p><b>Боссы</b> открываются, когда хорошо освоена вся группа тем. Какая тема попадётся — заранее не видно, как на настоящем экзамене. Чтобы пройти, реши правильно больше половины заданий. За прохождение начисляются очки, а вся группа тем усиливается.</p>`,
   },
 };
 
@@ -953,17 +953,8 @@ Store.on("xp", () => renderTopbar());
 Store.on("persistenceerror", (err) => {
   if (isBlockedError(err)) return; // бан показывает модалку, тост не нужен
   try {
-    const status = err && err.status ? ` (${err.status})` : "";
-    const code = err && (err.code || (err.payload && err.payload.code)) ? ` [${err.code || err.payload.code}]` : "";
     const msg = err && err.message ? String(err.message).slice(0, 160) : "";
-    console.warn("[save failed]", status, code, msg, err);
-    try {
-      localStorage.setItem("ege_last_save_error", JSON.stringify({ status: err && err.status || 0, code: err && (err.code || (err.payload && err.payload.code)) || "", message: msg, at: Date.now() }));
-    } catch (_) {}
-    if (status || code) {
-      toast(`Не удалось сохранить прогресс${status}${code}. Попробуй ещё раз.`, "toast--error", "x");
-      return;
-    }
+    console.warn("[save failed]", err && err.status, err && (err.code || (err.payload && err.payload.code)), msg, err);
   } catch (_) {}
   toast("Не удалось сохранить прогресс. Попробуй ещё раз.", "toast--error", "x");
 });
@@ -3166,7 +3157,7 @@ function openSkillModal(skillId) {
         ? 'теория <b>' + b.theory + '</b> из 40 · практика <b>' + b.practice + '</b> из 60'
         : 'урока по теме нет — весь прогресс из практики: <b>' + b.practice + '</b> из 100';
       let hint;
-      if (b.total >= 90) hint = 'Тема освоена — так держать.';
+      if (b.total >= 90) hint = 'Тема освоена.';
       else if (b.lessonTotal && b.lessonDone < b.lessonTotal) hint = 'Пройди урок — это сразу +40 к освоению.';
       else {
         const k = practiceSolvesToTarget(skillId, 90);
@@ -3179,7 +3170,7 @@ function openSkillModal(skillId) {
 
     <div style="margin-top:20px">
       <div class="stat-label" style="margin-bottom:8px">Типичные ошибки</div>
-      ${subs.length ? `<div class="error-subtopics">${subs.map((x) => `<span class="chip chip--danger">${esc(x)}</span>`).join("")}</div>` : `<div style="font-size:13px;color:var(--muted)">Пока не выявлены — так держать.</div>`}
+      ${subs.length ? `<div class="error-subtopics">${subs.map((x) => `<span class="chip chip--danger">${esc(x)}</span>`).join("")}</div>` : `<div style="font-size:13px;color:var(--muted)">Пока не выявлены.</div>`}
     </div>
 
     ${lessonErrs.length ? `
@@ -3985,11 +3976,11 @@ function essaySyncTakeAnotherVisibility(t) {
    получился бы «AI ещё работает → XP уже выдан». */
 
 const ESSAY_CHECK_MSGS = [
-  "Подсчитываю баллы…",
-  "Проверяю сочинение…",
-  "Анализирую критерии…",
-  "Собираю результат…",
-  "Готовлю отчёт…",
+  "Проверяем сочинение…",
+  "Считаем баллы…",
+  "Сверяем критерии…",
+  "Собираем результат…",
+  "Готовим отчёт…",
 ];
 
 function essayCheckMsgStart(scopeId) {
@@ -4011,9 +4002,9 @@ function essayCheckMsgStop() {
 function essayAiErrorText(status, data) {
   if (status === 429) return "Слишком частые запросы. Подожди немного и попробуй снова.";
   if (status === 503) return "Сервис проверки временно недоступен. Текст сохранён — попробуй снова чуть позже.";
-  if (status === 502) return "Нейросеть не смогла проверить сочинение — доступные провайдеры не ответили. Текст сохранён, попробуй ещё раз чуть позже.";
+  if (status === 502) return "Не получилось проверить сочинение. Текст сохранён — попробуй ещё раз чуть позже.";
   if (data && data.error) return data.error;
-  return "Не удалось дождаться ответа проверки. Текст сохранён — нажми «Попробовать снова»: если проверка успела досчитаться, результат подхватится без новой траты лимита.";
+  return "Не удалось дождаться ответа проверки. Текст сохранён — нажми «Попробовать снова»: если проверка успела завершиться, результат появится сам и лимит не потратится.";
 }
 
 /* Отчёт — это ege-result.html (единый шаблон результата): данные подставляет
@@ -4180,7 +4171,7 @@ function essayWaitElapsedTotal(t) {
 function essayWaitWarnHTML() {
   return `<div class="essay-waitwarn" id="essayWaitWarn" role="status">
     <span class="essay-waitwarn__badge" aria-hidden="true">⚠️</span>
-    <div class="essay-waitwarn__text"><b>Проверка идёт дольше минуты.</b> Провайдер, который должен ответить, пока молчит — перебираем запасных по очереди. Лимит ожидания — 2,5 минуты: если никто не ответит, жетон за проверку вернётся сам, а за долгое ожидание начислим бонус +1.</div>
+    <div class="essay-waitwarn__text"><b>Проверка идёт дольше минуты.</b> Пробуем другой способ проверки. Лимит ожидания — 2,5 минуты: если проверка не завершится, попытка не засчитается, а за долгое ожидание добавим +1 проверку.</div>
   </div>`;
 }
 
@@ -4346,13 +4337,13 @@ async function essayClaimTimeoutBonus() {
     }
     const n = Math.max(0, Number(data.remaining) || 0);
     const m = Math.max(1, Number(data.limit) || AI_LIMIT_FALLBACK);
-    const head = "Проверка ждала ответа дольше 2,5 минут — наши провайдеры так и не ответили. Жетон за неё вернулся сам.";
+    const head = "Проверка не завершилась за 2,5 минуты. Попытка не засчитана.";
     const tail = data.granted
-      ? ` А за долгое ожидание начислен бонус: <b>+1 проверка</b>. Сейчас доступно: <b>${n} из ${m}</b>. Просим прощения!`
+      ? ` За долгое ожидание добавили <b>+1 проверку</b>. Сейчас доступно: <b>${n} из ${m}</b>.`
       : (data.reason === "full"
-        ? " Лимит проверок у тебя и так полный, поэтому бонус класть некуда."
+        ? " Запас и так полный, добавлять нечего."
         : " Бонус за сегодня уже начислялся.");
-    openInfoDialog({ eyebrow: "Проверка сочинений", icon: "ai", title: "Провайдеры не ответили", text: `${esc(head)}${tail}`, closeText: "Понятно" });
+    openInfoDialog({ eyebrow: "Проверка сочинений", icon: "ai", title: "Не удалось проверить", text: `${esc(head)}${tail}`, closeText: "Понятно" });
   } catch (_) {}
 }
 
@@ -5145,7 +5136,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     essayMountFeedback(`
       <div class="feedback feedback--bad">
         <div class="feedback__head">${icon("x")} Отчёт не сформирован</div>
-        <div class="feedback__solution">Проверка прошла, но результат не сохранился. Текст не потерян — попробуй снова, XP начислен не будет до готового отчёта.</div>
+        <div class="feedback__solution">Проверка прошла, но результат не сохранился. Текст не потерян — попробуй снова, очки за сочинение появятся только в готовом отчёте.</div>
         <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
@@ -5212,7 +5203,7 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(submission.result.total_score)} / ${esc(submission.result.max_score)} · +${xp} XP</span></div>
-      <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
+      <div class="feedback__solution">Отчёт готов: содержание и грамотность проверены, баллы подсчитаны.</div>
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ${singleEssay ? "btn--soft" : "btn--primary"}" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
       </div>
@@ -5252,7 +5243,7 @@ function essayRestoreReportBlock(t, sub) {
     <div class="feedback feedback--ok">
       <div class="feedback__head">${icon("check")} Проверка завершена
         <span class="feedback__xp">${esc(sub.result.total_score)} / ${esc(sub.result.max_score)}</span></div>
-      <div class="feedback__solution">Отчёт готов: AI-проверка содержания и автоматическая проверка грамотности завершены, баллы подсчитаны.</div>
+      <div class="feedback__solution">Отчёт готов: содержание и грамотность проверены, баллы подсчитаны.</div>
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn btn--soft" onclick="openEssayResult('${esc(t.id)}')">Посмотреть результат →</button>
       </div>
@@ -5439,9 +5430,8 @@ function openAiLimitModal(status, burstRetryAfterSec, opts) {
     : (n) => plural(n, "проверка", "проверки", "проверок");
   const essayText = burst
     ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
-    : `Лимит — ${limit} ${pluralFn(limit)} сочинения в день на аккаунт:
-          каждая потраченная возвращается через 8 часов.
-          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — в 4 раза больше проверок.</div>` : ""}`;
+    : `Лимит — ${limit} ${pluralFn(limit)} в день: израсходованные возвращаются по одной каждые 8 часов.
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — вдвое больше проверок.</div>` : ""}`;
   const name = o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились");
   const text = typeof o.text === "function"
     ? o.text({ remaining, limit, burst, left, plural: pluralFn })
@@ -5795,7 +5785,7 @@ function sessionFinish(early = false) {
   });
 
   const isBossWin = boss && correct / solved >= 0.6 && bossDefeated(boss);
-  const title = missionDone ? "ПРАКТИКА ЗАВЕРШЕНА" : boss ? (isBossWin ? "ИСПЫТАНИЕ ПРОЙДЕНО" : "БОСС УСТОЯЛ") : "ТРЕНИРОВКА ЗАВЕРШЕНА";
+  const title = missionDone ? "Практика завершена" : boss ? (isBossWin ? "Испытание пройдено" : "Босс устоял") : "Тренировка завершена";
 
   const checkedSkills = boss ? [...new Set(S.results.map((r) => DataAPI.skill(DataAPI.task(r.taskId).skill).name))] : null;
 
@@ -6459,7 +6449,7 @@ function screenErrors(root) {
     ${minors.length ? `<div class="section-title">Почти получилось — закрепи без подсказок</div>
     <div style="font-size:13px;color:var(--muted);margin:-6px 0 12px">Решено, но неидеально: с подсказкой, после неверных попыток или слишком медленно. Чистое решение закроет пункт.</div>
     ${groupCards(minors, "")}` : ""}
-    ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Решай задания — система соберёт здесь всё, что пошло не так.</div>` : ""}`;
+    ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Новые появятся здесь после решений.</div>` : ""}`;
 }
 
 function reviewQueueForErrors(errors) {
@@ -6597,7 +6587,7 @@ function screenTrials(root) {
         const cp = catProgress(b.cat);
         return `
         <div class="card boss-card ${defeated ? "boss-card--defeated" : ""}">
-          <div class="boss-label">${defeated ? "ИСПЫТАНИЕ ПРОЙДЕНО ✓" : unlocked ? "ИСПЫТАНИЕ" : "ИСПЫТАНИЕ · ЗАКРЫТО"}</div>
+          <div class="boss-label">${defeated ? "Испытание пройдено ✓" : unlocked ? "Испытание" : "Испытание · закрыто"}</div>
           <div class="boss-title">${b.title.replace("БОСС: ", "")}</div>
           <div style="font-size:13px;color:var(--text-2);margin-top:8px">${b.desc}</div>
           <div style="margin:14px 0 6px">${progressBar(Math.min(cp / b.unlockAt, 1) * 100, unlocked ? "progress--success" : "progress--warn")}</div>
@@ -6606,7 +6596,7 @@ function screenTrials(root) {
             <span class="chip chip--accent mono">+${b.xp} XP</span>
             <span class="chip">${b.size} заданий</span>
             ${unlocked
-              ? `<button class="btn ${defeated ? "btn--soft" : "btn--danger-soft"} btn--sm" style="margin-left:auto" onclick="startBoss('${b.id}')">${defeated ? "Пройти снова" : "В бой"}</button>`
+              ? `<button class="btn ${defeated ? "btn--soft" : "btn--danger-soft"} btn--sm" style="margin-left:auto" onclick="startBoss('${b.id}')">${defeated ? "Пройти снова" : "Начать"}</button>`
               : `<span style="margin-left:auto;color:var(--muted)">${icon("lock")}</span>`}
           </div>
         </div>`;
@@ -7397,7 +7387,7 @@ function essayInsightHTML(snap, readyNewFirst) {
   } else if (d > 0) {
     trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
   } else if (d < 0) {
-    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Это нормально — баллы ходят волнами. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
+    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Это нормально — результаты от работы к работе меняются. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
   } else {
     trend = `Пока ровно: <b class="mono">${first} из 22</b> в первой и в последней из ${n} ${workWord}. Стабильность — уже результат; сдвинуть её поможет одно слабое место ниже.`;
   }
@@ -7409,7 +7399,7 @@ function essayInsightHTML(snap, readyNewFirst) {
     if (weak.pct >= ESSAY_STEADY_PCT) {
       const strong = crits[crits.length - 1];
       const strongGuide = ESSAY_CRIT_GUIDE[strong.id];
-      focus = `По критериям ровно: слабее всего <b>${esc(guide ? guide.name : weak.id)} (${weak.avg} из ${weak.max})</b> — и это всё равно высокий уровень. Держи планку${strongGuide && strong.id !== weak.id ? `, сильнее всего — ${esc(strongGuide.name)}` : ""}.`;
+      focus = `По критериям ровно: слабее всего <b>${esc(guide ? guide.name : weak.id)} (${weak.avg} из ${weak.max})</b> — и это всё равно высокий уровень${strongGuide && strong.id !== weak.id ? `, сильнее всего — ${esc(strongGuide.name)}` : ""}.`;
     } else if (guide) {
       focus = `Больше всего баллов уходит в <b>${esc(guide.name)} (${weak.id})</b> — в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Причина обычно в том, что ${esc(guide.why)}. Я предлагаю: ${esc(guide.next)}.`;
     } else {
@@ -9077,8 +9067,7 @@ const Onboarding = {
         try { this.subject = DataAPI.currentSubject() || null; } catch (_) {}
         this.render();
         try {
-          const code = err && (err.code || (err.payload && err.payload.code)) ? ` [${err.code || err.payload.code}]` : "";
-          toast(`Не удалось открыть предмет${err && err.status ? ` (${err.status})` : ""}${code}. Проверь соединение и выбери ещё раз.`, "toast--error", "x");
+          toast("Не удалось открыть предмет. Проверь соединение и выбери ещё раз.", "toast--error", "x");
         } catch (_) {}
         return;
       }

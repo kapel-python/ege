@@ -206,7 +206,7 @@ const resetRoots = () => {
   const dlg = devRoot();
   check("открыто .dlg-окно лимита (та же система, что у устройств)", dlg.includes("dlg-backdrop"));
   check("заголовок «Проверки на сегодня закончились»", dlg.includes("Проверки на сегодня закончились"));
-  check("текст про лимит 5 проверок в день", dlg.includes("5 проверок сочинения в день на аккаунт"), dlg.slice(0, 200));
+  check("текст про лимит 5 проверок в день", dlg.includes("5 проверок в день"), dlg.slice(0, 200));
   check("остаток «0 из 5»", dlg.includes(">0</span> из 5"), (dlg.match(/data-ai-limit-left[^<]*</) || [""])[0]);
   check("живой таймер ЧЧ:ММ:СС из resetInSec", dlg.includes("01:01:01"), (dlg.match(/\d\d:\d\d:\d\d/) || [""])[0]);
   check("закрытие крестиком и кнопкой", dlg.includes('onclick="closeAiLimitModal()"'));

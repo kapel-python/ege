@@ -151,7 +151,7 @@ check("подхват хода не дублирует пузырёк (дори�
   spaCode.includes("if (!bubble) bubble = userBubble(t.text)")
   && spaCode.includes('skel = loaders.length ? loaders[loaders.length - 1].closest(".agent__ai") : null'));
 check("композер при блокировке объясняет, а не глотает молча",
-  spaCode.includes('say("Дождись текущего ответа")'));
+  spaCode.includes('say("Дождись ответа")'));
 check("мёртвый ход не держит композер (syncBusy на путях повтора)",
   /removeChild\(bubble\);\s*syncBusy\(\);\s*retryWhenFree/.test(spaCode)
   && /openLimitModal\(S\.quota[^;]*;\s*syncBusy\(\);/.test(spaCode)
@@ -364,7 +364,7 @@ check("брошенное подтверждение гасится на кар�
   && spaCode.includes("function markStepDropped")
   && /\(res\.data\.dropped \|\| \[\]\)\.forEach\(function \(id\) \{ markStepDropped\(id\); \}\)/.test(spaCode)
   // погашенный шаг — честная подпись, а не мёртвые «Применить/Отмена»
-  && /st\.status === "dropped"[\s\S]{0,200}Не применил/.test(spaCode)
+  && /st\.status === "dropped"[\s\S]{0,200}Не применен/.test(spaCode)
   && !/status === "dropped"[\s\S]{0,300}confirmStep\(st\.id, true/.test(spaCode));
 check("кэш раздела: список и переписка, привязан к аккаунту",
   spaCode.includes("cacheHasThreads") && spaCode.includes("cachedMessages")

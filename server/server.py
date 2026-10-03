@@ -12059,13 +12059,13 @@ class Handler(BaseHTTPRequestHandler):
                         proposal = {}
                     if not approve:
                         conn.execute("UPDATE agent_messages SET status='cancelled' WHERE id=?", (mid,))
-                        _agent_add_message(conn, tid, user_id, "assistant", "Отменено учеником.")
+                        _agent_add_message(conn, tid, user_id, "assistant", "Отменено.")
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         # После отмены — без кнопок-шаблонов: их неоткуда взять
                         # (модель тут не отвечала), а дежурный набор — это и
                         # есть заглушка.
-                        self.send_json({"ok": True, "approved": False, "final": "Отменено учеником.",
+                        self.send_json({"ok": True, "approved": False, "final": "Отменено.",
                                         "steps": [], "suggests": [],
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла без нового жетона.

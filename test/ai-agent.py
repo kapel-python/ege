@@ -6,7 +6,7 @@ Temp-БД, живой сервер, мок провайдера (без сети
   * чужой тред — 404, чужие сообщения не отдаются, инструменты чужих не видят;
   * ответ без tools — финальный текст и одно списание квоты;
   * ответ с tools — цикл отрабатывает, шаги в базе и в ответе;
-  * действие — confirm без записи, approve меняет, отмена пишет «Отменено учеником»;
+  * действие — confirm без записи, approve меняет, отмена пишет «Отменено»;
   * длинный цикл — обрыв ответом по собранным данным (вызов без tools);
   * 10 ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает жетон;
   * повторный ход — кэш, usage.cost не растёт;
@@ -322,7 +322,7 @@ def _knowledge_and_paging_probes(server):
         part = agent.project_info(conn, uid, subj, {"topic": "проверки"})
         out["knowledge_full"] = "Устройства" in full.get("text", "") and "matched" not in full
         out["knowledge_part"] = (
-            part.get("matched") == ["Проверок сочинений в сутки: 5"]
+            part.get("matched") == ["Проверок сочинений в сутки: 5 (с Plus — 10)"]
             and "Устройства" not in part.get("text", "")
             and "5" in part.get("text", "")
             and len(part["text"]) < len(full["text"]))
@@ -921,7 +921,7 @@ def main():
             finally:
                 conn2.close()
 
-            section("отмена пишет «Отменено учеником»")
+            section("отмена пишет «Отменено»")
             with lock:
                 script.clear()
                 script.append({"text": None, "tool_calls": [{"id": "c3", "name": "reset_progress", "arguments": {}}]})
@@ -930,8 +930,8 @@ def main():
             cancel_id = (body.get("steps") or [{}])[0].get("id")
             status, body = a.request(base, "POST", "/api/agent/turns/confirm",
                                      {"messageId": cancel_id, "approve": False})
-            check("cancel -> Отменено учеником",
-                  status == 200 and body.get("final") == "Отменено учеником.", f"{status} {body}")
+            check("cancel -> Отменено",
+                  status == 200 and body.get("final") == "Отменено.", f"{status} {body}")
 
             section("длинный цикл обрывается ответом, а не отказом")
             with lock:
@@ -941,7 +941,7 @@ def main():
                                                                  "arguments": {"op": "progress"}}]})
             status, body = turn(a, tid_a, "расскажи всё подробно")
             check("длинный цикл -> 200 с финалом",
-                  status == 200 and isinstance(body.get("final"), str) and "не успел" in body["final"],
+                  status == 200 and isinstance(body.get("final"), str) and "не успел" in body["final"].lower(),
                   f"{status} {str(body)[:200]}")
             check("шагов не больше MAX",
                   len(body.get("steps") or []) <= agent.MAX_TOOL_STEPS, str(len(body.get("steps") or [])))
@@ -1722,7 +1722,7 @@ def main():
                     conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
                     budgeted, deadline=time.monotonic() + agent.TURN_CALL_FLOOR_SEC + 0.25)
                 check("истёкший бюджет с собранными шагами -> честный ответ, не 502",
-                      len(steps) == 1 and isinstance(final, str) and "не успел" in final
+                      len(steps) == 1 and isinstance(final, str) and "не успел" in final.lower()
                       and pending is None, f"{len(steps)} {final!r}")
                 # Вызовы хода ограничены остатком бюджета, а финал по собранным
                 # данным (_summarize) получает СВОЁ окно TURN_SUMMARY_EXTRA_SEC:

@@ -126,7 +126,7 @@ var Subscription = (function () {
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
           <span class="sub-card__name">ege easy <span class="plus">Plus</span></span>
-          <span class="sub-card__sub">В разы больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
+          <span class="sub-card__sub">Лимиты выше: больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
         </span>
         <span class="chip">бесплатно</span>
       </span>
