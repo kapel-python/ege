@@ -627,9 +627,9 @@
       sub.textContent = "Автопродление выключено. Верни его — доступ продлится сам, ничего доплачивать не нужно.";
       btn("btn-primary btn--sm", "Вернуть продление", "resume");
     } else {
-      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут. Нажми «Напомнить» — подарим месяц Plus, когда её включат.";
+      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут. Нажми «Напомнить» — сообщим, когда её включат.";
       btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "soon");
-      var nb = btn("btn-ghost btn--sm", notified ? "Напомним о запуске — месяц Plus твой" : "Напомнить о запуске", "notify");
+      var nb = btn("btn-ghost btn--sm", notified ? "Ты в списке — сообщим о запуске" : "Напомнить о запуске", "notify");
       if (notified) nb.disabled = true;
     }
     if (!row.getAttribute("data-bound")) {
@@ -642,7 +642,7 @@
         if (act === "notify") {
           setBusy(b, true, "Записываем…");
           api("/api/subscription/notify", {}).then(function(){
-            toast("Записали — подарим месяц Plus на старте");
+            toast("Записали — сообщим о запуске");
             reload();
           }).catch(function(err){
             setBusy(b, false);

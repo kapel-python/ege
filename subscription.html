@@ -338,7 +338,7 @@
         <button class="btn btn-ghost" id="notifyBtn" type="button" hidden>Напомнить о запуске</button>
         <a class="btn btn-ghost" href="/dashboard">Сначала посмотреть платформу</a>
         <span class="cta-note">Отмена в любой момент · возврат в течение 14 дней</span>
-        <span class="cta-note" id="notifyNote" hidden>Оплата подключается. Нажми «Напомнить» — подарим месяц Plus, когда её включат.</span>
+        <span class="cta-note" id="notifyNote" hidden>Оплата подключается. Нажми «Напомнить» — сообщим, когда её включат.</span>
       </div>
 
       <ul class="trust">
@@ -478,7 +478,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
     </span>
     <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Нажми «Напомнить» — подарим месяц Plus, когда оплату включат.</p>
+    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Оставь заявку — сообщим, как только оплату включат.</p>
     <div class="modal__actions">
       <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
       <a class="btn btn-ghost btn--sm" href="/dashboard#/profile">Открыть профиль</a>
@@ -644,14 +644,13 @@
   }
 
   /* Лист ожидания: кнопка видна только залогиненному без Plus.
-     Нажавший попадёт в plus_waitlist и получит месяц Plus в подарок,
-     когда включат оплату (выдача — одним ручным запросом админа). */
+     Нажавший попадёт в plus_waitlist — о запуске сообщим первым. */
   function paintNotify(){
     var show = subState.checked && !subState.guest && !subState.active;
     if (notifyBtn) {
       notifyBtn.hidden = !show;
       notifyBtn.disabled = !!subState.notified;
-      notifyBtn.textContent = subState.notified ? "Напомним о запуске — месяц Plus твой" : "Напомнить о запуске";
+      notifyBtn.textContent = subState.notified ? "Ты в списке — сообщим о запуске" : "Напомнить о запуске";
     }
     if (notifyNote) notifyNote.hidden = !show;
     if (soonNotify) {
