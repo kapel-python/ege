@@ -270,6 +270,13 @@ check("живое превью снимается перед авторитет�
   /function liveDrop\(turn\)/.test(spaCode)
   && /sawLive[\s\S]{0,80}?liveDrop\(turn\)/.test(spaCode)
   && /liveDrop\(turn\);\n    if \(e && e\.name/.test(spaCode));
+/* Перезагрузка посреди хода: локального S.turn уже нет, но шаги считаются на
+   сервере — их тоже дорисовываем вживую (объект один на busy-слот, опрос тот
+   же livePoll), а не ждём молча до конца хода. */
+check("перезагрузка посреди хода тоже видит живые шаги (showServerBusy + livePoll)",
+  /S\.serverBusy = \{ threadId: wantId, text: bt, liveTimer: null/.test(spaCode)
+  && /livePoll\(S\.serverBusy\)/.test(spaCode)
+  && /liveDrop\(S\.serverBusy\)/.test(spaCode));
 /* Клавиатура телефона: высоту держит CSS (колонка ровно в 100dvh), от focus
    требуется только освободить резерв под нижнее меню. Пин высоты в пикселях
    был причиной «поле съехало вверх и не вернулось». */

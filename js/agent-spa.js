@@ -2632,13 +2632,13 @@
      (S.turn) уже подхвачен reattachTurn — его не трогаем. */
   function showServerBusy(wantId, res) {
     if (!res || !res.data || !res.data.busy) {
-      if (S.serverBusy) { S.serverBusy = null; syncBusy(); }
+      if (S.serverBusy) { liveDrop(S.serverBusy); S.serverBusy = null; syncBusy(); }
       S._busyWatch = null;
       return;
     }
     var t = S.turn;
     if (t && !t.dead && Number(t.threadId) === Number(wantId)) {
-      if (S.serverBusy) { S.serverBusy = null; syncBusy(); }
+      if (S.serverBusy) { liveDrop(S.serverBusy); S.serverBusy = null; syncBusy(); }
       S._busyWatch = null;
       return;
     }
@@ -2651,7 +2651,8 @@
       }
       if (!hasBubble) userBubble(bt);
     }
-    if (!ui.live.querySelector(".agent__loader")) skeletonCard();
+    var skelBusy = null;
+    if (!ui.live.querySelector(".agent__loader")) skelBusy = skeletonCard();
     showEmpty(false);
     // Один цикл ожидания на (чат, текст): повторные заходы loadThreadMessages,
     // пока слот занят, не должны плодить параллельные опросы.
@@ -2660,8 +2661,30 @@
     // он живой: держим композер и «Стоп», как при своём ходе. Повторная
     // отправка упрётся в AGENT_BUSY — там уже есть ветка mineBusy с молчаливым
     // ожиданием, а не враньём про «сервер занят».
-    S.serverBusy = { threadId: wantId, text: bt };
+    // Живое превью продолжает чужой ход, а не начинается заново: объект один
+    // на слот, повторные заходы лишь подхватывают его (иначе каждый фоновый
+    // опрос сносил бы уже показанные шаги).
+    if (!S.serverBusy || Number(S.serverBusy.threadId) !== Number(wantId)) {
+      if (S.serverBusy) liveDrop(S.serverBusy);
+      S.serverBusy = { threadId: wantId, text: bt, liveTimer: null, liveShown: 0,
+                       liveEl: null, liveOl: null, liveNum: null,
+                       liveLoader: null, liveSkel: skelBusy };
+    } else {
+      S.serverBusy.text = bt;
+      if (skelBusy && !S.serverBusy.liveEl) S.serverBusy.liveSkel = skelBusy;
+    }
     syncBusy();
+    // Шаги чужого хода уже считаются на сервере (liveSteps в GET): ждать их
+    // молча со скелетоном — та же «пачка в конце», только после reload.
+    // Дорисовываем тем же живым путём; S.turn тут нет, опрос идёт по слоту.
+    if (!S.serverBusy.liveTimer) {
+      S.serverBusy.liveTimer = setInterval(function () {
+        var b = S.serverBusy;
+        if (!b) return;
+        livePoll(b);
+      }, LIVE_POLL_MS);
+      livePoll(S.serverBusy);
+    }
     if (S._busyWatch === wk) return;
     S._busyWatch = wk;
     watchAnswer(wantId, bt || null, WATCH_TRIES, function () { S._busyWatch = null; loadThreadMessages(true); });
