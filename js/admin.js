@@ -275,6 +275,7 @@ const AICONS = {
   reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
   pulse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-7 4 14 3-7h6"/></svg>',
+  crown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l4 4 5-7 5 7 4-4v11H3z"/></svg>',
 };
 
 function aicon(name) {
@@ -304,6 +305,7 @@ const SECTIONS = [
   { id: "providers", title: "Провайдеры", short: "ИИ", icon: "cpu" },
   { id: "inbox", title: "Обращения", short: "Обращения", icon: "inbox" },
   { id: "users", title: "Пользователи", short: "Люди", icon: "users" },
+  { id: "subscription", title: "Подписка", short: "Plus", icon: "crown" },
   { id: "blocked", title: "Заблокированные", short: "Блокировки", icon: "blocked" },
   { id: "audit", title: "Журнал действий", short: "Журнал", icon: "audit" },
 ];
@@ -920,8 +922,8 @@ function subCard(sub, payments) {
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
       </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
-        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт.`
-        : "Бесплатный тариф: 5 проверок сочинений в день, наставник закрыт. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
+        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений и 10 ходов наставника в день.`
+        : "Бесплатный тариф: 5 проверок сочинений и 10 ходов наставника в день. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
   // Платежи — стопкой строк, а не таблицей: таблица на телефоне уезжала
   // за край карточки (горизонтальный скролл внутри — не чтение).
   const history = (payments && payments.length) ? `
@@ -3804,6 +3806,126 @@ async function resetProvider(id) {
 
 /* ---------------- корневой рендер ---------------- */
 
+/* ---------------- Подписка: деньги, очередь, выдача ---------------- */
+
+/* Раздел «Подписка» (#/subscription): сводка одним запросом
+   GET /api/admin/subscription/overview + выдача листа ожидания.
+   Кнопка выдачи — с подтверждением ВВОДОМ ЧИСЛА: мисклик исключён
+   (кнопка мертва, пока не введено точное число), повтор разрешён
+   (невыданных уже нет — сервер вернёт пусто, а не дубли). */
+async function screenSubscription() {
+  renderShell("subscription", `<div class="a-skeleton" style="height:90px"></div><div class="a-skeleton" style="height:280px;margin-top:16px"></div>`);
+  let data;
+  try {
+    data = await AdminApi.get("/api/admin/subscription/overview");
+  } catch (e) {
+    if (e.unauthorized) { A.session = null; renderLogin(); return; }
+    renderShell("subscription", `<div class="a-error-banner">Не удалось загрузить подписки: ${esc(e.message)}<button class="btn btn--soft btn--sm" onclick="render()">Повторить</button></div>`);
+    return;
+  }
+  const u = data.users, s = data.subs, m = data.money, w = data.waitlist, cfg = data.config;
+  const screen = `
+    <div class="a-stats">
+      ${statTile("Аккаунтов", fmtNum(u.total), `онбординг: ${fmtNum(u.onboarded)}`)}
+      ${statTile("Plus активно", fmtNum(u.plusActive), `${u.plusSharePct}% аккаунтов`)}
+      ${statTile("Оборот", fmtMoney(m.revenueKopecks), `${fmtNum(m.paidCount)} ${plural(m.paidCount, "оплата", "оплаты", "оплат")}`)}
+      ${statTile("Средний чек", fmtMoney(m.avgCheckKopecks), m.paidCount ? "по настоящим платежам" : "оплат пока нет")}
+    </div>
+    <div class="a-stats" style="margin-top:14px">
+      ${statTile("Без продления", fmtNum(s.noRenew), "доступ до конца срока")}
+      ${statTile("Истекло", fmtNum(s.expired), "бывших подписок")}
+      ${statTile("Возвраты", `${fmtNum(m.refundedCount)} · ${fmtMoney(m.refundedKopecks)}`, "деньги возвращены")}
+      ${statTile("Ожидают оплаты", fmtNum(m.pendingCount), "pending-платежи")}
+    </div>
+
+    <div class="a-section-title">Лист ожидания</div>
+    <div class="a-card"${w.pending ? ' style="border-color:var(--accent-ring)"' : ""}>
+      <div class="a-card__head"><span class="a-card__title">«Напомнить о запуске»</span><span class="a-card__sub">${w.pending ? `ждут: ${fmtNum(w.pending)}` : "очередь пуста"}</span></div>
+      <div class="a-kv">
+        <div class="a-kv__item"><div class="a-kv__k">Нажали кнопку</div><div class="a-kv__v">${fmtNum(w.total)}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Ждут выдачи</div><div class="a-kv__v">${fmtNum(w.pending)}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Уже получили</div><div class="a-kv__v">${fmtNum(w.granted)}</div></div>
+      </div>
+      <div style="font-size:13.5px;color:var(--text-2);margin-top:12px">Выдача — месяц <span class="plus">Plus</span> каждому ждущему как ручной грант (платёж 0 ₽ в истории). У кого Plus уже есть — месяц добавится сверху. Повтор безопасен: получившие пропускаются.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+        <button class="btn btn--primary btn--sm" id="waitlistGrantBtn"${w.pending ? "" : " disabled title=\"Очередь пуста — выдавать некому\""}>Выдать месяц <span class="plus">Plus</span> — ${fmtNum(w.pending)} ${plural(w.pending, "человек", "человека", "человек")}</button>
+        <button class="btn btn--soft btn--sm" onclick="screenSubscription()">Обновить</button>
+      </div>
+    </div>
+
+    <div class="a-section-title">Тариф</div>
+    <div class="a-card">
+      <div class="a-kv">
+        <div class="a-kv__item"><div class="a-kv__k">Месяц</div><div class="a-kv__v">${fmtMoney(cfg.priceMonthKopecks)} · 30 суток</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Год</div><div class="a-kv__v">${fmtMoney(cfg.priceYearKopecks)} · 365 суток</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Лимиты <span class="plus">Plus</span></div><div class="a-kv__v">${cfg.plusEssay} проверок · ${cfg.plusAgent} ходов в день</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Бесплатно</div><div class="a-kv__v">${cfg.freeEssay} проверок · ${cfg.freeAgent} ходов в день</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Наставник</div><div class="a-kv__v">${cfg.agentRequiresPlus ? "только <span class=\"plus\">Plus</span>" : "открыт всем"}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Ручных грантов</div><div class="a-kv__v">${fmtNum(m.manualGrants)}</div></div>
+      </div>
+    </div>
+
+    <div class="a-section-title">Последние платежи</div>
+    <div class="a-card">
+      ${(data.recent && data.recent.length) ? `<div class="a-paylist">${data.recent.map((pm) => `
+        <div class="a-payrow">
+          <div class="a-payrow__main">
+            <div class="a-payrow__t">${pm.accountId ? `<a href="#/users/${esc(pm.accountId)}" class="mono">${esc(pm.accountId)}</a>` : "<span style=\"color:var(--muted)\">—</span>"} · ${pm.period === "year" ? "год" : "месяц"}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</div>
+          </div>
+          <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
+        </div>`).join("")}</div>`
+      : `<div class="a-empty"><div class="a-empty__title">Платежей пока нет</div><div class="a-empty__sub">Здесь появятся чеки после первой оплаты или выдачи</div></div>`}
+    </div>`;
+  renderShell("subscription", screen);
+  const grantBtn = document.getElementById("waitlistGrantBtn");
+  if (grantBtn && !grantBtn.disabled) {
+    grantBtn.onclick = () => openWaitlistGrantModal(w.pending);
+  }
+}
+
+/* Подтверждение выдачи: кнопка оживает только при точном вводе числа.
+   Число видно прямо в окне — сверять не с чем, кроме внимательности,
+   и это весь смысл: случайный клик «Выдать» ничего не выдаёт. */
+function openWaitlistGrantModal(pending) {
+  const n = Number(pending) || 0;
+  if (n <= 0) return;
+  openModal(`
+    <div class="a-modal__title">Выдать месяц <span class="plus">Plus</span> — ${fmtNum(n)} ${plural(n, "человек", "человека", "человек")}?</div>
+    <div class="a-modal__desc">Каждый ждущий получит месяц как ручной грант (0 ₽, пометка launch-waitlist). У кого Plus уже есть — срок продлится. Запись попадёт в журнал действий. Повторная выдача тех же людей невозможна.</div>
+    <div class="a-modal__form">
+      <div class="a-modal__warn"><b>Подтверждение:</b> введи число <span class="mono">${fmtNum(n)}</span></div>
+      <input class="a-input mono" id="fGrant" placeholder="${fmtNum(n)}" autocomplete="off" inputmode="numeric">
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mDo" disabled>Выдать ${fmtNum(n)} ${plural(n, "подписку", "подписки", "подписок")}</button>
+    </div>`, (modal) => {
+    const input = modal.querySelector("#fGrant");
+    const doBtn = modal.querySelector("#mDo");
+    modal.querySelector("#mCancel").onclick = closeModal;
+    input.oninput = () => { doBtn.disabled = input.value.trim() !== String(n); };
+    input.focus();
+    doBtn.onclick = async () => {
+      if (input.value.trim() !== String(n)) return;
+      doBtn.disabled = true;
+      doBtn.textContent = "Выдаём…";
+      try {
+        const result = await AdminApi.post("/api/admin/subscription/waitlist", { action: "grant", period: "month" });
+        closeModal();
+        toast(`Выдано подписок: ${fmtNum(result.grantedCount)}`);
+        await screenSubscription();
+      } catch (e) {
+        if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        doBtn.disabled = false;
+        doBtn.textContent = `Выдать ${fmtNum(n)} ${plural(n, "подписку", "подписки", "подписок")}`;
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
 async function screenBlocked() {
   let data;
   try { data = await AdminApi.get("/api/admin/blocked-tasks"); } catch (e) {
@@ -3859,6 +3981,8 @@ async function render() {
     else await screenProviders();
   } else if (route.name === "blocked") {
     await screenBlocked();
+  } else if (route.name === "subscription") {
+    await screenSubscription();
   } else {
     await screenDashboard();
   }

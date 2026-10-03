@@ -1041,3 +1041,103 @@ def grant_launch_waitlist(conn: sqlite3.Connection, period: str = PERIOD_MONTH,
         raise
     return {"ok": True, "granted": granted, "grantedCount": len(granted),
             "period": period}
+
+
+def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
+                          free_agent: int = 10) -> dict:
+    """Сводка для раздела «Подписка» в админке: люди, деньги, очередь.
+    Чистое чтение (кроме ensure схем): безопасно дёргать хоть каждую минуту.
+
+    Деньги считаются только по настоящим платежам (provider != 'manual'):
+    ручные гранты — 0₽ и в оборот/средний чек не входят, иначе один грант
+    ронял бы средний чек почти до нуля. Возвраты — отдельными числами:
+    оборот НЕ уменьшается на возвраты (видно и то, и другое)."""
+    ensure_subscription_schema(conn)
+    ensure_plus_waitlist(conn)
+    now_ms = NOW_MS()
+
+    def one(sql, *args):
+        try:
+            return conn.execute(sql, args).fetchone()
+        except sqlite3.Error:
+            return None
+
+    def num(row, key="c"):
+        try:
+            return int((row or {})[key] or 0)
+        except (TypeError, ValueError, KeyError):
+            return 0
+
+    users_total = num(one("SELECT COUNT(*) AS c FROM users"))
+    try:
+        onboarded = num(one("SELECT COUNT(DISTINCT user_id) AS c FROM user_subjects"
+                            " WHERE onboarded=1"))
+    except sqlite3.Error:
+        onboarded = 0
+    subs_active = num(one("SELECT COUNT(*) AS c FROM subscriptions"
+                          " WHERE status IN ('active','cancelled') AND expires_at_ms>?",
+                          now_ms))
+    subs_no_renew = num(one("SELECT COUNT(*) AS c FROM subscriptions"
+                            " WHERE status='cancelled' AND expires_at_ms>?",
+                            now_ms))
+    subs_expired = num(one("SELECT COUNT(*) AS c FROM subscriptions WHERE status='expired'"))
+
+    money = one("SELECT COUNT(*) AS c, COALESCE(SUM(amount_kopecks),0) AS s"
+                " FROM subscription_payments"
+                " WHERE status='succeeded' AND provider<>'manual'") or {}
+    try:
+        paid_count, revenue = int(money["c"] or 0), int(money["s"] or 0)
+    except (TypeError, ValueError, KeyError):
+        paid_count, revenue = 0, 0
+    grants = num(one("SELECT COUNT(*) AS c FROM subscription_payments"
+                     " WHERE status='succeeded' AND provider='manual'"))
+    refunds = one("SELECT COUNT(*) AS c, COALESCE(SUM(amount_kopecks),0) AS s"
+                  " FROM subscription_payments WHERE status='refunded'") or {}
+    try:
+        refund_count, refund_sum = int(refunds["c"] or 0), int(refunds["s"] or 0)
+    except (TypeError, ValueError, KeyError):
+        refund_count, refund_sum = 0, 0
+    pending_count = num(one("SELECT COUNT(*) AS c FROM subscription_payments"
+                            " WHERE status='pending'"))
+
+    waitlist = launch_waitlist_stats(conn)
+
+    recent = []
+    try:
+        rows = conn.execute("""SELECT p.amount_kopecks, p.currency, p.period, p.status,
+                                      p.provider, p.created_at_ms, p.paid_at_ms,
+                                      u.account_id
+                               FROM subscription_payments p
+                               LEFT JOIN users u ON u.id = p.user_id
+                               ORDER BY p.id DESC LIMIT 10""").fetchall()
+        for r in rows:
+            recent.append({"accountId": r["account_id"],
+                           "amountKopecks": r["amount_kopecks"],
+                           "currency": r["currency"] or "RUB",
+                           "period": r["period"], "status": r["status"],
+                           "provider": r["provider"],
+                           "createdAt": r["created_at_ms"],
+                           "paidAt": r["paid_at_ms"]})
+    except sqlite3.Error:
+        pass
+
+    return {"ok": True,
+            "users": {"total": users_total, "onboarded": onboarded,
+                      "plusActive": subs_active,
+                      "plusSharePct": round(100 * subs_active / max(1, users_total), 1)},
+            "subs": {"active": subs_active, "noRenew": subs_no_renew,
+                     "expired": subs_expired},
+            "money": {"revenueKopecks": revenue, "paidCount": paid_count,
+                      "avgCheckKopecks": (revenue // paid_count) if paid_count else 0,
+                      "manualGrants": grants,
+                      "refundedCount": refund_count,
+                      "refundedKopecks": refund_sum,
+                      "pendingCount": pending_count},
+            "waitlist": {"total": waitlist["total"], "pending": waitlist["pending"],
+                         "granted": waitlist["granted"]},
+            "config": {"priceMonthKopecks": plus_price_kopecks(PERIOD_MONTH),
+                       "priceYearKopecks": plus_price_kopecks(PERIOD_YEAR),
+                       "plusEssay": PLUS_ESSAY_LIMIT, "plusAgent": PLUS_AGENT_LIMIT,
+                       "freeEssay": free_essay, "freeAgent": free_agent,
+                       "agentRequiresPlus": agent_requires_plus()},
+            "recent": recent}

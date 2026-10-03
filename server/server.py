@@ -12058,6 +12058,18 @@ class Handler(BaseHTTPRequestHandler):
                     from urllib.parse import parse_qs
                     days = parse_qs(parsed.query).get("days", [None])[0]
                     self.send_json(admin_overview(conn, days if days is not None else 14)); return
+                if path == "/api/admin/subscription/overview":
+                    # Раздел «Подписка»: люди, деньги, очередь. Только чтение.
+                    if _SUB is None:
+                        self.send_json({"error": "Движок подписки недоступен"}, 503); return
+                    free_agent = 10
+                    try:
+                        if _AGENT is not None:
+                            free_agent = int(_AGENT.agent_quota_max())
+                    except (ValueError, TypeError, AttributeError):
+                        pass
+                    self.send_json(_SUB.subscription_overview(
+                        conn, free_essay=ai_usage_max(), free_agent=free_agent)); return
                 if path == "/api/admin/users":
                     from urllib.parse import parse_qs
                     query = parse_qs(parsed.query).get("q", [None])[0]

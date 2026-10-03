@@ -356,6 +356,55 @@ def main():
         s, body = request(admin, base, f"/api/admin/users/{target2}/subscription", "POST",
                            {"action": "zap"})
         check("неизвестное админ-действие 400", s == 400, f"{s} {body}")
+
+        section("админ-обзор и лист ожидания")
+        s, body = request(user, base, "/api/admin/subscription/overview")
+        check("обзор без admin-сессии 401", s == 401, f"{s} {body}")
+        s, ov = request(admin, base, "/api/admin/subscription/overview")
+        base_money = ov["money"] if s == 200 else {}
+        base_wait = ov["waitlist"] if s == 200 else {}
+        check("обзор отдаёт все блоки",
+              s == 200 and set(ov) >= {"users", "subs", "money", "waitlist",
+                                       "config", "recent"}
+              and ov["config"]["priceMonthKopecks"] == 9900
+              and ov["config"]["plusEssay"] == 20
+              and ov["config"]["freeEssay"] == 5, ov)
+        s, body = request(guest, base, "/api/subscription/notify", "GET", None)
+        check("гость GET notify 401", s == 401, f"{s} {body}")
+        s, body = request(guest, base, "/api/subscription/notify", "POST", {})
+        check("гость POST notify 401", s == 401, f"{s} {body}")
+        s, st = request(user, base, "/api/subscription/notify")
+        check("до клика в списке нет", s == 200 and st["joined"] is False, st)
+        s, jn = request(user, base, "/api/subscription/notify", "POST", {})
+        check("клик записывает", s == 200 and jn["joined"] is True, jn)
+        s, jn = request(user, base, "/api/subscription/notify", "POST", {})
+        check("повтор идемпотентен", s == 200 and jn["joined"] is True, jn)
+        s, cnt = request(admin, base, "/api/admin/subscription/waitlist",
+                         "POST", {"action": "count"})
+        check("count видит ждущего",
+              s == 200 and cnt["pending"] == 1
+              and cnt["total"] == base_wait.get("total", 0) + 1, cnt)
+        s, gr = request(admin, base, "/api/admin/subscription/waitlist",
+                        "POST", {"action": "grant", "period": "month"})
+        check("grant выдаёт месяц",
+              s == 200 and gr["grantedCount"] == 1, gr)
+        s, st = request(user, base, "/api/subscription/status")
+        check("после гранта Plus активен",
+              s == 200 and st["active"] is True and st["period"] == "month", st)
+        s, gr = request(admin, base, "/api/admin/subscription/waitlist",
+                        "POST", {"action": "grant"})
+        check("повторный grant пуст, а не дубль",
+              s == 200 and gr["grantedCount"] == 0, gr)
+        s, body = request(admin, base, "/api/admin/subscription/waitlist",
+                           "POST", {"action": "bogus"})
+        check("неизвестное действие waitlist 400", s == 400, f"{s} {body}")
+        s, ov = request(admin, base, "/api/admin/subscription/overview")
+        check("обзор после выдачи: +1 manual-грант, оборот не вырос",
+              s == 200 and ov["waitlist"]["granted"] == base_wait.get("granted", 0) + 1
+              and ov["waitlist"]["pending"] == 0
+              and ov["money"]["manualGrants"] == base_money.get("manualGrants", 0) + 1
+              and ov["money"]["revenueKopecks"] == base_money.get("revenueKopecks", 0)
+              and ov["users"]["plusActive"] >= 1, ov)
         manual_pub = db("SELECT public_id FROM subscription_payments WHERE user_id="
                         "(SELECT id FROM users WHERE account_id=?) AND provider='manual'",
                         (target2,))
