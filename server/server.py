@@ -3271,15 +3271,17 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
         if "essay_checks" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
             # Серверная запись о реальном вызове модели: единственный источник
             # оценки для evaluation 'ready'. Ключ — хэш нормализованного
-            # текста: клиент присылает один и тот же текст и в submission, и в
-            # проверку, поэтому связка (user, subject, текст) однозначна, а
-            # client_id менять не нужно.
+            # текста ПЛЮС задание (оценка содержания считается под проблему):
+            # клиент присылает один и тот же текст и в submission, и в
+            # проверку, поэтому связка (user, subject, task, текст) однозначна,
+            # а client_id менять не нужно.
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS essay_checks(
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
                      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                      subject TEXT NOT NULL DEFAULT '',
                      text_sha256 TEXT NOT NULL,
+                     task_id TEXT NOT NULL DEFAULT '',
                      provider TEXT NOT NULL DEFAULT '',
                      model TEXT NOT NULL DEFAULT '',
                      result_json TEXT NOT NULL,
@@ -3287,8 +3289,8 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                      created_at TEXT NOT NULL)"""
             )
             conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_text"
-                " ON essay_checks(user_id, subject, text_sha256)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_task_text"
+                " ON essay_checks(user_id, subject, task_id, text_sha256)"
             )
         else:
             # rubric_version — версия правил, по которым получен result_json.
@@ -3310,15 +3312,64 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                 conn.execute("ALTER TABLE essay_checks ADD COLUMN model TEXT NOT NULL DEFAULT ''")
                 conn.commit()
             # Тот же случай, что у essay_submissions: кэш проверок держится на
-            # UNIQUE(user_id, subject, text_sha256), и без индекса ON CONFLICT
-            # в store_essay_check падал бы на каждой проверке.
-            try:
-                conn.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_text"
-                    " ON essay_checks(user_id, subject, text_sha256)"
-                )
-            except sqlite3.Error:
-                pass
+            # UNIQUE(user_id, subject, task_id, text_sha256), и без индекса
+            # ON CONFLICT в store_essay_check падал бы на каждой проверке.
+            # task_id в ключе — осознанно: оценка содержания считается ПОД
+            # ПРОБЛЕМУ задания (apply_problem_check), и один и тот же текст
+            # под другим исходником — другая проверка. Живой случай 03.10:
+            # один текст вбили в пять заданий — всем досталась одна 21 из
+            # кэша без единого вызова модели. Старый индекс без задания
+            # сносим: с ним вторая задача с тем же текстом давала конфликт.
+            # Порядок: сначала колонка, потом индексы — иначе CREATE INDEX
+            # падает на отсутствующей колонке.
+            if "task_id" not in columns:
+                conn.execute("ALTER TABLE essay_checks ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+                columns = {r["name"] for r in conn.execute("PRAGMA table_info(essay_checks)")}
+            if "task_id" in columns:
+                try:
+                    conn.execute("DROP INDEX IF EXISTS idx_essay_checks_user_subject_text")
+                except sqlite3.Error:
+                    pass
+                try:
+                    conn.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_essay_checks_user_subject_task_text"
+                        " ON essay_checks(user_id, subject, task_id, text_sha256)"
+                    )
+                except sqlite3.Error:
+                    pass
+            if "task_id" in columns:
+                # Бэкфилл задания для старых строк: проверку создавал самый
+                # ранний submission с этим текстом (поздние с тем же текстом
+                # брались из кэша и новых проверок не писали) — его задание
+                # и есть то, под которое оценивали. Неоднозначные (текст в
+                # нескольких заданиях) остаются '' и переоцениваются один раз.
+                try:
+                    for crow in conn.execute(
+                            "SELECT id, user_id, subject, text_sha256 FROM essay_checks"
+                            " WHERE task_id=''"):
+                        srow = None
+                        for srow in conn.execute(
+                                "SELECT task_id, text FROM essay_submissions"
+                                " WHERE user_id=? AND subject=?"
+                                " ORDER BY id ASC",
+                                (crow["user_id"], crow["subject"])):
+                            try:
+                                match = essay_text_hash(srow["text"]) == crow["text_sha256"]
+                            except Exception:
+                                match = False
+                            if match:
+                                break
+                            srow = None
+                        if srow is not None:
+                            conn.execute("UPDATE essay_checks SET task_id=? WHERE id=?",
+                                         (srow["task_id"], crow["id"]))
+                    conn.commit()
+                except sqlite3.Error:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
         # История проверок текста для блока «Было → стало» на ege-result.html:
         # каждая успешная проверка дописывается сюда (включая первую), а
         # essay_checks держит только последнюю. Блок переживает перезагрузку,
@@ -3329,6 +3380,7 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                  subject TEXT NOT NULL DEFAULT '',
                  text_sha256 TEXT NOT NULL,
+                 task_id TEXT NOT NULL DEFAULT '',
                  provider TEXT NOT NULL DEFAULT '',
                  model TEXT NOT NULL DEFAULT '',
                  result_json TEXT NOT NULL,
@@ -3348,6 +3400,18 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
         if "model" not in {r["name"] for r in conn.execute("PRAGMA table_info(essay_check_history)")}:
             conn.execute("ALTER TABLE essay_check_history ADD COLUMN model TEXT NOT NULL DEFAULT ''")
             conn.commit()
+        if "task_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(essay_check_history)")}:
+            # «Было → стало» тоже в разрезе задания: один текст под разными
+            # исходниками — разные строки истории, иначе прошлое бралось бы
+            # из чужой проверки. Порядок: сначала колонка, потом индекс —
+            # иначе CREATE INDEX падает на отсутствующей колонке (это роняло
+            # старт сервера: ensure идёт в install_catalog).
+            conn.execute("ALTER TABLE essay_check_history ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_essay_check_history_user_subject_task_text"
+            " ON essay_check_history(user_id, subject, task_id, text_sha256, id)"
+        )
         if "evaluation_model" not in _table_columns(conn, "essay_submissions"):
             # Модель на submission: её читает экран результата подписи проверки.
             conn.execute("ALTER TABLE essay_submissions ADD COLUMN evaluation_model TEXT")
@@ -3733,7 +3797,7 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
     data["previous"] = None
     data["checkCount"] = 0
     try:
-        hist = previous_essay_check(conn, user_id, data["subject"], row["text"])
+        hist = previous_essay_check(conn, user_id, data["subject"], row["text"], row["task_id"])
     except sqlite3.Error:
         hist = {"previous": None, "checks": 0}
     data["checkCount"] = int(hist.get("checks") or 0)
@@ -3966,8 +4030,12 @@ def _validated_essay_result(result) -> dict:
 
 def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
                       text: str, provider: str, result: dict, note: str = "",
-                      model: str = "") -> None:
+                      model: str = "", task_id: str = "") -> None:
     """Записать факт проверки этого текста и версию правил, которыми он оценён.
+
+    Ключ — (пользователь, предмет, задание, текст): оценка содержания зависит
+    от проблемы задания, поэтому один и тот же текст под другим исходником
+    проверяется заново, а не берётся из чужого кэша.
 
     Вызывается из /api/ai/essay СРАЗУ после успешного ответа — это единственный
     путь появления строки. Повторная проверка перезаписывает запись в
@@ -3984,11 +4052,24 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
     if len(blob.encode("utf-8")) > ESSAY_EVALUATION_MAX_BYTES:
         raise ValueError("result too large")
     key = (user_id, subject, essay_text_hash(text))
+    task_value = str(task_id or "").strip()[:128]
     provider_value = str(provider or "")[:64]
     model_value = str(model or "")[:200]
-    # Колонка model могла не появиться (миграция не прошла на старой БД) —
-    # тогда пишем старую форму запроса, а не падаем на каждой проверке.
-    if "model" in _table_columns(conn, "essay_checks"):
+    # Колонки model/task_id могли не появиться (миграция не прошла на старой
+    # БД) — тогда пишем старую форму запроса, а не падаем на каждой проверке.
+    cols = _table_columns(conn, "essay_checks")
+    if "model" in cols and "task_id" in cols:
+        conn.execute(
+            "INSERT INTO essay_checks(user_id, subject, text_sha256, task_id, provider, model, result_json, rubric_version, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(user_id, subject, task_id, text_sha256) DO UPDATE SET"
+            " result_json=excluded.result_json, provider=excluded.provider,"
+            " model=excluded.model,"
+            " rubric_version=excluded.rubric_version, created_at=excluded.created_at",
+            (key[0], key[1], key[2], task_value, provider_value, model_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
+        )
+    elif "model" in cols:
         conn.execute(
             "INSERT INTO essay_checks(user_id, subject, text_sha256, provider, model, result_json, rubric_version, created_at)"
             " VALUES(?,?,?,?,?,?,?,?)"
@@ -4009,7 +4090,15 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
             (key[0], key[1], key[2], provider_value, blob,
              int(_AI.ESSAY_RUBRIC_VERSION), now_iso()),
         )
-    if "model" in _table_columns(conn, "essay_check_history"):
+    hcols = _table_columns(conn, "essay_check_history")
+    if "model" in hcols and "task_id" in hcols:
+        conn.execute(
+            "INSERT INTO essay_check_history(user_id, subject, text_sha256, task_id, provider, model, result_json, rubric_version, note, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (key[0], key[1], key[2], task_value, provider_value, model_value, blob,
+             int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
+        )
+    elif "model" in hcols:
         conn.execute(
             "INSERT INTO essay_check_history(user_id, subject, text_sha256, provider, model, result_json, rubric_version, note, created_at)"
             " VALUES(?,?,?,?,?,?,?,?,?)",
@@ -4024,35 +4113,52 @@ def store_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
              int(_AI.ESSAY_RUBRIC_VERSION), str(note or "")[:500], now_iso()),
         )
     # История — только для блока «Было → стало»: глубже не смотрим,
-    # поэтому старые записи сверх лимита удаляем сразу.
-    conn.execute(
-        "DELETE FROM essay_check_history WHERE user_id=? AND subject=? AND text_sha256=?"
-        " AND id NOT IN (SELECT id FROM essay_check_history"
-        " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT ?)",
-        (key[0], key[1], key[2], key[0], key[1], key[2], ESSAY_HISTORY_KEEP),
-    )
+    # поэтому старые записи сверх лимита удаляем сразу (в разрезе задания,
+    # иначе проверки одного задания вытесняли бы историю другого).
+    if "task_id" in hcols:
+        conn.execute(
+            "DELETE FROM essay_check_history WHERE user_id=? AND subject=? AND task_id=? AND text_sha256=?"
+            " AND id NOT IN (SELECT id FROM essay_check_history"
+            " WHERE user_id=? AND subject=? AND task_id=? AND text_sha256=? ORDER BY id DESC LIMIT ?)",
+            (key[0], key[1], task_value, key[2], key[0], key[1], task_value, key[2], ESSAY_HISTORY_KEEP),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM essay_check_history WHERE user_id=? AND subject=? AND text_sha256=?"
+            " AND id NOT IN (SELECT id FROM essay_check_history"
+            " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT ?)",
+            (key[0], key[1], key[2], key[0], key[1], key[2], ESSAY_HISTORY_KEEP),
+        )
 
 
 ESSAY_HISTORY_KEEP = 10
 
 
 def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
-                         text: str) -> dict:
-    """Прошлая проверка текста + счётчик всех проверок для «Было → стало».
+                        text: str, task_id: str = "") -> dict:
+    """Прошлая проверка текста в этом задании + счётчик для «Было → стало».
 
     Возвращает {"previous": {"result","provider","rubric_version"} | None,
     "checks": int}. Битое прошлое молча пропускаем: блок просто не рисуется,
     а текущая оценка не страдает.
     """
     ensure_essay_schema(conn)
+    task_value = str(task_id or "").strip()[:128]
+    hcols = _table_columns(conn, "essay_check_history")
+    if "task_id" in hcols:
+        where = "WHERE user_id=? AND subject=? AND task_id=? AND text_sha256=?"
+        args: tuple = (user_id, subject, task_value, essay_text_hash(text))
+    else:
+        where = "WHERE user_id=? AND subject=? AND text_sha256=?"
+        args = (user_id, subject, essay_text_hash(text))
     rows = conn.execute(
         "SELECT result_json, provider, model, rubric_version, note FROM essay_check_history"
-        " WHERE user_id=? AND subject=? AND text_sha256=? ORDER BY id DESC LIMIT 2",
-        (user_id, subject, essay_text_hash(text)),
+        f" {where} ORDER BY id DESC LIMIT 2",
+        args,
     ).fetchall()
     total = conn.execute(
-        "SELECT COUNT(*) FROM essay_check_history WHERE user_id=? AND subject=? AND text_sha256=?",
-        (user_id, subject, essay_text_hash(text)),
+        f"SELECT COUNT(*) FROM essay_check_history {where}",
+        args,
     ).fetchone()
     checks = int(total[0]) if total else 0
     previous = None
@@ -4070,8 +4176,12 @@ def previous_essay_check(conn: sqlite3.Connection, user_id: int, subject: str,
 
 
 def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text: str,
-                     rubric: int = 0) -> dict | None:
-    """Сохранённый ответ на этот текст или None, если проверки не было.
+                     rubric: int = 0, task_id: str = "") -> dict | None:
+    """Сохранённый ответ на этот текст в этом задании или None.
+
+    Ключ — (пользователь, предмет, задание, текст): оценка содержания зависит
+    от проблемы задания, и чужое задание оценку не отдаёт (иначе один текст
+    в пяти заданиях получал бы одну оценку без вызова модели).
 
     `rubric` — запрошенная версия правил. Если она задана и не совпадает с
     версией записи, запись не выдаётся: правила изменились, значит старый ответ
@@ -4080,11 +4190,20 @@ def load_essay_check(conn: sqlite3.Connection, user_id: int, subject: str, text:
     была записана, и пересчитывать её задним числом нельзя.
     """
     ensure_essay_schema(conn)
-    row = conn.execute(
-        "SELECT result_json, provider, model, rubric_version FROM essay_checks"
-        " WHERE user_id=? AND subject=? AND text_sha256=?",
-        (user_id, subject, essay_text_hash(text)),
-    ).fetchone()
+    task_value = str(task_id or "").strip()[:128]
+    cols = _table_columns(conn, "essay_checks")
+    if "task_id" in cols:
+        row = conn.execute(
+            "SELECT result_json, provider, model, rubric_version FROM essay_checks"
+            " WHERE user_id=? AND subject=? AND task_id=? AND text_sha256=?",
+            (user_id, subject, task_value, essay_text_hash(text)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT result_json, provider, model, rubric_version FROM essay_checks"
+            " WHERE user_id=? AND subject=? AND text_sha256=?",
+            (user_id, subject, essay_text_hash(text)),
+        ).fetchone()
     if row is None:
         return None
     if rubric and int(row["rubric_version"] or 0) != int(rubric):
@@ -4118,16 +4237,16 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
     if status not in ("ready", "failed"):
         raise ValueError("unknown status")
     row = conn.execute(
-        "SELECT id, text FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
+        "SELECT id, text, task_id FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
         (user_id, subject, client_id.strip()),
     ).fetchone()
     if not row:
         raise KeyError("submission not found")
     if status == "ready":
-        # Оценка — только из серверной записи о проверке этого текста. Чужую
-        # или несуществующую проверку привязать нельзя: ключ — хэш текста
-        # самого submission.
-        check = load_essay_check(conn, user_id, subject, row["text"])
+        # Оценка — только из серверной записи о проверке этого текста в этом
+        # задании. Чужую или несуществующую проверку привязать нельзя: ключ —
+        # хэш текста самого submission плюс его задание.
+        check = load_essay_check(conn, user_id, subject, row["text"], task_id=row["task_id"])
         if check is None:
             raise EssayNotChecked()
         result = _validated_essay_result(check["result"])
@@ -11546,7 +11665,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if not note and not recheck and format_id == "essay" and isinstance(essay_text, str):
                     cached = load_essay_check(conn, user_id, subject_now, essay_text,
-                                              rubric=_AI.ESSAY_RUBRIC_VERSION)
+                                              rubric=_AI.ESSAY_RUBRIC_VERSION,
+                                              task_id=task_id)
                     if cached is not None:
                         # Запись о проверке уже есть — переписывать нечего,
                         # только привязать submission, если клиент прислал id.
@@ -11643,7 +11763,8 @@ class Handler(BaseHTTPRequestHandler):
                             store_essay_check(conn, user_id, subject_now, payload.get("text"),
                                               _AI.last_used_provider() or "ai+grammar", result,
                                               note=note,
-                                              model=_AI.last_used_model() or "")
+                                              model=_AI.last_used_model() or "",
+                                              task_id=task_id)
                             conn.commit()
                         except (sqlite3.Error, ValueError) as exc:
                             # Не записали — значит evaluation позже честно скажет
