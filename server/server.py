@@ -12682,7 +12682,15 @@ class Handler(BaseHTTPRequestHandler):
                     if (query.get("history", [None])[0] or "").strip() in ("1", "true"):
                         # ?history=1 — вся история сочинений для экрана
                         # «Мои сочинения»: новые сверху, с баллами (см.
-                        # essay_history_list). Со statuses не совмещается.
+                        # essay_history_list). Раздел Plus: без подписки —
+                        # 403 SUBSCRIPTION_REQUIRED (как гейт наставника).
+                        # Точечные чтения (statuses/sid/taskId) гейта не
+                        # несут: практика и экран разбора остаются
+                        # бесплатными, платная здесь только агрегация.
+                        if not subscription_is_plus(conn, int(user_id)):
+                            self.send_json({"error": "Раздел доступен по подписке Plus",
+                                            "code": "SUBSCRIPTION_REQUIRED"}, 403, token=token); return
+                        # Со statuses не совмещается.
                         if task_id or client_id or sid > 0 or (query.get("statuses", [None])[0] or "").strip():
                             self.send_json({"error": "history не принимает sid, taskId, clientId или statuses"}, 400, token=token); return
                         try:

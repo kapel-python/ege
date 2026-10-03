@@ -6871,11 +6871,46 @@ function essayItemTitle(it) {
   return "Сочинение по тексту";
 }
 
-/* Карточка-вход в самом конце Пути. Нет сочинений в предмете, гость
-   или офлайн — слота как не было: Путь работает как раньше. */
+/* Статус Plus с кэшем Subscription (30 с на аккаунт). Модуля подписки нет
+   (нештатная сборка) — null: вызыватель покажет честную ошибку, а не
+   paywall (Plus-юзера нельзя запирать из-за незагрузившегося файла). */
+async function essayPlusStatus() {
+  try {
+    if (typeof Subscription === "undefined" || !Subscription || !Subscription.status) return null;
+    return await Subscription.status(false);
+  } catch (_) {
+    return null;
+  }
+}
+
+/* Пейволл «Моих сочинений»: история — раздел Plus, поэтому вместо неё —
+   честное предложение, а не пустота. Гостю — вход (покупать нечего без
+   аккаунта), залогиненному без Plus — тариф. */
+function essayPaywallHTML(isGuest) {
+  return `
+    <div class="card essays-empty">
+      <div class="essays-empty__icon" aria-hidden="true">${icon("crown")}</div>
+      <div class="essays-empty__title">«Мои сочинения» — с <span class="plus">Plus</span></div>
+      <div class="essays-empty__sub">Вся история проверок, динамика баллов и разбор по критериям. Каждый результат проверки при этом остаётся твоим: он открывается из практики и на экране разбора — бесплатно.</div>
+      <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        ${isGuest
+          ? `<a class="btn btn--primary" href="/dashboard#/profile">Открыть профиль</a>`
+          : `<a class="btn btn--primary" href="/subscription">Оформить Plus</a>`}
+        <button class="btn btn--ghost" onclick="go('path')">К карте тем</button>
+      </div>
+    </div>`;
+}
+
+/* Карточка-вход в самом конце Пути. Только для Plus: без подписки слота
+   как не было (статус решает ДО чтения истории — обречённый запрос не
+   уходит, карточка не мигает). Нет сочинений в предмете, гость или
+   офлайн — Путь работает как раньше. */
 async function essayPathSlotLoad() {
   const slot = document.getElementById("essayPathSlot");
   if (!slot || slot.dataset.done) return;
+  const plus = await essayPlusStatus();
+  const gated = document.getElementById("essayPathSlot");
+  if (!gated || gated.dataset.done || !plus || !plus.active) return;
   let snap = null;
   try {
     snap = await essayHistoryFetch(false);
@@ -6965,6 +7000,24 @@ async function screenEssays(root) {
       <div class="page-sub">Все твои работы: баллы, разборы и динамика.</div>
     </div>
     <div id="essaysBody">${loaderHTML("Собираем твою историю…")}</div>`;
+  // «Мои сочинения» — раздел Plus: статус подписки решает ДО чтения
+  // истории, поэтому без Plus история не рисуется даже на миллисекунду
+  // (сервер обречённый запрос всё равно отобьёт 403 — сюда он не уходит).
+  const sub = await essayPlusStatus();
+  if (currentRoute() !== "essays") return;
+  const gate = document.getElementById("essaysBody");
+  if (!gate) return;
+  if (!sub) {
+    gate.innerHTML = `
+      <div class="card empty">Не удалось проверить подписку.<br>
+        <button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button>
+      </div>`;
+    return;
+  }
+  if (!sub.active) {
+    gate.innerHTML = essayPaywallHTML(!!sub.guest);
+    return;
+  }
   let snap;
   try {
     snap = await essayHistoryFetch(true);
