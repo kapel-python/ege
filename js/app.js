@@ -3868,6 +3868,7 @@ function essayMountResumeFeedback(t) {
   const sub = S && S.essayReadyByTask && S.essayReadyByTask[t.id];
   if (!sub || !String(sub.text || "").trim()) return false;
   essayMountFeedback(essayResumeFeedbackHtml(t, sub));
+  essaySyncWaitWarning(t);
   essaySyncSubmitVisibility(t);
   essaySyncTakeAnotherVisibility(t);
   return true;
@@ -3980,6 +3981,148 @@ let essayRestoreSuppress = false;
    (sessionEssaySubmit через essayRunChecks и sessionEssayResume), сбрасывается
    в finally каждого выхода из essayRunChecks. */
 let essayCheckInflight = false;
+
+/* Долгое ожидание проверки: старт замера, предупреждение после минуты,
+   бонусный жетон после потолка (2,5 минуты).
+   Старт лежит в localStorage (ключ на аккаунт) — переживает перезагрузку:
+   заход после F5 видит тот же замер и продолжает его, а не начинает заново.
+   Привязка — clientId + хэш текста: чужой замер чужому тексту не показываем.
+   Очистка — только на исходе попытки (успех или блок ошибки): перезагрузка
+   посреди проверки записи не трогает, поэтому resume её и находит. */
+const ESSAY_WAIT_WARN_MS = 60000;
+const ESSAY_WAIT_BONUS_MS = 140000; // чуть раньше потолка 150 с — с запасом на сеть
+let essayWaitTimer = null;
+
+function essayWaitKey() {
+  return Store.accountId ? `ege_essay_wait:${Store.accountId}` : "";
+}
+
+function essayTextHash(s) {
+  const str = String(s || "");
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(16);
+}
+
+function essayWaitLoad() {
+  const key = essayWaitKey();
+  if (!key) return null;
+  try {
+    const rec = JSON.parse(localStorage.getItem(key) || "null");
+    if (rec && rec.clientId && rec.hash && Number(rec.start)) return rec;
+  } catch (_) {}
+  return null;
+}
+
+function essayWaitClear() {
+  essayWaitDisarm();
+  const key = essayWaitKey();
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch (_) {}
+}
+
+function essayWaitDisarm() {
+  if (essayWaitTimer) { clearTimeout(essayWaitTimer); essayWaitTimer = null; }
+}
+
+/* Начало замера: resume с тем же clientId и текстом продолжает старый старт
+   (ученик ждёт суммарно, а не «заново»), всё остальное — новый замер. */
+function essayWaitBegin(clientId, text) {
+  const hash = essayTextHash(text);
+  let rec = essayWaitLoad();
+  if (!rec || rec.clientId !== clientId || rec.hash !== hash) {
+    rec = { clientId, hash, start: Date.now() };
+    const key = essayWaitKey();
+    if (key) { try { localStorage.setItem(key, JSON.stringify(rec)); } catch (_) {} }
+  }
+  essayWaitArm(rec);
+  return rec.start;
+}
+
+function essayWaitArm(rec) {
+  essayWaitDisarm();
+  const r = rec || essayWaitLoad();
+  if (!r) return;
+  const delay = Math.max(0, ESSAY_WAIT_WARN_MS - (Date.now() - Number(r.start)));
+  essayWaitTimer = setTimeout(() => { essayWaitTimer = null; essayMountWaitWarning(); }, delay);
+}
+
+function essayWaitElapsed() {
+  const rec = essayWaitLoad();
+  return rec ? Math.max(0, Date.now() - Number(rec.start)) : 0;
+}
+
+function essayWaitWarnHTML() {
+  return `<div class="essay-waitwarn" id="essayWaitWarn" role="status">
+    <span class="essay-waitwarn__badge" aria-hidden="true">⚠️</span>
+    <div class="essay-waitwarn__text"><b>Проверка идёт дольше минуты.</b> Провайдер, который должен ответить, пока молчит — перебираем запасных по очереди. Лимит ожидания — 2,5 минуты: если никто не ответит, жетон за проверку вернётся сам, а за долгое ожидание начислим бонус +1.</div>
+  </div>`;
+}
+
+/* Предупреждение под лоадером проверки: появляется плавно через минуту
+   ожидания (CSS-анимация), раньше — никогда. */
+function essayMountWaitWarning() {
+  if (typeof document === "undefined") return;
+  const loader = document.querySelector("#screen .ege-loader");
+  if (!loader || document.getElementById("essayWaitWarn")) return;
+  loader.insertAdjacentHTML("beforeend", essayWaitWarnHTML());
+}
+
+/* Тот же замер в resume-блоке после перезагрузки: активной проверки уже нет,
+   но прошлая попытка ждала дольше минуты — ученик должен это видеть, а не
+   гадать, «само оно или зависло». */
+function essaySyncWaitWarning(t) {
+  if (typeof document === "undefined") return;
+  const S = Session.cur;
+  const saved = S && S.essayReadyByTask && S.essayReadyByTask[t && t.id];
+  if (!saved || !String(saved.text || "").trim()) return;
+  const rec = essayWaitLoad();
+  if (!rec || rec.hash !== essayTextHash(saved.text)) return;
+  if (Date.now() - Number(rec.start) < ESSAY_WAIT_WARN_MS) return;
+  const slot = document.getElementById("feedbackSlot");
+  const box = slot && slot.querySelector(".feedback");
+  if (!box || document.getElementById("essayWaitWarn")) return;
+  box.insertAdjacentHTML("beforeend", essayWaitWarnHTML());
+}
+
+function essayBonusDayKey() {
+  return Store.accountId ? `ege_essay_bonus_day:${Store.accountId}` : "";
+}
+
+function essayBonusToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/* Бонус за ожидание всем потолком: сервер — источник правды «раз в день»,
+   локальный ключ лишь не дёргает его дважды. Модалка — общий openInfoDialog,
+   своей разметки нет. Ошибка запроса бонуса молчит: блок ошибки уже показан,
+   бонус — best effort, а не второй повод расстраиваться. */
+async function essayClaimTimeoutBonus() {
+  const key = essayBonusDayKey();
+  try {
+    if (!key || localStorage.getItem(key) === essayBonusToday()) return;
+    const res = await fetch("/api/ai/timeout-bonus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || typeof data !== "object") return;
+    if (data.granted || data.reason === "already") {
+      try { localStorage.setItem(key, essayBonusToday()); } catch (_) {}
+    }
+    const n = Math.max(0, Number(data.remaining) || 0);
+    const m = Math.max(1, Number(data.limit) || AI_LIMIT_FALLBACK);
+    const head = "Проверка ждала ответа дольше 2,5 минут — наши провайдеры так и не ответили. Жетон за неё вернулся сам.";
+    const tail = data.granted
+      ? ` А за долгое ожидание начислен бонус: <b>+1 проверка</b>. Сейчас доступно: <b>${n} из ${m}</b>. Просим прощения!`
+      : (data.reason === "full"
+        ? " Лимит проверок у тебя и так полный, поэтому бонус класть некуда."
+        : " Бонус за сегодня уже начислялся.");
+    openInfoDialog({ eyebrow: "Проверка сочинений", icon: "ai", title: "Провайдеры не ответили", text: `${esc(head)}${tail}`, closeText: "Понятно" });
+  } catch (_) {}
+}
 
 /* Повторное открытие: готовый результат переживает перезагрузку — лежит в
    essay_submissions (evaluation_status='ready'), а не во frontend-state.
@@ -4612,6 +4755,9 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
   essayCheckMsgStop();
   screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart();
+  // Замер долгого ожидания: resume продолжает старый старт (тот же clientId),
+  // иначе таймер минуты обнулялся бы каждой перезагрузкой.
+  essayWaitBegin(clientId, text);
   const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
 
   let aiRes = null, aiData = {};
@@ -4643,6 +4789,11 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     aiData = await aiRes.json().catch(() => ({}));
   } catch (_) { aiRes = null; }
   if (!aiRes || !aiRes.ok || !aiData.result) {
+    // Исход попытки: замер останавливаем и стираем в любом случае — следующая
+    // попытка (вручную или после перезагрузки без замера) начнёт новый.
+    // Перезагрузка ПОСРЕДИ проверки сюда не попадает, её запись и нужна resume.
+    const waitElapsed = essayWaitElapsed();
+    essayWaitClear();
     try {
       await fetch("/api/essays/evaluation", {
         method: "POST",
@@ -4687,9 +4838,16 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
           <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
         </div>
       </div>`);
+    // Долгое ожидание всем потолком без ответа — вина провайдеров: поверх
+    // блока ошибки спрашиваем у сервера бонусный жетон (раз в день — решает
+    // он, модалка поверх страницы с исходником и проблемой).
+    if (waitElapsed >= ESSAY_WAIT_BONUS_MS && (!aiRes || aiRes.status >= 500)) {
+      await essayClaimTimeoutBonus();
+    }
     return;
   }
   aiLimitsNoteSpend(); // проверка состоялась — сервер списал одну, кэш следом
+  essayWaitClear(); // успех: замер больше не нужен
 
   // Report generation: фиксируем готовый отчёт в том же submission.
   // Сервер уже мог довести его до ready сам (clientId в /api/ai/essay выше):

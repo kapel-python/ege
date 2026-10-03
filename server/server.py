@@ -4930,6 +4930,12 @@ def install_catalog(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id)")
     for row in conn.execute("SELECT id FROM users WHERE account_id IS NULL"):
         assign_account_id(conn, row["id"])
+    # Маркер бонусного жетона за долгое ожидание проверки (POST
+    # /api/ai/timeout-bonus): дата выдачи по Москве, '' — ещё не выдавался.
+    # Отдельной таблицы и журнала нет осознанно: бонус выдаётся раз в день,
+    # история выдач для продукта не нужна.
+    if "essay_timeout_bonus_day" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN essay_timeout_bonus_day TEXT NOT NULL DEFAULT ''")
     # Subject rows are kept in the legacy table as well as in SUBJECTS.  The
     # latter remains the API source of truth; the rows preserve foreign-key
     # compatibility for old databases and make a new subject visible to SQL
@@ -6658,6 +6664,73 @@ def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
             conn.rollback()
         except sqlite3.Error:
             pass
+
+
+def ai_timeout_bonus_grant(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Бонусный жетон за долгое ожидание проверки, раз в день.
+
+    Проверка, прождавшая весь потолок (2,5 минуты) без ответа провайдеров, —
+    это вина сервиса, а не ученика: жетон за неё и так возвращается refund'ом,
+    а бонусом сверху даётся ещё один. Никаких новых таблиц: день выдачи —
+    колонка users.essay_timeout_bonus_day, сам жетон — та же строка бакета
+    `u:<id>` (только аккаунтный карман; device-бакеты антиабуза не трогаем).
+    Кап — персональный потолок, как у refund: при полном кармане начислять
+    нечего, день при этом НЕ тратится (granted:false, reason:"full").
+    Гонка двух вкладок закрыта атомарным claim'ом маркера: кто первым
+    проставил дату, того и жетон.
+    """
+    ensure_ai_usage_schema(conn)
+    ensure_ai_user_limit_schema(conn)
+    now_ms = int(time.time() * 1000)
+    window_ms = ai_usage_window_ms()
+    today = dt.datetime.fromtimestamp(
+        now_ms / 1000, tz=ZoneInfo("Europe/Moscow")).date().isoformat()
+    owner = f"u:{int(user_id)}"
+    owner_limit = ai_limit_for_owner(conn, owner)
+    # Маркер дня выдачи живёт в users.essay_timeout_bonus_day (boot-миграция
+    # делает то же самое для постоянных баз); здесь — страховка для баз, где
+    # она ещё не прошла: без неё claim ниже падал бы no such column.
+    try:
+        user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    except sqlite3.Error:
+        user_cols = set()
+    if "essay_timeout_bonus_day" not in user_cols:
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN essay_timeout_bonus_day TEXT NOT NULL DEFAULT ''")
+        except sqlite3.Error:
+            pass
+    conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                 " VALUES (?,?,NULL)", (owner, owner_limit))
+    _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
+    row = conn.execute("SELECT count FROM ai_usage WHERE owner=?", (owner,)).fetchone()
+    count = int(row["count"]) if row else owner_limit
+    if count >= owner_limit:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return {"ok": True, "granted": False, "reason": "full",
+                "remaining": count, "limit": owner_limit}
+    claimed = conn.execute(
+        "UPDATE users SET essay_timeout_bonus_day=? WHERE id=? AND essay_timeout_bonus_day!=?",
+        (today, int(user_id), today))
+    if claimed.rowcount == 0:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return {"ok": True, "granted": False, "reason": "already",
+                "remaining": count, "limit": owner_limit}
+    conn.execute("""
+        UPDATE ai_usage SET
+          count = MIN(?, count + 1),
+          timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END
+        WHERE owner = ?""", (owner_limit, owner_limit, owner))
+    conn.commit()
+    row = conn.execute("SELECT count FROM ai_usage WHERE owner=?", (owner,)).fetchone()
+    return {"ok": True, "granted": True, "applied": True,
+            "remaining": int(row["count"]) if row else owner_limit,
+            "limit": owner_limit}
 
 
 def admin_ai_limit_status(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -11321,6 +11394,43 @@ class Handler(BaseHTTPRequestHandler):
                 except sqlite3.Error: pass
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
+            return
+        if path == "/api/ai/timeout-bonus":
+            # POST /api/ai/timeout-bonus — бонусный жетон за проверку, прождавшую
+            # весь потолок без ответа провайдеров. Тело не читаем: доказывать
+            # ожидание нечем и незачем — гейт «раз в день» держит сервер
+            # (ai_timeout_bonus_grant), злоупотребить нечем сверх +1 в день.
+            # Те же ворота, что у остальных доменов ученика: общий бакет,
+            # гость 401, бан 403.
+            if self.api_rate_limited(): return
+            if not self.support_request_is_same_origin():
+                self.send_json({"error": "Cross-site request rejected"}, 403); return
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                try:
+                    result = ai_timeout_bonus_grant(conn, int(user_id))
+                except sqlite3.Error:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
+                    self.send_json({"error": "Не удалось начислить бонус. Попробуй позже."}, 503, token=token); return
+                fp_key, fp_net = ai_usage_device_fp(conn, self)
+                try:
+                    st = ai_usage_status(conn, int(user_id), fp_key, fp_net)
+                except sqlite3.Error:
+                    st = None
+                if isinstance(st, dict):
+                    result = {**result, "remaining": int(st["remaining"]),
+                              "limit": int(st["limit"]),
+                              "resetInSec": st["resetInSec"]}
+                self.send_json(result, token=token)
+            finally:
+                conn.close()
             return
         if path.startswith("/api/ai/"):
             # POST /api/ai/<format> — the browser posts the student's text and

@@ -1404,6 +1404,41 @@ body {
 .feedback__solution { margin-top: 12px; font-size: 14px; color: var(--text-2); line-height: 1.65; white-space: pre-line; }
 .feedback__solution b { color: var(--text); }
 
+/* Предупреждение о долгой проверке: появляется плавно через минуту ожидания
+   (монтируется по таймеру), живёт и под лоадером, и в resume-блоке. */
+.essay-waitwarn {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  border: 1px solid rgba(255, 196, 107, 0.35);
+  animation: waitwarn-in 0.5s ease;
+}
+.ege-loader .essay-waitwarn { text-align: left; max-width: 420px; margin-left: auto; margin-right: auto; }
+.essay-waitwarn__badge {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: rgba(255, 196, 107, 0.25);
+}
+.essay-waitwarn__text { font-size: 13.5px; line-height: 1.6; color: var(--warn-ink); }
+.essay-waitwarn__text b { color: var(--text); }
+@keyframes waitwarn-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .essay-waitwarn { animation: none; }
+}
+
 .hint-box {
   margin-top: 16px;
   padding: 14px 18px;
