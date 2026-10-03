@@ -911,6 +911,8 @@ function render(data) {
     if (rw) rw.hidden = true;
     if (sw) sw.hidden = true;
     if (banner) banner.hidden = false;
+    // Ссылку могут отозвать, пока она открыта: дальше её сторожит поллер.
+    sharedWatchStart(shareState.shareToken);
   }
   observeReveals(resultEl);
 }
@@ -946,6 +948,9 @@ const ERROR_TEXTS = {
   offline: "Нет связи с сервером. Проверь интернет и нажми «Повторить».",
   corrupt: "Данные результата повреждены и не прошли проверку. Попробуй открыть снова из практики — там лежит исходная версия.",
   server: "Сервер временно не отвечает. Нажми «Повторить» чуть позже.",
+  // Ссылку отозвали, пока страница была открыта (живая инвалидация ниже):
+  // повторять нечего — удалённое не вернётся, кнопку «Повторить» прячем.
+  revoked: "Эта ссылка удалена. Автор закрыл доступ к результату — попроси у него новую ссылку.",
 };
 
 function errorKind(err) {
@@ -955,6 +960,8 @@ function errorKind(err) {
 
 function showErrorText(kind) {
   document.getElementById("errorText").textContent = ERROR_TEXTS[kind] || ERROR_TEXTS.server;
+  const retry = document.getElementById("retryBtn");
+  if (retry) retry.style.display = (kind === "revoked") ? "none" : "";
   showError();
 }
 
@@ -1969,13 +1976,64 @@ async function shareRecreate() {
   await onShareClick(true);
 }
 
+// Живая инвалидация открытого /s/<token>: пока страница висит у зрителя,
+// владелец может отозвать ссылку — тогда контент гаснет сам (тем же экраном
+// ошибки с текстом «ссылка удалена»), без ручного обновления. Проверка —
+// дешёвый ping без тела отчёта раз в 15 с (окно настраивается через
+// window.EGE_SHARED_POLL_MS — тестам нужна секунда). Страницу убивает только
+// честный 404; обрыв сети и 429 игнорируются — контент остаётся.
+let sharedWatchTimer = null;
+
+function sharedPollMs() {
+  try {
+    const v = Math.floor(Number(window.EGE_SHARED_POLL_MS) || 0);
+    if (v >= 500) return v;
+  } catch (e) {}
+  return 15000;
+}
+
+function sharedWatchStart(token) {
+  sharedWatchStop();
+  if (!token) return;
+  sharedWatchTimer = setInterval(async () => {
+    if (document.hidden) return;
+    let res = null;
+    try {
+      res = await fetch('/api/shared/essay?token=' + encodeURIComponent(token) + '&ping=1',
+        { signal: AbortSignal.timeout(10000) });
+    } catch (e) { return; }
+    if (res && res.status === 404) {
+      sharedWatchStop();
+      try { window.scrollTo({ top: 0, behavior: "auto" }); } catch (e) { window.scrollTo(0, 0); }
+      showErrorText("revoked");
+    }
+  }, sharedPollMs());
+}
+
+function sharedWatchStop() {
+  if (sharedWatchTimer) { clearInterval(sharedWatchTimer); sharedWatchTimer = null; }
+}
+try { document.addEventListener("pagehide", sharedWatchStop); } catch (e) {}
+
 async function onShareClick(forceCreate) {
   if (shareState.busy || recheckLoading) return;
   if (shareState.mode !== "owner") return;
-  // Ссылка уже есть — то же окно с существующим токеном, создавать нечего.
+  // Ссылка уже есть — сначала дешёвый ping её живости (без тела): её могли
+  // отозвать из другой вкладки. Жива — то же окно мгновенно, без POST.
+  // Отозвана (404) — молча создаём заново тем же окном. Остальное (сеть,
+  // 429) — открываем как есть: хуже не будет.
   if (shareState.token && !forceCreate) {
-    openShareLinkModal(shareState.token);
-    return;
+    let alive = false, gone = false;
+    try {
+      const r = await fetch('/api/shared/essay?token=' + encodeURIComponent(shareState.token) + '&ping=1',
+        { signal: AbortSignal.timeout(10000) });
+      alive = r.ok;
+      gone = r.status === 404;
+    } catch (e) { alive = true; }
+    if (alive) { openShareLinkModal(shareState.token); return; }
+    if (!gone) { openShareLinkModal(shareState.token); return; }
+    shareState.token = "";
+    updateShareUI();
   }
   const ref = shareOwnerRef();
   if (!ref) {

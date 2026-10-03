@@ -268,6 +268,30 @@ async function main() {
       return !el || el.hidden;
     }));
 
+    section("S4b отзыв долетает до открытой страницы сам");
+    // Ускоряем поллер гостю (прод — 15 с) и переоткрываем ссылку: дальше
+    // отзыв из контекста владельца должен погасить её без перезагрузки.
+    await guest.addInitScript(() => { window.EGE_SHARED_POLL_MS = 1000; });
+    await guest.goto(`${BASE}/s/${token}`, { waitUntil: "domcontentloaded" });
+    await guest.waitForFunction(() => {
+      const el = document.getElementById("scoreValue");
+      return el && el.textContent.trim() === "15";
+    }, null, { timeout: 20000 });
+    await page.evaluate((tok) => fetch("/api/essays/share?token=" + encodeURIComponent(tok),
+      { method: "DELETE" }), token);
+    await guest.waitForFunction(() => {
+      const el = document.getElementById("errorText");
+      return el && /удалена/i.test(el.textContent || "");
+    }, null, { timeout: 15000 });
+    t("открытая страница гаснет сама текстом «ссылка удалена»", true);
+    t("«Повторить» у удалённой ссылки нет", await guest.evaluate(() => {
+      const b = document.getElementById("retryBtn");
+      return !b || b.style.display === "none";
+    }));
+    // Дальше S5 работает с пересозданной ссылкой: «Моя ссылка» после отзыва
+    // из другой вкладки молча создаёт новую (ping → 404 → POST), а не
+    // показывает мёртвый токен.
+
     section("S5 отзыв закрывает доступ");
     await page.click("#shareBtn");
     await page.waitForSelector("#shareDanger .share-danger-btn", { timeout: 15000 });

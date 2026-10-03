@@ -13258,6 +13258,21 @@ class Handler(BaseHTTPRequestHandler):
                     # чужой sid у приватного чтения: есть ли такая ссылка
                     # у кого-то, по ответу не понять.
                     share_token = (query.get("token", [None])[0] or "").strip()
+                    if (query.get("ping", [None])[0] or "").strip() in ("1", "true"):
+                        # Дешёвая проверка живости ссылки для открытого /s/<token>:
+                        # тело отчёта не отдаём, только факт «ссылка ещё действует».
+                        # Отозванная/битая — тот же 404, что у полного чтения.
+                        try:
+                            alive = conn.execute(
+                                "SELECT 1 FROM essay_share_links WHERE token=?",
+                                (share_token,)).fetchone() is not None
+                        except sqlite3.Error as exc:
+                            rid = log_request_error("shared-essay-ping", exc)
+                            self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                            "ref": rid}, 503); return
+                        if not is_essay_share_token(share_token) or not alive:
+                            self.send_json({"error": "Ссылка не найдена или отозвана"}, 404); return
+                        self.send_json({"ok": True}); return
                     try:
                         shared = get_shared_essay_submission(conn, share_token)
                     except sqlite3.Error as exc:

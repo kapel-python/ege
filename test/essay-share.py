@@ -276,6 +276,20 @@ def main():
             status, _ = request(guest, base, f"/api/shared/essay?token={token2}")
             check("SHARED new token 200", status == 200, f"got={status}")
 
+            # Дешёвый ping живости для открытой страницы (без тела отчёта):
+            # им же сторожится отзыв в реальном времени.
+            status, ping = request(guest, base,
+                                   f"/api/shared/essay?token={token2}&ping=1")
+            check("SHARED ping 200 without body",
+                  status == 200 and (ping or {}).get("ok") is True
+                  and "submission" not in (ping or {}),
+                  f"got={status} {str(ping)[:120]}")
+            status, _ = request(guest, base,
+                                "/api/shared/essay?token=ZzZzZzZzZ1&ping=1")
+            check("SHARED ping unknown 404", status == 404, f"got={status}")
+            status, _ = request(guest, base, "/api/shared/essay?ping=1")
+            check("SHARED ping empty 404", status == 404, f"got={status}")
+
             # Статика: /s/<token> и /essay/<ref> отдают ту же страницу.
             for url, name in ((f"/s/{token2}", "STATIC /s/<token>"),
                               (f"/essay/{pub}", "STATIC /essay/<public_id>"),
