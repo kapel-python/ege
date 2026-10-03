@@ -10041,7 +10041,8 @@ class Handler(BaseHTTPRequestHandler):
                                             "total": models.get("total") or 0,
                                             "latencyMs": models.get("latencyMs") or 0}
                         else:
-                            results[pid] = _AI.probe_provider(pid)
+                            results[pid] = _AI.probe_provider(
+                                pid, timeout=_AI.PROBE_ALL_TIMEOUT_SEC)
                     except (KeyError, ValueError) as exc:
                         results[pid] = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
                 self.send_json({"ok": True, "results": results,

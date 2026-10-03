@@ -2645,7 +2645,7 @@ function provPingRowsHTML(res) {
 async function runPingAll(paint, btn, busyLabel) {
   const idleLabel = btn ? btn.innerHTML : "";
   if (btn) { btn.disabled = true; btn.textContent = busyLabel || "Пингуем…"; }
-  paint(`<div class="a-prov-hint">Отправляем «привет» каждому провайдеру по очереди…</div>`);
+  paint(`<div class="a-prov-hint">Отправляем «привет» каждому провайдеру по очереди (до 15 с на провайдера)…</div>`);
   try {
     const r = await AdminApi.post("/api/admin/providers/probe-all", {});
     const res = (r && r.results) || {};
@@ -2672,7 +2672,11 @@ function probeAllProviders() {
     if (box) box.innerHTML = html;
   };
   runPingAll(paint, document.getElementById("provProbeAllBtn"), "Проверяем…")
-    .finally(() => { Prov.checkingAll = false; });
+    // Флаг снимаем только здесь, а runPingAll внутри уже вызвал
+    // screenProviders(true) и перерисовал раздел ПОДНЯТЫМ флагом — без
+    // повторной отрисовки кнопка навсегда оставалась «Проверяем…».
+    // drawProviders без provBody (страница провайдера) молча ничего не делает.
+    .finally(() => { Prov.checkingAll = false; drawProviders(); });
 }
 
 /* ---------------- Страница провайдера: модели и живой пинг ----------------
