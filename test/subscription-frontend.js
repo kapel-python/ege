@@ -54,7 +54,7 @@ function check(name, cond, detail) {
 
   // --- 1. публичная страница гостю ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
-  check("h1 про Plus", (await page.textContent("h1")).includes("в 4 раза"));
+  check("h1 про Plus", (await page.textContent("h1")).includes("в своём темпе"));
   const body = await page.textContent("body");
   check("нет техвитрины", !body.includes("Что происходит после") && !body.includes("Как подписка выглядит"));
   check("soon-модалка в DOM", body.includes("Оплата пока недоступна"));
