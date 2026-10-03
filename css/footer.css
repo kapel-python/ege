@@ -17,21 +17,23 @@ html { -webkit-tap-highlight-color: transparent; }
    Ссылка «Plus» в футере рисуется здесь, на странице тарифа — в её
    собственном CSS, но правило одно и то же: приложение и админка берут
    такую же копию из styles.css.
-   Фиолетовый → золото, оба конца выше AA 4.5 на светлых фонах страниц
-   (худший — #F3F5FA: 6.51 и 5.15) и 10+ в тёмной теме.
+   Фиолет → маджента → бронзовое золото, все три стопа выше AA 4.5
+   на светлых фонах страниц (худший — #F3F5FA: 5.22, 5.80 и 4.60)
+   и 6.6+ в тёмной теме.
    Токены на самом элементе — правило не зависит от токенов хоста.
    В print сплошной цвет: фоновая заливка по умолчанию не печатается, а
    текст с прозрачной заливкой напечатался бы пустым местом. */
 .plus {
-  --plus-from: #6d28d9;
-  --plus-to: #8a5f1f;
+  --plus-from: #7c3aed;
+  --plus-mid: #a21caf;
+  --plus-to: #b45309;
   color: var(--plus-to);
-  background-image: linear-gradient(100deg, var(--plus-from) 0%, var(--plus-to) 100%);
+  background-image: linear-gradient(100deg, var(--plus-from) 0%, var(--plus-mid) 50%, var(--plus-to) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-:root[data-theme="dark"] .plus { --plus-from: #c4b5fd; --plus-to: #f0cf8a; }
+:root[data-theme="dark"] .plus { --plus-from: #a78bfa; --plus-mid: #e879f9; --plus-to: #fcd34d; }
 @media print { .plus { background-image: none; -webkit-text-fill-color: currentColor; } }
 
 /* Фиксированная палитра футера — эталон: статус/404.
