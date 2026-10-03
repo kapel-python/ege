@@ -2967,6 +2967,7 @@ function screenPath(root) {
   // её из Path и не показываем `undefined` в заголовке.
   const orphans = allSkills.filter((skill) => !seen.has(skill.id)).sort((a, b) => nonNegativeNumber(a.order) - nonNegativeNumber(b.order));
   if (orphans.length) groups.push({ id: "__topics", name: "Темы предмета", skills: orphans });
+  sortPathGroups(groups);
 
   if (!allSkills.length) {
     root.innerHTML = `
@@ -3043,6 +3044,32 @@ function screenPath(root) {
 
 function overallProgress() {
   return pathProgressForSkills(subjectSkills().filter(Boolean));
+}
+
+/* Номер задания ЕГЭ навыка: '№12' → 12, 27 → 27, нет номера → null. */
+function skillEgeNum(skill) {
+  if (!skill || typeof skill !== "object") return null;
+  const m = String(skill.ege ?? skill.examNumber ?? "").match(/\d+/);
+  return m ? Number(m[0]) : null;
+}
+
+/* Порядок веток Пути — по номеру задания ЕГЭ, синхронно до отрисовки
+   (поэтому без мигания). Порядок строк в БД для этого не годится: rowid
+   зависит от истории установки — на проде «Сочинение» вставлено первым
+   и без сортировки открывало карту. Сортировка стабильная: группы без
+   номеров (системный хвост без категории) тонут в конец, не перемешиваясь
+   между собой; задание 27 predictably оказывается последним. */
+function sortPathGroups(groups) {
+  if (!Array.isArray(groups) || groups.length < 2) return groups;
+  const keyOf = (group) => {
+    let min = Infinity;
+    for (const skill of (group && group.skills) || []) {
+      const n = skillEgeNum(skill);
+      if (n !== null && n < min) min = n;
+    }
+    return min;
+  };
+  return groups.sort((a, b) => keyOf(a) - keyOf(b));
 }
 
 function statusChipClass(st) {
@@ -6861,15 +6888,6 @@ async function essayPathSlotLoad() {
     if ((Store.subject || "") !== (snap.subject || Store.subject)) return;
   } catch (_) {}
   live.dataset.done = "1";
-  // Задание-сочинение — в самом низу карты, прямо над карточкой истории:
-  // группа целиком из сочинений едет последней независимо от порядка
-  // категорий в каталоге. Какие навыки — сочинения, говорит сервер
-  // (essaySkills), поэтому ни одного id предмета в коде нет и новый
-  // предмет с long_text подхватится сам. Смешанную группу не трогаем —
-  // категорию пополам не режем.
-  try {
-    essayBranchToBottom(live, snap.essaySkills || []);
-  } catch (_) {}
   const ready = essayReadyItems(snap);
   const avg = essayAvg1(ready.map((it) => Number(it.totalScore)));
   const sub = snap.total === 0
@@ -6887,33 +6905,6 @@ async function essayPathSlotLoad() {
       </div>
       <div class="essay-path-card__go" aria-hidden="true">${icon("arrow")}</div>
     </div>`;
-}
-
-/* Группа сочинения — последняя в карте Пути. Id навыков-сочинений
-   приходят с сервера (essaySkills), сравниваем по ним, а не по названиям.
-   Узел несёт id в onclick вида go('skill', '<id>'): парсим его, классам
-   и порядку внутри группы не мешаем. Уже последняя — appendChild ничего
-   не меняет. */
-function essayBranchToBottom(slot, essaySkills) {
-  if (!slot || !Array.isArray(essaySkills) || !essaySkills.length) return;
-  const essay = new Set(essaySkills.map((s) => String(s)));
-  const root = slot.closest ? slot.closest(".screen, main, body") : null;
-  const list = root && root.querySelector ? root.querySelector(".tree-branches") : null;
-  if (!list) return;
-  const branches = list.querySelectorAll ? list.querySelectorAll(":scope > .tree-branch") : [];
-  let target = null;
-  for (const branch of branches) {
-    const nodes = branch.querySelectorAll ? branch.querySelectorAll(".tree-node") : [];
-    if (!nodes.length) continue;
-    let allEssay = true;
-    for (const node of nodes) {
-      const action = node.getAttribute ? (node.getAttribute("onclick") || "") : "";
-      const m = /go\('skill',\s*'([^']+)'\)/.exec(action);
-      if (!m || !essay.has(m[1])) { allEssay = false; break; }
-    }
-    if (allEssay) { target = branch; break; }
-  }
-  if (target && target.nextElementSibling) list.appendChild(target);
 }
 
 /* Тема из одних сочинений: банк непуст и каждое задание с ИЗВЕСТНЫМ типом —
