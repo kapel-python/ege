@@ -317,20 +317,33 @@
   /* Само окно шаринга круглее системного .dlg (20px): это отдельное
      «подарочное» окно, а не очередное подтверждение. */
   .dlg--share { border-radius: 26px; }
-  .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
-  .share-danger { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px; }
+  /* «Готово» и «Не удалять» — широкие (.dlg__actions--single растягивает
+     единственную кнопку): главный выход окна читается как действие, а не
+     жирная точка в углу. Заголовок опасной зоны — карточка с красным
+     акцентом вместо тонкого текста-ссылки: у удаления есть вес. */
+  .dlg--share .dlg__actions--single { margin-top: 16px; }
+  .dlg--share .dlg__actions--single .btn { font-size: 15px; padding: 13px 18px; }
+  .share-danger {
+    margin-top: 18px;
+    background: var(--surface-2); border: none; border-radius: 16px; padding: 14px 14px 14px;
+  }
+  .share-danger__head { display: flex; align-items: center; gap: 8px; }
+  .share-danger__head svg { width: 16px; height: 16px; flex: none; color: var(--red); }
   .share-danger-btn {
     background: none; border: none; padding: 0; cursor: pointer;
-    font: inherit; font-size: 13.5px; font-weight: 700; color: var(--red);
+    font: inherit; font-size: 14px; font-weight: 700; color: var(--red);
   }
   .share-danger-btn:hover { text-decoration: underline; }
   .share-danger-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); }
-  .share-confirm-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .share-confirm-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .share-confirm-row .btn--soft { flex: 1 1 auto; font-size: 15px; padding: 13px 18px; }
   .share-revoke-btn {
+    flex: 2 1 140px;
     background: var(--red); color: #fff; border: none; border-radius: 999px;
-    padding: 9px 18px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    padding: 13px 18px; font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
   }
   .share-revoke-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
   @media (max-width: 480px) {
     .share-link-box { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 8px; }
     .share-copy-btn { justify-content: center; }
@@ -1778,15 +1791,18 @@ function openShareLinkModal(token) {
           </button>
         </div>
         <p class="share-copied" id="shareCopied" hidden>Скопировано ✓</p>
-        <div class="dlg__actions">
+        <div class="dlg__actions dlg__actions--single">
           <button class="btn btn--soft" type="button" onclick="closeShareModal()">Готово</button>
         </div>
         <div class="share-danger" id="shareDanger">
-          <button class="share-danger-btn" type="button" onclick="shareArmRevoke()">Удалить ссылку</button>
+          <div class="share-danger__head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            <button class="share-danger-btn" type="button" onclick="shareArmRevoke()">Удалить ссылку</button>
+          </div>
           <p class="share-danger-text">Доступ по ссылке закроется сразу и навсегда. Приватная ссылка сочинения не изменится.</p>
           <div class="share-confirm-row" id="shareConfirmRow" hidden>
-            <button class="share-revoke-btn" type="button" id="shareRevokeBtn" onclick="shareDoRevoke()">Точно удалить</button>
-            <button class="btn btn--soft" type="button" onclick="shareDisarmRevoke()">Оставить</button>
+            <button class="share-revoke-btn" type="button" id="shareRevokeBtn" onclick="shareDoRevoke()">Удалить навсегда</button>
+            <button class="btn btn--soft" type="button" onclick="shareDisarmRevoke()">Не удалять</button>
           </div>
         </div>
       </div>`);
