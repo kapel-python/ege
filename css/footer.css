@@ -13,27 +13,30 @@
    тапа для них живёт здесь (в приложении то же делает styles.css). */
 html { -webkit-tap-highlight-color: transparent; }
 
-/* Слово «Plus» — градиентом, на всех страницах сайта одинаково.
+/* Слово «Plus» — фирменный знак, на всех страницах сайта одинаково.
    Ссылка «Plus» в футере рисуется здесь, на странице тарифа — в её
    собственном CSS, но правило одно и то же: приложение и админка берут
    такую же копию из styles.css.
-   Фиолет → маджента → бронзовое золото, все три стопа выше AA 4.5
-   на светлых фонах страниц (худший — #F3F5FA: 5.22, 5.80 и 4.60)
+   Жирный вес + чистый градиент фиолет → маджента (один hue-ряд, без
+   перехода через коричневый — именно середина «фиолет → золото»
+   давала грязь на коротком слове из 4 букв). Оба стопа выше AA 4.5
+   на светлых фонах страниц (худший — #F3F5FA: 5.22 и 5.80)
    и 6.6+ в тёмной теме.
    Токены на самом элементе — правило не зависит от токенов хоста.
    В print сплошной цвет: фоновая заливка по умолчанию не печатается, а
    текст с прозрачной заливкой напечатался бы пустым местом. */
 .plus {
   --plus-from: #7c3aed;
-  --plus-mid: #a21caf;
-  --plus-to: #b45309;
+  --plus-to: #a21caf;
   color: var(--plus-to);
-  background-image: linear-gradient(100deg, var(--plus-from) 0%, var(--plus-mid) 50%, var(--plus-to) 100%);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background-image: linear-gradient(115deg, var(--plus-from) 0%, var(--plus-to) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-:root[data-theme="dark"] .plus { --plus-from: #a78bfa; --plus-mid: #e879f9; --plus-to: #fcd34d; }
+:root[data-theme="dark"] .plus { --plus-from: #a78bfa; --plus-to: #e879f9; }
 @media print { .plus { background-image: none; -webkit-text-fill-color: currentColor; } }
 
 /* Фиксированная палитра футера — эталон: статус/404.

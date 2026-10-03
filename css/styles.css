@@ -186,24 +186,26 @@ body {
 .easy-name { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: var(--text); text-transform: lowercase; white-space: nowrap; }
 .easy-name em { font-style: normal; color: var(--brand-green); }
 
-/* Слово «Plus» — градиентом: подписка должна узнаваться с одного взгляда.
-   Фиолет → маджента → бронзовое золото (три стопа вместо плоского
-   перехода в коричневый — так градиент выглядит премиально, а не грязно).
-   Все три стопа выше AA 4.5 на любом фоне приложения (худший фон
-   #F3F5FA: 5.22, 5.80 и 4.60), в тёмной — 6.6+.
+/* Слово «Plus» — фирменный знак: жирный вес + чистый градиент
+   фиолет → маджента (один hue-ряд, без перехода через коричневый —
+   именно середина «фиолет → золото» давала грязь на коротком слове:
+   4 буквы слишком узкие, чтобы градиент успел перейти).
+   Оба стопа выше AA 4.5 на любом фоне приложения (худший фон
+   #F3F5FA: 5.22 и 5.80), в тёмной — 6.6+.
    Печать: браузер по умолчанию не печатает фоновые заливки, а текст с
    прозрачной заливкой напечатался бы пустым местом — в print сплошной. */
 .plus {
   --plus-from: #7c3aed;
-  --plus-mid: #a21caf;
-  --plus-to: #b45309;
+  --plus-to: #a21caf;
   color: var(--plus-to);
-  background-image: linear-gradient(100deg, var(--plus-from) 0%, var(--plus-mid) 50%, var(--plus-to) 100%);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background-image: linear-gradient(115deg, var(--plus-from) 0%, var(--plus-to) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-:root[data-theme="dark"] .plus { --plus-from: #a78bfa; --plus-mid: #e879f9; --plus-to: #fcd34d; }
+:root[data-theme="dark"] .plus { --plus-from: #a78bfa; --plus-to: #e879f9; }
 @media print { .plus { background-image: none; -webkit-text-fill-color: currentColor; } }
 .logo-sub { grid-column: 1 / -1; font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 
