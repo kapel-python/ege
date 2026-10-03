@@ -1012,9 +1012,18 @@ def judge_provider_set(provider: str | None) -> dict:
 
 
 def judge_providers_order() -> list:
-    """Порядок попыток для проверки сочинения: судья, затем запасной."""
+    """Порядок попыток для проверки сочинения: судья, затем запасные.
+
+    Запасных может быть несколько — все настроенные провайдеры кроме судьи
+    в порядке ротации (`effective_priority`). Доступность важнее: отвечающий
+    запасной всё равно фиксируется (`judge_failover` + `model` у проверки),
+    так что баллы после смены прибора несравнимы, сколько бы провайдеров
+    ни участвовало в цепочке."""
     names: list[str] = []
-    for name in (judge_provider(), judge_fallback()):
+    first = judge_provider()
+    if first:
+        names.append(first)
+    for name in effective_priority():
         if name and name not in names:
             names.append(name)
     return names
