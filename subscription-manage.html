@@ -383,9 +383,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
     </span>
     <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text">Подписка находится в разработке: платёжный провайдер ещё подключается. Кому <span class="plus">Plus</span> уже выдали — у тех всё уже работает: лимиты и наставник включены.</p>
+    <p class="modal__text">Подписка находится в разработке: платёжный провайдер ещё подключается. Оставь заявку — сообщим, как только оплату включат.</p>
     <div class="modal__actions">
-      <button class="btn btn-primary btn--sm" type="button" id="soonOk">Понятно</button>
+      <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
+      <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
     </div>
   </div>
 </div>
@@ -697,10 +698,19 @@
     boot();
   }
 
-  /* soon-модалка */
+  /* soon-модалка (+ «Напомнить» — та же запись в лист ожидания,
+     что кнопка в списке действий: модалка не должна быть тупиком) */
   var soonModal = document.getElementById("soonModal");
+  var soonNotify = document.getElementById("soonNotify");
+  var notifiedState = false;
+  function paintSoonNotify(){
+    if (!soonNotify) return;
+    soonNotify.disabled = notifiedState;
+    soonNotify.textContent = notifiedState ? "Записали — жди запуска" : "Напомнить о запуске";
+  }
   function openSoon(){
     if (!soonModal) return;
+    paintSoonNotify();
     soonModal.classList.add("is-open");
     try { document.body.style.overflow = "hidden"; } catch(e){}
   }
@@ -711,6 +721,20 @@
   }
   document.getElementById("soonClose").addEventListener("click", closeSoon);
   document.getElementById("soonOk").addEventListener("click", closeSoon);
+  if (soonNotify) soonNotify.addEventListener("click", function(){
+    if (notifiedState) return;
+    soonNotify.disabled = true;
+    soonNotify.textContent = "Записываем…";
+    api("/api/subscription/notify", {}).then(function(){
+      notifiedState = true;
+      paintSoonNotify();
+      toast("Записали — сообщим о запуске");
+      reload();
+    }).catch(function(err){
+      paintSoonNotify();
+      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
+    });
+  });
   soonModal.addEventListener("click", function(e){ if (e.target === soonModal) closeSoon(); });
   document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeSoon(); });
 
@@ -750,7 +774,8 @@
         ]).then(function(res){
           document.getElementById("loadingCard").hidden = true;
           document.getElementById("content").hidden = false;
-          renderAll(st, res[0], res[1], res[2], !!(res[3] && res[3].joined));
+          notifiedState = !!(res[3] && res[3].joined);
+          renderAll(st, res[0], res[1], res[2], notifiedState);
         });
       });
     }).catch(function(){
