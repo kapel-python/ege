@@ -2881,3 +2881,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .essay-path-card, .essay-item__score { transition: none; }
 }
+
+/* Вывод «Что это значит» в Моих сочинениях: текст + действия */
+.essay-insight__text { font-size: 14px; line-height: 1.65; margin: 8px 0 0; color: var(--text-2); }
+.essay-insight__text b { color: var(--text); }
+.essay-insight__actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }

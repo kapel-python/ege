@@ -6944,11 +6944,12 @@ function essaysBodyHTML(snap) {
       <div class="chart-legend"><span><i style="background:var(--accent)"></i>итог проверки · шкала 0–22</span></div>
     </div>`;
   const criteria = essayCriteriaHTML(ready);
+  const insight = essayInsightHTML(snap, ready);
   const items = snap.items.map((it, i) => essayItemHTML(it, snap.total - i)).join("");
   const tail = snap.total > snap.items.length
     ? `<div class="stat-label" style="margin-top:12px;text-align:center">Показаны последние ${snap.items.length} из ${snap.total} — старые работы уже в архиве.</div>`
     : "";
-  return `${stats}${dynamics}${criteria}
+  return `${stats}${dynamics}${insight}${criteria}
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin:20px 0 12px;gap:10px;flex-wrap:wrap">
       <div style="font-weight:650">Все работы · ${snap.total}</div>
       ${last && last.submissionId ? `<a class="btn btn--ghost btn--sm" href="/essay/${Number(last.submissionId)}">Последний разбор →</a>` : ""}
@@ -6968,25 +6969,106 @@ function essayDeltaChip(readyAscNewFirst) {
   return `<span class="chip ${cls} mono">${sign}${d} с первой работы</span>`;
 }
 
+/* Подписи времени под осью динамики. Формат выбирается по РАЗМАХУ дат —
+   правило одно и предсказуемое: всё за один московский день — часы
+   («18:00»), разброс меньше двух месяцев — даты («01.08»), шире —
+   короткие месяцы («сент.»), через год — с годом («сент. 25»).
+   Часовой пояс — московский, как у всей активности в приложении.
+   Точек больше шести — показываем первую, последнюю и равномерную
+   выборку между ними (максимум шесть подписей, без налезания). */
+const ESSAY_MONTHS_SHORT = ["янв.", "фев.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "ноя.", "дек."];
+const ESSAY_TICK_MAX = 6;
+const ESSAY_DAY_MS = 24 * 3600 * 1000;
+
+function essayMoscowParts(t) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(Number(t)));
+    const get = (k) => ((parts || []).find((p) => p && p.type === k) || {}).value;
+    if (!get("day") || !get("month") || !get("year")) return null;
+    return { d: get("day"), m: get("month"), y: get("year"), hh: get("hour") || "00", mm: get("minute") || "00" };
+  } catch (_) {
+    return null;
+  }
+}
+
+function essayTimeMode(times) {
+  const valid = times.filter((t) => Number.isFinite(t) && t > 0);
+  if (valid.length < 2) return { mode: "time", needYear: false };
+  const span = Math.max(...valid) - Math.min(...valid);
+  const days = new Set(valid.map((t) => {
+    const p = essayMoscowParts(t);
+    return p ? `${p.y}-${p.m}-${p.d}` : "unknown";
+  }));
+  // Меньше суток, но через полночь (23:50 → 00:10): голые часы врут,
+  // поэтому это уже режим дат, а не времени.
+  if (span < ESSAY_DAY_MS && days.size === 1) return { mode: "time", needYear: false };
+  if (span < 62 * ESSAY_DAY_MS) return { mode: "date", needYear: false };
+  const years = new Set(valid.map((t) => {
+    const p = essayMoscowParts(t);
+    return p ? p.y : "unknown";
+  }));
+  return { mode: "month", needYear: years.size > 1 };
+}
+
+function essayTickLabel(t, mode, needYear) {
+  const p = essayMoscowParts(t);
+  if (!p) return "";
+  if (mode === "time") return `${p.hh}:${p.mm}`;
+  if (mode === "date") return `${p.d}.${p.m}`;
+  const name = ESSAY_MONTHS_SHORT[Number(p.m) - 1] || "";
+  return needYear ? `${name} ${String(p.y).slice(2)}` : name;
+}
+
+function essayFullDateTime(t) {
+  const p = essayMoscowParts(t);
+  if (!p) return "";
+  return `${p.d}.${p.m}.${p.y}, ${p.hh}:${p.mm}`;
+}
+
+function essayTickIndices(n) {
+  if (n <= ESSAY_TICK_MAX) return Array.from({ length: n }, (_, i) => i);
+  const out = [];
+  for (let k = 0; k < ESSAY_TICK_MAX; k++) out.push(Math.round((k * (n - 1)) / (ESSAY_TICK_MAX - 1)));
+  return [...new Set(out)];
+}
+
 /* Прямая-линия динамики: шкала фиксирована 0–22, чтобы рост было видно
-   честно (без растягивания мелочей). Точек мало — подписываем первую
-   и последнюю, остальные видны по наведению. */
+   честно (без растягивания мелочей). Шаг по горизонтали — по порядку
+   работ, а не по времени (иначе две работы за вечер слиплись бы в одну
+   точку); время читается по подписям под осью и в подсказках точек. */
 function essayDynamicsSVG(readyNewFirst) {
   const ready = readyNewFirst.slice().reverse();
   if (ready.length < 2) {
     return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">График оживёт со второй проверенной работой: одна точка — это пока факт, а не динамика.</div>`;
   }
-  const W = 560, H = 190, padL = 30, padR = 16, padT = 16, padB = 24;
+  const times = ready.map((it) => Number(it.createdAt));
+  const { mode, needYear } = essayTimeMode(times);
+  const W = 560, H = 200, padL = 30, padR = 16, padT = 16, padB = 40;
   const X = (i) => padL + (ready.length === 1 ? 0.5 : i / (ready.length - 1)) * (W - padL - padR);
   const Y = (v) => padT + (1 - Math.max(0, Math.min(22, v)) / 22) * (H - padT - padB);
+  const baseY = H - padB;
   const line = ready.map((it, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(Number(it.totalScore)).toFixed(1)}`).join(" ");
-  const area = `${line} L${X(ready.length - 1).toFixed(1)},${(H - padB).toFixed(1)} L${X(0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
+  const area = `${line} L${X(ready.length - 1).toFixed(1)},${baseY.toFixed(1)} L${X(0).toFixed(1)},${baseY.toFixed(1)} Z`;
   const grid = [0, 11, 22].map((g) => `
     <line x1="${padL}" y1="${Y(g).toFixed(1)}" x2="${W - padR}" y2="${Y(g).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
     <text x="${padL - 6}" y="${(Y(g) + 4).toFixed(1)}" font-size="10" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
+  // Соседние точки в одну минуту/день/месяц давали бы две одинаковые
+  // подписи подряд — вторую пропускаем (первая, последняя и шаг те же).
+  let prevTick = null;
+  const ticks = essayTickIndices(ready.length).map((i) => {
+    const raw = essayTickLabel(times[i], mode, needYear) || `№${i + 1}`;
+    const label = raw === prevTick ? "" : raw;
+    if (raw !== prevTick) prevTick = raw;
+    return `<line x1="${X(i).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${X(i).toFixed(1)}" y2="${(baseY + 5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+    <text x="${X(i).toFixed(1)}" y="${(baseY + 19).toFixed(1)}" font-size="10" fill="var(--muted)" text-anchor="middle" class="mono">${esc(label)}</text>`;
+  }).join("");
   const dots = ready.map((it, i) => {
     const v = Number(it.totalScore);
-    const tip = `${essayFmtDate(it.createdAt) || "работа"}: ${v} из 22`;
+    const when = essayFullDateTime(times[i]);
+    const tip = `${when ? when + " — " : ""}${v} из 22`;
     const lastPt = i === ready.length - 1;
     return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${lastPt ? 5 : 3.5}" fill="${lastPt ? "var(--accent)" : "var(--surface, #fff)"}" stroke="var(--accent)" stroke-width="2.5"><title>${esc(tip)}</title></circle>`;
   }).join("");
@@ -7000,7 +7082,7 @@ function essayDynamicsSVG(readyNewFirst) {
     </linearGradient></defs>
     ${grid}<path d="${area}" fill="url(#essayDyn)"/>
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    ${dots}${ends}
+    ${dots}${ends}${ticks}
   </svg>`;
 }
 
@@ -7035,6 +7117,103 @@ function essayCriteriaHTML(ready) {
       <div style="font-weight:650">Среднее по критериям</div>
       <div class="stat-label" style="margin:4px 0 12px">Где баллы теряются чаще всего — туда и целимся дальше.</div>
       <div class="essay-ks">${rows}</div>
+    </div>`;
+}
+
+/* Вывод человеческим языком: что происходит с баллами и куда бить дальше.
+   Правила детерминированные (те же числа, что на графике и в сетке
+   критериев): тренд — последний минус первый; слабый критерий — худший
+   процент среднего (при равенстве — меньший id); «ровно» — все средние
+   от 75%. Тексты причин и шагов — статика по рубрике ФИПИ, а не мнение
+   модели, поэтому вывод одинаков при тех же данных. */
+const ESSAY_CRIT_GUIDE = {
+  K1: { name: "позиция автора", why: "позиция автора исходного текста не названа прямо или подменена пересказом", next: "перед письмом выпиши позицию автора одним предложением и сверяй с ней каждый абзац" },
+  K2: { name: "комментарий", why: "примеров-иллюстраций меньше двух или между ними нет пояснения-связки", next: "проверь, что примеров ровно два и после второго есть фраза, как они связаны с позицией" },
+  K3: { name: "своё отношение", why: "отношение заявлено, но не обосновано — нет «потому что»", next: "добавь к своей позиции одно обоснование: жизненный пример, чтение или рассуждение" },
+  K4: { name: "фактическая точность", why: "ошибки в фактах, именах или событиях", next: "перечитай работу и вычеркни всё, в чём не уверен: незнание факта хуже его отсутствия" },
+  K5: { name: "логика", why: "абзацы не связаны между собой или вывод противоречит началу", next: "прочитай только первые фразы абзацев подряд — должен получиться связный план" },
+  K6: { name: "этика", why: "резкие оценки людей или групп вместо разбора поступков", next: "замени оценку человека оценкой его поступка" },
+  K7: { name: "орфография", why: "описки и безударные, которые глаз уже не замечает", next: "перечитай работу медленно, по словам, от конца к началу" },
+  K8: { name: "пунктуация", why: "запятые в сложных предложениях и при обособлениях", next: "подчеркни все грамматические основы — каждая граница требует решения о запятой" },
+  K9: { name: "грамматика", why: "несогласования и неверные формы слов", next: "проверь каждое длинное предложение: подлежащее, сказуемое и их согласование" },
+  K10: { name: "речевые нормы", why: "повторы слов и штампы вместо точных формулировок", next: "выпиши слова, которые повторяются чаще двух раз, и замени синонимами" },
+};
+const ESSAY_CRIT_ORDER = ["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10"];
+const ESSAY_STEADY_PCT = 75;
+
+function essayCritStats(ready) {
+  const sums = new Map();
+  for (const it of ready) {
+    for (const c of (it.criteria || [])) {
+      if (!c || !c.id || !Number.isFinite(Number(c.score)) || !Number.isFinite(Number(c.max)) || Number(c.max) <= 0) continue;
+      const cur = sums.get(String(c.id)) || { sum: 0, n: 0, max: Number(c.max) };
+      cur.sum += Number(c.score);
+      cur.n += 1;
+      cur.max = Number(c.max);
+      sums.set(String(c.id), cur);
+    }
+  }
+  return [...sums.entries()].map(([id, cur]) => ({
+    id, n: cur.n, max: cur.max,
+    avg: Math.round((cur.sum / cur.n) * 10) / 10,
+    pct: Math.max(0, Math.min(100, (cur.sum / cur.n / cur.max) * 100)),
+  })).sort((a, b) => (a.pct - b.pct) || (ESSAY_CRIT_ORDER.indexOf(a.id) - ESSAY_CRIT_ORDER.indexOf(b.id)));
+}
+
+function essayInsightHTML(snap, readyNewFirst) {
+  const ready = readyNewFirst.slice().reverse();
+  const last = readyNewFirst[0] || null;
+  const lastSid = last && Number.isFinite(Number(last.submissionId)) ? Number(last.submissionId) : 0;
+  const actions = `
+    <div class="essay-insight__actions">
+      <button class="btn btn--primary btn--sm" type="button" onclick="startFirstEssay()">Написать следующее →</button>
+      ${lastSid ? `<a class="btn btn--ghost btn--sm" href="/essay/${lastSid}">Последний разбор →</a>` : ""}
+    </div>`;
+  // Есть работы, но ни одной проверки: динамике пока не из чего строиться.
+  if (!ready.length) {
+    return `
+    <div class="card essay-insight" style="margin-top:16px">
+      <div style="font-weight:650">Что это значит</div>
+      <p class="essay-insight__text">Проверок пока нет — поэтому графика и разбора по критериям тоже нет. Как только первая проверка завершится, здесь появятся линия баллов и подсказка, куда бить дальше.</p>
+      ${actions}
+    </div>`;
+  }
+  const scores = ready.map((it) => Number(it.totalScore));
+  const first = scores[0], lastScore = scores[scores.length - 1];
+  const d = Math.round((lastScore - first) * 10) / 10;
+  const n = ready.length;
+  const workWord = plural(n, "работа", "работы", "работ");
+  let trend;
+  if (n < 2) {
+    trend = `Первая проверенная работа — <b class="mono">${first} из 22</b>. Это точка отсчёта: со второй появится линия роста.`;
+  } else if (d > 0) {
+    trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
+  } else if (d < 0) {
+    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Это нормально — баллы ходят волнами. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
+  } else {
+    trend = `Пока ровно: <b class="mono">${first} из 22</b> в первой и в последней из ${n} ${workWord}. Стабильность — уже результат; сдвинуть её поможет одно слабое место ниже.`;
+  }
+  const crits = essayCritStats(ready);
+  let focus = "";
+  if (crits.length) {
+    const weak = crits[0];
+    const guide = ESSAY_CRIT_GUIDE[weak.id];
+    if (weak.pct >= ESSAY_STEADY_PCT) {
+      const strong = crits[crits.length - 1];
+      const strongGuide = ESSAY_CRIT_GUIDE[strong.id];
+      focus = `По критериям ровно: слабее всего <b>${esc(guide ? guide.name : weak.id)} (${weak.avg} из ${weak.max})</b> — и это всё равно высокий уровень. Держи планку${strongGuide && strong.id !== weak.id ? `, сильнее всего — ${esc(strongGuide.name)}` : ""}.`;
+    } else if (guide) {
+      focus = `Больше всего баллов уходит в <b>${esc(guide.name)} (${weak.id})</b> — в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Причина обычно в том, что ${esc(guide.why)}. Я предлагаю: ${esc(guide.next)}.`;
+    } else {
+      focus = `Больше всего баллов уходит в <b class="mono">${esc(weak.id)}</b> — в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Открой разбор любой работы и сверься с комментарием к этому критерию.`;
+    }
+  }
+  return `
+    <div class="card essay-insight" style="margin-top:16px">
+      <div style="font-weight:650">Что это значит</div>
+      <p class="essay-insight__text">${trend}</p>
+      ${focus ? `<p class="essay-insight__text">${focus}</p>` : ""}
+      ${actions}
     </div>`;
 }
 
