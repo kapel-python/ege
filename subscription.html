@@ -335,8 +335,10 @@
 
       <div class="cta-row" id="ctaRow">
         <button class="btn btn-primary" id="ctaBtn" type="button">Оформить Plus</button>
+        <button class="btn btn-ghost" id="notifyBtn" type="button" hidden>Напомнить о запуске</button>
         <a class="btn btn-ghost" href="/dashboard">Сначала посмотреть платформу</a>
         <span class="cta-note">Отмена в любой момент · возврат в течение 14 дней</span>
+        <span class="cta-note" id="notifyNote" hidden>Оплата подключается. Нажми «Напомнить» — подарим месяц Plus, когда её включат.</span>
       </div>
 
       <ul class="trust">
@@ -360,8 +362,8 @@
   <section class="section">
     <div class="wrap">
       <div class="section-label rv">что меняется</div>
-      <h2 class="section-title rv">Задания и прогноз — бесплатно. Платное — лимиты и наставник</h2>
-      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Платится только за количество проверок и за ИИ-наставника.</p>
+      <h2 class="section-title rv">Задания и прогноз — бесплатно. Платное — только повышенные лимиты</h2>
+      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Платится только за повышенные лимиты. ИИ-наставник сейчас бесплатен всем — 10 ходов в день.</p>
       <div class="card-grid">
         <div class="card rv">
           <div class="card-icon" aria-hidden="true">
@@ -376,8 +378,8 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/></svg>
           </div>
           <div class="card-title">ИИ-наставник</div>
-          <div class="card-big">открыт</div>
-          <p class="card-text">Диалог по твоему прогрессу: разбор ошибок, план на неделю, ответы с опорой на реальные данные.</p>
+          <div class="card-big">10 ходов</div>
+          <p class="card-text">Диалог по твоему прогрессу: разбор ошибок, план на неделю, ответы с опорой на реальные данные. Сейчас бесплатно всем; с Plus — 40 ходов в день.</p>
         </div>
         <div class="card rv" style="--d:200ms">
           <div class="card-icon" aria-hidden="true">
@@ -405,7 +407,7 @@
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Разбор сочинений</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Базовые лимиты: <b>5</b> проверок в день</span></li>
-            <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>ИИ-наставник</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ-наставник: <b>10</b> ходов в день · сейчас бесплатно всем</span></li>
             <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>Без очереди</span></li>
           </ul>
         </div>
@@ -418,7 +420,7 @@
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Разбор сочинений</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Лимиты <b>в 4 раза больше</b></span></li>
-            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ-наставник</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ-наставник: <b>40</b> ходов в день</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Приоритетная обработка</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Ранний доступ к новым предметам</span></li>
           </ul>
@@ -476,10 +478,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
     </span>
     <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Кому <span class="plus">Plus</span> уже выдали — у тех всё уже работает: лимиты и наставник включены.</p>
+    <p class="modal__text" id="soonText">Подписка находится в разработке: платёжный провайдер ещё подключается. Нажми «Напомнить» — подарим месяц Plus, когда оплату включат.</p>
     <div class="modal__actions">
+      <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
       <a class="btn btn-ghost btn--sm" href="/dashboard#/profile">Открыть профиль</a>
-      <button class="btn btn-primary btn--sm" type="button" id="soonOk">Понятно</button>
+      <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
     </div>
   </div>
 </div>
@@ -626,15 +629,54 @@
      Plus — баннер вместо неё. Сессия читается отдельным запросом:
      /api/auth/session гостю отвечает 200 с user:null, поэтому лишнего
      401 в консоли нет; subscription/status дёргаем только залогиненным. */
-  var subState = { checked: false, active: false, guest: true };
+  var subState = { checked: false, active: false, guest: true, notified: false };
   var ctaRow = document.getElementById("ctaRow");
   var ctaBtn = document.getElementById("ctaBtn");
+  var notifyBtn = document.getElementById("notifyBtn");
+  var notifyNote = document.getElementById("notifyNote");
+  var soonNotify = document.getElementById("soonNotify");
   var activeBanner = document.getElementById("activeBanner");
   var activeText = document.getElementById("activeText");
 
   function fmtDate(ms){
     try { return new Date(Number(ms)).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }); }
     catch(e){ return ""; }
+  }
+
+  /* Лист ожидания: кнопка видна только залогиненному без Plus.
+     Нажавший попадёт в plus_waitlist и получит месяц Plus в подарок,
+     когда включат оплату (выдача — одним ручным запросом админа). */
+  function paintNotify(){
+    var show = subState.checked && !subState.guest && !subState.active;
+    if (notifyBtn) {
+      notifyBtn.hidden = !show;
+      notifyBtn.disabled = !!subState.notified;
+      notifyBtn.textContent = subState.notified ? "Напомним о запуске — месяц Plus твой" : "Напомнить о запуске";
+    }
+    if (notifyNote) notifyNote.hidden = !show;
+    if (soonNotify) {
+      soonNotify.disabled = !!subState.notified;
+      soonNotify.textContent = subState.notified ? "Записали — жди запуска" : "Напомнить о запуске";
+    }
+  }
+  function postNotify(){
+    if (!subState.checked || subState.guest) { window.location.href = "/dashboard#/profile"; return; }
+    if (subState.notified) return;
+    if (soonNotify) { soonNotify.disabled = true; soonNotify.textContent = "Записываем…"; }
+    fetch("/api/subscription/notify", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, credentials: "same-origin", cache: "no-store", body: "{}" })
+      .then(function(resp){
+        if (resp.status === 401 || resp.status === 403) { window.location.href = "/dashboard#/profile"; throw new Error("auth"); }
+        if (!resp.ok) throw new Error("http " + resp.status);
+        return resp.json();
+      })
+      .then(function(){
+        subState.notified = true;
+        paintNotify();
+      })
+      .catch(function(err){
+        if (err && err.message === "auth") return;
+        paintNotify(); /* честная ошибка: кнопка снова жива */
+      });
   }
 
   try {
@@ -681,6 +723,14 @@
           }
           var buybar = document.getElementById("buybar");
           if (buybar) { buybar.hidden = true; buybar.classList.remove("is-on"); }
+        } else if (!subState.guest) {
+          /* Залогинен без Plus: подтягиваем участие в листе ожидания
+             (best-effort — страница живёт и без него). */
+          fetch("/api/subscription/notify", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
+            .then(function(resp){ if (!resp.ok) throw new Error("http " + resp.status); return resp.json(); })
+            .then(function(data){ subState.notified = !!(data && data.joined); paintNotify(); })
+            .catch(function(){ paintNotify(); });
+          paintNotify();
         }
       })
       .catch(function(){ /* офлайн — страница всё равно рассказывает тариф */ });
@@ -707,6 +757,8 @@
     openSoon();
   }
   if (ctaBtn) ctaBtn.addEventListener("click", onBuy);
+  if (notifyBtn) notifyBtn.addEventListener("click", postNotify);
+  if (soonNotify) soonNotify.addEventListener("click", postNotify);
   var buybarBtn = document.getElementById("buybarBtn");
   if (buybarBtn) buybarBtn.addEventListener("click", onBuy);
   var soonClose = document.getElementById("soonClose");

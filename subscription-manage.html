@@ -344,7 +344,7 @@
       <div class="card rv">
         <ul class="perks">
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Лимиты в 4 раза больше</b> — <span id="perkLimits">20 проверок сочинений и 40 ходов наставника в день</span>.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>ИИ-наставник</b> — разбор ошибок, план на неделю и ответы по твоему прогрессу.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>ИИ-наставник</b> — разбор ошибок, план на неделю и ответы по твоему прогрессу. Сейчас бесплатен всем — 10 ходов в день.</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Без очереди</b> — проверка и ответы не ждут свободный шлюз.</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Ранний доступ</b> — новые предметы и задания на неделю раньше.</span></li>
         </ul>
@@ -555,7 +555,7 @@
     else { btn.disabled = false; var l = btn.getAttribute("data-label"); if (l) btn.textContent = l; }
   }
 
-  function renderAll(st, hist, essayLim, agentLim){
+  function renderAll(st, hist, essayLim, agentLim, notified){
     var plus = !!(st && st.active);
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 20 : 5);
@@ -589,7 +589,7 @@
       pill.className = "chip chip--muted";
       pill.textContent = "бесплатный план";
       meta.innerHTML = "5 проверок сочинений и 10 ходов наставника в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год.";
-      heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает только лимиты и открывает наставника.";
+      heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает только лимиты. Наставник сейчас бесплатен всем — 10 ходов в день.";
       meter.hidden = true;
       plabel.hidden = true;
     }
@@ -627,8 +627,10 @@
       sub.textContent = "Автопродление выключено. Верни его — доступ продлится сам, ничего доплачивать не нужно.";
       btn("btn-primary btn--sm", "Вернуть продление", "resume");
     } else {
-      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут.";
+      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут. Нажми «Напомнить» — подарим месяц Plus, когда её включат.";
       btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "soon");
+      var nb = btn("btn-ghost btn--sm", notified ? "Напомним о запуске — месяц Plus твой" : "Напомнить о запуске", "notify");
+      if (notified) nb.disabled = true;
     }
     if (!row.getAttribute("data-bound")) {
       row.setAttribute("data-bound", "1");
@@ -637,6 +639,17 @@
         if (!b || b.disabled) return;
         var act = b.getAttribute("data-act");
         if (act === "soon") { openSoon(); return; }
+        if (act === "notify") {
+          setBusy(b, true, "Записываем…");
+          api("/api/subscription/notify", {}).then(function(){
+            toast("Записали — подарим месяц Plus на старте");
+            reload();
+          }).catch(function(err){
+            setBusy(b, false);
+            toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
+          });
+          return;
+        }
         if (act === "resume") { doPost("/api/subscription/resume", b, "Возвращаем…", "Автопродление снова включено"); return; }
         if (act === "ask-cancel") { askCancel(); return; }
       });
@@ -728,15 +741,16 @@
         return;
       }
       return api("/api/subscription/status").then(function(st){
-        /* платежи и остатки — best-effort, статус важнее */
+        /* платежи, остатки и лист ожидания — best-effort, статус важнее */
         return Promise.all([
           api("/api/subscription/payments?limit=50&offset=0").catch(function(){ return null; }),
           api("/api/ai/limits").catch(function(){ return null; }),
-          api("/api/agent/limits").catch(function(){ return null; })
+          api("/api/agent/limits").catch(function(){ return null; }),
+          api("/api/subscription/notify").catch(function(){ return null; })
         ]).then(function(res){
           document.getElementById("loadingCard").hidden = true;
           document.getElementById("content").hidden = false;
-          renderAll(st, res[0], res[1], res[2]);
+          renderAll(st, res[0], res[1], res[2], !!(res[3] && res[3].joined));
         });
       });
     }).catch(function(){

@@ -924,3 +924,120 @@ def payment_history(conn: sqlite3.Connection, user_id: int, limit: int = 50,
     return {"ok": True, "payments": items,
             "total": int(total["c"]) if total else 0,
             "limit": limit, "offset": offset}
+
+
+# ---------------------------------------------------------------------------
+# Лист ожидания запуска оплаты («Напомнить о запуске»).
+#
+# БУМАЖНАЯ ВЕРСИЯ ДОГОВОРА (читать через год): пока платёжный провайдер не
+# подключён, купить Plus нельзя, и кнопка «Напомнить о запуске» на
+# /subscription записывает сюда user_id нажавшего. Когда провайдер
+# подключат, админ ОДИН РАЗ выполняет выдачу всем из списка:
+#
+#   curl -b admin-cookie -X POST /api/admin/subscription/waitlist \
+#     -H 'Content-Type: application/json' \
+#     -d '{"action":"grant","period":"month"}'
+#
+# Каждый из списка получает месяц Plus как ручной грант (платёж 0₽
+# provider=manual с пометкой launch-waitlist — в истории платежей видно,
+# что это подарок за ожидание, а не деньги). Повтор безопасен: уже
+# получившие помечены granted_at_ms и пропускаются, новым нажавшим после
+# выдачи грант дойдёт следующим запуском. Никакой автоматики «если
+# провайдер есть, то раздать» нет осознанно: выдача — решение человека,
+# а не следствие флага.
+# ---------------------------------------------------------------------------
+
+def ensure_plus_waitlist(conn: sqlite3.Connection) -> None:
+    """Таблица листа ожидания. Один user_id — одна строка (повторный клик —
+    no-op, а не дубль). Удаление аккаунта сносит строку каскадом."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS plus_waitlist (
+          user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          created_at_ms INTEGER NOT NULL,
+          granted_at_ms INTEGER
+        )""")
+    if not conn.in_transaction:
+        try:
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+
+def join_launch_waitlist(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Записать «напомнить о запуске». Идемпотентно: повтор возвращает ту же
+    запись. Присоединяется к чужой транзакции или открывает свою."""
+    ensure_plus_waitlist(conn)
+    if not conn.execute("SELECT id FROM users WHERE id=?", (int(user_id),)).fetchone():
+        raise KeyError("user not found")
+    now_ms = NOW_MS()
+    own = _begin(conn)
+    try:
+        conn.execute("INSERT OR IGNORE INTO plus_waitlist (user_id, created_at_ms, granted_at_ms)"
+                     " VALUES (?,?,NULL)", (int(user_id), now_ms))
+        row = conn.execute("SELECT user_id, created_at_ms, granted_at_ms FROM plus_waitlist"
+                           " WHERE user_id=?", (int(user_id),)).fetchone()
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "joined": True, "joinedAt": int(row["created_at_ms"]),
+            "granted": row["granted_at_ms"] is not None}
+
+
+def launch_waitlist_joined(conn: sqlite3.Connection, user_id: int) -> bool:
+    """В списке ли (для подсветки кнопки). Чистое чтение, без записи."""
+    try:
+        ensure_plus_waitlist(conn)
+        return conn.execute("SELECT 1 FROM plus_waitlist WHERE user_id=?",
+                            (int(user_id),)).fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
+def launch_waitlist_stats(conn: sqlite3.Connection) -> dict:
+    """Сколько в списке, скольким уже выдали. Для админки перед выдачей."""
+    ensure_plus_waitlist(conn)
+    try:
+        total = conn.execute("SELECT COUNT(*) AS c FROM plus_waitlist").fetchone()
+        granted = conn.execute("SELECT COUNT(*) AS c FROM plus_waitlist"
+                               " WHERE granted_at_ms IS NOT NULL").fetchone()
+    except sqlite3.Error:
+        return {"ok": True, "total": 0, "pending": 0, "granted": 0}
+    total_n = int(total["c"]) if total else 0
+    granted_n = int(granted["c"]) if granted else 0
+    return {"ok": True, "total": total_n, "granted": granted_n,
+            "pending": total_n - granted_n}
+
+
+def grant_launch_waitlist(conn: sqlite3.Connection, period: str = PERIOD_MONTH,
+                          note: str = "launch-waitlist") -> dict:
+    """Выдать месяц Plus всем невыданным из листа ожидания (см. договор выше).
+
+    Каждому — обычный admin_grant (строка подписки + доливка карманов +
+    платёж 0₽ manual с пометкой), затем отметка granted_at_ms. Продления
+    складываются как обычно: у кого уже есть Plus, месяц добавится сверху.
+    Удалённые аккаунты пропускаются молча (CASCADE их уже унёс, но между
+    SELECT и грантом аккаунт могли снести — сверяем наличие)."""
+    ensure_plus_waitlist(conn)
+    if period not in PERIODS:
+        raise ValueError("period должен быть month или year")
+    now_ms = NOW_MS()
+    own = _begin(conn)
+    granted: list[int] = []
+    try:
+        rows = conn.execute("SELECT user_id FROM plus_waitlist"
+                            " WHERE granted_at_ms IS NULL ORDER BY user_id").fetchall()
+        for r in rows:
+            uid = int(r["user_id"])
+            if not conn.execute("SELECT id FROM users WHERE id=?", (uid,)).fetchone():
+                continue
+            admin_grant(conn, uid, period, note=str(note)[:200])
+            conn.execute("UPDATE plus_waitlist SET granted_at_ms=? WHERE user_id=?",
+                         (now_ms, uid))
+            granted.append(uid)
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "granted": granted, "grantedCount": len(granted),
+            "period": period}

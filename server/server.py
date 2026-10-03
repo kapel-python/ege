@@ -10495,6 +10495,10 @@ class Handler(BaseHTTPRequestHandler):
             return _SUB.cancel_subscription(conn, int(user_id))
         if path == "/api/subscription/resume":
             return _SUB.resume_subscription(conn, int(user_id))
+        if path == "/api/subscription/notify":
+            # «Напомнить о запуске»: лист ожидания месяца Plus в подарок
+            # (см. договор в server/subscription.py). Идемпотентно.
+            return _SUB.join_launch_waitlist(conn, int(user_id))
         raise ValueError("Неизвестное действие подписки")
 
     def handle_subscription_webhook(self, conn: sqlite3.Connection) -> None:
@@ -10688,8 +10692,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/subscription/checkout" or path == "/api/subscription/confirm" \
                 or path == "/api/subscription/cancel" or path == "/api/subscription/resume" \
+                or path == "/api/subscription/notify" \
                 or path == "/api/subscription/webhook":
-            # Подписка Plus: покупка, продление, отмена, вебхук шлюза.
+            # Подписка Plus: покупка, продление, отмена, лист ожидания, вебхук.
             # Всё состояние — в server/subscription.py; здесь только HTTP:
             # общий per-IP бакет, гость 401, бан 403. Мутаторы движка
             # присоединяются к открытой транзакции или открывают свою.
@@ -10960,6 +10965,53 @@ class Handler(BaseHTTPRequestHandler):
                 status = 404 if isinstance(exc, KeyError) else 400
                 self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status)
             finally: conn.close()
+            return
+        if path == "/api/admin/subscription/waitlist":
+            # Лист ожидания Plus: count (сколько ждут) / grant (выдать месяц
+            # всем невыданным — см. договор в server/subscription.py).
+            # Выдача — всегда ручное решение админа, никакой автоматики.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                if _SUB is None:
+                    self.send_json({"error": "Движок подписки недоступен"}, 503); return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                op = payload.get("action", "count")
+                if not isinstance(op, str):
+                    self.send_json({"error": "action должен быть count или grant"}, 400); return
+                op = op.strip().lower()
+                if op == "count":
+                    self.send_json(_SUB.launch_waitlist_stats(conn)); return
+                if op != "grant":
+                    self.send_json({"error": "action должен быть count или grant"}, 400); return
+                period = payload.get("period", "month")
+                if not isinstance(period, str):
+                    self.send_json({"error": "period должен быть month или year"}, 400); return
+                try:
+                    result = _SUB.grant_launch_waitlist(
+                        conn, period.strip().lower(),
+                        note=str(payload.get("note", "launch-waitlist")))
+                except ValueError as exc:
+                    self.send_json({"error": f"Request failed: {exc}"}, 400); return
+                admin_audit(conn, actor_id, "subscription-waitlist-grant", None,
+                            f"{result['period']} x{result['grantedCount']}"[:200])
+                self.send_json(result)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-waitlist", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            finally:
+                conn.close()
             return
         if path == "/api/errors":
             if self.api_rate_limited(): return
@@ -12294,14 +12346,20 @@ class Handler(BaseHTTPRequestHandler):
                     fp_key, fp_net = ai_usage_device_fp(conn, self)
                     self.send_json(ai_usage_status(conn, user_id, fp_key, fp_net), token=token)
                     return
-                if path == "/api/subscription/status" or path == "/api/subscription/payments":
-                    # Подписка Plus: свой статус/сроки/лимиты и история платежей.
+                if path == "/api/subscription/status" or path == "/api/subscription/payments" \
+                        or path == "/api/subscription/notify":
+                    # Подписка Plus: свой статус/сроки/лимиты, история платежей
+                    # и лист ожидания («напомнить о запуске» — только чтение).
                     # Личные данные — гостю 401, как всем доменам ученика.
                     if _SUB is None:
                         self.send_json({"error": "Подписки временно недоступны"}, 503, token=token); return
                     if not self.require_user(user_id): return
                     if self.reject_if_blocked(conn, user_id):
                         return
+                    if path == "/api/subscription/notify":
+                        self.send_json({"ok": True,
+                                        "joined": _SUB.launch_waitlist_joined(conn, int(user_id))},
+                                       token=token); return
                     if path == "/api/subscription/status":
                         self.send_json(_SUB.subscription_status(conn, int(user_id)), token=token); return
                     query = urlparse(self.path).query
