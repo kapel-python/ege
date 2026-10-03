@@ -293,7 +293,8 @@ async function main() {
     await page.waitForSelector("#shareStatsBox", { timeout: 15000 });
     const statsHtml = await page.$eval("#shareStatsBox", (el) => el.textContent);
     t("в модалке — 2 человека и 3 открытия",
-      /2\s*человека/.test(statsHtml || "") && /3\s*открытия/.test(statsHtml || ""),
+      /2\s*человека/.test(statsHtml || "") && /3\s*открытия/.test(statsHtml || "")
+      && /Статистика/.test(statsHtml || ""),
       (statsHtml || "").trim().replace(/\s+/g, " "));
     await page.click(".dlg__actions .btn--soft");
     await sleep(300);

@@ -361,7 +361,12 @@
   }
   .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
   /* Статистика ссылки: два числа (зрители/открытия) или одна строка «пока тихо». */
-  .share-stats { display: flex; gap: 8px; margin-top: 14px; }
+  .share-stats__title {
+    margin: 14px 0 8px; font-size: 11px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--text-soft); text-align: center;
+  }
+  .share-stats { display: flex; gap: 8px; }
   .share-stat {
     flex: 1 1 0; min-width: 0; background: var(--surface-2);
     border-radius: 14px; padding: 10px 8px; text-align: center;
@@ -1822,7 +1827,8 @@ function shareStatsHTML(stats) {
   if (v <= 0 && o <= 0) {
     return `<p class="share-stats--empty">Пока никто не открывал — отправь ссылку кому угодно.</p>`;
   }
-  return `<div class="share-stats" aria-label="Статистика ссылки">`
+  return `<div class="share-stats__title">Статистика</div>`
+    + `<div class="share-stats" aria-label="Статистика ссылки">`
     + `<div class="share-stat"><div class="share-stat__num tnum">${v}</div>`
     + `<div class="share-stat__label">${esc(dynPlural(v, "человек", "человека", "человек"))}</div></div>`
     + `<div class="share-stat"><div class="share-stat__num tnum">${o}</div>`
