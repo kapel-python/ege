@@ -391,6 +391,18 @@
       try { showAccountBlocked(res.data); } catch (_) { say("Аккаунт заблокирован"); }
       return true;
     }
+    // Вторая стена гейта «наставник только для Plus»: кэш фронта мог быть
+    // свежее сервера (подписка истекла между экраном и ходом). Сносим кэш
+    // подписки и перерисовываем раздел paywall-блоком через общий render.
+    if (res.status === 403 && res.data && res.data.code === "SUBSCRIPTION_REQUIRED") {
+      try {
+        if (typeof Subscription !== "undefined" && Subscription && Subscription.status) {
+          Subscription.status(true).catch(function () {});
+        }
+      } catch (_) {}
+      try { if (typeof render === "function") render(); } catch (_) {}
+      return true;
+    }
     return false;
   }
 
@@ -3011,6 +3023,45 @@
       cacheDrop();                     // чужие чаты в кэше не показываем
     }
     root = screenRoot;
+    // Гейт «наставник только для Plus»: прямой заход (#/ai, #/ai/<id>) без
+    // подписки упирается в paywall-блок вместо раздела — того же вида, что
+    // «Мои сочинения» без Plus. Проверка идёт ДО списка чатов и квоты,
+    // поэтому агент никогда не мигает перед блоком, а лишних запросов нет.
+    // Пока флаг выключен, сервер отдаёт agentAccess=true всем — ветка
+    // paywall мёртвая, раздел работает как раньше.
+    try {
+      if (typeof Subscription !== "undefined" && Subscription && Subscription.agentGate) {
+        screenLoader("Проверяем доступ…");
+        Subscription.agentGate().then(function (g) {
+          if (S.mountGen !== mg) return;
+          if (!g || g.failed) {
+            root.innerHTML = '<div class="card empty">Не удалось проверить подписку.<br>'
+              + '<button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button></div>';
+            return;
+          }
+          if (g.access === false) {
+            try {
+              if (typeof agentPaywallHTML === "function") root.innerHTML = agentPaywallHTML(!!g.guest);
+              else root.innerHTML = '<div class="card empty">Раздел доступен по подписке Plus.</div>';
+            } catch (_) {
+              root.innerHTML = '<div class="card empty">Раздел доступен по подписке Plus.</div>';
+            }
+            return;
+          }
+          openAgentBody(mg);
+        }).catch(function () {
+          if (S.mountGen !== mg) return;
+          root.innerHTML = '<div class="card empty">Не удалось проверить подписку.<br>'
+            + '<button class="btn btn--primary btn--sm" style="margin-top:12px" onclick="render()">Попробовать снова</button></div>';
+        });
+        return;
+      }
+    } catch (_) {}
+    openAgentBody(mg);
+  }
+  // Тело раздела после гейта: кэш мгновенно, холодный вход под лоадером.
+  function openAgentBody(mg) {
+    if (S.mountGen !== mg) return;
     if (cacheHasThreads()) {
       // Возврат на раздел в открытой вкладке: каркас и переписка рисуются из
       // кэша мгновенно, сеть только сверяет их на фоне.

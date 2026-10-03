@@ -50,6 +50,62 @@ var Subscription = (function () {
     } catch (_) { return String(ms); }
   }
 
+  /* Гейт наставника «только для Plus» (флаг EGE_AGENT_REQUIRES_PLUS).
+     Сервер уже отвечает 403 SUBSCRIPTION_REQUIRED на turns/confirm, когда
+     флаг включён, а limits.agentAccess в /api/subscription/status несёт
+     готовое решение (флаг + подписка). Здесь только чтение этого решения:
+     true — раздел открыт, false — закрыт (известный запрет),
+     null — неизвестно (гость/сеть/нет кэша — fail-open для навигации,
+     сервер всё равно держит вторую стену).
+     Пока флаг выключен, сервер всегда отдаёт agentAccess=true, поэтому
+     навигация и раздел ведут себя как раньше без единой правки. */
+  function agentAccessFromStatus(st) {
+    if (!st || typeof st !== "object") return null;
+    if (st.guest) return null;
+    if (!st.limits || typeof st.limits !== "object") return true;
+    if (st.limits.agentAccess === false) return false;
+    return true;
+  }
+
+  /* Синхронный срез из кэша — для отрисовки хрома без мигания.
+     Сети здесь нет: неизвестно — null, вызыватель показывает раздел
+     (fail-open), а точное решение доберёт ensureAgentAccess() до хрома. */
+  function cachedAgentAccess() {
+    try {
+      var id = accountId();
+      if (!id) return null;
+      if (cache.accountId !== id || !cache.status) return null;
+      return agentAccessFromStatus(cache.status);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /* Точное решение с сетью (кэш 30 с на аккаунт, как у status).
+     null — честная неизвестность (сеть легла): навигация показывает
+     раздел, экран — ошибку с повтором, а не paywall. */
+  function ensureAgentAccess() {
+    var id = accountId();
+    if (!id) return Promise.resolve(null);
+    return status(false).then(function (st) {
+      if (!st) return null;
+      return agentAccessFromStatus(st);
+    });
+  }
+
+  /* Полный гейт для экрана #/ai: доступ, гость ли, активен ли Plus.
+     Экран ждёт его под лоадером, поэтому агент никогда не мигает
+     перед paywall. */
+  function agentGate() {
+    var id = accountId();
+    if (!id) return Promise.resolve({ access: null, guest: true, active: false });
+    return status(false).then(function (st) {
+      if (!st) return { access: null, guest: false, active: false, failed: true };
+      if (st.guest) return { access: null, guest: true, active: false };
+      return { access: agentAccessFromStatus(st), guest: false, active: !!st.active, status: st };
+    });
+  }
+
   function daysLeft(expiresAt) {
     var ms = Number(expiresAt) - Date.now();
     if (!(ms > 0)) return 0;
@@ -140,5 +196,8 @@ var Subscription = (function () {
   return {
     status: status,
     mountCard: mountCard,
+    cachedAgentAccess: cachedAgentAccess,
+    ensureAgentAccess: ensureAgentAccess,
+    agentGate: agentGate,
   };
 })();

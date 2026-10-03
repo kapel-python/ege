@@ -1268,7 +1268,34 @@ async function render() {
   const param = routeParam();
   // Подсветка в меню: глубокий маршрут относится к своему разделу.
   const navRoute = navRouteForRoute(route);
+  // Гейт наставника для хрома: нижняя навигация обязана сразу рисоваться
+  // правильно — без «сначала с ИИ, потом без» и без «сначала без, потом
+  // с дёрганием». Если решение ещё неизвестно (первая загрузка, смена
+  // аккаунта) — ждём его ДО хрома, даже если это чуть дольше: boot-лоадер
+  // это ожидание покрывает, а дальше хром идёт из кэша синхронно.
+  try {
+    const needGate = Store.accountId && !isSubjectChoiceLocked()
+      && !TASK_FOCUS_ROUTES.has(route) && agentAccessCached() == null
+      && typeof Subscription !== "undefined" && Subscription && Subscription.ensureAgentAccess;
+    if (needGate) {
+      await Subscription.ensureAgentAccess();
+      if (currentRoute() !== route) return;
+    }
+  } catch (_) {}
   syncChromeForRoute(route, navRoute);
+  // Фоновая сверка: кэш мог протухнуть (покупка/истечение Plus в соседней
+  // вкладке). Рисуем сразу из кэша без мигания, а если сервер сказал
+  // иначе — перерисовываем хром один раз по факту изменения.
+  try {
+    if (Store.accountId && typeof Subscription !== "undefined" && Subscription && Subscription.ensureAgentAccess) {
+      const before = agentAccessCached();
+      Subscription.ensureAgentAccess().then((after) => {
+        if (after == null || after === before) return;
+        if (currentRoute() !== route) return;
+        try { syncChromeForRoute(currentRoute(), navRouteForRoute(currentRoute())); } catch (_) {}
+      }).catch(() => {});
+    }
+  } catch (_) {}
   updateDocumentTitle(route);
   const screen = document.getElementById("screen");
   const subjectState = subjectContentState();
@@ -2156,7 +2183,7 @@ function renderSidebar(active) {
     return;
   }
   nav.removeAttribute("aria-disabled");
-  const navItems = subjectNavItems();
+  const navItems = navItemsVisible();
   const openErrors = Store.state.errors.filter((e) => !e.resolved).length;
   nav.innerHTML = navItems.map((n) => {
     const href = n.href ? n.href : `#/${n.route}`;
@@ -2192,7 +2219,7 @@ function renderBottomNav(active, route = currentRoute()) {
   bottom.removeAttribute("aria-hidden");
   bottom.removeAttribute("hidden");
   bottom.style.display = "";
-  const items = subjectNavItems().filter((n) => ["dashboard", "path", "training", "errors", "ai", "profile"].includes(n.route));
+  const items = navItemsVisible().filter((n) => ["dashboard", "path", "training", "errors", "ai", "profile"].includes(n.route));
   bottom.innerHTML = items.map((n) => {
     const href = n.href ? n.href : `#/${n.route}`;
     return `
@@ -6897,6 +6924,52 @@ function essayPaywallHTML(isGuest) {
           ? `<a class="btn btn--primary" href="/dashboard#/profile">Открыть профиль</a>`
           : `<a class="btn btn--primary" href="/subscription">Оформить Plus</a>`}
         <button class="btn btn--ghost" onclick="go('path')">К карте тем</button>
+      </div>
+    </div>`;
+}
+
+/* Гейт наставника для хрома: синхронный срез из кэша подписки.
+   true — показывать «ИИ», false — прятать, null — неизвестно
+   (гость/сеть/нет кэша — fail-open: показываем, сервер держит
+   вторую стену 403, а точное решение доберётся до хрома ниже). */
+function agentAccessCached() {
+  try {
+    if (typeof Subscription === "undefined" || !Subscription || !Subscription.cachedAgentAccess) return null;
+    return Subscription.cachedAgentAccess();
+  } catch (_) {
+    return null;
+  }
+}
+
+/* Видимые пункты меню: те же subjectNavItems, но без «ИИ», когда доступ
+   закрыт известным запретом. Пока флаг EGE_AGENT_REQUIRES_PLUS выключен,
+   сервер отдаёт agentAccess=true всем — список совпадает с прежним. */
+function navItemsVisible() {
+  let items = null;
+  try { items = subjectNavItems(); } catch (_) { items = NAV; }
+  if (!Array.isArray(items)) return items;
+  if (agentAccessCached() === false) return items.filter((n) => n && n.route !== "ai");
+  return items;
+}
+
+/* Пейволл наставника для прямого захода (#/ai, #/ai/<id>): тот же
+   карточный блок, что у «Моих сочинений» — раздела фактически нет,
+   вместо него честное «нужна подписка». Гостю — вход, остальным — тариф. */
+function agentPaywallHTML(isGuest) {
+  return `
+    <div class="page-head">
+      <div class="page-title">ИИ-наставник</div>
+      <div class="page-sub">Разбор ошибок и план подготовки по твоему прогрессу.</div>
+    </div>
+    <div class="card essays-empty">
+      <div class="essays-empty__icon" aria-hidden="true">${icon("crown")}</div>
+      <div class="essays-empty__title">ИИ-наставник — с <span class="plus">Plus</span></div>
+      <div class="essays-empty__sub">Личные разборы, план подготовки и ответы по твоей истории. Твои чаты и прогресс на месте — открой доступ и продолжи с того же места.</div>
+      <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        ${isGuest
+          ? `<a class="btn btn--primary" href="/dashboard#/profile">Открыть профиль</a>`
+          : `<a class="btn btn--primary" href="/subscription">Оформить Plus</a>`}
+        <button class="btn btn--ghost" onclick="go('dashboard')">На главную</button>
       </div>
     </div>`;
 }

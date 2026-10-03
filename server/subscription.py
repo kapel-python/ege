@@ -384,10 +384,15 @@ def subscription_status(conn: sqlite3.Connection, user_id: int,
         subscription_refresh(conn, user_id, now_ms)
         sub = get_subscription(conn, user_id)
     if not sub:
+        # Строки нет — бесплатный без истории. Доступ наставника решает флаг:
+        # пока EGE_AGENT_REQUIRES_PLUS выключен — всем (как раньше), с флагом
+        # у бесплатного доступа нет. Хардкодить True здесь нельзя: turns уже
+        # отвечает 403, а статус врал бы фронту «доступ открыт».
         return {"ok": True, "plan": None, "active": False, "status": None,
                 "period": None, "startedAt": None, "expiresAt": None,
                 "cancelAtPeriodEnd": False,
-                "limits": {"essay": None, "agent": None, "agentAccess": True}}
+                "limits": {"essay": None, "agent": None,
+                           "agentAccess": agent_access_allowed(conn, user_id, now_ms)}}
     return {"ok": True, "plan": sub.get("plan"), "active": active,
             "status": sub.get("status"), "period": sub.get("period"),
             "startedAt": sub.get("started_at_ms"), "expiresAt": sub.get("expires_at_ms"),
