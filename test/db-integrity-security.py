@@ -298,6 +298,7 @@ def check_index_self_heal() -> None:
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute("DROP INDEX IF EXISTS idx_essay_submissions_user_subject_client")
             conn.execute("DROP INDEX IF EXISTS idx_essay_checks_user_subject_text")
+            conn.execute("DROP INDEX IF EXISTS idx_essay_checks_user_subject_task_text")
             conn.commit()
         finally:
             conn.close()
@@ -319,15 +320,16 @@ def check_index_self_heal() -> None:
             t("UNIQUE-индекс essay_submissions восстановлен",
               "idx_essay_submissions_user_subject_client" in subs, sorted(subs))
             t("UNIQUE-индекс essay_checks восстановлен",
-              "idx_essay_checks_user_subject_text" in checks, sorted(checks))
+              "idx_essay_checks_user_subject_task_text" in checks
+              and "idx_essay_checks_user_subject_text" not in checks, sorted(checks))
             # И главное: ON CONFLICT больше не падает.
             try:
                 conn.execute("PRAGMA foreign_keys=OFF")
                 conn.execute(
-                    "INSERT INTO essay_checks(user_id,subject,text_sha256,provider,"
+                    "INSERT INTO essay_checks(user_id,subject,task_id,text_sha256,provider,"
                     "result_json,rubric_version,created_at)"
-                    " VALUES (1,'profile_math','h1','mock','{}',1,'x')"
-                    " ON CONFLICT(user_id,subject,text_sha256) DO NOTHING")
+                    " VALUES (1,'profile_math','re27_1','h1','mock','{}',1,'x')"
+                    " ON CONFLICT(user_id,subject,task_id,text_sha256) DO NOTHING")
                 ok = True
             except sqlite3.Error as exc:
                 ok = False

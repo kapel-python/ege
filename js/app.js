@@ -4031,7 +4031,10 @@ function essayWaitBegin(clientId, text) {
   const hash = essayTextHash(text);
   let rec = essayWaitLoad();
   if (!rec || rec.clientId !== clientId || rec.hash !== hash) {
-    rec = { clientId, hash, start: Date.now() };
+    // Новая запись сеется не «сейчас», а временем отправки (createdAt):
+    // после перезагрузки замер продолжается суммарно, а не обнуляется.
+    const seed = essayWaitBaseForText(text) || Date.now();
+    rec = { clientId, hash, start: Math.min(Date.now(), seed) };
     const key = essayWaitKey();
     if (key) { try { localStorage.setItem(key, JSON.stringify(rec)); } catch (_) {} }
   }
@@ -4050,6 +4053,44 @@ function essayWaitArm(rec) {
 function essayWaitElapsed() {
   const rec = essayWaitLoad();
   return rec ? Math.max(0, Date.now() - Number(rec.start)) : 0;
+}
+
+/* Серверное время отправки (ms epoch) — неубиваемая база замера: переживает
+   любую чистку localStorage, т.к. едет с самим submission. Нет метки —
+   считаем замер свежим (выгодно ученику только в сторону «подождать»). */
+function essaySubmittedAt(saved) {
+  const v = saved && saved.createdAt;
+  const t = typeof v === "number" ? v : Date.parse(v);
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
+
+/* База замера для текста: живой замер, иначе свежий createdAt submission с
+   тем же текстом, иначе ничего. Именно поэтому потеря записи localStorage
+   (перезагрузка, чистка браузера) замер не обнуляет — он чинится сам. */
+function essayWaitBaseForText(text) {
+  const hash = essayTextHash(text);
+  const rec = essayWaitLoad();
+  if (rec && rec.hash === hash) return Number(rec.start);
+  try {
+    const S = Session.cur;
+    const tasks = (S && S.essayReadyByTask) || {};
+    for (const k of Object.keys(tasks)) {
+      const s = tasks[k];
+      if (s && essayTextHash(s.text) === hash) {
+        const t = essaySubmittedAt(s);
+        if (t && Date.now() - t < ESSAY_AUTO_FRESH_MS) return Math.min(Date.now(), t);
+      }
+    }
+  } catch (_) {}
+  return 0;
+}
+
+function essayWaitElapsedTotal(t) {
+  const S = Session.cur;
+  const taskId = t && t.id;
+  const saved = S && S.essayReadyByTask && taskId && S.essayReadyByTask[taskId];
+  const base = (saved && saved.text) ? essayWaitBaseForText(saved.text) : 0;
+  return base ? Math.max(0, Date.now() - base) : essayWaitElapsed();
 }
 
 function essayWaitWarnHTML() {
@@ -4077,12 +4118,114 @@ function essaySyncWaitWarning(t) {
   const saved = S && S.essayReadyByTask && S.essayReadyByTask[t && t.id];
   if (!saved || !String(saved.text || "").trim()) return;
   const rec = essayWaitLoad();
-  if (!rec || rec.hash !== essayTextHash(saved.text)) return;
-  if (Date.now() - Number(rec.start) < ESSAY_WAIT_WARN_MS) return;
+  if (rec && rec.hash === essayTextHash(saved.text)) {
+    if (Date.now() - Number(rec.start) < ESSAY_WAIT_WARN_MS) return;
+  } else {
+    // Записи нет (чистка), но submission отправлен давно — предупреждение всё
+    // равно честно: сервер считает с момента отправки.
+    const sent = essaySubmittedAt(saved);
+    if (!sent || Date.now() - sent < ESSAY_WAIT_WARN_MS) return;
+  }
   const slot = document.getElementById("feedbackSlot");
   const box = slot && slot.querySelector(".feedback");
   if (!box || document.getElementById("essayWaitWarn")) return;
   box.insertAdjacentHTML("beforeend", essayWaitWarnHTML());
+}
+
+/* Живой замер прерванной проверки: запись жива и свежая, а исхода не
+   было — клиент умер посреди запроса (перезагрузка), ученик ничего не
+   отменял. Протухший замер (старше получаса) — уже не «прерванная проверка»,
+   а старый хвост: решение там принимает ученик кнопкой, как раньше. */
+const ESSAY_AUTO_FRESH_MS = 30 * 60 * 1000;
+
+/* Решение «продолжать само»: доказательство — состояние сервера, а не
+   localStorage (запись могут не пережить чистку — тогда решает сервер).
+   submitted + свежее = отправлено, исхода нет: ученик ничего не отменял.
+   failed/ready/старьё решает ученик кнопкой: тратить жетон без спроса —
+   только за прерванное, а не за уже разобранное. */
+function essayShouldAutoResume(t, saved, status) {
+  if (!t || !isSingleEssaySession()) return false;
+  if (!saved || !String(saved.text || "").trim()) return false;
+  // Свой живой замер с этого устройства — самое сильное доказательство.
+  if (essayWaitMatches(saved.text, saved.clientId)) return true;
+  // Иначе — сервер: отправлено и свежее (полчаса). Два устройства сразу
+  // могут задвоить проход, но дешёвое ожидание обычно подхватывает готовое
+  // бесплатно раньше, чем стартует второй.
+  if (status !== "submitted") return false;
+  const sent = essaySubmittedAt(saved);
+  return !!sent && (Date.now() - sent < ESSAY_AUTO_FRESH_MS);
+}
+
+function essayWaitMatches(text, clientId) {
+  if (!String(text || "").trim()) return false;
+  const rec = essayWaitLoad();
+  if (!rec || rec.hash !== essayTextHash(text)) return false;
+  if (Date.now() - Number(rec.start) >= ESSAY_AUTO_FRESH_MS) return false;
+  if (clientId && rec.clientId && rec.clientId !== clientId) return false;
+  return true;
+}
+
+function essaySleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+/* Автопродолжение прерванной проверки: лоадер сразу (как будто проверки не
+   прерывались), сначала дешёвое ожидание готового (исходный проход мог
+   добежать на сервере без нас — подхватим бесплатно), и только потом полный
+   проход. Кнопки «Продолжить» при этом нет вовсе. Старого «хвоста» без
+   живого замера это не касается — там решение принимает ученик кнопкой. */
+const ESSAY_AUTO_POLL_MS = 8000;
+const ESSAY_AUTO_WAIT_MAX_MS = 45000;
+
+async function essayAutoResume(t) {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  if (essayCheckInflight) return;
+  const saved = S.essayReadyByTask && S.essayReadyByTask[t.id];
+  if (!saved || !String(saved.text || "").trim()) return;
+  essayCheckInflight = true;
+  try {
+    essayCheckMsgStop();
+    const screen = document.getElementById("screen");
+    if (screen) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+    essayCheckMsgStart();
+    essayWaitArm(); // замер продолжается: предупреждение — сразу, если >минуты
+    // Дешёвое ожидание: исходный проход считает на сервере, новый жетон не
+    // тратим, пока есть шанс подхватить его результат бесплатно. Потолок —
+    // остаток общего лимита 150 с от старта замера (минимум один опрос):
+    // дальше ждать нечего, исходный проход уже мёртв. База суммарная —
+    // страница могла чиститься, а сервер считает с момента отправки.
+    const budget = Math.max(ESSAY_AUTO_POLL_MS,
+      Math.min(ESSAY_AUTO_WAIT_MAX_MS, 150000 - essayWaitElapsedTotal(t)));
+    const until = Date.now() + budget;
+    for (;;) {
+      await essaySleep(ESSAY_AUTO_POLL_MS);
+      if (!Session.cur || Session.cur.answered) return;
+      if (!Session.task() || Session.task().id !== t.id) return;
+      let ready = null;
+      try {
+        const evRes = await fetch("/api/essays/evaluation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({ subject: Store.subject, clientId: saved.clientId, status: "ready" }),
+        });
+        const evData = await evRes.json().catch(() => ({}));
+        if (evRes.ok && evData.submission && evData.submission.status === "ready") ready = evData.submission;
+      } catch (_) {}
+      if (ready) {
+        const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+        essayFinishReady(t, ready, saved.text, saved.wordCount, seconds);
+        return;
+      }
+      if (Date.now() >= until) break;
+    }
+    if (!Session.cur || Session.cur.answered) return;
+    if (!Session.task() || Session.task().id !== t.id) return;
+    // Не дождались — полный проход тем же Inner: замер продолжается (та же
+    // запись clientId+хэш), предупреждение и бонус — по общим правилам.
+    await essayRunChecksInner(t, saved.text, saved.clientId, saved.wordCount);
+  } finally {
+    essayCheckInflight = false;
+  }
 }
 
 function essayBonusDayKey() {
@@ -4203,7 +4346,17 @@ async function essayRestoreReady(t) {
           if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
         }
       } catch (_) {}
-      essayMountResumeFeedback(t);
+      // Прерванная перезагрузкой проверка (живой свежий замер ИЛИ свежее
+      // submitted на сервере) продолжается сама — лоадером, а не кнопкой:
+      // ученик ничего не отменял, исходный проход мог добежать на сервере.
+      // Старого «хвоста» это не касается — там как раньше кнопка
+      // «Продолжить проверку».
+      const savedNow = Session.cur.essayReadyByTask && Session.cur.essayReadyByTask[t.id];
+      if (savedNow && essayShouldAutoResume(t, savedNow, sub.status)) {
+        essayAutoResume(t);
+      } else {
+        essayMountResumeFeedback(t);
+      }
     }
   } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
@@ -4792,7 +4945,9 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     // Исход попытки: замер останавливаем и стираем в любом случае — следующая
     // попытка (вручную или после перезагрузки без замера) начнёт новый.
     // Перезагрузка ПОСРЕДИ проверки сюда не попадает, её запись и нужна resume.
-    const waitElapsed = essayWaitElapsed();
+    // База elapsed — суммарная (замер, иначе createdAt submission): страницу
+    // могли чистить, а ждал ученик с момента отправки.
+    const waitElapsed = essayWaitElapsedTotal(t);
     essayWaitClear();
     try {
       await fetch("/api/essays/evaluation", {
