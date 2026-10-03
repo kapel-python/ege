@@ -3470,6 +3470,24 @@ function renderTask(root) {
   essayReportShown = false; // карточка задания перерисована целиком: отчёта нет
   const S = Session.cur;
   const t = Session.task();
+  // Оптимистичный лоадер прерванной проверки: перезагрузка посреди запроса
+  // иначе даёт мигание «задание → лоадер» (задание рисуется сразу, а restore
+  // с сервера приходит позже). Замер жив — сразу лоадер, без задания вовсе;
+  // restore дальше либо продолжит его (auto), либо вернёт задание одним
+  // renderTask. Без замера — как раньше, сразу задание.
+  if (!essayOptLoading && S && t && isSingleEssaySession() && isLongTextTask(t)) {
+    const draft = S.essayDraftByTask && S.essayDraftByTask[t.id];
+    const saved = S.essayReadyByTask && S.essayReadyByTask[t.id];
+    const txt = (saved && saved.text) || draft || "";
+    if (txt && essayWaitMatches(txt, saved && saved.clientId)) {
+      essayOptLoading = true;
+      root.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+      essayCheckMsgStart();
+      essayWaitArm();
+      essayRestoreReady(t);
+      return;
+    }
+  }
   const progressDone = S.offset + S.idx;
   S.hintLevel = 0;
   S.attempts = 0;
@@ -3981,6 +3999,7 @@ let essayRestoreSuppress = false;
    (sessionEssaySubmit через essayRunChecks и sessionEssayResume), сбрасывается
    в finally каждого выхода из essayRunChecks. */
 let essayCheckInflight = false;
+let essayOptLoading = false;
 
 /* Долгое ожидание проверки: старт замера, предупреждение после минуты,
    бонусный жетон после потолка (2,5 минуты).
@@ -4146,12 +4165,14 @@ const ESSAY_AUTO_FRESH_MS = 30 * 60 * 1000;
 function essayShouldAutoResume(t, saved, status) {
   if (!t || !isSingleEssaySession()) return false;
   if (!saved || !String(saved.text || "").trim()) return false;
+  if (status !== "submitted" && status !== "failed") return false;
   // Свой живой замер с этого устройства — самое сильное доказательство.
   if (essayWaitMatches(saved.text, saved.clientId)) return true;
-  // Иначе — сервер: отправлено и свежее (полчаса). Два устройства сразу
-  // могут задвоить проход, но дешёвое ожидание обычно подхватывает готовое
-  // бесплатно раньше, чем стартует второй.
-  if (status !== "submitted") return false;
+  // Иначе — свежесть отправки: исход не показан (иначе был бы ready), дело
+  // не старше получаса. failed сюда тоже входит: проверка умерла, пока
+  // ученика не было, — продолжаем, а не оставляем задание с кнопкой.
+  // Два устройства сразу могут задвоить проход, но дешёвое ожидание обычно
+  // подхватывает готовое бесплатно раньше, чем стартует второй.
   const sent = essaySubmittedAt(saved);
   return !!sent && (Date.now() - sent < ESSAY_AUTO_FRESH_MS);
 }
@@ -4175,7 +4196,7 @@ function essaySleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 const ESSAY_AUTO_POLL_MS = 8000;
 const ESSAY_AUTO_WAIT_MAX_MS = 45000;
 
-async function essayAutoResume(t) {
+async function essayAutoResume(t, skipPoll) {
   const S = Session.cur;
   if (!S || S.answered) return;
   if (essayCheckInflight) return;
@@ -4185,9 +4206,10 @@ async function essayAutoResume(t) {
   try {
     essayCheckMsgStop();
     const screen = document.getElementById("screen");
-    if (screen) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+    if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
     essayCheckMsgStart();
     essayWaitArm(); // замер продолжается: предупреждение — сразу, если >минуты
+    if (!skipPoll) {
     // Дешёвое ожидание: исходный проход считает на сервере, новый жетон не
     // тратим, пока есть шанс подхватить его результат бесплатно. Потолок —
     // остаток общего лимита 150 с от старта замера (минимум один опрос):
@@ -4220,8 +4242,10 @@ async function essayAutoResume(t) {
     }
     if (!Session.cur || Session.cur.answered) return;
     if (!Session.task() || Session.task().id !== t.id) return;
-    // Не дождались — полный проход тем же Inner: замер продолжается (та же
-    // запись clientId+хэш), предупреждение и бонус — по общим правилам.
+    }
+    // Не дождались (или ждать нечего — проход уже мёртв) — полный проход тем
+    // же Inner: замер продолжается (та же запись clientId+хэш), предупреждение
+    // и бонус — по общим правилам.
     await essayRunChecksInner(t, saved.text, saved.clientId, saved.wordCount);
   } finally {
     essayCheckInflight = false;
@@ -4274,15 +4298,26 @@ async function essayClaimTimeoutBonus() {
    свой исходный текст, но менять его уже нельзя. */
 async function essayRestoreReady(t) {
   if (essayRestoreSuppress) return;
+  // Оптимистичный лоадер (см. renderTask): экран уже лоадер, DOM задания
+  // нет. Флаг забираем сразу: дальше либо auto продолжает лоадер, либо
+  // возвращаем задание одним renderTask (второй restore уже видит DOM и
+  // решает обычно). Без флага всё как раньше.
+  const wasOpt = essayOptLoading; essayOptLoading = false;
+  const bailToTask = () => {
+    if (typeof document === "undefined") return;
+    const sc = document.getElementById("screen");
+    if (sc) renderTask(sc);
+  };
   try {
     const res = await fetch(`/api/essays?subject=${encodeURIComponent(Store.subject)}&taskId=${encodeURIComponent(t.id)}`);
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.submission) return;
+    if (!res.ok || !data.submission) { if (wasOpt) bailToTask(); return; }
     const sub = data.submission;
     const slot = document.getElementById("feedbackSlot");
-    if (!slot || !Session.cur || Session.cur.answered) return;
-    if (!Session.cur || Session.task().id !== t.id) return;
+    if (!slot || !Session.cur || Session.cur.answered) { if (wasOpt) bailToTask(); return; }
+    if (!Session.cur || Session.task().id !== t.id) { if (wasOpt) bailToTask(); return; }
     if (sub.status === "ready" && sub.result) {
+      if (wasOpt) { bailToTask(); return; }
       if (isSingleEssaySession()) {
         // Свой визит отличить можно ТОЛЬКО по меткам, которые оставила
         // отправка (essayMarkWritten из sessionEssaySubmit): серверная
@@ -4353,12 +4388,20 @@ async function essayRestoreReady(t) {
       // «Продолжить проверку».
       const savedNow = Session.cur.essayReadyByTask && Session.cur.essayReadyByTask[t.id];
       if (savedNow && essayShouldAutoResume(t, savedNow, sub.status)) {
-        essayAutoResume(t);
+        // Мёртвый проход (failed) ждать нечего — сразу полный, живой
+        // (submitted) сначала дешёво ждём готового.
+        essayAutoResume(t, sub.status !== "submitted");
+      } else if (wasOpt) {
+        // Лоадер показывали оптимистично, а продолжать нечего: вернуть
+        // задание, второй restore решит обычно (флаг уже снят).
+        bailToTask();
       } else {
         essayMountResumeFeedback(t);
       }
+    } else if (wasOpt) {
+      bailToTask();
     }
-  } catch (_) { /* офлайн/ошибка — редактор остаётся рабочим */ }
+  } catch (_) { if (wasOpt) bailToTask(); /* офлайн/ошибка — редактор остаётся рабочим */ }
 }
 
 /* Шаг назад по сессии — зеркало sessionNext. Готовый результат прошлого
@@ -4906,7 +4949,9 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
   const screen = document.getElementById("screen");
   essayClearReadonly();
   essayCheckMsgStop();
-  screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+  // Лоадер не перерисовываем, если уже стоит (переход из auto): перерисовка
+  // перезапускает CSS-анимацию и даёт видимый рывок.
+  if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart();
   // Замер долгого ожидания: resume продолжает старый старт (тот же clientId),
   // иначе таймер минуты обнулялся бы каждой перезагрузкой.
@@ -5045,6 +5090,10 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
 function essayFinishReady(t, submission, text, wordCount, seconds) {
   const S = Session.cur;
   if (!S || !t || !submission) return;
+  // Инвариант: сюда приходит только ready с результатом (сервер отдаёт ready
+  // лишь при записи в essay_checks). Без результата дальше были бы
+  // answered=true и пустой экран (краш на total_score ниже) — лучше громко.
+  if (!submission.result) throw new Error("essayFinishReady: ready submission without result");
 
   // Только теперь — существующий механизм фиксации результата/XP/прогресса.
   // Балл проверки известен лишь в этой точке («результат готов»): отдаём его
