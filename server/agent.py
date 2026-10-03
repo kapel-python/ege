@@ -193,6 +193,10 @@ AGENT_SYSTEM = (
     "2a. Порядок строгий: просьба ученика → инструмент(ы) → и только по результатам финальный ответ. "
     "Финальный ответ без единого вызова допустим лишь тогда, когда вопрос вообще не про его данные "
     "(«привет», «что такое логарифм», «объясни правило»). Сомневаешься — вызывай.\n"
+    "2b. Один ответ — один вызов: за раз вызывай РОВНО ОДИН инструмент. Нужны два — "
+    "зови по очереди: сначала первый, дождись результата, потом второй. Пачка вызовов "
+    "в одном ответе запрещена: следующий шаг зависит от результата предыдущего, а "
+    "ученик видит каждый шаг сразу, а не пачкой в конце.\n"
     "3. На вопрос «какой у меня балл/прогноз/сколько наберу» — fold_web(op=\"forecast\"). "
     "«что подтянуть» — тоже forecast, назови top-gains.\n"
     "4. Обращайся к ученику по имени из fold_web(op=\"profile\"), если оно есть. Род глаголов не угадывай: "
@@ -2766,8 +2770,19 @@ def _tool_payload(data: dict, cap: int = 4000) -> str:
                        "hint": "уменьши limit"}, ensure_ascii=False)
 
 
+def _emit_live_step(on_step, step: dict) -> None:
+    """Живой шаг подписчику (сервер публикует его в снимок треда). Не бросает:
+    подписчик чужой, а ход ронять нельзя."""
+    if on_step is None:
+        return
+    try:
+        on_step(step)
+    except Exception:
+        pass
+
+
 def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: list,
-              chat_fn, *, deadline: float | None = None) -> tuple[list, str | None, dict | None]:
+              chat_fn, *, deadline: float | None = None, on_step=None) -> tuple[list, str | None, dict | None]:
     """Один проход модель↔инструменты. Возвращает (steps, final, pending).
 
     steps — [{name, args, label, kind}] для ленты; final — текст ответа либо
@@ -2778,6 +2793,13 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
     секундах: им вызов ограничивает себя, иначе 90-секундный потолок держался
     бы только «между шагами», а один зависший вызов провайдера растягивал ход
     ещё на EGE_AI_TIMEOUT_SEC (45 с) сверх него.
+
+    on_step(step) — колбэк живого шага: зовётся сразу после выполнения КАЖДОГО
+    read-инструмента (шаг уже с label и результатом), а не в конце всего хода.
+    Сервер публикует его в live-снимок треда, и клиент дорисовывает ленту по
+    мере прихода — лоадер шага живёт ровно столько, сколько модель реально
+    думала, а не фиксированные ~2 с постфактум-анимации. Не бросает: исключение
+    подписчика глушится, ход продолжается.
     """
     deadline = deadline if deadline is not None else (time.monotonic() + TURN_TIMEOUT_SEC)
     steps: list = []
@@ -2808,6 +2830,15 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
         parsed = chat_fn(messages, AGENT_TOOLS, budget)
         text = parsed.get("text")
         calls = parsed.get("tool_calls") or []
+        if len(calls) > 1:
+            # Один запрос — один инструмент (правило 2b промпта): пачку в одном
+            # ответе модель иногда всё равно даёт («вызови все» → 3 вызова
+            # разом, живой случай 29.09). Берём первый, остальные отбрасываем —
+            # модель переспросит нужное следующим шагом, уже видя результат
+            # первого. Пачку целиком выполнять нельзя: зависимые вызовы
+            # (task_get с id из find_topics) корректны только по очереди, а
+            # остановка после первого шага экономит целый круг модели.
+            calls = calls[:1]
         # Модель часто пишет реплику («Сейчас соберу…») и зовёт инструменты в
         # одном сообщении. Это не пол-ответа: вызовы главнее, реплику
         # переигрываем в том же assistant-сообщении (см. parse_tool_message).
@@ -2837,7 +2868,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 if not call_args:
                     call_args = _args_for_tool(missing, asked)
                 forced = _force_read(conn, user_id, subject, missing, call_args, messages,
-                                     steps, chat_fn)
+                                     steps, chat_fn, on_step)
                 if forced:
                     return steps, forced, None
             # Обещание посмотреть вместо вызова. Один раз переспрашиваем
@@ -2860,7 +2891,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                     if name == "project_info" and not call_args.get("topic"):
                         call_args = _args_for_tool(name, asked) or call_args
                     forced = _force_read(conn, user_id, subject, name, call_args, messages, steps,
-                                         chat_fn)
+                                         chat_fn, on_step)
                     if forced:
                         return steps, forced, None
                 return steps, _final_or_summary(chat_fn, messages, text), None
@@ -2941,6 +2972,8 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             label = describe_step(name, call_args, data)
             steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
                           "status": "done", "call_id": call_id, "result": data})
+            _emit_live_step(on_step, {"name": name, "args": call_args, "label": label,
+                                      "kind": "read", "status": "done", "result": data})
             messages.append({"role": "assistant", "content": preamble or None,
                              "tool_calls": [{"id": call_id, "type": "function",
                                               "function": {"name": name, "arguments": json.dumps(call_args, ensure_ascii=False)}}]})
@@ -2954,7 +2987,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
 
 
 def _force_read(conn: sqlite3.Connection, user_id: int, subject: str, name: str, call_args: dict,
-                messages: list, steps: list, chat_fn) -> str | None:
+                messages: list, steps: list, chat_fn, on_step=None) -> str | None:
     """Модель не зовёт инструмент — зовём сами, чтобы ответ опирался на базу.
 
     Последний рубеж стабильности: вопрос был про данные (это уже проверено
@@ -2973,6 +3006,8 @@ def _force_read(conn: sqlite3.Connection, user_id: int, subject: str, name: str,
     call_id = f"auto-{len(steps) + 1}"
     steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
                   "status": "done", "call_id": call_id, "result": data})
+    _emit_live_step(on_step, {"name": name, "args": call_args, "label": label,
+                              "kind": "read", "status": "done", "result": data})
     local = list(messages) + [
         {"role": "assistant", "content": None,
          "tool_calls": [{"id": call_id, "type": "function",

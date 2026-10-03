@@ -260,6 +260,82 @@ def _agent_busy_retry_after(thread_id: int) -> int:
     return max(1, int(until - time.monotonic()) + 1) if until else 1
 
 
+# Живые шаги хода — in-memory снимок для опроса во время генерации.
+# POST /api/agent/turns считает до 90+15 с и отвечает один раз в конце, поэтому
+# без снимка клиент показывал бы один скелетон «Думаю…» всё время, а потом пачку
+# шагов с фиксированными задержками из revealTurn (~2 с на шаг). Снимок
+# пополняется по мере выполнения инструментов (on_step у run_cycle) и отдаётся
+# через GET треда, пока ход жив: клиент дорисовывает шаги в реальном времени,
+# и лоадер каждого шага длится ровно столько, сколько модель реально думала.
+# Только чтение для клиента: записи в базу по-прежнему идут одной транзакцией
+# в конце хода, снимок — не источник правды, а прогресс.
+_AGENT_LIVE: dict[int, list] = {}
+_AGENT_LIVE_LOCK = threading.Lock()
+# Потолок живого результата в снимке — как у колонки result_json: «Подробнее»
+# доступно и до конца хода, но весь срез целиком в опросный ответ не кладём.
+_AGENT_LIVE_RESULT_MAX = 16000
+
+
+def _agent_live_start(thread_id: int) -> None:
+    """Открыть живой снимок треда (вызывает автор хода, сразу после резерва)."""
+    try:
+        with _AGENT_LIVE_LOCK:
+            _AGENT_LIVE[int(thread_id)] = []
+    except Exception:
+        pass
+
+
+def _agent_live_push(thread_id: int, step: dict) -> None:
+    """Добавить готовый шаг в живой снимок треда. Не бросает."""
+    try:
+        item = {"tool": str((step or {}).get("name") or ""),
+                "args": (step or {}).get("args") if isinstance((step or {}).get("args"), dict) else {},
+                "label": str((step or {}).get("label") or (step or {}).get("name") or "Шаг"),
+                "kind": "action" if str((step or {}).get("kind") or "") == "action" else "read",
+                "status": str((step or {}).get("status") or "done")}
+        if item["status"] == "needs_confirm":
+            proposal = (step or {}).get("proposal")
+            item["proposal"] = proposal if isinstance(proposal, dict) else {}
+        else:
+            result = (step or {}).get("result")
+            try:
+                blob = json.dumps(result if result is not None else {}, ensure_ascii=False)
+            except (TypeError, ValueError):
+                blob = "{}"
+            if len(blob) > _AGENT_LIVE_RESULT_MAX:
+                item["result"] = {"truncated": True}
+            else:
+                try:
+                    item["result"] = json.loads(blob)
+                except (TypeError, ValueError):
+                    item["result"] = {}
+        with _AGENT_LIVE_LOCK:
+            bucket = _AGENT_LIVE.get(int(thread_id))
+            if bucket is not None:
+                bucket.append(item)
+    except Exception:
+        pass
+
+
+def _agent_live_snapshot(thread_id: int) -> list:
+    """Копия живых шагов треда для GET во время хода. Не бросает."""
+    try:
+        with _AGENT_LIVE_LOCK:
+            bucket = _AGENT_LIVE.get(int(thread_id))
+            return [dict(s) for s in bucket] if bucket else []
+    except Exception:
+        return []
+
+
+def _agent_live_clear(thread_id: int) -> None:
+    """Закрыть живой снимок (автор хода, в finally рядом со слотом)."""
+    try:
+        with _AGENT_LIVE_LOCK:
+            _AGENT_LIVE.pop(int(thread_id), None)
+    except Exception:
+        pass
+
+
 def _agent_final_payload(final: str, steps: list, fallback: str) -> tuple[str, list]:
     """Текст ответа и кнопки-продолжения для клиента.
 
@@ -11993,12 +12069,15 @@ class Handler(BaseHTTPRequestHandler):
                                         "steps": [], "suggests": [],
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла без нового жетона.
+                    # Живой снимок — как у обычного хода: resume тоже зовёт модель
+                    # и может идти десятки секунд.
                     if not _agent_busy_acquire(tid, "подтверждение действия"):
                         wait = _agent_busy_retry_after(tid)
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
                                         "retryAfter": wait, "busyText": _agent_busy_text(tid)},
                                        400, token=token,
                                        headers={"Retry-After": str(wait)}); return
+                    _agent_live_start(tid)
                     try:
                         try:
                             applied = _AGENT.apply_action(conn, int(user_id), subject,
@@ -12031,7 +12110,9 @@ class Handler(BaseHTTPRequestHandler):
                         cost = {"n": 0}
                         _chat_cf = _agent_chat_fn(cost, tid)
                         try:
-                            steps2, final2, pending2 = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_cf)
+                            steps2, final2, pending2 = _AGENT.run_cycle(
+                                conn, int(user_id), subject, messages, _chat_cf,
+                                on_step=lambda st: _agent_live_push(tid, st))
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-confirm", exc)
                             self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
@@ -12051,6 +12132,8 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"error": "Не удалось завершить ход, попробуй ещё раз.", "ref": rid},
                                            502, token=token); return
                         out_steps = []
+                        if pending2 is not None and steps2:
+                            _agent_live_push(tid, steps2[-1])
                         for st in steps2:
                             mid2 = _agent_add_message(conn, tid, user_id, "tool", "",
                                                       tool_name=st.get("name"), tool_args=st.get("args"),
@@ -12083,6 +12166,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     finally:
                         _agent_busy_release(tid)
+                        _agent_live_clear(tid)
                     return
                 # POST /api/agent/turns — начать ход {threadId, text}.
                 # threadId — числовой id (старые клиенты) или внешний public_id.
@@ -12228,6 +12312,10 @@ class Handler(BaseHTTPRequestHandler):
                                            429, token=token, headers={"Retry-After": str(retry)})
                             return
                         usage_spent = True
+                        # Живой снимок для опроса: клиент дорисовывает шаги во
+                        # время хода, а не пачкой в конце. Чистится в finally
+                        # рядом со слотом — при любом исходе.
+                        _agent_live_start(tid)
                         if _AI is None:
                             raise _AI.AIUnavailable("AI не настроен") if False else RuntimeError("no ai")
                         # Заголовок треда — детерминированно, без модели.
@@ -12255,7 +12343,9 @@ class Handler(BaseHTTPRequestHandler):
                         cost = {"n": 0}
                         _chat_fn = _agent_chat_fn(cost, tid)
                         try:
-                            steps, final, pending = _AGENT.run_cycle(conn, int(user_id), subject, messages, _chat_fn)
+                            steps, final, pending = _AGENT.run_cycle(
+                                conn, int(user_id), subject, messages, _chat_fn,
+                                on_step=lambda st: _agent_live_push(tid, st))
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-unavailable", exc)
                             self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
@@ -12275,6 +12365,10 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
                         # Заменяющий ход сносит старую пару в этой же транзакции.
+                        if pending is not None and steps:
+                            # Ждущий подтверждения шаг — тоже живой: опрос треда
+                            # видит его до ответа, кнопки дорисует финал.
+                            _agent_live_push(tid, steps[-1])
                         if replace_from is not None:
                             conn.execute("DELETE FROM agent_messages WHERE thread_id=? AND seq>=?",
                                          (tid, replace_from))
@@ -12325,6 +12419,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                     finally:
                         _agent_busy_release(tid)
+                        _agent_live_clear(tid)
                         if usage_spent:
                             # Точка невозврата — успешная фиксация хода выше (commit).
                             # Здесь проверяем: если ответ уже ушёл (commit был), возврат не нужен.
@@ -12842,6 +12937,10 @@ class Handler(BaseHTTPRequestHandler):
                                     "thread": _agent_thread_payload(thread),
                                     "busy": _agent_busy_locked(tid),
                                     "busyText": _agent_busy_text(tid) if _agent_busy_locked(tid) else "",
+                                    # Живые шаги хода — только пока ход жив (слот
+                                    # занят): клиент дорисовывает их во время
+                                    # генерации вместо пачки в конце.
+                                    "liveSteps": _agent_live_snapshot(tid) if _agent_busy_locked(tid) else [],
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):

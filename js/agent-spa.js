@@ -2146,6 +2146,169 @@
     scrollDown(true, true);
     return card;
   }
+  /* ---------- живые шаги хода ----------
+     POST /api/agent/turns считает до ~105 с и отвечает один раз в конце. Без
+     опроса клиент показывал бы один скелетон «Думаю…» всё время, а потом пачку
+     шагов с фиксированными задержками revealTurn (~2 с на шаг): сначала «долго
+     думает», потом «сразу пачкой пишет». Вместо этого опрашиваем GET треда
+     (там liveSteps, пока слот хода занят) и дорисовываем шаги по мере прихода:
+     лоадер каждого шага длится ровно столько, сколько модель реально думала.
+     Анимация остаётся (лоадер → шаг, печать ответа), но её длительности задаёт
+     сеть, а не шаблон. Финал из POST авторитетен: живое превью снимается, шаги
+     кладутся сразу без перепроигрывания, печатается только ответ. */
+  var LIVE_POLL_MS = 1500;
+  function liveStop(turn) {
+    if (turn && turn.liveTimer) { try { clearInterval(turn.liveTimer); } catch (_) {} turn.liveTimer = null; }
+  }
+  // Снять живое превью: перед авторитетным рендером, ошибкой или уходом.
+  function liveDrop(turn) {
+    liveStop(turn);
+    if (turn && turn.liveEl && turn.liveEl.parentNode) {
+      try { turn.liveEl.parentNode.removeChild(turn.liveEl); } catch (_) {}
+    }
+    if (turn) { turn.liveEl = null; turn.liveOl = null; turn.liveNum = null;
+                turn.liveLoader = null; turn.liveShown = 0; turn.liveSkel = null; }
+  }
+  // Живая карточка: та же структура, что у renderSteps (делегированный тоггл
+  // в wireEvents подхватывает её сам), но шаги досыпаются по одному, а в конце
+  // всегда стоит лоадер «думает дальше», пока сервер считает.
+  function liveEnsure(turn) {
+    if (turn.liveEl && turn.liveEl.parentNode) return turn.liveEl;
+    if (!ui.live) return null;
+    if (turn.liveSkel && turn.liveSkel.parentNode) {
+      try { turn.liveSkel.parentNode.removeChild(turn.liveSkel); } catch (_) {}
+    }
+    turn.liveSkel = null;
+    var card = el("article", "agent__ai");
+    card.setAttribute("data-live", "1");
+    var toggle = el("button", "agent__trace-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "true");
+    var traceId = "agent-trace-live-" + Math.random().toString(36).slice(2);
+    toggle.setAttribute("aria-controls", traceId);
+    toggle.appendChild(svgIcon(ARROW_D, "2.4"));
+    toggle.appendChild(el("span", "", "Скрыть шаги"));
+    var num = el("span", "num", "0");
+    toggle.appendChild(num);
+    var trace = el("div", "agent__trace open");
+    trace.id = traceId;
+    var inner = el("div", "agent__trace-in");
+    var ol = el("ol", "agent__steps");
+    inner.appendChild(ol); trace.appendChild(inner);
+    card.appendChild(toggle); card.appendChild(trace);
+    var loaderLi = el("li", "agent__step");
+    var loaderBody = el("div", "agent__tbody");
+    loaderBody.appendChild(stepLoader("Думаю…"));
+    loaderLi.appendChild(loaderBody);
+    ol.appendChild(loaderLi);
+    feedTouch();
+    clearBoot();
+    ui.live.appendChild(card);
+    showEmpty(false);
+    scrollDown(true, true);
+    turn.liveEl = card; turn.liveOl = ol; turn.liveNum = num; turn.liveLoader = loaderLi;
+    return card;
+  }
+  // Дорисовать только новые шаги (мгновенно, без постановочных задержек:
+  // реальное время уже прошло, пока сервер думал). «Подробнее» доступно
+  // сразу — результат шага приехал вместе с ним.
+  function liveAppendSteps(turn, steps) {
+    var fresh = (steps || []).slice(turn.liveShown || 0);
+    if (!fresh.length) return;
+    if (!liveEnsure(turn) || !turn.liveOl) return;
+    fresh.forEach(function (s) {
+      var p = stepShell({ tool: s.tool, args: s.args, label: s.label,
+                          kind: s.kind || "read", status: s.status,
+                          result: s.result, proposal: s.proposal });
+      stepFill(p);
+      try { turn.liveOl.insertBefore(p.li, turn.liveLoader); } catch (_) {}
+    });
+    turn.liveShown = (steps || []).length;
+    if (turn.liveNum) turn.liveNum.textContent = String(turn.liveShown);
+    follow(450);
+  }
+  function livePoll(turn) {
+    if (!turn || turn.dead) return;
+    var tid = turn.threadId;
+    if (tid == null || !ui.live || Number(S.currentId) !== Number(tid)) return;
+    api("GET", "/api/agent/threads/" + Number(tid)).then(function (res) {
+      if (!turn || turn.dead || !ui.live || Number(S.currentId) !== Number(tid)) return;
+      if (res.status === 200 && res.data && Array.isArray(res.data.liveSteps)
+          && res.data.liveSteps.length) {
+        liveAppendSteps(turn, res.data.liveSteps);
+      }
+    }).catch(function () {});
+  }
+  function liveStart(turn, skel) {
+    liveStop(turn);
+    if (turn) { turn.liveSkel = skel || null; turn.liveShown = 0; }
+    if (!turn || turn.dead) return;
+    turn.liveTimer = setInterval(function () { livePoll(turn); }, LIVE_POLL_MS);
+  }
+  // Живой ход досмотрен: шаги уже показаны в реальном времени, и
+  // перепроигрывать их с фиксированными задержками (revealTurn) — значит
+  // заставить человека смотреть одно и то же дважды. Шаги кладутся сразу
+  // (та же мгновенная ветка, что у истории), печатается только ответ.
+  function assistantCardLive(steps, finalText, suggests) {
+    var g = S.mountGen;
+    var card = el("article", "agent__ai");
+    if (finalText) card.setAttribute("data-answer", String(finalText));
+    var built = renderSteps(card, steps);
+    var paras = finalText ? mdBlocks(finalText) : [];
+    if (g !== S.mountGen || !ui.live) return card;
+    feedTouch();
+    clearBoot();
+    ui.live.appendChild(card);
+    showEmpty(false);
+    scrollDown(true, true);
+    if (built) built.card = card;
+    var asks = normalizeSuggests(suggests);
+    if (built) built.suggests = asks;
+    if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
+    syncBusy();
+    if (built) {
+      built.prepped.forEach(function (p) { built.ol.appendChild(p.li); stepFill(p); });
+      built.trace.classList.add("open");
+      // Карточка с ожиданием подтверждения остаётся раскрытой (то же правило,
+      // что у истории и revealTurn): кнопки «Применить/Отмена» должны быть
+      // видны сразу, а не под «Показать шаги».
+      var waits = built.prepped.some(function (p) { return p.st && p.st.status === "needs_confirm"; });
+      raf(function () {
+        card.classList.add("done");
+        if (!waits) built.trace.classList.remove("open");
+      });
+    }
+    if (!paras.length) {
+      cardFooter(card, null, asks);
+      return card;
+    }
+    var ag = ++S.animGen, stopped = false;
+    function alive() { return !stopped && g === S.mountGen && ag === S.animGen && card.parentNode; }
+    function bailPlain() {
+      if (stopped) return;
+      stopped = true;
+      glideStop();
+      paras.forEach(function (p) { if (!p.parentNode) card.appendChild(p); p.classList.remove("typing"); });
+      scrollDown(true, false);
+    }
+    S.pendingBail = bailPlain;
+    (function next() {
+      if (!alive()) return;
+      if (!paras.length) {
+        cardFooter(card, alive, asks);
+        S.pendingBail = null;
+        syncBusy();
+        finishBottom();
+        return;
+      }
+      var p = paras.shift();
+      card.appendChild(p);
+      beginPrinting();
+      parkParagraph(p);
+      printPara(p, alive, function () { later(calm() ? 0 : 140, next); });
+    })();
+    return card;
+  }
   // Отрисовка переписки из готового массива: кэш раздела и ответ сервера идут
   // в одну функцию, иначе кэш и сеть рисовали бы по-разному.
   function paintMessages(msgs) {
@@ -2365,6 +2528,9 @@
     if (replaceLast) payload.replaceLast = true;
     turn.promise = api("POST", "/api/agent/turns", payload, ctrl ? ctrl.signal : undefined);
     syncBusy();
+    // Живые шаги: опрос треда дорисовывает их во время хода. Скелетон при
+    // первом шаге заменится живой карточкой сам (liveEnsure).
+    liveStart(turn, skel);
     turn.promise.then(function (res) { settleTurn(turn, g, mg, skel, bubble, text, res); })
                 .catch(function (e) { failTurn(turn, g, mg, skel, text, e); });
   }
@@ -2413,6 +2579,14 @@
     if (Number(t.threadId) !== Number(S.currentId)) return;
     t.claimedBy = S.mountGen;
     var g = ++S.navGen, mg = S.mountGen;
+    // Перемонтирование снесло живую карточку вместе со старым DOM: следующий
+    // опрос построит её заново, а счётчик сбрасываем — иначе новые шаги в
+    // новом DOM оказались бы пропущены как «уже показанные».
+    if (t.liveEl || t.liveOl) { t.liveEl = null; t.liveOl = null; t.liveNum = null;
+                                t.liveLoader = null; t.liveShown = 0; t.liveSkel = null; }
+    if (!t.dead && !t.liveTimer) {
+      t.liveTimer = setInterval(function () { livePoll(t); }, LIVE_POLL_MS);
+    }
     syncBusy();
     showEmpty(false);
     // Пузырёк и скелетон дорисовываем ТОЛЬКО если их снесли (перерисовка
@@ -2513,6 +2687,11 @@
   function settleTurn(turn, g, mg, skel, bubble, text, res) {
     if (g !== S.navGen || mg !== S.mountGen) return;
     turn.dead = true;
+    // Живое превью снято: дальше — авторитетный ответ из POST. Шаги, уже
+    // виденные вживую, не перепроигрываем (assistantCardLive), быстрые ходы
+    // без единого опроса идут старым путём (revealTurn с его задержками).
+    var sawLive = (turn.liveShown || 0) > 0;
+    liveDrop(turn);
     if (S.turn === turn) S.turn = null;
     if (skel && skel.parentNode) skel.parentNode.removeChild(skel);
     if (S.abort === turn.ctrl) S.abort = null;
@@ -2521,11 +2700,16 @@
       cacheForget(turn.threadId);        // переписка изменилась — кэш больше не её
       var steps = res.data.steps || [];
       if (res.data.pending) {
-        assistantCard(steps.map(function (s) {
+        var mapped = steps.map(function (s) {
           return { id: s.id, tool: s.tool, args: s.args, label: s.label, kind: s.kind || "action",
                    status: "needs_confirm", proposal: s.proposal };
-        }), null, true);
+        });
+        // Ждущий подтверждения и так раскрыт: перепроигрывать нечего ни в
+        // живом случае (шаги уже на экране), ни в быстром (один шаг).
+        assistantCard(mapped, null, sawLive ? false : true);
         say("Нужно подтверждение — нажми «Применить»");
+      } else if (sawLive) {
+        assistantCardLive(steps, res.data.final || "", res.data.suggests);
       } else {
         assistantCard(steps, res.data.final || "", true, res.data.suggests);
       }
@@ -2676,6 +2860,9 @@
   }
   function failTurn(turn, g, mg, skel, text, e) {
     if (g !== S.navGen || mg !== S.mountGen) return;
+    // Живое превью при ошибке снимаем: тихий повтор начнёт новый ход и новую
+    // карточку, а ответ сервера (если он досчитал) придёт авторитетным путём.
+    liveDrop(turn);
     if (e && e.name === "AbortError") {
       // Сервер ход не бросает: turn НЕ хороним — перемонтирование подхватит
       // тот же промис, ответ придёт в ленту сам.
@@ -2725,6 +2912,9 @@
     S.abort = ctrl;
     S.turn = turn;
     syncBusy();
+    // Resume после подтверждения тоже считает модель (до 90 с): живые шаги
+    // опрашиваем так же, скелетона тут нет — карточка встанет в ленту сама.
+    liveStart(turn, null);
     function settle() {
       if (S.turn === turn) { turn.dead = true; S.turn = null; }
       if (S.abort === ctrl) S.abort = null;
@@ -2734,6 +2924,8 @@
       { messageId: messageId, approve: !!approve }, ctrl ? ctrl.signal : undefined);
     turn.promise.then(function (res) {
       settle();
+      var sawLive = (turn.liveShown || 0) > 0;
+      liveDrop(turn);
       if (mg !== S.mountGen) return;
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
@@ -2741,9 +2933,10 @@
         if (res.data.approved === false) {
           assistantCard([], res.data.final || "Отменено учеником.", true, res.data.suggests);
         } else if (res.data.final) {
-          assistantCard(res.data.steps || [], res.data.final, true, res.data.suggests);
+          if (sawLive) assistantCardLive(res.data.steps || [], res.data.final, res.data.suggests);
+          else assistantCard(res.data.steps || [], res.data.final, true, res.data.suggests);
         } else {
-          assistantCard(res.data.steps || [], null, true);
+          assistantCard(res.data.steps || [], null, sawLive ? false : true);
         }
         return;
       }
@@ -2753,6 +2946,7 @@
         function () { confirmStep(messageId, approve, null); });
     }).catch(function (e) {
       settle();
+      liveDrop(turn);
       if (mg !== S.mountGen) return;
       // Обрыв по «Стоп» — это не ошибка, а решение человека; сервер ход всё
       // равно досчитает, а ответ подхватит watchAnswer.

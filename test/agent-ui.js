@@ -253,6 +253,23 @@ check("новый ход дорисовывает прерванный (bail)", 
 check("ход переживает размонтирование (S.turn + reattach)",
   spaCode.includes("reattachTurn") && spaCode.includes("settleTurn") && spaCode.includes("failTurn")
   && spaCode.includes("claimedBy"));
+/* Живые шаги: один долгий POST + опрос liveSteps во время хода вместо «долго
+   думает, потом пачкой». Лоадер длится столько, сколько модель реально
+   думает; увиденные шаги в финале не перепроигрываются с фиксированными
+   задержками. */
+check("живой опрос шагов во время хода (liveSteps)",
+  spaCode.includes("liveSteps") && /function livePoll\(turn\)/.test(spaCode)
+  && spaCode.includes("setInterval(function () { livePoll(turn); }, LIVE_POLL_MS)"));
+check("живая карточка дорисовывает шаги без постановочных задержек",
+  /function liveAppendSteps\(turn, steps\)/.test(spaCode)
+  && /function assistantCardLive\(steps, finalText, suggests\)/.test(spaCode));
+check("финал живого хода не перепроигрывает шаги (assistantCardLive)",
+  spaCode.includes("assistantCardLive(steps, res.data.final")
+  && spaCode.includes("assistantCardLive(res.data.steps"));
+check("живое превью снимается перед авторитетным ответом и ошибкой",
+  /function liveDrop\(turn\)/.test(spaCode)
+  && /sawLive[\s\S]{0,80}?liveDrop\(turn\)/.test(spaCode)
+  && /liveDrop\(turn\);\n    if \(e && e\.name/.test(spaCode));
 /* Клавиатура телефона: высоту держит CSS (колонка ровно в 100dvh), от focus
    требуется только освободить резерв под нижнее меню. Пин высоты в пикселях
    был причиной «поле съехало вверх и не вернулось». */

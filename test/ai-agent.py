@@ -1919,6 +1919,67 @@ def main():
             status, quota = g.request(base, "GET", "/api/agent/limits", None)
             check("после снятия потолка снова 10 из 10",
                   quota.get("limit") == 10 and quota.get("remaining") == 10, str(quota))
+
+            section("один запрос — один инструмент + живые шаги")
+            # Пачка вызовов в одном ответе модели запрещена (правило 2b): сервер
+            # берёт только первый, остальное модель переспрашивает следующим
+            # кругом. Клиент при этом видит шаги во время хода (liveSteps в GET
+            # треда), а не пачку в конце долгого молчания.
+            h = Client("10.8.0.1")
+            claim(h, "Харитон-лайв")
+            status, body = new_thread(h)
+            tid_h = body["thread"]["id"]
+            slow = {"on": True}
+            real_mock = ai.chat_with_tools
+
+            def slow_mock(messages, tools, **kw):
+                if slow["on"]:
+                    time.sleep(0.8)
+                return real_mock(messages, tools, **kw)
+
+            ai.chat_with_tools = slow_mock
+            try:
+                with lock:
+                    script.clear()
+                    script.append({"text": "Сейчас соберу всё.", "tool_calls": [
+                        {"id": "lv1", "name": "fold_web", "arguments": {"op": "profile"}},
+                        {"id": "lv2", "name": "fold_web", "arguments": {"op": "forecast"}}],
+                        "preamble": "Сейчас соберу всё."})
+                    script.append({"text": None, "tool_calls": [
+                        {"id": "lv3", "name": "fold_web", "arguments": {"op": "forecast"}}]})
+                    script.append({"text": "Готово, вот разбор.", "tool_calls": []})
+                holder: dict = {}
+
+                def fire_live():
+                    holder["st"], holder["body"] = turn(h, tid_h, "как мои дела")
+
+                ft = threading.Thread(target=fire_live, daemon=True)
+                ft.start()
+                time.sleep(0.3)
+                seen = []
+                for _ in range(40):
+                    s2, g2 = h.request(base, "GET", f"/api/agent/threads/{tid_h}", None)
+                    if s2 == 200:
+                        seen.append((bool(g2.get("busy")), len(g2.get("liveSteps") or [])))
+                    if not ft.is_alive():
+                        break
+                    time.sleep(0.2)
+                ft.join(timeout=60)
+                slow["on"] = False
+                check("ход с пачкой -> 200 и два шага (пачка разбита на круги)",
+                      holder.get("st") == 200 and len((holder.get("body") or {}).get("steps", [])) == 2,
+                      str(holder.get("body"))[:300])
+                counts = [n for _, n in seen]
+                check("опрос видел живые шаги во время хода",
+                      any(n > 0 for n in counts), str(seen[:12]))
+                check("шаги нарастали постепенно, а не пачкой сразу",
+                      1 in counts and 2 in counts, str(counts))
+                s2, g2 = h.request(base, "GET", f"/api/agent/threads/{tid_h}", None)
+                check("после хода снимок пуст, слот свободен",
+                      s2 == 200 and g2.get("liveSteps") == [] and g2.get("busy") is False,
+                      str({k: g2.get(k) for k in ("busy", "liveSteps")}))
+            finally:
+                ai.chat_with_tools = real_mock
         finally:
             httpd.shutdown()
             httpd.server_close()
