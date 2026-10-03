@@ -70,9 +70,9 @@ PAY_CANCELLED = "cancelled"
 PROVIDER_MANUAL = "manual"
 PROVIDER_MOCK = "mock"
 
-# Уровни Plus: проверки сочинений 5 -> 20 в день, ходы наставника 10 -> 40.
-PLUS_ESSAY_LIMIT = 20
-PLUS_AGENT_LIMIT = 40
+# Уровни Plus: проверки сочинений 5 -> 10 в день, ходы наставника 5 -> 25.
+PLUS_ESSAY_LIMIT = 10
+PLUS_AGENT_LIMIT = 25
 
 # Публичный id платежа: 10 символов A–Z/a–z/0–9, как public_id тредов
 # наставника (та же узнаваемая форма). Последовательные INTEGER id наружу

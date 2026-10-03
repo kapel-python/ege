@@ -8,13 +8,13 @@
     ключу (повтор — тот же paymentId), чужой ключ — 400;
   * confirm без EGE_SUBSCRIPTION_MOCK — 503, с флагом — активация:
     статус active, expires ~+30 сут, зеркало users.subscription='plus',
-    карманы u:/agent: долиты до 20/40;
-  * лимиты едут за подпиской: GET /api/ai/limits → 20,
-    GET /api/agent/limits → 40; повторный confirm — идемпотентный no-op;
+    карманы u:/agent: долиты до 10/25;
+  * лимиты едут за подпиской: GET /api/ai/limits → 10,
+    GET /api/agent/limits → 25; повторный confirm — идемпотентный no-op;
   * продление складывается: годовой платёж растёт от конца прошлого срока;
   * cancel держит доступ до конца срока (cancelAtPeriodEnd), resume
     снимает флаг; cancel без подписки и resume после истечения — 400;
-  * истечение (срок перемотан в БД): статус inactive, лимиты 5/10,
+  * истечение (срок перемотан в БД): статус inactive, лимиты 5/5,
     строка переведена в expired, зеркало погашено;
   * webhook: без секрета 503, кривая подпись 403, неизвестный платёж 404,
     успех по checkout-платежу активирует, повтор — already;
@@ -22,7 +22,7 @@
   * админ: grant активирует (платёж 0₽ manual в истории), revoke гасит
     мгновенно, оба пишут аудит; сброс «весь прогресс» подписку НЕ трогает;
     удаление аккаунта сносит подписку и платежи каскадом;
-  * гейт наставника: без флага бесплатный ходит как раньше (лимиты 10),
+  * гейт наставника: без флага бесплатный ходит как раньше (лимиты 5),
     с EGE_AGENT_REQUIRES_PLUS=1 — 403 SUBSCRIPTION_REQUIRED, а Plus —
     проходит гейт.
 """
@@ -158,7 +158,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("free-лимит сочинений 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("free-квота наставника 10", s == 200 and q["limit"] == 10, q)
+        check("free-квота наставника 5", s == 200 and q["limit"] == 5, q)
 
         section("checkout и confirm")
         s, body = request(user, base, "/api/subscription/checkout", "POST",
@@ -223,17 +223,17 @@ def main():
             "(SELECT id FROM users WHERE account_id=?), 'agent:' || "
             "(SELECT id FROM users WHERE account_id=?))", (target, target))}
         check("карманы долиты до Plus",
-              len(buckets) == 2 and min(buckets.values()) >= 20, buckets)
+              len(buckets) == 2 and min(buckets.values()) >= 10, buckets)
 
         section("лимиты едут за подпиской")
         s, lim = request(user, base, "/api/ai/limits")
-        check("лимит сочинений стал 20", s == 200 and lim["limit"] == 20, lim)
+        check("лимит сочинений стал 10", s == 200 and lim["limit"] == 10, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("квота наставника стала 40", s == 200 and q["limit"] == 40, q)
+        check("квота наставника стала 25", s == 200 and q["limit"] == 25, q)
         s, st = request(user, base, "/api/subscription/status")
         check("статус active + лимиты",
               s == 200 and st["active"] is True and st["status"] == "active"
-              and st["limits"] == {"essay": 20, "agent": 40, "agentAccess": True}, st)
+              and st["limits"] == {"essay": 10, "agent": 25, "agentAccess": True}, st)
 
         section("продление складывается, отмена держит срок")
         s, co = request(user, base, "/api/subscription/checkout", "POST",
@@ -249,7 +249,7 @@ def main():
               s == 200 and st["active"] is True and st["status"] == "cancelled"
               and st["cancelAtPeriodEnd"] is True, st)
         s, lim = request(user, base, "/api/ai/limits")
-        check("после cancel лимит всё ещё 20", s == 200 and lim["limit"] == 20, lim)
+        check("после cancel лимит всё ещё 10", s == 200 and lim["limit"] == 10, lim)
         s, st = request(user, base, "/api/subscription/resume", "POST", {})
         check("resume снимает флаг",
               s == 200 and st["status"] == "active" and st["cancelAtPeriodEnd"] is False, st)
@@ -266,7 +266,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("лимит вернулся к 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("квота вернулась к 10", s == 200 and q["limit"] == 10, q)
+        check("квота вернулась к 5", s == 200 and q["limit"] == 5, q)
         mirror = db("SELECT subscription FROM users WHERE account_id=?", (target,))
         check("зеркало погашено", mirror and mirror[0]["subscription"] is None, mirror)
         s, body = request(user, base, "/api/subscription/resume", "POST", {})
@@ -346,7 +346,7 @@ def main():
             "(SELECT id FROM users WHERE account_id=?), 'agent:' || "
             "(SELECT id FROM users WHERE account_id=?))", (target2, target2))}
         check("грант долил карманы", buckets.get(next(
-            (k for k in buckets if k.startswith("u:")), "")) == 20, buckets)
+            (k for k in buckets if k.startswith("u:")), "")) == 10, buckets)
         s, res = request(admin, base, f"/api/admin/users/{target2}/subscription", "POST",
                          {"action": "revoke"})
         check("админ-отзыв гасит мгновенно",
@@ -367,7 +367,7 @@ def main():
               s == 200 and set(ov) >= {"users", "subs", "money", "waitlist",
                                        "config", "recent"}
               and ov["config"]["priceMonthKopecks"] == 9900
-              and ov["config"]["plusEssay"] == 20
+              and ov["config"]["plusEssay"] == 10
               and ov["config"]["freeEssay"] == 5, ov)
         s, body = request(guest, base, "/api/subscription/notify", "GET", None)
         check("гость GET notify 401", s == 401, f"{s} {body}")
@@ -422,7 +422,7 @@ def main():
         check("грант на пустой ai_usage создаёт бакеты",
               s == 200 and res["subscription"]["active"] is True, res)
         s, lim = request(u4, base, "/api/ai/limits", "GET", None, "10.9.0.4")
-        check("лимит сразу 20", s == 200 and lim["limit"] == 20, lim)
+        check("лимит сразу 10", s == 200 and lim["limit"] == 10, lim)
         s, res = request(admin, base, f"/api/admin/users/{target4}/subscription", "POST",
                          {"action": "refund"})
         check("refund гасит и помечает платёж",

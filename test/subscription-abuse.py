@@ -318,10 +318,10 @@ def main():
                        {"paymentId": co2["paymentId"]}, "10.8.1.5")
         assert s == 200, s
         bk = buckets(uE_id)
-        check("u: долит ровно до 20",
-              bk.get(f"u:{uE_id}", (None,))[0] == 20, bk)
-        check("agent: долит ровно до 40",
-              bk.get(f"agent:{uE_id}", (None,))[0] == 40, bk)
+        check("u: долит ровно до 10",
+              bk.get(f"u:{uE_id}", (None,))[0] == 10, bk)
+        check("agent: долит ровно до 25",
+              bk.get(f"agent:{uE_id}", (None,))[0] == 25, bk)
         check("таймеры погашены (карман полон)",
               bk.get(f"u:{uE_id}", (0, 1))[1] is None
               and bk.get(f"agent:{uE_id}", (0, 1))[1] is None, bk)
@@ -348,8 +348,8 @@ def main():
         check("бакет u: не перезаписан на 20",
               bk.get(f"u:{uE_id}", (None,))[0] == 500, bk)
 
-        # --- Исчерпание → Plus → 20 (легальный путь) ---
-        section("исчерпанный лимит + Plus = 20/20")
+        # --- Исчерпание → Plus → 10 (легальный путь) ---
+        section("исчерпанный лимит + Plus = 10/10")
         uE2 = make_device("10.8.1.7")
         aE2 = onboard(uE2, base, "Исчерпанный", "10.8.1.7")
         uE2_id = uid_of(aE2)
@@ -367,8 +367,8 @@ def main():
                        {"paymentId": co["paymentId"]}, "10.8.1.7")
         assert s == 200, s
         s, lim = request(uE2, base, "/api/ai/limits", ip="10.8.1.7")
-        check("после покупки 20/20",
-              s == 200 and lim["limit"] == 20 and lim["remaining"] == 20, lim)
+        check("после покупки 10/10",
+              s == 200 and lim["limit"] == 10 and lim["remaining"] == 10, lim)
 
         # --- Тик срезает накрутку выше потолка ---
         section("прямая накрутка в БД срезается тиком")
@@ -533,7 +533,7 @@ def main():
         check("cancel держит доступ до конца срока (by design)",
               s == 200 and st["active"] is True and st["status"] == "cancelled", st)
         s, lim = request(uE, base, "/api/ai/limits", ip="10.8.1.5")
-        check("после cancel лимит Plus жив", s == 200 and lim["limit"] >= 20, lim)
+        check("после cancel лимит Plus жив", s == 200 and lim["limit"] >= 10, lim)
         s, _ = request(uE, base, "/api/subscription/resume", "POST", {}, "10.8.1.5")
         check("resume возвращает active", s == 200, s)
         # confirm после истечения подписки — новый срок от now
@@ -677,7 +677,7 @@ def main():
         s, lim = request(uF, base, "/api/ai/limits", ip="10.8.1.5")
         check("у фермера free-лимит 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(uF, base, "/api/agent/limits", ip="10.8.1.5")
-        check("у фермера квота 10", s == 200 and q["limit"] == 10, q)
+        check("у фермера квота 5", s == 200 and q["limit"] == 5, q)
 
         # --- CSRF ---
         section("CSRF-гейт")

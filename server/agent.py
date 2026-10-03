@@ -29,7 +29,7 @@ recheck:true всегда идёт через модель за жетон); а�
 историю через essay_history, но не тратит чужую квоту из чата.
 
 Квота хода: один ход (не шаг) — один жетон. Своя суточная цепочка
-EGE_AGENT_QUOTA_MAX (по умолчанию 10) с окном 8 часов — та же механика, что у
+EGE_AGENT_QUOTA_MAX (по умолчанию 5) с окном 8 часов — та же механика, что у
 ai_usage, но отдельный owner `agent:<user_id>` в той же таблице ai_usage
 (таблица общая, бакеты не пересекаются по префиксу). Плюс общая сетка
 ai.ai_take по пользователю и IP от скриптов — это всплеск за минуту
@@ -51,7 +51,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # Лимиты хода
 # ---------------------------------------------------------------------------
-AGENT_QUOTA_MAX_DEFAULT = 10
+AGENT_QUOTA_MAX_DEFAULT = 5
 AGENT_QUOTA_WINDOW_DEFAULT_SEC = 8 * 3600
 AGENT_TEXT_MIN = 1
 AGENT_TEXT_MAX = 2000
@@ -701,7 +701,7 @@ def agent_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
     """Потолок ходов, который реально действует на пользователя.
 
     База — персональный грант админа или общий EGE_AGENT_QUOTA_MAX;
-    активный Plus поднимает итог до 40 (max, а не замена)."""
+    активный Plus поднимает итог до 25 (max, а не замена)."""
     custom = agent_custom_limit(conn, user_id)
     base = custom if custom is not None else agent_quota_max()
     if subscription_is_plus(conn, user_id) and _SUB is not None:

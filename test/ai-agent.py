@@ -34,6 +34,10 @@ SERVER_PATH = ROOT / "server" / "server.py"
 os.environ["EGE_AI_RATE_MAX"] = "1000"
 os.environ["EGE_AI_NET_RATE_MAX"] = "1000"
 os.environ["EGE_TRUSTED_PROXY"] = "1"
+# Механика квоты тестируется на фиксированном потолке 10: дефолт продукта
+# (AGENT_QUOTA_MAX_DEFAULT=5) проверяет test/subscription.py (free-квота),
+# здесь важны drain/429/refund, а не конкретная цифра.
+os.environ["EGE_AGENT_QUOTA_MAX"] = "10"
 
 failures = 0
 checks = 0

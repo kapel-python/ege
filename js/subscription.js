@@ -126,13 +126,13 @@ var Subscription = (function () {
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
           <span class="sub-card__name">ege easy <span class="plus">Plus</span></span>
-          <span class="sub-card__sub">В 4 раза больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
+          <span class="sub-card__sub">В разы больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
         </span>
         <span class="chip">бесплатно</span>
       </span>
       <span class="sub-card__limits">
         <span class="sub-limit"><b>5</b> проверок в день</span>
-        <span class="sub-limit"><b>10</b> ходов наставника в день</span>
+        <span class="sub-limit"><b>5</b> ходов наставника в день</span>
         <span class="sub-limit"><b>${PRICE_MONTH} ₽</b> в месяц · <b>${PRICE_YEAR} ₽</b> в год</span>
       </span>
       <span class="sub-card__actions">
@@ -148,8 +148,8 @@ var Subscription = (function () {
     var pill = cancelled
       ? `<span class="chip chip--warn">без продления</span>`
       : `<span class="chip chip--success">активен</span>`;
-    var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : 20;
-    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : 40;
+    var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : 10;
+    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : 25;
     return `
     <a class="card sub-card sub-card--plus" href="/subscription/manage" aria-label="Управление подпиской Plus">
       <span class="sub-card__top">

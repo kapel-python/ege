@@ -922,8 +922,8 @@ function subCard(sub, payments) {
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
       </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
-        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений и 10 ходов наставника в день.`
-        : "Бесплатный тариф: 5 проверок сочинений и 10 ходов наставника в день. Выдача открывает 20 проверок и 40 ходов наставника в день сразу."}</div>`;
+        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений и 5 ходов наставника в день.`
+        : "Бесплатный тариф: 5 проверок сочинений и 5 ходов наставника в день. Выдача открывает 10 проверок и 25 ходов наставника в день сразу."}</div>`;
   // Платежи — стопкой строк, а не таблицей: таблица на телефоне уезжала
   // за край карточки (горизонтальный скролл внутри — не чтение).
   const history = (payments && payments.length) ? `
@@ -1419,7 +1419,7 @@ function bindUserActions(p) {
       <div class="a-modal__title">${isExtend ? 'Продлить <span class="plus">Plus</span>' : 'Выдать <span class="plus">Plus</span>'} — ${esc(p.accountId || "")}</div>
       <div class="a-modal__desc">${isExtend
         ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
-        : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 20 проверок сочинений и 40 ходов наставника в день."}</div>
+        : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 10 проверок сочинений и 25 ходов наставника в день."}</div>
       <div class="a-modal__form" style="gap:10px">
         <button class="choice-item" data-period="month"><b>Месяц — 99 ₽</b><span>30 суток доступа</span></button>
         <button class="choice-item" data-period="year"><b>Год — 990 ₽</b><span>365 суток доступа, два месяца в подарок</span></button>

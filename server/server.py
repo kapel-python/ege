@@ -6633,7 +6633,7 @@ def ai_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
     """Потолок, который реально действует на пользователя.
 
     База — персональный грант админа или общий EGE_AI_USAGE_MAX; активный
-    Plus поднимает итог до 20 (max, а не замена: грант выше Plus живёт)."""
+    Plus поднимает итог до 10 (max, а не замена: грант выше Plus живёт)."""
     custom = ai_custom_limit(conn, user_id)
     base = custom if custom is not None else ai_usage_max()
     if _SUB is not None and subscription_is_plus(conn, user_id):
