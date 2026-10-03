@@ -32,6 +32,7 @@
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="css/footer.css?v=8">
+<link rel="stylesheet" href="/css/site-header.css?v=1">
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -148,19 +149,6 @@
   a{color:inherit;text-decoration:none;}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
   .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
-  header{
-    position:sticky;top:0;z-index:100;background:var(--header-bg);
-    backdrop-filter:blur(12px) saturate(180%);-webkit-backdrop-filter:blur(12px) saturate(180%);
-    border-bottom:1px solid var(--hairline);
-  }
-  .header-inner{
-    display:flex;align-items:center;justify-content:space-between;
-    gap:12px;padding-block:clamp(12px,2vw,18px);min-width:0;
-  }
-  .logo{display:flex;align-items:center;gap:12px;font-family:var(--font-display);font-weight:700;font-size:clamp(16px,2.2vw,19px);letter-spacing:-0.02em;white-space:nowrap;min-width:0;}
-  .logo-badge{width:clamp(32px,5vw,42px);height:clamp(32px,5vw,42px);border-radius:50%;background:linear-gradient(135deg,#22c07a 0%,#38BDF8 100%);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px -8px rgba(56,189,248,0.5);flex-shrink:0;position:relative;}
-  .logo-badge svg{width:20px;height:20px;position:relative;z-index:1;}
-  .logo-text em{font-style:normal;color:var(--brand);}
   .btn{
     display:inline-flex;align-items:center;justify-content:center;gap:10px;
     padding:clamp(11px,2vw,14px) clamp(20px,4vw,28px);border-radius:var(--radius-pill);
@@ -222,7 +210,6 @@
   .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);transition-delay:var(--d,0ms);}
   .js .rv.in{opacity:1;transform:none;}
   @media (max-width:480px){
-    .header-inner .btn{padding:10px 16px;font-size:13px;}
     .cta-row .btn{width:100%;}
   }
   @media (prefers-reduced-motion:reduce){
@@ -233,19 +220,7 @@
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap header-inner">
-    <a href="/" class="logo" aria-label="ege easy — на главную">
-      <span class="logo-badge" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="logo-text">ege <em>easy</em></span>
-    </a>
-    <nav aria-label="Действия">
-      <a class="btn btn-primary" href="/dashboard">начать подготовку</a>
-    </nav>
-  </div>
-</header>
+<div data-ege-header></div>
 
 <main>
   <section class="hero">
@@ -378,6 +353,7 @@
 </main>
 
 <div data-ege-footer></div>
+<script defer src="/js/site-header.js?v=1"></script>
 <script defer src="js/footer.js?v=5"></script>
 
 <script>
