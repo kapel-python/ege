@@ -3141,10 +3141,21 @@ function openSkillModal(skillId) {
     </div>` : ""}
 
     <div class="skill-modal__actions">
-      ${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${esc(lessons[0].id)}')">${icon("bulb")} ${Store.state.completedLessons && Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}
-      ${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${esc(mission.id)}')">${icon("target")} Практика</button>` : ""}
-      ${!mission && asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${esc(skillId)}')">Практика</button>` : ""}
-      ${!mission && !asSafeArray(DataAPI.practiceTasksBySkill(skillId)).length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}
+      ${(() => {
+        const bank = asSafeArray(DataAPI.practiceTasksBySkill(skillId));
+        // Тема из одних сочинений (урока нет и не будет — там только практика):
+        // главная кнопка ведёт в практику сочинений, а не в несуществующий
+        // урок. Сочинения узнаём по типу заданий; в лёгком каталоге типа нет
+        // (стабы), тогда это обычная «Практика» — маршрутизация всё равно
+        // верная: startSkillPractice после деталей выберет визит сочинения.
+        if (!lessons.length && !mission && bank.length && skillIsEssayOnly(skillId)) {
+          return `<button class="btn btn--primary" onclick="closeModal();startSkillPractice('${esc(skillId)}')">${icon("pen")} Написать сочинение</button>`;
+        }
+        return `${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${esc(lessons[0].id)}')">${icon("bulb")} ${Store.state.completedLessons && Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}`
+          + `${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${esc(mission.id)}')">${icon("target")} Практика</button>` : ""}`
+          + `${!mission && bank.length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${esc(skillId)}')">Практика</button>` : ""}`
+          + `${!mission && !bank.length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}`;
+      })()}
     </div>`, "Информация о теме");
 }
 
@@ -4723,6 +4734,12 @@ async function essayStatusesRefresh() {
    по порядку essayOrderedIds (недоведённые, затем ненаписанные, затем
    проверенные от давнего к свежему — новый круг начинается сам). */
 async function startEssayPractice(skillId) {
+  // Полные типы нужны СРАЗУ: в лёгком каталоге лежат стабы без type, и без
+  // деталей нельзя отличить визит сочинения от обычной тренировки. Кэш
+  // после первой загрузки делает повторные входы бесплатными.
+  try {
+    if (typeof Store !== "undefined" && Store.ensureDetails) await Store.ensureDetails();
+  } catch (_) {}
   const tasks = orderedTasks(DataAPI.practiceTasksBySkill(skillId));
   if (!tasks.length) {
     toast("В этой теме пока нет заданий для практики", "", "bulb");
@@ -6899,9 +6916,47 @@ function essayBranchToBottom(slot, essaySkills) {
   if (target && target.nextElementSibling) list.appendChild(target);
 }
 
+/* Тема из одних сочинений: банк непуст и каждое задание с ИЗВЕСТНЫМ типом —
+   long_text. Стабы лёгкого каталога типа не несут (неизвестный тип зачёт
+   не ломает, но и не подтверждает: нужен хотя бы один известный long_text,
+   иначе это обычная тема). Маршрутизация от ответа не зависит: что
+   «Написать сочинение», что «Практика» идут через startSkillPractice,
+   который после деталей выбирает визит сочинения сам. */
+function skillIsEssayOnly(skillId) {
+  let bank = [];
+  try {
+    bank = asSafeArray(DataAPI.practiceTasksBySkill(skillId));
+  } catch (_) {
+    return false;
+  }
+  if (!bank.length) return false;
+  let knownLong = 0;
+  for (const t of bank) {
+    const full = (t && (t.type || t.answerType)) ? t : DataAPI.task(t && t.id);
+    if (!full || (!full.type && !full.answerType)) continue;
+    if (!isLongTextTask(full)) return false;
+    knownLong++;
+  }
+  return knownLong > 0;
+}
+
 function startFirstEssay() {
   const snap = EssayHistory.cache;
-  const skill = snap && snap.essaySkills && snap.essaySkills[0];
+  const skills = snap && Array.isArray(snap.essaySkills)
+    ? snap.essaySkills.filter((s) => typeof s === "string" && s)
+    : [];
+  // Первый навык С БАНКОМ, а не первый из списка: серверный список мог
+  // отдать призрак прошлого (удалённая тема, живая в БД из-за прогресса),
+  // у которого в клиентском каталоге пусто — и кнопка давала тост вместо
+  // практики. Призраков в списке уже нет (сервер режет по файлам каталога),
+  // это вторая стена на случай рассинхрона кэшей.
+  const skill = skills.find((id) => {
+    try {
+      return DataAPI.practiceTasksBySkill(id).length > 0;
+    } catch (_) {
+      return false;
+    }
+  }) || skills[0];
   if (!skill) { go("training"); return; }
   try {
     const p = startEssayPractice(skill);

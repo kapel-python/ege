@@ -3895,6 +3895,21 @@ def essay_history_list(conn: sqlite3.Connection, user_id: int | None, subject: s
         "SELECT DISTINCT t.skill_id FROM tasks t JOIN skills s ON s.id=t.skill_id"
         " WHERE s.subject=? AND t.task_type='long_text' LIMIT 20",
         (subject,)).fetchall()] if has_essay else []
+    # Призраки прошлого: удалённая из файлов каталога тема живёт в БД,
+    # пока на неё ссылается чужой прогресс (prune её осознанно не трогает),
+    # но в выдачу каталога она не попадает (_CATALOG_LIVE_IDS). Клиентский
+    # банк строится по выдаче, поэтому призрачный skill_id вёл кнопку
+    # «Написать следующее» в пустой банк и тост вместо практики (живой
+    # случай: russian_essay перед russian_essay_source). Режем по тому же
+    # правилу, что каталог: нет в файлах — нет и здесь. Карта None (вызов
+    # без install_catalog) — оставляем как есть, как в _build_catalog_payload.
+    try:
+        live_skills = (_CATALOG_LIVE_IDS.get(subject) or {}).get("skills")
+    except (AttributeError, TypeError):
+        live_skills = None
+    if live_skills is not None:
+        essay_skills = [s for s in essay_skills if s in live_skills]
+    has_essay = bool(essay_skills)
     rows = conn.execute(
         "SELECT s.id, s.task_id, s.word_count, s.client_id, s.evaluation_status,"
         " s.evaluation_result, s.created_at, s.evaluated_at,"
