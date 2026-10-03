@@ -772,8 +772,8 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-models__bar { display: flex; align-items: center; gap: 10px; }
 .a-models__empty { font-size: 12.5px; color: var(--muted); padding: 8px 0; }
 .a-model {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 7px 10px; cursor: pointer;
+  display: flex; align-items: center; flex-wrap: wrap; row-gap: 5px; column-gap: 8px;
+  width: 100%; padding: 8px 10px; cursor: pointer;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--text-2);
   font: inherit; font-size: 12.5px; text-align: left;
@@ -782,7 +782,7 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-model:hover { border-color: var(--accent); background: var(--surface); }
 .a-model:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .a-model--picked { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
-.a-model__name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-model__name { order: -1; flex: 1 1 100%; overflow-wrap: anywhere; white-space: normal; }
 .a-model__pick { font-size: 11.5px; color: var(--muted); opacity: 0; transition: opacity 0.12s; }
 .a-model:hover .a-model__pick { opacity: 1; }
 
@@ -832,10 +832,10 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-ping__timer { font-family: var(--mono); color: var(--text); }
 .a-ping__body { padding: 8px; max-height: 420px; overflow-y: auto; }
 
-.a-ranks { display: flex; flex-direction: column; gap: 4px; }
+.a-ranks { display: flex; flex-direction: column; gap: 6px; }
 .a-rank {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 7px 10px; cursor: pointer;
+  display: flex; align-items: center; flex-wrap: wrap; row-gap: 6px; column-gap: 8px;
+  width: 100%; padding: 8px 10px; cursor: pointer;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--surface); color: var(--text-2);
   font: inherit; font-size: 12.5px; text-align: left;
@@ -857,7 +857,11 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .a-rank { animation: none; }
 }
 .a-rank__no { flex: 0 0 22px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.a-rank__name { flex: 0 1 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Название модели — всегда целиком, своей строкой сверху: в одну линию длинные
+   id упирались в max-width и обрезались после точки («anthropic/claude…»), и
+   было непонятно, что именно проверялось. Вторая строка — номер, точка,
+   полоса и задержка. Перенос длинных id без пробелов — overflow-wrap. */
+.a-rank__name { order: -1; flex: 1 1 100%; max-width: none; overflow-wrap: anywhere; white-space: normal; }
 .a-rank__bar { flex: 1 1 auto; min-width: 40px; height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
 .a-rank__bar > i {
   display: block; height: 100%; border-radius: 3px;

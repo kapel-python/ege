@@ -3981,7 +3981,14 @@ async function render() {
     if (!Prov.data) await screenProviders(true);
     screenProviderNew();
   } else if (route.name === "providers") {
-    if (route.param) await screenProviderPage(safeDecode(route.param));
+    if (route.param) {
+      // Прямой заход/перезагрузка на странице провайдера: список ещё не
+      // загружен, а screenProviderPage ищет в нём — без молчаливой догрузки
+      // всегда получали «Провайдер не найден». Тот же приём, что у providers-new.
+      if (!Prov.data) await screenProviders(true);
+      if (!A.session) return;
+      await screenProviderPage(safeDecode(route.param));
+    }
     else await screenProviders();
   } else if (route.name === "blocked") {
     await screenBlocked();

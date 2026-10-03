@@ -419,6 +419,14 @@ async function shot(page, name) {
     await admin.click("#provSlotSeg .a-seg2__btn[data-slot='']");
     t("в панели текущая модель", await admin.inputValue("#provDetailModel") === "alpha-pro");
     t("кнопка сброса есть", await admin.locator("#provResetBtn").count() === 1);
+    // Перезагрузка прямо на странице провайдера: список в памяти пуст, и без
+    // молчаливой догрузки страница всегда показывала «Провайдер не найден».
+    await admin.reload();
+    await admin.waitForSelector("#provDetailModel", { timeout: 15000 });
+    t("перезагрузка на странице провайдера не даёт «не найден»",
+      (await admin.locator(".a-page-title").innerText()).includes("Фейковый шлюз")
+      && await admin.locator("text=Провайдер не найден").count() === 0,
+      await admin.locator(".a-page-title").innerText());
     await openSection(admin);
     const probeCallsBefore = admin.provCalls.length;
     await admin.click(`${cardOf("fakegw")} .a-prov-actions button`);
@@ -670,6 +678,20 @@ async function shot(page, name) {
     t("у работающих моделей видна задержка в мс и полоса",
       modelPings.filter((p) => p.ok).every((p) => p.label.includes("мс") && p.bar),
       JSON.stringify(modelPings.filter((p) => p.ok).map((p) => p.label)));
+    // Название модели — всегда целиком: раньше строка резалась после точки
+    // (max-width + ellipsis), и было непонятно, что именно проверялось.
+    t("название модели в рейтинге — целиком, без обрезки", await admin.evaluate(() => {
+      const names = Array.from(document.querySelectorAll("#provModelPingResult .a-rank__name"));
+      if (!names.length) return false;
+      return names.every((el) => {
+        const cs = getComputedStyle(el);
+        return cs.textOverflow !== "ellipsis" && cs.whiteSpace === "normal"
+          && el.scrollWidth <= el.clientWidth + 2;
+      });
+    }), await admin.evaluate(() => Array.from(document.querySelectorAll("#provModelPingResult .a-rank__name")).map((el) => {
+      const cs = getComputedStyle(el);
+      return `${el.textContent.trim()}|${cs.textOverflow}|${cs.whiteSpace}|${el.scrollWidth}x${el.clientWidth}`;
+    }).join(" ; ")));
     t("сводка честно считает проверенные модели",
       (await admin.locator("#provModelPingResult .a-ping__head").innerText()).includes("2")
       && (await admin.locator("#provModelPingResult .a-ping__head").innerText()).includes("ответили"),
