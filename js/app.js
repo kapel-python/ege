@@ -6844,6 +6844,15 @@ async function essayPathSlotLoad() {
     if ((Store.subject || "") !== (snap.subject || Store.subject)) return;
   } catch (_) {}
   live.dataset.done = "1";
+  // Задание-сочинение — в самом низу карты, прямо над карточкой истории:
+  // группа целиком из сочинений едет последней независимо от порядка
+  // категорий в каталоге. Какие навыки — сочинения, говорит сервер
+  // (essaySkills), поэтому ни одного id предмета в коде нет и новый
+  // предмет с long_text подхватится сам. Смешанную группу не трогаем —
+  // категорию пополам не режем.
+  try {
+    essayBranchToBottom(live, snap.essaySkills || []);
+  } catch (_) {}
   const ready = essayReadyItems(snap);
   const avg = essayAvg1(ready.map((it) => Number(it.totalScore)));
   const sub = snap.total === 0
@@ -6861,6 +6870,33 @@ async function essayPathSlotLoad() {
       </div>
       <div class="essay-path-card__go" aria-hidden="true">${icon("arrow")}</div>
     </div>`;
+}
+
+/* Группа сочинения — последняя в карте Пути. Id навыков-сочинений
+   приходят с сервера (essaySkills), сравниваем по ним, а не по названиям.
+   Узел несёт id в onclick вида go('skill', '<id>'): парсим его, классам
+   и порядку внутри группы не мешаем. Уже последняя — appendChild ничего
+   не меняет. */
+function essayBranchToBottom(slot, essaySkills) {
+  if (!slot || !Array.isArray(essaySkills) || !essaySkills.length) return;
+  const essay = new Set(essaySkills.map((s) => String(s)));
+  const root = slot.closest ? slot.closest(".screen, main, body") : null;
+  const list = root && root.querySelector ? root.querySelector(".tree-branches") : null;
+  if (!list) return;
+  const branches = list.querySelectorAll ? list.querySelectorAll(":scope > .tree-branch") : [];
+  let target = null;
+  for (const branch of branches) {
+    const nodes = branch.querySelectorAll ? branch.querySelectorAll(".tree-node") : [];
+    if (!nodes.length) continue;
+    let allEssay = true;
+    for (const node of nodes) {
+      const action = node.getAttribute ? (node.getAttribute("onclick") || "") : "";
+      const m = /go\('skill',\s*'([^']+)'\)/.exec(action);
+      if (!m || !essay.has(m[1])) { allEssay = false; break; }
+    }
+    if (allEssay) { target = branch; break; }
+  }
+  if (target && target.nextElementSibling) list.appendChild(target);
 }
 
 function startFirstEssay() {
