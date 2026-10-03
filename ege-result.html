@@ -258,15 +258,23 @@
   .share-btn {
     display: inline-flex; align-items: center; gap: 8px;
     background: var(--surface); color: var(--text);
-    border: 1px solid var(--border); border-radius: 12px; padding: 10px 20px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 11px 22px;
     font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
     transition: border-color .15s ease, transform .1s ease, background .2s ease;
   }
   .share-btn:hover { border-color: var(--purple-border); }
   .share-btn:active { transform: scale(.98); }
-  .share-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .share-btn:disabled { opacity: .6; cursor: wait; }
   .share-btn:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
   .share-btn svg { width: 16px; height: 16px; flex: none; }
+  /* Крутилка создания живёт в самой кнопке: окно шаринга открывается один
+     раз — сразу с готовой ссылкой, без промежуточного спиннера-модалки
+     (тот давал видимое дёргание при первом нажатии). */
+  .share-btn__spin {
+    width: 15px; height: 15px; flex: none; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--purple);
+    animation: recheck-spin .9s linear infinite;
+  }
   .share-public {
     display: flex; gap: 10px; align-items: flex-start;
     background: var(--purple-soft); border: 1px solid var(--purple-border);
@@ -281,21 +289,34 @@
      Esc здесь НЕТ осознанно: ссылка остаётся в открытом доступе, и закрыть
      окно можно только явной кнопкой «Готово» — иначе её легко потерять,
      а доступ останется открытым. */
-  .share-link-box { display: flex; gap: 8px; margin-top: 14px; }
+  /* Поле ссылки — единая пилюля: текст слева, заливная кнопка справа.
+     Отдельных прямоугольников больше нет. */
+  .share-link-box {
+    display: flex; align-items: center; gap: 4px; margin-top: 14px;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-2); padding: 5px 5px 5px 16px;
+    transition: border-color .15s ease;
+  }
+  .share-link-box:focus-within { outline: 2px solid var(--purple); outline-offset: 1px; border-color: var(--purple-border); }
   .share-link-input {
-    flex: 1; min-width: 0; padding: 10px 12px; border-radius: 12px;
-    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    flex: 1; min-width: 0; border: none; background: transparent; color: var(--text);
     font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+    padding: 8px 4px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .share-link-input:focus { outline: 2px solid var(--purple); outline-offset: 1px; border-color: var(--purple-border); }
+  .share-link-input:focus { outline: none; }
   .share-copy-btn {
     flex: none; display: inline-flex; align-items: center; gap: 6px;
-    background: var(--purple); color: #fff; border: none; border-radius: 12px;
-    padding: 10px 16px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    background: var(--purple); color: #fff; border: none; border-radius: 999px;
+    padding: 10px 18px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    transition: transform .1s ease, background .15s ease;
   }
+  .share-copy-btn:hover { filter: brightness(1.06); }
   .share-copy-btn:active { transform: scale(.98); }
   .share-copy-btn svg { width: 15px; height: 15px; }
+  /* Само окно шаринга круглее системного .dlg (20px): это отдельное
+     «подарочное» окно, а не очередное подтверждение. */
+  .dlg--share { border-radius: 26px; }
   .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
   .share-danger { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px; }
   .share-danger-btn {
@@ -306,12 +327,12 @@
   .share-danger-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); }
   .share-confirm-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .share-revoke-btn {
-    background: var(--red); color: #fff; border: none; border-radius: 12px;
-    padding: 9px 16px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    background: var(--red); color: #fff; border: none; border-radius: 999px;
+    padding: 9px 18px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer;
   }
   .share-revoke-btn:disabled { opacity: .5; cursor: not-allowed; }
   @media (max-width: 480px) {
-    .share-link-box { flex-direction: column; }
+    .share-link-box { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 8px; }
     .share-copy-btn { justify-content: center; }
   }
 
@@ -1738,7 +1759,7 @@ function closeShareModal() {
 function openShareLinkModal(token) {
   const url = shareAbsUrl(token);
   openShareModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Ссылка на результат">
+      <div class="dlg dlg--share" role="dialog" aria-modal="true" aria-label="Ссылка на результат">
         <div class="dlg__eyebrow">Доступ по ссылке</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">${SHARE_SVG}</div>
@@ -1838,7 +1859,7 @@ async function shareDoRevoke() {
 
 function openShareRevokedModal() {
   openShareModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Ссылка удалена">
+      <div class="dlg dlg--share" role="dialog" aria-modal="true" aria-label="Ссылка удалена">
         <div class="dlg__eyebrow">Доступ по ссылке</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">
@@ -1857,21 +1878,21 @@ function openShareRevokedModal() {
       </div>`);
 }
 
-function openShareLoadingModal() {
-  openShareModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Создаём ссылку">
-        <div class="dlg__eyebrow">Доступ по ссылке</div>
-        <div style="padding:18px 0 4px">
-          <div class="recheck-spinner" aria-hidden="true"></div>
-          <p class="recheck-load-text">Создаём ссылку…</p>
-          <p class="recheck-load-sub">Окно закроется само, когда ссылка будет готова.</p>
-        </div>
-      </div>`);
+// Вернуть кнопку шаринга из состояния «Создаём…»: снять спиннер,
+// разблокировать, подпись — по состоянию ссылки («Моя ссылка» после успеха).
+function shareRestoreBtn(btn, btnLabel, prevLabel) {
+  if (btn) {
+    btn.disabled = false;
+    const spin = btn.querySelector(".share-btn__spin");
+    if (spin) spin.remove();
+  }
+  if (btnLabel) btnLabel.textContent = prevLabel;
+  updateShareUI();
 }
 
 function openShareError(title, text) {
   openShareModal(`
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="dlg dlg--share" role="dialog" aria-modal="true" aria-label="${esc(title)}">
         <div class="dlg__eyebrow">Доступ по ссылке</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">
@@ -1905,9 +1926,18 @@ async function onShareClick(forceCreate) {
     return;
   }
   shareState.busy = true;
+  // Создание — доли секунды (один INSERT), поэтому отдельного окна загрузки
+  // нет: крутилка едет прямо в кнопке, а модалка открывается один раз —
+  // сразу с готовой ссылкой. Промежуточный спиннер-модалка давал видимое
+  // дёргание при первом нажатии.
   const btn = document.getElementById("shareBtn");
-  if (btn) btn.disabled = true;
-  openShareLoadingModal();
+  const btnLabel = document.getElementById("shareBtnLabel");
+  const prevLabel = btnLabel ? btnLabel.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.insertAdjacentHTML("afterbegin", '<span class="share-btn__spin" aria-hidden="true"></span>');
+  }
+  if (btnLabel) btnLabel.textContent = "Создаём ссылку…";
   let res = null, data = {};
   try {
     res = await fetch("/api/essays/share", {
@@ -1919,13 +1949,13 @@ async function onShareClick(forceCreate) {
     data = await res.json().catch(() => ({}));
   } catch (err) {
     shareState.busy = false;
-    if (btn) btn.disabled = false;
+    shareRestoreBtn(btn, btnLabel, prevLabel);
     openShareError("Нет связи с сервером",
       "Проверь интернет и попробуй ещё раз. Ссылка не создана.");
     return;
   }
   shareState.busy = false;
-  if (btn) btn.disabled = false;
+  shareRestoreBtn(btn, btnLabel, prevLabel);
   if (!res.ok || !data.token) {
     if (res.status === 401) {
       openShareError("Нужно войти",

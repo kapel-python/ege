@@ -177,10 +177,31 @@ async function main() {
     t("подпись по умолчанию «Поделиться результатом»", /Поделиться результатом/.test(label || ""), (label || "").trim());
     const btnClass = btn ? await btn.getAttribute("class") : "";
     t("кнопка ghost, не вторая синяя", /share-btn/.test(btnClass || "") && !/retry-btn/.test(btnClass || ""));
+    const radius = await page.evaluate(() => getComputedStyle(document.getElementById("shareBtn")).borderRadius);
+    t("кнопка-пилюля", radius === "999px", radius);
 
     section("S2 создание и незакрываемое окно");
+    // Дёргания быть не должно: первое же открывшееся окно — уже с готовой
+    // ссылкой, промежуточного спиннера-модалки нет.
+    await page.evaluate(() => {
+      window.__dlgFlash = [];
+      window.__dlgTimer = setInterval(() => {
+        const dlg = document.querySelector(".dlg");
+        window.__dlgFlash.push(dlg
+          ? (document.getElementById("shareLinkInput") ? "link" : "other")
+          : "none");
+      }, 50);
+    });
     await btn.click();
     await page.waitForSelector("#shareLinkInput", { timeout: 15000 });
+    await sleep(600);
+    const flash = await page.evaluate(() => {
+      clearInterval(window.__dlgTimer);
+      return window.__dlgFlash;
+    });
+    t("окно открывается сразу с готовой ссылкой (без промежуточного)",
+      !flash.includes("other"), [...new Set(flash)].join(","));
+    t("окно скруглено (dlg--share)", (await page.$(".dlg.dlg--share")) !== null);
     const linkVal = await page.$eval("#shareLinkInput", (el) => el.value);
     const m = /\/s\/([A-Za-z0-9]{10})$/.exec(linkVal || "");
     t("в поле абсолютная ссылка /s/<token>", !!m && /^http/.test(linkVal || ""), linkVal);
