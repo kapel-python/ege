@@ -36,8 +36,8 @@
      и хранит его в базе рядом с ответом, поэтому история показывает те же
      кнопки, что были вживую. Нет списка — нет кнопок, а не дежурный набор. */
   var PLUS_D = "M12 5v14M5 12h14";
-  // Корзина, а не крестик: в эталоне удаление чата — корзина, и «×» рядом
-  // с текстом «Раздел бесплатный» читался как «закрыть панель».
+  // Корзина, а не крестик: в эталоне удаление чата — корзина, а «×»
+  // рядом с пунктом меню читался бы как «закрыть панель».
   var TRASH_D = "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3";
   var root = null, ui = {};
   /* Пока рисуется переписка из готового массива, внутренние вызовы доводки
@@ -637,15 +637,7 @@
     newBtn.addEventListener("click", newChat);
     var list = el("ul", "agent__list");
     list.id = "agent-threads";
-    var foot = el("div", "agent__foot");
-    foot.appendChild(el("small", "", "Раздел бесплатный"));
-    var del = el("button", "agent__del", null);
-    del.type = "button"; del.id = "agent-del";
-    del.setAttribute("aria-label", "Удалить чат"); del.title = "Удалить чат";
-    del.innerHTML = svgRaw(TRASH_D, "2");
-    del.addEventListener("click", deleteCurrent);
-    foot.appendChild(del);
-    side.appendChild(head); side.appendChild(newBtn); side.appendChild(list); side.appendChild(foot);
+    side.appendChild(head); side.appendChild(newBtn); side.appendChild(list);
 
     var main = el("div", "agent__main");
     var bar = el("div", "agent__toolbar");
@@ -907,8 +899,8 @@
       ctx.setAttribute("role", "menu");
       ctx.hidden = true;
       ctx.appendChild(ctxItem("Открыть чат", icon("arrow"), "", function () { selectThread(t.id); }));
-      // Корзина, а не крестик: «×» рядом с «Открыть чат» читался как «закрыть
-      // панель» (та же путаница, что была с кнопкой удаления в подвале рейла).
+      // Корзина, а не крестик: «×» рядом с «Открыть чат» читался как
+      // «закрыть панель».
       ctx.appendChild(ctxItem("Удалить чат", svgRaw(TRASH_D, "2.2"), "agent__ctx-item--danger", function () { deleteThread(t.id); }));
       li.appendChild(b); li.appendChild(more); li.appendChild(ctx);
       li._armed = armLongPress(li, t.id);
@@ -1292,12 +1284,6 @@
       say("Не удалось удалить чат");
     }).catch(function () { say("Нет соединения"); });
   }
-  function deleteCurrent() {
-    var t = currentThread();
-    if (!t) return;
-    deleteThread(t.id);
-  }
-
   /* ---------- сообщения ---------- */
   function clearFeed() { if (ui.live) ui.live.textContent = ""; }
   /* Лоадер «Читаем переписку…» (.agent__boot) живёт только пока лента пуста:

@@ -393,6 +393,22 @@ check("рейл: заголовок своей строкой, «Новый ча
   /\.agent__threads-head \.section-title \{[^}]*margin: 0/.test(spaCss)
   && prop(rule(spaCss, ".agent__new"), "width") === "100%"
   && spaCode.includes("side.appendChild(newBtn)"));
+/* Рейл скрыт по умолчанию везде (на десктопе 264px съедали половину чата,
+   а закрыть было нечем) и открывается бургером в тулбаре; выбор чата
+   закрывает обратно. Подвала «Раздел бесплатный» с корзиной нет нигде —
+   удаление живёт только в меню чата «Удалить чат». */
+check("рейл скрыт по умолчанию и открывается бургером (и на десктопе)",
+  /\.agent__threads \{[^}]*display: none/.test(spaCss)
+  && /\.agent\.nav-open \.agent__threads \{[^}]*display: flex/.test(spaCss)
+  && !/\.agent__menu \{ display: none/.test(spaCss)
+  && spaCode.includes("nav(open)")
+  && (spaCode.match(/nav\(false\)/g) || []).length >= 3,
+  rule(spaCss, ".agent__threads"));
+check("подвала «Раздел бесплатный» с корзиной нет",
+  !spaCode.includes("Раздел бесплатный") && !spaCode.includes("agent__foot")
+  && !spaCode.includes("deleteCurrent") && !spaCode.includes("agent-del")
+  && !/\.agent__foot \{/.test(spaCss) && !/\.agent__del \{/.test(spaCss)
+  && /ctxItem\("Удалить чат", svgRaw\(TRASH_D/.test(spaCode));
 check("у подсказок разные значки (эталон: галочка и вопрос)",
   spaCode.includes("ICON_TASKS") && spaCode.includes("ICON_HELP")
   && /\.agent__qr svg \{[^}]*var\(--accent-ink\)/.test(spaCss));

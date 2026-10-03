@@ -71,14 +71,18 @@
   min-height: 0; overflow: hidden;
 }
 /* Рейл: своя подложка, как в эталоне — иначе он сливается с лентой, потому
-   что у приложения этот оттенок уже занят боковой навигацией. */
+   что у приложения этот оттенок уже занят боковой навигацией.
+   По умолчанию СКРЫТ и на десктопе: 264px постоянного списка съедали почти
+   половину ширины чата, а закрыть его было нечем. Открывается бургером
+   в тулбаре (.agent__menu), выбор чата закрывает обратно (nav(false)). */
 .agent__threads {
   width: 264px; flex: none;
   border-right: 1px solid var(--border);
   background: var(--sidebar-bg);
-  display: flex; flex-direction: column; gap: 16px; padding: 20px 16px;
+  display: none; flex-direction: column; gap: 16px; padding: 20px 16px;
   min-height: 0; position: relative;
 }
+.agent.nav-open .agent__threads { display: flex; }
 .agent__threads-head { display: flex; align-items: center; gap: 12px; }
 /* Общий .section-title несёт margin: 34px 0 14px (отступы разделов
    страницы) и weight 700 — здесь он сдвигал заголовок рейла вниз и рвал
@@ -163,16 +167,6 @@
 .agent__msgmenu-i svg { width: 16px; height: 16px; flex: none; color: var(--agent-ink-3); }
 .agent__msgmenu-i:hover { background: var(--soft-hover); }
 .agent__msg-user, .agent__answer { cursor: default; }
-.agent__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
-.agent__foot small { font-size: 12px; color: var(--agent-ink-3); }
-.agent__del {
-  display: grid; place-items: center; width: 38px; height: 38px; flex: none; cursor: pointer;
-  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-3);
-  transition: background .15s, color .15s, transform .15s;
-}
-.agent__del svg { width: 18px; height: 18px; }
-.agent__del:hover { background: var(--danger-soft); color: var(--danger-ink); }
-.agent__del:active { transform: scale(.98); }
 /* Список тредов: появление нового чата и его удаление — движением высоты,
    иначе список дёргается на месте. */
 /* flex: 0 0 auto — ЖИЗНЕННО. Список сделан flex-колонкой, а его элементы по
@@ -192,7 +186,11 @@
   display: flex; flex-direction: column;
 }
 .agent__toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); flex: none; }
-.agent__menu { display: none; }
+/* Бургер виден и на десктопе: рейл по умолчанию скрыт, и без кнопки
+   в тулбаре список чатов было бы не открыть. */
+.agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-2); }
+.agent__menu svg { width: 20px; height: 20px; }
+.agent__menu:hover { background: var(--soft-hover); color: var(--text); }
 /* Заголовок хода — как в эталоне: 18px, плотный интерлиньяж. На телефоне
    16px (правило ниже в медиазапросе). */
 .agent__title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -564,7 +562,7 @@ a.agent__link--int { border-style: dashed; }
     transform: translateX(-100%); visibility: hidden;
     transition: transform .25s ease, visibility .25s;
   }
-  .agent.nav-open .agent__threads { transform: none; visibility: visible; }
+  .agent.nav-open .agent__threads { display: flex; transform: none; visibility: visible; }
   .agent__scrim {
     display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim);
     opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s;
@@ -591,8 +589,7 @@ a.agent__link--int { border-style: dashed; }
   .agent__quota { width: 40px; height: 40px; font-size: 13.5px; }
   .agent__quota .q-track, .agent__quota .q-ring { stroke-width: 3.4; }
   /* Тач-цели и шрифт поля: 16px не даёт iOS зумить страницу при фокусе. */
-  .agent__thread, .agent__send, .agent__stop, .agent__del, .agent__menu, .agent__new, .agent__copy { min-height: 44px; }
-  .agent__del { width: 44px; height: 44px; }
+  .agent__thread, .agent__send, .agent__stop, .agent__menu, .agent__new, .agent__copy { min-height: 44px; }
   /* Вход в меню чата на телефоне: «⋯» ВИДНА (долгое нажатие осталось как
      быстрый путь, но найти его нельзя — жест надо угадать). Раньше кнопка
      была display:none, и меню открывалось только удержанием 500 мс.

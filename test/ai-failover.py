@@ -358,6 +358,112 @@ def main() -> int:
             check("активный переключён на gptunnel", ai.active_provider() == "gptunnel")
 
             # ----------------------------------------------------------
+            section("Понижение: два подряд отказа — в конец очереди")
+            # ----------------------------------------------------------
+            reset()
+            calls = []
+
+            def flap(name, messages, **kw):
+                calls.append(name)
+                if name == "closerouter":
+                    raise ai.AIError("провайдер недоступен: TimeoutError")
+                return f"ok:{name}"
+
+            ai._chat_via = flap
+            ai.chat([{"role": "user", "content": "x"}])
+            check("первый отказ: порядок closerouter → gptunnel",
+                  calls == ["closerouter", "gptunnel"], calls)
+            check("после одного отказа понижения нет",
+                  ai._provider_demoted("closerouter") is False)
+            check("активный ушёл на живого gptunnel",
+                  ai.active_provider() == "gptunnel")
+            calls.clear()
+            ai.chat([{"role": "user", "content": "y"}])
+            check("здоровый активный идёт первым, упавший не дёргаем",
+                  calls == ["gptunnel"], calls)
+            # Оба лежат два раза подряд — оба понижены, порядок приоритетный.
+            ai._chat_via = both_dead
+            for _ in range(2):
+                try:
+                    ai.chat([{"role": "user", "content": "z"}])
+                except ai.AIError:
+                    pass
+            check("два подряд отказа понижают closerouter",
+                  ai._provider_demoted("closerouter") is True)
+            check("два подряд отказа понижают gptunnel",
+                  ai._provider_demoted("gptunnel") is True)
+            check("все понижены — порядок обычный приоритетный",
+                  ai._ordered_providers() == ["closerouter", "gptunnel"],
+                  ai._ordered_providers())
+            # Первый же успех снимает понижение — но только у ответившего:
+            # цепочка останавливается на первом успехе, второго не дёргают.
+            ai._chat_via = healthy
+            calls.clear()
+            ai.chat([{"role": "user", "content": "w"}])
+            check("успех снимает понижение у ответившего",
+                  ai._provider_demoted("closerouter") is False
+                  and ai._provider_demoted("gptunnel") is True
+                  and calls == ["closerouter"], calls)
+
+            # ----------------------------------------------------------
+            section("Probe с тремя провайдерами: поднимает высшего живого")
+            # ----------------------------------------------------------
+            # high мёртв, medium жив, активен low: старая проба пинала только
+            # high, падала и оставляла трафик на low. Новая обязана поднять
+            # medium — высшего из ответивших.
+            reset()
+            ai._app_config_write(ai._CUSTOM_KEY, {"third": {
+                "id": "third", "title": "Third",
+                "base_url": "https://third.example/v1", "model": "third-model",
+                "api_key": "sk-third-test", "auth": "bearer",
+                "use_wallet_balance": False, "merge_system": False,
+                "enabled": True}})
+            ai._app_config_write(ai._SLOTS_KEY,
+                                 {"high": "third", "medium": "closerouter",
+                                  "low": "gptunnel"})
+            ai.reset_providers_cache()
+            check("порядок — high → medium → low",
+                  ai.effective_priority() == ["third", "closerouter", "gptunnel"],
+                  ai.effective_priority())
+            calls.clear()
+
+            def high_mid_dead(name, messages, **kw):
+                calls.append(name)
+                if name in ("third", "closerouter"):
+                    raise ai.AIError("провайдер недоступен: TimeoutError")
+                return f"ok:{name}"
+
+            ai._chat_via = high_mid_dead
+            ai.chat([{"role": "user", "content": "x"}])
+            check("при двух мёртвых активен выживший low",
+                  ai.active_provider() == "gptunnel", ai.active_provider())
+
+            def high_dead(name, messages, **kw):
+                calls.append(name)
+                if name == "third":
+                    raise ai.AIError("провайдер недоступен: TimeoutError")
+                return f"ok:{name}"
+
+            ai._chat_via = high_dead
+            calls.clear()
+            t0 = time.time()
+            check("проба нашла живого medium и подняла его",
+                  ai.probe_tick(now=t0 + ai.PROBE_INTERVAL_SEC + 1) is True)
+            check("проба шла по кандидатам сверху вниз",
+                  calls == ["third", "closerouter"], calls)
+            check("активен поднятый medium",
+                  ai.active_provider() == "closerouter", ai.active_provider())
+            # Чистим трёхпровайдерную сцену: дальше тест живёт на паре
+            # closerouter/gptunnel, чужие слоты ему не нужны.
+            ai._app_config_write(ai._CUSTOM_KEY, {})
+            ai._app_config_write(ai._SLOTS_KEY,
+                                 {"high": None, "medium": None, "low": None})
+            ai.reset_providers_cache()
+            check("после чистки порядок снова кодовый",
+                  ai.effective_priority() == ["closerouter", "gptunnel"],
+                  ai.effective_priority())
+
+            # ----------------------------------------------------------
             section("Системные обращения: смена провайдера попадает в ленту админа")
             # ----------------------------------------------------------
             # Роутер только сообщает факт; собирает обращение сервер. Здесь

@@ -19,11 +19,15 @@ DEFAULT_MODEL — the EGE_ prefix wins when both are set). chat() tries the
 active provider first; an upstream failure (balance, auth, timeout, HTTP
 error) silently retries on the next configured provider inside the same
 request, and the router state in app_config (key "ai_router") remembers who
-is active so later requests skip the broken one. A background loop
-(start_failover_loop, EGE_AI_PROBE_INTERVAL_SEC, default 15 min) pings the
-preferred provider with a one-token "привет" ONLY while the fallback is
-active (probe_tick returns immediately when the preferred provider already is)
-and switches back on success. A provider without a key is simply skipped.
+is active so later requests skip the broken one. Two mechanisms keep the
+order honest: a provider with two consecutive failures sinks to the end of
+the attempt queue (ai_router field "fails", cleared by the first success),
+so later requests try the living ones first instead of waiting out its
+timeout; and a background loop (start_failover_loop,
+EGE_AI_PROBE_INTERVAL_SEC, default 15 min) probes every configured provider
+strictly ABOVE the current active one with a one-token "привет" and promotes
+the best living candidate (probe_tick returns immediately when the preferred
+provider already is active). A provider without a key is simply skipped.
 The deterministic literacy block (K7–K10) talks to LanguageTool:
 EGE_LT_URL (default is the public API; production should point at a
 self-hosted server), EGE_LT_TIMEOUT_SEC. Deliberately stdlib-only: server.py
@@ -144,6 +148,13 @@ PROVIDER_PRIORITY: tuple[str, ...] = ("closerouter", "gptunnel")
 PROVIDER_SLOTS: tuple[str, ...] = ("high", "medium", "low")
 PROVIDER_SLOT_LABELS = {"high": "Высокий", "medium": "Средний", "low": "Низкий"}
 PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+# Сколько ПОДРЯД отказов переводят провайдера в конец очереди попыток.
+# Два, а не один: единичный отказ уже двигает активного (`_note_provider_failure`
+# переключает на следующего), а повторный подряд означает «лежит прямо сейчас» —
+# следующие запросы идут сначала на живых и не ждут его таймаут. Первый успех
+# (живой трафик или проба) снимает понижение. Счётчик живёт в ai_router (поле
+# "fails"), поэтому переживает рестарт и виден в строке состояния.
+PROVIDER_DEMOTE_AFTER = 2
 # Статус «используется прямо сейчас»: последний успех от живого трафика
 # учеников моложе этого окна. Не опрос, а метка времени — холостых запросов
 # ради статуса нет, свежие данные приезжают с обычным GET списка.
@@ -891,12 +902,25 @@ def active_provider() -> str | None:
 
 
 def _ordered_providers() -> list:
-    """Порядок попыток: активный, за ним остальные настроенные по приоритету."""
+    """Порядок попыток: активный первым, за ним остальные по приоритету.
+
+    Провайдер после PROVIDER_DEMOTE_AFTER подряд отказов едет в конец очереди:
+    следующие запросы сначала идут на живых и не ждут его таймаут (45 с), а
+    понижение снимается первым же успехом. Если понижены все — порядок обычный
+    приоритетный: пропускать некого, пробуем всех по очереди."""
     active = active_provider()
     if active is None:
         return []
-    return [active] + [name for name in effective_priority()
-                       if name != active and _provider_configured(name)]
+    priority = [name for name in effective_priority() if _provider_configured(name)]
+    if active not in priority:
+        priority = [active] + priority
+    if not any(_provider_demoted(n) for n in priority):
+        return [active] + [name for name in priority if name != active]
+    healthy = [n for n in priority if not _provider_demoted(n)]
+    sick = [n for n in priority if _provider_demoted(n)]
+    if active in healthy:
+        return [active] + [n for n in healthy if n != active] + sick
+    return healthy + sick
 
 
 # ---------------------------------------------------------------------------
@@ -1068,6 +1092,44 @@ def _note_judge_switch(frm: str, to: str, reason: str) -> None:
         pass
 
 
+def _fails_counts() -> dict:
+    """Счётчик подряд идущих отказов из ai_router (поле "fails").
+
+    Живёт в БД, а не в памяти: переживает рестарт и сбрасывается вместе со
+    строкой роутера. Гонка двух параллельных отказов может потерять один
+    инкремент — последствие лишь отложенное на один отказ понижение, а не
+    неверное решение (конкурентных вызовов не больше AI_MAX_CONCURRENCY)."""
+    try:
+        raw = _router_state().get("fails")
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        known = set(known_provider_ids())
+    except Exception:
+        known = set()
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not isinstance(value, int) or value <= 0:
+            continue
+        if known and key not in known:
+            continue  # удалённый провайдер — его счётчик мёртв
+        out[key] = value
+    return out
+
+
+def _provider_demoted(name: str) -> bool:
+    """Провайдер после PROVIDER_DEMOTE_AFTER подряд отказов — в конец очереди.
+
+    Проверка дешёвая (одно чтение кэша роутера) и стоит в hot path каждого
+    запроса через _ordered_providers."""
+    try:
+        return _fails_counts().get(str(name), 0) >= PROVIDER_DEMOTE_AFTER
+    except Exception:
+        return False
+
+
 def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None) -> None:
     """Отказ провайдера: записать и, если сломался активный, переключить его.
 
@@ -1081,6 +1143,12 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
         _provider_last_err[name] = (now_ms, f"{type(exc).__name__}: {exc}"[:300])
     patch: dict[str, Any] = {"lastError": f"{name}: {type(exc).__name__}: {exc}"[:300],
                              "lastErrorAt": now_ms, "lastProbeAt": now_ms}
+    # Подряд идущий отказ: первый уже двигает активного ниже, повторный подряд
+    # понижает провайдера в конец очереди (_provider_demoted), чтобы следующие
+    # запросы не ждали его таймаут. Успех обнуляет счётчик.
+    fails = _fails_counts()
+    fails[str(name)] = fails.get(str(name), 0) + 1
+    patch["fails"] = fails
     current = str(_router_state().get("active") or "")
     if switch_to and current in ("", name):
         patch["active"] = switch_to
@@ -1095,12 +1163,37 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
 
 
 def _note_provider_success(name: str) -> None:
-    """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления."""
+    """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления.
+
+    Заодно снимает понижение за отказы: ответивший провайдер снова в ротации
+    на своём приоритетном месте."""
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
         _provider_last_ok[name] = now_ms
+    patch: dict[str, Any] = {}
+    fails = _fails_counts()
+    if fails.pop(str(name), None) is not None:
+        patch["fails"] = fails
     if str(_router_state().get("active") or "") not in ("", name):
-        _router_update({"active": name, "updatedAt": now_ms})
+        patch["active"] = name
+        patch["updatedAt"] = now_ms
+    if patch:
+        _router_update(patch)
+
+
+def _note_probe_success(name: str) -> None:
+    """Фоновая проба прошла: снять понижение и отметить живость.
+
+    Активного НЕ меняет — его ставит вызыватель (probe_tick выбирает высшего
+    живого кандидата сам). Метки last_ok/last_err — те же, что ставит ручная
+    проба из админки: провайдер отвечал, и это правда про последние 60 секунд."""
+    now_ms = int(time.time() * 1000)
+    with _provider_health_lock:
+        _provider_last_ok[name] = now_ms
+    fails = _fails_counts()
+    if str(name) in fails:
+        fails.pop(str(name), None)
+        _router_update({"fails": fails})
 
 
 # ---------------------------------------------------------------------------
@@ -3329,7 +3422,17 @@ PROBE_WAKE_SEC = 60.0
 
 
 def probe_tick(now: float | None = None) -> bool:
-    """Одна проверка приоритетного провайдера. True — он восстановлен и активен.
+    """Проверить кандидатов выше активного и поднять лучший живой. True — смена.
+
+    Раньше проверялся только приоритетный (order[0]): при трёх провайдерах это
+    давало дыру — high и medium лежат, работает low, активным остаётся low, а
+    medium после восстановления никто не проверял, и трафик шёл на low первым.
+    Теперь кандидаты — все настроенные СТРОГО ВЫШЕ текущего активного, по
+    приоритету: первый ответивший становится активным. Активного и более низких
+    проба не дёргает: здоровье активного видно по живому трафику, а стаскивать
+    его вниз проба не должна (вниз двигает только отказ в запросе через
+    _note_provider_failure). Понижение за отказы проба снимает: ответивший
+    кандидат возвращается в ротацию на своё приоритетное место.
 
     Кроме основного роутера, возвращает на место судью проверки сочинений:
     он тоже залипает на запасном после отказа (см. judge_failover), и без этой
@@ -3342,6 +3445,15 @@ def probe_tick(now: float | None = None) -> bool:
     current = active_provider()
     if current == preferred:
         return judge_restored  # уже на приоритетном — проверять нечего
+    # Кандидаты на повышение — всё, что выше активного по приоритету. Активный
+    # вне списка (снятый слот, выключенный провайдер) — проверяем всех: хуже
+    # текущего положения всё равно не станет, лучший живой станет активным.
+    if current in order:
+        candidates = [n for n in order[:order.index(current)] if _provider_configured(n)]
+    else:
+        candidates = [n for n in order if n != current and _provider_configured(n)]
+    if not candidates:
+        return judge_restored
     moment = time.time() if now is None else float(now)
     try:
         last_probe = float(_router_state().get("lastProbeAt") or 0) / 1000.0
@@ -3355,21 +3467,28 @@ def probe_tick(now: float | None = None) -> bool:
     if not _ai_slots.acquire(timeout=1.0):
         return judge_restored
     try:
-        _chat_via(preferred, [{"role": "user", "content": "привет"}],
-                  timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
-    except Exception as exc:  # noqa: BLE001 — любой отказ: ждём ещё интервал
+        first_error = ""
+        for name in candidates:
+            try:
+                _chat_via(name, [{"role": "user", "content": "привет"}],
+                          timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
+            except Exception as exc:  # noqa: BLE001 — кандидат мёртв, следующий
+                if not first_error:
+                    first_error = f"{type(exc).__name__}: {exc}"[:300]
+                continue
+            _note_probe_success(name)
+            _router_update({"active": name, "updatedAt": now_ms,
+                            "lastProbeAt": now_ms, "lastProbeError": None})
+            _notify_system({"kind": "provider_restored", "from": str(current or ""),
+                            "to": name, "reason": "проба прошла", "at": now_ms})
+            print(f"EGE CORE ai: провайдер {name} восстановлен пробой — снова активен",
+                  flush=True)
+            return True
         _router_update({"lastProbeAt": now_ms,
-                        "lastProbeError": f"{type(exc).__name__}: {exc}"[:300]})
+                        "lastProbeError": first_error or "кандидаты недоступны"})
         return judge_restored
     finally:
         _ai_slots.release()
-    _router_update({"active": preferred, "updatedAt": now_ms,
-                    "lastProbeAt": now_ms, "lastProbeError": None})
-    _notify_system({"kind": "provider_restored", "from": str(current or ""),
-                    "to": preferred, "reason": "проба прошла", "at": now_ms})
-    print(f"EGE CORE ai: приоритетный провайдер {preferred} восстановлен — снова активен",
-          flush=True)
-    return True
 
 
 def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
