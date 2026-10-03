@@ -3577,6 +3577,15 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
         # что приватный public_id, но таблица и маршрут свои (/s/<token>),
         # поэтому отзыв не трогает приватную ссылку и наоборот. Каскады:
         # удаление сочинения и удаление аккаунта гасят ссылку сами.
+        if "open_count" not in _table_columns(conn, "essay_share_links"):
+            # Всего открытий публичной ссылки (включая повторы): растёт только
+            # на полном чтении, ping живости и свои просмотры не считает.
+            try:
+                conn.execute("ALTER TABLE essay_share_links"
+                             " ADD COLUMN open_count INTEGER NOT NULL DEFAULT 0")
+                conn.commit()
+            except sqlite3.Error:
+                pass
         conn.execute(
             """CREATE TABLE IF NOT EXISTS essay_share_links(
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3584,7 +3593,22 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
                    REFERENCES essay_submissions(id) ON DELETE CASCADE,
                  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                  token TEXT NOT NULL UNIQUE,
+                 open_count INTEGER NOT NULL DEFAULT 0,
                  created_at TEXT NOT NULL)"""
+        )
+        # Уникальные зрители ссылки: только HMAC отпечатка (кука+сеть+UA),
+        # сырого IP/UA здесь нет и не будет — тот же приём, что device_net.
+        # user_id дублирует владельца ради uniform-DELETE сброса «весь
+        # прогресс»; удаление ссылки/сочинения/аккаунта чистит каскадом.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS essay_share_viewers(
+                 link_id INTEGER NOT NULL
+                   REFERENCES essay_share_links(id) ON DELETE CASCADE,
+                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                 viewer_hash TEXT NOT NULL,
+                 first_seen TEXT NOT NULL,
+                 last_seen TEXT NOT NULL,
+                 PRIMARY KEY(link_id, viewer_hash))"""
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_essay_share_links_user"
@@ -3744,6 +3768,88 @@ def serialize_essay_row(row) -> dict:
         "evaluationProvider": row["evaluation_provider"] if "evaluation_provider" in row.keys() else None,
         "evaluationModel": row["evaluation_model"] if "evaluation_model" in row.keys() else None,
     }
+
+
+# Потолок зрителей на ссылку: ботнет с ротацией IP/UA иначе раздул бы
+# таблицу бесконечно. Дальше — только счётчик открытий (он безразмерный).
+ESSAY_SHARE_VIEWERS_MAX = 1000
+
+
+def essay_share_count_view(conn: sqlite3.Connection, handler,
+                           link_id: int, link_user_id: int,
+                           viewer_user_id: int | None) -> None:
+    """Зачесть одно открытие публичной ссылки. Никогда не бросает: статистика
+    не имеет права ронять чтение (замок, гонка, кривой заголовок — молча мимо).
+
+    Свои просмотры владелец не накручивает: открыл ссылку сам — счётчики стоят.
+    Ping живости и 404 сюда не доходят: зовёт только ветка полного чтения.
+    """
+    try:
+        if viewer_user_id is not None and int(viewer_user_id) == int(link_user_id):
+            return
+        fp_key, fp_net = ai_usage_device_fp(conn, handler)
+        try:
+            ua = str(handler.headers.get("User-Agent") or "").strip()[:200]
+        except (AttributeError, TypeError):
+            ua = ""
+        secret = device_fingerprint_secret(conn).encode("utf-8")
+        viewer_hash = hmac.new(
+            secret,
+            f"share-view:{fp_key or ''}:{fp_net or ''}:{ua}".encode("utf-8"),
+            hashlib.sha256).hexdigest()[:32]
+        own = not conn.in_transaction
+        try:
+            if own:
+                conn.execute("BEGIN IMMEDIATE")
+            cols = _table_columns(conn, "essay_share_links")
+            if "open_count" in cols:
+                conn.execute("UPDATE essay_share_links SET open_count=open_count+1 WHERE id=?",
+                             (int(link_id),))
+            try:
+                already = conn.execute("SELECT COUNT(*) FROM essay_share_viewers"
+                                       " WHERE link_id=?", (int(link_id),)).fetchone()[0]
+            except sqlite3.Error:
+                already = ESSAY_SHARE_VIEWERS_MAX
+            if int(already or 0) < ESSAY_SHARE_VIEWERS_MAX:
+                conn.execute(
+                    "INSERT INTO essay_share_viewers(link_id, user_id, viewer_hash,"
+                    " first_seen, last_seen) VALUES(?,?,?,?,?)"
+                    " ON CONFLICT(link_id, viewer_hash) DO UPDATE SET last_seen=excluded.last_seen",
+                    (int(link_id), int(link_user_id), viewer_hash, now_iso(), now_iso()))
+            if own:
+                conn.commit()
+        except Exception:
+            if own:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+    except Exception:
+        pass
+
+
+def essay_share_stats(conn: sqlite3.Connection, user_id: int,
+                      submission_id: int) -> dict | None:
+    """{opens, viewers} ссылки сочинения или None (ссылки нет / старая БД).
+    Только владелец: зовут приватные ветки (деталка, создание)."""
+    try:
+        link = conn.execute("SELECT id, open_count FROM essay_share_links"
+                            " WHERE submission_id=? AND user_id=?",
+                            (int(submission_id), int(user_id))).fetchone()
+    except sqlite3.Error:
+        return None
+    if link is None:
+        return None
+    try:
+        opens = int(link["open_count"] or 0) if "open_count" in link.keys() else 0
+    except (TypeError, ValueError):
+        opens = 0
+    try:
+        viewers = int(conn.execute("SELECT COUNT(*) FROM essay_share_viewers"
+                                   " WHERE link_id=?", (int(link["id"]),)).fetchone()[0] or 0)
+    except sqlite3.Error:
+        viewers = 0
+    return {"opens": max(0, opens), "viewers": max(0, viewers)}
 
 
 def essay_share_token_for(conn: sqlite3.Connection, submission_id: int, user_id: int) -> str:
@@ -4247,6 +4353,14 @@ def get_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str,
         data["shareToken"] = essay_share_token_for(conn, int(row["id"]), int(user_id))
     except (sqlite3.Error, TypeError, ValueError):
         data["shareToken"] = ""
+    # Счётчики ссылки — только владельцу и только если ссылка есть: гостям
+    # публичный маршрут их не отдаёт (по трафику чужой ссылки владельца
+    # не вычисляют).
+    try:
+        data["shareStats"] = essay_share_stats(conn, int(user_id), int(row["id"])) \
+            if data["shareToken"] else None
+    except (sqlite3.Error, TypeError, ValueError):
+        data["shareStats"] = None
     # Прошлая проверка этого текста для блока «Было → стало»: адаптируем тем
     # же essay_result_view, чтобы критерии совпали с текущей схемой экрана.
     # Нет прошлого (первая проверка) или оно не адаптировалось — поле честно
@@ -9126,6 +9240,9 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
                         # иначе сброшенный результат открывался бы по
                         # /s/<token> и после «весь прогресс».
                         "essay_share_links",
+                        # Зрители ссылки — тоже прогресс-данные владельца:
+                        # user_id на строках есть, удаляются тем же фильтром.
+                        "essay_share_viewers",
                        # activity_events читает наставник (fold_web op=history),
                        # поэтому после сброса ИИ продолжал бы рассказывать
                        # ученику про активность, которой уже нет.
@@ -11976,11 +12093,17 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     self.send_json({"error": "Делиться можно только проверенным сочинением",
                                     "code": "ESSAY_NOT_READY"}, 409, token=token); return
+                try:
+                    stats = essay_share_stats(conn, int(user_id), int(found["submissionId"]))
+                except (sqlite3.Error, TypeError, ValueError):
+                    stats = None
                 self.send_json({"ok": True, "token": res["token"],
                                 "url": "/s/" + res["token"],
                                 "created": bool(res.get("created")),
                                 "submissionId": int(found["submissionId"]),
-                                "publicId": str(found.get("publicId") or "")}, token=token)
+                                "publicId": str(found.get("publicId") or ""),
+                                "stats": stats if stats is not None else {"opens": 0, "viewers": 0}},
+                               token=token)
             except SubjectLockedError as exc:
                 try:
                     conn.rollback()
@@ -13281,6 +13404,16 @@ class Handler(BaseHTTPRequestHandler):
                                         "ref": rid}, 503); return
                     if not shared:
                         self.send_json({"error": "Ссылка не найдена или отозвана"}, 404); return
+                    # Учёт просмотра — best-effort и мимо своих: владелец,
+                    # проверяющий ссылку из-под своей сессии, счётчики не двигает.
+                    try:
+                        link = conn.execute("SELECT id, user_id FROM essay_share_links"
+                                            " WHERE token=?", (share_token,)).fetchone()
+                    except sqlite3.Error:
+                        link = None
+                    if link is not None:
+                        essay_share_count_view(conn, self, int(link["id"]),
+                                               int(link["user_id"]), user_id)
                     self.send_json({"ok": True, "shared": True, "submission": shared}); return
                 if path == "/api/essays":
                     # GET /api/essays?subject=&taskId= — последний submission

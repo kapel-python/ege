@@ -360,6 +360,15 @@
     }
   }
   .share-copied { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--green); }
+  /* Статистика ссылки: два числа (зрители/открытия) или одна строка «пока тихо». */
+  .share-stats { display: flex; gap: 8px; margin-top: 14px; }
+  .share-stat {
+    flex: 1 1 0; min-width: 0; background: var(--surface-2);
+    border-radius: 14px; padding: 10px 8px; text-align: center;
+  }
+  .share-stat__num { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .share-stat__label { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+  .share-stats--empty { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-soft); text-align: center; }
   @media (max-width: 480px) {
     .share-link-box { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 8px; }
     .share-copy-btn { justify-content: center; }
@@ -1041,8 +1050,14 @@ const shareState = {
   shareToken: "",      // чей-то /s/<token> из пути (режим shared)
   token: "",           // публичный токен ЭТОГО сочинения (владелец)
   publicId: "",        // приватный 10-значный id сочинения
+  stats: null,         // {opens, viewers} ссылки или null (ссылки нет)
   busy: false,
 };
+
+// Склонение для статистики: dynPlural уже есть на странице.
+function shareViewersText(v) {
+  return `Открыли ${v} ${dynPlural(v, "человек", "человека", "человек")}`;
+}
 
 function resultParams() {
   const q = new URLSearchParams(location.search);
@@ -1167,6 +1182,7 @@ async function fetchFromApi() {
   shareState.mode = "owner";
   shareState.token = String(body.submission.shareToken || "");
   shareState.publicId = String(body.submission.publicId || "");
+  shareState.stats = body.submission.shareStats || null;
   updateShareUI();
   return view;
 }
@@ -1185,7 +1201,13 @@ function updateShareUI() {
   wrap.hidden = false;
   if (shareState.token) {
     label.textContent = "Моя ссылка";
-    if (meta) meta.textContent = "Ссылка уже создана — открой и отправь кому угодно.";
+    // Компактная строка под кнопкой — только уникальные зрители (не
+    // обновления страницы): владельцу важно «смотрят ли», а не «сколько
+    // раз дёрнули». Детали (включая всего открытий) — в модалке.
+    const v = shareState.stats ? Math.max(0, Math.floor(Number(shareState.stats.viewers) || 0)) : null;
+    if (meta) meta.textContent = (v == null || v <= 0)
+      ? "Пока никто не открывал — отправь кому угодно."
+      : shareViewersText(v) + ".";
   } else {
     label.textContent = "Поделиться результатом";
     if (meta) meta.textContent = "Откроется ссылка, которую можно отправить кому угодно.";
@@ -1792,6 +1814,22 @@ function closeShareModal() {
   root.innerHTML = "";
 }
 
+// Статистика в модалке: уникальные зрители крупно + всего открытий.
+// Нули отдельным «мёртвым» рядом не показываем — вместо них живая строка.
+function shareStatsHTML(stats) {
+  const v = stats ? Math.max(0, Math.floor(Number(stats.viewers) || 0)) : 0;
+  const o = stats ? Math.max(0, Math.floor(Number(stats.opens) || 0)) : 0;
+  if (v <= 0 && o <= 0) {
+    return `<p class="share-stats--empty">Пока никто не открывал — отправь ссылку кому угодно.</p>`;
+  }
+  return `<div class="share-stats" aria-label="Статистика ссылки">`
+    + `<div class="share-stat"><div class="share-stat__num tnum">${v}</div>`
+    + `<div class="share-stat__label">${esc(dynPlural(v, "человек", "человека", "человек"))}</div></div>`
+    + `<div class="share-stat"><div class="share-stat__num tnum">${o}</div>`
+    + `<div class="share-stat__label">${esc(dynPlural(o, "открытие", "открытия", "открытий"))}</div></div>`
+    + `</div>`;
+}
+
 function openShareLinkModal(token) {
   const url = shareAbsUrl(token);
   openShareModal(`
@@ -1814,6 +1852,7 @@ function openShareLinkModal(token) {
           </button>
         </div>
         <p class="share-copied" id="shareCopied" hidden>Скопировано ✓</p>
+        <div id="shareStatsBox">${shareStatsHTML(shareState.stats)}</div>
         <div class="dlg__actions dlg__actions--single">
           <button class="btn btn--soft" type="button" onclick="closeShareModal()">Готово</button>
         </div>
@@ -1973,7 +2012,7 @@ function openShareError(title, text) {
 }
 
 async function shareRecreate() {
-  await onShareClick(true);
+  await onShareClick();
 }
 
 // Живая инвалидация открытого /s/<token>: пока страница висит у зрителя,
@@ -2015,26 +2054,13 @@ function sharedWatchStop() {
 }
 try { document.addEventListener("pagehide", sharedWatchStop); } catch (e) {}
 
-async function onShareClick(forceCreate) {
+async function onShareClick() {
   if (shareState.busy || recheckLoading) return;
   if (shareState.mode !== "owner") return;
-  // Ссылка уже есть — сначала дешёвый ping её живости (без тела): её могли
-  // отозвать из другой вкладки. Жива — то же окно мгновенно, без POST.
-  // Отозвана (404) — молча создаём заново тем же окном. Остальное (сеть,
-  // 429) — открываем как есть: хуже не будет.
-  if (shareState.token && !forceCreate) {
-    let alive = false, gone = false;
-    try {
-      const r = await fetch('/api/shared/essay?token=' + encodeURIComponent(shareState.token) + '&ping=1',
-        { signal: AbortSignal.timeout(10000) });
-      alive = r.ok;
-      gone = r.status === 404;
-    } catch (e) { alive = true; }
-    if (alive) { openShareLinkModal(shareState.token); return; }
-    if (!gone) { openShareLinkModal(shareState.token); return; }
-    shareState.token = "";
-    updateShareUI();
-  }
+  // Всегда идемпотентный POST: тот же токен — та же ссылка (created:false),
+  // отозванная из другой вкладки — молча новая. Заодно привозит свежую
+  // статистику, поэтому модалка всегда с живыми цифрами. Отдельной
+  // ping-проверки здесь нет: ping — только сторожу открытой /s/-страницы.
   const ref = shareOwnerRef();
   if (!ref) {
     openShareError("Нечем поделиться",
@@ -2053,7 +2079,7 @@ async function onShareClick(forceCreate) {
     btn.disabled = true;
     btn.insertAdjacentHTML("afterbegin", '<span class="share-btn__spin" aria-hidden="true"></span>');
   }
-  if (btnLabel) btnLabel.textContent = "Создаём ссылку…";
+  if (btnLabel) btnLabel.textContent = shareState.token ? "Проверяем ссылку…" : "Создаём ссылку…";
   let res = null, data = {};
   try {
     res = await fetch("/api/essays/share", {
@@ -2094,6 +2120,7 @@ async function onShareClick(forceCreate) {
   }
   shareState.token = String(data.token || "");
   if (data.publicId) shareState.publicId = String(data.publicId || shareState.publicId);
+  shareState.stats = data.stats || null;
   updateShareUI();
   openShareLinkModal(shareState.token);
 }
@@ -2102,7 +2129,7 @@ observeReveals(document);
 document.getElementById('retryBtn').addEventListener('click', () => loadResult(fetchFromApi));
 document.getElementById('recheckBtn').addEventListener('click', onRecheckClick);
 const shareBtnEl = document.getElementById('shareBtn');
-if (shareBtnEl) shareBtnEl.addEventListener('click', () => onShareClick(false));
+if (shareBtnEl) shareBtnEl.addEventListener('click', () => onShareClick());
 // Reload во время незакрываемого окна загрузки: показываем то же окно снова
 // и ждём готовый отчёт (без повторного POST — жетон уже мог быть списан).
 (function recheckBoot() {

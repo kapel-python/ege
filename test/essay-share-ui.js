@@ -232,16 +232,12 @@ async function main() {
     const label2 = await page.$eval("#shareBtnLabel", (el) => el.textContent);
     t("кнопка стала «Моя ссылка»", /Моя ссылка/.test(label2 || ""), (label2 || "").trim());
 
-    section("S3 повторное открытие без создания");
-    let created = 0;
-    page.on("response", (r) => {
-      if (r.url().includes("/api/essays/share") && r.request().method() === "POST") created++;
-    });
+    section("S3 повторное открытие: тот же токен, цифры свежие");
     await page.click("#shareBtn");
     await page.waitForSelector("#shareLinkInput", { timeout: 15000 });
     await sleep(500);
     const linkVal2 = await page.$eval("#shareLinkInput", (el) => el.value);
-    t("тот же токен, POST не уходил", linkVal2 === linkVal && created === 0, `${linkVal2} vs ${linkVal}`);
+    t("тот же токен (идемпотентный POST)", linkVal2 === linkVal, `${linkVal2} vs ${linkVal}`);
     await page.click(".dlg__actions .btn--soft");
     await sleep(300);
 
@@ -267,6 +263,41 @@ async function main() {
       const el = document.getElementById("shareWrap");
       return !el || el.hidden;
     }));
+
+    section("S4c статистика: люди, а не обновления");
+    // Тот же гость обновляет: открытий +1, зрителей столько же.
+    await guest.reload({ waitUntil: "domcontentloaded" });
+    await guest.waitForFunction(() => {
+      const el = document.getElementById("scoreValue");
+      return el && el.textContent.trim() === "15";
+    }, null, { timeout: 20000 });
+    // Второй гость с другим UA — новый зритель (IP у всех один: localhost).
+    const guest2Ctx = await browser.newContext({ userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" });
+    const guest2 = await guest2Ctx.newPage();
+    guest2.on("pageerror", (e) => errors.push("guest2: " + String((e && e.message) || e)));
+    await guest2.goto(`${BASE}/s/${token}`, { waitUntil: "domcontentloaded" });
+    await guest2.waitForFunction(() => {
+      const el = document.getElementById("scoreValue");
+      return el && el.textContent.trim() === "15";
+    }, null, { timeout: 20000 });
+    // Свои просмотры владелец не накручивает: открываем ссылку из-под
+    // его сессии напрямую — счётчики должны стоять.
+    await page.evaluate((tok) => fetch("/s/" + tok).then((r) => r.text()), token);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#shareWrap:not([hidden])", { timeout: 20000 });
+    await sleep(500);
+    const meta = await page.$eval("#shareMeta", (el) => el.textContent);
+    t("под кнопкой — уникальные зрители", /Открыли 2 человека/.test(meta || ""), (meta || "").trim());
+    await page.click("#shareBtn");
+    await page.waitForSelector("#shareStatsBox", { timeout: 15000 });
+    const statsHtml = await page.$eval("#shareStatsBox", (el) => el.textContent);
+    t("в модалке — 2 человека и 3 открытия",
+      /2\s*человека/.test(statsHtml || "") && /3\s*открытия/.test(statsHtml || ""),
+      (statsHtml || "").trim().replace(/\s+/g, " "));
+    await page.click(".dlg__actions .btn--soft");
+    await sleep(300);
+    await guest2Ctx.close();
 
     section("S4b отзыв долетает до открытой страницы сам");
     // Ускоряем поллер гостю (прод — 15 с) и переоткрываем ссылку: дальше

@@ -273,8 +273,41 @@ def main():
                   status == 200 and bool(PUB_RE.match(token2 or ""))
                   and token2 != token and (mk3 or {}).get("created") is True,
                   f"got={status} same={token2 == token}")
+            # Счётчики: уникальные зрители (разные UA), а не обновления.
+            guest.addheaders = [("User-Agent", "share-test-A/1.0")]
             status, _ = request(guest, base, f"/api/shared/essay?token={token2}")
             check("SHARED new token 200", status == 200, f"got={status}")
+
+            def owner_stats():
+                st, own = request(opener, base,
+                                  f"/api/essays?subject=russian&sid={sid}")
+                assert st == 200, (st, own)
+                return ((own.get("submission") or {}).get("shareStats")
+                        if isinstance(own.get("submission"), dict) else None)
+
+            check("STATS first open 1x1", owner_stats() == {"opens": 1, "viewers": 1},
+                  str(owner_stats()))
+            status, _ = request(guest, base, f"/api/shared/essay?token={token2}")
+            check("STATS same UA: opens grow, viewers not",
+                  owner_stats() == {"opens": 2, "viewers": 1}, str(owner_stats()))
+            guest_b = make_device()
+            guest_b.addheaders = [("User-Agent", "share-test-B/1.0")]
+            status, _ = request(guest_b, base, f"/api/shared/essay?token={token2}")
+            check("STATS other UA: new viewer",
+                  status == 200 and owner_stats() == {"opens": 3, "viewers": 2},
+                  f"got={status} {owner_stats()}")
+            # Свои просмотры владелец не накручивает (открыл из-под сессии).
+            status, _ = request(opener, base, f"/api/shared/essay?token={token2}")
+            check("STATS owner self-view excluded",
+                  status == 200 and owner_stats() == {"opens": 3, "viewers": 2},
+                  f"got={status} {owner_stats()}")
+            # Создание отдаёт свежую стату тем же ответом (модалка без второго GET).
+            status, mk4 = request(opener, base, "/api/essays/share", "POST",
+                                  {"publicId": pub})
+            check("SHARE response carries stats",
+                  status == 200 and (mk4 or {}).get("stats") == {"opens": 3, "viewers": 2}
+                  and (mk4 or {}).get("created") is False,
+                  f"got={status} {str(mk4)[:160]}")
 
             # Дешёвый ping живости для открытой страницы (без тела отчёта):
             # им же сторожится отзыв в реальном времени.
@@ -298,7 +331,7 @@ def main():
                 ok = code == 200 and "Результат проверки".encode("utf-8") in body
                 check(name, ok, f"got={code}")
 
-            # Каскад: удаление сочинения гасит и ссылку (FK ON DELETE CASCADE).
+            # Каскад: удаление сочинения гасит и ссылку, и зрителей.
             conn3 = server.connect()
             try:
                 server.ensure_essay_schema(conn3)
@@ -308,6 +341,10 @@ def main():
                     "SELECT 1 FROM essay_share_links WHERE token=?",
                     (token2,)).fetchone()
                 check("CASCADE share gone with submission", left is None)
+                viewers_left = conn3.execute(
+                    "SELECT COUNT(*) FROM essay_share_viewers").fetchone()[0]
+                check("CASCADE viewers gone with submission", viewers_left == 0,
+                      f"left={viewers_left}")
             finally:
                 conn3.close()
             status, _ = request(guest, base, f"/api/shared/essay?token={token2}")
