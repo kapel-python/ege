@@ -180,7 +180,7 @@ async function main() {
     const radius = await page.evaluate(() => getComputedStyle(document.getElementById("shareBtn")).borderRadius);
     t("кнопка-пилюля", radius === "999px", radius);
 
-    section("S2 создание и незакрываемое окно");
+    section("S2 создание и обычное закрытие");
     // Дёргания быть не должно: первое же открывшееся окно — уже с готовой
     // ссылкой, промежуточного спиннера-модалки нет.
     await page.evaluate(() => {
@@ -207,13 +207,24 @@ async function main() {
     t("в поле абсолютная ссылка /s/<token>", !!m && /^http/.test(linkVal || ""), linkVal);
     const token = m ? m[1] : "";
     t("токен 10 знаков, не цифры", /^[A-Za-z0-9]{10}$/.test(token) && !/^\d+$/.test(token), token);
-    t("крестика нет", (await page.$(".dlg .dlg__close")) === null);
+    // Закрытие как у всех модалок: ссылку не потерять — «Моя ссылка»
+    // открывает окно заново, поэтому запирать его незачем.
+    t("крестик есть", (await page.$(".dlg .dlg__close")) !== null);
+    await page.click(".dlg .dlg__close");
+    await sleep(300);
+    t("крестик закрывает", (await page.$("#shareLinkInput")) === null);
+    await btn.click();
+    await page.waitForSelector("#shareLinkInput", { timeout: 15000 });
     await page.mouse.click(30, 30);
     await sleep(300);
-    t("тап по фону не закрывает", (await page.$("#shareLinkInput")) !== null);
+    t("тап по фону закрывает", (await page.$("#shareLinkInput")) === null);
+    await btn.click();
+    await page.waitForSelector("#shareLinkInput", { timeout: 15000 });
     await page.keyboard.press("Escape");
     await sleep(300);
-    t("Esc не закрывает", (await page.$("#shareLinkInput")) !== null);
+    t("Esc закрывает", (await page.$("#shareLinkInput")) === null);
+    await btn.click();
+    await page.waitForSelector("#shareLinkInput", { timeout: 15000 });
     t("есть «Удалить ссылку»", (await page.$("#shareDanger .share-danger-btn")) !== null);
     // Копирование: в headless буфер может отсутствовать — тогда поле
     // выделяется для ручной копии; главное — без ошибок и с фидбеком/фокусом.
