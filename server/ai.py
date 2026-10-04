@@ -859,6 +859,18 @@ class AIError(Exception):
     """Upstream refused, timed out, or answered with something unusable."""
 
 
+class AIBusyError(AIError):
+    """Локальная конкуренция за слоты, а не отказ провайдера.
+
+    Поднимается, когда все AI_MAX_CONCURRENCY слотов заняты другими
+    проверками (оборванные refresh-ем 499-потоки слот тоже держат до конца
+    своей работы). Повторять немедленно бессмысленно — это не флейк
+    апстрима, а «подожди, исходный проход ещё считает». Отдельный класс,
+    чтобы _ai_check_with_retry его не ретраил, а клиент отличал transient
+    от настоящей ошибки проверки.
+    """
+
+
 class AIInputError(Exception):
     """The caller's request is wrong (unknown format, empty/oversized text).
 
@@ -2121,7 +2133,7 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
     if not plan:
         raise AIUnavailable("AI не настроен")
     if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
-        raise AIError("ИИ занят, попробуй через несколько секунд")
+        raise AIBusyError("ИИ занят, попробуй через несколько секунд")
     try:
         last_exc: Exception | None = None
         failed: set[str] = set()
@@ -2223,7 +2235,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     # долго — клиенту честнее сразу «занят, попробуй сейчас», чем висеть и
     # потом упасть по таймауту вместе с уже начавшимся вызовом.
     if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
-        raise AIError("ИИ занят, попробуй через несколько секунд")
+        raise AIBusyError("ИИ занят, попробуй через несколько секунд")
     try:
         last_exc: Exception | None = None
         failed: set[str] = set()

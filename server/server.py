@@ -5016,6 +5016,12 @@ def _ai_check_with_retry(format_id: str, text, *, user_id: int, ip: str, **kwarg
     for attempt in range(1, attempts + 1):
         try:
             return _AI.run_format(format_id, text, **kwargs)
+        except _AI.AIBusyError as exc:
+            # Локальная конкуренция за слоты — не флейк апстрима: немедленный
+            # повтор лишь снова упрётся в занятые слоты (их держат в т.ч.
+            # оборванные refresh-ем потоки). Отдаём сразу, клиент дешёво
+            # дождётся исходного прохода через evaluation.
+            raise
         except (_AI.AIFormatError, _AI.AIError) as exc:
             failure = exc
             if attempt >= attempts or time.monotonic() - started >= _AI.AI_RETRY_BUDGET_SEC:
@@ -13353,6 +13359,17 @@ class Handler(BaseHTTPRequestHandler):
                             reviewer_note=note, source_text=source_text,
                             student_name=student_name,
                             tier=ai_tier_for(conn, user_id))
+                    except _AI.AIBusyError:
+                        # Все слоты заняты (обычно — собственными оборванными
+                        # refresh-ем проходами, которые ещё считают на сервере).
+                        # Это transient, а не ошибка проверки: 429 с кодом, жетон
+                        # уже возвращён через finally ниже, submission в failed
+                        # НЕ помечаем — клиент дешёво дождётся исходного прохода.
+                        # Лог не пишем: при шторме refresh-ей это ожидаемо.
+                        self.send_json({"error": "Сервер сейчас проверяет другое сочинение. Подожди несколько секунд — результат подхватится сам.",
+                                        "code": "AI_BUSY", "retryAfter": 8},
+                                       429, token=token, headers={"Retry-After": "8"})
+                        return
                     except _AI.AIInputError as exc:
                         # Наш ввод, наш 400: повтор не поможет.
                         self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return

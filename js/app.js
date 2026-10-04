@@ -5160,7 +5160,7 @@ async function essayRunChecks(t, text, clientId, wordCount) {
   }
 }
 
-async function essayRunChecksInner(t, text, clientId, wordCount) {
+async function essayRunChecksInner(t, text, clientId, wordCount, busyRetried) {
   const S = Session.cur;
   if (!S || S.answered) return;
   const screen = document.getElementById("screen");
@@ -5204,6 +5204,48 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
     aiData = await aiRes.json().catch(() => ({}));
   } catch (_) { aiRes = null; }
   if (!aiRes || !aiRes.ok || !aiData.result) {
+    // Транзитная занятость слотов (обычно — собственные оборванные refresh-ем
+    // проходы ещё считают на сервере): это НЕ ошибка проверки. submission в
+    // failed не помечаем (иначе следующий F5 увидит failed и пропустит дешёвое
+    // ожидание), замер не стираем, фатальный блок не рисуем — дешёво ждём
+    // исходный проход через evaluation и повторяем запрос один раз.
+    const busyHit = !busyRetried && aiRes && (
+      (aiRes.status === 429 && aiData && aiData.code === "AI_BUSY") ||
+      (aiRes.status === 502 && /занят/i.test(String((aiData && aiData.error) || "")))
+    );
+    if (busyHit) {
+      try {
+        const budget = Math.max(ESSAY_AUTO_POLL_MS,
+          Math.min(ESSAY_AUTO_WAIT_MAX_MS, 150000 - essayWaitElapsedTotal(t)));
+        const until = Date.now() + budget;
+        for (;;) {
+          await essaySleep(ESSAY_AUTO_POLL_MS);
+          if (!Session.cur || Session.cur.answered) return;
+          if (!Session.task() || Session.task().id !== t.id) return;
+          let ready = null;
+          try {
+            const evRes = await fetch("/api/essays/evaluation", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: AbortSignal.timeout(15000),
+              body: JSON.stringify({ subject: Store.subject, clientId, status: "ready" }),
+            });
+            const evData = await evRes.json().catch(() => ({}));
+            if (evRes.ok && evData.submission && evData.submission.status === "ready") ready = evData.submission;
+          } catch (_) {}
+          if (ready) {
+            const s = Session.cur;
+            const seconds = Math.max(0, (Date.now() - s.taskStartTs) / 1000);
+            essayFinishReady(t, ready, text, wordCount, seconds);
+            return;
+          }
+          if (Date.now() >= until) break;
+        }
+      } catch (_) {}
+      if (!Session.cur || Session.cur.answered) return;
+      if (!Session.task() || Session.task().id !== t.id) return;
+      return essayRunChecksInner(t, text, clientId, wordCount, true);
+    }
     // Исход попытки: замер останавливаем и стираем в любом случае — следующая
     // попытка (вручную или после перезагрузки без замера) начнёт новый.
     // Перезагрузка ПОСРЕДИ проверки сюда не попадает, её запись и нужна resume.
