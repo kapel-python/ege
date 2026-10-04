@@ -232,8 +232,8 @@ def main() -> int:
                 short_skills[t.get("skill")] = short_skills.get(t.get("skill"), 0) + 1
             check(
                 "RUSSIAN CONTENT task details",
-                len(served_russian_tasks) == 138
-                and len(russian_re27) == 8
+                len(served_russian_tasks) == 143
+                and len(russian_re27) == 13
                 and len(russian_short) == 130
                 and all(t.get("type") == "long_text" for t in russian_re27)
                 and all(t.get("sourceTextId") for t in russian_re27)
@@ -264,7 +264,7 @@ def main() -> int:
             catalog_shape_ok = (
                 russian_catalog.get("forecast") is None
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
-                and len(russian_catalog.get("tasks") or []) == 138
+                and len(russian_catalog.get("tasks") or []) == 143
                 and len(russian_catalog.get("lessons") or []) == 26
                 and len(russian_catalog.get("skills") or []) == 27
                 and russian_missions == []

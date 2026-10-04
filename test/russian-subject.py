@@ -87,10 +87,10 @@ def main():
             # Два вида практики: тестовая часть (задания №1–26, короткий ответ)
             # и работа с текстом (задание 27, у каждого задания есть исходник).
             source_tasks = [t for t in tasks if t.get("skill") == "russian_essay_source"]
-            assert len(source_tasks) == 8, len(source_tasks)
+            assert len(source_tasks) == 13, len(source_tasks)
             short_tasks = [t for t in tasks if t.get("type") == "short_answer"]
             assert len(short_tasks) == 130, len(short_tasks)
-            assert len(tasks) == 138, "26 тем по 5 заданий + 8 сочинений"
+            assert len(tasks) == 143, "26 тем по 5 заданий + 13 сочинений"
             assert all(t.get("type") == "long_text" for t in source_tasks), catalog
             assert all(t.get("sourceTextId") for t in source_tasks), "у задания 27 без исходника"
             # Каждая из 26 тем тестовой части представлена ровно 5 заданиями.
@@ -113,7 +113,7 @@ def main():
             src = source_payload["sourceText"]
             assert src["author"] and src["problem"] and len(src["text"]) > 500, src
             assert 150 <= src["wordCount"] <= 400, src
-            # Каждый из 8 текстов — экзаменационная нарезка, а не целый фрагмент.
+            # Каждый из 13 текстов — экзаменационная нарезка, а не целый фрагмент.
             volumes = {}
             for task in source_tasks:
                 payload = request(opener, base,
@@ -147,7 +147,7 @@ def main():
                 "свободное сочинение без исходника убрано"
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={rid}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 138, (status, len(task_details.get("tasks", [])))
+            assert status == 200 and len(task_details.get("tasks", [])) == 143, (status, len(task_details.get("tasks", [])))
             status, lessons = request(opener, base, f"/api/catalog-lessons?subject={rid}")
             assert status == 200 and len(lessons.get("lessons", [])) == 26, (status, lessons)
 
@@ -310,7 +310,7 @@ def main():
             public_russian = next((s for s in public.get("subjects", []) if s.get("id") == rid), None)
             assert public_russian, public
             public_counts = public_russian.get("counts", {})
-            assert public_counts.get("tasks") == 138, public_russian
+            assert public_counts.get("tasks") == 143, public_russian
             assert public_counts.get("skills") == 27, public_russian
             assert public_counts.get("missions") == 0, public_russian
             assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 0, public_russian

@@ -180,7 +180,8 @@ const WRITTEN = {
   re27_6: { status: "ready", submissionId: 14, clientId: "c-6", wordCount: 281 },
 };
 const ALL_READY = Object.fromEntries(
-  ["re27_1", "re27_2", "re27_3", "re27_4", "re27_5", "re27_6", "re27_7", "re27_8"]
+  ["re27_1", "re27_2", "re27_3", "re27_4", "re27_5", "re27_6", "re27_7", "re27_8",
+   "re27_9", "re27_10", "re27_11", "re27_12", "re27_13"]
     .map((id, i) => [id, { status: "ready", submissionId: 100 + i, clientId: `c-${id}`, wordCount: 300 }])
 );
 const readySubmission = (taskId, over = {}) => ({
@@ -358,9 +359,9 @@ async function main() {
     const { sandbox } = buildSandbox({ statuses: ALL_READY });
     const entered = await enterPractice(sandbox);
     // ALL_READY: чем больше submissionId, тем свежее отчёт. Самый свежий
-    // (re27_8) в новом круге переписывается первым.
-    check("всё готово — новый круг начинается со САМОГО СВЕЖЕГО отчёта (re27_8)",
-      entered.taskIds && entered.taskIds.join(",") === "re27_8", JSON.stringify(entered));
+    // (re27_13) в новом круге переписывается первым.
+    check("всё готово — новый круг начинается со САМОГО СВЕЖЕГО отчёта (re27_13)",
+      entered.taskIds && entered.taskIds.join(",") === "re27_13", JSON.stringify(entered));
   }
   {
     // Прогресс второго круга: re27_1 только что переписано (submissionId 37 —
@@ -372,8 +373,8 @@ async function main() {
     };
     const { sandbox } = buildSandbox({ statuses: cycle2 });
     const entered = await enterPractice(sandbox);
-    check("переписанное уходит в конец, а не предлагается снова (re27_8)",
-      entered.taskIds && entered.taskIds.join(",") === "re27_8", JSON.stringify(entered));
+    check("переписанное уходит в конец, а не предлагается снова (re27_13)",
+      entered.taskIds && entered.taskIds.join(",") === "re27_13", JSON.stringify(entered));
   }
   {
     // Свежий отчёт у re27_2 — вот его и предлагаем первым.
@@ -483,7 +484,7 @@ async function main() {
   {
     const { sandbox } = buildSandbox({});
     run(sandbox, `localStorage.setItem("ege_essay_skipped",
-      JSON.stringify({ "testnav:russian": ["re27_4", "re27_7", "re27_8"] }))`);
+      JSON.stringify({ "testnav:russian": ["re27_4", "re27_7", "re27_8", "re27_9", "re27_10", "re27_11", "re27_12", "re27_13"] }))`);
     const entered = await enterPractice(sandbox);
     check("все недописанные отложены — пропуски сгорели, снова re27_4",
       entered.taskIds && entered.taskIds.join(",") === "re27_4", JSON.stringify(entered));
@@ -493,7 +494,7 @@ async function main() {
       cleared);
   }
   {
-    // 7 из 8 готовы, осталось re27_8: отпускать некуда.
+    // 12 из 13 готовы, осталось re27_8: отпускать некуда.
     const seven = Object.fromEntries(Object.entries(ALL_READY).filter(([id]) => id !== "re27_8"));
     const { sandbox } = buildSandbox({ statuses: seven });
     await enterPractice(sandbox);
@@ -542,7 +543,7 @@ async function main() {
       html: document.getElementById("screen").innerHTML,
     })`);
     check("кнопка «Завершить» закрывает визит итоговым экраном", fin.curNull === true
-      && fin.html.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), fin.html.slice(0, 120));
+      && /тренировка завершена/i.test(fin.html), fin.html.slice(0, 120));
     check("на итоговом экране кнопка разбора со ссылкой на отчёт",
       fin.html.includes("Разбор сочинения") && fin.html.includes("/essay/77"),
       fin.html.slice(fin.html.indexOf("Разбор"), fin.html.indexOf("Разбор") + 120));
@@ -552,7 +553,7 @@ async function main() {
   /* ---------- 6. Новый круг: бланк чистый, но с пометкой о прошлом разборе ---------- */
   {
     const { sandbox } = buildSandbox({ statuses: ALL_READY });
-    const entered = await enterPractice(sandbox); // самый свежий отчёт = re27_8
+    const entered = await enterPractice(sandbox); // самый свежий отчёт = re27_13
     const taskId = entered.taskIds[0];
     run(sandbox, `renderTask(document.getElementById("screen"))`);
     await flush(); // essayRestoreReady подтянет СТАРЫЙ ready — бланк должен уцелеть

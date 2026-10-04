@@ -628,8 +628,11 @@ def _agent_call_timeout(budget) -> float | None:
     return max(1.0, min(float(_AI.DEFAULT_TIMEOUT_SEC), left))
 
 
-def _agent_chat_fn(cost: dict, thread_id: int | None = None):
+def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free"):
     """chat_fn для _AGENT.run_cycle: один вызов модели и невидимые повторы.
+
+    `tier` — направление маршрутизации (free/plus) на ВЕСЬ ход: решает
+    вызыватель по подписке до первого вызова модели, внутри хода не меняется.
 
     Повторяются только сбои, которые повторяются сами: AIFormatError (модель
     ответила не по контракту) и AIError (транспорт/402) — как у проверок
@@ -663,7 +666,7 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None):
             # данным, а не глубокое рассуждение (судья сочинений — наоборот,
             # high по as_judge в ai.chat).
             text = _AI.chat(messages, temperature=0.0, timeout=timeout,
-                            reasoning_effort="minimal")
+                            reasoning_effort="minimal", tier=tier)
             return {"text": (text or "").strip()[:AGENT_REPLY_MAX()] or None,
                     "tool_calls": [], "preamble": None}
         failure: Exception | None = None
@@ -5736,6 +5739,12 @@ def install_catalog(conn: sqlite3.Connection) -> None:
         diagnostics = config_value(subject, "diagnosticTasks", [])
         visual_assets = config_value(subject, "visualAssets", [])
         visual_audit = config_value(subject, "visualAudit", {})
+        # Шкала прогноза — из реестра (тот же объект, что в subjectInfo.forecast):
+        # агент читает forecast:<subject> из БД первым делом, без этого ключа
+        # каждый fold_web(op=forecast) уходил в чтение subjects/*.json с диска.
+        forecast_cfg = _REGISTRY.forecast_of(subject)
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (f"forecast:{subject}", json.dumps(forecast_cfg, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (f"daily:{subject}", json.dumps(daily, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",

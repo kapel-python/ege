@@ -40,6 +40,8 @@ def _builtin_definitions() -> dict:
     """Побайтовые копии значений, раньше лежавших инлайн в server.py.
 
     Используются только как fallback, если subjects/*.json недоступны.
+    Запись russian синхронизирована с опубликованным контрактом
+    (server/subjects/russian.json), а не с исторической locked-копией.
     """
     profile_weights = {
         "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
@@ -91,15 +93,20 @@ def _builtin_definitions() -> dict:
         },
         "russian": {
             "id": "russian", "title": "Русский язык", "short": "Русский",
-            "description": "Первый раздел русского языка готовится к публикации.",
-            "status": "coming-soon", "locked": True, "comingSoon": True,
-            "availability": "coming-soon", "order": 2,
+            # Зеркало server/subjects/russian.json: fallback обязан описывать
+            # опубликованный предмет честно, иначе аварийный старт без
+            # subjects/*.json показывал бы готовый русский закрытым.
+            "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
+            "status": "ready", "locked": False, "comingSoon": False,
+            "availability": "ready", "order": 2,
             "catalogFile": "catalog_russian.json",
             "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
             "forecast": None,
-            "features": dict(locked_features),
-            "metadata": {"availability": "coming-soon", "locked": True,
-                         "topic": "Итоговое сочинение", "topicCount": 1},
+            "features": {"lessons": True, "practice": True, "forecast": False,
+                         "diagnostics": False, "missions": False, "bosses": False,
+                         "daily": False, "path": True},
+            "metadata": {"availability": "ready",
+                         "topic": "Задания №1–26 и сочинение по тексту", "topicCount": 27},
             "content": {key: dict(value) for key, value in content_refs.items()},
         },
     }

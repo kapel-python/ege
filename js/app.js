@@ -5888,7 +5888,11 @@ function sessionFinish(early = false) {
 }
 
 function orderedTasks(arr) {
-  return arr.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  // Натуральный порядок: re27_10 идёт после re27_9, а не после re27_1
+  // (чистый localeCompare клал re27_10 вторым сразу при 10+ заданиях в теме —
+  // поймано расширением банка сочинений до 13; у базовой математики тот же
+  // эффект уже был на b01_p10). Без ICU опция игнорируется — тогда как раньше.
+  return arr.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
 }
 
 /* A handful of answers are algebraic expressions ("2x", "6x-2", "90/v-90/(v+5)"),

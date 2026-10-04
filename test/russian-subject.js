@@ -52,9 +52,9 @@ check("русский предмет зарегистрирован и откр�
 check("тема «Сочинение по тексту» доступна", !!result.topic && result.topic.id === "russian_essay_source" && result.topic.locked !== true);
 check("категория темы видна", !!result.category);
 check("тестовая часть и сочинение: практика и уроки на месте",
-  result.content === true && result.tasks === 138 && result.practice === 138 && result.lessons === 26 && result.missions === 0 && result.diagnostics === 0);
+  result.content === true && result.tasks === 143 && result.practice === 143 && result.lessons === 26 && result.missions === 0 && result.diagnostics === 0);
 check("26 тем тестовой части по 5 заданий + сочинение с исходниками",
-  result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 8 && result.sourceTasksHaveText === true);
+  result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 13 && result.sourceTasksHaveText === true);
 check("нет daily/достижений для предмета без них", result.daily === 0 && result.achievements === 0);
 check("рекомендации предлагают реальную практику", Array.isArray(result.next) && result.next.length > 0);
 check("подсчёт слов совпадает с серверным алгоритмом", result.wordCount === 6);
