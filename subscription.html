@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ege easy Plus — больше проверок сочинений и ИИ-наставник</title>
-<meta name="description" content="ege easy Plus: 10 проверок сочинений и 25 ходов ИИ-наставника в день. На бесплатном тарифе — по 5. Задания, прогноз и разборы остаются бесплатными. 99 ₽ в месяц, 990 ₽ в год, отмена в любой момент.">
+<meta name="description" content="ege easy Plus: 10 проверок сочинений и 25 ходов ИИ-наставника в день. На бесплатном тарифе — по 5. Задания, прогноз и разборы остаются бесплатными. 199 ₽ в месяц, 1590 ₽ в год (−33%), отмена в любой момент.">
 <link rel="canonical" href="https://egeeasy.ru/subscription">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
@@ -14,7 +14,7 @@
 <meta property="og:locale" content="ru_RU">
 <meta property="og:site_name" content="ege easy">
 <meta property="og:title" content="ege easy Plus — больше проверок сочинений и ИИ-наставник">
-<meta property="og:description" content="10 проверок сочинений и 25 ходов наставника в день. Задания, прогноз и разборы остаются бесплатными. 99 ₽ в месяц.">
+<meta property="og:description" content="10 проверок сочинений и 25 ходов наставника в день. Задания, прогноз и разборы остаются бесплатными. 199 ₽ в месяц.">
 <meta property="og:url" content="https://egeeasy.ru/subscription">
 <meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
 <script>
@@ -281,7 +281,7 @@
 
       <div class="price-row">
         <div class="price-figure" id="priceFigure">
-          <span class="price-num" id="priceNum">99</span>
+          <span class="price-num" id="priceNum">199</span>
           <span class="price-cur">₽</span>
           <span class="price-per" id="pricePer">в месяц</span>
         </div>
@@ -290,7 +290,7 @@
           <button class="billing__opt" type="button" role="tab" data-billing="month" aria-selected="true">Месяц</button>
           <button class="billing__opt" type="button" role="tab" data-billing="year" aria-selected="false">Год</button>
         </div>
-        <span class="price-save" id="priceSave" hidden>выгода 198 ₽ — два месяца бесплатно</span>
+        <span class="price-save" id="priceSave" hidden>−33% · выгода 798 ₽</span>
       </div>
 
       <div class="active-banner" id="activeBanner" hidden>
@@ -373,8 +373,8 @@
         </div>
         <div class="card card--plus rv" id="plusCard" style="--d:100ms">
           <div class="plan-name"><span class="plus">Plus</span></div>
-          <div class="plan-price"><span class="num" data-price>99</span> <small data-price-suffix>₽ / мес</small></div>
-          <div class="plan-period">990 ₽ в год · отмена в любой момент</div>
+          <div class="plan-price"><span class="num" data-price>199</span> <small data-price-suffix>₽ / мес</small></div>
+          <div class="plan-period">1590 ₽ в год · −33% · отмена в любой момент</div>
           <ul class="ticks">
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Все задания и навыки</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
@@ -425,7 +425,7 @@
 
 <div class="buybar" id="buybar" hidden>
   <span>
-    <span class="buybar__value num"><span id="stickyPrice">99</span> ₽<span class="buybar__hint" id="stickyPer">/мес · ege easy <span class="plus">Plus</span></span></span>
+    <span class="buybar__value num"><span id="stickyPrice">199</span> ₽<span class="buybar__hint" id="stickyPer">/мес · ege easy <span class="plus">Plus</span></span></span>
   </span>
   <button class="buybar__btn" type="button" id="buybarBtn">Оформить</button>
 </div>
@@ -477,8 +477,8 @@
     /* stick — без слова «Plus»: его подставляет PLUS_WORD, чтобы буква
        осталась градиентной и после смены периода (текст ставится
        innerHTML — строки внутренние, пользовательских данных тут нет). */
-    month: { price: 99,  per: "в месяц", suffix: "₽ / мес", stick: "/мес · ege easy ", save: "" },
-    year:  { price: 990, per: "в год",    suffix: "₽ / год", stick: "/год · ege easy ", save: "выгода 198 ₽ — два месяца бесплатно" }
+    month: { price: 199, per: "в месяц", suffix: "₽ / мес", stick: "/мес · ege easy ", save: "" },
+    year:  { price: 1590, per: "в год",   suffix: "₽ / год", stick: "/год · ege easy ", save: "−33% · выгода 798 ₽" }
   };
   var current = "month";
   var priceNum = document.getElementById("priceNum");

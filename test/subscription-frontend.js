@@ -62,13 +62,13 @@ function check(name, cond, detail) {
 
   // переключатель периода
   await page.click('[data-billing="year"]');
-  await page.waitForFunction(() => document.getElementById("priceNum").textContent === "990");
-  check("год -> 990", true);
+  await page.waitForFunction(() => document.getElementById("priceNum").textContent === "1590");
+  check("год -> 1590", true);
   const saveVisible = await page.isVisible("#priceSave");
   check("плашка выгоды видна", saveVisible);
   await page.click('[data-billing="month"]');
-  await page.waitForFunction(() => document.getElementById("priceNum").textContent === "99");
-  check("месяц -> 99", true);
+  await page.waitForFunction(() => document.getElementById("priceNum").textContent === "199");
+  check("месяц -> 199", true);
 
   // FAQ
   await page.click(".faq__item:first-child .faq__q");
@@ -157,7 +157,7 @@ function check(name, cond, detail) {
   await page.waitForSelector('#payHist .hist__row', { timeout: 15000 });
   let det = await page.textContent("#content");
   check("manage plus: срок и чек",
-    det.includes("доступ до") && det.includes("99") && det.includes("оплачено")
+    det.includes("доступ до") && det.includes("199") && det.includes("оплачено")
     && det.includes("Проверок сочинений") && det.includes("Ходов наставника"));
   await page.screenshot({ path: shot("sub-manage.png") });
 

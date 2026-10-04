@@ -369,7 +369,7 @@
 (function(){
   "use strict";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var PRICE_MONTH = 99, PRICE_YEAR = 990;
+  var PRICE_MONTH = 199, PRICE_YEAR = 1590;
   /* Слово «Plus» градиентное (css: .plus). Текст, который ставится
      textContent, его теряет — поэтому такие строки собираются innerHTML
      из этого литерала; пользовательских данных в них нет. */
@@ -558,7 +558,7 @@
     } else {
       pill.className = "chip chip--muted";
       pill.textContent = "бесплатный план";
-      meta.innerHTML = "5 проверок сочинений и 5 ходов наставника в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год.";
+      meta.innerHTML = "5 проверок сочинений и 5 ходов наставника в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год (−33%).";
       heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает только лимиты. Наставник сейчас бесплатен всем — 5 ходов в день.";
       meter.hidden = true;
       plabel.hidden = true;

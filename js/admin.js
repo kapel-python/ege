@@ -918,7 +918,7 @@ function subCard(sub, payments) {
   const rows = active ? `
       <div class="a-kv">
         <div class="a-kv__item"><div class="a-kv__k">Статус</div><div class="a-kv__v" style="color:var(--success-ink);font-weight:600">${esc(subStatusText(sub))}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Период</div><div class="a-kv__v">${sub.period === "year" ? "год · 990 ₽" : "месяц · 99 ₽"}</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Период</div><div class="a-kv__v">${sub.period === "year" ? "год · 1590 ₽" : "месяц · 199 ₽"}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
       </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
@@ -1421,8 +1421,8 @@ function bindUserActions(p) {
         ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
         : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 10 проверок сочинений и 25 ходов наставника в день."}</div>
       <div class="a-modal__form" style="gap:10px">
-        <button class="choice-item" data-period="month"><b>Месяц — 99 ₽</b><span>30 суток доступа</span></button>
-        <button class="choice-item" data-period="year"><b>Год — 990 ₽</b><span>365 суток доступа, два месяца в подарок</span></button>
+        <button class="choice-item" data-period="month"><b>Месяц — 199 ₽</b><span>30 суток доступа</span></button>
+        <button class="choice-item" data-period="year"><b>Год — 1590 ₽</b><span>365 суток доступа, −33% к помесячной оплате</span></button>
         <div class="a-field"><label>Заметка (необязательно)</label><input class="a-input" id="fSubNote" placeholder="например: победитель олимпиады" autocomplete="off"></div>
         <div id="mErr"></div>
       </div>

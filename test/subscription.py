@@ -4,7 +4,7 @@
 Покрывает server/subscription.py и его встройку в server.py / agent.py
 на живом сервере с temp-БД (прод не трогается):
   * гость везде 401; без модуля подписки — 503 (здесь модуль есть);
-  * checkout: pending 9900 коп, неверный период 400, идемпотентность по
+  * checkout: pending 19900 коп, неверный период 400, идемпотентность по
     ключу (повтор — тот же paymentId), чужой ключ — 400;
   * confirm без EGE_SUBSCRIPTION_MOCK — 503, с флагом — активация:
     статус active, expires ~+30 сут, зеркало users.subscription='plus',
@@ -166,8 +166,8 @@ def main():
         check("неверный период 400", s == 400, f"{s} {body}")
         s, co = request(user, base, "/api/subscription/checkout", "POST",
                          {"period": "month", "idempotencyKey": "k-1"})
-        check("checkout month pending 9900",
-              s == 200 and co["status"] == "pending" and co["amountKopecks"] == 9900
+        check("checkout month pending 19900",
+              s == 200 and co["status"] == "pending" and co["amountKopecks"] == 19900
               and co["currency"] == "RUB" and co["mock"] is True, co)
         pid = co["paymentId"]
         check("paymentId — публичный id (10 символов, не число)",
@@ -366,7 +366,7 @@ def main():
         check("обзор отдаёт все блоки",
               s == 200 and set(ov) >= {"users", "subs", "money", "waitlist",
                                        "config", "recent"}
-              and ov["config"]["priceMonthKopecks"] == 9900
+              and ov["config"]["priceMonthKopecks"] == 19900
               and ov["config"]["plusEssay"] == 10
               and ov["config"]["freeEssay"] == 5, ov)
         s, body = request(guest, base, "/api/subscription/notify", "GET", None)

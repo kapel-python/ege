@@ -5,8 +5,8 @@
 админку — сервер вызывает его из route-обработчиков.
 
 Модель:
-  * тариф один — ``plus``; период ``month`` (30 суток, 99₽) или ``year``
-    (365 суток, 990₽). Цены и длительности переопределяются окружением
+  * тариф один — ``plus``; период ``month`` (30 суток, 199₽) или ``year``
+    (365 суток, 1590₽, −33% к помесячной оплате). Цены и длительности переопределяются окружением
     (см. EGE_PLUS_* ниже): тесты и деплой меняют их без правки кода;
   * активна = status в (active, cancelled) И expires_at_ms > now.
     ``cancelled`` — это «не продлевать»: доступ до конца срока живёт.
@@ -111,8 +111,8 @@ def _env_int(name: str, default: int, minimum: int = 0) -> int:
 
 def plus_price_kopecks(period: str) -> int:
     if period == PERIOD_YEAR:
-        return _env_int("EGE_PLUS_PRICE_YEAR_KOP", 99000)
-    return _env_int("EGE_PLUS_PRICE_MONTH_KOP", 9900)
+        return _env_int("EGE_PLUS_PRICE_YEAR_KOP", 159000)
+    return _env_int("EGE_PLUS_PRICE_MONTH_KOP", 19900)
 
 
 def plus_period_ms(period: str) -> int:
