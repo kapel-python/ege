@@ -1328,7 +1328,7 @@ async function render() {
     lastHash = location.hash;
     // Уход с пикера выбора предмета гасит «предмет только что выбрали»:
     // вернуться сюда позже — уже новая ситуация, а не та же перерисовка.
-    if (previousRoute === "subject" && currentRoute() !== "subject") loginSubjectChosen = false;
+    if (previousRoute === "subject" && currentRoute() !== "subject") { loginSubjectChosen = false; loginSubjectShowAll = false; }
     try { closeModal(); } catch (_) {}
     try { closeDeviceModal(); } catch (_) {}
   }
@@ -8854,6 +8854,7 @@ async function submitLogin(event) {
     // sessionStorage, чтобы перезагрузка посреди пикера не теряла его;
     // обычный refresh после выбора флага уже не видит.
     pendingSubjectChoice = true;
+    loginSubjectShowAll = false;
     try { sessionStorage.setItem("ege_login_subject_pending", "1"); } catch (_) {}
     toast("Ты в аккаунте", "", "check");
     go("subject");
@@ -8891,6 +8892,7 @@ async function logoutAccount() {
     }
   }
   pendingSubjectChoice = false;
+  loginSubjectShowAll = false;
   try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
   try { sessionStorage.removeItem("ege_onboard_preset_subject"); } catch (_) {}
   try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}

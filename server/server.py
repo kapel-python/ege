@@ -960,6 +960,36 @@ def subjects_payload() -> list:
     """Публичное описание предметов для каталога/онбординга."""
     return [_public_subject_info(sid) for sid in SUBJECT_IDS]
 
+
+def subjects_with_progress(conn: sqlite3.Connection, user_id: int | None) -> list:
+    """Предметы, где у человека есть хоть какой-то прогресс.
+
+    Только для пикера «Какой предмет открываем?» после входа: он показывает
+    не весь каталог, а лишь начатые предметы. Прогрессом считается пройденный
+    онбординг предмета ИЛИ xp/total_solved/total_correct > 0 в user_stats —
+    сам по себе xp > 0 покрывает почти всё, но предмет с пройденным
+    онбордингом и нулём решённого тоже начат, и прятать его нельзя.
+    Пустой список означает «прогресса нет» — клиент тогда показывает все
+    предметы как раньше. Таблиц может не быть на очень старой БД — тогда
+    тоже пусто, а не 500: это fail-open, а не отказ входа.
+    """
+    if user_id is None:
+        return []
+    try:
+        onboarded = {str(r["subject"]) for r in conn.execute(
+            "SELECT subject FROM user_subjects WHERE user_id=? AND onboarded=1",
+            (user_id,)).fetchall()}
+    except sqlite3.Error:
+        onboarded = set()
+    try:
+        stats = {str(r["subject"]) for r in conn.execute(
+            "SELECT subject FROM user_stats WHERE user_id=? AND (xp>0 OR total_solved>0 OR total_correct>0)",
+            (user_id,)).fetchall()}
+    except sqlite3.Error:
+        stats = set()
+    known = set(SUBJECT_IDS)
+    return sorted((onboarded | stats) & known, key=lambda sid: SUBJECT_IDS.index(sid))
+
 # ---------------------------------------------------------------------------
 # Admin access
 #
@@ -13432,7 +13462,13 @@ class Handler(BaseHTTPRequestHandler):
                     # Гостя до онбординга current_subject не хранится (строки
                     # нет) — отвечаем дефолтом, предмет он ещё выбирает.
                     current = current_subject_for(conn, user_id) if user_id is not None else resolve_subject(req_subject)
-                    self.send_json({"subjects": subjects_payload(), "current": current}, token=token); return
+                    payload = {"subjects": subjects_payload(), "current": current}
+                    # Прогресс для пикера «Какой предмет открываем?» после
+                    # входа: он показывает только начатые предметы. Гостю
+                    # поле не отдаём вовсе — ему фильтровать нечего.
+                    if user_id is not None:
+                        payload["withProgress"] = subjects_with_progress(conn, user_id)
+                    self.send_json(payload, token=token); return
                 # Каталог и состояние всегда одного предмета: без ?subject -
                 # current_subject пользователя (переживает перезагрузку),
                 # с ?subject - явно запрошенный. Разводить их нельзя: иначе
