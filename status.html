@@ -517,7 +517,7 @@
       : "временно недоступна"});
     if (skill.visuals > 0){
       facts.push({label: "Схемы", value: esc(skill.visuals) + " " + esc(plural(skill.visuals, "задание", "задания", "заданий")) + " со схемами"});
-    } else if (skill.tasks > 0){
+    } else if ((skill.subjVisuals || 0) > 0 && skill.tasks > 0){
       facts.push({label: "Схемы", value: "пока без картинок"});
     }
     if (skill.inDiagnostics){

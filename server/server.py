@@ -6336,6 +6336,15 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
                 diag_task_ids = {str(x) for x in diag_list if isinstance(x, str)}
         except (sqlite3.Error, ValueError, TypeError):
             diag_task_ids = set()
+        # Статичные картинки (task.visual -> visualAssets) — тоже схемы, а не
+        # только живые mathVisual-чертежи: иначе биология с 6 SVG показывала 0.
+        try:
+            subject_asset_ids = {
+                str(a.get("id")) for a in _subject_config(conn, "visualAssets", sid, [])
+                if isinstance(a, dict) and a.get("id")
+            }
+        except (sqlite3.Error, ValueError, TypeError):
+            subject_asset_ids = set()
         task_skill: dict[str, str] = {}
         subj_tasks = subj_blocked = subj_visuals = 0
         for tr in task_rows:
@@ -6354,7 +6363,10 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
                 continue
             available_by_skill[str(tr["skill_id"])] = available_by_skill.get(str(tr["skill_id"]), 0) + 1
             subj_tasks += 1
-            if meta.get("mathVisual"):
+            static_visual = meta.get("visual")
+            if meta.get("mathVisual") or (
+                isinstance(static_visual, dict) and str(static_visual.get("assetId") or "") in subject_asset_ids
+            ):
                 visuals_by_skill[str(tr["skill_id"])] = visuals_by_skill.get(str(tr["skill_id"]), 0) + 1
                 subj_visuals += 1
         diag_skills = {task_skill[tid] for tid in diag_task_ids if tid in task_skill}
@@ -6444,6 +6456,7 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
                 "practice": tasks_n > 0,
                 "missions": missions_by_skill.get(skid, 0),
                 "visuals": visuals_by_skill.get(skid, 0),
+                "subjVisuals": subj_visuals,
                 "inDiagnostics": skid in diag_skills,
             })
         subj_lessons = 0 if subject_locked else len(lesson_rows)
