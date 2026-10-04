@@ -13808,6 +13808,36 @@ class Handler(BaseHTTPRequestHandler):
                         messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
                         cost = {"n": 0}
                         _chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        # Вопрос фиксируем СРАЗУ, до вызова модели, а не в конце
+                        # хода вместе с ответом. Иначе весь ход (до 90+15 с)
+                        # тред читается пустым: перезагрузка страницы посреди
+                        # генерации рисовала «Здесь пока пусто», хотя вопрос
+                        # уже отправлен и слот занят. С ранней записью GET
+                        # треда отдаёт вопрос + busy + liveSteps — лента
+                        # показывает пузырёк и скелетон, а не пустоту; падение
+                        # процесса посреди хода оставляет вопрос в базе (а не
+                        # теряет его молча). История для модели собрана выше
+                        # ДО вставки, поэтому дублирования вопроса в контексте
+                        # нет. Заменяющий ход (replaceLast) — исключение: там
+                        # вопрос встаёт в той же транзакции, что снос старой
+                        # пары в конце, иначе падение посреди хода теряло бы
+                        # старый ответ (удалён, новый не записан).
+                        if replace_from is None:
+                            try:
+                                _agent_add_message(conn, tid, user_id, "user", text)
+                                conn.commit()
+                            except sqlite3.Error as exc:
+                                # Без вопроса ход не имеет смысла (ответ без
+                                # вопроса — битый тред): честный 503 вместо
+                                # продолжения без записи.
+                                try:
+                                    conn.rollback()
+                                except sqlite3.Error:
+                                    pass
+                                rid = log_request_error("agent", exc)
+                                _turn_cleanup()
+                                self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                                "ref": rid}, 503, token=token); return
                         try:
                             steps, final, pending = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_fn,
@@ -13833,8 +13863,10 @@ class Handler(BaseHTTPRequestHandler):
                             rid = log_request_error("agent-model", exc)
                             _turn_cleanup()
                             self.send_json({"error": "ИИ не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
-                        # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
-                        # Заменяющий ход сносит старую пару в этой же транзакции.
+                        # Фиксируем ход: шаги + (финал либо ожидание). Вопрос уже
+                        # записан выше до вызова модели — кроме заменяющего
+                        # хода, где он встаёт здесь же, в одной транзакции со
+                        # сносом старой пары.
                         if pending is not None and steps:
                             # Ждущий подтверждения шаг — тоже живой: опрос треда
                             # видит его до ответа, кнопки дорисует финал.
@@ -13842,7 +13874,7 @@ class Handler(BaseHTTPRequestHandler):
                         if replace_from is not None:
                             conn.execute("DELETE FROM agent_messages WHERE thread_id=? AND seq>=?",
                                          (tid, replace_from))
-                        _agent_add_message(conn, tid, user_id, "user", text)
+                            _agent_add_message(conn, tid, user_id, "user", text)
                         out_steps = []
                         for st in steps:
                             if st.get("status") == "needs_confirm":
