@@ -1413,7 +1413,7 @@
     } else if (st.status === "dropped") {
       // Честная подпись вместо кнопок: предложение не применено, потому что
       // ученик его не подтвердил и задал другой вопрос.
-      body.appendChild(el("p", "", "Не применено — ты задал другой вопрос."));
+      body.appendChild(el("p", "", "Не применено — поступил другой вопрос."));
     }
     var det = document.createElement("details");
     det.className = "agent__step-detail";
