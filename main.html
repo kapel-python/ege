@@ -994,8 +994,14 @@
   }
 
   /* ===== RESPONSIVE ===== */
-  @media (max-width:768px){
+  /* Якорные ссылки шапки прячем раньше остального (1024px): их суммарная
+     ширина + CTA уже на ~800–1000px не влезает в колонку nav, и колонка
+     с justify-self:end наезжает влево на логотип (замер: до +184px).
+     Ниже остаются логотип + переключатель темы + CTA — этого достаточно. */
+  @media (max-width:1024px){
     .header-link{display:none;}
+  }
+  @media (max-width:768px){
     .card-grid{grid-template-columns:1fr;}
     .hero-visual{grid-template-columns:1fr;}
     .mentor-grid{grid-template-columns:1fr;}
@@ -1067,7 +1073,6 @@
       <span class="logo-text">ege <em>easy</em></span>
     </a>
     <nav class="header-nav" aria-label="Навигация по странице">
-      <a class="header-link" href="#essay-check">Проверка сочинения</a>
       <a class="header-link" href="#pricing">Тарифы</a>
       <a class="header-link" href="/subscription"><span class="plus">Plus</span></a>
       <a class="header-link" href="#subjects">Предметы</a>
