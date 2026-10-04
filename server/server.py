@@ -8174,10 +8174,16 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
         raise ValueError("нужны limit, remaining или refill")
     if agent_payload is not None:
         # Валидируем сочинения первыми: применённый грант агента не должен
-        # уезжать в базу при 400 по второй половине запроса.
-        _validate_ai_limit_payload(raw_limit if has_limit else None, has_limit,
-                                   raw_remaining if has_remaining else None, has_remaining,
-                                   refill)
+        # уезжать в базу при 400 по второй половине запроса. Пустая
+        # сочиненийская часть при этом валидна — она значит «сочинения не
+        # трогаем» (см. выше), поэтому проверяем её только если в ней
+        # вообще что-то есть, иначе agent-only запросы (включая все три
+        # быстрые кнопки «ходы») падали бы с «нужны limit, remaining или
+        # refill», хотя с ними всё в порядке.
+        if has_limit or has_remaining or refill:
+            _validate_ai_limit_payload(raw_limit if has_limit else None, has_limit,
+                                       raw_remaining if has_remaining else None, has_remaining,
+                                       refill)
         _AGENT.admin_agent_quota_set(conn, user_id, agent_payload)
     if not has_limit and not has_remaining and not refill:
         return admin_ai_limit_status(conn, user_id)
