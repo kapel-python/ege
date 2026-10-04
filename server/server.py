@@ -162,6 +162,28 @@ def _load_subscription_module():
 _SUB = _load_subscription_module()
 
 
+def _load_telegram_module():
+    """Load the admin second-factor module (server/telegram.py).
+
+    Failure is not fatal: without it (or without its env settings) the admin
+    login stays password-only, exactly as before — the rest of the site works."""
+    import importlib.util
+
+    tg_path = Path(__file__).resolve().parent / "telegram.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_telegram", tg_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_TG = _load_telegram_module()
+
+
 def subscription_is_plus(conn: sqlite3.Connection, user_id: int) -> bool:
     """Активна ли Plus-подписка. Без модуля — всегда False (free)."""
     if _SUB is None:
@@ -2532,6 +2554,201 @@ def is_admin_session(conn: sqlite3.Connection, user_id: int | None, admin_token:
     if user_id is None:
         return False
     return admin_session_user(conn, user_id, admin_token) is not None
+
+
+# ---------------------------------------------------------------------------
+# Второй фактор входа в админку: подтверждение через Telegram.
+#
+# Верный пароль при настроенном боте НЕ открывает сессию, а создаёт заявку
+# (admin_login_pending): владелец видит IP/время/клиента и жмёт
+# «Подтвердить/Отклонить» в личном чате с ботом, а браузер жмёт статус
+# опросам GET /api/admin/login/status. Решение из ЧУЖОГО чата игнорируется
+# (см. telegram.parse_decision), привязка заявки к браузеру — та же пара
+# (user_id из ege_session + непрозрачный токен заявки), что у admin_sessions:
+# чужой браузер с угаданным токеном без чужой же сессии ничего не забирает.
+#
+# Защита от спама владельцу: живые заявки ограничены (3 на браузер, 5 на IP),
+# поэтому верный пароль из одних рук даёт максимум 3 сообщения за время
+# жизни заявок. Просрочка — отказ по умолчанию: молчание владельца сессию
+# не открывает никогда.
+# ---------------------------------------------------------------------------
+ADMIN_LOGIN_PENDING_TTL_SEC = 300
+ADMIN_LOGIN_PENDING_MAX_PER_USER = 3
+ADMIN_LOGIN_PENDING_MAX_PER_IP = 5
+ADMIN_LOGIN_PENDING_OFFSET_KEY = "admin_telegram_update_offset"
+
+
+def admin_pending_ttl_sec() -> int:
+    """Время жизни заявки. Env — только для тестов коротких сценариев."""
+    try:
+        value = int((os.environ.get("EGE_ADMIN_PENDING_TTL_SEC") or "").strip() or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        return ADMIN_LOGIN_PENDING_TTL_SEC
+    return max(30, min(3600, value))
+
+
+def admin_login_telegram_required() -> bool:
+    """Второй фактор включён: модуль загружен И бот настроен (токен + чат)."""
+    try:
+        return _TG is not None and bool(_TG.is_configured())
+    except Exception:
+        return False
+
+
+def ensure_admin_pending_schema(conn: sqlite3.Connection) -> None:
+    """Идемпотентная таблица заявок на вход. token — только sha256 (как сессии)."""
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS admin_login_pending (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token TEXT NOT NULL UNIQUE,
+          short TEXT NOT NULL,
+          ip TEXT NOT NULL DEFAULT '',
+          user_agent TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          sent_at INTEGER NOT NULL DEFAULT 0,
+          decided_at INTEGER,
+          message_id INTEGER)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_pending_user "
+                     "ON admin_login_pending(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_pending_expires "
+                     "ON admin_login_pending(expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_pending_short "
+                     "ON admin_login_pending(short)")
+    except sqlite3.Error:
+        pass
+
+
+def admin_pending_cleanup(conn: sqlite3.Connection, now_ms: int) -> None:
+    """Убрать просроченные заявки. Молчание владельца — отказ, следов не держим."""
+    try:
+        conn.execute("DELETE FROM admin_login_pending WHERE expires_at<=?", (now_ms,))
+        conn.commit()
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+
+
+def admin_pending_live_count(conn: sqlite3.Connection, *, user_id: int | None = None,
+                             ip: str | None = None, now_ms: int) -> int:
+    """Число живых заявок браузера (user_id) или адреса (ip)."""
+    try:
+        if user_id is not None:
+            row = conn.execute("SELECT COUNT(*) AS c FROM admin_login_pending "
+                               "WHERE user_id=? AND status='pending' AND expires_at>?",
+                               (user_id, now_ms)).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) AS c FROM admin_login_pending "
+                               "WHERE ip=? AND status='pending' AND expires_at>?",
+                               (ip or "", now_ms)).fetchone()
+        return int(row["c"]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        return 0
+
+
+def _admin_telegram_offset_get(conn: sqlite3.Connection) -> int | None:
+    """Смещение getUpdates: переживает рестарт, иначе решения перечитывались бы."""
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                           (ADMIN_LOGIN_PENDING_OFFSET_KEY,)).fetchone()
+        if not row:
+            return None
+        value = json.loads(row["value_json"])
+        return int(value) if isinstance(value, int) and value > 0 else None
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
+
+
+def _admin_telegram_offset_set(conn: sqlite3.Connection, offset: int) -> None:
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (ADMIN_LOGIN_PENDING_OFFSET_KEY, json.dumps(int(offset))))
+        conn.commit()
+    except (sqlite3.Error, ValueError, TypeError):
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+
+
+def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
+    """Втянуть решения владельца из Bot API в заявки. Best-effort, никогда не бросает.
+
+    Вызывается из опроса статуса (и из нового входа): фонового потока нет,
+    поэтому решения забираются тогда, когда их кто-то ждёт. Применение
+    идемпотентно (UPDATE ... WHERE status='pending'), повторный втягивание
+    того же update безвредно. Сеть/протокол Telegram здесь — тишина: опрос
+    обязан отвечать даже при мёртвом Bot API.
+    """
+    if not admin_login_telegram_required():
+        return
+    try:
+        assert _TG is not None
+        chat_id = _TG.settings()["chatId"]
+        offset = _admin_telegram_offset_get(conn)
+        updates, max_id = _TG.fetch_updates(offset)
+        if max_id is not None:
+            _admin_telegram_offset_set(conn, int(max_id) + 1)
+        for update in updates or []:
+            try:
+                callback_id = None
+                if isinstance(update, dict) and isinstance(update.get("callback_query"), dict):
+                    callback_id = update["callback_query"].get("id")
+                decision = _TG.parse_decision(update, chat_id)
+                if callback_id:
+                    # Кнопке отвечаем всегда (убрать «часики»), даже чужой:
+                    # исход чужого нажатия при этом не применяется.
+                    _TG.answer_callback(str(callback_id))
+                if not decision:
+                    continue
+                short, status = decision
+                row = conn.execute("SELECT id, user_id, ip, message_id, short FROM admin_login_pending "
+                                   "WHERE short=? AND status='pending'", (short,)).fetchone()
+                if not row:
+                    continue
+                now_ms = int(time.time() * 1000)
+                conn.execute("UPDATE admin_login_pending SET status=?, decided_at=? WHERE id=?",
+                             (status, now_ms, int(row["id"])))
+                try:
+                    admin_audit(conn, int(row["user_id"]),
+                                "admin-login-approved" if status == "approved" else "admin-login-denied",
+                                int(row["user_id"]), f"{row['short']} {row['ip'] or ''}"[:200])
+                except (sqlite3.Error, TypeError, ValueError):
+                    pass
+                conn.commit()
+                if row["message_id"]:
+                    try:
+                        _TG.mark_message(int(row["message_id"]), approved=(status == "approved"),
+                                         code=_pending_code(str(row["short"])))
+                    except (TypeError, ValueError):
+                        pass
+            except Exception:
+                continue
+    except Exception:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return
+
+
+def _pending_short() -> str:
+    """Короткий код заявки для сверки с сообщением в Telegram (8 hex)."""
+    return token_hex(4).upper()
+
+
+def _pending_code(short: str) -> str:
+    """Человекочитаемая форма кода: 'XXXX-XXXX'."""
+    text = str(short or "").upper()
+    return f"{text[:4]}-{text[4:8]}" if len(text) == 8 else text
 
 
 # ---------------------------------------------------------------------------
@@ -11567,6 +11784,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Неверный пароль"}, 401)
             return
         admin_login_success(ip)
+        if admin_login_telegram_required():
+            self.handle_admin_login_pending(conn, ip)
+            return
         user_id, token = provision_user(conn, self)  # вход администратора = живой человек
         admin_token, expires_at = create_admin_session(conn, user_id)
         admin_audit(conn, user_id, "admin-login", user_id)
@@ -11575,6 +11795,165 @@ class Handler(BaseHTTPRequestHandler):
             token=token,
             admin_cookie=self.admin_cookie_attrs(admin_token, ADMIN_SESSION_MAX_AGE),
         )
+
+    def handle_admin_login_pending(self, conn: sqlite3.Connection, ip: str) -> None:
+        """Верный пароль при настроенном боте: заявка вместо сессии.
+
+        Сессия (кука ege_admin) НЕ создаётся, пока владелец не нажмёт
+        «Подтвердить» в Telegram: украденный пароль сам по себе бесполезен.
+        Кука обычной сессии при этом ставится сразу — по ней опрос статуса
+        привязывает заявку к этому же браузеру (см. handle_admin_login_status).
+        """
+        assert _TG is not None
+        ensure_admin_pending_schema(conn)
+        now_ms = int(time.time() * 1000)
+        admin_pending_cleanup(conn, now_ms)
+        # Капы ДО заведения пользователя: флуд верными паролями с ротацией
+        # кук иначе плодил бы и orphan-строки users, и сообщения владельцу.
+        if admin_pending_live_count(conn, ip=ip, now_ms=now_ms) >= ADMIN_LOGIN_PENDING_MAX_PER_IP:
+            self.send_json({"error": "Слишком много запросов подтверждения. Подожди несколько минут.",
+                            "retryAfter": 60}, 429)
+            return
+        user_id, token = provision_user(conn, self)
+        if admin_pending_live_count(conn, user_id=user_id, now_ms=now_ms) >= ADMIN_LOGIN_PENDING_MAX_PER_USER:
+            self.send_json({"error": "Слишком много запросов подтверждения. Подожди несколько минут.",
+                            "retryAfter": 60}, 429)
+            return
+        ttl_ms = admin_pending_ttl_sec() * 1000
+        pending_token = token_urlsafe(32)
+        short = _pending_short()
+        try:
+            ua = str(self.headers.get("User-Agent", "") or "")
+        except Exception:
+            ua = ""
+        ua = re.sub(r"\s+", " ", ua).strip()[:200]
+        conn.execute(
+            "INSERT INTO admin_login_pending(user_id, token, short, ip, user_agent, status, "
+            "created_at, expires_at, sent_at) VALUES (?,?,?,?,?,'pending',?,?,0)",
+            (user_id, token_digest(pending_token), short, ip, ua, now_ms, now_ms + ttl_ms),
+        )
+        conn.commit()
+        try:
+            message_id = _TG.send_login_request(
+                short=short, code=_pending_code(short), ip=ip,
+                when=_TG.now_msk(now_ms),
+                client=ua or "неизвестный клиент",
+                ttl_sec=admin_pending_ttl_sec())
+        except Exception:
+            # Сообщение не ушло — заявка без уведомления владельца мертва:
+            # откатываем её и просим повторить, а не оставляем висеть.
+            try:
+                conn.execute("DELETE FROM admin_login_pending WHERE token=?",
+                             (token_digest(pending_token),))
+                conn.commit()
+            except sqlite3.Error:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+            self.send_json({"error": "Telegram недоступен — подтверди позже.",
+                            "code": "TELEGRAM_UNAVAILABLE"}, 503)
+            return
+        try:
+            conn.execute("UPDATE admin_login_pending SET sent_at=?, message_id=? WHERE token=?",
+                         (int(time.time() * 1000),
+                          int(message_id) if isinstance(message_id, int) else None,
+                          token_digest(pending_token)))
+            conn.commit()
+        except (sqlite3.Error, TypeError, ValueError):
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        admin_audit(conn, user_id, "admin-login-pending", user_id, f"{short} {ip}"[:200])
+        self.send_json({"ok": True, "pending": True, "pendingId": pending_token,
+                        "code": _pending_code(short), "expiresAt": now_ms + ttl_ms},
+                       token=token)
+
+    def handle_admin_login_status(self, conn: sqlite3.Connection) -> None:
+        """GET /api/admin/login/status?pending= — опрос решения владельца."""
+        from urllib.parse import parse_qs
+        try:
+            query = parse_qs(urlparse(self.path).query)
+        except Exception:
+            query = {}
+        raw = str((query.get("pending") or [""])[0] or "").strip()
+        if not raw or len(raw) > 128:
+            self.send_json({"error": "Нужен идентификатор запроса"}, 400)
+            return
+        ensure_admin_pending_schema(conn)
+        # Решения втягиваются лениво, здесь: фонового потока нет, а ждать
+        # решения некому, кроме этого опроса. Мёртвый Bot API — тишина,
+        # опрос всё равно отвечает текущим состоянием заявки.
+        telegram_ingest_updates(conn)
+        row = conn.execute("SELECT id, user_id, short, ip, status, expires_at FROM admin_login_pending "
+                           "WHERE token=?", (token_digest(raw),)).fetchone()
+        if not row:
+            self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
+            return
+        user_id = existing_user_for(conn, self)
+        if user_id is None or int(user_id) != int(row["user_id"]):
+            # Чужой браузер (или сессия потеряна): тот же 404, что и
+            # несуществующая заявка — по ответу их не различить.
+            self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
+            return
+        now_ms = int(time.time() * 1000)
+        if int(row["expires_at"]) <= now_ms and row["status"] == "pending":
+            conn.execute("DELETE FROM admin_login_pending WHERE id=?", (int(row["id"]),))
+            conn.commit()
+            admin_audit(conn, int(row["user_id"]), "admin-login-expired",
+                        int(row["user_id"]), f"{row['short']} {row['ip'] or ''}"[:200])
+            self.send_json({"error": "Время подтверждения вышло. Войди заново.",
+                            "code": "PENDING_EXPIRED", "expired": True}, 410)
+            return
+        if row["status"] == "denied":
+            conn.execute("DELETE FROM admin_login_pending WHERE id=?", (int(row["id"]),))
+            conn.commit()
+            self.send_json({"error": "Вход отклонён владельцем.", "code": "ADMIN_LOGIN_DENIED",
+                            "denied": True}, 403)
+            return
+        if row["status"] == "approved":
+            admin_token, expires_at = create_admin_session(conn, int(row["user_id"]))
+            conn.execute("DELETE FROM admin_login_pending WHERE id=?", (int(row["id"]),))
+            conn.commit()
+            admin_audit(conn, int(row["user_id"]), "admin-login", int(row["user_id"]))
+            name_row = conn.execute("SELECT name FROM users WHERE id=?",
+                                    (int(row["user_id"]),)).fetchone()
+            self.send_json(
+                {"ok": True, "expiresAt": expires_at,
+                 "user": {"id": int(row["user_id"]), "accountId": account_id_for(conn, int(row["user_id"])),
+                          "name": name_row["name"] if name_row else None}},
+                admin_cookie=self.admin_cookie_attrs(admin_token, ADMIN_SESSION_MAX_AGE),
+            )
+            return
+        self.send_json({"ok": True, "pending": True, "expiresAt": int(row["expires_at"])})
+
+    def handle_admin_login_cancel(self, conn: sqlite3.Connection) -> None:
+        """POST /api/admin/login/cancel — снять свою заявку (идемпотентно)."""
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        raw = str(payload.get("pending") or "").strip() if isinstance(payload, dict) else ""
+        if raw and len(raw) <= 128:
+            try:
+                ensure_admin_pending_schema(conn)
+                row = conn.execute("SELECT id, user_id FROM admin_login_pending WHERE token=?",
+                                   (token_digest(raw),)).fetchone()
+                if row is not None:
+                    user_id = existing_user_for(conn, self)
+                    if user_id is not None and int(user_id) == int(row["user_id"]):
+                        conn.execute("DELETE FROM admin_login_pending WHERE id=?", (int(row["id"]),))
+                        conn.commit()
+                        admin_audit(conn, int(row["user_id"]), "admin-login-cancelled",
+                                    int(row["user_id"]), "")
+            except sqlite3.Error:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+        self.send_json({"ok": True})
 
     def handle_admin_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid cookie: clear what we can,
@@ -12615,13 +12994,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
-        if path == "/api/admin/login" or path == "/api/admin/logout":
+        if path in ("/api/admin/login", "/api/admin/logout", "/api/admin/login/cancel"):
             # Общий per-IP бакет поверх узкого admin_login_allowed: без него
             # флуд переборами/мусором шёл мимо глобальных 300/мин.
             if self.api_rate_limited(): return
             conn = connect()
             try:
                 if path == "/api/admin/login": self.handle_admin_login(conn)
+                elif path == "/api/admin/login/cancel": self.handle_admin_login_cancel(conn)
                 else: self.handle_admin_logout(conn)
             except sqlite3.Error as exc:
                 rid = log_request_error("admin-login", exc)
@@ -14252,6 +14632,17 @@ class Handler(BaseHTTPRequestHandler):
                                         "user": {"id": user_id, "accountId": user["account_id"], "name": user["name"]}})
                     else:
                         self.send_json({"admin": False}, 401)
+                    return
+                if path == "/api/admin/login/status":
+                    # Опрос решения владельца по заявке второго фактора:
+                    # сессии админа ещё нет, поэтому до общего require_admin
+                    # ниже. Привязка заявки к браузеру — внутри обработчика.
+                    try:
+                        self.handle_admin_login_status(conn)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("admin-login-status", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500)
                     return
                 auth = self.require_admin(conn)
                 if not auth: return

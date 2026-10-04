@@ -393,6 +393,12 @@ function renderLogin(error = "") {
     try {
       const password = document.getElementById("pwInput").value;
       const result = await AdminApi.post("/api/admin/login", { password });
+      // Второй фактор: верный пароль создал заявку — сессия откроется,
+      // только когда владелец нажмёт «Подтвердить» в Telegram.
+      if (result && result.pending && result.pendingId) {
+        renderPendingLogin(result.pendingId, result.code, result.expiresAt);
+        return;
+      }
       A.session = { user: result.user, expiresAt: result.expiresAt };
       toast("Вход выполнен");
       if (!location.hash) location.hash = "#/dashboard";
@@ -420,6 +426,114 @@ function renderLogin(error = "") {
       const el = document.getElementById("whoami");
       if (el) el.textContent = "недоступен";
     });
+}
+
+/* ---------------- ожидание второго фактора ---------------- */
+
+/* Заявка создана верным паролем: ждём решения владельца в Telegram.
+   Опрос — раз в 2.5 с; кука ege_admin ставится ответом опроса (fetch с
+   credentials), js её не видит и не хранит — как при обычном входе. */
+function renderPendingLogin(pendingId, code, expiresAt) {
+  stopPendingPoll();
+  A.pendingLogin = { id: pendingId, code: code || "", expiresAt: Number(expiresAt) || 0 };
+  A.root.innerHTML = `
+    <div class="admin-login">
+      <div class="admin-login__card">
+        <span class="admin-login__mark">ege <em>easy</em></span>
+        <div class="admin-login__title">Подтверди вход в Telegram</div>
+        <div class="admin-login__sub">Пароль верный. Запрос с кодом <span class="mono" id="pendingCode">${esc(A.pendingLogin.code)}</span> уже у владельца — нажми «Подтвердить» в личном чате с ботом.</div>
+        <div class="admin-login__error" id="pendingMsg" style="display:none"></div>
+        <div style="font-size:13px;color:var(--muted)" id="pendingTimer"></div>
+        <button class="btn btn--soft btn--lg" type="button" id="pendingCancel" style="justify-content:center">Отмена</button>
+      </div>
+    </div>`;
+  document.getElementById("pendingCancel").onclick = cancelPendingLogin;
+  pollPendingLogin();
+}
+
+function stopPendingPoll() {
+  if (A.pendingTimer) { clearTimeout(A.pendingTimer); A.pendingTimer = null; }
+  A.pendingLogin = null;
+}
+
+function pendingLeftMs() {
+  if (!A.pendingLogin || !A.pendingLogin.expiresAt) return 0;
+  return Math.max(0, A.pendingLogin.expiresAt - Date.now());
+}
+
+async function pollPendingLogin() {
+  if (!A.pendingLogin) return;
+  const left = pendingLeftMs();
+  const timerEl = document.getElementById("pendingTimer");
+  if (timerEl) {
+    const s = Math.ceil(left / 1000);
+    timerEl.textContent = left > 0
+      ? `Осталось ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+      : "Время вышло";
+  }
+  if (left <= 0) {
+    pendingFailed("Время подтверждения вышло. Войди заново.");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/admin/login/status?pending=${encodeURIComponent(A.pendingLogin.id)}`, {
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload && payload.user) {
+      // Владелец подтвердил: ответ уже поставил куку ege_admin.
+      stopPendingPoll();
+      A.session = { user: payload.user, expiresAt: payload.expiresAt };
+      toast("Вход выполнен");
+      if (!location.hash) location.hash = "#/dashboard";
+      render();
+      return;
+    }
+    if (response.ok && payload && payload.pending) {
+      if (payload.expiresAt) A.pendingLogin.expiresAt = Number(payload.expiresAt);
+    } else if (response.status === 403) {
+      pendingFailed("Вход отклонён владельцем.");
+      return;
+    } else if (response.status === 410 || response.status === 404) {
+      pendingFailed("Время подтверждения вышло. Войди заново.");
+      return;
+    } else {
+      pendingNote(payload.error || "Ждём решения…");
+    }
+  } catch (e) {
+    pendingNote("Нет связи с сервером — пробуем снова…");
+  }
+  if (A.pendingLogin) A.pendingTimer = setTimeout(pollPendingLogin, 2500);
+}
+
+function pendingNote(text) {
+  const el = document.getElementById("pendingMsg");
+  if (el && text) { el.style.display = ""; el.textContent = text; }
+}
+
+function pendingFailed(text) {
+  stopPendingPoll();
+  A.root.innerHTML = `
+    <div class="admin-login">
+      <div class="admin-login__card">
+        <span class="admin-login__mark">ege <em>easy</em></span>
+        <div class="admin-login__title">Вход не подтверждён</div>
+        <div class="admin-login__sub">${esc(text)}</div>
+        <button class="btn btn--primary btn--lg" type="button" id="pendingBack" style="justify-content:center">Назад ко входу</button>
+      </div>
+    </div>`;
+  document.getElementById("pendingBack").onclick = () => renderLogin();
+}
+
+async function cancelPendingLogin() {
+  const id = A.pendingLogin ? A.pendingLogin.id : null;
+  stopPendingPoll();
+  if (id) {
+    try {
+      await AdminApi.post("/api/admin/login/cancel", { pending: id });
+    } catch (e) { /* заявка и так протухнет сама */ }
+  }
+  renderLogin();
 }
 
 /* ---------------- Dashboard ---------------- */
@@ -4260,6 +4374,9 @@ async function screenBlocked() {
 }
 
 async function render() {
+  // Пока ждём решения владельца в Telegram, экран ожидания не трогаем:
+  // смена хэша в этот момент не должна сносить опрос.
+  if (A.pendingLogin) return;
   if (!A.session) { renderLogin(); return; }
   const route = parseHash();
   if (route.name === "users") {
