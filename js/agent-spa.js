@@ -3206,14 +3206,16 @@
     function drawerW() {
       var n = drawerNodes();
       var w = n ? n.side.offsetWidth : 0;
-      // Пока шторка скрыта, offsetWidth может врать — тогда по CSS-формуле
-      // ширины шторки min(86vw, 320px).
+      // Шторка прячется visibility (раскладка жива), поэтому offsetWidth
+      // обычно честный; ноль бывает только до первого маунта — тогда по
+      // CSS-формуле ширины шторки min(86vw, 320px).
       if (!w) w = Math.min(window.innerWidth * 0.86, 320);
       return w;
     }
     // px: -w (закрыто) .. 0 (открыто). Затемнение едет вместе со шторкой.
-    // display тоже берём на себя: закрытая шторка — display:none, и без
-    // инлайна её не видно ни при каком transform.
+    // Шторка всегда в раскладке (прячется visibility, а не display:none —
+    // иначе transition нечем играть и открытие/закрытие мигали бы), поэтому
+    // инлайны ниже — только позиция и видимость на время ведения.
     function drawerPos(px) {
       var n = drawerNodes();
       if (!n || !sw.w) return;

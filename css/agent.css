@@ -79,10 +79,15 @@
   width: 264px; flex: none;
   border-right: 1px solid var(--border);
   background: var(--sidebar-bg);
-  display: none; flex-direction: column; gap: 16px; padding: 20px 16px;
+  display: flex; flex-direction: column; gap: 16px; padding: 20px 16px;
   min-height: 0; position: relative;
+  /* Скрыт через visibility, а не display:none: display переключается
+     мгновенно и убивает transition — шторка просто мигала. visibility
+     держит элемент в раскладке (на телефоне он fixed — всё равно, на
+     десктопе закрытие уводит margin), поэтому едут обе стороны. */
+  visibility: hidden;
 }
-.agent.nav-open .agent__threads { display: flex; }
+.agent.nav-open .agent__threads { visibility: visible; }
 .agent__threads-head { display: flex; align-items: center; gap: 12px; }
 /* Общий .section-title несёт margin: 34px 0 14px (отступы разделов
    страницы) и weight 700 — здесь он сдвигал заголовок рейла вниз и рвал
@@ -185,7 +190,7 @@
   flex: 1; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
 }
-.agent__toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); flex: none; }
+.agent__toolbar { display: flex; align-items: center; gap: 4px; padding: 7px 12px 7px 8px; border-bottom: 1px solid var(--border); flex: none; }
 /* Бургер виден и на десктопе: рейл по умолчанию скрыт, и без кнопки
    в тулбаре список чатов было бы не открыть. */
 .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-2); }
@@ -547,7 +552,6 @@ a.agent__link--int { border-style: dashed; }
 }
 /* Десктоп: рейл — колонка в потоке, жеста там нет, но появление/скрытие —
    плавной анимацией, а не мгновенно. */
-@keyframes agentDrawerIn { from { opacity: 0; transform: translateX(-14px); } }
 @keyframes agentShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .32s cubic-bezier(.2, .7, .2, 1) both; }
@@ -569,10 +573,12 @@ a.agent__link--int { border-style: dashed; }
     border-radius: 0 var(--radius) var(--radius) 0; border-right: 1px solid var(--border-strong);
     background: var(--surface); box-shadow: 24px 0 48px -18px var(--shadow);
     padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    /* Открытие И закрытие — одним transition: visibility прячется с задержкой
+       (уже за краем), показывается сразу. Без задержки закрытие мигало бы. */
     transform: translateX(-100%); visibility: hidden;
-    transition: transform .25s ease, visibility .25s;
+    transition: transform .25s ease, visibility 0s linear .25s;
   }
-  .agent.nav-open .agent__threads { display: flex; transform: none; visibility: visible; }
+  .agent.nav-open .agent__threads { transform: none; visibility: visible; transition: transform .25s ease, visibility 0s; }
   .agent__scrim {
     display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim);
     opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s;
@@ -595,8 +601,9 @@ a.agent__link--int { border-style: dashed; }
   }
   .agent__hint { display: none; }
   /* Тулбар на телефоне ниже: бургер и кольцо квоты уменьшены по высоте, но
-     их тач-зоны остаются 44px (padding внутрь, а не рост кнопки). */
-  .agent__toolbar { padding: 4px 10px; gap: 6px; }
+     их тач-зоны остаются 44px (padding внутрь, а не рост кнопки). Бургер
+     прижат левее (padding-left и gap меньше), размеры кнопок и шрифт те же. */
+  .agent__toolbar { padding: 4px 10px 4px 6px; gap: 4px; }
   .agent__menu { width: 44px; height: 44px; }
   /* Телефон: 40px и 13.5px — зазор 5.6px по бокам, 5.0px сверху/снизу
      (было 3.5/2.5 при 32px и 12px). Тач-зона остаётся 44px по высоте. */
@@ -636,7 +643,7 @@ a.agent__link--int { border-style: dashed; }
 @media (prefers-reduced-motion: reduce) {
   .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter,
   .agent__qr, .agent__suggest-card, .agent__empty-badge, .agent__list li.new { animation: none; }
-  .agent.nav-open .agent__threads { animation: none; }
+  .agent__threads { transition: none; }
   .agent__mark, .agent__step::before { animation: none; }
   .agent__loader-dot, .agent__loader-text { animation: none; }
   .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--agent-ink-2); filter: none; }
@@ -647,9 +654,18 @@ a.agent__link--int { border-style: dashed; }
 
 @media (prefers-reduced-motion: reduce) { .agent__md a, a.agent__link { transition: none; } }
 
-/* Десктоп: рейл — колонка в потоке, жеста там нет, но появление — плавной
-   анимацией, а не мгновенно. Правило в конце файла осознанно: тест режет CSS
+/* Десктоп: рейл — колонка в потоке, уезжает margin-ом вбок (точная ширина
+   264px при border-box), поэтому плавно и открытие, и закрытие. display
+   для этого не годится: он переключается мгновенно и убивает transition
+   в обе стороны. Правило в конце файла осознанно: тест режет CSS
    по первому @media и ждёт там мобильный блок. */
 @media (min-width: 901px) {
-  .agent.nav-open .agent__threads { animation: agentDrawerIn .22s ease both; }
+  .agent__threads {
+    margin-left: -264px;
+    transition: margin-left .25s ease, visibility 0s linear .25s;
+  }
+  .agent.nav-open .agent__threads {
+    margin-left: 0;
+    transition: margin-left .25s ease, visibility 0s;
+  }
 }

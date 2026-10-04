@@ -489,11 +489,14 @@ check("рейл: заголовок своей строкой, «Новый ча
   && spaCode.includes("side.appendChild(newBtn)"));
 /* Рейл скрыт по умолчанию везде (на десктопе 264px съедали половину чата,
    а закрыть было нечем) и открывается бургером в тулбаре; выбор чата
-   закрывает обратно. Подвала «Раздел бесплатный» с корзиной нет нигде —
-   удаление живёт только в меню чата «Удалить чат». */
+   закрывает обратно. Скрытие — через visibility, а не display:none: display
+   переключается мгновенно и убивает transition в обе стороны. Подвала
+   «Раздел бесплатный» с корзиной нет нигде — удаление живёт только в меню
+   чата «Удалить чат». */
 check("рейл скрыт по умолчанию и открывается бургером (и на десктопе)",
-  /\.agent__threads \{[^}]*display: none/.test(spaCss)
-  && /\.agent\.nav-open \.agent__threads \{[^}]*display: flex/.test(spaCss)
+  /\.agent__threads \{[^}]*visibility: hidden/.test(spaCss)
+  && !/\.agent__threads \{[^}]*display: none/.test(spaCss)
+  && /\.agent\.nav-open \.agent__threads \{[^}]*visibility: visible/.test(spaCss)
   && !/\.agent__menu \{ display: none/.test(spaCss)
   && spaCode.includes("nav(open)")
   && (spaCode.match(/nav\(false\)/g) || []).length >= 3,
@@ -878,8 +881,22 @@ check("«Подробнее» скрыто из интерфейса, код н�
   && spaCode.includes('sum.textContent = "Подробнее"'));
 check("во время ведения transition выключен (иначе дёрганье)",
   /\.agent\.dragging \.agent__threads/.test(spaCss));
-check("десктоп: открытие списка с анимацией, а не мгновенно",
-  /agentDrawerIn/.test(spaCss) && /min-width: 901px/.test(spaCss));
+/* Шторка открывается И закрывается плавно: на телефоне едет transform-ом,
+   на десктопе уезжает margin-ом (точная ширина 264px при border-box),
+   visibility прячется с задержкой. display:none для скрытия запрещён —
+   он убивает transition и шторка мигает. */
+check("шторка плавно открывается и закрывается (обе стороны)",
+  /transform: translateX\(-100%\); visibility: hidden;/.test(spaCss)
+  && /transition: transform \.25s ease, visibility 0s linear \.25s/.test(spaCss)
+  && /margin-left: -264px;/.test(spaCss)
+  && /transition: margin-left \.25s ease, visibility 0s linear \.25s/.test(spaCss)
+  && !/agentDrawerIn/.test(spaCss));
+/* Тулбар компактный: бургер левее за счёт меньших отступа и зазора, размеры
+   кнопки (40/44px) и шрифт заголовка (18/16px) не тронуты. */
+check("тулбар компактный (бургер левее, размеры те же)",
+  /gap: 4px; padding: 7px 12px 7px 8px/.test(rule(spaCss, ".agent__toolbar"))
+  && /width: 40px; height: 40px/.test(rule(spaCss, ".agent__menu"))
+  && /font-size: 18px/.test(rule(spaCss, ".agent__title")));
 /* --- список чатов не сжимается и листается. Список — flex-колонка, а её
    элементы по умолчанию сжимаются: при 24 чатах строки наезжали друг на
    друга (замер: высота кнопки 60.3px, зазор −36.3px, наложений 23 из 23) и
