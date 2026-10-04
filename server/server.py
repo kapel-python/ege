@@ -12808,17 +12808,26 @@ class Handler(BaseHTTPRequestHandler):
                                        400, token=token,
                                        headers={"Retry-After": str(wait)}); return
                     _agent_live_start(tid)
+                    def _confirm_cleanup():
+                        # Слот и снимок — ДО ответа: клиент видит ответ и тут же
+                        # может слать следующий запрос, а release в finally
+                        # опаздывал — быстрый повтор видел занятый слот
+                        # (400 AGENT_BUSY). finally ниже — страховка.
+                        _agent_busy_release(tid)
+                        _agent_live_clear(tid)
                     try:
                         try:
                             applied = _AGENT.apply_action(conn, int(user_id), subject,
                                                           str(msg["tool_name"] or ""), proposal if isinstance(proposal, dict) else {})
                         except ValueError as exc:
                             conn.rollback()
+                            _confirm_cleanup()
                             self.send_json({"error": f"Не удалось применить: {exc}"}, 400, token=token); return
                         conn.execute("UPDATE agent_messages SET status='applied', result_json=? WHERE id=?",
                                      (json.dumps({"proposal": proposal, "applied": applied}, ensure_ascii=False)[:16000], mid))
                         conn.commit()
                         if _AI is None:
+                            _confirm_cleanup()
                             self.send_json({"error": "ИИ временно недоступен"}, 503, token=token); return
                         # Результат применения (assistant с вызовом + tool с
                         # {proposal, applied}) ОБЯЗАН остаться в истории: именно он
@@ -12845,6 +12854,7 @@ class Handler(BaseHTTPRequestHandler):
                                 on_step=lambda st: _agent_live_push(tid, st))
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-confirm", exc)
+                            _confirm_cleanup()
                             self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                         except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError, Exception) as exc:
                             # Статус уже 'applied', а ответа нет: откатываем шаг в
@@ -12859,6 +12869,7 @@ class Handler(BaseHTTPRequestHandler):
                                 except sqlite3.Error:
                                     pass
                             rid = log_request_error("agent-confirm", exc)
+                            _confirm_cleanup()
                             self.send_json({"error": "Не удалось завершить ход, попробуй ещё раз.", "ref": rid},
                                            502, token=token); return
                         out_steps = []
@@ -12879,6 +12890,7 @@ class Handler(BaseHTTPRequestHandler):
                         if pending2 is not None:
                             conn.commit()
                             quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            _confirm_cleanup()
                             self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                             "final": None, "pending": True, "quota": quota,
                                             "usage": {"cost": cost["n"]}}, token=token); return
@@ -12891,6 +12903,7 @@ class Handler(BaseHTTPRequestHandler):
                                            suggests=suggests)
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        _confirm_cleanup()
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                         "final": final_clean, "suggests": suggests, "quota": quota,
                                         "usage": {"cost": cost["n"]}}, token=token); return
@@ -12952,6 +12965,22 @@ class Handler(BaseHTTPRequestHandler):
                                                 "code": "AGENT_PENDING"}, 400, token=token); return
                             replace_from = int(lu["seq"])
                     usage_spent = False
+                    def _turn_cleanup():
+                        # Слот, снимок и возврат жетона — ДО ответа: клиент видит
+                        # ответ и тут же шлёт следующий ход, а release/refund в
+                        # finally опаздывали — быстрый повтор получал занятый слот
+                        # (400 AGENT_BUSY) или ещё не возвращённый жетон.
+                        # finally ниже — страховка (всё идемпотентно, двойного
+                        # возврата нет: флаг снят).
+                        nonlocal usage_spent
+                        if usage_spent:
+                            try:
+                                _AGENT.agent_quota_refund(conn, int(user_id))
+                            except sqlite3.Error:
+                                pass
+                            usage_spent = False
+                        _agent_busy_release(tid)
+                        _agent_live_clear(tid)
                     try:
                         # Повторный ход кэшируется: тот же текст последним — отдаём готовое без модели и без жетона.
                         # force:true от клиента (кнопка «Попробовать снова») обходит кэш: явный повтор = новый шанс.
@@ -12976,6 +13005,7 @@ class Handler(BaseHTTPRequestHandler):
                                     finals = [(s["content"], s.get("suggests") or []) for s in public
                                               if s["role"] == "assistant" and (s["content"] or "").strip()]
                                     quota = _AGENT.agent_quota_status(conn, int(user_id))
+                                    _turn_cleanup()
                                     self.send_json({"ok": True, "cached": True, "steps": [
                                         {"id": s["id"], "tool": s.get("tool"), "args": s.get("args"),
                                          "label": _AGENT.describe_step(s.get("tool") or "", s.get("args") or {}, s.get("result")),
@@ -13027,6 +13057,7 @@ class Handler(BaseHTTPRequestHandler):
                             allowed, retry_after = _AI.ai_take(
                                 [(f"agent-user:{user_id}", _AI.AI_RATE_MAX), (f"agent-ip:{ip}", _AI.AI_NET_RATE_MAX)], 1)
                             if not allowed:
+                                _turn_cleanup()
                                 self.send_json({"error": "Слишком частые запросы. Попробуй через несколько секунд.",
                                                 "retryAfter": retry_after}, 429, token=token,
                                                headers={"Retry-After": str(retry_after)})
@@ -13035,6 +13066,7 @@ class Handler(BaseHTTPRequestHandler):
                         if not _AGENT.agent_quota_reserve(conn, int(user_id)):
                             st = _AGENT.agent_quota_status(conn, int(user_id))
                             retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
+                            _turn_cleanup()
                             self.send_json({"error": "Ходы наставника на сегодня закончились. Дождись таймера.",
                                             "code": AI_LIMIT_CODE, "limit": st["limit"],
                                             "remaining": st["remaining"], "resetInSec": st["resetInSec"],
@@ -13078,20 +13110,24 @@ class Handler(BaseHTTPRequestHandler):
                                 on_step=lambda st: _agent_live_push(tid, st))
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-unavailable", exc)
+                            _turn_cleanup()
                             self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                         except _AGENT.AgentInputError as exc:
                             # Детерминированная ошибка инструментов (нет урока/задания,
                             # цель не из шкалы): повторять бессмысленно — 400 с текстом.
-                            # Жетон вернётся через finally (usage_spent ещё True).
+                            # Жетон возвращается в _turn_cleanup до ответа.
+                            _turn_cleanup()
                             self.send_json({"error": str(exc) or "Наставник не смог подобрать данные.",
                                             "code": "AGENT_TOOL_ERROR"}, 400, token=token); return
                         except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError) as exc:
                             rid = log_request_error("agent-model", exc)
+                            _turn_cleanup()
                             self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         except Exception as exc:
                             # Любой сбой вне контракта (обрыв провайдера не-AIError,
                             # ошибка сериализации): JSON вместо рваного соединения.
                             rid = log_request_error("agent-model", exc)
+                            _turn_cleanup()
                             self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
                         # Заменяющий ход сносит старую пару в этой же транзакции.
@@ -13123,6 +13159,7 @@ class Handler(BaseHTTPRequestHandler):
                             conn.commit()
                             usage_spent = False
                             quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            _turn_cleanup()
                             self.send_json({"ok": True, "steps": out_steps, "final": None,
                                             "pending": True, "quota": quota,
                                             "thread": {"id": tid, "title": thread_title,
@@ -13138,6 +13175,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn.commit()
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        _turn_cleanup()
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
                                         "suggests": suggests, "dropped": dropped_ids,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
@@ -13146,6 +13184,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     except (RuntimeError,) as exc:
                         rid = log_request_error("agent", exc)
+                        _turn_cleanup()
                         self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                     finally:
                         _agent_busy_release(tid)

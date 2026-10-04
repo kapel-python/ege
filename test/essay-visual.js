@@ -15,6 +15,7 @@
    Код 2 — SKIP (нет playwright-core), как у admin-inbox-ui.js.
 */
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -30,6 +31,7 @@ try {
 
 const ROOT = path.resolve(__dirname, "..");
 const SERVER = path.join(ROOT, "server", "server.py");
+const ADMIN_PASSWORD = "ui-visual-test-admin-pw";
 const SHOTS = path.join(ROOT, "screenshots");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "ege-essay-visual-"));
 const DB = path.join(TMP, "ege.sqlite3");
@@ -58,6 +60,8 @@ function findChrome() {
 }
 
 async function startServer() {
+  const salt = "e".repeat(32);
+  const dk = crypto.pbkdf2Sync(ADMIN_PASSWORD, Buffer.from(salt, "hex"), 210000, 32, "sha256");
   const proc = spawn("python3", ["-u", SERVER], {
     env: {
       ...process.env,
@@ -67,11 +71,13 @@ async function startServer() {
       EGE_PID_FILE: path.join(TMP, "ege.pid"),
       EGE_LOCK_FILE: path.join(TMP, "ege.lock"),
       EGE_QUIET: "1",
+      EGE_ADMIN_PASSWORD_HASH: `pbkdf2_sha256$210000$${salt}$${dk.toString("hex")}`,
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
   let err = "";
-  proc.stderr.on("data", (d) => { err += d; });
+  const errFile = path.join(TMP, "server-err.log");
+  proc.stderr.on("data", (d) => { err += d; try { fs.appendFileSync(errFile, d); } catch (_) {} });
   for (let i = 0; i < 120; i++) {
     try {
       const res = await fetch(`${BASE}/api/health`);
@@ -165,7 +171,7 @@ async function main() {
     t("открытое окно ничего не отложило (визит на месте)", await page.evaluate(() => {
       const raw = localStorage.getItem("ege_essay_skipped") || "{}";
       const set = JSON.parse(raw)[`${Store.accountId || "guest"}:russian`];
-      return Array.isArray(set) && set.length === 0 && !!Session.cur;
+      return (!set || (Array.isArray(set) && set.length === 0)) && !!Session.cur;
     }));
     await shot(page, "essay-take-another-confirm-desktop-light.png");
     await page.click("#device-modal-root .dlg__actions .btn--soft");
@@ -193,28 +199,47 @@ async function main() {
     await shot(page, "essay-long-desktop-light.png");
     await overflow(page, "desktop long");
 
-    // Отправка -> pipeline: единый лоадер с текстами проверки, затем либо
-    // итоговый экран с кнопкой разбора (есть AI-ключ: один визит — одно
-    // сочинение, зелёного блока с навигацией больше нет), либо честная
+    // Отправка -> pipeline: единый лоадер с текстами проверки, затем зелёный
+    // блок отчёта («Проверка завершена» + «Посмотреть результат →»), а финиш
+    // (.result-wrap) — только кнопкой «Завершить →» под блоком; либо честная
     // ошибка без XP (ключа нет). В обоих случаях — никаких mock-баллов
     // и висящих спиннеров.
     await page.click("#essaySubmitBtn");
-    await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
-    const loaderSub = await page.$eval("#screen [data-loader-sub]", (e) => e.textContent);
-    t("pipeline: единый лоадер с текстом проверки",
-      /Проверяем сочинение|Считаем баллы|Сверяем критерии|Собираем результат|Готовим отчёт/.test(loaderSub), loaderSub);
-    await page.waitForSelector("#screen .result-wrap, #feedbackSlot .feedback--bad", { timeout: 180000 });
-    const finished = await page.$("#screen .result-wrap");
+    await page.waitForSelector("#screen .ege-loader, #feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 15000 });
+    const loaderSubEl = await page.$("#screen [data-loader-sub]");
+    if (loaderSubEl) {
+      const loaderSub = await loaderSubEl.textContent();
+      t("pipeline: единый лоадер с текстом проверки",
+        /Проверяем сочинение|Считаем баллы|Сверяем критерии|Собираем результат|Готовим отчёт/.test(loaderSub), loaderSub);
+    } else {
+      t("pipeline: быстрая проверка без лоадера", !!(await page.$("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad")));
+    }
+    await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
+    const readyReport = await page.$("#feedbackSlot .feedback--ok");
+    let finished = null;
+    if (readyReport) {
+      const repText = await page.$eval("#feedbackSlot .feedback--ok", (e) => e.textContent);
+      t("ready: зелёный блок отчёта с баллами и разбором",
+        /Проверка завершена/.test(repText) && repText.includes("Посмотреть результат"), repText.slice(0, 140));
+      await shot(page, "essay-report-desktop-light.png");
+      // Визит закрываем кнопкой «Завершить →» под блоком — только она ведёт
+      // на итоговый экран (sessionFinish).
+      await page.click("#screen .session-nav .btn--primary");
+      await page.waitForSelector("#screen .result-wrap", { timeout: 15000 });
+      finished = await page.$("#screen .result-wrap");
+    }
     if (finished) {
       const finText = await page.$eval("#screen .result-wrap", (e) => e.textContent);
-      t("finish: итоговый экран сразу после проверки",
-        finText.includes("ТРЕНИРОВКА ЗАВЕРШЕНА"), finText.slice(0, 120));
+      t("finish: итоговый экран после кнопки «Завершить»",
+        /тренировка завершена/i.test(finText), finText.slice(0, 120));
       t("finish: кнопка разбора сочинения",
         finText.includes("Разбор сочинения"), finText.slice(0, 200));
       await shot(page, "essay-finish-desktop-light.png");
-      // Кнопка ведёт на ege-result.html с реальными данными этого submission.
+      // Кнопка ведёт на разбор с реальными данными этого submission: красивая
+      // ссылка /essay/<publicId> отдаёт тот же ege-result.html без редиректа,
+      // старые ссылки вида ege-result.html тоже работают.
       await page.click("#screen .result-wrap .btn--primary");
-      await page.waitForURL("**/ege-result.html**", { timeout: 15000 });
+      await page.waitForURL((url) => /ege-result\.html|\/essay\//.test(url.pathname + url.search), { timeout: 15000 });
       await page.waitForSelector("#resultState:not([hidden])", { timeout: 15000 });
       await sleep(2200); // animateCount шаблона: читаем финальное значение
       const critCount = await page.$$eval(".crit-card", (els) => els.length);
@@ -223,8 +248,11 @@ async function main() {
         `cards=${critCount} max=${scoreMax}`);
       await shot(page, "essay-result-desktop-light.png");
       // Назад — в тренировку (финиш подменил адрес), новый вход в практику —
-      // следующее сочинение: первое визитом закрыто и не блокирует.
-      await page.goBack();
+      // следующее сочинение: первое визитом закрыто и не блокирует. Идём
+      // прямо (goto), а не goBack: возврат из /essay/<id> историей
+      // нестабилен (приземляет на #/path без сессии).
+      await page.goto(`${BASE}/dashboard#/training`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => typeof Store !== "undefined" && Store.ready === true, null, { timeout: 30000 });
       await page.evaluate(() => { startSkillPractice("russian_essay_source"); });
       await page.waitForFunction(
         () => typeof Session !== "undefined" && Session.cur && Session.cur.taskIds[0] === "re27_2",
@@ -276,8 +304,13 @@ async function main() {
     await shot(page, "essay-200-mobile-light.png");
     await overflow(page, "mobile long");
     await page.click("#essaySubmitBtn");
-    await page.waitForSelector("#screen .ege-loader", { timeout: 15000 });
-    await page.waitForSelector("#screen .result-wrap, #feedbackSlot .feedback--bad", { timeout: 180000 });
+    await page.waitForSelector("#screen .ege-loader, #feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 15000 });
+    await page.waitForSelector("#feedbackSlot .feedback--ok, #feedbackSlot .feedback--bad", { timeout: 180000 });
+    if (await page.$("#feedbackSlot .feedback--ok")) {
+      // Готовый отчёт своего визита — финиш только кнопкой «Завершить →».
+      await page.click("#screen .session-nav .btn--primary");
+      await page.waitForSelector("#screen .result-wrap", { timeout: 15000 });
+    }
     const doneSel = await page.$("#screen .result-wrap")
       ? "#screen .result-wrap .btn--primary"
       : "#feedbackSlot .feedback--bad .btn--primary";

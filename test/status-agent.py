@@ -117,21 +117,21 @@ def main():
                   and "Нет данных" in svc["ai-providers"]["detail"],
                   svc["ai-providers"]["detail"])
 
-            ai._provider_last_ok["gptunnel"] = now - 300_000
+            ai._provider_last_ok[("free", "gptunnel")] = now - 300_000
             svc = services(base)
             check("последний успех — успешно",
                   svc["ai-providers"]["ok"] is True
                   and "успешен" in svc["ai-providers"]["detail"],
                   svc["ai-providers"]["detail"])
 
-            ai._provider_last_err["gptunnel"] = (now - 60_000, "AIError: boom")
+            ai._provider_last_err[("free", "gptunnel")] = (now - 60_000, "AIError: boom")
             svc = services(base)
             check("ошибка новее — ошибка",
                   svc["ai-providers"]["ok"] is False
                   and "ошибка" in svc["ai-providers"]["detail"],
                   svc["ai-providers"]["detail"])
 
-            ai._provider_last_ok["gptunnel"] = now
+            ai._provider_last_ok[("free", "gptunnel")] = now
             first = services(base)["ai-providers"]
             second = services(base)["ai-providers"]
             check("успех новее — снова успешно", first["ok"] is True, first["detail"])

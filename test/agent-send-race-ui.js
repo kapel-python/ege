@@ -80,6 +80,12 @@ def mock_chat(messages, tools, **kw):
     if MODE == "slow" and state["n"] == 1:
         time.sleep(6)   # первый ход долгий: его останавливают и правят
         return {"text": "Первый ответ готов.", "tool_calls": []}
+    if MODE == "slow15" and state["n"] == 1:
+        # БАГ1: правка со всеми кликами по меню занимает секунды — 6 с
+        # мок успевал досчитать до повторной отправки, и проверки
+        # «честно сказано» становилось нечего проверять (флейк).
+        time.sleep(15)  # первый ход долгий: его останавливают и правят
+        return {"text": "Первый ответ готов.", "tool_calls": []}
     time.sleep(0.3)
     return {"text": "Второй ответ готов.", "tool_calls": []}
 def mock_plain(messages, **kw):
@@ -197,7 +203,7 @@ async function firstThreadId(jar) {
 
     /* ============ БАГ 1: правка во время остановленного, но живого хода ============ */
     {
-      const srv = await startServer("slow");
+      const srv = await startServer("slow15");
       BASE = `http://127.0.0.1:${srv.port}`;
       const claim = await raw("POST", "/api/profile/claim",
         { subject: "profile_math", onboarded: true, name: "Тест-Правка" }, "");
@@ -224,8 +230,8 @@ async function firstThreadId(jar) {
       } catch (_) {}
       const busyModal = await page.evaluate(() =>
         Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
-          (n) => /Сервер ещё считает/.test(n.textContent || "")));
-      check("БАГ1: при живом ходе честно сказано «сервер ещё считает»", busyModal);
+          (n) => /ещё отвечает|повторю через/.test(n.textContent || "")));
+      check("БАГ1: при живом ходе честно сказано «ещё отвечает»", busyModal);
       // Ждём итог: повтор должен уйти СРАЗУ, как сервер освободился
       // (старый код ждал бы весь TTL ~95 с и ушёл бы дублем).
       await page.waitForFunction(() => {
@@ -290,7 +296,7 @@ async function firstThreadId(jar) {
       await page.waitForTimeout(3000);
       const mid = await page.evaluate(() => ({
         busyModal: Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
-          (n) => /Сервер ещё считает/.test(n.textContent || "")),
+          (n) => /Сервер ещё считает|ещё отвечает|повторю через/.test(n.textContent || "")),
         bubbles: Array.prototype.map.call(document.querySelectorAll(".agent__msg-user"), (n) => n.textContent),
       }));
       check("БАГ3: свой же ход не назван «сервер ещё считает»", !mid.busyModal,
@@ -304,7 +310,29 @@ async function firstThreadId(jar) {
         await page.waitForFunction(() => Array.prototype.some.call(
           document.querySelectorAll(".agent__ai"), (n) => /Первый ответ готов/.test(n.textContent || "")),
           null, { timeout: 40000 });
-      } catch (_) { appeared = false; }
+      } catch (_) {
+        appeared = false;
+        try {
+          const dbg = await page.evaluate(async () => {
+            const users = Array.prototype.map.call(document.querySelectorAll(".agent__msg-user"), (n) => n.textContent);
+            const ai = Array.prototype.map.call(document.querySelectorAll(".agent__ai"), (n) => (n.textContent || "").slice(0, 120));
+            let thr = null;
+            try {
+              const id = (typeof S !== "undefined" && S.currentId) || null;
+              if (id != null) {
+                const r = await fetch("/api/agent/threads/" + Number(id), { credentials: "same-origin" });
+                const j = await r.json();
+                thr = { status: r.status, busy: j.busy, liveSteps: (j.liveSteps || []).length,
+                        roles: (j.messages || []).map((m) => m.role + ":" + String(m.content || "").slice(0, 30)) };
+              }
+            } catch (e) { thr = "fetch-fail"; }
+            return { url: location.href, currentId: (typeof S !== "undefined" && S.currentId) || null,
+                     turn: !!(typeof S !== "undefined" && S.turn), busy: !!(typeof S !== "undefined" && S.busy),
+                     users, ai, thr };
+          });
+          console.log("  DEBUG bug3-hang: " + JSON.stringify(dbg).slice(0, 900));
+        } catch (_) {}
+      }
       const took = Math.round((Date.now() - t0) / 1000);
       check("БАГ3: ответ появился сам, без обновления страницы", appeared, `через ${took} с`);
       // Ключевое отличие от старого поведения: сервер УЖЕ считал этот ответ, так
@@ -318,7 +346,7 @@ async function firstThreadId(jar) {
       const end = await page.evaluate(() => ({
         bubbles: Array.prototype.map.call(document.querySelectorAll(".agent__msg-user"), (n) => n.textContent),
         busyModal: Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
-          (n) => /Сервер ещё считает/.test(n.textContent || "")),
+          (n) => /Сервер ещё считает|ещё отвечает|повторю через/.test(n.textContent || "")),
       }));
       check("БАГ3: вопрос в ленте ОДИН (без дубля)", end.bubbles.length === 1,
         JSON.stringify(end.bubbles).slice(0, 200));
