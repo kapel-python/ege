@@ -158,21 +158,6 @@ def agent_quota_max() -> int:
     return _env_int("EGE_AGENT_QUOTA_MAX", AGENT_QUOTA_MAX_DEFAULT)
 
 
-def agent_pure_model() -> bool:
-    """Рубильник «модель решает всё»: отключает ВСЕ серверные перехваты цикла
-    (детектор «инструмента нет», переспрос обещаний, принудительный вызов по
-    вопросу). Сервер тогда только исполняет вызовы модели как есть, а её
-    осечки («сейчас посмотрю» без вызова, «инструмента нет») уходят ученику
-    без правок.
-
-    По умолчанию выключен: на слабых моделях без перехватов регулярно
-    приезжают пустые обещания вместо цифр (замеры — в комментариях выше и в
-    AGENTS.md). Рубильник нужен, чтобы сравнить поведение на живом трафике
-    цифрами, а не спорами: включил — смотришь ленту, выключил — всё как было.
-    Читается в момент вызова, перезапуск не нужен."""
-    return (os.environ.get("EGE_AGENT_PURE_MODEL") or "").strip() == "1"
-
-
 def agent_quota_window_ms() -> int:
     return _env_int("EGE_AGENT_QUOTA_WINDOW_SEC", AGENT_QUOTA_WINDOW_DEFAULT_SEC) * 1000
 
@@ -2538,232 +2523,6 @@ def build_messages(system: str, history: list, user_text: str) -> list:
 # сервер сам зовёт очевидный инструмент по вопросу и просит ответ по данным.
 # Последний шаг делает отказ невозможным: данные придут из базы в любом случае.
 # ---------------------------------------------------------------------------
-# Глаголы-обещания. Ловим именно «сделаю потом»: «посмотрю», «проверю»,
-# «сейчас глянем» и т.п. «Не могу посмотреть» под правило не попадает —
-# это честный отказ, а не обещание.
-PROMISE_RE = re.compile(
-    r"(?:сейчас|щас|сейчас-сейчас|секунду|минуту|давай|давай-ка|сразу|уже)?\s*"
-    r"(?:посмотрю|посмотрим|проверю|проверим|гляну|глянем|загляну|открою|откроем|"
-    r"загружу|загрузим|соберу|соберём|изучу|посчитаю|подниму|подтяну|сверю|"
-    r"обновлю|поменяю|изменю|составлю|подготовлю|посчитаю|"
-    r"соберу\s+данные|собираю\s+данные|беру\s+данные)",
-    re.IGNORECASE)
-
-# Признаки того, что вопрос вообще про данные ученика (и без инструмента на
-# него честно ответить нельзя). Только сущности данных, без местоимений:
-# «мой вопрос про логарифмы» — не повод лезть в fold_web, а «мой профиль» —
-# повод. Поэтому здесь нет голых «мой/мои/как дела».
-DATA_ASK_RE = re.compile(
-    r"(?:профил|прогресс|прогноз|балл|ошибк|ошиба|навык|статистик|попытк|"
-    r"сочинени|эссе|план\s+подготовк|уровен|цел[ьия]|насколько\s+я|"
-    r"сколько\s+(?:я|у\s+меня|реш|набр|балл)|у\s+меня\s+(?:прогресс|балл|ошибк|уровен|статистик))",
-    re.IGNORECASE)
-
-STALL_NUDGE = ("Стоп. Не пиши, что сейчас посмотришь, — вызови инструмент прямо сейчас, "
-               "в этом же ответе, без текста. Данные ученика нужны для ответа.")
-
-# Что вызвать, если модель так и не согласилась звать инструменты. Порядок
-# важен: первое совпадение выигрывает, поэтому частное (сочинения, план) стоит
-# перед общим (прогресс).
-FALLBACK_TOOL_RULES: list = [
-    (re.compile(r"(?:лимит|сколько\s+(?:раз|провер)|провер\w*\s+в\s+день|"
-                r"что\s+такое\s+(?:xp|опыт)|как\s+получить\s+(?:xp|опыт)|"
-                r"где\s+(?:мне\s+)?(?:посмотреть|найти|сбросить|отозвать)|"
-                r"как\s+(?:мне\s+)?(?:самому\s+)?сбросить|устройств|отозвать|"
-                r"что\s+ты\s+умеешь|что\s+умеешь|поддержк|контакт|администратор|"
-                r"сброс\s+прогресс|удали\w*\s+(?:мой\s+)?аккаунт)", re.IGNORECASE),
-     ("project_info", {})),
-    (re.compile(r"(?:сочинени|эссе|к1|критери)", re.IGNORECASE), ("essay_history", {})),
-    (re.compile(r"(?:план|расписани|график|недел)", re.IGNORECASE), ("plan_draft", {})),
-    (re.compile(r"(?:прогноз|балл|сколько\s+набер|подтянуть|поднять|потян)", re.IGNORECASE),
-     ("fold_web", {"op": "forecast"})),
-    (re.compile(r"(?:профил|кто\s+я|как\s+меня|цел[ьия]|уровен)", re.IGNORECASE),
-     ("fold_web", {"op": "profile"})),
-    (re.compile(r"(?:ошибк|ошиба|разобра)", re.IGNORECASE), ("fold_web", {"op": "errors"})),
-    (re.compile(r"(?:что\s+я\s+(?:недавно\s+)?делал|чем\s+занимался|последние\s+события|лента)", re.IGNORECASE),
-     ("fold_web", {"op": "timeline"})),
-    # Поиск задания/урока по смыслу — ПЕРЕД общим «тем/урок»: иначе «подбери
-    # тему производная» уходило в fold_web(skills), то есть в список ВСЕХ тем
-    # вместо конкретных заданий по производной.
-    (re.compile(r"(?:подбер|найди|выдай|дай|подкинь|подскажи|сделай|разбер|"
-                r"задани|задач|задачу|урок|конспект|практик).{0,40}?"
-                r"(?:по|на|для|из)\s+[а-яё]{3,}"
-                r"|(?:тема|тему|теме|урок|урока|задани\w*|задачу|конспект).{0,30}?"
-                r"(?:производн|логарифм|вектор|планиметр|стереометр|вероятност|тригонометр|"
-                r"уравнени|выражен|функци|текст|сочинени|график)", re.IGNORECASE),
-     ("find_topics", {})),
-    (re.compile(r"(?:навык|тем[аыу]|урок)", re.IGNORECASE), ("fold_web", {"op": "skills"})),
-]
-
-# Модель объявляет инструмент недоступным, хотя он У НЕЁ ЕСТЬ.
-# Живой случай (чат 54): «Подбери тему производная» → «Не хватает инструмента для
-# поиска по каталогу темы — у меня нет возможности его вызвать», при том что
-# find_topics был в списке инструментов и на том же провайдере отвечал верно на
-# соседние вопросы. Это ЗЕРКАЛО «обещания вместо вызова»: там модель говорит
-# «сейчас посмотрю» и не зовёт, здесь — «не могу» и не зовёт. Лечится так же.
-MISSING_TOOL_RE = re.compile(
-    r"(?:не\s+хватает|нет\s+(?:доступа|возможности|такого\s+инструмента)|"
-    r"недоступен|не\s+могу\s+(?:вызвать|найти|открыть|сделать)|"
-    r"отсутствует|не\s+предусмотрен)"
-    r"[^.]{0,80}?(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
-    r"update_profile|resolve_error)", re.IGNORECASE)
-# Порядок слов бывает обратным («find_topics у меня недоступен»).
-MISSING_TOOL_REV_RE = re.compile(
-    r"(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|"
-    r"update_profile|resolve_error)[^.]{0,80}?"
-    r"(?:не\s+хватает|недоступен|нет\s+доступа|не\s+могу|отсутствует|не\s+предусмотрен)",
-    re.IGNORECASE)
-
-
-def claims_missing_tool(text: str):
-    """Инструмент, который модель объявила недоступным, — либо None.
-
-    Живой случай (чат 54): «Не хватает инструмента для поиска по каталогу темы —
-    у меня нет возможности его вызвать». Имя инструмента модель НЕ назвала, поэтому
-    по имени поймать нельзя — ловим по смыслу («не хватает инструмента») и
-    отдаём вопрос на догадку: какой инструмент здесь нужен. Та же семья —
-    «не выйдет/не получается вызвать», «без текста не выйдет»: модель
-    расписывается в беспомощности вместо вызова (болтовня «ты даже не
-    увидишь, что я смотрел» вместо ответа ученику)."""
-    clean = str(text or "")
-    for rx in (MISSING_TOOL_RE, MISSING_TOOL_REV_RE):
-        m = rx.search(clean)
-        if m and m.group(1) in READ_TOOLS:
-            return m.group(1)
-    if re.search(r"(?:не\s+хватает|нет\s+(?:доступа|возможности|такого\s+инструмента)|"
-                 r"инструмент\s+не|не\s+предусмотрен|отсутствует|не\s+работает|"
-                 r"не\s+(?:выйдет|выходит|получается|получится|могу)\s+вызвать|"
-                 r"вызвать\s+(?:его\s+)?не\s+(?:могу|получается|выйдет)|"
-                 r"без\s+текста\s+не\s+(?:выйдет|получится|могу))", clean, re.IGNORECASE):
-        return "?"   # инструмент не назван — разбираемся по вопросу ученика
-    return None
-
-
-def looks_like_promise(text: str) -> bool:
-    """Текст похож на «сейчас посмотрю» без самого вызова?
-
-    Только будущее время первого лица: обещание сделать. Прошедшее («посмотрел»)
-    и инфинитив («объяснить») сюда не попадают — иначе под правило попал бы
-    обычный ответ по данным («Смотри, что видно из твоих попыток»).
-    """
-    return bool(text) and bool(PROMISE_RE.search(str(text)))
-
-
-# Маркеры «обещания вперёд»: рядом с глаголом действия должно стоять «сейчас»
-# или конструкция «я посмотрю». Без них «посмотрю» в тексте — часть объяснения,
-# а не заглушка вместо вызова.
-_PROMISE_NOW_RE = re.compile(r"(?:сейчас|щас|секунду|минуту|давай|сразу|уже)\s*$",
-                             re.IGNORECASE)
-
-
-def is_empty_promise(text: str) -> bool:
-    """Главная эвристика: ответ ТОЛЬКО обещает посмотреть и больше ничего не
-    несёт (короткий, без цифр и без выводов) — значит вместо вызова.
-
-    Важно: длинный ответ по данным с фразой «посмотрю» в середине сюда не
-    попадает, иначе мы переспрашивали бы модель там, где она уже ответила.
-    """
-    body = str(text or "").strip()
-    if not body or len(body) > 220:
-        return False
-    if not looks_like_promise(body):
-        return False
-    # Цифра в ответе — уже результат инструмента (баллы, попытки, проценты).
-    if re.search(r"\d", body):
-        return False
-    # Несколько предложений — это уже объяснение, а не заглушка.
-    return body.count(".") + body.count("!") + body.count("?") <= 2
-
-
-def asks_for_data(text: str) -> bool:
-    return bool(text) and bool(DATA_ASK_RE.search(str(text)))
-
-
-def should_nudge(text: str, asked: str, steps: list, recently_read: bool) -> bool:
-    """Нужно ли переспрашивать модель «вызови инструмент, а не обещай посмотреть».
-
-    Два независимых повода, и оба узкие — иначе под переспрос попадёт обычный
-    ответ по данным:
-    1. Пустое обещание: ответ целиком из «сейчас посмотрю», без цифр и выводов
-       (см. is_empty_promise).
-    2. Данных вообще нет (ни шагов, ни чтения), а вопрос про них: самый частый
-       живой случай — «посмотри мой профиль» → «Сейчас посмотрю твой профиль»
-       без вызова fold_web. Здесь нужен и второй признак ответа — обещание в
-       будущем времени, иначе «Привет! Чем помочь?» на вопрос про профиль тоже
-       тянуло бы вызов инструмента (а это нормальный ответ).
-    """
-    if is_empty_promise(text):
-        return True
-    if steps or recently_read:
-        return False
-    return looks_like_promise(text) and asks_for_data(asked)
-
-
-def fallback_tool_for(text: str) -> tuple[str, dict]:
-    """Инструмент по вопросу, когда модель упорно не зовёт его сама."""
-    clean = str(text or "")
-    for pattern, call in FALLBACK_TOOL_RULES:
-        if pattern.search(clean):
-            return call[0], dict(call[1])
-    return "fold_web", {"op": "progress"}
-
-
-def _fallback_rule_matched(text: str) -> bool:
-    """Вопрос подошёл под конкретное правило (а не под дефолт «прогресс»)."""
-    clean = str(text or "")
-    return any(pattern.search(clean) for pattern, _ in FALLBACK_TOOL_RULES)
-
-
-# Модель написала вызов инструмента ТЕКСТОМ, а не вызвала его:
-# «find_topics(query="логарифмы")» вместо настоящего tool_call. Живой замер: в
-# ответ ученику уезжали строки «task_get(id="<id из find_topics>")», шагов не
-# было вовсе, и человек видел служебный синтаксис вместо ответа.
-PSEUDO_CALL_RE = re.compile(
-    r"\b(fold_web|lesson_get|task_get|essay_history|plan_draft|find_topics|project_info|"
-    r"update_profile|resolve_error)\s*\(([^)]{0,200})\)", re.IGNORECASE)
-
-
-def pseudo_call(text: str):
-    """(имя инструмента, аргументы) из вызова, написанного текстом, — либо None."""
-    m = PSEUDO_CALL_RE.search(str(text or ""))
-    if not m:
-        return None
-    name = m.group(1)
-    if name not in READ_TOOLS:
-        return None
-    args = {}
-    try:
-        blob = json.loads("{" + m.group(2).strip().rstrip(",") + "}")
-        if isinstance(blob, dict):
-            args = {k: v for k, v in blob.items() if isinstance(v, (str, int, float, bool))}
-    except (ValueError, TypeError):
-        args = {}
-    return name, args
-
-
-def _args_for_tool(name: str, asked: str) -> dict:
-    """Аргументы для принудительного вызова инструмента по вопросу ученика.
-
-    Для `find_topics` запрос — это сами слова вопроса без служебных («подбери»,
-    «дай»): иначе в поиск уйдёт мусор вроде «найди», который ничего не найдёт."""
-    if name == "find_topics":
-        words = [w for w in re.split(r"[^\w]+", str(asked or "").lower())
-                 if len(w) >= 3 and w not in ("подбери", "подобрать", "найди", "найти", "дай",
-                                             "выдай", "подскажи", "сделай", "разбери", "тему",
-                                             "тема", "задание", "задания", "задачу", "урок",
-                                             "темы", "уроки", "практику", "конспект")]
-        query = " ".join(words).strip() or str(asked or "").strip()
-        return {"query": query[:80]}
-    if name == "fold_web":
-        fallback, call_args = fallback_tool_for(asked)
-        return dict(call_args) if fallback == "fold_web" else {"op": "progress"}
-    if name == "project_info":
-        # Запасной вызов по вопросу ученика тоже точный: «сколько проверок» —
-        # сразу раздел про проверки, а не вся справка целиком.
-        topic = _knowledge_topic_for(asked)
-        return {"topic": topic} if topic else {}
-    return {}
-
 
 def _tool_payload(data: dict, cap: int = 4000) -> str:
     """JSON результата инструмента в контекст модели — ВСЕГДА валидный.
@@ -2863,19 +2622,6 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
     """
     deadline = deadline if deadline is not None else (time.monotonic() + TURN_TIMEOUT_SEC)
     steps: list = []
-    stalls = 0
-    # Вопрос ученика нужен для эвристик («это вообще про данные?») и для
-    # запасного инструмента. Искать его в хвосте messages нельзя: после шага
-    # последним сообщением идёт результат инструмента (JSON), а в resume после
-    # подтверждения — вообще пустой хвост. Берём только настоящую реплику
-    # ученика последним сообщением: у resume её нет, и навязывать ему
-    # инструмент нельзя.
-    _last = messages[-1] if messages else {}
-    asked = str(_last.get("content") or "") if str(_last.get("role") or "") == "user" else ""
-    # Вопрос про данные? Только тогда «сейчас посмотрю» — это заглушка вместо
-    # вызова, и только тогда сервер имеет право позвать инструмент сам.
-    asked_for_data = asks_for_data(asked)
-    recently_read = False
     failed = 0
     for _ in range(MAX_TOOL_STEPS + MAX_TOOL_RETRIES + 1):
         budget = deadline - time.monotonic()
@@ -2904,81 +2650,23 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
         # переигрываем в том же assistant-сообщении (см. parse_tool_message).
         preamble = parsed.get("preamble")
         if text is not None and not calls:
-            # Модель объявила инструмент НЕДОСТУПНЫМ, хотя он у неё есть
-            # (живой случай: «Подбери тему производная» → «не хватает
-            # find_topics»). Отдавать это ученику нельзя: он уйдёт искать
-            # инструмент, которого здесь нет. Зовём его САМИ — данные всё
-            # равно лежат в базе, а вопрос без ответа хуже ответа из данных.
-            missing = claims_missing_tool(text)
-            guessed_args = {}
-            if not missing:
-                # Вызов, НАПИСАННЫЙ ТЕКСТОМ («find_topics(query="…")»), — модель
-                # показала ученику служебный синтаксис и ничего не получила.
-                guess = pseudo_call(text)
-                if guess:
-                    missing, guessed_args = guess[0], dict(guess[1])
-            if missing and not steps and not recently_read and not agent_pure_model():
-                # Имя инструмента модель могла и не назвать («не хватает
-                # инструмента для поиска») — тогда берём его по вопросу ученика.
-                # Но дефолт «прогресс» без совпадения с вопросом не навязываем:
-                # болтовня «не могу вызвать» на вопрос НЕ про данные («объясни
-                # логарифмы») с принудительным прогрессом дала бы ответ не про
-                # то — пусть лучше отработает переспрос ниже.
-                if missing == "?":
-                    if asked_for_data or _fallback_rule_matched(asked):
-                        missing = fallback_tool_for(asked)[0]
-                    else:
-                        missing = None
-                # Аргументы из текста модели полезнее пересборки по вопросу:
-                # она сама назвала нужный запрос.
-                call_args = dict(guessed_args) if guessed_args else _args_for_tool(missing, asked)
-                if not call_args:
-                    call_args = _args_for_tool(missing, asked)
-                forced = _force_read(conn, user_id, subject, missing, call_args, messages,
-                                     steps, chat_fn, on_step)
-                if forced:
-                    return steps, forced, None
-            # Обещание посмотреть вместо вызова. Один раз переспрашиваем
-            # жёстко, потом зовём инструмент сами — ученик не должен получать
-            # «сейчас посмотрю» вместо цифр. В pure-режиме переспроса нет:
-            # что модель сказала, то ученик и видит.
-            if stalls == 0 and not agent_pure_model() and should_nudge(text, asked, steps, recently_read):
-                stalls = 1
-                messages.append({"role": "assistant", "content": text})
-                messages.append({"role": "user", "content": STALL_NUDGE})
-                continue
-            if stalls == 1:
-                # Модель уже получила жёсткую просьбу и всё равно не позвала
-                # инструмент. Данные нужны — зовём сами и отвечаем по базе:
-                # второй раз «посмотрю» без цифр ученик видеть не должен.
-                # Только по вопросу ПРО данные: на «объясни логарифмы» смотреть
-                # нечего, там инструмент не нужен и навязывать его нельзя.
-                # В pure-режиме и здесь ничего не зовём сами.
-                if (not steps and not recently_read and asked_for_data
-                        and not agent_pure_model() and is_empty_promise(text)):
-                    name, call_args = fallback_tool_for(asked)
-                    if name == "project_info" and not call_args.get("topic"):
-                        call_args = _args_for_tool(name, asked) or call_args
-                    forced = _force_read(conn, user_id, subject, name, call_args, messages, steps,
-                                         chat_fn, on_step)
-                    if forced:
-                        return steps, forced, None
-                return steps, _final_or_summary(chat_fn, messages, text), None
+            # Текст без вызовов — обычный финал: модель решила ответить сама,
+            # и сервер её не поправляет, ничего не зовёт за неё и не
+            # переспрашивает. Что модель сказала (включая «сейчас посмотрю»
+            # без вызова и «инструмента нет»), то ученик и видит.
             # Пустой текст — не ответ: уходит в _summarize (ответ модели по
-            # собранному или честный отказ), а не в пустую карточку.
+            # собранному или честный отказ исключением), а не в пустую карточку.
             # Непустой возвращается как есть, БЕЗ реза длины: потолок режет
             # провайдер (AI_REPLY_MAX), а рез до вырезания ```suggest оторвал
             # бы кнопки-продолжения у длинного ответа.
-            if text is not None and str(text).strip():
+            if str(text).strip():
                 return steps, str(text), None
             return steps, _summarize(chat_fn, messages), None
         if not calls:
             # Парсер ai.py такое уже отбраковал; страховка от чужого chat_fn.
-            if stalls == 0:
-                stalls = 1
-                messages.append({"role": "user", "content": STALL_NUDGE})
-                continue
-            if steps or recently_read:
+            # Нечего показать — честный отказ (502 с возвратом жетона),
+            # а не переспрос: модель уже имела слово.
+            if steps:
                 return steps, _summarize(chat_fn, messages), None
             raise ValueError("пустой ответ модели")
         if len(steps) + len(calls) > MAX_TOOL_STEPS:
@@ -3044,7 +2732,6 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 if failed >= MAX_TOOL_RETRIES:
                     return steps, _summarize(chat_fn, messages), None
                 continue
-            recently_read = True
             label = describe_step(name, call_args, data)
             steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
                           "status": "done", "call_id": call_id, "result": data})
@@ -3060,46 +2747,6 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             preamble = None
         # Продолжаем цикл: модель решает дальше с результатами инструментов.
     return steps, _summarize(chat_fn, messages), None
-
-
-def _force_read(conn: sqlite3.Connection, user_id: int, subject: str, name: str, call_args: dict,
-                messages: list, steps: list, chat_fn, on_step=None) -> str | None:
-    """Модель не зовёт инструмент — зовём сами, чтобы ответ опирался на базу.
-
-    Последний рубеж стабильности: вопрос был про данные (это уже проверено
-    вызывающим), значит и ответ обязан прийти из базы, а не из фантазии.
-    Возвращает текст ответа по собранным данным либо None, если инструмент не
-    отдал ничего (тогда решает вызывающий).
-
-    messages ШТАТНО НЕ МУТИРУЕТСЯ: модель этот хвост уже не увидит (финал
-    собирается из своей копии), а мутация ломала бы вызывающего.
-    """
-    try:
-        data = execute_read_tool(conn, user_id, subject, name, call_args)
-    except ValueError:
-        return None
-    label = describe_step(name, call_args, data)
-    call_id = f"auto-{len(steps) + 1}"
-    steps.append({"name": name, "args": call_args, "label": label, "kind": "read",
-                  "status": "done", "call_id": call_id, "result": data})
-    _emit_live_step(on_step, {"name": name, "args": call_args, "label": label,
-                              "kind": "read", "status": "done", "result": data})
-    local = list(messages) + [
-        {"role": "assistant", "content": None,
-         "tool_calls": [{"id": call_id, "type": "function",
-                         "function": {"name": name,
-                                      "arguments": json.dumps(call_args, ensure_ascii=False)}}]},
-        {"role": "tool", "tool_call_id": call_id,
-         "content": _tool_payload(data)},
-    ]
-    return _summarize(chat_fn, local)
-
-
-def _final_or_summary(chat_fn, messages: list, text: str) -> str:
-    """Ответ модели либо (если он снова обещает вместо ответа) — по собранному."""
-    if text and not is_empty_promise(text):
-        return str(text)[:AGENT_REPLY_MAX]
-    return _summarize(chat_fn, messages)
 
 
 # ---------------------------------------------------------------------------

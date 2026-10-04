@@ -336,10 +336,11 @@ def _knowledge_and_paging_probes(server):
         soch = agent.project_info(conn, uid, subj, {"topic": "сочинение"})
         out["knowledge_narrow"] = (len(soch.get("matched") or []) <= 2
                                    and "Устройства" not in soch.get("text", ""))
-        # Вопрос ученика -> тема для запасного вызова (иначе fallback несёт всё).
-        out["knowledge_args"] = (
-            agent._args_for_tool("project_info", "сколько проверок в день") == {"topic": "проверки сочинений в сутки"}
-            and agent._args_for_tool("project_info", "расскажи о приложении") == {})
+        # Вопрос ученика как topic: инструмент сам находит раздел по словам
+        # (его штатная работа с аргументом модели, не запасной вызов сервера).
+        qtopic = agent.project_info(conn, uid, subj, {"topic": "сколько проверок в день"})
+        out["knowledge_args"] = ("Проверок сочинений в сутки: 5 (с Plus — 10)"
+                                 in (qtopic.get("matched") or []))
 
         # 2. Пагинация: сеем 4 ошибки и листаем их limit/offset.
         task = conn.execute("SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
@@ -414,9 +415,7 @@ def _knowledge_and_paging_probes(server):
         tl = agent.fold_web(conn, uid, subj, {"op": "timeline"})
         empty = agent.fold_web(conn, uid, "russian", {"op": "timeline"})
         out["timeline"] = (any("n01_p1" in e.get("text", "") for e in tl.get("events", []))
-                           and empty.get("events") == []
-                           and agent.fallback_tool_for("что я делал вчера")[0] == "fold_web"
-                           and agent.fallback_tool_for("что я делал вчера")[1] == {"op": "timeline"})
+                           and empty.get("events") == [])
         out["timeline_detail"] = [e.get("text") for e in tl.get("events", [])][:2]
         conn.execute("DELETE FROM timeline WHERE client_id=?", ("probe-tl-1",))
         conn.commit()
@@ -1522,57 +1521,39 @@ def main():
                       if w.lower() in text.lower()]
             check("в справке нет технического нутра (только то, что видит ученик)",
                   not banned, str(banned))
-            check("fallback ведёт вопросы о лимитах в project_info, а не в историю",
-                  agent.fallback_tool_for("сколько проверок сочинений в день")[0] == "project_info"
-                  and agent.fallback_tool_for("как мне самому сбросить прогресс")[0] == "project_info",
-                  str(agent.fallback_tool_for("сколько проверок сочинений в день")))
-            check("текстовый вызов project_info() тоже исполняется",
-                  (agent.pseudo_call("project_info()") or (None,))[0] == "project_info")
 
-            section("модель не имеет права сказать «инструмента нет» (живой случай: чат 54)")
-            # «Подбери тему производная» → «Не хватает инструмента для поиска по
-            # каталогу темы — у меня нет возможности его вызвать», при том что
-            # find_topics в списке был. Ученику такое отвечать нельзя: он уйдёт
-            # искать несуществующий инструмент. Сервер зовёт инструмент сам.
+            section("ответ модели уходит как есть — сервер не вмешивается (чат 54)")
+            # Тот же живой случай («Подбери тему производная» → «Не хватает
+            # инструмента…»), но перехватов больше нет: что модель сказала,
+            # то ученик и видит. Сервер только исполняет её вызовы.
             c3 = Client("10.9.0.4")
             claim(c3, "Кузя-54")
             _, tf4 = new_thread(c3)
             tid_f4 = tf4["thread"]["id"]
+            claim_text = ("Не хватает инструмента для поиска по каталогу темы — "
+                          "у меня нет возможности его вызвать.")
             with lock:
                 script.clear()
-                script.append({"text": "Не хватает инструмента для поиска по каталогу темы — "
-                                       "у меня нет возможности его вызвать.", "tool_calls": []})
-                script.append({"text": "Вот производные: задания и урок.", "tool_calls": []})
+                script.append({"text": claim_text, "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(c3, tid_f4, "Подбери тему производная")
-            check("ход не прошёл пустым: сервер позвал инструмент сам",
-                  status == 200 and body.get("steps"), f"{status} {str(body)[:220]}")
-            check("ответ ученику больше НЕ содержит «инструмента нет»",
-                  not re.search(r"не хватает инструмента|нет возможности его вызвать",
-                                body.get("final") or "", re.IGNORECASE),
-                  (body.get("final") or "")[:160])
-            check("ответ по данным, а не отказ",
-                  "производн" in (body.get("final") or "").lower(),
-                  (body.get("final") or "")[:120])
-            check("поиск отработал по вопросу, а не наугад",
-                  any((s.get("args") or {}).get("query") == "производная"
-                      for s in body.get("steps") or [] if s.get("tool") == "find_topics"),
-                  str([s.get("args") for s in body.get("steps") or []]))
+            check("заявление модели доходит без правок и без шагов",
+                  status == 200 and body.get("final") == claim_text
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
 
-            # Вызов, написанный ТЕКСТОМ: модель показала ученику служебный
-            # синтаксис («find_topics(query="логарифмы")») и ничего не получила.
+            # Вызов, написанный ТЕКСТОМ, больше не исполняется: модель написала
+            # текст — ученик видит текст. Разбирать его за модель не будем.
+            pseudo_text = 'find_topics(query="логарифмы")\n\nСейчас возьму задание.'
             with lock:
                 script.clear()
-                script.append({"text": 'find_topics(query="логарифмы")\n\nСейчас возьму задание.',
-                               "tool_calls": []})
-                script.append({"text": "Вот задание на логарифмы.", "tool_calls": []})
+                script.append({"text": pseudo_text, "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(c3, tid_f4, "дай мне задание на логарифмы")
-            check("текстовый вызов разобран и выполнен по-настоящему",
-                  any(s.get("tool") == "find_topics" for s in body.get("steps") or []),
-                  str([s.get("tool") for s in body.get("steps") or []]))
-            check("в ответе ученику нет служебного синтаксиса",
-                  not re.search(r"(fold_web|find_topics|task_get|lesson_get)\s*\(",
-                                body.get("final") or ""),
-                  (body.get("final") or "")[:140])
+            check("текст уходит как есть, шагов нет",
+                  status == 200 and body.get("final") == pseudo_text
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
 
             section("одно подтверждение на действие (живой случай: чат 52)")
             # Ученик: «Смени мое имя на Артем». Модель зовёт update_profile,
@@ -1628,72 +1609,32 @@ def main():
             check("в переписке ровно ОДИН шаг update_profile",
                   len(applied_msgs) == 1, str(len(applied_msgs)))
 
-            section("болтовня «не выйдет вызвать» вместо ответа не доходит до ученика")
-            # Живой случай: модель вместо вызова пишет мета-рассуждения про
-            # вызовы («так ты даже не увидишь, что я смотрел»). Это НЕ шаблон
-            # в коде — такого текста в репозитории нет, это ответ модели,
-            # и ученик его видеть не должен: сервер зовёт инструмент сам.
+            section("ответ модели уходит как есть — без перехватов и переспросов")
+            # Живой случай с болтовнёй («не выйдет вызвать…», «так ты даже не
+            # увидишь, что я смотрел»): перехватов больше нет, и такой текст —
+            # это ответ модели. Что сказала, то ученик и видит: сервер только
+            # исполняет её вызовы, за неё ничего не зовёт и не переспрашивает.
             babble = ("Не выйдет вызвать инструмент вслепую без текста — так ты "
                       "даже не увидишь, что я смотрел. Скажи, что нужно — прогноз, "
                       "ошибки, задание — и я гляну по данным и отвечу")
-            check("детектор ловит беспомощную болтовню",
-                  agent.claims_missing_tool(babble) == "?", agent.claims_missing_tool(babble))
             with lock:
                 script.clear()
                 script.append({"text": babble, "tool_calls": []})
-                script.append({"text": "Вот твои ошибки: разбери первую.", "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(c3, tid_f4, "посмотри мои ошибки")
-            check("болтовня на вопрос про данные -> инструмент вызван сам",
-                  status == 200 and any((s.get("args") or {}).get("op") == "errors"
-                                        for s in body.get("steps") or []),
-                  f"{status} {str(body)[:240]}")
-            check("болтовня не попадает в ответ ученику",
-                  status == 200 and body.get("final") == "Вот твои ошибки: разбери первую.",
-                  (body.get("final") or "")[:160])
-            # А на вопрос НЕ про данные дефолтный «прогресс» не навязывается:
-            # модель переспрашивается один раз и отвечает сама.
+            check("болтовня уходит как есть, шагов нет, вызов один",
+                  status == 200 and body.get("final") == babble
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
             with lock:
                 script.clear()
                 script.append({"text": babble, "tool_calls": []})
-                script.append({"text": "Логарифм — это показатель степени.", "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(c3, tid_f4, "объясни логарифмы")
-            check("болтовня на вопрос не про данные -> ответ модели, без чужого чтения",
-                  status == 200 and body.get("final") == "Логарифм — это показатель степени."
-                  and not (body.get("steps") or []),
-                  f"{status} {str(body)[:240]}")
-
-            section("pure-режим: EGE_AGENT_PURE_MODEL=1 отключает все перехваты")
-            # Рубильник честной проверки: сервер только исполняет вызовы модели,
-            # осечки («сейчас посмотрю» без вызова, «инструмента нет») уходят
-            # ученику без правок. По умолчанию выключен.
-            check("по умолчанию перехваты включены",
-                  agent.agent_pure_model() is False, str(agent.agent_pure_model()))
-            os.environ["EGE_AGENT_PURE_MODEL"] = "1"
-            try:
-                check("флаг читается живьём, без перезагрузки",
-                      agent.agent_pure_model() is True)
-                with lock:
-                    script.clear()
-                    script.append({"text": "Сейчас посмотрю твой профиль", "tool_calls": []})
-                    calls["n"] = 0
-                status, body = turn(c3, tid_f4, "посмотри мой профиль")
-                check("pure: обещание без вызова уходит как есть, без переспроса",
-                      status == 200 and body.get("final") == "Сейчас посмотрю твой профиль"
-                      and not (body.get("steps") or []) and calls["n"] == 1,
-                      f"{status} {str(body)[:200]} cost={calls['n']}")
-                with lock:
-                    script.clear()
-                    script.append({"text": "Не хватает инструмента для поиска.", "tool_calls": []})
-                    calls["n"] = 0
-                status, body = turn(c3, tid_f4, "подбери тему производная")
-                check("pure: «инструмента нет» уходит как есть, force нет",
-                      status == 200 and "Не хватает инструмента" in (body.get("final") or "")
-                      and not (body.get("steps") or []) and calls["n"] == 1,
-                      f"{status} {str(body)[:200]} cost={calls['n']}")
-            finally:
-                del os.environ["EGE_AGENT_PURE_MODEL"]
-            check("флаг снят — перехваты вернулись",
-                  agent.agent_pure_model() is False)
+            check("и на вопрос не про данные — так же, без чужого чтения",
+                  status == 200 and body.get("final") == babble
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
 
             section("кнопки-продолжения: блок вырезается всегда")
             # Живой случай: ответ провайдера обрезался по лимиту, закрывающая
@@ -1715,39 +1656,30 @@ def main():
                   "suggest" not in text_two.lower() and len(items_two) == 2,
                   f"{text_two!r} {[i['label'] for i in items_two]}")
 
-            section("«сейчас посмотрю» без вызова -> инструмент зовётся")
-            # Живой случай: «посмотри мой профиль» → «Сейчас посмотрю твой
-            # профиль» и НИ ОДНОГО вызова. Правило в промпте лечит не всех,
-            # поэтому цикл переспрашивает, а потом зовёт инструмент сам.
+            section("«сейчас посмотрю» без вызова уходит как есть")
+            # Перехватов больше нет: обещание без вызова — это ответ модели.
+            # Что сказала, то ученик и видит; сервер ничего не зовёт за неё
+            # и не переспрашивает.
             with lock:
                 script.clear()
                 script.append({"text": "Сейчас посмотрю твой профиль", "tool_calls": []})
-                script.append({"text": None, "tool_calls": [
-                    {"id": "s1", "name": "fold_web", "arguments": {"op": "profile"}}]})
-                script.append({"text": "Ты Иван, уровень base.", "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(k, tid_k, "посмотри мой профиль")
-            check("обещание без вызова -> ход всё равно с шагом",
-                  status == 200 and len(body.get("steps") or []) == 1
-                  and body["steps"][0]["tool"] == "fold_web"
-                  and body.get("final") == "Ты Иван, уровень base.", f"{status} {str(body)[:200]}")
-
-            # Модель упрямится и после переспроса: сервер зовёт инструмент сам,
-            # выбирая его по вопросу, и отвечает по данным — без блока кнопок
-            # «сейчас посмотрю» на экране.
+            check("обещание уходит как есть, шагов нет, вызов один",
+                  status == 200 and body.get("final") == "Сейчас посмотрю твой профиль"
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
             with lock:
                 script.clear()
                 script.append({"text": "Сейчас проверю твои ошибки.", "tool_calls": []})
-                script.append({"text": "Сейчас проверю твои ошибки.", "tool_calls": []})
-                script.append({"text": "Вот что видно по ошибкам.", "tool_calls": []})
+                calls["n"] = 0
             status, body = turn(k, tid_k, "где я ошибаюсь?")
-            check("упрямое обещание -> сервер зовёт инструмент сам",
-                  status == 200 and len(body.get("steps") or []) == 1
-                  and body["steps"][0]["tool"] == "fold_web"
-                  and body["steps"][0]["args"].get("op") == "errors"
-                  and body.get("final") == "Вот что видно по ошибкам.", f"{status} {str(body)[:240]}")
+            check("и вторая такая же — так же, без вмешательства",
+                  status == 200 and body.get("final") == "Сейчас проверю твои ошибки."
+                  and not (body.get("steps") or []) and calls["n"] == 1,
+                  f"{status} {str(body)[:200]} cost={calls['n']}")
 
-            # Обычный короткий ответ (приветствие) переспросом не ломается:
-            # вопрос не про данные — лишнего вызова быть не должно.
+            # Обычный короткий ответ (приветствие) идёт тем же путём:
             with lock:
                 script.clear()
                 script.append({"text": "Привет! Чем помочь?", "tool_calls": []})
