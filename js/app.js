@@ -908,7 +908,7 @@ const HELP = {
   nextstep: {
     title: "Что делать сейчас",
     body: `
-      <p>Здесь мы подсказываем, чем лучше заняться прямо сейчас: закончить начатый урок, повторить ошибки или потренировать слабую тему.</p>
+      <p>Здесь мы подсказываем, чем лучше заняться прямо сейчас: закончить начатый урок, повторить ошибки, потренировать слабую тему или написать сочинение.</p>
       <p>Совет каждый раз подбирается под тебя — что сейчас полезнее всего.</p>
       <p>Но это только совет: все разделы всегда открыты, можешь заниматься чем хочешь.</p>`,
   },
@@ -2715,6 +2715,8 @@ function screenDashboard(root) {
   const steps = safeNextStepCandidates();
   const step = steps[0] || null;
   const alts = steps.slice(1, 3);
+  // Снимок подписей кнопок для runNextStep: см. комментарий там.
+  try { lastNextStepsSnapshot = steps.map((c) => ({ action: c && c.action, payload: c && c.payload })); } catch (_) {}
   const topGainRaw = forecastTopGains(1).find((item) => item && DataAPI.skill(item.skillId) && !topicIsLocked(DataAPI.skill(item.skillId))) || null;
   const topGain = topGainRaw ? { gain: nonNegativeNumber(topGainRaw.gain), skillId: topGainRaw.skillId, shortName: String(topGainRaw.name || "тема").replace(/^№\d+\s*[—–-]\s*/, "") } : null;
   const cov = forecastCoverage();
@@ -2798,7 +2800,7 @@ function screenDashboard(root) {
       <div class="nextstep__title">${esc(step.text)}</div>
       <div class="nextstep__reason">${esc(step.reason)}</div>
       <div class="nextstep__actions">
-        <button class="btn btn--primary btn--lg" onclick="runNextStep(0)">Начать ${icon("arrow")}</button>
+        <button class="btn btn--primary btn--lg" onclick="runNextStep(0)">${esc(step.cta || "Начать")} ${icon("arrow")}</button>
         <div class="nextstep__alts">
           ${alts.map((a, i) => `
             <button class="btn btn--ghost btn--sm" onclick="runNextStep(${i + 1})" title="${esc(a.reason)}">
@@ -2899,6 +2901,11 @@ function nextStepActionable(candidate) {
       const skill = mission && DataAPI.skill(mission.skill);
       return !!mission && missionPracticeIds(mission).length > 0 && (!skill || !topicIsLocked(skill));
     }
+    if (candidate.action === "essay") {
+      const skill = DataAPI.skill(payload.skillId);
+      if (!skill || topicIsLocked(skill)) return false;
+      return DataAPI.practiceTasksBySkill(payload.skillId).some((t) => t && (t.type === "long_text" || t.answerType === "long_text"));
+    }
     if (candidate.action === "boss") {
       const boss = DataAPI.bosses().find((item) => item && item.id === payload.bossId);
       return !!boss && bossUnlocked(boss) && DataAPI.practiceTasks().some((task) => DataAPI.skill(task.skill) && DataAPI.skill(task.skill).cat === boss.cat);
@@ -2911,6 +2918,11 @@ function nextStepActionable(candidate) {
   return false;
 }
 
+/* Снимок последнего отрисованного списка «Что делать сейчас»
+   (действие + нагрузка каждой кнопки). Нужен runNextStep, чтобы клик
+   запускал подписанное на кнопке, а не свежий список по тому же индексу. */
+let lastNextStepsSnapshot = [];
+
 function safeNextStepCandidates() {
   if (subjectContentState().locked) return [];
   try {
@@ -2921,13 +2933,36 @@ function safeNextStepCandidates() {
 }
 
 function runNextStep(index = 0) {
-  const c = safeNextStepCandidates()[index];
+  const fresh = safeNextStepCandidates();
+  /* Кнопки рисовались по списку на момент рендера, а кандидаты
+     пересчитываются в момент нажатия: за это время состояние могло
+     измениться (ответ с другого устройства, добивший тик), и слепой
+     индекс запустил бы не то, что подписано на кнопке. Поэтому сначала
+     ищем в свежем списке кандидата с тем же действием и нагрузкой, что
+     был на кнопке, и только если его уже нет — берём свежий по индексу. */
+  const snap = Array.isArray(lastNextStepsSnapshot) ? lastNextStepsSnapshot[index] : null;
+  let c = null;
+  if (snap && snap.action) {
+    const key = JSON.stringify(snap.payload || {});
+    c = fresh.find((x) => x && x.action === snap.action && JSON.stringify(x.payload || {}) === key) || null;
+    if (c && !nextStepActionable(c)) c = null;
+  }
+  if (!c) {
+    c = fresh[index] || null;
+    if (c && !nextStepActionable(c)) c = null;
+  }
   if (!c) return;
   switch (c.action) {
     case "finish-lesson":
     case "lesson": Lesson.start(c.payload.lessonId); break;
     case "errors-review": startErrorsReview(); break;
     case "practice": startMission(c.payload.missionId); break;
+    case "essay":
+      try {
+        const r = startEssayPractice(c.payload.skillId);
+        if (r && typeof r.catch === "function") r.catch(() => {});
+      } catch (_) {}
+      break;
     case "boss": startBoss(c.payload.bossId); break;
     case "daily": startDaily(); break;
     case "mixed": startMixedTrial(); break;

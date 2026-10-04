@@ -400,6 +400,7 @@ const DataAPI = {
       lessons: subjectAvailable && features.lessons !== false,
       practice: subjectAvailable && features.practice !== false,
       missions: subjectAvailable && (features.missions !== false) && features.practice !== false,
+      bosses: subjectAvailable && features.bosses !== false && features.practice !== false,
     };
     const skills = cat ? this._currentEntities(cat.skills) : [];
     const categories = cat ? this._currentEntities(cat.categories) : [];

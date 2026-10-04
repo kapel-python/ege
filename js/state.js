@@ -2674,16 +2674,21 @@ function skillSnapshot(skillId) {
 }
 
 /* Самый слабый навык из pool: ниже прогресс, при равенстве — больше
-   открытых ошибок, больше промахов диагностики, больше решено. */
-function weakestOf(pool) {
-  let worst = null;
+   открытых ошибок, больше промахов диагностики, больше решено.
+   Снимки берутся из переданной карты (посчитаны один раз вызывателем),
+   а не пересчитываются на каждое сравнение: иначе движок на каждом
+   рендере дашборда сканировал бы всю историю попыток по квадрату. */
+function weakestOf(pool, snaps) {
+  let worst = null, worstSnap = null;
   for (const sk of pool) {
-    if (!worst) { worst = sk; continue; }
-    const a = skillSnapshot(sk.id), b = skillSnapshot(worst.id);
-    if (a.progress !== b.progress) { if (a.progress < b.progress) worst = sk; continue; }
-    if (a.openErrors !== b.openErrors) { if (a.openErrors > b.openErrors) worst = sk; continue; }
-    if (a.diagnosticMisses !== b.diagnosticMisses) { if (a.diagnosticMisses > b.diagnosticMisses) worst = sk; continue; }
-    if (a.solved !== b.solved) { if (a.solved > b.solved) worst = sk; }
+    const snap = (snaps && snaps[sk.id]) || skillSnapshot(sk.id);
+    if (!snap) continue;
+    if (!worst) { worst = sk; worstSnap = snap; continue; }
+    const a = snap, b = worstSnap;
+    if (a.progress !== b.progress) { if (a.progress < b.progress) { worst = sk; worstSnap = snap; } continue; }
+    if (a.openErrors !== b.openErrors) { if (a.openErrors > b.openErrors) { worst = sk; worstSnap = snap; } continue; }
+    if (a.diagnosticMisses !== b.diagnosticMisses) { if (a.diagnosticMisses > b.diagnosticMisses) { worst = sk; worstSnap = snap; } continue; }
+    if (a.solved !== b.solved) { if (a.solved > b.solved) { worst = sk; worstSnap = snap; } }
   }
   return worst;
 }
@@ -2706,8 +2711,9 @@ function nextStepCandidates() {
       action: "finish-lesson",
       payload: { lessonId: openLesson.lessonId },
       route: "#/training", icon: "bulb",
+      cta: "Продолжить",
       text: `Продолжить урок «${openLesson.lesson.title}»`,
-      reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))} из ${DataAPI.lessonStepsCount(openLesson.lesson)} — закончить начатое дешевле всего.`,
+      reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))} из ${DataAPI.lessonStepsCount(openLesson.lesson)} — доучить начатое проще всего.`,
       score: 92,
     });
   }
@@ -2740,6 +2746,7 @@ function nextStepCandidates() {
       action: "errors-review",
       payload: {},
       route: "#/errors", icon: "rotate",
+      cta: "Повторить",
       text: `Повторить слабые места — открыто ${openErrors.length} ${plural(openErrors.length, "ошибка", "ошибки", "ошибок")}`,
       reason: openErrors.length >= 3
         ? `Накопилось несколько нерешённых ошибок — их повторение даст больше, чем новая тема.`
@@ -2785,9 +2792,10 @@ function nextStepCandidates() {
         action: "lesson",
         payload: { lessonId: snap.lesson.id },
         route: "#/training", icon: "bulb",
+        cta: repeatAfterFail ? "Повторить" : (untouched ? "Начать" : "Вернуться"),
         text: repeatAfterFail
-          ? `Повторить урок «${snap.lesson.title}» — тема «${weakTheory.name}» так и не пошла`
-          : `${untouched ? "Начать" : "Вернуться к"} уроку «${snap.lesson.title}» — тема «${weakTheory.name}»`,
+          ? `Повторить урок «${snap.lesson.title}» — тема «${weakTheory.name}» так и не освоена`
+          : `${untouched ? "Начать урок" : "Вернуться к уроку"} «${snap.lesson.title}» — тема «${weakTheory.name}»`,
         reason: repeatAfterFail
           ? `Урок по «${weakTheory.name}» пройден, но точность всё ещё ниже 50% — повтори объяснение, прежде чем решать дальше.`
           : snap.fatigued
@@ -2802,13 +2810,29 @@ function nextStepCandidates() {
 
   /* 4. Тренировка по самому слабому навыку (миссия): растёт при низком
      освоении и незакрытой миссии, падает при свежей практике и утомлении.
-     Незавершённая миссия — бонус: дешевле закончить начатое. */
+     Незавершённая миссия — бонус: дешевле закончить начатое.
+     Два случая НЕ дают кандидата вовсе, а не «со штрафом»: по теме
+     с непройденным уроком сначала нужен урок (иначе «потренируйся»
+     вытесняет «изучи», а подпись советовала бы не делать то, что делает
+     кнопка), а перетренированную тему без начатой миссии полезнее
+     отпустить — её представляет урок/ошибки/смена фокуса. Начатая
+     миссия в обоих случаях остаётся: бросать работу на середине хуже. */
   {
     const pool = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()).filter((sk) => {
       const snap = snaps[sk.id];
-      return snap && snap.mission && !mentioned.has(sk.id) && snap.progress < 90;
+      if (!snap || !snap.mission || mentioned.has(sk.id) || snap.progress >= 90) return false;
+      const prog = missionProgress(snap.mission);
+      const total = missionPracticeCount(snap.mission);
+      const started = prog > 0 && total > 0 && prog < total;
+      if (started) return true;
+      // Теория раньше практики (см. выше).
+      if (snap.lesson && !snap.lessonDone
+        && (snap.solved === 0 || (snap.accuracy !== null && snap.accuracy < 0.5))) return false;
+      // Пауза вместо зубрёжки (см. выше).
+      if (snap.fatigued) return false;
+      return true;
     });
-    const target = weakestOf(pool);
+    const target = weakestOf(pool, snaps);
     if (target) {
       const snap = snaps[target.id];
       mentioned.add(target.id);
@@ -2824,33 +2848,83 @@ function nextStepCandidates() {
         score -= (snap.recentAccuracy !== null && snap.recentAccuracy < 0.5) ? 22 : 10;
       }
       if (snap.recentAccuracy !== null && snap.recentAccuracy < 0.4 && snap.lessonDone) score -= 12;
-      if (snap.fatigued) score -= 35;
+      /* Урок не пройден, но попытки были удачными (например, чистая
+         диагностика): практиковаться можно, но теория всё равно раньше —
+         штраф держит такой кандидат ниже нетронутого урока. Подпись при
+         этом честная: она не отправляет «сначала в теорию» с кнопки
+         практики, а говорит про закрепление. */
+      const theoryPending = !started && !!snap.lesson && !snap.lessonDone;
+      if (theoryPending) score -= 20;
       /* Закрепление свежего: урок пройден совсем недавно — короткая
          тренировка сразу после теории закрепляет её лучше всего. */
       const lessonRecord = snap.lesson && safeObject(s.completedLessons)[snap.lesson.id];
        const lessonTs = lessonRecord ? Number(lessonRecord.ts) || 0 : 0;
       const justLearned = lessonTs && Date.now() - lessonTs < 2 * 3600 * 1000;
       if (justLearned && !snap.fatigued) score += 12;
-      /* Теория раньше практики: по теме с непройденным уроком, которую
-         ученик ещё не трогал или которая даётся с ошибками, сначала урок —
-         иначе «потренируйся» вытесняет «изучи» у новичка. */
-      const lessonFirst = !!snap.lesson && !snap.lessonDone && !started
-        && (snap.solved === 0 || (snap.accuracy !== null && snap.accuracy < 0.5));
-      if (lessonFirst) score -= 20;
       push({
         action: "practice",
         payload: { missionId: snap.mission.id, skillId: target.id },
         route: "#/training", icon: "target",
+        cta: started ? "Продолжить" : "Тренироваться",
         text: started
           ? `Продолжить тренировку по теме «${target.name}» — ${prog}/${missionTotal}`
-          : `Потренироваться в теме «${target.name}» — самое слабое место`,
+          : theoryPending
+            ? `Закрепить тему «${target.name}» — база есть, урока ещё не было`
+            : `Потренировать тему «${target.name}» — самое слабое место`,
         reason: started
           ? `Тренировка по «${target.name}» уже начата — закончить её сейчас проще всего.`
-          : snap.fatigued
-            ? `Тема «${target.name}» сейчас перетренирована — короткая пауза вернёт эффективность.`
-            : lessonFirst
-              ? `«${target.name}» — слабое место, но по ней есть непройденный урок: сначала разберись в теории, практика пойдёт лучше.`
-              : `«${target.name}» — самый отстающий навык (${snap.progress}%), и его давно не тренировали.`,
+          : theoryPending
+            ? `Урок по «${target.name}» ещё не пройден, но раньше ты отвечал верно — короткая серия закрепит тему, теория подождёт.`
+            : snap.solved === 0
+              ? `По теме «${target.name}» ещё не было практики (${snap.progress}%) — начни с короткой серии.`
+              : (snap.ageMs < NEXTSTEP_RECENT_MS
+                ? `«${target.name}» — самый отстающий навык (${snap.progress}%) — короткая серия закрепит результат.`
+                : `«${target.name}» — самый отстающий навык (${snap.progress}%), и его давно не тренировали.`),
+        score,
+      });
+    }
+  }
+
+  /* 4b. Сочинение по тексту (задание 27): у темы сочинений нет ни урока,
+     ни миссии, поэтому секции 3–4 её никогда не выбирают — без отдельной
+     секции самый весомый навык русского (22 из 50 первичных баллов) был
+     бы невидим движку, а низкий прогресс по нему вечно давил бы
+     «новую тему» и боссов через общий минимум. Сигналы те же, что
+     у практики: освоение, свежесть, утомление. Исполнение — визитом
+     startEssayPractice (одно сочинение), а не миссией. */
+  {
+    const pool = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()).filter((sk) => {
+      const snap = snaps[sk.id];
+      if (!snap || mentioned.has(sk.id) || snap.progress >= 90) return false;
+      if (snap.mission || snap.lesson) return false;
+      const bank = DataAPI.practiceTasksBySkill(sk.id);
+      if (!(bank.length > 0 && bank.some((t) => t && (t.type === "long_text" || t.answerType === "long_text")))) return false;
+      /* Совсем новому ученику (ни одного урока) первым шагом нужен урок,
+         а не сочинение на 150+ слов: как и «теория раньше практики» выше. */
+      if (snap.solved === 0 && Object.keys(safeObject(s.completedLessons)).length === 0) return false;
+      return true;
+    });
+    const target = weakestOf(pool, snaps);
+    if (target) {
+      const snap = snaps[target.id];
+      mentioned.add(target.id);
+      let score = 56 + (100 - snap.progress) * 0.3;
+      if (snap.ageMs < NEXTSTEP_RECENT_MS) {
+        score -= (snap.recentAccuracy !== null && snap.recentAccuracy < 0.5) ? 22 : 10;
+      }
+      if (snap.fatigued) score -= 35;
+      const untouched = snap.solved === 0;
+      push({
+        action: "essay",
+        payload: { skillId: target.id },
+        route: "#/training", icon: "pen",
+        cta: "Написать",
+        text: untouched
+          ? `Написать сочинение по тексту — задание 27`
+          : `Потренировать сочинение — задание 27 (${snap.progress}%)`,
+        reason: untouched
+          ? `Сочинение даёт 22 из 50 первичных баллов — почти половину экзамена. Первый текст лучше написать сейчас, а не откладывать.`
+          : `Задание 27 — самое весомое в экзамене, а освоение пока ${snap.progress}% — одно сочинение сейчас даст больше всего.`,
         score,
       });
     }
@@ -2875,7 +2949,8 @@ function nextStepCandidates() {
         action: "boss",
         payload: { bossId: bestBoss.id },
         route: "#/trials", icon: "crown",
-        text: `Пройти ${bestBoss.title.replace("БОСС: ", "")}`,
+        cta: "Сразиться",
+        text: `Пройти босса: ${String(bestBoss.title || "итоговое испытание").replace(/^БОСС:\s*/, "")}`,
         reason: `Ветка «${(DataAPI.category(bestBoss.cat) || {}).name || "предмета"}» прокачана до ${catProgress(bestBoss.cat)}% — босс покажет, держится ли результат на смешанных заданиях.`,
         score: bestBossScore,
       });
@@ -2892,6 +2967,7 @@ function nextStepCandidates() {
       action: "daily",
       payload: {},
       route: "#/trials", icon: "zap",
+      cta: partial ? "Закончить" : "Решить",
       text: partial ? `Закончить ежедневную подборку — ${Math.min(s.daily.solved, goal)}/${goal}` : "Решить ежедневную подборку",
       reason: partial
         ? `Подборка почти закрыта — один заход, и день засчитан.`
@@ -2923,6 +2999,7 @@ function nextStepCandidates() {
         action: "lesson",
         payload: { lessonId: snap.lesson.id },
         route: "#/path", icon: "path",
+        cta: "Открыть",
         text: `Открыть новую тему — урок «${snap.lesson.title}»`,
         reason: `Текущие темы в хорошем состоянии — следующий рост даст новый навык по карте.`,
         score: 56,
@@ -2937,13 +3014,14 @@ function nextStepCandidates() {
       action: "mixed",
       payload: {},
       route: "#/trials", icon: "trials",
+      cta: "Начать",
       text: "Пройти смешанное испытание",
       reason: `Слабых мест нет — проверка общей формы на заданиях из разных тем не даст застояться.`,
       score: 30,
     });
   }
 
-  const priority = { "finish-lesson": 0, "lesson": 1, "errors-review": 2, "practice": 3, "boss": 4, "daily": 5, "mixed": 6 };
+  const priority = { "finish-lesson": 0, "lesson": 1, "errors-review": 2, "practice": 3, "essay": 3, "boss": 4, "daily": 5, "mixed": 6 };
   return cands.sort((a, b) => b.score - a.score || priority[a.action] - priority[b.action]);
 }
 

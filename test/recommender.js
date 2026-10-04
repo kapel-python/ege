@@ -44,7 +44,10 @@ const testBody = async () => {
     const best = bestNextStep();
     t("новичку: лучший шаг — урок (теория раньше практики)", best && best.action === "lesson" && !!best.payload.lessonId);
     t("новичку: не босс и не испытание", best.action !== "boss" && best.action !== "mixed");
-    t("новичку: все кандидаты с текстом и причиной", nextStepCandidates().every((c) => c.text && c.reason));
+    t("новичку: все кандидаты с текстом, причиной и подписью кнопки",
+      nextStepCandidates().every((c) => c.text && c.reason && c.cta));
+    t("профиль: без сочинений в банке — кандидата «essay» нет",
+      !nextStepCandidates().some((c) => c.action === "essay"));
   }
 
   /* ---------- 2. Слабая база: много ошибок в нескольких темах ---------- */
@@ -200,6 +203,34 @@ const testBody = async () => {
   /* ---------- 12. Всегда есть хотя бы один следующий шаг ---------- */
   Store.reset();
   t("список кандидатов никогда пустым не бывает", nextStepCandidates().length >= 1 && !!bestNextStep());
+
+  /* ---------- 13. Русский: сочинение видно движку ---------- */
+  // У russian_essay_source нет ни урока, ни миссии: без отдельной секции
+  // самый весомый навык предмета (22 из 50 первичных) движок не видел бы.
+  DataAPI.load(JSON.parse(fs.readFileSync("server/catalog_russian.json", "utf8")));
+  Store.reset();
+  {
+    const ids = (DataAPI.availableSkills() || []).map((s) => s.id);
+    t("русский: навык сочинения доступен", ids.includes("russian_essay_source"));
+    // Совсем новому ученику — сначала урок, а не сочинение.
+    const freshBest = bestNextStep();
+    t("русский новичку: лучший шаг — урок, а не сочинение",
+      freshBest && freshBest.action === "lesson");
+    t("русский новичку: кандидата «essay» пока нет",
+      !nextStepCandidates().some((c) => c.action === "essay"));
+    // После первого урока сочинение появляется в кандидатах.
+    const firstLesson = DataAPI.lessons()[0];
+    Store.state.completedLessons[firstLesson.id] = { ts: now - HOUR };
+    const cands = nextStepCandidates();
+    const essay = cands.find((c) => c.action === "essay");
+    t("русский: после урока сочинение есть в кандидатах",
+      !!essay && essay.payload.skillId === "russian_essay_source");
+    t("русский: у сочинения текст, причина и подпись без противоречий",
+      !!essay && !!essay.text && !!essay.reason && essay.cta === "Написать"
+      && /сочинение/i.test(essay.text));
+    t("русский: без боссов и daily по флагу предмета",
+      !cands.some((c) => c.action === "boss") && !cands.some((c) => c.action === "daily"));
+  }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
