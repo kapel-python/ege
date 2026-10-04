@@ -314,7 +314,11 @@ def main() -> int:
             russian_boot = payloads[("/api/bootstrap", "russian")]
             russian_catalog = russian_boot.get("catalog") or {}
             russian_missions = russian_catalog.get("missions") or []
-            empty_catalog_keys = ("bosses", "achievements", "goals", "diagnosticTasks")
+            empty_catalog_keys = ("bosses", "goals", "diagnosticTasks")
+            # Пустой achievements в файле русского ставит стандартный набор
+            # DEFAULT_ACHIEVEMENTS (как у профиля) — новый единый контракт.
+            default_ach_ids = ("first-solve", "hundred", "series20", "nohints",
+                               "comeback", "part1_master", "streak7", "boss1", "basic_master")
             russian_forecast = russian_catalog.get("forecast") or {}
             russian_weights = russian_forecast.get("weights") or {}
             russian_scale = russian_forecast.get("scale") or []
@@ -331,6 +335,7 @@ def main() -> int:
                 and russian_scale[0] == 0 and russian_scale[50] == 100
                 and russian_scale[28] == 55
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
+                and [a.get("id") for a in (russian_catalog.get("achievements") or [])] == list(default_ach_ids)
                 and len(russian_catalog.get("tasks") or []) == 143
                 and len(russian_catalog.get("lessons") or []) == 26
                 and len(russian_catalog.get("skills") or []) == 27

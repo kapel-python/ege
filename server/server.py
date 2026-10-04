@@ -2718,8 +2718,9 @@ CREATE TABLE IF NOT EXISTS bosses (
   task_count INTEGER NOT NULL, xp INTEGER NOT NULL, unlock_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS achievements (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL,
-  subject TEXT NOT NULL DEFAULT 'profile_math'
+  id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT 'profile_math',
+  PRIMARY KEY(id, subject)
 );
 CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS user_stats (
@@ -2773,8 +2774,9 @@ CREATE TABLE IF NOT EXISTS user_bosses (
   PRIMARY KEY(user_id, subject, boss_id)
 );
 CREATE TABLE IF NOT EXISTS user_achievements (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', achievement_id TEXT NOT NULL REFERENCES achievements(id), unlocked_at TEXT NOT NULL,
-  PRIMARY KEY(user_id, subject, achievement_id)
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', achievement_id TEXT NOT NULL, unlocked_at TEXT NOT NULL,
+  PRIMARY KEY(user_id, subject, achievement_id),
+  FOREIGN KEY(achievement_id, subject) REFERENCES achievements(id, subject)
 );
 CREATE TABLE IF NOT EXISTS activity_history (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, activity_date TEXT NOT NULL, solved INTEGER NOT NULL, correct INTEGER NOT NULL, xp INTEGER NOT NULL,
@@ -5049,6 +5051,95 @@ def _ensure_mutable_subject_pks(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _achievements_scope_done(conn: sqlite3.Connection) -> bool:
+    """True, когда achievements уже с составным ключом (id, subject),
+    а user_achievements ссылается на него парой колонок."""
+    try:
+        pk = {r["name"]: r["pk"] for r in conn.execute("PRAGMA table_info(achievements)")}
+        if pk.get("id") != 1 or pk.get("subject") != 2:
+            return False
+        pairs = {(r["from"], r["to"]) for r in
+                 conn.execute("PRAGMA foreign_key_list(user_achievements)")
+                 if r["table"] == "achievements"}
+        return pairs == {("achievement_id", "id"), ("subject", "subject")}
+    except sqlite3.Error:
+        return False
+
+
+def _ensure_achievements_subject_scope(conn: sqlite3.Connection) -> None:
+    """Награды — пер-предметные: один и тот же id живёт в каждом предмете
+    своей строкой (так стандартный набор одинаков везде, а прогресс учеников
+    не смешивается). Раньше id был глобальным PRIMARY KEY, поэтому второй
+    предмет с тем же id ронял install_catalog в _assert_catalog_owner.
+
+    Правила пересборки — те же, что у _MUTABLE_PK_REBUILDS: FK OFF поверх
+    закоммиченного, сверка числа строк до DROP (потеря строк = откат
+    и громкая ошибка, а не «успех»), DROP+RENAME обеих таблиц в одной
+    транзакции BEGIN IMMEDIATE. Идемпотентно: со составным ключом — no-op."""
+    try:
+        has_ach = bool(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='achievements'").fetchone())
+        has_user = bool(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='user_achievements'").fetchone())
+    except sqlite3.Error:
+        return
+    if not has_ach or not has_user:
+        return
+    if _achievements_scope_done(conn):
+        return
+    try:
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("PRAGMA foreign_keys=OFF")
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS achievements_new (
+              id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL,
+              icon TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'profile_math',
+              PRIMARY KEY(id, subject))""")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS user_achievements_new (
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              subject TEXT NOT NULL DEFAULT 'profile_math',
+              achievement_id TEXT NOT NULL, unlocked_at TEXT NOT NULL,
+              PRIMARY KEY(user_id, subject, achievement_id),
+              FOREIGN KEY(achievement_id, subject) REFERENCES achievements(id, subject))""")
+        old_ach = conn.execute("SELECT COUNT(*) AS c FROM achievements").fetchone()["c"]
+        old_user = conn.execute("SELECT COUNT(*) AS c FROM user_achievements").fetchone()["c"]
+        conn.execute("DELETE FROM achievements_new")
+        conn.execute("DELETE FROM user_achievements_new")
+        conn.execute("INSERT INTO achievements_new(id, name, description, icon, subject)"
+                     " SELECT id, name, description, icon, subject FROM achievements")
+        conn.execute("INSERT INTO user_achievements_new(user_id, subject, achievement_id, unlocked_at)"
+                     " SELECT user_id, subject, achievement_id, unlocked_at FROM user_achievements")
+        new_ach = conn.execute("SELECT COUNT(*) AS c FROM achievements_new").fetchone()["c"]
+        new_user = conn.execute("SELECT COUNT(*) AS c FROM user_achievements_new").fetchone()["c"]
+        if new_ach != old_ach or new_user != old_user:
+            raise sqlite3.Error(f"achievements copy mismatch: {old_ach}/{old_user} -> {new_ach}/{new_user}")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.Error:
+            pass
+        conn.execute("DROP TABLE achievements")
+        conn.execute("ALTER TABLE achievements_new RENAME TO achievements")
+        conn.execute("DROP TABLE user_achievements")
+        conn.execute("ALTER TABLE user_achievements_new RENAME TO user_achievements")
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_user_achievements_user_subject"
+                         " ON user_achievements(user_id, subject)")
+        except sqlite3.Error:
+            pass
+    finally:
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+        except sqlite3.Error:
+            pass
+
+
 def _backfill_append_client_ids(conn: sqlite3.Connection) -> None:
     """Выдаёт существующим строкам детерминированные client_id и вешает UNIQUE.
 
@@ -5304,8 +5395,9 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
             ("coming_soon", "coming_soon INTEGER NOT NULL DEFAULT 0"),
             ("metadata_json", "metadata_json TEXT NOT NULL DEFAULT '{}'"),
         ),
-        # Достижения исторически были глобальными. Новые предметы не должны
-        # получать чужие награды; существующие строки относятся к профилю.
+        # Достижения — пер-предметные строки (составной ключ id+subject):
+        # один и тот же id живёт в каждом предмете отдельно, пустой список
+        # в каталоге ставит стандартный набор DEFAULT_ACHIEVEMENTS.
         "achievements": (
             ("subject", f"subject TEXT NOT NULL DEFAULT '{DEFAULT_SUBJECT}'"),
         ),
@@ -5397,6 +5489,7 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
     # client_id с UNIQUE для append-сущностей. Миграции идемпотентны, данные
     # сохраняются (пересоздание через INSERT OR IGNORE, backfill ключей).
     _ensure_mutable_subject_pks(conn)
+    _ensure_achievements_subject_scope(conn)
     _backfill_append_client_ids(conn)
     conn.commit()
     _SUBJECT_SCHEMA_DONE.add(key)
@@ -5625,15 +5718,34 @@ def _upsert_catalog_boss(conn: sqlite3.Connection, item: dict, subject: str) -> 
 
 def _upsert_catalog_achievement(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
-    _assert_catalog_owner(conn, "achievements", item_id, subject)
+    # Владельца по одному id здесь нет: ключ составной (id, subject), и одна
+    # и та же награда живёт в каждом предмете своей строкой.
     conn.execute(
         """INSERT INTO achievements(id, name, description, icon, subject)
            VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description,
-             icon=excluded.icon, subject=excluded.subject""",
+           ON CONFLICT(id, subject) DO UPDATE SET name=excluded.name, description=excluded.description,
+             icon=excluded.icon""",
         (item_id, str(item.get("name") or item_id), str(item.get("desc", item.get("description", ""))),
          str(item.get("icon") or "flag"), subject),
     )
+
+
+# Стандартный набор наград: тот же, что в profile_math. Каталог без своих
+# achievements (пусто или ключа нет) получает его автоматически — так новый
+# предмет выходит с наградами из коробки, а все предметы одинаковы.
+# Непустой список в каталоге — автор берёт награды на себя: ставится ровно
+# он (upsert по (id, subject), чужие строки предмета не трогаем).
+DEFAULT_ACHIEVEMENTS = [
+    {"id": "first-solve", "name": "Первый шаг", "desc": "Решить первое задание", "icon": "flag"},
+    {"id": "hundred", "name": "Первая сотня", "desc": "Решить 100 заданий", "icon": "layers"},
+    {"id": "series20", "name": "Безошибочная серия", "desc": "Решить 20 заданий подряд без ошибки", "icon": "zap"},
+    {"id": "nohints", "name": "Ни одной подсказки", "desc": "Пройти тренировку из 5+ заданий без подсказок", "icon": "eye-off"},
+    {"id": "comeback", "name": "Возвращение", "desc": "Закрыть 10 ранее допущенных ошибок", "icon": "rotate"},
+    {"id": "part1_master", "name": "Мастер первой части", "desc": "Освоить 80% навыков первой части", "icon": "compass"},
+    {"id": "streak7", "name": "Неделя в строю", "desc": "Заниматься 7 дней подряд", "icon": "flame"},
+    {"id": "boss1", "name": "Первый босс", "desc": "Пройти босс-испытание", "icon": "crown"},
+    {"id": "basic_master", "name": "Мастер предмета", "desc": "Освоить 80% навыков предмета", "icon": "shield"},
+]
 
 
 def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: str,
@@ -5653,7 +5765,7 @@ def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: s
         _upsert_catalog_mission(conn, mission, subject)
     for boss in catalog.get("bosses") or []:
         _upsert_catalog_boss(conn, boss, subject)
-    for achievement in catalog.get("achievements") or []:
+    for achievement in catalog.get("achievements") or DEFAULT_ACHIEVEMENTS:
         _upsert_catalog_achievement(conn, achievement, subject)
 
 
@@ -9277,7 +9389,7 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
     for r in conn.execute("SELECT activity_date, solved, correct, xp FROM activity_history WHERE user_id=? AND subject=? ORDER BY activity_date DESC LIMIT 60", (user_id, detail_subject)):
         detail["activity"].append({"date": r["activity_date"], "solved": r["solved"], "correct": r["correct"], "xp": r["xp"]})
     for r in conn.execute("""SELECT ua.achievement_id, ua.unlocked_at, a.name, a.icon, a.description
-                             FROM user_achievements ua LEFT JOIN achievements a ON a.id=ua.achievement_id
+                             FROM user_achievements ua LEFT JOIN achievements a ON a.id=ua.achievement_id AND a.subject=ua.subject
                              WHERE ua.user_id=? AND ua.subject=? ORDER BY ua.unlocked_at DESC""", (user_id, detail_subject)):
         detail["achievements"].append({"id": r["achievement_id"], "name": r["name"], "icon": r["icon"],
                                        "description": r["description"], "ts": timestamp_value(r["unlocked_at"])})
