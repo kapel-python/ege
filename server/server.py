@@ -13253,38 +13253,11 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_busy_release(tid)
                         _agent_live_clear(tid)
                     try:
-                        # Повторный ход кэшируется: тот же текст последним — отдаём готовое без модели и без жетона.
-                        # force:true от клиента (кнопка «Попробовать снова») обходит кэш: явный повтор = новый шанс.
-                        # replaceLast обходит кэш всегда: замена ради нового ответа.
-                        if replace_from is None and payload.get("force") is not True:
-                            last_user = conn.execute("SELECT content, seq FROM agent_messages WHERE thread_id=? AND role='user' ORDER BY seq DESC LIMIT 1",
-                                                     (tid,)).fetchone()
-                            if last_user is not None and (last_user["content"] or "").strip() == text:
-                                try:
-                                    after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at, suggests_json"
-                                                         " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
-                                                         (tid, int(last_user["seq"]))).fetchall()
-                                except sqlite3.Error:
-                                    after = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status, result_json, seq, created_at"
-                                                         " FROM agent_messages WHERE thread_id=? AND seq>? ORDER BY seq",
-                                                         (tid, int(last_user["seq"]))).fetchall()
-                                has_assistant = any(r["role"] == "assistant" and (r["content"] or "").strip() for r in after)
-                                has_pending = any(r["status"] == "needs_confirm" for r in after)
-                                if has_assistant and not has_pending:
-                                    public = [_agent_public_message(r) for r in after]
-                                    steps_cached = [s for s in public if s["role"] == "tool"]
-                                    finals = [(s["content"], s.get("suggests") or []) for s in public
-                                              if s["role"] == "assistant" and (s["content"] or "").strip()]
-                                    quota = _AGENT.agent_quota_status(conn, int(user_id))
-                                    _turn_cleanup()
-                                    self.send_json({"ok": True, "cached": True, "steps": [
-                                        {"id": s["id"], "tool": s.get("tool"), "args": s.get("args"),
-                                         "label": _AGENT.describe_step(s.get("tool") or "", s.get("args") or {}, s.get("result")),
-                                         "kind": "read", "status": s.get("status"), "result": s.get("result")} for s in steps_cached],
-                                        "final": finals[-1][0] if finals else "",
-                                        "suggests": finals[-1][1] if finals else [],
-                                        "quota": quota,
-                                        "usage": {"cost": 0}}, token=token); return
+                        # Кэша повторов нет осознанно: каждый вопрос — инициатива
+                        # ученика, и каждый ход идёт в модель заново за жетон,
+                        # даже если текст совпадает с прошлым (повтор мог хотеть
+                        # другой ответ). force:true и replaceLast клиент шлёт как
+                        # раньше — сервер их принимает, обходить нечего.
                         # Брошенное подтверждение. Ученик нажал «Применить» не сразу
                         # (или вообще ушёл), а задал НОВЫЙ вопрос — значит это
                         # предложение больше неактуально. Раньше такой шаг висел
@@ -13297,8 +13270,7 @@ class Handler(BaseHTTPRequestHandler):
                         # двойное подтверждение в чате 52, только молча и на
                         # все последующие ходы чата. Закрываем шаг сами: действие
                         # НЕ применяется (ученик его не подтвердил), а история
-                        # получает честный результат. Кэш повтора тоже перестаёт
-                        # блокироваться (has_pending).
+                        # получает честный результат.
                         dropped_ids = []
                         try:
                             pend_rows = conn.execute(

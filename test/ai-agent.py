@@ -9,7 +9,7 @@ Temp-БД, живой сервер, мок провайдера (без сети
   * действие — confirm без записи, approve меняет, отмена пишет «Отменено»;
   * длинный цикл — обрыв ответом по собранным данным (вызов без tools);
   * 10 ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает жетон;
-  * повторный ход — кэш, usage.cost не растёт;
+  * повтор того же вопроса — снова модель за жетон, кэша повторов нет;
   * 400 на пустой/длинный, 400 AGENT_BUSY на параллельный ход;
   * парсер ai.py: реплика вместе с вызовами — не ошибка (preamble), пустой ответ — ошибка;
   * заголовок — первые 60 символов, подписка — колонка в users.
@@ -700,7 +700,7 @@ def main():
                         " VALUES(?,?,?,?,?,?)",
                         (ruser, "profile_math", f"чат {k}", "1", "1", f"RACE{k}{ruser}"))
                     race_tids.append(int(cur.lastrowid))
-                    # История в чате: без неё первый вопрос попал бы в кэш повтора.
+                    # История в чате (вопрос уже задан раньше).
                     conn4.execute(
                         "INSERT INTO agent_messages(thread_id, user_id, role, content, seq, created_at)"
                         " VALUES(?,?,?,?,?,?)",
@@ -1008,25 +1008,35 @@ def main():
             got = (body.get("steps") or [{}])[0].get("result", {})
             check("Боря не видит Анину ошибку", got.get("total") == 0 and got.get("open") == 0, str(got))
 
-            section("повторный ход кэшируется, cost не растёт")
+            section("повтор того же вопроса идёт в модель заново, а не из кэша")
+            # Кэша повторов нет осознанно: повтор — инициатива ученика (мог
+            # хотеть другой ответ), поэтому каждый ход тратит жетон и зовёт
+            # модель, даже если текст совпадает.
             with lock:
                 script.clear()
-                script.append({"text": "Кэшируемый ответ.", "tool_calls": []})
+                script.append({"text": "Первый ответ.", "tool_calls": []})
+                script.append({"text": "Второй ответ.", "tool_calls": []})
                 calls["n"] = 0
+            _, quota_before = a.request(base, "GET", "/api/agent/limits", None)
             status, body = turn(a, tid_a, "повторимый вопрос")
-            check("первый -> 200", status == 200, f"{status}")
-            first_cost = calls["n"]
+            check("первый -> 200", status == 200 and body.get("final") == "Первый ответ.",
+                  f"{status} {body.get('final')}")
             status, body = turn(a, tid_a, "повторимый вопрос")
-            check("повтор -> cached", status == 200 and body.get("cached") is True, f"{status} {body}")
-            check("cost не растёт", calls["n"] == first_cost, f"{calls['n']} vs {first_cost}")
-            check("usage.cost 0 у кэша", body.get("usage", {}).get("cost") == 0, str(body.get("usage")))
+            check("повтор того же текста -> снова модель, а не cached",
+                  status == 200 and body.get("cached") is not True
+                  and body.get("final") == "Второй ответ.", f"{status} {body}")
+            check("модель вызвана оба раза", calls["n"] == 2, str(calls["n"]))
+            _, quota_after = a.request(base, "GET", "/api/agent/limits", None)
+            check("оба хода потратили по жетону",
+                  (quota_before.get("remaining") or 0) - (quota_after.get("remaining") or 0) == 2,
+                  f"{quota_before} -> {quota_after}")
             with lock:
                 script.clear()
                 script.append({"text": "Свежая попытка.", "tool_calls": []})
                 calls["n"] = 0
             status, body = turn(a, tid_a, "повторимый вопрос", {"force": True})
-            check("force:true обходит кэш", status == 200 and body.get("cached") is not True
-                  and body.get("final") == "Свежая попытка.", f"{status} {body}")
+            check("force:true -> обычный ход через модель",
+                  status == 200 and body.get("final") == "Свежая попытка.", f"{status} {body}")
             check("force зовёт модель", calls["n"] == 1, str(calls["n"]))
 
             section("replaceLast: ход ЗАМЕНЯЕТ последнюю пару, а не дублирует")
@@ -1050,7 +1060,7 @@ def main():
             status, body = turn(c4, tid_d, "заменяемый вопрос")
             check("обычный ход -> 200", status == 200, f"{status} {body}")
             status, body = turn(c4, tid_d, "заменяемый вопрос", {"replaceLast": True})
-            check("replaceLast с тем же текстом обходит кэш (не cached)",
+            check("replaceLast с тем же текстом даёт новый ответ от модели",
                   status == 200 and body.get("cached") is not True, f"{status} {body}")
             check("replaceLast -> новый ответ от модели",
                   body.get("final") == "Второй ответ.", str(body.get("final")))
@@ -1405,12 +1415,17 @@ def main():
                   last.get("suggests") == [{"label": "Разбери ошибку", "ask": "Разбери мою ошибку по шагам."},
                                            {"label": "Дай задачу", "ask": "Дай задачу на слабую тему."}],
                   repr(last.get("suggests")))
-            # Кэшированный повтор того же вопроса: кнопки — те же, из базы.
+            # Повтор того же вопроса идёт в модель заново: кнопки — новые слова
+            # модели, а не сохранённые. Кэша повторов нет.
+            with lock:
+                script.clear()
+                script.append({"text": "Новый разбор.\n\n```suggest\n[{\"label\":\"Ещё\",\"ask\":\"Дай ещё задачу\"}]\n```",
+                               "tool_calls": []})
             status, body = turn(k, tid_k, "расскажи про прогресс")
-            check("кэшированный ход отдаёт сохранённые кнопки",
-                  status == 200 and body.get("cached") is True
-                  and [x["label"] for x in (body.get("suggests") or [])]
-                  == ["Разбери ошибку", "Дай задачу"], f"{status} {body.get('suggests')}")
+            check("повтор идёт в модель: кнопки новые, а не сохранённые",
+                  status == 200 and body.get("cached") is not True
+                  and [x["label"] for x in (body.get("suggests") or [])] == ["Ещё"],
+                  f"{status} {body.get('suggests')}")
 
             with lock:
                 script.clear()
