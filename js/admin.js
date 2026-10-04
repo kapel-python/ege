@@ -1313,7 +1313,7 @@ function bindUserActions(p) {
       : "";
     openModal(`
       <div class="a-modal__title">ИИ-лимиты — ${esc(p.accountId || "")}</div>
-      <div class="a-modal__desc">Сейчас ученику доступно <b>${remaining} из ${limit}</b>${resetNote}. Каждая потраченная проверка возвращается через 8 часов.${customNote}</div>
+      <div class="a-modal__desc">Сейчас ученику доступно <b>${remaining} из ${limit}</b>${resetNote}. Каждые 8 часов возвращается примерно треть запаса, полный — за сутки.${customNote}</div>
       <div class="a-modal__form">
         <div class="a-field"><label>Доступно сейчас (0–1000)</label><input class="a-input mono" id="fAiRemaining" type="number" min="0" max="1000" step="1" value="${remaining}"></div>
         <div class="a-field"><label>Всего выдавать (пусто — не менять)</label><input class="a-input mono" id="fAiLimit" type="number" min="0" max="1000" step="1" placeholder="${limit}"></div>
@@ -1323,7 +1323,7 @@ function bindUserActions(p) {
           <button type="button" class="btn btn--soft btn--sm" id="mStd">Вернуть обычные 5</button>
         </div>
       </div>
-      <div class="a-modal__desc" style="margin-top:18px">Ходы наставника: доступно <b>${agRemaining} из ${agLimit}</b>${agReset}. Каждый потраченный ход возвращается через 8 часов.${agCustomNote}</div>
+      <div class="a-modal__desc" style="margin-top:18px">Ходы наставника: доступно <b>${agRemaining} из ${agLimit}</b>${agReset}. Каждые 8 часов возвращается примерно треть запаса, полный — за сутки.${agCustomNote}</div>
       <div class="a-modal__form">
         <div class="a-field"><label>Ходов доступно сейчас (0–1000)</label><input class="a-input mono" id="fAgRemaining" type="number" min="0" max="1000" step="1" value="${agRemaining}"></div>
         <div class="a-field"><label>Ходов всего выдавать (пусто — не менять)</label><input class="a-input mono" id="fAgLimit" type="number" min="0" max="1000" step="1" placeholder="${agLimit}"></div>

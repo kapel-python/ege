@@ -332,8 +332,17 @@ def ensure_ai_usage_table(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS ai_usage (
           owner TEXT PRIMARY KEY,
           count INTEGER NOT NULL,
-          timer_ms INTEGER
+          timer_ms INTEGER,
+          anchor_ms INTEGER
         )""")
+    try:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
+        if cols and "anchor_ms" not in cols:
+            conn.execute("ALTER TABLE ai_usage ADD COLUMN anchor_ms INTEGER")
+            conn.execute("UPDATE ai_usage SET anchor_ms=timer_ms"
+                         " WHERE anchor_ms IS NULL AND timer_ms IS NOT NULL")
+    except sqlite3.Error:
+        pass
 
 
 def get_subscription(conn: sqlite3.Connection, user_id: int) -> dict | None:
@@ -442,7 +451,7 @@ def _top_up_buckets(conn: sqlite3.Connection, user_id: int, essay_limit: int,
                          (f"agent:{int(user_id)}", int(agent_limit))):
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
                      " VALUES (?,?,NULL)", (owner, level))
-        conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL"
+        conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
                      " WHERE owner=? AND count<?",
                      (level, owner, level))
 

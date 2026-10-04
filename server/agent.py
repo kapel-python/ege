@@ -28,10 +28,14 @@
 recheck:true всегда идёт через модель за жетон); агент объясняет и показывает
 историю через essay_history, но не тратит чужую квоту из чата.
 
-Квота хода: один ход (не шаг) — один жетон. Своя суточная цепочка
-EGE_AGENT_QUOTA_MAX (по умолчанию 5) с окном 8 часов — та же механика, что у
+Квота хода: один ход (не шаг) — один жетон. Своя цепочка
+EGE_AGENT_QUOTA_MAX (по умолчанию 5) с тиком 8 часов — та же механика, что у
 ai_usage, но отдельный owner `agent:<user_id>` в той же таблице ai_usage
-(таблица общая, бакеты не пересекаются по префиксу). Плюс общая сетка
+(таблица общая, бакеты не пересекаются по префиксу). Зарядка — ТРЕТЬ ЗАПАСА
+ЗА ТИК: каждые 8 часов возвращается round(limit/3) жетонов (5 → 2, 25 → 8),
+полный карман — за 24 часа при любом лимите. Якорь цепочки (момент первой
+траты) хранится в ai_usage.anchor_ms, граница отыгранных тиков — в timer_ms.
+Плюс общая сетка
 ai.ai_take по пользователю и IP от скриптов — это всплеск за минуту
 (60/мин на аккаунт), а не «много за день»: единственный счётчик, который
 видит ученик, — квота ходов. Потолок хода — кодом: MAX_TOOL_STEPS шагов,
@@ -617,11 +621,14 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")}
         if not cols or "owner" not in cols:
             conn.execute("DROP TABLE IF EXISTS ai_usage")
-            conn.execute("CREATE TABLE IF NOT EXISTS ai_usage (owner TEXT PRIMARY KEY, count INTEGER NOT NULL, timer_ms INTEGER)")
+            conn.execute("CREATE TABLE IF NOT EXISTS ai_usage (owner TEXT PRIMARY KEY, count INTEGER NOT NULL, timer_ms INTEGER, anchor_ms INTEGER)")
+        elif "anchor_ms" not in cols:
+            conn.execute("ALTER TABLE ai_usage ADD COLUMN anchor_ms INTEGER")
+            conn.execute("UPDATE ai_usage SET anchor_ms=timer_ms WHERE anchor_ms IS NULL AND timer_ms IS NOT NULL")
     except sqlite3.Error:
         pass
     if "ai_usage" not in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
-        conn.execute("CREATE TABLE IF NOT EXISTS ai_usage (owner TEXT PRIMARY KEY, count INTEGER NOT NULL, timer_ms INTEGER)")
+        conn.execute("CREATE TABLE IF NOT EXISTS ai_usage (owner TEXT PRIMARY KEY, count INTEGER NOT NULL, timer_ms INTEGER, anchor_ms INTEGER)")
     conn.commit()
     _AGENT_SCHEMA_DONE.add(key)
 
@@ -633,22 +640,132 @@ def thread_title_for(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Квота хода: цепочка 8 часов на owner `agent:<user_id>`
+# Квота хода: тик 8 часов на owner `agent:<user_id>`, полный карман за 24 часа
 # ---------------------------------------------------------------------------
 def _agent_owner(user_id: int) -> str:
     return f"agent:{int(user_id)}"
 
 
+# Тиков до полного кармана: 24 ч / 8 ч. Делитель общий для всех лимитов,
+# поэтому дробных «8 с копейкой в час» нет: за тик возвращается
+# round(limit/3) — обычное округление (5 → 2, 25 → 8, 500 → 167).
+# Делитель 3 хорош тем, что limit*n/3 при целом limit никогда не даёт ровно
+# .5 (остатки только 1/3 и 2/3), поэтому банковское округление Python здесь
+# совпадает с обычным: спора «3.5 → 3 или 4» на этих числах не бывает.
+CHAIN_FULL_TICKS = 3
+
+
+def _chain_cum(n: int, limit: int) -> int:
+    """Сколько жетонов положено за n тиков от якоря (без капа сверху).
+
+    Кумулятивное округление: cum(n) = round(limit*n/3). Приращение тика —
+    cum(total) − cum(done) (для 25: 8, 9, 8 — в сумме ровно лимит), поэтому
+    полный карман сходится за 3 тика при любом лимите, а не «примерно».
+    Кап до limit делает вызыватель через MIN."""
+    try:
+        n = int(n)
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return 0
+    if n <= 0 or limit <= 0:
+        return 0
+    return int(round(limit * n / 3.0))
+
+
+def _ensure_anchor_col(conn: sqlite3.Connection) -> None:
+    """Колонка якоря цепочки. Без коммита: вызывается и внутри чужих
+    транзакций (reserve/status уже открыли свою через INSERT)."""
+    try:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")}
+    except sqlite3.Error:
+        return
+    if cols and "anchor_ms" not in cols:
+        try:
+            conn.execute("ALTER TABLE ai_usage ADD COLUMN anchor_ms INTEGER")
+        except sqlite3.Error:
+            pass
+
+
 def _quota_catch_up(conn: sqlite3.Connection, owner: str, now_ms: int, limit: int, window_ms: int) -> None:
-    conn.execute("""
-        UPDATE ai_usage SET
-          count = MIN(?, count + (? - timer_ms) / ?),
-          timer_ms = CASE WHEN count + (? - timer_ms) / ? >= ?
-                           THEN NULL
-                           ELSE timer_ms + ((? - timer_ms) / ?) * ? END
-        WHERE owner = ? AND timer_ms IS NOT NULL AND ? >= timer_ms + ?""",
-        (limit, now_ms, window_ms, now_ms, window_ms, limit,
-         now_ms, window_ms, window_ms, owner, now_ms, window_ms))
+    """Ленивая зарядка: за каждый созревший 8-часовой тик от якоря — треть
+    запаса (см. _chain_cum). Идемпотентно, без коммита (коммит за вызывателем,
+    чья транзакция уже открыта первым INSERT)."""
+    _ensure_anchor_col(conn)
+    try:
+        row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage"
+                           " WHERE owner=?", (owner,)).fetchone()
+    except sqlite3.Error:
+        return
+    if not row:
+        return
+    try:
+        count = int(row["count"])
+    except (TypeError, ValueError):
+        return
+    timer = row["timer_ms"]
+    anchor = row["anchor_ms"] if "anchor_ms" in row.keys() else None
+    if timer is None:
+        if count < limit:
+            # Призрак (строка частично заполнена, таймера нет): запускаем
+            # цепочку сейчас, иначе такой карман не зарядился бы никогда.
+            try:
+                conn.execute("UPDATE ai_usage SET timer_ms=?, anchor_ms=? WHERE owner=?",
+                             (now_ms, now_ms, owner))
+            except sqlite3.Error:
+                pass
+        return
+    if anchor is None:
+        # Цепочка от старой версии (был только timer_ms): якорем считаем его.
+        # Разовый перекос для активных цепочек (полный за ~32 ч вместо 24 ч),
+        # дальше все тики идут по новой сетке.
+        try:
+            conn.execute("UPDATE ai_usage SET anchor_ms=? WHERE owner=?",
+                         (int(timer), owner))
+        except sqlite3.Error:
+            return
+        anchor = int(timer)
+    try:
+        anchor = int(anchor)
+        timer = int(timer)
+    except (TypeError, ValueError):
+        return
+    if count > limit:
+        # Потолок снизили (кончился Plus): срезаем к новому, цепочка гаснет.
+        try:
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
+                         " WHERE owner=?", (limit, owner))
+        except sqlite3.Error:
+            pass
+        return
+    if now_ms < anchor or window_ms <= 0:
+        return
+    if timer < anchor:
+        timer = anchor
+    total = (now_ms - anchor) // window_ms
+    done = (timer - anchor) // window_ms
+    if total <= done:
+        if timer != row["timer_ms"]:
+            try:
+                conn.execute("UPDATE ai_usage SET timer_ms=? WHERE owner=?",
+                             (timer, owner))
+            except sqlite3.Error:
+                pass
+        return
+    inc = _chain_cum(total, limit) - _chain_cum(done, limit)
+    if inc <= 0 and count < limit:
+        inc = 1  # лимит 1: cum(1) = round(1/3) = 0, но стоять тик без жетона нельзя
+    if inc <= 0:
+        return
+    new_count = min(limit, count + inc)
+    try:
+        if new_count >= limit:
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
+                         " WHERE owner=?", (new_count, owner))
+        else:
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
+                         (new_count, anchor + total * window_ms, owner))
+    except sqlite3.Error:
+        pass
 
 
 # Персональный потолок ходов, который ставит админ из карточки пользователя.
@@ -747,8 +864,11 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int) -> bool:
     _quota_catch_up(conn, owner, now_ms, limit, window_ms)
     cur = conn.execute("""
         UPDATE ai_usage SET count = count - 1,
-          timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END
-        WHERE owner = ? AND count > 0""", (now_ms, owner))
+          timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END,
+          anchor_ms = CASE WHEN timer_ms IS NULL THEN ?
+                           WHEN anchor_ms IS NULL THEN timer_ms
+                           ELSE anchor_ms END
+        WHERE owner = ? AND count > 0""", (now_ms, now_ms, owner))
     if cur.rowcount == 0:
         conn.rollback()
         return False
@@ -763,8 +883,9 @@ def agent_quota_refund(conn: sqlite3.Connection, user_id: int) -> None:
     try:
         conn.execute("""
             UPDATE ai_usage SET count = MIN(?, count + 1),
-              timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END
-            WHERE owner = ?""", (limit, limit, owner))
+              timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END,
+              anchor_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE anchor_ms END
+            WHERE owner = ?""", (limit, limit, limit, owner))
         conn.commit()
     except sqlite3.Error:
         try:
@@ -845,7 +966,7 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
                      " VALUES (?,?,NULL)", (owner, eff))
         _quota_catch_up(conn, owner, now_ms, eff, window_ms)
         if refill:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL WHERE owner=?",
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL WHERE owner=?",
                          (eff, owner))
         elif has_remaining:
             try:
@@ -865,21 +986,27 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
                     " updated_at_ms=excluded.updated_at_ms",
                     (user_id, eff, now_ms))
             timer = None if want >= eff else now_ms
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
-                         (min(want, eff), timer, owner))
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=?, anchor_ms=? WHERE owner=?",
+                         (min(want, eff), timer, timer, owner))
         else:
-            # Менялся только потолок: остаток клампим, таймер чиним.
-            row = conn.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?",
+            # Менялся только потолок: остаток клампим, таймер и якорь чиним.
+            row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage WHERE owner=?",
                                (owner,)).fetchone()
             count = int(row["count"]) if row else eff
             count = min(count, eff)
             if count >= eff:
                 timer = None
+                anchor = None
             else:
                 timer = row["timer_ms"] if row and row["timer_ms"] is not None else now_ms
                 timer = int(timer)
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
-                         (count, timer, owner))
+                try:
+                    anchor = row["anchor_ms"]
+                except (KeyError, IndexError):
+                    anchor = None
+                anchor = int(anchor) if anchor is not None else timer
+            conn.execute("UPDATE ai_usage SET count=?, timer_ms=?, anchor_ms=? WHERE owner=?",
+                         (count, timer, anchor, owner))
         if own_txn:
             conn.commit()
     except Exception:
