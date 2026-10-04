@@ -224,12 +224,13 @@ _provider_last_err: dict[str, tuple[int, str]] = {}
 _provider_last_check: dict[str, dict] = {}
 
 _admin_cache_lock = threading.Lock()
-_admin_cache: dict = {"path": None, "customs": None, "slots": None, "enabled": None}
+_admin_cache: dict = {"path": None, "customs": None, "slots": None, "enabled": None,
+                      "version": None}
 # Кэш цепочек моделей — отдельно от _admin_snapshot (у него фиксированный
 # кортеж из 4 элементов, который разбирают десятки мест): цепочки читаются
 # своей парой функций ниже и сбрасываются тем же _admin_invalidate.
 _model_slots_lock = threading.Lock()
-_model_slots_cache: dict = {"path": None, "data": None}
+_model_slots_cache: dict = {"path": None, "data": None, "version": None}
 
 
 def _app_config_read(key: str):
@@ -253,17 +254,64 @@ def _app_config_write(key: str, value) -> None:
                      "(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
         conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                      (key, json.dumps(value, ensure_ascii=False)))
+        _bump_config_version(conn)
         conn.commit()
     finally:
         conn.close()
 
 
+# Версия конфига: монотонный счётчик, растёт на КАЖДУЮ запись в app_config.
+# Нужен, потому что in-process кэши (_admin_snapshot, цепочки моделей,
+# состояние роутера) иначе не видят записей, сделанных мимо процесса —
+# скриптом напрямую в БД (ручная установка провайдера, грант из консоли).
+# Живой случай 04.10: opencode записан в базу, а серверный процесс держал
+# старый снимок (без нового id в customs/slots) — новый провайдер был
+# невидим ротации до рестарта, и проверки уходили через запасных, хотя
+# строка уже лежала в базе. Теперь кэши сверяются с версией и подхватывают
+# чужие записи сами. Гонка двух параллельных писателей может потерять один
+# инкремент — последствие лишь отложенное на одну запись обновление, а не
+# неверное решение (ручные записи сериализованы человеком).
+_CONFIG_VERSION_KEY = "config_version"
+
+
+def _bump_config_version(conn: sqlite3.Connection) -> None:
+    """+1 к версии конфига в той же транзакции. Не бросает мимо вызывающего:
+    ошибка счётчика не должна ронять саму запись."""
+    try:
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                           (_CONFIG_VERSION_KEY,)).fetchone()
+        try:
+            version = int(json.loads(row[0])) if row else 0
+        except (TypeError, ValueError):
+            version = 0
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (_CONFIG_VERSION_KEY, json.dumps(version + 1)))
+    except sqlite3.Error:
+        pass
+
+
+def _config_version() -> int:
+    """Текущая версия конфига из БД (0 — нет/битая). Не бросает."""
+    try:
+        raw = _app_config_read(_CONFIG_VERSION_KEY)
+        return int(raw) if isinstance(raw, int) and raw >= 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
-    """(customs, slots, enabled, overrides) с кэшем на процесс. Не бросает."""
+    """(customs, slots, enabled, overrides) с кэшем на процесс. Не бросает.
+
+    Кэш сверяется с версией конфига: запись мимо процесса (скрипт в БД)
+    поднимает версию, и следующий читатель перестраивается сам, а не живёт
+    на протухшем снимке до рестарта. Версия читается ВНЕ лока — держать общий
+    замок на время IO нельзя, гонка здесь самолечится следующим чтением."""
     global _admin_cache
     path = _router_db_path()
+    version = _config_version()
     with _admin_cache_lock:
-        if (_admin_cache.get("path") == path and _admin_cache.get("customs") is not None):
+        if (_admin_cache.get("path") == path and _admin_cache.get("customs") is not None
+                and _admin_cache.get("version") == version):
             return (_admin_cache["customs"], _admin_cache["slots"],
                     _admin_cache["enabled"], _admin_cache["overrides"])
     customs, slots, enabled, overrides = {}, {"high": None, "medium": None, "low": None}, {}, {}
@@ -292,7 +340,8 @@ def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
         pass
     with _admin_cache_lock:
         _admin_cache = {"path": path, "customs": customs, "slots": slots,
-                        "enabled": enabled, "overrides": overrides}
+                        "enabled": enabled, "overrides": overrides,
+                        "version": _config_version()}
     return customs, slots, enabled, overrides
 
 
@@ -300,9 +349,10 @@ def _admin_invalidate() -> None:
     global _admin_cache, _model_slots_cache
     with _admin_cache_lock:
         _admin_cache = {"path": _admin_cache.get("path"), "customs": None,
-                        "slots": None, "enabled": None, "overrides": None}
+                        "slots": None, "enabled": None, "overrides": None,
+                        "version": None}
     with _model_slots_lock:
-        _model_slots_cache = {"path": _admin_cache.get("path"), "data": None}
+        _model_slots_cache = {"path": _admin_cache.get("path"), "data": None, "version": None}
 
 
 def reset_providers_cache() -> None:
@@ -885,6 +935,7 @@ def reset_ai_rate() -> None:
 # ---------------------------------------------------------------------------
 _ROUTER_KEY = "ai_router"
 _router_cache: dict | None = None
+_router_cache_version: int | None = None
 _router_lock = threading.Lock()
 
 
@@ -913,16 +964,18 @@ def _load_router_state() -> dict:
 
 
 def _router_state() -> dict:
-    global _router_cache
+    global _router_cache, _router_cache_version
+    version = _config_version()
     with _router_lock:
-        if _router_cache is None:
+        if _router_cache is None or _router_cache_version != version:
             _router_cache = _load_router_state()
+            _router_cache_version = _config_version()
         return dict(_router_cache)
 
 
 def _router_update(patch: dict) -> dict:
     """Слить patch в состояние роутера (память + app_config). Не бросает."""
-    global _router_cache
+    global _router_cache, _router_cache_version
     with _router_lock:
         state = dict(_router_cache) if _router_cache is not None else _load_router_state()
         state.update(patch)
@@ -934,19 +987,23 @@ def _router_update(patch: dict) -> dict:
                          "(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
             conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
                          (_ROUTER_KEY, json.dumps(state, ensure_ascii=False)))
+            _bump_config_version(conn)
             conn.commit()
         finally:
             conn.close()
     except (sqlite3.Error, OSError) as exc:
         print(f"EGE CORE ai: router state not saved: {exc}", file=sys.stderr, flush=True)
+    with _router_lock:
+        _router_cache_version = _config_version()
     return state
 
 
 def reset_router() -> None:
     """Тестовый хук: забыть кэш состояния (строку в БД не трогает)."""
-    global _router_cache
+    global _router_cache, _router_cache_version
     with _router_lock:
         _router_cache = None
+        _router_cache_version = None
 
 
 def _provider_configured(name: str) -> bool:
@@ -2752,8 +2809,11 @@ def _read_model_slots_all() -> dict:
     """Вся карта цепочек {providerId: {high, medium, low}}. Не бросает."""
     global _model_slots_cache
     path = _router_db_path()
+    version = _config_version()
     with _model_slots_lock:
-        if _model_slots_cache.get("path") == path and _model_slots_cache.get("data") is not None:
+        if (_model_slots_cache.get("path") == path
+                and _model_slots_cache.get("data") is not None
+                and _model_slots_cache.get("version") == version):
             return {k: dict(v) for k, v in _model_slots_cache["data"].items()}
     data: dict[str, dict] = {}
     try:
@@ -2770,7 +2830,8 @@ def _read_model_slots_all() -> dict:
                 clean[slot] = str(val).strip()[:200] if isinstance(val, str) and val.strip() else None
             data[pid] = clean
     with _model_slots_lock:
-        _model_slots_cache = {"path": path, "data": {k: dict(v) for k, v in data.items()}}
+        _model_slots_cache = {"path": path, "data": {k: dict(v) for k, v in data.items()},
+                              "version": _config_version()}
     return {k: dict(v) for k, v in data.items()}
 
 
@@ -5262,9 +5323,18 @@ _PROBLEM_STOP = frozenset("""
 почему зачем который которая которые которых
 """.split())
 # Указание в тексте работы, что она объявляет проблему: «проблема…», «вопрос
-# о…». Ищем только в начале (первые четыре предложения) — дальше это уже
-# рассуждение, где слово «проблема» всплывает по ходу.
-_ESSAY_PROBLEM_RE = re.compile(r"проблем[аыуе]|вопрос\w*\s+(?:о|об)\b", re.IGNORECASE)
+# о…» — и вопросная форма («Что позволяет…?»): каноническое объявление проблемы
+# в сочинении ЕГЭ это вопрос в первых предложениях, за которым идёт «Именно над
+# этим вопросом размышляет автор». Без вопросной ветки живой случай 04.10
+# (re27_6) давал ложное вето: вопрос «Что позволяет человеку раскрыть свой
+# потенциал…?» regex не видел, а цеплялся за «Раскрывая проблему, писатель
+# обращает внимание…» из комментария — работа с верным К1 = 1 уходила 16 → 4.
+# Ищем только в начале (первые четыре предложения) — дальше это уже
+# рассуждение, где слово «проблема» всплывает по ходу. Лишний захват здесь
+# безопасен, а пропуск — нет: функция кормит только вето (essay_wrong_problem),
+# и пропущенное объявление означает ложное обнуление хорошей работы, тогда как
+# лишнее предложение лишь добавляет stems в сравнение.
+_ESSAY_PROBLEM_RE = re.compile(r"проблем[аыуе]|вопрос\w*\s+(?:о|об)\b|\?", re.IGNORECASE)
 _ESSAY_PROBLEM_HEAD_SENTENCES = 4
 # Длина общей основы при сравнении формулировок. Шесть знаков разводят
 # «взросл»/«реализ»/«памят» и при этом склеивают «взрослеют» с «взрослым».
@@ -5346,6 +5416,52 @@ def apply_problem_check(partial: dict, text: str, problem: str, words: int) -> b
     total = sum(int(item.get("score") or 0) for item in partial["criteria"]
                 if isinstance(item, dict))
     partial["total_score"] = _apply_rubric_caps(partial["criteria"], total)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Вердикт обязан сходиться с итогом после серверных вето
+#
+# Живой случай 04.10 (re27_6): модель оценила работу в 16 и написала
+# «справился полностью», затем apply_problem_check + literacy-veto уронили
+# итог до 4 — а short_verdict остался хвалебным, и экран показал «работа
+# написана полностью, 4 из 22». veto_off_task свой хвост дописывает сам
+# (_OFF_TASK_VERDICT); здесь дописываем причину остальных downgrade'ов.
+# ---------------------------------------------------------------------------
+_SERVER_VERDICT_TAIL_MARK = "снижен правилами проверки"
+
+
+def _reconcile_verdict_with_vetoes(merged: dict, proposed: int,
+                                   problem_fired: bool,
+                                   literacy_fired: bool) -> bool:
+    """Дописать к вердикту причину серверного снижения итога. Не бросает:
+    вердикт — подпись, а не измерение.
+
+    `proposed` — итог сразу после merge (до вето), `merged` — после.
+    Срабатывает только на downgrade; каждый проход строит merged заново из
+    ответа модели, поэтому хвост добавляется один раз (защита от дубля —
+    на случай, если модель процитировала хвост прошлого прохода).
+    """
+    try:
+        final = int((merged or {}).get("total_score") or 0)
+        proposed = int(proposed or 0)
+    except (TypeError, ValueError):
+        return False
+    if final >= proposed:
+        return False
+    verdict = _clean_text((merged or {}).get("short_verdict"))
+    if not verdict or _SERVER_VERDICT_TAIL_MARK in verdict:
+        return False
+    if problem_fired:
+        tail = (" Итог снижен правилами проверки: работа написана по другой "
+                "проблеме — позиция автора (К1), комментарий (К2), собственное "
+                "отношение (К3) и грамотность (К7–К10) не оцениваются.")
+    elif literacy_fired:
+        tail = (" Итог снижен правилами проверки: позиция автора исходного "
+                "текста не сформулирована — баллы грамотности не начислены.")
+    else:
+        return False
+    merged["short_verdict"] = (verdict + tail)[:600]
     return True
 
 
@@ -5543,16 +5659,20 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     # пять баллов содержания (К1 + каскад К2/К3) не должны зависеть от того,
     # какой шлюз ответил. Стоит ДО merge: обнулённый К1 обязан увести за собой
     # и баллы грамотности (veto ниже), иначе мусор снова начнёт их собирать.
-    apply_problem_check(partial, body, problem, words)
+    problem_fired = bool(apply_problem_check(partial, body, problem, words))
     merged = spec["merge"](partial, grammar, words)
+    proposed_total = int(merged.get("total_score") or 0)
     veto_fn = spec.get("veto")
-    if callable(veto_fn):
-        veto_fn(merged, partial)
+    literacy_fired = bool(veto_fn(merged, partial)) if callable(veto_fn) else False
     # Последний фильтр: работа, которая не опирается на исходный текст вовсе,
     # не оценивается по правилу ФИПИ целиком, а не только по содержанию.
     # Исходник передаём: без него «цитата» — это любая реплика в кавычках, и
     # чат-болтовня спасалась от вето собственной же болтовнёй.
     veto_off_task(merged, partial, body, words, source_text)
+    # Сервер мог уронить итог ниже вердикта модели (см.
+    # _reconcile_verdict_with_vetoes): экран не должен хвалить за 4/22.
+    _reconcile_verdict_with_vetoes(merged, proposed_total,
+                                   problem_fired, literacy_fired)
     if holder.get("provider"):
         # Подпись итога — модель, выставившая баллы (holder вернул из пула
         # потоков, где реально шёл chat). Вето второй инстанцией шло в нашем

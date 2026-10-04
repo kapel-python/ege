@@ -682,6 +682,141 @@ def test_wrong_problem(ai) -> None:
           and ok["total_score"] == before)
 
 
+def test_wrong_problem_question_form(ai) -> None:
+    section("объявление проблемы вопросной формой (живой случай 04.10, re27_6)")
+    # Проверка 16 → 4: работа начиналась вопросом «Что позволяет человеку
+    # раскрыть свой потенциал…?» (точная парафраза задания) + «Именно над этим
+    # вопросом размышляет Пастернак», а regex видел только «Раскрывая проблему,
+    # писатель обращает внимание…» из комментария — пересечения ноль, К1 ушёл
+    # в ноль по правилу сервера при верном К1 = 1 от модели.
+    problem = ("Что позволяет человеку реализовать свой потенциал и добиться "
+               "больших высот в профессии?")
+    head = ("Что позволяет человеку раскрыть свой потенциал и достичь подлинных "
+            "высот в любимом деле? Именно над этим вопросом размышляет Борис "
+            "Леонидович Пастернак в предложенном для анализа тексте. "
+            "В центре внимания автора — внутренние переживания рассказчика. "
+            "Раскрывая проблему, писатель обращает внимание на то, как герой "
+            "мучил себя мыслями об отсутствии абсолютного слуха.")
+    check("вопросная форма объявления распознана",
+          ai.essay_wrong_problem(head, problem) is False,
+          ai.essay_declared_problem(head)[:80])
+    check("голый вопрос без маркеров — тоже объявление",
+          ai.essay_wrong_problem("Что такое счастье? Автор отвечает по-своему. "
+                                 "Дальше идёт разбор.",
+                                 "В чём заключается счастье человека?") is False)
+    check("чужой вопрос пересечения не даёт — вето сохраняется",
+          ai.essay_wrong_problem("Хочешь заработать быстро? Жми сюда. "
+                                 "Никаких усилий не надо.",
+                                 problem) is True)
+    # Старые пины вопросной ветки не задевают (там нет «?»).
+    check("прежний True жив",
+          ai.essay_wrong_problem(
+              "**Сочинение ЕГЭ**\n\nВ предложенном тексте ставится проблема: что "
+              "позволяет человеку реализовать свой потенциал и добиться больших "
+              "высот в профессии? Автор считает, что помогает преданность делу.",
+              "Как люди понимают, что взрослеют?") is True)
+
+
+def _praising_partial(ai) -> dict:
+    """Модель оценила содержание в 6 баллов и похвалила (как в живом случае)."""
+    scores = {"K1": 1, "K2": 1, "K3": 0, "K4": 1, "K5": 2, "K6": 1}
+    names = {"K1": "Позиция автора", "K2": "Комментарий",
+             "K3": "Собственное отношение", "K4": "Фактическая точность",
+             "K5": "Логичность речи", "K6": "Этические нормы"}
+    maxima = {"K1": 1, "K2": 3, "K3": 2, "K4": 1, "K5": 2, "K6": 1}
+    return {
+        "total_score": 999, "max_score": 999,
+        "short_verdict": "Ты справился с заданием полностью: всё названо точно.",
+        "criteria": [{"id": cid, "name": names[cid], "score": scores[cid],
+                      "max_score": maxima[cid], "comment": f"Комментарий к {cid}."}
+                     for cid in ("K1", "K2", "K3", "K4", "K5", "K6")],
+        "what_to_improve": [], "recommendation": "",
+    }
+
+
+def _full_grammar() -> list:
+    return [{"id": cid, "name": name, "score": mx, "max_score": mx,
+             "comment": "Ошибок нет."}
+            for cid, name, mx in (("K7", "Орфография", 3), ("K8", "Пунктуация", 3),
+                                  ("K9", "Грамматика", 3), ("K10", "Речевые нормы", 3))]
+
+
+def test_verdict_reconciliation(ai) -> None:
+    section("вердикт сходится с итогом после серверных вето (живой случай 04.10)")
+    task = "Как люди понимают, что взрослеют?"
+    другой = ("**Сочинение ЕГЭ**\n\nВ предложенном тексте ставится проблема: что "
+              "позволяет человеку реализовать свой потенциал и добиться больших "
+              "высот в профессии? Автор считает, что помогает преданность делу.")
+    partial = ai.validate_essay(_praising_partial(ai), 300)
+    fired = ai.apply_problem_check(partial, другой, task, 300)
+    merged = ai.merge_essay(partial, _full_grammar(), 300)
+    proposed = int(merged["total_score"])
+    literacy_fired = bool(ai.veto_unrelated_literacy(merged, partial))
+    check("сценарий как в проде: правило до merge (4 содерж.), 12 грамм. = 16",
+          proposed == 16, str(proposed))
+    check("вето уронило до содержания", merged["total_score"] == 4
+          and literacy_fired and fired, str(merged["total_score"]))
+    check("вердикт пока хвалебный (дефект воспроизведён)",
+          "полностью" in merged["short_verdict"])
+    fixed = ai._reconcile_verdict_with_vetoes(merged, proposed, fired, literacy_fired)
+    check("хвост о снижении дописан", fixed is True
+          and "снижен правилами проверки" in merged["short_verdict"]
+          and "другой проблеме" in merged["short_verdict"],
+          merged["short_verdict"][-160:])
+    check("похвала модели не затёрта, хвост один",
+          merged["short_verdict"].startswith("Ты справился")
+          and merged["short_verdict"].count("снижен правилами проверки") == 1)
+    check("повторный вызов хвост не дублирует",
+          ai._reconcile_verdict_with_vetoes(merged, proposed, fired,
+                                            literacy_fired) is False
+          and merged["short_verdict"].count("снижен правилами проверки") == 1)
+    # Без downgrade вердикт не трогаем.
+    clean = ai.merge_essay(ai.validate_essay(_praising_partial(ai), 300),
+                           _full_grammar(), 300)
+    before = clean["short_verdict"]
+    check("без вето вердикт untouched",
+          ai._reconcile_verdict_with_vetoes(clean, int(clean["total_score"]),
+                                            False, False) is False
+          and clean["short_verdict"] == before)
+
+
+def test_config_version_guard(ai) -> None:
+    section("кэш видит чужие записи без рестарта (живой случай 04.10)")
+    # Праймим кэши, затем пишем МИМО процесса — тем же путём, каким пишет
+    # чужой процесс (наши скрипты идут через _app_config_write/_router_update;
+    # голый SQL версию не двигает и guard не покрывает — так задокументировано).
+    ai._admin_snapshot()
+    ai._router_state()
+    v0 = ai._config_version()
+    ai._app_config_write(ai._CUSTOM_KEY, {"ghost": {"id": "ghost"}})
+    check("версия растёт на каждую запись", ai._config_version() == v0 + 1,
+          f"{v0} -> {ai._config_version()}")
+    customs, _, _, _ = ai._admin_snapshot()
+    check("чужой провайдер виден без _admin_invalidate", "ghost" in customs)
+    ai._app_config_write(ai._CUSTOM_KEY, {})
+    state = ai._router_update({"active": "ghost"})
+    check("роутер пишет версию вместе с собой",
+          state.get("active") == "ghost" and ai._config_version() == v0 + 3,
+          str(ai._config_version()))
+    # Чужая запись состояния (другой процесс draining через те же хелперы
+    # невозможен в одном процессе — эмулируем парой raw-SQL + bump, ровно как
+    # делают хелперы).
+    import sqlite3 as _sqlite
+    conn = _sqlite.connect(ai._router_db_path(), timeout=5.0)
+    try:
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     ("ai_router", json.dumps({"active": "elsewhere"})))
+        ai._bump_config_version(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    check("чужой active подхвачен без reset_router",
+          ai._router_state().get("active") == "elsewhere",
+          str(ai._router_state().get("active")))
+    ai.reset_router()
+    ai.reset_providers_cache()
+
+
 def test_judge(ai) -> None:
     section("судья проверки закреплён и не едет вместе с роутером")
     # Дыра, которую закрывает судья: в конфиге три провайдера с тремя РАЗНЫМИ
@@ -1655,6 +1790,9 @@ def main() -> int:
     test_veto(ai)
     test_caps_and_tolerance(ai)
     test_wrong_problem(ai)
+    test_wrong_problem_question_form(ai)
+    test_verdict_reconciliation(ai)
+    test_config_version_guard(ai)
     test_judge(ai)
     test_config_and_transport(ai)
 
