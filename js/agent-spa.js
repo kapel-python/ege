@@ -1740,11 +1740,32 @@
     if (!ui.feed) return;
     var left = 24, stable = 0;
     (function tick() {
-      if (!ui.feed || left-- <= 0) return;
+      if (!ui.feed || left-- <= 0) { settleLate(); return; }
       if (S.follow && S.stick && !S.busy && dist() > 1) { stable = 0; progWrite(ui.feed.scrollHeight); }
-      else if (dist() <= 1) { if (++stable >= 2) return; }
+      else if (dist() <= 1) { if (++stable >= 2) { settleLate(); return; } }
       raf(tick);
     })();
+  }
+  /* Поздний рост ленты после перезагрузки: подгрузка шрифтов меняет переносы
+     и высоту строк (плюс догрузка картинок из markdown), и низ уезжает ниже
+     уже после быстрых кадров выше — человек остаётся на строку-две выше
+     конца, а «Скопировать» под краем. Три точечные доводки (~2.5 с) плюс
+     момент готовности шрифтов — только пока человек сам не ушёл вверх
+     (S.stick) и ход не начался, иначе дёрнули бы читающего. */
+  function settlePin() {
+    if (!ui.feed || !S.follow || !S.stick || S.busy) return;
+    if (dist() > 1) progWrite(ui.feed.scrollHeight);
+  }
+  function settleLate() {
+    var mg = S.mountGen;
+    [350, 1100, 2500].forEach(function (ms) {
+      later(ms, function () { if (mg === S.mountGen) settlePin(); });
+    });
+    try {
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function () { if (mg === S.mountGen) settlePin(); });
+      }
+    } catch (_) {}
   }
   function printGlideTick() {
     var feed = S.glideFeed;
@@ -3049,34 +3070,96 @@
       }
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });
-    // Свайп открывает/закрывает список чатов. Слушатели на каркасе раздела:
-    // узел пересоздаётся на каждом маунте, поэтому старые обработчики уходят вместе
-    // с ним (глобальных touch-листенеров у экрана нет).
-    var sw = { on: false, x0: 0, y0: 0, t0: 0 };
+    // Шторка списка чатов едет ЗА ПАЛЬЦЕМ (только телефон: на десктопе рейл —
+    // обычная колонка в потоке, там жест не нужен, только анимация открытия).
+    // Слушатели на каркасе раздела: узел пересоздаётся на каждом маунте,
+    // поэтому старые обработчики уходят вместе с ним (глобальных
+    // touch-листенеров у экрана нет).
+    // Позиция шторки — 1:1 от смещения пальца, без искусственных масштабов:
+    // на сколько сдвинул, настолько и открылась. Отпустил — шторка сама
+    // доводится анимацией до открытого/закрытого: больше половины ширины —
+    // туда, быстрый флик решает сам.
+    var sw = { on: false, drag: false, x0: 0, y0: 0, t0: 0, lx: 0, lt: 0, w: 0, open: false };
+    function drawerNodes() {
+      if (!ui.wrap) return null;
+      var side = ui.wrap.querySelector(".agent__threads");
+      var scrim = ui.wrap.querySelector(".agent__scrim");
+      if (!side || !scrim) return null;
+      return { side: side, scrim: scrim };
+    }
+    function drawerW() {
+      var n = drawerNodes();
+      var w = n ? n.side.offsetWidth : 0;
+      // Пока шторка скрыта, offsetWidth может врать — тогда по CSS-формуле
+      // ширины шторки min(86vw, 320px).
+      if (!w) w = Math.min(window.innerWidth * 0.86, 320);
+      return w;
+    }
+    // px: -w (закрыто) .. 0 (открыто). Затемнение едет вместе со шторкой.
+    // display тоже берём на себя: закрытая шторка — display:none, и без
+    // инлайна её не видно ни при каком transform.
+    function drawerPos(px) {
+      var n = drawerNodes();
+      if (!n || !sw.w) return;
+      px = Math.max(-sw.w, Math.min(0, px));
+      n.side.style.display = "flex";
+      n.side.style.transform = "translateX(" + Math.round(px) + "px)";
+      n.side.style.visibility = "visible";
+      n.scrim.style.visibility = "visible";
+      n.scrim.style.opacity = String(Math.max(0, Math.min(1, 1 + px / sw.w)));
+    }
+    function drawerDrop() {
+      var n = drawerNodes();
+      if (n) {
+        n.side.style.display = "";
+        n.side.style.transform = ""; n.side.style.visibility = "";
+        n.scrim.style.opacity = ""; n.scrim.style.visibility = "";
+      }
+      if (ui.wrap) ui.wrap.classList.remove("dragging");
+    }
+    function drawerMobile() {
+      try { return window.matchMedia("(max-width: 900px)").matches; }
+      catch (_) { return true; }
+    }
     ui.wrap.addEventListener("touchstart", function (e) {
       if (e.touches.length !== 1 || swipeSkips(e.target)) { sw.on = false; return; }
-      sw.on = true;
+      sw.on = true; sw.drag = false;
       sw.x0 = e.touches[0].clientX; sw.y0 = e.touches[0].clientY; sw.t0 = Date.now();
+      sw.lx = sw.x0; sw.lt = sw.t0;
     }, { passive: true });
-    ui.wrap.addEventListener("touchend", function (e) {
+    ui.wrap.addEventListener("touchmove", function (e) {
+      if (!sw.on || e.touches.length !== 1 || !drawerMobile()) return;
+      var x = e.touches[0].clientX, y = e.touches[0].clientY;
+      var dx = x - sw.x0, dy = y - sw.y0;
+      if (!sw.drag) {
+        // Не горизонталь (угол тот же, что был у порогового свайпа:
+        // dx ≥ 1.3·|dy|) — обычный скролл ленты, жест не наш.
+        if (Math.abs(dx) < Math.abs(dy) * 1.3 || Math.abs(dx) < 10) return;
+        sw.drag = true;
+        sw.open = ui.wrap.classList.contains("nav-open");
+        sw.w = drawerW();
+        if (ui.wrap) ui.wrap.classList.add("dragging");
+      }
+      // Горизонталь взяли на себя: ленту/страницу не скроллим.
+      try { e.preventDefault(); } catch (_) {}
+      sw.lx = x; sw.lt = Date.now();
+      drawerPos(sw.open ? Math.min(0, dx) : -sw.w + Math.max(0, dx));
+    }, { passive: false });
+    function drawerEnd(e) {
       if (!sw.on) return;
       sw.on = false;
-      if (e.touches.length) return;
-      var t = e.changedTouches && e.changedTouches[0];
-      if (!t) return;
-      var dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
-      // Порог по расстоянию 28px, по времени — 2.5с. Замер показал, почему
-      // жест казался «слишком длинным»: при 56px и пределе 900ms быстрый
-      // свайп срабатывал с 56px, а МЕДЛЕННЫЙ (60px за 1.5с) — нет, и человек
-      // начинал свайпать всё дальше и дальше, не понимая почему. От медленного
-      // жеста защищает не время, а угол: свайп с dx ≥ 1.3·|dy| не спутать со
-      // скроллом ленты, а ложное срабатывание ничего не ломает (шторку так же
-      // легко закрыть). ВЕРТИКАЛЬ отбрасываем с запасом: «вправо и чуть вниз»
-      // тоже считается.
-      if (Date.now() - sw.t0 > 2500) return;
-      if (Math.abs(dx) < 28 || Math.abs(dy) > 70 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
-      if (dx > 0) nav(true); else nav(false);
-    }, { passive: true });
+      if (!sw.drag) return;
+      sw.drag = false;
+      var t = (e.changedTouches && e.changedTouches[0]) || null;
+      var x = t ? t.clientX : sw.lx;
+      var dx = x - sw.x0;
+      var v = (x - sw.lx) / Math.max(1, Date.now() - sw.lt);   // px/мс конца жеста
+      var goOpen = sw.open ? !(dx < -sw.w * 0.5 || v < -0.35) : (dx > sw.w * 0.5 || v > 0.35);
+      drawerDrop();
+      nav(goOpen);
+    }
+    ui.wrap.addEventListener("touchend", drawerEnd, { passive: true });
+    ui.wrap.addEventListener("touchcancel", drawerEnd, { passive: true });
     // Меню сообщения: ДОЛГОЕ нажатие (500 мс) на свой пузырёк или текст
     // ответа — как у списка чатов. Обычный клик/выделение текста не трогаем;
     // правый клик на десктопе — тот же вход в меню. Отмена: отпускание,

@@ -777,18 +777,25 @@ check("скроллится только лента", /\.agent__feed \{[^}]*over
   && /\.agent__toolbar \{[^}]*flex: none/.test(spaCss)
   && /\.agent__composer-zone \{[^}]*flex: none/.test(spaCss));
 check("свой тред не абортит ход", spaCode.includes("Number(prev) !== Number(id)"));
-/* --- свайп по разделу: вправо открывает список чатов, влево закрывает ---
-   Бургер в тулбаре на телефоне мелкая цель, а список чатов нужен часто. Жест
-   не перехватывается в поле ввода (там это выделение текста) и в блоках с
-   горизонтальной прокруткой. */
-check("свайп вправо открывает список чатов, влево закрывает",
+/* --- шторка чатов едет за пальцем: позиция 1:1 от смещения пальца, отпуск
+   доводится анимацией (больше половины ширины — туда, быстрый флик решает
+   сам). Бургер в тулбаре на телефоне мелкая цель, а список чатов нужен
+   часто. Жест не перехватывается в поле ввода (там это выделение текста) и
+   в блоках с горизонтальной прокруткой. На десктопе жеста нет — только
+   анимация открытия. */
+check("шторка чатов едет за пальцем, отпуск доводит анимацией",
   /ui\.wrap\.addEventListener\("touchstart"/.test(spaCode)
+  && /ui\.wrap\.addEventListener\("touchmove"/.test(spaCode)
   && /ui\.wrap\.addEventListener\("touchend"/.test(spaCode)
-  && /if \(dx > 0\) nav\(true\); else nav\(false\);/.test(spaCode)
-  && /Math\.abs\(dx\) < 28/.test(spaCode)
-  && /Math\.abs\(dy\) > 70/.test(spaCode)
-  && /sw\.t0 > 2500/.test(spaCode)
-  && /passive: true/.test(spaCode));
+  && /classList\.add\("dragging"\)/.test(spaCode)
+  && /drawerPos\(sw\.open/.test(spaCode)
+  && /n\.scrim\.style\.opacity/.test(spaCode)
+  && !/if \(dx > 0\) nav\(true\); else nav\(false\);/.test(spaCode)
+  && /swipeSkips\(e\.target\)/.test(spaCode));
+check("во время ведения transition выключен (иначе дёрганье)",
+  /\.agent\.dragging \.agent__threads/.test(spaCss));
+check("десктоп: открытие списка с анимацией, а не мгновенно",
+  /agentDrawerIn/.test(spaCss) && /min-width: 901px/.test(spaCss));
 /* --- список чатов не сжимается и листается. Список — flex-колонка, а её
    элементы по умолчанию сжимаются: при 24 чатах строки наезжали друг на
    друга (замер: высота кнопки 60.3px, зазор −36.3px, наложений 23 из 23) и

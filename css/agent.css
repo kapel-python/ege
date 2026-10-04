@@ -538,6 +538,9 @@ a.agent__link--int { border-style: dashed; }
   70% { box-shadow: 0 0 0 9px transparent; opacity: .75; }
   100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
 }
+/* Десктоп: рейл — колонка в потоке, жеста там нет, но появление/скрытие —
+   плавной анимацией, а не мгновенно. */
+@keyframes agentDrawerIn { from { opacity: 0; transform: translateX(-14px); } }
 @keyframes agentShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .32s cubic-bezier(.2, .7, .2, 1) both; }
@@ -568,6 +571,10 @@ a.agent__link--int { border-style: dashed; }
     opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s;
   }
   .agent.nav-open .agent__scrim { opacity: 1; visibility: visible; }
+  /* Пока палец ведёт шторку, CSS-переход выключен: позицию задаёт жест 1:1,
+     а transition отставал бы и давал «дёрганье». Отпуск — через обычный
+     класс nav-open, и та же transition доводит шторку плавно. */
+  .agent.dragging .agent__threads, .agent.dragging .agent__scrim { transition: none; }
   .agent__menu { display: grid; place-items: center; width: 40px; height: 40px; flex: none; cursor: pointer; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--agent-ink-2); }
   .agent__menu svg { width: 20px; height: 20px; }
   .agent__title { font-size: 16px; }
@@ -622,6 +629,7 @@ a.agent__link--int { border-style: dashed; }
 @media (prefers-reduced-motion: reduce) {
   .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter,
   .agent__qr, .agent__suggest-card, .agent__empty-badge, .agent__list li.new { animation: none; }
+  .agent.nav-open .agent__threads { animation: none; }
   .agent__mark, .agent__step::before { animation: none; }
   .agent__loader-dot, .agent__loader-text { animation: none; }
   .agent__loader-text { background: none; -webkit-text-fill-color: currentColor; color: var(--agent-ink-2); filter: none; }
@@ -631,3 +639,10 @@ a.agent__link--int { border-style: dashed; }
 }
 
 @media (prefers-reduced-motion: reduce) { .agent__md a, a.agent__link { transition: none; } }
+
+/* Десктоп: рейл — колонка в потоке, жеста там нет, но появление — плавной
+   анимацией, а не мгновенно. Правило в конце файла осознанно: тест режет CSS
+   по первому @media и ждёт там мобильный блок. */
+@media (min-width: 901px) {
+  .agent.nav-open .agent__threads { animation: agentDrawerIn .22s ease both; }
+}
