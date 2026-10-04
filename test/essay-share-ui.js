@@ -167,6 +167,7 @@ async function main() {
     t("онбординг и отправка", claimed.claimed === 200 && claimed.submitted === 200,
       JSON.stringify(claimed).slice(0, 160));
     const clientId = claimed.sub.clientId;
+    const pubId = claimed.sub.publicId;
     await seedReady();
     await page.goto(`${BASE}/ege-result.html?subject=russian&clientId=${encodeURIComponent(clientId)}`,
       { waitUntil: "domcontentloaded" });
@@ -401,6 +402,31 @@ async function main() {
     await guest.goto(`${BASE}/s/${token3}`, { waitUntil: "domcontentloaded" });
     await guest.waitForSelector("#scoreValue", { timeout: 20000 });
     t("новая ссылка открывается", true);
+
+    section("S7 resume перепроверки на приватной pub-ссылке");
+    // Практика ведёт на /essay/<public_id>: reload посреди перепроверки
+    // обязан восстановить окно и дождаться отчёта (метка хранит pub).
+    await page.goto(`${BASE}/essay/${pubId}`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => {
+      const el = document.getElementById("scoreValue");
+      return el && el.textContent.trim() === "15";
+    }, null, { timeout: 20000 });
+    // Тот же вызов, что делает doRecheck перед POST: «перепроверка в полёте».
+    await page.evaluate(() => { recheckPendingSave("записка"); });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => {
+      const el = document.querySelector(".recheck-load-sub");
+      return el && /обновлена/.test(el.textContent || "");
+    }, null, { timeout: 20000 });
+    t("окно перепроверки восстановлено после reload", true);
+    // Сервер добегает: ещё одна проверка того же текста растит checkCount —
+    // тот же эффект, что прилетевший ответ модели.
+    await seedReady();
+    await page.waitForFunction(() => {
+      const el = document.getElementById("scoreValue");
+      return !document.querySelector(".dlg") && el && el.textContent.trim() === "15";
+    }, null, { timeout: 60000 });
+    t("дождавшийся отчёт закрыл окно сам", true);
 
     section("S6 консоль чиста");
     t("ноль ошибок консоли", errors.length === 0, errors.slice(0, 3).join(" | "));

@@ -1510,6 +1510,10 @@ function recheckPendingSave(note) {
       clientId: (recheckSubmission && recheckSubmission.clientId) || p.clientId || "",
       sid: (recheckSubmission && recheckSubmission.submissionId)
         ? String(recheckSubmission.submissionId) : (p.sid || ""),
+      // Приватный public_id (/essay/<public_id> — каноническая ссылка практики):
+      // без него reload на pub-URL не совпадал ни по одному полю и resume терялся.
+      pub: (typeof shareState !== "undefined" && shareState.publicId)
+        ? String(shareState.publicId) : (p.pub || ""),
       taskId: (recheckSubmission && recheckSubmission.taskId) || p.taskId || "",
       prevCheckCount: (snap.checkCount == null ? null : snap.checkCount),
       prevTotal: Number.isFinite(snap.total_score) ? snap.total_score : null,
@@ -1538,10 +1542,11 @@ function recheckPendingFresh(p) {
 }
 
 // Метка относится к этой странице: совпал хотя бы один непустой
-// идентификатор (clientId в приоритете — он точнее всего).
+// идентификатор (clientId и pub точнее всего — оба указывают на строку).
 function recheckPendingMatches(p, params) {
   if (!p || !params) return false;
   if (p.clientId && params.clientId && p.clientId === params.clientId) return true;
+  if (p.pub && params.pub && String(p.pub) === String(params.pub)) return true;
   if (p.sid && params.sid && String(p.sid) === String(params.sid)) return true;
   if (p.taskId && params.taskId && p.taskId === params.taskId) return true;
   return false;
