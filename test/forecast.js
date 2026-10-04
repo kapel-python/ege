@@ -64,13 +64,13 @@ const testBody = async () => {
     }
   }
 
-  /* 1. Веса покрывают все навыки каталога и в сумме дают 32. */
+  /* 1. Веса покрывают все навыки каталога и в сумме дают 33 (спецификация ЕГЭ-2027: 20 заданий, max 33). */
   {
     const cfg = DataAPI.forecastConfig();
     const configured = cfg && cfg.weights && typeof cfg.weights === "object" ? cfg.weights : {};
     const wSum = skills.reduce((a, s) => a + skillEgeWeight(s.id), 0);
     const uncovered = skills.filter((s) => !Object.prototype.hasOwnProperty.call(configured, s.id)).map((s) => s.id);
-    t("веса: сумма по каталогу = 32 первичных балла", wSum === 32, "sum=" + wSum);
+    t("веса: сумма по каталогу = 33 первичных балла", wSum === 33, "sum=" + wSum);
     t("веса: все навыки каталога явно взвешены", uncovered.length === 0, uncovered.join(","));
     t("веса: вторая часть дороже первой", skillEgeWeight("n17_optimization") > skillEgeWeight("n01_planimetry"));
   }
@@ -79,8 +79,8 @@ const testBody = async () => {
   {
     const scale = forecastScale();
     const mono = scale.every((v, i, a) => i === 0 || v >= a[i - 1]);
-    t("шкала: монотонна и длиной 33 (0–32)", mono && scale.length === 33);
-    t("шкала: 0→0, 5→27 (порог), 30→100", scale[0] === 0 && scale[5] === 27 && scale[30] === 100);
+    t("шкала: монотонна и длиной 34 (0–33)", mono && scale.length === 34);
+    t("шкала: 0→0, 5→27 (порог), 30→99, 31→100", scale[0] === 0 && scale[5] === 27 && scale[30] === 99 && scale[31] === 100);
   }
 
   /* 3. Новичок: низкий прогноз и широкая вилка. */

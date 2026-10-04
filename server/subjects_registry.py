@@ -42,17 +42,19 @@ def _builtin_definitions() -> dict:
     Используются только как fallback, если subjects/*.json недоступны.
     Запись russian синхронизирована с опубликованным контрактом
     (server/subjects/russian.json), а не с исторической locked-копией.
+    Веса/шкала profile — со спецификацией ЕГЭ-2027 (20 заданий, max 33),
+    как в server/subjects/profile_math.json.
     """
     profile_weights = {
         "n01_planimetry": 1, "n02_vectors": 1, "n03_stereometry": 1, "n04_probability": 1,
         "n05_prob_theorems": 1, "n06_random_var": 1, "n07_equations": 1, "n08_expressions": 1,
         "n09_derivative": 1, "n10_applied": 1, "n11_word_problems": 1, "n12_functions": 1,
-        "n14_trig_eq": 2, "n15_stereometry": 3, "n13_financial": 2, "n18_planimetry": 2,
-        "n16_inequality": 3, "n17_optimization": 4, "n19_parameter": 2, "n20_numbers": 2,
+        "n13_financial": 1, "n14_trig_eq": 2, "n15_stereometry": 3, "n16_inequality": 2,
+        "n17_optimization": 2, "n18_planimetry": 3, "n19_parameter": 4, "n20_numbers": 4,
     }
     profile_scale = [
-        0, 6, 12, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
-        80, 82, 84, 86, 88, 90, 92, 94, 95, 96, 97, 98, 99, 100, 100, 100,
+        0, 6, 11, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78,
+        80, 82, 84, 86, 88, 90, 92, 93, 94, 95, 96, 97, 98, 99, 100, 100, 100,
     ]
     basic_weights = {
         "b01_wordcalc": 1, "b02_units": 1, "b03_tables": 1, "b04_formulas": 1,
@@ -76,7 +78,7 @@ def _builtin_definitions() -> dict:
             "status": "ready", "locked": False, "comingSoon": False, "order": 0,
             "catalogFile": "catalog.json",
             "level": {"id": "profile", "subjectId": "math", "name": "Профильный уровень"},
-            "forecast": {"weights": profile_weights, "total": 32, "scale": profile_scale},
+            "forecast": {"weights": profile_weights, "total": 33, "scale": profile_scale},
             "features": dict(full_features),
             "content": {key: dict(value) for key, value in content_refs.items()},
         },
