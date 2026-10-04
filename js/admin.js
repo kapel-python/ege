@@ -448,11 +448,29 @@ function renderPendingLogin(pendingId, code, expiresAt) {
       </div>
     </div>`;
   document.getElementById("pendingCancel").onclick = cancelPendingLogin;
+  // Таймер обратного отсчёта живёт отдельно от опроса: long-poll висит
+  // до 20 с, а цифры должны тикать каждую секунду.
+  paintPendingTimer();
+  A.pendingTick = setInterval(() => {
+    if (!A.pendingLogin) {
+      if (A.pendingTick) { clearInterval(A.pendingTick); A.pendingTick = null; }
+      return;
+    }
+    if (pendingLeftMs() <= 0) {
+      pendingFailed("Время подтверждения вышло. Войди заново.");
+      return;
+    }
+    paintPendingTimer();
+  }, 1000);
   pollPendingLogin();
 }
 
 function stopPendingPoll() {
   if (A.pendingTimer) { clearTimeout(A.pendingTimer); A.pendingTimer = null; }
+  if (A.pendingTick) { clearInterval(A.pendingTick); A.pendingTick = null; }
+  if (A.pendingLogin && A.pendingLogin.ctrl) {
+    try { A.pendingLogin.ctrl.abort(); } catch (e) {}
+  }
   A.pendingLogin = null;
 }
 
@@ -461,47 +479,65 @@ function pendingLeftMs() {
   return Math.max(0, A.pendingLogin.expiresAt - Date.now());
 }
 
+function paintPendingTimer() {
+  const el = document.getElementById("pendingTimer");
+  if (!el) return;
+  const s = Math.ceil(pendingLeftMs() / 1000);
+  el.textContent = s > 0
+    ? `Осталось ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+    : "Время вышло";
+}
+
 async function pollPendingLogin() {
+  // Long-poll цепочка: сервер держит запрос до события в Telegram (20 с),
+  // ответ «pending» — сразу следующий запрос. Решение применяется в момент
+  // нажатия кнопки, ждать тика не нужно.
   if (!A.pendingLogin) return;
-  const left = pendingLeftMs();
-  const timerEl = document.getElementById("pendingTimer");
-  if (timerEl) {
-    const s = Math.ceil(left / 1000);
-    timerEl.textContent = left > 0
-      ? `Осталось ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
-      : "Время вышло";
-  }
-  if (left <= 0) {
+  if (pendingLeftMs() <= 0) {
     pendingFailed("Время подтверждения вышло. Войди заново.");
     return;
   }
+  const ctrl = new AbortController();
+  A.pendingLogin.ctrl = ctrl;
+  // Запас поверх серверных 20 с: висящий запрос не должен жить вечно.
+  const guard = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 45000);
   try {
     const response = await fetch(`/api/admin/login/status?pending=${encodeURIComponent(A.pendingLogin.id)}`, {
       credentials: "same-origin",
+      signal: ctrl.signal,
     });
     const payload = await response.json().catch(() => ({}));
     if (response.ok && payload && payload.user) {
       // Владелец подтвердил: ответ уже поставил куку ege_admin.
       stopPendingPoll();
       A.session = { user: payload.user, expiresAt: payload.expiresAt };
-      toast("Вход выполнен");
+      toast("Вход подтверждён");
       if (!location.hash) location.hash = "#/dashboard";
       render();
       return;
     }
     if (response.ok && payload && payload.pending) {
       if (payload.expiresAt) A.pendingLogin.expiresAt = Number(payload.expiresAt);
-    } else if (response.status === 403) {
+      pollPendingLogin();
+      return;
+    }
+    if (response.status === 403) {
       pendingFailed("Вход отклонён владельцем.");
       return;
-    } else if (response.status === 410 || response.status === 404) {
+    }
+    if (response.status === 410) {
       pendingFailed("Время подтверждения вышло. Войди заново.");
       return;
-    } else {
-      pendingNote(payload.error || "Ждём решения…");
     }
+    if (response.status === 404) {
+      pendingFailed("Запрос не найден или уже использован. Войди заново.");
+      return;
+    }
+    pendingNote(payload.error || "Ждём решения…");
   } catch (e) {
     pendingNote("Нет связи с сервером — пробуем снова…");
+  } finally {
+    clearTimeout(guard);
   }
   if (A.pendingLogin) A.pendingTimer = setTimeout(pollPendingLogin, 2500);
 }

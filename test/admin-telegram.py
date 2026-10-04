@@ -136,7 +136,7 @@ class FakeTelegram:
                     self._send(200, json.dumps({"ok": True, "result": {"message_id": mid}}).encode())
                     return
                 if method == "answerCallbackQuery":
-                    outer.callbacks_answered.append(str(payload.get("callback_query_id") or ""))
+                    outer.callbacks_answered.append(payload)
                     self._send(200, b'{"ok":true,"result":true}')
                     return
                 if method == "editMessageText":
@@ -363,9 +363,14 @@ def main():
             status, _, _ = login_status(opener, base, pending_id)
             check("заявка съедена (повтор -> 404)", status == 404, status)
             check("кнопка получила ответ", len(fake.callbacks_answered) >= 1)
+            check("тост на кнопке — про подтверждение",
+                  any("подтвержд" in str(c.get("text") or "") for c in fake.callbacks_answered),
+                  [c.get("text") for c in fake.callbacks_answered])
             check("сообщение подписано итогом",
                   any("подтвержд" in str(e.get("text") or "") for e in fake.edits),
                   fake.edits)
+            check("в подписи — открытая сессия",
+                  any("Сессия открыта" in str(e.get("text") or "") for e in fake.edits))
             actions = [r["action"] for r in db_rows(
                 server, "SELECT action FROM admin_audit WHERE action LIKE 'admin-login%'")]
             check("аудит: approve + login", "admin-login-approved" in actions
@@ -384,6 +389,10 @@ def main():
             check("куки ege_admin нет", cookie_value(jar2, "ege_admin") is None)
             status, _, _ = request(opener2, base, "/api/admin/session")
             check("сессии нет", status == 401, status)
+            check("тост на кнопке — про отклонение",
+                  any("отклон" in str(c.get("text") or "") for c in fake.callbacks_answered))
+            check("сообщение подписано отказом",
+                  any("Сессия не открыта" in str(e.get("text") or "") for e in fake.edits))
 
             # ---------------------------------------------------------------
             section("6. Чужой чат игнорируется")
@@ -418,6 +427,8 @@ def main():
             check("просрочка -> 410 expired",
                   status == 410 and st.get("code") == "PENDING_EXPIRED", (status, st))
             check("куки нет", cookie_value(jar4, "ege_admin") is None)
+            check("сообщение подписано просрочкой (мёртвых кнопок нет)",
+                  any("Время вышло" in str(e.get("text") or "") for e in fake.edits))
 
             # ---------------------------------------------------------------
             section("8. Отмена")
@@ -430,6 +441,8 @@ def main():
                   (status, cancelled))
             status, _, _ = login_status(opener5, base, pending5)
             check("после отмены опрос -> 404", status == 404, status)
+            check("сообщение подписано отзывом",
+                  any("отозвана" in str(e.get("text") or "") for e in fake.edits))
             opener6, _ = make_device()
             status, _, body6 = admin_login(opener6, base)
             pending6 = body6.get("pendingId") or ""

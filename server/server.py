@@ -2575,6 +2575,9 @@ def is_admin_session(conn: sqlite3.Connection, user_id: int | None, admin_token:
 ADMIN_LOGIN_PENDING_TTL_SEC = 300
 ADMIN_LOGIN_PENDING_MAX_PER_USER = 3
 ADMIN_LOGIN_PENDING_MAX_PER_IP = 5
+# Long-poll опроса статуса: сервер ждёт событие Bot API столько, браузер —
+# с запасом (см. pollPendingLogin). Меньше 60 с прокси-default'а nginx.
+ADMIN_LOGIN_STATUS_WAIT_SEC = 20
 ADMIN_LOGIN_PENDING_OFFSET_KEY = "admin_telegram_update_offset"
 
 
@@ -2679,12 +2682,14 @@ def _admin_telegram_offset_set(conn: sqlite3.Connection, offset: int) -> None:
             pass
 
 
-def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
+def telegram_ingest_updates(conn: sqlite3.Connection, wait_sec: int = 0) -> None:
     """Втянуть решения владельца из Bot API в заявки. Best-effort, никогда не бросает.
 
     Вызывается из опроса статуса (и из нового входа): фонового потока нет,
-    поэтому решения забираются тогда, когда их кто-то ждёт. Применение
-    идемпотентно (UPDATE ... WHERE status='pending'), повторный втягивание
+    поэтому решения забираются тогда, когда их кто-то ждёт. wait_sec>0 —
+    long-poll: ждём событие вместе с Telegram (см. fetch_updates), и решение
+    применяется в момент нажатия, а не к следующему тику. Применение
+    идемпотентно (UPDATE ... WHERE status='pending'), повторное втягивание
     того же update безвредно. Сеть/протокол Telegram здесь — тишина: опрос
     обязан отвечать даже при мёртвом Bot API.
     """
@@ -2694,7 +2699,7 @@ def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
         assert _TG is not None
         chat_id = _TG.settings()["chatId"]
         offset = _admin_telegram_offset_get(conn)
-        updates, max_id = _TG.fetch_updates(offset)
+        updates, max_id = _TG.fetch_updates(offset, wait_sec)
         if max_id is not None:
             _admin_telegram_offset_set(conn, int(max_id) + 1)
         for update in updates or []:
@@ -2714,16 +2719,18 @@ def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
                 if isinstance(update, dict) and isinstance(update.get("callback_query"), dict):
                     callback_id = update["callback_query"].get("id")
                 decision = _TG.parse_decision(update, chat_id)
-                if callback_id:
-                    # Кнопке отвечаем всегда (убрать «часики»), даже чужой:
-                    # исход чужого нажатия при этом не применяется.
-                    _TG.answer_callback(str(callback_id))
                 if not decision:
+                    if callback_id:
+                        # Чужое/битое нажатие: исход не применяется, но
+                        # «часики» на кнопке снимаем, иначе висят.
+                        _TG.answer_callback(str(callback_id))
                     continue
                 short, status = decision
                 row = conn.execute("SELECT id, user_id, ip, message_id, short FROM admin_login_pending "
                                    "WHERE short=? AND status='pending'", (short,)).fetchone()
                 if not row:
+                    if callback_id:
+                        _TG.answer_callback(str(callback_id), "Заявка уже закрыта")
                     continue
                 now_ms = int(time.time() * 1000)
                 conn.execute("UPDATE admin_login_pending SET status=?, decided_at=? WHERE id=?",
@@ -2735,10 +2742,16 @@ def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
                 except (sqlite3.Error, TypeError, ValueError):
                     pass
                 conn.commit()
+                if callback_id:
+                    # Тост прямо на кнопке: владелец видит итог сразу,
+                    # не дожидаясь правки сообщения.
+                    _TG.answer_callback(str(callback_id),
+                                        "Вход подтверждён ✅" if status == "approved"
+                                        else "Вход отклонён ⛔")
                 if row["message_id"]:
                     try:
-                        _TG.mark_message(int(row["message_id"]), approved=(status == "approved"),
-                                         code=_pending_code(str(row["short"])))
+                        _TG.mark_message(int(row["message_id"]),
+                                         outcome=status, code=_pending_code(str(row["short"])))
                     except (TypeError, ValueError):
                         pass
             except Exception:
@@ -11882,7 +11895,12 @@ class Handler(BaseHTTPRequestHandler):
                        token=token)
 
     def handle_admin_login_status(self, conn: sqlite3.Connection) -> None:
-        """GET /api/admin/login/status?pending= — опрос решения владельца."""
+        """GET /api/admin/login/status?pending= — опрос решения владельца.
+
+        Long-poll на 20 с: решение применяется в момент нажатия кнопки, а не
+        к следующему тику опроса. Клиент сразу же опрашивает снова, поэтому
+        задержка между «Подтвердить» и открытой сессией — доли секунды.
+        """
         from urllib.parse import parse_qs
         try:
             query = parse_qs(urlparse(self.path).query)
@@ -11896,8 +11914,9 @@ class Handler(BaseHTTPRequestHandler):
         # Решения втягиваются лениво, здесь: фонового потока нет, а ждать
         # решения некому, кроме этого опроса. Мёртвый Bot API — тишина,
         # опрос всё равно отвечает текущим состоянием заявки.
-        telegram_ingest_updates(conn)
-        row = conn.execute("SELECT id, user_id, short, ip, status, expires_at FROM admin_login_pending "
+        telegram_ingest_updates(conn, ADMIN_LOGIN_STATUS_WAIT_SEC)
+        row = conn.execute("SELECT id, user_id, short, ip, status, expires_at, message_id "
+                           "FROM admin_login_pending "
                            "WHERE token=?", (token_digest(raw),)).fetchone()
         if not row:
             self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
@@ -11910,10 +11929,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         now_ms = int(time.time() * 1000)
         if int(row["expires_at"]) <= now_ms and row["status"] == "pending":
+            short, message_id = str(row["short"]), row["message_id"]
             conn.execute("DELETE FROM admin_login_pending WHERE id=?", (int(row["id"]),))
             conn.commit()
             admin_audit(conn, int(row["user_id"]), "admin-login-expired",
-                        int(row["user_id"]), f"{row['short']} {row['ip'] or ''}"[:200])
+                        int(row["user_id"]), f"{short} {row['ip'] or ''}"[:200])
+            if message_id:
+                # Мёртвых кнопок не оставляем: повторное нажатие после
+                # просрочки уже ничего не решит, сообщение говорит об этом.
+                try:
+                    assert _TG is not None
+                    _TG.mark_message(int(message_id), outcome="expired",
+                                     code=_pending_code(short))
+                except Exception:
+                    pass
             self.send_json({"error": "Время подтверждения вышло. Войди заново.",
                             "code": "PENDING_EXPIRED", "expired": True}, 410)
             return
@@ -11950,7 +11979,8 @@ class Handler(BaseHTTPRequestHandler):
         if raw and len(raw) <= 128:
             try:
                 ensure_admin_pending_schema(conn)
-                row = conn.execute("SELECT id, user_id FROM admin_login_pending WHERE token=?",
+                row = conn.execute("SELECT id, user_id, short, message_id FROM admin_login_pending "
+                                   "WHERE token=?",
                                    (token_digest(raw),)).fetchone()
                 if row is not None:
                     user_id = existing_user_for(conn, self)
@@ -11959,6 +11989,13 @@ class Handler(BaseHTTPRequestHandler):
                         conn.commit()
                         admin_audit(conn, int(row["user_id"]), "admin-login-cancelled",
                                     int(row["user_id"]), "")
+                        if row["message_id"]:
+                            try:
+                                assert _TG is not None
+                                _TG.mark_message(int(row["message_id"]), outcome="cancelled",
+                                                 code=_pending_code(str(row["short"])))
+                            except Exception:
+                                pass
             except sqlite3.Error:
                 try:
                     conn.rollback()

@@ -140,14 +140,21 @@ def send_login_request(*, short: str, code: str, ip: str, when: str,
     return None
 
 
-def fetch_updates(offset: int | None) -> tuple[list, int | None]:
+def fetch_updates(offset: int | None, wait_sec: int = 0) -> tuple[list, int | None]:
     """Забрать решения владельца. Возвращает (updates, max_update_id|None).
 
-    timeout=0: немедленный ответ, без висения. Опрос идёт из обработчика
-    статуса заявки, поэтому висеть здесь нельзя — браузер ждёт.
+    wait_sec>0 — long-poll: Bot API держит соединение до первого события
+    (или таймаута) и отвечает сразу, поэтому решение прилетает мгновенно,
+    а не к следующему тику опроса. Вызыватель (опрос статуса заявки) ждёт
+    вместе с Telegram, а не крутит пустые запросы. wait_sec=0 — немедленный
+    ответ без висения.
     """
     cfg = require_configured()
-    params = {"timeout": 0, "limit": 100}
+    try:
+        wait = max(0, min(50, int(wait_sec)))
+    except (TypeError, ValueError):
+        wait = 0
+    params = {"timeout": wait, "limit": 100}
     if offset is not None:
         params["offset"] = offset
     url = f"{cfg['apiUrl']}/bot{cfg['botToken']}/getUpdates?" + urllib.parse.urlencode(params)
@@ -155,7 +162,7 @@ def fetch_updates(offset: int | None) -> tuple[list, int | None]:
                                      headers={"Accept": "application/json",
                                               "User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC) as response:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC + wait + 5) as response:
             raw = response.read(MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         raise TelegramError(f"telegram HTTP {exc.code}") from exc
@@ -276,15 +283,25 @@ def answer_callback(callback_id: str, text: str = "") -> None:
         pass
 
 
-def mark_message(message_id: int, *, approved: bool, code: str) -> None:
-    """Подписать сообщение итогом (best-effort, исход уже решён без этого)."""
+def mark_message(message_id: int, *, outcome: str, code: str) -> None:
+    """Подписать сообщение итогом (best-effort, исход уже решён без этого).
+
+    outcome: approved / denied / expired / cancelled. Живых кнопок после
+    этого не остаётся: повторное нажатие уже ничего не решает, а сообщение
+    в истории честно говорит, чем кончилось.
+    """
+    texts = {
+        "approved": f"✅ Вход подтверждён (код {code}). Сессия открыта.",
+        "denied": f"⛔ Вход отклонён (код {code}). Сессия не открыта.",
+        "expired": f"⌛ Время вышло (код {code}). Заявка закрыта — войди заново.",
+        "cancelled": f"🚫 Заявка отозвана (код {code}).",
+    }
     try:
         cfg = require_configured()
-        verdict = "✅ Вход подтверждён" if approved else "⛔ Вход отклонён"
         _api_call("editMessageText", {
             "chat_id": cfg["chatId"],
             "message_id": message_id,
-            "text": f"{verdict} (код {code}).",
+            "text": texts.get(outcome, f"Заявка закрыта (код {code})."),
         }, cfg=cfg)
     except TelegramError:
         pass
