@@ -7500,7 +7500,7 @@ function essayDynamicsSVG(readyNewFirst) {
   }
   const times = ready.map((it) => Number(it.createdAt));
   const { mode, needYear } = essayTimeMode(times);
-  const W = 560, H = 224, padL = 38, padR = 18, padT = 36, padB = 46;
+  const W = 560, H = 236, padL = 46, padR = 18, padT = 42, padB = 52;
   const X = (i) => padL + (ready.length === 1 ? 0.5 : i / (ready.length - 1)) * (W - padL - padR);
   const Y = (v) => padT + (1 - Math.max(0, Math.min(22, v)) / 22) * (H - padT - padB);
   const baseY = H - padB;
@@ -7508,7 +7508,7 @@ function essayDynamicsSVG(readyNewFirst) {
   const area = `${line} L${X(ready.length - 1).toFixed(1)},${baseY.toFixed(1)} L${X(0).toFixed(1)},${baseY.toFixed(1)} Z`;
   const grid = [0, 11, 22].map((g) => `
     <line x1="${padL}" y1="${Y(g).toFixed(1)}" x2="${W - padR}" y2="${Y(g).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${padL - 8}" y="${(Y(g) + 4.5).toFixed(1)}" font-size="12" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
+    <text x="${padL - 8}" y="${(Y(g) + 5.5).toFixed(1)}" font-size="16" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
   // Соседние точки в одну минуту/день/месяц давали бы две одинаковые
   // подписи подряд — вторую пропускаем (первая, последняя и шаг те же).
   let prevTick = null;
@@ -7517,7 +7517,7 @@ function essayDynamicsSVG(readyNewFirst) {
     const label = raw === prevTick ? "" : raw;
     if (raw !== prevTick) prevTick = raw;
     return `<line x1="${X(i).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${X(i).toFixed(1)}" y2="${(baseY + 5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${X(i).toFixed(1)}" y="${(baseY + 21).toFixed(1)}" font-size="12" fill="var(--muted)" text-anchor="middle" class="mono">${esc(label)}</text>`;
+    <text x="${X(i).toFixed(1)}" y="${(baseY + 23).toFixed(1)}" font-size="15" fill="var(--muted)" text-anchor="middle" class="mono">${esc(label)}</text>`;
   }).join("");
   const dots = ready.map((it, i) => {
     const v = Number(it.totalScore);
@@ -7528,8 +7528,8 @@ function essayDynamicsSVG(readyNewFirst) {
   }).join("");
   const first = ready[0], last = ready[ready.length - 1];
   const ends = `
-    <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 9).toFixed(1)}" font-size="13" fill="var(--muted)" text-anchor="start" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(first.totalScore)}</text>
-    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 9).toFixed(1)}" font-size="14" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(last.totalScore)} / 22</text>`;
+    <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 10).toFixed(1)}" font-size="16" fill="var(--muted)" text-anchor="start" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(first.totalScore)}</text>
+    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 10).toFixed(1)}" font-size="18" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(last.totalScore)} / 22</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика баллов за сочинения">
     <defs><linearGradient id="essayDyn" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="rgba(2,119,182,0.25)"/><stop offset="1" stop-color="rgba(2,119,182,0)"/>
