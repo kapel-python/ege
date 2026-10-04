@@ -708,6 +708,10 @@ def test_wrong_problem_question_form(ai) -> None:
           ai.essay_wrong_problem("Хочешь заработать быстро? Жми сюда. "
                                  "Никаких усилий не надо.",
                                  problem) is True)
+    check("реплика диалога проблемой не объявляет — правило молчит",
+          ai.essay_wrong_problem("— Маша, ты умеешь делать снежного ангела? "
+                                 "— Это еще как? Дальше идёт обычный разбор.",
+                                 problem) is False)
     # Старые пины вопросной ветки не задевают (там нет «?»).
     check("прежний True жив",
           ai.essay_wrong_problem(
