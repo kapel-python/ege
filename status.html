@@ -212,7 +212,6 @@
   .svc-dot--off{background:var(--amber);}
   .svc-name{font-weight:600;font-size:clamp(14px,1.8vw,16px);overflow-wrap:anywhere;}
   .svc-detail{color:var(--text-faint);font-size:clamp(12px,1.5vw,13px);overflow-wrap:anywhere;}
-  .checks-meta{margin:clamp(18px,3vw,26px) 0 clamp(12px,2vw,16px);}
   .subj{
     background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
     border:1px solid var(--card-border);border-radius:var(--radius-lg);
@@ -340,12 +339,8 @@
     <div class="wrap">
       <div class="section-label">Проверка</div>
       <h2 class="section-title">Что работает</h2>
-      <p class="section-desc">То, от чего зависит твоя подготовка. Состояние — по последним запросам, а раз в минуту сервер сам прогоняет короткие самопроверки по каждому разделу: они только читают данные, шлюзы без нужды не опрашивают и деньги не тратят.</p>
+      <p class="section-desc">То, от чего зависит твоя подготовка. Проверяем каждую минуту — у каждой строки написано, когда её проверяли.</p>
       <div class="svc-grid" id="svcGrid"></div>
-      <div id="checksBlock" hidden>
-        <p class="section-desc checks-meta" id="checksMeta"></p>
-        <div class="svc-grid" id="checksGrid"></div>
-      </div>
     </div>
   </section>
 
@@ -390,9 +385,6 @@
   var statGrid = document.getElementById("statGrid");
   var svcGrid = document.getElementById("svcGrid");
   var subjectsList = document.getElementById("subjectsList");
-  var checksBlock = document.getElementById("checksBlock");
-  var checksGrid = document.getElementById("checksGrid");
-  var checksMeta = document.getElementById("checksMeta");
 
   try { var yearEl = document.getElementById("year"); if (yearEl) yearEl.textContent = "© " + new Date().getFullYear(); } catch (e) {}
 
@@ -494,51 +486,21 @@
     var html = "";
     for (var i = 0; i < services.length; i++){
       var s = services[i] || {};
+      /* Свежесть минутной самопроверки вшивается в строку: «Отвечает
+         • последняя проверка: только что». Отдельной технической таблицы
+         нет — ученик видит один понятный список. */
+      var detail = s.ok ? (s.detail || "Работает") : (s.detail || "Не удалось проверить");
+      if (s.checkAge){
+        detail += " • последняя проверка: " + s.checkAge;
+      }
       html += '<div class="svc">'
         + '<span class="svc-dot' + (s.ok ? "" : " svc-dot--off") + '" aria-hidden="true"></span>'
         + '<div style="min-width:0;"><div class="svc-name">' + esc(s.label || s.id) + "</div>"
-        + '<div class="svc-detail">' + esc(s.ok ? (s.detail || "Работает") : (s.detail || "Не удалось проверить")) + "</div></div>"
+        + '<div class="svc-detail">' + esc(detail) + "</div></div>"
         + "</div>";
     }
     svcGrid.innerHTML = html;
     servicesSection.hidden = false;
-  }
-
-  function renderChecks(checks){
-    /* Минутные самопроверки сервера: что гонялось, когда и сколько заняло.
-       Прогона нет первые секунды после старта — блок тогда прячется, врать
-       «всё хорошо» без прогона не надо. */
-    if (!checks || !Array.isArray(checks.items) || !checks.items.length){
-      checksBlock.hidden = true;
-      checksGrid.innerHTML = "";
-      checksMeta.textContent = "";
-      return;
-    }
-    var html = "";
-    for (var i = 0; i < checks.items.length; i++){
-      var c = checks.items[i] || {};
-      var sub = c.detail || (c.ok ? "Работает" : "Не удалось проверить");
-      if (typeof c.latencyMs === "number" && c.latencyMs >= 0){
-        sub += " · " + c.latencyMs + " мс";
-      }
-      html += '<div class="svc">'
-        + '<span class="svc-dot' + (c.ok ? "" : " svc-dot--off") + '" aria-hidden="true"></span>'
-        + '<div style="min-width:0;"><div class="svc-name">' + esc(c.label || c.id) + "</div>"
-        + '<div class="svc-detail">' + esc(sub) + "</div></div>"
-        + "</div>";
-    }
-    checksGrid.innerHTML = html;
-    var age = (typeof checks.ageSec === "number" && checks.ageSec >= 0) ? checks.ageSec : null;
-    var meta = "Самопроверки сервера — по всем разделам, раз в минуту";
-    if (age !== null){
-      meta += ": прогон " + age + " " + plural(age, "секунду", "секунды", "секунд") + " назад";
-    }
-    if (typeof checks.durationMs === "number" && checks.durationMs >= 0){
-      meta += " · заняло " + checks.durationMs + " мс";
-    }
-    meta += ".";
-    checksMeta.textContent = meta;
-    checksBlock.hidden = false;
   }
 
   function renderSkillFacts(skill){
@@ -732,7 +694,6 @@
     renderStats(data.totals || {subjects: 0, skills: 0, tasks: 0, lessons: 0});
     renderServices(services);
     renderSubjects(data.subjects || []);
-    renderChecks(data.checks);
   }
 
   /* Мягкая защита от случайного спама кнопкой: чаще раза в 10 секунд

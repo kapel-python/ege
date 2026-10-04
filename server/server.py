@@ -6501,6 +6501,33 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
         total_bosses += subj_bosses
     content_updated = max(_status_file_mtime_ms(path) for path in _subject_catalog_paths())
     agent_service, agent_tools_service = _agent_status_service()
+    # Минутные самопроверки (server/health_checks.py): их свежесть вшивается в
+    # строки ниже полем checkAge («только что», «минуту назад»), а упавшая
+    # проверка гасит свою строку — отдельной технической таблицы на странице
+    # нет, ученик видит один понятный список.
+    check_age: str | None = None
+    failed_checks: dict[str, str] = {}
+    essays_check: dict | None = None
+    try:
+        mod = health_mod()
+        cached = mod.cached_checks() if mod is not None else None
+    except Exception:
+        cached = None
+    if cached:
+        try:
+            items = cached.get("items") or []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("id") == "essays":
+                    essays_check = item
+                elif not item.get("ok"):
+                    failed_checks[str(item.get("id") or "")] = str(
+                        item.get("detail") or "Временно недоступно")
+            if cached.get("checkedAt"):
+                check_age = _age_ru(int(cached.get("checkedAt") or 0), now_ms) or None
+        except Exception:
+            failed_checks = {}
     services = [
         {"id": "api", "label": "API", "ok": True, "detail": "Отвечает"},
         {"id": "database", "label": "База данных", "ok": db_ok,
@@ -6519,23 +6546,41 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
         {"id": "diagnostics", "label": "Диагностика", "ok": db_ok and diagnostics_any,
          "detail": "Доступна" if db_ok and diagnostics_any else "Не удалось проверить"},
     ]
+    if essays_check is not None:
+        essays_ok = bool(essays_check.get("ok"))
+        services.append({"id": "essays", "label": "Проверка сочинений",
+                         "ok": essays_ok,
+                         "detail": "Работает" if essays_ok else str(
+                             essays_check.get("detail") or "Временно недоступно")})
+    for service in services:
+        if check_age:
+            service["checkAge"] = check_age
+        fail_detail = failed_checks.get(_CHECK_FOR_SERVICE.get(service.get("id"), ""))
+        if fail_detail:
+            service["ok"] = False
+            service["detail"] = fail_detail
     overall = "ok" if all(s["ok"] for s in services) else "degraded"
-    try:
-        mod = health_mod()
-        checks = mod.cached_checks() if mod is not None else None
-    except Exception:
-        checks = None
     return {
         "ok": overall == "ok",
         "now": now_ms,
         "overall": overall,
         "services": services,
-        "checks": checks,
         "subjects": subjects,
         "totals": {"subjects": len(subjects), "skills": total_skills, "tasks": total_tasks,
                    "lessons": total_lessons, "missions": total_missions, "bosses": total_bosses},
         "contentUpdatedAt": content_updated or None,
     }
+
+
+# Какая минутная самопроверка отвечает за каждую строку «Что работает».
+# Упавшая проверка гасит свои строки; свежесть (checkAge) у всех строк одна —
+# это возраст общего прогона.
+_CHECK_FOR_SERVICE = {
+    "api": "api", "database": "api", "auth": "api",
+    "agent": "agent", "agent-tools": "agent",
+    "ai-providers": "ai",
+    "tasks": "content", "lessons": "content", "diagnostics": "content",
+}
 
 
 def public_status_payload(conn: sqlite3.Connection) -> dict:

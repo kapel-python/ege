@@ -81,7 +81,7 @@ def _run_one(check_id: str, label: str, fn) -> dict:
         ok = bool(ok)
         detail = str(detail or "")
     except Exception as exc:  # noqa: BLE001 — проверка не роняет прогон
-        ok, detail = False, f"Проверка не прошла: {type(exc).__name__}"
+        ok, detail = False, "Временно недоступно"
     latency = int((time.monotonic() - started) * 1000)
     if latency > int(CHECK_TIMEOUT_SOFT_SEC * 1000):
         ok = False
@@ -109,41 +109,41 @@ def run_all_checks(ctx: dict) -> list[dict]:
     def check_api():
         counts = ctx.get("counts")
         if not callable(counts):
-            return False, "Нет источника данных"
+            return False, "Временно недоступно"
         subjects, skills, tasks, lessons = counts()
         subjects, skills, tasks = int(subjects), int(skills), int(tasks)
         if subjects <= 0 or skills <= 0 or tasks <= 0:
-            return False, "Хранилище отвечает, но каталог пуст"
+            return False, "Временно недоступно"
         return True, (f"{subjects} предм., {skills} тем, {tasks} заданий — отвечают")
 
     def check_content():
         counts = ctx.get("counts")
         if not callable(counts):
-            return False, "Нет источника данных"
+            return False, "Временно недоступно"
         subjects, skills, tasks, lessons = (int(v) for v in counts())
         if lessons <= 0:
-            return False, f"Тем: {skills}, заданий: {tasks}, но нет ни одного урока"
+            return False, "Материалы временно недоступны"
         if tasks <= 0:
-            return False, "Нет доступных заданий"
+            return False, "Материалы временно недоступны"
         return True, f"Тем: {skills}, заданий: {tasks}, уроков: {lessons}"
 
     def check_agent():
         fn = ctx.get("agent_health")
         if not callable(fn):
-            return False, "Модуль наставника недоступен"
+            return False, "Наставник временно недоступен"
         health = fn() or {}
         tools = [t for t in (health.get("tools") or []) if t]
         missing = [t for t in (health.get("missing") or []) if t]
         if missing:
-            return False, f"{len(tools) - len(missing)} из {len(tools)} подключены"
+            return False, "Наставник временно недоступен"
         if not tools:
-            return False, "Нет инструментов"
+            return False, "Наставник временно недоступен"
         return True, f"{len(tools)} инструментов подключены"
 
     def check_ai():
         fn = ctx.get("ai_health")
         if not callable(fn):
-            return False, "Модуль ИИ недоступен"
+            return False, "Временно недоступно"
         health = fn() or {}
         providers = [p for p in (health.get("providers") or []) if isinstance(p, dict)]
         configured = [p for p in providers if p.get("configured")]
@@ -157,7 +157,7 @@ def run_all_checks(ctx: dict) -> list[dict]:
             except Exception:
                 order = []
         if not order:
-            return False, "Порядок ротации пуст"
+            return False, "Временно недоступно"
         last_ok = 0
         for p in configured:
             try:
@@ -196,22 +196,22 @@ def run_all_checks(ctx: dict) -> list[dict]:
             except Exception:
                 probe_age = None
         if probe_age is not None and probe_age > 300:
-            return False, detail + "; фоновый дозор молчит"
+            return False, "Временно недоступно"
         return True, detail
 
     def check_essays():
         fn = ctx.get("essay_ready")
         if not callable(fn):
-            return False, "Нет источника данных"
+            return False, "Проверка сочинений временно недоступна"
         tables_ok, rubric = fn()
         if not tables_ok:
-            return False, "Таблицы проверок недоступны"
+            return False, "Проверка сочинений временно недоступна"
         try:
             rubric = int(rubric or 0)
         except (TypeError, ValueError):
             rubric = 0
         if rubric <= 0:
-            return False, "Рубрика не загружена"
+            return False, "Проверка сочинений временно недоступна"
         judge_fn = ctx.get("essay_judge")
         judge = None
         if callable(judge_fn):
@@ -221,8 +221,8 @@ def run_all_checks(ctx: dict) -> list[dict]:
             except Exception:
                 judge = None
         if not judge:
-            return False, "Судья проверки не назначен"
-        return True, f"Рубрика v{rubric}, судья назначен"
+            return False, "Проверка сочинений временно недоступна"
+        return True, "Работает"
 
     plan = [
         ("api", "API", check_api),
