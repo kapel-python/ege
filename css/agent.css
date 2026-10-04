@@ -478,12 +478,18 @@ a.agent__link--int { border-style: dashed; }
    отделяет поле от ленты и держит ощущение «прибито к низу». */
 .agent__composer-zone {
   position: relative; flex: none;
-  padding: 12px 28px 20px;
+  /* Поле чуть шире колонки ленты (20px против 28px у ленты): по бокам
+     остаётся небольшой запас, но пилюля не зажата. Верхней границы нет
+     осознанно — зону от ленты отделяет сама подложка с размытием. */
+  padding: 12px 20px 20px;
   background: var(--chrome-bg);
-  border-top: 1px solid var(--border);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
+/* Нижней полоски тоже нет: на экране чата верхняя граница нижнего меню
+   снята — иначе под пилюлей лежала бы вторая линия. Остальных экранов это
+   не касается (правило только под .screen--agent). */
+.app:has(.screen--agent) .bottomnav { border-top: none; }
 .agent__to-bottom {
   position: absolute; right: 28px; top: -52px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
   background: var(--surface); border: 1px solid var(--border-strong); color: var(--agent-ink-2);
@@ -585,7 +591,7 @@ a.agent__link--int { border-style: dashed; }
   /* safe-area снизу НЕ прибавляем: под комозером теперь сама полоса меню,
      а под меню — системный отступ. Дублировали бы и оставляли зазор. */
   .agent__composer-zone {
-    padding: 8px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px));
+    padding: 8px max(8px, env(safe-area-inset-right, 0px)) 12px max(8px, env(safe-area-inset-left, 0px));
   }
   .agent__hint { display: none; }
   /* Тулбар на телефоне ниже: бургер и кольцо квоты уменьшены по высоте, но

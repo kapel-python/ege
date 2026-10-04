@@ -475,6 +475,14 @@ check("поле ввода — карточка 760px с тенью, зона с
   && prop(rule(spaCss, ".agent__composer"), "box-shadow") === "var(--card-shadow)"
   && prop(rule(spaCss, ".agent__composer-zone"), "background") === "var(--chrome-bg)"
   && /blur\(10px\)/.test(rule(spaCss, ".agent__composer-zone")));
+/* Поле чуть шире колонки ленты (боковые отступы зоны 20px против 28px у
+   ленты), полосок сверху/снизу нет: верхняя граница зоны снята, верхняя
+   граница нижнего меню снята только на экране чата. */
+check("поле чуть шире, полосок сверху/снизу нет",
+  /padding: 12px 20px 20px/.test(rule(spaCss, ".agent__composer-zone"))
+  && !/border-top/.test(rule(spaCss, ".agent__composer-zone"))
+  && /\.app:has\(\.screen--agent\) \.bottomnav \{[^}]*border-top: none/.test(spaCss)
+  && /padding: 8px max\(8px,/.test(spaCss));
 check("рейл: заголовок своей строкой, «Новый чат» во всю ширину",
   /\.agent__threads-head \.section-title \{[^}]*margin: 0/.test(spaCss)
   && prop(rule(spaCss, ".agent__new"), "width") === "100%"
