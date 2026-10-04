@@ -13529,7 +13529,8 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"ok": True, "approved": False, "final": "Отменено.",
                                         "steps": [], "suggests": [],
                                         "quota": quota}, token=token); return
-                    # approve: применяем действие, затем resume цикла без нового жетона.
+                    # approve: применяем действие, затем resume цикла (каждый его
+                    # запрос к ИИ — тоже жетон, та же по-запросная логика).
                     # Живой снимок — как у обычного хода: resume тоже зовёт модель
                     # и может идти десятки секунд.
                     if not _agent_busy_acquire(tid, "подтверждение действия"):

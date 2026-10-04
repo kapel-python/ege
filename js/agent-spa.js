@@ -494,6 +494,38 @@
           : agentQuotaText(limit, left)),
     }));
   }
+  /* Клик по кружку квоты: свежее состояние с сервера, дальше — то же окно,
+     что открывает исчерпание (ноль) или справка (остаток есть). */
+  function clickQuota() {
+    fetchQuota(true).then(function (st) {
+      if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
+      openQuotaInfoModal();
+    });
+  }
+  /* Автопоказ окна лимита, когда ход только что обнулил квоту. Взводим в
+     settle (успех с финалом, потрачен хоть один запрос, остаток 0), стреляет
+     в конце печати ответа — ученик видит то же окно, что по клику на круг.
+     Флаг с привязкой к маунту и чату: ушли в другой чат или пересобрали
+     экран — чужому показу не бывать. */
+  function armLimitModal(tid) {
+    S.limitArmed = { mg: S.mountGen, tid: Number(tid) };
+  }
+  function disarmLimitModal() { S.limitArmed = null; }
+  function fireLimitModal() {
+    var f = S.limitArmed;
+    S.limitArmed = null;
+    if (!f || f.mg !== S.mountGen || Number(S.currentId) !== Number(f.tid)) return;
+    clickQuota();
+  }
+  function limitSpentOut(res) {
+    // Этот успех только что обнулил квоту: остаток 0, ответ готов (не
+    // pending) и модель хоть раз сходила (cost>0 — отмена подтверждения
+    // ничего не тратит и сюда не попадает).
+    if (!res || !res.data || !res.data.final) return false;
+    if (!quotaOut()) return false;
+    var cost = res.data.usage && res.data.usage.cost;
+    return Number(cost) > 0;
+  }
   /* Справочное окно по клику на кружок квоты: сколько ходов осталось и как
      они тратятся. Раньше на тап всплывал тост в углу — ненадёжно (его
      перебивает другая подсказка, он живёт 2.6с и ничего не объясняет). */
@@ -683,12 +715,9 @@
     // удалена полностью: прятать её было бесполезно — на тач-тапе
     // совместимый mouseenter приходит ДО click и возвращал её, а следующая
     // setQuota ставила display="" заново.
-    quota.addEventListener("click", function () {
-      fetchQuota(true).then(function (st) {
-        if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
-        openQuotaInfoModal();
-      });
-    });
+    // Обработчик — именованной функцией: её же зовём сами, когда ход только
+    // что обнулил квоту. Это ровно «ученик нажал на круг», без дубля логики.
+    quota.addEventListener("click", clickQuota);
     bar.appendChild(menu); bar.appendChild(title); bar.appendChild(quota);
 
     var feed = el("div", "agent__feed");
@@ -986,6 +1015,9 @@
       return;
     }
     S.navGen++;
+    // Уходим в другой чат — взведённый автопоказ окна лимита сгорает: он был
+    // про ЭТОТ чат и его допечатанный ответ, чужому чату окно не положено.
+    if (leaving) disarmLimitModal();
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
     if (leaving && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
     // Недопечатанный ответ доигрываем разом.
@@ -2028,6 +2060,7 @@
       if (S.pendingBail === bail) S.pendingBail = null;
       syncBusy();          // ответ дописан — композер снова свободен
       finishBottom();
+      fireLimitModal();    // ход обнулил квоту — то же окно, что по клику
     }
     // Новый ход перебил незаконченный: дорисовываем остаток разом, карточка
     // не должна остаться с лоадером или с полупустым блоком шага.
@@ -2139,6 +2172,7 @@
         // доводки, и конец замирал бы на уровне текста с обрезанной кнопкой
         // «Скопировать» ниже.
         finishBottom();
+        fireLimitModal();    // ход обнулил квоту — то же окно, что по клику
         return;
       }
       var p = paras.shift();
@@ -2328,6 +2362,7 @@
     }
     if (!paras.length) {
       cardFooter(card, null, asks);
+      fireLimitModal();    // ход обнулил квоту — то же окно, что по клику
       return card;
     }
     var ag = ++S.animGen, stopped = false;
@@ -2347,6 +2382,7 @@
         S.pendingBail = null;
         syncBusy();
         finishBottom();
+        fireLimitModal();    // ход обнулил квоту — то же окно, что по клику
         return;
       }
       var p = paras.shift();
@@ -2565,6 +2601,9 @@
     // Композер занят (летит ход или допечатывается ответ): молча глотать
     // вопрос нельзя — человек жмёт Enter и видит, что «ничего не происходит».
     if (S.busy) { if (!(opts && opts.quiet)) say("Дождись текущего ответа"); return; }
+    // Новый вопрос — новый отсчёт: взведённый автопоказ прошлого хода сгорел
+    // (окно либо уже показали в конце его печати, либо ход ушёл без него).
+    disarmLimitModal();
     var force = !!(opts && opts.force);
     var quiet = !!(opts && opts.quiet);      // невидимый повтор сервера
     // Ходов не осталось — в сеть не идём и ленту не трогаем: заменяющий ход
@@ -2830,6 +2869,9 @@
     if (S.abort === turn.ctrl) S.abort = null;
     if (res.status === 200 && res.data) {
       if (res.data.quota) setQuota(res.data.quota);
+      // Ход потратился в ноль и ответ готов: когда допечатается последний
+      // текст — покажем то же окно, что по клику на круг.
+      if (limitSpentOut(res)) armLimitModal(turn.threadId);
       cacheForget(turn.threadId);        // переписка изменилась — кэш больше не её
       var steps = res.data.steps || [];
       if (res.data.pending) {
@@ -3073,6 +3115,9 @@
       if (mg !== S.mountGen) return;
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
+        // Resume тоже тратит (каждый запрос — жетон): обнулил — покажем то же
+        // окно по клику, когда допечатается ответ.
+        if (limitSpentOut(res)) armLimitModal(turn.threadId);
         cacheForget(S.currentId);
         if (res.data.approved === false) {
           assistantCard([], res.data.final || "Отменено учеником.", true, res.data.suggests);
@@ -3456,6 +3501,8 @@
     S.pendingBail = null;
     S.newThreadId = null;
     S.creating = null;
+    // Экран пересобран — взведённый автопоказ сгорел вместе с печатью.
+    disarmLimitModal();
     closeThreadMenu();
     closeLimitModal();
     // Резерв под нижнее меню и замер высоты — состояние прошлого экрана: на

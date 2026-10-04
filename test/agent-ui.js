@@ -66,8 +66,19 @@ check("справочный режим без таймера, кнопка «З�
   /timer: false/.test(spaCode) && /closeText: "Закрыть"/.test(spaCode)
   && /icon: "ai"/.test(spaCode) && /eyebrow: "ИИ"/.test(spaCode));
 check("тап по кружку открывает окно, а не тост",
-  /quota\.addEventListener\("click"[\s\S]{0,700}?openQuotaInfoModal\(\);/.test(spaCode)
+  /quota\.addEventListener\("click", clickQuota\)/.test(spaCode)
+  && /function clickQuota\(\)[\s\S]{0,400}?openQuotaInfoModal\(\);/.test(spaCode)
   && !/quota\.addEventListener\("click"[\s\S]{0,700}?say\("Осталось/.test(spaCode));
+/* Автопоказ окна исчерпания: ход потратился в ноль с готовым ответом —
+   взводим в settle, стреляем в конце печати (те же точки, где дописывается
+   ответ), окно — ровно то же, что по клику на круг (clickQuota). Снятие —
+   новый вопрос, уход в другой чат, пересборка экрана. */
+check("исчерпание показывает то же окно, что клик по кругу (после печати)",
+  /function clickQuota\(\)/.test(spaCode)
+  && /if \(limitSpentOut\(res\)\) armLimitModal\(turn\.threadId\);/.test(spaCode)
+  && (spaCode.match(/fireLimitModal\(\);/g) || []).length >= 4
+  && /function fireLimitModal\(\)[\s\S]{0,300}?clickQuota\(\);/.test(spaCode)
+  && /disarmLimitModal\(\);/.test(spaCode));
 check("общая модалка закрывается по Esc и возвращает фокус",
   /function limitEscHandler\(e\)/.test(spaCode)
   && /closeAiLimitModal/.test(spaCode)
