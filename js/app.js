@@ -7963,7 +7963,10 @@ function screenProfile(root) {
       <div class="profile-card__identity">
         <div class="avatar" aria-hidden="true">${initial || icon("profile")}</div>
         <div class="profile-card__who">
-          <div class="profile-card__name">${name ? esc(name) : "Без имени"}</div>
+          <div class="profile-card__name-row">
+            <div class="profile-card__name">${name ? esc(name) : "Без имени"}</div>
+            <button class="name-edit" type="button" onclick="openNameEditDialog()" aria-label="Изменить имя" title="Изменить имя">${icon("pen")}</button>
+          </div>
           <div class="account-id-wrap">
             <button class="account-id" type="button" data-account-id="${accountId}" onclick="copyAccountId(this)" aria-label="Скопировать ID аккаунта" ${accountId ? "" : "disabled"}>
               <span class="account-id__text">
@@ -8335,6 +8338,82 @@ function closeDeviceModal() {
     deviceModalPrevFocus.focus({ preventScroll: true });
   }
   deviceModalPrevFocus = null;
+}
+
+/* Смена имени в профиле: то же .dlg-окно, что устройства и подтверждения
+   (device-modal-root + .dlg-backdrop/.dlg) — своего дизайна не заводим.
+   Сохранение идёт обычным путём Store.save() → PATCH /api/settings, поэтому
+   OCC-версия, таб-лидер и повтор после GUEST_PENDING работают как у всех
+   доменных записей; сервер чистит имя тем же sanitize_name. */
+function openNameEditDialog() {
+  const root = deviceModalRoot();
+  if (!root) return;
+  const current = (typeof Store !== "undefined" && Store.state && Store.state.name)
+    ? String(Store.state.name) : "";
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Изменить имя">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Профиль</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("pen")}</div>
+          <div class="dlg-device__name">Изменить имя</div>
+        </div>
+        <div class="dlg__field">
+          <input class="answer-input" id="nameEditInput" type="text" autocomplete="given-name"
+            maxlength="${NAME_MAX_LENGTH}" placeholder="Имя" value="${esc(current)}"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();saveProfileName()}">
+          <div class="dlg__error" id="nameEditError" role="alert"></div>
+        </div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Отмена</button>
+          <button class="btn btn--primary" id="nameEditSave" type="button" onclick="saveProfileName()">Сохранить</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  const input = root.querySelector("#nameEditInput");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); }
+  if (input) { try { input.focus({ preventScroll: true }); input.select(); } catch (_) {} }
+}
+
+async function saveProfileName() {
+  const root = deviceModalRoot();
+  const input = root ? root.querySelector("#nameEditInput") : null;
+  const errorEl = root ? root.querySelector("#nameEditError") : null;
+  const saveBtn = root ? root.querySelector("#nameEditSave") : null;
+  if (!input) return;
+  const fail = (text) => {
+    if (errorEl) { errorEl.textContent = text; errorEl.style.display = "block"; }
+    input.classList.add("answer-input--wrong");
+    setTimeout(() => { try { input.classList.remove("answer-input--wrong"); } catch (_) {} }, 400);
+    try { input.focus({ preventScroll: true }); } catch (_) {}
+  };
+  const value = String(input.value || "").trim().replace(/\s+/g, " ").slice(0, NAME_MAX_LENGTH);
+  if (!value) { fail("Введи имя — пустым оно быть не может."); return; }
+  if (typeof Store === "undefined" || !Store.state) { fail("Профиль ещё загружается. Попробуй ещё раз."); return; }
+  if (value === String(Store.state.name || "").trim()) { try { closeDeviceModal(); } catch (_) {} return; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Сохраняем…"; }
+  try {
+    Store.state.name = value;
+    await Store.save();
+  } catch (e) {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Сохранить"; }
+    fail("Не удалось сохранить имя. Проверь соединение и попробуй ещё раз.");
+    return;
+  }
+  try { closeDeviceModal(); } catch (_) {}
+  try { toast("Имя обновлено", "", "check"); } catch (_) {}
+  try {
+    if (typeof currentRoute === "function" && currentRoute() === "profile") render();
+  } catch (_) {}
 }
 
 /* Единый диалог подтверждения на той же системе, что и инфо-диалог

@@ -1882,6 +1882,30 @@ body {
 
 .profile-card__who { min-width: 0; }
 .profile-card__name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+.profile-card__name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.profile-card__name-row .profile-card__name { min-width: 0; overflow-wrap: anywhere; }
+/* Кнопка смены имени: тихая иконка-карандаш рядом с именем, а не отдельная
+   строка — имя меняют редко, и целый ряд настроек под это избыточен. */
+.name-edit {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.name-edit svg { width: 15px; height: 15px; }
+.name-edit:hover, .name-edit:focus-visible { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--border); }
+.name-edit:active { transform: scale(0.94); }
+/* Поле имени внутри .dlg-окна: тот же .answer-input, что в онбординге. */
+.dlg__field { margin-top: 16px; }
+.dlg__field .answer-input { width: 100%; box-sizing: border-box; font-family: inherit; }
+.dlg__error { display: none; margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--danger); }
 .profile-card__streak { margin-left: auto; }
 
 .account-id-wrap { position: relative; display: flex; align-items: center; gap: 10px; margin-top: 7px; flex-wrap: wrap; }
