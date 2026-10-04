@@ -2485,6 +2485,27 @@ def provider_set_override(pid: str, patch: dict) -> dict:
                        ("mergeSystem", "merge_system")):
         if field in patch:
             clean[key] = bool(patch.get(field))
+    if "protocol" in patch and not builtin:
+        # Протокол — только своему: у встроенного его нет в схеме, и через
+        # apply он не появляется (responses задаётся целиком при добавлении).
+        try:
+            clean["protocol"] = _clean_protocol(patch.get("protocol"))
+        except ValueError as exc:
+            raise ValueError(str(exc))
+    for effort_key in ("reasoning_effort", "reasoningEffort"):
+        if effort_key in patch and not builtin:
+            try:
+                clean["reasoning_effort"] = _clean_reasoning_effort(patch.get(effort_key))
+            except ValueError as exc:
+                raise ValueError(str(exc))
+            break
+    for headers_key in ("extra_headers", "extraHeaders"):
+        if headers_key in patch and not builtin:
+            try:
+                clean["extra_headers"] = _clean_extra_headers(patch.get(headers_key))
+            except ValueError as exc:
+                raise ValueError(str(exc))
+            break
     if "model_title" in patch or "modelTitle" in patch:
         clean["model_title"] = str(patch.get("model_title", patch.get("modelTitle") or ""))[:120].strip()
     titles_map = patch.get("model_titles", patch.get("modelTitles"))
@@ -2524,6 +2545,17 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             entry["use_wallet_balance"] = clean["use_wallet_balance"]
         if "merge_system" in clean:
             entry["merge_system"] = clean["merge_system"]
+        if "protocol" in clean:
+            # Протокол — свойство записи своего провайдера (у встроенного его
+            # нет и через apply не появляется: там только значения поверх
+            # окружения, а responses задаётся целиком при добавлении).
+            entry["protocol"] = clean["protocol"] or "chat"
+        if "reasoning_effort" in clean:
+            entry["reasoning_effort"] = clean["reasoning_effort"] or ""
+        if "extra_headers" in clean:
+            # Замена целиком (пустой объект чистит): частичный merge ключом
+            # не выразить, а «удалить один заголовок» иначе было бы нечем.
+            entry["extra_headers"] = dict(clean["extra_headers"])
         entry["updated_at"] = int(time.time() * 1000)
         customs[pid] = entry
         _app_config_write(_CUSTOM_KEY, customs)
@@ -2606,8 +2638,14 @@ def provider_reset(pid: str) -> dict:
         defaults = entry.get("defaults") if isinstance(entry.get("defaults"), dict) else None
         if defaults:
             for field in ("base_url", "model", "api_key", "auth",
-                          "use_wallet_balance", "merge_system"):
-                if field in defaults:
+                          "use_wallet_balance", "merge_system",
+                          "protocol", "reasoning_effort", "extra_headers"):
+                if field not in defaults:
+                    continue
+                if field == "extra_headers":
+                    entry[field] = dict(defaults[field]) \
+                        if isinstance(defaults[field], dict) else {}
+                else:
                     entry[field] = defaults[field]
         # Название снятой модели — тоже часть возврата к стандарту: иначе
         # подпись «временная» продолжала бы висеть на модели, которой у
@@ -3233,14 +3271,18 @@ def _public_provider_card(pid: str) -> dict:
         # появится». Админ должен видеть это на карточке, а не узнавать от
         # ученика, который спросит «а кто это проверял».
         "modelTitleMissing": bool((primary_model or model_value) and not title),
+        # Значения доп. заголовков — только своему провайдеру и только в
+        # админку: без них их нельзя показать для правки, а секретам здесь не
+        # место (см. _clean_extra_headers). У встроенного всегда пусто.
+        "extraHeaders": dict(spec.get("extra_headers") or {})
+        if not builtin else {},
         "modelOverridden": bool((primary_model or model_value) and default_model and (primary_model or model_value) != default_model),
         "overridden": overridden,
         "auth": "raw" if spec.get("auth") == "raw" else "bearer",
         "useWalletBalance": bool((spec.get("extra_body") or {}).get("useWalletBalance")),
         "mergeSystem": bool(spec.get("merge_system")),
         # Responses-протокол и мышление: свои поля записи, у встроенных всегда
-        # chat/пусто. Значений доп. заголовков в карточке нет (только имена) —
-        # по тому же правилу, что keyHint: лишнего наружу не отдаём.
+        # chat/пусто.
         "protocol": str(spec.get("protocol") or "chat"),
         "reasoningEffort": str(spec.get("reasoning_effort") or ""),
         "extraHeaderNames": sorted((spec.get("extra_headers") or {}).keys()),
@@ -3846,9 +3888,21 @@ def probe_draft(params: dict, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
     extra: dict = {}
     if params.get("use_wallet_balance", params.get("useWalletBalance")):
         extra = {"useWalletBalance": True}
+    # Черновик responses-шаблона проверяется своим протоколом: chat-проба там
+    # всегда 400, и живой черновик выглядел бы мёртвым до сохранения.
+    try:
+        protocol = _clean_protocol(params.get("protocol"))
+    except ValueError as exc:
+        raise ValueError(str(exc))
+    try:
+        headers = _clean_extra_headers(params.get("extra_headers",
+                                                  params.get("extraHeaders")))
+    except ValueError as exc:
+        raise ValueError(str(exc))
     ok, latency, error = _run_probe_request(
         base_url=base_url, key=key, model=model, auth=auth, extra=extra,
-        merge_system=False, timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
+        merge_system=False, protocol=protocol, extra_headers=headers,
+        timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
     return {"ok": ok, "latencyMs": latency, "error": error,
             "checkedAt": int(time.time() * 1000)}
 

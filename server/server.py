@@ -10936,7 +10936,9 @@ class Handler(BaseHTTPRequestHandler):
                                  if k in ("model", "base_url", "baseUrl", "api_key", "apiKey",
                                           "auth", "use_wallet_balance", "useWalletBalance",
                                           "merge_system", "mergeSystem", "model_title", "modelTitle",
-                                          "model_titles", "modelTitles")}
+                                          "model_titles", "modelTitles", "protocol",
+                                          "reasoning_effort", "reasoningEffort",
+                                          "extra_headers", "extraHeaders")}
                         if pending_chain is not None:
                             try:
                                 old_chain = _AI.provider_model_slots(pid)

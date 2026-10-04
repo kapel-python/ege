@@ -341,6 +341,51 @@ def main() -> int:
           spec["protocol"] == "chat" and spec["reasoning_effort"] == ""
           and spec["extra_headers"] == {}, str({k: spec.get(k) for k in ("protocol",)}))
 
+    # --- правка своих через apply-путь ----------------------------------
+    make_custom()
+    ai.provider_set_override("opencode", {"protocol": "chat"})
+    check("override ставит protocol своему",
+          ai._spec_for("opencode")["protocol"] == "chat")
+    ai.provider_set_override("opencode", {"protocol": "responses",
+                                          "reasoning_effort": "high",
+                                          "extra_headers": {"x-a": "1", "x-b": "2"}})
+    spec2 = ai._spec_for("opencode")
+    check("override ставит effort+headers своему",
+          spec2["reasoning_effort"] == "high"
+          and spec2["extra_headers"] == {"x-a": "1", "x-b": "2"})
+    ai.provider_set_override("opencode", {"extra_headers": {}})
+    check("override пустым объектом чистит заголовки",
+          ai._spec_for("opencode")["extra_headers"] == {})
+    try:
+        ai.provider_set_override("opencode", {"protocol": "soap"})
+        check("override отвергает левый protocol", False)
+    except ValueError:
+        check("override отвергает левый protocol", True)
+    card2 = ai._public_provider_card("opencode")
+    check("карточка отдаёт значения заголовков (свой, админка)",
+          card2["extraHeaders"] == {} or isinstance(card2["extraHeaders"], dict))
+
+    # --- черновик responses проверяется своим протоколом ------------------
+    with FakeHTTP() as fake:
+        fake.reply({"id": "r", "status": "completed", "output": [
+            {"type": "message", "content": [{"type": "output_text", "text": "привет"}]}]})
+        probe = ai.probe_draft({"base_url": "https://opencode.ai/zen/go/v1",
+                                "model": "muse-spark-1.3-contributor",
+                                "api_key": "oc_sk_test", "auth": "bearer",
+                                "protocol": "responses",
+                                "extra_headers": {"x-opencode-session": "ege-test"}})
+        req = fake.requests[0]
+    check("probe_draft идёт в /responses с заголовком",
+          probe["ok"] is True and req["url"].endswith("/responses")
+          and req["headers"].get("x-opencode-session") == "ege-test",
+          f"{probe} {req['url']}")
+    with FakeHTTP() as fake:
+        fake.reply({"choices": [{"message": {"content": "hi"}}]})
+        probe = ai.probe_draft({"base_url": "https://plain.test/v1",
+                                "model": "m", "api_key": "k"})
+    check("probe_draft без protocol — старый chat-путь",
+          probe["ok"] is True and fake.requests[0]["url"].endswith("/chat/completions"))
+
     print(f"\n{'ALL OK' if not failures else str(failures) + ' FAILURES'}: {checks} checks")
     return 0 if not failures else 1
 

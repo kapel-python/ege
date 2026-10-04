@@ -771,6 +771,113 @@ async function shot(page, name) {
       await admin.locator(".a-field__hint--dirty").count() === 0,
       await admin.locator("#provTitleHint").innerText());
 
+    // ---------------- P8c: шаблоны протокола + мышление + заголовки -------
+    section("P8c шаблоны протокола и уровень мышления");
+    // Форма добавления: сегмент шаблонов виден сразу, по умолчанию OpenAI.
+    await openSection(admin);
+    await admin.click("#provBody .a-card__head button:has-text('Добавить')");
+    await admin.waitForSelector("#provBaseUrl", { timeout: 15000 });
+    t("на странице добавления есть сегмент шаблонов (по умолчанию OpenAI)",
+      await admin.locator("#provNewProtoSeg .a-seg2__btn").count() === 2
+      && await admin.locator("#provNewProtoSeg .a-seg2__btn--on").getAttribute("data-proto") === "chat");
+    t("мышление — сегмент из 5 (Стандарт по умолчанию), а не текст",
+      await admin.locator("#provNewEffortSeg .a-seg2__btn").count() === 5
+      && await admin.locator("#provNewEffortSeg .a-seg2__btn--on").getAttribute("data-effort") === "");
+    t("у OpenAI-шаблона нет блока заголовков, подклейка видна",
+      await admin.locator("#provNewHeaders").isHidden()
+      && await admin.locator("#provMerge").isVisible());
+    await admin.click("#provNewProtoSeg .a-seg2__btn[data-proto='responses']");
+    t("шаблон Responses показывает заголовки и прячет подклейку",
+      await admin.locator("#provNewHeaders").isVisible()
+      && await admin.locator("#provMerge").isHidden());
+    await admin.click("#provNewEffortSeg .a-seg2__btn[data-effort='high']");
+    t("клик по мышлению обновляет подсказку",
+      (await admin.locator("#provNewEffortNote").innerText()).includes("Высок"),
+      await admin.locator("#provNewEffortNote").innerText());
+    await shot(admin, "admin-providers-new-responses.png");
+    // Черновик Responses против chat-only шлюза: обязан упасть на /responses
+    // (404), а не пройти по chat-пути — иначе шаблон не переключает протокол.
+    await admin.fill("#provBaseUrl", `http://127.0.0.1:${GATEWAY_PORT}/v1`);
+    await admin.fill("#provModel", "alpha-pro");
+    await admin.fill("#provKey", "fake-secret-key-1234");
+    await admin.click("#provDraftBtn");
+    await admin.waitForFunction(
+      () => /можно добавлять|недоступна/.test(
+        (document.querySelector("#provDraftResult") || {}).textContent || ""),
+      null, { timeout: 20000 });
+    t("черновик Responses проверяется своим протоколом (/responses → 404 шлюза)",
+      (await admin.locator("#provDraftResult").innerText()).includes("404"),
+      await admin.locator("#provDraftResult").innerText());
+    await sleep(3500); // троттлинг черновиков — вторая проба только после паузы
+    await admin.click("#provNewProtoSeg .a-seg2__btn[data-proto='chat']");
+    await admin.click("#provDraftBtn");
+    await admin.waitForFunction(
+      () => (document.querySelector("#provDraftResult") || {}).textContent.includes("можно добавлять"),
+      null, { timeout: 20000 });
+    t("тот же черновик шаблоном OpenAI проверяется и проходит",
+      (await admin.locator("#provDraftResult").innerText()).includes("можно добавлять"));
+
+    // Страница провайдера: шаблон, мышление и заголовки сохраняются.
+    await openSection(admin);
+    await admin.click(".a-prov-card:has-text('Быстрый шлюз') .a-prov-card__open");
+    await admin.waitForSelector("#provDetailModel", { timeout: 15000 });
+    t("на странице свой провайдер видит шаблон (по умолчанию OpenAI)",
+      await admin.locator("#provProtoSeg .a-seg2__btn").count() === 2
+      && await admin.locator("#provProtoSeg .a-seg2__btn--on").getAttribute("data-proto") === "chat");
+    await admin.click("#provProtoSeg .a-seg2__btn[data-proto='responses']");
+    // Кнопки добавления заголовка — по тексту, id у неё нет.
+    await admin.click("button:has-text('+ Заголовок')");
+    const hrows = admin.locator("#provHeaders [data-hrow]");
+    await hrows.last().locator("[data-hname]").fill("x-test");
+    await hrows.last().locator("[data-hvalue]").fill("1");
+    await admin.click("#provEffortSeg .a-seg2__btn[data-effort='high']");
+    t("правка шаблона/мышления/заголовков зажигает «не сохранено»",
+      (await admin.locator("#provApplyState").innerText()).includes("несохранённые"),
+      await admin.locator("#provApplyState").innerText());
+    await admin.click("#provDetailApply");
+    await admin.waitForFunction(
+      () => (document.querySelector("#provApplyState") || {}).textContent.trim() === "",
+      null, { timeout: 20000 });
+    const fastgw = await admin.evaluate(async () => {
+      const r = await fetch("/api/admin/providers", { credentials: "same-origin" });
+      const d = await r.json();
+      return (d.providers || []).find((p) => p.id === "fastgw");
+    });
+    t("шаблон+мышление+заголовки доехали до сервера",
+      fastgw && fastgw.protocol === "responses" && fastgw.reasoningEffort === "high"
+      && fastgw.extraHeaders && fastgw.extraHeaders["x-test"] === "1",
+      JSON.stringify({ p: fastgw && fastgw.protocol, e: fastgw && fastgw.reasoningEffort }));
+    await admin.reload({ waitUntil: "domcontentloaded" });
+    await admin.waitForSelector("#provDetailModel", { timeout: 15000 });
+    t("после reload: чип Responses, заголовки на месте, подклейка скрыта",
+      (await admin.locator(".a-page-badges").innerText()).includes("Responses")
+      && await admin.locator("#provHeaders [data-hrow]").count() === 1
+      && (await admin.locator("#provHeaders [data-hname]").inputValue()) === "x-test"
+      && await admin.locator("#provMerge").isHidden());
+    await shot(admin, "admin-providers-detail-responses.png");
+    // Живая проверка своим протоколом: шлюз chat-only → честные 404.
+    await admin.click("#provModelProbeBtn");
+    await admin.waitForFunction(
+      () => (document.querySelector("#provModelProbeResult") || {}).textContent.includes("404"),
+      null, { timeout: 30000 });
+    t("кнопка «Проверить» идёт своим протоколом (404, а не успех по chat)",
+      (await admin.locator("#provModelProbeResult").innerText()).includes("404"));
+    // Возвращаем как было: chat без заголовков в отправке (скрытые хранятся).
+    await admin.click("#provProtoSeg .a-seg2__btn[data-proto='chat']");
+    await admin.click("#provDetailApply");
+    await admin.waitForFunction(
+      () => (document.querySelector("#provApplyState") || {}).textContent.trim() === "",
+      null, { timeout: 20000 });
+    const fastgw2 = await admin.evaluate(async () => {
+      const r = await fetch("/api/admin/providers", { credentials: "same-origin" });
+      const d = await r.json();
+      return (d.providers || []).find((p) => p.id === "fastgw");
+    });
+    t("возврат на chat не стирает скрытые заголовки",
+      fastgw2 && fastgw2.protocol === "chat"
+      && fastgw2.extraHeaders && fastgw2.extraHeaders["x-test"] === "1",
+      JSON.stringify(fastgw2 && fastgw2.extraHeaders));
+
     // ---------------- P9b: проверка всех ПРОВАЙДЕРОВ (другая кнопка) ------
     section("P9b проверка всех провайдеров в разделе");
     await openSection(admin);

@@ -2015,6 +2015,164 @@ const PROV_SLOT_OPTIONS = [
    в панели они не помещались и читались как «Высокий — первый» в кнопке. */
 const PROV_SLOT_LABELS = { high: "Высокий", medium: "Средний", low: "Низкий" };
 
+/* Шаблон протокола API: два стандартных формата, а не причуда одного шлюза.
+   OpenAI — классический chat/completions; Responses API — собственный новый
+   протокол самого OpenAI (инструкции + input, ответ массивом output[]), его же
+   отдают Azure и ряд шлюзов. Выбор шаблона меняет, какие поля видит форма:
+   effort — всегда (уровень мышления универсален), заголовки — только у
+   Responses, подклейка system — только у OpenAI (в responses system едет
+   полем instructions и подклеивать нечего). */
+const PROV_PROTOCOLS = [
+  { id: "chat", label: "OpenAI", hint: "chat/completions — обычный формат" },
+  { id: "responses", label: "Responses API", hint: "responses — новый формат OpenAI" },
+];
+/* Уровень мышления reasoning-модели — выбором, а не текстом: свободная строка
+   здесь давала бы опечатки, которые сервер резал бы 400-й уже после нажатия.
+   Пусто («Стандарт») = default шлюза, поле в запрос не едет вовсе. */
+const PROV_EFFORTS = [
+  { id: "", label: "Стандарт", hint: "как решит шлюз" },
+  { id: "minimal", label: "Минимальный", hint: "дешевле всего" },
+  { id: "low", label: "Низкий", hint: "чуть глубже" },
+  { id: "medium", label: "Средний", hint: "середина" },
+  { id: "high", label: "Высокий", hint: "полное мышление" },
+];
+function provEffortLabel(id) {
+  const f = PROV_EFFORTS.find((x) => (x.id || "") === (id || ""));
+  return f ? f.label : (id || "Стандарт");
+}
+/* Сегмент шаблона протокола: тем же .a-seg2, что приоритет, — кнопки с
+   подписью и пояснением, видно сразу оба формата. */
+function provProtoSegHTML(current, onclick) {
+  const cur = current === "responses" ? "responses" : "chat";
+  return `<div class="a-seg2" role="group" aria-label="Протокол API провайдера">
+    ${PROV_PROTOCOLS.map((s) => `<button type="button" class="a-seg2__btn${s.id === cur ? " a-seg2__btn--on" : ""}"
+        data-proto="${s.id}" onclick="${onclick}('${s.id}')" title="${esc(s.hint)}">
+      ${esc(s.label)}<span class="a-seg2__hint">${esc(s.hint)}</span>
+    </button>`).join("")}
+  </div>`;
+}
+/* Сегмент мышления: пять состояний, тот же .a-seg2 (на телефоне сложится
+   2+2+1 сам — у компонента уже есть такой брейкпоинт). Пояснение — одной
+   строкой под сегментом, а не в каждой кнопке: пять хинтов в кнопках не
+   читались бы и на десктопе. */
+function provEffortSegHTML(current, onclick) {
+  const cur = (current || "").toLowerCase();
+  return `<div class="a-seg2" role="group" aria-label="Уровень мышления модели">
+    ${PROV_EFFORTS.map((s) => `<button type="button" class="a-seg2__btn${(s.id || "") === cur ? " a-seg2__btn--on" : ""}"
+        data-effort="${esc(s.id)}" onclick="${onclick}('${esc(s.id)}')" title="${esc(s.hint)}">
+      ${esc(s.label)}
+    </button>`).join("")}
+  </div>`;
+}
+function provEffortNote(effort) {
+  const f = PROV_EFFORTS.find((x) => (x.id || "") === ((effort || "").toLowerCase()));
+  if (!f || !f.id) return "Стандарт: уровень мышления выбирает сам шлюз (поле в запрос не едет).";
+  return `${f.label}: ${f.hint}. Наставник ходит на «Минимальном» всегда, судья сочинений — на «Высоком», это задано кодом, а не этим полем.`;
+}
+/* Редактор доп. заголовков HTTP: строки «имя — значение» тем же
+   .a-chain-row, что слоты цепочки (flex-ряд, а не новая вёрстка). Пустое имя —
+   строка игнорируется, значения только видимые: секретам здесь не место. */
+function provHeaderRowHTML(name, value) {
+  return `<div class="a-chain-row" data-hrow>
+    <input class="a-input mono a-chain-input" data-hname placeholder="x-custom-header" value="${esc(name || "")}" autocomplete="off" spellcheck="false" oninput="provHeadersTouched()">
+    <input class="a-input mono a-chain-input" data-hvalue placeholder="значение" value="${esc(value || "")}" autocomplete="off" spellcheck="false" oninput="provHeadersTouched()">
+    <button type="button" class="a-icon-btn a-icon-btn--danger" onclick="provHeaderDel(this)" title="Убрать заголовок">✕</button>
+  </div>`;
+}
+function provHeadersHTML(headers) {
+  const rows = Object.entries(headers || {})
+    .filter(([n]) => n && String(n).trim())
+    .map(([n, v]) => provHeaderRowHTML(n, v)).join("");
+  return rows || `<div class="a-card__sub" data-hempty>Заголовков нет — обычный провайдер без них работает.</div>`;
+}
+function provHeadersTouched() {
+  // Правка заголовков — тоже несохранённое изменение, но только на странице
+  // провайдера: в форме добавления нечего сравнивать, там всё новое.
+  if (ProvDetail.id) provDetailMarkDirty();
+}
+function provHeaderDel(btn) {
+  const row = btn && btn.closest ? btn.closest("[data-hrow]") : null;
+  if (row && row.parentNode) row.parentNode.removeChild(row);
+  const box = document.getElementById("provHeaders") || document.getElementById("provNewHeaders");
+  if (box && !box.querySelector("[data-hrow]") && !box.querySelector("[data-hempty]")) {
+    box.insertAdjacentHTML("beforeend", `<div class="a-card__sub" data-hempty>Заголовков нет — обычный провайдер без них работает.</div>`);
+  }
+  provHeadersTouched();
+}
+function provHeaderAdd(boxId) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const empty = box.querySelector("[data-hempty]");
+  if (empty && empty.parentNode) empty.parentNode.removeChild(empty);
+  box.insertAdjacentHTML("beforeend", provHeaderRowHTML("", ""));
+  provHeadersTouched();
+}
+function provHeadersRead(boxId) {
+  const box = document.getElementById(boxId);
+  const out = {};
+  if (!box) return out;
+  box.querySelectorAll("[data-hrow]").forEach((row) => {
+    const n = ((row.querySelector("[data-hname]") || {}).value || "").trim();
+    const v = ((row.querySelector("[data-hvalue]") || {}).value || "").trim();
+    if (n) out[n] = v;
+  });
+  return out;
+}
+/* Переключение шаблона: красит сегмент и показывает/прячет блоки. Классы, а
+   не style.display: .a-check — flex, и атрибут hidden его не спрячет (авторский
+   display бьёт UA-правило), поэтому прячем блочные обёртки. Значения скрытых
+   блоков НЕ стираются — при возврате на шаблон они на месте. */
+function paintProtoSeg(boxId, proto) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const cur = proto === "responses" ? "responses" : "chat";
+  box.querySelectorAll(".a-seg2__btn").forEach((b) => {
+    b.classList.toggle("a-seg2__btn--on", (b.dataset.proto || "") === cur);
+  });
+}
+function paintProtoBlocks(proto) {
+  const responses = (proto || "chat") === "responses";
+  document.querySelectorAll(".resp-only").forEach((n) => { n.hidden = !responses; });
+  document.querySelectorAll(".chat-only").forEach((n) => { n.hidden = responses; });
+}
+function setNewProto(proto) {
+  paintProtoSeg("provNewProtoSeg", proto);
+  paintProtoBlocks(proto);
+}
+function setDetailProto(proto) {
+  paintProtoSeg("provProtoSeg", proto);
+  paintProtoBlocks(proto);
+  provDetailMarkDirty();
+}
+function paintEffortSeg(boxId, effort) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const cur = (effort || "").toLowerCase();
+  box.querySelectorAll(".a-seg2__btn").forEach((b) => {
+    b.classList.toggle("a-seg2__btn--on", (b.dataset.effort || "") === cur);
+  });
+}
+function setNewEffort(effort) {
+  paintEffortSeg("provNewEffortSeg", effort);
+  const note = document.getElementById("provNewEffortNote");
+  if (note) note.textContent = provEffortNote(effort);
+}
+function setDetailEffort(effort) {
+  paintEffortSeg("provEffortSeg", effort);
+  const note = document.getElementById("provEffortNote");
+  if (note) note.textContent = provEffortNote(effort);
+  provDetailMarkDirty();
+}
+function currentProto(boxId) {
+  const on = document.querySelector(`#${boxId} .a-seg2__btn--on`);
+  const v = on ? (on.dataset.proto || "") : "";
+  return v === "responses" ? "responses" : "chat";
+}
+function currentEffort(boxId) {
+  const on = document.querySelector(`#${boxId} .a-seg2__btn--on`);
+  return on ? (on.dataset.effort || "") : "";
+}
+
 /* Сегмент-контрол на странице провайдера: короткие подписи + пояснение, зачем
    слот нужен. PROV_SLOT_OPTIONS длиннее — они для выпадающего списка на
    карточке, где места мало, а пояснение не помещается. */
@@ -2083,6 +2241,7 @@ function provCardHTML(p) {
         ${p.auth === "raw" ? `<span class="a-chip" title="Ключ уходит как есть (quirk gptunnel)">raw-ключ</span>` : ""}
         ${p.useWalletBalance ? `<span class="a-chip" title="Списывать предоплату кошелька">кошелёк</span>` : ""}
         ${p.mergeSystem ? `<span class="a-chip" title="System-промпт подклеивается к user (маршруты вроде anthropic)">merge system</span>` : ""}
+        ${p.protocol === "responses" ? `<span class="a-chip" title="Новый формат OpenAI: instructions + input, ответ массивом output">Responses API</span>` : ""}
       </div>
     </button>
     <div class="a-prov-actions">
@@ -2459,7 +2618,7 @@ function screenProviderNew() {
         <span class="a-dot a-dot--idle"></span>
         <div class="a-page-title-wrap">
           <h1 class="a-page-title">Новый провайдер</h1>
-          <div class="a-page-sub">Обычный OpenAI-совместимый API: адрес, ключ, модель</div>
+          <div class="a-page-sub">Шаблон API, адрес, ключ, модель — форма подстроится под шаблон</div>
         </div>
       </div>
       <div class="a-page-status">
@@ -2471,6 +2630,11 @@ function screenProviderNew() {
       <div class="a-page-col">
         <section class="a-card">
           <div class="a-card__head"><span class="a-card__title">Подключение</span></div>
+          <div class="a-field">
+            <label>Шаблон API</label>
+            <div id="provNewProtoSeg">${provProtoSegHTML("chat", "setNewProto")}</div>
+            <span class="a-field__hint">Шаблон меняет поля формы: у Responses API свой формат запросов, ему нужны заголовки и не нужна подклейка system.</span>
+          </div>
           <div class="a-form-grid">
             <div class="a-field">
               <label for="provId">ID латиницей</label>
@@ -2500,6 +2664,20 @@ function screenProviderNew() {
               <option value="raw">Сырой ключ (как gptunnel)</option>
             </select>
           </div>
+          <div class="a-field">
+            <label>Уровень мышления</label>
+            <div id="provNewEffortSeg">${provEffortSegHTML("", "setNewEffort")}</div>
+            <span class="a-field__hint" id="provNewEffortNote">${provEffortNote("")}</span>
+          </div>
+        </section>
+
+        <section class="a-card resp-only" hidden>
+          <div class="a-card__head"><span class="a-card__title">Доп. заголовки HTTP</span></div>
+          <div id="provNewHeaders">${provHeadersHTML({})}</div>
+          <div class="a-actions-row" style="margin-top:8px">
+            <button class="btn btn--soft btn--sm" type="button" onclick="provHeaderAdd('provNewHeaders')">+ Заголовок</button>
+          </div>
+          <span class="a-field__hint">Например x-opencode-session для маршрутизации. Секретам здесь не место — значения видны в админке.</span>
         </section>
 
         <section class="a-card">
@@ -2531,7 +2709,8 @@ function screenProviderNew() {
         <section class="a-card">
           <div class="a-card__head"><span class="a-card__title">Особенности шлюза</span></div>
           <label class="a-check"><input type="checkbox" id="provWallet"> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
-          <label class="a-check"><input type="checkbox" id="provMerge"> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label>
+          <div class="chat-only"><label class="a-check"><input type="checkbox" id="provMerge"> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label></div>
+          <div class="a-pnl__note resp-only" hidden>Для Responses API подклейка не применяется — system едет отдельным полем instructions.</div>
           <div class="a-pnl__note">Оставьте пустым, если шлюз ведёт себя как обычный OpenAI API. Ошибка в этой настройке ломает все запросы, поэтому «проверить без сохранения» — правильный способ убедиться до добавления.</div>
         </section>
 
@@ -2562,6 +2741,8 @@ async function draftProbeFromPage() {
       base_url: provField("provBaseUrl"), model: provField("provModel"),
       api_key: provField("provKey"), auth: provField("provAuth"),
       useWalletBalance: document.getElementById("provWallet")?.checked,
+      protocol: currentProto("provNewProtoSeg"),
+      extra_headers: provHeadersRead("provNewHeaders"),
     });
     const p = r && r.probe;
     if (box) box.innerHTML = p && p.ok
@@ -2598,6 +2779,9 @@ async function saveProviderFromPage() {
       model_title: provField("provModelTitle"),
       useWalletBalance: document.getElementById("provWallet")?.checked,
       mergeSystem: document.getElementById("provMerge")?.checked,
+      protocol: currentProto("provNewProtoSeg"),
+      reasoning_effort: currentEffort("provNewEffortSeg"),
+      extra_headers: provHeadersRead("provNewHeaders"),
       slot: slot || null,
     });
     created = (r && r.provider && r.provider.id) || provField("provId").trim();
@@ -3041,6 +3225,7 @@ function screenProviderPage(id) {
         </div>
         <div class="a-page-badges">
           ${p.builtin ? '<span class="a-chip">встроенный</span>' : '<span class="a-chip a-chip--accent">свой</span>'}
+          ${p.protocol === "responses" ? '<span class="a-chip a-chip--accent" title="Новый формат OpenAI: instructions + input, ответ массивом output">Responses API</span>' : ""}
           ${p.active ? '<span class="a-chip a-chip--success">активный</span>' : ""}
           ${p.enabled ? "" : '<span class="a-chip a-chip--warn">выключен</span>'}
           ${p.modelOverridden ? '<span class="a-chip a-chip--warn">модель изменена</span>' : ""}
@@ -3117,8 +3302,15 @@ function screenProviderPage(id) {
           ${provKvHTML("Адрес", esc(p.baseHost || p.baseUrl || "—"), true)}
           ${provKvHTML("Ключ", p.keySet ? `задан <span class="mono">${esc(p.keyHint || "")}</span>` : "не задан")}
           ${provKvHTML("Авторизация", p.auth === "raw" ? "сырой ключ" : "Bearer")}
+          ${provKvHTML("Протокол", p.protocol === "responses" ? "Responses API" : "OpenAI")}
+          ${p.reasoningEffort ? provKvHTML("Мышление", esc(provEffortLabel(p.reasoningEffort))) : ""}
           <details class="a-fold"${p.builtin ? "" : " open"}>
             <summary>Изменить адрес, ключ и quirks</summary>
+            ${p.builtin ? "" : `<div class="a-field">
+              <label>Шаблон API</label>
+              <div id="provProtoSeg">${provProtoSegHTML(p.protocol || "chat", "setDetailProto")}</div>
+              <span class="a-field__hint">Шаблон меняет поля формы: у Responses API свой формат запросов, ему нужны заголовки и не нужна подклейка system.</span>
+            </div>`}
             <div class="a-field">
               <label for="provDetailBaseUrl">Base URL</label>
               <input class="a-input mono" id="provDetailBaseUrl" value="${esc(p.baseUrl || "")}" autocomplete="off" spellcheck="false">
@@ -3128,8 +3320,24 @@ function screenProviderPage(id) {
               <input class="a-input mono" id="provDetailKey" type="password" placeholder="${p.keySet ? esc(`задан ${p.keyHint || ""} — пусто = не менять`) : "не задан"}" autocomplete="off">
               <span class="a-field__hint">Ключ никогда не отдаётся в браузер целиком.</span>
             </div>
+            ${p.builtin ? "" : `<div class="a-field">
+              <label>Уровень мышления</label>
+              <div id="provEffortSeg">${provEffortSegHTML(p.reasoningEffort || "", "setDetailEffort")}</div>
+              <span class="a-field__hint" id="provEffortNote">${provEffortNote(p.reasoningEffort || "")}</span>
+            </div>`}
             <label class="a-check"><input type="checkbox" id="provWallet"${p.useWalletBalance ? " checked" : ""}> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
-            <label class="a-check"><input type="checkbox" id="provMerge"${p.mergeSystem ? " checked" : ""}> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label>
+            <div class="chat-only"${(!p.builtin && (p.protocol || "chat") === "responses") ? " hidden" : ""}><label class="a-check"><input type="checkbox" id="provMerge"${p.mergeSystem ? " checked" : ""}> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label></div>
+            ${p.builtin ? "" : `<div class="resp-only"${(p.protocol || "chat") === "responses" ? "" : " hidden"}>
+              <div class="a-pnl__note">Для Responses API подклейка не применяется — system едет отдельным полем instructions.</div>
+              <div class="a-field" style="margin-top:10px">
+                <label>Доп. заголовки HTTP</label>
+                <div id="provHeaders">${provHeadersHTML(p.extraHeaders || {})}</div>
+                <div class="a-actions-row" style="margin-top:8px">
+                  <button class="btn btn--soft btn--sm" type="button" onclick="provHeaderAdd('provHeaders')">+ Заголовок</button>
+                </div>
+                <span class="a-field__hint">Скрытые при другом шаблоне значения не стираются. Секретам здесь не место — значения видны в админке.</span>
+              </div>
+            </div>`}
           </details>
           <div class="a-pnl__note">${p.builtin
             ? "Стандартные значения встроенного провайдера берутся из окружения сервера. Здесь можно наложить свои — они переживут рестарт, а «Сбросить» вернёт окружение."
@@ -3510,7 +3718,24 @@ function provDetailMarkDirty() {
     const address = (document.getElementById("provDetailBaseUrl") || {}).value || "";
     const slotBtn = document.querySelector("#provSlotSeg .a-seg2__btn--on");
     const slotChanged = (card.slot || "") !== ((slotBtn && slotBtn.dataset.slot) || "");
-    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged || chainDirty || titlesDirty)
+    // Шаблон, мышление и заголовки — тоже несохранённые изменения: без этого
+    // человек уходил бы, думая, что новый формат уже действует.
+    const protoBtn = document.querySelector("#provProtoSeg .a-seg2__btn--on");
+    const protoChanged = !!document.getElementById("provProtoSeg")
+      && (card.protocol || "chat") !== ((protoBtn && protoBtn.dataset.proto) || "chat");
+    const effortBtn = document.querySelector("#provEffortSeg .a-seg2__btn--on");
+    const effortChanged = !!document.getElementById("provEffortSeg")
+      && (card.reasoningEffort || "") !== ((effortBtn && effortBtn.dataset.effort) || "");
+    let headersChanged = false;
+    try {
+      const saved = card.extraHeaders || {};
+      const draft = document.getElementById("provHeaders") ? provHeadersRead("provHeaders") : saved;
+      const keys = (o) => Object.keys(o || {}).sort();
+      headersChanged = !!document.getElementById("provHeaders")
+        && (keys(saved).join("\n") !== keys(draft).join("\n")
+          || keys(saved).some((k) => String(saved[k] || "") !== String(draft[k] || "")));
+    } catch (e) { headersChanged = false; }
+    state.textContent = (modelDirty || titleDirty || key.trim() || address.trim() !== (card.baseUrl || "") || slotChanged || chainDirty || titlesDirty || protoChanged || effortChanged || headersChanged)
       ? "Есть несохранённые изменения" : "";
     state.classList.toggle("a-sticky-actions__state--on", !!state.textContent);
   }
@@ -3694,6 +3919,17 @@ async function applyProviderDetail() {
   if (key && key.trim()) payload.api_key = key.trim();
   payload.use_wallet_balance = !!(document.getElementById("provWallet") || {}).checked;
   payload.merge_system = !!(document.getElementById("provMerge") || {}).checked;
+  // Шаблон, мышление и заголовки — той же кнопкой (свой провайдер; у
+  // встроенного этих полей нет и сервер их не примет). Заголовки едут только
+  // при активном шаблоне Responses: скрытые при chat значения сервер и так
+  // хранит, а пустая отправка их стёрла бы.
+  if (!((ProvDetail.data || {}).builtin)) {
+    payload.protocol = currentProto("provProtoSeg");
+    payload.reasoning_effort = currentEffort("provEffortSeg");
+    if (payload.protocol === "responses") {
+      payload.extra_headers = provHeadersRead("provHeaders");
+    }
+  }
   if (!payload.model) { provDetailError("Впиши ID модели — без нее провайдер не сможет отвечать"); return; }
   // Цепочка — той же кнопкой: верх обязан совпадать с полем модели (иначе
   // сервер отклонит как рассинхрон), дубли от одного переноса — обмен.
@@ -3762,6 +3998,18 @@ function provDetailSyncFromCard(fresh) {
   if (wallet) wallet.checked = !!fresh.useWalletBalance;
   const merge = document.getElementById("provMerge");
   if (merge) merge.checked = !!fresh.mergeSystem;
+  // Шаблон, мышление и заголовки — из свежей карточки, иначе после сохранения
+  // страница показывала бы старые: сегменты перекрашиваем, редактор строк
+  // пересобираем целиком (значений в нём больше нет смысла держать).
+  const protoBox = document.getElementById("provProtoSeg");
+  if (protoBox) protoBox.innerHTML = provProtoSegHTML(fresh.protocol || "chat", "setDetailProto");
+  const effortBox = document.getElementById("provEffortSeg");
+  if (effortBox) effortBox.innerHTML = provEffortSegHTML(fresh.reasoningEffort || "", "setDetailEffort");
+  const effortNote = document.getElementById("provEffortNote");
+  if (effortNote) effortNote.textContent = provEffortNote(fresh.reasoningEffort || "");
+  const headersBox = document.getElementById("provHeaders");
+  if (headersBox) headersBox.innerHTML = provHeadersHTML(fresh.extraHeaders || {});
+  paintProtoBlocks(fresh.protocol || "chat");
   const slotBox = document.getElementById("provSlotSeg");
   if (slotBox) slotBox.innerHTML = provSlotSegHTML(fresh.slot || "");
   ProvDetail.model = fresh.model || "";
