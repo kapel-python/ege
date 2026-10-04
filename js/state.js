@@ -1987,8 +1987,10 @@ function recordForecastSnapshot() {
 
 function forecastHistory(days = 14) {
   if (!Store.state || !forecastConfigAvailable()) return [];
-  const from = new Date(Date.now() - (days - 1) * 86400000);
-  const cutoff = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+  // Снимки хранятся под московской датой (todayStr), поэтому и срез окна
+  // считаем по ней же (dateKeyForTimestamp), а не по локальной дате браузера:
+  // иначе вдали от Москвы крайние дни выпадали бы из окна на сутки раньше.
+  const cutoff = dateKeyForTimestamp(Date.now() - (days - 1) * 86400000);
   return safeArray(Store.state.forecastHistory).filter((x) => x && x.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
 }
 

@@ -6823,18 +6823,52 @@ function screenStats(root) {
   const avgTime = s.totalSolved ? Math.round(s.totalTimeSec / s.totalSolved) : 0;
   const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()).filter((skill) => !topicIsLocked(skill));
   const byProg = skills.slice().sort((a, b) => skillProgress(b.id) - skillProgress(a.id));
-  // With every skill still at 0% (a brand-new account), sort() ties resolve
-  // to catalog order — that would label skills №1-3 "strong" and №18-20
-  // "needs attention" with zero real signal behind it. Show an honest empty
-  // state instead of a ranking that looks meaningful but isn't.
-  const hasSignal = byProg.some((sk) => skillProgress(sk.id) > 0);
-  const strongest = hasSignal ? byProg.slice(0, 3) : [];
+  // Сильные темы — только темы с реальным сигналом (>0%): иначе при одной-двух
+  // тронутых темах в топ-3 добирались бы нетронутые нулевые и выглядели бы
+  // «сильными», хотя по ним нет ни ответов, ни уроков.
+  const withSignal = byProg.filter((sk) => skillProgress(sk.id) > 0);
+  const hasSignal = withSignal.length > 0;
+  const strongest = withSignal.slice(0, 3);
   // «Требуют внимания» — только реальные проблемы (ошибки / плохая точность),
   // а не темы с нулевым прогрессом: иначе свежий аккаунт после диагностики
   // получал бы здесь случайные нетронутые темы под видом слабых мест.
+  // К каждой строке прикладываем причину, потому что голый процент освоения её
+  // не объясняет: тема может стоять высоко за счёт уроков и при этом требовать
+  // внимания из-за открытых ошибок.
   const weakest = skills.filter((sk) => skillNeedsAttention(sk.id))
-    .sort((a, b) => skillProgress(a.id) - skillProgress(b.id))
+    .map((sk) => {
+      const st = (s.skillStats && s.skillStats[sk.id]) || {};
+      const solved = nonNegativeNumber(st.solved);
+      const correct = nonNegativeNumber(st.correct);
+      return {
+        sk,
+        prog: nonNegativeNumber(skillProgress(sk.id)),
+        errs: openErrorCount(sk.id),
+        acc: solved ? Math.round((correct / solved) * 100) : null,
+      };
+    })
+    .sort((a, b) => (a.prog - b.prog) || (b.errs - a.errs))
     .slice(0, 3);
+  const f = safeForecast();
+  let trend = null;
+  try { trend = forecastTrend(); } catch (_) { trend = null; }
+  let cov = null;
+  try { cov = forecastCoverage(); } catch (_) { cov = null; }
+  let gains = [];
+  try {
+    gains = forecastTopGains(3)
+      .filter((g) => g && DataAPI.skill(g.skillId) && !topicIsLocked(DataAPI.skill(g.skillId)));
+  } catch (_) { gains = []; }
+  let forecastNote = "";
+  try { forecastNote = forecastNoteHTML(); } catch (_) { forecastNote = ""; }
+  const openErrs = asSafeArray(s.errors).filter((e) => e && !e.resolved).length;
+  const streak = nonNegativeNumber(s.streak);
+  const bestSeries = nonNegativeNumber(s.bestSeries);
+  let lessons = [];
+  try { lessons = DataAPI.lessons(); } catch (_) { lessons = []; }
+  const doneLessons = lessons.filter((l) => l && s.completedLessons && s.completedLessons[l.id]).length;
+  let hasEssayTasks = false;
+  try { hasEssayTasks = DataAPI.tasks().some(isLongTextTask); } catch (_) { hasEssayTasks = false; }
 
   root.innerHTML = `
     <div class="page-head">
@@ -6848,6 +6882,30 @@ function screenStats(root) {
       <div class="card"><div class="stat-num mono">${avgTime ? fmtTime(avgTime) : "—"}</div><div class="stat-label">среднее время</div></div>
       <div class="card"><div class="stat-num mono">${s.xp}</div><div class="stat-label">всего XP</div></div>
     </div>
+
+    <div class="grid grid--4" style="margin-top:16px">
+      <div class="card"><div class="stat-num mono">${streak}</div><div class="stat-label">дней подряд</div></div>
+      <div class="card"><div class="stat-num mono">${bestSeries}</div><div class="stat-label">лучшая серия</div></div>
+      <div class="card"><div class="stat-num mono">${openErrs}</div><div class="stat-label">открытых ошибок</div></div>
+      <div class="card"><div class="stat-num mono">${lessons.length ? `${doneLessons}/${lessons.length}` : "—"}</div><div class="stat-label">уроков пройдено</div></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div style="font-weight:650;margin-bottom:10px">Текущий прогноз</div>
+      ${f.empty
+        ? `<div class="stat-label">Пока считать не по чему — проходи уроки и практику, прогноз появится после первых шагов.</div>`
+        : `<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+             <div class="stat-num mono" style="margin:0">${f.mid}</div>
+             <div class="stat-label">диапазон ${f.low}–${f.high} · ${forecastTrendLabel(trend)}</div>
+           </div>
+           ${cov && cov.totalLessons ? `<div style="font-size:13px;color:var(--muted);margin-top:10px">Уроки: ${cov.doneLessons} из ${cov.totalLessons} · Темы с данными: ${cov.covered} из ${cov.totalSkills}</div>
+           <div style="margin-top:8px;max-width:340px">${progressBar(cov.lessonPct, "progress--thin")}</div>` : ""}
+           ${gains.length ? `<div style="margin-top:12px;font-size:14px;font-weight:600">Что даст больше всего</div>
+           ${gains.map((g) => `<button class="forecast-gain-btn" onclick="go('skill', '${g.skillId}')" title="Открыть тему">Закрой «${esc(String(g.name || "тема").replace(/^№\d+\s*[—–-]\s*/, ""))}» — будет <b class="mono">+${g.gain}</b><span class="go">→</span></button>`).join("")}` : ""}
+           ${forecastNote ? `<div style="font-size:12px;color:var(--muted);margin-top:10px">${forecastNote}</div>` : ""}`}
+    </div>
+
+    ${hasEssayTasks ? `<div class="card" style="margin-top:16px" id="statsEssayBox"><div class="stat-label">Загружаем историю сочинений…</div></div>` : ""}
 
     <div class="card" style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <div style="font-weight:650">Использование помощи</div>
@@ -6884,17 +6942,33 @@ function screenStats(root) {
       <div>
         <div class="card" style="margin-bottom:16px">
           <div style="font-weight:650;margin-bottom:10px">Сильные темы</div>
-          ${hasSignal ? strongest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--success mono">${skillProgress(sk.id)}%</span></div>`).join("")
+          ${hasSignal ? strongest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--success mono">${skillProgress(sk.id)}%</span></div>`).join("") + (strongest.length < 3 ? `<div class="stat-label" style="margin-top:8px">Показаны только темы с данными — остальные пока не начаты.</div>` : "")
             : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть сильные темы.</div>`}
         </div>
         <div class="card">
           <div style="font-weight:650;margin-bottom:10px">Требуют внимания</div>
-          ${weakest.length ? weakest.map((sk) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><span>${sk.name}</span><span class="chip chip--danger mono">${skillProgress(sk.id)}%</span></div>`).join("")
+          ${weakest.length ? weakest.map((w) => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><div style="display:flex;justify-content:space-between;gap:8px"><span>${w.sk.name}</span><span class="chip chip--danger mono">${w.prog}%</span></div><div class="stat-label" style="margin-top:2px">${w.errs > 0 ? `открытых ошибок: ${w.errs}` : ""}${w.errs > 0 && w.acc != null ? " · " : ""}${w.acc != null ? `точность ${w.acc}%` : "пока нет ответов"}</div></div>`).join("")
             : hasSignal ? `<div class="stat-label">Слабых мест нет — все темы в хорошем состоянии.</div>`
             : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть слабые темы.</div>`}
         </div>
       </div>
     </div>`;
+  try { statsEssayFill(); } catch (_) {}
+}
+
+async function statsEssayFill() {
+  const box = document.getElementById("statsEssayBox");
+  if (!box || currentRoute() !== "stats") return;
+  const linkHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div style="font-weight:650">Сочинения</div><div class="stat-label">История сочинений живёт в отдельном разделе.</div></div><button class="btn btn--soft btn--sm" type="button" onclick="go('essays')">Мои сочинения</button></div>`;
+  let snap = null;
+  try { snap = await essayHistoryFetch(false); }
+  catch (_) { if (box.isConnected) box.innerHTML = linkHTML; return; }
+  if (!box.isConnected || currentRoute() !== "stats" || !snap) return;
+  const ready = essayReadyItems(snap);
+  const avg = ready.length
+    ? ready.reduce((a, it) => a + Number(it.totalScore), 0) / ready.length
+    : null;
+  box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div style="font-weight:650">Сочинения</div><div class="stat-label">${ready.length ? `проверено: ${ready.length} · средний балл ${avg.toFixed(1)} из 22` : "пока ни одного проверенного — напиши первое"}</div></div><button class="btn btn--soft btn--sm" type="button" onclick="go('essays')">Мои сочинения</button></div>`;
 }
 
 function last14Days() {
@@ -6912,6 +6986,9 @@ function last14Days() {
 
 function activityChart() {
   const days = last14Days();
+  if (!days.some((d) => (Number(d.solved) || 0) > 0)) {
+    return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">Пока пусто — реши первое задание, и здесь появятся столбики активности.</div>`;
+  }
   const W = 520, H = 160, pad = 8;
   const max = Math.max(4, ...days.map((d) => d.solved));
   const bw = (W - pad * 2) / days.length;
@@ -6932,8 +7009,12 @@ function activityChart() {
 
 function forecastChart() {
   const points = forecastHistory();
+  if (!points.length) {
+    return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">Оценок пока нет — первая сохранится сегодня после уроков или практики. Здесь показываются только сохранённые дневные оценки.</div>`;
+  }
   if (points.length < 2) {
-    return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">История появится после второго дня подготовки. Здесь показываются только сохранённые дневные оценки.</div>`;
+    const only = points[0];
+    return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">Первая оценка сохранена (${esc(String(only.date).slice(8))}: ${only.mid}). Вторая появится завтра — тогда здесь будет видна линия динамики.</div>`;
   }
 
   const W = 520, H = 160, pad = 12;
