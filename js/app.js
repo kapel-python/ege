@@ -7425,7 +7425,8 @@ function essayDeltaChip(readyAscNewFirst) {
 
 /* Подписи времени под осью динамики. Формат выбирается по РАЗМАХУ дат —
    правило одно и предсказуемое: всё за один московский день — часы
-   («18:00»), разброс меньше двух месяцев — даты («01.08»), шире —
+   («18:00»), разброс меньше двух месяцев — даты («01.08»), но свежак
+   словами («сегодня», «вчера» — по московскому календарю), шире —
    короткие месяцы («сент.»), через год — с годом («сент. 25»).
    Часовой пояс — московский, как у всей активности в приложении.
    Точек больше шести — показываем первую, последнюю и равномерную
@@ -7467,11 +7468,20 @@ function essayTimeMode(times) {
   return { mode: "month", needYear: years.size > 1 };
 }
 
-function essayTickLabel(t, mode, needYear) {
+function essayTickLabel(t, mode, needYear, nowMs) {
   const p = essayMoscowParts(t);
   if (!p) return "";
   if (mode === "time") return `${p.hh}:${p.mm}`;
-  if (mode === "date") return `${p.d}.${p.m}`;
+  if (mode === "date") {
+    // Свежие даты — словами: сегодняшняя работа — «сегодня»,
+    // вчерашняя — «вчера», остальное — числами («03.10»).
+    const ref = nowMs !== undefined ? nowMs : Date.now();
+    const today = essayMoscowParts(ref);
+    if (today && p.y === today.y && p.m === today.m && p.d === today.d) return "сегодня";
+    const yest = essayMoscowParts(ref - ESSAY_DAY_MS);
+    if (yest && p.y === yest.y && p.m === yest.m && p.d === yest.d) return "вчера";
+    return `${p.d}.${p.m}`;
+  }
   const name = ESSAY_MONTHS_SHORT[Number(p.m) - 1] || "";
   return needYear ? `${name} ${String(p.y).slice(2)}` : name;
 }
