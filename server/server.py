@@ -3674,7 +3674,7 @@ _essay_schema_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Приватные и публичные ссылки сочинений: неперебираемые 10-значные
-# идентификаторы (та же школа, что public_id тредов наставника и платежей
+# идентификаторы (та же школа, что public_id тредов ИИ и платежей
 # Plus). Приватный public_id лежит прямо в essay_submissions и виден только
 # владельцу (/essay/<public_id>, рядом с легаси /essay/<int>); публичный токен
 # живёт в отдельной таблице essay_share_links и открывается всем без входа
@@ -6646,32 +6646,32 @@ def _age_ru(ts_ms: int, now_ms: int) -> str:
 
 
 def _agent_status_service() -> dict:
-    """Строки статуса про наставника: движок, инструменты. Только чтение
+    """Строки статуса про ИИ: движок, инструменты. Только чтение
     памяти — ни БД, ни сети. Подписку (биллинг) сюда не добавляем
     осознанно: это про заработок, а не про работу сервиса."""
     if _AGENT is None:
-        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
-                 "detail": "Модуль наставника недоступен"},
-                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
-                 "detail": "Модуль наставника недоступен"})
+        return ({"id": "agent", "label": "ИИ", "ok": False,
+                 "detail": "Модуль ИИ недоступен"},
+                {"id": "agent-tools", "label": "Инструменты ИИ", "ok": False,
+                 "detail": "Модуль ИИ недоступен"})
     try:
         health = _AGENT.public_agent_health()
     except Exception:
-        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
+        return ({"id": "agent", "label": "ИИ", "ok": False,
                  "detail": "Не удалось проверить"},
-                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
+                {"id": "agent-tools", "label": "Инструменты ИИ", "ok": False,
                  "detail": "Не удалось проверить"})
     tools = [t for t in (health.get("tools") or []) if t]
     missing = [t for t in (health.get("missing") or []) if t]
     if missing:
-        return ({"id": "agent", "label": "ИИ-наставник", "ok": False,
+        return ({"id": "agent", "label": "ИИ", "ok": False,
                  "detail": "Часть возможностей недоступна"},
-                {"id": "agent-tools", "label": "Инструменты наставника", "ok": False,
+                {"id": "agent-tools", "label": "Инструменты ИИ", "ok": False,
                  "detail": f"{len(tools) - len(missing)} из {len(tools)} подключены"})
     count = len(tools)
-    return ({"id": "agent", "label": "ИИ-наставник", "ok": True,
+    return ({"id": "agent", "label": "ИИ", "ok": True,
              "detail": "Готов отвечать на вопросы"},
-            {"id": "agent-tools", "label": "Инструменты наставника", "ok": True,
+            {"id": "agent-tools", "label": "Инструменты ИИ", "ok": True,
              "detail": f"{count} {_plural_ru(count, 'инструмент', 'инструмента', 'инструментов')} подключены"})
 
 
@@ -7901,7 +7901,7 @@ def _load_chain_quota():
 _CHAIN = _load_chain_quota()
 
 # Единая реализация зарядки (см. server/chain_quota.py): и сочинения здесь,
-# и наставник в agent.py буквально вызывают её — дублей нет. Ниже только
+# и ИИ в agent.py буквально вызывают её — дублей нет. Ниже только
 # исторические имена, чтобы не переписывать вызывателей.
 BUCKET_FULL_TICKS = _CHAIN.FULL_TICKS
 _bucket_cum = _CHAIN.cum
@@ -8111,7 +8111,7 @@ def admin_ai_limit_status(conn: sqlite3.Connection, user_id: int) -> dict:
         "globalLimit": ai_usage_max(),
         "customLimit": custom,
     }
-    # Квота ходов ИИ-наставника живёт в том же бакете-таблице, но отдельным
+    # Квота ходов ИИ живёт в том же бакете-таблице, но отдельным
     # owner `agent:<user_id>` и со своим персональным потолком.
     try:
         payload["agent"] = _AGENT.admin_agent_quota_status(conn, user_id)
@@ -8158,7 +8158,7 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
         raise KeyError("user not found")
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
-    # Вложенный объект `agent` — квота ходов ИИ-наставника: свой бакет
+    # Вложенный объект `agent` — квота ходов ИИ: свой бакет
     # `agent:<user_id>`, свой персональный потолок, те же ключи limit /
     # remaining / refill. Пустой — значит по сочинениям ничего не меняем.
     agent_payload = payload.get("agent")
@@ -9883,7 +9883,7 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
                         # Зрители ссылки — тоже прогресс-данные владельца:
                         # user_id на строках есть, удаляются тем же фильтром.
                         "essay_share_viewers",
-                       # activity_events читает наставник (fold_web op=history),
+                       # activity_events читает ИИ (fold_web op=history),
                        # поэтому после сброса ИИ продолжал бы рассказывать
                        # ученику про активность, которой уже нет.
                        "activity_events"],
@@ -13480,7 +13480,7 @@ class Handler(BaseHTTPRequestHandler):
                 # POST /api/agent/turns/confirm — {messageId, approve}.
                 if path == "/api/agent/turns/confirm":
                     if _AGENT is not None and not _AGENT.agent_access_allowed(conn, int(user_id)):
-                        # Флаг EGE_AGENT_REQUIRES_PLUS: наставник только для Plus.
+                        # Флаг EGE_AGENT_REQUIRES_PLUS: ИИ только для Plus.
                         # По умолчанию выключен — бесплатные пользователи ходят
                         # как раньше, проверка ниже их не касается.
                         self.send_json({"error": "Раздел доступен по подписке Plus",
@@ -13771,7 +13771,7 @@ class Handler(BaseHTTPRequestHandler):
                             st = _AGENT.agent_quota_status(conn, int(user_id))
                             retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
                             _turn_cleanup()
-                            self.send_json({"error": "Ходы наставника на сегодня закончились. Дождись таймера.",
+                            self.send_json({"error": "Ходы ИИ на сегодня закончились. Дождись таймера.",
                                             "code": AI_LIMIT_CODE, "limit": st["limit"],
                                             "remaining": st["remaining"], "resetInSec": st["resetInSec"],
                                             "retryAfter": retry},
@@ -13821,18 +13821,18 @@ class Handler(BaseHTTPRequestHandler):
                             # цель не из шкалы): повторять бессмысленно — 400 с текстом.
                             # Жетон возвращается в _turn_cleanup до ответа.
                             _turn_cleanup()
-                            self.send_json({"error": str(exc) or "Наставник не смог подобрать данные.",
+                            self.send_json({"error": str(exc) or "ИИ не смог подобрать данные.",
                                             "code": "AGENT_TOOL_ERROR"}, 400, token=token); return
                         except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError) as exc:
                             rid = log_request_error("agent-model", exc)
                             _turn_cleanup()
-                            self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
+                            self.send_json({"error": "ИИ не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         except Exception as exc:
                             # Любой сбой вне контракта (обрыв провайдера не-AIError,
                             # ошибка сериализации): JSON вместо рваного соединения.
                             rid = log_request_error("agent-model", exc)
                             _turn_cleanup()
-                            self.send_json({"error": "Наставник не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
+                            self.send_json({"error": "ИИ не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         # Фиксируем ход: вопрос + шаги + (финал либо ожидание).
                         # Заменяющий ход сносит старую пару в этой же транзакции.
                         if pending is not None and steps:
@@ -14315,7 +14315,7 @@ class Handler(BaseHTTPRequestHandler):
                         # ?history=1 — вся история сочинений для экрана
                         # «Мои сочинения»: новые сверху, с баллами (см.
                         # essay_history_list). Раздел Plus: без подписки —
-                        # 403 SUBSCRIPTION_REQUIRED (как гейт наставника).
+                        # 403 SUBSCRIPTION_REQUIRED (как гейт ИИ).
                         # Точечные чтения (statuses/sid/taskId) гейта не
                         # несут: практика и экран разбора остаются
                         # бесплатными, платная здесь только агрегация.
@@ -14518,7 +14518,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/dashboard':
             file_path = ROOT / "index.html"
         elif path == '/agent' or path == '/ai':
-            # ИИ-наставник: канонический адрес — /agent (алиас /ai для коротких
+            # ИИ: канонический адрес — /agent (алиас /ai для коротких
             # ссылок). Тот же agent.html, что лежал бы под /agent.html.
             file_path = ROOT / "agent.html"
         elif path == '/admin':
@@ -15053,7 +15053,7 @@ if __name__ == "__main__":
                           file=sys.stderr, flush=True)
             # Минутные самопроверки страницы /status: раз в 60 секунд сервер
             # последовательно прогоняет короткие проверки по всем разделам
-            # (API, материалы, наставник, ИИ, сочинения) и кэширует результат —
+            # (API, материалы, ИИ, ИИ, сочинения) и кэширует результат —
             # /api/status отдаёт кэш, нового эндпоинта и новых лимитов нет.
             stop_health_checks = threading.Event()
             health_checks_thread = None

@@ -1335,7 +1335,7 @@ async function render() {
   const param = routeParam();
   // Подсветка в меню: глубокий маршрут относится к своему разделу.
   const navRoute = navRouteForRoute(route);
-  // Гейт наставника для хрома: нижняя навигация обязана сразу рисоваться
+  // Гейт ИИ для хрома: нижняя навигация обязана сразу рисоваться
   // правильно — без «сначала с ИИ, потом без» и без «сначала без, потом
   // с дёрганием». Если решение ещё неизвестно (первая загрузка, смена
   // аккаунта) — ждём его ДО хрома, даже если это чуть дольше: boot-лоадер
@@ -1489,7 +1489,7 @@ const ROUTE_TITLES = {
   dashboard: "Главная", path: "Путь", skill: "Тема", training: "Тренировка",
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
-  errors: "Ошибки", trials: "Испытания", stats: "Статистика", essays: "Мои сочинения", ai: "ИИ-наставник", profile: "Профиль",
+  errors: "Ошибки", trials: "Испытания", stats: "Статистика", essays: "Мои сочинения", ai: "ИИ", profile: "Профиль",
   login: "Вход", register: "Регистрация", subject: "Выбор предмета",
 };
 
@@ -5550,7 +5550,7 @@ function aiLimitsNoteSpend() {
    открывает его кликом по кружку квоты (справочный режим: timer:false и
    closeText "Закрыть" — ровно инфо-диалог о модели на ege-result) и по
    исчерпании ходов (свои текст, своё склонение, refresh: fetchQuota).
-   Отдельной модалки у наставника больше нет: вид и поведение (крестик, Esc,
+   Отдельной модалки у ИИ больше нет: вид и поведение (крестик, Esc,
    тап по фону, живой таймер, перезапуск по нулю) — одни и те же. */
 let aiLimitTickTimer = null;
 
@@ -7159,7 +7159,7 @@ function essayPaywallHTML(isGuest) {
     </div>`;
 }
 
-/* Гейт наставника для хрома: синхронный срез из кэша подписки.
+/* Гейт ИИ для хрома: синхронный срез из кэша подписки.
    true — показывать «ИИ», false — прятать, null — неизвестно
    (гость/сеть/нет кэша — fail-open: показываем, сервер держит
    вторую стену 403, а точное решение доберётся до хрома ниже). */
@@ -7183,18 +7183,18 @@ function navItemsVisible() {
   return items;
 }
 
-/* Пейволл наставника для прямого захода (#/ai, #/ai/<id>): тот же
+/* Пейволл ИИ для прямого захода (#/ai, #/ai/<id>): тот же
    карточный блок, что у «Моих сочинений» — раздела фактически нет,
    вместо него честное «нужна подписка». Гостю — вход, остальным — тариф. */
 function agentPaywallHTML(isGuest) {
   return `
     <div class="page-head">
-      <div class="page-title">ИИ-наставник</div>
+      <div class="page-title">ИИ</div>
       <div class="page-sub">Разбор ошибок и план подготовки по твоему прогрессу.</div>
     </div>
     <div class="card essays-empty">
       <div class="essays-empty__icon" aria-hidden="true">${icon("crown")}</div>
-      <div class="essays-empty__title">ИИ-наставник — с <span class="plus">Plus</span></div>
+      <div class="essays-empty__title">ИИ — с <span class="plus">Plus</span></div>
       <div class="essays-empty__sub">Личные разборы, план подготовки и ответы по твоей истории. Твои чаты и прогресс на месте — открой доступ и продолжи с того же места.</div>
       <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         ${isGuest

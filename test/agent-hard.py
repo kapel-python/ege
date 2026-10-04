@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""СЛОЖНЫЕ ЗАДАНИЧКИ ИИ-наставника: цепочки ходов, а не одиночные вопросы.
+"""СЛОЖНЫЕ ЗАДАНИЧКИ ИИ: цепочки ходов, а не одиночные вопросы.
 
 `agent-capabilities.py` проверяет «на что он СПОСОБЕН» на коротких вопросах.
 Этот тест — про другое: многошаговые реальные задачи, где ученик говорит
@@ -465,7 +465,7 @@ def main() -> int:
             c.close()
             return (tuple(row), n_open)
 
-        print(f"=== СЛОЖНЫЕ ЗАДАЧИ НАСТАВНИКА ({'DRY/мок' if DRY else 'живой провайдер'}) ===")
+        print(f"=== СЛОЖНЫЕ ЗАДАЧИ ИИ ({'DRY/мок' if DRY else 'живой провайдер'}) ===")
         print(f"сценариев: {len(scens)}, повторов: {args.repeat}; заданий в каталоге: {len(VALID_TASKS)}")
         for rep in range(args.repeat):
             for scen in scens:
@@ -490,7 +490,7 @@ def main() -> int:
                 sys.stdout.flush()
         httpd.shutdown()
 
-    lines = [f"# Сложные задачи ИИ-наставника — {'DRY (мок)' if DRY else 'живой провайдер'}", ""]
+    lines = [f"# Сложные задачи ИИ — {'DRY (мок)' if DRY else 'живой провайдер'}", ""]
     for g in ("цепочки", "сопротивление", "о проекте"):
         rows = [x for x in results if x["group"] == g]
         if not rows:

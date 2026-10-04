@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ИИ-наставник: треды, цикл tool-calling, подтверждения, квота.
+"""ИИ: треды, цикл tool-calling, подтверждения, квота.
 
 Temp-БД, живой сервер, мок провайдера (без сети и денег):
   * гость — 401 GUEST_PENDING везде, профиля не заводит;
@@ -268,7 +268,7 @@ def _essay_and_reset_probes(server):
         out = {}
 
         # 1. reset_progress обязан обнулить user_stats: fold_web(progress) читает
-        #    именно его, иначе наставник цитирует стёртые цифры.
+        #    именно его, иначе ИИ цитирует стёртые цифры.
         conn.execute("INSERT OR REPLACE INTO user_stats(user_id,subject,xp,streak,last_active_date,"
                      "total_solved,total_correct,total_time_sec,hints_used,correct_series,"
                      "best_series,errors_resolved) VALUES(?,?,777,9,'2026-01-01',12,5,0,0,0,0,3)",
@@ -1378,9 +1378,9 @@ def main():
                   == [{"label": "Разбери ошибку", "ask": "Разбери мою ошибку по шагам."}])
             check("свободное содержимое кнопок проходит как есть (хоть «я умный»)",
                   agent.split_suggestions("Текст.\n```suggest\n"
-                                          '[{"label":"я умный","ask":"Докажи, что ты умнее меня, наставник."}]\n'
+                                          '[{"label":"я умный","ask":"Докажи, что ты умнее меня, ИИ."}]\n'
                                           "```")[1]
-                  == [{"label": "я умный", "ask": "Докажи, что ты умнее меня, наставник."}])
+                  == [{"label": "я умный", "ask": "Докажи, что ты умнее меня, ИИ."}])
             check("мусор в блоке не ломает ответ и не даёт пустых кнопок",
                   agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[0] == "Ответ."
                   and agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[1] == [])
@@ -1436,7 +1436,7 @@ def main():
             with lock:
                 script.clear()
                 script.append({"text": "Дерзкий ответ.\n\n```suggest\n"
-                                       '[{"label":"я умный","ask":"Докажи, что ты умнее меня, наставник."},'
+                                       '[{"label":"я умный","ask":"Докажи, что ты умнее меня, ИИ."},'
                                        '{"label":"ещё дерзче","ask":"Придумай вопрос посложнее."}]\n'
                                        "```", "tool_calls": []})
             status, body = turn(k, tid_k, "дерзни")
@@ -1854,7 +1854,7 @@ def main():
                                      {"messageId": retry_id, "approve": True})
             check("повторный approve -> 200", status == 200 and body.get("final"), f"{status} {body}")
 
-            section("персональный потолок ходов наставника")
+            section("персональный потолок ходов ИИ")
             g = Client("10.7.0.1")
             claim(g, "Гоша-грант")
             status, body = new_thread(g)
@@ -1945,7 +1945,7 @@ def main():
                 server.ensure_ai_user_limit_schema(conn2)
                 row = conn2.execute("SELECT COUNT(*) c FROM ai_user_limits WHERE user_id=?",
                                     (uid_g,)).fetchone()
-                check("потолок наставника не трогает ai_user_limits", int(row["c"]) == 0, str(dict(row)))
+                check("потолок ИИ не трогает ai_user_limits", int(row["c"]) == 0, str(dict(row)))
             finally:
                 conn2.close()
 

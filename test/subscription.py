@@ -22,7 +22,7 @@
   * админ: grant активирует (платёж 0₽ manual в истории), revoke гасит
     мгновенно, оба пишут аудит; сброс «весь прогресс» подписку НЕ трогает;
     удаление аккаунта сносит подписку и платежи каскадом;
-  * гейт наставника: без флага бесплатный ходит как раньше (лимиты 5),
+  * гейт ИИ: без флага бесплатный ходит как раньше (лимиты 5),
     с EGE_AGENT_REQUIRES_PLUS=1 — 403 SUBSCRIPTION_REQUIRED, а Plus —
     проходит гейт.
 """
@@ -158,7 +158,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("free-лимит сочинений 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("free-квота наставника 5", s == 200 and q["limit"] == 5, q)
+        check("free-квота ИИ 5", s == 200 and q["limit"] == 5, q)
 
         section("checkout и confirm")
         s, body = request(user, base, "/api/subscription/checkout", "POST",
@@ -229,7 +229,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("лимит сочинений стал 10", s == 200 and lim["limit"] == 10, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("квота наставника стала 25", s == 200 and q["limit"] == 25, q)
+        check("квота ИИ стала 25", s == 200 and q["limit"] == 25, q)
         s, st = request(user, base, "/api/subscription/status")
         check("статус active + лимиты",
               s == 200 and st["active"] is True and st["status"] == "active"
@@ -470,7 +470,7 @@ def main():
         check("удаление сносит подписку и платежи каскадом",
               left == 0 and left_pay == 0, (left, left_pay))
 
-        section("гейт наставника")
+        section("гейт ИИ")
         agent = server._AGENT
         assert agent is not None
         # target2 удалён выше — заводим свежего бесплатного.

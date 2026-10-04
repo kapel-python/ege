@@ -14,7 +14,7 @@
   * ответ: message+function_call → {text, tool_calls, preamble} общим
     парсером; incomplete без содержимого — AIError (повторяемый), пустой
     complete — AIFormatError;
-  * судья (as_judge) без явного effort едет на high, наставник — как сказано
+  * судья (as_judge) без явного effort едет на high, ИИ — как сказано
     вызывающим; chat-провайдеры идут старым путём без новых полей.
 """
 from __future__ import annotations
@@ -210,7 +210,7 @@ def main() -> int:
                            "parameters": {"type": "object",
                                           "properties": {"op": {"type": "string"}}}}}]
     messages = [
-        {"role": "system", "content": "Ты наставник."},
+        {"role": "system", "content": "Ты ИИ."},
         {"role": "user", "content": "как дела"},
         {"role": "assistant", "content": None,
          "tool_calls": [{"id": "c0", "name": "fold_web", "arguments": {"op": "errors"}}]},
@@ -224,7 +224,7 @@ def main() -> int:
           req["url"] == "https://opencode.ai/zen/go/v1/responses", req["url"])
     body = req["body"]
     check("system едет в instructions, а не в input",
-          body.get("instructions") == "Ты наставник."
+          body.get("instructions") == "Ты ИИ."
           and all(m.get("role") != "system" for m in body.get("input", [])), str(body)[:200])
     kinds = [m.get("type") for m in body.get("input", [])]
     check("история треда — function_call + function_call_output",

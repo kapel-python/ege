@@ -1,4 +1,4 @@
-/* ИИ-наставник как экран SPA (#/ai): шапка/сайдбар/тема/тосты/модалки общие,
+/* ИИ как экран SPA (#/ai): шапка/сайдбар/тема/тосты/модалки общие,
    свой только контент чата (js/agent-spa.js + css/agent.css).
    API-контракт проверяет test/ai-agent.py, здесь — только клиентская интеграция. */
 const fs = require("fs");
@@ -36,7 +36,7 @@ check("NAV: ИИ без внешнего href (без перезагрузки)"
   appJs.includes('{ route: "ai"') && !appJs.includes('href: "/agent"') && !appJs.includes("href: '/agent'"));
 check("NAV: ИИ левее Профиля",
   appJs.indexOf('"ai"') > 0 && appJs.indexOf('"ai"') < appJs.indexOf('"profile"'));
-check("заголовок вкладки для ai", appJs.includes('ai: "ИИ-наставник"'));
+check("заголовок вкладки для ai", appJs.includes('ai: "ИИ"'));
 check("bottomnav включает ИИ", appJs.includes('"ai"') && appJs.includes("renderBottomNav"));
 
 /* --- ничего своего: хром берётся у приложения --- */
@@ -51,7 +51,7 @@ check("нет innerHTML с сырыми строками",
   !/\.innerHTML\s*=\s*[^`]*\$\{/.test(spaCode) && !/\.innerHTML\s*\+=/.test(spaCode));
 check("экранирование через esc()", spaCode.includes("esc("));
 check("иконки через icon()", spaCode.includes("icon("));
-/* --- окно квоты наставника = общая модалка приложения (openAiLimitModal из
+/* --- окно квоты ИИ = общая модалка приложения (openAiLimitModal из
    app.js), а не своя сборка .dlg: тот же вид, что у окна лимита проверки
    сочинений и инфо-диалога о модели на ege-result, меняются только текст,
    иконка и подпись таймера. */
@@ -64,7 +64,7 @@ check("окно квоты — общая модалка лимита, а не �
   && /AGENT_QUOTA_OPTS/.test(spaCode));
 check("справочный режим без таймера, кнопка «Закрыть» (как инфо о модели)",
   /timer: false/.test(spaCode) && /closeText: "Закрыть"/.test(spaCode)
-  && /icon: "ai"/.test(spaCode) && /eyebrow: "ИИ-наставник"/.test(spaCode));
+  && /icon: "ai"/.test(spaCode) && /eyebrow: "ИИ"/.test(spaCode));
 check("тап по кружку открывает окно, а не тост",
   /quota\.addEventListener\("click"[\s\S]{0,700}?openQuotaInfoModal\(\);/.test(spaCode)
   && !/quota\.addEventListener\("click"[\s\S]{0,700}?say\("Осталось/.test(spaCode));
@@ -78,7 +78,7 @@ check("бан через showAccountBlocked", spaCode.includes("showAccountBlock
 check("апсейл Plus в окне исчерпания — тем же правилом, что у сочинений (только limit <= 5)",
   /function agentQuotaText[\s\S]{0,800}?limit <= 5/.test(spaCode)
   && spaCode.includes("dlg__upsell") && spaCode.includes("/subscription")
-  && spaCode.includes("25 ходов наставника"));
+  && spaCode.includes("25 ходов ИИ"));
 check("модалка перепроверки перезапускает таймер свежим статусом, как openAiLimitModal (не замирает на 00:00:00)",
   /else openRecheckLimit\(st\);/.test(resultHtml));
 
@@ -216,7 +216,7 @@ check("пустой блок реально прячется ([hidden])", spaCss
 check("пустой блок прячется инлайном (без зависимости от CSS)",
   spaCode.includes('style.display = visible ? "" : "none"'));
 check("шаги живого хода появляются по одному", spaCss.includes("agentRise") && spaCode.includes("reveal"));
-/* Ход наставника: пустой шаг -> лоадер вырастает -> гаснет -> результат,
+/* Ход ИИ: пустой шаг -> лоадер вырастает -> гаснет -> результат,
    потом лента сворачивается и ответ печатается по словам. */
 check("шаг умеет переливаться по высоте (morph)", spaCode.includes("function morph") && spaCode.includes("stepFill"));
 check("лоадер растёт в пустом шаге", spaCode.includes("agent__tbody") && spaCss.includes(".agent__tbody"));
@@ -578,7 +578,7 @@ check("«Стоп» работает на обоих этапах: обрыв з
   && (spaJs.match(/ui\.stopBtn\.addEventListener\("click"[\s\S]{0,700}?turn\.detached = true;/) || []).length === 1
   && /watchAnswer\(tid, text, WATCH_TRIES\)/.test(spaCode));
 check("плейсхолдер различает «отвечает» и «пишет ответ»",
-  spaCode.includes("Наставник пишет ответ…") && spaCode.includes("Наставник отвечает…"));
+  spaCode.includes("ИИ пишет ответ…") && spaCode.includes("ИИ отвечает…"));
 
 /* --- лента идёт вровень с печатью, а не прыгает в конец неготовости --- */
 check("низ написанного — последнее проявившееся слово (followPrint)",
@@ -736,10 +736,10 @@ check("в светлой теме у раздела субпиксельное �
   lightSmoothing === "auto", `сейчас: ${lightSmoothing || "не задано"}`);
 check("в тёмной теме сглаживание остаётся antialiased (без цветных каёмок)",
   darkSmoothing === "antialiased", `сейчас: ${darkSmoothing || "не задано"}`);
-/* Ответ наставника — длинный текст для чтения; 15px на фоне приложения он
+/* Ответ ИИ — длинный текст для чтения; 15px на фоне приложения он
    читался мелким. Проверяем именно кегль ОТВЕТА, а не всего раздела. */
 const answerSize = parseFloat(prop(rule(spaCss, ".agent__answer"), "font-size"));
-check("ответ наставника не меньше 16px (кегль, а не цвет, делает его заметнее)",
+check("ответ ИИ не меньше 16px (кегль, а не цвет, делает его заметнее)",
   answerSize >= 16, `сейчас: ${answerSize || "не задан"}px`);
 /* Общее правило темы на весь сайт не трогаем: правка видимости — локальная
    раздела, иначе менялся бы рендер всех экранов. */

@@ -68,7 +68,7 @@
   var BLACKLIST = {
     login: true, register: true, subject: true,
     session: true, practice: true, boss: true, daily: true, review: true, lesson: true,
-    // Чат наставника — тоже сфокусированный экран во весь рост (как урок):
+    // Чат ИИ — тоже сфокусированный экран во весь рост (как урок):
     // поле ввода должно стоять в самом низу, а не над футером.
     ai: true
   };

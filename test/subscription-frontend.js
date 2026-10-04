@@ -101,7 +101,7 @@ function check(name, cond, detail) {
   const cardFree = await page.textContent("#sub-card");
   check("карточка free: короткая, с покупкой, без лимитов",
     cardFree.includes("Оформить Plus") && !cardFree.includes("Страница тарифа")
-    && !cardFree.includes("проверок в день") && !cardFree.includes("ходов наставника"));
+    && !cardFree.includes("проверок в день") && !cardFree.includes("ходов ИИ"));
   check("карточка — ссылка на управление",
     (await page.getAttribute("#sub-card .sub-card", "href")) === "/subscription/manage");
   await page.screenshot({ path: shot("sub-profile-free.png") });
@@ -158,7 +158,7 @@ function check(name, cond, detail) {
   let det = await page.textContent("#content");
   check("manage plus: срок и чек",
     det.includes("доступ до") && det.includes("199") && det.includes("оплачено")
-    && det.includes("Проверок сочинений") && det.includes("Ходов наставника"));
+    && det.includes("Проверок сочинений") && det.includes("Ходов ИИ"));
   await page.screenshot({ path: shot("sub-manage.png") });
 
   // отмена продления

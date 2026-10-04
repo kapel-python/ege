@@ -51,7 +51,7 @@ var Subscription = (function () {
     } catch (_) { return String(ms); }
   }
 
-  /* Гейт наставника «только для Plus» (флаг EGE_AGENT_REQUIRES_PLUS).
+  /* Гейт ИИ «только для Plus» (флаг EGE_AGENT_REQUIRES_PLUS).
      Сервер уже отвечает 403 SUBSCRIPTION_REQUIRED на turns/confirm, когда
      флаг включён, а limits.agentAccess в /api/subscription/status несёт
      готовое решение (флаг + подписка). Здесь только чтение этого решения:
@@ -155,7 +155,7 @@ var Subscription = (function () {
       </span>
       <span class="sub-card__limits">
         <span class="sub-limit"><b>${essay}</b> проверок в день</span>
-        <span class="sub-limit"><b>${agent}</b> ходов наставника в день</span>
+        <span class="sub-limit"><b>${agent}</b> ходов ИИ в день</span>
       </span>
       <span class="sub-card__meter">
         ${progressBar(periodFrac(st) * 100)}

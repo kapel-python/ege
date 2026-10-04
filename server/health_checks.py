@@ -2,7 +2,7 @@
 """Минутные самопроверки для страницы /status.
 
 Каждую минуту сервер сам прогоняет короткие проверки по всем разделам,
-которые видят пользователи (API, материалы, наставник, ИИ-провайдеры,
+которые видят пользователи (API, материалы, ИИ, ИИ-провайдеры,
 проверка сочинений), и страница показывает их результат. Это замена прежней
 логики «показываем последнее известное и ничего не трогаем»: последнее
 известное врало после рестартов, а живого подтверждения работы не было.
@@ -130,14 +130,14 @@ def run_all_checks(ctx: dict) -> list[dict]:
     def check_agent():
         fn = ctx.get("agent_health")
         if not callable(fn):
-            return False, "Наставник временно недоступен"
+            return False, "ИИ временно недоступен"
         health = fn() or {}
         tools = [t for t in (health.get("tools") or []) if t]
         missing = [t for t in (health.get("missing") or []) if t]
         if missing:
-            return False, "Наставник временно недоступен"
+            return False, "ИИ временно недоступен"
         if not tools:
-            return False, "Наставник временно недоступен"
+            return False, "ИИ временно недоступен"
         return True, f"{len(tools)} инструментов подключены"
 
     def check_ai():
@@ -227,7 +227,7 @@ def run_all_checks(ctx: dict) -> list[dict]:
     plan = [
         ("api", "API", check_api),
         ("content", "Материалы", check_content),
-        ("agent", "Наставник", check_agent),
+        ("agent", "ИИ", check_agent),
         ("ai", "ИИ-провайдеры", check_ai),
         ("essays", "Проверка сочинений", check_essays),
     ]

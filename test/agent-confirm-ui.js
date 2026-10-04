@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Живая проверка трёх багов карточки подтверждения в ИИ-наставнике.
+/* Живая проверка трёх багов карточки подтверждения в ИИ.
  *
  * 1) В карточке шага не должно быть сырого имени инструмента (`update_profile`).
  * 2) После «Применить» композер остаётся заблокированным («Стоп» на месте,
@@ -242,7 +242,7 @@ function req(pathname, body, cookies) {
   }));
   check("2) «Стоп» на месте, пока сервер думает", busy.stopHidden === false, JSON.stringify(busy));
   check("2) композер помечен занятым", busy.composerBusy === true, JSON.stringify(busy));
-  check("2) поле говорит, что наставник отвечает",
+  check("2) поле говорит, что ИИ отвечает",
     /отвечает|пишет/.test(busy.placeholder), JSON.stringify(busy));
   check("2) отправка заблокирована", busy.sendDisabled === true, JSON.stringify(busy));
 
