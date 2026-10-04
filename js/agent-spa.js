@@ -687,13 +687,20 @@
     quotaTip.id = "agent-quota-tip";
     quotaTip.setAttribute("role", "tooltip");
     quotaWrap.appendChild(quota); quotaWrap.appendChild(quotaTip);
-    // Тап по кружку — окно о квоте (тот же .dlg, что у проверки сочинений),
-    // а не всплывающий тост: тост живёт 2.6с, ничего не объяснял и
-    // перебивается другим. Сначала одна сверка с сервером, чтобы цифра в
-    // окне была честной. Пилюля-подсказка при нуле скрыта самим setQuota
-    // (см. выше) — здесь прятать уже нечего.
+    // Тап/клик по кружку — это запрос ОКНА, а не подсказки: пилюля
+    // («Осталось 11 из 25») дублировала бы окно с тем же текстом. Прячем её
+    // ПОСЛЕ сверки с сервером — fetchQuota внутри зовёт setQuota, который
+    // подсказку возвращает, — и держим скрытой, пока мышь живо не наведётся
+    // снова (mouseenter ниже). На тач-тапе такого наведения нет (совместимый
+    // mouseenter приходит ДО click, и click следом прячет снова), поэтому
+    // при тапе пилюля не появляется никогда — ни при нуле, ни при остатке.
+    // Живое наведение мыши возвращает её как раньше.
+    quotaWrap.addEventListener("mouseenter", function () {
+      if (Number(S.quota && S.quota.remaining) > 0) quotaTip.style.display = "";
+    });
     quota.addEventListener("click", function () {
       fetchQuota(true).then(function (st) {
+        quotaTip.style.display = "none";
         if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
         openQuotaInfoModal();
       });
