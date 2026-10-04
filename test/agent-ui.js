@@ -100,6 +100,25 @@ check("пилюли квоты нет вообще (не прячется — у
   !/quotaTip/.test(spaCode) && !/quota-tip/.test(spaCode) && !/quota-tip/.test(spaCss)
   && !/quota-wrap/.test(spaCode) && !/quota-wrap/.test(spaCss)
   && /aria-label", "Осталось/.test(spaCode));
+/* Кольцо живое: сервер отдаёт квоту в том же GET треда, что опрос шагов,
+   клиент применяет её и в опросе (после каждого шага), и при открытии
+   переписки. Ноль — полный красный круг (offset 0 + класс zero), а не пустой
+   серый трек: иначе исчерпание выглядело как «кольца нет». Плавность даёт
+   transition stroke-dashoffset в CSS, обновления — частые и мелкие, поэтому
+   кольцо ползёт, а не прыгает. */
+check("GET треда несёт квоту для живого кольца",
+  /"quota": _AGENT\.agent_quota_status\(conn, int\(user_id\)\)/.test(srvCode));
+check("опрос применяет квоту после каждого шага (только пока ход жив)",
+  /function livePoll\(turn\)[\s\S]{0,900}?res\.data\.quota && res\.data\.busy/.test(spaCode)
+  && /function livePoll\(turn\)[\s\S]{0,900}?setQuota\(res\.data\.quota\)/.test(spaCode));
+check("открытие переписки тоже сверяет кольцо",
+  /function loadThreadMessages\(force\)[\s\S]{0,700}?if \(res\.data\.quota\) setQuota\(res\.data\.quota\)/.test(spaCode));
+check("ноль — полный красный круг, а не пустой трек",
+  /remaining <= 0 \? 0 : \(RING/.test(spaCode)
+  && /\.agent__quota\.zero \.q-ring \{ stroke: var\(--danger\); \}/.test(spaCss)
+  && /classList\.toggle\("zero", remaining === 0\)/.test(spaCode));
+check("кольцо анимируется переходом, а не прыжком",
+  /\.agent__quota \.q-ring \{[^}]*transition: stroke-dashoffset/.test(spaCss));
 /* При нуле кнопка отправки серая/disabled, а send() в сеть не идёт и ленту
    не трогает (заменяющий ход иначе сносил удачный ответ, а сервер при 429
    старую пару не сносит — два вопроса подряд без ответа). */

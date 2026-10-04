@@ -2004,11 +2004,19 @@ def main():
                 ft = threading.Thread(target=fire_live, daemon=True)
                 ft.start()
                 time.sleep(0.3)
+                s0, g0 = h.request(base, "GET", f"/api/agent/threads/{tid_h}", None)
+                q0 = ((g0 or {}).get("quota") or {}).get("remaining")
+                check("GET треда несёт квоту для живого кольца",
+                      s0 == 200 and isinstance(q0, int), str((g0 or {}).get("quota")))
                 seen = []
+                quota_seen = []
                 for _ in range(40):
                     s2, g2 = h.request(base, "GET", f"/api/agent/threads/{tid_h}", None)
                     if s2 == 200:
                         seen.append((bool(g2.get("busy")), len(g2.get("liveSteps") or [])))
+                        qv = (g2.get("quota") or {}).get("remaining")
+                        if isinstance(qv, int):
+                            quota_seen.append(qv)
                     if not ft.is_alive():
                         break
                     time.sleep(0.2)
@@ -2022,10 +2030,18 @@ def main():
                       any(n > 0 for n in counts), str(seen[:12]))
                 check("шаги нарастали постепенно, а не пачкой сразу",
                       1 in counts and 2 in counts, str(counts))
+                # Ход делает 3 запроса к ИИ (2 инструмента + финал): кольцо
+                # обязано увидеть списание ДО конца хода, а не только в ответе
+                # POST (иначе ему нечего анимировать во время генерации).
+                check("квота убывает уже во время хода (кольцу есть что показать)",
+                      any(q < q0 for q in quota_seen), f"q0={q0} seen={quota_seen[:12]}")
                 s2, g2 = h.request(base, "GET", f"/api/agent/threads/{tid_h}", None)
                 check("после хода снимок пуст, слот свободен",
                       s2 == 200 and g2.get("liveSteps") == [] and g2.get("busy") is False,
                       str({k: g2.get(k) for k in ("busy", "liveSteps")}))
+                check("итоговая квота сошлась: q0 уже minus входной резерв, +2 следующих",
+                      s2 == 200 and (g2.get("quota") or {}).get("remaining") == q0 - 2,
+                      f"q0={q0} quota={g2.get('quota')}")
             finally:
                 ai.chat_with_tools = real_mock
         finally:

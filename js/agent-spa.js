@@ -424,13 +424,16 @@
     S.quota = { limit: limit, remaining: remaining, resetInSec: q.resetInSec == null ? null : Number(q.resetInSec) };
     // Цифры в кружке нет осознанно: только кольцо + aria-label для
     // скринридера. Сколько ходов осталось — показывает окно по клику.
+    // Ноль — ПОЛНЫЙ красный круг (offset 0), а не пустой серый трек:
+    // иначе исчерпание выглядело как «кольца нет».
     if (ui.quotaBtn) {
       ui.quotaBtn.setAttribute("aria-label", "Осталось " + remaining + " " + pluralQ(remaining) + " из " + limit);
       ui.quotaBtn.title = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit);
       ui.quotaBtn.classList.toggle("low", remaining > 0 && remaining <= 3);
       ui.quotaBtn.classList.toggle("zero", remaining === 0);
     }
-    if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset = (RING * (1 - Math.min(remaining, limit) / limit)) + "px";
+    if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset =
+      (remaining <= 0 ? 0 : (RING * (1 - Math.min(remaining, limit) / limit))) + "px";
     if (!cached) { try { localStorage.setItem(quotaCacheKey(), JSON.stringify(S.quota)); } catch (_) {} }
     syncInput();
   }
@@ -2272,8 +2275,14 @@
     if (tid == null || !ui.live || Number(S.currentId) !== Number(tid)) return;
     api("GET", "/api/agent/threads/" + Number(tid)).then(function (res) {
       if (!turn || turn.dead || !ui.live || Number(S.currentId) !== Number(tid)) return;
-      if (res.status === 200 && res.data && Array.isArray(res.data.liveSteps)
-          && res.data.liveSteps.length) {
+      if (res.status !== 200 || !res.data) return;
+      // Квота — сразу, после каждого шага: сервер списывает жетон за каждый
+      // запрос к ИИ, и опрос (1.5 с) подхватывает остаток раньше конца хода.
+      // Только пока ход жив (busy): ответ опроса, пришедший ПОСЛЕ финала
+      // POST, может быть старше его (взят до последнего списания) — финал
+      // авторитетнее, его квоту не перетираем.
+      if (res.data.quota && res.data.busy) setQuota(res.data.quota);
+      if (Array.isArray(res.data.liveSteps) && res.data.liveSteps.length) {
         liveAppendSteps(turn, res.data.liveSteps);
       }
     }).catch(function () {});
@@ -2448,6 +2457,10 @@
     return api("GET", "/api/agent/threads/" + wantId).then(function (res) {
       if (g !== S.mountGen || wantId !== S.currentId) return;
       if (res.status === 200 && res.data && Array.isArray(res.data.messages)) {
+        // Квота из того же ответа — до любых ранних выходов ниже: кольцо
+        // должно отражать сервер даже когда ленту не перерисовываем
+        // (не изменилась) или подхватываем чужой ход.
+        if (res.data.quota) setQuota(res.data.quota);
         var msgs = res.data.messages;
         cacheMessages(wantId, msgs);
         // Лента новее запроса (человек отправил вопрос или получил ошибку,

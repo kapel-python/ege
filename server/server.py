@@ -14663,6 +14663,13 @@ class Handler(BaseHTTPRequestHandler):
                                     # занят): клиент дорисовывает их во время
                                     # генерации вместо пачки в конце.
                                     "liveSteps": _agent_live_snapshot(tid) if _agent_busy_locked(tid) else [],
+                                    # Квота — в том же ответе, что опрос живого
+                                    # хода: клиент перерисовывает кольцо после
+                                    # каждого шага (резервы уже в базе), а не
+                                    # только по клику и в конце хода. Дешёвый
+                                    # SELECT-путь agent_quota_status, как у
+                                    # /api/agent/limits и списка тредов.
+                                    "quota": _AGENT.agent_quota_status(conn, int(user_id)),
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
