@@ -1401,7 +1401,7 @@ function openRecheckLimit(status) {
           <div class="dlg-device__name">Проверки закончились</div>
         </div>
         <div class="dlg__text">
-          Лимит — ${limit} ${aiLimitPlural(limit, "проверка", "проверки", "проверок")} в день: израсходованные возвращаются по одной каждые 8 часов.
+          Лимит — ${limit} ${aiLimitPlural(limit, "проверка", "проверки", "проверок")} в день: израсходованные возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки).
           Сейчас доступно: <b><span class="tnum">0 из ${limit}</span></b>.${limit <= 5 ? `
           <span style="display:block;margin-top:10px;">Нужно больше? <a href="/subscription" style="font-weight:700;">ege easy <span class="plus">Plus</span></a> — вдвое больше проверок.</span>` : ""}
         </div>
