@@ -236,10 +236,14 @@ PROBE_MODELS_BUDGET_SEC = 20.0
 
 _provider_health_lock = threading.Lock()
 # Последний успех живого трафика по провайдеру (ms epoch) — пишет только
-# _note_provider_success. Ручная проба из админки сюда тоже попадает.
+# _note_provider_success (живые запросы учеников) и _note_probe_success
+# (фоновая проба восстановления). Ручная проба из админки сюда НЕ пишет:
+# она диагностическая и лежит отдельно в _provider_last_check, иначе пинг
+# мёртвой модели красил бы публичный статус красным при живом обслуживающем
+# провайдере.
 _provider_last_ok: dict[str, int] = {}
 # Последний отказ по провайдеру (ms epoch, короткий текст) — пишет только
-# _note_provider_failure. Текста ключа тут нет: только класс + сообщение.
+# _note_provider_failure (живой трафик). Ручные пробы — см. выше.
 _provider_last_err: dict[str, tuple[int, str]] = {}
 # Последняя РУЧНАЯ проверка из админки: {id: {ok, at, latencyMs, error}}.
 _provider_last_check: dict[str, dict] = {}
@@ -1026,11 +1030,19 @@ def reset_ai_rate() -> None:
 # Router state — кто сейчас активный провайдер
 #
 # Живёт в app_config (ключ "ai_router", JSON): {"active": имя, "updatedAt": ms,
-# "lastError": str, "lastProbeAt": ms, "lastProbeError": str}. Отдельная
+# "lastError": str, "lastProbeAt": ms, "lastProbeError": str,
+# "marks": {providerId: {"ok": ms, "err": ms}}}. Отдельная
 # таблица избыточна: это один singleton-документ, а app_config уже создана
 # install_catalog'ом и переживает рестарты. Внутри процесса состояние
 # кэшируется (одно чтение на процесс), записи редки — только смена активного
 # и результаты проб.
+#
+# Поле marks — персистентная копия меток здоровья ПО ПРОВАЙДЕРУ (то же, что
+# in-memory _provider_last_ok/_provider_last_err, но переживает рестарт).
+# Без него каждый рестарт стирал историю живого трафика, и страница статуса
+# падала на скалярные lastErrorAt/lastOkAt одного тира — stale-ошибка free
+# побеждала свежий успех plus, хотя ученики отвечали нормально. Пишется в той
+# же _router_update-транзакции, что и скаляры, — отдельных записей нет.
 #
 # Железное правило: состояние роутера никогда не роняет запрос. БД недоступна
 # или строки нет — работаем на приоритетном настроенном провайдере; запись не
@@ -1040,6 +1052,10 @@ _ROUTER_KEY = "ai_router"
 _router_cache: dict = {}
 _router_cache_version: dict = {}
 _router_lock = threading.Lock()
+# Сколько чужих id держим в marks: свои провайдеры плюс небольшой запас на
+# переименования. Удалённые id чистятся при записи (неизвестных не храним) и
+# при удалении провайдера — иначе scalar-агрегат вечно помнил бы мёртвых.
+_MARKS_KEEP_MAX = 40
 
 
 def _router_db_path() -> str:
@@ -1113,6 +1129,82 @@ def reset_router() -> None:
     with _router_lock:
         _router_cache = {}
         _router_cache_version = {}
+
+
+def _router_marks(tier: str | None = None) -> dict[str, tuple[int, int]]:
+    """Персистентные метки здоровья по провайдерам: {pid: (ok_ms, err_ms)}.
+
+    Читает поле marks состояния роутера (переживает рестарт). Не бросает;
+    битые значения считаются нулём, пустое — отсутствием записей."""
+    tier = _normalize_tier(tier)
+    try:
+        raw = _router_state(tier).get("marks")
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, tuple[int, int]] = {}
+    for pid, mark in raw.items():
+        if not isinstance(pid, str) or not isinstance(mark, dict):
+            continue
+        try:
+            ok = int(mark.get("ok") or 0)
+        except (TypeError, ValueError):
+            ok = 0
+        try:
+            err = int(mark.get("err") or 0)
+        except (TypeError, ValueError):
+            err = 0
+        if ok or err:
+            out[pid] = (ok, err)
+    return out
+
+
+def _marks_patch(name: str, ok_ms: int = 0, err_ms: int = 0,
+                 tier: str | None = None) -> dict:
+    """Новое поле marks для _router_update: обновить метку провайдера.
+
+    Пишется в ТОЙ ЖЕ транзакции, что и скаляры, — отдельных записей в БД нет.
+    Неизвестные id (удалённые провайдеры) не храним: их метки иначе вечно
+    лежали бы в агрегате и красили статус после удаления. Не бросает."""
+    tier = _normalize_tier(tier)
+    pid = str(name or "")
+    marks = _router_marks(tier)
+    prev_ok, prev_err = marks.get(pid, (0, 0))
+    if pid:
+        marks[pid] = (ok_ms or prev_ok, err_ms or prev_err)
+    try:
+        known = set(known_provider_ids(tier))
+    except Exception:
+        known = set()
+    if known:
+        for stale in [k for k in marks if k != pid and k not in known]:
+            marks.pop(stale, None)
+    while len(marks) > _MARKS_KEEP_MAX:
+        marks.pop(next(iter(marks)))
+    return {"marks": {k: {"ok": ok, "err": err} for k, (ok, err) in marks.items()}}
+
+
+def _drop_provider_marks(pid: str, tier: str | None = None) -> None:
+    """Удаление провайдера: снести его метки из памяти и из персистентного
+    агрегата. Скаляры lastOkAt/lastErrorAt пересчитываются по оставшимся
+    меткам, чтобы мёртвый id не красил статус после удаления. Не бросает."""
+    tier = _normalize_tier(tier)
+    pid = str(pid or "")
+    with _provider_health_lock:
+        _provider_last_ok.pop((tier, pid), None)
+        _provider_last_err.pop((tier, pid), None)
+        _provider_last_check.pop((tier, pid), None)
+    try:
+        marks = _router_marks(tier)
+        if pid in marks:
+            marks.pop(pid, None)
+            rest_ok = max([v[0] for v in marks.values()] + [0])
+            rest_err = max([v[1] for v in marks.values()] + [0])
+            _router_update({"marks": {k: {"ok": ok, "err": err} for k, (ok, err) in marks.items()},
+                            "lastOkAt": rest_ok, "lastErrorAt": rest_err}, tier)
+    except Exception:
+        pass
 
 
 def _provider_configured(name: str, tier: str | None = None) -> bool:
@@ -1409,6 +1501,7 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None,
     fails = _fails_counts(tier)
     fails[str(name)] = fails.get(str(name), 0) + 1
     patch["fails"] = fails
+    patch.update(_marks_patch(str(name), err_ms=now_ms, tier=tier))
     current = str(_router_state(tier).get("active") or "")
     if switch_to and current in ("", name):
         patch["active"] = switch_to
@@ -1441,6 +1534,7 @@ def _note_provider_success(name: str, tier: str | None = None) -> None:
     fails = _fails_counts(tier)
     if fails.pop(str(name), None) is not None:
         patch["fails"] = fails
+    patch.update(_marks_patch(str(name), ok_ms=now_ms, tier=tier))
     if str(_router_state(tier).get("active") or "") not in ("", name):
         patch["active"] = name
         patch["updatedAt"] = now_ms
@@ -1463,7 +1557,9 @@ def _note_probe_success(name: str, tier: str | None = None) -> None:
         fails.pop(str(name), None)
     # Успех пробы — тоже persistent-метка (см. _note_provider_success):
     # иначе рестарт возвращал бы древнюю ошибку в статус.
-    _router_update({"fails": fails, "lastOkAt": now_ms}, tier)
+    patch = {"fails": fails, "lastOkAt": now_ms}
+    patch.update(_marks_patch(str(name), ok_ms=now_ms, tier=tier))
+    _router_update(patch, tier)
 
 
 # ---------------------------------------------------------------------------
@@ -2555,9 +2651,10 @@ def custom_provider_delete(pid: str, tier: str | None = None) -> None:
     except Exception:
         pass
     with _provider_health_lock:
-        _provider_last_ok.pop((tier, pid), None)
-        _provider_last_err.pop((tier, pid), None)
         _provider_last_check.pop((tier, pid), None)
+    # Метки живого трафика — из памяти и из персистентного агрегата роутера,
+    # иначе мёртвый id вечно красил бы статус после удаления.
+    _drop_provider_marks(pid, tier)
     _admin_invalidate(tier)
 
 
@@ -3359,9 +3456,18 @@ def _public_provider_card(pid: str, tier: str | None = None) -> dict:
         ok_at = int(_provider_last_ok.get((tier, pid)) or 0)
         err = _provider_last_err.get((tier, pid))
         check = dict(_provider_last_check.get((tier, pid)) or {}) if _provider_last_check.get((tier, pid)) else None
+    try:
+        _persisted_ok, _persisted_err = _router_marks(tier).get(pid, (0, 0))
+        ok_at = max(ok_at, int(_persisted_ok or 0))
+        _persisted_err_at = int(_persisted_err or 0)
+    except Exception:
+        _persisted_err_at = 0
     last_err_text, last_err_at = "", 0
     if err:
         last_err_at, last_err_text = int(err[0] or 0), str(err[1] or "")
+    if _persisted_err_at > last_err_at:
+        # Персистентная метка пережила рестарт: память пуста, а ошибка была.
+        last_err_at, last_err_text = _persisted_err_at, ""
     recent = bool(ok_at and (now_ms - ok_at) < PROVIDER_RECENT_SEC * 1000)
     order = effective_priority(tier)
     try:
@@ -3475,18 +3581,21 @@ def public_ai_health() -> dict:
 
     Источники — только записи о прошлом: in-memory метки последнего успеха
     (`_provider_last_ok`) и последней ошибки (`_provider_last_err`) живого
-    трафика, ручных и фоновых проб, плюс переживающее рестарт
-    `ai_router.lastErrorAt`. Никаких проб при чтении: страница статуса
-    обязана показывать последнее известное, а не будить шлюзы каждым
-    визитом.
+    трафика и фоновых проб, плюс переживающие рестарт персистентные метки
+    (`marks` в состоянии роутера) и скаляры `ai_router.lastErrorAt/lastOkAt`.
+    Никаких проб при чтении: страница статуса обязана показывать последнее
+    известное, а не будить шлюзы каждым визитом.
 
     Наружу — ни ключей, ни адресов, ни моделей, ни текстов ошибок: только
     факты «настроен/включён» и метки времени. Возраст меток подписывает
     сервер в /api/status — клиент время не считает.
 
-    Направлений два (free/Plus), а страница одна: метки здоровья берутся
-    максимумом по обоим (провайдер отвечал хоть где-то — он жив), роутер —
-    обычного направления. Контракт ответа не меняется."""
+    Направлений два (free/Plus), а страница одна: метки здоровья и роутер
+    берутся максимумом по обоим (провайдер отвечал хоть где-то — он жив).
+    Раньше роутер читался только free, и stale-ошибка free побеждала свежий
+    успех plus после каждого рестарта (in-memory метки стирались,
+    персистентного следа успеха не было) — страница врала «не работает»,
+    хотя наставник отвечал нормально. Контракт ответа не меняется."""
     try:
         ids = list(dict.fromkeys(list(known_provider_ids("free"))
                                  + list(known_provider_ids("plus"))))
@@ -3498,18 +3607,36 @@ def public_ai_health() -> dict:
             err_map = {k: v[0] for k, v in _provider_last_err.items()}
     except Exception:
         ok_map, err_map = {}, {}
+    persisted: dict[str, tuple[int, int]] = {}
     try:
-        router = _router_state("free")
+        for _tier in ("free", "plus"):
+            for _pid, (_ok, _err) in _router_marks(_tier).items():
+                _prev_ok, _prev_err = persisted.get(_pid, (0, 0))
+                persisted[_pid] = (max(_prev_ok, _ok), max(_prev_err, _err))
     except Exception:
-        router = {}
+        pass
+    router_err_at: int | None = None
+    router_ok_at: int | None = None
+    router_active: str | None = None
     try:
-        router_err_at = int(router.get("lastErrorAt") or 0) or None
-    except (TypeError, ValueError):
-        router_err_at = None
-    try:
-        router_ok_at = int(router.get("lastOkAt") or 0) or None
-    except (TypeError, ValueError):
-        router_ok_at = None
+        for _tier in ("free", "plus"):
+            _router = _router_state(_tier)
+            try:
+                _cand_err = int(_router.get("lastErrorAt") or 0) or None
+            except (TypeError, ValueError):
+                _cand_err = None
+            try:
+                _cand_ok = int(_router.get("lastOkAt") or 0) or None
+            except (TypeError, ValueError):
+                _cand_ok = None
+            if _cand_err and (router_err_at is None or _cand_err > router_err_at):
+                router_err_at = _cand_err
+            if _cand_ok and (router_ok_at is None or _cand_ok > router_ok_at):
+                router_ok_at = _cand_ok
+            if _tier == "free":
+                router_active = str(_router.get("active") or "") or None
+    except Exception:
+        pass
     providers = []
     for pid in ids:
         try:
@@ -3532,19 +3659,21 @@ def public_ai_health() -> dict:
             configured = False
         try:
             ok_at = int(max(ok_map.get(("free", pid)) or 0,
-                            ok_map.get(("plus", pid)) or 0)) or None
+                            ok_map.get(("plus", pid)) or 0,
+                            persisted.get(pid, (0, 0))[0])) or None
         except (TypeError, ValueError):
             ok_at = None
         try:
             err_at = int(max(err_map.get(("free", pid)) or 0,
-                             err_map.get(("plus", pid)) or 0)) or None
+                             err_map.get(("plus", pid)) or 0,
+                             persisted.get(pid, (0, 0))[1])) or None
         except (TypeError, ValueError):
             err_at = None
         providers.append({"id": str(pid), "title": str(title or pid),
                           "enabled": enabled, "configured": configured,
                           "lastOkAt": ok_at, "lastErrorAt": err_at})
     return {"providers": providers,
-            "router": {"active": str(router.get("active") or "") or None,
+            "router": {"active": router_active,
                        "lastErrorAt": router_err_at,
                        "lastOkAt": router_ok_at},
             "now": int(time.time() * 1000)}
@@ -4099,7 +4228,12 @@ def probe_draft(params: dict, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
 
 
 def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str | None = None) -> dict:
-    """Ручная проверка сохранённого провайдера. Пишет lastCheck (и lastOk при успехе)."""
+    """Ручная проверка сохранённого провайдера. Пишет только lastCheck.
+
+    Метки живого трафика (last_ok/last_err) ручная проба не трогает
+    осознанно: это диагностика админа, а не здоровье serving-пути. Иначе пинг
+    мёртвой модели из панели красил бы публичную страницу статуса красным,
+    хотя ученики отвечали бы нормально через живой провайдер."""
     tier = _normalize_tier(tier)
     pid = str(name or "")
     try:
@@ -4135,10 +4269,6 @@ def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: s
               "checkedAt": int(time.time() * 1000)}
     with _provider_health_lock:
         _provider_last_check[(tier, pid)] = dict(result)
-        if ok:
-            _provider_last_ok[(tier, pid)] = result["checkedAt"]
-        else:
-            _provider_last_err[(tier, pid)] = (result["checkedAt"], error[:300])
     return result
 
 
@@ -4294,13 +4424,17 @@ def start_failover_loop(stop: threading.Event) -> threading.Thread:
     """Фоновый поток возврата приоритетного провайдера. Не падает никогда.
 
     Направлений два — тик идёт по каждому своим порядком, своим активным и
-    своим судьёй: восстановление Plus не трогает free и наоборот."""
+    своим судьёй: восстановление Plus не трогает free и наоборот. Каждый виток
+    отмечает heartbeat (probe_heartbeat_age_sec): минутные самопроверки
+    страницы статуса по нему видят, жив ли дозор, — молчание дольше 5 минут
+    честно красит проверку ИИ красным."""
     def run() -> None:
         # Первая проверка почти сразу: если рестарт пришёлся на восстановление
         # провайдера, ждать целый час незачем.
         if stop.wait(5.0):
             return
         while not stop.is_set():
+            _probe_heartbeat_touch()
             for tier in _TIERS:
                 try:
                     probe_tick(tier=tier)
@@ -4313,6 +4447,38 @@ def start_failover_loop(stop: threading.Event) -> threading.Thread:
     thread = threading.Thread(target=run, name="ege-ai-failover", daemon=True)
     thread.start()
     return thread
+
+
+_probe_heartbeat_lock = threading.Lock()
+_probe_heartbeat_ms = 0
+
+
+def _probe_heartbeat_touch() -> None:
+    """Отметить виток фонового дозора. Не бросает."""
+    global _probe_heartbeat_ms
+    try:
+        with _probe_heartbeat_lock:
+            _probe_heartbeat_ms = int(time.time() * 1000)
+    except Exception:
+        pass
+
+
+def probe_heartbeat_age_sec() -> float | None:
+    """Возраст последнего витка фоновой пробы в секундах.
+
+    None — поток дозора не стартовал (тесты, запуск без run_server): проверка
+    ИИ на странице статуса тогда heartbeat не требует. Не бросает."""
+    try:
+        with _probe_heartbeat_lock:
+            heartbeat = int(_probe_heartbeat_ms or 0)
+    except Exception:
+        return None
+    if not heartbeat:
+        return None
+    try:
+        return max(0.0, (time.time() * 1000 - heartbeat) / 1000.0)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

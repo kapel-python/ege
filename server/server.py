@@ -6520,11 +6520,17 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
          "detail": "Доступна" if db_ok and diagnostics_any else "Не удалось проверить"},
     ]
     overall = "ok" if all(s["ok"] for s in services) else "degraded"
+    try:
+        mod = health_mod()
+        checks = mod.cached_checks() if mod is not None else None
+    except Exception:
+        checks = None
     return {
         "ok": overall == "ok",
         "now": now_ms,
         "overall": overall,
         "services": services,
+        "checks": checks,
         "subjects": subjects,
         "totals": {"subjects": len(subjects), "skills": total_skills, "tasks": total_tasks,
                    "lessons": total_lessons, "missions": total_missions, "bosses": total_bosses},
@@ -9695,6 +9701,143 @@ def backup_mod():
             print(f"EGE CORE backups disabled: {exc}", file=sys.stderr, flush=True)
             _BACKUP_MOD = False
     return _BACKUP_MOD or None
+
+
+_HEALTH_MOD = None
+
+
+def health_mod():
+    """Ленивая загрузка server/health_checks.py (рядом с этим файлом). None,
+    если модуль недоступен — страница статуса работает дальше, но без минутных
+    самопроверок (поле checks отсутствует, services как раньше)."""
+    global _HEALTH_MOD
+    if _HEALTH_MOD is None:
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "ege_health_checks", Path(__file__).resolve().parent / "health_checks.py")
+            if spec is None or spec.loader is None:
+                raise ImportError("no spec for health_checks.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _HEALTH_MOD = mod
+        except Exception as exc:
+            print(f"EGE CORE health checks disabled: {exc}", file=sys.stderr, flush=True)
+            _HEALTH_MOD = False
+    return _HEALTH_MOD or None
+
+
+def _health_counts() -> tuple[int, int, int, int]:
+    """Дешёвые COUNT(*) для самопроверок: те же таблицы, что видит ученик.
+
+    Только чтение через короткое read-only соединение — проверки не мешают
+    живым запросам и не заводят ничего в базе. Не бросает: неуспех — нули,
+    а проверка API тогда честно краснеет."""
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=3.0)
+    except (sqlite3.Error, OSError, ValueError):
+        return (0, 0, 0, 0)
+    try:
+        try:
+            subjects = len(SUBJECT_IDS)
+        except Exception:
+            subjects = 0
+        try:
+            skills = int(conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0])
+        except (sqlite3.Error, ValueError, TypeError, IndexError):
+            skills = 0
+        try:
+            tasks = int(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0])
+        except (sqlite3.Error, ValueError, TypeError, IndexError):
+            tasks = 0
+        try:
+            lessons = int(conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0])
+        except (sqlite3.Error, ValueError, TypeError, IndexError):
+            lessons = 0
+        return (subjects, skills, tasks, lessons)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _health_essay_ready() -> tuple[bool, int]:
+    """Готовность pipeline проверки сочинений: таблицы на месте, рубрика
+    загружена. Без вызова модели и без LanguageTool — только код и схема."""
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=3.0)
+    except (sqlite3.Error, OSError, ValueError):
+        return (False, 0)
+    try:
+        try:
+            conn.execute("SELECT 1 FROM essay_checks LIMIT 1").fetchone()
+            conn.execute("SELECT 1 FROM essay_submissions LIMIT 1").fetchone()
+        except sqlite3.Error:
+            return (False, 0)
+        try:
+            rubric = int(_AI.ESSAY_RUBRIC_VERSION) if _AI is not None else 0
+        except (TypeError, ValueError, AttributeError):
+            rubric = 0
+        return (True, rubric)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _health_checks_ctx() -> dict:
+    """Зависимости минутных самопроверок (см. server/health_checks.py)."""
+    def agent_health():
+        try:
+            if _AGENT is None:
+                return {}
+            return _AGENT.public_agent_health() or {}
+        except Exception:
+            return {}
+
+    def ai_health():
+        try:
+            if _AI is None:
+                return {}
+            return _AI.public_ai_health() or {}
+        except Exception:
+            return {}
+
+    def ai_order():
+        try:
+            if _AI is None:
+                return []
+            return [x for x in list(_AI.effective_priority("free"))
+                    + list(_AI.effective_priority("plus")) if x]
+        except Exception:
+            return []
+
+    def essay_judge():
+        try:
+            if _AI is None:
+                return (None, None)
+            return (_AI.judge_provider("free"), _AI.judge_provider("plus"))
+        except Exception:
+            return (None, None)
+
+    def probe_age():
+        try:
+            if _AI is None:
+                return None
+            return _AI.probe_heartbeat_age_sec()
+        except Exception:
+            return None
+
+    return {"counts": _health_counts,
+            "agent_health": agent_health,
+            "ai_health": ai_health,
+            "ai_order": ai_order,
+            "essay_judge": essay_judge,
+            "essay_ready": _health_essay_ready,
+            "probe_age_sec": probe_age,
+            "age_fmt": _age_ru}
 
 
 # Полная проверка целостности дорогая (quick_check читает все таблицы и
@@ -14371,6 +14514,20 @@ if __name__ == "__main__":
                 except Exception as exc:
                     print(f"EGE CORE AI failover loop failed to start: {exc}",
                           file=sys.stderr, flush=True)
+            # Минутные самопроверки страницы /status: раз в 60 секунд сервер
+            # последовательно прогоняет короткие проверки по всем разделам
+            # (API, материалы, наставник, ИИ, сочинения) и кэширует результат —
+            # /api/status отдаёт кэш, нового эндпоинта и новых лимитов нет.
+            stop_health_checks = threading.Event()
+            health_checks_thread = None
+            try:
+                mod = health_mod()
+                if mod is not None:
+                    health_checks_thread = mod.start_loop(
+                        stop_health_checks, _health_checks_ctx)
+            except Exception as exc:
+                print(f"EGE CORE health checks loop failed to start: {exc}",
+                      file=sys.stderr, flush=True)
 
             def stop_server(signum, _frame):
                 if stopping.is_set():
@@ -14396,10 +14553,13 @@ if __name__ == "__main__":
             finally:
                 stop_backups.set()
                 stop_ai_probe.set()
+                stop_health_checks.set()
                 if backup_thread is not None:
                     backup_thread.join(timeout=10)
                 if ai_probe_thread is not None:
                     ai_probe_thread.join(timeout=5)
+                if health_checks_thread is not None:
+                    health_checks_thread.join(timeout=5)
                 httpd.server_close()
                 for sig, handler in previous_handlers.items():
                     signal.signal(sig, handler)

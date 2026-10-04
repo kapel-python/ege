@@ -138,6 +138,53 @@ def main():
             check("повтор детерминирован",
                   first["detail"] == second["detail"], first["detail"])
 
+            # Живой случай 04.10: весь трафик идёт в Plus-тире, а stale-ошибка
+            # висит во free. После рестарта (память пуста) статус обязан брать
+            # максимум по обоим тирам, а не врать по одному free.
+            ai._provider_last_ok.clear()
+            ai._provider_last_err.clear()
+            ai.reset_router()
+            ai._router_update({"lastErrorAt": now - 3_600_000}, "free")
+            ai._router_update({"lastOkAt": now - 600_000}, "plus")
+            ai.reset_router()
+            svc = services(base)
+            check("успех Plus новее stale-ошибки free — успешно",
+                  svc["ai-providers"]["ok"] is True, svc["ai-providers"]["detail"])
+
+            # То же без рестарта, но наоборот: свежая ошибка free при живом
+            # успехе Plus обязана честно краснеть (побеждает последняя запись).
+            ai._router_update({"lastErrorAt": now}, "free")
+            ai.reset_router()
+            svc = services(base)
+            check("свежая ошибка free — ошибка",
+                  svc["ai-providers"]["ok"] is False, svc["ai-providers"]["detail"])
+
+            # Переживание рестарта: успех живого трафика пишется в персистентные
+            # метки тем же апдейтом — после wipe памяти статус остаётся зелёным.
+            ai._provider_last_ok.clear()
+            ai._provider_last_err.clear()
+            ai.reset_router()
+            ai._note_provider_success("gptunnel", "free")
+            ai._provider_last_ok.clear()
+            ai._provider_last_err.clear()
+            ai.reset_router()
+            svc = services(base)
+            check("успех пережил рестарт — успешно",
+                  svc["ai-providers"]["ok"] is True, svc["ai-providers"]["detail"])
+
+            # Ручная проба ненастроенного провайдера (сети нет — ранний возврат)
+            # не трогает метки живого трафика и не красит статус.
+            ai._provider_last_ok.clear()
+            ai._provider_last_err.clear()
+            ai.reset_router()
+            os.environ.pop("EGE_AI_API_KEY", None)
+            server._AI.reset_providers_cache()
+            res = ai.probe_provider("gptunnel", tier="free")
+            check("проба без ключа — ранний возврат", res["ok"] is False, res["error"])
+            check("ручная проба не пишет метки трафика",
+                  not ai._provider_last_ok and not ai._provider_last_err,
+                  f"{ai._provider_last_ok} {ai._provider_last_err}")
+
             # Тексты ошибок и ключи наружу не едут.
             blob = json.dumps(status(base), ensure_ascii=False)
             check("без утечек", "test-key" not in blob and "boom" not in blob)
