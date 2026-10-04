@@ -1399,6 +1399,9 @@ def main():
             check("промпт запрещает готовые ответы в кнопках (только вопрос/подсказка)",
                   "в кнопки класть запрещено" in agent.AGENT_SYSTEM
                   and "дай подсказку" in agent.AGENT_SYSTEM)
+            check("промпт запрещает заканчивать ход обещанием продолжить (2c)",
+                  "Не заканчивай ход обещанием продолжить" in agent.AGENT_SYSTEM
+                  and "Один вопрос ученика — доводи до конца сам" in agent.AGENT_SYSTEM)
             check("мусор в блоке не ломает ответ и не даёт пустых кнопок",
                   agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[0] == "Ответ."
                   and agent.split_suggestions("Ответ.\n```suggest\nне json и не список\n```")[1] == [])
