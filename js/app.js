@@ -7409,7 +7409,15 @@ function essayDeltaChip(readyAscNewFirst) {
   const lastScore = Number(readyAscNewFirst[0].totalScore);
   if (!Number.isFinite(first) || !Number.isFinite(lastScore)) return "";
   const d = Math.round((lastScore - first) * 10) / 10;
-  if (d === 0) return `<span class="chip">без изменений с первой работы</span>`;
+  if (d === 0) {
+    // Первая и последняя совпали, а в середине были качели (22…0…22) —
+    // «без изменений» врало бы, поэтому честно показываем совпадение краёв.
+    const mid = readyAscNewFirst.slice(1, -1).map((it) => Number(it.totalScore));
+    if (mid.some((v) => Number.isFinite(v) && v !== first)) {
+      return `<span class="chip mono">первая и последняя — ${first}</span>`;
+    }
+    return `<span class="chip">без изменений с первой работы</span>`;
+  }
   const cls = d > 0 ? "chip--success" : "chip--danger";
   const sign = d > 0 ? "+" : "";
   return `<span class="chip ${cls} mono">${sign}${d} с первой работы</span>`;
@@ -7492,7 +7500,7 @@ function essayDynamicsSVG(readyNewFirst) {
   }
   const times = ready.map((it) => Number(it.createdAt));
   const { mode, needYear } = essayTimeMode(times);
-  const W = 560, H = 200, padL = 30, padR = 16, padT = 16, padB = 40;
+  const W = 560, H = 224, padL = 38, padR = 18, padT = 36, padB = 46;
   const X = (i) => padL + (ready.length === 1 ? 0.5 : i / (ready.length - 1)) * (W - padL - padR);
   const Y = (v) => padT + (1 - Math.max(0, Math.min(22, v)) / 22) * (H - padT - padB);
   const baseY = H - padB;
@@ -7500,7 +7508,7 @@ function essayDynamicsSVG(readyNewFirst) {
   const area = `${line} L${X(ready.length - 1).toFixed(1)},${baseY.toFixed(1)} L${X(0).toFixed(1)},${baseY.toFixed(1)} Z`;
   const grid = [0, 11, 22].map((g) => `
     <line x1="${padL}" y1="${Y(g).toFixed(1)}" x2="${W - padR}" y2="${Y(g).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${padL - 6}" y="${(Y(g) + 4).toFixed(1)}" font-size="10" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
+    <text x="${padL - 8}" y="${(Y(g) + 4.5).toFixed(1)}" font-size="12" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
   // Соседние точки в одну минуту/день/месяц давали бы две одинаковые
   // подписи подряд — вторую пропускаем (первая, последняя и шаг те же).
   let prevTick = null;
@@ -7509,25 +7517,25 @@ function essayDynamicsSVG(readyNewFirst) {
     const label = raw === prevTick ? "" : raw;
     if (raw !== prevTick) prevTick = raw;
     return `<line x1="${X(i).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${X(i).toFixed(1)}" y2="${(baseY + 5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${X(i).toFixed(1)}" y="${(baseY + 19).toFixed(1)}" font-size="10" fill="var(--muted)" text-anchor="middle" class="mono">${esc(label)}</text>`;
+    <text x="${X(i).toFixed(1)}" y="${(baseY + 21).toFixed(1)}" font-size="12" fill="var(--muted)" text-anchor="middle" class="mono">${esc(label)}</text>`;
   }).join("");
   const dots = ready.map((it, i) => {
     const v = Number(it.totalScore);
     const when = essayFullDateTime(times[i]);
     const tip = `${when ? when + " — " : ""}${v} из 22`;
     const lastPt = i === ready.length - 1;
-    return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${lastPt ? 5 : 3.5}" fill="${lastPt ? "var(--accent)" : "var(--surface, #fff)"}" stroke="var(--accent)" stroke-width="2.5"><title>${esc(tip)}</title></circle>`;
+    return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${lastPt ? 6 : 4}" fill="${lastPt ? "var(--accent)" : "var(--surface, #fff)"}" stroke="var(--accent)" stroke-width="2.5"><title>${esc(tip)}</title></circle>`;
   }).join("");
   const first = ready[0], last = ready[ready.length - 1];
   const ends = `
-    <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 10).toFixed(1)}" font-size="11" fill="var(--muted)" text-anchor="start" class="mono">${Number(first.totalScore)}</text>
-    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 10).toFixed(1)}" font-size="12" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono">${Number(last.totalScore)} / 22</text>`;
+    <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 9).toFixed(1)}" font-size="13" fill="var(--muted)" text-anchor="start" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(first.totalScore)}</text>
+    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 9).toFixed(1)}" font-size="14" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(last.totalScore)} / 22</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика баллов за сочинения">
     <defs><linearGradient id="essayDyn" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="rgba(2,119,182,0.25)"/><stop offset="1" stop-color="rgba(2,119,182,0)"/>
     </linearGradient></defs>
     ${grid}<path d="${area}" fill="url(#essayDyn)"/>
-    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
     ${dots}${ends}${ticks}
   </svg>`;
 }
@@ -7568,10 +7576,12 @@ function essayCriteriaHTML(ready) {
 
 /* Вывод человеческим языком: что происходит с баллами и куда бить дальше.
    Правила детерминированные (те же числа, что на графике и в сетке
-   критериев): тренд — последний минус первый; слабый критерий — худший
-   процент среднего (при равенстве — меньший id); «ровно» — все средние
-   от 75%. Тексты причин и шагов — статика по рубрике ФИПИ, а не мнение
-   модели, поэтому вывод одинаков при тех же данных. */
+   критериев): тренд — последний минус первый, плюс минимум/максимум
+   отрезка (качели 22…0…22 — это не «ровно», а «гуляет»); слабый
+   критерий — худший процент среднего (при равенстве — меньший id);
+   «ровно» — все средние от 75%. Тексты причин и шагов — статика
+   по рубрике ФИПИ, а не мнение модели, поэтому вывод одинаков
+   при тех же данных. */
 const ESSAY_CRIT_GUIDE = {
   K1: { name: "позиция автора", why: "позиция автора исходного текста не названа прямо или подменена пересказом", next: "перед письмом выпиши позицию автора одним предложением и сверяй с ней каждый абзац" },
   K2: { name: "комментарий", why: "примеров-иллюстраций меньше двух или между ними нет пояснения-связки", next: "проверь, что примеров ровно два и после второго есть фраза, как они связаны с позицией" },
@@ -7630,15 +7640,22 @@ function essayInsightHTML(snap, readyNewFirst) {
   const d = Math.round((lastScore - first) * 10) / 10;
   const n = ready.length;
   const workWord = plural(n, "работа", "работы", "работ");
+  // Минимум/максимум отрезка: тренд «первый − последний» прячет качели
+  // вида 22…0…22, поэтому разброс упоминаем явно.
+  const lo = Math.min(...scores), hi = Math.max(...scores);
   let trend;
   if (n < 2) {
     trend = `Первая проверенная работа — <b class="mono">${first} из 22</b>. Это точка отсчёта: со второй появится линия роста.`;
   } else if (d > 0) {
-    trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
+    trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из 22</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
+    if (lo < first) trend += ` По пути была просадка до <b class="mono">${lo} из 22</b> — это нормально, важен тренд.`;
   } else if (d < 0) {
-    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore}</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Это нормально — результаты от работы к работе меняются. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
+    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из 22</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Результаты от работы к работе гуляют — это нормально. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
+    if (hi > first) trend += ` Лучшее на этом отрезке — <b class="mono">${hi} из 22</b>: к нему и возвращаемся.`;
+  } else if (hi !== lo) {
+    trend = `Первая и последняя — по <b class="mono">${first} из 22</b>, а в середине было от <b class="mono">${lo}</b> до <b class="mono">${hi}</b>. Результат пока гуляет — это нормально: разбери просадки и закрепи то, что уже получается.`;
   } else {
-    trend = `Пока ровно: <b class="mono">${first} из 22</b> в первой и в последней из ${n} ${workWord}. Стабильность — уже результат; сдвинуть её поможет одно слабое место ниже.`;
+    trend = `Все ${n} ${workWord} — по <b class="mono">${first} из 22</b>. Стабильность — уже результат; пойти выше поможет одно слабое место ниже.`;
   }
   const crits = essayCritStats(ready);
   let focus = "";
@@ -7650,9 +7667,9 @@ function essayInsightHTML(snap, readyNewFirst) {
       const strongGuide = ESSAY_CRIT_GUIDE[strong.id];
       focus = `По критериям ровно: слабее всего <b>${esc(guide ? guide.name : weak.id)} (${weak.avg} из ${weak.max})</b> — и это всё равно высокий уровень${strongGuide && strong.id !== weak.id ? `, сильнее всего — ${esc(strongGuide.name)}` : ""}.`;
     } else if (guide) {
-      focus = `Больше всего баллов уходит в <b>${esc(guide.name)} (${weak.id})</b> — в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Причина обычно в том, что ${esc(guide.why)}. Я предлагаю: ${esc(guide.next)}.`;
+      focus = `Самое слабое место — «${esc(guide.name)}» (${weak.id}): в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Обычно дело в том, что ${esc(guide.why)}. Следующий шаг: ${esc(guide.next)}.`;
     } else {
-      focus = `Больше всего баллов уходит в <b class="mono">${esc(weak.id)}</b> — в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Открой разбор любой работы и сверься с комментарием к этому критерию.`;
+      focus = `Самое слабое место — <b class="mono">${esc(weak.id)}</b>: в среднем <b class="mono">${weak.avg} из ${weak.max}</b>. Открой разбор любой работы и сверься с комментарием к этому критерию.`;
     }
   }
   return `
