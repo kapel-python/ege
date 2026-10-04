@@ -82,7 +82,7 @@ def main() -> int:
     # 1. Урезанный UA врёт про версию — верим ему только в generics.
     t("урезанный Android без версии", p(REDUCED_ANDROID) == ("Android-смартфон", "phone"),
       p(REDUCED_ANDROID))
-    t("Windows по одному UA без версии", p(CHROME_WIN) == ("Windows PC", "desktop"),
+    t("Windows по одному UA без версии", p(CHROME_WIN) == ("Windows", "desktop"),
       p(CHROME_WIN))
     t("пустой UA — Браузер", p("") == ("Браузер", "desktop"), p(""))
     t("curl — Браузер", p("curl/8.0") == ("Браузер", "desktop"), p("curl/8.0"))
@@ -93,26 +93,26 @@ def main() -> int:
       p(LEGACY_SAMSUNG))
 
     # 3. Версии Apple/macOS из UA (Safari не урезает).
-    t("iPhone iOS 17", p(IPHONE_17) == ("iPhone · iOS 17", "phone"), p(IPHONE_17))
-    t("iPhone iOS 13", p(IPHONE_13) == ("iPhone · iOS 13", "phone"), p(IPHONE_13))
-    t("iPad iPadOS 16", p(IPAD_16) == ("iPad · iPadOS 16", "tablet"), p(IPAD_16))
-    t("Mac 10.15", p(MAC_1015) == ("MacBook · macOS 10.15", "laptop"), p(MAC_1015))
-    t("Mac 14", p(MAC_14) == ("MacBook · macOS 14", "laptop"), p(MAC_14))
+    t("iPhone iOS 17", p(IPHONE_17) == ("iOS 17", "phone"), p(IPHONE_17))
+    t("iPhone iOS 13", p(IPHONE_13) == ("iOS 13", "phone"), p(IPHONE_13))
+    t("iPad iPadOS 16", p(IPAD_16) == ("iPadOS 16", "tablet"), p(IPAD_16))
+    t("Mac 10.15", p(MAC_1015) == ("macOS 10.15", "laptop"), p(MAC_1015))
+    t("Mac 14", p(MAC_14) == ("macOS 14", "laptop"), p(MAC_14))
 
     # 4. Подсказки поверх урезанного UA: модель и версия.
     t("POCO F6 Pro + Android 16 из хинтов",
       p(REDUCED_ANDROID, {"model": "POCO F6 Pro", "platform": "android",
                           "version": "16", "mobile": True}) == ("POCO F6 Pro · Android 16", "phone"),
       p(REDUCED_ANDROID, {"model": "POCO F6 Pro", "platform": "android", "version": "16", "mobile": True}))
-    t("Android 15 без модели", p(REDUCED_ANDROID, {"platform": "android", "version": "15"}) ==
-      ("Android-смартфон · Android 15", "phone"),
+    t("Android 15 без модели — только система", p(REDUCED_ANDROID, {"platform": "android", "version": "15"}) ==
+      ("Android 15", "phone"),
       p(REDUCED_ANDROID, {"platform": "android", "version": "15"}))
     t("Windows 11 из хинтов", p(CHROME_WIN, {"platform": "windows", "version": "15"}) ==
-      ("Windows 11 PC", "desktop"), p(CHROME_WIN, {"platform": "windows", "version": "15"}))
+      ("Windows 11", "desktop"), p(CHROME_WIN, {"platform": "windows", "version": "15"}))
     t("Windows 10 из хинтов", p(CHROME_WIN, {"platform": "windows", "version": "10"}) ==
-      ("Windows 10 PC", "desktop"), p(CHROME_WIN, {"platform": "windows", "version": "10"}))
+      ("Windows 10", "desktop"), p(CHROME_WIN, {"platform": "windows", "version": "10"}))
     t("полная версия 15.0.0 режется до major",
-      p(CHROME_WIN, {"platform": "windows", "version": "15.0.0"}) == ("Windows 11 PC", "desktop"),
+      p(CHROME_WIN, {"platform": "windows", "version": "15.0.0"}) == ("Windows 11", "desktop"),
       p(CHROME_WIN, {"platform": "windows", "version": "15.0.0"}))
 
     # 5. Санитария: заглушки и инъекции никогда не становятся названием.
@@ -157,7 +157,7 @@ def main() -> int:
       h4 == {"model": "", "platform": "", "version": "", "mobile": None}, h4)
 
     # 7. Старые честные NT и iPad-на-Mac через JS-платформу.
-    t("Windows 7 честно", p("Mozilla/5.0 (Windows NT 6.1; Win64; x64)") == ("Windows 7 PC", "desktop"),
+    t("Windows 7 честно", p("Mozilla/5.0 (Windows NT 6.1; Win64; x64)") == ("Windows 7", "desktop"),
       p("Mozilla/5.0 (Windows NT 6.1; Win64; x64)"))
     t("iPad-на-Mac через платформу (версия неизвестна — честно без неё)",
       p(MAC_1015, {"platform": "ipados"}) == ("iPad", "tablet"),
@@ -165,17 +165,17 @@ def main() -> int:
     t("планшет без Mobile по хинтам",
       p("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36",
         {"platform": "android", "version": "14", "mobile": False}) ==
-      ("Android-планшет · Android 14", "tablet"),
+      ("Android 14", "tablet"),
       p("Mozilla/5.0 (Linux; Android 10; K)"))
 
     # 8. Заводские коды прячутся всегда: остаётся только система.
     t("заводской код прячется, версия остаётся",
       p(REDUCED_ANDROID, {"model": "23113RKC6G", "platform": "android",
-                          "version": "16", "mobile": True}) == ("Android-смартфон · Android 16", "phone"),
+                          "version": "16", "mobile": True}) == ("Android 16", "phone"),
       p(REDUCED_ANDROID, {"model": "23113RKC6G"}))
     t("неизвестный техкод прячется, версия остаётся",
       p(REDUCED_ANDROID, {"model": "24049PC21G", "platform": "android",
-                          "version": "15", "mobile": True}) == ("Android-смартфон · Android 15", "phone"),
+                          "version": "15", "mobile": True}) == ("Android 15", "phone"),
       p(REDUCED_ANDROID, {"model": "24049PC21G"}))
     t("неизвестный техкод без версии — голый generic",
       p(REDUCED_ANDROID, {"model": "24049PC21G"}) == ("Android-смартфон", "phone"),

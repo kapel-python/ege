@@ -1527,7 +1527,13 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
             except (TypeError, ValueError):
                 ver = 0
         base = model or ("Android-планшет" if tablet else "Android-смартфон")
-        name = f"{base} · Android {ver}" if ver else base
+        if ver:
+            # Система известна — слово-пустышка не нужно: «Android 16»,
+            # а не «Android-смартфон · Android 16». Тип (телефон/планшет)
+            # несёт отдельное поле device_type (иконка в списке).
+            name = f"{model} · Android {ver}" if model else f"Android {ver}"
+        else:
+            name = base
         return (name, "tablet" if tablet else "phone")
     if is_iphone or is_ipad:
         ver = hver
@@ -1538,16 +1544,23 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
             except (TypeError, ValueError):
                 ver = 0
         if is_ipad:
-            base = _human_model(hmodel) or "iPad"
+            model = _human_model(hmodel)
             label = f"iPadOS {ver}" if ver else ""
+            if model:
+                name = f"{model} · {label}" if label else model
+            else:
+                name = label or "iPad"
         else:
-            base = _human_model(hmodel) or "iPhone"
+            model = _human_model(hmodel)
             label = f"iOS {ver}" if ver else ""
-        name = f"{base} · {label}" if label else base
+            if model:
+                name = f"{model} · {label}" if label else model
+            else:
+                name = label or "iPhone"
         return (name, "tablet" if is_ipad else "phone")
     if is_windows:
         if hver:
-            name = "Windows 11 PC" if hver >= _WIN11_PLATFORM_MAJOR else "Windows 10 PC"
+            name = "Windows 11" if hver >= _WIN11_PLATFORM_MAJOR else "Windows 10"
             return (name, "desktop")
         # Старые NT-честно отличаются, а NT 10.0 — это и 10, и 11 сразу.
         try:
@@ -1556,12 +1569,12 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
         except (TypeError, ValueError):
             major, minor = 0, 0
         if (major, minor) == (6, 1):
-            return ("Windows 7 PC", "desktop")
+            return ("Windows 7", "desktop")
         if (major, minor) == (6, 2):
-            return ("Windows 8 PC", "desktop")
+            return ("Windows 8", "desktop")
         if (major, minor) == (6, 3):
-            return ("Windows 8.1 PC", "desktop")
-        return ("Windows PC", "desktop")
+            return ("Windows 8.1", "desktop")
+        return ("Windows", "desktop")
     if is_mac:
         ver = hver
         minor = 0
@@ -1574,7 +1587,7 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
             except (TypeError, ValueError):
                 ver, minor = 0, 0
         label = _macos_label(ver, minor) if ver else ""
-        name = f"MacBook · {label}" if label else "MacBook"
+        name = label or "Mac"
         return (name, "laptop")
     if "cros" in low or "chromebook" in low or hplat == "chromeos":
         return ("Chromebook", "laptop")
@@ -1584,7 +1597,7 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
         hm = _human_model(hmodel)
         if hm:
             return (f"{hm} · Linux", "desktop")
-        return ("Linux PC", "desktop")
+        return ("Linux", "desktop")
     if hmobile is True or "mobile" in low:
         hm = _human_model(hmodel)
         if hm:
@@ -1687,26 +1700,68 @@ def request_device_identity(conn: sqlite3.Connection, handler, user_id: int | No
         return None, None
 
 
+def _device_family(name) -> str:
+    """Семья устройства для слияния строк: первое слово названия.
+
+    Названия со временем уточняются (`Windows PC` -> `Windows`,
+    `iPhone` -> `iOS 17`), а старые строки в базе остаются со прежним именем —
+    точное совпадение их бы больше никогда не нашло. Семья схлопывает такие
+    переименования (`Windows PC` и `Windows` — одна семья), но не сливает
+    разные устройства: у телефона и планшета, `iPhone` и `iPad`, `Браузера`
+    и всего остального первые слова разные. Тип сверяется отдельно.
+    """
+    try:
+        text = str(name or "").strip()
+    except Exception:
+        text = ""
+    if not text:
+        return "Браузер"
+    try:
+        head = re.split(r"[\s·(/]+", text, maxsplit=1)[0].strip()
+    except Exception:
+        head = ""
+    return head or "Браузер"
+
+
 def adopt_legacy_device_rows(conn: sqlite3.Connection, user_id: int, name, dtype, key, net) -> int:
     """Привязать к опознанному устройству его старые сессии без отпечатков.
 
     Так рождается вторая строка в «Устройствах»: тот же браузер вошёл до
     появления отпечатков (или зашёл снова, потеряв куку сессии), а его прошлая
     строка осталась жить. Как только устройство опознано, все его прежние строки
-    с тем же названием и типом получают те же отпечатки и снова становятся
-    одним устройством. Ничего не удаляется: живая сессия не исчезает без воли
-    человека, лишнее убирается вручную — отзывом устройства.
+    с той же семьёй названия (`_device_family`) и типом получают те же отпечатки
+    и снова становятся одним устройством. Ничего не удаляется: живая сессия
+    не исчезает без воли человека, лишнее убирается вручную — отзывом устройства.
 
     Возвращает число привязанных строк (0 — обновлять нечего)."""
     if not key:
         return 0
     try:
+        fam = _device_family(name)
+        rows = conn.execute(
+            "SELECT id, device_name FROM user_sessions "
+            "WHERE user_id=? AND device_key IS NULL AND device_net IS NULL "
+            "AND COALESCE(device_type, 'desktop')=COALESCE(?, 'desktop')",
+            (int(user_id), dtype),
+        ).fetchall()
+        ids: list[int] = []
+        for r in rows:
+            try:
+                sid = int(r["id"])
+            except (TypeError, ValueError):
+                continue
+            try:
+                peer = r["device_name"]
+            except (KeyError, IndexError, TypeError):
+                peer = None
+            if _device_family(peer) == fam:
+                ids.append(sid)
+        if not ids:
+            return 0
         cur = conn.execute(
             "UPDATE user_sessions SET device_key=?, device_net=COALESCE(device_net, ?) "
-            "WHERE user_id=? AND device_key IS NULL AND device_net IS NULL "
-            "AND COALESCE(device_name, 'Браузер')=COALESCE(?, 'Браузер') "
-            "AND COALESCE(device_type, 'desktop')=COALESCE(?, 'desktop')",
-            (key, net, int(user_id), name, dtype),
+            f"WHERE id IN ({','.join('?' * len(ids))})",
+            (key, net, *ids),
         )
         return int(cur.rowcount or 0)
     except sqlite3.Error:
