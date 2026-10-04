@@ -158,6 +158,21 @@ def agent_quota_max() -> int:
     return _env_int("EGE_AGENT_QUOTA_MAX", AGENT_QUOTA_MAX_DEFAULT)
 
 
+def agent_pure_model() -> bool:
+    """Рубильник «модель решает всё»: отключает ВСЕ серверные перехваты цикла
+    (детектор «инструмента нет», переспрос обещаний, принудительный вызов по
+    вопросу). Сервер тогда только исполняет вызовы модели как есть, а её
+    осечки («сейчас посмотрю» без вызова, «инструмента нет») уходят ученику
+    без правок.
+
+    По умолчанию выключен: на слабых моделях без перехватов регулярно
+    приезжают пустые обещания вместо цифр (замеры — в комментариях выше и в
+    AGENTS.md). Рубильник нужен, чтобы сравнить поведение на живом трафике
+    цифрами, а не спорами: включил — смотришь ленту, выключил — всё как было.
+    Читается в момент вызова, перезапуск не нужен."""
+    return (os.environ.get("EGE_AGENT_PURE_MODEL") or "").strip() == "1"
+
+
 def agent_quota_window_ms() -> int:
     return _env_int("EGE_AGENT_QUOTA_WINDOW_SEC", AGENT_QUOTA_WINDOW_DEFAULT_SEC) * 1000
 
@@ -2902,7 +2917,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 guess = pseudo_call(text)
                 if guess:
                     missing, guessed_args = guess[0], dict(guess[1])
-            if missing and not steps and not recently_read:
+            if missing and not steps and not recently_read and not agent_pure_model():
                 # Имя инструмента модель могла и не назвать («не хватает
                 # инструмента для поиска») — тогда берём его по вопросу ученика.
                 # Но дефолт «прогресс» без совпадения с вопросом не навязываем:
@@ -2925,8 +2940,9 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                     return steps, forced, None
             # Обещание посмотреть вместо вызова. Один раз переспрашиваем
             # жёстко, потом зовём инструмент сами — ученик не должен получать
-            # «сейчас посмотрю» вместо цифр.
-            if stalls == 0 and should_nudge(text, asked, steps, recently_read):
+            # «сейчас посмотрю» вместо цифр. В pure-режиме переспроса нет:
+            # что модель сказала, то ученик и видит.
+            if stalls == 0 and not agent_pure_model() and should_nudge(text, asked, steps, recently_read):
                 stalls = 1
                 messages.append({"role": "assistant", "content": text})
                 messages.append({"role": "user", "content": STALL_NUDGE})
@@ -2937,8 +2953,9 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
                 # второй раз «посмотрю» без цифр ученик видеть не должен.
                 # Только по вопросу ПРО данные: на «объясни логарифмы» смотреть
                 # нечего, там инструмент не нужен и навязывать его нельзя.
+                # В pure-режиме и здесь ничего не зовём сами.
                 if (not steps and not recently_read and asked_for_data
-                        and is_empty_promise(text)):
+                        and not agent_pure_model() and is_empty_promise(text)):
                     name, call_args = fallback_tool_for(asked)
                     if name == "project_info" and not call_args.get("topic"):
                         call_args = _args_for_tool(name, asked) or call_args

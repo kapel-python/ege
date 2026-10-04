@@ -1647,6 +1647,39 @@ def main():
                   and not (body.get("steps") or []),
                   f"{status} {str(body)[:240]}")
 
+            section("pure-режим: EGE_AGENT_PURE_MODEL=1 отключает все перехваты")
+            # Рубильник честной проверки: сервер только исполняет вызовы модели,
+            # осечки («сейчас посмотрю» без вызова, «инструмента нет») уходят
+            # ученику без правок. По умолчанию выключен.
+            check("по умолчанию перехваты включены",
+                  agent.agent_pure_model() is False, str(agent.agent_pure_model()))
+            os.environ["EGE_AGENT_PURE_MODEL"] = "1"
+            try:
+                check("флаг читается живьём, без перезагрузки",
+                      agent.agent_pure_model() is True)
+                with lock:
+                    script.clear()
+                    script.append({"text": "Сейчас посмотрю твой профиль", "tool_calls": []})
+                    calls["n"] = 0
+                status, body = turn(c3, tid_f4, "посмотри мой профиль")
+                check("pure: обещание без вызова уходит как есть, без переспроса",
+                      status == 200 and body.get("final") == "Сейчас посмотрю твой профиль"
+                      and not (body.get("steps") or []) and calls["n"] == 1,
+                      f"{status} {str(body)[:200]} cost={calls['n']}")
+                with lock:
+                    script.clear()
+                    script.append({"text": "Не хватает инструмента для поиска.", "tool_calls": []})
+                    calls["n"] = 0
+                status, body = turn(c3, tid_f4, "подбери тему производная")
+                check("pure: «инструмента нет» уходит как есть, force нет",
+                      status == 200 and "Не хватает инструмента" in (body.get("final") or "")
+                      and not (body.get("steps") or []) and calls["n"] == 1,
+                      f"{status} {str(body)[:200]} cost={calls['n']}")
+            finally:
+                del os.environ["EGE_AGENT_PURE_MODEL"]
+            check("флаг снят — перехваты вернулись",
+                  agent.agent_pure_model() is False)
+
             section("кнопки-продолжения: блок вырезается всегда")
             # Живой случай: ответ провайдера обрезался по лимиту, закрывающая
             # ограда ```suggest не пришла — и весь служебный блок остался в
