@@ -1420,6 +1420,41 @@ def _android_model_from_ua(ua: str) -> str:
     return _clean_device_token(m.group(1))
 
 
+# Заводской код -> маркетинговое имя. Браузер отдаёт именно код
+# (`Sec-CH-UA-Model: "23113RKC6G"`), а человек знает телефон как POCO F6 Pro.
+# Таблица пополняется только подтверждёнными связками (владелец опознал свой
+# аппарат): неверное имя хуже честного обобщения, поэтому угадывать сюда
+# нельзя — неизвестный код прячется правилом ниже, а не маппится наугад.
+_MODEL_MARKETING_NAMES = {
+    "23113RKC6G": "POCO F6 Pro",
+}
+
+# Заводской код без известного имени (Xiaomi/Redmi/POCO нумеруют аппараты
+# датой выпуска: 2311... = ноябрь 2023, одни заглавные+цифры, начинается
+# с цифры, без пробелов и дефисов). Показывать его человеку — шум
+# («23113RKC6G · Android 16»), поэтому такая модель отбрасывается и остаётся
+# честное обобщение («Android-смартфон · Android 16»). Человеческие имена
+# («POCO F6 Pro», «Pixel 7», «SM-G991B») под правило не попадают: там есть
+# пробелы/дефис/строчные или начинаются с буквы.
+_TECHNICAL_MODEL_RE = re.compile(r"^[0-9][A-Z0-9]{4,}$")
+
+
+def _human_model(cleaned: str) -> str:
+    """Почищенная модель -> имя для показа: маппинг, иначе прячем техкоды."""
+    try:
+        text = str(cleaned or "").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    known = _MODEL_MARKETING_NAMES.get(text.upper())
+    if known:
+        return known
+    if _TECHNICAL_MODEL_RE.match(text):
+        return ""
+    return text
+
+
 def _major_or_zero(text: str) -> int:
     """Major версии из «16», 16 или «15.0.0» — иначе 0 (версии нет)."""
     if isinstance(text, int):
@@ -1449,6 +1484,9 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
        и `Windows NT 10.0` версии НЕ дают — там остаётся обобщённое название.
     2. UA + Client Hints / `X-Ege-*` (современный Chrome/Edge с JS): точная
        модель (`POCO F6 Pro`) и точная версия (`Android 16`, `Windows 11`).
+       Заводской код с неизвестным именем (Xiaomi-стиль `23113RKC6G`) не
+       показывается — остаётся обобщение с версией; известные коды
+       подменяются именем из `_MODEL_MARKETING_NAMES`.
 
     Тип — один из: phone, tablet, laptop, desktop.
     """
@@ -1489,7 +1527,7 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
         else:
             # Легаси-эвристика: планшеты на Android обычно без маркера Mobile.
             tablet = "mobile" not in low
-        model = hmodel or _android_model_from_ua(ua)
+        model = _human_model(hmodel) or _human_model(_android_model_from_ua(ua))
         ver = hver
         if not ver and not _REDUCED_ANDROID_RE.search(ua):
             try:
@@ -1509,10 +1547,10 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
             except (TypeError, ValueError):
                 ver = 0
         if is_ipad:
-            base = hmodel or "iPad"
+            base = _human_model(hmodel) or "iPad"
             label = f"iPadOS {ver}" if ver else ""
         else:
-            base = hmodel or "iPhone"
+            base = _human_model(hmodel) or "iPhone"
             label = f"iOS {ver}" if ver else ""
         name = f"{base} · {label}" if label else base
         return (name, "tablet" if is_ipad else "phone")
@@ -1552,19 +1590,23 @@ def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tupl
     # X11/ubuntu/freebsd — те же настольные Linux, что и «linux». Проверка после
     # «cros», иначе Chrome OS (в его UA тоже есть X11) назвался бы Linux PC.
     if "linux" in low or "x11" in low or "ubuntu" in low or "freebsd" in low or hplat == "linux":
-        if hmodel:
-            return (f"{hmodel} · Linux", "desktop")
+        hm = _human_model(hmodel)
+        if hm:
+            return (f"{hm} · Linux", "desktop")
         return ("Linux PC", "desktop")
     if hmobile is True or "mobile" in low:
-        if hmodel:
-            return (hmodel, "phone")
+        hm = _human_model(hmodel)
+        if hm:
+            return (hm, "phone")
         return ("Смартфон", "phone")
     if "tablet" in low:
-        if hmodel:
-            return (hmodel, "tablet")
+        hm = _human_model(hmodel)
+        if hm:
+            return (hm, "tablet")
         return ("Планшет", "tablet")
-    if hmodel:
-        return (hmodel, "phone" if hmobile else "desktop")
+    hm = _human_model(hmodel)
+    if hm:
+        return (hm, "phone" if hmobile else "desktop")
     return ("Браузер", "desktop")
 
 

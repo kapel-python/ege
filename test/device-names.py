@@ -168,6 +168,27 @@ def main() -> int:
       ("Android-планшет · Android 14", "tablet"),
       p("Mozilla/5.0 (Linux; Android 10; K)"))
 
+    # 8. Заводские коды: известный — имя, неизвестный — прячем, не шумим.
+    t("заводской код POCO подменяется именем",
+      p(REDUCED_ANDROID, {"model": "23113RKC6G", "platform": "android",
+                          "version": "16", "mobile": True}) == ("POCO F6 Pro · Android 16", "phone"),
+      p(REDUCED_ANDROID, {"model": "23113RKC6G"}))
+    t("маппинг не зависит от регистра",
+      p(REDUCED_ANDROID, {"model": "23113rkc6g", "platform": "android",
+                          "version": "16", "mobile": True}) == ("POCO F6 Pro · Android 16", "phone"),
+      p(REDUCED_ANDROID, {"model": "23113rkc6g"}))
+    t("неизвестный техкод прячется, версия остаётся",
+      p(REDUCED_ANDROID, {"model": "24049PC21G", "platform": "android",
+                          "version": "15", "mobile": True}) == ("Android-смартфон · Android 15", "phone"),
+      p(REDUCED_ANDROID, {"model": "24049PC21G"}))
+    t("неизвестный техкод без версии — голый generic",
+      p(REDUCED_ANDROID, {"model": "24049PC21G"}) == ("Android-смартфон", "phone"),
+      p(REDUCED_ANDROID, {"model": "24049PC21G"}))
+    t("человеческий код Samsung остаётся",
+      p(REDUCED_ANDROID, {"model": "SM-G991B", "platform": "android",
+                          "version": "14", "mobile": True}) == ("SM-G991B · Android 14", "phone"),
+      p(REDUCED_ANDROID, {"model": "SM-G991B"}))
+
     print(f"\npassed: {PASSED}, failed: {len(FAILED)}")
     for name in FAILED:
         print(f"  — {name}")
