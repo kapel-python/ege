@@ -1286,12 +1286,170 @@ def ensure_auth_schema(conn: sqlite3.Connection) -> None:
     AUTH_SCHEMA_DONE.add(key)
 
 
-def parse_device_info(user_agent: str | None) -> tuple[str, str]:
-    """Человекочитаемое (название, тип) по User-Agent без хранения сырого UA.
+def _clean_device_token(value: object, *, max_len: int = 64) -> str:
+    """Аккуратно почистить подсказку устройства (модель/платформа/версия).
 
-    Точную модель вернуть можно лишь когда она есть в самом UA (редкие
-    Android-аппараты); во всех остальных случаях — понятное обобщённое
-    название: iPhone / iPad / Windows PC / MacBook / Android-смартфон.
+    Значения приходят из заголовков, то есть от клиента: кавычки Client Hints
+    (`"POCO F6 Pro"`, `"15.0.0"`), мусор и попытки вложить чужой текст режем
+    здесь, а не в названии. Пусто — значит подсказки нет, честно возвращаем "".
+    """
+    try:
+        text = str(value or "").strip()
+    except Exception:
+        return ""
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        text = text[1:-1].strip()
+    # Greased-значение Client Hints — не модель, а заглушка совместимости.
+    if "not" in text.lower() and "brand" in text.lower():
+        return ""
+    text = text[:max_len].strip()
+    if len(text) < 2:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                  "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+                  "0123456789 _-+()./")
+    if any(c not in allowed for c in text):
+        return ""
+    if not any(c.isalnum() for c in text):
+        return ""
+    low = text.lower()
+    if low in ("k", "build", "mobile", "android", "linux", "unknown"):
+        return ""
+    return text
+
+
+def _hint_header(handler, *names: str) -> str:
+    """Первое непустое значение заголовка из списка имён."""
+    try:
+        headers = handler.headers
+    except Exception:
+        return ""
+    for name in names:
+        try:
+            value = headers.get(name)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+    return ""
+
+
+def parse_client_hints(handler) -> dict:
+    """Подсказки устройства из заголовков запроса (только производные, сырьё не храним).
+
+    Источников два, и оба добровольные:
+    * стандартные Client Hints Chromium (`Sec-CH-UA-*`) — браузер шлёт их сам
+      после нашего `Accept-CH` (см. `send_security_headers`); модель и точная
+      версия ОС — высокоуровневые (high-entropy), без opt-in не приезжают;
+    * собственные `X-Ege-*` от `js/device-hints.js` — те же значения, но добытые
+      через `navigator.userAgentData.getHighEntropyValues()` и приложенные к
+      каждому `/api/`-запросу (нужны там, где навигационного opt-in не было,
+      например повторные fetch после входа).
+
+    Свои заголовки старше стандартных: это те же данные, но свежее (JS читает
+    их на каждом запуске вкладки). Возвращаем только почищенные значения —
+    сырые строки заголовков за пределы вызова не уходят.
+    """
+    raw_model = _hint_header(handler, "X-Ege-Device-Model", "Sec-CH-UA-Model")
+    raw_platform = _hint_header(handler, "X-Ege-Platform", "Sec-CH-UA-Platform")
+    raw_version = _hint_header(handler, "X-Ege-OS-Version", "Sec-CH-UA-Platform-Version")
+    raw_mobile = _hint_header(handler, "X-Ege-Mobile", "Sec-CH-UA-Mobile")
+    model = _clean_device_token(raw_model)
+    try:
+        plat = str(raw_platform or "").strip()
+    except Exception:
+        plat = ""
+    if len(plat) >= 2 and plat[0] == '"' and plat[-1] == '"':
+        plat = plat[1:-1].strip()
+    plat = plat.lower()
+    if any(c not in "abcdefghijklmnopqrstuvwxyz " for c in plat):
+        plat = ""
+    platform = {"macos": "macos", "mac os x": "macos", "windows": "windows",
+                "android": "android", "ios": "ios", "ipados": "ipados",
+                "linux": "linux", "chrome os": "chromeos", "chromeos": "chromeos"}.get(plat, "")
+    version = ""
+    try:
+        ver = str(raw_version or "").strip()
+    except Exception:
+        ver = ""
+    if len(ver) >= 2 and ver[0] == '"' and ver[-1] == '"':
+        ver = ver[1:-1].strip()
+    m = re.match(r"\s*(\d{1,3})(?:[._](\d{1,3}))?", ver or "")
+    if m:
+        try:
+            major = int(m.group(1))
+        except (TypeError, ValueError):
+            major = -1
+        if 0 <= major <= 99:
+            version = str(major)
+    mobile: bool | None = None
+    try:
+        mob = str(raw_mobile or "").strip().lower()
+    except Exception:
+        mob = ""
+    if mob in ("?1", "1", "true", "mobile"):
+        mobile = True
+    elif mob in ("?0", "0", "false", "desktop"):
+        mobile = False
+    return {"model": model, "platform": platform, "version": version, "mobile": mobile}
+
+
+_ANDROID_MODEL_RE = re.compile(r";\s*([^;()]{2,64}?)\s*build[\s/;]", re.IGNORECASE)
+_ANDROID_VER_RE = re.compile(r"android\s+(\d{1,2})(?:[._](\d{1,2}))?", re.IGNORECASE)
+# Урезанный UA современного Chrome: версия заморожена на 10, модель заменена
+# на «K» — версии и модели здесь НЕТ, верить цифре 10 нельзя (иначе владелец
+# Android 16 увидит «Android 10»).
+_REDUCED_ANDROID_RE = re.compile(r"android\s+10\s*;\s*K\s*[;)]", re.IGNORECASE)
+_IOS_VER_RE = re.compile(r"\bos\s+(\d{1,2})[_.](\d{1,2})?", re.IGNORECASE)
+_MAC_VER_RE = re.compile(r"mac\s*os\s*x\s+(\d{1,2})[_.](\d{1,2})?(?:[_.](\d{1,3}))?", re.IGNORECASE)
+_WIN_NT_RE = re.compile(r"windows\s+nt\s+(\d{1,2})\.(\d{1,2})", re.IGNORECASE)
+
+# Major версии платформы Windows из Client Hints: 13+ означает Windows 11,
+# ниже — Windows 10 (см. документацию Chromium про Sec-CH-UA-Platform-Version).
+_WIN11_PLATFORM_MAJOR = 13
+
+
+def _android_model_from_ua(ua: str) -> str:
+    """Модель из легаси-UA вида `; POCO F6 Pro Build/UP1A...`."""
+    try:
+        m = _ANDROID_MODEL_RE.search(ua or "")
+    except Exception:
+        return ""
+    if not m:
+        return ""
+    return _clean_device_token(m.group(1))
+
+
+def _major_or_zero(text: str) -> int:
+    """Major версии из «16», 16 или «15.0.0» — иначе 0 (версии нет)."""
+    if isinstance(text, int):
+        return text if 0 <= text <= 99 else 0
+    try:
+        m = re.match(r"\s*(\d{1,3})", str(text or ""))
+        major = int(m.group(1)) if m else 0
+    except (TypeError, ValueError):
+        return 0
+    return major if 0 <= major <= 99 else 0
+
+
+def _macos_label(major: int, minor: int) -> str:
+    if major == 10 and minor:
+        return f"macOS 10.{minor}"
+    return f"macOS {major}" if major else ""
+
+
+def parse_device_info(user_agent: str | None, hints: dict | None = None) -> tuple[str, str]:
+    """Человекочитаемое (название, тип) по User-Agent + подсказкам клиента.
+
+    Сырой UA по-прежнему нигде не хранится — только эта пара. Точность растёт
+    по лестнице (каждая ступень честна, врать лучше generics не становится):
+    1. UA один (curl, тесты, старые браузеры): версия ОС, если она в UA есть
+       по-настоящему (`iPhone OS 17_0`, `Mac OS X 10_15_7`, легаси-Android
+       с моделью `; POCO F6 Pro Build/`). Урезанный Chrome (`Android 10; K`)
+       и `Windows NT 10.0` версии НЕ дают — там остаётся обобщённое название.
+    2. UA + Client Hints / `X-Ege-*` (современный Chrome/Edge с JS): точная
+       модель (`POCO F6 Pro`) и точная версия (`Android 16`, `Windows 11`).
+
     Тип — один из: phone, tablet, laptop, desktop.
     """
     try:
@@ -1299,40 +1457,132 @@ def parse_device_info(user_agent: str | None) -> tuple[str, str]:
     except Exception:
         ua = ""
     low = ua.lower()
-    if "iphone" in low:
-        return ("iPhone", "phone")
-    if "ipad" in low:
-        return ("iPad", "tablet")
-    if "android" in low:
-        # Планшеты на Android обычно без маркера Mobile.
-        if "mobile" not in low:
-            return ("Android-планшет", "tablet")
-        return ("Android-смартфон", "phone")
-    if "windows" in low:
+    try:
+        h = hints if isinstance(hints, dict) else {}
+    except Exception:
+        h = {}
+    hmodel = _clean_device_token(h.get("model")) if h else ""
+    hplat = str(h.get("platform") or "").lower() if h else ""
+    hver = _major_or_zero(h.get("version")) if h else 0
+    hmobile = h.get("mobile") if h else None
+    if not isinstance(hmobile, bool):
+        hmobile = None
+
+    is_android = "android" in low or hplat == "android"
+    is_iphone = "iphone" in low or hplat == "ios"
+    is_ipad = "ipad" in low or hplat == "ipados"
+    # iPad в десктопном режиме притворяется Macintosh — таких по UA не отличить,
+    # их помечает JS (тачскрин + Macintosh) через X-Ege-Platform: ipados.
+    is_mac = ("macintosh" in low or "mac os x" in low or hplat == "macos") and not is_ipad
+    is_windows = "windows" in low or hplat == "windows"
+
+    if is_android:
+        tablet: bool | None = None
+        if hmobile is True:
+            tablet = False
+        elif hmobile is False:
+            tablet = True
+        elif "mobile" in low:
+            tablet = False
+        elif "tablet" in low or "sm-x" in low or "sm-p" in low:
+            tablet = True
+        else:
+            # Легаси-эвристика: планшеты на Android обычно без маркера Mobile.
+            tablet = "mobile" not in low
+        model = hmodel or _android_model_from_ua(ua)
+        ver = hver
+        if not ver and not _REDUCED_ANDROID_RE.search(ua):
+            try:
+                m = _ANDROID_VER_RE.search(ua)
+                ver = int(m.group(1)) if m else 0
+            except (TypeError, ValueError):
+                ver = 0
+        base = model or ("Android-планшет" if tablet else "Android-смартфон")
+        name = f"{base} · Android {ver}" if ver else base
+        return (name, "tablet" if tablet else "phone")
+    if is_iphone or is_ipad:
+        ver = hver
+        if not ver:
+            try:
+                m = _IOS_VER_RE.search(ua)
+                ver = int(m.group(1)) if m else 0
+            except (TypeError, ValueError):
+                ver = 0
+        if is_ipad:
+            base = hmodel or "iPad"
+            label = f"iPadOS {ver}" if ver else ""
+        else:
+            base = hmodel or "iPhone"
+            label = f"iOS {ver}" if ver else ""
+        name = f"{base} · {label}" if label else base
+        return (name, "tablet" if is_ipad else "phone")
+    if is_windows:
+        if hver:
+            name = "Windows 11 PC" if hver >= _WIN11_PLATFORM_MAJOR else "Windows 10 PC"
+            return (name, "desktop")
+        # Старые NT-честно отличаются, а NT 10.0 — это и 10, и 11 сразу.
+        try:
+            m = _WIN_NT_RE.search(ua)
+            major, minor = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+        except (TypeError, ValueError):
+            major, minor = 0, 0
+        if (major, minor) == (6, 1):
+            return ("Windows 7 PC", "desktop")
+        if (major, minor) == (6, 2):
+            return ("Windows 8 PC", "desktop")
+        if (major, minor) == (6, 3):
+            return ("Windows 8.1 PC", "desktop")
         return ("Windows PC", "desktop")
-    if "macintosh" in low or "mac os x" in low:
-        return ("MacBook", "laptop")
-    if "cros" in low or "chromebook" in low:
+    if is_mac:
+        ver = hver
+        minor = 0
+        if not ver:
+            try:
+                m = _MAC_VER_RE.search(ua)
+                if m:
+                    ver = int(m.group(1))
+                    minor = int(m.group(2)) if m.group(2) else 0
+            except (TypeError, ValueError):
+                ver, minor = 0, 0
+        label = _macos_label(ver, minor) if ver else ""
+        name = f"MacBook · {label}" if label else "MacBook"
+        return (name, "laptop")
+    if "cros" in low or "chromebook" in low or hplat == "chromeos":
         return ("Chromebook", "laptop")
     # X11/ubuntu/freebsd — те же настольные Linux, что и «linux». Проверка после
     # «cros», иначе Chrome OS (в его UA тоже есть X11) назвался бы Linux PC.
-    if "linux" in low or "x11" in low or "ubuntu" in low or "freebsd" in low:
+    if "linux" in low or "x11" in low or "ubuntu" in low or "freebsd" in low or hplat == "linux":
+        if hmodel:
+            return (f"{hmodel} · Linux", "desktop")
         return ("Linux PC", "desktop")
-    if "mobile" in low:
+    if hmobile is True or "mobile" in low:
+        if hmodel:
+            return (hmodel, "phone")
         return ("Смартфон", "phone")
     if "tablet" in low:
+        if hmodel:
+            return (hmodel, "tablet")
         return ("Планшет", "tablet")
+    if hmodel:
+        return (hmodel, "phone" if hmobile else "desktop")
     return ("Браузер", "desktop")
 
 
 def request_device_info(handler) -> tuple[str, str]:
-    """Название/тип текущего устройства по заголовку запроса. Сырой UA за
-    пределы этого вызова не уходит и нигде не хранится."""
+    """Название/тип текущего устройства по заголовкам запроса.
+
+    Читает User-Agent и добровольные подсказки (Client Hints / X-Ege-* от
+    `js/device-hints.js`). Сырой UA и сырые заголовки за пределы этого вызова
+    не уходят и нигде не хранятся — только распарсенная пара."""
     try:
         ua = handler.headers.get("User-Agent", "")
     except Exception:
         ua = ""
-    return parse_device_info(ua)
+    try:
+        hints = parse_client_hints(handler)
+    except Exception:
+        hints = {}
+    return parse_device_info(ua, hints)
 
 
 def device_fingerprint_secret(conn: sqlite3.Connection) -> str:
@@ -10249,7 +10499,18 @@ class Handler(BaseHTTPRequestHandler):
                          "script-src 'self' 'unsafe-inline'; "
                          "object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
         self.send_header("Permissions-Policy",
-                         "camera=(), microphone=(), geolocation=(), payment=()")
+                         "camera=(), microphone=(), geolocation=(), payment=(), "
+                         "ch-ua-model=(self), ch-ua-platform-version=(self)")
+        # Opt-in для Client Hints: после этого ответа браузер сам прикладывает
+        # к последующим запросам Sec-CH-UA-Model/Platform/Platform-Version —
+        # только так сервер узнаёт точную модель телефона (вплоть до
+        # «POCO F6 Pro») и отличает Windows 11 от 10, потому что урезанный
+        # User-Agent современного Chrome ни того, ни другого не содержит
+        # (там всегда «Android 10; K» и «Windows NT 10.0»). Без подсказок
+        # названия остаются обобщёнными — это честно, а не угадывание.
+        self.send_header("Accept-CH",
+                         "Sec-CH-UA-Model, Sec-CH-UA-Platform, "
+                         "Sec-CH-UA-Platform-Version, Sec-CH-UA-Mobile")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         try:
             https = (trusted_forwarded(self, "X-Forwarded-Proto") == "https"

@@ -269,8 +269,8 @@ def run_checks(server, base: str) -> None:
     devices = main_browser.devices()
     names = sorted(d["name"] for d in devices)
     t("телефон — отдельное устройство", len(devices) == 2, devices)
-    t("названия осмысленные", names == ["Windows PC", "iPhone"], names)
-    phone_device = next(d for d in devices if d["name"] == "iPhone")
+    t("названия осмысленные", names == ["Windows PC", "iPhone · iOS 17"], names)
+    phone_device = next(d for d in devices if d["name"] == "iPhone · iOS 17")
     t("у телефона своя сессия", int(phone_device["sessions"]) == 1, phone_device)
     t("текущее устройство — браузер",
       any(d["current"] and d["name"] == "Windows PC" for d in devices), devices)
@@ -435,7 +435,7 @@ def run_checks(server, base: str) -> None:
       int(browser_device["sessions"]) <= server.DEVICE_SESSION_REVISIONS_MAX, browser_device)
     rows = session_rows(server, user_id)
     t("подчистка не съела соседнее устройство",
-      any(r["device_name"] == "iPhone" for r in rows), rows)
+      any(r["device_name"] == "iPhone · iOS 17" for r in rows), rows)
     t("текущая сессия выжила", any(r["id"] == browser_device["id"] for r in rows), rows)
 
 
