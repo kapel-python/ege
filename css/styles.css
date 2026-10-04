@@ -2721,6 +2721,24 @@ body {
 }
 /* Таблетка «Система» и рамка пунктиром: сообщение о состоянии сервера. */
 .aib-msg--system { border-style: dashed; }
+/* Живая заявка пользователя: градиентная рамка — глаз сразу отличает её
+   от серой пунктирной системной карточки. Двойной фон: сплошная подложка
+   в padding-box, градиент — в border-box (виден сквозь прозрачную рамку). */
+.aib-msg--user {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+    linear-gradient(135deg, var(--accent), var(--violet)) border-box;
+  box-shadow: 0 4px 16px -10px var(--accent-glow);
+}
+.aib-msg--user:hover {
+  box-shadow: 0 6px 20px -8px var(--accent-glow);
+}
+.aib-msg--user.open {
+  background:
+    linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+    linear-gradient(135deg, var(--accent), var(--violet), var(--success)) border-box;
+}
 .aib-msg__meta {
   font-size: 12px;
   color: var(--muted);

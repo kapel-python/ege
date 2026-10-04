@@ -2354,9 +2354,11 @@ function adminInboxMessageHTML(m) {
   const isNew = m.status === "new";
   // source='system' — сообщение о самом сервере (например, смена ИИ-провайдера).
   // Всё остальное — как у обычного обращения: статус, «Прочитано», счётчики.
+  // Живая заявка пользователя подсвечена градиентной рамкой (.aib-msg--user),
+  // системная — пунктиром (.aib-msg--system): глаз различает их сразу.
   const isSystem = m.source === "system";
   return `
-  <article class="aib-msg${open ? " open" : ""}${isSystem ? " aib-msg--system" : ""}">
+  <article class="aib-msg${open ? " open" : ""}${isSystem ? " aib-msg--system" : " aib-msg--user"}">
     <button type="button" class="aib-msg__head" onclick="toggleAdminMessage(${id})"
         aria-expanded="${open ? "true" : "false"}" aria-label="Обращение № ${id}${isNew ? ", новое" : ""}${isSystem ? ", системное" : ""}">
       <span class="aib-msg__head-main">
@@ -2412,11 +2414,22 @@ function adminInboxCountsHTML() {
   return `<span class="aib-counts"><b class="mono">${AdminInbox.newCount}</b>&nbsp;новых</span>`;
 }
 
+function adminInboxShouldShow() {
+  // Блок «Обращения» рисуется только когда есть что показать: хотя бы одно
+  // сообщение в ленте или ошибка загрузки (иначе админ не узнает о сбое).
+  // Пустая лента (все прочитаны / обращений не было) — блока нет в DOM
+  // вообще, а не «пустая карточка с текстом».
+  if (!adminInboxVisible()) return false;
+  if (AdminInbox.error) return true;
+  return AdminInbox.messages.length > 0;
+}
+
 function adminInboxHTML() {
   // Не админ — блока нет в DOM вообще (не скрыт CSS, а не отрендерен),
   // и fetch ниже не выполняется: обычный пользователь не получает ни
-  // разметки, ни данных обращений.
-  if (!adminInboxVisible()) return "";
+  // разметки, ни данных обращений. Админу без сообщений — тоже пусто:
+  // блок появится сам через paintAdminInbox, когда fetch принесёт ленту.
+  if (!adminInboxShouldShow()) return "";
   return `
   <section class="card card--glow admin-inbox" id="adminInbox" aria-label="Обращения пользователей">
     <div class="aib-head">
@@ -2435,8 +2448,27 @@ function adminInboxHTML() {
 
 function paintAdminInbox() {
   try {
-    const box = document.getElementById("adminInbox");
-    if (!box || !adminInboxVisible()) return;
+    const show = adminInboxShouldShow();
+    let box = document.getElementById("adminInbox");
+    if (!box) {
+      // Блока нет: либо не нужен (пустая лента), либо первый рендер был до
+      // fetch. Вставляем только когда есть что показать и мы на дашборде —
+      // иначе асинхронный fetch доложил бы ленту на чужой экран.
+      if (!show) return;
+      try { if (typeof currentRoute === "function" && currentRoute() !== "dashboard") return; } catch (_) {}
+      const host = document.getElementById("screen");
+      if (!host) return;
+      const tmp = document.createElement("template");
+      tmp.innerHTML = adminInboxHTML().trim();
+      const node = tmp.content.firstElementChild;
+      if (!node) return;
+      if (host.firstChild) host.insertBefore(node, host.firstChild);
+      else host.appendChild(node);
+      return;
+    }
+    // Лента опустела (всё прочитано) или слетела admin-сессия — блок уходит
+    // из DOM целиком, а не превращается в «Новых обращений нет».
+    if (!show) { box.remove(); return; }
     const counts = box.querySelector(".aib-counts-row");
     const list = document.getElementById("adminInboxList");
     const foot = document.getElementById("adminInboxFoot");
