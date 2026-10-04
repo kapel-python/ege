@@ -106,7 +106,14 @@ check("пилюли квоты нет вообще (не прячется — у
 check("при нуле отправка закрыта заранее (кнопка + гейт в send)",
   /ui\.sendBtn\) ui\.sendBtn\.disabled = S\.busy \|\| !has \|\| quotaOut\(\)/.test(spaCode)
   && /if \(!quiet && quotaOut\(\)\)/.test(spaCode)
-  && /if \(bubble && bubble\.parentNode\) bubble\.parentNode\.removeChild\(bubble\);\s*\n\s*if \(turn\.replaceLast\) loadThreadMessages\(true\);\s*\n\s*openLimitModal\(\{ limit/.test(spaCode));
+  && /removeChild\(bubble\);\s*\n\s*if \(turn\.replaceLast\) loadThreadMessages\(true\);\s*\n\s*(else restoreAskButton\(turn\.askBtn\);\s*\n\s*)?openLimitModal\(\{ limit/.test(spaCode));
+check("кнопка-подсказка при известном нуле не схлопывается (модалку откроет send)",
+  /if \(quotaOut\(\)\) return;/.test(spaCode)
+  && /askButton\(q, i\)/.test(spaCode));
+check("отказ сервера до записи возвращает кнопку на место (оба 429, кроме replaceLast)",
+  /function restoreAskButton\(meta\)/.test(spaCode)
+  && (spaCode.match(/restoreAskButton\(turn\.askBtn\)/g) || []).length === 2
+  && /if \(turn\.replaceLast\) loadThreadMessages\(true\);\s*\n\s*else restoreAskButton\(turn\.askBtn\);/.test(spaCode));
 check("список тредов + Новый чат", spaCode.includes("agent__list") && spaCode.includes("Новый чат"));
 check("тред из localStorage с ключом аккаунта", spaCode.includes("ege_agent_thread:"));
 check("квота переживает перезагрузку", spaCode.includes("ege_agent_quota:"));
@@ -116,8 +123,9 @@ check("Enter отправляет", spaCode.includes('"Enter"'));
 check("Shift+Enter перенос", spaCode.includes("shiftKey"));
 check("авто-рост textarea", spaCode.includes("scrollHeight"));
 check("Стоп через AbortController", spaCode.includes("AbortController") && spaCode.includes("abort"));
-check("один обработчик data-ask",
-  (spaCode.match(/\[data-ask\]/g) || []).length === 1);
+check("один обработчик data-ask (делегированный closest + скан восстановления)",
+  (spaCode.match(/\.closest\(\"\[data-ask\]\"\)/g) || []).length === 1
+  && (spaCode.match(/querySelectorAll\(\"\[data-ask\]\"\)/g) || []).length === 1);
 /* Подсказки ([data-ask]) отправляются без фокуса поля. Исключение — меню
    сообщения «Изменить и отправить»: там фокус сознательный, человек правит
    текст руками. Поэтому смотрим только на обработчик подсказок. */

@@ -1867,28 +1867,52 @@
     var list = normalizeSuggests(suggests);
     if (!list.length) return null;
     var row = el("div", "agent__actions");
-    list.forEach(function (q, i) {
-      var b = el("button", "agent__qr");
-      b.type = "button";
-      try { b.style.setProperty("--i", String(i)); } catch (_) { b.setAttribute("style", "--i:" + i); }
-      b.setAttribute("data-ask", q.ask);
-      b.setAttribute("aria-label", q.label + ": " + q.ask);
-      b.appendChild(svgIcon(SUGGEST_ICONS[i % SUGGEST_ICONS.length], "2.2"));
-      b.appendChild(document.createTextNode(q.label));
-      b.addEventListener("click", function () {
-        // Ход уже идёт — кнопка не должна исчезать впустую: сервер не примет
-        // второй вопрос, и человек остался бы без вариантов продолжения.
-        if (S.busy) return;
-        // Фокус снимаем сами: иначе после ухода кнопки браузер оставлял
-        // обводку на пустом месте (было видно как «залипшая» кнопка).
-        try { b.blur(); } catch (_) {}
-        collapseAsk(b);
-      });
-      row.appendChild(b);
-    });
+    list.forEach(function (q, i) { row.appendChild(askButton(q, i)); });
     card.appendChild(row);
     if (isAlive) follow(350);
     return row;
+  }
+  function askButton(item, i) {
+    var b = el("button", "agent__qr");
+    b.type = "button";
+    try { b.style.setProperty("--i", String(i)); } catch (_) { b.setAttribute("style", "--i:" + i); }
+    b.setAttribute("data-ask", item.ask);
+    b.setAttribute("aria-label", item.label + ": " + item.ask);
+    b.appendChild(svgIcon(SUGGEST_ICONS[i % SUGGEST_ICONS.length], "2.2"));
+    b.appendChild(document.createTextNode(item.label));
+    b.addEventListener("click", function () {
+      // Ход уже идёт — кнопка не должна исчезать впустую: сервер не примет
+      // второй вопрос, и человек остался бы без вариантов продолжения.
+      if (S.busy) return;
+      // Ноль известен заранее — кнопку не трогаем вовсе: модалку откроет
+      // send(), а кнопка останется на месте до возвращения лимита.
+      if (quotaOut()) return;
+      // Фокус снимаем сами: иначе после ухода кнопки браузер оставлял
+      // обводку на пустом месте (было видно как «залипшая» кнопка).
+      try { b.blur(); } catch (_) {}
+      collapseAsk(b);
+    });
+    return b;
+  }
+  // Вопрос не ушёл (сервер отказал до записи — оба 429): схлопнутая кнопка
+  // возвращается на то же место, а не выглядит «сработанной». Чинится только
+  // отказ до записи; неуспех после отправки чинится карточкой ошибки с
+  // кнопкой повтора. replaceLast сюда не попадает: там ленту перечитывает
+  // loadThreadMessages и кнопки пересобираются из данных сервера сами.
+  function restoreAskButton(meta) {
+    if (!meta || !meta.row || !meta.row.parentNode || !meta.ask) return;
+    var row = meta.row;
+    var same = row.querySelectorAll("[data-ask]");
+    for (var k = 0; k < same.length; k++) {
+      var it = same[k];
+      if (it.classList.contains("is-gone") && it.getAttribute("data-ask") === meta.ask
+          && it.parentNode) it.parentNode.removeChild(it);
+    }
+    var at = Math.max(0, meta.index | 0);
+    var b = askButton({ label: meta.label || meta.ask, ask: meta.ask }, at);
+    var kids = row.children;
+    if (at < kids.length) row.insertBefore(b, kids[at]);
+    else row.appendChild(b);
   }
   /* Копирование ответа — своей кнопкой ПОД ответом, а не в меню по
      удержанию: на телефоне меню надо ещё дождаться, а кнопку видно сразу и
@@ -2592,6 +2616,7 @@
     // возврат из фона): промис один, обработчики цепляются заново.
     var turn = { threadId: S.currentId, text: text, ctrl: ctrl, promise: null,
                  startedAt: Date.now(), dead: false, claimedBy: -1, replaceLast: replaceLast,
+                 askBtn: (opts && opts.askBtn) || null,
                  retries: quiet ? (opts && opts.retries) || 0 : 0 };
     S.abort = ctrl;
     S.turn = turn;                 // держит композер до конца хода (см. turnHeld)
@@ -2869,9 +2894,11 @@
       // Сервер отказал до записи: оптимистичный пузырёк нигде не записан —
       // снимаем, а снесённую заменой пару возвращаем из базы, иначе удачный
       // ответ пропадал бы с экрана (страховка под гейт в send() на случай
-      // протухшего кэша квоты).
+      // протухшего кэша квоты). Схлопнутая кнопка-подсказка возвращается на
+      // место: вопрос не ушёл, «сработанной» она выглядеть не должна.
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
       if (turn.replaceLast) loadThreadMessages(true);
+      else restoreAskButton(turn.askBtn);
       openLimitModal({ limit: res.data.limit, remaining: res.data.remaining, resetInSec: res.data.resetInSec }, null);
       if (res.data.limit) setQuota(res.data);
       syncBusy();   // дальше говорит модалка, а не блокировка
@@ -2880,6 +2907,7 @@
     if (res.status === 429) {
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
       if (turn.replaceLast) loadThreadMessages(true);
+      else restoreAskButton(turn.askBtn);
       openLimitModal(S.quota, Number(res.data.retryAfter) || 60);
       syncBusy();
       return;
@@ -3343,7 +3371,21 @@
         return;
       }
       var q = e.target.closest ? e.target.closest("[data-ask]") : null;
-      if (q) { e.preventDefault(); send(q.getAttribute("data-ask")); }
+      if (q) {
+        e.preventDefault();
+        var ask = q.getAttribute("data-ask");
+        var meta = null;
+        // Кнопка-подсказка уже схлопывается (её обработчик ставит is-gone
+        // синхронно и срабатывает раньше делегированного): запоминаем, куда
+        // вернуть, если сервер откажет до записи. Карточки пустого чата не
+        // схлопываются — им возвращать нечего.
+        if (q.classList && q.classList.contains("is-gone") && q.parentNode) {
+          meta = { row: q.parentNode,
+                   index: Array.prototype.indexOf.call(q.parentNode.children, q),
+                   label: (q.textContent || "").trim(), ask: ask };
+        }
+        send(ask, meta ? { askBtn: meta } : null);
+      }
     });
   }
 
