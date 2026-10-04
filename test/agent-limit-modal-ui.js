@@ -146,30 +146,33 @@ const dlgText = () => {
     });
     await page.fill(sel, "вопрос про лимит");
     await page.keyboard.press("Enter");
-    await page.waitForFunction(() => /Ходы закончились/.test(document.body.textContent || ""),
-      null, { timeout: 45000 });
+    // Ждём именно модалку (.dlg), а не текст «Ходы закончились»: он же живёт
+    // в плейсхолдере поля и появляется раньше, вместе с нулём на кольце.
+    await page.waitForSelector(".dlg-backdrop .dlg", { timeout: 45000 });
     const probe = await page.evaluate(() => {
       clearInterval(window.__sampler);
       const samples = window.__samples || [];
       const modalIdx = samples.findIndex((s) => s.modal > 0);
-      const typedIdx = samples.findIndex((s, i) =>
-        s.typing === 0 && samples.slice(0, i + 1).some((p) => p.typing > 0));
+      // Последний сэмпл с недопечатанными словами: модалка обязана быть
+      // строго позже него (иначе она вылезла поверх недописанного ответа).
+      let lastTypingIdx = -1;
+      samples.forEach((s, i) => { if (s.typing > 0) lastTypingIdx = i; });
       return {
         samples: samples.length,
         sawTyping: samples.some((s) => s.typing > 0),
-        modalIdx, typedIdx,
+        modalIdx, lastTypingIdx,
         autoText: (document.querySelector(".dlg-backdrop .dlg") || {}).textContent || "",
         answer: (document.querySelector(".agent__answer, .agent__md") || {}).textContent || "",
         ringZero: !!(document.querySelector("#agent-quota.zero")),
       };
     });
-    check("модалка появилась только после вопроса с ответом", /Ходы закончились/.test(probe.autoText),
+    check("модалка «Ходы закончились» появилась сама", /Ходы закончились/.test(probe.autoText),
       probe.autoText.slice(0, 80));
     check("печать реально шла (окно не выскочило мгновенно)", probe.sawTyping,
       `сэмплов: ${probe.samples}`);
     check("модалка — после допечатки, а не поверх неё",
-      probe.modalIdx >= 0 && probe.typedIdx >= 0 && probe.modalIdx >= probe.typedIdx,
-      `печать готова на сэмпле ${probe.typedIdx}, модалка на ${probe.modalIdx}`);
+      probe.modalIdx >= 0 && probe.lastTypingIdx >= 0 && probe.modalIdx > probe.lastTypingIdx,
+      `последнее недопечатанное на сэмпле ${probe.lastTypingIdx}, модалка на ${probe.modalIdx}`);
     check("ответ на экране целиком", probe.answer.length > 100,
       `знаков: ${probe.answer.length}`);
     check("кольцо красное (класс zero)", probe.ringZero);
@@ -179,8 +182,7 @@ const dlgText = () => {
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.querySelector(".dlg-backdrop .dlg"), null, { timeout: 5000 });
     await page.click("#agent-quota");
-    await page.waitForFunction(() => /Ходы закончились/.test(document.body.textContent || ""),
-      null, { timeout: 10000 });
+    await page.waitForSelector(".dlg-backdrop .dlg", { timeout: 10000 });
     const clickText = await page.evaluate(() => ((document.querySelector(".dlg-backdrop .dlg") || {}).textContent || ""));
     check("авто-окно = окно по клику (тот же текст)", norm(clickText) === norm(probe.autoText),
       norm(clickText).slice(0, 120));
