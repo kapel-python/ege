@@ -17,6 +17,7 @@ const check = (name, cond, detail = "") => {
 
 const spaJs = read("js/agent-spa.js");
 const spaCss = read("css/agent.css");
+const srvCode = read("server/server.py");
 const appJs = read("js/app.js");
 const indexHtml = read("index.html");
 const agentHtml = read("agent.html");
@@ -788,10 +789,37 @@ check("шторка чатов едет за пальцем, отпуск дов
   && /ui\.wrap\.addEventListener\("touchmove"/.test(spaCode)
   && /ui\.wrap\.addEventListener\("touchend"/.test(spaCode)
   && /classList\.add\("dragging"\)/.test(spaCode)
-  && /drawerPos\(sw\.open/.test(spaCode)
+  && /drawerPosFrame\(sw\.open/.test(spaCode)
   && /n\.scrim\.style\.opacity/.test(spaCode)
+  && /function drawerRelease\(goOpen\)/.test(spaCode)
   && !/if \(dx > 0\) nav\(true\); else nav\(false\);/.test(spaCode)
   && /swipeSkips\(e\.target\)/.test(spaCode));
+/* Отпуск без рывка: класс меняется, пока инлайн держит позицию пальца, а
+   инлайн снимается следующим кадром — transition идёт от пальца до цели.
+   Позиция пишется не чаще кадра (сырые touchmove идут чаще 60 Гц). */
+check("отпуск доводится от позиции пальца, позиция — не чаще кадра",
+  /nav\(goOpen\);\s*\n\s*if \(!n\) return;/.test(spaCode)
+  && /raf\(function \(\) \{\s*\n\s*if \(!drawerNodes\(\)\) return;/.test(spaCode)
+  && /function drawerPosFrame\(px\)/.test(spaCode)
+  && /touch-action: pan-y pinch-zoom/.test(spaCss));
+/* Подписи шагов после reload — человеческие: история (GET треда) несёт тот
+   же label, что живой ход, а не сырое имя инструмента. */
+check("история шагов с человеческими подписями (label от сервера + зеркало)",
+  /out\["label"\] = label or str\(row\["tool_name"\]\)/.test(srvCode)
+  && /describe_step\(str\(row\["tool_name"\]\)/.test(srvCode)
+  && /res\["proposal"\]\["label"\]/.test(srvCode)
+  && /function humanStepLabel\(tool, args, result\)/.test(spaCode)
+  && /m\.label \|\| humanStepLabel\(m\.tool/.test(spaCode));
+/* Строка «Показать шаги» — во всю ширину: тап в любом месте строки открывает
+   ленту, тянуться к слову слева не надо. */
+check("строка шагов тапается целиком (кнопка во всю ширину)",
+  /width: 100%/.test(rule(spaCss, ".agent__trace-toggle"))
+  && /\.agent__trace-toggle \.num \{[^}]*margin-left: auto/.test(spaCss));
+/* «Подробнее» с сырым JSON скрыто из интерфейса (код и разметка на месте —
+   скрытие только CSS). */
+check("«Подробнее» скрыто из интерфейса, код на месте",
+  /display: none/.test(rule(spaCss, ".agent__step-detail"))
+  && spaCode.includes('sum.textContent = "Подробнее"'));
 check("во время ведения transition выключен (иначе дёрганье)",
   /\.agent\.dragging \.agent__threads/.test(spaCss));
 check("десктоп: открытие списка с анимацией, а не мгновенно",

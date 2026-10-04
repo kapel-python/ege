@@ -2343,6 +2343,41 @@
     })();
     return card;
   }
+  // Локальное зеркало серверного describe_step — ТОЛЬКО запасной путь для
+  // истории без m.label (кэш, записанный до серверной подписи). Живой ход и
+  // свежая история несут label от сервера; зеркало обязано совпадать с ним
+  // по смыслу, дословное совпадение не требуется.
+  function humanStepLabel(tool, args, result) {
+    args = args || {}; result = result || {};
+    function op() { return String(args.op || ""); }
+    if (tool === "fold_web") {
+      var o = op();
+      if (o === "forecast") return "Смотрю прогноз по баллам";
+      if (o === "errors") return (result.open != null ? "Смотрю твои ошибки — " + result.open + " штук" : "Смотрю твои ошибки");
+      if (o === "skills") return "Смотрю навыки — " + ((result.skills || []).length) + " тем";
+      if (o === "attempts") {
+        var topic = (result.attempts && result.attempts[0] && result.attempts[0].topic) || "";
+        if (topic) return "Смотрю попытки по теме «" + topic + "»";
+        return args.taskId ? "Смотрю попытки по этому заданию" : "Смотрю попытки по навыкам";
+      }
+      if (o === "profile") return "Смотрю твой профиль";
+      if (o === "progress") return "Смотрю общий прогресс";
+      if (o === "daily") return "Смотрю дни занятий";
+      if (o === "history") return "Смотрю историю за период";
+      if (o === "timeline") return "Смотрю ленту твоих занятий";
+      return "Смотрю прогресс";
+    }
+    if (tool === "lesson_get") return "Открываю урок" + (result.title ? " «" + result.title + "»" : "");
+    if (tool === "task_get") return "Открываю задание" + (result.topic ? " «" + result.topic + "»" : "");
+    if (tool === "essay_history") return "Смотрю твои сочинения";
+    if (tool === "find_topics") return "Ищу по каталогу" + (args.query ? ": " + String(args.query).slice(0, 60) : "");
+    if (tool === "plan_draft") return "Составляю черновик плана";
+    if (tool === "project_info") return "Смотрю справку о сайте";
+    if (tool === "update_profile") return "Меняю профиль";
+    if (tool === "resolve_error") return "Отмечаю ошибку разобранной";
+    if (tool === "reset_progress") return "Сбрасываю прогресс";
+    return "";
+  }
   // Отрисовка переписки из готового массива: кэш раздела и ответ сервера идут
   // в одну функцию, иначе кэш и сеть рисовали бы по-разному.
   function paintMessages(msgs) {
@@ -2372,7 +2407,11 @@
       else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests);
       else if (m.role === "tool") {
         pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
-                       label: (m.tool || "Шаг"), kind: "read", status: m.status, proposal: m.result });
+                       // Подпись — серверная (m.label, та же строка, что была
+                       // вживую); запасной путь — локальное зеркало describe_step
+                       // для кэшей, записанных до серверного label.
+                       label: (m.label || humanStepLabel(m.tool, m.args, m.result) || m.tool || "Шаг"),
+                       kind: "read", status: m.status, proposal: m.result });
       }
     });
     flushSteps(null);
@@ -3079,7 +3118,14 @@
     // на сколько сдвинул, настолько и открылась. Отпустил — шторка сама
     // доводится анимацией до открытого/закрытого: больше половины ширины —
     // туда, быстрый флик решает сам.
-    var sw = { on: false, drag: false, x0: 0, y0: 0, t0: 0, lx: 0, lt: 0, w: 0, open: false };
+    var sw = { on: false, drag: false, x0: 0, y0: 0, t0: 0, lx: 0, lt: 0, w: 0, open: false, pend: 0, raf: false };
+    function drawerNodes() {
+      if (!ui.wrap) return null;
+      var side = ui.wrap.querySelector(".agent__threads");
+      var scrim = ui.wrap.querySelector(".agent__scrim");
+      if (!side || !scrim) return null;
+      return { side: side, scrim: scrim };
+    }
     function drawerNodes() {
       if (!ui.wrap) return null;
       var side = ui.wrap.querySelector(".agent__threads");
@@ -3108,14 +3154,16 @@
       n.scrim.style.visibility = "visible";
       n.scrim.style.opacity = String(Math.max(0, Math.min(1, 1 + px / sw.w)));
     }
-    function drawerDrop() {
-      var n = drawerNodes();
-      if (n) {
-        n.side.style.display = "";
-        n.side.style.transform = ""; n.side.style.visibility = "";
-        n.scrim.style.opacity = ""; n.scrim.style.visibility = "";
-      }
-      if (ui.wrap) ui.wrap.classList.remove("dragging");
+    // Запись позиции — не чаще кадра: сырые touchmove идут чаще 60 Гц, и
+    // запись стилей на каждое событие давала дёрганье.
+    function drawerPosFrame(px) {
+      sw.pend = px;
+      if (sw.raf) return;
+      sw.raf = true;
+      raf(function () {
+        sw.raf = false;
+        drawerPos(sw.pend);
+      });
     }
     function drawerMobile() {
       try { return window.matchMedia("(max-width: 900px)").matches; }
@@ -3143,8 +3191,28 @@
       // Горизонталь взяли на себя: ленту/страницу не скроллим.
       try { e.preventDefault(); } catch (_) {}
       sw.lx = x; sw.lt = Date.now();
-      drawerPos(sw.open ? Math.min(0, dx) : -sw.w + Math.max(0, dx));
+      drawerPosFrame(sw.open ? Math.min(0, dx) : -sw.w + Math.max(0, dx));
     }, { passive: false });
+    // Отпуск: шторка доводится обычной анимацией ОТ ПОЗИЦИИ ПАЛЬЦА, а не
+    // прыжком. drawerDrop() + nav() в одном кадре давали рывок: инлайн
+    // сносился раньше смены класса, и шторка сначала прыгала в крайнее
+    // положение, а уже потом анимировалась. Здесь класс меняется, пока
+    // инлайн ещё держит позицию пальца, а инлайн снимается следующим кадром —
+    // transition идёт от пальца до цели.
+    function drawerRelease(goOpen) {
+      var n = drawerNodes();
+      if (ui.wrap) ui.wrap.classList.remove("dragging");
+      nav(goOpen);
+      if (!n) return;
+      try { void n.side.offsetWidth; } catch (_) {}
+      raf(function () {
+        if (!drawerNodes()) return;
+        var cur = drawerNodes();
+        cur.side.style.transform = ""; cur.side.style.visibility = "";
+        cur.side.style.display = "";
+        cur.scrim.style.opacity = ""; cur.scrim.style.visibility = "";
+      });
+    }
     function drawerEnd(e) {
       if (!sw.on) return;
       sw.on = false;
@@ -3155,9 +3223,18 @@
       var dx = x - sw.x0;
       var v = (x - sw.lx) / Math.max(1, Date.now() - sw.lt);   // px/мс конца жеста
       var goOpen = sw.open ? !(dx < -sw.w * 0.5 || v < -0.35) : (dx > sw.w * 0.5 || v > 0.35);
-      drawerDrop();
-      nav(goOpen);
+      // Ведение было осмысленным — следующий синтетический click (тап после
+      // свайпа) гасим, чтобы не улетать по кнопке под пальцем.
+      if (Math.abs(dx) > 10) sw.suppressClick = Date.now();
+      drawerRelease(goOpen);
     }
+    // Один раз на маунт: гасим клик, пришедший сразу за ведением.
+    ui.wrap.addEventListener("click", function (e) {
+      if (sw.suppressClick && Date.now() - sw.suppressClick < 350) {
+        try { e.stopPropagation(); e.preventDefault(); } catch (_) {}
+        sw.suppressClick = 0;
+      }
+    }, true);
     ui.wrap.addEventListener("touchend", drawerEnd, { passive: true });
     ui.wrap.addEventListener("touchcancel", drawerEnd, { passive: true });
     // Меню сообщения: ДОЛГОЕ нажатие (500 мс) на свой пузырёк или текст

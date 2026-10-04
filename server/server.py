@@ -604,6 +604,27 @@ def _agent_public_message(row) -> dict:
         out["tool"] = row["tool_name"]
         out["args"] = args if isinstance(args, dict) else {}
         out["result"] = res if isinstance(res, dict) else {}
+        # Человеческая подпись шага — та же, что была вживую. Живой ответ
+        # (POST /turns, liveSteps) несёт label от run_cycle, а история (GET
+        # треда) собиралась без неё — после reload шаги показывали сырое
+        # имя инструмента («fold_web»). Источник подписи по порядку:
+        # 1) сохранённый label предложения (needs_confirm: result И ЕСТЬ
+        #    proposal; applied: result.proposal) — точная строка того момента;
+        # 2) describe_step по тем же args/result — как в живом ходу;
+        # 3) сырое имя — лучше, чем пустота.
+        label = ""
+        try:
+            if isinstance(res, dict):
+                if isinstance(res.get("label"), str) and res["label"].strip():
+                    label = res["label"].strip()
+                elif isinstance(res.get("proposal"), dict) and isinstance(res["proposal"].get("label"), str):
+                    label = res["proposal"]["label"].strip()
+            if not label and _AGENT is not None and hasattr(_AGENT, "describe_step"):
+                label = _AGENT.describe_step(str(row["tool_name"]),
+                                             out["args"], out["result"]) or ""
+        except Exception:
+            label = ""
+        out["label"] = label or str(row["tool_name"])
     return out
 
 

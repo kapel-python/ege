@@ -230,6 +230,10 @@
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch; padding: 24px 28px;
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  /* Жест шторки — за пальцем: вертикаль скроллит браузер сам (плавно, своим
+     потоком), горизонталь отдаётся JS. Без этого браузер брал жест себе
+     целиком, и шторка дёргалась вслед за скроллом. pinch-zoom оставляем. */
+  touch-action: pan-y pinch-zoom;
 }
 .agent__feed-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 .agent__feed-inner .agent__feed-inner { width: 100%; max-width: none; margin: 0; }
@@ -370,12 +374,18 @@ a.agent__link--int { border-style: dashed; }
 /* Ход работы: лоадер шага вырастает, гаснет и на его месте раскрывается
    результат; после конца хода вся лента сворачивается под «Показать шаги». */
 .agent__trace-toggle {
-  display: inline-flex; align-self: flex-start; align-items: center; gap: 6px;
+  /* Кнопка — на всю ширину строки: тап/клик в любом месте строки (а не
+     только по слову «Показать шаги» слева) открывает ленту. Счётчик уехал
+     вправо (.num ниже), строка читается как полноценный ряд. Тач-цель —
+     вся строка × 44px. */
+  display: flex; width: 100%; align-self: stretch; align-items: center; gap: 6px;
+  justify-content: flex-start; text-align: left;
   max-height: 0; opacity: 0; visibility: hidden; overflow: hidden;
-  padding: 0 10px 0 6px; margin: 0 0 -10px -6px; border: 0; border-radius: 20px; background: transparent;
+  padding: 0 10px 0 6px; margin: 0; border: 0; border-radius: 20px; background: transparent;
   color: var(--agent-ink-2); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background .15s, color .15s, max-height .3s ease, margin .3s ease, padding .3s ease, opacity .3s ease, visibility .3s;
 }
+.agent__trace-toggle .num { margin-left: auto; }
 .agent__trace-toggle:hover { background: var(--soft-hover); color: var(--text); }
 .agent__trace-toggle svg { width: 14px; height: 14px; flex: none; transition: transform .25s ease; }
 .agent__trace-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
@@ -402,7 +412,11 @@ a.agent__link--int { border-style: dashed; }
 .agent__step p { margin: 0; }
 .agent__step code { display: block; margin-top: 2px; font: 12px/1.5 var(--mono); color: var(--agent-ink-3); overflow-wrap: anywhere; }
 .agent__step-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.agent__step-detail { margin-top: 6px; }
+/* «Подробнее» с сырым JSON скрыто из интерфейса: обычному ученику это
+   лишнее, а наружу светить аргументы/результаты инструментов не стоит.
+   Разметка и код (stepFill) остаются как были — скрытие только здесь,
+   вернуть можно одной строкой. */
+.agent__step-detail { margin-top: 6px; display: none; }
 .agent__step-detail summary { cursor: pointer; font-size: 13px; color: var(--agent-ink-3); font-weight: 600; }
 .agent__step-detail code { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
 .agent__step.is-action b { color: var(--warn-ink); }
