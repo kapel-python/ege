@@ -423,6 +423,74 @@ def model_student_label(provider: str, model: str = "") -> str:
     return model_title(str(provider or ""), str(model or ""))
 
 
+# Протокол запроса. Обычный — OpenAI `POST {base}/chat/completions`;
+# `responses` — OpenAI Responses API (`POST {base}/responses` с `instructions` +
+# `input` и массивом `output[]` в ответе). Нужен шлюзам, которые chat-протокол
+# не поддерживают вовсе (замер 04.10: opencode.ai/zen отвечает на chat 400
+# ModelProtocolUnsupported, а на responses — 200). Встроенные провайдеры всегда
+# chat; responses задаётся только своему провайдеру.
+RESPONSE_PROTOCOLS = ("chat", "responses")
+# Уровень мышления reasoning-модели. Замерено на живом шлюзе 04.10 (один и тот
+# же вопрос «что такое ЕГЭ», модель muse-spark): high — 462 токена мышления,
+# minimal — 38, ответ одинаковый; `low` шлюз молча игнорирует (эхо high),
+# `none` отвергает 400-й. Пустое значение = default шлюза (поле не шлём).
+REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+# Пробе «привет» нужно не 1 токен, а столько, чтобы reasoning-модель успела и
+# подумать, и ответить: при max_output_tokens=1 ответ всегда incomplete без
+# текста. 512 хватает с запасом (замер minimal: 38–87 токенов мышления).
+RESPONSES_PROBE_MAX_TOKENS = 512
+_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$")
+# Эти заголовки ставит сам транспорт — переопределить их записью нельзя.
+_RESERVED_HEADERS = frozenset({"authorization", "content-type", "content-length", "host"})
+
+
+def _clean_protocol(raw) -> str:
+    """Протокол провайдера: chat (обычный) или responses. Пусто = chat."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return "chat"
+    if value not in RESPONSE_PROTOCOLS:
+        raise ValueError("protocol — chat или responses")
+    return value
+
+
+def _clean_reasoning_effort(raw) -> str:
+    """Уровень мышления: minimal|low|medium|high, пусто = default шлюза."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return ""
+    if value not in REASONING_EFFORTS:
+        raise ValueError("reasoningEffort — minimal, low, medium или high")
+    return value
+
+
+def _clean_extra_headers(raw) -> dict:
+    """Статические доп. заголовки записи (например, x-opencode-session).
+
+    Только латиница/цифры/дефис в имени, системные заголовки (Authorization,
+    Content-Type и т.п.) переопределить нельзя, значений-«секретов» сюда не
+    кладём: имена и так видны админу, а значений в карточке нет (только имена).
+    Пусто/не словарь = нет заголовков."""
+    if raw is None or raw == "":
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("extraHeaders — объект {имя: значение}")
+    if len(raw) > 8:
+        raise ValueError("Слишком много заголовков (максимум 8)")
+    clean: dict = {}
+    for name, value in raw.items():
+        header = str(name or "").strip()
+        if not _HEADER_NAME_RE.match(header):
+            raise ValueError(f"Некорректное имя заголовка: {header[:64]}")
+        if header.lower() in _RESERVED_HEADERS:
+            raise ValueError(f"Заголовок {header} ставит сам транспорт")
+        text = str(value if value is not None else "").strip()
+        if not text or len(text) > 200 or "\n" in text or "\r" in text:
+            raise ValueError(f"Некорректное значение заголовка {header}")
+        clean[header] = text
+    return clean
+
+
 def _custom_spec(entry: dict, overrides: dict | None = None) -> dict:
     ov = overrides if isinstance(overrides, dict) else {}
     title = str(entry.get("title") or entry.get("id") or "").strip()
@@ -445,6 +513,12 @@ def _custom_spec(entry: dict, overrides: dict | None = None) -> dict:
         "auth": auth,
         "extra_body": extra,
         "merge_system": bool(merge),
+        "protocol": str(entry.get("protocol") or "chat").strip().lower()
+        if str(entry.get("protocol") or "chat").strip().lower() in RESPONSE_PROTOCOLS else "chat",
+        "reasoning_effort": str(entry.get("reasoning_effort") or "").strip().lower()
+        if str(entry.get("reasoning_effort") or "").strip().lower() in REASONING_EFFORTS else "",
+        "extra_headers": dict(entry.get("extra_headers"))
+        if isinstance(entry.get("extra_headers"), dict) else {},
         "enabled": entry.get("enabled", True) is not False,
         "builtin": False,
         "entry": entry,
@@ -502,6 +576,11 @@ def _spec_for(name: str) -> dict:
         spec["overrides"] = ov
         spec["enabled"] = bool(enabled.get(key, True))
         spec["builtin"] = True
+        # Встроенные — всегда обычный chat-протокол без мышления и доп.
+        # заголовков: responses задаётся только своему провайдеру.
+        spec["protocol"] = "chat"
+        spec["reasoning_effort"] = ""
+        spec["extra_headers"] = {}
         return spec
     customs, _slots, enabled, _ov = _admin_snapshot()
     entry = customs.get(key)
@@ -1337,6 +1416,133 @@ def _clean_tool_calls(raw) -> list:
     return out
 
 
+def _responses_input_items(messages: list) -> tuple[str, list]:
+    """Chat-сообщения → (instructions, input[]) для Responses API.
+
+    system уходит в `instructions` (родное поле протокола, подклейка
+    merge_system здесь не нужна и не применяется), остальное — элементами
+    input: user/assistant — message-элементы, вызовы — function_call,
+    результаты — function_call_output. Обе формы вызовов (внутренняя
+    {id,name,arguments} из истории треда и wire {id,type,function:{...}} из
+    живого цикла) понимаются одинаково. Пустые текстовые элементы
+    пропускаются, но совсем пустой input — AIInputError, а не 400 от шлюза.
+    """
+    instructions: list[str] = []
+    items: list[dict] = []
+
+    def _text_part(text: str) -> dict:
+        return {"type": "input_text", "text": str(text or "")}
+
+    def _out_text_part(text: str) -> dict:
+        return {"type": "output_text", "text": str(text or "")}
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        if role == "system":
+            text = str(message.get("content") or "").strip()
+            if text:
+                instructions.append(text)
+            continue
+        if role == "user":
+            text = str(message.get("content") or "")
+            if text.strip():
+                items.append({"type": "message", "role": "user",
+                              "content": [_text_part(text)]})
+            continue
+        if role == "assistant":
+            text = str(message.get("content") or "")
+            if text.strip():
+                items.append({"type": "message", "role": "assistant",
+                              "content": [_out_text_part(text)]})
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") if isinstance(call.get("function"), dict) else call
+                name = str((fn.get("name") if isinstance(fn, dict) else "") or "").strip()
+                if not name:
+                    continue
+                args = (fn.get("arguments") if isinstance(fn, dict) else {})
+                if isinstance(args, dict):
+                    args = json.dumps(args, ensure_ascii=False)
+                items.append({"type": "function_call",
+                              "call_id": str(call.get("id") or call.get("tool_call_id") or ""),
+                              "name": name, "arguments": str(args or "")})
+            continue
+        if role == "tool":
+            text = str(message.get("content") or "")
+            items.append({"type": "function_call_output",
+                          "call_id": str(message.get("tool_call_id")
+                                         or message.get("id") or ""),
+                          "output": text if text.strip() else "{}"})
+            continue
+    if not items:
+        raise AIInputError("пустой список сообщений")
+    return ("\n\n".join(instructions), items)
+
+
+def _responses_tools(tools: list) -> list:
+    """Наши AGENT_TOOLS → tools для Responses API (плоские function-объекты)."""
+    if not isinstance(tools, list) or not tools:
+        raise AIInputError("tools должен быть непустым списком")
+    out = []
+    for tool in tools:
+        fn = (tool or {}).get("function") if isinstance(tool, dict) else None
+        if not isinstance(fn, dict) or not str(fn.get("name") or "").strip():
+            raise AIInputError("инструмент без имени")
+        params = fn.get("parameters")
+        out.append({"type": "function", "name": str(fn["name"]).strip(),
+                    "description": str(fn.get("description") or ""),
+                    "parameters": params if isinstance(params, dict) else {}})
+    return out
+
+
+def _responses_to_message(data: dict) -> dict:
+    """output[] Responses API → chat-shaped message для parse_tool_message.
+
+    Дальше контракт общий: текст рядом с вызовами — preamble, пустота —
+    AIFormatError. Статус incomplete без содержимого — AIError (повторяемый
+    отказ, а не вина запроса): чаще всего это срезанный бюджет.
+    """
+    if not isinstance(data, dict):
+        raise AIError("неожиданная структура ответа провайдера")
+    output = data.get("output")
+    if not isinstance(output, list):
+        raise AIError("неожиданная структура ответа провайдера")
+    texts: list[str] = []
+    calls: list[dict] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "")
+        if kind == "message":
+            for part in item.get("content") or []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("output_text", "text"):
+                    text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+        elif kind == "function_call":
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            args = item.get("arguments")
+            if isinstance(args, dict):
+                args = json.dumps(args, ensure_ascii=False)
+            calls.append({"id": str(item.get("call_id") or item.get("id") or ""),
+                          "type": "function",
+                          "function": {"name": name, "arguments": str(args or "")}})
+        # reasoning и прочие служебные элементы — не контент для нас.
+    text = "\n\n".join(texts).strip()[:AI_REPLY_MAX] or None
+    if text is None and not calls:
+        if str(data.get("status") or "") == "incomplete":
+            raise AIError("провайдер не завершил ответ")
+        raise AIFormatError("пустой ответ модели")
+    return {"content": text, "tool_calls": calls}
+
+
 def parse_tool_message(message: dict) -> dict:
     """Разобрать ответ модели с tools.
 
@@ -1378,11 +1584,81 @@ def parse_tool_message(message: dict) -> dict:
             "preamble": text if (text is not None and calls) else None}
 
 
+def _responses_via_message(provider: str, messages: list[dict], *,
+                         model_value: str, base_value: str, key: str, auth: str,
+                         extra_headers: dict, effort: str,
+                         timeout: float | None = None, max_tokens: int | None = None,
+                         temperature: float | None = None,
+                         tools: list | None = None, tool_choice=None) -> dict:
+    """Один вызов по Responses API. Возвращает chat-shaped message.
+
+    Форма ответа приводится к виду chat (`{"content", "tool_calls"}`), поэтому
+    дальше работают общие `parse_tool_message`/`_chat_via`: контракты выше не
+    знают, каким протоколом ответ приехал.
+    """
+    instructions, input_items = _responses_input_items(messages)
+    body: dict[str, Any] = {
+        "model": model_value,
+        "input": input_items,
+    }
+    if instructions:
+        body["instructions"] = instructions
+    if tools is not None:
+        body["tools"] = _responses_tools(tools)
+        # То же правило, что у chat: явный auto шлём только по просьбе —
+        # дефолт шлюза и так auto.
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
+    if max_tokens:
+        # Бюджет обязан покрывать и мышление: max_tokens=1 от фоновых проб
+        # для reasoning-модели означает вечный incomplete без текста, и живой
+        # провайдер выглядел бы мёртвым. Ниже пробного минимума не опускаемся.
+        body["max_output_tokens"] = max(int(max_tokens), RESPONSES_PROBE_MAX_TOKENS)
+    if temperature is not None:
+        body["temperature"] = float(temperature)
+    if effort:
+        body["reasoning"] = {"effort": effort}
+    headers = {
+        "Authorization": key if auth == "raw" else f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    for name, value in (extra_headers or {}).items():
+        headers[str(name)] = str(value)
+    request = urllib.request.Request(
+        f"{base_value.rstrip('/')}/responses",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
+    try:
+        with urllib.request.urlopen(request, timeout=deadline) as response:
+            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise _http_error(exc) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AIError(f"провайдер недоступен: {type(exc).__name__}") from None
+    if len(raw) > MAX_UPSTREAM_BYTES:
+        raise AIError("ответ провайдера слишком большой")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise AIError("провайдер вернул не-JSON") from None
+    return _responses_to_message(data)
+
+
 def _chat_via_message(provider: str, messages: list[dict], *, model: str | None = None,
                       timeout: float | None = None, max_tokens: int | None = None,
                       temperature: float | None = None,
-                      tools: list | None = None, tool_choice=None) -> dict:
-    """Один HTTP-вызов, возвращающий сырое message (content + tool_calls)."""
+                      tools: list | None = None, tool_choice=None,
+                      reasoning_effort: str | None = None) -> dict:
+    """Один HTTP-вызов, возвращающий сырое message (content + tool_calls).
+
+    `reasoning_effort` — явный уровень мышления (minimal|low|medium|high);
+    None = default из настроек провайдера (у своих — поле reasoning_effort,
+    пусто = default шлюза). Протокол берётся из спека: responses-провайдеры
+    идут через `_responses_via_message`, остальные — как раньше.
+    """
     try:
         spec = _spec_for(provider)
     except KeyError:
@@ -1404,6 +1680,32 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
         base_value = ""
     if not base_value:
         raise AIUnavailable("AI не настроен")
+    try:
+        protocol = str(spec.get("protocol") or "chat").strip().lower()
+    except Exception:
+        protocol = "chat"
+    if protocol not in RESPONSE_PROTOCOLS:
+        protocol = "chat"
+    effort = str(reasoning_effort or "").strip().lower()
+    if not effort:
+        try:
+            effort = str(spec.get("reasoning_effort") or "").strip().lower()
+        except Exception:
+            effort = ""
+    if effort and effort not in REASONING_EFFORTS:
+        effort = ""
+    try:
+        extra_headers = dict(spec.get("extra_headers") or {})
+    except Exception:
+        extra_headers = {}
+    if protocol == "responses":
+        return _responses_via_message(
+            provider, messages, model_value=model or model_value,
+            base_value=base_value, key=key,
+            auth="raw" if spec.get("auth") == "raw" else "bearer",
+            extra_headers=extra_headers, effort=effort,
+            timeout=timeout, max_tokens=max_tokens,
+            temperature=temperature, tools=tools, tool_choice=tool_choice)
     body: dict[str, Any] = {
         "model": model or model_value,
         "messages": _wire_messages(provider, messages),
@@ -1507,13 +1809,16 @@ def _next_plan_provider(plan: list, idx: int) -> str | None:
 def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = None,
                     timeout: float | None = None, max_tokens: int | None = None,
                     temperature: float | None = None, tool_choice=None,
-                    state: dict | None = None) -> dict:
+                    state: dict | None = None, reasoning_effort: str | None = None) -> dict:
     """chat() для цикла агента: failover + слот + строгий парсер tool-ответа.
 
     Возвращает {"text": str|None, "tool_calls": [...], "preamble": str|None}.
     Ошибка формата (пустой ответ, битые аргументы) — AIFormatError и
     НЕ переключает провайдера: провайдер жив, небрежна модель. Реплика рядом с
     вызовами ошибкой не считается — см. parse_tool_message.
+
+    `reasoning_effort` — явный уровень мышления для reasoning-провайдеров
+    (responses); None = default из настроек провайдера.
     """
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
@@ -1538,7 +1843,8 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
             try:
                 message = _chat_via_message(name, messages, model=want_model, timeout=timeout,
                                             max_tokens=max_tokens, temperature=temperature,
-                                            tools=tools, tool_choice=tool_choice)
+                                            tools=tools, tool_choice=tool_choice,
+                                            reasoning_effort=reasoning_effort)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
                 if _is_provider_level_error(exc):
@@ -1572,12 +1878,18 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
 def chat(messages: list[dict], *, model: str | None = None, timeout: float | None = None,
          max_tokens: int | None = None, temperature: float | None = None,
          state: dict | None = None, tools: list | None = None,
-         tool_choice=None, as_judge: bool = False):
+         tool_choice=None, as_judge: bool = False,
+         reasoning_effort: str | None = None):
     """Send a chat completion and return the assistant text.
 
     `messages` is the OpenAI shape ([{"role": ..., "content": ...}, ...]) and is
     passed through untouched, which is what makes the call reusable: a format
     only decides what to put in the list.
+
+    `reasoning_effort` — явный уровень мышления для reasoning-провайдеров
+    (responses); None = default из настроек провайдера, НО у судьи (`as_judge`)
+    None означает high: измерение по рубрике обязано думать в полную силу, а
+    не экономить. Наставник передаёт minimal явно из `_agent_chat_fn`.
 
     Failover: провайдеры идут в порядке _ordered_providers() (активный
     первым), внутри провайдера — его цепочка моделей (high → medium → low).
@@ -1597,10 +1909,15 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     С tools — режим агента: возвращается {"text","tool_calls"} (см.
     chat_with_tools), текст и вызовы одновременно запрещены парсером.
     """
+    if as_judge and reasoning_effort is None:
+        # Судья меряет баллы — ему полное мышление независимо от default
+        # провайдера (у дешёвого дефолта minimal оценку ставить нельзя).
+        reasoning_effort = "high"
     if tools is not None:
         return chat_with_tools(messages, tools, model=model, timeout=timeout,
                                max_tokens=max_tokens, temperature=temperature,
-                               tool_choice=tool_choice, state=state)
+                               tool_choice=tool_choice, state=state,
+                               reasoning_effort=reasoning_effort)
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
     names = judge_providers_order() if as_judge else _ordered_providers()
@@ -1624,7 +1941,8 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 continue
             try:
                 answer = _chat_via(name, messages, model=want_model, timeout=timeout,
-                                   max_tokens=max_tokens, temperature=temperature)
+                                   max_tokens=max_tokens, temperature=temperature,
+                                   reasoning_effort=reasoning_effort)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
                 if _is_provider_level_error(exc):
@@ -1688,7 +2006,8 @@ def chat_as_judge(messages: list[dict], **kwargs):
 def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
               timeout: float | None = None, max_tokens: int | None = None,
               temperature: float | None = None,
-              tools: list | None = None, tool_choice=None):
+              tools: list | None = None, tool_choice=None,
+              reasoning_effort: str | None = None):
     """Один HTTP-вызов конкретного провайдера. Без failover и без слота —
     это забота chat() (и проба probe_tick зовёт напрямую сюда).
 
@@ -1698,7 +2017,8 @@ def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
     """
     message = _chat_via_message(provider, messages, model=model, timeout=timeout,
                                 max_tokens=max_tokens, temperature=temperature,
-                                tools=tools, tool_choice=tool_choice)
+                                tools=tools, tool_choice=tool_choice,
+                                reasoning_effort=reasoning_effort)
     if tools is not None:
         return parse_tool_message(message)
     try:
@@ -1841,6 +2161,33 @@ def validate_custom_payload(payload: dict, *, is_update: bool = False,
     if "merge_system" in payload or "mergeSystem" in payload or not is_update:
         clean["merge_system"] = bool(payload.get("merge_system",
                                                  payload.get("mergeSystem", False)))
+    if "protocol" in payload or not is_update:
+        try:
+            clean["protocol"] = _clean_protocol(payload.get("protocol"))
+        except ValueError as exc:
+            raise ValueError(str(exc))
+    for effort_key in ("reasoning_effort", "reasoningEffort"):
+        if effort_key in payload:
+            break
+    else:
+        effort_key = ""
+    if effort_key or not is_update:
+        try:
+            clean["reasoning_effort"] = _clean_reasoning_effort(
+                payload.get(effort_key) if effort_key else "")
+        except ValueError as exc:
+            raise ValueError(str(exc))
+    for headers_key in ("extra_headers", "extraHeaders"):
+        if headers_key in payload:
+            break
+    else:
+        headers_key = ""
+    if headers_key or not is_update:
+        try:
+            clean["extra_headers"] = _clean_extra_headers(
+                payload.get(headers_key) if headers_key else {})
+        except ValueError as exc:
+            raise ValueError(str(exc))
     if "enabled" in payload or not is_update:
         clean["enabled"] = bool(payload.get("enabled", True))
     if "model_title" in payload or "modelTitle" in payload or not is_update:
@@ -1886,6 +2233,9 @@ def custom_provider_create(clean: dict) -> dict:
         "auth": clean.get("auth") or "bearer",
         "use_wallet_balance": bool(clean.get("use_wallet_balance")),
         "merge_system": bool(clean.get("merge_system")),
+        "protocol": clean.get("protocol") or "chat",
+        "reasoning_effort": clean.get("reasoning_effort") or "",
+        "extra_headers": dict(clean.get("extra_headers") or {}),
         "enabled": bool(clean.get("enabled", True)),
         "created_at": now_ms,
         "updated_at": now_ms,
@@ -1899,6 +2249,9 @@ def custom_provider_create(clean: dict) -> dict:
         "api_key": entry["api_key"], "auth": entry["auth"],
         "use_wallet_balance": entry["use_wallet_balance"],
         "merge_system": entry["merge_system"],
+        "protocol": entry["protocol"],
+        "reasoning_effort": entry["reasoning_effort"],
+        "extra_headers": dict(entry["extra_headers"]),
     }
     customs[pid] = entry
     # Название модели живёт отдельной картой (model_title), а не в записи
@@ -1952,6 +2305,13 @@ def custom_provider_update(pid: str, patch: dict) -> dict:
         entry["use_wallet_balance"] = bool(patch["use_wallet_balance"])
     if "merge_system" in patch:
         entry["merge_system"] = bool(patch["merge_system"])
+    if "protocol" in patch:
+        entry["protocol"] = patch["protocol"] or "chat"
+    if "reasoning_effort" in patch:
+        entry["reasoning_effort"] = patch["reasoning_effort"] or ""
+    if "extra_headers" in patch:
+        entry["extra_headers"] = dict(patch["extra_headers"] or {}) \
+            if isinstance(patch["extra_headers"], dict) else {}
     if "enabled" in patch:
         entry["enabled"] = bool(patch["enabled"])
     entry["updated_at"] = int(time.time() * 1000)
@@ -2817,6 +3177,12 @@ def _public_provider_card(pid: str) -> dict:
         "auth": "raw" if spec.get("auth") == "raw" else "bearer",
         "useWalletBalance": bool((spec.get("extra_body") or {}).get("useWalletBalance")),
         "mergeSystem": bool(spec.get("merge_system")),
+        # Responses-протокол и мышление: свои поля записи, у встроенных всегда
+        # chat/пусто. Значений доп. заголовков в карточке нет (только имена) —
+        # по тому же правилу, что keyHint: лишнего наружу не отдаём.
+        "protocol": str(spec.get("protocol") or "chat"),
+        "reasoningEffort": str(spec.get("reasoning_effort") or ""),
+        "extraHeaderNames": sorted((spec.get("extra_headers") or {}).keys()),
         "slot": slot,
         "slotLabel": PROVIDER_SLOT_LABELS.get(slot or "", ""),
         "modelSlots": {s: chain_slots.get(s) for s in PROVIDER_SLOTS},
@@ -3056,11 +3422,73 @@ def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
 
 def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
                        extra: dict, merge_system: bool,
-                       timeout: float) -> tuple[bool, int, str]:
+                       timeout: float, protocol: str = "chat",
+                       extra_headers: dict | None = None) -> tuple[bool, int, str]:
     """Один живой запрос «привет» (1 токен). Возвращает (ok, latencyMs, error).
 
-    Ключ в ошибку не попадает никогда — только класс и короткий текст."""
+    Ключ в ошибку не попадает никогда — только класс и короткий текст.
+    Responses-провайдеры пробуются своим протоколом (`/responses`): chat-проба
+    там всегда 400, и без этой ветки живой провайдер выглядел бы мёртвым.
+    Бюджет пробы шире токена (`RESPONSES_PROBE_MAX_TOKENS`): reasoning-модель
+    сначала думает и только потом отвечает, при max_output_tokens=1 текста нет
+    никогда. Успех — HTTP 200 + непустой текст в ответе."""
     started = time.monotonic()
+    if (protocol or "chat") == "responses":
+        # Проба всегда на minimal: живость шлюза видна и на дешёвом мышлении,
+        # а high сжигал бы ~500 токенов на каждое нажатие «Проверить».
+        effort = "minimal"
+        body: dict[str, Any] = {
+            "model": model,
+            "input": "привет",
+            "max_output_tokens": RESPONSES_PROBE_MAX_TOKENS,
+            "temperature": 0.0,
+            "reasoning": {"effort": effort},
+        }
+        headers = {
+            "Authorization": key if auth == "raw" else f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        for name, value in (extra_headers or {}).items():
+            headers[str(name)] = str(value)
+        request = urllib.request.Request(
+            f"{base_url.rstrip('/')}/responses",
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read(MAX_UPSTREAM_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            try:
+                exc.read()
+            except Exception:
+                pass
+            status = getattr(exc, "code", 0) or 0
+            if status in (401, 403):
+                return False, latency, "Неверный API-ключ (401/403)"
+            if status == 402:
+                return False, latency, "На балансе нет средств (402)"
+            if status == 429:
+                return False, latency, "Провайдер перегружен (429)"
+            return False, latency, f"Провайдер ответил {status}"
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            if isinstance(exc, TimeoutError) or "timed out" in type(exc).__name__.lower():
+                return False, latency, "Превышено время ожидания"
+            return False, latency, f"Недоступен: {type(exc).__name__}"
+        except Exception as exc:  # noqa: BLE001 — проба не роняет админку
+            return False, int((time.monotonic() - started) * 1000), f"Ошибка проверки: {type(exc).__name__}"
+        latency = int((time.monotonic() - started) * 1000)
+        try:
+            data = json.loads(raw)
+            message = _responses_to_message(data)
+            if not (message.get("content") or "").strip():
+                return False, latency, "Пустой ответ модели"
+        except (AIError, AIFormatError, ValueError, UnicodeDecodeError) as exc:
+            return False, latency, f"Ответ не похож на Responses-формат ({type(exc).__name__})"
+        return True, latency, ""
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": "привет"}],
@@ -3144,6 +3572,8 @@ def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC
         base_url=base_value, key=key, model=wanted,
         auth="raw" if spec.get("auth") == "raw" else "bearer",
         extra=spec.get("extra_body") or {}, merge_system=bool(spec.get("merge_system")),
+        protocol=str(spec.get("protocol") or "chat"),
+        extra_headers=spec.get("extra_headers") or {},
         timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
     return {"ok": ok, "latencyMs": latency, "error": error, "model": wanted,
             "checkedAt": int(time.time() * 1000)}
@@ -3193,6 +3623,8 @@ def probe_models_plan(name: str, models: list | None = None) -> dict:
         "auth": "raw" if spec.get("auth") == "raw" else "bearer",
         "extra": spec.get("extra_body") or {},
         "merge_system": bool(spec.get("merge_system")),
+        "protocol": str(spec.get("protocol") or "chat"),
+        "extra_headers": dict(spec.get("extra_headers") or {}),
         "wanted": wanted,
         "total": len(wanted),
         "checked": wanted[:PROBE_MODELS_MAX],
@@ -3205,7 +3637,10 @@ def probe_one(plan: dict, model: str, timeout: float = PROBE_MODELS_TIMEOUT_SEC)
     ok, latency, error = _run_probe_request(
         base_url=plan["base_url"], key=plan["key"], model=str(model),
         auth=plan["auth"], extra=plan["extra"],
-        merge_system=plan["merge_system"], timeout=timeout)
+        merge_system=plan["merge_system"],
+        protocol=str(plan.get("protocol") or "chat"),
+        extra_headers=plan.get("extra_headers") or {},
+        timeout=timeout)
     return {"ok": bool(ok), "latencyMs": latency, "error": error}
 
 
@@ -3386,6 +3821,8 @@ def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
         base_url=base_value, key=key, model=model_value,
         auth="raw" if spec.get("auth") == "raw" else "bearer",
         extra=spec.get("extra_body") or {}, merge_system=bool(spec.get("merge_system")),
+        protocol=str(spec.get("protocol") or "chat"),
+        extra_headers=spec.get("extra_headers") or {},
         timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
     result = {"ok": ok, "latencyMs": latency, "error": error,
               "checkedAt": int(time.time() * 1000)}
@@ -3473,7 +3910,8 @@ def probe_tick(now: float | None = None) -> bool:
         for name in candidates:
             try:
                 _chat_via(name, [{"role": "user", "content": "привет"}],
-                          timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
+                          timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0,
+                          reasoning_effort="minimal")
             except Exception as exc:  # noqa: BLE001 — кандидат мёртв, следующий
                 if not first_error:
                     first_error = f"{type(exc).__name__}: {exc}"[:300]
@@ -3524,7 +3962,8 @@ def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
             return False
         try:
             _chat_via(preferred, [{"role": "user", "content": "привет"}],
-                      timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0)
+                      timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0,
+                      reasoning_effort="minimal")
         except Exception:  # noqa: BLE001 — не ожил, ждём следующего интервала
             return False
         finally:

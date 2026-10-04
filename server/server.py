@@ -659,7 +659,11 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None):
             # инструментов — короткий текст по уже собранным данным. Потолок —
             # AGENT_REPLY_MAX(), а не прежние 8000: ответ несёт ещё и блок
             # кнопок-продолжений в конце, и жёсткий рез раньше отрывал его.
-            text = _AI.chat(messages, temperature=0.0, timeout=timeout)
+            # Мышление — minimal явно: ходу нужен быстрый ответ по готовым
+            # данным, а не глубокое рассуждение (судья сочинений — наоборот,
+            # high по as_judge в ai.chat).
+            text = _AI.chat(messages, temperature=0.0, timeout=timeout,
+                            reasoning_effort="minimal")
             return {"text": (text or "").strip()[:AGENT_REPLY_MAX()] or None,
                     "tool_calls": [], "preamble": None}
         failure: Exception | None = None
@@ -668,7 +672,8 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None):
                 break
             try:
                 return _AI.chat_with_tools(messages, tools, temperature=temperature,
-                                           timeout=_agent_call_timeout(budget))
+                                           timeout=_agent_call_timeout(budget),
+                                           reasoning_effort="minimal")
             except (_AI.AIFormatError, _AI.AIError) as exc:
                 failure = exc
         raise failure  # noqa: B904 — повторяем ровно то, что поймали
