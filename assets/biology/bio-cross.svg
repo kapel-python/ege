@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Схема моногибридного скрещивания Аа × Аа</title>
+  <desc id="desc">Решётка Пеннета: гаметы A и a, потомство AA, Aa, Aa, aa.</desc>
+  <rect width="640" height="420" rx="10" fill="#111827"/>
+  <text x="120" y="90" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#f59e0b">A</text>
+  <text x="280" y="90" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#f59e0b">a</text>
+  <text x="30" y="180" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#f59e0b">A</text>
+  <text x="30" y="300" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#f59e0b">a</text>
+  <rect x="90" y="110" width="170" height="110" rx="8" fill="none" stroke="#38bdf8" stroke-width="3"/>
+  <rect x="280" y="110" width="170" height="110" rx="8" fill="none" stroke="#38bdf8" stroke-width="3"/>
+  <rect x="90" y="235" width="170" height="110" rx="8" fill="none" stroke="#38bdf8" stroke-width="3"/>
+  <rect x="280" y="235" width="170" height="110" rx="8" fill="none" stroke="#f472b6" stroke-width="3"/>
+  <text x="160" y="175" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">АА</text>
+  <text x="350" y="175" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">Аа</text>
+  <text x="160" y="300" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">Аа</text>
+  <text x="350" y="300" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">аа</text>
+  <text x="470" y="300" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#e2e8f0">3 : 1</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация: решётка Пеннета для скрещивания Аа × Аа</text>
+</svg>

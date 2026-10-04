@@ -537,6 +537,75 @@ function taskVisualHtml(task, context = "task") {
     '</figure>';
 }
 
+/* ---------------- visual lightbox ----------------
+   Клик по ЛЮБОЙ картинке внутри .task-visual (практика, урок, диагностика,
+   миссии, сочинения — везде, где рендерит taskVisualHtml) открывает её
+   крупно. Один делегированный обработчик на document покрывает и разметку,
+   добавленную позже через innerHTML. Для SVG в <img> показывается тот же
+   src крупно, перерисовывать нечего. Состояния .task-visual--missing /
+   --broken и onerror-фолбэк не трогаем: у них либо нет <img> вовсе, либо
+   картинка уже спрятана. */
+let visualLightboxPrevFocus = null;
+
+function openVisualLightbox(src, label) {
+  closeVisualLightbox();
+  if (!src) return;
+  visualLightboxPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const caption = String(label || "");
+  const root = document.createElement("div");
+  root.id = "visual-lightbox-root";
+  root.innerHTML =
+    '<div class="visual-lightbox-backdrop" data-visual-lightbox-backdrop>' +
+      '<div class="visual-lightbox" role="dialog" aria-modal="true" aria-label="' + esc(caption || "Увеличенный рисунок") + '">' +
+        '<button class="visual-lightbox__close" type="button" data-visual-lightbox-close aria-label="Закрыть рисунок">' + icon("x") + "</button>" +
+        '<img class="visual-lightbox__img" src="' + esc(src) + '" alt="' + esc(caption || "Увеличенный рисунок") + '">' +
+        (caption ? '<div class="visual-lightbox__caption">' + esc(caption) + "</div>" : "") +
+      "</div>" +
+    "</div>";
+  document.body.appendChild(root);
+  document.addEventListener("keydown", visualLightboxEscHandler);
+  const closeBtn = root.querySelector("[data-visual-lightbox-close]");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", closeVisualLightbox);
+    if (closeBtn.focus) closeBtn.focus({ preventScroll: true });
+  }
+  const backdrop = root.querySelector("[data-visual-lightbox-backdrop]");
+  if (backdrop) backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeVisualLightbox(); });
+}
+
+function closeVisualLightbox() {
+  const root = document.getElementById("visual-lightbox-root");
+  if (!root) return;
+  root.remove();
+  document.removeEventListener("keydown", visualLightboxEscHandler);
+  if (visualLightboxPrevFocus && visualLightboxPrevFocus.isConnected) {
+    visualLightboxPrevFocus.focus({ preventScroll: true });
+  }
+  visualLightboxPrevFocus = null;
+}
+
+function visualLightboxEscHandler(e) {
+  if (e && e.key === "Escape") closeVisualLightbox();
+}
+
+function onTaskVisualClick(e) {
+  if (!e || e.defaultPrevented) return;
+  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const target = e.target;
+  if (!target || !target.closest) return;
+  const img = target.closest(".task-visual img");
+  if (!img) return;
+  const box = img.closest(".task-visual");
+  if (!box || box.classList.contains("task-visual--missing")) return;
+  if (img.style.display === "none") return; // сломанная картинка уже спрятана onerror-фолбэком
+  const src = img.currentSrc || img.src;
+  if (!src) return;
+  e.preventDefault();
+  openVisualLightbox(src, (img.getAttribute && img.getAttribute("alt")) || "");
+}
+
+document.addEventListener("click", onTaskVisualClick);
+
 /* ---------------- toast ---------------- */
 
 function toast(html, type = "", iconName = null) {
@@ -6230,6 +6299,7 @@ function screenLesson(root) {
         ${step.title ? `<div class="lesson-title">${esc(step.title)}</div>` : ""}
         <div class="lesson-body">
           ${lessonStepTextDup(step, task) ? "" : `<div class="task-card__text lesson-text">${mathText(step.text || "")}</div>`}
+          ${taskVisualHtml({ visual: step.visual }, "lesson-step")}
           ${task ? `<div class="lesson-independent-task"><div class="stat-label">Задание из банка · ${esc(task.num)}</div><div class="task-card__text">${mathText(task.text)}</div>${taskVisualHtml(task, "lesson")}</div>` : ""}
         </div>
         ${lessonBoardHtml(step, type)}
@@ -8464,6 +8534,11 @@ function subjectWasJustChosen() {
   try { return loginSubjectChosen; } catch (_) { return false; }
 }
 
+// Пикер входа показывает только начатые предметы (withProgress с сервера),
+// остальные скрыты за кнопкой «Показать все предметы». Флаг живёт до выбора
+// предмета или ухода с маршрута — как loginSubjectChosen выше.
+let loginSubjectShowAll = false;
+
 function authScreenShell(title, sub, body) {
   return `
     <div class="auth-screen">
@@ -8633,16 +8708,53 @@ function screenLoginSubject(root) {
     render();
     return;
   }
+  // Пикер входа показывает только начатые предметы (см. renderLoginSubjectList
+  // ниже): прогресс приезжает полем withProgress из GET /api/subjects.
   const subjects = asSafeArray(DataAPI.subjects());
   const cur = DataAPI.currentSubject();
+  const renderLoginSubjectList = (progressIds) => {
+    if (currentRoute() !== "subject") return;
+    let visible = subjects;
+    let filtered = false;
+    if (!loginSubjectShowAll && Array.isArray(progressIds) && progressIds.length) {
+      const want = new Set(progressIds);
+      const narrowed = subjects.filter((s) => want.has(s.id));
+      // Сервер мог вернуть id, которых нет в каталоге, — пустой список
+      // означает «показать все», а не «показать ничего».
+      if (narrowed.length) {
+        visible = narrowed;
+        filtered = narrowed.length < subjects.length;
+      }
+    }
+    const sub = filtered
+      ? "Показаны предметы, где у тебя уже есть прогресс. Остальные — под кнопкой ниже, прогресс никуда не денется."
+      : "Один аккаунт может использоваться на разных устройствах — выбери, с каким предметом продолжить. Прогресс каждого предмета хранится отдельно и никуда не денется.";
+    root.innerHTML = authScreenShell("Какой предмет открываем?", sub,
+      `<div class="choice-list">
+        ${visible.map((s) => {
+          const status = subjectAvailabilityLabel(s);
+          return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
+        }).join("")}
+      </div>${filtered ? `<div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button class="btn btn--ghost" onclick="toggleLoginSubjectShowAll()">Показать все предметы</button></div>` : ""}`);
+  };
+  // Раскрытый полный список рисуем сразу, без запроса.
+  if (loginSubjectShowAll) { renderLoginSubjectList(null); return; }
   root.innerHTML = authScreenShell("Какой предмет открываем?",
-    "Один аккаунт может использоваться на разных устройствах — выбери, с каким предметом продолжить. Прогресс каждого предмета хранится отдельно и никуда не денется.",
-    `<div class="choice-list">
-       ${subjects.map((s) => {
-         const status = subjectAvailabilityLabel(s);
-         return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
-       }).join("")}
-     </div>`);
+    "Подбираем предметы с твоим прогрессом…",
+    loaderHTML("Подбираем предметы…"));
+  try {
+    ApiClient.get("/api/subjects").then(
+      (payload) => renderLoginSubjectList(payload && payload.withProgress),
+      () => renderLoginSubjectList(null)
+    );
+  } catch (_) {
+    renderLoginSubjectList(null);
+  }
+}
+
+function toggleLoginSubjectShowAll() {
+  loginSubjectShowAll = true;
+  try { render(); } catch (_) {}
 }
 
 async function chooseLoginSubject(id) {
@@ -8667,6 +8779,7 @@ async function chooseLoginSubject(id) {
     await Store.switchSubject(id);
     subjectSwitching = false;
     loginSubjectChosen = true;
+    loginSubjectShowAll = false;
     pendingSubjectChoice = false;
     try { sessionStorage.removeItem("ege_login_subject_pending"); } catch (_) {}
     // Предмет выбран явно в пикере входа: онбординг не переспрашивает его.

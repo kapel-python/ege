@@ -1295,6 +1295,61 @@ body {
   line-height: 1.45;
   border-top: 1px solid var(--border);
 }
+/* Lightbox: клик по картинке внутри .task-visual открывает её крупно
+   (единый делегированный обработчик onTaskVisualClick в js/app.js).
+   Подложка тёмная в обеих темах, поэтому подпись и крестик — светлые. */
+.task-visual img { cursor: zoom-in; }
+.visual-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+.visual-lightbox { position: relative; max-width: 100%; }
+.visual-lightbox__img {
+  display: block;
+  max-width: 92vw;
+  max-height: 84vh;
+  max-height: 84dvh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.visual-lightbox__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+.visual-lightbox__close svg { width: 18px; height: 18px; }
+.visual-lightbox__close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.visual-lightbox__caption {
+  margin-top: 10px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 92vw;
+}
 
 /* MathVisual: declarative diagrams rendered live by JSXGraph (or, for
    probability trees, plain inline SVG). Shares .task-visual's frame
