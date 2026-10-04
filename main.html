@@ -944,7 +944,7 @@
     text-align:center;
   }
 
-  /* ===== MENTOR (Скоро): приглушённый некликабельный блок ===== */
+  /* ===== MENTOR ===== */
   .mentor{
     position:relative;
     background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
@@ -954,11 +954,7 @@
     box-shadow:
       0 1px 0 var(--inset-line) inset,
       var(--shadow-sm);
-    opacity:0.8;
   }
-
-  .js .mentor.rv-scale{opacity:0;}
-  .js .mentor.rv-scale.in{opacity:0.8;}
 
   .mentor-grid{
     display:grid;
@@ -1326,6 +1322,71 @@
     </div>
   </section>
 
+  <section class="section" id="mentor">
+    <div class="wrap">
+      <div class="mentor rv-scale">
+        <div class="mentor-grid">
+          <div>
+            <div class="section-label">
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              ИИ
+            </div>
+            <h2 class="section-title" data-type="mask">Личный ИИ, который знает твою историю</h2>
+            <p class="section-description">ИИ помнит твои решения и ошибки и ведёт тебя по подготовке, как живой учитель, — только доступен в любое время.</p>
+            <ul class="mentor-list">
+              <li>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
+                <span>Знает историю ученика: какие темы закрыты, где ошибки и что пора повторить.</span>
+              </li>
+              <li>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
+                <span>Разбирает каждую ошибку — объясняет, почему ответ неверный и как рассуждать иначе.</span>
+              </li>
+              <li>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
+                <span>Считает прогноз балла и предлагает следующий шаг, который даст больше всего.</span>
+              </li>
+              <li>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
+                <span>Ничего не делает молча: любое действие — только с твоим подтверждением.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="pricing">
+    <div class="wrap">
+      <div class="section-header">
+        <div class="section-label rv">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
+          Тарифы
+        </div>
+        <h2 class="section-title" data-type="mask">Бесплатно — навсегда. Plus — в 4 раза больше</h2>
+        <p class="section-description rv" style="--d:200ms">Все задания, навыки и прогноз баллов бесплатны у всех. Платная подписка ege easy <span class="plus">Plus</span> увеличивает дневные лимиты: 10 проверок сочинений и 25 ходов ИИ в день вместо 5 и 5.</p>
+      </div>
+
+      <div class="card-grid">
+        <div class="card rv" style="--d:0ms">
+          <h3 class="card-title">Бесплатно</h3>
+          <p class="card-text">0 ₽ — навсегда. Все задания и навыки, прогноз баллов, 5 проверок сочинений и 5 ходов ИИ в день.</p>
+        </div>
+
+        <div class="card rv" style="--d:120ms">
+          <span class="card-badge badge-live">Plus</span>
+          <h3 class="card-title">199 ₽ в месяц · 1590 ₽ в год (−33%)</h3>
+          <p class="card-text">10 проверок сочинений и 25 ходов ИИ в день. Отмена в любой момент, возврат — в течение 14 дней.</p>
+        </div>
+      </div>
+
+      <div class="section-cta rv" style="--d:200ms">
+        <a class="btn btn-primary" href="/subscription">Выбрать Plus</a>
+      </div>
+    </div>
+  </section>
+
   <section class="section" id="how">
     <div class="wrap">
       <div class="section-header">
@@ -1380,76 +1441,6 @@
             <p class="step-text">Уровень и статистика показывают, как меняется результат со временем.</p>
           </div>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="mentor">
-    <div class="wrap">
-      <div class="mentor rv-scale">
-        <span class="card-badge badge-soon">Скоро</span>
-        <div class="mentor-grid">
-          <div>
-            <div class="section-label">
-              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              ИИ
-            </div>
-            <h2 class="section-title" data-type="mask">Личный ИИ, который знает твою историю</h2>
-            <p class="section-description">ИИ помнит твои решения и ошибки и ведёт тебя по подготовке, как живой учитель, — только доступен в любое время.</p>
-            <ul class="mentor-list">
-              <li>
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
-                <span>Знает историю ученика: какие темы закрыты, где ошибки и что пора повторить.</span>
-              </li>
-              <li>
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
-                <span>Разбирает каждую ошибку — объясняет, почему ответ неверный и как рассуждать иначе.</span>
-              </li>
-              <li>
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
-                <span>Считает прогноз балла и предлагает следующий шаг, который даст больше всего.</span>
-              </li>
-              <li>
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
-                <span>Ничего не делает молча: любое действие — только с твоим подтверждением.</span>
-              </li>
-              <li>
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13.5l4.5 4.5L19 7.5"/></svg>
-                <span>Бесплатно.</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="pricing">
-    <div class="wrap">
-      <div class="section-header">
-        <div class="section-label rv">
-          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
-          Тарифы
-        </div>
-        <h2 class="section-title" data-type="mask">Бесплатно — навсегда. Plus — в 4 раза больше</h2>
-        <p class="section-description rv" style="--d:200ms">Все задания, навыки и прогноз баллов бесплатны у всех. Платная подписка ege easy <span class="plus">Plus</span> увеличивает дневные лимиты: 10 проверок сочинений и 25 ходов ИИ в день вместо 5 и 5.</p>
-      </div>
-
-      <div class="card-grid">
-        <div class="card rv" style="--d:0ms">
-          <h3 class="card-title">Бесплатно</h3>
-          <p class="card-text">0 ₽ — навсегда. Все задания и навыки, прогноз баллов, 5 проверок сочинений и 5 ходов ИИ в день.</p>
-        </div>
-
-        <div class="card rv" style="--d:120ms">
-          <span class="card-badge badge-live">Plus</span>
-          <h3 class="card-title">199 ₽ в месяц · 1590 ₽ в год (−33%)</h3>
-          <p class="card-text">10 проверок сочинений и 25 ходов ИИ в день. Отмена в любой момент, возврат — в течение 14 дней.</p>
-        </div>
-      </div>
-
-      <div class="section-cta rv" style="--d:200ms">
-        <a class="btn btn-primary" href="/subscription">Выбрать Plus</a>
       </div>
     </div>
   </section>
