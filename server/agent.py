@@ -646,126 +646,29 @@ def _agent_owner(user_id: int) -> str:
     return f"agent:{int(user_id)}"
 
 
-# Тиков до полного кармана: 24 ч / 8 ч. Делитель общий для всех лимитов,
-# поэтому дробных «8 с копейкой в час» нет: за тик возвращается
-# round(limit/3) — обычное округление (5 → 2, 25 → 8, 500 → 167).
-# Делитель 3 хорош тем, что limit*n/3 при целом limit никогда не даёт ровно
-# .5 (остатки только 1/3 и 2/3), поэтому банковское округление Python здесь
-# совпадает с обычным: спора «3.5 → 3 или 4» на этих числах не бывает.
-CHAIN_FULL_TICKS = 3
+def _load_chain_quota_module():
+    """Общая цепочка лимитов (server/chain_quota.py) — та же, что у проверок
+    сочинений: любой лимит (5, 10, 25) заряжается одной логикой. Строгая
+    загрузка: квота без неё несчитаема."""
+    import importlib.util
+    from pathlib import Path as _Path
+
+    chain_path = _Path(__file__).resolve().parent / "chain_quota.py"
+    spec = importlib.util.spec_from_file_location("ege_agent_chain_quota", chain_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("chain_quota.py missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _chain_cum(n: int, limit: int) -> int:
-    """Сколько жетонов положено за n тиков от якоря (без капа сверху).
+_CHAIN = _load_chain_quota_module()
 
-    Кумулятивное округление: cum(n) = round(limit*n/3). Приращение тика —
-    cum(total) − cum(done) (для 25: 8, 9, 8 — в сумме ровно лимит), поэтому
-    полный карман сходится за 3 тика при любом лимите, а не «примерно».
-    Кап до limit делает вызыватель через MIN."""
-    try:
-        n = int(n)
-        limit = int(limit)
-    except (TypeError, ValueError):
-        return 0
-    if n <= 0 or limit <= 0:
-        return 0
-    return int(round(limit * n / 3.0))
-
-
-def _ensure_anchor_col(conn: sqlite3.Connection) -> None:
-    """Колонка якоря цепочки. Без коммита: вызывается и внутри чужих
-    транзакций (reserve/status уже открыли свою через INSERT)."""
-    try:
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")}
-    except sqlite3.Error:
-        return
-    if cols and "anchor_ms" not in cols:
-        try:
-            conn.execute("ALTER TABLE ai_usage ADD COLUMN anchor_ms INTEGER")
-        except sqlite3.Error:
-            pass
-
-
-def _quota_catch_up(conn: sqlite3.Connection, owner: str, now_ms: int, limit: int, window_ms: int) -> None:
-    """Ленивая зарядка: за каждый созревший 8-часовой тик от якоря — треть
-    запаса (см. _chain_cum). Идемпотентно, без коммита (коммит за вызывателем,
-    чья транзакция уже открыта первым INSERT)."""
-    _ensure_anchor_col(conn)
-    try:
-        row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage"
-                           " WHERE owner=?", (owner,)).fetchone()
-    except sqlite3.Error:
-        return
-    if not row:
-        return
-    try:
-        count = int(row["count"])
-    except (TypeError, ValueError):
-        return
-    timer = row["timer_ms"]
-    anchor = row["anchor_ms"] if "anchor_ms" in row.keys() else None
-    if timer is None:
-        if count < limit:
-            # Призрак (строка частично заполнена, таймера нет): запускаем
-            # цепочку сейчас, иначе такой карман не зарядился бы никогда.
-            try:
-                conn.execute("UPDATE ai_usage SET timer_ms=?, anchor_ms=? WHERE owner=?",
-                             (now_ms, now_ms, owner))
-            except sqlite3.Error:
-                pass
-        return
-    if anchor is None:
-        # Цепочка от старой версии (был только timer_ms): якорем считаем его.
-        # Разовый перекос для активных цепочек (полный за ~32 ч вместо 24 ч),
-        # дальше все тики идут по новой сетке.
-        try:
-            conn.execute("UPDATE ai_usage SET anchor_ms=? WHERE owner=?",
-                         (int(timer), owner))
-        except sqlite3.Error:
-            return
-        anchor = int(timer)
-    try:
-        anchor = int(anchor)
-        timer = int(timer)
-    except (TypeError, ValueError):
-        return
-    if count > limit:
-        # Потолок снизили (кончился Plus): срезаем к новому, цепочка гаснет.
-        try:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
-                         " WHERE owner=?", (limit, owner))
-        except sqlite3.Error:
-            pass
-        return
-    if now_ms < anchor or window_ms <= 0:
-        return
-    if timer < anchor:
-        timer = anchor
-    total = (now_ms - anchor) // window_ms
-    done = (timer - anchor) // window_ms
-    if total <= done:
-        if timer != row["timer_ms"]:
-            try:
-                conn.execute("UPDATE ai_usage SET timer_ms=? WHERE owner=?",
-                             (timer, owner))
-            except sqlite3.Error:
-                pass
-        return
-    inc = _chain_cum(total, limit) - _chain_cum(done, limit)
-    if inc <= 0 and count < limit:
-        inc = 1  # лимит 1: cum(1) = round(1/3) = 0, но стоять тик без жетона нельзя
-    if inc <= 0:
-        return
-    new_count = min(limit, count + inc)
-    try:
-        if new_count >= limit:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
-                         " WHERE owner=?", (new_count, owner))
-        else:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
-                         (new_count, anchor + total * window_ms, owner))
-    except sqlite3.Error:
-        pass
+# Исторические имена — алиасы единой реализации (см. server/chain_quota.py).
+CHAIN_FULL_TICKS = _CHAIN.FULL_TICKS
+_chain_cum = _CHAIN.cum
+_ensure_anchor_col = _CHAIN.ensure_anchor_col
+_quota_catch_up = _CHAIN.catch_up
 
 
 # Персональный потолок ходов, который ставит админ из карточки пользователя.

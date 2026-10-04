@@ -7433,143 +7433,31 @@ def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
     return owners
 
 
-# Тиков 8-часового окна до полного кармана: 24 ч / 8 ч. Делитель общий для
-# всех лимитов: за тик возвращается round(limit/3) — обычное округление
-# (5 → 2, 10 → 3, 25 → 8). Делитель 3 хорош тем, что limit*n/3 при целом
-# limit никогда не даёт ровно .5, поэтому банковское округление Python здесь
-# совпадает с обычным.
-BUCKET_FULL_TICKS = 3
+def _load_chain_quota():
+    """Общая цепочка лимитов (server/chain_quota.py). Строгая загрузка: без
+    неё продуктовые бюджеты считать нельзя, молчать здесь — значит врать
+    лимиты ученикам."""
+    import importlib.util
+
+    chain_path = Path(__file__).resolve().parent / "chain_quota.py"
+    spec = importlib.util.spec_from_file_location("ege_chain_quota", chain_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("chain_quota.py missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _bucket_cum(n, limit):
-    try:
-        n = int(n)
-        limit = int(limit)
-    except (TypeError, ValueError):
-        return 0
-    if n <= 0 or limit <= 0:
-        return 0
-    return int(round(limit * n / 3.0))
+_CHAIN = _load_chain_quota()
 
-
-def _ensure_bucket_anchor(conn):
-    try:
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
-    except Exception:
-        return
-    if cols and "anchor_ms" not in cols:
-        try:
-            conn.execute("ALTER TABLE ai_usage ADD COLUMN anchor_ms INTEGER")
-        except Exception:
-            pass
-
-
-def _ai_usage_catch_up(conn, owner, now_ms, limit, window_ms):
-    _ensure_bucket_anchor(conn)
-    try:
-        row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage"
-                           " WHERE owner=?", (owner,)).fetchone()
-    except Exception:
-        return
-    if not row:
-        return
-    try:
-        count = int(row["count"])
-    except (TypeError, ValueError):
-        return
-    try:
-        timer = row["timer_ms"]
-        anchor = row["anchor_ms"]
-    except (KeyError, IndexError):
-        timer, anchor = row[1] if len(row) > 1 else None, None
-    if timer is None:
-        if count < limit:
-            try:
-                conn.execute("UPDATE ai_usage SET timer_ms=?, anchor_ms=? WHERE owner=?",
-                             (now_ms, now_ms, owner))
-            except Exception:
-                pass
-        return
-    if anchor is None:
-        try:
-            conn.execute("UPDATE ai_usage SET anchor_ms=? WHERE owner=?",
-                         (int(timer), owner))
-        except Exception:
-            return
-        anchor = int(timer)
-    try:
-        anchor = int(anchor)
-        timer = int(timer)
-    except (TypeError, ValueError):
-        return
-    if count > limit:
-        try:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
-                         " WHERE owner=?", (limit, owner))
-        except Exception:
-            pass
-        return
-    if now_ms < anchor or window_ms <= 0:
-        return
-    if timer < anchor:
-        timer = anchor
-    total = (now_ms - anchor) // window_ms
-    done = (timer - anchor) // window_ms
-    if total <= done:
-        if timer != row["timer_ms"]:
-            try:
-                conn.execute("UPDATE ai_usage SET timer_ms=? WHERE owner=?",
-                             (timer, owner))
-            except Exception:
-                pass
-        return
-    inc = _bucket_cum(total, limit) - _bucket_cum(done, limit)
-    if inc <= 0 and count < limit:
-        inc = 1
-    if inc <= 0:
-        return
-    new_count = min(limit, count + inc)
-    try:
-        if new_count >= limit:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
-                         " WHERE owner=?", (new_count, owner))
-        else:
-            conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
-                         (new_count, anchor + total * window_ms, owner))
-    except Exception:
-        pass
-
-
-def _ai_usage_count_at(state, t_ms, now_ms, limit, window_ms):
-    """Проекция бакета (count, timer, anchor) на момент t_ms: чистая функция,
-    ничего не пишет. Таймер-призрак (count < limit, но timer NULL) считаем
-    стартующим сейчас — такой строки быть не должно, но пусть лечится."""
-    count, timer_ms, anchor_ms = state[0], state[1], state[2] if len(state) > 2 else None
-    if count >= limit:
-        return count
-    if limit <= 0:
-        return count
-    if timer_ms is None or anchor_ms is None:
-        start = now_ms
-        if t_ms < start or window_ms <= 0:
-            return count
-        total = (t_ms - start) // window_ms
-        if total <= 0:
-            return count
-        inc = _bucket_cum(total, limit)
-        if inc <= 0:
-            inc = 1
-        return min(limit, count + inc)
-    if window_ms <= 0 or t_ms < anchor_ms:
-        return count
-    done = (timer_ms - anchor_ms) // window_ms if timer_ms >= anchor_ms else 0
-    total = (t_ms - anchor_ms) // window_ms
-    if total <= done:
-        return min(limit, count)
-    inc = _bucket_cum(total, limit) - _bucket_cum(done, limit)
-    if inc <= 0:
-        inc = 1
-    return min(limit, count + inc)
+# Единая реализация зарядки (см. server/chain_quota.py): и сочинения здесь,
+# и наставник в agent.py буквально вызывают её — дублей нет. Ниже только
+# исторические имена, чтобы не переписывать вызывателей.
+BUCKET_FULL_TICKS = _CHAIN.FULL_TICKS
+_bucket_cum = _CHAIN.cum
+_ensure_bucket_anchor = _CHAIN.ensure_anchor_col
+_ai_usage_catch_up = _CHAIN.catch_up
+_ai_usage_count_at = _CHAIN.count_at
 
 
 def ai_usage_status(conn: sqlite3.Connection, user_id: int,
