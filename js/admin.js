@@ -1217,12 +1217,12 @@ function bindUserActions(p) {
         <div class="a-field"><label>Цель</label>
           ${locked
             ? `<div class="a-empty" style="padding:12px 0;text-align:left">Для закрытого предмета цель появится вместе с материалами.</div>`
-            : `<select class="a-select" id="fGoal">
+            : (p.goalOptions && p.goalOptions.length
+              ? `<select class="a-select" id="fGoal">
             <option value="" ${!p.goal ? "selected" : ""}>Не выбрана</option>
-            <option value="g60" ${p.goal === "g60" ? "selected" : ""}>60+ баллов</option>
-            <option value="g80" ${p.goal === "g80" ? "selected" : ""}>80+ баллов</option>
-            <option value="g95" ${p.goal === "g95" ? "selected" : ""}>95+ баллов</option>
-          </select>`}
+            ${p.goalOptions.map((g) => `<option value="${esc(g.id)}" ${p.goal === g.id ? "selected" : ""}>${esc(g.label || g.id)}</option>`).join("")}
+          </select>`
+              : `<div class="a-empty" style="padding:12px 0;text-align:left">У этого предмета шкалы целей нет.</div>`)}
         </div>
         <div id="mErr"></div>
       </div>

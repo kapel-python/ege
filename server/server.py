@@ -9112,6 +9112,17 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
         detail["aiLimit"] = admin_ai_limit_status(conn, user_id)
     except (sqlite3.Error, KeyError, ValueError):
         detail["aiLimit"] = None
+    # Шкала целей текущего предмета для модалки профиля: клиент строит
+    # <select> из неё, а не из захардкоженных g60/g80/g95 (у базы g3/g4/g5,
+    # у русского шкалы нет вовсе).
+    try:
+        detail["goalOptions"] = [
+            {"id": g.get("id"), "label": g.get("label") or g.get("id")}
+            for g in _subject_config(conn, "goals", detail_subject, [])
+            if isinstance(g, dict) and g.get("id")
+        ]
+    except (sqlite3.Error, KeyError, ValueError):
+        detail["goalOptions"] = []
     # Подписка для карточки пользователя: статус + последние 5 платежей
     # (история для кнопок «продлить/отменить/возврат» и аудита глазами).
     try:

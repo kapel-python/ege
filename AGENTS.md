@@ -247,6 +247,7 @@
 ## Commands
 - install: `pip install flask` (if needed for server deps)
 - test: запускать из корня репозитория; обычные команды не требуют внешних сервисов, а Python-тесты с `temp-БД` поднимают свои серверы и не трогают прод.
+  - **Никогда не запускай `python3 server/server.py` напрямую** (ни с `EGE_PORT`, ни без): `ServerInstance` убивает предыдущий процесс и роняет прод. Только in-process импорт модуля или `create_http_server` на порту 0, как делают тесты.
   - `python3 test/admin-inbox-security.py` (83 критические проверки Admin Inbox: видимость блока guest/юзер/admin, исчезновение при logout/отзыве/истечении сессий/admin-logout/удалении аккаунта/смене аккаунта, обход авторизации чужими и подменёнными куками и query, отсутствие утечек в bootstrap и 401, пагинация/порядок/«Прочитано»/аудит; свой temp-БД, живой сервер)
   - `python3 test/admin-inbox.py` (контракт endpoint'ов обращений: поля `{id,message,status,source,createdAt}`, системные обращения `source='system'` с дедуплем и полными правами обычного обращения)
   - `python3 test/admin-block.py` (контракт бана: маршрут `POST /api/admin/users/<ref>/block|unblock`, сверка действий панели с backend'ом, явный 404 вместо общего «Not found», сроки/self-block/неизвестный ref, 403 ACCOUNT_BLOCKED, ленивое истечение, аудит; свой temp-БД, живой сервер)

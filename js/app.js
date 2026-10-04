@@ -3717,6 +3717,18 @@ function isLongTextTask(t) {
   return !!t && (t.type === "long_text" || t.answerType === "long_text");
 }
 
+/* Предмет для essay-запросов: текущий, а не вшитый "russian". Сочинения
+   сегодня только у русского, но дефолт берём из загруженного каталога —
+   при гонке раннего boot запрос не должен уйти на чужой предмет. */
+function essaySubject() {
+  if (typeof Store !== "undefined" && Store.subject) return Store.subject;
+  try {
+    const s = DataAPI.catalog && DataAPI.catalog.subject;
+    if (s) return s;
+  } catch (_) {}
+  return "russian";
+}
+
 /* ---------------- исходный текст к заданию 27 ----------------
    Задание 27 — работа С чужим текстом: ученик читает его и пишет по нему.
    Текст лежит на сервере (essay_source_texts) и подгружается на экран задания
@@ -4116,7 +4128,7 @@ function essayAiErrorText(status, data) {
    параллельной системы нет. */
 function essayResultUrl(submission) {
   if (!submission) return "";
-  const subject = Store.subject || "russian";
+  const subject = essaySubject();
   // Приватная ссылка — неперебираемый public_id (10 знаков). Числовой sid
   // оставлен для старых ссылок: сервер отдаёт submission только его автору,
   // остальным 404 (и числом, и public_id). Публичная /s/<token> — только
@@ -4145,7 +4157,7 @@ function openEssayResult(taskId) {
   // Fallback — последний submission по заданию: его отдаёт тот же endpoint,
   // что рисует restore-блоки, так что ведёт ровно туда, куда вёл бы и точный id.
   const url = essayResultUrl(submission)
-    || `/ege-result.html?subject=${encodeURIComponent(Store.subject || "russian")}&taskId=${encodeURIComponent(taskId || "")}`;
+    || `/ege-result.html?subject=${encodeURIComponent(essaySubject())}&taskId=${encodeURIComponent(taskId || "")}`;
   if (url) location.href = url;
 }
 
@@ -6928,7 +6940,7 @@ const ESSAY_HISTORY_FRESH_MS = 30000;
 const EssayDetail = new Map();
 
 async function essayHistoryFetch(force) {
-  const subject = (typeof Store !== "undefined" && Store.subject) || "russian";
+  const subject = (typeof Store !== "undefined" && Store.subject) || essaySubject();
   if (!force && EssayHistory.cache && EssayHistory.subject === subject
       && (Date.now() - EssayHistory.at) < ESSAY_HISTORY_FRESH_MS) {
     return EssayHistory.cache;
@@ -7176,9 +7188,16 @@ async function screenEssays(root) {
       <div class="page-sub">Все твои работы: баллы, разборы и динамика.</div>
     </div>
     <div id="essaysBody">${loaderHTML("Собираем твою историю…")}</div>`;
-  // «Мои сочинения» — раздел Plus: статус подписки решает ДО чтения
-  // истории, поэтому без Plus история не рисуется даже на миллисекунду
-  // (сервер обречённый запрос всё равно отобьёт 403 — сюда он не уходит).
+  // «Мои сочинения» — раздел Plus, но сначала проверяем, есть ли сочинения
+  // в ТЕКУЩЕМ предмете: математику/биологию без Plus встречает честное
+  // «сочинений нет», а не paywall про товар, которого здесь нет.
+  try { if (typeof Store !== "undefined" && Store.ensureDetails) await Store.ensureDetails(); } catch (_) {}
+  if (currentRoute() !== "essays") return;
+  if (!DataAPI.tasks().some(isLongTextTask)) {
+    const gate0 = document.getElementById("essaysBody");
+    if (gate0) gate0.innerHTML = essaysBodyHTML({ hasEssayTasks: false });
+    return;
+  }
   const sub = await essayPlusStatus();
   if (currentRoute() !== "essays") return;
   const gate = document.getElementById("essaysBody");
@@ -7585,7 +7604,7 @@ async function toggleEssayItem(sid, btn) {
   }
   if (btn) btn.textContent = "Загружаем…";
   try {
-    const subject = (typeof Store !== "undefined" && Store.subject) || "russian";
+    const subject = (typeof Store !== "undefined" && Store.subject) || essaySubject();
     let sub = EssayDetail.get(sid);
     if (!sub) {
       const res = await fetch(`/api/essays?sid=${sid}&subject=${encodeURIComponent(subject)}`, {
@@ -9375,7 +9394,7 @@ const Onboarding = {
       if (list.some((g) => g && g.id === this.goal)) return this.goal;
       if (list.length && list[0].id) return list[0].id;
     } catch (_) {}
-    return "g60";
+    return null;
   },
 
   answerDiag() {

@@ -785,7 +785,7 @@ const DataAPI = {
   },
   bosses() {
     const idx = this._index();
-    if (!idx.subjectAvailable || !idx.feat.practice) return [];
+    if (!idx.subjectAvailable || !idx.feat.bosses) return [];
     return idx.bosses.slice();
   },
   achievements() {
