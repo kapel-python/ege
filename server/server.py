@@ -13158,7 +13158,14 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                             "final": None, "pending": True, "quota": quota,
                                             "usage": {"cost": cost["n"]}}, token=token); return
-                        final_text = (final2 or "").strip() or "Готово."
+                        final_text = (final2 or "").strip()
+                        # Пустой финал подменять «Готово.» нельзя — это был бы
+                        # чужой голос вместо ответа модели. run_cycle либо
+                        # возвращает текст, либо бросает сам, так что сюда
+                        # попадаем только при баге парсера — идём штатным путём
+                        # отказа resume (откат в needs_confirm + 502).
+                        if not final_text:
+                            raise _AI.AIFormatError("пустой финал подтверждения")
                         # Кнопки-продолжения: блок ```suggest вырезается из
                         # текста ДО записи, поэтому в ленту и в базу уходит
                         # чистый ответ, а варианты едут клиенту отдельным полем.
@@ -13429,7 +13436,14 @@ class Handler(BaseHTTPRequestHandler):
                                             "thread": {"id": tid, "title": thread_title,
                                                        "publicId": _agent_thread_public_id(thread)},
                                             "usage": {"cost": cost["n"]}}, token=token); return
-                        final_text = (final or "").strip() or "Что-то я потерял мысль — переформулируй вопрос, и отвечу."
+                        final_text = (final or "").strip()
+                        # Пустой финал подменять шаблоном нельзя — это был бы
+                        # чужой голос вместо ответа модели. run_cycle либо
+                        # возвращает текст, либо бросает сам, так что сюда
+                        # попадаем только при баге парсера — честный 502
+                        # с бесплатным повтором и возвратом жетона.
+                        if not final_text:
+                            raise _AI.AIFormatError("пустой финал хода")
                         # Кнопки-продолжения: служебный блок ```suggest из ответа
                         # вырезается из текста (в ленту он не попадает), а сами
                         # варианты уходят клиенту готовыми data-ask.

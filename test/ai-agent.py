@@ -933,16 +933,22 @@ def main():
             check("cancel -> Отменено",
                   status == 200 and body.get("final") == "Отменено.", f"{status} {body}")
 
-            section("длинный цикл обрывается ответом, а не отказом")
+            section("длинный цикл без ответа модели -> честный 502, а не шаблон")
             with lock:
                 script.clear()
                 for i in range(12):
                     script.append({"text": None, "tool_calls": [{"id": f"l{i}", "name": "fold_web",
                                                                  "arguments": {"op": "progress"}}]})
+            _, quota_before = a.request(base, "GET", "/api/agent/limits", None)
             status, body = turn(a, tid_a, "расскажи всё подробно")
-            check("длинный цикл -> 200 с финалом",
-                  status == 200 and isinstance(body.get("final"), str) and "не успел" in body["final"].lower(),
-                  f"{status} {str(body)[:200]}")
+            check("длинный цикл без ответа -> 502",
+                  status == 502, f"{status} {str(body)[:200]}")
+            _, quota_after = a.request(base, "GET", "/api/agent/limits", None)
+            check("жетон за несостоявшийся ход возвращён",
+                  (quota_after.get("remaining") or 0) == (quota_before.get("remaining") or 0),
+                  f"{quota_before} -> {quota_after}")
+            check("в ответе нет чужого голоса (ни шаблона, ни финала)",
+                  "final" not in body and "не успел" not in json.dumps(body), str(body)[:200])
             check("шагов не больше MAX",
                   len(body.get("steps") or []) <= agent.MAX_TOOL_STEPS, str(len(body.get("steps") or [])))
             # Тот же потолок, но на вызове без инструментов модель отвечает
@@ -1139,7 +1145,7 @@ def main():
                   quota_after.get("remaining") == (quota_before.get("remaining") or 0) - 1,
                   f"{quota_before} -> {quota_after}")
 
-            section("ошибка инструмента исчерпала попытки -> честный ответ, не 400")
+            section("ошибка инструмента исчерпала попытки -> честный 502, а не шаблон")
             _, tf2 = new_thread(cfix)
             tid_f2 = tf2["thread"]["id"]
             with lock:
@@ -1147,11 +1153,14 @@ def main():
                 for i in range(agent.MAX_TOOL_RETRIES + 2):
                     script.append({"text": None, "tool_calls": [{"id": f"loop{i}", "name": "lesson_get",
                                                                  "arguments": {"skillId": "нет_такого"}}]})
+            _, quota_before = cfix.request(base, "GET", "/api/agent/limits", None)
             status, body = turn(cfix, tid_f2, "объясни несуществующий урок")
-            check("ход выживает после серии неверных вызовов",
-                  status == 200 and bool(body.get("final")), f"{status} {str(body)[:300]}")
-            check("в ленте нет ни одного неверного вызова",
-                  len(body.get("steps") or []) == 0, str(len(body.get("steps") or [])))
+            check("исчерпанные попытки без ответа модели -> 502",
+                  status == 502, f"{status} {str(body)[:300]}")
+            _, quota_after = cfix.request(base, "GET", "/api/agent/limits", None)
+            check("жетон возвращён",
+                  (quota_after.get("remaining") or 0) == (quota_before.get("remaining") or 0),
+                  f"{quota_before} -> {quota_after}")
 
             section("update_profile принимает человеческую формулировку цели")
             with lock:
@@ -1604,6 +1613,40 @@ def main():
             check("в переписке ровно ОДИН шаг update_profile",
                   len(applied_msgs) == 1, str(len(applied_msgs)))
 
+            section("болтовня «не выйдет вызвать» вместо ответа не доходит до ученика")
+            # Живой случай: модель вместо вызова пишет мета-рассуждения про
+            # вызовы («так ты даже не увидишь, что я смотрел»). Это НЕ шаблон
+            # в коде — такого текста в репозитории нет, это ответ модели,
+            # и ученик его видеть не должен: сервер зовёт инструмент сам.
+            babble = ("Не выйдет вызвать инструмент вслепую без текста — так ты "
+                      "даже не увидишь, что я смотрел. Скажи, что нужно — прогноз, "
+                      "ошибки, задание — и я гляну по данным и отвечу")
+            check("детектор ловит беспомощную болтовню",
+                  agent.claims_missing_tool(babble) == "?", agent.claims_missing_tool(babble))
+            with lock:
+                script.clear()
+                script.append({"text": babble, "tool_calls": []})
+                script.append({"text": "Вот твои ошибки: разбери первую.", "tool_calls": []})
+            status, body = turn(c3, tid_f4, "посмотри мои ошибки")
+            check("болтовня на вопрос про данные -> инструмент вызван сам",
+                  status == 200 and any((s.get("args") or {}).get("op") == "errors"
+                                        for s in body.get("steps") or []),
+                  f"{status} {str(body)[:240]}")
+            check("болтовня не попадает в ответ ученику",
+                  status == 200 and body.get("final") == "Вот твои ошибки: разбери первую.",
+                  (body.get("final") or "")[:160])
+            # А на вопрос НЕ про данные дефолтный «прогресс» не навязывается:
+            # модель переспрашивается один раз и отвечает сама.
+            with lock:
+                script.clear()
+                script.append({"text": babble, "tool_calls": []})
+                script.append({"text": "Логарифм — это показатель степени.", "tool_calls": []})
+            status, body = turn(c3, tid_f4, "объясни логарифмы")
+            check("болтовня на вопрос не про данные -> ответ модели, без чужого чтения",
+                  status == 200 and body.get("final") == "Логарифм — это показатель степени."
+                  and not (body.get("steps") or []),
+                  f"{status} {str(body)[:240]}")
+
             section("кнопки-продолжения: блок вырезается всегда")
             # Живой случай: ответ провайдера обрезался по лимиту, закрывающая
             # ограда ```suggest не пришла — и весь служебный блок остался в
@@ -1718,12 +1761,18 @@ def main():
                             {"id": "bt1", "name": "fold_web", "arguments": {"op": "progress"}}]}
                     return {"text": "", "tool_calls": []}
 
-                steps, final, pending = agent.run_cycle(
-                    conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
-                    budgeted, deadline=time.monotonic() + agent.TURN_CALL_FLOOR_SEC + 0.25)
-                check("истёкший бюджет с собранными шагами -> честный ответ, не 502",
-                      len(steps) == 1 and isinstance(final, str) and "не успел" in final.lower()
-                      and pending is None, f"{len(steps)} {final!r}")
+                try:
+                    steps, final, pending = agent.run_cycle(
+                        conn3, anya_id, "profile_math", [{"role": "user", "content": "hi"}],
+                        budgeted, deadline=time.monotonic() + agent.TURN_CALL_FLOOR_SEC + 0.25)
+                    check("истёкший бюджет с собранными шагами, а модель молчит -> отказ, а не шаблон",
+                          False, f"ответ вместо отказа: {len(steps)} {final!r}")
+                except TimeoutError:
+                    # Шаблонного «не успел» больше нет: финал имеет право дать
+                    # только модель, отказ идёт кодом (на HTTP это 502
+                    # с возвратом жетона — проверено выше живым ходом).
+                    check("истёкший бюджет с собранными шагами, а модель молчит -> отказ, а не шаблон",
+                          True)
                 # Вызовы хода ограничены остатком бюджета, а финал по собранным
                 # данным (_summarize) получает СВОЁ окно TURN_SUMMARY_EXTRA_SEC:
                 # к этому моменту бюджет хода обычно исчерпан, и без своего окна
