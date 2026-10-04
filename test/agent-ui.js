@@ -75,10 +75,10 @@ check("общая модалка закрывается по Esc и возвра
   && /deviceModalPrevFocus = document\.activeElement/.test(appJs)
   && /deviceModalPrevFocus && deviceModalPrevFocus\.isConnected[\s\S]{0,200}?deviceModalPrevFocus\.focus/.test(appJs));
 check("бан через showAccountBlocked", spaCode.includes("showAccountBlocked"));
-check("апсейл Plus в окне исчерпания — тем же правилом, что у сочинений (только limit <= 5)",
-  /function agentQuotaText[\s\S]{0,800}?limit <= 5/.test(spaCode)
+check("апсейл Plus в окне исчерпания — тем же правилом, что у сочинений (только limit <= 10)",
+  /function agentQuotaText[\s\S]{0,800}?limit <= 10/.test(spaCode)
   && spaCode.includes("dlg__upsell") && spaCode.includes("/subscription")
-  && spaCode.includes("25 ходов ИИ"));
+  && spaCode.includes("50 ходов ИИ"));
 check("модалка перепроверки перезапускает таймер свежим статусом, как openAiLimitModal (не замирает на 00:00:00)",
   /else openRecheckLimit\(st\);/.test(resultHtml));
 
@@ -857,13 +857,15 @@ check("удаление чата — общий диалог подтвержд�
   && /onConfirm: function \(\) \{ doDeleteThread\(t\); \}/.test(spaCode)
   && /function doDeleteThread\(t\)/.test(spaCode)
   && /trash: '<svg/.test(appJs));
-/* --- кружок квоты: цифра крупнее и кольцо дальше от неё. Замер на живом
-   экране: было 13px/36px с зазором 4.5px по бокам и 3.4px сверху, стало
-   15px/42px с зазором 5.3/4.1 (на телефоне 12px/32px → 13.5px/40px,
-   зазор 3.5/2.5 → 5.4/4.3). */
-check("кружок квоты: цифра крупнее, кольцо дальше",
+/* --- кружок квоты: только кольцо, без цифры. Остаток показывает окно по
+   клику (и aria-label для скринридера). Размер кольца — 42px/15px
+   (на телефоне 40px/13.5px). */
+check("кружок квоты: только кольцо, без цифры",
   /\.agent__quota \{[^}]*width: 42px; height: 42px;[^}]*font-size: 15px/.test(spaCss)
-  && /\.agent__quota \{ width: 40px; height: 40px; font-size: 13.5px; \}/.test(spaCss));
+  && /\.agent__quota \{ width: 40px; height: 40px; font-size: 13.5px; \}/.test(spaCss)
+  && !/agent-quota-num/.test(spaCode)
+  && !/quotaNum: qn/.test(spaCode)
+  && /Цифры в кружке нет/.test(spaJs));
 check("футер скрыт на экране чата", read("js/footer.js").includes("ai: true"));
 
 /* --- старый адрес /agent — редирект в SPA --- */

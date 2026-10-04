@@ -8,13 +8,13 @@
     ключу (повтор — тот же paymentId), чужой ключ — 400;
   * confirm без EGE_SUBSCRIPTION_MOCK — 503, с флагом — активация:
     статус active, expires ~+30 сут, зеркало users.subscription='plus',
-    карманы u:/agent: долиты до 10/25;
+    карманы u:/agent: долиты до 10/50;
   * лимиты едут за подпиской: GET /api/ai/limits → 10,
-    GET /api/agent/limits → 25; повторный confirm — идемпотентный no-op;
+    GET /api/agent/limits → 50; повторный confirm — идемпотентный no-op;
   * продление складывается: годовой платёж растёт от конца прошлого срока;
   * cancel держит доступ до конца срока (cancelAtPeriodEnd), resume
     снимает флаг; cancel без подписки и resume после истечения — 400;
-  * истечение (срок перемотан в БД): статус inactive, лимиты 5/5,
+  * истечение (срок перемотан в БД): статус inactive, лимиты 5/10,
     строка переведена в expired, зеркало погашено;
   * webhook: без секрета 503, кривая подпись 403, неизвестный платёж 404,
     успех по checkout-платежу активирует, повтор — already;
@@ -22,7 +22,7 @@
   * админ: grant активирует (платёж 0₽ manual в истории), revoke гасит
     мгновенно, оба пишут аудит; сброс «весь прогресс» подписку НЕ трогает;
     удаление аккаунта сносит подписку и платежи каскадом;
-  * гейт ИИ: без флага бесплатный ходит как раньше (лимиты 5),
+  * гейт ИИ: без флага бесплатный ходит как раньше (лимиты 10),
     с EGE_AGENT_REQUIRES_PLUS=1 — 403 SUBSCRIPTION_REQUIRED, а Plus —
     проходит гейт.
 """
@@ -158,7 +158,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("free-лимит сочинений 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("free-квота ИИ 5", s == 200 and q["limit"] == 5, q)
+        check("free-квота ИИ 10", s == 200 and q["limit"] == 10, q)
 
         section("checkout и confirm")
         s, body = request(user, base, "/api/subscription/checkout", "POST",
@@ -229,11 +229,11 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("лимит сочинений стал 10", s == 200 and lim["limit"] == 10, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("квота ИИ стала 25", s == 200 and q["limit"] == 25, q)
+        check("квота ИИ стала 50", s == 200 and q["limit"] == 50, q)
         s, st = request(user, base, "/api/subscription/status")
         check("статус active + лимиты",
               s == 200 and st["active"] is True and st["status"] == "active"
-              and st["limits"] == {"essay": 10, "agent": 25, "agentAccess": True}, st)
+              and st["limits"] == {"essay": 10, "agent": 50, "agentAccess": True}, st)
 
         section("продление складывается, отмена держит срок")
         s, co = request(user, base, "/api/subscription/checkout", "POST",
@@ -266,7 +266,7 @@ def main():
         s, lim = request(user, base, "/api/ai/limits")
         check("лимит вернулся к 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
-        check("квота вернулась к 5", s == 200 and q["limit"] == 5, q)
+        check("квота вернулась к 10", s == 200 and q["limit"] == 10, q)
         mirror = db("SELECT subscription FROM users WHERE account_id=?", (target,))
         check("зеркало погашено", mirror and mirror[0]["subscription"] is None, mirror)
         s, body = request(user, base, "/api/subscription/resume", "POST", {})

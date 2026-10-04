@@ -13540,18 +13540,47 @@ class Handler(BaseHTTPRequestHandler):
                         # (400 AGENT_BUSY). finally ниже — страховка.
                         _agent_busy_release(tid)
                         _agent_live_clear(tid)
+
+                    def _confirm_refund(spent):
+                        try:
+                            owed = int((spent or {}).get("n") or 0)
+                        except (TypeError, ValueError):
+                            owed = 0
+                        if owed > 0:
+                            try:
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
+                            except sqlite3.Error:
+                                pass
+                            spent["n"] = 0
+                    # approve продолжает тот же замысел моделью: каждый запрос к
+                    # ИИ и здесь стоит жетон (та же по-запросная логика, что у
+                    # turns). Вход — атомарный резерв первого запроса resume:
+                    # без остатка resume не начинаем, действие не применяем.
+                    confirm_spent = {"n": 0}
+                    if not _AGENT.agent_quota_reserve(conn, int(user_id)):
+                        _confirm_quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        _confirm_cleanup()
+                        retry = int(_confirm_quota.get("resetInSec") or _confirm_quota.get("windowSec") or 3600)
+                        self.send_json({"error": "Ходы ИИ на сегодня закончились. Дождись таймера.",
+                                        "code": AI_LIMIT_CODE, "limit": _confirm_quota["limit"],
+                                        "remaining": _confirm_quota["remaining"], "resetInSec": _confirm_quota["resetInSec"],
+                                        "retryAfter": retry},
+                                       429, token=token, headers={"Retry-After": str(retry)}); return
+                    confirm_spent["n"] = 1
                     try:
                         try:
                             applied = _AGENT.apply_action(conn, int(user_id), subject,
                                                           str(msg["tool_name"] or ""), proposal if isinstance(proposal, dict) else {})
                         except ValueError as exc:
                             conn.rollback()
+                            _confirm_refund(confirm_spent)
                             _confirm_cleanup()
                             self.send_json({"error": f"Не удалось применить: {exc}"}, 400, token=token); return
                         conn.execute("UPDATE agent_messages SET status='applied', result_json=? WHERE id=?",
                                      (json.dumps({"proposal": proposal, "applied": applied}, ensure_ascii=False)[:16000], mid))
                         conn.commit()
                         if _AI is None:
+                            _confirm_refund(confirm_spent)
                             _confirm_cleanup()
                             self.send_json({"error": "ИИ временно недоступен"}, 503, token=token); return
                         # Результат применения (assistant с вызовом + tool с
@@ -13572,13 +13601,44 @@ class Handler(BaseHTTPRequestHandler):
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}
-                        _chat_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _raw_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _confirm_first = {"done": False}
+
+                        def _chat_cf(messages, tools, budget=None):
+                            if not _confirm_first["done"]:
+                                _confirm_first["done"] = True
+                                try:
+                                    return _raw_cf(messages, tools, budget)
+                                except Exception:
+                                    try:
+                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                    except sqlite3.Error:
+                                        pass
+                                    confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
+                                    raise
+                            try:
+                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id))
+                            except sqlite3.Error:
+                                reserved = False
+                            if reserved:
+                                confirm_spent["n"] = int(confirm_spent.get("n") or 0) + 1
+                            try:
+                                return _raw_cf(messages, tools, budget)
+                            except Exception:
+                                if reserved:
+                                    try:
+                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                    except sqlite3.Error:
+                                        pass
+                                    confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
+                                raise
                         try:
                             steps2, final2, pending2 = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_cf,
                                 on_step=lambda st: _agent_live_push(tid, st))
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-confirm", exc)
+                            _confirm_refund(confirm_spent)
                             _confirm_cleanup()
                             self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                         except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError, Exception) as exc:
@@ -13594,6 +13654,7 @@ class Handler(BaseHTTPRequestHandler):
                                 except sqlite3.Error:
                                     pass
                             rid = log_request_error("agent-confirm", exc)
+                            _confirm_refund(confirm_spent)
                             _confirm_cleanup()
                             self.send_json({"error": "Не удалось завершить ход, попробуй ещё раз.", "ref": rid},
                                            502, token=token); return
@@ -13614,6 +13675,8 @@ class Handler(BaseHTTPRequestHandler):
                             out_steps.append(item)
                         if pending2 is not None:
                             conn.commit()
+                            # Успех resume: списания остаются, счётчик — в ноль.
+                            confirm_spent["n"] = 0
                             quota = _AGENT.agent_quota_status(conn, int(user_id))
                             _confirm_cleanup()
                             self.send_json({"ok": True, "approved": True, "steps": out_steps,
@@ -13624,9 +13687,21 @@ class Handler(BaseHTTPRequestHandler):
                         # чужой голос вместо ответа модели. run_cycle либо
                         # возвращает текст, либо бросает сам, так что сюда
                         # попадаем только при баге парсера — идём штатным путём
-                        # отказа resume (откат в needs_confirm + 502).
+                        # отказа resume (откат в needs_confirm + 502 + возврат).
                         if not final_text:
-                            raise _AI.AIFormatError("пустой финал подтверждения")
+                            try:
+                                conn.execute("UPDATE agent_messages SET status='needs_confirm' WHERE id=?", (mid,))
+                                conn.commit()
+                            except sqlite3.Error:
+                                try:
+                                    conn.rollback()
+                                except sqlite3.Error:
+                                    pass
+                            rid = log_request_error("agent-confirm", _AI.AIFormatError("пустой финал подтверждения"))
+                            _confirm_refund(confirm_spent)
+                            _confirm_cleanup()
+                            self.send_json({"error": "Не удалось завершить ход, попробуй ещё раз.", "ref": rid},
+                                           502, token=token); return
                         # Кнопки-продолжения: блок ```suggest вырезается из
                         # текста ДО записи, поэтому в ленту и в базу уходит
                         # чистый ответ, а варианты едут клиенту отдельным полем.
@@ -13634,6 +13709,7 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_add_message(conn, tid, user_id, "assistant", final_clean,
                                            suggests=suggests)
                         conn.commit()
+                        confirm_spent["n"] = 0
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         _confirm_cleanup()
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
@@ -13696,21 +13772,27 @@ class Handler(BaseHTTPRequestHandler):
                                 self.send_json({"error": "Прошлый ход ждёт подтверждения действия — сначала реши его.",
                                                 "code": "AGENT_PENDING"}, 400, token=token); return
                             replace_from = int(lu["seq"])
+                    turn_spent = {"n": 0}
                     usage_spent = False
                     def _turn_cleanup():
-                        # Слот, снимок и возврат жетона — ДО ответа: клиент видит
+                        # Слот, снимок и возврат жетонов — ДО ответа: клиент видит
                         # ответ и тут же шлёт следующий ход, а release/refund в
                         # finally опаздывали — быстрый повтор получал занятый слот
                         # (400 AGENT_BUSY) или ещё не возвращённый жетон.
                         # finally ниже — страховка (всё идемпотентно, двойного
-                        # возврата нет: флаг снят).
+                        # возврата нет: счётчик снят).
                         nonlocal usage_spent
-                        if usage_spent:
+                        try:
+                            owed = int(turn_spent.get("n") or 0)
+                        except (TypeError, ValueError):
+                            owed = 0
+                        if owed > 0:
                             try:
-                                _AGENT.agent_quota_refund(conn, int(user_id))
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
                             except sqlite3.Error:
                                 pass
-                            usage_spent = False
+                            turn_spent["n"] = 0
+                        usage_spent = False
                         _agent_busy_release(tid)
                         _agent_live_clear(tid)
                     try:
@@ -13750,9 +13832,9 @@ class Handler(BaseHTTPRequestHandler):
                             dropped_ids = []
                         # Анти-лавиновая сетка (пользователь + сеть): ловит
                         # всплеск, а не «много за день» — числа и обоснование
-                        # в server/ai.py. Продуктовая квота ходов (agent_quota_
-                        # reserve ниже, 10 ходов с цепочкой 8 ч) — единственный
-                        # счётчик, который видит ученик.
+                        # в server/ai.py. Продуктовая квота (по запросу к ИИ,
+                        # 10/50 с цепочкой 8 ч) — единственный счётчик, который
+                        # видит ученик.
                         try:
                             ip = support_client_ip(self)
                         except Exception:
@@ -13766,17 +13848,27 @@ class Handler(BaseHTTPRequestHandler):
                                                 "retryAfter": retry_after}, 429, token=token,
                                                headers={"Retry-After": str(retry_after)})
                                 return
-                        # Жетон хода — транзакцией до модели; возврат при любом неуспехе.
+                        # Входной гейт — атомарный резерв первого запроса (CAS
+                        # UPDATE ... WHERE count>0): без остатка ход не начинаем
+                        # (429 сразу, модель не зовём). Это же и защита от
+                        # параллельных ходов в разных чатах: из пяти с одним
+                        # жетоном проходит ровно один. Дальше — по одному жетону
+                        # за каждый СЛЕДУЮЩИЙ запрос к ИИ (см. _chat_fn ниже):
+                        # пустой карман посреди хода — не стоп, ход догуливает
+                        # до конца за счёт овердрафта, итог — ровно 0, никогда
+                        # в минус.
                         if not _AGENT.agent_quota_reserve(conn, int(user_id)):
-                            st = _AGENT.agent_quota_status(conn, int(user_id))
-                            retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
+                            _quota_state = _AGENT.agent_quota_status(conn, int(user_id))
+                            retry = int(_quota_state.get("resetInSec") or _quota_state.get("windowSec") or 3600)
                             _turn_cleanup()
                             self.send_json({"error": "Ходы ИИ на сегодня закончились. Дождись таймера.",
-                                            "code": AI_LIMIT_CODE, "limit": st["limit"],
-                                            "remaining": st["remaining"], "resetInSec": st["resetInSec"],
+                                            "code": AI_LIMIT_CODE, "limit": _quota_state["limit"],
+                                            "remaining": _quota_state["remaining"], "resetInSec": _quota_state["resetInSec"],
                                             "retryAfter": retry},
                                            429, token=token, headers={"Retry-After": str(retry)})
                             return
+                        # Первый запрос уже оплачен входным резервом.
+                        turn_spent["n"] = 1
                         usage_spent = True
                         # Живой снимок для опроса: клиент дорисовывает шаги во
                         # время хода, а не пачкой в конце. Чистится в finally
@@ -13807,7 +13899,45 @@ class Handler(BaseHTTPRequestHandler):
                         history = _agent_history_for_model(conn, tid, before_seq=replace_from)
                         messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
                         cost = {"n": 0}
-                        _chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _raw_chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _first_call = {"done": False}
+
+                        def _chat_fn(messages, tools, budget=None):
+                            # Первый запрос уже оплачен входным резервом выше —
+                            # здесь только вызов и возврат при его неуспехе.
+                            # Каждый СЛЕДУЮЩИЙ запрос — свой резерв ДО вызова;
+                            # неуспех именно этого вызова — возврат сразу (ошибка
+                            # провайдера ученику не стоит ничего). Пустой карман —
+                            # не остановка: reserve пишет только WHERE count>0,
+                            # поэтому лишние вызовы идут бесплатно (овердрафт),
+                            # а итог — ровно 0.
+                            if not _first_call["done"]:
+                                _first_call["done"] = True
+                                try:
+                                    return _raw_chat_fn(messages, tools, budget)
+                                except Exception:
+                                    try:
+                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                    except sqlite3.Error:
+                                        pass
+                                    turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
+                                    raise
+                            try:
+                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id))
+                            except sqlite3.Error:
+                                reserved = False
+                            if reserved:
+                                turn_spent["n"] = int(turn_spent.get("n") or 0) + 1
+                            try:
+                                return _raw_chat_fn(messages, tools, budget)
+                            except Exception:
+                                if reserved:
+                                    try:
+                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                    except sqlite3.Error:
+                                        pass
+                                    turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
+                                raise
                         # Вопрос фиксируем СРАЗУ, до вызова модели, а не в конце
                         # хода вместе с ответом. Иначе весь ход (до 90+15 с)
                         # тред читается пустым: перезагрузка страницы посреди
@@ -13893,6 +14023,9 @@ class Handler(BaseHTTPRequestHandler):
                                                   "status": "done", "result": st.get("result")})
                         if pending is not None:
                             conn.commit()
+                            # Успех: списания хода остаются (возвращать нечего),
+                            # счётчик обнуляем без refund — иначе finally вернул бы.
+                            turn_spent["n"] = 0
                             usage_spent = False
                             quota = _AGENT.agent_quota_status(conn, int(user_id))
                             _turn_cleanup()
@@ -13906,9 +14039,11 @@ class Handler(BaseHTTPRequestHandler):
                         # чужой голос вместо ответа модели. run_cycle либо
                         # возвращает текст, либо бросает сам, так что сюда
                         # попадаем только при баге парсера — честный 502
-                        # с бесплатным повтором и возвратом жетона.
+                        # с бесплатным повтором и возвратом всего списанного ходом.
                         if not final_text:
-                            raise _AI.AIFormatError("пустой финал хода")
+                            rid = log_request_error("agent-model", _AI.AIFormatError("пустой финал хода"))
+                            _turn_cleanup()
+                            self.send_json({"error": "ИИ не смог ответить, попробуй ещё раз.", "ref": rid}, 502, token=token); return
                         # Кнопки-продолжения: служебный блок ```suggest из ответа
                         # вырезается из текста (в ленту он не попадает), а сами
                         # варианты уходят клиенту готовыми data-ask.
@@ -13916,6 +14051,8 @@ class Handler(BaseHTTPRequestHandler):
                         _agent_add_message(conn, tid, user_id, "assistant", final_clean,
                                            suggests=suggests)
                         conn.commit()
+                        # Успех: списания остаются, счётчик — в ноль без refund.
+                        turn_spent["n"] = 0
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id))
                         _turn_cleanup()
@@ -13932,15 +14069,24 @@ class Handler(BaseHTTPRequestHandler):
                     finally:
                         _agent_busy_release(tid)
                         _agent_live_clear(tid)
-                        if usage_spent:
+                        try:
+                            owed = int(turn_spent.get("n") or 0)
+                        except (TypeError, ValueError):
+                            owed = 0
+                        if owed > 0 or usage_spent:
                             # Точка невозврата — успешная фиксация хода выше (commit).
                             # Здесь проверяем: если ответ уже ушёл (commit был), возврат не нужен.
-                            # Простой маркер: usage_spent сбрасывается только на commit-ветках.
-                            # Раз commit-ветки возвращают раньше, сюда попадаем только при неуспехе.
+                            # Успешные ветки обнулили счётчик выше и возвращают раньше,
+                            # сюда попадаем только при неуспехе — возвращаем всё списанное ходом.
                             try:
-                                _AGENT.agent_quota_refund(conn, int(user_id))
+                                if owed > 0:
+                                    _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
+                                elif usage_spent:
+                                    _AGENT.agent_quota_refund(conn, int(user_id))
                             except sqlite3.Error:
                                 pass
+                            turn_spent["n"] = 0
+                            usage_spent = False
                     return
                 self.send_json({"error": "Not found"}, 404, token=token); return
             except sqlite3.Error as exc:

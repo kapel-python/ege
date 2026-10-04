@@ -28,19 +28,22 @@
 recheck:true всегда идёт через модель за жетон); агент объясняет и показывает
 историю через essay_history, но не тратит чужую квоту из чата.
 
-Квота хода: один ход (не шаг) — один жетон. Своя цепочка
-EGE_AGENT_QUOTA_MAX (по умолчанию 5) с тиком 8 часов — та же механика, что у
+Квота: один запрос к ИИ — один жетон. Своя цепочка
+EGE_AGENT_QUOTA_MAX (по умолчанию 10) с тиком 8 часов — та же механика, что у
 ai_usage, но отдельный owner `agent:<user_id>` в той же таблице ai_usage
 (таблица общая, бакеты не пересекаются по префиксу). Зарядка — ТРЕТЬ ЗАПАСА
-ЗА ТИК: каждые 8 часов возвращается round(limit/3) жетонов (5 → 2, 25 → 8),
+ЗА ТИК: каждые 8 часов возвращается round(limit/3) жетонов (10 → 3, 50 → 17),
 полный карман — за 24 часа при любом лимите. Якорь цепочки (момент первой
 траты) хранится в ai_usage.anchor_ms, граница отыгранных тиков — в timer_ms.
 Плюс общая сетка
 ai.ai_take по пользователю и IP от скриптов — это всплеск за минуту
 (60/мин на аккаунт), а не «много за день»: единственный счётчик, который
 видит ученик, — квота ходов. Потолок хода — кодом: MAX_TOOL_STEPS шагов,
-TURN_TIMEOUT_SEC секунд на весь ход. Жетон резервируется транзакцией до вызова
-модели и возвращается при любом неуспехе.
+TURN_TIMEOUT_SEC секунд на весь ход. Жетон резервируется транзакцией до КАЖДОГО
+вызова модели и возвращается при неуспехе именно этого вызова (ошибка
+провайдера ученику не стоит ничего). Пустой карман посреди хода — не стоп:
+ход догуливает до конца за счёт овердрафта (редкие +1..N сверх остатка),
+итог — ровно 0, никогда в минус (списание идёт только WHERE count>0).
 """
 from __future__ import annotations
 
@@ -55,7 +58,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # Лимиты хода
 # ---------------------------------------------------------------------------
-AGENT_QUOTA_MAX_DEFAULT = 5
+AGENT_QUOTA_MAX_DEFAULT = 10
 AGENT_QUOTA_WINDOW_DEFAULT_SEC = 8 * 3600
 AGENT_TEXT_MIN = 1
 AGENT_TEXT_MAX = 2000
@@ -721,10 +724,10 @@ def agent_custom_limit(conn: sqlite3.Connection, user_id: int) -> int | None:
 
 
 def agent_effective_limit(conn: sqlite3.Connection, user_id: int) -> int:
-    """Потолок ходов, который реально действует на пользователя.
+    """Потолок запросов к ИИ, который реально действует на пользователя.
 
     База — персональный грант админа или общий EGE_AGENT_QUOTA_MAX;
-    активный Plus поднимает итог до 25 (max, а не замена)."""
+    активный Plus поднимает итог до 50 (max, а не замена)."""
     custom = agent_custom_limit(conn, user_id)
     base = custom if custom is not None else agent_quota_max()
     if subscription_is_plus(conn, user_id) and _SUB is not None:
@@ -759,7 +762,7 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int, now_ms: int | Non
 
 
 def agent_quota_reserve(conn: sqlite3.Connection, user_id: int) -> bool:
-    """Списать один ход. True — списано, False — квота пуста."""
+    """Списать один запрос к ИИ. True — списано, False — квота пуста."""
     ensure_agent_schema(conn)
     now_ms = int(time.time() * 1000)
     limit = agent_effective_limit(conn, user_id)
@@ -780,6 +783,21 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int) -> bool:
         return False
     conn.commit()
     return True
+
+
+def agent_quota_refund_many(conn: sqlite3.Connection, user_id: int, n: int) -> None:
+    """Вернуть n запросов к ИИ (для отката целого хода при неуспехе).
+
+    По одному за раз через agent_quota_refund: таймер полного кармана гасится
+    ровно тогда, когда карман снова полон, а кап MIN(limit, ...) держит гранты.
+    n<=0 — no-op. Овердрафтные (бесплатные) вызовы сюда не попадают: их
+    возвращать нечего, итог хода и так ровно 0."""
+    try:
+        count = max(0, int(n))
+    except (TypeError, ValueError):
+        return
+    for _ in range(min(count, MAX_TOOL_STEPS + MAX_TOOL_RETRIES + 4)):
+        agent_quota_refund(conn, int(user_id))
 
 
 def agent_quota_refund(conn: sqlite3.Connection, user_id: int) -> None:

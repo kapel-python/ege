@@ -8,13 +8,13 @@
 
   var S = {
     threads: [], currentId: null, busy: false, mountGen: 0, navGen: 0, animGen: 0, sendGen: 0,
-    quota: { limit: 5, remaining: 5, resetInSec: null },
+    quota: { limit: 10, remaining: 10, resetInSec: null },
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
     follow: true, printTarget: null, gliding: false, glideFeed: null, progTop: null,
     cache: { accountId: null, threads: null, messages: {} },
   };
-  var RING = 94.25, QUOTA_FALLBACK = 5;
+  var RING = 94.25, QUOTA_FALLBACK = 10;
   /* Окно подхвата хода (после перемонтирования экрана) и параметры ожидания
      ответа, который сервер считает после обрыва на клиенте. REATTACH_MS
      заведомо больше потолка хода на сервере (90 с цикла + вызов финала) —
@@ -422,7 +422,8 @@
     var limit = Math.max(1, Number(q.limit) || QUOTA_FALLBACK);
     var remaining = Math.max(0, Math.min(limit, Number(q.remaining) || 0));
     S.quota = { limit: limit, remaining: remaining, resetInSec: q.resetInSec == null ? null : Number(q.resetInSec) };
-    if (ui.quotaNum) ui.quotaNum.textContent = String(remaining);
+    // Цифры в кружке нет осознанно: только кольцо + aria-label для
+    // скринридера. Сколько ходов осталось — показывает окно по клику.
     if (ui.quotaBtn) {
       ui.quotaBtn.setAttribute("aria-label", "Осталось " + remaining + " " + pluralQ(remaining) + " из " + limit);
       ui.quotaBtn.title = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit);
@@ -460,12 +461,12 @@
   };
   function agentQuotaText(limit, left) {
     // Апсейл — тем же правилом, что у сочинений (только бесплатный уровень,
-    // limit <= 5; у Plus и грантов его нет) и только в окне исчерпания:
+    // limit <= 10; у Plus и грантов его нет) и только в окне исчерпания:
     // справочное окно по кружку и burst-режим его не показывают.
-    var upsell = limit <= 5
-      ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — 25 ходов ИИ в день.</div>`
+    var upsell = limit <= 10
+      ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — 50 ходов ИИ в день.</div>`
       : "";
-    return "Ход — это твой вопрос ИИ и его ответ. Доступно " +
+    return "Ход — это один запрос к ИИ: вопрос, каждый шаг поиска и ответ считаются отдельно, поэтому длинный разбор тратит несколько ходов. Доступно " +
       "<b><span data-ai-limit-left>" + left + "</span> из " + limit + "</b> " +
       pluralQ(limit) + ": израсходованные ходы возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки)." + upsell;
   }
@@ -486,7 +487,7 @@
       text: burst
         ? "Ты отправляешь вопросы ИИ слишком часто. Подожди немного — вопрос и ответ уже в переписке, ничего не потеряно."
         : (left > 0
-          ? "Один ход — это твой вопрос ИИ вместе с его ответом. Ходов осталось <b>" + left + " из " + limit + "</b>."
+          ? "Один ход — это один запрос к ИИ, а не весь разбор целиком. Ходов осталось <b>" + left + " из " + limit + "</b>."
           : agentQuotaText(limit, left)),
     }));
   }
@@ -504,7 +505,7 @@
       closeText: "Закрыть",
       ariaLabel: "Ходы ИИ",
       text: left > 0
-        ? "Ход — это твой вопрос ИИ и его ответ вместе с шагами. Доступно <b>" +
+        ? "Ход — это один запрос к ИИ: вопрос, каждый шаг поиска и ответ считаются отдельно. Доступно <b>" +
           left + " из " + limit + "</b> " + pluralQ(limit) + ". Израсходованные ходы возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки)."
         : "Ходы закончились. Следующий вернётся сам — таймер появится здесь же.",
     }));
@@ -671,9 +672,8 @@
     var quota = el("button", "agent__quota", null);
     quota.type = "button"; quota.id = "agent-quota";
     quota.innerHTML = '<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="q-track" cx="18" cy="18" r="15"/><circle class="q-ring" cx="18" cy="18" r="15" style="stroke-dashoffset:0px"/></svg>';
-    var qn = el("span", "num", "5");
-    qn.id = "agent-quota-num";
-    quota.appendChild(qn);
+    // Цифры в кружке нет: только кольцо. Сколько ходов осталось — показывает
+    // окно по клику (и aria-label для скринридера).
     // Клик по кружку — сразу окно (тот же .dlg, что у проверки сочинений),
     // никаких всплывающих пилюль: текст «Осталось N из M» живёт только
     // внутри окна и в aria-label кнопки (скринридер). Пилюля-подсказка
@@ -744,7 +744,7 @@
 
     ui = { wrap: wrap, list: list, title: title, live: live, empty: empty, feed: feed,
            main: main, input: input, sendBtn: send, stopBtn: stop, composer: composer,
-           quotaBtn: quota, quotaNum: qn, quotaRing: quota.querySelector(".q-ring"),
+           quotaBtn: quota, quotaNum: null, quotaRing: quota.querySelector(".q-ring"),
            downBtn: down, menuBtn: menu, newBtn: newBtn, ctx: null, ctxMore: null };
     wireEvents();
   }

@@ -5,10 +5,11 @@ Temp-БД, живой сервер, мок провайдера (без сети
   * гость — 401 GUEST_PENDING везде, профиля не заводит;
   * чужой тред — 404, чужие сообщения не отдаются, инструменты чужих не видят;
   * ответ без tools — финальный текст и одно списание квоты;
-  * ответ с tools — цикл отрабатывает, шаги в базе и в ответе;
+  * ответ с tools — цикл отрабатывает, шаги в базе и в ответе (каждый запрос
+    к ИИ — жетон: вопрос+шаг+ответ на 1 инструмент стоят 2);
   * действие — confirm без записи, approve меняет, отмена пишет «Отменено»;
   * длинный цикл — обрыв ответом по собранным данным (вызов без tools);
-  * 10 ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает жетон;
+  * 10 простых ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает всё списанное ходом;
   * повтор того же вопроса — снова модель за жетон, кэша повторов нет;
   * 400 на пустой/длинный, 400 AGENT_BUSY на параллельный ход;
   * парсер ai.py: реплика вместе с вызовами — не ошибка (preamble), пустой ответ — ошибка;
@@ -963,6 +964,19 @@ def main():
                   status == 200 and body.get("final") == "Собрал всё по твоим данным."
                   and len(body.get("steps") or []) == agent.MAX_TOOL_STEPS,
                   f"{status} {str(body)[:200]}")
+            # По-запросная квота: каждый вызов модели — жетон, поэтому к этому
+            # месту карман Ани (10) уже на исходе — доливаем для следующих
+            # секций (как ниже для Дины/Киры).
+            try:
+                _conn_r = server.connect()
+                _conn_r.row_factory = sqlite3.Row
+                _uid_a = _conn_r.execute("SELECT id FROM users WHERE name='Аня' ORDER BY id DESC LIMIT 1").fetchone()["id"]
+                agent.admin_agent_quota_set(_conn_r, _uid_a, {"remaining": 100})
+            finally:
+                try:
+                    _conn_r.close()
+                except Exception:
+                    pass
             # Реплика модели вместе с вызовами — обычный ход, а не 502: реплика
             # уходит в preamble, инструменты выполняются.
             with lock:
@@ -1150,9 +1164,10 @@ def main():
                   [s.get("args", {}).get("op") for s in body.get("steps") or []] == ["profile"],
                   str([s.get("args") for s in body.get("steps") or []]))
             _, quota_after = cfix.request(base, "GET", "/api/agent/limits", None)
-            check("ход с починкой инструмента стоит ровно один жетон",
-                  quota_after.get("remaining") == (quota_before.get("remaining") or 0) - 1,
-                  f"{quota_before} -> {quota_after}")
+            check("ход с починкой инструмента стоит столько, сколько запросов к ИИ (3: битый, починка, финал)",
+                  quota_after.get("remaining") == (quota_before.get("remaining") or 0) - 3
+                  and body.get("usage", {}).get("cost") == 3,
+                  f"{quota_before} -> {quota_after} cost={body.get('usage')}")
 
             section("ошибка инструмента исчерпала попытки -> честный 502, а не шаблон")
             _, tf2 = new_thread(cfix)

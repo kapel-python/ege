@@ -320,8 +320,8 @@ def main():
         bk = buckets(uE_id)
         check("u: долит ровно до 10",
               bk.get(f"u:{uE_id}", (None,))[0] == 10, bk)
-        check("agent: долит ровно до 25",
-              bk.get(f"agent:{uE_id}", (None,))[0] == 25, bk)
+        check("agent: долит ровно до 50",
+              bk.get(f"agent:{uE_id}", (None,))[0] == 50, bk)
         check("таймеры погашены (карман полон)",
               bk.get(f"u:{uE_id}", (0, 1))[1] is None
               and bk.get(f"agent:{uE_id}", (0, 1))[1] is None, bk)
@@ -677,7 +677,7 @@ def main():
         s, lim = request(uF, base, "/api/ai/limits", ip="10.8.1.5")
         check("у фермера free-лимит 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(uF, base, "/api/agent/limits", ip="10.8.1.5")
-        check("у фермера квота 5", s == 200 and q["limit"] == 5, q)
+        check("у фермера квота 10", s == 200 and q["limit"] == 10, q)
 
         # --- CSRF ---
         section("CSRF-гейт")
