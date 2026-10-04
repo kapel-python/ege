@@ -1984,7 +1984,41 @@ const Prov = {
   checkingAll: false,
   draftChecking: false,
   ping: null, // последний «пинг всех»: {results, at} — рисуется в разделе
+  // Направление раздела: free — обычные пользователи, plus — подписка Plus.
+  // У каждого свой полный конфиг (провайдеры, очередь, судья), вкладки
+  // одинаковы по функционалу. Переживает перезагрузку, чтобы глубокая ссылка
+  // на страницу провайдера открывалась в том же направлении.
+  tier: (function () {
+    try { return localStorage.getItem("ege_admin_prov_tier") === "plus" ? "plus" : "free"; }
+    catch (_) { return "free"; }
+  })(),
 };
+
+/* Тир текущего направления во все запросы раздела: GET — query, POST/PUT —
+   поле тела. DELETE тела обычно не несёт — ему query собирается на месте. */
+function provTier() { return Prov.tier === "plus" ? "plus" : "free"; }
+function provTierQS() { return "?tier=" + provTier(); }
+function provTierBody(obj) {
+  const out = Object.assign({}, obj || {});
+  out.tier = provTier();
+  return out;
+}
+function setProvTier(tier) {
+  Prov.tier = tier === "plus" ? "plus" : "free";
+  try { localStorage.setItem("ege_admin_prov_tier", Prov.tier); } catch (_) {}
+  // Вкладка — это другое направление целиком: список перечитываем, раздел
+  // перерисовываем (иначе подсветка таба врёт), а открытую страницу
+  // провайдера пересобираем из новых данных — или честно показываем
+  // «не найден», если в этом направлении его нет. Черновик несохранённых
+  // правок при смене направления теряется, как при уходе со страницы.
+  screenProviders(true).then(() => {
+    try { drawProviders(); } catch (_) {}
+    try {
+      const h = String(location.hash || "");
+      if (h.startsWith("#/providers/")) render();
+    } catch (_) {}
+  });
+}
 
 /* Состояние СТРАНИЦЫ одного провайдера (#/providers/<id>). Держим отдельно от
    Prov: список провайдеров и настройка одного — разные экраны, и раньше их
@@ -2279,7 +2313,18 @@ function drawProviders() {
   const order = Array.isArray(d.order) ? d.order : [];
   const names = Object.fromEntries(list.map((p) => [p.id, p.title || p.id]));
   const judge = (d.essayJudge && typeof d.essayJudge === "object") ? d.essayJudge : {};
+  const tier = provTier();
   body.innerHTML = `
+    <div class="a-card" style="margin-bottom:14px">
+      <div class="a-card__head a-card__head--wrap">
+        <span class="a-card__title">Направление</span>
+      </div>
+      <div class="a-seg" role="tablist" aria-label="Направление маршрутизации">
+        <button class="a-seg__btn${tier === "free" ? " a-seg__btn--active" : ""}" role="tab" aria-selected="${tier === "free"}" onclick="setProvTier('free')">Обычные</button>
+        <button class="a-seg__btn${tier === "plus" ? " a-seg__btn--active" : ""}" role="tab" aria-selected="${tier === "plus"}" onclick="setProvTier('plus')">Plus</button>
+      </div>
+      <div class="a-card__sub" style="margin-top:8px">Два независимых направления с одинаковым функционалом: провайдеры, очередь и судья у каждого свои. Обычные пользователи ходят через «Обычные», подписка Plus — через «Plus».</div>
+    </div>
     <div class="a-card" style="margin-bottom:14px">
       <div class="a-card__head a-card__head--wrap">
         <span class="a-card__title">Очерёдность запросов</span>
@@ -2383,7 +2428,7 @@ async function resetJudge() {
   const box = document.getElementById("provJudgeResult");
   if (box) box.innerHTML = `<span class="a-card__sub">Возвращаем к очереди…</span>`;
   try {
-    await AdminApi.post("/api/admin/providers/judge", { provider: "" });
+    await AdminApi.post("/api/admin/providers/judge", provTierBody({ provider: "" }));
     toast("Судья — снова первый в очереди");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -2399,7 +2444,7 @@ async function saveJudge() {
   if (!checked || !box) return;
   box.innerHTML = `<span class="a-card__sub">Сохраняем…</span>`;
   try {
-    const r = await AdminApi.post("/api/admin/providers/judge", { provider: checked.value || "" });
+    const r = await AdminApi.post("/api/admin/providers/judge", provTierBody({ provider: checked.value || "" }));
     box.innerHTML = `<span class="a-chip a-chip--success">Судья: ${esc(r.judge || "—")}</span>`;
     await screenProviders(true);
   } catch (e) {
@@ -2417,7 +2462,7 @@ async function screenProviders(quiet) {
   }
   if (!quiet) { Prov.loading = true; Prov.error = null; drawProviders(); }
   try {
-    Prov.data = await AdminApi.get("/api/admin/providers");
+    Prov.data = await AdminApi.get("/api/admin/providers" + provTierQS());
     Prov.error = null;
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -2435,7 +2480,7 @@ async function probeProvider(id) {
   Prov.probing[id] = true;
   drawProviders();
   try {
-    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe`, {});
+    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe`, provTierBody({}));
     const p = r && r.probe;
     toast(p && p.ok ? `«${id}» доступен (${p.latencyMs} мс)` : `«${id}» недоступен: ${(p && p.error) || "ошибка"}`, p && p.ok ? "ok" : "err");
   } catch (e) {
@@ -2527,7 +2572,7 @@ async function setProviderSlot(id, slot) {
         cur[want] = id;
       }
     }
-    res = await AdminApi.post("/api/admin/providers/slots", { slots: cur });
+    res = await AdminApi.post("/api/admin/providers/slots", provTierBody({ slots: cur }));
     if (!toastSlotSwap(res && res.slotSwap)) toast("Приоритет обновлён");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -2538,7 +2583,7 @@ async function setProviderSlot(id, slot) {
 
 async function toggleProvider(id, enabled) {
   try {
-    await AdminApi.put(`/api/admin/providers/${encodeURIComponent(id)}`, { enabled: !!enabled });
+    await AdminApi.put(`/api/admin/providers/${encodeURIComponent(id)}`, provTierBody({ enabled: !!enabled }));
     toast(enabled ? "Провайдер включён" : "Провайдер выключен");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -2551,7 +2596,7 @@ async function deleteProvider(id) {
   if (!confirm(`Удалить провайдера «${id}»? Из ротации он уйдёт сразу.`)) return;
   let ok = false;
   try {
-    await AdminApi.request(`/api/admin/providers/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await AdminApi.request(`/api/admin/providers/${encodeURIComponent(id)}` + provTierQS(), { method: "DELETE" });
     toast("Провайдер удалён");
     ok = true;
   } catch (e) {
@@ -2772,7 +2817,7 @@ async function saveProviderFromPage() {
   if (btn) { btn.disabled = true; btn.textContent = "Добавляем…"; }
   let created = null;
   try {
-    const r = await AdminApi.post("/api/admin/providers", {
+    const r = await AdminApi.post("/api/admin/providers", provTierBody({
       id: provField("provId"), title: provField("provTitle"),
       base_url: provField("provBaseUrl"), model: provField("provModel"),
       api_key: provField("provKey"), auth: provField("provAuth"),
@@ -2783,7 +2828,7 @@ async function saveProviderFromPage() {
       reasoning_effort: currentEffort("provNewEffortSeg"),
       extra_headers: provHeadersRead("provNewHeaders"),
       slot: slot || null,
-    });
+    }));
     created = (r && r.provider && r.provider.id) || provField("provId").trim();
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -2831,7 +2876,7 @@ async function runPingAll(paint, btn, busyLabel) {
   if (btn) { btn.disabled = true; btn.textContent = busyLabel || "Пингуем…"; }
   paint(`<div class="a-prov-hint">Отправляем «привет» каждому провайдеру по очереди (до 20 с на провайдера)…</div>`);
   try {
-    const r = await AdminApi.post("/api/admin/providers/probe-all", {});
+    const r = await AdminApi.post("/api/admin/providers/probe-all", provTierBody({}));
     const res = (r && r.results) || {};
     Prov.ping = { results: res, at: Date.now() };
     paint(provPingRowsHTML(res));
@@ -2961,7 +3006,7 @@ async function pingProviderModels() {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ tier: provTier() }),
     });
     if (resp.status === 401) { A.session = null; renderLogin(); return; }
     if (!resp.ok || !resp.body) {
@@ -3855,7 +3900,7 @@ async function loadProviderModels() {
   provDetailSetLoading("models", true, "Загружаем…");
   provDetailRenderList();
   try {
-    const r = await AdminApi.get(`/api/admin/providers/${encodeURIComponent(id)}/models`);
+    const r = await AdminApi.get(`/api/admin/providers/${encodeURIComponent(id)}/models` + provTierQS());
     ProvDetail.models = { models: (r && r.models) || [], total: r && r.total, truncated: !!(r && r.truncated), current: (r && r.current) || "", latencyMs: r && r.latencyMs };
     if (!ProvDetail.models.models.length && ProvDetail.model) {
       // Шлюз не отдаёт текущую модель в списке — показываем её вручную, иначе
@@ -3886,7 +3931,7 @@ async function probeProviderModel() {
   provDetailSetLoading("probe", true, "Проверяем…");
   provDetailSetVerdict(`<div class="a-card__sub">Проверяем модель живым запросом «привет»…</div>`);
   try {
-    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe-model`, { model });
+    const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe-model`, provTierBody({ model }));
     const p = r && r.probe;
     if (p && p.ok) provVerdictOk(`Модель <span class="mono">${esc(model)}</span> отвечает (${fmtNum(p.latencyMs)} мс). Её можно применять.`);
     else provVerdictBad(`Модель <span class="mono">${esc(model)}</span> не отвечает: ${esc((p && p.error) || "ошибка")}. Применить её можно, но проверки работать не будут.`);
@@ -3905,11 +3950,11 @@ async function applyProviderDetail() {
   if (!id) return;
   const btn = document.getElementById("provDetailApply");
   provDetailError("");
-  const payload = {
+  const payload = provTierBody({
     model: provDetailModelInput(),
     base_url: (document.getElementById("provDetailBaseUrl") || {}).value || "",
     model_title: ((document.getElementById("provDetailModelTitle") || {}).value || "").trim(),
-  };
+  });
   // Приоритет, quirks и адрес едут ТОЙ ЖЕ кнопкой: иначе модель применилась бы
   // мгновенно, а слот — только после второго запроса, и между ними ученик
   // получил бы провайдера по старому порядку.
@@ -4044,7 +4089,7 @@ async function resetProvider(id) {
   if (!confirm(`Сбросить провайдера «${target}» к стандартным значениям?`)) return;
   provDetailError("");
   try {
-    await AdminApi.post(`/api/admin/providers/${encodeURIComponent(target)}/reset`, {});
+    await AdminApi.post(`/api/admin/providers/${encodeURIComponent(target)}/reset`, provTierBody({}));
     toast("Возвращены стандартные значения");
       } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }

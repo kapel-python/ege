@@ -891,6 +891,84 @@ async function shot(page, name) {
     t("у недоступного показана причина, а не тишина",
       pingRows.some((s) => /доступен|401|Неверный/.test(s)), pingRows.join(" | "));
 
+    // ---------------- P2c: направления free / Plus --------------------------
+    section("P2c направления free и Plus: одинаковый функционал, разный конфиг");
+    // Клон при старте детерминированно покрыт юнитом (ai-tiers.py): здесь —
+    // изоляция мутаций сквозняком через UI. (Клон одноразовый: провайдер,
+    // добавленный во free ПОСЛЕ первого чтения Plus, туда сам не приезжает —
+    // направления независимы, иначе новый шлюз молча попал бы в ротацию Plus.)
+    const tierIds = async (page, tier) => page.evaluate(async (t) => {
+      const r = await fetch(`/api/admin/providers?tier=${t}`, { credentials: "same-origin" });
+      const d = await r.json();
+      return { ids: (d.providers || []).map((p) => p.id).sort(), judge: (d.essayJudge || {}).provider || null,
+               slots: d.slots || {}, tier: d.tier || null };
+    }, tier);
+    const waitPlusTab = () => admin.waitForFunction(
+      () => (document.querySelector("[aria-label='Направление маршрутизации'] .a-seg__btn--active") || {}).textContent === "Plus",
+      null, { timeout: 15000 });
+    const waitFreeTab = () => admin.waitForFunction(
+      () => (document.querySelector("[aria-label='Направление маршрутизации'] .a-seg__btn--active") || {}).textContent === "Обычные",
+      null, { timeout: 15000 });
+    t("вкладки направлений видны, по умолчанию обычные",
+      await admin.locator("[role='tablist'][aria-label='Направление маршрутизации'] button").count() === 2
+      && await admin.evaluate(() => localStorage.getItem("ege_admin_prov_tier") !== "plus"));
+    await admin.click("button[onclick=\"setProvTier('plus')\"]");
+    await waitPlusTab();
+    t("переключение на Plus обновляет список",
+      (await admin.locator(".a-prov-card").count()) >= 1);
+    // Добавление в Plus через форму: свой реестр, во free его нет.
+    await admin.click("#provBody .a-card__head button:has-text('Добавить')");
+    await admin.waitForSelector("#provBaseUrl", { timeout: 15000 });
+    await admin.fill("#provId", "plusgw2");
+    await admin.fill("#provBaseUrl", `http://127.0.0.1:${GATEWAY_PORT}/v1`);
+    await admin.fill("#provModel", "alpha-pro");
+    await admin.fill("#provKey", "plus-secret-1");
+    await admin.click("#provSave");
+    await admin.waitForFunction(() => location.hash.includes("providers/plusgw2"), null, { timeout: 20000 });
+    await admin.waitForSelector("#provDetailModel", { timeout: 15000 });
+    const plusView = await tierIds(admin, "plus");
+    const freeView = await tierIds(admin, "free");
+    t("созданный в Plus провайдер есть только в Plus",
+      plusView.ids.includes("plusgw2") && !freeView.ids.includes("plusgw2"),
+      JSON.stringify({ plus: plusView.ids, free: freeView.ids }));
+    // Судья отдельно на направление: ставим в Plus через радио, free не двигается.
+    await openSection(admin);
+    await admin.click("button[onclick=\"setProvTier('plus')\"]");
+    await waitPlusTab();
+    await admin.click(".a-judge-opt input[type='radio'][value='plusgw2']");
+    await admin.waitForFunction(async () => {
+      const r = await fetch("/api/admin/providers?tier=plus", { credentials: "same-origin" });
+      const d = await r.json();
+      return ((d.essayJudge || {}).provider || "") === "plusgw2";
+    }, null, { timeout: 20000 });
+    const freeJudge = (await tierIds(admin, "free")).judge;
+    t("судья Plus не двигает судью free",
+      (await tierIds(admin, "plus")).judge === "plusgw2" && freeJudge !== "plusgw2",
+      `free=${freeJudge}`);
+    // Слот отдельно на направление: двигаем в Plus через селект карточки.
+    await admin.selectOption(".a-prov-card:has(.a-prov-card__open[onclick*='/providers/plusgw2']) .a-prov-slot", "low");
+    await sleep(800);
+    const plusSlots = (await tierIds(admin, "plus")).slots;
+    const freeSlots = (await tierIds(admin, "free")).slots;
+    t("слот в Plus не двигает очередь free",
+      plusSlots.low === "plusgw2" && freeSlots.low !== "plusgw2",
+      JSON.stringify({ plus: plusSlots, free: freeSlots }));
+    // Чистим за собой: удаление и снятие судьи идут с query/body-тиром.
+    await admin.evaluate(async () => {
+      await fetch("/api/admin/providers/plusgw2?tier=plus", { method: "DELETE", credentials: "same-origin" });
+      await fetch("/api/admin/providers/judge", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "", tier: "plus" }) });
+    });
+    const plusClean = await tierIds(admin, "plus");
+    t("удаление в Plus не трогает free",
+      !plusClean.ids.includes("plusgw2")
+      && (await tierIds(admin, "free")).ids.includes("fastgw"));
+    await admin.click("button[onclick=\"setProvTier('free')\"]");
+    await waitFreeTab();
+    t("возврат на free, тир пережил навигацию по localStorage",
+      await admin.evaluate(() => localStorage.getItem("ege_admin_prov_tier")) === "free");
+
     // ---------------- ошибок в консоли нет --------------------------------
     section("P10 ошибок в консоли нет");
     t("ни одной необработанной ошибки на странице раздела", !admin.errors.length, admin.errors.join(" | "));

@@ -172,6 +172,15 @@ def subscription_is_plus(conn: sqlite3.Connection, user_id: int) -> bool:
         return False
 
 
+def ai_tier_for(conn: sqlite3.Connection, user_id: int) -> str:
+    """Направление ИИ-маршрутизации для пользователя: plus при активной
+    подписке, иначе free. Не бросает: сомнение = free (дефолт транспорта)."""
+    try:
+        return "plus" if subscription_is_plus(conn, user_id) else "free"
+    except Exception:
+        return "free"
+
+
 # Потолок текста, который вообще попадает в agent_messages (и оттуда в ленту).
 # Источник правды — модуль агента: там же живёт блок кнопок-продолжений, из-за
 # которого ответ длиннее прежних 8000. Без модуля (тогда весь раздел отдаёт
@@ -676,7 +685,7 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free")
             try:
                 return _AI.chat_with_tools(messages, tools, temperature=temperature,
                                            timeout=_agent_call_timeout(budget),
-                                           reasoning_effort="minimal")
+                                           reasoning_effort="minimal", tier=tier)
             except (_AI.AIFormatError, _AI.AIError) as exc:
                 failure = exc
         raise failure  # noqa: B904 — повторяем ровно то, что поймали
@@ -4286,10 +4295,17 @@ def essay_result_view(submission: dict) -> dict | None:
     model_key = str(submission.get("evaluationModel") or "").strip()
     label = ""
     if _AI is not None and provider_key:
+        # Тир проверки в записи не хранится: ищем название сначала в free,
+        # затем в plus (обычно совпадают — plus стартует клоном).
         try:
-            label = _AI.model_student_label(provider_key, model_key)
+            label = _AI.model_student_label(provider_key, model_key) or ""
         except Exception:
             label = ""
+        if not label:
+            try:
+                label = _AI.model_student_label(provider_key, model_key, "plus") or ""
+            except Exception:
+                label = ""
     if provider_key:
         view["providerId"] = provider_key
         if model_key:
@@ -6891,8 +6907,11 @@ def _ai_system_text(event: dict) -> str | None:
         reason = re.sub(r"\s+", " ", reason)
         parts = [f"Система. {title}."]
         if _AI is not None and hasattr(_AI, "provider_title"):
-            source = _AI.provider_title(str(event.get("from") or ""))
-            target = _AI.provider_title(str(event.get("to") or ""))
+            # Тир события закодирован суффиксом причины (" [Plus]"): название
+            # ищем в своём направлении, иначе plus-провайдер подписался бы id.
+            event_tier = "plus" if reason.endswith(" [Plus]") else "free"
+            source = _AI.provider_title(str(event.get("from") or ""), event_tier)
+            target = _AI.provider_title(str(event.get("to") or ""), event_tier)
             if kind == "provider_switch" and source and target:
                 parts.append(f"Провайдер «{source}» отказал, запросы переведены на «{target}».")
             elif kind == "provider_restored" and target:
@@ -10754,7 +10773,26 @@ class Handler(BaseHTTPRequestHandler):
     # остальное — результат последней ручной пробы. POST/PUT/DELETE — мутации
     # за require_admin + CSRF-гейтом do_*; ключ в ответах не отдаётся никогда
     # (только keySet/keyHint из providers_overview).
+    #
+    # Направлений два (вкладки «Обычные»/«Plus»): тир едет query (?tier=plus)
+    # или телом ({"tier": "plus"}), всё остальное = free. Тир — часть КАЖДОЙ
+    # операции, а не контекст экрана: прямой запрос без тира честно читает
+    # free, а не «текущую вкладку» (её у сервера нет).
     # ------------------------------------------------------------------
+    def _admin_ai_tier(self, payload=None) -> str:
+        """Тир направления ИИ для админ-операции. Мусор = free."""
+        try:
+            query = urlparse(self.path).query
+        except Exception:
+            query = ""
+        for part in str(query or "").split("&"):
+            name, _, value = part.partition("=")
+            if name.strip() == "tier":
+                return "plus" if value.strip().lower() == "plus" else "free"
+        if isinstance(payload, dict):
+            return "plus" if str(payload.get("tier") or "").strip().lower() == "plus" else "free"
+        return "free"
+
     def handle_admin_providers_list(self, conn: sqlite3.Connection) -> None:
         auth = self.require_admin(conn)
         if not auth:
@@ -10763,7 +10801,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Раздел временно недоступен"}, 503)
             return
         try:
-            self.send_json(_AI.providers_overview())
+            self.send_json(_AI.providers_overview(self._admin_ai_tier()))
         except (ValueError, KeyError) as exc:
             self.send_json({"error": f"Request failed: {exc}"}, 400)
 
@@ -10794,18 +10832,21 @@ class Handler(BaseHTTPRequestHandler):
                 # поле карточки: судья один на систему, и его смена — не
                 # настройка шлюза, а переключение измерительного прибора
                 # (замеренная разница между моделями — до 18 баллов из 22).
+                # Судья свой у каждого направления: Plus измеряет своим.
                 provider = payload.get("provider")
                 if provider is not None and not isinstance(provider, str):
                     self.send_json({"error": "Некорректный провайдер"}, 400)
                     return True
+                tier = self._admin_ai_tier(payload)
                 try:
-                    before = _AI.judge_provider()
-                    after = _AI.judge_provider_set(provider)
+                    before = _AI.judge_provider(tier)
+                    after = _AI.judge_provider_set(provider, tier)
                 except (_AI.AIInputError, ValueError) as exc:
                     self.send_json({"error": str(exc) or "Не удалось назначить судью"}, 400)
                     return True
                 admin_audit(conn, actor_id, "providers.judge", None,
-                            f"{before or '—'} → {after.get('judge') or '—'}")
+                            f"{before or '—'} → {after.get('judge') or '—'}"
+                            + (" [Plus]" if tier != "free" else ""))
                 self.send_json({"ok": True, "judge": after.get("judge"),
                                 "explicit": after.get("explicit"), "previous": before})
                 return True
@@ -10814,25 +10855,28 @@ class Handler(BaseHTTPRequestHandler):
                 # не делается (ключа ещё нет в базе и гонка не нужна): сначала
                 # валидация и сохранение, затем живой запрос уже по записи.
                 # Недоступная модель добавлению НЕ мешает — вернётся warning.
+                # Направление — из тела: у Plus свой реестр записей.
                 try:
-                    clean = _AI.validate_custom_payload(payload)
+                    tier = self._admin_ai_tier(payload)
+                    clean = _AI.validate_custom_payload(payload, tier=tier)
                 except ValueError as exc:
                     msg = str(exc)
                     self.send_json({"error": msg},
                                    409 if "уже существует" in msg or "уже занят" in msg else 400)
                     return True
                 try:
-                    entry = _AI.custom_provider_create(clean)
+                    entry = _AI.custom_provider_create(clean, tier)
                 except ValueError as exc:
                     self.send_json({"error": str(exc)}, 409)
                     return True
-                admin_audit(conn, actor_id, "ai-provider-create", None, entry["id"][:64])
+                admin_audit(conn, actor_id, "ai-provider-create", None,
+                            (entry["id"][:64] + (" [Plus]" if tier != "free" else "")))
                 # Без живой проверки: добавление должно завершаться мгновенно.
                 # Работоспособность проверяется на странице провайдера («Проверить»
                 # или «Пинг всех моделей»), а в самой форме остаётся «Проверить
                 # до сохранения» — но это явный выбор админа, а не побочный
                 # эффект кнопки «Добавить».
-                self.send_json({"ok": True, "provider": _AI._public_provider_card(entry["id"])})
+                self.send_json({"ok": True, "provider": _AI._public_provider_card(entry["id"], tier)})
                 return True
             if rest == "/probe":
                 # Проверить черновик БЕЗ сохранения (кнопка «Проверить» в форме).
@@ -10862,20 +10906,21 @@ class Handler(BaseHTTPRequestHandler):
                                    headers={"Retry-After": str(int(wait))})
                     return True
                 try:
-                    order = _AI.effective_priority()
+                    tier = self._admin_ai_tier(payload)
+                    order = _AI.effective_priority(tier)
                 except Exception:
                     order = []
                 results: dict = {}
                 for pid in order:
                     try:
                         if want_models:
-                            models = _AI.list_models(pid)
+                            models = _AI.list_models(pid, tier=tier)
                             results[pid] = {"ok": True, "models": models.get("models") or [],
                                             "total": models.get("total") or 0,
                                             "latencyMs": models.get("latencyMs") or 0}
                         else:
                             results[pid] = _AI.probe_provider(
-                                pid, timeout=_AI.PROBE_ALL_TIMEOUT_SEC)
+                                pid, timeout=_AI.PROBE_ALL_TIMEOUT_SEC, tier=tier)
                     except (KeyError, ValueError) as exc:
                         results[pid] = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
                 self.send_json({"ok": True, "results": results,
@@ -10884,16 +10929,18 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             if rest == "/slots":
                 # Выставить приоритеты разом: {slots: {high, medium, low}}.
+                # Направление — из тела: очередь у каждого своя.
                 slots = payload.get("slots")
                 if not isinstance(slots, dict):
                     self.send_json({"error": "Нужен объект slots {high, medium, low}"}, 400)
                     return True
+                tier = self._admin_ai_tier(payload)
                 try:
-                    old_slots = dict(_AI.providers_overview().get("slots") or {})
+                    old_slots = dict(_AI.providers_overview(tier).get("slots") or {})
                 except Exception:
                     old_slots = {}
                 try:
-                    saved = _AI.providers_set_slots(slots)
+                    saved = _AI.providers_set_slots(slots, tier)
                 except ValueError as exc:
                     self.send_json({"error": str(exc)}, 400)
                     return True
@@ -10902,7 +10949,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     swap = {"type": "noop"}
                 admin_audit(conn, actor_id, "ai-provider-slots", None,
-                            json.dumps(saved, ensure_ascii=False)[:200])
+                            (json.dumps(saved, ensure_ascii=False)[:200]
+                             + (" [Plus]" if tier != "free" else "")))
                 self.send_json({"ok": True, "slotSwap": swap, **_AI.providers_overview()})
                 return True
             parts = rest.strip("/").split("/")
@@ -10914,15 +10962,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not pid:
                     self.send_json({"error": "Некорректный идентификатор"}, 400)
                     return True
+                # Направление — из тела: у Plus свои записи, слоты и пробы.
+                tier = self._admin_ai_tier(payload)
+                tier_suffix = " [Plus]" if tier != "free" else ""
                 # Смена модели и сброс — это запись, а не опрос: троттлинг
                 # им не нужен (и не должен мешать), пауза стоит только на
                 # пробах, которые реально ходят в провайдера.
                 if action in ("apply", "reset"):
                     try:
                         if action == "reset":
-                            _AI.provider_reset(pid)
-                            admin_audit(conn, actor_id, "ai-provider-reset", None, pid[:64])
-                            self.send_json({"ok": True, "provider": _AI._public_provider_card(pid)})
+                            _AI.provider_reset(pid, tier)
+                            admin_audit(conn, actor_id, "ai-provider-reset", None,
+                                        pid[:64] + tier_suffix)
+                            self.send_json({"ok": True, "provider": _AI._public_provider_card(pid, tier)})
                             return True
                         # Цепочка моделей — отдельная запись (полная карта
                         # {high, medium, low}): проверяем согласованность ДО
@@ -10950,23 +11002,24 @@ class Handler(BaseHTTPRequestHandler):
                                           "extra_headers", "extraHeaders")}
                         if pending_chain is not None:
                             try:
-                                old_chain = _AI.provider_model_slots(pid)
+                                old_chain = _AI.provider_model_slots(pid, tier)
                             except Exception:
                                 old_chain = {}
                             try:
-                                _AI.providers_set_model_slots(pid, pending_chain)
+                                _AI.providers_set_model_slots(pid, pending_chain, tier)
                             except KeyError:
                                 self.send_json({"error": "Провайдер не найден"}, 404)
                                 return True
                             try:
                                 model_swap = _AI.describe_model_slots_change(
-                                    old_chain, _AI.provider_model_slots(pid))
+                                    old_chain, _AI.provider_model_slots(pid, tier))
                             except Exception:
                                 model_swap = {"type": "noop"}
                             admin_audit(conn, actor_id, "ai-provider-models", None,
-                                        json.dumps(pending_chain, ensure_ascii=False)[:200])
+                                        (json.dumps(pending_chain, ensure_ascii=False)[:200]
+                                         + tier_suffix))
                         try:
-                            _AI.provider_set_override(pid, patch)
+                            _AI.provider_set_override(pid, patch, tier)
                         except KeyError:
                             self.send_json({"error": "Провайдер не найден"}, 404)
                             return True
@@ -10980,7 +11033,7 @@ class Handler(BaseHTTPRequestHandler):
                             # Занятый слот НЕ вытесняет молча: у кого был свой
                             # приоритет — меняемся местами, у кого не было —
                             # честно говорим, что он больше не используется.
-                            cur = dict(_AI.providers_overview().get("slots") or {})
+                            cur = dict(_AI.providers_overview(tier).get("slots") or {})
                             want = payload.get("slot")
                             try:
                                 cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, want)
@@ -10991,11 +11044,12 @@ class Handler(BaseHTTPRequestHandler):
                                 self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
                                 return True
                             try:
-                                _AI.providers_set_slots(cur)
+                                _AI.providers_set_slots(cur, tier)
                             except ValueError as exc:
                                 self.send_json({"error": str(exc)}, 400)
                                 return True
-                        admin_audit(conn, actor_id, "ai-provider-apply", None, pid[:64])
+                        admin_audit(conn, actor_id, "ai-provider-apply", None,
+                                    pid[:64] + tier_suffix)
                         # БЕЗ живой проверки модели: сохранение должно быть
                         # мгновенным. Проба — это отдельный вопрос админа, и на
                         # странице провайдера для него есть «Проверить» и живой
@@ -11003,9 +11057,9 @@ class Handler(BaseHTTPRequestHandler):
                         # ответа провайдера (до 20 с на мёртвой модели), то есть
                         # подтверждать настройку можно было только дождавшись
                         # шлюза — ровно тогда, когда он не нужен.
-                        self.send_json({"ok": True, "provider": _AI._public_provider_card(pid),
+                        self.send_json({"ok": True, "provider": _AI._public_provider_card(pid, tier),
                                         "slotSwap": slot_swap, "modelSwap": model_swap,
-                                        "slots": _AI.providers_overview().get("slots") or {}})
+                                        "slots": _AI.providers_overview(tier).get("slots") or {}})
                         return True
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)
@@ -11019,11 +11073,11 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Нужен объект slots {high, medium, low} с моделями"}, 400)
                         return True
                     try:
-                        old_chain = _AI.provider_model_slots(pid)
+                        old_chain = _AI.provider_model_slots(pid, tier)
                     except Exception:
                         old_chain = {}
                     try:
-                        saved = _AI.providers_set_model_slots(pid, raw_slots)
+                        saved = _AI.providers_set_model_slots(pid, raw_slots, tier)
                     except KeyError:
                         self.send_json({"error": "Провайдер не найден"}, 404)
                         return True
@@ -11035,8 +11089,9 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         swap = {"type": "noop"}
                     admin_audit(conn, actor_id, "ai-provider-models", None,
-                                json.dumps(saved, ensure_ascii=False)[:200])
-                    self.send_json({"ok": True, "provider": _AI._public_provider_card(pid),
+                                (json.dumps(saved, ensure_ascii=False)[:200]
+                                 + (" [Plus]" if tier != "free" else "")))
+                    self.send_json({"ok": True, "provider": _AI._public_provider_card(pid, tier),
                                     "modelSwap": swap, "modelSlots": saved})
                     return True
                 # Разные кнопки — разные бакеты: «проверить провайдера» и
@@ -11061,7 +11116,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "models должен быть списком"}, 400)
                         return True
                     try:
-                        out = _AI.probe_models(pid, wanted)
+                        out = _AI.probe_models(pid, wanted, tier=tier)
                     except KeyError:
                         self.send_json({"error": "Провайдер не найден"}, 404)
                         return True
@@ -11091,7 +11146,7 @@ class Handler(BaseHTTPRequestHandler):
                             "kind": "error", "error": "models должен быть списком"}]))
                         return True
                     try:
-                        stream = _AI.probe_models_stream(pid, wanted)
+                        stream = _AI.probe_models_stream(pid, wanted, tier=tier)
                     except KeyError:
                         self.send_event_stream(iter([{"kind": "error",
                                                       "error": "Провайдер не найден"}]))
@@ -11123,9 +11178,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if action == "probe-model":
                         wanted = str(payload.get("model") or "").strip()
-                        probe = _AI.probe_model(pid, wanted)
+                        probe = _AI.probe_model(pid, wanted, tier=tier)
                     else:
-                        probe = _AI.probe_provider(pid)
+                        probe = _AI.probe_provider(pid, tier=tier)
                 except KeyError:
                     self.send_json({"error": "Провайдер не найден"}, 404)
                     return True
@@ -11169,6 +11224,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self.send_json({"error": "Некорректный JSON"}, 400)
             return True
+        # Направление — из тела: у Plus свои записи и слоты.
+        tier = self._admin_ai_tier(payload)
+        tier_suffix = " [Plus]" if tier != "free" else ""
         try:
             builtin_ids = set(getattr(_AI, "PROVIDERS", {}) or {})
             if pid in builtin_ids:
@@ -11187,27 +11245,27 @@ class Handler(BaseHTTPRequestHandler):
                                 "use_wallet_balance", "useWalletBalance",
                                 "merge_system", "mergeSystem"}
                 if "enabled" in payload:
-                    _AI.provider_set_enabled(pid, bool(payload.get("enabled")))
+                    _AI.provider_set_enabled(pid, bool(payload.get("enabled")), tier)
                 if set(payload) & override_fields:
                     # Поля поверх окружения (модель из списка моделей и т.п.).
                     # Пустая модель = снять переопределение, т.е. вернуть
                     # значение из окружения, а не «модель не задана».
                     try:
                         _AI.provider_set_override(
-                            pid, {k: v for k, v in payload.items() if k in override_fields})
+                            pid, {k: v for k, v in payload.items() if k in override_fields}, tier)
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)
                         return True
                 if "model_titles" in payload or "modelTitles" in payload:
                     try:
                         _AI.provider_set_override(
-                            pid, {"model_titles": payload.get("model_titles", payload.get("modelTitles"))})
+                            pid, {"model_titles": payload.get("model_titles", payload.get("modelTitles"))}, tier)
                     except (KeyError, ValueError) as exc:
                         self.send_json({"error": str(exc) if isinstance(exc, ValueError) else "Провайдер не найден"},
                                        400 if isinstance(exc, ValueError) else 404)
                         return True
                 if "slot" in payload:
-                    _cur = dict(_AI.providers_overview().get("slots") or {})
+                    _cur = dict(_AI.providers_overview(tier).get("slots") or {})
                     want = payload.get("slot")
                     try:
                         _cur, slot_swap = _AI.apply_provider_slot_move(_cur, pid, want)
@@ -11218,23 +11276,23 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Приоритет — high, medium, low или пусто"}, 400)
                         return True
                     try:
-                        _AI.providers_set_slots(_cur)
+                        _AI.providers_set_slots(_cur, tier)
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400)
                         return True
                 else:
                     slot_swap = {"type": "noop"}
-                admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
-                card = _AI._public_provider_card(pid)
+                admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64] + tier_suffix)
+                card = _AI._public_provider_card(pid, tier)
                 probe = None
                 if set(payload) & override_fields:
                     # Модель сменилась — старая проверка больше не про текущую
                     # конфигурацию, поэтому честно меряем заново.
                     try:
-                        probe = _AI.probe_provider(pid)
+                        probe = _AI.probe_provider(pid, tier=tier)
                     except (KeyError, ValueError) as exc:
                         probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-                out = {"ok": True, "provider": card, "slots": _AI.providers_overview().get("slots") or {},
+                out = {"ok": True, "provider": card, "slots": _AI.providers_overview(tier).get("slots") or {},
                        "slotSwap": slot_swap}
                 if probe is not None:
                     out["probe"] = probe
@@ -11244,42 +11302,42 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(out)
                 return True
             try:
-                patch = _AI.validate_custom_payload(payload, is_update=True, existing_id=pid)
+                patch = _AI.validate_custom_payload(payload, is_update=True, existing_id=pid, tier=tier)
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, 400)
                 return True
             try:
-                _AI.custom_provider_update(pid, patch)
+                _AI.custom_provider_update(pid, patch, tier)
             except KeyError:
                 self.send_json({"error": "Провайдер не найден"}, 404)
                 return True
             if "slot" in patch and patch.get("slot") is not None:
-                cur = dict(_AI.providers_overview().get("slots") or {})
+                cur = dict(_AI.providers_overview(tier).get("slots") or {})
                 try:
                     cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, patch.get("slot"))
                 except Exception as exc:
                     self.send_json({"error": str(exc) or "Приоритет — high, medium, low или пусто"}, 400)
                     return True
                 try:
-                    _AI.providers_set_slots(cur)
+                    _AI.providers_set_slots(cur, tier)
                 except ValueError as exc:
                     self.send_json({"error": str(exc)}, 400)
                     return True
             elif "slot" in payload and payload.get("slot") in (None, "", "none", "null"):
-                cur = dict(_AI.providers_overview().get("slots") or {})
+                cur = dict(_AI.providers_overview(tier).get("slots") or {})
                 try:
                     cur, slot_swap = _AI.apply_provider_slot_move(cur, pid, None)
                 except Exception:
                     cur, slot_swap = cur, {"type": "noop"}
-                _AI.providers_set_slots(cur)
+                _AI.providers_set_slots(cur, tier)
             else:
                 slot_swap = {"type": "noop"}
-            admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64])
+            admin_audit(conn, actor_id, "ai-provider-update", None, pid[:64] + tier_suffix)
             try:
-                probe = _AI.probe_provider(pid)
+                probe = _AI.probe_provider(pid, tier=tier)
             except (KeyError, ValueError) as exc:
                 probe = {"ok": False, "latencyMs": 0, "error": str(exc)[:200]}
-            out = {"ok": True, "provider": _AI._public_provider_card(pid), "probe": probe,
+            out = {"ok": True, "provider": _AI._public_provider_card(pid, tier), "probe": probe,
                    "slotSwap": slot_swap}
             if not probe.get("ok"):
                 out["warning"] = ("Изменения сохранены, но модель недоступна: "
@@ -11311,8 +11369,10 @@ class Handler(BaseHTTPRequestHandler):
         if not pid:
             self.send_json({"error": "Некорректный идентификатор"}, 400)
             return True
+        # Направление — из query (?tier=plus): у DELETE тела обычно нет.
+        tier = self._admin_ai_tier()
         try:
-            _AI.custom_provider_delete(pid)
+            _AI.custom_provider_delete(pid, tier)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
             return True
@@ -11328,7 +11388,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Не удалось удалить. Попробуй ещё раз.",
                             "ref": rid}, 500)
             return True
-        admin_audit(conn, actor_id, "ai-provider-delete", None, pid[:64])
+        admin_audit(conn, actor_id, "ai-provider-delete", None,
+                    pid[:64] + (" [Plus]" if tier != "free" else ""))
         self.send_json({"ok": True, "id": pid})
         return True
 
@@ -12466,7 +12527,8 @@ class Handler(BaseHTTPRequestHandler):
                             format_id, payload.get("text"), user_id=user_id, ip=ip,
                             source=mode, problem=problem,
                             reviewer_note=note, source_text=source_text,
-                            student_name=student_name)
+                            student_name=student_name,
+                            tier=ai_tier_for(conn, user_id))
                     except _AI.AIInputError as exc:
                         # Наш ввод, наш 400: повтор не поможет.
                         self.send_json({"error": _ai_user_message(exc)}, 400, token=token); return
@@ -12746,7 +12808,7 @@ class Handler(BaseHTTPRequestHandler):
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}
-                        _chat_cf = _agent_chat_fn(cost, tid)
+                        _chat_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
                         try:
                             steps2, final2, pending2 = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_cf,
@@ -12979,7 +13041,7 @@ class Handler(BaseHTTPRequestHandler):
                         history = _agent_history_for_model(conn, tid, before_seq=replace_from)
                         messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
                         cost = {"n": 0}
-                        _chat_fn = _agent_chat_fn(cost, tid)
+                        _chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
                         try:
                             steps, final, pending = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_fn,
@@ -13201,7 +13263,7 @@ class Handler(BaseHTTPRequestHandler):
                                        headers={"Retry-After": str(int(wait))})
                         return
                     try:
-                        models = _AI.list_models(pid)
+                        models = _AI.list_models(pid, tier=self._admin_ai_tier())
                     except KeyError:
                         self.send_json({"error": "Провайдер не найден"}, 404)
                         return

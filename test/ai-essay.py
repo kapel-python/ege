@@ -492,7 +492,7 @@ def test_source_mode(ai) -> None:
         user_msg = str(seen[1]["content"])
         check("исходный текст в промпт модели не передаётся: у оценщика его нет",
               params == {"format_id", "text", "source", "problem", "reviewer_note",
-                         "source_text", "student_name"}
+                         "source_text", "student_name", "tier"}
               and "бабушка" in user_msg and user_msg.count("--- ТЕКСТ") == 1
               and "ИСХОДНЫЙ ТЕКСТ" not in user_msg.upper(),
               str(sorted(params)))

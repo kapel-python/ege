@@ -148,6 +148,27 @@ PROVIDER_PRIORITY: tuple[str, ...] = ("closerouter", "gptunnel")
 PROVIDER_SLOTS: tuple[str, ...] = ("high", "medium", "low")
 PROVIDER_SLOT_LABELS = {"high": "Высокий", "medium": "Средний", "low": "Низкий"}
 PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+# Два независимых направления маршрутизации: обычные пользователи и Plus.
+# У каждого — ПОЛНЫЙ свой конфиг (провайдеры, слоты, выключатели, цепочки,
+# названия, активный, судья): вкладки в админке одинаковы по функционалу, но
+# пишут в разные ключи. Обычное направление живёт на исторических ключах без
+# суффикса (миграции нет — текущие настройки и есть free). Plus стартует
+# клоном free при первом обращении (ensure_tier_clone) и дальше живёт сам:
+# смена в одной вкладке вторую не трогает.
+_TIERS = ("free", "plus")
+TIER_LABELS = {"free": "Обычные", "plus": "Plus"}
+
+
+def _normalize_tier(raw) -> str:
+    """Тир направления: plus или free. Неизвестное/пустое = free."""
+    return "plus" if str(raw or "").strip().lower() == "plus" else "free"
+
+
+def _tier_key(base: str, tier: str) -> str:
+    """Ключ app_config для направления: free — исторический, plus — с префиксом."""
+    if _normalize_tier(tier) == "free":
+        return base
+    return "ai_plus_" + base[3:] if base.startswith("ai_") else "ai_plus_" + base
 # Сколько ПОДРЯД отказов переводят провайдера в конец очереди попыток.
 # Два, а не один: единичный отказ уже двигает активного (`_note_provider_failure`
 # переключает на следующего), а повторный подряд означает «лежит прямо сейчас» —
@@ -224,13 +245,16 @@ _provider_last_err: dict[str, tuple[int, str]] = {}
 _provider_last_check: dict[str, dict] = {}
 
 _admin_cache_lock = threading.Lock()
-_admin_cache: dict = {"path": None, "customs": None, "slots": None, "enabled": None,
-                      "version": None}
+# Снимок конфига в разрезе направлений: tiers[tier] = {customs, slots,
+# enabled, overrides, version}. Плоский кэш на два тира неизбежно трешил бы
+# (free-трафик вытеснял plus-снимок и наоборот — перестроение на каждом
+# чужом запросе), поэтому пространство одно на тир.
+_admin_cache: dict = {"path": None, "tiers": {}}
 # Кэш цепочек моделей — отдельно от _admin_snapshot (у него фиксированный
 # кортеж из 4 элементов, который разбирают десятки мест): цепочки читаются
 # своей парой функций ниже и сбрасываются тем же _admin_invalidate.
 _model_slots_lock = threading.Lock()
-_model_slots_cache: dict = {"path": None, "data": None, "version": None}
+_model_slots_cache: dict = {"path": None, "tiers": {}}
 
 
 def _app_config_read(key: str):
@@ -299,7 +323,41 @@ def _config_version() -> int:
         return 0
 
 
-def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
+def ensure_tier_clone(tier: str) -> None:
+    """Plus стартует клоном free: все текущие настройки сохраняются, и пока
+    админ ничего не менял, оба направления ведут себя одинаково.
+
+    Клонируются providers/slots/enabled/overrides/titles/chains — всё, что
+    видит админ во вкладках. Состояние роутера и судьи НЕ клонируется: пустое
+    состояние честно падает на приоритетный слот, то есть на тот же результат.
+    Идемпотентно: есть хоть какая-то запись customs у тира — уже не «первый
+    раз», чужое (пустое осознанно) не затираем. Не бросает: транспорт и так
+    умеет работать без записей.
+    """
+    tier = _normalize_tier(tier)
+    if tier == "free":
+        return
+    try:
+        if _app_config_read(_tier_key(_CUSTOM_KEY, tier)) is not None:
+            return
+        for base in (_CUSTOM_KEY, _SLOTS_KEY, _ENABLED_KEY, _OVERRIDES_KEY,
+                     _MODEL_TITLES_KEY, _MODEL_SLOTS_KEY):
+            raw = _app_config_read(base)
+            if raw is None:
+                continue
+            try:
+                clone = json.loads(json.dumps(raw, ensure_ascii=False))
+            except (TypeError, ValueError):
+                continue
+            try:
+                _app_config_write(_tier_key(base, tier), clone)
+            except (sqlite3.Error, OSError):
+                return
+    except Exception:
+        pass
+
+
+def _admin_snapshot(tier: str | None = None) -> tuple[dict, dict, dict, dict]:
     """(customs, slots, enabled, overrides) с кэшем на процесс. Не бросает.
 
     Кэш сверяется с версией конфига: запись мимо процесса (скрипт в БД)
@@ -307,31 +365,40 @@ def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
     на протухшем снимке до рестарта. Версия читается ВНЕ лока — держать общий
     замок на время IO нельзя, гонка здесь самолечится следующим чтением."""
     global _admin_cache
+    tier = _normalize_tier(tier)
+    if tier != "free":
+        ensure_tier_clone(tier)
+    custom_key = _tier_key(_CUSTOM_KEY, tier)
+    slots_key = _tier_key(_SLOTS_KEY, tier)
+    enabled_key = _tier_key(_ENABLED_KEY, tier)
+    overrides_key = _tier_key(_OVERRIDES_KEY, tier)
     path = _router_db_path()
     version = _config_version()
     with _admin_cache_lock:
-        if (_admin_cache.get("path") == path and _admin_cache.get("customs") is not None
-                and _admin_cache.get("version") == version):
-            return (_admin_cache["customs"], _admin_cache["slots"],
-                    _admin_cache["enabled"], _admin_cache["overrides"])
+        tiers = _admin_cache.get("tiers") or {}
+        cached = tiers.get(tier) or {}
+        if (_admin_cache.get("path") == path and cached.get("customs") is not None
+                and cached.get("version") == version):
+            return (cached["customs"], cached["slots"],
+                    cached["enabled"], cached["overrides"])
     customs, slots, enabled, overrides = {}, {"high": None, "medium": None, "low": None}, {}, {}
     try:
-        raw_customs = _app_config_read(_CUSTOM_KEY)
+        raw_customs = _app_config_read(custom_key)
         if isinstance(raw_customs, dict):
             for pid, entry in raw_customs.items():
                 if isinstance(pid, str) and isinstance(entry, dict):
                     customs[pid] = entry
-        raw_slots = _app_config_read(_SLOTS_KEY)
+        raw_slots = _app_config_read(slots_key)
         if isinstance(raw_slots, dict):
             for slot in PROVIDER_SLOTS:
                 val = raw_slots.get(slot)
                 slots[slot] = val if isinstance(val, str) and val else None
-        raw_enabled = _app_config_read(_ENABLED_KEY)
+        raw_enabled = _app_config_read(enabled_key)
         if isinstance(raw_enabled, dict):
             for pid, val in raw_enabled.items():
                 if isinstance(pid, str):
                     enabled[pid] = bool(val)
-        raw_overrides = _app_config_read(_OVERRIDES_KEY)
+        raw_overrides = _app_config_read(overrides_key)
         if isinstance(raw_overrides, dict):
             for pid, entry in raw_overrides.items():
                 if isinstance(pid, str) and isinstance(entry, dict):
@@ -339,20 +406,32 @@ def _admin_snapshot() -> tuple[dict, dict, dict, dict]:
     except Exception:
         pass
     with _admin_cache_lock:
-        _admin_cache = {"path": path, "customs": customs, "slots": slots,
-                        "enabled": enabled, "overrides": overrides,
-                        "version": _config_version()}
+        tiers = _admin_cache.get("tiers") or {}
+        tiers[tier] = {"customs": customs, "slots": slots,
+                       "enabled": enabled, "overrides": overrides,
+                       "version": _config_version()}
+        _admin_cache = {"path": path, "tiers": tiers}
     return customs, slots, enabled, overrides
 
 
-def _admin_invalidate() -> None:
+def _admin_invalidate(tier: str | None = None) -> None:
+    """Сбросить кэш снимка (одного тира или всех, если тир не задан)."""
     global _admin_cache, _model_slots_cache
+    want = _normalize_tier(tier) if tier is not None else None
     with _admin_cache_lock:
-        _admin_cache = {"path": _admin_cache.get("path"), "customs": None,
-                        "slots": None, "enabled": None, "overrides": None,
-                        "version": None}
+        if want is None:
+            _admin_cache = {"path": _admin_cache.get("path"), "tiers": {}}
+        else:
+            tiers = _admin_cache.get("tiers") or {}
+            tiers.pop(want, None)
+            _admin_cache = {"path": _admin_cache.get("path"), "tiers": tiers}
     with _model_slots_lock:
-        _model_slots_cache = {"path": _admin_cache.get("path"), "data": None, "version": None}
+        if want is None:
+            _model_slots_cache = {"path": _admin_cache.get("path"), "tiers": {}}
+        else:
+            tiers = _model_slots_cache.get("tiers") or {}
+            tiers.pop(want, None)
+            _model_slots_cache = {"path": _model_slots_cache.get("path"), "tiers": tiers}
 
 
 def reset_providers_cache() -> None:
@@ -364,8 +443,9 @@ def reset_providers_cache() -> None:
 # Человеческие названия моделей — то, что видит ученик
 # ---------------------------------------------------------------------------
 
-def model_title(provider: str, model: str) -> str:
+def model_title(provider: str, model: str, tier: str | None = None) -> str:
     """Название модели, заданное админом ('' — не задано). Не бросает."""
+    tier = _normalize_tier(tier)
     pid = str(provider or "")
     mid = str(model or "")
     if not pid or not mid:
@@ -382,8 +462,9 @@ def model_title(provider: str, model: str) -> str:
     return str(for_model.get(mid) or "").strip()[:120]
 
 
-def set_model_title(provider: str, model: str, title: str) -> str:
+def set_model_title(provider: str, model: str, title: str, tier: str | None = None) -> str:
     """Задать (или снять пустой строкой) название модели. Возвращает итог."""
+    tier = _normalize_tier(tier)
     pid = str(provider or "")
     mid = str(model or "")
     if not pid or not mid:
@@ -403,11 +484,11 @@ def set_model_title(provider: str, model: str, title: str) -> str:
         store[pid] = for_model
     else:
         store.pop(pid, None)
-    _app_config_write(_MODEL_TITLES_KEY, store)
+    _app_config_write(_tier_key(_MODEL_TITLES_KEY, tier), store)
     return clean
 
 
-def set_model_titles(provider: str, mapping: dict) -> dict:
+def set_model_titles(provider: str, mapping: dict, tier: str | None = None) -> dict:
     """Пакетно задать названия моделей провайдера {modelId: title}.
 
     Пустое название снимает подпись с модели. Нужно цепочке: у каждого слота
@@ -415,13 +496,14 @@ def set_model_titles(provider: str, mapping: dict) -> dict:
     покрывает только верх. Без названия строка «проверено моделью» на экране
     результата не рисуется вовсе (см. model_student_label), поэтому цепочка
     без названий — это невидимые проверки. Возвращает {modelId: итог}."""
+    tier = _normalize_tier(tier)
     pid = str(provider or "").strip()
     if not pid:
         raise ValueError("Нужен провайдер для названий моделей")
     if not isinstance(mapping, dict):
         raise ValueError("Названия моделей — объект {модель: название}")
     try:
-        _spec_for(pid)
+        _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     out: dict[str, str] = {}
@@ -431,20 +513,21 @@ def set_model_titles(provider: str, mapping: dict) -> dict:
             continue
         if len(mapping) > 60:
             raise ValueError("Слишком много названий за раз")
-        out[mid] = set_model_title(pid, mid, title)
+        out[mid] = set_model_title(pid, mid, title, tier)
     return out
 
 
-def model_display_title(provider: str, model: str = "") -> str:
+def model_display_title(provider: str, model: str = "", tier: str | None = None) -> str:
     """Подпись модели для АДМИНА: название → id модели → '' (всё, что известно).
 
     Никаких вшитых имён: что админ назвал, то и подписываем. Если название не
     задано, показывается id модели — админу это полезно (видно, что именно
     настроено), ученику такую строку показывать нельзя, для него есть
     `model_student_label`."""
+    tier = _normalize_tier(tier)
     pid = str(provider or "")
     mid = str(model or "")
-    title = model_title(pid, mid)
+    title = model_title(pid, mid, tier)
     if title:
         return title
     if mid:
@@ -456,13 +539,13 @@ def model_display_title(provider: str, model: str = "") -> str:
     if not pid:
         return ""
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
         return str(spec["model"]())[:200]
     except Exception:
         return ""
 
 
-def model_student_label(provider: str, model: str = "") -> str:
+def model_student_label(provider: str, model: str = "", tier: str | None = None) -> str:
     """Подпись для УЧЕНИКА: только то, что админ назвал сам, иначе ''.
 
     Отличие от `model_display_title` намеренное: там откат на id модели —
@@ -470,7 +553,8 @@ def model_student_label(provider: str, model: str = "") -> str:
     grok-chat-fast» была бы шумом из технического id. Лучше не показать строку,
     чем показать служебное; зато админ не пропустит это молча — в панели у
     модели без названия горит чип «нет названия для ученика»."""
-    return model_title(str(provider or ""), str(model or ""))
+    tier = _normalize_tier(tier)
+    return model_title(str(provider or ""), str(model or ""), tier)
 
 
 # Протокол запроса. Обычный — OpenAI `POST {base}/chat/completions`;
@@ -575,12 +659,12 @@ def _custom_spec(entry: dict, overrides: dict | None = None) -> dict:
     }
 
 
-def _builtin_overrides(pid: str) -> dict:
+def _builtin_overrides(pid: str, tier: str | None = None) -> dict:
     """Поля встроенного, наложенные админкой поверх окружения (модель и т.п.).
 
     Пустое переопределение = «как в окружении», поэтому сброс возвращает
     провайдер к деплою, а не ломает его."""
-    _customs, _slots, _enabled, overrides = _admin_snapshot()
+    _customs, _slots, _enabled, overrides = _admin_snapshot(tier)
     entry = overrides.get(pid)
     clean: dict = {}
     if not isinstance(entry, dict):
@@ -595,16 +679,17 @@ def _builtin_overrides(pid: str) -> dict:
     return clean
 
 
-def _spec_for(name: str) -> dict:
+def _spec_for(name: str, tier: str | None = None) -> dict:
+    tier = _normalize_tier(tier)
     key = str(name or "")
     builtin = PROVIDERS.get(key)
     if builtin is not None:
         spec = dict(builtin)
-        _customs, _slots, enabled, _ov = _admin_snapshot()
+        _customs, _slots, enabled, _ov = _admin_snapshot(tier)
         # Ключ/URL/модель встроенного — сначала окружение; сверху админское
         # переопределение, но ТОЛЬКО для кастомных полей (модель, иногда
         # ключ) — окружение по-прежнему может всё переопределить.
-        ov = _builtin_overrides(key)
+        ov = _builtin_overrides(key, tier)
         base_model = spec["model"]
         base_key = spec["key"]
         base_url = spec["base_url"]
@@ -632,7 +717,7 @@ def _spec_for(name: str) -> dict:
         spec["reasoning_effort"] = ""
         spec["extra_headers"] = {}
         return spec
-    customs, _slots, enabled, _ov = _admin_snapshot()
+    customs, _slots, enabled, _ov = _admin_snapshot(tier)
     entry = customs.get(key)
     if entry is None:
         raise KeyError(f"unknown provider {key!r}")
@@ -642,9 +727,10 @@ def _spec_for(name: str) -> dict:
     return spec
 
 
-def known_provider_ids() -> list[str]:
+def known_provider_ids(tier: str | None = None) -> list[str]:
     """Все известные id: встроенные + кастомные из базы."""
-    customs, _slots, _enabled, _ov = _admin_snapshot()
+    tier = _normalize_tier(tier)
+    customs, _slots, _enabled, _ov = _admin_snapshot(tier)
     return list(PROVIDER_PRIORITY) + sorted(customs.keys())
 
 
@@ -666,63 +752,80 @@ def default_slots() -> dict:
     return out
 
 
-def ensure_default_slots() -> dict:
+def ensure_default_slots(tier: str | None = None) -> dict:
     """Материализовать стандартные слоты, если ни один не задан. Идемпотентно.
 
     Пишем один раз — с этого момента порядок виден в админке буквально, и
     смена приоритета любой карточкой честно освобождает прежний слот (уже не
     неявно, а записью в слоты). Пишем только когда НИ ОДИН слот не занят: иначе
-    админ, который освободил слоты нарочно, потерял бы это решение."""
-    _customs, slots, _enabled, _ov = _admin_snapshot()
+    админ, который освободил слоты нарочно, потерял бы это решение.
+
+    Plus легаси-раскладку сам не материализует: начальное состояние Plus —
+    клон free (ensure_tier_clone в snapshot), и писать туда кодовый стандарт
+    означало бы перетирать решения админа кодом."""
+    tier = _normalize_tier(tier)
+    if tier != "free":
+        ensure_default_slots("free")
+        try:
+            if _app_config_read(_tier_key(_SLOTS_KEY, tier)) is None:
+                free_slots = dict((_admin_snapshot("free")[1] or {}))
+                _app_config_write(_tier_key(_SLOTS_KEY, tier), free_slots)
+                _admin_invalidate(tier)
+        except (sqlite3.Error, OSError):
+            pass
+        return _admin_snapshot(tier)[1]
+    _customs, slots, _enabled, _ov = _admin_snapshot(tier)
     if any(slots.get(s) for s in PROVIDER_SLOTS):
         return slots
     defaults = default_slots()
     if not any(defaults.get(s) for s in PROVIDER_SLOTS):
         return slots
     try:
-        _app_config_write(_SLOTS_KEY, defaults)
+        _app_config_write(_tier_key(_SLOTS_KEY, tier), defaults)
     except (sqlite3.Error, OSError):
         return slots
-    _admin_invalidate()
-    _customs, slots, _enabled, _ov = _admin_snapshot()
+    _admin_invalidate(tier)
+    _customs, slots, _enabled, _ov = _admin_snapshot(tier)
     return slots
 
 
-def effective_priority() -> list[str]:
+def effective_priority(tier: str | None = None) -> list[str]:
     """Порядок ротации по слотам: high → medium → low, затем остальные.
 
     Слот, указывающий на неизвестный/отключённый провайдер без ключа,
     пропускается — ротация никогда не зовёт то, чего нет. Если слотов нет
     вовсе (база до миграции, миграция не записалась) — работает кодовый
     порядок PROVIDER_PRIORITY, то есть ровно стандартная раскладка слотов."""
-    customs, slots, _enabled, _ov = _admin_snapshot()
+    tier = _normalize_tier(tier)
+    customs, slots, _enabled, _ov = _admin_snapshot(tier)
     if not any(slots.get(s) for s in PROVIDER_SLOTS):
-        order = [n for n in PROVIDER_PRIORITY if _provider_configured(n)]
-        order += [pid for pid in sorted(customs.keys()) if _provider_configured(pid)]
+        order = [n for n in PROVIDER_PRIORITY if _provider_configured(n, tier)]
+        order += [pid for pid in sorted(customs.keys()) if _provider_configured(pid, tier)]
         return order
     order: list[str] = []
     for slot in PROVIDER_SLOTS:
         pid = slots.get(slot)
-        if isinstance(pid, str) and pid and pid not in order and _provider_configured(pid):
+        if isinstance(pid, str) and pid and pid not in order and _provider_configured(pid, tier):
             order.append(pid)
     for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()):
-        if pid not in order and _provider_configured(pid):
+        if pid not in order and _provider_configured(pid, tier):
             order.append(pid)
     return order
 
 
-def _slot_of(pid: str) -> str | None:
-    _customs, slots, _enabled, _ov = _admin_snapshot()
+def _slot_of(pid: str, tier: str | None = None) -> str | None:
+    tier = _normalize_tier(tier)
+    _customs, slots, _enabled, _ov = _admin_snapshot(tier)
     for slot in PROVIDER_SLOTS:
         if slots.get(slot) == pid:
             return slot
     return None
 
 
-def provider_title(name: str) -> str:
+def provider_title(name: str, tier: str | None = None) -> str:
     """Человеческое имя провайдера для сообщений админу (fallback — сам id)."""
     try:
-        spec = _spec_for(str(name or ""))
+        spec = _spec_for(str(name or ""), tier)
     except KeyError:
         return str(name or "").strip()
     title = spec.get("title") if isinstance(spec, dict) else ""
@@ -934,8 +1037,8 @@ def reset_ai_rate() -> None:
 # удалась — failover всё равно действует внутри процесса до рестарта.
 # ---------------------------------------------------------------------------
 _ROUTER_KEY = "ai_router"
-_router_cache: dict | None = None
-_router_cache_version: int | None = None
+_router_cache: dict = {}
+_router_cache_version: dict = {}
 _router_lock = threading.Lock()
 
 
@@ -946,12 +1049,12 @@ def _router_db_path() -> str:
     return str(Path(__file__).resolve().parent / "ege.sqlite3")
 
 
-def _load_router_state() -> dict:
+def _load_router_state(tier: str | None = None) -> dict:
     try:
         conn = sqlite3.connect(f"file:{_router_db_path()}?mode=ro", uri=True, timeout=3.0)
         try:
             row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
-                               (_ROUTER_KEY,)).fetchone()
+                               (_tier_key(_ROUTER_KEY, tier),)).fetchone()
         finally:
             conn.close()
         if row:
@@ -963,30 +1066,36 @@ def _load_router_state() -> dict:
     return {}
 
 
-def _router_state() -> dict:
+def _router_state(tier: str | None = None) -> dict:
     global _router_cache, _router_cache_version
+    tier = _normalize_tier(tier)
     version = _config_version()
     with _router_lock:
-        if _router_cache is None or _router_cache_version != version:
-            _router_cache = _load_router_state()
-            _router_cache_version = _config_version()
-        return dict(_router_cache)
+        cached = _router_cache.get(tier)
+        if cached is None or _router_cache_version.get(tier) != version:
+            cached = _load_router_state(tier)
+            _router_cache[tier] = cached
+            _router_cache_version[tier] = _config_version()
+        return dict(cached)
 
 
-def _router_update(patch: dict) -> dict:
+def _router_update(patch: dict, tier: str | None = None) -> dict:
     """Слить patch в состояние роутера (память + app_config). Не бросает."""
     global _router_cache, _router_cache_version
+    tier = _normalize_tier(tier)
+    key = _tier_key(_ROUTER_KEY, tier)
     with _router_lock:
-        state = dict(_router_cache) if _router_cache is not None else _load_router_state()
+        cached = _router_cache.get(tier)
+        state = dict(cached) if cached is not None else _load_router_state(tier)
         state.update(patch)
-        _router_cache = dict(state)
+        _router_cache[tier] = dict(state)
     try:
         conn = sqlite3.connect(_router_db_path(), timeout=5.0)
         try:
             conn.execute("CREATE TABLE IF NOT EXISTS app_config "
                          "(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
             conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
-                         (_ROUTER_KEY, json.dumps(state, ensure_ascii=False)))
+                         (key, json.dumps(state, ensure_ascii=False)))
             _bump_config_version(conn)
             conn.commit()
         finally:
@@ -994,7 +1103,7 @@ def _router_update(patch: dict) -> dict:
     except (sqlite3.Error, OSError) as exc:
         print(f"EGE CORE ai: router state not saved: {exc}", file=sys.stderr, flush=True)
     with _router_lock:
-        _router_cache_version = _config_version()
+        _router_cache_version[tier] = _config_version()
     return state
 
 
@@ -1002,13 +1111,13 @@ def reset_router() -> None:
     """Тестовый хук: забыть кэш состояния (строку в БД не трогает)."""
     global _router_cache, _router_cache_version
     with _router_lock:
-        _router_cache = None
-        _router_cache_version = None
+        _router_cache = {}
+        _router_cache_version = {}
 
 
-def _provider_configured(name: str) -> bool:
+def _provider_configured(name: str, tier: str | None = None) -> bool:
     try:
-        spec = _spec_for(name)
+        spec = _spec_for(name, tier)
     except KeyError:
         return False
     if spec.get("enabled") is False:
@@ -1020,42 +1129,44 @@ def _provider_configured(name: str) -> bool:
         return False
 
 
-def _provider_enabled(name: str) -> bool:
+def _provider_enabled(name: str, tier: str | None = None) -> bool:
     try:
-        spec = _spec_for(name)
+        spec = _spec_for(name, tier)
     except KeyError:
         return False
     return spec.get("enabled") is not False
 
 
-def active_provider() -> str | None:
+def active_provider(tier: str | None = None) -> str | None:
     """Кого звать первым: сохранённый активный, иначе приоритетный настроенный."""
-    stored = str(_router_state().get("active") or "")
-    if stored and _provider_configured(stored):
+    tier = _normalize_tier(tier)
+    stored = str(_router_state(tier).get("active") or "")
+    if stored and _provider_configured(stored, tier):
         return stored
-    for name in effective_priority():
-        if _provider_configured(name):
+    for name in effective_priority(tier):
+        if _provider_configured(name, tier):
             return name
     return None
 
 
-def _ordered_providers() -> list:
+def _ordered_providers(tier: str | None = None) -> list:
     """Порядок попыток: активный первым, за ним остальные по приоритету.
 
     Провайдер после PROVIDER_DEMOTE_AFTER подряд отказов едет в конец очереди:
     следующие запросы сначала идут на живых и не ждут его таймаут (45 с), а
     понижение снимается первым же успехом. Если понижены все — порядок обычный
     приоритетный: пропускать некого, пробуем всех по очереди."""
-    active = active_provider()
+    tier = _normalize_tier(tier)
+    active = active_provider(tier)
     if active is None:
         return []
-    priority = [name for name in effective_priority() if _provider_configured(name)]
+    priority = [name for name in effective_priority(tier) if _provider_configured(name, tier)]
     if active not in priority:
         priority = [active] + priority
-    if not any(_provider_demoted(n) for n in priority):
+    if not any(_provider_demoted(n, tier) for n in priority):
         return [active] + [name for name in priority if name != active]
-    healthy = [n for n in priority if not _provider_demoted(n)]
-    sick = [n for n in priority if _provider_demoted(n)]
+    healthy = [n for n in priority if not _provider_demoted(n, tier)]
+    sick = [n for n in priority if _provider_demoted(n, tier)]
     if active in healthy:
         return [active] + [n for n in healthy if n != active] + sick
     return healthy + sick
@@ -1097,10 +1208,10 @@ def _ordered_providers() -> list:
 _JUDGE_KEY = "ai_essay_judge"
 
 
-def _judge_slot() -> dict:
+def _judge_slot(tier: str | None = None) -> dict:
     """Что записано про судью сочинений: {} — не назначали. Не бросает."""
     try:
-        raw = _app_config_read(_JUDGE_KEY)
+        raw = _app_config_read(_tier_key(_JUDGE_KEY, tier))
     except Exception:
         return {}
     if isinstance(raw, str):
@@ -1108,21 +1219,22 @@ def _judge_slot() -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
-def judge_preferred() -> str | None:
+def judge_preferred(tier: str | None = None) -> str | None:
     """Кого админ считает судьёй по умолчанию: явный выбор, иначе приоритет.
 
     Значение читается из слота «Высокий» (`effective_priority()[0]`), то есть
     из того же места, откуда берёт порядок весь роутер: отдельной настройки
     «кто главный» в проекте нет и не должно появиться.
     """
-    explicit = str(_judge_slot().get("provider") or "").strip()
+    tier = _normalize_tier(tier)
+    explicit = str(_judge_slot(tier).get("provider") or "").strip()
     if explicit:
         return explicit
-    priority = effective_priority()
-    return priority[0] if priority else active_provider()
+    priority = effective_priority(tier)
+    return priority[0] if priority else active_provider(tier)
 
 
-def judge_provider() -> str | None:
+def judge_provider(tier: str | None = None) -> str | None:
     """Провайдер, который СЕЙЧАС оценивает содержание сочинений.
 
     Порядок: явное назначение админа → автопереключение после отказа судьи
@@ -1133,33 +1245,35 @@ def judge_provider() -> str | None:
     или удалённый провайдер молча игнорируется — судья никогда не «не
     настроен» из-за битой строки в базе.
     """
-    slot = _judge_slot()
+    tier = _normalize_tier(tier)
+    slot = _judge_slot(tier)
     explicit = str(slot.get("provider") or "").strip()
-    if explicit and _provider_configured(explicit):
+    if explicit and _provider_configured(explicit, tier):
         return explicit
     if explicit:
         # Явно назначенного больше нет — работаем на судье по умолчанию.
-        return judge_preferred()
+        return judge_preferred(tier)
     auto = str(slot.get("auto") or "").strip()
-    if auto and _provider_configured(auto):
+    if auto and _provider_configured(auto, tier):
         return auto
-    return judge_preferred()
+    return judge_preferred(tier)
 
 
-def judge_fallback() -> str | None:
+def judge_fallback(tier: str | None = None) -> str | None:
     """Запасной судья: первый настроенный провайдер, кроме назначенного.
 
     Нужен ровно для одного случая — судья недоступен целиком. Пустой ответ
     означает «запасного нет»: проверку честнее отдать ошибкой, чем считать
     другим прибором молча."""
-    chosen = judge_provider()
-    for name in effective_priority():
-        if name != chosen and _provider_configured(name):
+    tier = _normalize_tier(tier)
+    chosen = judge_provider(tier)
+    for name in effective_priority(tier):
+        if name != chosen and _provider_configured(name, tier):
             return name
     return None
 
 
-def judge_provider_set(provider: str | None) -> dict:
+def judge_provider_set(provider: str | None, tier: str | None = None) -> dict:
     """Назначить судью сочинений ('' или None — снять назначение).
 
     Пишет строку в app_config и возвращает, что получилось: админке нужно
@@ -1167,17 +1281,18 @@ def judge_provider_set(provider: str | None) -> dict:
     назначения заодно убирает автопереключение: админ явно вернулся к
     настройке по умолчанию, и старое «судья падал вчера» не должно её
     подменять."""
+    tier = _normalize_tier(tier)
     value = str(provider or "").strip()
-    if value and not _provider_configured(value):
+    if value and not _provider_configured(value, tier):
         raise AIInputError("провайдер не настроен или отключён")
     if value:
-        _app_config_write(_JUDGE_KEY, {"provider": value})
+        _app_config_write(_tier_key(_JUDGE_KEY, tier), {"provider": value})
     else:
-        _app_config_write(_JUDGE_KEY, {})
-    return {"judge": judge_provider(), "explicit": bool(value)}
+        _app_config_write(_tier_key(_JUDGE_KEY, tier), {})
+    return {"judge": judge_provider(tier), "explicit": bool(value)}
 
 
-def judge_providers_order() -> list:
+def judge_providers_order(tier: str | None = None) -> list:
     """Порядок попыток для проверки сочинения: судья, затем запасные.
 
     Запасных может быть несколько — все настроенные провайдеры кроме судьи
@@ -1185,66 +1300,71 @@ def judge_providers_order() -> list:
     запасной всё равно фиксируется (`judge_failover` + `model` у проверки),
     так что баллы после смены прибора несравнимы, сколько бы провайдеров
     ни участвовало в цепочке."""
+    tier = _normalize_tier(tier)
     names: list[str] = []
-    first = judge_provider()
+    first = judge_provider(tier)
     if first:
         names.append(first)
-    for name in effective_priority():
+    for name in effective_priority(tier):
         if name and name not in names:
             names.append(name)
     return names
 
 
-def judge_failover(to: str) -> None:
+def judge_failover(to: str, tier: str | None = None) -> None:
     """Судья отказал и его место занял запасной: запомнить и объявить.
 
     Залипание (`auto`) снимает таймаут на мёртвый шлюз у следующих проверок,
     а `probe_tick` вернёт прежнего судью, как только тот ответит. Не бросает:
     оценка ученика важнее записи в конфиг."""
-    preferred = judge_preferred()
+    tier = _normalize_tier(tier)
+    preferred = judge_preferred(tier)
     try:
-        if not _judge_slot().get("provider"):
-            _app_config_write(_JUDGE_KEY, {"auto": str(to or ""),
-                                           "from": str(preferred or ""),
-                                           "at": int(time.time() * 1000)})
+        if not _judge_slot(tier).get("provider"):
+            _app_config_write(_tier_key(_JUDGE_KEY, tier), {"auto": str(to or ""),
+                                                           "from": str(preferred or ""),
+                                                           "at": int(time.time() * 1000)})
     except Exception:
         pass
-    _note_judge_switch(str(preferred or ""), str(to or ""), "судья недоступен")
+    _note_judge_switch(str(preferred or ""), str(to or ""), "судья недоступен", tier)
 
 
-def _note_judge_switch(frm: str, to: str, reason: str) -> None:
+def _note_judge_switch(frm: str, to: str, reason: str, tier: str | None = None) -> None:
     """Смена судьи проверки — событие уровня системы, а не строчка в отчёте.
 
     Пишем и в лог, и в ленту обращений (таблетка «Система»): после смены
     модели баллы за содержание несравнимы между собой, и админ должен узнать
     об этом в момент события. Не бросает — проверка ученика важнее ленты."""
+    tier = _normalize_tier(tier)
+    suffix = f" [{TIER_LABELS[tier]}]" if tier != "free" else ""
     try:
-        print(f"EGE CORE ai: судья сочинений сменён {frm or '—'} → {to} ({reason})",
+        print(f"EGE CORE ai: судья сочинений сменён {frm or '—'} → {to} ({reason}){suffix}",
               file=sys.stderr)
     except Exception:
         pass
     try:
         _notify_system({"kind": "judge_switch", "from": frm, "to": to,
-                        "reason": reason[:200], "at": int(time.time() * 1000)})
+                        "reason": (reason + suffix)[:200], "at": int(time.time() * 1000)})
     except Exception:
         pass
 
 
-def _fails_counts() -> dict:
+def _fails_counts(tier: str | None = None) -> dict:
     """Счётчик подряд идущих отказов из ai_router (поле "fails").
 
     Живёт в БД, а не в памяти: переживает рестарт и сбрасывается вместе со
     строкой роутера. Гонка двух параллельных отказов может потерять один
     инкремент — последствие лишь отложенное на один отказ понижение, а не
     неверное решение (конкурентных вызовов не больше AI_MAX_CONCURRENCY)."""
+    tier = _normalize_tier(tier)
     try:
-        raw = _router_state().get("fails")
+        raw = _router_state(tier).get("fails")
     except Exception:
         return {}
     if not isinstance(raw, dict):
         return {}
     try:
-        known = set(known_provider_ids())
+        known = set(known_provider_ids(tier))
     except Exception:
         known = set()
     out: dict[str, int] = {}
@@ -1257,18 +1377,19 @@ def _fails_counts() -> dict:
     return out
 
 
-def _provider_demoted(name: str) -> bool:
+def _provider_demoted(name: str, tier: str | None = None) -> bool:
     """Провайдер после PROVIDER_DEMOTE_AFTER подряд отказов — в конец очереди.
 
     Проверка дешёвая (одно чтение кэша роутера) и стоит в hot path каждого
     запроса через _ordered_providers."""
     try:
-        return _fails_counts().get(str(name), 0) >= PROVIDER_DEMOTE_AFTER
+        return _fails_counts(tier).get(str(name), 0) >= PROVIDER_DEMOTE_AFTER
     except Exception:
         return False
 
 
-def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None) -> None:
+def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None,
+                           tier: str | None = None) -> None:
     """Отказ провайдера: записать и, если сломался активный, переключить его.
 
     Переключение оптимистичное — на того, кого chat() попробует следующим;
@@ -1276,62 +1397,67 @@ def _note_provider_failure(name: str, exc: BaseException, switch_to: str | None)
     упавшими нет, т.к. переключает только отказ текущего активного).
     Отказ — это тоже свежая информация о здоровье: lastProbeAt двигается,
     и фоновая проба придёт не раньше чем через интервал после него."""
+    tier = _normalize_tier(tier)
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
-        _provider_last_err[name] = (now_ms, f"{type(exc).__name__}: {exc}"[:300])
+        _provider_last_err[(tier, name)] = (now_ms, f"{type(exc).__name__}: {exc}"[:300])
     patch: dict[str, Any] = {"lastError": f"{name}: {type(exc).__name__}: {exc}"[:300],
                              "lastErrorAt": now_ms, "lastProbeAt": now_ms}
     # Подряд идущий отказ: первый уже двигает активного ниже, повторный подряд
     # понижает провайдера в конец очереди (_provider_demoted), чтобы следующие
     # запросы не ждали его таймаут. Успех обнуляет счётчик.
-    fails = _fails_counts()
+    fails = _fails_counts(tier)
     fails[str(name)] = fails.get(str(name), 0) + 1
     patch["fails"] = fails
-    current = str(_router_state().get("active") or "")
+    current = str(_router_state(tier).get("active") or "")
     if switch_to and current in ("", name):
         patch["active"] = switch_to
         print(f"EGE CORE ai: провайдер {name} недоступен ({exc}); "
               f"активный теперь {switch_to}", file=sys.stderr, flush=True)
-    _router_update(patch)
+    _router_update(patch, tier)
     if patch.get("active"):
         # Смена активного — событие для ленты админа. Отказ самого запасного
         # (switch_to пуст) — не смена, о нём скажет provider_outage из chat().
+        suffix = f" [{TIER_LABELS[tier]}]" if tier != "free" else ""
         _notify_system({"kind": "provider_switch", "from": name, "to": switch_to,
-                        "reason": f"{type(exc).__name__}: {exc}"[:200], "at": now_ms})
+                        "reason": (f"{type(exc).__name__}: {exc}" + suffix)[:200],
+                        "at": now_ms})
 
 
-def _note_provider_success(name: str) -> None:
+def _note_provider_success(name: str, tier: str | None = None) -> None:
     """Успех фиксирует активного: реальный трафик — тоже сигнал восстановления.
 
     Заодно снимает понижение за отказы: ответивший провайдер снова в ротации
     на своём приоритетном месте."""
+    tier = _normalize_tier(tier)
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
-        _provider_last_ok[name] = now_ms
+        _provider_last_ok[(tier, name)] = now_ms
     patch: dict[str, Any] = {}
-    fails = _fails_counts()
+    fails = _fails_counts(tier)
     if fails.pop(str(name), None) is not None:
         patch["fails"] = fails
-    if str(_router_state().get("active") or "") not in ("", name):
+    if str(_router_state(tier).get("active") or "") not in ("", name):
         patch["active"] = name
         patch["updatedAt"] = now_ms
     if patch:
-        _router_update(patch)
+        _router_update(patch, tier)
 
 
-def _note_probe_success(name: str) -> None:
+def _note_probe_success(name: str, tier: str | None = None) -> None:
     """Фоновая проба прошла: снять понижение и отметить живость.
 
     Активного НЕ меняет — его ставит вызыватель (probe_tick выбирает высшего
     живого кандидата сам). Метки last_ok/last_err — те же, что ставит ручная
     проба из админки: провайдер отвечал, и это правда про последние 60 секунд."""
+    tier = _normalize_tier(tier)
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
-        _provider_last_ok[name] = now_ms
-    fails = _fails_counts()
+        _provider_last_ok[(tier, name)] = now_ms
+    fails = _fails_counts(tier)
     if str(name) in fails:
         fails.pop(str(name), None)
-        _router_update({"fails": fails})
+        _router_update({"fails": fails}, tier)
 
 
 # ---------------------------------------------------------------------------
@@ -1369,7 +1495,7 @@ def _notify_system(event: dict) -> None:
 # ---------------------------------------------------------------------------
 # Transport — the single call every format goes through
 # ---------------------------------------------------------------------------
-def _wire_messages(provider: str, messages: list) -> list:
+def _wire_messages(provider: str, messages: list, tier: str | None = None) -> list:
     """Причесать messages под провайдера (quirk merge_system).
 
     У closerouter маршрут anthropic молча роняет роль system (замерено живьём:
@@ -1377,7 +1503,7 @@ def _wire_messages(provider: str, messages: list) -> list:
     промпт подклеивается к первому user-сообщению. gptunnel системную роль
     выполняет — его сообщения не трогаем.
     """
-    spec = _spec_for(provider)
+    spec = _spec_for(provider, tier)
     if not spec.get("merge_system"):
         return messages
     if len(messages) >= 2 and messages[0].get("role") == "system":
@@ -1395,19 +1521,20 @@ def _wire_messages(provider: str, messages: list) -> list:
 _chat_state = threading.local()
 
 
-def _model_of(provider: str, requested: str | None = None) -> str:
+def _model_of(provider: str, requested: str | None = None, tier: str | None = None) -> str:
     """Id модели, по которой ПОНИМАЕМ уйти провайдеру (явный аргумент важнее
     настроек: chat(model=...) зовут с конкретной моделью)."""
+    tier = _normalize_tier(tier)
     if requested:
         return str(requested)[:200]
     try:
-        primary = provider_primary_model(str(provider or ""))
+        primary = provider_primary_model(str(provider or ""), tier)
         if primary:
             return primary
     except Exception:
         pass
     try:
-        spec = _spec_for(provider)
+        spec = _spec_for(provider, tier)
         return str(spec["model"]())[:200]
     except Exception:
         return ""
@@ -1708,7 +1835,7 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
                       timeout: float | None = None, max_tokens: int | None = None,
                       temperature: float | None = None,
                       tools: list | None = None, tool_choice=None,
-                      reasoning_effort: str | None = None) -> dict:
+                      reasoning_effort: str | None = None, tier: str | None = None) -> dict:
     """Один HTTP-вызов, возвращающий сырое message (content + tool_calls).
 
     `reasoning_effort` — явный уровень мышления (minimal|low|medium|high);
@@ -1716,8 +1843,9 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
     пусто = default шлюза). Протокол берётся из спека: responses-провайдеры
     идут через `_responses_via_message`, остальные — как раньше.
     """
+    tier = _normalize_tier(tier)
     try:
-        spec = _spec_for(provider)
+        spec = _spec_for(provider, tier)
     except KeyError:
         raise AIUnavailable("AI не настроен") from None
     try:
@@ -1765,7 +1893,7 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
             temperature=temperature, tools=tools, tool_choice=tool_choice)
     body: dict[str, Any] = {
         "model": model or model_value,
-        "messages": _wire_messages(provider, messages),
+        "messages": _wire_messages(provider, messages, tier),
     }
     body.update(spec.get("extra_body") or {})
     if max_tokens:
@@ -1819,7 +1947,8 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
     return message
 
 
-def _expand_chat_plan(names: list, explicit_model: str | None = None) -> list:
+def _expand_chat_plan(names: list, explicit_model: str | None = None,
+                     tier: str | None = None) -> list:
     """Развернуть провайдеров в план (провайдер, модель) по цепочкам моделей.
 
     Явная модель важнее цепочек: chat(model=...) зовут с конкретной моделью
@@ -1827,13 +1956,14 @@ def _expand_chat_plan(names: list, explicit_model: str | None = None) -> list:
     столько попыток, сколько моделей в его цепочке (high → medium → low).
     Провайдер с пустой цепочкой пропускается: «нет моделей» — честный пропуск,
     а не молчаливый откат на старую одиночную модель."""
+    tier = _normalize_tier(tier)
     plan: list = []
     for prov in names or []:
         if explicit_model:
             plan.append((prov, explicit_model))
             continue
         try:
-            chain = provider_model_chain(prov)
+            chain = provider_model_chain(prov, tier)
         except Exception:
             chain = []
         if not chain:
@@ -1866,7 +1996,7 @@ def _next_plan_provider(plan: list, idx: int) -> str | None:
 def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = None,
                     timeout: float | None = None, max_tokens: int | None = None,
                     temperature: float | None = None, tool_choice=None,
-                    state: dict | None = None, reasoning_effort: str | None = None) -> dict:
+                    state: dict | None = None, reasoning_effort: str | None = None, tier: str | None = None) -> dict:
     """chat() для цикла агента: failover + слот + строгий парсер tool-ответа.
 
     Возвращает {"text": str|None, "tool_calls": [...], "preamble": str|None}.
@@ -1877,14 +2007,15 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
     `reasoning_effort` — явный уровень мышления для reasoning-провайдеров
     (responses); None = default из настроек провайдера.
     """
+    tier = _normalize_tier(tier)
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
     if not isinstance(tools, list) or not tools:
         raise AIInputError("tools должен быть непустым списком")
-    names = _ordered_providers()
+    names = _ordered_providers(tier)
     if not names:
         raise AIUnavailable("AI не настроен")
-    plan = _expand_chat_plan(names, model)
+    plan = _expand_chat_plan(names, model, tier)
     if not plan:
         raise AIUnavailable("AI не настроен")
     if not _ai_slots.acquire(timeout=AI_SLOT_WAIT_SEC):
@@ -1901,12 +2032,12 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
                 message = _chat_via_message(name, messages, model=want_model, timeout=timeout,
                                             max_tokens=max_tokens, temperature=temperature,
                                             tools=tools, tool_choice=tool_choice,
-                                            reasoning_effort=reasoning_effort)
+                                            reasoning_effort=reasoning_effort, tier=tier)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
                 if _is_provider_level_error(exc):
                     failed.add(name)
-                    _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                    _note_provider_failure(name, exc, _next_plan_provider(plan, index), tier)
                 else:
                     # Ошибка уровня модели (404/500 по конкретной модели):
                     # пробуем следующую модель того же провайдера, а провал
@@ -1914,13 +2045,13 @@ def chat_with_tools(messages: list[dict], tools: list, *, model: str | None = No
                     rest_same = any(p == name for p, _ in plan[index + 1:] if p not in failed)
                     if not rest_same:
                         failed.add(name)
-                        _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                        _note_provider_failure(name, exc, _next_plan_provider(plan, index), tier)
                 continue
             # Парсер — после успеха транспорта: форматная ошибка не failover.
             parsed = parse_tool_message(message)
-            _note_provider_success(name)
+            _note_provider_success(name, tier)
             _chat_state.provider = name
-            _chat_state.model = _model_of(name, want_model)
+            _chat_state.model = _model_of(name, want_model, tier)
             if state is not None:
                 state["provider"] = name
             return parsed
@@ -1936,7 +2067,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
          max_tokens: int | None = None, temperature: float | None = None,
          state: dict | None = None, tools: list | None = None,
          tool_choice=None, as_judge: bool = False,
-         reasoning_effort: str | None = None):
+         reasoning_effort: str | None = None, tier: str | None = None):
     """Send a chat completion and return the assistant text.
 
     `messages` is the OpenAI shape ([{"role": ..., "content": ...}, ...]) and is
@@ -1948,7 +2079,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     None означает high: измерение по рубрике обязано думать в полную силу, а
     не экономить. Наставник передаёт minimal явно из `_agent_chat_fn`.
 
-    Failover: провайдеры идут в порядке _ordered_providers() (активный
+    Failover: провайдеры идут в порядке _ordered_providers(tier) (активный
     первым), внутри провайдера — его цепочка моделей (high → medium → low).
     Отказ молча переносит ЭТОТ ЖЕ запрос на следующую модель/провайдера:
     ошибка сети/ключа — сразу на следующего провайдера (остальные модели того
@@ -1966,6 +2097,7 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
     С tools — режим агента: возвращается {"text","tool_calls"} (см.
     chat_with_tools), текст и вызовы одновременно запрещены парсером.
     """
+    tier = _normalize_tier(tier)
     if as_judge and reasoning_effort is None:
         # Судья меряет баллы — ему полное мышление независимо от default
         # провайдера (у дешёвого дефолта minimal оценку ставить нельзя).
@@ -1974,13 +2106,13 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
         return chat_with_tools(messages, tools, model=model, timeout=timeout,
                                max_tokens=max_tokens, temperature=temperature,
                                tool_choice=tool_choice, state=state,
-                               reasoning_effort=reasoning_effort)
+                               reasoning_effort=reasoning_effort, tier=tier)
     if not isinstance(messages, list) or not messages:
         raise AIError("пустой список сообщений")
-    names = judge_providers_order() if as_judge else _ordered_providers()
+    names = judge_providers_order(tier) if as_judge else _ordered_providers(tier)
     if not names:
         raise AIUnavailable("AI не настроен")
-    plan = _expand_chat_plan(names, model)
+    plan = _expand_chat_plan(names, model, tier)
     if not plan:
         raise AIUnavailable("AI не настроен")
     # Слот — один на весь вызов, включая переключение провайдеров: это бюджет
@@ -1999,17 +2131,17 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
             try:
                 answer = _chat_via(name, messages, model=want_model, timeout=timeout,
                                    max_tokens=max_tokens, temperature=temperature,
-                                   reasoning_effort=reasoning_effort)
+                                   reasoning_effort=reasoning_effort, tier=tier)
             except (AIError, AIUnavailable) as exc:
                 last_exc = exc
                 if _is_provider_level_error(exc):
                     failed.add(name)
-                    _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                    _note_provider_failure(name, exc, _next_plan_provider(plan, index), tier)
                 else:
                     rest_same = any(p == name for p, _ in plan[index + 1:] if p not in failed)
                     if not rest_same:
                         failed.add(name)
-                        _note_provider_failure(name, exc, _next_plan_provider(plan, index))
+                        _note_provider_failure(name, exc, _next_plan_provider(plan, index), tier)
                 continue
             if as_judge and name != names[0]:
                 # Судья отказал, отвечает ЗАПАСНОЙ ПРОВАЙДЕР: измерение сменило
@@ -2020,10 +2152,10 @@ def chat(messages: list[dict], *, model: str | None = None, timeout: float | Non
                 # смена прибора: auto-залипание здесь плодило бы вечный чип
                 # «подменён после отказа» при неизменном судье. Какая модель
                 # ответила, и так пишется рядом с каждой проверкой.
-                judge_failover(name)
-            _note_provider_success(name)
+                judge_failover(name, tier)
+            _note_provider_success(name, tier)
             _chat_state.provider = name
-            _chat_state.model = _model_of(name, want_model)
+            _chat_state.model = _model_of(name, want_model, tier)
             if state is not None:
                 state["provider"] = name
                 state["model"] = _chat_state.model
@@ -2064,7 +2196,7 @@ def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
               timeout: float | None = None, max_tokens: int | None = None,
               temperature: float | None = None,
               tools: list | None = None, tool_choice=None,
-              reasoning_effort: str | None = None):
+              reasoning_effort: str | None = None, tier: str | None = None):
     """Один HTTP-вызов конкретного провайдера. Без failover и без слота —
     это забота chat() (и проба probe_tick зовёт напрямую сюда).
 
@@ -2072,10 +2204,11 @@ def _chat_via(provider: str, messages: list[dict], *, model: str | None = None,
     вместе с вызовами допустима — см. parse_tool_message), без — сырой текст
     (legacy путь проверок сочинений).
     """
+    tier = _normalize_tier(tier)
     message = _chat_via_message(provider, messages, model=model, timeout=timeout,
                                 max_tokens=max_tokens, temperature=temperature,
                                 tools=tools, tool_choice=tool_choice,
-                                reasoning_effort=reasoning_effort)
+                                reasoning_effort=reasoning_effort, tier=tier)
     if tools is not None:
         return parse_tool_message(message)
     try:
@@ -2158,11 +2291,12 @@ def _base_host(base_url: str) -> str:
 
 
 def validate_custom_payload(payload: dict, *, is_update: bool = False,
-                            existing_id: str | None = None) -> dict:
+                            existing_id: str | None = None, tier: str | None = None) -> dict:
     """Проверить поля кастомного провайдера. Возвращает clean dict.
 
     Бросает ValueError с человеческим текстом. При update отсутствующие поля
     означают «не менять» (ключ: пустая строка = не менять тоже)."""
+    tier = _normalize_tier(tier)
     if not isinstance(payload, dict):
         raise ValueError("Некорректный запрос")
     clean: dict = {}
@@ -2174,7 +2308,7 @@ def validate_custom_payload(payload: dict, *, is_update: bool = False,
             raise ValueError("id — латиница/цифры/дефис/подчёркивание, 2–32 символа")
         if pid in PROVIDERS:
             raise ValueError(f"id «{pid}» уже занят встроенным провайдером")
-        customs, _slots, _enabled, _ov = _admin_snapshot()
+        customs, _slots, _enabled, _ov = _admin_snapshot(tier)
         if pid in customs:
             raise ValueError(f"Провайдер «{pid}» уже существует")
         clean["id"] = pid
@@ -2273,10 +2407,11 @@ def validate_custom_payload(payload: dict, *, is_update: bool = False,
     return clean
 
 
-def custom_provider_create(clean: dict) -> dict:
+def custom_provider_create(clean: dict, tier: str | None = None) -> dict:
     """Сохранить нового провайдера. clean — из validate_custom_payload."""
-    ensure_default_slots()  # иначе «Высокий» новому тихо отнял бы слот у closerouter
-    customs, slots, _enabled, _ov = _admin_snapshot()
+    tier = _normalize_tier(tier)
+    ensure_default_slots(tier)  # иначе «Высокий» новому тихо отнял бы слот у closerouter
+    customs, slots, _enabled, _ov = _admin_snapshot(tier)
     pid = clean["id"]
     if pid in PROVIDERS or pid in customs:
         raise ValueError(f"Провайдер «{pid}» уже существует")
@@ -2316,7 +2451,7 @@ def custom_provider_create(clean: dict) -> dict:
     # встроенного провайдера, и при переключении модели оно не должно
     # затирать ничего, кроме самой пары (провайдер, модель).
     try:
-        set_model_title(pid, entry["model"], clean.get("model_title") or "")
+        set_model_title(pid, entry["model"], clean.get("model_title") or "", tier)
     except (sqlite3.Error, OSError):
         pass
     slot = clean.get("slot")
@@ -2328,23 +2463,24 @@ def custom_provider_create(clean: dict) -> dict:
             if other != slot and slots.get(other) == pid:
                 slots[other] = None
         slots[slot] = pid
-    _app_config_write(_CUSTOM_KEY, customs)
-    _app_config_write(_SLOTS_KEY, slots)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
+    _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
+    _admin_invalidate(tier)
     # Новый провайдер сразу получает цепочку из своей модели (high) — иначе
     # карточка показывала бы «цепочки нет», а запросы шли бы на одиночную.
     try:
-        all_chains = _read_model_slots_all()
+        all_chains = _read_model_slots_all(tier)
         all_chains[pid] = {"high": entry["model"], "medium": None, "low": None}
-        _write_model_slots_all(all_chains)
+        _write_model_slots_all(all_chains, tier)
     except Exception:
         pass
     return entry
 
 
-def custom_provider_update(pid: str, patch: dict) -> dict:
+def custom_provider_update(pid: str, patch: dict, tier: str | None = None) -> dict:
     """Частично обновить кастомного провайдера. Пустой ключ = оставить старый."""
-    customs, _slots, _enabled, _ov = _admin_snapshot()
+    tier = _normalize_tier(tier)
+    customs, _slots, _enabled, _ov = _admin_snapshot(tier)
     entry = customs.get(pid)
     if entry is None:
         raise KeyError(f"unknown provider {pid!r}")
@@ -2373,23 +2509,24 @@ def custom_provider_update(pid: str, patch: dict) -> dict:
         entry["enabled"] = bool(patch["enabled"])
     entry["updated_at"] = int(time.time() * 1000)
     customs[pid] = entry
-    _app_config_write(_CUSTOM_KEY, customs)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
+    _admin_invalidate(tier)
     if "model" in patch and patch.get("model"):
         try:
-            _sync_chain_to_legacy_model(pid, str(patch["model"]))
+            _sync_chain_to_legacy_model(pid, str(patch["model"]), tier)
         except Exception:
             pass
     if "model_titles" in patch and isinstance(patch["model_titles"], dict):
         try:
-            set_model_titles(pid, patch["model_titles"])
+            set_model_titles(pid, patch["model_titles"], tier)
         except (KeyError, ValueError) as exc:
             raise ValueError(str(exc) or "Не удалось сохранить названия")
     return entry
 
 
-def custom_provider_delete(pid: str) -> None:
-    customs, slots, _enabled, overrides = _admin_snapshot()
+def custom_provider_delete(pid: str, tier: str | None = None) -> None:
+    tier = _normalize_tier(tier)
+    customs, slots, _enabled, overrides = _admin_snapshot(tier)
     if pid in PROVIDERS:
         raise ValueError("Встроенный провайдер удалить нельзя — его можно только отключить")
     if pid not in customs:
@@ -2398,40 +2535,41 @@ def custom_provider_delete(pid: str) -> None:
     for slot in PROVIDER_SLOTS:
         if slots.get(slot) == pid:
             slots[slot] = None
-    _app_config_write(_CUSTOM_KEY, customs)
-    _app_config_write(_SLOTS_KEY, slots)
+    _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
+    _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
     # Переопределение удалённого провайдера — мёртвая запись, её тоже сносим:
     # иначе id можно было бы заново занять, и новый провайдер молча унаследовал
     # бы чужую модель из прошлой «жизни» того же id.
     if overrides.pop(pid, None) is not None:
-        _app_config_write(_OVERRIDES_KEY, overrides)
+        _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
     try:
-        all_chains = _read_model_slots_all()
+        all_chains = _read_model_slots_all(tier)
         if all_chains.pop(pid, None) is not None:
-            _write_model_slots_all(all_chains)
+            _write_model_slots_all(all_chains, tier)
     except Exception:
         pass
     with _provider_health_lock:
-        _provider_last_ok.pop(pid, None)
-        _provider_last_err.pop(pid, None)
-        _provider_last_check.pop(pid, None)
-    _admin_invalidate()
+        _provider_last_ok.pop((tier, pid), None)
+        _provider_last_err.pop((tier, pid), None)
+        _provider_last_check.pop((tier, pid), None)
+    _admin_invalidate(tier)
 
 
-def provider_set_enabled(pid: str, enabled: bool) -> None:
+def provider_set_enabled(pid: str, enabled: bool, tier: str | None = None) -> None:
     """Выключатель для любого провайдера (встроенного тоже)."""
+    tier = _normalize_tier(tier)
     try:
-        _spec_for(pid)
+        _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
-    _customs, _slots, stored, _ov = _admin_snapshot()
+    _customs, _slots, stored, _ov = _admin_snapshot(tier)
     stored = dict(stored)
     stored[pid] = bool(enabled)
-    _app_config_write(_ENABLED_KEY, stored)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_ENABLED_KEY, tier), stored)
+    _admin_invalidate(tier)
 
 
-def provider_set_override(pid: str, patch: dict) -> dict:
+def provider_set_override(pid: str, patch: dict, tier: str | None = None) -> dict:
     """Наложить/снять поля поверх стандартных — для ЛЮБОГО провайдера.
 
     Для встроенного это отдельная карта переопределений (модель прежде
@@ -2441,14 +2579,15 @@ def provider_set_override(pid: str, patch: dict) -> dict:
 
     Пустая строка в patch означает «снять переопределение» (для встроенного —
     вернуться к окружению), а не «записать пустое значение»."""
+    tier = _normalize_tier(tier)
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     if not isinstance(patch, dict):
         raise ValueError("Некорректный запрос")
     builtin = bool(spec.get("builtin"))
-    customs, _slots, _enabled, overrides = _admin_snapshot()
+    customs, _slots, _enabled, overrides = _admin_snapshot(tier)
     if builtin:
         current = dict(overrides.get(pid) or {})
     else:
@@ -2532,7 +2671,7 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             # старым названием — ровно то, ради чего это и заводилось.
             target_model = clean.get("model") or entry.get("model") or ""
             try:
-                set_model_title(pid, target_model, clean["model_title"])
+                set_model_title(pid, target_model, clean["model_title"], tier)
             except (sqlite3.Error, OSError):
                 pass
         if clean.get("base_url"):
@@ -2558,16 +2697,16 @@ def provider_set_override(pid: str, patch: dict) -> dict:
             entry["extra_headers"] = dict(clean["extra_headers"])
         entry["updated_at"] = int(time.time() * 1000)
         customs[pid] = entry
-        _app_config_write(_CUSTOM_KEY, customs)
-        _admin_invalidate()
+        _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
+        _admin_invalidate(tier)
         if clean.get("model"):
             try:
-                _sync_chain_to_legacy_model(pid, clean["model"])
+                _sync_chain_to_legacy_model(pid, clean["model"], tier)
             except Exception:
                 pass
         if "model_titles" in clean:
             try:
-                set_model_titles(pid, clean["model_titles"])
+                set_model_titles(pid, clean["model_titles"], tier)
             except (KeyError, ValueError) as exc:
                 raise ValueError(str(exc) or "Не удалось сохранить названия")
         return entry
@@ -2583,7 +2722,7 @@ def provider_set_override(pid: str, patch: dict) -> dict:
                 target_model = ""
         if target_model:
             try:
-                set_model_title(pid, target_model, clean["model_title"])
+                set_model_title(pid, target_model, clean["model_title"], tier)
             except (sqlite3.Error, OSError):
                 pass
         clean.pop("model_title", None)
@@ -2599,22 +2738,22 @@ def provider_set_override(pid: str, patch: dict) -> dict:
         overrides[pid] = current
     else:
         overrides.pop(pid, None)
-    _app_config_write(_OVERRIDES_KEY, overrides)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
+    _admin_invalidate(tier)
     if "model" in patch:
         try:
-            _sync_chain_to_legacy_model(pid, _raw_provider_model(pid))
+            _sync_chain_to_legacy_model(pid, _raw_provider_model(pid, tier), tier)
         except Exception:
             pass
     if titles_for_chain is not None:
         try:
-            set_model_titles(pid, titles_for_chain)
+            set_model_titles(pid, titles_for_chain, tier)
         except (KeyError, ValueError) as exc:
             raise ValueError(str(exc) or "Не удалось сохранить названия")
     return current
 
 
-def provider_reset(pid: str) -> dict:
+def provider_reset(pid: str, tier: str | None = None) -> dict:
     """Вернуть провайдер к стандартным значениям.
 
     Встроенный: сносятся ВСЕ переопределения — значения снова из окружения
@@ -2622,15 +2761,16 @@ def provider_reset(pid: str) -> dict:
     Свой: возвращается снимок исходных значений, сделанный при добавлении
     (entry["defaults"]) — «вернуть как было», а не «вернуть последнюю
     правку». Метка ручной проверки гасится: она измеряла другое состояние."""
+    tier = _normalize_tier(tier)
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     if not spec.get("builtin"):
         # У своего провайдера «стандартные значения» — снимок, сделанный при
         # добавлении (entry["defaults"]). Возврат к нему осмыслен: правка
         # модели/ключа не затирает эталон, и кнопка сброса честно откатывает.
-        customs, _slots, _enabled, _ov = _admin_snapshot()
+        customs, _slots, _enabled, _ov = _admin_snapshot(tier)
         entry = customs.get(pid)
         if entry is None:
             raise KeyError(f"unknown provider {pid!r}")
@@ -2652,57 +2792,57 @@ def provider_reset(pid: str) -> dict:
         # провайдера больше нет.
         if previous_model and previous_model != str(entry.get("model") or ""):
             try:
-                set_model_title(pid, previous_model, "")
+                set_model_title(pid, previous_model, "", tier)
             except (sqlite3.Error, OSError):
                 pass
         entry["updated_at"] = int(time.time() * 1000)
         customs[pid] = entry
-        _app_config_write(_CUSTOM_KEY, customs)
+        _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
         with _provider_health_lock:
-            _provider_last_check.pop(pid, None)
-        _admin_invalidate()
+            _provider_last_check.pop((tier, pid), None)
+        _admin_invalidate(tier)
         # Сброс возвращает и цепочку к исходной модели — иначе цепочка помнила
         # бы снятую модель, а одиночная уже вернулась к стандарту.
         try:
             std_model = str(entry.get("model") or "")
             if std_model:
-                all_chains = _read_model_slots_all()
+                all_chains = _read_model_slots_all(tier)
                 all_chains[pid] = {"high": std_model, "medium": None, "low": None}
-                _write_model_slots_all(all_chains)
+                _write_model_slots_all(all_chains, tier)
         except Exception:
             pass
         return entry
-    customs, _slots, _enabled, overrides = _admin_snapshot()
+    customs, _slots, _enabled, overrides = _admin_snapshot(tier)
     # Снятую переопределённую модель запоминаем ДО сноса: её название уходит
     # вместе с ней, а название восстановленной (из окружения) обязано уцелеть —
     # иначе после сброса строка «проверено моделью» на экране результата
     # пропадала бы ровно тогда, когда её настроили.
     dropped_model = str((overrides.get(pid) or {}).get("model") or "").strip()[:200]
     overrides.pop(pid, None)
-    _app_config_write(_OVERRIDES_KEY, overrides)
+    _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
     try:
-        restored = str(_spec_for(pid)["model"]())[:200]
+        restored = str(_spec_for(pid, tier)["model"]())[:200]
     except Exception:
         restored = ""
     if dropped_model and dropped_model != restored:
         try:
-            set_model_title(pid, dropped_model, "")
+            set_model_title(pid, dropped_model, "", tier)
         except (sqlite3.Error, OSError):
             pass
     with _provider_health_lock:
-        _provider_last_check.pop(pid, None)
-    _admin_invalidate()
+        _provider_last_check.pop((tier, pid), None)
+    _admin_invalidate(tier)
     try:
         if restored:
-            all_chains = _read_model_slots_all()
+            all_chains = _read_model_slots_all(tier)
             all_chains[pid] = {"high": restored, "medium": None, "low": None}
-            _write_model_slots_all(all_chains)
+            _write_model_slots_all(all_chains, tier)
     except Exception:
         pass
-    return _spec_for(pid)
+    return _spec_for(pid, tier)
 
 
-def providers_set_slots(slots: dict) -> dict:
+def providers_set_slots(slots: dict, tier: str | None = None) -> dict:
     """Атомно выставить слоты {high, medium, low} (значения — id или null).
 
     Один слот — один провайдер, один провайдер — один слот: дубли внутри
@@ -2710,10 +2850,11 @@ def providers_set_slots(slots: dict) -> dict:
     Стандартная раскладка ensure_default_slots() отрабатывает ДО записи, чтобы
     освобождённый слот не остался неявно занятым старым (иначе «приоритет не
     задан» вернулся бы ровно в том виде, который мы убираем)."""
-    ensure_default_slots()
+    tier = _normalize_tier(tier)
+    ensure_default_slots(tier)
     if not isinstance(slots, dict):
         raise ValueError("Нужен объект slots")
-    customs, current, _enabled, _ov = _admin_snapshot()
+    customs, current, _enabled, _ov = _admin_snapshot(tier)
     known = set(PROVIDER_PRIORITY) | set(customs.keys())
     # Запись несуществующего id вместо опечатки создавала бы «мёртвый» слот,
     # который ротация пропускала бы молча — поэтому строгая проверка.
@@ -2733,8 +2874,8 @@ def providers_set_slots(slots: dict) -> dict:
             raise ValueError(f"Провайдер «{pid}» уже стоит в слоте «{PROVIDER_SLOT_LABELS[seen[pid]]}» — один приоритет на провайдер")
         if pid:
             seen[pid] = slot
-    _app_config_write(_SLOTS_KEY, cleaned)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_SLOTS_KEY, tier), cleaned)
+    _admin_invalidate(tier)
     return cleaned
 
 
@@ -2843,19 +2984,25 @@ def describe_slots_change(old: dict, new: dict) -> dict:
 # Цепочки моделей внутри провайдера
 # ---------------------------------------------------------------------------
 
-def _read_model_slots_all() -> dict:
+def _read_model_slots_all(tier: str | None = None) -> dict:
     """Вся карта цепочек {providerId: {high, medium, low}}. Не бросает."""
     global _model_slots_cache
+    tier = _normalize_tier(tier)
+    if tier != "free":
+        ensure_tier_clone(tier)
+    key = _tier_key(_MODEL_SLOTS_KEY, tier)
     path = _router_db_path()
     version = _config_version()
     with _model_slots_lock:
+        tiers = _model_slots_cache.get("tiers") or {}
+        cached = tiers.get(tier) or {}
         if (_model_slots_cache.get("path") == path
-                and _model_slots_cache.get("data") is not None
-                and _model_slots_cache.get("version") == version):
-            return {k: dict(v) for k, v in _model_slots_cache["data"].items()}
+                and cached.get("data") is not None
+                and cached.get("version") == version):
+            return {k: dict(v) for k, v in cached["data"].items()}
     data: dict[str, dict] = {}
     try:
-        raw = _app_config_read(_MODEL_SLOTS_KEY)
+        raw = _app_config_read(key)
     except Exception:
         raw = None
     if isinstance(raw, dict):
@@ -2868,12 +3015,15 @@ def _read_model_slots_all() -> dict:
                 clean[slot] = str(val).strip()[:200] if isinstance(val, str) and val.strip() else None
             data[pid] = clean
     with _model_slots_lock:
-        _model_slots_cache = {"path": path, "data": {k: dict(v) for k, v in data.items()},
-                              "version": _config_version()}
+        tiers = _model_slots_cache.get("tiers") or {}
+        tiers[tier] = {"data": {k: dict(v) for k, v in data.items()},
+                       "version": _config_version()}
+        _model_slots_cache = {"path": path, "tiers": tiers}
     return {k: dict(v) for k, v in data.items()}
 
 
-def _write_model_slots_all(data: dict) -> None:
+def _write_model_slots_all(data: dict, tier: str | None = None) -> None:
+    tier = _normalize_tier(tier)
     clean_all: dict[str, dict] = {}
     for pid, entry in (data or {}).items():
         if not isinstance(pid, str) or not pid or not isinstance(entry, dict):
@@ -2882,84 +3032,90 @@ def _write_model_slots_all(data: dict) -> None:
                               if isinstance(entry.get(s), str) and str(entry.get(s)).strip()
                               else None)
                           for s in PROVIDER_SLOTS}
-    _app_config_write(_MODEL_SLOTS_KEY, clean_all)
-    _admin_invalidate()
+    _app_config_write(_tier_key(_MODEL_SLOTS_KEY, tier), clean_all)
+    _admin_invalidate(tier)
 
 
-def _raw_provider_model(pid: str) -> str:
+def _raw_provider_model(pid: str, tier: str | None = None) -> str:
     """Одиночная модель провайдера из настроек (без цепочки). Не бросает."""
+    tier = _normalize_tier(tier)
     try:
-        spec = _spec_for(str(pid or ""))
+        spec = _spec_for(str(pid or ""), tier)
         return str(spec["model"]())[:200]
     except Exception:
         return ""
 
 
-def provider_model_slots(pid: str) -> dict:
+def provider_model_slots(pid: str, tier: str | None = None) -> dict:
     """Слоты цепочки провайдера {high, medium, low} (None — пусто)."""
+    tier = _normalize_tier(tier)
     pid = str(pid or "")
-    return _read_model_slots_all().get(pid, {"high": None, "medium": None, "low": None})
+    return _read_model_slots_all(tier).get(pid, {"high": None, "medium": None, "low": None})
 
 
-def ensure_model_slots(pid: str) -> dict:
+def ensure_model_slots(pid: str, tier: str | None = None) -> dict:
     """Материализовать цепочку из одиночной модели, если её ещё нет.
 
     Идемпотентно: срабатывает один раз на провайдер — дальше пустые слоты
     уважаются (админ очистил цепочку нарочно). Без материализации карточка
     врала бы «цепочки нет», а запросы всё равно шли бы на одиночную модель."""
+    tier = _normalize_tier(tier)
     pid = str(pid or "")
     if not pid:
         return {"high": None, "medium": None, "low": None}
-    all_slots = _read_model_slots_all()
+    all_slots = _read_model_slots_all(tier)
     if pid in all_slots:
         return dict(all_slots[pid])
-    raw = _raw_provider_model(pid)
+    raw = _raw_provider_model(pid, tier)
     slots = {"high": (raw or None), "medium": None, "low": None}
     # Провайдер без модели (нет ключа/не настроен) — цепочку не создаём из
     # пустоты: нечего материализовывать, слоты останутся пустыми по чтению.
     if raw:
         all_slots[pid] = dict(slots)
         try:
-            _write_model_slots_all(all_slots)
+            _write_model_slots_all(all_slots, tier)
         except (sqlite3.Error, OSError):
             pass
         return slots
     return {"high": None, "medium": None, "low": None}
 
 
-def ensure_all_model_slots() -> None:
+def ensure_all_model_slots(tier: str | None = None) -> None:
     """Материализовать цепочки всех известных провайдеров (для overview)."""
+    tier = _normalize_tier(tier)
     try:
-        ids = known_provider_ids()
+        ids = known_provider_ids(tier)
     except Exception:
         return
     for pid in ids:
         try:
-            ensure_model_slots(pid)
+            ensure_model_slots(pid, tier)
         except Exception:
             continue
 
 
-def provider_model_chain(pid: str) -> list[str]:
+def provider_model_chain(pid: str, tier: str | None = None) -> list[str]:
     """Порядок попыток моделей внутри провайдера: high → medium → low.
 
     Пустые слоты пропускаются. Если цепочки ещё нет (база до фичи) —
     работает одиночная модель из настроек, то есть ровно прежнее поведение."""
+    tier = _normalize_tier(tier)
     pid = str(pid or "")
-    all_slots = _read_model_slots_all()
+    all_slots = _read_model_slots_all(tier)
     if pid not in all_slots:
-        raw = _raw_provider_model(pid)
+        raw = _raw_provider_model(pid, tier)
         return [raw] if raw else []
     slots = all_slots[pid]
     return [str(slots[s]) for s in PROVIDER_SLOTS if slots.get(s)]
 
 
-def provider_primary_model(pid: str) -> str:
+def provider_primary_model(pid: str, tier: str | None = None) -> str:
     """Первая модель цепочки (та, что идёт в запросы по умолчанию)."""
-    chain = provider_model_chain(pid)
+    tier = _normalize_tier(tier)
+    chain = provider_model_chain(pid, tier)
     if chain:
         return chain[0]
-    return _raw_provider_model(pid)
+    return _raw_provider_model(pid, tier)
 
 
 def apply_model_slot_move(current: dict, want_slot, want_model) -> tuple[dict, dict]:
@@ -3044,7 +3200,7 @@ def describe_model_slots_change(old: dict, new: dict) -> dict:
     return {"type": "moved", "changes": moved}
 
 
-def providers_set_model_slots(pid: str, slots: dict) -> dict:
+def providers_set_model_slots(pid: str, slots: dict, tier: str | None = None) -> dict:
     """Атомно выставить цепочку провайдера {high, medium, low} (модели/null).
 
     Та же строгость, что у слотов провайдеров: дубли внутри цепочки
@@ -3052,11 +3208,12 @@ def providers_set_model_slots(pid: str, slots: dict) -> dict:
     моделей», а не будет молча работать на старой). После записи одиночная
     модель провайдера синхронизируется с первой в цепочке — иначе старые пути
     (проба, judge, legacy-чтения) видели бы вчерашнюю модель."""
+    tier = _normalize_tier(tier)
     pid = str(pid or "").strip()
     if not pid:
         raise ValueError("Нужен провайдер для цепочки моделей")
     try:
-        _spec_for(pid)
+        _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     if not isinstance(slots, dict):
@@ -3080,24 +3237,25 @@ def providers_set_model_slots(pid: str, slots: dict) -> dict:
             raise ValueError(f"Модель «{model}» уже стоит в слоте «{PROVIDER_SLOT_LABELS[seen[model]]}» — один приоритет на модель")
         if model:
             seen[model] = slot
-    all_slots = _read_model_slots_all()
+    all_slots = _read_model_slots_all(tier)
     all_slots[pid] = dict(cleaned)
-    _write_model_slots_all(all_slots)
-    _sync_legacy_model_to_chain(pid, cleaned)
+    _write_model_slots_all(all_slots, tier)
+    _sync_legacy_model_to_chain(pid, cleaned, tier)
     return cleaned
 
 
-def _sync_legacy_model_to_chain(pid: str, chain_slots: dict) -> None:
+def _sync_legacy_model_to_chain(pid: str, chain_slots: dict, tier: str | None = None) -> None:
     """Одиночная модель = первая в цепочке (для старых путей чтения).
 
     Без синхронизации проба провайдера, judge и любой код, читающий
     spec['model'], видели бы вчерашнюю модель после смены цепочки."""
+    tier = _normalize_tier(tier)
     chain = [str(chain_slots.get(s)) for s in PROVIDER_SLOTS if chain_slots.get(s)]
     if not chain:
         return
     primary = chain[0]
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         return
     try:
@@ -3108,42 +3266,43 @@ def _sync_legacy_model_to_chain(pid: str, chain_slots: dict) -> None:
         return
     try:
         if spec.get("builtin"):
-            _customs, _slots, _enabled, overrides = _admin_snapshot()
+            _customs, _slots, _enabled, overrides = _admin_snapshot(tier)
             entry = dict(overrides.get(pid) or {})
             entry["model"] = primary
             overrides[pid] = entry
-            _app_config_write(_OVERRIDES_KEY, overrides)
+            _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
         else:
-            customs, _slots, _enabled, _ov = _admin_snapshot()
+            customs, _slots, _enabled, _ov = _admin_snapshot(tier)
             entry = customs.get(pid)
             if entry is None:
                 return
             entry["model"] = primary
             entry["updated_at"] = int(time.time() * 1000)
             customs[pid] = entry
-            _app_config_write(_CUSTOM_KEY, customs)
+            _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
     except (sqlite3.Error, OSError):
         return
     finally:
-        _admin_invalidate()
+        _admin_invalidate(tier)
 
 
-def _sync_chain_to_legacy_model(pid: str, model: str) -> None:
+def _sync_chain_to_legacy_model(pid: str, model: str, tier: str | None = None) -> None:
     """Одиночная модель сменилась старым путём — отразить в цепочке.
 
     Новая модель встаёт в «Высокий»; если она уже была в цепочке — обмен со
     старым «Высоким», иначе старый «Высокий» вытесняется (остальные слоты не
     трогаем). Пустая модель — ничего не делаем."""
+    tier = _normalize_tier(tier)
     model = str(model or "").strip()[:200]
     if not model:
         return
-    all_slots = _read_model_slots_all()
+    all_slots = _read_model_slots_all(tier)
     if pid not in all_slots:
         # Цепочки ещё не было — материализуем сразу с новой моделью наверху.
         raw_chain = [m for m in [model] if m]
         all_slots[pid] = {"high": model, "medium": None, "low": None}
         try:
-            _write_model_slots_all(all_slots)
+            _write_model_slots_all(all_slots, tier)
         except (sqlite3.Error, OSError):
             pass
         return
@@ -3165,13 +3324,14 @@ def _sync_chain_to_legacy_model(pid: str, model: str) -> None:
             seen.add(cur[s])
     all_slots[pid] = cur
     try:
-        _write_model_slots_all(all_slots)
+        _write_model_slots_all(all_slots, tier)
     except (sqlite3.Error, OSError):
         pass
 
 
-def _public_provider_card(pid: str) -> dict:
-    spec = _spec_for(pid)
+def _public_provider_card(pid: str, tier: str | None = None) -> dict:
+    tier = _normalize_tier(tier)
+    spec = _spec_for(pid, tier)
     key_fn = spec.get("key")
     try:
         key = key_fn() if key_fn else ""
@@ -3187,19 +3347,19 @@ def _public_provider_card(pid: str) -> dict:
         model_value = ""
     enabled = spec.get("enabled") is not False
     configured = bool(enabled and key)
-    slot = _slot_of(pid)
+    slot = _slot_of(pid, tier)
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
-        ok_at = int(_provider_last_ok.get(pid) or 0)
-        err = _provider_last_err.get(pid)
-        check = dict(_provider_last_check.get(pid) or {}) if _provider_last_check.get(pid) else None
+        ok_at = int(_provider_last_ok.get((tier, pid)) or 0)
+        err = _provider_last_err.get((tier, pid))
+        check = dict(_provider_last_check.get((tier, pid)) or {}) if _provider_last_check.get((tier, pid)) else None
     last_err_text, last_err_at = "", 0
     if err:
         last_err_at, last_err_text = int(err[0] or 0), str(err[1] or "")
     recent = bool(ok_at and (now_ms - ok_at) < PROVIDER_RECENT_SEC * 1000)
-    order = effective_priority()
+    order = effective_priority(tier)
     try:
-        active = active_provider()
+        active = active_provider(tier)
     except Exception:
         active = None
     warnings: list[str] = []
@@ -3227,7 +3387,7 @@ def _public_provider_card(pid: str) -> dict:
     # её overview, карточка лишь показывает. Нет записи — показываем одиночную
     # как high, чтобы вид совпадал с тем, что реально поедет в запросы.
     try:
-        stored_chains = _read_model_slots_all()
+        stored_chains = _read_model_slots_all(tier)
     except Exception:
         stored_chains = {}
     chain_slots = stored_chains.get(pid)
@@ -3244,14 +3404,14 @@ def _public_provider_card(pid: str) -> dict:
     chain_titles = {}
     try:
         for mdl in chain:
-            chain_titles[mdl] = model_title(pid, mdl)
+            chain_titles[mdl] = model_title(pid, mdl, tier)
     except Exception:
         pass
     # Модели цепочки без названия для ученика: их проверки пройдут, но строка
     # «проверено моделью» на экране результата не появится — админ должен
     # видеть это на карточке до жалоб учеников.
     titles_missing = [m for m in chain if m and not chain_titles.get(m)]
-    title = model_title(pid, primary_model or model_value)
+    title = model_title(pid, primary_model or model_value, tier)
     return {
         "id": pid,
         "title": str(spec.get("title") or pid),
@@ -3316,9 +3476,14 @@ def public_ai_health() -> dict:
 
     Наружу — ни ключей, ни адресов, ни моделей, ни текстов ошибок: только
     факты «настроен/включён» и метки времени. Возраст меток подписывает
-    сервер в /api/status — клиент время не считает."""
+    сервер в /api/status — клиент время не считает.
+
+    Направлений два (free/Plus), а страница одна: метки здоровья берутся
+    максимумом по обоим (провайдер отвечал хоть где-то — он жив), роутер —
+    обычного направления. Контракт ответа не меняется."""
     try:
-        ids = list(known_provider_ids())
+        ids = list(dict.fromkeys(list(known_provider_ids("free"))
+                                 + list(known_provider_ids("plus"))))
     except Exception:
         ids = []
     try:
@@ -3328,7 +3493,7 @@ def public_ai_health() -> dict:
     except Exception:
         ok_map, err_map = {}, {}
     try:
-        router = _router_state()
+        router = _router_state("free")
     except Exception:
         router = {}
     try:
@@ -3338,23 +3503,31 @@ def public_ai_health() -> dict:
     providers = []
     for pid in ids:
         try:
-            title = provider_title(pid)
+            title = provider_title(pid, "free")
         except Exception:
             title = str(pid)
+        if not title or title == str(pid):
+            try:
+                title = provider_title(pid, "plus")
+            except Exception:
+                title = str(pid)
         try:
-            enabled = bool(_provider_enabled(pid))
+            enabled = bool(_provider_enabled(pid, "free") or _provider_enabled(pid, "plus"))
         except Exception:
             enabled = False
         try:
-            configured = bool(_provider_configured(pid))
+            configured = bool(_provider_configured(pid, "free")
+                              or _provider_configured(pid, "plus"))
         except Exception:
             configured = False
         try:
-            ok_at = int(ok_map.get(pid) or 0) or None
+            ok_at = int(max(ok_map.get(("free", pid)) or 0,
+                            ok_map.get(("plus", pid)) or 0)) or None
         except (TypeError, ValueError):
             ok_at = None
         try:
-            err_at = int(err_map.get(pid) or 0) or None
+            err_at = int(max(err_map.get(("free", pid)) or 0,
+                             err_map.get(("plus", pid)) or 0)) or None
         except (TypeError, ValueError):
             err_at = None
         providers.append({"id": str(pid), "title": str(title or pid),
@@ -3366,7 +3539,7 @@ def public_ai_health() -> dict:
             "now": int(time.time() * 1000)}
 
 
-def providers_overview() -> dict:
+def providers_overview(tier: str | None = None) -> dict:
     """Весь экран админки одним ответом: карточки + порядок + активный.
 
     Тяжёлых запросов тут нет — только метки времени живого трафика и
@@ -3375,12 +3548,13 @@ def providers_overview() -> dict:
     Здесь же ensure_default_slots(): раздел — то место, где человек видит
     порядок, поэтому стандартная раскладка (closerouter высокий, gptunnel
     средний) материализуется при первом открытии, а не остаётся неявной."""
-    ensure_default_slots()
+    tier = _normalize_tier(tier)
+    ensure_default_slots(tier)
     try:
-        ensure_all_model_slots()
+        ensure_all_model_slots(tier)
     except Exception:
         pass
-    customs, slots, _enabled, _ov = _admin_snapshot()
+    customs, slots, _enabled, _ov = _admin_snapshot(tier)
     slotted = [slots[s] for s in PROVIDER_SLOTS if slots.get(s)]
     rest = [pid for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()) if pid not in slotted]
     ids = slotted + rest
@@ -3389,12 +3563,12 @@ def providers_overview() -> dict:
     cards = []
     for pid in ids:
         try:
-            cards.append(_public_provider_card(pid))
+            cards.append(_public_provider_card(pid, tier))
         except KeyError:
             continue
     try:
-        order = effective_priority()
-        active = active_provider()
+        order = effective_priority(tier)
+        active = active_provider(tier)
     except Exception:
         order, active = [], None
     # Судья проверки сочинений — отдельное поле, а не «первый в порядке»:
@@ -3402,16 +3576,17 @@ def providers_overview() -> dict:
     # отличается ли она от приоритетной (подмена после отказа залипает до
     # пробы). Без этого поля смена судьи видна только по расхождению баллов.
     try:
-        judge = judge_provider()
-        judge_pref = judge_preferred()
-        judge_slot = _judge_slot()
-        judge_fallback_name = judge_fallback()
+        judge = judge_provider(tier)
+        judge_pref = judge_preferred(tier)
+        judge_slot = _judge_slot(tier)
+        judge_fallback_name = judge_fallback(tier)
     except Exception:
         judge, judge_pref, judge_slot, judge_fallback_name = None, None, {}, None
     judge_auto = str((judge_slot or {}).get("auto") or "").strip()
     judge_from = str((judge_slot or {}).get("from") or "").strip()
     return {
         "ok": True,
+        "tier": tier,
         "providers": cards,
         "order": order,
         "active": active,
@@ -3433,16 +3608,17 @@ def providers_overview() -> dict:
     }
 
 
-def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str | None = None) -> dict:
     """Список моделей провайдера: GET <base>/models (OpenAI-совместимый).
 
     Это единственный способ узнать реальные имена моделей: админка их не
     выдумывает и не держит свой список, поэтому после провайдера с другой
     связкой id не пришлось бы угадывать. Тело стандартное — {"data":[{"id"}]},
     у всех шлюзов OpenAI; ключ в запрос не попадает в ответ и в лог."""
+    tier = _normalize_tier(tier)
     pid = str(name or "")
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     try:
@@ -3643,19 +3819,20 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
     return True, latency, ""
 
 
-def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str | None = None) -> dict:
     """Проверить КОНКРЕТНУЮ модель, не переключая провайдера на неё.
 
     Это то, что нужно перед применением: выбранная из списка модель может
     быть недоступна именно у этого шлюза (нет доступа, снята с обслуживания).
     Проверка идёт по фактическим настройкам провайдера (ключ, auth, quirks),
     но модель берётся из аргумента."""
+    tier = _normalize_tier(tier)
     pid = str(name or "")
     wanted = str(model or "").strip()[:200]
     if not wanted:
         raise ValueError("Выбери модель для проверки")
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     try:
@@ -3682,16 +3859,17 @@ def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC
             "checkedAt": int(time.time() * 1000)}
 
 
-def probe_models_plan(name: str, models: list | None = None) -> dict:
+def probe_models_plan(name: str, models: list | None = None, tier: str | None = None) -> dict:
     """Подготовка проверки моделей: что проверять и куда ходить.
 
     Общая для пакетной проверки (`probe_models`) и живого потока
     (`probe_models_stream`): список моделей, адрес, ключ, quirks. Oба пути
     обязаны смотреть на ОДИН и тот же провайдер одинаково, иначе кнопка и
     поток разошлись бы в том, какие модели вообще проверяются."""
+    tier = _normalize_tier(tier)
     pid = str(name or "")
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     try:
@@ -3707,7 +3885,7 @@ def probe_models_plan(name: str, models: list | None = None) -> dict:
     if models is None:
         # Список берём сами, а не берём из тела запроса: клиент мог бы прислать
         # что угодно, а проверять надо реальные модели этого провайдера.
-        listed = list_models(pid)
+        listed = list_models(pid, tier=tier)
         wanted = [str(m) for m in (listed.get("models") or [])]
     else:
         wanted = []
@@ -3756,7 +3934,7 @@ def _probe_order(results: dict) -> list:
 
 
 def probe_models(name: str, models: list | None = None,
-                 timeout: float = PROBE_MODELS_TIMEOUT_SEC) -> dict:
+                 timeout: float = PROBE_MODELS_TIMEOUT_SEC, tier: str | None = None) -> dict:
     """Проверить доступность КАЖДОЙ модели провайдера (пакетно, одним ответом).
 
     Смысл один в одном: список моделей у шлюза может быть на сотни позиций,
@@ -3768,7 +3946,8 @@ def probe_models(name: str, models: list | None = None,
     списке уже первая), дальше до PROBE_MODELS_MAX. Ограничение названо в
     ответе явно, а не молча обрезано: человек должен знать, что 240 моделей
     проверены не все."""
-    plan = probe_models_plan(name, models)
+    tier = _normalize_tier(tier)
+    plan = probe_models_plan(name, models, tier)
     checked = plan["checked"]
     deadline = min(60.0, max(1.0, float(timeout or PROBE_MODELS_TIMEOUT_SEC)))
     results: dict = {}
@@ -3802,7 +3981,7 @@ def probe_models(name: str, models: list | None = None,
 
 
 def probe_models_stream(name: str, models: list | None = None,
-                        budget: float = PROBE_MODELS_BUDGET_SEC):
+                        budget: float = PROBE_MODELS_BUDGET_SEC, tier: str | None = None):
     """Живой поток проверки моделей: отдаёт результаты ПО МЕРЕ ГОТОВНОСТИ.
 
     Генератор отдаёт словари-события:
@@ -3819,7 +3998,8 @@ def probe_models_stream(name: str, models: list | None = None,
     ответить, получает `timedOut: true` и честную причину, а не молчание.
     Потолок нужен потому, что у шлюза всегда найдётся модель, которая висит до
     таймаута, и без него «пинг» превращался бы в ожидание неизвестной длины."""
-    plan = probe_models_plan(name, models)
+    tier = _normalize_tier(tier)
+    plan = probe_models_plan(name, models, tier)
     checked = plan["checked"]
     limit_sec = max(0.5, float(budget or PROBE_MODELS_BUDGET_SEC))
     per_call = max(0.5, min(PROBE_MODELS_TIMEOUT_SEC, limit_sec))
@@ -3907,11 +4087,12 @@ def probe_draft(params: dict, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
             "checkedAt": int(time.time() * 1000)}
 
 
-def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict:
+def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str | None = None) -> dict:
     """Ручная проверка сохранённого провайдера. Пишет lastCheck (и lastOk при успехе)."""
+    tier = _normalize_tier(tier)
     pid = str(name or "")
     try:
-        spec = _spec_for(pid)
+        spec = _spec_for(pid, tier)
     except KeyError:
         raise KeyError(f"unknown provider {pid!r}")
     try:
@@ -3923,14 +4104,14 @@ def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
     except Exception:
         base_value = ""
     try:
-        model_value = provider_primary_model(pid) or spec["model"]()
+        model_value = provider_primary_model(pid, tier) or spec["model"]()
     except Exception:
         model_value = ""
     if not key or not base_value or not model_value:
         result = {"ok": False, "latencyMs": 0, "error": "Провайдер не настроен (нет ключа)",
                   "checkedAt": int(time.time() * 1000)}
         with _provider_health_lock:
-            _provider_last_check[pid] = dict(result)
+            _provider_last_check[(tier, pid)] = dict(result)
         return result
     ok, latency, error = _run_probe_request(
         base_url=base_value, key=key, model=model_value,
@@ -3942,11 +4123,11 @@ def probe_provider(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC) -> dict
     result = {"ok": ok, "latencyMs": latency, "error": error,
               "checkedAt": int(time.time() * 1000)}
     with _provider_health_lock:
-        _provider_last_check[pid] = dict(result)
+        _provider_last_check[(tier, pid)] = dict(result)
         if ok:
-            _provider_last_ok[pid] = result["checkedAt"]
+            _provider_last_ok[(tier, pid)] = result["checkedAt"]
         else:
-            _provider_last_err[pid] = (result["checkedAt"], error[:300])
+            _provider_last_err[(tier, pid)] = (result["checkedAt"], error[:300])
     return result
 
 
@@ -3975,7 +4156,7 @@ PROBE_TIMEOUT_SEC = float(_env("EGE_AI_PROBE_TIMEOUT_SEC", default="45") or 45)
 PROBE_WAKE_SEC = 60.0
 
 
-def probe_tick(now: float | None = None) -> bool:
+def probe_tick(now: float | None = None, tier: str | None = None) -> bool:
     """Проверить кандидатов выше активного и поднять лучший живой. True — смена.
 
     Раньше проверялся только приоритетный (order[0]): при трёх провайдерах это
@@ -3991,26 +4172,27 @@ def probe_tick(now: float | None = None) -> bool:
     Кроме основного роутера, возвращает на место судью проверки сочинений:
     он тоже залипает на запасном после отказа (см. judge_failover), и без этой
     же пробы ученики остались бы считать запасным прибором навсегда."""
-    order = effective_priority()
+    tier = _normalize_tier(tier)
+    order = effective_priority(tier)
     preferred = order[0] if order else PROVIDER_PRIORITY[0]
-    if not _provider_configured(preferred):
+    if not _provider_configured(preferred, tier):
         return False
-    judge_restored = _probe_judge_return(preferred, now)
-    current = active_provider()
+    judge_restored = _probe_judge_return(preferred, now, tier)
+    current = active_provider(tier)
     if current == preferred:
         return judge_restored  # уже на приоритетном — проверять нечего
     # Кандидаты на повышение — всё, что выше активного по приоритету. Активный
     # вне списка (снятый слот, выключенный провайдер) — проверяем всех: хуже
     # текущего положения всё равно не станет, лучший живой станет активным.
     if current in order:
-        candidates = [n for n in order[:order.index(current)] if _provider_configured(n)]
+        candidates = [n for n in order[:order.index(current)] if _provider_configured(n, tier)]
     else:
-        candidates = [n for n in order if n != current and _provider_configured(n)]
+        candidates = [n for n in order if n != current and _provider_configured(n, tier)]
     if not candidates:
         return judge_restored
     moment = time.time() if now is None else float(now)
     try:
-        last_probe = float(_router_state().get("lastProbeAt") or 0) / 1000.0
+        last_probe = float(_router_state(tier).get("lastProbeAt") or 0) / 1000.0
     except (TypeError, ValueError):
         last_probe = 0.0
     if moment - last_probe < PROBE_INTERVAL_SEC:
@@ -4026,35 +4208,38 @@ def probe_tick(now: float | None = None) -> bool:
             try:
                 _chat_via(name, [{"role": "user", "content": "привет"}],
                           timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0,
-                          reasoning_effort="minimal")
+                          reasoning_effort="minimal", tier=tier)
             except Exception as exc:  # noqa: BLE001 — кандидат мёртв, следующий
                 if not first_error:
                     first_error = f"{type(exc).__name__}: {exc}"[:300]
                 continue
-            _note_probe_success(name)
+            _note_probe_success(name, tier)
             _router_update({"active": name, "updatedAt": now_ms,
-                            "lastProbeAt": now_ms, "lastProbeError": None})
+                            "lastProbeAt": now_ms, "lastProbeError": None}, tier)
             _notify_system({"kind": "provider_restored", "from": str(current or ""),
-                            "to": name, "reason": "проба прошла", "at": now_ms})
+                            "to": name,
+                            "reason": "проба прошла" + (" [Plus]" if tier != "free" else ""),
+                            "at": now_ms})
             print(f"EGE CORE ai: провайдер {name} восстановлен пробой — снова активен",
                   flush=True)
             return True
         _router_update({"lastProbeAt": now_ms,
-                        "lastProbeError": first_error or "кандидаты недоступны"})
+                        "lastProbeError": first_error or "кандидаты недоступны"}, tier)
         return judge_restored
     finally:
         _ai_slots.release()
 
 
-def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
+def _probe_judge_return(preferred: str, now: float | None = None, tier: str | None = None) -> bool:
     """Вернуть судью сочинений, если он залип на запасном, а прежний ожил.
 
     Тот же интервал, что у роутера, и отдельная отметка времени: проба судьи
     не должна ни стоить запроса, пока он и так на месте, ни дёргать шлюз чаще
     общего расписания. Не бросает — фоновая проба не повод падать.
     """
+    tier = _normalize_tier(tier)
     try:
-        slot = _judge_slot()
+        slot = _judge_slot(tier)
         auto = str(slot.get("auto") or "").strip()
         if not auto or str(slot.get("provider") or "").strip():
             return False       # судья не залипал или выбран вручную
@@ -4063,11 +4248,11 @@ def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
             # смена модели внутри цепочки тоже писала auto). Чистим молча —
             # поведение не меняется, врёт только чип «подменён».
             try:
-                _app_config_write(_JUDGE_KEY, {})
+                _app_config_write(_tier_key(_JUDGE_KEY, tier), {})
             except Exception:
                 pass
             return False
-        if not _provider_configured(preferred):
+        if not _provider_configured(preferred, tier):
             return False
         moment = time.time() if now is None else float(now)
         last = float(slot.get("at") or 0) / 1000.0
@@ -4078,7 +4263,7 @@ def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
         try:
             _chat_via(preferred, [{"role": "user", "content": "привет"}],
                       timeout=PROBE_TIMEOUT_SEC, max_tokens=1, temperature=0.0,
-                      reasoning_effort="minimal")
+                      reasoning_effort="minimal", tier=tier)
         except Exception:  # noqa: BLE001 — не ожил, ждём следующего интервала
             return False
         finally:
@@ -4086,26 +4271,32 @@ def _probe_judge_return(preferred: str, now: float | None = None) -> bool:
     except Exception:  # noqa: BLE001 — фоновая проба не роняет поток
         return False
     try:
-        _app_config_write(_JUDGE_KEY, {})
+        _app_config_write(_tier_key(_JUDGE_KEY, tier), {})
     except Exception:
         return False
     print(f"EGE CORE ai: судья сочинений возвращён на {preferred}", flush=True)
-    _note_judge_switch(auto, preferred, "прежний судья снова доступен")
+    _note_judge_switch(auto, preferred, "прежний судья снова доступен", tier)
     return True
 
 
 def start_failover_loop(stop: threading.Event) -> threading.Thread:
-    """Фоновый поток возврата приоритетного провайдера. Не падает никогда."""
+    """Фоновый поток возврата приоритетного провайдера. Не падает никогда.
+
+    Направлений два — тик идёт по каждому своим порядком, своим активным и
+    своим судьёй: восстановление Plus не трогает free и наоборот."""
     def run() -> None:
         # Первая проверка почти сразу: если рестарт пришёлся на восстановление
         # провайдера, ждать целый час незачем.
         if stop.wait(5.0):
             return
         while not stop.is_set():
-            try:
-                probe_tick()
-            except Exception as exc:  # noqa: BLE001 — фон не должен падать
-                print(f"EGE CORE ai probe: {exc}", file=sys.stderr, flush=True)
+            for tier in _TIERS:
+                try:
+                    probe_tick(tier=tier)
+                except Exception as exc:  # noqa: BLE001 — фон не должен падать
+                    print(f"EGE CORE ai probe[{tier}]: {exc}", file=sys.stderr, flush=True)
+                if stop.is_set():
+                    break
             stop.wait(PROBE_WAKE_SEC)
 
     thread = threading.Thread(target=run, name="ege-ai-failover", daemon=True)
@@ -5650,7 +5841,7 @@ def format_ids() -> list[str]:
 
 def run_format(format_id: str, text: str, *, source: str | None = None,
                problem: str = "", reviewer_note: str = "",
-               source_text: str = "", student_name: str = "") -> dict:
+               source_text: str = "", student_name: str = "", tier: str | None = None) -> dict:
     """Validate the input, call the model, return the normalised result.
 
     Only `text` is accepted from the caller: the model, the system prompt and
@@ -5674,6 +5865,7 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     до букв/пробелов/дефиса, пустое — нейтральные формулировки без
     угадывания пола, см. секцию «ИМЯ И РОД ОБРАЩЕНИЯ» в системном промпте).
     """
+    tier = _normalize_tier(tier)
     spec = FORMATS.get(_clean_text(format_id))
     if spec is None:
         raise AIInputError("неизвестный формат")
@@ -5712,10 +5904,11 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     # новый формат с официальной рубрикой просто кладёт сюда судью.
     chat_fn = spec.get("chat") or chat_json
     if grammar_fn is None:
-        return spec["validate"](chat_fn(system_prompt, user_prompt(body)), words, registry)
+        return spec["validate"](chat_fn(system_prompt, user_prompt(body), tier=tier), words, registry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         holder: dict = {}
-        model_future = pool.submit(chat_fn, system_prompt, user_prompt(body), state=holder)
+        model_future = pool.submit(chat_fn, system_prompt, user_prompt(body),
+                                   state=holder, tier=tier)
         grammar_future = pool.submit(grammar_fn, body, source_text)
         # Результат грамотности забираем ПЕРВЫМ: авария LanguageTool не должна
         # выбрасывать уже оплаченный ответ модели.
