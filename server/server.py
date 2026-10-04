@@ -2685,13 +2685,14 @@ def _admin_telegram_offset_set(conn: sqlite3.Connection, offset: int) -> None:
 def telegram_ingest_updates(conn: sqlite3.Connection, wait_sec: int = 0) -> None:
     """Втянуть решения владельца из Bot API в заявки. Best-effort, никогда не бросает.
 
-    Вызывается из опроса статуса (и из нового входа): фонового потока нет,
-    поэтому решения забираются тогда, когда их кто-то ждёт. wait_sec>0 —
-    long-poll: ждём событие вместе с Telegram (см. fetch_updates), и решение
-    применяется в момент нажатия, а не к следующему тику. Применение
-    идемпотентно (UPDATE ... WHERE status='pending'), повторное втягивание
-    того же update безвредно. Сеть/протокол Telegram здесь — тишина: опрос
-    обязан отвечать даже при мёртвом Bot API.
+    Основной вызыватель — фоновый цикл admin_telegram_loop (бот жив всегда);
+    запасной — опрос статуса и новый вход (лениво, если цикла нет — например,
+    в тестах). wait_sec>0 — long-poll: ждём событие вместе с Telegram
+    (см. fetch_updates), и решение применяется в момент нажатия, а не к
+    следующему тику. Применение идемпотентно (UPDATE ... WHERE
+    status='pending'), повторное втягивание того же update безвредно.
+    Сеть/протокол Telegram здесь — тишина: опрос обязан отвечать даже при
+    мёртвом Bot API.
     """
     if not admin_login_telegram_required():
         return
@@ -2773,6 +2774,64 @@ def _pending_code(short: str) -> str:
     """Человекочитаемая форма кода: 'XXXX-XXXX'."""
     text = str(short or "").upper()
     return f"{text[:4]}-{text[4:8]}" if len(text) == 8 else text
+
+
+# Окно long-poll фонового цикла Bot API: Telegram держит соединение до
+# первого события. Меньше 60 с прокси-default'а — но наружу ходит только
+# исходящий HTTPS с loopback-сервера, прокси тут вообще не при чём.
+ADMIN_TELEGRAM_POLL_WAIT_SEC = 25
+
+
+def admin_telegram_loop(stop: threading.Event) -> None:
+    """Фоновый цикл Bot API: бот жив всегда, а не только во время входа.
+
+    Раньше обновления втягивались лениво — из опроса статуса заявки: без
+    активного входа /start отвечал только следующему входу, а решения,
+    пришедшие в тишине, лежали у Telegram до первого опроса. Теперь цикл
+    висит в long-poll и применяет решения и команды сразу.
+
+    Нагрузка нулевая: в тишине один висящий HTTPS-запрос раз в ~25 с плюс
+    короткая запись offset; при мёртвом Bot API — растущая пауза до 5 мин,
+    а не hammering. Поток daemon, своё соединение на итерацию, гонка с
+    ленивым втягиванием безопасна (применение идемпотентно).
+    """
+    backoff = 5.0
+    while not stop.is_set():
+        if not admin_login_telegram_required():
+            # Бот не настроен: минуту спим и перепроверяем.
+            stop.wait(60)
+            continue
+        started = time.monotonic()
+        try:
+            conn = connect()
+        except Exception:
+            conn = None
+        try:
+            if conn is not None:
+                telegram_ingest_updates(conn, ADMIN_TELEGRAM_POLL_WAIT_SEC)
+        except Exception:
+            pass
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+        if time.monotonic() - started >= 5:
+            # Живой цикл (событие или полное окно): сразу дальше.
+            backoff = 5.0
+        else:
+            # Быстрый возврат = транспорт мёртв: пауза растёт до 5 минут.
+            stop.wait(backoff)
+            backoff = min(300.0, backoff * 2)
+
+
+def start_admin_telegram_loop(stop: threading.Event) -> threading.Thread:
+    """Запустить фоновый цикл Bot API (только из run_server, не из тестов)."""
+    thread = threading.Thread(target=admin_telegram_loop, args=(stop,),
+                              daemon=True, name="admin-telegram")
+    thread.start()
+    return thread
 
 
 # ---------------------------------------------------------------------------
@@ -15801,6 +15860,16 @@ if __name__ == "__main__":
             except Exception as exc:
                 print(f"EGE CORE health checks loop failed to start: {exc}",
                       file=sys.stderr, flush=True)
+            # Фоновый цикл Telegram-второго фактора: решения и /start
+            # применяются всегда, а не только во время чужого входа.
+            # Без настроенного бота поток спит и ничего не делает.
+            stop_admin_telegram = threading.Event()
+            admin_telegram_thread = None
+            try:
+                admin_telegram_thread = start_admin_telegram_loop(stop_admin_telegram)
+            except Exception as exc:
+                print(f"EGE CORE admin telegram loop failed to start: {exc}",
+                      file=sys.stderr, flush=True)
 
             def stop_server(signum, _frame):
                 if stopping.is_set():
@@ -15827,12 +15896,15 @@ if __name__ == "__main__":
                 stop_backups.set()
                 stop_ai_probe.set()
                 stop_health_checks.set()
+                stop_admin_telegram.set()
                 if backup_thread is not None:
                     backup_thread.join(timeout=10)
                 if ai_probe_thread is not None:
                     ai_probe_thread.join(timeout=5)
                 if health_checks_thread is not None:
                     health_checks_thread.join(timeout=5)
+                if admin_telegram_thread is not None:
+                    admin_telegram_thread.join(timeout=5)
                 httpd.server_close()
                 for sig, handler in previous_handlers.items():
                     signal.signal(sig, handler)

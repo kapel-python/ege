@@ -542,6 +542,25 @@ def main():
             check("обычный текст игнорируется молча", len(fake.sent) == sent_before,
                   len(fake.sent))
             request(opener8, base, "/api/admin/login/cancel", "POST", {"pending": pending8})
+
+            # ---------------------------------------------------------------
+            section("13. Фоновый цикл: бот жив без входов")
+            stop_bg = threading.Event()
+            bg_thread = server.start_admin_telegram_loop(stop_bg)
+            try:
+                sent_before = len(fake.sent)
+                fake.queue_message(ADMIN_CHAT, "/start")
+                deadline = time.time() + 30
+                while len(fake.sent) == sent_before and time.time() < deadline:
+                    time.sleep(0.5)
+                check("/start отвечен фоном, без единого входа",
+                      len(fake.sent) == sent_before + 1, len(fake.sent))
+                check("ответ — про привязку",
+                      "привязан как владелец" in str((fake.sent[-1] or {}).get("text") or ""))
+            finally:
+                stop_bg.set()
+                bg_thread.join(timeout=15)
+            check("поток останавливается по событию", not bg_thread.is_alive())
         finally:
             httpd.shutdown()
             httpd.server_close()
