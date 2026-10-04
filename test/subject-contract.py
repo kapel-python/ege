@@ -22,11 +22,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SERVER_DIR = ROOT / "server"
 SERVER_PATH = SERVER_DIR / "server.py"
-SUBJECTS = ("profile_math", "basic_math", "russian")
+SUBJECTS = ("profile_math", "basic_math", "russian", "biology")
 CATALOG_FILES = {
     "profile_math": "catalog.json",
     "basic_math": "catalog_basic.json",
     "russian": "catalog_russian.json",
+    "biology": "catalog_biology.json",
 }
 REQUIRED_FEATURES = frozenset(
     {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}
@@ -206,7 +207,8 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice", "lessons", "forecast"} for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice", "lessons", "forecast", "missions"} for key in REQUIRED_FEATURES},
+                "biology": {key: True for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
@@ -220,6 +222,58 @@ def main() -> int:
                     else repr(features)
                 )
                 check(f"CAPABILITY MATRIX {subject}", matrix_ok, matrix)
+
+            # Раздел «Тренировка» рисуется строго из missions: флаг
+            # missions:true при пустом банке даёт пустой раздел (живой случай
+            # русского до миссий). Проверяем покрытие для КАЖДОГО предмета,
+            # чтобы новый предмет не уехал в прод с дырой.
+            for subject in SUBJECTS:
+                contract = contracts.get(subject) or {}
+                feats = contract.get("features") or {}
+                locked = bool(contract.get("locked")) or contract.get("status") != "ready"
+                boot_catalog = payloads[("/api/bootstrap", subject)].get("catalog") or {}
+                served_tasks = boot_catalog.get("tasks") or []
+                served_missions = boot_catalog.get("missions") or []
+                served_lessons = boot_catalog.get("lessons") or []
+                task_ids = {t.get("id") for t in served_tasks if isinstance(t, dict)}
+                task_skill = {t.get("id"): t.get("skill") for t in served_tasks if isinstance(t, dict)}
+                needs_mission = {
+                    t.get("skill") for t in served_tasks
+                    if isinstance(t, dict) and t.get("skill") and t.get("type") != "long_text"
+                }
+                covered = {m.get("skill") for m in served_missions if isinstance(m, dict)}
+                refs_ok = all(
+                    isinstance(m, dict) and m.get("tasks")
+                    and all(tid in task_ids and task_skill.get(tid) == m.get("skill") for tid in m["tasks"])
+                    for m in served_missions
+                )
+                if locked:
+                    check(f"SECTION COVERAGE missions {subject}", True, "locked — покрытие не требуется")
+                elif feats.get("missions"):
+                    missing = sorted(needs_mission - covered)
+                    check(
+                        f"SECTION COVERAGE missions {subject}",
+                        bool(served_missions) and not missing and refs_ok,
+                        f"missions={len(served_missions)}, uncovered={missing or 'none'}, refs_ok={refs_ok}",
+                    )
+                else:
+                    check(
+                        f"SECTION COVERAGE missions {subject}",
+                        True,
+                        f"missions=false, served={len(served_missions)}",
+                    )
+                if feats.get("practice") and not locked:
+                    check(
+                        f"SECTION COVERAGE practice {subject}",
+                        len(served_tasks) > 0,
+                        f"tasks={len(served_tasks)}",
+                    )
+                if feats.get("lessons") and not locked:
+                    check(
+                        f"SECTION COVERAGE lessons {subject}",
+                        len(served_lessons) > 0,
+                        f"lessons={len(served_lessons)}",
+                    )
 
             russian_tasks = payloads[("/api/catalog-tasks", "russian")]
             served_russian_tasks = russian_tasks.get("tasks") or []
@@ -280,7 +334,8 @@ def main() -> int:
                 and len(russian_catalog.get("tasks") or []) == 143
                 and len(russian_catalog.get("lessons") or []) == 26
                 and len(russian_catalog.get("skills") or []) == 27
-                and russian_missions == []
+                and len(russian_missions) == 26
+                and {m.get("skill") for m in russian_missions} == {f"r{i:02d}" for i in range(1, 27)}
                 and isinstance(russian_catalog.get("daily"), dict)
                 and (russian_catalog.get("daily") or {}).get("target") == 0
             )
