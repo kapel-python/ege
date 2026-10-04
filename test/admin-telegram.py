@@ -153,6 +153,19 @@ class FakeTelegram:
         self.httpd.shutdown()
         self.httpd.server_close()
 
+    def queue_message(self, chat: str, text: str):
+        update_id = self._next_update
+        self._next_update += 1
+        self.updates.append({
+            "update_id": update_id,
+            "message": {
+                "message_id": update_id,
+                "chat": {"id": int(chat), "type": "private"},
+                "from": {"id": int(chat)},
+                "text": text,
+            },
+        })
+
     def queue_decision(self, short: str, approve: bool, chat: str = ADMIN_CHAT):
         action = "ok" if approve else "no"
         update_id = self._next_update
@@ -488,6 +501,34 @@ def main():
                   all(len(t) == 64 and all(c in "0123456789abcdef" for c in t.lower())
                       for t in tokens), tokens)
             request(opener7, base, "/api/admin/login/cancel", "POST", {"pending": pending7})
+
+            # ---------------------------------------------------------------
+            section("12. Команда /start")
+            opener8, _ = make_device()
+            status, _, body8 = admin_login(opener8, base)
+            pending8 = body8.get("pendingId") or ""
+            sent_before = len(fake.sent)
+            fake.queue_message(ADMIN_CHAT, "/start")
+            status, _, st = login_status(opener8, base, pending8)
+            check("опрос после /start всё ещё pending", status == 200 and st.get("pending") is True,
+                  (status, st))
+            check("владельцу пришёл ответ о привязке", len(fake.sent) == sent_before + 1,
+                  len(fake.sent))
+            owner_reply = str((fake.sent[-1] or {}).get("text") or "")
+            check("ответ подтверждает привязку чата", "привязан как владелец" in owner_reply,
+                  owner_reply[:80])
+            fake.queue_message(FOREIGN_CHAT, "/start@ege_easy_ru_bot")
+            status, _, _ = login_status(opener8, base, pending8)
+            stranger_reply = str((fake.sent[-1] or {}).get("text") or "")
+            check("чужому отвечает про непривязанный чат",
+                  FOREIGN_CHAT in stranger_reply and "не привязан" in stranger_reply,
+                  stranger_reply[:80])
+            sent_before = len(fake.sent)
+            fake.queue_message(ADMIN_CHAT, "привет, это просто текст")
+            status, _, _ = login_status(opener8, base, pending8)
+            check("обычный текст игнорируется молча", len(fake.sent) == sent_before,
+                  len(fake.sent))
+            request(opener8, base, "/api/admin/login/cancel", "POST", {"pending": pending8})
         finally:
             httpd.shutdown()
             httpd.server_close()

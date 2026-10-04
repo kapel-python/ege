@@ -2699,6 +2699,17 @@ def telegram_ingest_updates(conn: sqlite3.Connection) -> None:
             _admin_telegram_offset_set(conn, int(max_id) + 1)
         for update in updates or []:
             try:
+                command = _TG.parse_command(update)
+                if command is not None and command[1] in ("start", "help"):
+                    # /start владельца и чужого: ответ — только текст о
+                    # привязке, никаких заявок и решений здесь нет. Обычный
+                    # текст игнорируется молча (см. parse_command).
+                    try:
+                        _TG.send_text(command[0], _TG.start_reply(
+                            str(command[0]) == str(chat_id), str(command[0])))
+                    except Exception:
+                        pass
+                    continue
                 callback_id = None
                 if isinstance(update, dict) and isinstance(update.get("callback_query"), dict):
                     callback_id = update["callback_query"].get("id")

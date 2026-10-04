@@ -215,6 +215,59 @@ def parse_decision(update: object, chat_id: str) -> tuple[str, str] | None:
         return None
 
 
+def send_text(chat_id: str | int, text: str) -> None:
+    """Обычное сообщение в чат. Ошибки — вызывателю (там best-effort)."""
+    cfg = require_configured()
+    _api_call("sendMessage", {"chat_id": str(chat_id), "text": text}, cfg=cfg)
+
+
+def parse_command(update: object) -> tuple[str, str] | None:
+    """(chat_id, команда) из входящего сообщения — иначе None.
+
+    Понимаем только команды ('/start', '/help'): обычный текст игнорируется
+    молча, иначе бот отвечал бы на каждое слово. Суффикс '@имябота' (команда
+    из группы) отрезаем.
+    """
+    try:
+        if not isinstance(update, dict):
+            return None
+        message = update.get("message")
+        if not isinstance(message, dict):
+            return None
+        text = str(message.get("text") or "").strip()
+        if not text.startswith("/"):
+            return None
+        command = text[1:].split(None, 1)[0].split("@", 1)[0].strip().lower()
+        if not command:
+            return None
+        chat = message.get("chat")
+        if not isinstance(chat, dict):
+            return None
+        chat_id = str(chat.get("id") or "")
+        if not chat_id:
+            return None
+        return chat_id, command
+    except Exception:
+        return None
+
+
+def start_reply(is_owner: bool, chat_id: str) -> str:
+    """Текст ответа на /start: владельцу — подтверждение привязки, чужому —
+    только его id (по нему владелец привяжет чат) и ничего лишнего."""
+    if is_owner:
+        return (
+            "🔐 Это служебный бот входа в админ-панель ege easy.\n\n"
+            "Этот чат привязан как владелец: заявки на вход с кодом, "
+            "IP и кнопками «Подтвердить / Отклонить» приходят сюда.\n\n"
+            "Команды: /start — это сообщение."
+        )
+    return (
+        "🔐 Это служебный бот входа в админ-панель ege easy.\n\n"
+        f"Этот чат ({chat_id}) не привязан как владелец — заявки сюда "
+        "приходить не будут."
+    )
+
+
 def answer_callback(callback_id: str, text: str = "") -> None:
     """Убрать «часики» на кнопке. Best-effort: исход решения уже в базе."""
     try:
