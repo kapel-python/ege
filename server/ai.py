@@ -1433,7 +1433,11 @@ def _note_provider_success(name: str, tier: str | None = None) -> None:
     now_ms = int(time.time() * 1000)
     with _provider_health_lock:
         _provider_last_ok[(tier, name)] = now_ms
-    patch: dict[str, Any] = {}
+    # Успех переживает рестарт так же, как ошибка: иначе перезапуск стирал бы
+    # все успехи из памяти, а переживший его ai_router.lastErrorAt снова
+    # красил бы статус красным по древней записи («побеждает последняя
+    # запись» обязана работать и после рестарта).
+    patch: dict[str, Any] = {"lastOkAt": now_ms}
     fails = _fails_counts(tier)
     if fails.pop(str(name), None) is not None:
         patch["fails"] = fails
@@ -1457,7 +1461,9 @@ def _note_probe_success(name: str, tier: str | None = None) -> None:
     fails = _fails_counts(tier)
     if str(name) in fails:
         fails.pop(str(name), None)
-        _router_update({"fails": fails}, tier)
+    # Успех пробы — тоже persistent-метка (см. _note_provider_success):
+    # иначе рестарт возвращал бы древнюю ошибку в статус.
+    _router_update({"fails": fails, "lastOkAt": now_ms}, tier)
 
 
 # ---------------------------------------------------------------------------
@@ -3500,6 +3506,10 @@ def public_ai_health() -> dict:
         router_err_at = int(router.get("lastErrorAt") or 0) or None
     except (TypeError, ValueError):
         router_err_at = None
+    try:
+        router_ok_at = int(router.get("lastOkAt") or 0) or None
+    except (TypeError, ValueError):
+        router_ok_at = None
     providers = []
     for pid in ids:
         try:
@@ -3535,7 +3545,8 @@ def public_ai_health() -> dict:
                           "lastOkAt": ok_at, "lastErrorAt": err_at})
     return {"providers": providers,
             "router": {"active": str(router.get("active") or "") or None,
-                       "lastErrorAt": router_err_at},
+                       "lastErrorAt": router_err_at,
+                       "lastOkAt": router_ok_at},
             "now": int(time.time() * 1000)}
 
 

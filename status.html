@@ -743,6 +743,14 @@
   refreshBtn.addEventListener("click", manualRefresh);
   retryBtn.addEventListener("click", manualRefresh);
   load();
+  /* Живой статус без перезагрузки страницы: раз в минуту молча сверяемся
+     с сервером. Вкладка в фоне не опрашивается (document.hidden), лимит
+     /api/status — 60 запросов в минуту, один запрос в минуту его не замечает.
+     Свежесть самих данных даёт сервер (успехи провайдеров тоже persist'ятся),
+     здесь только регулярное чтение. */
+  setInterval(function(){
+    if (!document.hidden) load();
+  }, 60000);
 })();
 </script>
 </body>

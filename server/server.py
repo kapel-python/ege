@@ -6228,6 +6228,13 @@ def _provider_status_service(now_ms: int) -> dict:
             last_ok = max(last_ok, int(p.get("lastOkAt") or 0))
         except (TypeError, ValueError):
             pass
+    try:
+        # Успехи тоже переживают рестарт (ai_router.lastOkAt): иначе древняя
+        # ошибка снова побеждала бы после перезапуска при пустой памяти.
+        router_ok = int(((health.get("router") or {}).get("lastOkAt")) or 0)
+        last_ok = max(last_ok, router_ok)
+    except (TypeError, ValueError):
+        pass
     last_err = 0
     for p in configured:
         try:
