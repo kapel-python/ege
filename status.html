@@ -310,14 +310,14 @@
         Состояние сервиса
       </span>
       <h1>Состояние ege easy прямо сейчас</h1>
-      <p class="hero-sub">Живые данные: что работает, какие предметы доступны и сколько заданий уже можно решать. Цифры обновляются сами и всегда показывают, как дела на самом деле.</p>
+      <p class="hero-sub">Что работает, какие предметы открыты и сколько заданий тебя уже ждёт. Данные свежие — обновляем их каждую минуту.</p>
       <div class="status-card" id="overallCard" role="status" aria-live="polite">
         <span class="status-dot" id="overallDot" aria-hidden="true"></span>
         <div style="min-width:0;flex:1;">
           <p class="status-title" id="overallTitle">Проверяем состояние…</p>
-          <p class="status-text" id="overallText">Загружаем живые данные с сервера.</p>
+          <p class="status-text" id="overallText">Загружаем свежие данные.</p>
           <p class="status-meta">
-            <span id="updatedMeta">Обновление…</span>
+            <span id="updatedMeta">Обновляем…</span>
             <span id="contentMeta"></span>
             <button class="btn btn-ghost status-refresh" id="refreshBtn" type="button">Обновить</button>
           </p>
@@ -329,8 +329,8 @@
   <section class="section" id="statsSection" hidden>
     <div class="wrap">
       <div class="section-label">В цифрах</div>
-      <h2 class="section-title">Наполненность платформы</h2>
-      <p class="section-desc">Всё, что уже доступно для подготовки. Цифры обновляются автоматически.</p>
+      <h2 class="section-title">Что уже готово</h2>
+      <p class="section-desc">Всё, чем уже можно пользоваться.</p>
       <div class="stat-grid" id="statGrid"></div>
     </div>
   </section>
@@ -339,7 +339,7 @@
     <div class="wrap">
       <div class="section-label">Проверка</div>
       <h2 class="section-title">Что работает</h2>
-      <p class="section-desc">То, от чего зависит твоя подготовка. Проверяем каждую минуту — у каждой строки написано, когда её проверяли.</p>
+      <p class="section-desc">Всё, от чего зависят твои занятия. Проверяем каждую минуту.</p>
       <div class="svc-grid" id="svcGrid"></div>
     </div>
   </section>
@@ -348,7 +348,7 @@
     <div class="wrap">
       <div class="section-label">Предметы</div>
       <h2 class="section-title">Что сейчас доступно</h2>
-      <p class="section-desc">Нажми на предмет, чтобы увидеть темы. Нажми на тему, чтобы увидеть, что внутри: задания, теорию, практику и схемы.</p>
+      <p class="section-desc">Открой предмет — увидишь темы, а в теме — задания, теорию и практику.</p>
       <div id="subjectsList"></div>
     </div>
   </section>
@@ -357,7 +357,7 @@
     <div class="wrap">
       <div class="error-card">
         <p class="status-title" id="errorTitle">Не удалось проверить состояние</p>
-        <p id="errorText">Сервер временно не отвечает. Попробуй обновить страницу чуть позже — данные появятся, как только он вернётся.</p>
+        <p id="errorText">Сервер временно не отвечает. Обнови страницу чуть позже — данные появятся сами.</p>
         <button class="btn btn-primary" id="retryBtn" type="button">Попробовать снова</button>
       </div>
     </div>
@@ -425,7 +425,7 @@
   }
 
   function showError(){
-    setOverall("warn", "Не удалось проверить состояние", "Сервер временно не отвечает. Мы не показываем «всё хорошо», если не можем это подтвердить.");
+    setOverall("warn", "Не удалось проверить состояние", "Сервер временно не отвечает. Обнови страницу чуть позже.");
     updatedMeta.textContent = "Данные недоступны";
     contentMeta.textContent = "";
     statsSection.hidden = true;
@@ -461,8 +461,8 @@
   function skillStatusText(skill){
     var raw = skill && typeof skill === "object" ? skill : {status: skill};
     var status = statusKey(raw.status);
-    if (raw.locked === true || raw.comingSoon === true || ["locked", "soon", "empty", "coming-soon", "planned", "disabled", "unavailable", "hidden"].indexOf(status) >= 0) return "заблокирована — материалы скоро";
-    if (["partial", "limited"].indexOf(status) >= 0) return "частично — теория есть, практика скоро";
+    if (raw.locked === true || raw.comingSoon === true || ["locked", "soon", "empty", "coming-soon", "planned", "disabled", "unavailable", "hidden"].indexOf(status) >= 0) return "пока закрыта — откроется скоро";
+    if (["partial", "limited"].indexOf(status) >= 0) return "теория уже есть, практика — скоро";
     if (["available", "ready", "active", "published", "open"].indexOf(status) >= 0) return "доступна";
     return "пока недоступна";
   }
@@ -509,7 +509,7 @@
     facts.push({label: "Заданий доступно", value: esc(skill.tasks) + " " + esc(plural(skill.tasks, "задание", "задания", "заданий"))});
     if (skill.blockedTasks > 0){
       facts.push({label: "Временно недоступно", warn: true,
-        value: esc(skill.blockedTasks) + " " + esc(plural(skill.blockedTasks, "задание", "задания", "заданий")) + " — ждём картинки из экзамена"});
+        value: esc(skill.blockedTasks) + " " + esc(plural(skill.blockedTasks, "задание", "задания", "заданий")) + " — выйдут позже: ждём официальные рисунки"});
     }
     if (skill.lesson){
       var lessonText = "есть";
@@ -525,7 +525,7 @@
     if (skill.visuals > 0){
       facts.push({label: "Схемы", value: esc(skill.visuals) + " " + esc(plural(skill.visuals, "задание", "задания", "заданий")) + " со схемами"});
     } else if ((skill.subjVisuals || 0) > 0 && skill.tasks > 0){
-      facts.push({label: "Схемы", value: "пока без картинок"});
+      facts.push({label: "Схемы", value: "пока без рисунков"});
     }
     if (skill.inDiagnostics){
       facts.push({label: "Диагностика", value: "входит в диагностику"});
@@ -554,7 +554,7 @@
         if ((counts.blockedTasks || 0) > 0){
           note = '<p class="subj-note">' + esc(counts.blockedTasks) + " "
             + esc(plural(counts.blockedTasks, "задание", "задания", "заданий"))
-            + " появятся позже — для них нужны картинки из экзамена.</p>";
+            + " выйдут позже — ждём официальные рисунки.</p>";
         }
         var head = document.createElement("button");
         head.className = "subj-head";
@@ -578,7 +578,7 @@
         var cats = subj.categories || [];
         var skills = subj.skills || [];
         if (!skills.length){
-          bodyHtml += '<p class="subj-note">Темы пока не загружены. Загляни позже.</p>';
+          bodyHtml += '<p class="subj-note">Тем пока нет. Загляни позже.</p>';
         }
         for (var c = 0; c < cats.length; c++){
           var catSkills = [];
@@ -596,8 +596,8 @@
                 || ["locked", "soon", "empty", "coming-soon", "planned", "disabled", "unavailable", "hidden"].indexOf(skillStatus) >= 0;
               var countText = skill.tasks > 0
                 ? skill.tasks + " " + plural(skill.tasks, "задание", "задания", "заданий")
-                : (["partial", "limited"].indexOf(skillStatus) >= 0 ? "практика скоро"
-                  : skillSoon ? "материалы скоро" : "нет заданий");
+                : (["partial", "limited"].indexOf(skillStatus) >= 0 ? "практика — скоро"
+                  : skillSoon ? "откроется скоро" : "нет заданий");
               bodyHtml += '<div class="skill">'
                 + '<button class="skill-head" type="button" aria-expanded="false" aria-controls="' + esc(sid) + '">'
                 + '<span class="' + skillDotClass(skill) + '" aria-hidden="true"></span>'
@@ -628,8 +628,8 @@
                 || ["locked", "soon", "empty", "coming-soon", "planned", "disabled", "unavailable", "hidden"].indexOf(skillStatus) >= 0;
               var countText = skill.tasks > 0
                 ? skill.tasks + " " + plural(skill.tasks, "задание", "задания", "заданий")
-                : (["partial", "limited"].indexOf(skillStatus) >= 0 ? "практика скоро"
-                  : skillSoon ? "материалы скоро" : "нет заданий");
+                : (["partial", "limited"].indexOf(skillStatus) >= 0 ? "практика — скоро"
+                  : skillSoon ? "откроется скоро" : "нет заданий");
               bodyHtml += '<div class="skill">'
                 + '<button class="skill-head" type="button" aria-expanded="false" aria-controls="' + esc(sid) + '">'
                 + '<span class="' + skillDotClass(skill) + '" aria-hidden="true"></span>'
@@ -676,10 +676,10 @@
       if (!services[i].ok) failed.push(services[i].label || services[i].id);
     }
     if (data.overall === "ok" && !failed.length){
-      setOverall("live", "ege easy работает нормально", "Все основные сервисы работают.");
+      setOverall("live", "Всё работает", "Все разделы доступны — можно заниматься.");
     } else if (data.overall === "degraded" || failed.length){
-      setOverall("warn", "Есть частичные проблемы",
-        failed.length ? "Недоступно: " + failed.join(", ") + ". Остальное работает." : "Часть сервисов временно недоступна.");
+      setOverall("warn", "Что-то временно не работает",
+        failed.length ? "Сейчас недоступно: " + failed.join(", ") + ". Всё остальное работает." : "Часть разделов временно недоступна.");
     } else {
       setOverall("warn", "Не удалось проверить состояние", "Попробуй обновить страницу чуть позже.");
     }
