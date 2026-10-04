@@ -8379,9 +8379,13 @@ function openNameEditDialog() {
   document.removeEventListener("keydown", deviceModalEscHandler);
   document.addEventListener("keydown", deviceModalEscHandler);
   const dlg = root.querySelector(".dlg");
-  const input = root.querySelector("#nameEditInput");
-  if (dlg) { dlg.setAttribute("tabindex", "-1"); }
-  if (input) { try { input.focus({ preventScroll: true }); input.select(); } catch (_) {} }
+  if (dlg) {
+    dlg.setAttribute("tabindex", "-1");
+    // Фокус на самом окне, а не на поле: автофокус в input на телефоне
+    // сразу поднимает клавиатуру поверх только что открывшегося окна.
+    // Кто хочет ввести имя — тапнет по полю сам.
+    try { dlg.focus({ preventScroll: true }); } catch (_) {}
+  }
 }
 
 async function saveProfileName() {
