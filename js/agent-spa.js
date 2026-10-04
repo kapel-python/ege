@@ -459,9 +459,15 @@
     fallbackLimit: QUOTA_FALLBACK,
   };
   function agentQuotaText(limit, left) {
+    // Апсейл — тем же правилом, что у сочинений (только бесплатный уровень,
+    // limit <= 5; у Plus и грантов его нет) и только в окне исчерпания:
+    // справочное окно по кружку и burst-режим его не показывают.
+    var upsell = limit <= 5
+      ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — 25 ходов наставника в день.</div>`
+      : "";
     return "Ход — это твой вопрос наставнику и его ответ. Доступно " +
       "<b><span data-ai-limit-left>" + left + "</span> из " + limit + "</b> " +
-      pluralQ(limit) + ": израсходованные ходы возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки).";
+      pluralQ(limit) + ": израсходованные ходы возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки)." + upsell;
   }
   function openLimitModal(quota, burstRetry) {
     if (typeof openAiLimitModal !== "function") {

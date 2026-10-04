@@ -1427,6 +1427,9 @@ function openRecheckLimit(status) {
       recheckFetchLimits().then((st) => {
         if (!st || !st.ok) return;
         if (Number(st.remaining) > 0) openRecheckConfirm(st, "");
+        // Сервер сказал ждать ещё — перезапускаем таймер свежим resetInSec,
+        // как openAiLimitModal в app.js. Иначе окно замирало на 00:00:00.
+        else openRecheckLimit(st);
       });
     }, 1000);
   }

@@ -21,6 +21,7 @@ const srvCode = read("server/server.py");
 const appJs = read("js/app.js");
 const indexHtml = read("index.html");
 const agentHtml = read("agent.html");
+const resultHtml = read("ege-result.html");
 
 /* --- старые отдельные файлы удалены --- */
 check("нет отдельной страницы js/agent.js", !exists("js/agent.js"));
@@ -74,6 +75,12 @@ check("общая модалка закрывается по Esc и возвра
   && /deviceModalPrevFocus = document\.activeElement/.test(appJs)
   && /deviceModalPrevFocus && deviceModalPrevFocus\.isConnected[\s\S]{0,200}?deviceModalPrevFocus\.focus/.test(appJs));
 check("бан через showAccountBlocked", spaCode.includes("showAccountBlocked"));
+check("апсейл Plus в окне исчерпания — тем же правилом, что у сочинений (только limit <= 5)",
+  /function agentQuotaText[\s\S]{0,800}?limit <= 5/.test(spaCode)
+  && spaCode.includes("dlg__upsell") && spaCode.includes("/subscription")
+  && spaCode.includes("25 ходов наставника"));
+check("модалка перепроверки перезапускает таймер свежим статусом, как openAiLimitModal (не замирает на 00:00:00)",
+  /else openRecheckLimit\(st\);/.test(resultHtml));
 
 /* --- поведение чата (портировано из старой страницы) --- */
 check("скелетоны loader", spaCode.includes("agent__loader"));
