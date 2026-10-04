@@ -118,7 +118,7 @@ check("пилюли квоты нет вообще (не прячется — у
    transition stroke-dashoffset в CSS, обновления — частые и мелкие, поэтому
    кольцо ползёт, а не прыгает. */
 check("GET треда несёт квоту для живого кольца",
-  /"quota": _AGENT\.agent_quota_status\(conn, int\(user_id\)\)/.test(srvCode));
+  /"quota": _AGENT\.agent_quota_status\(\s*conn, int\(user_id\)[\s\S]{0,120}?\)/.test(srvCode));
 check("опрос применяет квоту после каждого шага (только пока ход жив)",
   /function livePoll\(turn\)[\s\S]{0,900}?res\.data\.quota && res\.data\.busy/.test(spaCode)
   && /function livePoll\(turn\)[\s\S]{0,900}?setQuota\(res\.data\.quota\)/.test(spaCode));

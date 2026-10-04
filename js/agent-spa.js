@@ -422,6 +422,9 @@
     var limit = Math.max(1, Number(q.limit) || QUOTA_FALLBACK);
     var remaining = Math.max(0, Math.min(limit, Number(q.remaining) || 0));
     S.quota = { limit: limit, remaining: remaining, resetInSec: q.resetInSec == null ? null : Number(q.resetInSec) };
+    // Причина блокировки (ферма) едет тем же объектом: модалка по клику на
+    // кружок обязана показать то же окно, что исчерпание, — с причиной.
+    if (q && q.reason === "farm_suspected") S.quota.reason = "farm_suspected";
     // Цифры в кружке нет осознанно: только кольцо + aria-label для
     // скринридера. Сколько ходов осталось — показывает окно по клику.
     // Ноль — ПОЛНЫЙ красный круг (offset 0), а не пустой серый трек:
@@ -2957,7 +2960,7 @@
       if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
       if (turn.replaceLast) loadThreadMessages(true);
       else restoreAskButton(turn.askBtn);
-      openLimitModal({ limit: res.data.limit, remaining: res.data.remaining, resetInSec: res.data.resetInSec }, null);
+      openLimitModal({ limit: res.data.limit, remaining: res.data.remaining, resetInSec: res.data.resetInSec, reason: res.data.reason }, null);
       if (res.data.limit) setQuota(res.data);
       syncBusy();   // дальше говорит модалка, а не блокировка
       return;

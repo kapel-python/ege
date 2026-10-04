@@ -5234,6 +5234,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount) {
           limit: Math.max(1, Number(aiData.limit) || AI_LIMIT_FALLBACK), remaining: 0,
           resetInSec: Math.max(0, Number(aiData.resetInSec) || 0),
           windowSec: 8 * 3600, at: Date.now(),
+          ...(aiData.reason === "farm_suspected" ? { reason: "farm_suspected" } : {}),
         };
         // Под модалкой — тот же resume-блок, что после прочих неудач:
         // когда таймер дойдёт и окно закроется, единственной кнопкой
@@ -5505,6 +5506,7 @@ function aiLimitsFetch(force) {
           resetInSec: data.resetInSec == null ? null : Math.max(0, Number(data.resetInSec) || 0),
           windowSec: Math.max(60, Number(data.windowSec) || 8 * 3600),
           at: Date.now(),
+          ...(data.reason === "farm_suspected" ? { reason: "farm_suspected" } : {}),
         };
         AiLimits.accountId = Store.accountId;
         AiLimits.cache = st;
@@ -5546,6 +5548,11 @@ function aiLimitsNoteSpend() {
    Других мест про лимит нет: внутри практики оба 429 идут сюда, отдельных
    inline-блоков «Проверка не удалась / Слишком часто» больше нет.
 
+   Третий режим — ферма (status.reason === "farm_suspected": свежий аккаунт,
+   а котёл устройства выели чужие траты): окно «Доступ временно ограничен»
+   с причиной, БЕЗ таймера и без апсейла Plus. Время вслух не называем,
+   чтобы не учить ферму ротации; Plus от котла не освобождает.
+
    Третий аргумент opts — тот же вид окна для ДРУГОГО продукта: раздел ИИ
    открывает его кликом по кружку квоты (справочный режим: timer:false и
    closeText "Закрыть" — ровно инфо-диалог о модели на ege-result) и по
@@ -5578,20 +5585,30 @@ function openAiLimitModal(status, burstRetryAfterSec, opts) {
     ? Math.max(1, Math.floor(Number(burstRetryAfterSec) || 60))
     : Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
   const hasBalance = status && status.remaining != null;
+  // Подозрение на ферму (reason="farm_suspected" от сервера: свежий аккаунт,
+  // а котёл устройства выели чужие траты): отдельное окно БЕЗ таймера и без
+  // апсейла Plus — время вслух не называем, чтобы не учить ферму ротации, а
+  // Plus от котла не освобождает, и продавать его здесь было бы враньём.
+  // Ветка первая: никакие opts.text её не перебивают (у ИИ свой текст).
+  const farm = !burst && status && status.reason === "farm_suspected";
   // Имя НЕ plural: локальная константа перекрыла бы глобальную функцию в
   // своём же инициализаторе (рекурсия до переполнения стека).
   const pluralFn = typeof o.plural === "function"
     ? o.plural
     : (n) => plural(n, "проверка", "проверки", "проверок");
+  const farmText = `На этом устройстве лимит уже использован другим аккаунтом, поэтому доступ временно ограничен.`
+    + `<br><br>Причина: подозрение на ферму аккаунтов. Попробуй чуть позже.`
+    + `${hasBalance ? `<br><br>Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`;
   const essayText = burst
     ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
     : `Лимит — ${limit} ${pluralFn(limit)} в день: израсходованные возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки).
           Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — вдвое больше проверок.</div>` : ""}`;
-  const name = o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились");
-  const text = typeof o.text === "function"
+  const name = farm ? "Доступ временно ограничен"
+    : (o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились"));
+  const text = farm ? farmText : (typeof o.text === "function"
     ? o.text({ remaining, limit, burst, left, plural: pluralFn })
-    : (o.text || essayText);
-  const withTimer = o.timer !== false;
+    : (o.text || essayText));
+  const withTimer = farm ? false : o.timer !== false;
   const timerLabel = o.timerLabel || (burst ? "Повторная попытка через" : "Обновление лимита через");
   try {
     deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;

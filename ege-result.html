@@ -1317,6 +1317,7 @@ async function recheckFetchLimits() {
     limit: Math.max(1, Number(data.limit) || AI_LIMIT_FALLBACK),
     remaining: Math.max(0, Number(data.remaining) || 0),
     resetInSec: data.resetInSec == null ? null : Math.max(0, Number(data.resetInSec) || 0),
+    ...(data.reason === "farm_suspected" ? { reason: "farm_suspected" } : {}),
   };
 }
 
@@ -1389,6 +1390,32 @@ function openRecheckLimit(status) {
   recheckPendingClear();
   const limit = Math.max(1, Number(status && status.limit) || AI_LIMIT_FALLBACK);
   let left = Math.max(0, Math.floor(Number(status && status.resetInSec) || 0));
+  // Ферма (reason от сервера): то же окно «Доступ временно ограничен» с
+  // причиной, что в практике, — без таймера и без апсейла Plus.
+  if (status && status.reason === "farm_suspected") {
+    openRecheckModal(`
+        <div class="dlg" role="dialog" aria-modal="true" aria-label="Доступ временно ограничен">
+          <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+          <div class="dlg__eyebrow">Перепроверка сочинения</div>
+          <div class="dlg-device">
+            <div class="dlg-device__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            </div>
+            <div class="dlg-device__name">Доступ временно ограничен</div>
+          </div>
+          <div class="dlg__text">
+            На этом устройстве лимит уже использован другим аккаунтом, поэтому доступ временно ограничен.
+            <br><br>Причина: подозрение на ферму аккаунтов. Попробуй чуть позже.
+            <br><br>Сейчас доступно: <b><span class="tnum">0 из ${limit}</span></b>.
+          </div>
+          <div class="dlg__actions">
+            <button class="btn btn--soft" type="button" onclick="closeRecheckModal()">Понятно</button>
+          </div>
+        </div>`, true);
+    return;
+  }
   openRecheckModal(`
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Лимит проверок исчерпан">
         <button class="dlg__close" type="button" onclick="closeRecheckModal()" aria-label="Закрыть окно">
@@ -1668,7 +1695,8 @@ async function doRecheck(note) {
   }
   if (!aiRes.ok || !aiData.result) {
     if (aiRes.status === 429 && aiData && aiData.code === "AI_LIMIT") {
-      openRecheckLimit({ limit: aiData.limit || AI_LIMIT_FALLBACK, remaining: 0, resetInSec: aiData.resetInSec });
+      openRecheckLimit({ limit: aiData.limit || AI_LIMIT_FALLBACK, remaining: 0, resetInSec: aiData.resetInSec,
+        ...(aiData.reason === "farm_suspected" ? { reason: "farm_suspected" } : {}) });
       return;
     }
     if (aiRes.status === 401) {

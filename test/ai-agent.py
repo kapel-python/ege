@@ -1924,7 +1924,9 @@ def main():
                 owner = f"agent:{uid_g}"
                 win = agent.agent_quota_window_ms()
                 # Ход выше запустил таймер цепочки — прокручиваем окно на тик+.
-                agent.agent_quota_status(conn2, uid_g, int(time.time() * 1000) + win)
+                # now_ms — только по имени: третьим позиционным идёт fp_key
+                # (котёл устройства), а не время.
+                agent.agent_quota_status(conn2, uid_g, now_ms=int(time.time() * 1000) + win)
                 row = conn2.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?",
                                     (owner,)).fetchone()
                 check("грант пережил 8-часовой тик (не срезан до 10)",

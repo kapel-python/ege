@@ -7863,12 +7863,16 @@ def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bo
 
 def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
                      fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
-    """Бакеты, из которых списывает этот пользователь: всегда аккаунт,
-    а для СВЕЖЕГО аккаунта ещё и отпечатки устройства (кука и сеть).
+    """Бакеты, по которым ЧИТАЕТСЯ остаток этого пользователя: всегда аккаунт,
+    а для СВЕЖЕГО аккаунта без оплаченной подписки ещё и котлы устройства
+    (кука и сеть).
 
-    Исключение — персональный грант админа выше общего лимита: общий
-    бакет устройства с потолком 5 тогда душил бы грант 100 через min(),
-    поэтому доверенный аккаунт списывает только из своего u:-бакета."""
+    Исключения из чтения котла (остаток — только свой u:-бакет):
+    персональный грант админа выше общего лимита (иначе котёл с потолком 5
+    душил бы грант 100 через min()) и активный Plus (квота оплачена —
+    честные 10/10 с момента покупки, см. «исчерпанный лимит + Plus»).
+    Оба при этом котёл ГРЕЮТ как все (см. ai_usage_try_reserve): Plus
+    основного не прикрывает свежую ферму рядом, грант — тоже."""
     owners = [f"u:{user_id}"]
     try:
         if ai_effective_limit(conn, user_id) > ai_usage_max():
@@ -7880,6 +7884,23 @@ def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
             owners.append(f"k:{fp_key}")
         if fp_net:
             owners.append(f"n:{fp_net}")
+    return owners
+
+
+def _ai_usage_spend_owners(user_id: int, fp_key: str | None, fp_net: str | None) -> list[str]:
+    """Бакеты, которые греет КАЖДАЯ трата — любой возраст, любая подписка.
+
+    Старый основной аккаунт раньше минусил только свой u:-бакет, и котёл
+    устройства оставался холодным: свежая ферма рядом видела полный лимит.
+    Теперь трата всегда греет и котлы (k:/n:), а читает их только свежий
+    аккаунт (см. выше) — давний сосед по компьютеру своим остатком не
+    делится. Единственное исключение — грант админа выше базового (решает
+    вызыватель): доверенный греет только свой бакет."""
+    owners = [f"u:{user_id}"]
+    if fp_key:
+        owners.append(f"k:{fp_key}")
+    if fp_net:
+        owners.append(f"n:{fp_net}")
     return owners
 
 
@@ -7918,6 +7939,8 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
     remaining — минимум по бакетам (аккаунт и, для свежего аккаунта,
     устройство); resetInSec — ближайший момент, когда этот минимум вырастет:
     если несколько бакетов делят минимум, ждать придётся последнего из них.
+    Когда свежий аккаунт душит чужой котёл (свой бакет полнее устройства),
+    ответ несёт reason="farm_suspected" — повод для модалки без таймера.
     """
     ensure_ai_usage_schema(conn)
     ensure_ai_user_limit_schema(conn)
@@ -7955,38 +7978,70 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
                 break
         if reset_ms is None:
             reset_ms = now_ms + window_ms  # страховка: блок с полным карманом невозможен
-    return {
+    payload = {
         "ok": True,
         "limit": limit,
         "remaining": remaining,
         "resetInSec": None if reset_ms is None else max(1, (reset_ms - now_ms + 999) // 1000),
         "windowSec": window_ms // 1000,
     }
+    # Подозрение на ферму: свежий аккаунт, а жмёт котёл устройства, а не
+    # свой бакет (свой полнее котла — значит, котёл выели ЧУЖИЕ траты с
+    # этого устройства/сети). Клиент по этому полю показывает причину
+    # без таймера: время вслух не называем, чтобы не учить ферму ротации.
+    if len(owners) > 1:
+        try:
+            own_rem = _ai_usage_count_at((states[0][0], states[0][1], states[0][2]),
+                                         now_ms, now_ms, states[0][3], window_ms)
+            dev_rem = min(_ai_usage_count_at((s[0], s[1], s[2]), now_ms, now_ms, s[3], window_ms)
+                          for s in states[1:])
+            if dev_rem < own_rem:
+                payload["reason"] = "farm_suspected"
+        except (IndexError, TypeError, ValueError):
+            pass
+    return payload
 
 
 def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
                          fp_key: str | None, fp_net: str | None) -> list[str] | None:
     """Атомарно списать одну проверку. Возвращает затронутые бакеты (для
-    refund) либо None, если хоть один пуст.
+    refund) либо None, если списывать нечего.
 
     Все шаги — в одной транзакции (её открывает первый INSERT, журнальный
     замок SQLite держится до commit/rollback): гонка параллельных вкладок
-    сериализуется, частичного списания «аккаунт минусанул, устройство нет»
-    не бывает. Трата из ПОЛНОГО бакета запускает таймер цепочки (якорь
+    сериализуется. Трата из ПОЛНОГО бакета запускает таймер цепочки (якорь
     первой траты); трата из уже тикающего таймер не трогает — второй и
     третий запросы на расписание возврата не влияют.
+
+    Котёл устройства греется ВСЕГДА (см. _ai_usage_spend_owners): свой
+    бакет обязан списаться, иначе None; пустой котёл свежего аккаунта —
+    тоже None (ферма: котёл выели чужие траты); пустой котёл давнего или
+    доверенного аккаунта резерв не роняет — такой сосед своим остатком
+    не делится, а котёл в минус не уходит (возврат ниже точен: в списке
+    только реально тронутые бакеты).
     """
     ensure_ai_usage_schema(conn)
     ensure_ai_user_limit_schema(conn)
     now_ms = int(time.time() * 1000)
     window_ms = ai_usage_window_ms()
-    owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
-    for owner in owners:
+    check_owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
+    try:
+        _essay_custom = ai_custom_limit(conn, user_id)
+        _essay_exempt = _essay_custom is not None and int(_essay_custom) > ai_usage_max()
+    except (sqlite3.Error, TypeError, ValueError):
+        _essay_exempt = False
+    # Грант админа — явное доверие человеку: котёл не греем вовсе (ни
+    # чтение — см. _ai_usage_owners, ни запись). Ферма через гранты
+    # невозможна, их выдаёт человек вручную. Plus под льготу не попадает.
+    spend_owners = [f"u:{user_id}"] if _essay_exempt else _ai_usage_spend_owners(user_id, fp_key, fp_net)
+    gated = len(check_owners) > 1
+    for owner in spend_owners:
         owner_limit = ai_limit_for_owner(conn, owner)
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
                      " VALUES (?,?,NULL)", (owner, owner_limit))
         _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
-    for owner in owners:
+    touched: list[str] = []
+    for owner in spend_owners:
         cur = conn.execute("""
             UPDATE ai_usage SET
               count = count - 1,
@@ -7996,10 +8051,13 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
                                ELSE anchor_ms END
             WHERE owner = ? AND count > 0""", (now_ms, now_ms, owner))
         if cur.rowcount == 0:
-            conn.rollback()
-            return None
+            if owner == f"u:{user_id}" or gated:
+                conn.rollback()
+                return None
+            continue  # давний/доверенный при пустом котле: свой резерв жив
+        touched.append(owner)
     conn.commit()
-    return owners
+    return touched
 
 
 def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
@@ -13270,10 +13328,15 @@ class Handler(BaseHTTPRequestHandler):
                 if needs_model and usage_owners is None:
                     st = ai_usage_status(conn, user_id, fp_key, fp_net)
                     retry = int(st.get("resetInSec") or st.get("windowSec") or 3600)
-                    self.send_json({"error": "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся.",
+                    farm = st.get("reason") == "farm_suspected"
+                    self.send_json({"error": ("На этом устройстве лимит уже использован другим аккаунтом. "
+                                              "Попробуй чуть позже."
+                                              if farm else
+                                              "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся."),
                                     "code": AI_LIMIT_CODE, "limit": st["limit"],
                                     "remaining": st["remaining"], "resetInSec": st["resetInSec"],
-                                    "retryAfter": retry},
+                                    "retryAfter": retry,
+                                    **({"reason": "farm_suspected"} if farm else {})},
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
                 usage_spent = False
@@ -13392,6 +13455,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.require_user(user_id): return
                 if self.reject_if_blocked(conn, user_id):
                     return
+                # Отпечатки устройства для котлов антиабуза (кука + сеть):
+                # траты ходов ИИ греют общий котёл, свежий аккаунт на горячем
+                # устройстве упирается в него. Без отпечатков (гость сюда не
+                # доходит) — старый путь по одному бакету.
+                try:
+                    ag_fp_key, ag_fp_net = ai_usage_device_fp(conn, self)
+                except Exception:
+                    ag_fp_key, ag_fp_net = None, None
                 try:
                     payload = self.read_json(max_bytes=AI_REQUEST_MAX_BYTES)
                 except RequestBodyTooLarge:
@@ -13522,7 +13593,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute("UPDATE agent_messages SET status='cancelled' WHERE id=?", (mid,))
                         _agent_add_message(conn, tid, user_id, "assistant", "Отменено.")
                         conn.commit()
-                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         # После отмены — без кнопок-шаблонов: их неоткуда взять
                         # (модель тут не отвечала), а дежурный набор — это и
                         # есть заглушка.
@@ -13555,7 +13626,7 @@ class Handler(BaseHTTPRequestHandler):
                             owed = 0
                         if owed > 0:
                             try:
-                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
                             except sqlite3.Error:
                                 pass
                             spent["n"] = 0
@@ -13564,14 +13635,19 @@ class Handler(BaseHTTPRequestHandler):
                     # turns). Вход — атомарный резерв первого запроса resume:
                     # без остатка resume не начинаем, действие не применяем.
                     confirm_spent = {"n": 0}
-                    if not _AGENT.agent_quota_reserve(conn, int(user_id)):
-                        _confirm_quota = _AGENT.agent_quota_status(conn, int(user_id))
+                    if not _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net):
+                        _confirm_quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _confirm_cleanup()
                         retry = int(_confirm_quota.get("resetInSec") or _confirm_quota.get("windowSec") or 3600)
-                        self.send_json({"error": "Ходы ИИ на сегодня закончились. Дождись таймера.",
+                        _confirm_farm = _confirm_quota.get("reason") == "farm_suspected"
+                        self.send_json({"error": ("На этом устройстве лимит уже использован другим аккаунтом. "
+                                                  "Попробуй чуть позже."
+                                                  if _confirm_farm else
+                                                  "Ходы ИИ на сегодня закончились. Дождись таймера."),
                                         "code": AI_LIMIT_CODE, "limit": _confirm_quota["limit"],
                                         "remaining": _confirm_quota["remaining"], "resetInSec": _confirm_quota["resetInSec"],
-                                        "retryAfter": retry},
+                                        "retryAfter": retry,
+                                        **({"reason": "farm_suspected"} if _confirm_farm else {})},
                                        429, token=token, headers={"Retry-After": str(retry)}); return
                     confirm_spent["n"] = 1
                     try:
@@ -13618,13 +13694,13 @@ class Handler(BaseHTTPRequestHandler):
                                     return _raw_cf(messages, tools, budget)
                                 except Exception:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
                                     except sqlite3.Error:
                                         pass
                                     confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
                                     raise
                             try:
-                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id))
+                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net)
                             except sqlite3.Error:
                                 reserved = False
                             if reserved:
@@ -13634,7 +13710,7 @@ class Handler(BaseHTTPRequestHandler):
                             except Exception:
                                 if reserved:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
                                     except sqlite3.Error:
                                         pass
                                     confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
@@ -13684,7 +13760,7 @@ class Handler(BaseHTTPRequestHandler):
                             conn.commit()
                             # Успех resume: списания остаются, счётчик — в ноль.
                             confirm_spent["n"] = 0
-                            quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                             _confirm_cleanup()
                             self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                             "final": None, "pending": True, "quota": quota,
@@ -13717,7 +13793,7 @@ class Handler(BaseHTTPRequestHandler):
                                            suggests=suggests)
                         conn.commit()
                         confirm_spent["n"] = 0
-                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _confirm_cleanup()
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
                                         "final": final_clean, "suggests": suggests, "quota": quota,
@@ -13795,7 +13871,7 @@ class Handler(BaseHTTPRequestHandler):
                             owed = 0
                         if owed > 0:
                             try:
-                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
                             except sqlite3.Error:
                                 pass
                             turn_spent["n"] = 0
@@ -13864,14 +13940,19 @@ class Handler(BaseHTTPRequestHandler):
                         # пустой карман посреди хода — не стоп, ход догуливает
                         # до конца за счёт овердрафта, итог — ровно 0, никогда
                         # в минус.
-                        if not _AGENT.agent_quota_reserve(conn, int(user_id)):
-                            _quota_state = _AGENT.agent_quota_status(conn, int(user_id))
+                        if not _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net):
+                            _quota_state = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                             retry = int(_quota_state.get("resetInSec") or _quota_state.get("windowSec") or 3600)
                             _turn_cleanup()
-                            self.send_json({"error": "Ходы ИИ на сегодня закончились. Дождись таймера.",
+                            _turn_farm = _quota_state.get("reason") == "farm_suspected"
+                            self.send_json({"error": ("На этом устройстве лимит уже использован другим аккаунтом. "
+                                                      "Попробуй чуть позже."
+                                                      if _turn_farm else
+                                                      "Ходы ИИ на сегодня закончились. Дождись таймера."),
                                             "code": AI_LIMIT_CODE, "limit": _quota_state["limit"],
                                             "remaining": _quota_state["remaining"], "resetInSec": _quota_state["resetInSec"],
-                                            "retryAfter": retry},
+                                            "retryAfter": retry,
+                                            **({"reason": "farm_suspected"} if _turn_farm else {})},
                                            429, token=token, headers={"Retry-After": str(retry)})
                             return
                         # Первый запрос уже оплачен входным резервом.
@@ -13924,13 +14005,13 @@ class Handler(BaseHTTPRequestHandler):
                                     return _raw_chat_fn(messages, tools, budget)
                                 except Exception:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
                                     except sqlite3.Error:
                                         pass
                                     turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
                                     raise
                             try:
-                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id))
+                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net)
                             except sqlite3.Error:
                                 reserved = False
                             if reserved:
@@ -13940,7 +14021,7 @@ class Handler(BaseHTTPRequestHandler):
                             except Exception:
                                 if reserved:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id))
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
                                     except sqlite3.Error:
                                         pass
                                     turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
@@ -14034,7 +14115,7 @@ class Handler(BaseHTTPRequestHandler):
                             # счётчик обнуляем без refund — иначе finally вернул бы.
                             turn_spent["n"] = 0
                             usage_spent = False
-                            quota = _AGENT.agent_quota_status(conn, int(user_id))
+                            quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                             _turn_cleanup()
                             self.send_json({"ok": True, "steps": out_steps, "final": None,
                                             "pending": True, "quota": quota,
@@ -14061,7 +14142,7 @@ class Handler(BaseHTTPRequestHandler):
                         # Успех: списания остаются, счётчик — в ноль без refund.
                         turn_spent["n"] = 0
                         usage_spent = False
-                        quota = _AGENT.agent_quota_status(conn, int(user_id))
+                        quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _turn_cleanup()
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
                                         "suggests": suggests, "dropped": dropped_ids,
@@ -14087,9 +14168,9 @@ class Handler(BaseHTTPRequestHandler):
                             # сюда попадаем только при неуспехе — возвращаем всё списанное ходом.
                             try:
                                 if owed > 0:
-                                    _AGENT.agent_quota_refund_many(conn, int(user_id), owed)
+                                    _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
                                 elif usage_spent:
-                                    _AGENT.agent_quota_refund(conn, int(user_id))
+                                    _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
                             except sqlite3.Error:
                                 pass
                             turn_spent["n"] = 0
@@ -14589,7 +14670,11 @@ class Handler(BaseHTTPRequestHandler):
                     except sqlite3.Error:
                         pass
                     if path == "/api/agent/limits":
-                        self.send_json(_AGENT.agent_quota_status(conn, int(user_id)), token=token); return
+                        try:
+                            ag_fp_key, ag_fp_net = ai_usage_device_fp(conn, self)
+                        except Exception:
+                            ag_fp_key, ag_fp_net = None, None
+                        self.send_json(_AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net), token=token); return
                     try:
                         rows = conn.execute("SELECT id, subject, title, created_at, updated_at,"
                                             " public_id FROM agent_threads"
@@ -14601,8 +14686,10 @@ class Handler(BaseHTTPRequestHandler):
                                             (int(user_id),)).fetchall()
                     self.send_json({"ok": True, "threads": [_agent_thread_payload(r) for r in rows],
                         # Квота в том же ответе: первый экран строится за 2 RTT
-                        # (треды+квота → сообщения), а не за 3.
-                        "quota": _AGENT.agent_quota_status(conn, int(user_id))},
+                        # (треды+квота → сообщения), а не за 3. Отпечатки — те
+                        # же котлы антиабуза, что у резервов хода.
+                        "quota": _AGENT.agent_quota_status(
+                            conn, int(user_id), *ai_usage_device_fp(conn, self))},
                         token=token); return
                 if path == "/api/agent/context":
                     # Лёгкий контекст для единой шапки (уровень/XP/серия) без
@@ -14670,7 +14757,8 @@ class Handler(BaseHTTPRequestHandler):
                                     # только по клику и в конце хода. Дешёвый
                                     # SELECT-путь agent_quota_status, как у
                                     # /api/agent/limits и списка тредов.
-                                    "quota": _AGENT.agent_quota_status(conn, int(user_id)),
+                                    "quota": _AGENT.agent_quota_status(
+                                        conn, int(user_id), *ai_usage_device_fp(conn, self)),
                                     "messages": [_agent_public_message(r) for r in rows]}, token=token); return
                 if path == "/api/bootstrap" or path == "/api/bootstrap-lite":
                     if self.reject_if_blocked(conn, user_id):
