@@ -1002,14 +1002,19 @@
   }
 
   /* ===== RESPONSIVE ===== */
-  /* Якорные ссылки шапки прячем раньше остального (1024px): их суммарная
-     ширина + CTA уже на ~800–1000px не влезает в колонку nav, и колонка
-     с justify-self:end наезжает влево на логотип (замер: до +184px).
-     Ниже остаются логотип + переключатель темы + CTA — этого достаточно. */
+  /* Средняя ширина (планшет/узкое окно): ссылки остаются, но шапка
+     ужата — иначе колонка nav с justify-self:end наезжает влево
+     на логотип (замер: до +184px при шести ссылках). */
   @media (max-width:1024px){
-    .header-link{display:none;}
+    .header-inner{gap:12px;}
+    .logo{gap:8px;}
+    .header-nav{gap:12px;}
+    .header-nav .btn{padding:10px 14px;font-size:13px;}
+    .header-link{font-size:14px;}
+    .eh-toggle{width:36px;height:36px;}
   }
   @media (max-width:768px){
+    .header-link{display:none;}
     .card-grid{grid-template-columns:1fr;}
     .hero-visual{grid-template-columns:1fr;}
     .mentor-grid{grid-template-columns:1fr;}
