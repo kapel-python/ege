@@ -77,7 +77,8 @@ def main():
             assert set(russian.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}, russian
             assert russian["features"]["practice"] is True and russian["features"]["missions"] is False, russian
             assert russian["features"]["lessons"] is True, russian
-            assert not any(russian["features"][k] for k in ("forecast", "diagnostics", "bosses", "daily")), russian
+            assert russian["features"]["forecast"] is True, russian
+            assert not any(russian["features"][k] for k in ("diagnostics", "bosses", "daily")), russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")
             assert status == 200, (status, boot)

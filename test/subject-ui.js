@@ -306,10 +306,13 @@ vm.runInContext(`
 `, sandbox);
 const fake = sandbox.fakeLearningResult;
 /* Предмет открыт: поверхности честно предлагают реальную практику и
-   начисляют XP; выключенные фичи (daily, forecast) по-прежнему молчат. */
+   начисляют XP; выключенные фичи (daily) по-прежнему молчат, а включённый
+   прогноз русского (шкала ФИПИ 50→100) отдаётся конфигом. */
 check("LEARNING SURFACES recommendations", Array.isArray(fake.next) && fake.next.length > 0);
 check("LEARNING SURFACES content selector", fake.content === true);
-check("LEARNING SURFACES forecast config", fake.forecast === null);
+check("LEARNING SURFACES forecast config", fake.forecast !== null && fake.forecast.total === 50
+  && Array.isArray(fake.forecast.scale) && fake.forecast.scale.length === 51,
+  JSON.stringify(fake.forecast && { total: fake.forecast.total, scaleLen: (fake.forecast.scale || []).length }));
 check(
   "LEARNING SURFACES XP guard",
   fake.awarded === 100 && fake.xpBefore === 0 && fake.xpAfter === 100,

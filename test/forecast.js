@@ -197,18 +197,41 @@ const testBody = async () => {
       `total=${forecastTotal()} scaleLength=${scale.length}`);
   }
 
-  /* 12. Без forecast-конфига математический fallback не должен просачиваться в locked-предмет. */
+  /* 12. Русский язык: прогноз по шкале ФИПИ (тест 28 + сочинение 22 = 50). */
   {
     DataAPI.load(serverLikePayload("russian", "server/catalog_russian.json"));
     Store.ready = false;
     Store.reset();
-    const f = forecast();
-    const hist = forecastHistory();
-    const snap = recordForecastSnapshot();
-    t("без forecast-конфига: forecast помечается пустым", f.empty === true, JSON.stringify(f));
-    t("без forecast-конфига: конфиг недоступен", forecastConfigAvailable() === false);
-    t("без forecast-конфига: история пуста", Array.isArray(hist) && hist.length === 0, JSON.stringify(hist));
-    t("без forecast-конфига: снимок не записывается", snap === null, JSON.stringify(snap));
+    const cfg = DataAPI.forecastConfig();
+    const configured = cfg && cfg.weights && typeof cfg.weights === "object" ? cfg.weights : {};
+    const skillsRu = DataAPI.skills();
+    const wSum = skillsRu.reduce((a, s) => a + skillEgeWeight(s.id), 0);
+    const uncovered = skillsRu.filter((s) => !Object.prototype.hasOwnProperty.call(configured, s.id)).map((s) => s.id);
+    t("русский: веса покрывают все 27 навыков и в сумме дают 50", wSum === 50 && uncovered.length === 0,
+      "sum=" + wSum + " uncovered=" + uncovered.join(","));
+    t("русский: двухбалльные — №8 и №22, сочинение — 22",
+      skillEgeWeight("r08") === 2 && skillEgeWeight("r22") === 2
+      && skillEgeWeight("russian_essay_source") === 22
+      && skillEgeWeight("r01") === 1);
+    const scale = forecastScale();
+    const mono = scale.every((v, i, a) => i === 0 || v >= a[i - 1]);
+    t("русский: шкала монотонна, длиной 51 (0–50)", mono && scale.length === 51);
+    t("русский: 0→0, 8→20, 28→55 (потолок без сочинения), 50→100",
+      scale[0] === 0 && scale[8] === 20 && scale[28] === 55 && scale[50] === 100);
+    t("русский: total 50, конфиг доступен", forecastTotal() === 50 && forecastConfigAvailable() === true);
+    const novice = forecast();
+    t("русский: новичок — низкий прогноз", novice.empty !== true && novice.mid <= 15, JSON.stringify(novice));
+    for (const sk of skillsRu) {
+      const l = (DataAPI.lessonsBySkill(sk.id)[0]) || null;
+      if (l) Store.state.completedLessons[l.id] = { ts: now - 3 * DAY };
+      Store.state.skillStats[sk.id] = { progress: 0, solved: 14, correct: 13, timeSec: 400 };
+      for (let i = 0; i < 14; i++) {
+        Store.state.taskAttempts.push({ taskId: `ru_${sk.id}_${i}`, skill: sk.id, correct: i !== 5, hintLevel: 0, seconds: 30, closesTaskId: null, ts: now - i * HOUR });
+      }
+    }
+    const strong = forecast();
+    t("русский: сильный ученик — высокий прогноз (mid ≥ 85)", strong.mid >= 85, JSON.stringify(strong));
+    t("русский: mid внутри вилки", strong.low <= strong.mid && strong.mid <= strong.high);
   }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");

@@ -17,7 +17,7 @@ warning и продолжает работу. Порядок показа в UI 
 | `order` | Сортировка предметов (не отдаётся в API) |
 | `catalogFile` | Обычно bare basename вроде `catalog_informatics.json`; реестр соединяет `server_dir / catalogFile`, поэтому префикс `server/` в JSON не нужен |
 | `level` | Объект `{id, subjectId, name}` для строки `math_levels(id, subject_id, name)`; проверяются непустые строки, но не уникальность или смысл связей |
-| `forecast` | `{weights, total, scale}` или JSON `null`. Нет шкалы — `forecast: null`, как у русского; проверяется только форма объекта |
+| `forecast` | `{weights, total, scale}` или JSON `null`. Нет шкалы — `forecast: null` (тогда и флаг `features.forecast: false`); проверяется только форма объекта |
 | `features` | Capabilities: ровно 8 boolean-флагов `lessons/practice/forecast/diagnostics/missions/bosses/daily/path`. Для locked обычно `false` везде, кроме `path: true`, но это соглашение, а не проверка registry |
 | `metadata` | Необязательный объект; любой dict принимается, схема и семантика не валидируются |
 | `content` | Указатели: `topics → catalog.categories/skills`, `preparationVariants → catalog.goals`, `onboarding → catalog.diagnosticTasks`. Реестр проверяет форму указателей и наличие ключей в catalog-файле |

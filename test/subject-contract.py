@@ -206,7 +206,7 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice", "lessons"} for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice", "lessons", "forecast"} for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
@@ -261,8 +261,21 @@ def main() -> int:
             russian_catalog = russian_boot.get("catalog") or {}
             russian_missions = russian_catalog.get("missions") or []
             empty_catalog_keys = ("bosses", "achievements", "goals", "diagnosticTasks")
+            russian_forecast = russian_catalog.get("forecast") or {}
+            russian_weights = russian_forecast.get("weights") or {}
+            russian_scale = russian_forecast.get("scale") or []
             catalog_shape_ok = (
-                russian_catalog.get("forecast") is None
+                isinstance(russian_forecast, dict)
+                and russian_forecast.get("total") == 50
+                and len(russian_scale) == 51
+                and all(b >= a for a, b in zip(russian_scale, russian_scale[1:]))
+                and sum(russian_weights.values()) == 50
+                and set(russian_weights) == {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}
+                and russian_weights.get("r08") == 2
+                and russian_weights.get("r22") == 2
+                and russian_weights.get("russian_essay_source") == 22
+                and russian_scale[0] == 0 and russian_scale[50] == 100
+                and russian_scale[28] == 55
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
                 and len(russian_catalog.get("tasks") or []) == 143
                 and len(russian_catalog.get("lessons") or []) == 26
