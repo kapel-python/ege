@@ -1,29 +1,134 @@
 {
+ "id": "russian",
+ "title": "Русский язык",
+ "short": "Русский",
+ "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
+ "status": "ready",
+ "locked": false,
+ "comingSoon": false,
+ "availability": "ready",
+ "order": 2,
+ "catalogFile": "catalog_russian.json",
+ "level": {
   "id": "russian",
-  "title": "Русский язык",
-  "short": "Русский",
-  "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
-  "status": "ready",
-  "locked": false,
-  "comingSoon": false,
+  "subjectId": "russian",
+  "name": "Русский язык"
+ },
+ "forecast": {
+  "weights": {
+   "r01": 1,
+   "r02": 1,
+   "r03": 1,
+   "r04": 1,
+   "r05": 1,
+   "r06": 1,
+   "r07": 1,
+   "r08": 2,
+   "r09": 1,
+   "r10": 1,
+   "r11": 1,
+   "r12": 1,
+   "r13": 1,
+   "r14": 1,
+   "r15": 1,
+   "r16": 1,
+   "r17": 1,
+   "r18": 1,
+   "r19": 1,
+   "r20": 1,
+   "r21": 1,
+   "r22": 2,
+   "r23": 1,
+   "r24": 1,
+   "r25": 1,
+   "r26": 1,
+   "russian_essay_source": 22
+  },
+  "total": 50,
+  "scale": [
+   0,
+   3,
+   5,
+   8,
+   10,
+   12,
+   15,
+   17,
+   20,
+   22,
+   24,
+   27,
+   29,
+   32,
+   34,
+   36,
+   37,
+   39,
+   40,
+   42,
+   43,
+   45,
+   46,
+   48,
+   49,
+   51,
+   52,
+   54,
+   55,
+   57,
+   58,
+   60,
+   61,
+   63,
+   64,
+   66,
+   67,
+   69,
+   70,
+   72,
+   73,
+   75,
+   78,
+   81,
+   83,
+   86,
+   89,
+   91,
+   94,
+   97,
+   100
+  ]
+ },
+ "features": {
+  "lessons": true,
+  "practice": true,
+  "forecast": true,
+  "diagnostics": false,
+  "missions": true,
+  "bosses": false,
+  "daily": false,
+  "path": true
+ },
+ "metadata": {
   "availability": "ready",
-  "order": 2,
-  "catalogFile": "catalog_russian.json",
-  "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
-  "forecast": {
-    "weights": {"r01": 1, "r02": 1, "r03": 1, "r04": 1, "r05": 1, "r06": 1, "r07": 1, "r08": 2, "r09": 1, "r10": 1, "r11": 1, "r12": 1, "r13": 1, "r14": 1, "r15": 1, "r16": 1, "r17": 1, "r18": 1, "r19": 1, "r20": 1, "r21": 1, "r22": 2, "r23": 1, "r24": 1, "r25": 1, "r26": 1, "russian_essay_source": 22},
-    "total": 50,
-    "scale": [0, 3, 5, 8, 10, 12, 15, 17, 20, 22, 24, 27, 29, 32, 34, 36, 37, 39, 40, 42, 43, 45, 46, 48, 49, 51, 52, 54, 55, 57, 58, 60, 61, 63, 64, 66, 67, 69, 70, 72, 73, 75, 78, 81, 83, 86, 89, 91, 94, 97, 100]
+  "topic": "Задания №1–26 и сочинение по тексту",
+  "topicCount": 27
+ },
+ "content": {
+  "topics": {
+   "source": "catalog",
+   "keys": [
+    "categories",
+    "skills"
+   ]
   },
-  "features": {"lessons": true, "practice": true, "forecast": true, "diagnostics": false, "missions": false, "bosses": false, "daily": false, "path": true},
-  "metadata": {
-    "availability": "ready",
-    "topic": "Задания №1–26 и сочинение по тексту",
-    "topicCount": 27
+  "preparationVariants": {
+   "source": "catalog",
+   "key": "goals"
   },
-  "content": {
-    "topics": {"source": "catalog", "keys": ["categories", "skills"]},
-    "preparationVariants": {"source": "catalog", "key": "goals"},
-    "onboarding": {"source": "catalog", "key": "diagnosticTasks"}
+  "onboarding": {
+   "source": "catalog",
+   "key": "diagnosticTasks"
   }
+ }
 }
