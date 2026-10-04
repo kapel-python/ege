@@ -1,7 +1,10 @@
 /* ============================================================
-   ege easy Plus — карточка подписки в профиле (SPA).
+   Plus — карточка подписки в профиле (SPA).
    Компактная ссылка на страницу управления (/subscription/manage):
-   вся карточка кликабельна, внутри одна кнопка «Управлять».
+   вся карточка кликабельна. Без подписки — короткий блок с одной
+   синей кнопкой «Оформить Plus» (без лимитов и цен — всё это на
+   странице управления); с подпиской — статус, лимиты, срок
+   и синяя кнопка «Управлять».
    Управление, история и покупка живут на странице, здесь только
    живой статус. Зависимости — глобалы приложения (ApiClient, Store,
    esc, icon, progressBar, plural). Файл грузится до js/app.js,
@@ -12,8 +15,6 @@ var Subscription = (function () {
 
   var cache = { accountId: null, status: null, at: 0 };
   var FRESH_MS = 30000;
-  var PRICE_MONTH = 99;
-  var PRICE_YEAR = 990;
 
   function accountId() {
     try { return Store.accountId || null; } catch (_) { return null; }
@@ -121,22 +122,13 @@ var Subscription = (function () {
 
   function freeCardHTML() {
     return `
-    <a class="card sub-card" href="/subscription/manage" aria-label="Управление подпиской Plus">
+    <a class="card sub-card sub-card--free" href="/subscription/manage" aria-label="Оформить подписку Plus">
       <span class="sub-card__top">
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
-          <span class="sub-card__name">ege easy <span class="plus">Plus</span></span>
-          <span class="sub-card__sub">Лимиты выше: больше проверок и ходов наставника. Задания, прогноз и разборы остаются бесплатными.</span>
+          <span class="sub-card__name"><span class="plus">Plus</span></span>
         </span>
-        <span class="chip">бесплатно</span>
-      </span>
-      <span class="sub-card__limits">
-        <span class="sub-limit"><b>5</b> проверок в день</span>
-        <span class="sub-limit"><b>5</b> ходов наставника в день</span>
-        <span class="sub-limit"><b>${PRICE_MONTH} ₽</b> в месяц · <b>${PRICE_YEAR} ₽</b> в год</span>
-      </span>
-      <span class="sub-card__actions">
-        <span class="btn btn--primary btn--sm">Управлять</span>
+        <span class="btn btn--primary btn--sm">Оформить Plus</span>
       </span>
     </a>`;
   }
@@ -155,7 +147,7 @@ var Subscription = (function () {
       <span class="sub-card__top">
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
-          <span class="sub-card__name">ege easy <span class="plus">Plus</span> ${pill}</span>
+          <span class="sub-card__name"><span class="plus">Plus</span> ${pill}</span>
           <span class="sub-card__sub">${cancelled
             ? "Автопродление выключено — доступ до " + esc(fmtDate(st.expiresAt)) + "."
             : "Продление " + esc(fmtDate(st.expiresAt)) + " · " + esc(st.period === "year" ? "год" : "месяц") + "."}</span>
@@ -170,7 +162,7 @@ var Subscription = (function () {
         <span class="sub-card__meter-label">Осталось <b>${esc(leftText)}</b> подписки</span>
       </span>
       <span class="sub-card__actions">
-        <span class="btn btn--soft btn--sm">Управлять</span>
+        <span class="btn btn--primary btn--sm">Управлять</span>
       </span>
     </a>`;
   }

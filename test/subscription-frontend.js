@@ -99,8 +99,9 @@ function check(name, cond, detail) {
   await page.goto(BASE + "/dashboard#/profile", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#sub-card .sub-card", { timeout: 15000 });
   const cardFree = await page.textContent("#sub-card");
-  check("карточка free: одна кнопка, без тарифа",
-    cardFree.includes("Управлять") && !cardFree.includes("Страница тарифа") && cardFree.includes("99"));
+  check("карточка free: короткая, с покупкой, без лимитов",
+    cardFree.includes("Оформить Plus") && !cardFree.includes("Страница тарифа")
+    && !cardFree.includes("проверок в день") && !cardFree.includes("ходов наставника"));
   check("карточка — ссылка на управление",
     (await page.getAttribute("#sub-card .sub-card", "href")) === "/subscription/manage");
   await page.screenshot({ path: shot("sub-profile-free.png") });
