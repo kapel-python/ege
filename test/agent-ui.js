@@ -83,6 +83,20 @@ check("кнопки подтверждения", spaCode.includes("Примен�
 check("confirm без даблклика", spaCode.includes("disabled = true"));
 check("квота с plural", spaCode.includes("setQuota") && spaCode.includes("pluralQ"));
 check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат хода через"));
+/* При нулевой квоте пилюля «Осталось 0 из …» не показывается никак (живой
+   баг: тап по кружку давал и окно лимита, и пилюлю поверх/до него — через
+   залипший :hover и :focus-visible не ловилось классом .tip). Правило живёт
+   в setQuota рядом с цифрой: display none ровно при remaining === 0, иначе
+   ховер-подсказка на десктопе. Проверено вживую в мобильном Chromium. */
+check("пилюля квоты скрыта при нуле (не дублирует окно лимита)",
+  /quotaTip\.style\.display = remaining === 0 \? "none" : ""/.test(spaCode));
+/* При нуле кнопка отправки серая/disabled, а send() в сеть не идёт и ленту
+   не трогает (заменяющий ход иначе сносил удачный ответ, а сервер при 429
+   старую пару не сносит — два вопроса подряд без ответа). */
+check("при нуле отправка закрыта заранее (кнопка + гейт в send)",
+  /ui\.sendBtn\) ui\.sendBtn\.disabled = S\.busy \|\| !has \|\| quotaOut\(\)/.test(spaCode)
+  && /if \(!quiet && quotaOut\(\)\)/.test(spaCode)
+  && /if \(bubble && bubble\.parentNode\) bubble\.parentNode\.removeChild\(bubble\);\s*\n\s*if \(turn\.replaceLast\) loadThreadMessages\(true\);\s*\n\s*openLimitModal\(\{ limit/.test(spaCode));
 check("список тредов + Новый чат", spaCode.includes("agent__list") && spaCode.includes("Новый чат"));
 check("тред из localStorage с ключом аккаунта", spaCode.includes("ege_agent_thread:"));
 check("квота переживает перезагрузку", spaCode.includes("ege_agent_quota:"));

@@ -431,6 +431,14 @@
     }
     if (ui.quotaTip) {
       ui.quotaTip.textContent = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit);
+      // При нуле подсказка-пилюля не показывается НИКАК — ни по ховеру, ни
+      // по фокусу, ни по тапу: её текст («Осталось 0 из …») дублирует окно
+      // лимита, которое открывается по клику на кружок. Прячем инлайном в
+      // единственном месте, где меняется цифра, — тогда не зависит ни от
+      // таймингов fetch, ни от залипшего :hover на тач-экранах, ни от
+      // анимации появления модалки (пилюля не успевает мелькнуть даже на
+      // кадр). Ходов больше нуля — подсказка как раньше.
+      ui.quotaTip.style.display = remaining === 0 ? "none" : "";
     }
     if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset = (RING * (1 - Math.min(remaining, limit) / limit)) + "px";
     if (!cached) { try { localStorage.setItem(quotaCacheKey(), JSON.stringify(S.quota)); } catch (_) {} }
@@ -680,20 +688,12 @@
     quotaTip.setAttribute("role", "tooltip");
     quotaWrap.appendChild(quota); quotaWrap.appendChild(quotaTip);
     // Тап по кружку — окно о квоте (тот же .dlg, что у проверки сочинений),
-    // а не всплывающий тост: тост живёт 2.6с, ничего не объясняет и
+    // а не всплывающий тост: тост живёт 2.6с, ничего не объяснял и
     // перебивается другим. Сначала одна сверка с сервером, чтобы цифра в
-    // окне была честной. Подсказку-тултип при тапе не показываем осознанно:
-    // она дублировала бы окно («Осталось 0 из …» поверх окна
-    // «Ходы закончились»). Убранного класса .tip мало: на тач-экранах тап
-    // залипает в :hover, а клик ставит фокус (:focus-visible) — оба CSS-пути
-    // поднимали бы плашку снова. Поэтому на время сверки прячем её
-    // инлайном и снимаем фокус; ховер-подсказка на десктопе работает как
-    // раньше (мышь, без тапа).
+    // окне была честной. Пилюля-подсказка при нуле скрыта самим setQuota
+    // (см. выше) — здесь прятать уже нечего.
     quota.addEventListener("click", function () {
-      try { quota.blur(); } catch (_) {}
-      quotaTip.style.display = "none";
       fetchQuota(true).then(function (st) {
-        quotaTip.style.display = "";
         if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
         openQuotaInfoModal();
       });
