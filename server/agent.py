@@ -704,7 +704,7 @@ def _agent_device_exempt(conn: sqlite3.Connection, user_id: int) -> bool:
     его траты котёл не греют вовсе (ни чтение, ни запись), и refill после
     снятия гранта возвращает честные «10 из 10» без причины. Ферма через
     гранты невозможна — их выдаёт человек вручную. (Plus — отдельная ветка
-    в _agent_device_should_gate: чтения котла нет, запись есть.)"""
+    в _agent_check_owners: чтения котла нет, запись есть.)"""
     try:
         custom = agent_custom_limit(conn, user_id)
     except sqlite3.Error:
@@ -715,23 +715,33 @@ def _agent_device_exempt(conn: sqlite3.Connection, user_id: int) -> bool:
         return False
 
 
-def _agent_device_should_gate(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bool:
-    """Проверять ли котёл устройства при чтении остатка. Только свежие
-    аккаунты без админского гранта выше общего потолка и без активного
-    Plus: грант — явное доверие человека, Plus — оплаченная квота (честные
-    50 с момента покупки). Оба при этом котёл ГРЕЮТ как все: подписка
-    основного не прикрывает свежую ферму рядом."""
-    if _agent_device_exempt(conn, user_id):
-        return False
+def _agent_check_owners(conn: sqlite3.Connection, user_id: int,
+                      fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
+    """Бакеты, по которым ЧИТАЕТСЯ остаток ходов: всегда свой `agent:`, плюс
+    котёл КУКИ `ak:` — тоже всегда (один браузер = почти наверняка один
+    человек), плюс котёл СЕТИ `an:` — только свежему (один IP может быть
+    целым классом, давних по сети не судим).
+
+    Без чтения котла (только свой бакет): грант админа выше базового
+    (явное доверие человеку) и активный Plus (оплаченная квота — честные
+    50 с момента покупки). Оба при этом котёл ГРЕЮТ как все."""
+    owner = _agent_owner(user_id)
     try:
-        if subscription_is_plus(conn, int(user_id)):
-            return False
-    except (sqlite3.Error, TypeError, ValueError):
+        if agent_effective_limit(conn, user_id) > agent_quota_max():
+            return [owner]
+    except sqlite3.Error:
         pass
-    try:
-        return _agent_account_fresh(conn, int(user_id), now_ms)
-    except (sqlite3.Error, TypeError, ValueError):
-        return False
+    owners = [owner]
+    if fp_key:
+        owners.append(f"ak:{fp_key}")
+    if fp_net:
+        try:
+            fresh = _agent_account_fresh(conn, int(user_id), now_ms)
+        except (sqlite3.Error, TypeError, ValueError):
+            fresh = False
+        if fresh:
+            owners.append(f"an:{fp_net}")
+    return owners
 
 
 def _agent_device_limit_for_owner(conn: sqlite3.Connection, owner: str) -> int:
@@ -847,8 +857,8 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     limit = agent_effective_limit(conn, user_id)
     window_ms = agent_quota_window_ms()
     owner = _agent_owner(user_id)
-    gate = bool(fp_key or fp_net) and _agent_device_should_gate(conn, user_id, now_ms)
-    device_owners = _agent_device_owners(fp_key, fp_net) if gate else []
+    check = _agent_check_owners(conn, user_id, fp_key, fp_net, now_ms)
+    device_owners = check[1:]
     if not device_owners:
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
                      (owner, limit))
@@ -865,7 +875,7 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
         return {"ok": True, "limit": limit, "remaining": max(0, count),
                 "resetInSec": max(1, (reset_ms - now_ms + 999) // 1000),
                 "windowSec": window_ms // 1000}
-    # Свежий аккаунт на известном устройстве: свой бакет + котлы.
+    # Аккаунт на известном устройстве, читающий котёл: свой бакет + котлы.
     owners = [owner] + device_owners
     states: list = []
     for own in owners:
@@ -930,7 +940,11 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
     window_ms = agent_quota_window_ms()
     owner = _agent_owner(user_id)
     exempt = _agent_device_exempt(conn, user_id)
-    gate = not exempt and bool(fp_key or fp_net) and _agent_device_should_gate(conn, user_id, now_ms)
+    check = _agent_check_owners(conn, user_id, fp_key, fp_net, now_ms)
+    # Требует успеха только ЧИТАЕМОЕ (свой + котлы из остатка): пустой
+    # ненаблюдаемый котёл (сеть у давнего) резерв не роняет.
+    must_set = set(check)
+    gate = len(check) > 1
     device_owners = _agent_device_owners(fp_key, fp_net) if not exempt else []
     for own in [owner] + device_owners:
         own_limit = _agent_device_limit_for_owner(conn, own)
@@ -955,13 +969,14 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
                                " WHEN anchor_ms IS NULL THEN timer_ms ELSE anchor_ms END"
                                " WHERE owner = ? AND count > 0",
                                (now_ms, now_ms, own))
-            if cur.rowcount == 0:
+            if cur.rowcount == 0 and own in must_set:
                 conn.rollback()
                 return False
     else:
-        # Давний/доверенный: котёл греем в меру (пустой не трогаем и не
-        # блокируем им свой резерв) — чтобы возврат ниже не рисовал жетон
-        # из воздуха, пустой котёл возврату не подлежит (см. refund).
+        # Plus/грант (читают только своё, см. _agent_check_owners): котёл
+        # греем в меру (пустой не трогаем и не блокируем им свой резерв) —
+        # чтобы возврат ниже не рисовал жетон из воздуха, пустой котёл
+        # возврату не подлежит (см. refund).
         for own in device_owners:
             conn.execute("UPDATE ai_usage SET count = count - 1,"
                          " timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END,"

@@ -8170,26 +8170,29 @@ def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bo
 def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
                      fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
     """Бакеты, по которым ЧИТАЕТСЯ остаток этого пользователя: всегда аккаунт,
-    а для СВЕЖЕГО аккаунта без оплаченной подписки ещё и котлы устройства
-    (кука и сеть).
+    плюс котёл КУКИ — тоже всегда (один браузер = почти наверняка один
+    человек: старый второй в том же браузере упирается в выеденный котёл),
+    плюс котёл СЕТИ — только свежему (один IP может быть целым классом,
+    давних по сети не судим).
 
     Исключения из чтения котла (остаток — только свой u:-бакет):
     персональный грант админа выше общего лимита (иначе котёл с потолком 5
     душил бы грант 100 через min()) и активный Plus (квота оплачена —
     честные 10/10 с момента покупки, см. «исчерпанный лимит + Plus»).
     Оба при этом котёл ГРЕЮТ как все (см. ai_usage_try_reserve): Plus
-    основного не прикрывает свежую ферму рядом, грант — тоже."""
+    основного не прикрывает ферму рядом, грант — тоже. Без куки (слабый
+    сигнал) давний сетевым котлом не судится — только свежий."""
     owners = [f"u:{user_id}"]
     try:
         if ai_effective_limit(conn, user_id) > ai_usage_max():
             return owners
     except sqlite3.Error:
         pass
-    if (fp_key or fp_net) and _ai_account_fresh(conn, user_id, now_ms):
-        if fp_key:
-            owners.append(f"k:{fp_key}")
-        if fp_net:
-            owners.append(f"n:{fp_net}")
+    fresh = _ai_account_fresh(conn, user_id, now_ms)
+    if fp_key:
+        owners.append(f"k:{fp_key}")
+    if fp_net and fresh:
+        owners.append(f"n:{fp_net}")
     return owners
 
 
@@ -8198,9 +8201,9 @@ def _ai_usage_spend_owners(user_id: int, fp_key: str | None, fp_net: str | None)
 
     Старый основной аккаунт раньше минусил только свой u:-бакет, и котёл
     устройства оставался холодным: свежая ферма рядом видела полный лимит.
-    Теперь трата всегда греет и котлы (k:/n:), а читает их только свежий
-    аккаунт (см. выше) — давний сосед по компьютеру своим остатком не
-    делится. Единственное исключение — грант админа выше базового (решает
+    Теперь трата всегда греет и котлы (k:/n:), а читают их все без льгот
+    (см. _ai_usage_owners): кука — любой возраст, сеть — только свежий.
+    Единственное исключение — грант админа выше базового (решает
     вызыватель): доверенный греет только свой бакет."""
     owners = [f"u:{user_id}"]
     if fp_key:
@@ -8340,7 +8343,11 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
     # чтение — см. _ai_usage_owners, ни запись). Ферма через гранты
     # невозможна, их выдаёт человек вручную. Plus под льготу не попадает.
     spend_owners = [f"u:{user_id}"] if _essay_exempt else _ai_usage_spend_owners(user_id, fp_key, fp_net)
-    gated = len(check_owners) > 1
+    # Требуют успеха только ЧИТАЕМЫЕ бакеты (свой + те котлы, что входят в
+    # остаток): пустой ненаблюдаемый котёл (сеть у давнего) резерв не роняет,
+    # а лишь пропускается — иначе старый из другого браузера упирался бы в
+    # чужую сеть. Возврат точен: в списке только реально тронутые.
+    must_set = set(check_owners)
     for owner in spend_owners:
         owner_limit = ai_limit_for_owner(conn, owner)
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
@@ -8357,10 +8364,10 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
                                ELSE anchor_ms END
             WHERE owner = ? AND count > 0""", (now_ms, now_ms, owner))
         if cur.rowcount == 0:
-            if owner == f"u:{user_id}" or gated:
+            if owner in must_set:
                 conn.rollback()
                 return None
-            continue  # давний/доверенный при пустом котле: свой резерв жив
+            continue  # пустой ненаблюдаемый котёл: свой резерв жив
         touched.append(owner)
     conn.commit()
     return touched
