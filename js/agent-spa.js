@@ -429,17 +429,6 @@
       ui.quotaBtn.classList.toggle("low", remaining > 0 && remaining <= 3);
       ui.quotaBtn.classList.toggle("zero", remaining === 0);
     }
-    if (ui.quotaTip) {
-      ui.quotaTip.textContent = "Осталось " + remaining + " из " + limit + " " + pluralQ(limit);
-      // При нуле подсказка-пилюля не показывается НИКАК — ни по ховеру, ни
-      // по фокусу, ни по тапу: её текст («Осталось 0 из …») дублирует окно
-      // лимита, которое открывается по клику на кружок. Прячем инлайном в
-      // единственном месте, где меняется цифра, — тогда не зависит ни от
-      // таймингов fetch, ни от залипшего :hover на тач-экранах, ни от
-      // анимации появления модалки (пилюля не успевает мелькнуть даже на
-      // кадр). Ходов больше нуля — подсказка как раньше.
-      ui.quotaTip.style.display = remaining === 0 ? "none" : "";
-    }
     if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset = (RING * (1 - Math.min(remaining, limit) / limit)) + "px";
     if (!cached) { try { localStorage.setItem(quotaCacheKey(), JSON.stringify(S.quota)); } catch (_) {} }
     syncInput();
@@ -679,33 +668,19 @@
     var qn = el("span", "num", "5");
     qn.id = "agent-quota-num";
     quota.appendChild(qn);
-    // Подсказка про остаток — наведение/фокус (чистый CSS), клик по кольцу
-    // остаётся действием: обновить квоту и, если пусто, открыть окно лимита.
-    var quotaWrap = el("div", "agent__quota-wrap");
-    quotaWrap.id = "agent-quota-wrap";
-    var quotaTip = el("span", "agent__quota-tip");
-    quotaTip.id = "agent-quota-tip";
-    quotaTip.setAttribute("role", "tooltip");
-    quotaWrap.appendChild(quota); quotaWrap.appendChild(quotaTip);
-    // Тап/клик по кружку — это запрос ОКНА, а не подсказки: пилюля
-    // («Осталось 11 из 25») дублировала бы окно с тем же текстом. Прячем её
-    // ПОСЛЕ сверки с сервером — fetchQuota внутри зовёт setQuota, который
-    // подсказку возвращает, — и держим скрытой, пока мышь живо не наведётся
-    // снова (mouseenter ниже). На тач-тапе такого наведения нет (совместимый
-    // mouseenter приходит ДО click, и click следом прячет снова), поэтому
-    // при тапе пилюля не появляется никогда — ни при нуле, ни при остатке.
-    // Живое наведение мыши возвращает её как раньше.
-    quotaWrap.addEventListener("mouseenter", function () {
-      if (Number(S.quota && S.quota.remaining) > 0) quotaTip.style.display = "";
-    });
+    // Клик по кружку — сразу окно (тот же .dlg, что у проверки сочинений),
+    // никаких всплывающих пилюль: текст «Осталось N из M» живёт только
+    // внутри окна и в aria-label кнопки (скринридер). Пилюля-подсказка
+    // удалена полностью: прятать её было бесполезно — на тач-тапе
+    // совместимый mouseenter приходит ДО click и возвращал её, а следующая
+    // setQuota ставила display="" заново.
     quota.addEventListener("click", function () {
       fetchQuota(true).then(function (st) {
-        quotaTip.style.display = "none";
         if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
         openQuotaInfoModal();
       });
     });
-    bar.appendChild(menu); bar.appendChild(title); bar.appendChild(quotaWrap);
+    bar.appendChild(menu); bar.appendChild(title); bar.appendChild(quota);
 
     var feed = el("div", "agent__feed");
     feed.id = "agent-feed";
@@ -763,7 +738,7 @@
 
     ui = { wrap: wrap, list: list, title: title, live: live, empty: empty, feed: feed,
            main: main, input: input, sendBtn: send, stopBtn: stop, composer: composer,
-           quotaBtn: quota, quotaNum: qn, quotaTip: quotaTip, quotaRing: quota.querySelector(".q-ring"),
+           quotaBtn: quota, quotaNum: qn, quotaRing: quota.querySelector(".q-ring"),
            downBtn: down, menuBtn: menu, newBtn: newBtn, ctx: null, ctxMore: null };
     wireEvents();
   }
@@ -3222,7 +3197,7 @@
       var x = t ? t.clientX : sw.lx;
       var dx = x - sw.x0;
       var v = (x - sw.lx) / Math.max(1, Date.now() - sw.lt);   // px/мс конца жеста
-      var goOpen = sw.open ? !(dx < -sw.w * 0.5 || v < -0.35) : (dx > sw.w * 0.5 || v > 0.35);
+      var goOpen = sw.open ? !(dx < -sw.w * 0.25 || v < -0.35) : (dx > sw.w * 0.25 || v > 0.35);
       // Ведение было осмысленным — следующий синтетический click (тап после
       // свайпа) гасим, чтобы не улетать по кнопке под пальцем.
       if (Math.abs(dx) > 10) sw.suppressClick = Date.now();

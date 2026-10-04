@@ -212,19 +212,6 @@
 .agent__quota.low .q-ring { stroke: var(--warn); }
 .agent__quota.zero { color: var(--danger-ink); }
 .agent__quota.zero .q-ring { stroke: var(--danger); }
-/* Подсказка про остаток — наведение/фокус, сам клик по кольцу остаётся
-   действием (обновить квоту / открыть окно лимита). */
-.agent__quota-wrap { position: relative; flex: none; }
-.agent__quota-tip {
-  position: absolute; right: 0; top: calc(100% + 8px); z-index: 15; white-space: nowrap; padding: 6px 12px;
-  border-radius: var(--radius-sm); background: var(--surface-3); border: 1px solid var(--border-strong);
-  font-size: 12px; font-weight: 600; color: var(--text); box-shadow: 0 8px 20px -8px var(--shadow);
-  opacity: 0; visibility: hidden; transform: translateY(-4px); pointer-events: none;
-  transition: opacity .18s, transform .18s, visibility .18s;
-}
-.agent__quota-wrap:hover .agent__quota-tip,
-.agent__quota-wrap.tip .agent__quota-tip,
-.agent__quota:focus-visible + .agent__quota-tip { opacity: 1; visibility: visible; transform: none; }
 
 .agent__feed {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;

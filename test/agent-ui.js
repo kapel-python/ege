@@ -84,19 +84,15 @@ check("кнопки подтверждения", spaCode.includes("Примен�
 check("confirm без даблклика", spaCode.includes("disabled = true"));
 check("квота с plural", spaCode.includes("setQuota") && spaCode.includes("pluralQ"));
 check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат хода через"));
-/* При нулевой квоте пилюля «Осталось 0 из …» не показывается никак (живой
-   баг: тап по кружку давал и окно лимита, и пилюлю поверх/до него — через
-   залипший :hover и :focus-visible не ловилось классом .tip). Правило живёт
-   в setQuota рядом с цифрой: display none ровно при remaining === 0, иначе
-   ховер-подсказка на десктопе. Проверено вживую в мобильном Chromium. */
-check("пилюля квоты скрыта при нуле (не дублирует окно лимита)",
-  /quotaTip\.style\.display = remaining === 0 \? "none" : ""/.test(spaCode));
-/* Тап по кружку не показывает пилюлю НИ ПРИ КАКОМ остатке (живой баг:
-   «Осталось 11 из 25» поверх окна с тем же текстом): клик прячет её после
-   сверки с сервером, а возвращает только живое наведение мыши. */
-check("тап по кружку прячет пилюлю при любом остатке",
-  /fetchQuota\(true\)\.then\(function \(st\) \{\s*\n\s*quotaTip\.style\.display = "none";/.test(spaCode)
-  && /quotaWrap\.addEventListener\("mouseenter"/.test(spaCode));
+/* Пилюля «Осталось N из M» удалена полностью (элемента нет в DOM, CSS нет):
+   прятать её было бесполезно — на тач-тапе совместимый mouseenter приходит ДО
+   click и возвращал её, а следующая setQuota ставила display="" заново, и при
+   остатке > 0 она всплывала снова. Текст остатка живёт только внутри окна и
+   в aria-label кнопки (скринридер). */
+check("пилюли квоты нет вообще (не прячется — удалена)",
+  !/quotaTip/.test(spaCode) && !/quota-tip/.test(spaCode) && !/quota-tip/.test(spaCss)
+  && !/quota-wrap/.test(spaCode) && !/quota-wrap/.test(spaCss)
+  && /aria-label", "Осталось/.test(spaCode));
 /* При нуле кнопка отправки серая/disabled, а send() в сеть не идёт и ленту
    не трогает (заменяющий ход иначе сносил удачный ответ, а сервер при 429
    старую пару не сносит — два вопроса подряд без ответа). */
