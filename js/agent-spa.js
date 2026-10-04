@@ -434,6 +434,7 @@
     }
     if (ui.quotaRing) ui.quotaRing.style.strokeDashoffset = (RING * (1 - Math.min(remaining, limit) / limit)) + "px";
     if (!cached) { try { localStorage.setItem(quotaCacheKey(), JSON.stringify(S.quota)); } catch (_) {} }
+    syncInput();
   }
   function renderCachedQuota() {
     try {
@@ -678,15 +679,13 @@
     quotaTip.id = "agent-quota-tip";
     quotaTip.setAttribute("role", "tooltip");
     quotaWrap.appendChild(quota); quotaWrap.appendChild(quotaTip);
-    var tipTimer = null;
     // Тап по кружку — окно о квоте (тот же .dlg, что у проверки сочинений),
     // а не всплывающий тост: тост живёт 2.6с, ничего не объясняет и
     // перебивается другим. Сначала одна сверка с сервером, чтобы цифра в
-    // окне была честной.
+    // окне была честной. Подсказку-тип (.tip) при тапе не показываем
+    // осознанно: она дублировала бы окно («Осталось 0 из …» поверх окна
+    // «Ходы закончились»); ховер-подсказка на десктопе работает как раньше.
     quota.addEventListener("click", function () {
-      quotaWrap.classList.add("tip");
-      if (tipTimer) clearTimeout(tipTimer);
-      tipTimer = setTimeout(function () { quotaWrap.classList.remove("tip"); }, 2600);
       fetchQuota(true).then(function (st) {
         if (st && Number(st.remaining) <= 0) { openLimitModal(st, null); return; }
         openQuotaInfoModal();
@@ -2425,9 +2424,15 @@
   }
 
   /* ---------- ввод ---------- */
+  // Ходов заведомо нет — отправка закрыта заранее (кнопка серая через
+  // :disabled, а не синяя). Финальное слово за сервером: send() при
+  // известном нуле тоже не идёт в сеть, а показывает окно лимита.
+  function quotaOut() {
+    return Number(S.quota && S.quota.remaining) <= 0;
+  }
   function syncInput() {
     var has = ui.input && ui.input.value.trim().length > 0;
-    if (ui.sendBtn) ui.sendBtn.disabled = S.busy || !has;
+    if (ui.sendBtn) ui.sendBtn.disabled = S.busy || !has || quotaOut();
     if (ui.stopBtn) ui.stopBtn.hidden = !S.busy;
     if (ui.composer) ui.composer.classList.toggle("busy", S.busy);
   }
@@ -2456,7 +2461,7 @@
     if (!held) S.printing = false;
     if (ui.input) {
       ui.input.setAttribute("placeholder", S.printing ? "Наставник пишет ответ…"
-        : (held ? "Наставник отвечает…" : "Спроси что-нибудь…"));
+        : (held ? "Наставник отвечает…" : (quotaOut() ? "Ходы закончились…" : "Спроси что-нибудь…")));
     }
     syncInput();
   }
@@ -2470,6 +2475,18 @@
     if (S.busy) { if (!(opts && opts.quiet)) say("Дождись текущего ответа"); return; }
     var force = !!(opts && opts.force);
     var quiet = !!(opts && opts.quiet);      // невидимый повтор сервера
+    // Ходов не осталось — в сеть не идём и ленту не трогаем: заменяющий ход
+    // (перегенерировать/исправить) иначе снёс бы с экрана удачный ответ, а
+    // сервер при 429 старую пару не сносит — оставались бы два вопроса
+    // подряд без ответа. Тихие повторы пропускаем: это догрузка уже
+    // показанного хода, а не новый вопрос. Ввод при этом цел (поле не
+    // чистим), а квоту сверяем с сервером — вдруг уже вернулась.
+    if (!quiet && quotaOut()) {
+      editTarget = null;
+      openLimitModal(S.quota, null);
+      fetchQuota(true);
+      return;
+    }
     // Отправка из «Изменить и отправить» всегда заменяет последний вопрос.
     var replaceLast = !!((opts && opts.replaceLast) || editTarget !== null);
     editTarget = null;
@@ -2794,12 +2811,20 @@
       return;
     }
     if (res.status === 429 && res.data && res.data.code === "AI_LIMIT") {
+      // Сервер отказал до записи: оптимистичный пузырёк нигде не записан —
+      // снимаем, а снесённую заменой пару возвращаем из базы, иначе удачный
+      // ответ пропадал бы с экрана (страховка под гейт в send() на случай
+      // протухшего кэша квоты).
+      if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      if (turn.replaceLast) loadThreadMessages(true);
       openLimitModal({ limit: res.data.limit, remaining: res.data.remaining, resetInSec: res.data.resetInSec }, null);
       if (res.data.limit) setQuota(res.data);
       syncBusy();   // дальше говорит модалка, а не блокировка
       return;
     }
     if (res.status === 429) {
+      if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      if (turn.replaceLast) loadThreadMessages(true);
       openLimitModal(S.quota, Number(res.data.retryAfter) || 60);
       syncBusy();
       return;
