@@ -201,6 +201,14 @@ def main() -> int:
         check("отмена видна: active + cancelled",
               isinstance(cancelled_page, dict) and cancelled_page.get("active") is True
               and cancelled_page.get("status") == "cancelled", cancelled_page)
+        status, plus_page, _ = raw_request(user, base, "/subscription", ip="10.20.0.4")
+        check("Plus: CTA скрыт, баннер открыт с первого байта",
+              b'<div class="cta-row" id="ctaRow" hidden>' in plus_page
+              and b'<div class="active-banner" id="activeBanner">' in plus_page)
+        status, guest_page, _ = raw_request(guest, base, "/subscription", ip="10.20.0.3")
+        check("гость: разметка hero без изменений",
+              b'<div class="cta-row" id="ctaRow">' in guest_page
+              and b'<div class="active-banner" id="activeBanner" hidden>' in guest_page)
 
         print("== конвейер и fail-open")
         status, _, gz_headers = raw_request(

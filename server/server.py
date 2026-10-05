@@ -7617,7 +7617,18 @@ def _inject_ssr_payload(handler, conn: sqlite3.Connection, page_name: str, data:
         tag = _ssr_json_block(script_id, payload)
         if not tag:
             return data
-        return data.replace(SSR_MARKER, tag, 1)
+        data = data.replace(SSR_MARKER, tag, 1)
+        if page_name == "subscription.html" and payload.get("active"):
+            # Plus с первого байта: CTA Biom сразу скрыт, баннер открыт
+            # (текст в нём добивает клиент тем же тиком). Без этого на
+            # медленном парсе виден прыжок кнопки в баннер. Точное
+            # совпадение разметки обязательно: иначе замена молча не
+            # срабатывает и работает обычный клиентский путь.
+            data = data.replace(b'<div class="cta-row" id="ctaRow">',
+                                b'<div class="cta-row" id="ctaRow" hidden>', 1)
+            data = data.replace(b'<div class="active-banner" id="activeBanner" hidden>',
+                                b'<div class="active-banner" id="activeBanner">', 1)
+        return data
     except Exception:
         return data
 

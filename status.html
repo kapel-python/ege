@@ -19,6 +19,7 @@
       try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
       var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
       document.documentElement.setAttribute('data-theme',theme);
+      try{ document.documentElement.classList.add('js'); }catch(e){}
     }catch(e){}
   })();
 </script>
@@ -149,6 +150,9 @@
   }
   a{color:inherit;text-decoration:none;}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
+  /* hidden обязан побеждать всегда: класс с display ниже иначе перебивает
+     UA-правило и элемент с hidden остаётся видимым. */
+  [hidden]{display:none!important;}
   .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
   .btn{
     display:inline-flex;align-items:center;justify-content:center;gap:10px;
@@ -187,6 +191,10 @@
   .status-dot--warn.status-dot--live::after{border-color:var(--amber);}
   .status-dot--bad{background:var(--red);}
   .status-title{font-family:var(--font-display);font-size:clamp(20px,3vw,28px);font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;overflow-wrap:anywhere;}
+  /* Плейсхолдеры первого блока не мигают: при включённом JS текст скрыт
+     (место держит layout), проявка — синхронно с отрисовкой данных.
+     Без JS класса нет и видно всё сразу, как раньше. */
+  .js .hold{visibility:hidden;}
   .status-text{color:var(--text-dim);margin:0 0 4px;overflow-wrap:anywhere;}
   .status-meta{color:var(--text-faint);font-size:clamp(13px,1.6vw,14px);margin:12px 0 0;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;}
   .status-refresh{margin-left:auto;flex-shrink:0;}
@@ -314,10 +322,10 @@
       <div class="status-card" id="overallCard" role="status" aria-live="polite">
         <span class="status-dot" id="overallDot" aria-hidden="true"></span>
         <div style="min-width:0;flex:1;">
-          <p class="status-title" id="overallTitle">Проверяем состояние…</p>
-          <p class="status-text" id="overallText">Загружаем свежие данные.</p>
+          <p class="status-title hold" id="overallTitle">Проверяем состояние…</p>
+          <p class="status-text hold" id="overallText">Загружаем свежие данные.</p>
           <p class="status-meta">
-            <span id="updatedMeta">Обновляем…</span>
+            <span id="updatedMeta" class="hold">Обновляем…</span>
             <span id="contentMeta"></span>
             <button class="btn btn-ghost status-refresh" id="refreshBtn" type="button">Обновить</button>
           </p>
@@ -420,7 +428,16 @@
     catch(e){ return ""; }
   }
 
+  function releaseHold(){
+    var ids = ["overallTitle", "overallText", "updatedMeta"];
+    for (var i = 0; i < ids.length; i++){
+      var el = document.getElementById(ids[i]);
+      if (el) el.classList.remove("hold");
+    }
+  }
+
   function setOverall(kind, title, text){
+    releaseHold();
     overallDot.className = "status-dot" + (kind === "live" ? " status-dot--live" : kind === "warn" ? " status-dot--warn status-dot--live" : kind === "bad" ? " status-dot--bad" : "");
     overallTitle.textContent = title;
     overallText.textContent = text;
@@ -751,6 +768,9 @@
 
   refreshBtn.addEventListener("click", manualRefresh);
   retryBtn.addEventListener("click", manualRefresh);
+  /* Подстраховка холда: если данные висят дольше 4 секунд, показываем
+     честные плейсхолдеры — лучше «Проверяем…», чем вечная пустота. */
+  setTimeout(releaseHold, 4000);
   /* SSR: сервер вшивает свежий срез прямо в HTML — первый кадр сразу целый,
      без «Проверяем…» и прыжка секций (как префетч в профиле SPA). Живое
      обновление раз в минуту, кнопки и автообновление работают как раньше:
