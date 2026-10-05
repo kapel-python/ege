@@ -339,6 +339,7 @@ check("ряд действий под каждым сообщением: ква�
   && /getUTCHours\(\)/.test(spaCode) && /3 \* 3600 \* 1000/.test(spaCode)
   && /\.agent__act\s*\{[^}]*width: 30px/.test(spaCss)
   && /\.agent__act\[hidden\] \{ display: none/.test(spaCss)
+  && /\.agent__time \{[^}]*font-size: 14px/.test(spaCss)
   && spaCode.includes('card.setAttribute("data-answer"')
   && spaCode.includes("card.dataset.answer"));
 check("крайние кнопки только у последней пары (refreshActs по ленте)",

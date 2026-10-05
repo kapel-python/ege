@@ -354,7 +354,7 @@ a.agent__link--int { border-style: dashed; }
 .agent__edit-x:hover { color: var(--text); }
 .agent__edit-x:focus { outline: none; }
 .agent__edit-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.agent__time { margin-left: 6px; font-size: 12px; line-height: 1; color: var(--agent-ink-3); white-space: nowrap; }
+.agent__time { margin-left: 6px; font-size: 14px; line-height: 1; color: var(--agent-ink-3); white-space: nowrap; }
 .agent__qr {
   display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; cursor: pointer;
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600;
