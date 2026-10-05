@@ -1867,6 +1867,8 @@ body {
 .badge-icon svg { width: 26px; height: 26px; }
 .badge-name { font-weight: 650; font-size: 14px; }
 .badge-desc { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+.profile-more { display: flex; justify-content: center; margin-top: 14px; }
+.profile-more--left { justify-content: flex-start; margin-top: 4px; }
 
 /* ---------- profile identity card ---------- */
 

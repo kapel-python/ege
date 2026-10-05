@@ -8078,6 +8078,77 @@ function profileStatsTeaser(s, acc, avgTime) {
     </div>`;
 }
 
+function profileSortedAchievements(list) {
+  const arr = asSafeArray(list).slice();
+  // Сначала открытые, потом закрытые; внутри групп — исходный порядок каталога.
+  arr.sort((a, b) => {
+    const ua = achievementUnlocked(a && a.id) ? 0 : 1;
+    const ub = achievementUnlocked(b && b.id) ? 0 : 1;
+    return ua - ub;
+  });
+  return arr;
+}
+
+function profileAchievementsHTML(achievements) {
+  const sorted = profileSortedAchievements(achievements);
+  if (!sorted.length) return `<div class="card empty">Достижения появятся вместе с материалами предмета.</div>`;
+  const VISIBLE = 4;
+  const items = sorted.map((a, i) => {
+    const un = achievementUnlocked(a.id);
+    const extra = i >= VISIBLE ? ` data-profile-ach-extra hidden` : ``;
+    return `
+          <div class="card badge-card ${un ? "" : "badge-card--locked"}"${extra}>
+            <div class="badge-icon">${icon(a.icon)}</div>
+            <div class="badge-name">${esc(a.name || "Достижение")}</div>
+            <div class="badge-desc">${esc(a.desc || "")}</div>
+            ${un ? `<div style="margin-top:8px"><span class="chip chip--success">получено</span></div>` : `<div style="margin-top:8px"><span class="chip chip--locked">закрыто</span></div>`}
+          </div>`;
+  }).join("");
+  const rest = sorted.length - VISIBLE;
+  return `<div class="badge-grid" id="profile-ach-grid" data-collapsed="true">${items}</div>`
+    + (rest > 0 ? `<div class="profile-more"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileAchievements(this)" data-rest="${rest}">Показать ещё · осталось ${rest}</button></div>` : ``);
+}
+
+function toggleProfileAchievements(btn) {
+  try {
+    const grid = document.getElementById("profile-ach-grid");
+    if (!grid) return;
+    const extra = grid.querySelectorAll("[data-profile-ach-extra]");
+    if (!extra.length) return;
+    const collapsed = grid.getAttribute("data-collapsed") !== "false";
+    extra.forEach((el) => { if (collapsed) el.removeAttribute("hidden"); else el.setAttribute("hidden", ""); });
+    grid.setAttribute("data-collapsed", collapsed ? "false" : "true");
+    if (btn) btn.textContent = collapsed ? "Скрыть" : `Показать ещё · осталось ${extra.length}`;
+  } catch (_) {}
+}
+
+function profileTimelineHTML(timeline, contentUnavailable) {
+  const list = asSafeArray(timeline);
+  if (!list.length) return `<div class="empty">${contentUnavailable ? "События появятся после подключения материалов." : "Пока пусто — реши первое задание."}</div>`;
+  const VISIBLE = 5;
+  const items = list.map((t, i) => `
+              <div class="timeline__item"${i >= VISIBLE ? ` data-profile-timeline-extra hidden` : ``}>
+                <div class="timeline__date">${relTime(t.ts)}</div>
+                <div class="timeline__text">${esc(t && t.text || "Событие профиля")}</div>
+              </div>`).join("");
+  const rest = list.length - VISIBLE;
+  return `<div class="timeline" id="profile-timeline" data-collapsed="true">${items}</div>`
+    + (rest > 0 ? `<div class="profile-more profile-more--left"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileTimeline(this)">Показать ещё · осталось ${rest}</button></div>` : ``);
+}
+
+function toggleProfileTimeline(btn) {
+  try {
+    const box = document.getElementById("profile-timeline");
+    if (!box) return;
+    const extra = box.querySelectorAll("[data-profile-timeline-extra]");
+    if (!extra.length) return;
+    const collapsed = box.getAttribute("data-collapsed") !== "false";
+    extra.forEach((el) => { if (collapsed) el.removeAttribute("hidden"); else el.setAttribute("hidden", ""); });
+    box.setAttribute("data-collapsed", collapsed ? "false" : "true");
+    if (btn) btn.textContent = collapsed ? "Скрыть" : `Показать ещё · осталось ${extra.length}`;
+  } catch (_) {}
+}
+
 function screenProfile(root) {
   const s = Store.state || {};
   const subjectState = subjectContentState();
@@ -8096,18 +8167,7 @@ function screenProfile(root) {
     ? subjectStateCardHTML(subjectState)
     : `${profileStatsTeaser(s, acc, avgTime)}
       <div class="section-title">Достижения</div>
-      ${achievements.length ? `<div class="badge-grid">
-        ${achievements.map((a) => {
-          const un = achievementUnlocked(a.id);
-          return `
-          <div class="card badge-card ${un ? "" : "badge-card--locked"}">
-            <div class="badge-icon">${icon(a.icon)}</div>
-            <div class="badge-name">${esc(a.name || "Достижение")}</div>
-            <div class="badge-desc">${esc(a.desc || "")}</div>
-            ${un ? `<div style="margin-top:8px"><span class="chip chip--success">получено</span></div>` : `<div style="margin-top:8px"><span class="chip chip--locked">закрыто</span></div>`}
-          </div>`;
-        }).join("")}
-      </div>` : `<div class="card empty">Достижения появятся вместе с материалами предмета.</div>`}`;
+      ${profileAchievementsHTML(achievements)}`;
 
   const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip profile-card__streak ${streakTier(streak)}">${icon("flame")} ${streak} дн</div>`;
   const profileProgressHTML = `
@@ -8163,13 +8223,7 @@ function screenProfile(root) {
       <div>
         <div class="section-title" style="margin-top:0">История прогресса</div>
         <div class="card">
-          ${timeline.length ? `<div class="timeline">
-            ${timeline.slice(0, 10).map((t) => `
-              <div class="timeline__item">
-                <div class="timeline__date">${relTime(t.ts)}</div>
-                <div class="timeline__text">${esc(t && t.text || "Событие профиля")}</div>
-              </div>`).join("")}
-          </div>` : `<div class="empty">${contentUnavailable ? "События появятся после подключения материалов." : "Пока пусто — реши первое задание."}</div>`}
+          ${profileTimelineHTML(timeline, contentUnavailable)}
         </div>
       </div>
       <div>

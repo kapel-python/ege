@@ -137,9 +137,6 @@ var Subscription = (function () {
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var left = daysLeft(st.expiresAt);
     var leftText = left <= 0 ? "срок вышел" : left + " " + plural(left, "день", "дня", "дней");
-    var pill = cancelled
-      ? `<span class="chip chip--warn">без продления</span>`
-      : `<span class="chip chip--success">активен</span>`;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : 10;
     var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : 25;
     return `
@@ -147,7 +144,7 @@ var Subscription = (function () {
       <span class="sub-card__top">
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
-          <span class="sub-card__name"><span class="plus">Plus</span> ${pill}</span>
+          <span class="sub-card__name"><span class="plus">Plus</span></span>
           <span class="sub-card__sub">${cancelled
             ? "Автопродление выключено — доступ до " + esc(fmtDate(st.expiresAt)) + "."
             : "Продление " + esc(fmtDate(st.expiresAt)) + " · " + esc(st.period === "year" ? "год" : "месяц") + "."}</span>
