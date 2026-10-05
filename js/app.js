@@ -1401,7 +1401,7 @@ async function render() {
   if (NEEDS_DETAILS.has(route)) {
     // Экран с заданиями: ждём полные тексты и математические библиотеки.
     // Пока грузится — скелетон вместо пустоты; ушедшую навигацию не трогаем.
-    screen.innerHTML = loaderHTML("Тянем задания и формулы…");
+    screen.innerHTML = pageLoaderHTML("Тянем задания и формулы…");
     try {
       await Store.ensureDetails();
     } catch (error) {
@@ -2174,7 +2174,7 @@ async function switchSubjectFromUI(sel) {
   try {
     // Мгновенный отклик: лоадер на экране сразу, а не после ответа сети —
     // иначе клик выглядит зависшим, пока летят save + POST /api/subject.
-    try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
+    try { document.getElementById("screen").innerHTML = pageLoaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
     try { Session.cur = null; } catch (_) {}
     try { pauseLessonClock(); } catch (_) {}
@@ -4470,7 +4470,7 @@ async function essayAutoResume(t, skipPoll) {
   try {
     essayCheckMsgStop();
     const screen = document.getElementById("screen");
-    if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+    if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = pageLoaderHTML(ESSAY_CHECK_MSGS[0]);
     essayCheckMsgStart();
     essayWaitArm(); // замер продолжается: предупреждение — сразу, если >минуты
     if (!skipPoll) {
@@ -5234,7 +5234,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount, busyRetried) {
   essayCheckMsgStop();
   // Лоадер не перерисовываем, если уже стоит (переход из auto): перерисовка
   // перезапускает CSS-анимацию и даёт видимый рывок.
-  if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+  if (screen && !screen.querySelector(".ege-loader")) screen.innerHTML = pageLoaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart();
   // Замер долгого ожидания: resume продолжает старый старт (тот же clientId),
   // иначе таймер минуты обнулялся бы каждой перезагрузкой.
@@ -5537,7 +5537,7 @@ async function sessionEssaySubmit() {
   // завершена, XP НЕ начисляем: дальше pipeline, а не feedback с баллами.
   essayCheckMsgStop();
   try {
-  document.getElementById("screen").innerHTML = loaderHTML(ESSAY_CHECK_MSGS[0]);
+  document.getElementById("screen").innerHTML = pageLoaderHTML(ESSAY_CHECK_MSGS[0]);
   essayCheckMsgStart();
   let data = null, ok = false;
   try {
@@ -9637,7 +9637,7 @@ async function chooseLoginSubject(id) {
   subjectSwitching = true;
   try {
     // Мгновенный отклик: лоадер сразу, а не после ответа сети.
-    try { document.getElementById("screen").innerHTML = loaderHTML("Открываем предмет…"); } catch (_) {}
+    try { document.getElementById("screen").innerHTML = pageLoaderHTML("Открываем предмет…"); } catch (_) {}
     // Сессии и уроки другого предмета недействительны — сбрасываем до смены.
     try { Session.cur = null; } catch (_) {}
     try { pauseLessonClock(); } catch (_) {}
@@ -10419,6 +10419,16 @@ function loaderHTML(sub) {
   </div>`;
 }
 
+/* Полноэкранная загрузка: та же анимация, но на высоту вьюпорта, чтобы
+   футер не прыгал. Проблема: короткий лоадер (~350px) ставит футер прямо
+   под себя, а приехавший высокий контент уносит его вниз — видимый рывок.
+   Растянутая подложка держит футер за сгибом и в загрузке, и в контенте,
+   поэтому смена одного на другое экран не двигает. Только для замен всего
+   #screen; вложенные лоадеры (история, лента чата) остаются компактными. */
+function pageLoaderHTML(sub) {
+  return `<div class="ege-loading">${loaderHTML(sub)}</div>`;
+}
+
 /* Смена подписей, пока висит boot-экран. Останавливается при отрисовке
    первого экрана или при показе ошибки. */
 const BOOT_MSGS = ["Открываем страницу…", "Тянем каталог заданий…", "Считаем XP и уровень…", "Почти готово…"];
@@ -10500,7 +10510,7 @@ let bootPromise = null;
 function bootstrapApp() {
   if (bootPromise) return bootPromise;
   const screen = document.getElementById("screen");
-  screen.innerHTML = loaderHTML("Открываем страницу…");
+  screen.innerHTML = pageLoaderHTML("Открываем страницу…");
   startBootMsgs();
   bootPromise = (async () => {
     try {

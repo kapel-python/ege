@@ -2478,6 +2478,9 @@ body {
    карточка выше. В блок-родителе (все остальные экраны) width: 100% +
    max-width: 340px даёт ровно ту же картинку, что была. */
 .ege-loader { width: 100%; max-width: 340px; margin: 64px auto; text-align: center; padding-top: 34px; padding-bottom: 26px; }
+/* Подложка полноэкранной загрузки: держит футер за сгибом, пока едет контент. */
+.ege-loading { min-height: calc(100dvh - var(--topbar-h, 64px) - 24px); display: grid; align-content: center; }
+.ege-loading .ege-loader { margin-top: 0; margin-bottom: 0; }
 .ege-loader__orbit { width: 96px; height: 96px; margin: 0 auto 18px; position: relative; display: grid; place-items: center; }
 .ege-loader__orbit::before, .ege-loader__orbit::after { content: ""; position: absolute; border-radius: 50%; border: 3px solid transparent; }
 .ege-loader__orbit::before { inset: 0; border-top-color: var(--accent); border-right-color: var(--accent); animation: ege-spin 1s linear infinite; }

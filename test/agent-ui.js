@@ -464,6 +464,27 @@ check("анимация загрузки не схлопывается в flex-�
   && /\.screen--agent \{[^}]*display: flex; flex-direction: column/.test(spaCss),
   loaderDecl.trim());
 
+/* Полноэкранная загрузка держит футер за сгибом: короткий лоадер ставил
+   футер прямо под себя, и приехавший контент уносил его вниз (рывок).
+   Подложка .ege-loading — на высоту вьюпорта, вложенные лоадеры
+   (история, лента чата) остаются компактными. */
+const loadingDecl = (read("css/styles.css").replace(/\/\*[\s\S]*?\*\//g, "")
+  .match(/(?:^|\})\s*\.ege-loading\s*\{([^}]*)\}/) || [, ""])[1];
+check("загрузка на весь экран держит футер за сгибом (min-height 100dvh + центрирование)",
+  /min-height:\s*calc\(100dvh/.test(loadingDecl)
+  && /display:\s*grid/.test(loadingDecl)
+  && /align-content:\s*center/.test(loadingDecl),
+  loadingDecl.trim());
+check("карточка в подложке не добавляет своих отступов",
+  /\.ege-loading \.ege-loader \{[^}]*margin-top:\s*0[^}]*margin-bottom:\s*0/.test(
+    read("css/styles.css").replace(/\/\*[\s\S]*?\*\//g, "")));
+check("pageLoaderHTML оборачивает ту же анимацию (без второй вёрстки)",
+  /function pageLoaderHTML\(sub\)/.test(appJs)
+  && /return `<div class="ege-loading">\$\{loaderHTML\(sub\)\}<\/div>`/.test(appJs.replace(/\n/g, "")));
+check("замены всего #screen едут через подложку (вложенные лоадеры — нет)",
+  !/(screen\.innerHTML|getElementById\("screen"\)\.innerHTML)\s*=\s*loaderHTML\(/.test(appJs)
+  && /(screen\.innerHTML|getElementById\("screen"\)\.innerHTML)\s*=\s*pageLoaderHTML\(/.test(appJs));
+
 /* --- паритет с эталоном agent_preview.html ---
    Эталон — источник правды по вёрстке раздела: ритм ленты, ширина колонки,
    карточка поля с тенью, зелёная галочка шага, рейл с кнопкой во всю
