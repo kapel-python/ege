@@ -10532,8 +10532,10 @@ def admin_delete_user(conn: sqlite3.Connection, user_id: int, actor_id: int) -> 
         except Exception:
             pass
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    # Та же запись, что admin_audit, но внутри общей транзакции удаления:
+    # хелпер коммитит сам и разорвал бы атомарность (DELETE без строки аудита).
     conn.execute("INSERT INTO admin_audit(actor_user_id, action, target_user_id, detail, created_at) VALUES (?,?,?,?,?)",
-                 (actor_id, "delete-user", user_id, user["account_id"] or "", now_iso()))
+                 (actor_id, "delete-user", user_id, (user["account_id"] or "")[:200], now_iso()))
     conn.commit()
     return {"ok": True, "deleted": user_id, "accountId": user["account_id"]}
 

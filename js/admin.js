@@ -1799,52 +1799,317 @@ function openUnblockUserModal(p, reload) {
   });
 }
 
-/* ---------------- Журнал действий ---------------- */
+/* ---------------- Журнал действий ----------------
+   Лента вместо сырой таблицы: группировка по дням, фильтр по смыслу
+   (Входы / Пользователи / Подписка / Провайдеры / Обращения), поиск по
+   тексту и человеческие расшифровки деталей вместо сырого detail.
+   Неизвестное действие рисуется сырым кодом, а не пустотой — иначе новая
+   запись бэкенда молча исчезла бы из ленты. Покрытие меток проверяет
+   test/audit-log.py: каждое действие из server.py обязано иметь запись
+   в AUDIT_ACTIONS и расшифровку в AUDIT_DETAIL. */
 
-const AUDIT_LABELS = {
-  "admin-login": ["Вход в админ-панель", "a-chip--accent"],
-  "admin-logout": ["Выход из админ-панели", ""],
-  "grant-xp": ["Корректировка XP", "a-chip--warn"],
-  reset: ["Сброс состояния", "a-chip--warn"],
-  "update-profile": ["Изменение профиля", ""],
-  "delete-user": ["Удаление аккаунта", "a-chip--danger"],
-  "block-user": ["Блокировка аккаунта", "a-chip--danger"],
-  "unblock-user": ["Разблокировка аккаунта", "a-chip--success"],
-  "support-read": ["Обращение прочитано", ""],
+const AUDIT_CATS = [
+  { id: "all", label: "Все" },
+  { id: "login", label: "Входы" },
+  { id: "users", label: "Пользователи" },
+  { id: "plus", label: "Подписка" },
+  { id: "providers", label: "Провайдеры" },
+  { id: "inbox", label: "Обращения" },
+];
+
+// Действие -> [категория, подпись, класс чипа].
+const AUDIT_ACTIONS = {
+  "admin-login": ["login", "Вход в админку", "a-chip--accent"],
+  "admin-login-pending": ["login", "Запрос входа", "a-chip--warn"],
+  "admin-login-approved": ["login", "Вход подтверждён", "a-chip--success"],
+  "admin-login-denied": ["login", "Вход отклонён", "a-chip--danger"],
+  "admin-login-expired": ["login", "Заявка истекла", ""],
+  "admin-login-cancelled": ["login", "Заявка отозвана", ""],
+  "admin-logout": ["login", "Выход", ""],
+  "grant-xp": ["users", "Корректировка XP", "a-chip--warn"],
+  reset: ["users", "Сброс", "a-chip--warn"],
+  "update-profile": ["users", "Правка профиля", ""],
+  "delete-user": ["users", "Удаление аккаунта", "a-chip--danger"],
+  "block-user": ["users", "Блокировка", "a-chip--danger"],
+  "unblock-user": ["users", "Разблокировка", "a-chip--success"],
+  "ai-limit": ["users", "Лимиты ИИ", ""],
+  "subscription-grant": ["plus", "Plus выдан", "a-chip--success"],
+  "subscription-revoke": ["plus", "Доступ отозван", "a-chip--danger"],
+  "subscription-refund": ["plus", "Возврат", "a-chip--warn"],
+  "subscription-waitlist-grant": ["plus", "Plus очереди", "a-chip--success"],
+  "providers.judge": ["providers", "Судья назначен", "a-chip--accent"],
+  "ai-provider-create": ["providers", "Провайдер добавлен", "a-chip--success"],
+  "ai-provider-slots": ["providers", "Приоритеты", ""],
+  "ai-provider-reset": ["providers", "Сброс провайдера", "a-chip--warn"],
+  "ai-provider-models": ["providers", "Цепочка моделей", ""],
+  "ai-provider-apply": ["providers", "Настройки провайдера", ""],
+  "ai-provider-update": ["providers", "Правка провайдера", ""],
+  "ai-provider-delete": ["providers", "Провайдер удалён", "a-chip--danger"],
+  "support-read": ["inbox", "Обращение прочитано", ""],
 };
+
+function auditActionOf(e) {
+  // Запасной путь для будущих действий бэкенда: сырой код виден только
+  // во вкладке «Все», а не пустотой (покрытие — в test/audit-log.py).
+  return AUDIT_ACTIONS[e.action] || ["all", String(e.action || "—"), ""];
+}
+
+const AUDIT_RESET_LABELS = {
+  "all-progress": "весь прогресс",
+  streak: "серия",
+  errors: "ошибки",
+  daily: "подборка",
+  forecast: "прогноз",
+};
+
+function auditRub(kop) {
+  const n = Number(kop);
+  if (!Number.isFinite(n)) return "";
+  return `${(n / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
+}
+
+function auditCode(short) {
+  const t = String(short || "").toUpperCase();
+  return t.length === 8 ? `${t.slice(0, 4)}-${t.slice(4)}` : t;
+}
+
+function auditPendingDetail(detail) {
+  // "SHORT ip" -> "код XXXX-XXXX · 1.2.3.4".
+  const parts = String(detail || "").split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return `код ${auditCode(parts[0])}${parts[1] ? ` · ${parts[1]}` : ""}`;
+}
+
+function auditCompactPairs(detail) {
+  // {"high":"x","medium":"y"} -> "high: x · medium: y", не длиннее ~140 знаков.
+  try {
+    const obj = JSON.parse(detail);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+    const text = Object.entries(obj).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(" · ");
+    return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  } catch (e) { return ""; }
+}
+
+// Расшифровка сырого detail в человеческую строку. Пусто — строки деталей
+// нет вовсе; нераспознанное показывает карточка сырым текстом, а не пустотой.
+const AUDIT_DETAIL = {
+  "admin-login": () => "",
+  "admin-logout": () => "",
+  "admin-login-pending": (e) => auditPendingDetail(e.detail),
+  "admin-login-approved": (e) => auditPendingDetail(e.detail),
+  "admin-login-denied": (e) => auditPendingDetail(e.detail),
+  "admin-login-expired": (e) => auditPendingDetail(e.detail),
+  "admin-login-cancelled": () => "",
+  "grant-xp": (e) => {
+    const m = String(e.detail || "").match(/^\s*([+-]?\d+)\s*(.*)$/);
+    if (!m) return "";
+    return `${m[1]} XP${m[2] ? ` · ${m[2]}` : ""}`;
+  },
+  reset: (e) => AUDIT_RESET_LABELS[String(e.detail || "").trim()] || "",
+  "update-profile": (e) => {
+    try {
+      const obj = JSON.parse(e.detail || "");
+      if (!obj || typeof obj !== "object") return "";
+      const parts = [];
+      if (obj.name) parts.push(`имя «${obj.name}»`);
+      if (obj.selfLevel) parts.push(LEVEL_LABELS[obj.selfLevel] || obj.selfLevel);
+      if (obj.goal) parts.push(GOAL_LABELS[obj.goal] || obj.goal);
+      return parts.join(" · ");
+    } catch (err) { return ""; }
+  },
+  "delete-user": (e) => (e.detail ? `аккаунт ${e.detail}` : ""),
+  "block-user": (e) => {
+    // "1d причина" / "permanent причина".
+    const parts = String(e.detail || "").split(/\s+/).filter(Boolean);
+    const dur = BLOCK_DURATIONS.find((d) => d.id === parts[0]);
+    if (!dur) return "";
+    const date = dur.secs == null ? "навсегда" : `до ${fmtDateTime(Number(e.ts) + dur.secs * 1000)}`;
+    const reason = parts.slice(1).join(" ");
+    return `${dur.title} · ${date}${reason ? ` · ${reason}` : ""}`;
+  },
+  "unblock-user": () => "",
+  "ai-limit": (e) => {
+    // "limit=5 remaining=3 agent: limit=10 remaining=7".
+    const m = String(e.detail || "").match(/limit=(\d+)\s+remaining=(\d+)/);
+    if (!m) return "";
+    const agent = String(e.detail || "").split("agent:")[1] || "";
+    const am = agent.match(/limit=(\d+)\s+remaining=(\d+)/);
+    return `Сочинения — лимит ${m[1]}, остаток ${m[2]}`
+      + (am ? `; ИИ — лимит ${am[1]}, остаток ${am[2]}` : "");
+  },
+  "subscription-grant": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+until\s+(\d+)/);
+    if (!m) return "";
+    return `Plus на ${m[1] === "year" ? "год" : "месяц"} · до ${fmtDateTime(Number(m[2]))}`;
+  },
+  "subscription-revoke": () => "доступ закрыт сразу",
+  "subscription-refund": (e) => {
+    const m = String(e.detail || "").match(/payment=(\S+)\s+(\d+)/);
+    if (!m) return "";
+    return `возврат ${auditRub(m[2])} · платёж ${m[1]}`;
+  },
+  "subscription-waitlist-grant": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+x(\d+)/);
+    if (!m) return "";
+    const n = Number(m[2]);
+    return `Plus на ${m[1] === "year" ? "год" : "месяц"} × ${n} ${plural(n, "человек", "человека", "человек")}`;
+  },
+  "providers.judge": (e) => {
+    const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
+    return text ? `судья: ${text}` : "";
+  },
+  "ai-provider-create": (e) => auditProviderDetail(e.detail),
+  "ai-provider-reset": (e) => auditProviderDetail(e.detail),
+  "ai-provider-apply": (e) => auditProviderDetail(e.detail),
+  "ai-provider-update": (e) => auditProviderDetail(e.detail),
+  "ai-provider-delete": (e) => auditProviderDetail(e.detail),
+  "ai-provider-slots": (e) => auditCompactPairs(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
+  "ai-provider-models": (e) => auditCompactPairs(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
+  "support-read": (e) => {
+    const m = String(e.detail || "").match(/message\s+(\d+)/);
+    return m ? `обращение № ${m[1]}` : "";
+  },
+};
+
+function auditProviderDetail(detail) {
+  // "pid [Plus]" -> "«pid»" (таблетка Plus рисуется отдельно).
+  return String(detail || "").replace(/\s*\[Plus\]$/, "").trim();
+}
+
+function auditDayLabel(ts) {
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return "—";
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return "Сегодня";
+  if (diff === 1) return "Вчера";
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return fmtShortDate(iso);
+}
+
+function auditCardHTML(e) {
+  const entry = auditActionOf(e);
+  const label = entry[1];
+  const cls = entry[2];
+  const human = (AUDIT_DETAIL[e.action] || (() => ""))(e);
+  const raw = String(e.detail || "");
+  const plus = / \[Plus\]$/.test(raw);
+  const me = A.session?.user?.id;
+  const actor = e.actorAccount
+    ? `<span class="mono">${esc(e.actorAccount)}</span>${e.actorId === me ? " (ты)" : ""}`
+    : "—";
+  const target = e.targetAccount
+    ? `<a href="#/users/${esc(e.targetAccount)}" class="mono">${esc(e.targetAccount)}</a>${e.targetId === me ? " (ты)" : ""}`
+    : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
+  return `<article class="a-audit">
+    <div class="a-audit__head">
+      <span class="a-chip ${cls}">${esc(label)}</span>
+      ${plus ? `<span class="a-chip a-chip--accent">Plus</span>` : ""}
+      <span class="a-audit__time">${esc(fmtDateTime(e.ts))}</span>
+    </div>
+    <div class="a-audit__text">${esc(human || label)}</div>
+    <div class="a-audit__meta">${actor}<span class="a-audit__arrow">→</span>${target}</div>
+    ${human || !raw ? "" : `<div class="a-audit__raw mono">${esc(raw)}</div>`}
+  </article>`;
+}
+
+function auditTab() {
+  try {
+    const v = localStorage.getItem("ege_admin_audit_tab");
+    if (v && AUDIT_CATS.some((c) => c.id === v)) return v;
+  } catch (e) {}
+  return "all";
+}
+
+function auditFiltered(entries, tab, q) {
+  const needle = String(q || "").trim().toLowerCase();
+  return entries.filter((e) => {
+    const entry = auditActionOf(e);
+    if (tab !== "all" && entry[0] !== tab) return false;
+    if (!needle) return true;
+    const hay = [entry[1], e.action, e.detail, e.actorAccount, e.targetAccount]
+      .filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(needle);
+  });
+}
 
 async function screenAudit() {
   renderShell("audit", `<div class="a-skeleton" style="height:300px"></div>`);
   let entries;
   try {
-    entries = (await AdminApi.get("/api/admin/audit")).entries;
+    entries = (await AdminApi.get("/api/admin/audit")).entries || [];
   } catch (e) {
     if (e.unauthorized) { A.session = null; renderLogin(); return; }
-    renderShell("audit", `<div class="a-error-banner">Ошибка: ${esc(e.message)}<button class="btn btn--soft btn--sm" onclick="render()">Повторить</button></div>`);
+    renderShell("audit", `<div class="a-error-banner">Не удалось загрузить журнал: ${esc(e.message)}<button class="btn btn--soft btn--sm" onclick="render()">Повторить</button></div>`);
     return;
   }
-  const screen = entries.length ? `
-    <div class="a-table-wrap"><table class="a-table">
-      <thead><tr><th>Когда</th><th>Действие</th><th>Кто</th><th>Кому</th><th>Детали</th></tr></thead>
-      <tbody>
-        ${entries.map((e) => {
-          const [label, cls] = AUDIT_LABELS[e.action] || [e.action, ""];
-          const target = e.targetAccount ? `<a href="#/users/${esc(e.targetAccount)}" class="mono" style="color:var(--accent)">${esc(e.targetAccount)}</a>${e.targetId === A.session?.user?.id ? " (ты)" : ""}` : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
-          return `<tr>
-            <td style="white-space:nowrap">${fmtDateTime(e.ts)}</td>
-            <td><span class="a-chip ${cls}">${esc(label)}</span></td>
-            <td class="mono">${esc(e.actorAccount || "—")}${e.actorId === A.session?.user?.id ? " (ты)" : ""}</td>
-            <td>${target}</td>
-            <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis" class="mono">${esc(e.detail || "")}</td>
-          </tr>`;
-        }).join("")}
-      </tbody></table></div>` : `
-    <div class="a-card"><div class="a-empty">
+  renderShell("audit", `
+    <div class="a-toolbar">
+      <input class="a-input" id="auditSearch" placeholder="Поиск: действие, детали, аккаунт…" value="${esc(A.lastAuditQuery || "")}">
+      <span class="a-seg" role="group" aria-label="Категория действий">
+        ${AUDIT_CATS.map((c) => `<button class="a-seg__btn${c.id === auditTab() ? " a-seg__btn--active" : ""}" data-audit-tab="${c.id}">${esc(c.label)}</button>`).join("")}
+      </span>
+      <span class="spacer"></span>
+      <span class="a-card__sub" id="auditCount"></span>
+    </div>
+    <div id="auditList"></div>`);
+  const input = document.getElementById("auditSearch");
+  input.addEventListener("input", () => {
+    A.lastAuditQuery = input.value;
+    drawAuditList(entries);
+  });
+  document.querySelectorAll("#adminScreen [data-audit-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      try { localStorage.setItem("ege_admin_audit_tab", btn.dataset.auditTab); } catch (err) {}
+      document.querySelectorAll("#adminScreen [data-audit-tab]").forEach((b) => {
+        b.classList.toggle("a-seg__btn--active", b.dataset.auditTab === btn.dataset.auditTab);
+      });
+      drawAuditList(entries);
+    };
+  });
+  drawAuditList(entries);
+}
+
+/* Лента группируется по дням (записи уже идут от новых к старым).
+   Поиск и вкладка фильтруют загруженные 200 записей локально — сервер
+   отдаёт тот же срез, что раньше показывала таблица. */
+function drawAuditList(entries) {
+  const list = document.getElementById("auditList");
+  if (!list) return;
+  const tab = auditTab();
+  const found = auditFiltered(entries, tab, A.lastAuditQuery || "");
+  const count = document.getElementById("auditCount");
+  if (count) count.textContent = `${found.length} из ${entries.length}`;
+  if (!found.length) {
+    const hint = tab === "all" && !(A.lastAuditQuery || "").trim()
+      ? ["Журнал пуст", "Здесь появятся все админ-действия: входы, пользователи, подписка, провайдеры"]
+      : ["Ничего не нашлось", "Попробуй другую вкладку или поисковый запрос"];
+    list.innerHTML = `<div class="a-card"><div class="a-empty">
       <div class="a-empty__icon">${aicon("audit")}</div>
-      <div class="a-empty__title">Журнал пуст</div>
-      <div class="a-empty__sub">Здесь появятся все админ-действия: входы, корректировки, сбросы, удаления</div>
+      <div class="a-empty__title">${hint[0]}</div>
+      <div class="a-empty__sub">${hint[1]}</div>
     </div></div>`;
-  renderShell("audit", screen);
+    return;
+  }
+  const groups = [];
+  found.forEach((e) => {
+    const key = new Date(Number(e.ts));
+    const day = Number.isNaN(key.getTime()) ? "—" : key.toDateString();
+    if (!groups.length || groups[groups.length - 1].day !== day) {
+      groups.push({ day, label: auditDayLabel(e.ts), items: [] });
+    }
+    groups[groups.length - 1].items.push(e);
+  });
+  list.innerHTML = groups.map((g) => `
+    <div class="a-msg-group">
+      <div class="a-msg-group__head">
+        <span class="a-chip">${esc(g.label)}</span>
+        <span class="a-msg-group__count">${fmtNum(g.items.length)}</span>
+      </div>
+      ${g.items.map(auditCardHTML).join("")}
+    </div>`).join("");
 }
 
 /* ---------------- Обращения (Contact Inbox) ----------------

@@ -617,6 +617,65 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .a-msg { transition: none; }
 }
 
+/* ---------- audit: журнал действий ---------- */
+
+/* Та же карточка, что у обращений, но без раскрытия: действие уже
+   рассказано одной строкой (чип + расшифровка + кто → кому). */
+.a-audit {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.a-audit:hover { border-color: var(--border-strong); }
+.a-audit__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 13px 16px 0;
+}
+.a-audit__time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.a-audit__text {
+  padding: 6px 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.a-audit__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 16px 13px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.a-audit__meta .mono { color: var(--text-2); }
+.a-audit__meta a.mono { color: var(--accent); text-decoration: none; }
+.a-audit__meta a.mono:hover { text-decoration: underline; }
+.a-audit__arrow { flex: 0 0 auto; }
+.a-audit__raw {
+  padding: 0 16px 13px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  .a-audit__head { padding: 11px 13px 0; }
+  .a-audit__text { padding: 5px 13px 0; }
+  .a-audit__meta { padding: 5px 13px 11px; }
+  .a-audit__raw { padding: 0 13px 11px; }
+}
+
 /* ---------- providers: ИИ-провайдеры ---------- */
 
 .a-prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
