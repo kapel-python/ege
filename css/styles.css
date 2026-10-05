@@ -215,31 +215,6 @@ body {
 
 .sidebar__nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 
-/* ---------- static chrome skeletons (first paint) ----------
-   index.html везёт скелетоны сайдбара/топбара/нижнего меню статикой,
-   поэтому шапка приложения видна сразу, а не догоняет контент.
-   renderSidebar/renderBottomNav/топбар затирают их своим innerHTML
-   при старте — JS-правок не нужно. Без JS остаётся тихий скелетон. */
-.chrome-skel { display: grid; gap: 2px; }
-.chrome-skel__row {
-  display: flex; align-items: center; gap: 11px; padding: 9px 12px;
-  animation: skel-pulse 1.6s ease-in-out infinite;
-}
-.chrome-skel__ic { width: 17px; height: 17px; flex: 0 0 17px; border-radius: 6px; background: var(--surface-3); }
-.chrome-skel__tx { height: 12px; border-radius: 6px; background: var(--surface-3); flex: 1; }
-.chrome-skel__tx--s { max-width: 76px; }
-.chrome-skel__tx--m { max-width: 118px; }
-.chrome-skel__tx--l { max-width: 148px; }
-.chrome-skel--top { display: flex; align-items: center; gap: 18px; width: 100%; }
-.chrome-skel__pill { height: 30px; width: 150px; border-radius: 999px; background: var(--surface-3); animation: skel-pulse 1.6s ease-in-out infinite; }
-.chrome-skel__dot { width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); margin-left: auto; animation: skel-pulse 1.6s ease-in-out infinite; }
-.chrome-skel--bottom { display: flex; justify-content: space-around; width: 100%; }
-.chrome-skel__tab { width: 44px; height: 30px; border-radius: 10px; background: var(--surface-3); animation: skel-pulse 1.6s ease-in-out infinite; }
-@keyframes skel-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
-  .chrome-skel__row, .chrome-skel__pill, .chrome-skel__dot, .chrome-skel__tab { animation: none; opacity: 0.7; }
-}
-
 .nav-item {
   display: flex;
   align-items: center;

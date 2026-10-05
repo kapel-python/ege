@@ -119,7 +119,8 @@ check("предмет треда в заголовке окна («назван�
   && /subjectCompact/.test(spaCode) && /\.slice\(0, 8\)/.test(spaCode)
   && ((spaCode.match(/ui\.title\.textContent\s*=/g) || []).length === 1) // только очистка внутри paintTitle
   && /\.agent__title-s\s*\{[^}]*color:\s*var\(--accent-ink\)/.test(spaCss)
-  && /\.agent__title-t\s*\{[^}]*text-overflow:\s*ellipsis/.test(spaCss));
+  && /\.agent__title-t\s*\{[^}]*text-overflow:\s*ellipsis/.test(spaCss)
+  && /\.agent__title-t\s*\{[^}]*flex:\s*0 1 auto/.test(spaCss)); // название не тянется: дыры «Новый чат … • Проф мат» нет, пустота уходит за предмет
 check("сервер отдаёт название предмета треда",
   /"subjectTitle":\s*_agent_subject_title\(/.test(srvCode)
   && /def _agent_subject_title/.test(srvCode)

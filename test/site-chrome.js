@@ -1,9 +1,10 @@
 /* Шапка и подвал с первого кадра (без догоняющего прыжка).
-   Статика: страницы со слотом [data-ege-header]/[data-ege-footer] обязаны
+   Страницы со слотом [data-ege-header]/[data-ege-footer] обязаны
    подключать site-header.js/footer.js СИНХРОННО (без defer), а сами файлы —
    монтироваться сразу при выполнении (mountStatic вне readyState-ветки).
-   SPA: каркас index.html везёт скелетоны chrome-skel статикой — их затирает
-   первый render своим innerHTML, JS-правок не нужно.
+   Пульсирующих скелетонов каркаса нет осознанно (удалены: мельтешение
+   в шапке и нижнем меню раздражало): слоты index.html пустые, рендер
+   рисует настоящий хром сразу благодаря синхронному маунту.
    Запуск: node test/site-chrome.js (статика, без сервера). */
 const fs = require("fs");
 const path = require("path");
@@ -41,11 +42,12 @@ for (const [file, fn] of [["js/site-header.js", "mountStatic"], ["js/footer.js",
 
 const index = read("index.html");
 for (const id of ["sidebarNav", "topbar", "bottomnav"]) {
-  check(`index.html: скелетон в #${id}`,
-    new RegExp(`id="${id}"[^>]*><div class="chrome-skel`).test(index));
+  check(`index.html: без скелетона в #${id}`,
+    new RegExp(`id="${id}"[^>]*></(nav|header)>`).test(index));
 }
 const css = read("css/styles.css");
-check("styles.css: стили chrome-skel", css.includes(".chrome-skel__row") && css.includes("@keyframes skel-pulse"));
+check("styles.css: без стилей chrome-skel",
+  !css.includes(".chrome-skel") && !css.includes("skel-pulse"));
 
 console.log(failures === 0 ? "ALL OK" : `FAILURES=${failures}`);
 process.exit(failures === 0 ? 0 : 1);
