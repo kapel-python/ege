@@ -116,6 +116,29 @@ got = agent._weighted_skills(conn, "profile_math", {"x1": 3, "n09_derivative": 1
 check("locked out, unlocked in",
       [s for s, _ in got] == ["n09_derivative"], str(got))
 
+# --- Синхрон с браузерной формулой: константы обязаны совпадать ---
+# Дублирование формулы (Python) и оригинала (js/state.js) честно опасно
+# ровно одним: кто-то поменяет константу в одном месте и забудет второе.
+# Этот тест читает константы из JS и сверяет — разъехались, тест красный.
+import re as _re
+_state_js = (ROOT / "js" / "state.js").read_text(encoding="utf-8")
+
+
+def _js_const(name):
+    m = _re.search(rf"const\s+{name}\s*=\s*(\d+)", _state_js)
+    return int(m.group(1)) if m else None
+
+
+check("DECAY synced with js", agent.FORECAST_DECAY_DAYS == _js_const("FORECAST_DECAY_DAYS"),
+      f"py={agent.FORECAST_DECAY_DAYS} js={_js_const('FORECAST_DECAY_DAYS')}")
+check("VOLUME synced with js", agent.FORECAST_FULL_VOLUME == _js_const("FORECAST_FULL_VOLUME"),
+      f"py={agent.FORECAST_FULL_VOLUME} js={_js_const('FORECAST_FULL_VOLUME')}")
+check("DIAG weight synced with js", agent.FORECAST_DIAGNOSTIC_WEIGHT == _js_const("FORECAST_DIAGNOSTIC_WEIGHT"),
+      f"py={agent.FORECAST_DIAGNOSTIC_WEIGHT} js={_js_const('FORECAST_DIAGNOSTIC_WEIGHT')}")
+m = _re.search(r"theoryWeight\s*=\s*lessons\.length\s*\?\s*(\d+)", _state_js)
+check("THEORY weight synced with js", agent.FORECAST_THEORY_WEIGHT == (int(m.group(1)) if m else None),
+      f"py={agent.FORECAST_THEORY_WEIGHT}")
+
 conn.close()
 os.unlink(path)
 print(f"\n{checks - failures}/{checks} ok")
