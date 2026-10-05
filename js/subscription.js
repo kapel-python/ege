@@ -134,7 +134,6 @@ var Subscription = (function () {
   }
 
   function plusCardHTML(st) {
-    var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var left = daysLeft(st.expiresAt);
     var leftText = left <= 0 ? "срок вышел" : left + " " + plural(left, "день", "дня", "дней");
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : 10;
@@ -145,9 +144,7 @@ var Subscription = (function () {
         <span class="sub-card__mark" aria-hidden="true">${icon("crown")}</span>
         <span class="sub-card__who">
           <span class="sub-card__name"><span class="plus">Plus</span></span>
-          <span class="sub-card__sub">${cancelled
-            ? "Автопродление выключено — доступ до " + esc(fmtDate(st.expiresAt)) + "."
-            : "Продление " + esc(fmtDate(st.expiresAt)) + " · " + esc(st.period === "year" ? "год" : "месяц") + "."}</span>
+          <span class="sub-card__sub">${"Доступ до " + esc(fmtDate(st.expiresAt)) + " · " + esc(st.period === "year" ? "год" : "месяц") + "."}</span>
         </span>
       </span>
       <span class="sub-card__limits">

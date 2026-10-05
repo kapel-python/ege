@@ -1,5 +1,6 @@
 /* Фронт подписки Plus сквозняком: публичная страница, карточка профиля,
-   окно управления, покупка и отмена/возврат (mock-провайдер).
+   окно управления и покупка (mock-провайдер). Отмены и возврата в интерфейсе
+   нет — только статус, срок и история (тест проверяет и отсутствие текстов).
    Самодостаточен: поднимает свой temp-сервер (test/subscription-frontend-server.py,
    прод не трогает), гоняет живой Chromium, в конце кладёт сервер.
    Требует playwright-core и Chromium (как остальные браузерные suites).
@@ -161,27 +162,21 @@ function check(name, cond, detail) {
     && det.includes("Проверок сочинений") && det.includes("Ходов ИИ"));
   await page.screenshot({ path: shot("sub-manage.png") });
 
-  // отмена продления — тем же .modal-окном, что soon
-  await page.click('#actionsRow [data-act="ask-cancel"]');
-  await page.waitForSelector('#cancelModal.is-open', { timeout: 10000 });
-  check("отмена: модалка подтверждения", true);
-  await page.click('#cancelGo');
-  await page.waitForFunction(() => {
-    const sub = document.getElementById("actionsSub");
-    return sub && sub.textContent.includes("Автопродление выключено");
-  }, { timeout: 10000 });
-  check("отмена: продление выключено", true);
+  // отмены и возврата в интерфейсе нет — только статус, срок и история.
+  // Проверяется буквально: ни текстов кнопок, ни модалки, ни слова «автопродление».
   det = await page.textContent("#content");
-  check("отмена: плашка Plus без статусной таблетки",
+  check("manage plus: без отмены/возврата/автопродления",
+    !det.includes("Отменить") && !det.includes("Вернуть продление")
+    && !det.includes("Автопродление") && !det.includes("возврат")
+    && (await page.locator('#actionsRow [data-act="ask-cancel"], #actionsRow [data-act="resume"], #cancelModal').count()) === 0);
+  check("manage plus: плашка Plus без статусной таблетки",
     det.includes("Plus") && !det.includes("без продления") && !det.includes("Plus активен"));
 
-  // возврат продления
-  await page.click('#actionsRow [data-act="resume"]');
-  await page.waitForFunction(() => {
-    const sub = document.getElementById("actionsSub");
-    return sub && sub.textContent.includes("Продление держит доступ");
-  }, { timeout: 10000 });
-  check("resume: продление вернулось", true);
+  // «Продлить Plus» у активного — честное «скоро», деньги никуда не уходят
+  await page.click('#actionsRow [data-act="soon"]');
+  await page.waitForSelector("#soonModal.is-open");
+  check("plus soon-модалка", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
+  await page.keyboard.press("Escape");
 
   // --- 4. публичная страница залогиненным Plus ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });

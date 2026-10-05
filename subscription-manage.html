@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Управление подпиской — ege easy Plus</title>
-<meta name="description" content="Управление подпиской ege easy Plus: статус, лимиты, история платежей, продление и отмена.">
+<meta name="description" content="Управление подпиской ege easy Plus: статус, лимиты и история платежей.">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
@@ -317,7 +317,7 @@
       <div class="section-label rv">списания</div>
       <div class="card rv">
         <h2 class="card-title">История платежей</h2>
-        <p class="card-sub">Каждый платёж и каждая выдача — своей строкой. Возвраты помечаются отдельно.</p>
+        <p class="card-sub">Каждый платёж и каждая выдача — своей строкой.</p>
         <div class="hist" id="payHist"></div>
       </div>
     </section>
@@ -347,21 +347,6 @@
     <div class="modal__actions">
       <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
       <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="cancelModal" role="dialog" aria-modal="true" aria-label="Отмена автопродления">
-  <div class="modal__box">
-    <button class="modal__close" type="button" id="cancelClose" aria-label="Закрыть">×</button>
-    <span class="modal__mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/></svg>
-    </span>
-    <h2 class="modal__title">Отменить автопродление?</h2>
-    <p class="modal__text">Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план. Прогресс и история никуда не денутся.</p>
-    <div class="modal__actions">
-      <button class="btn btn-ghost btn--sm" type="button" id="cancelBack">Назад</button>
-      <button class="btn btn-primary btn--sm" type="button" id="cancelGo">Да, отменить</button>
     </div>
   </div>
 </div>
@@ -552,8 +537,8 @@
       var periodText = st.period === "year" ? "год · " + PRICE_YEAR + " ₽" : "месяц · " + PRICE_MONTH + " ₽";
       meta.textContent = "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
       heroSub.textContent = cancelled
-        ? "Автопродление выключено — доступ сохранится до конца оплаченного срока."
-        : "Подписка активна, лимиты уже увеличены. Следующее продление — " + fmtDate(st.expiresAt) + ".";
+        ? "Доступ сохранится до конца оплаченного срока."
+        : "Подписка активна, лимиты уже увеличены.";
       meter.hidden = false;
       plabel.hidden = false;
       var total = Number(st.expiresAt) - Number(st.startedAt);
@@ -594,13 +579,9 @@
       row.appendChild(b);
       return b;
     }
-    if (plus && !cancelled) {
-      sub.textContent = "Продление держит доступ без перерывов. Отмена сохраняет доступ до конца оплаченного срока.";
+    if (plus) {
+      sub.textContent = "Доступ действует до конца оплаченного срока.";
       btn("btn-primary btn--sm", "Продлить Plus", "soon");
-      btn("btn-ghost btn--sm", "Отменить продление", "ask-cancel");
-    } else if (plus && cancelled) {
-      sub.textContent = "Автопродление выключено. Верни его — доступ продлится сам, ничего доплачивать не нужно.";
-      btn("btn-primary btn--sm", "Вернуть продление", "resume");
     } else {
       sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут. Нажми «Напомнить» — сообщим, когда её включат.";
       btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "soon");
@@ -625,51 +606,8 @@
           });
           return;
         }
-        if (act === "resume") { doPost("/api/subscription/resume", b, "Возвращаем…", "Автопродление снова включено"); return; }
-        if (act === "ask-cancel") { openCancel(); return; }
       });
     }
-  }
-
-  /* Отмена — тем же окном .modal/.is-open, что «Оплата пока недоступна»:
-     отдельный статичный блок в разметке, без конструкторов из JS. */
-  var cancelModal = document.getElementById("cancelModal");
-  function openCancel(){
-    if (!cancelModal) return;
-    cancelModal.classList.add("is-open");
-    try { document.body.style.overflow = "hidden"; } catch(e){}
-  }
-  function closeCancel(){
-    if (!cancelModal) return;
-    cancelModal.classList.remove("is-open");
-    try { document.body.style.overflow = ""; } catch(e){}
-  }
-  document.getElementById("cancelClose").addEventListener("click", closeCancel);
-  document.getElementById("cancelBack").addEventListener("click", closeCancel);
-  document.getElementById("cancelGo").addEventListener("click", function(){
-    var b = document.getElementById("cancelGo");
-    setBusy(b, true, "Отменяем…");
-    api("/api/subscription/cancel", {}).then(function(){
-      closeCancel();
-      toast("Автопродление выключено — доступ до конца срока сохранён");
-      reload();
-    }).catch(function(err){
-      setBusy(b, false);
-      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
-    });
-  });
-  cancelModal.addEventListener("click", function(e){ if (e.target === cancelModal) closeCancel(); });
-  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeCancel(); });
-
-  function doPost(path, btn, busyLabel, okText){
-    setBusy(btn, true, busyLabel);
-    api(path, {}).then(function(){
-      toast(okText);
-      reload();
-    }).catch(function(err){
-      setBusy(btn, false);
-      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
-    });
   }
 
   function reload(){
