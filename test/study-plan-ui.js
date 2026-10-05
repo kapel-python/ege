@@ -175,7 +175,7 @@ let agentBox = null;
   }
 })();
 if (agentBox && agentBox.AgentScreen) {
-  const { planProposal, planDialog } = agentBox.AgentScreen;
+  const { planProposal, planDialog, pendingStepState } = agentBox.AgentScreen;
   check("VM: planProposal/planDialog экспортированы", typeof planProposal === "function" && typeof planDialog === "function");
   const liveStep = { tool: "plan_apply", status: "needs_confirm",
     proposal: { action: "plan_apply", days: 7, title: "План на 7 дней", periods: [] } };
@@ -188,6 +188,22 @@ if (agentBox && agentBox.AgentScreen) {
   check("VM: чужой шаг (update_profile) — null",
     planProposal({ tool: "update_profile", result: { action: "x" } }) === null
     && planProposal(null) === null && planProposal({}) === null);
+  // Живой баг: ход, вставший на подтверждение, переписывал ВСЕ шаги в
+  // needs_confirm — карточка черновика (read/done) получала кнопки
+  // «Применить/Отмена». Статус сервера теперь уважается как есть.
+  check("VM: pendingStepState экспортирован", typeof pendingStepState === "function");
+  if (typeof pendingStepState === "function") {
+    check("VM: done-шаг остаётся done (без кнопок)",
+      pendingStepState({ tool: "plan_draft", kind: "read", status: "done" }) === "done");
+    check("VM: needs_confirm-шаг остаётся needs_confirm",
+      pendingStepState({ tool: "plan_apply", kind: "action", status: "needs_confirm" }) === "needs_confirm");
+    check("VM: без статуса — старое поведение (needs_confirm)",
+      pendingStepState({ tool: "plan_apply" }) === "needs_confirm"
+      && pendingStepState({}) === "needs_confirm" && pendingStepState(null) === "needs_confirm");
+  }
+  check("SRC: settleTurn маппит через pendingStepState, а не захардкоженный статус",
+    /status:\s*pendingStepState\(s\)/.test(spaJs)
+    && !/status:\s*"needs_confirm", proposal: s\.proposal/.test(spaJs));
   const evil = {
     action: "plan_apply", days: 7, title: "План <b>на</b> 7 дней & друзей",
     periods: [

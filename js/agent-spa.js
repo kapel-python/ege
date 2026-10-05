@@ -1504,6 +1504,17 @@
     } catch (_) {}
     try { say(dlg.title); } catch (_) {}
   }
+  /* Статус шага в ходе, вставшем на подтверждение: сервер уже пометил шаги
+     честно (read → done, действие → needs_confirm). Раньше клиент переписывал
+     ВСЕ шаги в needs_confirm — карточка черновика плана получала кнопки
+     «Применить/Отмена», жмущие в пустоту (сервер на них отвечал «Шаг уже
+     обработан», живой скрин: две карточки подтверждения подряд).
+     Доверяем серверу; статуса нет вовсе — старое поведение. */
+  function pendingStepState(s) {
+    if (s && s.status === "needs_confirm") return "needs_confirm";
+    if (s && typeof s.status === "string" && s.status) return s.status;
+    return "needs_confirm";
+  }
   function stepFill(p) {
     var st = p.st, body = p.body, li = p.li;
     body.textContent = "";
@@ -2979,7 +2990,7 @@
       if (res.data.pending) {
         var mapped = steps.map(function (s) {
           return { id: s.id, tool: s.tool, args: s.args, label: s.label, kind: s.kind || "action",
-                   status: "needs_confirm", proposal: s.proposal };
+                   status: pendingStepState(s), proposal: s.proposal };
         });
         // Ждущий подтверждения и так раскрыт: перепроигрывать нечего ни в
         // живом случае (шаги уже на экране), ни в быстром (один шаг).
@@ -3697,5 +3708,6 @@
     send: send, selectThread: selectThread, state: S, setQuota: setQuota,
     confirmStep: confirmStep, emptyVisible: emptyVisible, screen: screenAgent,
     planProposal: planProposalOf, planDialog: planProposalDialog,
+    pendingStepState: pendingStepState,
   };
 })();
