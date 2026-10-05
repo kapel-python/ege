@@ -167,6 +167,9 @@ check("periods share one window each",
       and pb["topics"][0]["availableAt"] == st6["active"]["startsAt"] + 14 * 86400000)
 check("future period locked, current open",
       pa["locked"] is False and pb["locked"] is True)
+check("lesson lever present",
+      pa["topics"][0]["lessonDone"] is False and pa["topics"][0]["lessonBonus"] == 40,
+      str({k: pa["topics"][0][k] for k in ("lessonDone", "lessonBonus")}))
 for i in range(12):
     conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
                  " VALUES(1,'profile_math',?,?,1,0,?)", (f"mz{i}", "sk_a", now - i * 60000))

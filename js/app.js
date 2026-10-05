@@ -8206,6 +8206,9 @@ function studyPlanCloseHint(t) {
   if (!t || t.closeable) return "";
   const reasons = Array.isArray(t.closeReasons) ? t.closeReasons : [];
   const parts = [];
+  if (t.lessonId && !t.lessonDone && Math.floor(Number(t.lessonBonus) || 0) > 0) {
+    parts.push("пройди урок — сразу +" + Math.floor(Number(t.lessonBonus)) + "%");
+  }
   if (reasons.indexOf("time") < 0) parts.push("откроется " + studyPlanFmtDate(t.availableAt));
   if (reasons.indexOf("mastered") < 0) {
     parts.push("освой тему — сейчас " + Math.max(0, Math.floor(Number(t.mastery) || 0)) + "%");

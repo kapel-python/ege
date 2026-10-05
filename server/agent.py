@@ -2637,6 +2637,19 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
             mastered = mastery >= TOPIC_MASTERED_AT
             available_at = int(p_end)
             time_ok = moment >= available_at
+            # Быстрый рычаг: непройденный урок даёт сразу +40 теории, а задачи
+            # после насыщения объёма (12 свежих) двигают только точность —
+            # отсюда «сделал три задания, а +1%». Подсказка обязана называть
+            # выход, иначе цифра выглядит сломанной.
+            lesson_id = t.get("lessonId")
+            skill_lessons = fdata.get("lessons", {}).get(sid, []) if isinstance(fdata, dict) else []
+            if skill_lessons:
+                lessons_done = sum(1 for lid in skill_lessons if lid in (fdata.get("done", set()) if isinstance(fdata, dict) else set()))
+                lesson_bonus = int(round((1 - lessons_done / len(skill_lessons)) * FORECAST_THEORY_WEIGHT))
+            else:
+                lessons_done, lesson_bonus = 0, 0
+            lesson_done = bool(lesson_id and isinstance(fdata, dict)
+                               and lesson_id in fdata.get("done", set()))
             out_topics.append({
                 "skillId": sid,
                 "name": str(t.get("name") or sid)[:120],
@@ -2650,6 +2663,8 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
                                  + (["mastered"] if mastered else [])],
                 "availableAt": available_at,
                 "allotDays": pdays,
+                "lessonDone": lesson_done,
+                "lessonBonus": lesson_bonus,
             })
         if current_idx is None and any(t["state"] == "open" for t in out_topics):
             current_idx = pidx

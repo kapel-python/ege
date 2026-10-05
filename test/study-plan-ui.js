@@ -280,6 +280,11 @@ if (P) {
     (() => { const h = P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000, mastery: 42 });
       return /Откроется .+ · /.test(h) && /освой тему — сейчас 42%/.test(h); })(),
     P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000, mastery: 42 }));
+  check("closeHint: непройденный урок — первый и с бонусом",
+    (() => { const h = P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000,
+        mastery: 42, lessonId: "les1", lessonDone: false, lessonBonus: 40 });
+      return h.indexOf("Пройди урок — сразу +40% · откроется ") === 0
+        && /освой тему — сейчас 42%$/.test(h); })());
   check("closeHint: срок вышел, но не освоено — только освоение",
     P.studyPlanCloseHint({ closeable: false, closeReasons: ["time"], availableAt: 1, mastery: 10 }) === "Освой тему — сейчас 10%");
   check("closeHint: освоено, но рано — только дата",
