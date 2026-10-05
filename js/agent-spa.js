@@ -203,7 +203,9 @@
       var cards = ui.live.querySelectorAll(".agent__ai[data-answer]");
       var lastC = cards.length ? cards[cards.length - 1] : null;
       ui.live.querySelectorAll(".agent__acts").forEach(function (row) {
-        var host = row.parentNode;
+        // Хозяин ряда помнит себя сам (_host): пузырь пользователя лежит
+        // в обёртке рядом с рядом, карточка держит ряд внутри себя.
+        var host = row._host || row.parentNode;
         var isU = !!lastU && host === lastU;
         var isC = !!lastC && host === lastC;
         row.querySelectorAll('[data-act="regen"]').forEach(function (b) { b.hidden = !(isU || isC); });
@@ -250,19 +252,21 @@
     return out;
   }
   // Вопрос ученика, стоящий в ленте перед карточкой ответа.
+  // Пузырь лежит в обёртке вместе с рядом действий (ряд — сосед, а не
+  // содержимое, поэтому textContent пузыря чистый).
   function questionBeforeCard(card) {
     var prev = null;
     if (card && ui.live) {
       var kids = ui.live.childNodes;
       for (var i = 0; i < kids.length; i++) {
         if (kids[i] === card) break;
-        if (kids[i].classList && kids[i].classList.contains("agent__msg-user")) prev = kids[i];
+        var u = null;
+        try { u = kids[i].querySelector ? kids[i].querySelector(".agent__msg-user") : null; } catch (_) {}
+        if (!u && kids[i].classList && kids[i].classList.contains("agent__msg-user")) u = kids[i];
+        if (u) prev = u;
       }
     }
-    if (!prev) return "";
-    // Сырой текст, а не textContent: в пузыре лежит и ряд действий со временем.
-    if (typeof prev._rawText === "string" && prev._rawText) return prev._rawText;
-    return (prev.textContent || "").trim();
+    return prev ? (prev.textContent || "").trim() : "";
   }
   // «Изменить и отправить»: последний вопрос ЗАМЕНЯЕТСЯ (replaceLast),
   // новый ход встаёт на его место, а не дублирует переписку.
@@ -1501,17 +1505,21 @@
   function feedTouch() { S.feedGen = (S.feedGen || 0) + 1; }
   function userBubble(text, atMs) {
     var clean = String(text == null ? "" : text).trim();
-    var d = el("div", "agent__msg-user enter", clean);
-    // Сырой текст вопроса отдельно от DOM: ряд действий под пузырём
-    // (время «• 18:45») тоже лежит внутри и попал бы в textContent.
-    d._rawText = clean;
+    // Ряд действий — РЯДОМ в обёртке, а не внутри пузыря: пузырь снова
+    // только текст (как раньше), время не раздувает его и не утекает в
+    // textContent при копировании/перегенерации.
+    var wrap = el("div", "agent__msg-wrap enter");
+    var d = el("div", "agent__msg-user", clean);
+    wrap.appendChild(d);
+    var r = msgActsRow(
+      function () { return clean; },
+      function () { return clean; },
+      atMs, true);
+    r._host = d;
+    wrap.appendChild(r);
     feedTouch();
     clearBoot();
-    if (ui.live) ui.live.appendChild(d);
-    d.appendChild(msgActsRow(
-      function () { return d._rawText || ""; },
-      function () { return d._rawText || ""; },
-      atMs, true));
+    if (ui.live) ui.live.appendChild(wrap);
     refreshActs();
     showEmpty(false);
     if (!painting) scrollDown(true, true);
@@ -2208,10 +2216,12 @@
   function cardFooter(card, isAlive, asks, atMs) {
     var row = quickActions(card, isAlive, asks);
     if (card && card.querySelector(".agent__answer")) {
-      card.appendChild(msgActsRow(
+      var acts = msgActsRow(
         function () { return answerText(card); },
         function () { return questionBeforeCard(card); },
-        atMs, false));
+        atMs, false);
+      acts._host = card;
+      card.appendChild(acts);
       refreshActs();
     }
     return row;
@@ -2877,7 +2887,14 @@
       var oldCard = lastAssistantCard();
       var oldBubble = lastUserBubble();
       if (oldCard && oldCard.parentNode) oldCard.parentNode.removeChild(oldCard);
-      if (oldBubble && oldBubble.parentNode) oldBubble.parentNode.removeChild(oldBubble);
+      // Пузырь живёт в обёртке вместе с рядом действий: сносим обёртку
+      // целиком, иначе ряд с кнопками остался бы сиротой в ленте.
+      if (oldBubble) {
+        var oldWrap = null;
+        try { oldWrap = oldBubble.closest ? oldBubble.closest(".agent__msg-wrap") : null; } catch (_) {}
+        var gonner = oldWrap || oldBubble;
+        if (gonner && gonner.parentNode) gonner.parentNode.removeChild(gonner);
+      }
       cacheForget(S.currentId);
     }
     // Невидимый повтор: пузырёк, скелетон и вопрос уже на экране — второй раз

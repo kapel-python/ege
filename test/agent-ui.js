@@ -348,8 +348,16 @@ check("крайние кнопки только у последней пары (
 check("перегенерация с подтверждением в общей модалке",
   spaCode.includes("function askRegenerate") && spaCode.includes("openConfirmDialog")
   && /onConfirm: function \(\) \{ regenerate\(q\); \}/.test(spaCode));
-check("сырой текст пузыря изолирован от ряда действий (_rawText)",
-  spaCode.includes("_rawText") && /prev\._rawText/.test(spaCode));
+check("пузырь — только текст: ряд действий РЯДОМ в обёртке, а не внутри",
+  /var wrap = el\("div", "agent__msg-wrap enter"\);/.test(spaJs)
+  && /wrap\.appendChild\(d\);/.test(spaJs) && /wrap\.appendChild\(r\);/.test(spaJs)
+  && !spaCode.includes("_rawText")
+  && /\.agent__msg-wrap \{[^}]*align-self: flex-end/.test(spaCss)
+  && /\.agent__msg-wrap \.agent__acts \{[^}]*justify-content: flex-end/.test(spaCss));
+check("переносы строк вопроса сохраняются (pre-line в пузыре)",
+  /\.agent__msg-user \{[^}]*white-space: pre-line/.test(spaCss));
+check("replaceLast сносит обёртку с рядом целиком, а не голый пузырь",
+  /oldBubble\.closest\("?\.agent__msg-wrap"?\)/.test(spaJs) || /closest\("\.agent__msg-wrap"\)/.test(spaJs));
 check("иконки-узлы только через appendChild (иначе [object SVGElement] вместо иконки)",
   !/\.innerHTML\s*=\s*svgIcon\(/.test(spaJs)
   && /\.appendChild\(svgIcon\(ICON_COPY/.test(spaJs)

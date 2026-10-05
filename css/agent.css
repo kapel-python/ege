@@ -229,9 +229,14 @@
 .agent__boot { margin: 0; }
 .agent__boot .ege-loader { margin: 24px auto; }
 .agent__boot .ege-loader__bar { display: none; }
+/* Пузырь — только текст (ряд действий живёт РЯДОМ в обёртке, а не внутри:
+   иначе пузырь раздувался и время утекало в textContent). Переносы строк
+   вопроса сохраняем (pre-line): отправленное в три строки так и лежит. */
+.agent__msg-wrap { align-self: flex-end; max-width: 85%; display: flex; flex-direction: column; }
 .agent__msg-user {
-  align-self: flex-end; max-width: 85%; padding: 10px 16px; border-radius: var(--radius);
+  max-width: 100%; padding: 10px 16px; border-radius: var(--radius);
   background: var(--accent-soft); border: 1px solid var(--accent-ring); overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 .agent__ai { display: flex; flex-direction: column; gap: 10px; }
 .agent__ai, .agent__msg-user, .agent__step, .agent__answer, .agent__trace-toggle { text-align: left; }
@@ -318,7 +323,7 @@ a.agent__link--int { border-style: dashed; }
    «Скопировать»: ряд виден всегда, угадывать удержание не нужно.
    Крайние кнопки прячутся через hidden (только последняя пара живая). */
 .agent__acts { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
-.agent__msg-user .agent__acts { justify-content: flex-end; }
+.agent__msg-wrap .agent__acts { justify-content: flex-end; }
 .agent__act {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
   border-radius: 8px; cursor: pointer; border: 1px solid transparent; background: transparent;
@@ -564,7 +569,7 @@ a.agent__link--int { border-style: dashed; }
    плавной анимацией, а не мгновенно. */
 @keyframes agentShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-.agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .32s cubic-bezier(.2, .7, .2, 1) both; }
+.agent__step.enter, .agent__answer.enter, .agent__msg-wrap.enter, .agent__msg-user.enter, .agent__ai.enter { animation: agentRise .32s cubic-bezier(.2, .7, .2, 1) both; }
 
 @media (max-width: 900px) {
   /* Резерв под нижнее меню — на экране (тот же --agent-bottom/--bottomnav-h):
@@ -603,7 +608,7 @@ a.agent__link--int { border-style: dashed; }
   .agent__title { font-size: 16px; }
   .agent__feed { padding: 16px max(12px, env(safe-area-inset-right, 0px)) 16px max(12px, env(safe-area-inset-left, 0px)); }
   .agent__feed-inner { gap: 16px; }
-  .agent__msg-user { max-width: 92%; }
+  .agent__msg-wrap { max-width: 92%; }
   /* safe-area снизу НЕ прибавляем: под комозером теперь сама полоса меню,
      а под меню — системный отступ. Дублировали бы и оставляли зазор. */
   .agent__composer-zone {
@@ -651,7 +656,7 @@ a.agent__link--int { border-style: dashed; }
   .agent__ai.done .agent__trace-toggle { padding-top: 12px; padding-bottom: 12px; max-height: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .agent__step.enter, .agent__answer.enter, .agent__msg-user.enter, .agent__ai.enter,
+  .agent__step.enter, .agent__answer.enter, .agent__msg-wrap.enter, .agent__msg-user.enter, .agent__ai.enter,
   .agent__qr, .agent__suggest-card, .agent__empty-badge, .agent__list li.new { animation: none; }
   .agent__threads { transition: none; }
   .agent__mark, .agent__step::before { animation: none; }
