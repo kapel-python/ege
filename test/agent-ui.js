@@ -367,8 +367,8 @@ check("режим правки: плашка с крестиком над пол
   spaCode.includes("agent__editbar") && spaCode.includes("function cancelEdit")
   && spaCode.includes("function syncEditBar") && spaCode.includes("Отменить правку")
   && /\.agent__editbar\[hidden\] \{ display: none/.test(spaCss)
-  && /\.agent__edit-x \{[^}]*width: 36px[^}]*border-radius: 50%/.test(spaCss)
-  && /\.agent__editbar \{[^}]*margin: 0 auto -18px/.test(spaCss)); // круг сидит на кромке поля
+  && /\.agent__edit-x \{[^}]*width: 32px[^}]*border-radius: 50%/.test(spaCss)
+  && /\.agent__editbar \{[^}]*background: var\(--surface\)/.test(spaCss)); // отдельная планка, ничего не перекрывает
 check("правка сгорает при уходе в другой чат и по Esc, плейсхолдер различает режимы",
   /if \(leaving && editTarget !== null\)/.test(spaCode)
   && /e\.key === "Escape" && editTarget !== null/.test(spaCode)
