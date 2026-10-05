@@ -4,12 +4,13 @@
 Офлайн, temp-БД: периоды режутся по неделям + хвост днями (день/неделя/
 месяц/год — решает days), proposal строг (чужой skillId, не сумма дней —
 ValueError для починки моделью), apply пишет план и гасит предыдущий,
-закрытие темы — только по времени ИЛИ освоению ≥ 60, полный обход
+закрытие темы — только по времени ИЛИ освоению ≥ 75, полный обход
 переводит план в done.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sqlite3
 import tempfile
@@ -77,6 +78,17 @@ check("cap 365", agent.plan_draft(conn, 1, "profile_math", {"days": 9999})["days
 check("topics carry lesson+tasks",
       agent._plan_lesson_for_skill(conn, "profile_math", "sk_a") == "les_a"
       and agent._plan_tasks_for_skill(conn, 1, "profile_math", "sk_a", 2) == ["t_a1", "t_a2"])
+check("draft topics are light (no lesson/task bulk)",
+      all(set(t.keys()) <= {"skillId", "name"} for p in d30["periods"] for t in p["topics"]))
+d90 = agent.plan_draft(conn, 1, "profile_math", {"days": 90})
+p90 = agent._tool_payload(d90)
+b90 = json.loads(p90)
+check("90-day draft fits context whole",
+      len(p90) <= 4000 and "error" not in b90
+      and len(b90.get("periods", [])) == len(d90["periods"]))
+b365 = json.loads(agent._tool_payload(
+    agent.plan_draft(conn, 1, "profile_math", {"days": 365})))
+check("365-day draft degrades to partial, not error", "truncated" in b365)
 
 # --- 2. Proposal: строгая проверка ---
 prop = agent.propose_action(conn, 1, "profile_math", "plan_apply",

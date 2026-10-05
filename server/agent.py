@@ -2547,13 +2547,14 @@ def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
                 focus.append(order[step % len(order)])
                 step += 1
             focus = list(dict.fromkeys(focus))
-        topics = []
-        for sid in focus:
-            topics.append({"skillId": sid,
-                           "name": next((str(g.get("name") or sid) for g in gains
-                                         if str(g.get("skillId")) == sid), sid),
-                           "lessonId": _plan_lesson_for_skill(conn, subject, sid),
-                           "taskIds": _plan_tasks_for_skill(conn, user_id, subject, sid, 2)})
+        # Топики лёгкие намеренно ({skillId, name}): lessonId/taskIds к черновику
+        # не нужны никому (proposal их докладывает сам), а каждый лишний байт
+        # умножается на лимит контекста — черновик на 90 дней иначе не влезал
+        # в _tool_payload и модель видела error вместо черновика.
+        topics = [{"skillId": sid,
+                   "name": next((str(g.get("name") or sid) for g in gains
+                                 if str(g.get("skillId")) == sid), sid)}
+                  for sid in focus]
         plan.append({"index": idx, "label": chunk["label"], "days": chunk["days"],
                      "topics": topics})
     return {"days": days, "title": title, "forecast": fc.get("mid"),
@@ -3900,7 +3901,8 @@ def _tool_payload(data: dict, cap: int = 4000) -> str:
                     return json.dumps(trimmed, ensure_ascii=False)
             except (TypeError, ValueError):
                 break
-    for key in ("attempts", "last", "skills", "days", "criteria", "bySkill", "essays"):
+    for key in ("attempts", "last", "skills", "days", "criteria", "bySkill", "essays",
+                "periods"):
         seq = trimmed.get(key)
         if not isinstance(seq, list) or len(seq) < 2:
             continue
