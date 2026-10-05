@@ -78,6 +78,7 @@ def clear_router_row(db_path: Path) -> None:
 class FakeResponse:
     def __init__(self, payload: bytes):
         self._payload = payload
+        self._off = 0
 
     def __enter__(self):
         return self
@@ -86,7 +87,13 @@ class FakeResponse:
         return False
 
     def read(self, _n=-1):
-        return self._payload
+        if self._off >= len(self._payload):
+            return b""
+        if _n is None or _n < 0:
+            chunk, self._off = self._payload[self._off:], len(self._payload)
+            return chunk
+        chunk, self._off = self._payload[self._off:self._off + _n], self._off + _n
+        return chunk
 
 
 def main() -> int:
@@ -541,6 +548,42 @@ def main() -> int:
                   sum(1 for r in rows if "Не отвечает ни один провайдер" in r[3]) == 1, kinds)
             check("подписчик не роняет проверку при мусорном событии",
                   srv.log_system_support_message({"kind": "нет-такого"}) is None)
+
+            section("Общий потолок чтения: вялый ответ рвётся бюджетом, а не висит")
+            blob = b'{"ok": true}' + b" " * 100
+            got = ai._read_upstream(FakeResponse(blob), 1024, 5.0)
+            check("целый ответ читается как есть", got == blob, str(len(got)))
+
+            class Trickle:
+                def __init__(self, total, pace):
+                    self.left = total
+                    self.pace = pace
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+                def read(self, n=-1):
+                    if self.left <= 0:
+                        return b""
+                    time.sleep(self.pace)
+                    n = max(1, self.left if n is None or n < 0 else min(n, self.left))
+                    self.left -= 1
+                    return b"x"
+
+            t0 = time.monotonic()
+            raised = None
+            try:
+                ai._read_upstream(Trickle(100000, 0.02), 1024, 1.0)
+            except TimeoutError as exc:
+                raised = exc
+            dt = time.monotonic() - t0
+            check("капающий ответ обрывается TimeoutError", raised is not None)
+            check("обрыв быстрый (бюджет, а не вечность)", dt < 10.0, f"{dt:.1f} c")
+            check("целый ответ без лимита не режется",
+                  ai._read_upstream(FakeResponse(b"ab"), 1024, 5.0) == b"ab")
 
             ai.set_system_listener(None)
         finally:

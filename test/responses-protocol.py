@@ -92,6 +92,7 @@ class FakeHTTP:
 class _FakeResp:
     def __init__(self, payload: dict):
         self._raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self._off = 0
 
     def __enter__(self):
         return self
@@ -100,7 +101,9 @@ class _FakeResp:
         return False
 
     def read(self, *args):
-        return self._raw
+        n = args[0] if args and args[0] is not None and args[0] >= 0 else len(self._raw)
+        chunk, self._off = self._raw[self._off:self._off + n], self._off + n
+        return chunk
 
 
 def http_error(url: str, code: int) -> urllib.error.HTTPError:

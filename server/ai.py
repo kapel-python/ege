@@ -1931,7 +1931,7 @@ def _responses_via_message(provider: str, messages: list[dict], *,
     deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
     try:
         with urllib.request.urlopen(request, timeout=deadline) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, deadline)
     except urllib.error.HTTPError as exc:
         raise _http_error(exc) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -1943,6 +1943,36 @@ def _responses_via_message(provider: str, messages: list[dict], *,
     except (ValueError, UnicodeDecodeError):
         raise AIError("провайдер вернул не-JSON") from None
     return _responses_to_message(data)
+
+
+def _read_upstream(response, limit: int, budget_s: float) -> bytes:
+    """Читать тело ответа с ОБЩИМ потолком времени.
+
+    urllib timeout — это потолок одного recv, а не всего ответа: вялотекущее
+    тело (байты капают, каждый recv успевает) читалось минутами. Живой случай:
+    один вызов confirm-resume 106 с при потолке 45 — ученик ждал, обновлял
+    страницу и видел артефакты busy-состояния. Превышение — TimeoutError,
+    вызыватель маппит его в AIError как обычный таймаут (ретрай/фейловер)."""
+
+    try:
+        budget = max(0.5, float(budget_s or 0))
+    except (TypeError, ValueError):
+        budget = 45.0
+    stop = time.monotonic() + budget
+    chunks: list = []
+    taken = 0
+    while taken <= limit:
+        if time.monotonic() >= stop:
+            raise TimeoutError("истёк общий потолок чтения ответа")
+        want = min(65536, limit + 1 - taken)
+        if want <= 0:
+            break
+        piece = response.read(want)
+        if not piece:
+            break
+        chunks.append(piece)
+        taken += len(piece)
+    return b"".join(chunks)
 
 
 def _chat_via_message(provider: str, messages: list[dict], *, model: str | None = None,
@@ -2039,7 +2069,7 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
     deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
     try:
         with urllib.request.urlopen(request, timeout=deadline) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, deadline)
     except urllib.error.HTTPError as exc:
         raise _http_error(exc) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -3796,7 +3826,7 @@ def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str 
     )
     try:
         with urllib.request.urlopen(request, timeout=deadline) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, deadline)
     except urllib.error.HTTPError as exc:
         latency = int((time.monotonic() - started) * 1000)
         try:
@@ -3889,7 +3919,7 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read(MAX_UPSTREAM_BYTES + 1)
+                raw = _read_upstream(response, MAX_UPSTREAM_BYTES, timeout)
         except urllib.error.HTTPError as exc:
             latency = int((time.monotonic() - started) * 1000)
             try:
@@ -3938,7 +3968,7 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, timeout)
     except urllib.error.HTTPError as exc:
         latency = int((time.monotonic() - started) * 1000)
         try:
@@ -4966,7 +4996,7 @@ def lt_check(text: str) -> list:
         headers={"Content-Type": "application/x-www-form-urlencoded"})
     try:
         with urllib.request.urlopen(request, timeout=LT_TIMEOUT_SEC) as response:
-            raw = response.read(MAX_UPSTREAM_BYTES + 1)
+            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, LT_TIMEOUT_SEC)
     except Exception as exc:  # noqa: BLE001 — любая сетевая/HTTP-ошибка = 503
         raise AIUnavailable(
             f"проверка грамотности недоступна: {type(exc).__name__}") from None
