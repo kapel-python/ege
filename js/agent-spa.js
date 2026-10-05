@@ -115,51 +115,113 @@
     syncInput();
   }
 
-  /* ---------- меню сообщения ----------
-     Долгое нажатие (500 мс) на своё сообщение или ответ ИИ открывает
-     меню у точки нажатия; тап в любом другом месте, Esc и прокрутка его
-     закрывают. Действия зависят от места в ленте:
-     - свой вопрос: «Скопировать» + (если он последний) «Изменить и отправить»
-       (замена существующего сообщения, не новое);
-     - ответ ИИ: только у последней пары «Перегенерировать» — тот же
-       вопрос уходит с replaceLast, сервер ЗАМЕНЯЕТ пару «вопрос+ответ» и
-       модель даёт новый ответ.
-     Копирование ОТВЕТА в меню больше не держим: под каждым ответом ИИ
-     есть своя кнопка «Скопировать» (addCopyRow) — на телефоне её видно сразу,
-     а меню по удержанию приходилось ещё и угадывать. Свой вопрос копируется
-     только тут — под ним своей кнопки нет. У более ранних сообщений ИИ
-     пунктов не остаётся, и меню просто не открывается: «изменить» середину
-     переписки означало бы переписать всю историю после неё. */
-  var msgMenu = { node: null, timer: null };
-  function closeMsgMenu() {
-    if (!msgMenu.node) return;
-    try { if (msgMenu.node.parentNode) msgMenu.node.parentNode.removeChild(msgMenu.node); } catch (_) {}
-    msgMenu.node = null;
+  /* ---------- действия под сообщением ----------
+     Удержания НЕТ (удалено: жест надо было угадывать, меню у точки нажатия
+     закрывало текст). Под каждым сообщением свой ряд: [копировать]
+     [перегенерировать?] [изменить?] • ЧЧ:ММ. Копировать — на всех сообщениях
+     (маленький квадрат с иконкой, первым); перегенерировать/изменить —
+     только у последней пары: середину переписки менять нельзя, иначе история
+     после неё потеряет смысл. Видимость крайних кнопок пересчитывает
+     refreshActs() после каждой отрисовки (ряды статичны, «последний»
+     со временем уезжает). Время — московское, из createdAt сервера
+     (вживую — момент отрисовки). Перегенерация — с подтверждением в общей
+     модалке openConfirmDialog (та же система .dlg, что окно лимита). */
+  function fmtTimeMSK(ms) {
+    var t = Number(ms);
+    if (!isFinite(t) || t <= 0) t = Date.now();
+    // МСК — всегда UTC+3 без перехода (с 2014 года): сдвиг фиксированный.
+    var d = new Date(t + 3 * 3600 * 1000);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return "• " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
   }
-  function openMsgMenu(x, y, items) {
-    closeMsgMenu();
-    var m = el("div", "agent__msgmenu");
-    m.setAttribute("role", "menu");
-    items.forEach(function (it) {
-      var b = el("button", "agent__msgmenu-i", null);
-      b.type = "button";
-      b.innerHTML = svgRaw(it.icon, "2.2");
-      b.appendChild(document.createTextNode(it.label));
-      b.addEventListener("click", function () { closeMsgMenu(); it.run(); });
-      m.appendChild(b);
+  function msgActsRow(getCopy, getRegenQ, atMs, canEdit) {
+    var row = el("div", "agent__acts");
+    var copy = el("button", "agent__act", null);
+    copy.type = "button";
+    copy.setAttribute("aria-label", "Скопировать");
+    copy.setAttribute("data-act", "copy");
+    copy.innerHTML = svgIcon(ICON_COPY, "2.2");
+    copy.addEventListener("click", function () {
+      var text = "";
+      try { text = getCopy() || ""; } catch (_) {}
+      if (!String(text).trim()) { say("Нечего копировать"); return; }
+      copyText(text);
+      // Короткое подтверждение прямо на квадрате: тост про то, что копия
+      // ушла, здесь лишний (копирование — обычное дело, а не событие).
+      if (copy.classList.contains("is-done")) return;
+      copy.classList.add("is-done");
+      later(1200, function () { try { copy.classList.remove("is-done"); } catch (_) {} });
     });
-    document.body.appendChild(m);
-    // Не вылезаем за экран: сначала меряем, потом ставим.
-    var w = m.offsetWidth, h = m.offsetHeight;
-    var left = Math.max(8, Math.min(x, window.innerWidth - w - 8));
-    var top = y + h > window.innerHeight - 8 ? Math.max(8, y - h) : y;
-    m.style.left = left + "px";
-    m.style.top = top + "px";
-    msgMenu.node = m;
+    row.appendChild(copy);
+    var regen = el("button", "agent__act", null);
+    regen.type = "button";
+    regen.setAttribute("aria-label", "Сгенерировать заново");
+    regen.setAttribute("data-act", "regen");
+    regen.hidden = true;
+    regen.innerHTML = svgIcon(ICON_RETRY, "2.2");
+    regen.addEventListener("click", function () {
+      var q = "";
+      try { q = getRegenQ() || ""; } catch (_) {}
+      if (!String(q).trim()) { say("Вопрос не найден"); return; }
+      if (S.busy) { say("ИИ ещё отвечает"); return; }
+      askRegenerate(q);
+    });
+    row.appendChild(regen);
+    if (canEdit) {
+      var edit = el("button", "agent__act", null);
+      edit.type = "button";
+      edit.setAttribute("aria-label", "Изменить и отправить");
+      edit.setAttribute("data-act", "edit");
+      edit.hidden = true;
+      // Карандаш — тот же icon("pen"), что у имени в профиле: один значок
+      // на одно действие везде.
+      try { edit.innerHTML = icon("pen"); } catch (_) { edit.innerHTML = svgIcon(ICON_RETRY, "2.2"); }
+      edit.addEventListener("click", function () {
+        var text = "";
+        try { text = getCopy() || ""; } catch (_) {}
+        if (!String(text).trim()) return;
+        editLastQuestion(text);
+      });
+      row.appendChild(edit);
+    }
+    var time = el("span", "agent__time", null);
+    try { time.textContent = fmtTimeMSK(atMs); } catch (_) {}
+    row.appendChild(time);
+    return row;
+  }
+  // Кто сейчас «последний»: по ним refreshActs показывает/прячет крайние
+  // кнопки. Последний пузырёк — и изменить, и перегенерировать; последняя
+  // карточка с ответом — только перегенерировать.
+  function refreshActs() {
+    if (!ui.live) return;
+    try {
+      var users = ui.live.querySelectorAll(".agent__msg-user");
+      var lastU = users.length ? users[users.length - 1] : null;
+      var cards = ui.live.querySelectorAll(".agent__ai[data-answer]");
+      var lastC = cards.length ? cards[cards.length - 1] : null;
+      ui.live.querySelectorAll(".agent__acts").forEach(function (row) {
+        var host = row.parentNode;
+        var isU = !!lastU && host === lastU;
+        var isC = !!lastC && host === lastC;
+        row.querySelectorAll('[data-act="regen"]').forEach(function (b) { b.hidden = !(isU || isC); });
+        row.querySelectorAll('[data-act="edit"]').forEach(function (b) { b.hidden = !isU; });
+      });
+    } catch (_) {}
+  }
+  // «Перегенерировать» — с подтверждением: старый ответ будет снесён
+  // (replaceLast) и его не вернуть. Та же общая модалка, что окно лимита.
+  function askRegenerate(q) {
+    if (typeof openConfirmDialog === "function") {
+      openConfirmDialog({
+        eyebrow: "ИИ", iconName: "ai", title: "Сгенерировать заново?",
+        text: "Старый ответ пропадёт — вместо него появится новый.",
+        confirmText: "Сгенерировать", cancelText: "Отмена",
+        onConfirm: function () { regenerate(q); }
+      });
+    } else regenerate(q);
   }
   var ICON_COPY = "M9 9h10v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1";
   var ICON_RETRY = "M3 12a9 9 0 1 0 3-6.7M3 4v5h5";
-  var ICON_EDIT = "M4 20h4L20 8l-4-4L4 16v4z";
   function answerText(card) {
     // Сырой markdown ответа: textContent уже отрендеренного HTML теряет
     // ** и списки, а копировать человек хочет то, что написала модель.
@@ -170,39 +232,6 @@
       if (t) parts.push(t);
     });
     return parts.join("\n\n");
-  }
-  function msgMenuFor(e, node) {
-    var isUser = node.classList.contains("agent__msg-user");
-    var card = isUser ? null : node.closest(".agent__ai");
-    var text = isUser ? (node.textContent || "").trim() : answerText(card || node);
-    if (!text) return;
-    var last = isUser ? lastUserBubble() : lastAssistantCard();
-    var isLast = (isUser ? node === last : !!card && card === last);
-    var items = [];
-    if (isUser) items.push({ label: "Скопировать", icon: ICON_COPY, run: function () { copyText(text); } });
-    if (isLast) {
-      if (isUser) {
-        items.push({
-          label: "Изменить и отправить",
-          icon: ICON_EDIT,
-          run: function () { editLastQuestion(text); },
-        });
-      }
-      items.push({
-        label: isUser ? "Перегенерировать ответ" : "Перегенерировать",
-        icon: ICON_RETRY,
-        run: function () {
-          var q = isUser ? text : questionBeforeCard(card);
-          if (!q) { say("Вопрос не найден"); return; }
-          if (S.busy) { say("ИИ ещё отвечает"); return; }
-          regenerate(q);
-        },
-      });
-    }
-    // Пунктов нет (старый ответ ИИ: копирование — кнопкой под ответом) —
-    // пустое меню не показываем.
-    if (!items.length) return;
-    openMsgMenu(e.clientX || 8, e.clientY || 8, items);
   }
   // Последний пузырёк ученика и последняя карточка ответа в ленте.
   function lastUserBubble() {
@@ -227,7 +256,10 @@
         if (kids[i].classList && kids[i].classList.contains("agent__msg-user")) prev = kids[i];
       }
     }
-    return prev ? (prev.textContent || "").trim() : "";
+    if (!prev) return "";
+    // Сырой текст, а не textContent: в пузыре лежит и ряд действий со временем.
+    if (typeof prev._rawText === "string" && prev._rawText) return prev._rawText;
+    return (prev.textContent || "").trim();
   }
   // «Изменить и отправить»: последний вопрос ЗАМЕНЯЕТСЯ (replaceLast),
   // новый ход встаёт на его место, а не дублирует переписку.
@@ -1424,11 +1456,20 @@
   // createThread → selectThread → GET треда летит раньше, чем send рисует
   // пузырёк, а возвращается позже — и сносит его вместе со скелетоном.
   function feedTouch() { S.feedGen = (S.feedGen || 0) + 1; }
-  function userBubble(text) {
-    var d = el("div", "agent__msg-user enter", text);
+  function userBubble(text, atMs) {
+    var clean = String(text == null ? "" : text).trim();
+    var d = el("div", "agent__msg-user enter", clean);
+    // Сырой текст вопроса отдельно от DOM: ряд действий под пузырём
+    // (время «• 18:45») тоже лежит внутри и попал бы в textContent.
+    d._rawText = clean;
     feedTouch();
     clearBoot();
     if (ui.live) ui.live.appendChild(d);
+    d.appendChild(msgActsRow(
+      function () { return d._rawText || ""; },
+      function () { return d._rawText || ""; },
+      atMs, true));
+    refreshActs();
     showEmpty(false);
     if (!painting) scrollDown(true, true);
     return d;
@@ -2119,42 +2160,17 @@
     if (at < kids.length) row.insertBefore(b, kids[at]);
     else row.appendChild(b);
   }
-  /* Копирование ответа — своей кнопкой ПОД ответом, а не в меню по
-     удержанию: на телефоне меню надо ещё дождаться, а кнопку видно сразу и
-     промахнуться по ней нельзя. Текст берём сырым (data-answer), чтобы в
-     буфер ушли markdown и списки, а не текст отрендеренного HTML. */
-  function addCopyRow(card) {
-    if (!card || !card.querySelector(".agent__answer")) return null;
-    var row = el("div", "agent__copy-row");
-    var btn = el("button", "agent__copy", null);
-    btn.type = "button";
-    var lbl = el("span", "agent__copy-lbl", "Скопировать");
-    btn.appendChild(svgIcon(ICON_COPY, "2.2"));
-    btn.appendChild(lbl);
-    btn.addEventListener("click", function () {
-      var text = answerText(card);
-      if (!text) { say("Нечего копировать"); return; }
-      copyText(text);
-      // Короткое подтверждение прямо на кнопке: тост про то, что копия ушла,
-      // здесь лишний (копирование — обычное дело, а не событие).
-      if (btn.classList.contains("is-done")) return;
-      btn.classList.add("is-done");
-      lbl.textContent = "Скопировано";
-      later(1600, function () {
-        if (!btn.parentNode) return;
-        btn.classList.remove("is-done");
-        lbl.textContent = "Скопировать";
-      });
-    });
-    row.appendChild(btn);
-    card.appendChild(row);
-    return row;
-  }
-  // Подпись ответ + кнопки-продолжения + копирование — в одном месте, чтобы
-  // порядок не разъезжался между ветками анимации и истории.
-  function cardFooter(card, isAlive, asks) {
+  /* Ряд действий под ответом (копировать/перегенерировать/время) — в одном
+     месте, чтобы порядок не разъезжался между ветками анимации и истории. */
+  function cardFooter(card, isAlive, asks, atMs) {
     var row = quickActions(card, isAlive, asks);
-    addCopyRow(card);
+    if (card && card.querySelector(".agent__answer")) {
+      card.appendChild(msgActsRow(
+        function () { return answerText(card); },
+        function () { return questionBeforeCard(card); },
+        atMs, false));
+      refreshActs();
+    }
     return row;
   }
   // Показать результат хода: пустые шаги -> лоадер -> содержимое, затем
@@ -2254,7 +2270,7 @@
     scrollDown(true, true);
     later(quiet ? 0 : 120, function () { step(0); });
   }
-  function assistantCard(steps, finalText, animate, suggests) {
+  function assistantCard(steps, finalText, animate, suggests, atMs) {
     var g = S.mountGen;
     var card = el("article", "agent__ai");
     if (finalText) card.setAttribute("data-answer", String(finalText));   // сырой markdown для «Скопировать»
@@ -2297,12 +2313,12 @@
         });
         // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
         // и после перезагрузки продолжение было только у ответов без шагов.
-        cardFooter(card, null, asks);
+        cardFooter(card, null, asks, atMs);
       } else {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
         syncBusy();
         paras.forEach(function (p) { card.appendChild(p); });
-        cardFooter(card, null, asks);
+        cardFooter(card, null, asks, atMs);
       }
       return card;
     }
@@ -2617,14 +2633,14 @@
     // ходах все вопросы сбивались в кучу наверх, а все ответы — вниз. Теперь
     // группы идут в том порядке, в каком сообщения лежат в базе.
     var groups = [];
-    function flushSteps(finalText, suggests) {
+    function flushSteps(finalText, suggests, atMs) {
       if (!pending.length && !finalText) return;
       groups.push({ kind: "answer", steps: pending.splice(0, pending.length),
-                    final: finalText || null, suggests: suggests || [] });
+                    final: finalText || null, suggests: suggests || [], at: atMs || null });
     }
     msgs.forEach(function (m) {
-      if (m.role === "user") { flushSteps(null); groups.push({ kind: "user", text: m.content || "" }); }
-      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests);
+      if (m.role === "user") { flushSteps(null); groups.push({ kind: "user", text: m.content || "", at: m.createdAt || null }); }
+      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests, m.createdAt);
       else if (m.role === "tool") {
         pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
                        // Подпись — серверная (m.label, та же строка, что была
@@ -2640,12 +2656,13 @@
       var lastAnswer = -1;
       groups.forEach(function (g, i) { if (g.kind === "answer") lastAnswer = i; });
       groups.forEach(function (g, i) {
-        if (g.kind === "user") userBubble(g.text);
-        else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : []);
+        if (g.kind === "user") userBubble(g.text, g.at);
+        else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : [], g.at);
       });
     }
     painting = false;
     showEmpty(false);
+    refreshActs();
     // Низ — после того как лента встанет (схлопываются ленты шагов, догружается
     // шрифт): один smooth-скролл на такой высоте не доезжал.
     settleBottom();
@@ -3516,55 +3533,9 @@
     }, true);
     ui.wrap.addEventListener("touchend", drawerEnd, { passive: true });
     ui.wrap.addEventListener("touchcancel", drawerEnd, { passive: true });
-    // Меню сообщения: ДОЛГОЕ нажатие (500 мс) на свой пузырёк или текст
-    // ответа — как у списка чатов. Обычный клик/выделение текста не трогаем;
-    // правый клик на десктопе — тот же вход в меню. Отмена: отпускание,
-    // уход пальца, движение больше 8px.
-    ui.feed.addEventListener("pointerdown", function (e) {
-      var node = e.target.closest ? e.target.closest(".agent__msg-user, .agent__answer") : null;
-      if (!node || !ui.feed.contains(node)) return;
-      if (e.target.closest && (e.target.closest("button") || e.target.closest("a"))) return;
-      var x = e.clientX || 0, y = e.clientY || 0;
-      var pt = { clientX: x, clientY: y };
-      function cancel() {
-        if (msgMenu.timer) { try { clearTimeout(msgMenu.timer); } catch (_) {} msgMenu.timer = null; }
-      }
-      cancel();
-      msgMenu.timer = setTimeout(function () {
-        msgMenu.timer = null;
-        try { if (navigator.vibrate) navigator.vibrate(12); } catch (_) {}
-        msgMenuFor(pt, node);
-      }, 500);
-      ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) {
-        ui.feed.addEventListener(ev, cancel, { once: true, capture: true });
-      });
-      var move = function (mv) {
-        if (!msgMenu.timer) { ui.feed.removeEventListener("pointermove", move); return; }
-        if (Math.abs((mv.clientX || 0) - x) > 8 || Math.abs((mv.clientY || 0) - y) > 8) {
-          cancel();
-          ui.feed.removeEventListener("pointermove", move);
-        }
-      };
-      ui.feed.addEventListener("pointermove", move);
-    });
-    ui.feed.addEventListener("contextmenu", function (e) {
-      var node = e.target.closest ? e.target.closest(".agent__msg-user, .agent__answer") : null;
-      if (!node || !ui.feed.contains(node)) return;
-      e.preventDefault();
-      msgMenuFor(e, node);
-    });
-    // Один раз на документ (маунтов экрана может быть много): при отсутствии
-    // меню обработчики ничего не делают. Любой тап в другом месте — закрыть.
-    if (!msgMenu.wired) {
-      msgMenu.wired = true;
-      document.addEventListener("pointerdown", function (e) {
-        if (msgMenu.node && !msgMenu.node.contains(e.target)) closeMsgMenu();
-      });
-      document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") closeMsgMenu();
-      });
-    }
-    ui.feed.addEventListener("scroll", function () { closeMsgMenu(); }, { passive: true });
+    // Удержание сообщения удалено: действия живут в ряду под каждым
+    // сообщением, угадывать жест не нужно. Правый клик — штатный браузерный
+    // (выделение и копирование текста вручную).
     ui.stopBtn.addEventListener("click", function () {
       // «Стоп» работает на обоих этапах хода. Пока считает сервер — обрываем
       // запрос; пока печатается уже полученный ответ — выкладываем остаток

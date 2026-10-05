@@ -324,20 +324,32 @@ check("markdown ответа — библиотеками (marked + DOMPurify), 
 check("копирование через Clipboard API с запасным путём",
   spaCode.includes("navigator.clipboard") && spaCode.includes("writeText")
   && spaCode.includes("execCommand") && spaCode.includes("isSecureContext"));
-/* Меню по клику на сообщение: своё — скопировать/изменить/повторить,
-   ответ — скопировать/повторить. Ответ копируется сырым markdown
+/* Действия под сообщением вместо меню по удержанию: удержания нет вообще
+   (ни долгого нажатия, ни правого клика в ленте), под каждым сообщением ряд
+   [копировать] [заново?] [изменить?] • ЧЧ:ММ. Ответ копируется сырым markdown
    (data-answer), а не textContent отрендеренного HTML. */
-check("меню сообщения по ДОЛГОМУ нажатию (pointerdown+500мс), не по клику",
-  /ui\.feed\.addEventListener\("pointerdown"[\s\S]{0,900}?setTimeout\([\s\S]{0,300}?msgMenuFor/.test(spaCode)
-  && spaCode.includes("contextmenu") && !/ui\.feed\.addEventListener\("click"[\s\S]{0,120}?msgMenuFor/.test(spaCode));
-check("перегенерировать/изменить только у последней пары, копирование сырого markdown",
-  spaCode.includes("openMsgMenu") && spaCode.includes("msgMenuFor")
-  && spaCode.includes("agent__msg-user, .agent__answer")
+check("удержания сообщения нет (ни long-press, ни contextmenu в ленте)",
+  !spaCode.includes("msgMenuFor") && !spaCode.includes("openMsgMenu") && !spaCode.includes("msgMenu")
+  && !/ui\.feed\.addEventListener\("contextmenu"/.test(spaJs)
+  && !/\.agent__msgmenu\b/.test(spaCss));
+check("ряд действий под каждым сообщением: квадрат-копия первым, время МСК в конце",
+  spaCode.includes("function msgActsRow") && spaCode.includes("agent__acts")
+  && spaCode.includes('data-act", "copy') && spaCode.includes('data-act", "regen')
+  && spaCode.includes("agent__time") && spaCode.includes("fmtTimeMSK")
+  && /getUTCHours\(\)/.test(spaCode) && /3 \* 3600 \* 1000/.test(spaCode)
+  && /\.agent__act\s*\{[^}]*width: 30px/.test(spaCss)
+  && /\.agent__act\[hidden\] \{ display: none/.test(spaCss)
   && spaCode.includes('card.setAttribute("data-answer"')
-  && spaCode.includes("card.dataset.answer") && /\.agent__msgmenu\b/.test(spaCss));
-check("действие только у последнего сообщения (lastUserBubble/lastAssistantCard/isLast)",
-  spaCode.includes("lastUserBubble") && spaCode.includes("lastAssistantCard")
-  && /var isLast =/.test(spaCode) && /if \(isLast\)/.test(spaCode));
+  && spaCode.includes("card.dataset.answer"));
+check("крайние кнопки только у последней пары (refreshActs по ленте)",
+  spaCode.includes("function refreshActs") && spaCode.includes('data-act="edit')
+  && spaCode.includes('icon("pen")') && spaCode.includes("lastUserBubble")
+  && spaCode.includes("lastAssistantCard"));
+check("перегенерация с подтверждением в общей модалке",
+  spaCode.includes("function askRegenerate") && spaCode.includes("openConfirmDialog")
+  && /onConfirm: function \(\) \{ regenerate\(q\); \}/.test(spaCode));
+check("сырой текст пузыря изолирован от ряда действий (_rawText)",
+  spaCode.includes("_rawText") && /prev\._rawText/.test(spaCode));
 check("перегенерировать и изменить идут через replaceLast (замена, не дубль)",
   /regenerate/.test(spaCode) && /replaceLast: true/.test(spaCode)
   && /payload\.replaceLast = true/.test(spaCode)
@@ -634,8 +646,8 @@ check("шаблонных кнопок нет: ни запасника, ни п�
   && !spaCode.includes("default_suggestions"));
 check("история показывает сохранённые кнопки модели (suggests из базы)",
   /var lastAnswer = -1;/.test(spaCode)
-  && /flushSteps\(m\.content, m\.suggests\)/.test(spaCode)
-  && /assistantCard\(g\.steps, g\.final, false, i === lastAnswer \? g\.suggests : \[\]\)/.test(spaCode));
+  && /flushSteps\(m\.content, m\.suggests/.test(spaCode)
+  && /assistantCard\(g\.steps, g\.final, false, i === lastAnswer \? g\.suggests : \[\], g\.at\)/.test(spaCode));
 /* --- порядок истории строго по ленте: раньше пузыри пользователя рисовались
    сразу по ходу цикла, а карточки ответов — пачкой после него, и при N ходах
    все вопросы сбивались в кучу наверх, а все ответы — вниз (живой баг:
@@ -653,9 +665,9 @@ check("история рисуется строго по порядку (воп�
    перестанет расти). */
 check("открытие истории: рисуем молча, вниз — один раз, мгновенно",
   /var painting = false;/.test(spaCode)
-  && /function userBubble\(text\)[\s\S]{0,220}?if \(!painting\) scrollDown\(true, true\);/.test(spaCode)
+  && /function userBubble\(text, atMs\)[\s\S]{0,2000}?if \(!painting\) scrollDown\(true, true\);/.test(spaCode)
   && /function paintMessages\(msgs\) \{\s*painting = true;/.test(spaCode)
-  && /painting = false;\s*showEmpty\(false\);\s*(?:\/\/[^\n]*\n\s*)*settleBottom\(\);/.test(spaCode)
+  && /painting = false;\s*showEmpty\(false\);\s*refreshActs\(\);[\s\S]{0,120}?settleBottom\(\);/.test(spaCode)
   && /function settleBottom\(\)/.test(spaCode)
   && /progWrite\(ui\.feed\.scrollHeight\)/.test(spaCode)
   && /S\.follow && S\.stick && !S\.busy && dist\(\) > 1/.test(spaCode));
@@ -664,7 +676,7 @@ check("карточка истории не дёргает ленту плавн
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
-  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks\)/.test(spaJs));
+  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks, atMs\)/.test(spaJs));
 // Карточка, ЖДУЩАЯ подтверждения, не должна сворачиваться: иначе кнопки
 // «Применить/Отмена» прячутся под «Показать шаги» и приходится раскрывать
 // заново (жалоба ученика). Живой ход и история — обе ветки.
@@ -692,19 +704,14 @@ check("фокус с кнопки снимается (обводка не ост
 check("кнопка не исчезает впустую, пока идёт ход",
   /b\.addEventListener\("click", function \(\) \{[^}]*if \(S\.busy\) return;[^}]*blur\(\)/.test(spaJs));
 
-/* --- копирование ответа: своей кнопкой под ответом, а не в меню по
-   удержанию. На телефоне меню надо дождаться, а кнопку видно сразу. --- */
-check("кнопка «Скопировать» под ответом (все ответы, включая историю)",
-  spaCode.includes("function addCopyRow") && spaCode.includes("agent__copy-row")
-  && /var row = quickActions\(card, isAlive, asks\);\s*addCopyRow\(card\);/.test(spaCode)
-  && /\.agent__copy \{[^}]*min-height: 36px/.test(spaCss));
-check("копируется сырой markdown ответа (data-answer), кнопка подтверждает сама",
-  /function addCopyRow\(card\) \{[^}]*answerText\(card\)/.test(spaJs)
-  && spaCode.includes('lbl.textContent = "Скопировано"')
-  && /\.agent__copy\.is-done/.test(spaCss));
-check("в меню по удержанию копирование осталось только у СВОЕГО вопроса",
-  /if \(isUser\) items\.push\(\{ label: "Скопировать"/.test(spaJs)
-  && /if \(!items\.length\) return;/.test(spaJs));
+/* --- ряд действий под сообщением вместо меню по удержанию --- */
+check("ряд [копия][заново][изменить]•время под ответом (все ответы, включая историю)",
+  spaCode.includes("function msgActsRow") && spaCode.includes("agent__acts")
+  && /var row = quickActions\(card, isAlive, asks\);\s*if \(card && card\.querySelector\("\.agent__answer"\)\) \{/.test(spaCode));
+check("копируется сырой markdown ответа (data-answer), квадрат подтверждает сам",
+  /function cardFooter\(card, isAlive, asks, atMs\) \{[\s\S]{0,500}?answerText\(card\)/.test(spaJs)
+  && spaCode.includes('copy.classList.add("is-done")')
+  && /\.agent__act\.is-done/.test(spaCss));
 
 /* --- блокировка композера держится до конца ВИДИМОГО хода ---
    Ответ приходит из сети целиком, а печать идёт ещё секунды: раньше флаг
