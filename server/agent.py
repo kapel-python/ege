@@ -255,7 +255,7 @@ AGENT_SYSTEM = (
     "«fold_web», «lesson_get» говори словами, которые понимает человек — «задание на отрезки», "
     "«урок по производным», «твои ошибки». Код уместен, только если ученик сам его прислал или "
     "просит найти именно его, — и тогда рядом с человеческим названием.\n"
-    "6. Действия (сменить уровень/цель/имя, отметить ошибку разобранной, сбросить прогресс) — только через "
+    "6. Действия (сменить уровень/цель/имя, отметить ошибку разобранной, сбросить прогресс, применить план) — только через "
     "инструменты действий: они сами попросят подтверждение, сам ничего не меняй и не обещай «сейчас поменяю».\n"
     "5f. ССЫЛКИ. Когда ученику полезно куда-то пойти — первоисточник (сайт ФИПИ, материалы экзамена), разбор темы, его собственный результат — дай ссылку обычной разметкой: [текст ссылки](https://…). Это тот же markdown, что жирный и курсив; ученику она покажется синей кнопкой. Правила: (1) ссылка должна быть ТОЧНОЙ и рабочей — не выдумывай адреса, не указывай «примерно на fipi.ru/…», не ссылайся на то, чего не знаешь; (2) подпись — ЗАГЛАВНЫМИ словами и ТОЛЬКО НАЗВАНИЕМ, без слова «сайт» и без «перейти/открыть»: «ФИПИ», «ОЦЕНКА СОЧИНЕНИЯ», «РАЗБОР ТЕМЫ» — а не «САЙТ ФИПИ» и не сам адрес; кнопка сама показывает, что это ссылка; (3) не сыпь ссылками без нужды: одна-две на ответ хватит, иначе это шум; (4) если уверенного адреса нет — честно скажи это словами и не оставляй пустую ссылку.\n"
     "5g. ВОПРОСЫ О САЙТЕ — НЕ ПРО УЧЁБУ. «Сколько проверок в день», "
@@ -292,8 +292,10 @@ AGENT_SYSTEM = (
     "- «какой прогноз / что поднять» → fold_web(op=\"forecast\"), назови top-gains из ответа.\n"
     "- «разбери задание N» → fold_web(op=\"attempts\", taskId=...) + task_get.\n"
     "- «как мои успехи / сколько решено / что пройдено» → fold_web(op=\"progress\"), при нужде skills.\n"
-    "- «план на неделю» → plan_draft, затем коротко перескажи своими словами.\n"
-    "- «что делать / с чего начать / распиши недели» → plan_draft (weeks=сколько назвали), затем коротко своими словами: вопрос про план, а не просьба «посмотреть».\n"
+    "- «план на …» → plan_draft(days=N: день 1, неделя 7, две недели 14, месяц 30, год 365), "
+    "затем plan_apply (periods из черновика) — он попросит подтверждение, текст плана пиши только после.\n"
+    "- «что делать / с чего начать / распиши» → plan_draft(days=сколько назвали, иначе 7), "
+    "затем plan_apply: вопрос про план, а не просьба «посмотреть».\n"
     "- «посмотри профиль / кто я» → fold_web(op=\"profile\").\n"
     "- «что я недавно делал / чем занимался» → fold_web(op=\"timeline\") — это лента событий, а не числа.\n"
     "- «как мои сочинения / сколько баллов / покажи работы» → essay_history БЕЗ submissionId "
@@ -391,10 +393,28 @@ AGENT_TOOLS: list = [
       {"type": "object", "properties": {
           "query": {"type": "string", "description": "что ищем: тема, ключевое слово или фраза"}},
        "required": ["query"], "additionalProperties": False}),
-    _tool("plan_draft", "Черновик плана подготовки на основе прогноза.",
+    _tool("plan_draft", "Черновик плана на гибкий срок (день/неделя/месяц/год — "
+          "решаешь сам по словам ученика). Ничего не применяет: применение — "
+          "только через plan_apply с подтверждением. Возвращает периоды "
+          "с темами, уроками и заданиями — их можно отдать в plan_apply как есть.",
           {"type": "object", "properties": {
-              "weeks": {"type": "integer", "minimum": 1, "maximum": 8}},
+              "days": {"type": "integer", "minimum": 1, "maximum": 365,
+                       "description": "горизонт в днях: день 1, неделя 7, две недели 14, месяц 30, год 365"},
+              "title": {"type": "string", "maxLength": 80,
+                        "description": "название плана человеческими словами"}},
            "additionalProperties": False}),
+    _tool("plan_apply", "Применить план из plan_draft. Требует подтверждения ученика.",
+          {"type": "object", "properties": {
+              "days": {"type": "integer", "minimum": 1, "maximum": 365},
+              "title": {"type": "string", "maxLength": 80},
+              "periods": {"type": "array", "maxItems": 53, "items": {
+                  "type": "object",
+                  "properties": {
+                      "days": {"type": "integer", "minimum": 1},
+                      "skillIds": {"type": "array", "maxItems": 4,
+                                   "items": {"type": "string"}}},
+                  "additionalProperties": False}}},
+           "required": ["periods"], "additionalProperties": False}, action=True),
     _tool("project_info",
       "СПРАВКА о сайте: предметы, профиль, опыт, сочинение, проверки (5 в сутки), "
       "ИИ, устройства, сброс, поддержка. ЗОВИ ПЕРВЫМ на вопросы НЕ про учёбу "
@@ -420,7 +440,7 @@ AGENT_TOOLS: list = [
           {"type": "object", "properties": {}, "additionalProperties": False}, action=True),
 ]
 
-ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress"})
+ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress", "plan_apply"})
 READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_draft",
                         "find_topics", "project_info"})
 
@@ -1594,11 +1614,10 @@ def _locked_set(conn: sqlite3.Connection, table: str, id_col: str = "id") -> set
     return out
 
 
-def _weighted_skills(conn: sqlite3.Connection, subject: str, weights: dict) -> list:
-    """Навыки с весом > 0 из конфига, без закрытых в каталоге (сам навык
-    или его категория — как availableSkills в браузере)."""
-    shut_skills = _locked_set(conn, "skills")
-    shut_topics: set = set()
+def _shut_study_skills(conn: sqlite3.Connection, subject: str) -> set:
+    """Закрытые навыки предмета: закрыт сам или закрыта его категория —
+    та же логика, что availableSkills в браузере."""
+    shut = _locked_set(conn, "skills")
     topic_of: dict = {}
     try:
         for row in conn.execute("SELECT id, topic_id FROM skills WHERE subject=?",
@@ -1611,6 +1630,16 @@ def _weighted_skills(conn: sqlite3.Connection, subject: str, weights: dict) -> l
         pass
     if topic_of:
         shut_topics = _locked_set(conn, "topics")
+        for sid, tid in topic_of.items():
+            if tid and tid in shut_topics:
+                shut.add(sid)
+    return shut
+
+
+def _weighted_skills(conn: sqlite3.Connection, subject: str, weights: dict) -> list:
+    """Навыки с весом > 0 из конфига, без закрытых в каталоге (сам навык
+    или его категория — как availableSkills в браузере)."""
+    shut = _shut_study_skills(conn, subject)
     out = []
     for skill_id, w in (weights or {}).items():
         try:
@@ -1620,9 +1649,7 @@ def _weighted_skills(conn: sqlite3.Connection, subject: str, weights: dict) -> l
         if weight <= 0:
             continue
         sid = str(skill_id)
-        if sid in shut_skills:
-            continue
-        if topic_of.get(sid, "") in shut_topics:
+        if sid in shut:
             continue
         out.append((sid, weight))
     return out
@@ -2317,43 +2344,362 @@ def _essay_status_note(item: dict) -> str:
     return "написано, но ещё не проверено"
 
 
-def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
-    weeks = (args or {}).get("weeks", 1)
+def _days_ru(n: int) -> str:
+    """3 → «3 дня», 7 → «7 дней», 1 → «1 день»."""
     try:
-        weeks = max(1, min(8, int(weeks)))
+        n = int(n)
     except (TypeError, ValueError):
-        weeks = 1
+        n = 0
+    word = "дней"
+    if n % 10 == 1 and n % 100 != 11:
+        word = "день"
+    elif n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        word = "дня"
+    return f"{n} {word}"
+
+
+def _topics_ru(n: int) -> str:
+    """2 → «2 темы», 5 → «5 тем»."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 0
+    word = "тем"
+    if n % 10 == 1 and n % 100 != 11:
+        word = "тема"
+    elif n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        word = "темы"
+    return f"{n} {word}"
+
+
+def _plan_tasks_for_skill(conn: sqlite3.Connection, user_id: int,
+                          subject: str, skill_id: str, limit: int = 2) -> list:
+    """Конкретные задания темы: сначала нерешённые, дальше по порядку."""
+    try:
+        solved = {str(r["task_id"]) for r in conn.execute(
+            "SELECT DISTINCT task_id FROM task_attempts"
+            " WHERE user_id=? AND subject=? AND skill_id=? AND correct=1",
+            (user_id, subject, skill_id))}
+    except sqlite3.Error:
+        solved = set()
+    try:
+        rows = conn.execute("SELECT id FROM tasks WHERE skill_id=? ORDER BY id",
+                            (skill_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    ids = [str(r["id"]) for r in rows]
+    fresh = [tid for tid in ids if tid not in solved]
+    return (fresh + [tid for tid in ids if tid in solved])[:max(0, limit)]
+
+
+def _plan_lesson_for_skill(conn: sqlite3.Connection, subject: str, skill_id: str):
+    try:
+        row = conn.execute("SELECT l.id FROM lessons l JOIN skills s ON s.id=l.skill_id"
+                           " WHERE s.id=? ORDER BY l.id LIMIT 1", (skill_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    return str(row["id"]) if row else None
+
+
+def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """Черновик плана на гибкий срок: days 1..365 (день/неделя/месяц/год —
+    решает агент по словам ученика). Черновик ничего не пишет: применение —
+    только через plan_apply с подтверждением.
+
+    Периоды режутся по 7 дней («Неделя N») + хвост днями; короткий план
+    (< 7 дней) — один период. Фокус ротируется по слабым темам прогноза,
+    к каждой — конкретные lessonId/taskIds, чтобы модалка и блок профиля
+    показывали готовое, а не пересказ."""
+    args = dict(args or {}) if isinstance(args, dict) else {}
+    days = args.get("days", args.get("weeks", 1) if "weeks" in args else 7)
+    if "weeks" in args and "days" not in args:
+        try:
+            days = int(args.get("weeks") or 1) * 7
+        except (TypeError, ValueError):
+            days = 7
+    try:
+        days = max(1, min(365, int(days)))
+    except (TypeError, ValueError):
+        days = 7
+    title = str(args.get("title") or "").strip()[:80] or f"План на {_days_ru(days)}"
     fc = _compute_forecast(conn, user_id, subject)
     gains = fc.get("topGains") or []
     names = dict(_skill_names(conn, subject))
     if not gains:
-        rows = conn.execute("SELECT skill_id, COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=? AND resolved=0"
-                            " GROUP BY skill_id ORDER BY c DESC LIMIT 3", (user_id, subject)).fetchall()
-        gains = [{"skillId": r["skill_id"], "name": names.get(r["skill_id"], r["skill_id"]),
-                  "mastery": 0} for r in rows]
+        try:
+            rows = conn.execute("SELECT skill_id, COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=? AND resolved=0"
+                                " GROUP BY skill_id ORDER BY c DESC LIMIT 5", (user_id, subject)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        gains = [{"skillId": str(r["skill_id"]),
+                  "name": names.get(str(r["skill_id"]), str(r["skill_id"]))} for r in rows]
     else:
-        gains = [dict(g, name=names.get(g.get("skillId"), g.get("name") or g.get("skillId")))
-                 for g in gains]
-    # Раньше каждая неделя получала ОДИН И ТОТ ЖЕ список focus — план на 4 недели
-    # был четыре раза одно и то же, и модель честно пересказывала это ученику.
-    # Теперь недели различаются: сначала закрываем самые слабые навыки, дальше
-    # берём следующие по счёту, а на хвосте — закрепление и повторение.
-    order = [g["skillId"] for g in gains]
-    focus_pool = order or []
+        gains = [dict(g, name=names.get(str(g.get("skillId")),
+                                        str(g.get("name") or g.get("skillId")))) for g in gains]
+    order = [str(g["skillId"]) for g in gains if g.get("skillId")]
+    if not order:
+        try:
+            order = [str(r["id"]) for r in conn.execute(
+                "SELECT id FROM skills WHERE subject=? ORDER BY display_order LIMIT 6",
+                (subject,)).fetchall()]
+        except sqlite3.Error:
+            order = []
+    # Периоды: полные недели + хвост. Раньше каждая неделя получала один и
+    # тот же список — теперь фокус ротируется, хвост не дублирует неделю.
+    chunks = []
+    left = days
+    week_no = 0
+    while left >= 7:
+        week_no += 1
+        chunks.append({"label": f"Неделя {week_no}", "days": 7})
+        left -= 7
+    if left:
+        chunks.append({"label": f"Дни ({_days_ru(left)})", "days": left})
+    if not chunks:
+        chunks.append({"label": f"Дни ({_days_ru(days)})", "days": days})
+    if days < 7:
+        chunks = [{"label": f"Дни 1–{days}", "days": days}]
     plan = []
-    for w in range(weeks):
-        start = (w * 2) % max(len(focus_pool), 1)
-        focus = [focus_pool[(start + i) % len(focus_pool)] for i in range(min(2, len(focus_pool)))] \
-            if focus_pool else []
-        focus = list(dict.fromkeys(focus))
-        titles = [next((g["name"] for g in gains if g["skillId"] == s), s) for s in focus]
-        if w >= len(focus_pool) and focus_pool:
-            tasks = (f"Неделя {w + 1}: повторение и закрепление — "
-                     + ", ".join(titles) + "; разбор ошибок по этим темам")
-        else:
-            tasks = f"Неделя {w + 1}: " + (", ".join(titles) or "повторение")
-        plan.append({"week": w + 1, "focus": focus, "focusNames": titles, "tasks": tasks})
-    return {"weeks": weeks, "forecast": fc.get("mid"), "plan": plan}
+    step = 0
+    for idx, chunk in enumerate(chunks):
+        focus = []
+        if order:
+            for _ in range(min(2, len(order))):
+                focus.append(order[step % len(order)])
+                step += 1
+            focus = list(dict.fromkeys(focus))
+        topics = []
+        for sid in focus:
+            topics.append({"skillId": sid,
+                           "name": next((str(g.get("name") or sid) for g in gains
+                                         if str(g.get("skillId")) == sid), sid),
+                           "lessonId": _plan_lesson_for_skill(conn, subject, sid),
+                           "taskIds": _plan_tasks_for_skill(conn, user_id, subject, sid, 2)})
+        plan.append({"index": idx, "label": chunk["label"], "days": chunk["days"],
+                     "topics": topics})
+    return {"days": days, "title": title, "forecast": fc.get("mid"),
+            "periods": plan,
+            "note": ("Черновик: ничего не применено. Применение — только через "
+                     "plan_apply с подтверждением ученика.")}
+
+
+# Порог «тема пройдена» по освоению (та же шкала 0–100, что на дашборде).
+# 60 — уверенное владение без фанатизма: 25 означает лишь «знаком» (covered),
+# а 100 требует свежих 12 попыток и у многих тем недостижимо быстро.
+TOPIC_MASTERED_AT = 60
+# Самый длинный горизонт — год; периодов не больше недель в году.
+PLAN_DAYS_MAX = 365
+PLAN_PERIODS_MAX = 53
+
+
+class PlanStateError(ValueError):
+    """Ошибка состояния плана с машиночитаемым кодом для HTTP-маппинга."""
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def ensure_study_plan_schema(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS study_plans (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              subject TEXT NOT NULL,
+              title TEXT NOT NULL,
+              days_total INTEGER NOT NULL,
+              starts_at_ms INTEGER NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active','done','replaced')),
+              created_at_ms INTEGER NOT NULL,
+              periods_json TEXT NOT NULL DEFAULT '[]')""")
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(study_plans)")}
+        if cols and "periods_json" not in cols:
+            conn.execute("ALTER TABLE study_plans ADD COLUMN periods_json TEXT NOT NULL DEFAULT '[]'")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_study_plans_user"
+                     " ON study_plans(user_id, subject, status)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS study_plan_topics (
+              plan_id INTEGER NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+              period_idx INTEGER NOT NULL,
+              skill_id TEXT NOT NULL,
+              state TEXT NOT NULL DEFAULT 'open'
+                CHECK(state IN ('open','closed')),
+              closed_at_ms INTEGER,
+              PRIMARY KEY(plan_id, period_idx, skill_id))""")
+    except sqlite3.Error:
+        pass
+
+
+def _study_plan_periods(plan_row) -> list:
+    try:
+        periods = json.loads(plan_row["periods_json"] or "[]")
+    except (ValueError, TypeError, KeyError, IndexError):
+        periods = []
+    return periods if isinstance(periods, list) else []
+
+
+def active_study_plan(conn: sqlite3.Connection, user_id: int, subject: str):
+    ensure_study_plan_schema(conn)
+    try:
+        return conn.execute("SELECT * FROM study_plans"
+                            " WHERE user_id=? AND subject=? AND status='active'"
+                            " ORDER BY id DESC LIMIT 1", (user_id, subject)).fetchone()
+    except sqlite3.Error:
+        return None
+
+
+def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
+                     now_ms: int | None = None) -> dict:
+    """Состояние активного плана для блока профиля и модалки: периоды, темы
+    со статусами open/current/done/locked, кликабельность кнопки закрытия
+    (время ИЛИ освоение), прогресс. Без активного — active:null (+ последний
+    завершённый для экрана «план выполнен»)."""
+    try:
+        moment = int(now_ms) if now_ms is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        moment = int(time.time() * 1000)
+    ensure_study_plan_schema(conn)
+    plan = active_study_plan(conn, user_id, subject)
+    if plan is None:
+        try:
+            last = conn.execute("SELECT title, days_total, created_at_ms FROM study_plans"
+                                " WHERE user_id=? AND subject=? AND status='done'"
+                                " ORDER BY id DESC LIMIT 1", (user_id, subject)).fetchone()
+        except sqlite3.Error:
+            last = None
+        out: dict = {"active": None, "lastDone": None}
+        if last is not None:
+            try:
+                out["lastDone"] = {"title": str(last["title"]),
+                                   "days": int(last["days_total"])}
+            except (KeyError, IndexError, TypeError, ValueError):
+                pass
+        return out
+    periods = _study_plan_periods(plan)
+    try:
+        closed = {(int(r["period_idx"]), str(r["skill_id"]))
+                  for r in conn.execute("SELECT period_idx, skill_id FROM study_plan_topics"
+                                        " WHERE plan_id=? AND state='closed'", (int(plan["id"]),))}
+    except (sqlite3.Error, TypeError, ValueError):
+        closed = set()
+    try:
+        fdata = _forecast_inputs(conn, user_id, subject, moment)
+    except Exception:
+        fdata = {}
+    try:
+        starts_at = int(plan["starts_at_ms"])
+    except (TypeError, ValueError, KeyError, IndexError):
+        starts_at = moment
+    day_ms = 86400000
+    out_periods = []
+    total = 0
+    done_n = 0
+    cursor = starts_at
+    current_idx = None
+    for p in periods:
+        if not isinstance(p, dict):
+            continue
+        try:
+            pidx = int(p.get("index", len(out_periods)))
+            pdays = max(1, int(p.get("days", 7)))
+        except (TypeError, ValueError):
+            continue
+        topics_in = p.get("topics") if isinstance(p.get("topics"), list) else []
+        p_start = cursor
+        cursor += pdays * day_ms
+        allot = (pdays * day_ms / len(topics_in)) if topics_in else pdays * day_ms
+        out_topics = []
+        for tpos, t in enumerate(topics_in):
+            if not isinstance(t, dict):
+                continue
+            sid = str(t.get("skillId") or t.get("skill_id") or "").strip()
+            if not sid:
+                continue
+            total += 1
+            is_closed = (pidx, sid) in closed
+            if is_closed:
+                done_n += 1
+            try:
+                mastery = _mastery_from_inputs(sid, fdata, moment)
+            except Exception:
+                mastery = 0
+            mastered = mastery >= TOPIC_MASTERED_AT
+            available_at = int(p_start + (tpos + 1) * allot)
+            time_ok = moment >= available_at
+            out_topics.append({
+                "skillId": sid,
+                "name": str(t.get("name") or sid)[:120],
+                "lessonId": t.get("lessonId"),
+                "taskIds": t.get("taskIds") if isinstance(t.get("taskIds"), list) else [],
+                "state": "done" if is_closed else "open",
+                "mastery": mastery,
+                "mastered": mastered,
+                "closeable": bool(not is_closed and (time_ok or mastered)),
+                "closeReasons": [r for r in (["time"] if time_ok else [])
+                                 + (["mastered"] if mastered else [])],
+                "availableAt": available_at,
+                "allotDays": max(1, int(round(allot / day_ms))),
+            })
+        if current_idx is None and any(t["state"] == "open" for t in out_topics):
+            current_idx = pidx
+        out_periods.append({"index": pidx, "label": str(p.get("label") or f"Период {pidx + 1}")[:64],
+                            "days": pdays, "topics": out_topics})
+    try:
+        title = str(plan["title"])
+        days_total = int(plan["days_total"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        title, days_total = "План", 7
+    return {"active": {"planId": int(plan["id"]), "title": title,
+                       "days": days_total, "daysLabel": _days_ru(days_total),
+                       "startsAt": starts_at,
+                       "periods": out_periods, "currentIndex": current_idx,
+                       "progress": {"closed": done_n, "total": total},
+                       "completed": bool(total and done_n >= total)},
+            "lastDone": None}
+
+
+def study_plan_close_topic(conn: sqlite3.Connection, user_id: int, subject: str,
+                           skill_id: str, now_ms: int | None = None) -> dict:
+    """Закрыть тему плана. Проверяет: план есть, тема из плана, не закрыта,
+    кнопка кликабельна (время вышло ИЛИ освоение ≥ порога). Иначе PlanStateError
+    с кодом: NO_PLAN | NOT_IN_PLAN | ALREADY_CLOSED | LOCKED."""
+    sid = str(skill_id or "").strip()
+    if not sid:
+        raise PlanStateError("NOT_IN_PLAN", "такой темы нет")
+    state = study_plan_state(conn, user_id, subject, now_ms)
+    active = state.get("active")
+    if not active:
+        raise PlanStateError("NO_PLAN", "активного плана нет")
+    target = None
+    for p in active.get("periods", []):
+        for t in p.get("topics", []):
+            if t.get("skillId") == sid:
+                target = t
+                break
+    if target is None:
+        raise PlanStateError("NOT_IN_PLAN", "этой темы нет в плане")
+    if target.get("state") == "done":
+        raise PlanStateError("ALREADY_CLOSED", "тема уже закрыта")
+    if not target.get("closeable"):
+        raise PlanStateError("LOCKED", "тема ещё не готова к закрытию")
+    try:
+        moment = int(now_ms) if now_ms is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        moment = int(time.time() * 1000)
+    conn.execute("UPDATE study_plan_topics SET state='closed', closed_at_ms=?"
+                 " WHERE plan_id=? AND skill_id=? AND state='open'",
+                 (moment, int(active["planId"]), sid))
+    fresh = study_plan_state(conn, user_id, subject, moment)
+    if fresh.get("active", {}).get("completed"):
+        conn.execute("UPDATE study_plans SET status='done' WHERE id=?",
+                     (int(active["planId"]),))
+        conn.commit()
+        fresh = study_plan_state(conn, user_id, subject, moment)
+    else:
+        conn.commit()
+    fresh["closed"] = sid
+    return fresh
 
 
 # ---------------------------------------------------------------------------
@@ -2453,6 +2799,112 @@ def _match_self_level(raw) -> str | None:
     hits = [lid for lid, words in SELF_LEVEL_SYNONYMS.items()
             if any(v in words or (v and v in {_norm_goal(w) for w in words}) for v in variants if v)]
     return hits[0] if len(hits) == 1 else None
+
+
+def _propose_study_plan(conn: sqlite3.Connection, user_id: int,
+                        subject: str, args: dict) -> dict:
+    """Проверить план перед карточкой подтверждения и вернуть готовое
+    предложение. Принимает черновик plan_draft как есть
+    ({days, title?, periods:[{days, topics:[{skillId}]}]}) или ужатый
+    ({days, periods:[{days, skillIds:[]}]}) — модель выбирает сама.
+
+    Строгость осознанная: id тем берутся только из каталога предмета,
+    сумма дней обязана сойтись с горизонтом, иначе модель чинит вызов
+    в том же ходу (общий механизм _tool_failure). Подписи периодов
+    ставит сервер — выдуманные названия периодов в план не попадают."""
+    args = dict(args or {}) if isinstance(args, dict) else {}
+    raw_periods = args.get("periods")
+    if not isinstance(raw_periods, list) or not raw_periods:
+        raise ValueError("план пуст: передай periods из plan_draft (дни и темы)")
+    if len(raw_periods) > PLAN_PERIODS_MAX:
+        raise ValueError(f"слишком много периодов (максимум {PLAN_PERIODS_MAX})")
+    try:
+        shut = _shut_study_skills(conn, subject)
+    except Exception:
+        shut = set()
+    try:
+        catalog = {str(r["id"]) for r in conn.execute(
+            "SELECT id FROM skills WHERE subject=?", (str(subject or ""),))}
+    except sqlite3.Error:
+        catalog = set()
+    try:
+        names = dict(_skill_names(conn, subject))
+    except Exception:
+        names = {}
+    norm = []
+    total_days = 0
+    total_topics = 0
+    for raw in raw_periods:
+        if not isinstance(raw, dict):
+            raise ValueError("период плана — объект {days, skillIds}")
+        try:
+            pdays = int(raw.get("days", 0))
+        except (TypeError, ValueError):
+            raise ValueError("у периода должно быть число дней")
+        if pdays < 1:
+            raise ValueError("у периода должно быть хотя бы день")
+        sids = raw.get("skillIds")
+        if sids is None:
+            topics = raw.get("topics") or []
+            sids = [t.get("skillId") for t in topics if isinstance(t, dict)]
+        if not isinstance(sids, list) or not sids:
+            raise ValueError("у периода должна быть хотя бы одна тема")
+        sids = [str(s).strip() for s in sids if str(s or "").strip()]
+        sids = list(dict.fromkeys(sids))[:4]
+        if not sids:
+            raise ValueError("у периода должна быть хотя бы одна тема")
+        if len(sids) > 4:
+            raise ValueError("в периоде не больше 4 тем")
+        bad = [s for s in sids if (catalog and s not in catalog) or s in shut]
+        if bad:
+            raise ValueError(f"таких тем нет в предмете: {', '.join(bad[:4])} — "
+                             "возьми skillId из plan_draft или find_topics")
+        total_days += pdays
+        total_topics += len(sids)
+        norm.append({"days": pdays, "skillIds": sids})
+    if total_topics > 100:
+        raise ValueError("слишком много тем в плане (максимум 100)")
+    try:
+        days = int(args.get("days", 0) or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        days = total_days
+    if not 1 <= days <= PLAN_DAYS_MAX:
+        raise ValueError(f"горизонт плана — 1..{PLAN_DAYS_MAX} дней")
+    if total_days != days:
+        raise ValueError(f"дни периодов дают {total_days}, а горизонт {days} — "
+                         "сумма обязана сойтись")
+    title = str(args.get("title") or "").strip()[:80] or f"План на {_days_ru(days)}"
+    periods = []
+    week_no = 0
+    for idx, item in enumerate(norm):
+        if len(norm) == 1 and days < 7:
+            label = f"Дни 1–{item['days']}"
+        elif item["days"] == 7:
+            week_no += 1
+            label = f"Неделя {week_no}"
+        else:
+            label = f"Дни ({_days_ru(item['days'])})"
+        topics = []
+        for sid in item["skillIds"]:
+            topics.append({"skillId": sid,
+                           "name": str(names.get(sid, sid))[:120],
+                           "lessonId": _plan_lesson_for_skill(conn, subject, sid),
+                           "taskIds": _plan_tasks_for_skill(conn, user_id, subject, sid, 2)})
+        periods.append({"index": idx, "label": label, "days": item["days"],
+                        "topics": topics, "topicIds": item["skillIds"]})
+    first_name = periods[0]["topics"][0]["name"] if periods[0]["topics"] else ""
+    try:
+        current = active_study_plan(conn, user_id, subject)
+    except Exception:
+        current = None
+    tail = (f" (заменит текущий «{str(current['title'])[:40]}»)"
+            if current is not None else "")
+    return {"action": "plan_apply", "days": days, "title": title,
+            "periods": periods,
+            "label": (f"Применяю план «{title}» на {_days_ru(days)}: "
+                      f"{_topics_ru(total_topics)}, первая — «{first_name}»{tail}")}
 
 
 def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
@@ -2574,6 +3026,8 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
                 "label": f"Отмечаю разобранной ошибку по теме «{where}»"}
     if name == "reset_progress":
         return {"action": name, "label": "Сбрасываю весь прогресс предмета"}
+    if name == "plan_apply":
+        return _propose_study_plan(conn, user_id, subject, args)
     raise ValueError(f"неизвестное действие: {name}")
 
 
@@ -2658,6 +3112,50 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
             pass
         conn.commit()
         return {"reset": True, "subject": subject}
+    if name == "plan_apply":
+        proposal = proposal if isinstance(proposal, dict) else {}
+        days = proposal.get("days")
+        title = str(proposal.get("title") or "").strip()[:80]
+        periods = proposal.get("periods")
+        try:
+            days = max(1, min(PLAN_DAYS_MAX, int(days)))
+        except (TypeError, ValueError):
+            raise ValueError("битое предложение плана")
+        if not isinstance(periods, list) or not periods:
+            raise ValueError("битое предложение плана")
+        if not title:
+            title = f"План на {_days_ru(days)}"
+        try:
+            now_ms = int(time.time() * 1000)
+        except (TypeError, ValueError):
+            now_ms = 0
+        ensure_study_plan_schema(conn)
+        cur = conn.execute("SELECT id, title FROM study_plans"
+                           " WHERE user_id=? AND subject=? AND status='active'",
+                           (user_id, subject)).fetchone()
+        if cur is not None:
+            conn.execute("UPDATE study_plans SET status='replaced' WHERE id=?",
+                         (int(cur["id"]),))
+        cur = conn.execute("INSERT INTO study_plans(user_id, subject, title, days_total,"
+                           " starts_at_ms, status, created_at_ms, periods_json)"
+                           " VALUES (?,?,?,?,?,'active',?,?)",
+                           (user_id, subject, title, days, now_ms, now_ms,
+                            json.dumps(periods, ensure_ascii=False)))
+        plan_id = int(cur.lastrowid)
+        for p in periods:
+            try:
+                pidx = int(p.get("index", 0))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            for sid in p.get("topicIds") or []:
+                try:
+                    conn.execute("INSERT OR IGNORE INTO study_plan_topics"
+                                 "(plan_id, period_idx, skill_id, state)"
+                                 " VALUES (?,?,?,'open')", (plan_id, pidx, str(sid)))
+                except sqlite3.Error:
+                    pass
+        conn.commit()
+        return {"planId": plan_id, "title": title, "days": days}
     raise ValueError(f"неизвестное действие: {name}")
 
 
@@ -3018,6 +3516,11 @@ def _hints_for_tool(conn: sqlite3.Connection, subject: str, name: str, args: dic
         out["levels"] = [f"{lid} — {SELF_LEVEL_LABELS.get(lid, lid)}" for lid in sorted(SELF_LEVEL_LABELS)]
         out["hint"] = ("goal — это id из goals (например g95) или ТОЧНАЯ подпись из goals; "
                        "selfLevel — zero/base/confident.")
+    elif name == "plan_apply":
+        out["hint"] = ("periods бери из ответа plan_draft (там дни и skillId уже "
+                       "проверены) либо собери сам: [{days, skillIds[]}]. Сумма дней "
+                       "периодов обязана равняться days, skillId — только из каталога "
+                       "предмета (подскажет find_topics).")
     return out
 
 
@@ -3096,6 +3599,8 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         return "Отмечаю ошибку разобранной (жду подтверждения)"
     if name == "reset_progress":
         return "Готовлю сброс прогресса (жду подтверждения)"
+    if name == "plan_apply":
+        return "Готовлю план (жду подтверждения)"
     return f"Вызываю {name}"
 
 

@@ -14357,7 +14357,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "ref": rid}, 503 if locked else 500)
             finally: conn.close()
             return
-        if path == "/api/agent/threads" or path == "/api/agent/turns" or path == "/api/agent/turns/confirm" or path.startswith("/api/agent/threads/"):
+        if path == "/api/agent/threads" or path == "/api/agent/turns" or path == "/api/agent/turns/confirm" or path == "/api/plan/topics/close" or path.startswith("/api/agent/threads/"):
             if self.api_rate_limited(): return
             conn = connect()
             try:
@@ -14387,6 +14387,25 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "Некорректный JSON"}, 400, token=token); return
                 if not isinstance(payload, dict):
                     self.send_json({"error": "Некорректный запрос"}, 400, token=token); return
+                # POST /api/plan/topics/close — закрыть тему учебного плана.
+                if path == "/api/plan/topics/close":
+                    subj_raw = payload.get("subject")
+                    subject = resolve_subject(subj_raw) if is_known_subject(subj_raw) else current_subject_for(conn, user_id)
+                    skill_id = str(payload.get("skillId") or payload.get("skill_id") or "").strip()
+                    if not skill_id or len(skill_id) > 128:
+                        self.send_json({"error": "Нужен skillId", "code": "BAD_SKILL"}, 400, token=token); return
+                    try:
+                        state = _AGENT.study_plan_close_topic(conn, int(user_id), subject, skill_id)
+                    except _AGENT.PlanStateError as exc:
+                        code = str(exc.code or "PLAN_ERROR")
+                        status = {"NO_PLAN": 404, "NOT_IN_PLAN": 400,
+                                  "ALREADY_CLOSED": 409, "LOCKED": 409}.get(code, 400)
+                        self.send_json({"error": str(exc), "code": code}, status, token=token); return
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("plan-close", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500, token=token); return
+                    self.send_json({"ok": True, "subject": subject, **state}, token=token); return
                 # POST /api/agent/threads — создать тред.
                 if path == "/api/agent/threads":
                     subj_raw = payload.get("subject")
@@ -15695,6 +15714,30 @@ class Handler(BaseHTTPRequestHandler):
                                     "need": need,
                                     "pct": max(0, min(100, round(int(li["intoLevel"]) / need * 100))),
                                     "streak": streak}, token=token); return
+                if path == "/api/plan":
+                    # Активный учебный план: периоды, темы, кликабельность
+                    # закрытия, прогресс. Гостю — 401 GUEST_PENDING, как всем
+                    # доменам ученика; чтение чужого — невозможно (все выборки
+                    # с user_id внутри study_plan_*).
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    if _AGENT is None:
+                        self.send_json({"error": "Раздел временно недоступен"}, 503, token=token); return
+                    query = urlparse(self.path).query
+                    from urllib.parse import parse_qs
+                    args = parse_qs(query)
+                    raw_subject = args.get("subject", [None])[0]
+                    subject = (resolve_subject(raw_subject)
+                               if is_known_subject(raw_subject)
+                               else current_subject_for(conn, user_id))
+                    try:
+                        state = _AGENT.study_plan_state(conn, int(user_id), subject)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("plan", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500, token=token); return
+                    self.send_json({"ok": True, "subject": subject, **state}, token=token); return
                 if path.startswith("/api/agent/threads/"):
                     if not self.require_user(user_id): return
                     if self.reject_if_blocked(conn, user_id):
