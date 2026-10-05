@@ -112,6 +112,17 @@ check("шаги с тогглом", spaCode.includes("agent__trace-toggle") && s
 check("раскрытие Подробнее", spaCode.includes("Подробнее"));
 check("кнопки подтверждения", spaCode.includes("Применить") && spaCode.includes("Отмена")
   && spaCode.includes("needs_confirm") && spaCode.includes("confirmStep"));
+check("предмет треда в заголовке окна («название • Предмет», предмет не режется)",
+  /function paintTitle\(\)/.test(spaCode)
+  && /agent__title-t/.test(spaCode) && /agent__title-s/.test(spaCode)
+  && /"• " \+ sub/.test(spaCode)
+  && ((spaCode.match(/ui\.title\.textContent\s*=/g) || []).length === 1) // только очистка внутри paintTitle
+  && /SUBJ_FALLBACK/.test(spaCode) && spaCode.includes("profile_math")
+  && /\.agent__title-s\s*\{[^}]*color:\s*var\(--accent-ink\)/.test(spaCss)
+  && /\.agent__title-t\s*\{[^}]*text-overflow:\s*ellipsis/.test(spaCss));
+check("сервер отдаёт название предмета треда",
+  /"subjectTitle":\s*_agent_subject_title\(/.test(srvCode)
+  && /def _agent_subject_title/.test(srvCode));
 check("confirm без даблклика", spaCode.includes("disabled = true"));
 check("подтверждение отвечает сразу: галочка + скелетон, а не тишина",
   /function confirmUIBusy/.test(spaCode)

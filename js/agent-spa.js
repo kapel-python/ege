@@ -977,7 +977,8 @@
       if (Number(t.id) === Number(thread.id)) {
         found = true;
         return { id: t.id, publicId: thread.publicId || t.publicId,
-                 subject: t.subject, title: thread.title || t.title,
+                 subject: t.subject, subjectTitle: thread.subjectTitle || t.subjectTitle,
+                 title: thread.title || t.title,
                  createdAt: t.createdAt, updatedAt: Date.now() };
       }
       return t;
@@ -985,8 +986,39 @@
     if (!found) return;
     cacheThreads(S.threads);           // заголовок из первого сообщения — тоже в кэш
     renderThreads();
-    var cur = currentThread();
-    if (cur && ui.title) ui.title.textContent = cur.title || "Новый чат";
+    paintTitle();
+  }
+  /* Предмет треда — прямо в заголовке окна чата («Новый чат • Математика»):
+     предмет решает, в каком предмете идёт ход, а ученик его не видел
+     (живой баг: «у меня есть план?» из математики при плане в обществе).
+     Название треда режется многоточием, предмет — никогда: он второй,
+     несжимаемый. Отдельной плашки нет осознанно: тулбар не разъезжается. */
+  var SUBJ_FALLBACK = {
+    profile_math: "Профильная математика", basic_math: "Базовая математика",
+    russian: "Русский язык", biology: "Биология", society: "Обществознание"
+  };
+  function subjName(t) {
+    if (!t) return "";
+    try {
+      if (t.subjectTitle && String(t.subjectTitle).trim()) return String(t.subjectTitle).trim().slice(0, 40);
+      var s = SUBJ_FALLBACK[String(t.subject || "")];
+      return s || "";
+    } catch (_) { return ""; }
+  }
+  function paintTitle() {
+    if (!ui.title) return;
+    var t = null;
+    try { t = currentThread(); } catch (_) { t = null; }
+    ui.title.textContent = "";
+    var a = el("span", "agent__title-t", null);
+    try { a.textContent = (t && t.title) || (t ? "Новый чат" : "Нет чатов"); } catch (_) {}
+    ui.title.appendChild(a);
+    var sub = subjName(t);
+    if (sub) {
+      var b = el("span", "agent__title-s", null);
+      try { b.textContent = "• " + sub; } catch (_) {}
+      ui.title.appendChild(b);
+    }
   }
   function selectThread(id) {
     // Принимаем и внешний ref из ссылки: свой чат маппим на внутренний id.
@@ -1016,7 +1048,7 @@
       S.turn.detached = false;
       syncBusy();
       var _cur = currentThread();
-      if (ui.title) ui.title.textContent = _cur ? (_cur.title || "Новый чат") : "Нет чатов";
+      paintTitle();
       syncHash();
       var _cached = cachedMessages(id);
       if (_cached) paintMessages(_cached);
@@ -1050,7 +1082,7 @@
     S.newThreadId = null;
     nav(false);
     var t = currentThread();
-    if (ui.title) ui.title.textContent = t ? (t.title || "Новый чат") : "Нет чатов";
+    paintTitle();
     syncHash();
     loadThreadMessages();
   }
@@ -1235,7 +1267,7 @@
   function newChat() {
     if (currentChatEmpty()) {
       showEmpty(true);
-      if (ui.title) ui.title.textContent = "Новый чат";
+      paintTitle();
       nav(false);
       try { if (ui.input) ui.input.focus({ preventScroll: true }); } catch (_) {}
       return;
@@ -2657,7 +2689,7 @@
         S.currentId = next ? Number(next.id) : null;
         saveCurrent();
         var t = currentThread();
-        if (ui.title) ui.title.textContent = t ? (t.title || "Новый чат") : "Нет чатов";
+        paintTitle();
         syncHash();
         if (t) { loadThreadMessages(); return; }
         clearFeed(); showEmpty(true);

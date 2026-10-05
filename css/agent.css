@@ -198,7 +198,13 @@
 .agent__menu:hover { background: var(--soft-hover); color: var(--text); }
 /* Заголовок хода — как в эталоне: 18px, плотный интерлиньяж. На телефоне
    16px (правило ниже в медиазапросе). */
-.agent__title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent__title { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; overflow: hidden; white-space: nowrap; display: flex; align-items: baseline; gap: 6px; }
+/* Название треда режется многоточием, предмет после «•» — никогда: именно
+   предмет решает, в каком предмете идёт ход. Цвет — чернила акцента
+   (контраст с запасом, как у ссылок-кнопок), не градиент: градиентный текст
+   на части фонов проваливает AA. */
+.agent__title-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent__title-s { flex: none; white-space: nowrap; font-size: 0.78em; color: var(--accent-ink); }
 /* Кольцо квоты — как в эталоне: 36px на карточной подложке (в 32px на
    телефоне под тач-цель тулбара). */
 /* Кружок квоты: 42px вместо 36px и цифра 15px вместо 13px. Замер на живом

@@ -490,10 +490,27 @@ def _agent_thread_public_id(row) -> str:
     return ""
 
 
+def _agent_subject_title(sid) -> str:
+    """Человеческое название предмета треда («Профильная математика»).
+
+    Нужно ленте чатов и заголовку: предмет треда решает, в каком предмете
+    идёт ход, а ученик его не видел — отсюда живой баг «у меня есть план?»
+    из математики при плане в обществе. Запасной путь — сам id, пустоты нет."""
+    try:
+        if _AGENT is not None:
+            name = _AGENT.subject_title(sid)
+            if str(name or "").strip():
+                return str(name).strip()
+    except Exception:
+        pass
+    return str(sid or "").strip()
+
+
 def _agent_thread_payload(row) -> dict:
     """Публичная форма треда: внутренний id (совместимость) + внешний publicId."""
     return {"id": int(row["id"]), "publicId": _agent_thread_public_id(row),
-            "subject": row["subject"], "title": row["title"],
+            "subject": row["subject"], "subjectTitle": _agent_subject_title(row["subject"]),
+            "title": row["title"],
             "createdAt": int(row["created_at"]), "updatedAt": int(row["updated_at"])}
 
 
@@ -14630,6 +14647,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True, "reused": reused,
                                     "thread": {"id": tid, "publicId": public_id,
                                                "subject": subject,
+                                               "subjectTitle": _agent_subject_title(subject),
                                                "title": "Новый чат", "createdAt": created_at,
                                                "updatedAt": now_ms}}, token=token); return
                 # POST /api/agent/threads/<ref>/delete — удалить свой тред.
