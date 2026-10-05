@@ -653,7 +653,9 @@ body {
   color: var(--streak-hot);
   background: var(--streak-hot-soft);
   border: 1px solid var(--streak-hot-glow);
-  animation: streak-breathe-hot 1.8s ease-in-out infinite;
+  /* Без «дыхания»: пульсация свечения всего блока слишком тянет взгляд.
+     Свечение статичное, живыми остаются только огонёк и искры. */
+  box-shadow: 0 0 10px 0 var(--streak-hot-glow);
 }
 .streak-chip--hot svg {
   color: var(--streak-hot-neon);
@@ -689,15 +691,12 @@ body {
   15% { opacity: 1; }
   100% { transform: translate(4px, -26px) scale(0.25); opacity: 0; }
 }
-@keyframes streak-breathe-hot {
-  0%, 100% { box-shadow: 0 0 0 0 var(--streak-hot-glow), 0 0 10px 0 var(--streak-hot-glow); }
-  50% { box-shadow: 0 0 18px 0 var(--streak-hot-glow), 0 0 34px 0 var(--streak-hot-glow); }
-}
 .streak-chip--inferno {
   color: var(--streak-viol);
   background: var(--streak-viol-soft);
   border: 1px solid var(--streak-viol-glow);
-  animation: streak-breathe-inferno 1.5s ease-in-out infinite;
+  /* Как у оранжевого: статичное свечение вместо пульсации блока. */
+  box-shadow: 0 0 12px 0 var(--streak-viol-glow);
 }
 .streak-chip--inferno svg {
   color: var(--streak-viol-neon);
@@ -732,10 +731,6 @@ body {
   0% { transform: translate(0, 0) scale(1); opacity: 0; }
   15% { opacity: 1; }
   100% { transform: translate(5px, -32px) scale(0.25); opacity: 0; }
-}
-@keyframes streak-breathe-inferno {
-  0%, 100% { box-shadow: 0 0 0 0 var(--streak-viol-glow), 0 0 12px 0 var(--streak-viol-glow); }
-  50% { box-shadow: 0 0 22px 0 var(--streak-viol-glow), 0 0 40px 0 var(--streak-viol-glow); }
 }
 @media (prefers-reduced-motion: reduce) {
   .streak-chip, .streak-chip svg, .streak-chip::before, .streak-chip::after { animation: none; }
