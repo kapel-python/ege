@@ -16,11 +16,12 @@ const testBody = async () => {
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
   t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
-  t("каталог содержит 91 задачу (80 официальных + 11 аналогов банка)", DataAPI.tasks().length === 91);
+  t("каталог содержит 121 задачу (80 официальных + 41 аналог банка)", DataAPI.tasks().length === 121);
   t("каждый из 20 номеров ЕГЭ представлен", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length > 0));
-  // После добивки тонких мест каждый навык имеет минимум 3 задания.
-  t("у каждого навыка есть >= 3 заданий", DataAPI.skills()
-    .every((s) => DataAPI.tasksBySkill(s.id).length >= 3));
+  // Каждый навык держит минимум 5 заданий — страница статуса показывает
+  // профиль на уровне остальных предметов (всего > 120).
+  t("у каждого навыка есть >= 5 заданий", DataAPI.skills()
+    .every((s) => DataAPI.tasksBySkill(s.id).length >= 5));
   t("развёрнутые задания №14-20 помечены для самопроверки", DataAPI.tasks()
     .filter((x) => x.type === "extended_answer")
     .every((x) => x.selfCheck === true && x.check === "self"));
