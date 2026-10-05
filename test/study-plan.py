@@ -202,6 +202,53 @@ pa6, pb6 = st6b["active"]["periods"]
 check("time unlocks future period",
       pb6["locked"] is False and pa6["topics"][0]["closeable"] is True)
 
+# --- 7. plan_get: текущий план для модели ---
+check("plan_get in registry",
+      "plan_get" in [t["function"]["name"] for t in agent.AGENT_TOOLS]
+      and "plan_get" in agent.READ_TOOLS,
+      str([t["function"]["name"] for t in agent.AGENT_TOOLS]))
+empty_get = agent.plan_get(conn, 1, "russian", {})
+check("plan_get empty", empty_get["hasPlan"] is False and empty_get["periods"] == []
+      and "plan_draft" in empty_get["note"], str(empty_get)[:160])
+check("plan_get dispatch",
+      agent.execute_read_tool(conn, 1, "russian", "plan_get", {})["hasPlan"] is False)
+full_get = agent.plan_get(conn, 1, "profile_math", {})
+st_cur = agent.study_plan_state(conn, 1, "profile_math")
+check("plan_get full",
+      full_get["hasPlan"] is True and full_get["days"] == st_cur["active"]["days"]
+      and full_get["progress"] == st_cur["active"]["progress"]
+      and len(full_get["periods"]) == len(st_cur["active"]["periods"])
+      and all(set(t) >= {"skillId", "name", "state", "mastery"}
+              for p in full_get["periods"] for t in p["topics"]),
+      str(full_get["progress"]))
+try:
+    re_prop = agent.propose_action(conn, 1, "profile_math", "plan_apply",
+                                   {"days": full_get["days"], "title": full_get["title"],
+                                    "periods": full_get["periods"]})
+    check("plan_get periods feed plan_apply", re_prop["days"] == full_get["days"]
+          and len(re_prop["periods"]) == len(full_get["periods"]))
+except ValueError as exc:
+    check("plan_get periods feed plan_apply", False, str(exc)[:120])
+check("plan_get step human",
+      agent.describe_step("plan_get", {}, full_get).startswith("Смотрю текущий план")
+      and "sk_" not in agent.describe_step("plan_get", {}, full_get)
+      and agent.describe_step("plan_get", {}, empty_get) == "Проверяю текущий учебный план")
+ctx_empty = agent.turn_context(conn, 1, "russian")
+ctx_full = agent.turn_context(conn, 1, "profile_math")
+check("context no plan", "Учебного плана пока нет." in ctx_empty, " | ".join(ctx_empty.splitlines()[-2:]))
+check("context has plan",
+      "Учебный план есть:" in ctx_full and "plan_get" in ctx_full, " | ".join(ctx_full.splitlines()[-3:]))
+big = dict(full_get)
+big["periods"] = full_get["periods"] * 30
+pay = agent._tool_payload(big)
+try:
+    parsed = json.loads(pay)
+    check("plan_get payload trims valid",
+          len(pay) <= 4000 and isinstance(parsed.get("periods"), list)
+          and parsed.get("truncated", {}).get("field") == "periods")
+except ValueError:
+    check("plan_get payload trims valid", False, pay[:80])
+
 conn.close()
 os.unlink(path)
 print(f"\n{checks - failures}/{checks} ok")

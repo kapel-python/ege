@@ -4,7 +4,7 @@
 Проверяет _build_public_status на живом сервере с temp-БД (прод не трогается):
   * строки agent / agent-tools / ai-providers есть, форма {id,label,ok,detail};
   * строки subscription нет осознанно (биллинг — не работа сервиса);
-  * инструменты покрыты реализациями (10 из 10, без missing);
+  * инструменты покрыты реализациями (все из AGENT_TOOLS, без missing);
   * провайдеры без ключей — честное «не настроены», а не зелёное;
   * последнее известное решает: успех новее ошибки — ok, иначе — ошибка;
   * записей нет — «нет данных», а не «всё хорошо»;
@@ -94,7 +94,7 @@ def main():
                   not [k for k in svc if "sub" in k], sorted(svc))
             check("инструменты покрыты",
                   svc["agent-tools"]["ok"] is True
-                  and "10" in svc["agent-tools"]["detail"]
+                  and str(len(server._AGENT.AGENT_TOOLS)) in svc["agent-tools"]["detail"]
                   and "из" not in svc["agent-tools"]["detail"],
                   svc["agent-tools"]["detail"])
             check("агент готов", svc["agent"]["ok"] is True, svc["agent"]["detail"])

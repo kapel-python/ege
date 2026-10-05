@@ -13,6 +13,9 @@
     lesson_get — текст урока по скиллу/уроку;
     task_get — условие задания;
     essay_history — сочинения с баллами;
+    plan_get — ТЕКУЩИЙ учебный план (есть ли, что внутри: название, срок,
+      прогресс, периоды с темами — в том же формате, что plan_draft, поэтому
+      periods оттуда годятся в plan_apply как шаблон с мелкими правками);
     plan_draft — детерминированный черновик плана по прогнозу;
   действия (только с подтверждением ученика):
     update_profile — имя/уровень/цель;
@@ -292,15 +295,23 @@ AGENT_SYSTEM = (
     "- «какой прогноз / что поднять» → fold_web(op=\"forecast\"), назови top-gains из ответа.\n"
     "- «разбери задание N» → fold_web(op=\"attempts\", taskId=...) + task_get.\n"
     "- «как мои успехи / сколько решено / что пройдено» → fold_web(op=\"progress\"), при нужде skills.\n"
-    "- «план на …» → plan_draft(days=N: день 1, неделя 7, две недели 14, месяц 30, год 365; "
+    "- «какой у меня план / покажи план / что у меня с планом / есть ли план» → plan_get "
+    "(детали текущего; без него не отвечай; плана нет — так и скажи и предложи собрать новый).\n"
+    "- «план на …» → СНАЧАЛА plan_get (проверь текущий; если в КОНТЕКСТЕ ХОДА "
+    "«Учебного плана пока нет» — этот вызов пропусти и строй сразу), "
+    "затем plan_draft(days=N: день 1, неделя 7, две недели 14, месяц 30, год 365; "
     "месяцы умножай сам: 3 месяца = 90 дней, полгода = 180 — «месяц = 30» относится "
     "только к одному месяцу), "
-    "затем plan_apply (periods из черновика) — он попросит подтверждение, текст плана пиши только после. "
+    "затем plan_apply (periods из черновика; periods из plan_get — в том же формате, "
+    "тоже годятся как шаблон с мелкими правками) — он попросит подтверждение, текст плана пиши только после. "
+    "План уже есть — предупреди, что новый его заменит. "
     "Срок между черновиком и применением не меняй: days в plan_apply = days из plan_draft; "
     "второй черновик за ход — только если ученик сам поменял срок.\n"
-    "- «что делать / с чего начать / распиши» → plan_draft(days=сколько назвали, иначе 7), "
+    "- «что делать / с чего начать / распиши» → СНАЧАЛА plan_get (если в КОНТЕКСТЕ "
+    "«плана нет» — пропусти), затем plan_draft(days=сколько назвали, иначе 7), "
     "затем plan_apply: вопрос про план, а не просьба «посмотреть».\n"
-    "- «поменяй темы / переделай план» → НЕ переспрашивай список тем и НЕ проси "
+    "- «поменяй темы / переделай план» → СНАЧАЛА plan_get (что сейчас в плане), "
+    "НЕ переспрашивай список тем и НЕ проси "
     "«скажи продолжай»: слабые темы уже видны (skills/errors, в т.ч. из прошлых "
     "ходов) — сразу plan_draft + plan_apply новым предложением. Отменённый черновик "
     "— не запрет, а черновик: переделывать можно и нужно.\n"
@@ -406,6 +417,15 @@ AGENT_TOOLS: list = [
       {"type": "object", "properties": {
           "query": {"type": "string", "description": "что ищем: тема, ключевое слово или фраза"}},
        "required": ["query"], "additionalProperties": False}),
+    _tool("plan_get", "ТЕКУЩИЙ учебный план: есть ли, что внутри. ЗОВИ ПЕРВЫМ, "
+          "когда вопрос про план («какой у меня план», «план на месяц», «переделай план»): "
+          "вернёт название, срок, прогресс (закрыто N из M) и периоды с темами "
+          "(skillId + человеческое название + состояние done/open) — в том же формате, "
+          "что plan_draft, поэтому periods оттуда годятся в plan_apply как шаблон "
+          "с мелкими правками. Плана нет — так и скажет, тогда строй сразу "
+          "через plan_draft + plan_apply без повторной проверки.",
+          {"type": "object", "properties": {},
+           "additionalProperties": False}),
     _tool("plan_draft", "Черновик плана на гибкий срок (день/неделя/месяц/год — "
           "решаешь сам по словам ученика). Ничего не применяет: применение — "
           "только через plan_apply с подтверждением. Возвращает периоды "
@@ -454,7 +474,7 @@ AGENT_TOOLS: list = [
 ]
 
 ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress", "plan_apply"})
-READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_draft",
+READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_get", "plan_draft",
                         "find_topics", "project_info"})
 
 
@@ -2810,6 +2830,96 @@ def study_plan_close_topic(conn: sqlite3.Connection, user_id: int, subject: str,
     return fresh
 
 
+def plan_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """ТЕКУЩИЙ учебный план: есть ли, что внутри.
+
+    Read-инструмент для модели (в паре с plan_draft/plan_apply): перед тем как
+    писать НОВЫЙ план, модель сначала смотрит, что уже есть, — иначе она
+    молча затирала бы текущий или переспрашивала то, что уже в базе.
+
+    Формат — ТОТ ЖЕ, что у plan_draft (periods с topics skillId+name), плюс
+    состояние каждой темы (done/open) и прогресс. Отдельного «шаблона» нет
+    осознанно: periods отсюда годятся в plan_apply как есть (он принимает и
+    {topics:[{skillId}]}, и ужатый {skillIds:[]}) — для мелких правок модели
+    достаточно чуть поменять список, для нового с нуля — выкинуть и позвать
+    plan_draft. Человеческим языком сверху не дублируем: названия тем и так
+    человеческие, а пересказ заставил бы модель перекодировать слова обратно
+    в skillId с риском выдумать id.
+
+    Ключ periods — верхнего уровня (как у plan_draft), поэтому длинный план
+    режется _tool_payload поштучно, как черновик, а не обрывком JSON.
+    """
+    try:
+        state = study_plan_state(conn, int(user_id), str(subject or ""))
+    except Exception:
+        state = {}
+    active = state.get("active") if isinstance(state, dict) else None
+    last_done = state.get("lastDone") if isinstance(state, dict) else None
+    if not isinstance(active, dict):
+        out: dict = {"hasPlan": False, "periods": [], "lastDone": last_done}
+        if isinstance(last_done, dict) and last_done.get("title"):
+            out["note"] = (f"Учебного плана пока нет (прошлый «{last_done.get('title')}» "
+                           "выполнен) — новый строй сразу через plan_draft + plan_apply.")
+        else:
+            out["note"] = ("Учебного плана пока нет — новый строй сразу через "
+                           "plan_draft + plan_apply, проверять больше нечего.")
+        return out
+    try:
+        title = str(active.get("title") or "План")
+        days = int(active.get("days") or 0)
+    except (TypeError, ValueError):
+        title, days = "План", 0
+    prog = active.get("progress") if isinstance(active.get("progress"), dict) else {}
+    try:
+        closed = int(prog.get("closed") or 0)
+        total = int(prog.get("total") or 0)
+    except (TypeError, ValueError):
+        closed, total = 0, 0
+    periods = []
+    for p in active.get("periods", []) or []:
+        if not isinstance(p, dict):
+            continue
+        topics = []
+        for t in p.get("topics", []) or []:
+            if not isinstance(t, dict):
+                continue
+            sid = str(t.get("skillId") or "").strip()
+            if not sid:
+                continue
+            try:
+                mastery = int(t.get("mastery") or 0)
+            except (TypeError, ValueError):
+                mastery = 0
+            topics.append({"skillId": sid,
+                           "name": str(t.get("name") or sid)[:120],
+                           "state": str(t.get("state") or "open")[:8],
+                           "mastery": mastery})
+        try:
+            pidx = int(p.get("index", len(periods)))
+            pdays = max(1, int(p.get("days", 7)))
+        except (TypeError, ValueError):
+            continue
+        periods.append({"index": pidx, "label": str(p.get("label") or f"Период {pidx + 1}")[:64],
+                        "days": pdays, "topics": topics})
+    try:
+        cur_idx = active.get("currentIndex")
+        cur_idx = None if cur_idx is None else int(cur_idx)
+    except (TypeError, ValueError):
+        cur_idx = None
+    return {"hasPlan": True,
+            "title": title[:80], "days": days, "daysLabel": _days_ru(days),
+            "progress": {"closed": closed, "total": total},
+            "currentIndex": cur_idx,
+            "completed": bool(active.get("completed")),
+            "periods": periods,
+            "lastDone": last_done,
+            "note": ("Текущий план выше (periods — в том же формате, что plan_draft: "
+                     "для мелких правок отдай их в plan_apply как есть, для нового "
+                     "с нуля — позови plan_draft). Новый план ЗАМЕНИТ этот — "
+                     "предупреди ученика.")}
+
+
+
 # ---------------------------------------------------------------------------
 # Действия: сначала proposal (без записи), потом apply после подтверждения
 # ---------------------------------------------------------------------------
@@ -3549,6 +3659,8 @@ def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name
         return essay_history(conn, user_id, subject, args)
     if name == "plan_draft":
         return plan_draft(conn, user_id, subject, args)
+    if name == "plan_get":
+        return plan_get(conn, user_id, subject, args)
     if name == "find_topics":
         return find_topics(conn, user_id, subject, args)
     if name == "project_info":
@@ -3699,6 +3811,21 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         return f"Ищу по каталогу: {q}" if q else "Ищу по каталогу"
     if name == "plan_draft":
         return "Составляю черновик плана"
+    if name == "plan_get":
+        # Строка шага читает ученик: название плана человеческое, кодов нет
+        # (правило 5b); прогресс — парой чисел, как в остальных шагах.
+        try:
+            if isinstance(result, dict) and result.get("hasPlan"):
+                prog = result.get("progress") or {}
+                closed = int(prog.get("closed") or 0)
+                total = int(prog.get("total") or 0)
+                title = str(result.get("title") or "").strip()[:60]
+                if title:
+                    return f"Смотрю текущий план «{title}» — {closed} из {total}"
+                return f"Смотрю текущий план — {closed} из {total}"
+        except (TypeError, ValueError):
+            pass
+        return "Проверяю текущий учебный план"
     if name == "project_info":
         return "Смотрю справку о сайте"
     if name == "update_profile":
@@ -3785,14 +3912,18 @@ def subject_title(subject: str) -> str:
 
 
 def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
-    """Стартовый блок хода: имя, предмет простыми словами, компактный прогноз.
+    """Стартовый блок хода: имя, предмет простыми словами, компактный прогноз,
+    одна строка про учебный план.
 
     Экономит целый круг модели: раньше «какой у меня предмет» и «как меня
     зовут» требовали вызова fold_web(op="profile"), а «какой прогноз» —
     ещё и fold_web(op="forecast"). Теперь это лежит в system с первого
     токена. Прогноз считается тем же _compute_forecast (копейки локального
     SQL, без провайдера) и актуален на начало хода; детали (ошибки,
-    попытки, разборы) по-прежнему только инструментами. Не бросает:
+    попытки, разборы) по-прежнему только инструментами. Строка про план —
+    та же экономия: «сделай мне план» при пустом плане идёт сразу в
+    plan_draft без лишнего plan_get, а при существующем модель знает, что
+    детали надо добрать инструментом. Не бросает:
     при любой проблеме отдаёт то, что собралось (хоть пусто).
     """
     lines = ["КОНТЕКСТ ХОДА (данные сервера на начало хода)."]
@@ -3828,9 +3959,39 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
             if gains:
                 line += " Что подтянуть: " + ", ".join(f"«{g[:60]}»" for g in gains) + "."
             lines.append(line)
+        # Одна строка про план — факт наличия без деталей (детали — в plan_get).
+        # Дешёвый запрос: активный план + счётчики тем, без прогноза и mastery.
+        # Если в базе нет таблиц плана — молча пропускаем строку, а не врём.
+        try:
+            plan_row = active_study_plan(conn, int(user_id), str(subject or ""))
+        except Exception:
+            plan_row = None
+        if plan_row is not None:
+            try:
+                ptitle = str(plan_row["title"] or "План")[:60]
+                pdays = int(plan_row["days_total"] or 0)
+                pid = int(plan_row["id"])
+                try:
+                    cnt = conn.execute("SELECT COUNT(*) AS c FROM study_plan_topics"
+                                       " WHERE plan_id=?", (pid,)).fetchone()
+                    total = int((cnt["c"] if cnt else 0) or 0)
+                except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+                    total = 0
+                try:
+                    cnt = conn.execute("SELECT COUNT(*) AS c FROM study_plan_topics"
+                                       " WHERE plan_id=? AND state='closed'", (pid,)).fetchone()
+                    closed = int((cnt["c"] if cnt else 0) or 0)
+                except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+                    closed = 0
+                lines.append(f"Учебный план есть: «{ptitle}» на {_days_ru(pdays)}, "
+                             f"закрыто {closed} из {total}. Детали — только через plan_get.")
+            except (TypeError, ValueError, KeyError, IndexError):
+                pass
+        else:
+            lines.append("Учебного плана пока нет.")
         lines.append("Числа и факты выше — от сервера, их можно называть сразу "
-                     "без вызова инструментов; детали (ошибки, попытки, разборы) "
-                     "добери инструментами.")
+                     "без вызова инструментов; детали (ошибки, попытки, разборы, "
+                     "план) добери инструментами.")
     except Exception:
         pass
     return "\n".join(lines)
