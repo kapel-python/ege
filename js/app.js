@@ -5765,7 +5765,7 @@ function askSessionSelfReveal() {
     iconName: "bulb",
     cancelText: "Решу сам(а)",
     confirmText: "Сверить",
-    danger: false,
+    primary: true,
     onConfirm: () => sessionSelfReveal(),
   });
 }
@@ -5868,7 +5868,7 @@ function askSessionShowAnswer() {
     iconName: "bulb",
     cancelText: "Подумаю ещё",
     confirmText: "Показать",
-    danger: false,
+    primary: true,
     onConfirm: () => sessionShowAnswer(),
   });
 }
@@ -8803,7 +8803,7 @@ function openConfirmDialog(opts) {
   const text = o.text || "";
   const cancelText = o.cancelText || "Отмена";
   const confirmText = o.confirmText || "Подтвердить";
-  const danger = o.danger === false ? "" : " btn--danger-soft";
+  const danger = o.primary ? " btn--primary" : (o.danger === false ? "" : " btn--danger-soft");
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
       <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
