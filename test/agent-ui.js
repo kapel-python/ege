@@ -113,6 +113,11 @@ check("раскрытие Подробнее", spaCode.includes("Подробн�
 check("кнопки подтверждения", spaCode.includes("Применить") && spaCode.includes("Отмена")
   && spaCode.includes("needs_confirm") && spaCode.includes("confirmStep"));
 check("confirm без даблклика", spaCode.includes("disabled = true"));
+check("кнопки отвечают сразу («Думаю…» с фиксом ширины, возврат текста на всех выходах)",
+  spaCode.includes("Думаю…")
+  && /minWidth\s*=\s*b\.offsetWidth/.test(spaCode)
+  && spaCode.includes("function unthinkBtns")
+  && /delete b\.dataset\.think/.test(spaCode));
 check("квота с plural", spaCode.includes("setQuota") && spaCode.includes("pluralQ"));
 check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат хода через"));
 /* Пилюля «Осталось N из M» удалена полностью (элемента нет в DOM, CSS нет):
@@ -642,8 +647,8 @@ check("в карточке шага нет сырого имени инстру�
 // композер должен быть заблокирован (иначе «Стоп» пропадает, а следующий
 // вопрос упирается в AGENT_BUSY).
 check("подтверждение держит блокировку хода",
-  /function confirmStep[\s\S]{0,900}?S\.turn = turn;/.test(spaJs)
-  && /function confirmStep[\s\S]{0,1200}?syncBusy\(\);/.test(spaJs));
+  /function confirmStep[\s\S]{0,2200}?S\.turn = turn;/.test(spaJs)
+  && /function confirmStep[\s\S]{0,2600}?syncBusy\(\);/.test(spaJs));
 check("нажатие убирает кнопку и сдвигает соседние",
   spaCode.includes("collapseAsk") && /is-gone/.test(spaCss)
   && /\.agent__qr\.is-gone \{[^}]*overflow: hidden/.test(spaCss)

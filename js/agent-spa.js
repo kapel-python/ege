@@ -3205,7 +3205,37 @@
   }
   function confirmStep(messageId, approve, btns) {
     var mg = S.mountGen;
-    if (btns) btns.forEach(function (b) { b.disabled = true; });
+    // Кнопки отвечают сразу: нажатая пишет «Думаю…» (ширина фиксируется,
+    // чтобы не прыгала), остальные просто гаснут. Раньше ответ модели ждали
+    // молча — при медленном провайдере десятки секунд тишины. Возврат текста
+    // — в unthinkBtns на всех выходах (успех перерисует ленту сам, но если
+    // карточка осталась на месте, залипшего «Думаю…» быть не должно).
+    if (btns) btns.forEach(function (b) {
+      try {
+        if (b && !b.dataset.think) {
+          b.dataset.think = "1";
+          b.dataset.label = b.textContent;
+          try { b.style.minWidth = b.offsetWidth + "px"; } catch (_) {}
+          var mine = (approve && b.textContent === "Применить")
+            || (!approve && b.textContent === "Отмена");
+          if (mine) b.textContent = "Думаю…";
+        }
+        b.disabled = true;
+      } catch (_) { try { b.disabled = true; } catch (_) {} }
+    });
+    function unthinkBtns() {
+      if (!btns) return;
+      btns.forEach(function (b) {
+        try {
+          if (b && b.dataset && b.dataset.think) {
+            delete b.dataset.think;
+            if (b.dataset.label != null) b.textContent = b.dataset.label;
+            delete b.dataset.label;
+            try { b.style.minWidth = ""; } catch (_) {}
+          }
+        } catch (_) {}
+      });
+    }
     // Подтверждение — это ТОЖЕ ход: сервер применяет действие и зовёт модель
     // (до 90 с). Раньше композер на это время оставался свободным: «Стоп»
     // пропадал, поле принимало текст, и ученик успевал отправить следующий
@@ -3234,6 +3264,7 @@
       var sawLive = (turn.liveShown || 0) > 0;
       liveDrop(turn);
       if (mg !== S.mountGen) return;
+      unthinkBtns();
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
         // Resume тоже тратит (каждый запрос — жетон): обнулил — покажем то же
@@ -3251,6 +3282,7 @@
         return;
       }
       if (handleAuthError(res)) return;
+      unthinkBtns();
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard((res.data && res.data.error) || "Не удалось подтвердить.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });
@@ -3261,6 +3293,7 @@
       // Обрыв по «Стоп» — это не ошибка, а решение человека; сервер ход всё
       // равно досчитает, а ответ подхватит watchAnswer.
       if (turn.detached) { watchAnswer(S.currentId, "", WATCH_TRIES); return; }
+      unthinkBtns();
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard("Нет соединения. Подтверждение не ушло — повтори.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });
