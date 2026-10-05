@@ -5858,7 +5858,7 @@ function sessionShowAnswer() {
         <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
       </div>
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решёшь его позже сам.</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решишь его позже сам.</div>
       <div style="margin-top:14px;text-align:right">
         <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
       </div>
