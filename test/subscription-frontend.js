@@ -161,11 +161,11 @@ function check(name, cond, detail) {
     && det.includes("Проверок сочинений") && det.includes("Ходов ИИ"));
   await page.screenshot({ path: shot("sub-manage.png") });
 
-  // отмена продления — через подтверждающее .dlg-окно
+  // отмена продления — тем же .modal-окном, что soon
   await page.click('#actionsRow [data-act="ask-cancel"]');
-  await page.waitForSelector('#cancel-modal-root .dlg', { timeout: 10000 });
+  await page.waitForSelector('#cancelModal.is-open', { timeout: 10000 });
   check("отмена: модалка подтверждения", true);
-  await page.click('#cancelGoBtn');
+  await page.click('#cancelGo');
   await page.waitForFunction(() => {
     const sub = document.getElementById("actionsSub");
     return sub && sub.textContent.includes("Автопродление выключено");

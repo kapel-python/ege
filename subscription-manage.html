@@ -26,7 +26,6 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
-<link rel="stylesheet" href="/css/dlg.css?v=2">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -352,7 +351,20 @@
   </div>
 </div>
 
-<div id="cancel-modal-root"></div>
+<div class="modal" id="cancelModal" role="dialog" aria-modal="true" aria-label="Отмена автопродления">
+  <div class="modal__box">
+    <button class="modal__close" type="button" id="cancelClose" aria-label="Закрыть">×</button>
+    <span class="modal__mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/></svg>
+    </span>
+    <h2 class="modal__title">Отменить автопродление?</h2>
+    <p class="modal__text">Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план. Прогресс и история никуда не денутся.</p>
+    <div class="modal__actions">
+      <button class="btn btn-ghost btn--sm" type="button" id="cancelBack">Назад</button>
+      <button class="btn btn-primary btn--sm" type="button" id="cancelGo">Да, отменить</button>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
@@ -614,69 +626,40 @@
           return;
         }
         if (act === "resume") { doPost("/api/subscription/resume", b, "Возвращаем…", "Автопродление снова включено"); return; }
-        if (act === "ask-cancel") { askCancel(); return; }
+        if (act === "ask-cancel") { openCancel(); return; }
       });
     }
   }
 
-  /* Отмена — подтверждающим .dlg-окном из единой dlg-системы
-     (css/dlg.css, как подтверждения на ege-result.html), а не строчным
-     блоком: мисклик мимо кнопки исключён, Esc/фон/«Назад» закрывают. */
-  var cancelPrevFocus = null;
-  function askCancel(){
-    var root = document.getElementById("cancel-modal-root");
-    if (!root || root.innerHTML) return;
-    try { cancelPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
-    catch(e){ cancelPrevFocus = null; }
-    root.innerHTML = '<div class="dlg-backdrop">'
-      + '<div class="dlg" role="dialog" aria-modal="true" aria-label="Отмена автопродления">'
-      + '<button class="dlg__close" type="button" aria-label="Закрыть окно">×</button>'
-      + '<div class="dlg__eyebrow">Подписка ' + PLUS_WORD + '</div>'
-      + '<div class="dlg__text" style="margin-top:10px;font-size:16px;font-weight:700;color:var(--text)">Отменить автопродление?</div>'
-      + '<div class="dlg__text">Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план. Прогресс и история никуда не денутся.</div>'
-      + '<div class="dlg__actions">'
-      + '<button class="btn btn-ghost btn--sm" type="button" data-cancel-act="back">Назад</button>'
-      + '<button class="btn btn-primary btn--sm" type="button" id="cancelGoBtn" data-cancel-act="go">Да, отменить</button>'
-      + '</div></div></div>';
-    /* Обработчики — свойствами, а не инлайн-атрибутами: весь скрипт живёт
-       внутри IIFE, глобальных имён confirmCancel/closeCancelModal нет. */
-    var backdrop = root.querySelector(".dlg-backdrop");
-    if (backdrop) backdrop.onclick = function(e){ if (e.target === this) closeCancelModal(); };
-    var xBtn = root.querySelector(".dlg__close");
-    if (xBtn) xBtn.onclick = closeCancelModal;
-    var backBtn = root.querySelector('[data-cancel-act="back"]');
-    if (backBtn) backBtn.onclick = closeCancelModal;
-    var goBtn = root.querySelector('[data-cancel-act="go"]');
-    if (goBtn) goBtn.onclick = confirmCancel;
-    document.addEventListener("keydown", cancelEscHandler);
-    var dlg = root.querySelector(".dlg");
-    if (dlg) { dlg.setAttribute("tabindex", "-1"); try { dlg.focus({ preventScroll: true }); } catch(e){} }
+  /* Отмена — тем же окном .modal/.is-open, что «Оплата пока недоступна»:
+     отдельный статичный блок в разметке, без конструкторов из JS. */
+  var cancelModal = document.getElementById("cancelModal");
+  function openCancel(){
+    if (!cancelModal) return;
+    cancelModal.classList.add("is-open");
+    try { document.body.style.overflow = "hidden"; } catch(e){}
   }
-  function cancelEscHandler(e){
-    if (e && e.key === "Escape") closeCancelModal();
+  function closeCancel(){
+    if (!cancelModal) return;
+    cancelModal.classList.remove("is-open");
+    try { document.body.style.overflow = ""; } catch(e){}
   }
-  function closeCancelModal(){
-    var root = document.getElementById("cancel-modal-root");
-    if (!root || !root.innerHTML) return;
-    root.innerHTML = "";
-    document.removeEventListener("keydown", cancelEscHandler);
-    if (cancelPrevFocus && cancelPrevFocus.isConnected) {
-      try { cancelPrevFocus.focus({ preventScroll: true }); } catch(e){}
-    }
-    cancelPrevFocus = null;
-  }
-  function confirmCancel(){
-    var b = document.getElementById("cancelGoBtn");
+  document.getElementById("cancelClose").addEventListener("click", closeCancel);
+  document.getElementById("cancelBack").addEventListener("click", closeCancel);
+  document.getElementById("cancelGo").addEventListener("click", function(){
+    var b = document.getElementById("cancelGo");
     setBusy(b, true, "Отменяем…");
     api("/api/subscription/cancel", {}).then(function(){
-      closeCancelModal();
+      closeCancel();
       toast("Автопродление выключено — доступ до конца срока сохранён");
       reload();
     }).catch(function(err){
       setBusy(b, false);
       toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
     });
-  }
+  });
+  cancelModal.addEventListener("click", function(e){ if (e.target === cancelModal) closeCancel(); });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeCancel(); });
 
   function doPost(path, btn, busyLabel, okText){
     setBusy(btn, true, busyLabel);
