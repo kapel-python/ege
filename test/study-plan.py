@@ -154,6 +154,7 @@ try:
 except agent.PlanStateError as exc:
     check("foreign skill rejects", exc.code == "NOT_IN_PLAN", exc.code)
 
+check("threshold is 75", agent.TOPIC_MASTERED_AT == 75)
 conn.close()
 os.unlink(path)
 print(f"\n{checks - failures}/{checks} ok")
