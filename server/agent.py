@@ -422,8 +422,9 @@ AGENT_TOOLS: list = [
           "вернёт название, срок, прогресс (закрыто N из M) и периоды с темами "
           "(skillId + человеческое название + состояние done/open) — в том же формате, "
           "что plan_draft, поэтому periods оттуда годятся в plan_apply как шаблон "
-          "с мелкими правками. Плана нет — так и скажет, тогда строй сразу "
-          "через plan_draft + plan_apply без повторной проверки.",
+          "с мелкими правками. Плана в этом предмете нет, но есть в другом — "
+          "так и скажет (otherPlans): ученику называешь ПРЕДМЕТ, а не «план в школе». "
+          "Нигде нет — строй сразу через plan_draft + plan_apply без повторной проверки.",
           {"type": "object", "properties": {},
            "additionalProperties": False}),
     _tool("plan_draft", "Черновик плана на гибкий срок (день/неделя/месяц/год — "
@@ -2830,6 +2831,52 @@ def study_plan_close_topic(conn: sqlite3.Connection, user_id: int, subject: str,
     return fresh
 
 
+def _other_subject_plans(conn: sqlite3.Connection, user_id: int, subject: str,
+                         limit: int = 3) -> list:
+    """Активные планы ДРУГИХ предметов: сводка без периодов.
+
+    Планы лежат по предметам (user_id + subject), а ученик спрашивает «у меня
+    есть план?» без уточнения — живым случаем модель отвечала «плана нет»,
+    когда план был в соседнем предмете. Только сводка (название/срок/
+    прогресс): чужие periods сюда нельзя — их skillId каталог текущего
+    предмета отвергнет, а детали живут в чате того предмета.
+    """
+    out: list = []
+    try:
+        rows = conn.execute("SELECT id, subject, title, days_total FROM study_plans"
+                            " WHERE user_id=? AND status='active' AND subject<>?"
+                            " ORDER BY id DESC LIMIT ?",
+                            (int(user_id), str(subject or ""), max(1, int(limit or 3)))).fetchall()
+    except (sqlite3.Error, TypeError, ValueError):
+        return []
+    for r in rows or []:
+        try:
+            pid = int(r["id"])
+            subj = str(r["subject"] or "")
+            title = str(r["title"] or "План")[:60]
+            days = int(r["days_total"] or 0)
+        except (TypeError, ValueError, KeyError, IndexError):
+            continue
+        if not subj:
+            continue
+        try:
+            cnt = conn.execute("SELECT COUNT(*) AS c FROM study_plan_topics"
+                               " WHERE plan_id=?", (pid,)).fetchone()
+            total = int((cnt["c"] if cnt else 0) or 0)
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            total = 0
+        try:
+            cnt = conn.execute("SELECT COUNT(*) AS c FROM study_plan_topics"
+                               " WHERE plan_id=? AND state='closed'", (pid,)).fetchone()
+            closed = int((cnt["c"] if cnt else 0) or 0)
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            closed = 0
+        out.append({"subject": subj, "subjectTitle": subject_title(subj) or subj,
+                    "title": title, "days": days,
+                    "progress": {"closed": closed, "total": total}})
+    return out
+
+
 def plan_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     """ТЕКУЩИЙ учебный план: есть ли, что внутри.
 
@@ -2857,6 +2904,24 @@ def plan_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
     last_done = state.get("lastDone") if isinstance(state, dict) else None
     if not isinstance(active, dict):
         out: dict = {"hasPlan": False, "periods": [], "lastDone": last_done}
+        # План мог быть в СОСЕДНЕМ предмете: «у меня есть план?» без уточнения —
+        # это про любой, а не про текущий (живой случай: план в обществе,
+        # вопрос из математики → «плана нет — чистый лист» при живом плане).
+        try:
+            others = _other_subject_plans(conn, int(user_id), str(subject or ""))
+        except Exception:
+            others = []
+        if others:
+            out["otherSubject"] = True
+            out["otherPlans"] = others
+            first = others[0]
+            out["note"] = (f"В этом предмете плана нет, но он есть в другом: "
+                           f"«{first['title']}» ({first['subjectTitle']}, "
+                           f"{_days_ru(first['days'])}). Так и скажи ученику и НЕ "
+                           f"выдумывай «план в школе»: детали живут в чате того "
+                           f"предмета. Новый план здесь строй только если он "
+                           f"просит именно сюда — через plan_draft + plan_apply.")
+            return out
         if isinstance(last_done, dict) and last_done.get("title"):
             out["note"] = (f"Учебного плана пока нет (прошлый «{last_done.get('title')}» "
                            "выполнен) — новый строй сразу через plan_draft + plan_apply.")
@@ -3988,7 +4053,20 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
             except (TypeError, ValueError, KeyError, IndexError):
                 pass
         else:
-            lines.append("Учебного плана пока нет.")
+            # В этом предмете пусто — но план мог быть в соседнем (живой случай:
+            # «у меня есть план?» из математики при живом плане в обществе).
+            # Без этой строки модель отвечала «плана нет — чистый лист».
+            try:
+                others = _other_subject_plans(conn, int(user_id), str(subject or ""), 1)
+            except Exception:
+                others = []
+            if others:
+                first = others[0]
+                lines.append(f"Учебного плана пока нет, но он есть в другом предмете: "
+                             f"«{str(first['title'])[:60]}» ({first['subjectTitle']}, "
+                             f"{_days_ru(first['days'])}). Детали — только через plan_get.")
+            else:
+                lines.append("Учебного плана пока нет.")
         lines.append("Числа и факты выше — от сервера, их можно называть сразу "
                      "без вызова инструментов; детали (ошибки, попытки, разборы, "
                      "план) добери инструментами.")

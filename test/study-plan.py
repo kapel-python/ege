@@ -235,7 +235,8 @@ check("plan_get step human",
       and agent.describe_step("plan_get", {}, empty_get) == "Проверяю текущий учебный план")
 ctx_empty = agent.turn_context(conn, 1, "russian")
 ctx_full = agent.turn_context(conn, 1, "profile_math")
-check("context no plan", "Учебного плана пока нет." in ctx_empty, " | ".join(ctx_empty.splitlines()[-2:]))
+check("context no plan", "Учебного плана пока нет, но он есть в другом предмете" in ctx_empty
+      and "Профильная математика" in ctx_empty, " | ".join(ctx_empty.splitlines()[-2:]))
 check("context has plan",
       "Учебный план есть:" in ctx_full and "plan_get" in ctx_full, " | ".join(ctx_full.splitlines()[-3:]))
 big = dict(full_get)
@@ -248,6 +249,31 @@ try:
           and parsed.get("truncated", {}).get("field") == "periods")
 except ValueError:
     check("plan_get payload trims valid", False, pay[:80])
+# --- 8. План в соседнем предмете: «у меня есть план?» без уточнения ---
+# Живой случай: план в обществе, вопрос из математики → «плана нет — чистый
+# лист» при живом плане. plan_get и контекст обязаны назвать другой предмет.
+conn.execute("INSERT INTO study_plans(user_id,subject,title,days_total,starts_at_ms,status,created_at_ms,periods_json)"
+             " VALUES(1,'russian','План Р',7,?,'active',?,?)",
+             (now, now, json.dumps([{"index": 0, "label": "Неделя 1", "days": 7,
+                                          "topics": [{"skillId": "sk_a", "name": "Альфа"}]}])))
+rid = conn.execute("SELECT id FROM study_plans WHERE user_id=1 AND subject='russian'").fetchone()["id"]
+conn.execute("INSERT INTO study_plan_topics(plan_id,period_idx,skill_id,state) VALUES(?,?,?,'open')",
+             (rid, 0, "sk_a"))
+conn.commit()
+other_get = agent.plan_get(conn, 1, "society", {})
+check("plan_get other subject",
+      other_get["hasPlan"] is False and other_get.get("otherSubject") is True
+      and any(p["subject"] == "russian" and p["subjectTitle"] == "Русский язык"
+              and p["progress"] == {"closed": 0, "total": 1}
+              for p in (other_get.get("otherPlans") or []))
+      and "школе" in other_get["note"] and "План Р" in other_get["note"],
+      str(other_get.get("otherPlans")))
+check("plan_get current wins",
+      "otherPlans" not in full_get and full_get["hasPlan"] is True)
+ctx_other = agent.turn_context(conn, 1, "society")
+check("context other subject",
+      "есть в другом предмете" in ctx_other and "Русский язык" in ctx_other,
+      " | ".join(ctx_other.splitlines()[-3:-1]))
 
 conn.close()
 os.unlink(path)
