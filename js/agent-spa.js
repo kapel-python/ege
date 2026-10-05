@@ -978,6 +978,7 @@
         found = true;
         return { id: t.id, publicId: thread.publicId || t.publicId,
                  subject: t.subject, subjectTitle: thread.subjectTitle || t.subjectTitle,
+                 subjectCompact: thread.subjectCompact || t.subjectCompact,
                  title: thread.title || t.title,
                  createdAt: t.createdAt, updatedAt: Date.now() };
       }
@@ -988,21 +989,27 @@
     renderThreads();
     paintTitle();
   }
-  /* Предмет треда — прямо в заголовке окна чата («Новый чат • Математика»):
+  /* Предмет треда — прямо в заголовке окна чата («Новый чат • Проф мат»):
      предмет решает, в каком предмете идёт ход, а ученик его не видел
      (живой баг: «у меня есть план?» из математики при плане в обществе).
      Название треда режется многоточием, предмет — никогда: он второй,
-     несжимаемый. Отдельной плашки нет осознанно: тулбар не разъезжается. */
-  var SUBJ_FALLBACK = {
-    profile_math: "Профильная математика", basic_math: "Базовая математика",
-    russian: "Русский язык", biology: "Биология", society: "Обществознание"
-  };
+     несжимаемый, бюджет 8 символов (серверное subjectCompact; резерв —
+     срез полного). Отдельной плашки нет осознанно: тулбар не разъезжается. */
   function subjName(t) {
     if (!t) return "";
     try {
-      if (t.subjectTitle && String(t.subjectTitle).trim()) return String(t.subjectTitle).trim().slice(0, 40);
-      var s = SUBJ_FALLBACK[String(t.subject || "")];
-      return s || "";
+      var c = t.subjectCompact && String(t.subjectCompact).trim();
+      if (c) return c.slice(0, 8);
+      var f = t.subjectTitle && String(t.subjectTitle).trim();
+      if (f) return f.slice(0, 8);
+      return "";
+    } catch (_) { return ""; }
+  }
+  function subjFull(t) {
+    if (!t) return "";
+    try {
+      var f = t.subjectTitle && String(t.subjectTitle).trim();
+      return f ? f.slice(0, 40) : "";
     } catch (_) { return ""; }
   }
   function paintTitle() {
@@ -1016,7 +1023,11 @@
     var sub = subjName(t);
     if (sub) {
       var b = el("span", "agent__title-s", null);
-      try { b.textContent = "• " + sub; } catch (_) {}
+      try {
+        b.textContent = "• " + sub;
+        var full = subjFull(t);
+        if (full && full !== sub) b.title = full;
+      } catch (_) {}
       ui.title.appendChild(b);
     }
   }

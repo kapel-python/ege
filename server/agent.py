@@ -3976,6 +3976,35 @@ def subject_title(subject: str) -> str:
     return _SUBJECT_TITLE_FALLBACK.get(sid, sid)
 
 
+# Компактное имя предмета для заголовка окна чата («название • Проф мат»).
+# Бюджет — 8 символов: тулбар узкий, особенно на телефоне. Это НЕ общее поле
+# `short` из subjects/*.json (оно живёт на карточках и в переключателе
+# предметов всего сайта) — здесь свои слова именно под заголовок.
+SUBJECT_COMPACT = {
+    "profile_math": "Проф мат",
+    "basic_math": "Баз мат",
+    "russian": "Русский",
+    "biology": "Биология",
+    "society": "Общество",
+}
+SUBJECT_COMPACT_LEN = 8
+
+
+def subject_compact_title(subject: str) -> str:
+    """Компактное имя предмета (≤8 символов). Не бросает.
+
+    Будущие предметы без явной записи режутся из полного названия: бюджет
+    держится всегда, пусть и с обрывом слова — явную запись тогда добавляем
+    (тест test/agent-ui.js следит, что каждый предмет реестра покрыт)."""
+    sid = str(subject or "").strip()
+    if not sid:
+        return ""
+    name = SUBJECT_COMPACT.get(sid)
+    if name:
+        return name
+    return subject_title(sid)[:SUBJECT_COMPACT_LEN]
+
+
 def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
     """Стартовый блок хода: имя, предмет простыми словами, компактный прогноз,
     одна строка про учебный план.

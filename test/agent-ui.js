@@ -112,17 +112,32 @@ check("шаги с тогглом", spaCode.includes("agent__trace-toggle") && s
 check("раскрытие Подробнее", spaCode.includes("Подробнее"));
 check("кнопки подтверждения", spaCode.includes("Применить") && spaCode.includes("Отмена")
   && spaCode.includes("needs_confirm") && spaCode.includes("confirmStep"));
-check("предмет треда в заголовке окна («название • Предмет», предмет не режется)",
+check("предмет треда в заголовке окна («название • Проф мат», предмет не режется)",
   /function paintTitle\(\)/.test(spaCode)
   && /agent__title-t/.test(spaCode) && /agent__title-s/.test(spaCode)
   && /"• " \+ sub/.test(spaCode)
+  && /subjectCompact/.test(spaCode) && /\.slice\(0, 8\)/.test(spaCode)
   && ((spaCode.match(/ui\.title\.textContent\s*=/g) || []).length === 1) // только очистка внутри paintTitle
-  && /SUBJ_FALLBACK/.test(spaCode) && spaCode.includes("profile_math")
   && /\.agent__title-s\s*\{[^}]*color:\s*var\(--accent-ink\)/.test(spaCss)
   && /\.agent__title-t\s*\{[^}]*text-overflow:\s*ellipsis/.test(spaCss));
 check("сервер отдаёт название предмета треда",
   /"subjectTitle":\s*_agent_subject_title\(/.test(srvCode)
-  && /def _agent_subject_title/.test(srvCode));
+  && /def _agent_subject_title/.test(srvCode)
+  && /"subjectCompact":\s*_agent_subject_compact\(/.test(srvCode));
+/* Компакт (≤8 символов) задан явно для каждого предмета реестра: срез
+   будущего предмета без записи дал бы обрыв слова. */
+check("компакт предмета ≤8 и покрывает весь реестр",
+  (() => {
+    const agentCode = read("server/agent.py");
+    const m = agentCode.match(/SUBJECT_COMPACT = \{([\s\S]*?)\}/);
+    if (!m) return false;
+    const entries = [...m[1].matchAll(/"([a-z_]+)":\s*"([^"]*)"/g)];
+    if (!entries.length || !entries.every((e) => e[2].length <= 8)) return false;
+    const dir = fs.readdirSync(path.join(ROOT, "server", "subjects"));
+    const ids = dir.filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, ""));
+    const keys = entries.map((e) => e[1]);
+    return ids.every((id) => keys.includes(id));
+  })());
 check("confirm без даблклика", spaCode.includes("disabled = true"));
 check("подтверждение отвечает сразу: галочка + скелетон, а не тишина",
   /function confirmUIBusy/.test(spaCode)

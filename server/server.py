@@ -506,10 +506,23 @@ def _agent_subject_title(sid) -> str:
     return str(sid or "").strip()
 
 
+def _agent_subject_compact(sid) -> str:
+    """Компактное имя предмета треда (≤8 символов) для заголовка чата."""
+    try:
+        if _AGENT is not None:
+            name = _AGENT.subject_compact_title(sid)
+            if str(name or "").strip():
+                return str(name).strip()[:_AGENT.SUBJECT_COMPACT_LEN]
+    except Exception:
+        pass
+    return str(sid or "").strip()[:8]
+
+
 def _agent_thread_payload(row) -> dict:
     """Публичная форма треда: внутренний id (совместимость) + внешний publicId."""
     return {"id": int(row["id"]), "publicId": _agent_thread_public_id(row),
             "subject": row["subject"], "subjectTitle": _agent_subject_title(row["subject"]),
+            "subjectCompact": _agent_subject_compact(row["subject"]),
             "title": row["title"],
             "createdAt": int(row["created_at"]), "updatedAt": int(row["updated_at"])}
 
@@ -14648,6 +14661,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "thread": {"id": tid, "publicId": public_id,
                                                "subject": subject,
                                                "subjectTitle": _agent_subject_title(subject),
+                                               "subjectCompact": _agent_subject_compact(subject),
                                                "title": "Новый чат", "createdAt": created_at,
                                                "updatedAt": now_ms}}, token=token); return
                 # POST /api/agent/threads/<ref>/delete — удалить свой тред.
