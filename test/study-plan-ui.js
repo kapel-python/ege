@@ -37,8 +37,8 @@ check("A: кнопка только в ветке needs_confirm (не трога
   /if \(st\.status === "needs_confirm"\)[\s\S]{0,1400}Показать план/.test(spaJs)
   && !/status === "dropped"[\s\S]{0,400}Показать план/.test(spaJs));
 check("A: Применить/Отмена на месте и зовут confirmStep как раньше",
-  /confirmStep\(st\.id, true, \[apply, cancel\]\)/.test(spaJs)
-  && /confirmStep\(st\.id, false, \[apply, cancel\]\)/.test(spaJs));
+  /confirmStep\(st\.id, true, \[apply, cancel\]/.test(spaJs)
+  && /confirmStep\(st\.id, false, \[apply, cancel\]/.test(spaJs));
 check("A: шаг определяется как plan_apply по tool и по result/proposal.action",
   /function planProposalOf\(st\)/.test(spaJs)
   && /r\.action === "plan_apply"/.test(spaJs)

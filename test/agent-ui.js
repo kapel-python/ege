@@ -113,11 +113,17 @@ check("раскрытие Подробнее", spaCode.includes("Подробн�
 check("кнопки подтверждения", spaCode.includes("Применить") && spaCode.includes("Отмена")
   && spaCode.includes("needs_confirm") && spaCode.includes("confirmStep"));
 check("confirm без даблклика", spaCode.includes("disabled = true"));
-check("кнопки отвечают сразу («Думаю…» с фиксом ширины, возврат текста на всех выходах)",
-  spaCode.includes("Думаю…")
-  && /minWidth\s*=\s*b\.offsetWidth/.test(spaCode)
-  && spaCode.includes("function unthinkBtns")
-  && /delete b\.dataset\.think/.test(spaCode));
+check("подтверждение отвечает сразу: галочка + скелетон, а не тишина",
+  /function confirmUIBusy/.test(spaCode)
+  && /stepMark\(\{\s*kind:\s*"action",\s*status:\s*"done"\s*\}\)/.test(spaCode)
+  && /skel = skeletonCard\(\)/.test(spaCode)
+  && /dropSkel\(\);/.test(spaCode));
+check("ошибка подтверждения возвращает кнопки (перерисовка шага)",
+  /confirmUIBusy\(p\);/.test(spaCode)
+  && /stepFill\(p\); \} catch/.test(spaCode));
+check("pending после сноса превью доводится до кнопок (только следящего, дважды)",
+  /if \(res\.data\.pending\)[\s\S]{0,1500}?if \(S\.follow\) scrollDown\(true, false\);/.test(spaJs)
+  && /later\(450, function \(\) \{ if \(S\.follow\) scrollDown\(true, false\); \}\);/.test(spaJs));
 check("квота с plural", spaCode.includes("setQuota") && spaCode.includes("pluralQ"));
 check("ноль показывает время возврата", spaCode.includes("resetInSec") && spaCode.includes("Возврат хода через"));
 /* Пилюля «Осталось N из M» удалена полностью (элемента нет в DOM, CSS нет):

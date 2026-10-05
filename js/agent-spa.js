@@ -1544,8 +1544,14 @@
       apply.type = "button";
       var cancel = el("button", "btn btn--ghost btn--sm", "Отмена");
       cancel.type = "button";
-      apply.addEventListener("click", function () { confirmStep(st.id, true, [apply, cancel]); });
-      cancel.addEventListener("click", function () { confirmStep(st.id, false, [apply, cancel]); });
+      apply.addEventListener("click", function () {
+        confirmUIBusy(p);
+        confirmStep(st.id, true, [apply, cancel], function () { try { stepFill(p); } catch (_) {} });
+      });
+      cancel.addEventListener("click", function () {
+        confirmUIBusy(p);
+        confirmStep(st.id, false, [apply, cancel], function () { try { stepFill(p); } catch (_) {} });
+      });
       acts.appendChild(apply); acts.appendChild(cancel);
       // Учебный план: третья кнопка показывает содержимое предложения до
       // решения. confirmStep трогает только первые две кнопки, эта — лишь
@@ -3003,6 +3009,16 @@
         // Ждущий подтверждения и так раскрыт: перепроигрывать нечего ни в
         // живом случае (шаги уже на экране), ни в быстром (один шаг).
         assistantCard(mapped, null, sawLive ? false : true);
+        // Живое превью только что снесли (liveDrop выше): лента стоит на его
+        // уровне, то есть в начале карточки, а кнопки — под краем. Печати,
+        // которая дотягивает обычные ходы до низа, здесь нет и не будет —
+        // доводим руками, но только следящего (S.follow): ушедшего вверх
+        // не трогаем. Живой случай на медленном провайдере: превью росло
+        // секунды, кламп после сноса уводил вид на начало сообщения.
+        // Дважды: раскрытие ленты анимируется (~0.35 с grid-transition),
+        // и первый скролл едет к ещё не доросшей высоте.
+        if (S.follow) scrollDown(true, false);
+        later(450, function () { if (S.follow) scrollDown(true, false); });
         say("Нужно подтверждение — нажми «Применить»");
       } else if (sawLive) {
         assistantCardLive(steps, res.data.final || "", res.data.suggests);
@@ -3203,38 +3219,33 @@
     errorCard("Нет соединения. Текст цел — повтори, когда появится сеть.", "Попробовать снова",
       function () { send(text, turn.replaceLast ? { force: true, replaceLast: true } : { force: true }); });
   }
-  function confirmStep(messageId, approve, btns) {
+  /* Кнопки уходят сразу, а не ждут ответа: вместо них — та же зелёная
+     галочка, что у исполненных шагов (действие вызвано), а ниже — тот же
+     скелетон «Думаю…», что у обычного хода. Молча ждать ответ модели
+     при медленном провайдере — десятки секунд тишины. */
+  function confirmUIBusy(p) {
+    try {
+      if (!p || !p.li || !p.body) return;
+      var mark = p.li.querySelector(".agent__mark");
+      if (mark) {
+        var done = null;
+        try { done = stepMark({ kind: "action", status: "done" }); } catch (_) { done = null; }
+        if (done && mark.parentNode) mark.parentNode.replaceChild(done, mark);
+      }
+      var acts = p.body.querySelector(".agent__step-actions");
+      if (acts && acts.parentNode) acts.parentNode.removeChild(acts);
+    } catch (_) {}
+  }
+  function confirmStep(messageId, approve, btns, onFail) {
     var mg = S.mountGen;
-    // Кнопки отвечают сразу: нажатая пишет «Думаю…» (ширина фиксируется,
-    // чтобы не прыгала), остальные просто гаснут. Раньше ответ модели ждали
-    // молча — при медленном провайдере десятки секунд тишины. Возврат текста
-    // — в unthinkBtns на всех выходах (успех перерисует ленту сам, но если
-    // карточка осталась на месте, залипшего «Думаю…» быть не должно).
-    if (btns) btns.forEach(function (b) {
-      try {
-        if (b && !b.dataset.think) {
-          b.dataset.think = "1";
-          b.dataset.label = b.textContent;
-          try { b.style.minWidth = b.offsetWidth + "px"; } catch (_) {}
-          var mine = (approve && b.textContent === "Применить")
-            || (!approve && b.textContent === "Отмена");
-          if (mine) b.textContent = "Думаю…";
-        }
-        b.disabled = true;
-      } catch (_) { try { b.disabled = true; } catch (_) {} }
-    });
-    function unthinkBtns() {
-      if (!btns) return;
-      btns.forEach(function (b) {
-        try {
-          if (b && b.dataset && b.dataset.think) {
-            delete b.dataset.think;
-            if (b.dataset.label != null) b.textContent = b.dataset.label;
-            delete b.dataset.label;
-            try { b.style.minWidth = ""; } catch (_) {}
-          }
-        } catch (_) {}
-      });
+    if (btns) btns.forEach(function (b) { try { b.disabled = true; } catch (_) {} });
+    // Скелетон как у обычного хода: сервер применяет действие и зовёт модель
+    // (до 90 с). Снимаем на всех выходах; ответ дорисует ленту сам.
+    var skel = null;
+    try { skel = skeletonCard(); } catch (_) { skel = null; }
+    function dropSkel() {
+      try { if (skel && skel.parentNode) skel.parentNode.removeChild(skel); } catch (_) {}
+      skel = null;
     }
     // Подтверждение — это ТОЖЕ ход: сервер применяет действие и зовёт модель
     // (до 90 с). Раньше композер на это время оставался свободным: «Стоп»
@@ -3264,7 +3275,7 @@
       var sawLive = (turn.liveShown || 0) > 0;
       liveDrop(turn);
       if (mg !== S.mountGen) return;
-      unthinkBtns();
+      dropSkel();
       if (res.status === 200 && res.data) {
         if (res.data.quota) setQuota(res.data.quota);
         // Resume тоже тратит (каждый запрос — жетон): обнулил — покажем то же
@@ -3281,8 +3292,9 @@
         }
         return;
       }
-      if (handleAuthError(res)) return;
-      unthinkBtns();
+      if (handleAuthError(res)) { dropSkel(); return; }
+      dropSkel();
+      try { if (typeof onFail === "function") onFail(); } catch (_) {}
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard((res.data && res.data.error) || "Не удалось подтвердить.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });
@@ -3292,8 +3304,9 @@
       if (mg !== S.mountGen) return;
       // Обрыв по «Стоп» — это не ошибка, а решение человека; сервер ход всё
       // равно досчитает, а ответ подхватит watchAnswer.
-      if (turn.detached) { watchAnswer(S.currentId, "", WATCH_TRIES); return; }
-      unthinkBtns();
+      if (turn.detached) { dropSkel(); watchAnswer(S.currentId, "", WATCH_TRIES); return; }
+      dropSkel();
+      try { if (typeof onFail === "function") onFail(); } catch (_) {}
       if (btns) btns.forEach(function (b) { b.disabled = false; });
       errorCard("Нет соединения. Подтверждение не ушло — повтори.", "Попробовать снова",
         function () { confirmStep(messageId, approve, null); });
