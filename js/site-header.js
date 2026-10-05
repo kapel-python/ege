@@ -107,6 +107,11 @@
   };
 
   try { document.addEventListener("click", onClick); } catch (_) {}
+  /* Шапка должна быть в первом кадре, а не догонять контент: монтируем
+     сразу при выполнении скрипта (тег стоит синхронно в конце body —
+     слот уже в DOM), слушатель ниже — лишь подстраховка. mountStatic
+     идемпотентен (непустые слоты пропускает), двойной вызов безопасен. */
+  try { mountStatic(); } catch (_) {}
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mountStatic);
   } else {

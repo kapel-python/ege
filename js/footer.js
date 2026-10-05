@@ -135,6 +135,10 @@
 
   window.Footer = { BLACKLIST: BLACKLIST, sync: sync, hide: hide, mountStatic: mountStatic };
 
+  /* Футер тоже в первом кадре: монтируем сразу при выполнении скрипта
+     (тег стоит синхронно в конце body), слушатель ниже — подстраховка.
+     Идемпотентно, двойной вызов безопасен. */
+  try { mountStatic(); } catch (_) {}
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mountStatic);
   } else {
