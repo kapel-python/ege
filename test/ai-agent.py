@@ -1441,6 +1441,7 @@ def main():
                   "СТРОГО ЗАПРЕЩЕНО" in agent.AGENT_SYSTEM
                   and "Проверь мой ответ: 12313" in agent.AGENT_SYSTEM
                   and "без чисел, без ответов, без решений" in agent.AGENT_SYSTEM
+                  and "3 месяца = 90 дней" in agent.AGENT_SYSTEM
                   and "дай подсказку" in agent.AGENT_SYSTEM)
             check("промпт запрещает заканчивать ход обещанием продолжить (2c)",
                   "Не заканчивай ход обещанием продолжить" in agent.AGENT_SYSTEM
