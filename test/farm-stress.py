@@ -545,6 +545,51 @@ def main():
             check("ИИ: старый в том же браузере — 0 + reason",
                   q.get("remaining") == 0 and q.get("reason") == "farm_suspected", str(q))
 
+            section("B7. тяжёлый сам + подогретый котёл: обычное окно, БЕЗ причины")
+            # Живой случай 05.10: 8 своих трат из 10, котёл добит чужими
+            # тратами с того же браузера — обвинение в ферме было ложным.
+            # Правило: reason — только когда свой почти полон (потратил сам
+            # не больше тика); блокировка та же (0), модалка честная.
+            # Сочинения (потолок 5): чужие 2 + свои 3 → 4-я попытка обычная:
+            hv = Client("10.48.0.1")
+            claim(hv, "Тяжёлый-чужой")
+            for _ in range(2):
+                s, _, _ = ai_check(hv)
+                assert s == 200, s
+            hv.request(base, "POST", "/api/auth/logout")
+            claim(hv, "Тяжёлый-сам")
+            for _ in range(3):
+                s, _, _ = ai_check(hv)
+                assert s == 200, s
+            s, _, st = essay_limits(hv)
+            check("0 без reason (свой 2/5 — тратил сам)",
+                  st.get("remaining") == 0 and st.get("reason") is None, str(st))
+            s, _, body = ai_check(hv)
+            check("429 обычный, с таймером, модель не вызвана",
+                  s == 429 and body.get("reason") is None and "аймер" in str(body.get("error")),
+                  f"{s} {body}")
+            # Ходы (потолок 10): чужие 2 + свои 8 → 9-я попытка обычная:
+            ha = Client("10.49.0.1")
+            claim(ha, "Тяжёлый-ИИ-чужой", "profile_math")
+            s, _, tb = new_thread(ha)
+            htid = (tb.get("thread") or {}).get("id")
+            for i in range(2):
+                s, _, _ = turn(ha, htid, f"чужой вопрос {i}")
+                assert s == 200, (s, i)
+            ha.request(base, "POST", "/api/auth/logout")
+            claim(ha, "Тяжёлый-ИИ-сам", "profile_math")
+            s, _, tb = new_thread(ha)
+            stid = (tb.get("thread") or {}).get("id")
+            for i in range(8):
+                s, _, _ = turn(ha, stid, f"свой вопрос {i}")
+                assert s == 200, (s, i)
+            s, _, q = agent_quota(ha)
+            check("ИИ: 0 без reason (свой 2/10 — тратил сам)",
+                  q.get("remaining") == 0 and q.get("reason") is None, str(q))
+            s, _, body = turn(ha, stid, "девятый")
+            check("ход 429 обычный, без reason",
+                  s == 429 and body.get("reason") is None, f"{s} {body}")
+
             # ================= C. ИЗВЕСТНЫЕ ГРАНИЦЫ =================
             section("C1. другой браузер + старые акки: котлом НЕ ловится (документировано)")
             o1 = Client("10.45.0.1")

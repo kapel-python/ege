@@ -8330,17 +8330,21 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
         "resetInSec": None if reset_ms is None else max(1, (reset_ms - now_ms + 999) // 1000),
         "windowSec": window_ms // 1000,
     }
-    # Подозрение на ферму: свежий аккаунт, а жмёт котёл устройства, а не
-    # свой бакет (свой полнее котла — значит, котёл выели ЧУЖИЕ траты с
-    # этого устройства/сети). Клиент по этому полю показывает причину
-    # без таймера: время вслух не называем, чтобы не учить ферму ротации.
+    # Подозрение на ферму: чужой котёл жмёт сильнее своего бакета — НО
+    # обвиняем, только если свой почти полон (потратил сам не больше одного
+    # тика: own >= limit - cum(1)). Тяжёлый сам (8 из 10 своих потратил, а
+    # котёл добили чужие траты с того же браузера) получает обычное окно
+    # исчерпания с таймером, а не обвинение: блокировка та же (остаток 0),
+    # а модалка честная. Клиент по полю reason показывает причину без
+    # таймера: время вслух не называем, чтобы не учить ферму ротации.
     if len(owners) > 1:
         try:
             own_rem = _ai_usage_count_at((states[0][0], states[0][1], states[0][2]),
                                          now_ms, now_ms, states[0][3], window_ms)
             dev_rem = min(_ai_usage_count_at((s[0], s[1], s[2]), now_ms, now_ms, s[3], window_ms)
                           for s in states[1:])
-            if dev_rem < own_rem:
+            own_limit = states[0][3]
+            if dev_rem < own_rem and own_rem >= own_limit - _bucket_cum(1, own_limit):
                 payload["reason"] = "farm_suspected"
         except (IndexError, TypeError, ValueError):
             pass
