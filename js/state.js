@@ -2575,7 +2575,7 @@ function checkAchievements() {
 function addTimeline(text) {
   // Timeline — производная от реальных учебных действий. Выбор locked
   // предмета не должен оставлять локальную «историю», которая выглядит как
-  // пройденнаяactivity, но никогда не сохраняется сервером.
+  // пройденная activity, но никогда не сохраняется сервером.
   if (!Store.state || !subjectLearningAvailable()) return;
   Store.state.timeline = safeArray(Store.state.timeline);
   Store.state.timeline.unshift({ id: newEntityId(), ts: Date.now(), text });
