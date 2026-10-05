@@ -3734,8 +3734,8 @@ function renderTask(root) {
     essayStatusesLoad();
     essayRestoreReady(t);
     essaySourceTextLoad(t);
-  } else if (t.selfCheck) {
-    // Развёрнутые задания (№14–20) не проверяются автоматически: единый
+  } else if (isSelfCheckTask(t)) {
+    // Развёрнутые задания части 2 не проверяются автоматически: единый
     // текстовый ответ не отражает полноту доказательства и записи решения.
     // Ученик решает на бумаге, сверяется с официальным решением и честно
     // отмечает результат сам — так же, как реально проверяют часть 2 ЕГЭ.
@@ -4005,7 +4005,7 @@ function sessionAnswerAreaHtml(t, S) {
     <div class="essay-editor__submit">
       <button class="btn btn--primary" id="essaySubmitBtn" disabled onclick="sessionEssaySubmit()">Отправить сочинение</button>
     </div>`;
-  if (t.selfCheck) return sessionSelfCheckAreaHtml(t);
+  if (isSelfCheckTask(t)) return sessionSelfCheckAreaHtml(t);
   return `
     <div class="answer-row">
       <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
@@ -5714,7 +5714,13 @@ function closeAiLimitModal() {
   closeDeviceModal();
 }
 
-/* ---------------- задания части 2: самопроверка вместо авто-проверки ---------------- */
+/* ---------------- задания части 2: самопроверка вместо авто-проверки ----------------
+   Режим берёт isSelfCheckTask: каноническое поле check:"self" из каталога
+   (legacy selfCheck:true нормализуется сервером туда же). */
+
+function isSelfCheckTask(t) {
+  return !!(t && (t.check === "self" || t.selfCheck === true));
+}
 
 function sessionSelfCheckAreaHtml() {
   return `

@@ -23,7 +23,7 @@ const testBody = async () => {
     .every((s) => DataAPI.tasksBySkill(s.id).length >= 3));
   t("развёрнутые задания №14-20 помечены для самопроверки", DataAPI.tasks()
     .filter((x) => x.type === "extended_answer")
-    .every((x) => x.selfCheck === true));
+    .every((x) => x.selfCheck === true && x.check === "self"));
   t("каждая задача несёт свой первоисточник", DataAPI.tasks().every((x) => x.sourceId && ["official-demo-2025", "official-demo-2026", "official-demo-2027", "official-openbank", "analog-openbank"].includes(x.status)));
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
   const visualAssets = DataAPI.visualAssets();

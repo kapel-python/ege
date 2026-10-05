@@ -94,6 +94,7 @@ sudo systemctl enable --now ege-2026.service
 node test/smoke.js
 node test/seo.js
 python3 test/support-message.py
+python3 test/task-check-type.py
 python3 test/russian-subject.py
 node test/russian-subject.js
 python3 test/biology-subject.py

@@ -6302,6 +6302,32 @@ def _upsert_catalog_skill(conn: sqlite3.Connection, item: dict, subject: str, su
     )
 
 
+_TASK_CHECK_MODES = ("auto", "self")
+
+
+def _task_check_mode(item: dict) -> str:
+    """Канонический режим проверки задания: "auto" (строгая сверка ответа
+    с эталоном) или "self" (неуниверсальный развёрнутый ответ: поля ввода
+    нет, ученик решает письменно и сверяется с решением сам).
+
+    `check` опционален и по умолчанию "auto"; legacy-флаг `selfCheck: true`
+    нормализуется в "self" для обратной совместимости. Три случая роняют
+    установку каталога сразу, а не на первом ученике: неизвестное значение
+    `check`, конфликт явного `check` с `selfCheck: true` и фраза
+    «в ответ запишите» в тексте self-задания (у него нет поля ввода)."""
+    check = item.get("check", None)
+    legacy = bool(item.get("selfCheck"))
+    if check is None:
+        check = "self" if legacy else "auto"
+    if check not in _TASK_CHECK_MODES:
+        raise ValueError(f"task {item.get('id')!r}: unknown check mode {check!r}")
+    if "check" in item and legacy and check != "self":
+        raise ValueError(f"task {item.get('id')!r}: check={check!r} conflicts with selfCheck:true")
+    if check == "self" and "ответ запишите" in str(item.get("text") or ""):
+        raise ValueError(f"task {item.get('id')!r}: self-check task must not ask to type the answer")
+    return check
+
+
 def _upsert_catalog_task(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
     _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
@@ -6310,9 +6336,14 @@ def _upsert_catalog_task(conn: sqlite3.Connection, item: dict, subject: str) -> 
     ).fetchone()
     if owner is not None and owner["subject"] != subject:
         raise ValueError(f"catalog id {item_id!r} belongs to another subject")
+    check = _task_check_mode(item)
     metadata = dict(item)
     for key in ("id", "skill", "sub", "num", "diff", "text", "answer", "hint", "solution"):
         metadata.pop(key, None)
+    # Нормализованный режим едет в payload явно (см. _build_catalog_payload:
+    # item.update(meta)), плюс legacy-флаг для старых клиентов.
+    metadata["check"] = check
+    metadata["selfCheck"] = (check == "self")
     conn.execute(
         """INSERT INTO tasks
            (id, skill_id, topic, exam_number, difficulty, statement, answer, explanation,
