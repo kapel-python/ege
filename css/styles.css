@@ -1265,7 +1265,9 @@ body {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-2);
+  /* Экзаменационный лист всегда белый (как на ЕГЭ),
+     независимо от темы сайта. */
+  background: #fff;
 }
 .task-visual img {
   display: block;
@@ -1274,6 +1276,7 @@ body {
   max-height: min(58vh, 520px);
   object-fit: contain;
   margin: 0 auto;
+  background: #fff;
 }
 .task-visual--svg img,
 .task-visual--graph img,

@@ -1,23 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
   <title id="title">Схема животной клетки</title>
   <desc id="desc">Ядро с порами, митохондрия, эндоплазматическая сеть, комплекс Гольджи.</desc>
-  <rect width="640" height="420" rx="10" fill="#111827"/>
-  <ellipse cx="320" cy="200" rx="240" ry="150" fill="none" stroke="#38bdf8" stroke-width="3"/>
-  <circle cx="320" cy="200" r="52" fill="none" stroke="#f59e0b" stroke-width="3"/>
-  <circle cx="320" cy="200" r="8" fill="#f59e0b"/>
-  <text x="330" y="150" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">ядро</text>
-  <text x="340" y="148" font-family="Arial, sans-serif" font-size="13"  fill="#94a3b8">(поры)</text>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
+  <ellipse cx="320" cy="200" rx="240" ry="150" fill="none" stroke="#0284c7" stroke-width="3"/>
+  <circle cx="320" cy="200" r="52" fill="none" stroke="#b45309" stroke-width="3"/>
+  <circle cx="320" cy="200" r="8" fill="#b45309"/>
+  <text x="330" y="150" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">ядро</text>
+  <text x="340" y="148" font-family="Arial, sans-serif" font-size="13"  fill="#64748b">(поры)</text>
 
-  <ellipse cx="180" cy="150" rx="46" ry="22" fill="none" stroke="#a78bfa" stroke-width="3"/>
-  <text x="120" y="110" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">митохондрия</text>
+  <ellipse cx="180" cy="150" rx="46" ry="22" fill="none" stroke="#7c3aed" stroke-width="3"/>
+  <text x="120" y="110" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">митохондрия</text>
 
-  <path d="M430,120 l60,0 M430,135 l60,0 M430,150 l60,0" stroke="#34d399" stroke-width="3"/>
-  <text x="440" y="100" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">ЭПС</text>
+  <path d="M430,120 l60,0 M430,135 l60,0 M430,150 l60,0" stroke="#059669" stroke-width="3"/>
+  <text x="440" y="100" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">ЭПС</text>
 
-  <path d="M150,280 q40,-18 80,0 q40,18 80,0" fill="none" stroke="#f472b6" stroke-width="3"/>
-  <text x="120" y="330" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">аппарат Гольджи</text>
+  <path d="M150,280 q40,-18 80,0 q40,18 80,0" fill="none" stroke="#db2777" stroke-width="3"/>
+  <text x="120" y="330" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">аппарат Гольджи</text>
 
-  <circle cx="260" cy="280" r="4" fill="#f8fafc"/><circle cx="280" cy="290" r="4" fill="#f8fafc"/><circle cx="380" cy="280" r="4" fill="#f8fafc"/>
-  <text x="390" y="300" font-family="Arial, sans-serif" font-size="14"  fill="#94a3b8">рибосомы</text>
-  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация: строение животной клетки (схема)</text>
+  <circle cx="260" cy="280" r="4" fill="#0f172a"/><circle cx="280" cy="290" r="4" fill="#0f172a"/><circle cx="380" cy="280" r="4" fill="#0f172a"/>
+  <text x="390" y="300" font-family="Arial, sans-serif" font-size="14"  fill="#64748b">рибосомы</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Иллюстрация: строение животной клетки (схема)</text>
 </svg>

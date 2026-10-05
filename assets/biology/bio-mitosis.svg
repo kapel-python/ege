@@ -1,23 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
   <title id="title">Фазы митоза</title>
   <desc id="desc">Профаза, метафаза, анафаза и телофаза: поведение хромосом.</desc>
-  <rect width="640" height="420" rx="10" fill="#111827"/>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
   <circle cx="110" cy="180" r="70" fill="none" stroke="#475569" stroke-width="2"/>
-  <path d="M70,150 q20,-20 40,0 M90,200 q20,20 40,0 M110,140 l10,80" stroke="#38bdf8" stroke-width="3" fill="none"/>
-  <text x="55" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">профаза</text>
+  <path d="M70,150 q20,-20 40,0 M90,200 q20,20 40,0 M110,140 l10,80" stroke="#0284c7" stroke-width="3" fill="none"/>
+  <text x="55" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">профаза</text>
 
   <circle cx="270" cy="180" r="70" fill="none" stroke="#475569" stroke-width="2"/>
-  <path d="M270,110 L270,250" stroke="#f59e0b" stroke-width="3" stroke-dasharray="6 4"/>
-  <circle cx="250" cy="180" r="7" fill="#38bdf8"/><circle cx="290" cy="180" r="7" fill="#38bdf8"/>
-  <text x="215" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">метафаза</text>
+  <path d="M270,110 L270,250" stroke="#b45309" stroke-width="3" stroke-dasharray="6 4"/>
+  <circle cx="250" cy="180" r="7" fill="#0284c7"/><circle cx="290" cy="180" r="7" fill="#0284c7"/>
+  <text x="215" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">метафаза</text>
 
   <circle cx="430" cy="180" r="70" fill="none" stroke="#475569" stroke-width="2"/>
-  <circle cx="405" cy="180" r="7" fill="#38bdf8"/><circle cx="455" cy="180" r="7" fill="#38bdf8"/>
-  <path d="M430,115 L405,173 M430,115 L455,173 M430,245 L405,187 M430,245 L455,187" stroke="#94a3b8" stroke-width="2"/>
-  <text x="380" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">анафаза</text>
+  <circle cx="405" cy="180" r="7" fill="#0284c7"/><circle cx="455" cy="180" r="7" fill="#0284c7"/>
+  <path d="M430,115 L405,173 M430,115 L455,173 M430,245 L405,187 M430,245 L455,187" stroke="#64748b" stroke-width="2"/>
+  <text x="380" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">анафаза</text>
 
   <circle cx="560" cy="155" r="42" fill="none" stroke="#475569" stroke-width="2"/>
   <circle cx="560" cy="225" r="42" fill="none" stroke="#475569" stroke-width="2"/>
-  <text x="515" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">телофаза</text>
-  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация: фазы митоза по порядку (схема)</text>
+  <text x="515" y="290" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">телофаза</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Иллюстрация: фазы митоза по порядку (схема)</text>
 </svg>

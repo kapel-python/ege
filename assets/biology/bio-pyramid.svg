@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
   <title id="title">Экологическая пирамида биомасс</title>
   <desc id="desc">Продуценты в основании, выше — консументы первого и второго порядка.</desc>
-  <rect width="640" height="420" rx="10" fill="#111827"/>
-  <path d="M120,300 L520,300 L440,230 L200,230 Z" fill="none" stroke="#34d399" stroke-width="3"/>
-  <path d="M200,230 L440,230 L380,165 L260,165 Z" fill="none" stroke="#38bdf8" stroke-width="3"/>
-  <path d="M260,165 L380,165 L340,110 L300,110 Z" fill="none" stroke="#f59e0b" stroke-width="3"/>
-  <text x="250" y="272" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">продуценты</text>
-  <text x="245" y="205" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">консументы I</text>
-  <text x="255" y="145" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#e2e8f0">консументы II</text>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
+  <path d="M120,300 L520,300 L440,230 L200,230 Z" fill="none" stroke="#059669" stroke-width="3"/>
+  <path d="M200,230 L440,230 L380,165 L260,165 Z" fill="none" stroke="#0284c7" stroke-width="3"/>
+  <path d="M260,165 L380,165 L340,110 L300,110 Z" fill="none" stroke="#b45309" stroke-width="3"/>
+  <text x="250" y="272" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">продуценты</text>
+  <text x="245" y="205" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">консументы I</text>
+  <text x="255" y="145" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1e293b">консументы II</text>
 
-  <path d="M550,100 L550,310" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
-  <defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
-  <text x="500" y="330" font-family="Arial, sans-serif" font-size="14"  fill="#94a3b8">энергия ↓</text>
-  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8">Иллюстрация: трофические уровни пирамиды биомасс</text>
+  <path d="M550,100 L550,310" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker></defs>
+  <text x="500" y="330" font-family="Arial, sans-serif" font-size="14"  fill="#64748b">энергия ↓</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Иллюстрация: трофические уровни пирамиды биомасс</text>
 </svg>
