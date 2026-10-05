@@ -368,6 +368,8 @@
 <script defer src="/js/site-header.js?v=1"></script>
 <script defer src="js/footer.js?v=5"></script>
 
+<!--SSR-DATA-->
+
 <script>
 (function(){
   "use strict";
@@ -749,7 +751,23 @@
 
   refreshBtn.addEventListener("click", manualRefresh);
   retryBtn.addEventListener("click", manualRefresh);
-  load();
+  /* SSR: сервер вшивает свежий срез прямо в HTML — первый кадр сразу целый,
+     без «Проверяем…» и прыжка секций (как префетч в профиле SPA). Живое
+     обновление раз в минуту, кнопки и автообновление работают как раньше:
+     при любом сбое вшивки страница молча догружает обычным fetch. */
+  var ssrStatus = null;
+  try {
+    var ssrEl = document.getElementById("ssr-status");
+    ssrStatus = ssrEl ? JSON.parse(ssrEl.textContent) : null;
+    if (ssrEl) ssrEl.remove();
+  } catch (e) { ssrStatus = null; }
+  if (ssrStatus && typeof ssrStatus === "object" && Array.isArray(ssrStatus.services)) {
+    lastRefreshAt = Date.now();
+    try { render(ssrStatus); }
+    catch (e) { load(); }
+  } else {
+    load();
+  }
   /* Живой статус без перезагрузки страницы: раз в минуту молча сверяемся
      с сервером. Вкладка в фоне не опрашивается (document.hidden), лимит
      /api/status — 60 запросов в минуту, один запрос в минуту его не замечает.

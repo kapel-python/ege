@@ -13,6 +13,7 @@ import errno
 import gzip
 import hashlib
 import hmac
+import html
 import ipaddress
 import json
 import os
@@ -7498,6 +7499,127 @@ def status_rate_ok(ip: str) -> bool:
             return True
     except Exception:
         return True
+
+
+# SSR первых кадров /status и /subscription: данные едут ВМЕСТЕ со
+# страницей (как префетч подписки и плана в профиле SPA), а не вторым
+# запросом после первой отрисовки — первый кадр сразу целый, без дёргания.
+# Маркер в HTML заменяется блоком application/json; любой сбой — тихий
+# пропуск (клиент догружает обычным fetch, как раньше). application/json +
+# html.escape вместо <script> с литералом: вырваться из блока через
+# </script> в данных невозможно по построению.
+SSR_MARKER = b"<!--SSR-DATA-->"
+
+_SSR_STATUS_CACHE = {"at": 0.0, "payload": None}
+_SSR_STATUS_CACHE_TTL_SEC = 30.0
+_SSR_STATUS_CACHE_LOCK = threading.Lock()
+
+
+def _ssr_json_block(script_id: str, payload: dict) -> bytes | None:
+    try:
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(text, str) or not text:
+        return None
+    tag = ('<script id="' + script_id + '" type="application/json">'
+           + html.escape(text, quote=False) + "</script>")
+    return tag.encode("utf-8")
+
+
+def _ssr_status_payload(conn: sqlite3.Connection, handler) -> dict | None:
+    """Публичный срез для /status: тот же рейт-гейт, что у API, плюс кэш на
+    полминуты (сборка идёт по всем предметам и заданиям, а страница и так
+    обновляется раз в минуту)."""
+    try:
+        try:
+            ip = client_ip(handler)
+        except Exception:
+            ip = "?"
+        if not status_rate_ok(ip):
+            return None
+        now = time.time()
+        try:
+            with _SSR_STATUS_CACHE_LOCK:
+                hit = _SSR_STATUS_CACHE["payload"]
+                if hit is not None and now - _SSR_STATUS_CACHE["at"] < _SSR_STATUS_CACHE_TTL_SEC:
+                    return hit
+        except Exception:
+            pass
+        payload = public_status_payload(conn)
+        if not isinstance(payload, dict):
+            return None
+        try:
+            with _SSR_STATUS_CACHE_LOCK:
+                _SSR_STATUS_CACHE["at"] = now
+                _SSR_STATUS_CACHE["payload"] = payload
+        except Exception:
+            pass
+        return payload
+    except Exception:
+        return None
+
+
+def _ssr_subscription_payload(conn: sqlite3.Connection, handler) -> dict | None:
+    """Срез подписки для /subscription. Без куки сессии — точно гость, в базу
+    не ходим вовсе (боты и разлогиненные). Бан проверяем только чтением
+    (get_active_block): reject_if_blocked тут нельзя — он сам отправляет 403
+    и порвал бы HTML-ответ. Пишущие шаги (ensure/refresh внутри статуса) —
+    те же, что дёрнул бы fetch клиента секундой позже."""
+    try:
+        try:
+            has_session_cookie = bool(cookie_value(handler, "ege_session"))
+        except Exception:
+            has_session_cookie = False
+        if not has_session_cookie:
+            return {"guest": True}
+        if _SUB is None:
+            return None
+        uid = existing_user_for(conn, handler)
+        if uid is None:
+            return {"guest": True}
+        try:
+            if get_active_block(conn, uid):
+                return None
+        except Exception:
+            return None
+        st = _SUB.subscription_status(conn, int(uid))
+        if not isinstance(st, dict):
+            return None
+        try:
+            joined = bool(_SUB.launch_waitlist_joined(conn, int(uid)))
+        except Exception:
+            joined = False
+        out = dict(st)
+        out["guest"] = False
+        out["notifyJoined"] = joined
+        return out
+    except Exception:
+        return None
+
+
+def _inject_ssr_payload(handler, conn: sqlite3.Connection, page_name: str, data: bytes) -> bytes:
+    """Заменяет маркер готовым JSON-блоком. Возвращает байты как были при
+    любом сбое или отсутствии данных."""
+    try:
+        if SSR_MARKER not in data:
+            return data
+        if page_name == "status.html":
+            payload = _ssr_status_payload(conn, handler)
+            script_id = "ssr-status"
+        elif page_name == "subscription.html":
+            payload = _ssr_subscription_payload(conn, handler)
+            script_id = "ssr-sub"
+        else:
+            return data
+        if payload is None:
+            return data
+        tag = _ssr_json_block(script_id, payload)
+        if not tag:
+            return data
+        return data.replace(SSR_MARKER, tag, 1)
+    except Exception:
+        return data
 
 
 def support_token_secret(conn: sqlite3.Connection) -> str:
@@ -15962,6 +16084,24 @@ class Handler(BaseHTTPRequestHandler):
             # Файл мог исчезнуть или оказаться нечитаемым между stat и read —
             # это 404, а не трейсбек на весь ответ.
             self.serve_not_found_page(); return
+        # SSR первых кадров /status и /subscription: данные едут вместе со
+        # страницей (как префетч в профиле SPA), а не вторым запросом после
+        # отрисовки. Своё соединение: в этой ветке общего conn нет, пишущие
+        # шаги хелперов коммитят сами. Любой сбой — тихий пропуск без смены
+        # ответа: страница догрузит обычным fetch, как раньше.
+        if file_path.name in ("status.html", "subscription.html"):
+            ssr_conn = None
+            try:
+                ssr_conn = connect()
+                data = _inject_ssr_payload(self, ssr_conn, file_path.name, data)
+            except Exception:
+                pass
+            finally:
+                try:
+                    if ssr_conn is not None:
+                        ssr_conn.close()
+                except Exception:
+                    pass
         # ETag по хешу содержимого: повторные заходы отдают 304 без тела.
         # Раньше стоял безусловный no-cache без валидатора — каждый reload
         # заново качал ~1.5 МБ JS (jsxgraph 947 КБ + katex 269 КБ + app 141 КБ).

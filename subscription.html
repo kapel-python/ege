@@ -442,6 +442,8 @@
 <script defer src="/js/site-header.js?v=1"></script>
 <script defer src="/js/footer.js?v=8"></script>
 
+<!--SSR-DATA-->
+
 <script>
 (function(){
   "use strict";
@@ -612,31 +614,12 @@
       });
   }
 
-  try {
-    fetch("/api/auth/session", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
-      .then(function(resp){
-        if (!resp.ok) throw new Error("http " + resp.status);
-        return resp.json();
-      })
-      .then(function(sess){
-        if (!sess || !sess.user) {
-          subState.checked = true;
-          subState.guest = true;
-          // Дальше по цепочке data.guest === true: гость ведёт себя как
-          // 401-ветка старого кода (data=null давал guest=false — баг).
-          return { guest: true };
-        }
-        subState.guest = false;
-        return fetch("/api/subscription/status", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
-          .then(function(resp){
-            if (resp.status === 401 || resp.status === 403) return { guest: true };
-            if (!resp.ok) throw new Error("http " + resp.status);
-            return resp.json();
-          });
-      })
-      .then(function(data){
-        subState.checked = true;
-        subState.guest = !!(data && data.guest);
+  /* Единая отрисовка статуса — и для SSR-среза, вшитого сервером в HTML
+     (первый кадр сразу целый, как префетч в профиле SPA), и для обычного
+     fetch после загрузки. */
+  function applySubData(data){
+    subState.checked = true;
+    subState.guest = !!(data && data.guest);
         subState.active = !!(data && data.active);
         try { document.body.setAttribute("data-sub", subState.active ? "active" : (subState.guest ? "guest" : "free")); } catch(e){}
         if (subState.active) {
@@ -657,17 +640,64 @@
           var buybar = document.getElementById("buybar");
           if (buybar) { buybar.hidden = true; buybar.classList.remove("is-on"); }
         } else if (!subState.guest) {
-          /* Залогинен без Plus: подтягиваем участие в листе ожидания
-             (best-effort — страница живёт и без него). */
-          fetch("/api/subscription/notify", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
-            .then(function(resp){ if (!resp.ok) throw new Error("http " + resp.status); return resp.json(); })
-            .then(function(data){ subState.notified = !!(data && data.joined); paintNotify(); })
-            .catch(function(){ paintNotify(); });
-          paintNotify();
+          /* Залогинен без Plus: участие в листе ожидания едет в SSR-срезе,
+             без него — подтягиваем отдельным запросом (best-effort). */
+          if (data && typeof data.notifyJoined === "boolean") {
+            subState.notified = data.notifyJoined;
+            paintNotify();
+          } else {
+            fetch("/api/subscription/notify", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
+              .then(function(resp){ if (!resp.ok) throw new Error("http " + resp.status); return resp.json(); })
+              .then(function(nd){ subState.notified = !!(nd && nd.joined); paintNotify(); })
+              .catch(function(){ paintNotify(); });
+            paintNotify();
+          }
         }
-      })
-      .catch(function(){ /* офлайн — страница всё равно рассказывает тариф */ });
-  } catch(e){}
+  }
+
+  function fetchSubData(){
+    try {
+      fetch("/api/auth/session", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
+        .then(function(resp){
+          if (!resp.ok) throw new Error("http " + resp.status);
+          return resp.json();
+        })
+        .then(function(sess){
+          if (!sess || !sess.user) {
+            subState.checked = true;
+            subState.guest = true;
+            // Дальше по цепочке data.guest === true: гость ведёт себя как
+            // 401-ветка старого кода (data=null давал guest=false — баг).
+            return { guest: true };
+          }
+          subState.guest = false;
+          return fetch("/api/subscription/status", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
+            .then(function(resp){
+              if (resp.status === 401 || resp.status === 403) return { guest: true };
+              if (!resp.ok) throw new Error("http " + resp.status);
+              return resp.json();
+            });
+        })
+        .then(applySubData)
+        .catch(function(){ /* офлайн — страница всё равно рассказывает тариф */ });
+    } catch(e){}
+  }
+
+  /* SSR: сервер вшивает срез подписки прямо в HTML — первый кадр сразу
+     целый, без прыжка кнопки в баннер. Нет вшивки или она битая —
+     молча едем обычным путём. */
+  var ssrSub = null;
+  try {
+    var ssrSubEl = document.getElementById("ssr-sub");
+    ssrSub = ssrSubEl ? JSON.parse(ssrSubEl.textContent) : null;
+    if (ssrSubEl) ssrSubEl.remove();
+  } catch (e) { ssrSub = null; }
+  if (ssrSub && typeof ssrSub === "object" && !ssrSub.error) {
+    try { applySubData(ssrSub); }
+    catch (e) { fetchSubData(); }
+  } else {
+    fetchSubData();
+  }
 
   /* покупка: без аккаунта — в профиль (там онбординг),
      с аккаунтом — честное «скоро» (провайдера оплаты нет) */
