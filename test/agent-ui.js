@@ -402,6 +402,9 @@ check("каркас строится после ответа списка, а н
   /screenLoader\("Открываем чаты…"\);\s*\n\s*loadThreads\(function first/.test(spaCode)
   && spaCode.includes("function mountFrame")
   && /if \(cacheHasThreads\(\)\) \{[\s\S]{0,80}mountFrame\(\);\s*\n\s*loadThreads\(\);/.test(spaCode));
+check("известный доступ пропускает повторный гейт без второго лоадера",
+  /Subscription\.cachedAgentAccess\(\) === true\) \{\s*\n\s*openAgentBody\(mg\);\s*\n\s*return;/.test(spaCode)
+  && spaCode.includes('screenLoader("Проверяем доступ…")'));
 check("пустой блок не показывается на всякий случай",
   !/renderCachedQuota\(\);\s*\n\s*syncInput\(\);\s*\n\s*syncViewport\(\);\s*\n\s*showEmpty\(true\)/.test(spaCode)
   && spaCode.includes("function paintMessages")

@@ -1437,10 +1437,10 @@ async function render() {
     }
     if (my !== renderSeq || currentRoute() !== route) return;
   }
-  // Профиль: подписка и учебный план едут ВМЕСТЕ со страницей, а не после
-  // неё — иначе карточки догоняют первый кадр вторым запросом (дёргание).
-  // Ждём недолго (2 с): при лежащей сети страница всё равно рисуется,
-  // карточки догрузятся обычным путём. Гость — пропускаем, ему нечего.
+  // Профиль: подписка, учебный план и устройства едут ВМЕСТЕ со страницей,
+  // а не после неё — иначе карточки догоняют первый кадр вторым запросом
+  // (дёргание). Ждём недолго (2 с): при лежащей сети страница всё равно
+  // рисуется, карточки догрузятся обычным путём. Гость — пропускаем, ему нечего.
   if (route === "profile") {
     try {
       const jobs = [];
@@ -1448,6 +1448,7 @@ async function render() {
         if (Store.accountId) {
           if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
           if (typeof planPrefetch === "function") jobs.push(planPrefetch());
+          if (typeof devicesPrefetch === "function") jobs.push(devicesPrefetch());
         }
       } catch (_) {}
       if (jobs.length) {
@@ -8845,9 +8846,37 @@ function formatDeviceTime(ts) {
   }
 }
 
-async function loadDevicesSection() {
+/* Префетч списка устройств в render(): профиль рисуется целиком за один
+   кадр — карточка устройств не догоняет контент второй волной. Одноразовый:
+   сбрасывается в начале каждого префетча и съедается первой отрисовкой,
+   поэтому протухший список показать нельзя; отзыв сессии всегда идёт
+   принудительным обновлением. */
+let devicesPrefetchCache = null;
+function devicesPrefetch() {
+  devicesPrefetchCache = null;
+  try {
+    if (typeof AuthAPI === "undefined" || !AuthAPI.devices) return Promise.resolve(null);
+    return AuthAPI.devices().then((payload) => {
+      const devices = (payload && payload.devices) || [];
+      devicesPrefetchCache = Array.isArray(devices) ? devices : [];
+      try { devicesCache = devicesPrefetchCache; } catch (_) {}
+      return devicesPrefetchCache;
+    }).catch(() => null);
+  } catch (_) { return Promise.resolve(null); }
+}
+
+async function loadDevicesSection(force) {
   const box = document.getElementById("devices-list");
   if (!box) return;
+  // Свежий префетч из render(): рисуем синхронно, без второго запроса.
+  try {
+    if (!force && Array.isArray(devicesPrefetchCache)) {
+      const devices = devicesPrefetchCache;
+      devicesPrefetchCache = null;
+      renderDevicesList(box, devices);
+      return;
+    }
+  } catch (_) {}
   let payload;
   try {
     payload = await AuthAPI.devices();
@@ -8859,6 +8888,11 @@ async function loadDevicesSection() {
   // Кэш для confirm-модалки: имя/тип подставляем из него, а не из onclick —
   // не нужно экранировать строки в атрибутах.
   try { devicesCache = devices; } catch (_) {}
+  renderDevicesList(box, devices);
+}
+
+function renderDevicesList(box, devices) {
+  if (!box || !Array.isArray(devices)) return;
   if (!devices.length) {
     box.textContent = "Активных устройств нет.";
     return;
@@ -9301,7 +9335,7 @@ async function revokeDeviceSession(id) {
       return;
     }
     toast("Выход на выбранном устройстве завершён.", "", "check");
-    await loadDevicesSection();
+    await loadDevicesSection(true);
   } catch (error) {
     toast("Не удалось завершить выход. Попробуй ещё раз.", "toast--error", "x");
   }

@@ -3637,6 +3637,19 @@
       cacheDrop();                     // чужие чаты в кэше не показываем
     }
     root = screenRoot;
+    // Доступ уже известен из кэша (render ждёт его до хрома, дальше кэш
+    // свежий) — лоадер «Проверяем доступ…» и повторный запрос не нужны:
+    // идём сразу к чатам. Протухший true безопасен: вторая стена гейта
+    // (403 SUBSCRIPTION_REQUIRED) сносит кэш подписки и рисует paywall.
+    // unknown/false — как раньше, под лоадером: paywall собирается из
+    // деталей гейта (guest/active), которых в синхронном срезе нет.
+    try {
+      if (typeof Subscription !== "undefined" && Subscription && Subscription.cachedAgentAccess
+        && Subscription.cachedAgentAccess() === true) {
+        openAgentBody(mg);
+        return;
+      }
+    } catch (_) {}
     // Гейт «ИИ только для Plus»: прямой заход (#/ai, #/ai/<id>) без
     // подписки упирается в paywall-блок вместо раздела — того же вида, что
     // «Мои сочинения» без Plus. Проверка идёт ДО списка чатов и квоты,

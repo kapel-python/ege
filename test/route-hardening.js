@@ -286,7 +286,7 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
   t('справочное окно живёт в общем контейнере диалогов',
     /deviceModalRoot\(\)/.test(info) && /closeDeviceModal\(\)/.test(info));
   t('справочное окно в том же классе .dlg и закрывается по Esc',
-    /class="dlg"/.test(info) && /deviceModalEscHandler/.test(info));
+    /class="dlg"|class="dlg\$/.test(info) && /deviceModalEscHandler/.test(info));
   t('у справочного окна одна кнопка «Понятно»',
     /dlg__actions--single/.test(info) && /o\.closeText \|\| "Понятно"/.test(info));
 
@@ -353,6 +353,24 @@ const result = fs.readFileSync('ege-result.html', 'utf8');
     /function unlinkGoogle\(\) \{ askUnlinkGoogle\(\); \}/.test(app));
   t('смена подписи не сносит логотип (только span)',
     /caption\.textContent = label/.test(app));
+}
+
+/* ---- 9. Профиль без второй волны: устройства едут с префетчем ----
+   Живое требование: карточка устройств рисуется вместе с остальным
+   профилем, а не догоняет его отдельным запросом. Префетч одноразовый
+   (съедается первой отрисовкой — протухшее показать нельзя), отзыв чужой
+   сессии всегда идёт принудительным обновлением. */
+{
+  t('устройства в общем префетче профиля',
+    /jobs\.push\(devicesPrefetch\(\)\)/.test(app));
+  t('префетч сбрасывается и наполняет кэш модалки',
+    /devicesPrefetchCache = null;/.test(app)
+    && /devicesPrefetchCache = Array\.isArray\(devices\) \? devices : \[\];/.test(app));
+  t('отрисовка съедает префетч один раз',
+    /if \(!force && Array\.isArray\(devicesPrefetchCache\)\) \{/.test(app)
+    && /devicesPrefetchCache = null;\s*\n\s*renderDevicesList\(box, devices\);/.test(app));
+  t('отзыв сессии обновляет список принудительно',
+    /await loadDevicesSection\(true\);/.test(app));
 }
 
 console.log(fails ? fails + ' FAILURES' : 'ALL ROUTE-HARDENING OK');
