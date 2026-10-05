@@ -9740,21 +9740,40 @@ def _parse_streak_date(value) -> str | None:
 def streak_activity_dates(conn: sqlite3.Connection, user_id: int, subject: str) -> set:
     """Все дни с реальной учёбой в предмете: практика, уроки, сочинения, ИИ.
 
-    Старая серия считала только recordAnswer/уроки с клиента и жила в
-    localStorage — сочинения, чаты ИИ и любые новые действия мимо неё
-    проходили, а сервер streak вообще не пересчитывал. Теперь источник
-    один — durable-таблицы, клиент ничего не решает:
-    - task_attempts / lesson_attempts / completed_lessons — любая попытка
-      и любой завершённый урок (как раньше touchStreak: верно/неверно —
-      всё равно активность);
-    - essay_submissions — отправленное сочинение (оно же даёт task_attempts
-      после ready, но считать надо и сам факт отправки);
+    Бизнес-правило: серия = «занимался», а не «заходил». Считается только
+    учебное действие с усилием, всё остальное — нет:
+    СЧИТАЕТСЯ:
+    - task_attempts — любая попытка (верно/неверно/подсказка/показ ответа:
+      как раньше touchStreak и как XP, который платит минимум за попытку);
+    - diagnostics — решение диагностических заданий (дубль task_attempts
+      на клиенте, но считаем и напрямую — вдруг попытка не долетела);
+    - lesson_attempts / completed_lessons — завершённый урок и повтор;
+    - lesson_step_errors / lesson_error_history — ошибки шагов урока:
+      человек работал, но не довёл до конца (иначе его день пропадал);
+    - essay_submissions — отправленное сочинение от 150 слов (оно же даёт
+      task_attempts после ready, но считаем и сам факт отправки);
     - agent_messages (любая роль, свой тред) — вопрос ИИ, подтверждение,
-      ответ: всё это инициатива ученика в тот же день;
+      ответ: всё это инициатива ученика в тот же день (каждый вопрос
+      стоит квоты, накрутка пустыми «а» невозможна бесплатно);
     - activity_history — только строки с пользой (solved/correct/xp > 0),
       пустые 0-строки от открытия приложения серию не продлевают;
-    - daily_progress — только solved > 0 или done.
-    Даты — московские, как клиентский todayStr(). Ошибка здесь не должна
+    - daily_progress — только solved > 0 (голый done без решений —
+      подделка или пустая подборка, учёбы в нём нет).
+    НЕ СЧИТАЕТСЯ (осознанно):
+    - смена имени/цели/уровня, онбординг, смена предмета, вход/выход/
+      регистрация — профиль, а не учёба;
+    - открытие урока без работы (lesson_sessions), просмотр теории,
+      чтение чужих разборов — пассивного просмотра в таблицах нет
+      как усилия;
+    - создание пустого чата ИИ без сообщений, удаление чата, чтение
+      истории — нет вопроса, нет учёбы;
+    - обращения в поддержку, покупка/отмена Plus, гранты админа
+      (user_xp_adjustments), тайм-аут бонусы — не учёба;
+    - системные строки ленты («Серия: N дн»), прогнозы, milestones XP —
+      иначе серия считала бы сама себя.
+    Серия — в разрезе предмета (как XP и как раньше): математикой
+    занимался — математика растёт, русский при этом стоит. Даты —
+    московские, как клиентский todayStr(). Ошибка здесь не должна
     ронять запись: вызыватель глушит исключения."""
     days: set = set()
 
@@ -9765,8 +9784,11 @@ def streak_activity_dates(conn: sqlite3.Connection, user_id: int, subject: str) 
 
     try:
         for table, col in (("task_attempts", "created_at"),
+                           ("diagnostics", "created_at"),
                            ("lesson_attempts", "created_at"),
                            ("completed_lessons", "completed_at"),
+                           ("lesson_error_history", "created_at"),
+                           ("lesson_step_errors", "last_at"),
                            ("essay_submissions", "created_at")):
             try:
                 for r in conn.execute(
@@ -9800,7 +9822,7 @@ def streak_activity_dates(conn: sqlite3.Connection, user_id: int, subject: str) 
         try:
             for r in conn.execute(
                 "SELECT progress_date FROM daily_progress"
-                " WHERE user_id=? AND subject=? AND (solved>0 OR done!=0)"
+                " WHERE user_id=? AND subject=? AND solved>0"
                 " LIMIT 1000",
                 (user_id, subject),
             ):
