@@ -857,8 +857,9 @@ def main():
             check("список тредов несёт квоту (первый экран за 2 RTT)",
                   (body.get("quota") or {}).get("limit") == 10, str(body.get("quota")))
             status, ctx = a.request(base, "GET", "/api/agent/context", None)
+            # Ход ИИ — тоже учебная активность: после первого вопроса серия уже 1.
             check("контекст шапки: уровень/серия",
-                  status == 200 and ctx.get("level") == 1 and ctx.get("streak") == 0
+                  status == 200 and ctx.get("level") == 1 and ctx.get("streak") == 1
                   and ctx.get("need") == 400 and ctx.get("pct") == 0, f"{status} {ctx}")
             status, ctx = guest.request(base, "GET", "/api/agent/context", None)
             check("контекст гостю -> 401 GUEST_PENDING",

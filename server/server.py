@@ -9137,13 +9137,20 @@ def refresh_derived_stats(conn: sqlite3.Connection, user_id: int, subject: str) 
     """Recompute trusted aggregates from durable domain records after a write."""
     state = read_state(conn, user_id, subject)
     derived = derive_stats(conn, state, user_id)
-    prev = None if subject_is_locked(subject) else conn.execute(
-        "SELECT streak, last_active_date FROM user_stats WHERE user_id=? AND subject=?", (user_id, subject)
-    ).fetchone()
+    if subject_is_locked(subject):
+        streak, last = 0, None
+    else:
+        try:
+            streak, last = _derive_streak(streak_activity_dates(conn, user_id, subject))
+        except Exception:
+            prev = conn.execute(
+                "SELECT streak, last_active_date FROM user_stats WHERE user_id=? AND subject=?", (user_id, subject)
+            ).fetchone()
+            streak, last = (int(prev["streak"] or 0), prev["last_active_date"]) if prev else (0, None)
     conn.execute("""INSERT INTO user_stats(user_id,subject,xp,streak,last_active_date,total_solved,total_correct,total_time_sec,hints_used,correct_series,best_series,errors_resolved)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(user_id,subject) DO UPDATE SET xp=excluded.xp,streak=excluded.streak,last_active_date=excluded.last_active_date,total_solved=excluded.total_solved,total_correct=excluded.total_correct,total_time_sec=excluded.total_time_sec,hints_used=excluded.hints_used,correct_series=excluded.correct_series,best_series=MAX(user_stats.best_series,excluded.best_series),errors_resolved=excluded.errors_resolved""",
-                 (user_id, subject, int(derived["xp"]), int(prev["streak"] if prev else 0), prev["last_active_date"] if prev else None, int(derived["totalSolved"]), int(derived["totalCorrect"]), float(sum(float(a.get("seconds") or 0) for a in state.get("taskAttempts") or [] if isinstance(a, dict))), int(derived["hintsUsed"]), int(derived["correctSeries"]), int(derived["bestSeries"]), int(derived["errorsResolved"])))
+                 (user_id, subject, int(derived["xp"]), int(streak), last, int(derived["totalSolved"]), int(derived["totalCorrect"]), float(sum(float(a.get("seconds") or 0) for a in state.get("taskAttempts") or [] if isinstance(a, dict))), int(derived["hintsUsed"]), int(derived["correctSeries"]), int(derived["bestSeries"]), int(derived["errorsResolved"])))
     if subject_is_locked(subject):
         # MAX(existing.best_series, 0) is intentional for ready subjects, but a
         # locked subject must not retain a legacy/fabricated high-water mark.
@@ -9693,6 +9700,145 @@ def _derive_streak(activity_dates: set, today_str: str | None = None) -> tuple[i
         else:
             break
     return streak, last
+
+
+def _parse_streak_date(value) -> str | None:
+    """Любая дата активности -> 'YYYY-MM-DD' по Europe/Moscow, иначе None.
+
+    В базе намешано три формата: миллисекунды (int или строка цифр —
+    так пишет now_iso() и клиентский Date.now()), уже готовая дата
+    'YYYY-MM-DD' (activity_history/daily_progress) и редкий ISO-текст.
+    Пустые activity-строки 'solved=0' сюда не доходят — их отсекает
+    вызыватель, здесь только парсинг."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return _msk_date_key(int(value))
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        try:
+            dt.date.fromisoformat(text)
+            return text
+        except ValueError:
+            return None
+    if text.isdigit():
+        try:
+            return _msk_date_key(int(text))
+        except (ValueError, OverflowError, OSError):
+            return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(ZoneInfo("Europe/Moscow")).date().isoformat()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def streak_activity_dates(conn: sqlite3.Connection, user_id: int, subject: str) -> set:
+    """Все дни с реальной учёбой в предмете: практика, уроки, сочинения, ИИ.
+
+    Старая серия считала только recordAnswer/уроки с клиента и жила в
+    localStorage — сочинения, чаты ИИ и любые новые действия мимо неё
+    проходили, а сервер streak вообще не пересчитывал. Теперь источник
+    один — durable-таблицы, клиент ничего не решает:
+    - task_attempts / lesson_attempts / completed_lessons — любая попытка
+      и любой завершённый урок (как раньше touchStreak: верно/неверно —
+      всё равно активность);
+    - essay_submissions — отправленное сочинение (оно же даёт task_attempts
+      после ready, но считать надо и сам факт отправки);
+    - agent_messages (любая роль, свой тред) — вопрос ИИ, подтверждение,
+      ответ: всё это инициатива ученика в тот же день;
+    - activity_history — только строки с пользой (solved/correct/xp > 0),
+      пустые 0-строки от открытия приложения серию не продлевают;
+    - daily_progress — только solved > 0 или done.
+    Даты — московские, как клиентский todayStr(). Ошибка здесь не должна
+    ронять запись: вызыватель глушит исключения."""
+    days: set = set()
+
+    def _add(value) -> None:
+        day = _parse_streak_date(value)
+        if day:
+            days.add(day)
+
+    try:
+        for table, col in (("task_attempts", "created_at"),
+                           ("lesson_attempts", "created_at"),
+                           ("completed_lessons", "completed_at"),
+                           ("essay_submissions", "created_at")):
+            try:
+                for r in conn.execute(
+                    f"SELECT {col} FROM {table} WHERE user_id=? AND subject=? LIMIT 5000",
+                    (user_id, subject),
+                ):
+                    _add(r[col])
+            except sqlite3.Error:
+                continue
+        try:
+            for r in conn.execute(
+                "SELECT m.created_at FROM agent_messages m"
+                " JOIN agent_threads t ON t.id=m.thread_id"
+                " WHERE m.user_id=? AND t.user_id=? AND t.subject=?"
+                " LIMIT 5000",
+                (user_id, user_id, subject),
+            ):
+                _add(r["created_at"])
+        except sqlite3.Error:
+            pass
+        try:
+            for r in conn.execute(
+                "SELECT activity_date FROM activity_history"
+                " WHERE user_id=? AND subject=? AND (solved>0 OR correct>0 OR xp>0)"
+                " LIMIT 1000",
+                (user_id, subject),
+            ):
+                _add(r["activity_date"])
+        except sqlite3.Error:
+            pass
+        try:
+            for r in conn.execute(
+                "SELECT progress_date FROM daily_progress"
+                " WHERE user_id=? AND subject=? AND (solved>0 OR done!=0)"
+                " LIMIT 1000",
+                (user_id, subject),
+            ):
+                _add(r["progress_date"])
+        except sqlite3.Error:
+            pass
+    except sqlite3.Error:
+        pass
+    return days
+
+
+def refresh_streak(conn: sqlite3.Connection, user_id: int, subject: str) -> tuple[int, str | None]:
+    """Пересчитать и сохранить серию из durable-активности. Не бросает.
+
+    Зовут все пишущие пути ученика: практика/уроки — через
+    refresh_derived_stats, чаты ИИ и сочинения — напрямую после своей
+    записи. Возвращает (streak, last_active_date) для ответа клиенту."""
+    try:
+        if subject_is_locked(subject):
+            return 0, None
+        ensure_subject_rows(conn, user_id, subject)
+        streak, last = _derive_streak(streak_activity_dates(conn, user_id, subject))
+        conn.execute(
+            "INSERT INTO user_stats(user_id,subject,streak,last_active_date)"
+            " VALUES(?,?,?,?)"
+            " ON CONFLICT(user_id,subject) DO UPDATE"
+            " SET streak=excluded.streak, last_active_date=excluded.last_active_date",
+            (user_id, subject, int(streak), last),
+        )
+        return streak, last
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return 0, None
+    except Exception:
+        return 0, None
 
 
 def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
@@ -13594,8 +13740,23 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("BEGIN IMMEDIATE")
                 ensure_subject_rows(conn, user_id, subject)
                 result = append_essay_submission(conn, user_id, subject, payload)
+                try:
+                    refresh_streak(conn, user_id, subject)
+                except Exception:
+                    pass
                 conn.commit()
-                self.send_json({"ok": True, "subject": subject, **result}, token=token)
+                try:
+                    streak_row = conn.execute(
+                        "SELECT streak, last_active_date FROM user_stats WHERE user_id=? AND subject=?",
+                        (user_id, subject),
+                    ).fetchone()
+                except sqlite3.Error:
+                    streak_row = None
+                extra = {}
+                if streak_row:
+                    extra = {"streak": int(streak_row["streak"] or 0),
+                             "lastActiveDate": streak_row["last_active_date"]}
+                self.send_json({"ok": True, "subject": subject, **result, **extra}, token=token)
             except SubjectLockedError as exc:
                 conn.rollback()
                 self.send_json({"error": "Предмет пока заблокирован", "subject": exc.subject}, 423)
@@ -14325,6 +14486,10 @@ class Handler(BaseHTTPRequestHandler):
                     if not approve:
                         conn.execute("UPDATE agent_messages SET status='cancelled' WHERE id=?", (mid,))
                         _agent_add_message(conn, tid, user_id, "assistant", "Отменено.")
+                        try:
+                            refresh_streak(conn, user_id, subject)
+                        except Exception:
+                            pass
                         conn.commit()
                         quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         # После отмены — без кнопок-шаблонов: их неоткуда взять
@@ -14394,6 +14559,10 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json({"error": f"Не удалось применить: {exc}"}, 400, token=token); return
                         conn.execute("UPDATE agent_messages SET status='applied', result_json=? WHERE id=?",
                                      (json.dumps({"proposal": proposal, "applied": applied}, ensure_ascii=False)[:16000], mid))
+                        try:
+                            refresh_streak(conn, user_id, subject)
+                        except Exception:
+                            pass
                         conn.commit()
                         if _AI is None:
                             _confirm_refund(confirm_spent)
@@ -14776,6 +14945,10 @@ class Handler(BaseHTTPRequestHandler):
                         if replace_from is None:
                             try:
                                 _agent_add_message(conn, tid, user_id, "user", text)
+                                try:
+                                    refresh_streak(conn, user_id, subject)
+                                except Exception:
+                                    pass
                                 conn.commit()
                             except sqlite3.Error as exc:
                                 # Без вопроса ход не имеет смысла (ответ без
@@ -14826,6 +14999,10 @@ class Handler(BaseHTTPRequestHandler):
                             conn.execute("DELETE FROM agent_messages WHERE thread_id=? AND seq>=?",
                                          (tid, replace_from))
                             _agent_add_message(conn, tid, user_id, "user", text)
+                            try:
+                                refresh_streak(conn, user_id, subject)
+                            except Exception:
+                                pass
                         out_steps = []
                         for st in steps:
                             if st.get("status") == "needs_confirm":
@@ -14850,11 +15027,19 @@ class Handler(BaseHTTPRequestHandler):
                             usage_spent = False
                             quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                             _turn_cleanup()
+                            try:
+                                _streak_row = conn.execute(
+                                    "SELECT streak, last_active_date FROM user_stats"
+                                    " WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+                            except sqlite3.Error:
+                                _streak_row = None
+                            _streak_extra = {"streak": int(_streak_row["streak"] or 0),
+                                             "lastActiveDate": _streak_row["last_active_date"]} if _streak_row else {}
                             self.send_json({"ok": True, "steps": out_steps, "final": None,
                                             "pending": True, "quota": quota,
                                             "thread": {"id": tid, "title": thread_title,
                                                        "publicId": _agent_thread_public_id(thread)},
-                                            "usage": {"cost": cost["n"]}}, token=token); return
+                                            "usage": {"cost": cost["n"]}, **_streak_extra}, token=token); return
                         final_text = (final or "").strip()
                         # Пустой финал подменять шаблоном нельзя — это был бы
                         # чужой голос вместо ответа модели. run_cycle либо
@@ -14877,12 +15062,20 @@ class Handler(BaseHTTPRequestHandler):
                         usage_spent = False
                         quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _turn_cleanup()
+                        try:
+                            _streak_row = conn.execute(
+                                "SELECT streak, last_active_date FROM user_stats"
+                                " WHERE user_id=? AND subject=?", (user_id, subject)).fetchone()
+                        except sqlite3.Error:
+                            _streak_row = None
+                        _streak_extra = {"streak": int(_streak_row["streak"] or 0),
+                                         "lastActiveDate": _streak_row["last_active_date"]} if _streak_row else {}
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
                                         "suggests": suggests, "dropped": dropped_ids,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
                                         "thread": {"id": tid, "title": thread_title,
                                                    "publicId": _agent_thread_public_id(thread)},
-                                        "usage": {"cost": cost["n"]}}, token=token); return
+                                        "usage": {"cost": cost["n"]}, **_streak_extra}, token=token); return
                     except (RuntimeError,) as exc:
                         rid = log_request_error("agent", exc)
                         _turn_cleanup()
