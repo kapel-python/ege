@@ -140,7 +140,7 @@
     copy.type = "button";
     copy.setAttribute("aria-label", "Скопировать");
     copy.setAttribute("data-act", "copy");
-    copy.innerHTML = svgIcon(ICON_COPY, "2.2");
+    copy.appendChild(svgIcon(ICON_COPY, "2.2"));
     copy.addEventListener("click", function () {
       var text = "";
       try { text = getCopy() || ""; } catch (_) {}
@@ -158,7 +158,7 @@
     regen.setAttribute("aria-label", "Сгенерировать заново");
     regen.setAttribute("data-act", "regen");
     regen.hidden = true;
-    regen.innerHTML = svgIcon(ICON_RETRY, "2.2");
+    regen.appendChild(svgIcon(ICON_RETRY, "2.2"));
     regen.addEventListener("click", function () {
       var q = "";
       try { q = getRegenQ() || ""; } catch (_) {}
@@ -174,8 +174,11 @@
       edit.setAttribute("data-act", "edit");
       edit.hidden = true;
       // Карандаш — тот же icon("pen"), что у имени в профиле: один значок
-      // на одно действие везде.
-      try { edit.innerHTML = icon("pen"); } catch (_) { edit.innerHTML = svgIcon(ICON_RETRY, "2.2"); }
+      // на одно действие везде. icon() возвращает СТРОКУ (а местный svgIcon —
+      // DOM-узел: его только через appendChild, иначе в кнопку встанет
+      // "[object SVGElement]" вместо иконки).
+      try { edit.innerHTML = icon("pen"); } catch (_) {}
+      if (!edit.firstChild) { try { edit.appendChild(svgIcon(ICON_RETRY, "2.2")); } catch (_) {} }
       edit.addEventListener("click", function () {
         var text = "";
         try { text = getCopy() || ""; } catch (_) {}
@@ -263,7 +266,17 @@
   }
   // «Изменить и отправить»: последний вопрос ЗАМЕНЯЕТСЯ (replaceLast),
   // новый ход встаёт на его место, а не дублирует переписку.
+  // Карандаш — без подтверждений: режим правки виден (плашка с крестиком
+  // над полем), выход — крестик, Esc или отправка/уход в другой чат.
   var editTarget = null;
+  var INPUT_PLACEHOLDER = "Спроси что-нибудь…";
+  var INPUT_PLACEHOLDER_EDIT = "Отредактируй и отправь — заменит старый вопрос";
+  function syncEditBar() {
+    try {
+      if (ui.editbar) ui.editbar.hidden = (editTarget == null);
+      if (ui.input) ui.input.placeholder = (editTarget == null ? INPUT_PLACEHOLDER : INPUT_PLACEHOLDER_EDIT);
+    } catch (_) {}
+  }
   function editLastQuestion(text) {
     if (!ui.input) return;
     editTarget = text;
@@ -271,7 +284,17 @@
     ui.input.style.height = "auto";
     ui.input.style.height = Math.min(ui.input.scrollHeight, 140) + "px";
     syncInput();
+    syncEditBar();
     try { ui.input.focus({ preventScroll: true }); } catch (_) {}
+  }
+  function cancelEdit() {
+    editTarget = null;
+    try {
+      if (ui.input) { ui.input.value = ""; ui.input.style.height = "auto"; }
+    } catch (_) {}
+    syncInput();
+    syncEditBar();
+    try { if (ui.input) ui.input.focus({ preventScroll: true }); } catch (_) {}
   }
   // «Перегенерировать»: тот же вопрос уходит с replaceLast — сервер сносит
   // последнюю пару и отвечает заново. force не нужен (кэш replaceLast обходит).
@@ -808,7 +831,18 @@
     stop.innerHTML = svgRaw("M7 7h10v10H7z", "2.4");
     composer.appendChild(input); composer.appendChild(send); composer.appendChild(stop);
     var hint = el("p", "agent__hint", "Enter отправляет, Shift+Enter переносит строку");
-    zone.appendChild(down); zone.appendChild(composer); zone.appendChild(hint);
+    // Плашка режима правки: карандаш кладёт вопрос в поле без спросу, и без
+    // крестика человеку оставалось бы только отправить или обновить страницу.
+    var editbar = el("div", "agent__editbar", null);
+    editbar.hidden = true;
+    editbar.appendChild(el("span", "agent__editbar-tx", "Правишь вопрос — отправится вместо старого"));
+    var editX = el("button", "agent__edit-x", null);
+    editX.type = "button";
+    editX.setAttribute("aria-label", "Отменить правку");
+    editX.innerHTML = svgRaw("M6 6l12 12M18 6L6 18", "2.2");
+    editX.addEventListener("click", function () { cancelEdit(); });
+    editbar.appendChild(editX);
+    zone.appendChild(down); zone.appendChild(editbar); zone.appendChild(composer); zone.appendChild(hint);
     main.appendChild(bar); main.appendChild(feed); main.appendChild(zone);
 
     var scrim = el("div", "agent__scrim");
@@ -819,7 +853,9 @@
     ui = { wrap: wrap, list: list, title: title, live: live, empty: empty, feed: feed,
            main: main, input: input, sendBtn: send, stopBtn: stop, composer: composer,
            quotaBtn: quota, quotaNum: null, quotaRing: quota.querySelector(".q-ring"),
-           downBtn: down, menuBtn: menu, newBtn: newBtn, ctx: null, ctxMore: null };
+           downBtn: down, menuBtn: menu, newBtn: newBtn, ctx: null, ctxMore: null,
+           editbar: editbar };
+    syncEditBar();
     wireEvents();
   }
 
@@ -1103,6 +1139,13 @@
     // Уходим в другой чат — взведённый автопоказ окна лимита сгорает: он был
     // про ЭТОТ чат и его допечатанный ответ, чужому чату окно не положено.
     if (leaving) disarmLimitModal();
+    // Уходим в другой чат — недописанная правка сгорает: editTarget ссылался
+    // на вопрос СТАРОГО чата, а отправка в новом заменила бы чужой вопрос.
+    if (leaving && editTarget !== null) {
+      editTarget = null;
+      try { if (ui.input) { ui.input.value = ""; ui.input.style.height = "auto"; } } catch (_) {}
+      syncEditBar();
+    }
     // Свой же тред не абортим: иначе клик по текущему чату убивал бы ход.
     if (leaving && S.abort) { try { S.abort.abort(); } catch (_) {} S.abort = null; }
     // Недопечатанный ответ доигрываем разом.
@@ -2801,6 +2844,7 @@
     // чистим), а квоту сверяем с сервером — вдруг уже вернулась.
     if (!quiet && quotaOut()) {
       editTarget = null;
+      syncEditBar();
       openLimitModal(S.quota, null);
       fetchQuota(true);
       return;
@@ -2808,6 +2852,7 @@
     // Отправка из «Изменить и отправить» всегда заменяет последний вопрос.
     var replaceLast = !!((opts && opts.replaceLast) || editTarget !== null);
     editTarget = null;
+    syncEditBar();
     // Явный вопрос — человек хочет ответ: следование включается заново.
     // Невидимый повтор (quiet) идёт фоном и чужой выбор «я ушёл читать» чтит.
     if (!quiet) { S.follow = true; S.printTarget = null; S.progTop = null; }
@@ -3400,6 +3445,9 @@
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touchCoarse) {
         e.preventDefault();
         send(ui.input.value);
+      } else if (e.key === "Escape" && editTarget !== null) {
+        e.preventDefault();
+        cancelEdit();
       }
     });
     ui.sendBtn.addEventListener("click", function () { send(ui.input.value); });

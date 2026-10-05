@@ -350,6 +350,18 @@ check("перегенерация с подтверждением в общей 
   && /onConfirm: function \(\) \{ regenerate\(q\); \}/.test(spaCode));
 check("сырой текст пузыря изолирован от ряда действий (_rawText)",
   spaCode.includes("_rawText") && /prev\._rawText/.test(spaCode));
+check("иконки-узлы только через appendChild (иначе [object SVGElement] вместо иконки)",
+  !/\.innerHTML\s*=\s*svgIcon\(/.test(spaJs)
+  && /\.appendChild\(svgIcon\(ICON_COPY/.test(spaJs)
+  && /\.appendChild\(svgIcon\(ICON_RETRY/.test(spaJs));
+check("режим правки: плашка с крестиком над полем, отмена без отправки",
+  spaCode.includes("agent__editbar") && spaCode.includes("function cancelEdit")
+  && spaCode.includes("function syncEditBar") && spaCode.includes("Отменить правку")
+  && /\.agent__editbar\[hidden\] \{ display: none/.test(spaCss));
+check("правка сгорает при уходе в другой чат и по Esc, плейсхолдер различает режимы",
+  /if \(leaving && editTarget !== null\)/.test(spaCode)
+  && /e\.key === "Escape" && editTarget !== null/.test(spaCode)
+  && spaCode.includes("INPUT_PLACEHOLDER_EDIT"));  
 check("перегенерировать и изменить идут через replaceLast (замена, не дубль)",
   /regenerate/.test(spaCode) && /replaceLast: true/.test(spaCode)
   && /payload\.replaceLast = true/.test(spaCode)
