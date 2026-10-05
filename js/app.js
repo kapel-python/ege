@@ -3723,7 +3723,6 @@ function renderTask(root) {
     <div class="session-wrap">
       <div class="session-head">
         <div class="session-head__nav">
-          ${sessionPrevButtonHtml(t)}
           <button class="btn btn--ghost btn--sm" onclick="askSessionQuit()">← Выйти</button>
         </div>
         <div class="session-head__title">${esc(S.title)}</div>
@@ -4040,7 +4039,8 @@ function sessionAnswerAreaHtml(t, S) {
       <span id="hintControl"></span>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
-    </div>`;
+    </div>
+    ${sessionBackNavHtml()}`;
 }
 
 /* Черновик живёт в состоянии сессии (и дублируется в localStorage через
@@ -4685,10 +4685,22 @@ function sessionHasNext() {
    «Назад» в шапке не дублируется: он ждёт в постоянном ряду навигации в
    конце карточки (sessionEssayNavHtml) — там он есть и на ненаписанном
    сочинении, и под готовым отчётом. */
-function sessionPrevButtonHtml(task) {
-  if (task && isLongTextTask(task)) return "";
+/* «Назад» живёт снизу слева — как у сочинений, а не в липкой шапке.
+   Ряд принадлежит состоянию ДО ответа: после ответа (верно / показано /
+   сверка открыта) вернуться уже нельзя, и ряд убирается через
+   sessionHideBackNav() в каждой ветке завершения. */
+function sessionBackBtnHtml() {
   if (!sessionHasPrev()) return "";
   return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
+}
+function sessionBackNavHtml() {
+  const back = sessionBackBtnHtml();
+  if (!back) return "";
+  return `<div class="session-nav" id="sessionBackNav">${back}<span></span></div>`;
+}
+function sessionHideBackNav() {
+  const row = document.getElementById("sessionBackNav");
+  if (row) row.remove();
 }
 
 /* Отметка «сочинение написано» — на ней держится правило «Далее» у сочинений.
@@ -5069,7 +5081,8 @@ function sessionEssayNextLabel() {
 }
 
 /* Ряд «вперёд» под результатом — тот же, что у обычных заданий. «Назад» здесь
-   не дублируется: он в шапке (sessionPrevButtonHtml). */
+   нет: он жил в ряду ДО ответа (sessionBackNavHtml) и убран вместе с ним —
+   после ответа вернуться уже нельзя. */
 function sessionNextHtml() {
   return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
 }
@@ -5079,8 +5092,8 @@ function sessionNextHtml() {
    — и когда отчёт готов, и когда сочинение ещё не написано. Раньше ряд жил
    внутри блока отчёта, поэтому на ненаписанном сочинении его не было вовсе:
    кнопка «Назад», которой ученик только что пользовался, исчезала, и до уже
-   написанных работ дальше достучаться было нечем. Шапка задания у сочинения
-   «Назад» не дублирует (sessionPrevButtonHtml).
+   написанных работ дальше достучаться было нечем. В шапке задания «Назад» нет
+   (он живёт только в нижних рядах) — дублировать нечего.
 
    Ряда нет, если показать нечего: на первом ненаписанном задании возвращаться
    некуда, а кнопки вперёд sessionEssayNextLabel не дала — пустой ряд лишь
@@ -5747,13 +5760,15 @@ function isSelfCheckTask(t) {
 }
 
 function sessionSelfCheckAreaHtml() {
+  const back = sessionBackBtnHtml();
   return `
     <div class="session-tools">
       <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="sessionSelfHint()">${icon("bulb")} Подсказка 1</button>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
     </div>
-    <div style="margin-top:10px">
+    <div class="session-nav" id="sessionBackNav">
+      ${back || "<span></span>"}
       <button class="btn btn--primary" id="selfRevealBtn" onclick="askSessionSelfReveal()">Сверить с решением</button>
     </div>`;
 }
@@ -5798,6 +5813,7 @@ function sessionSelfReveal() {
   const S = Session.cur;
   const t = Session.task();
   if (S.answered) return;
+  sessionHideBackNav();
   const btn = document.getElementById("selfRevealBtn");
   if (btn) btn.remove();
   document.getElementById("feedbackSlot").innerHTML = `
@@ -5909,6 +5925,7 @@ function sessionShowAnswer() {
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
   S.answered = true;
+  sessionHideBackNav();
   Session.stopTimer();
 
   const input = document.getElementById("answerInput");
@@ -5977,6 +5994,7 @@ function sessionSubmit() {
   S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
   S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
+  sessionHideBackNav();
   Session.stopTimer();
 
   input.disabled = true;
