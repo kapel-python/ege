@@ -943,8 +943,8 @@ const HELP = {
   errors: {
     title: "Ошибки",
     body: `
-      <p>Здесь собираются все твои ошибки — по темам. Это список того, что стоит повторить.</p>
-      <p>Нажми «Повторить слабые места» — подберём похожие задания. Правильный ответ закроет ошибку и даст <b>+15 очков</b>.</p>`,
+      <p>Здесь собираются твои ошибки — по темам. «Требуют повторения» — задания, которые не решены. «Почти получилось» — решены, но неидеально: с подсказкой, после неверных попыток или слишком медленно, — такое закрывает только чистое решение без помощи.</p>
+      <p>Нажми «Повторить слабые места» — подберём похожие задания. Чистый верный ответ закроет ошибку и даст <b>+15 XP</b>.</p>`,
   },
   trials: {
     title: "Испытания",
@@ -2280,7 +2280,7 @@ function renderSidebar(active) {
   }
   nav.removeAttribute("aria-disabled");
   const navItems = navItemsVisible();
-  const openErrors = Store.state.errors.filter((e) => !e.resolved).length;
+  const openErrors = asSafeArray(Store.state.errors).filter((e) => e && !e.resolved).length;
   nav.innerHTML = navItems.map((n) => {
     const href = n.href ? n.href : `#/${n.route}`;
     const ext = n.href ? ` target="_self" rel="noopener"` : "";
@@ -6128,7 +6128,12 @@ function sessionFinish(early = false) {
   /* достижение «без подсказок» */
   if (solved >= 5 && S.hintsUsed === 0 && correct / solved >= 0.8) unlockAchievement("nohints");
 
-  const errorsClosed = S.results.filter((r) => r.correct && S.mode === "errors").length;
+  /* Закрытых считаем по факту (начисленный бонус за закрытие), а не по
+     верным ответам: мини-ошибка после неидеального решения (подсказка,
+     неверные попытки, медленно) остаётся открытой до чистого прохода, хотя
+     ответ уже correct. Делим сумму бонусов на цену закрытия из state.js. */
+  const errUnit = (typeof XP_ERROR_RESOLVED === "number" && XP_ERROR_RESOLVED > 0) ? XP_ERROR_RESOLVED : 15;
+  const errorsClosed = S.mode === "errors" ? Math.round((S.errorResolvedSum || 0) / errUnit) : 0;
   /* Сессия из длинных текстовых ответов не «правильна/неправильна»:
      сочинение либо отправлено (минимальный объём есть), либо нет.
      Оценки по критериям здесь нет — только честный факт отправки. */
@@ -6140,7 +6145,11 @@ function sessionFinish(early = false) {
   const isBossWin = boss && correct / solved >= 0.6 && bossDefeated(boss);
   const title = missionDone ? "Практика завершена" : boss ? (isBossWin ? "Испытание пройдено" : "Босс устоял") : "Тренировка завершена";
 
-  const checkedSkills = boss ? [...new Set(S.results.map((r) => DataAPI.skill(DataAPI.task(r.taskId).skill).name))] : null;
+  const checkedSkills = boss ? [...new Set(S.results.map((r) => {
+    const t = DataAPI.task(r.taskId);
+    const sk = t ? DataAPI.skill(t.skill) : null;
+    return sk ? sk.name : null;
+  }).filter(Boolean))] : null;
 
   // Одиночное сочинение: разбор готового — кнопкой с итогового экрана
   // (внутри визита его показать было некуда: навигации нет). Ссылку считаем
@@ -6733,10 +6742,11 @@ function screenErrors(root) {
   // вызов функции (тест, будущий рефакторинг роутера) тоже обязан показать
   // раздел «Ошибки», а не ready-подобный экран с чужими данными.
   if (subjectLearningUnavailable()) return screenSubjectUnavailable(root, true, "errors");
-  const open = Store.state.errors.filter((e) => !e.resolved);
-  const resolvedTotal = Store.state.errors.filter((e) => e.resolved).length;
+  const allErrors = asSafeArray(Store.state.errors).filter((e) => e && typeof e === "object");
+  const open = allErrors.filter((e) => !e.resolved);
+  const resolvedTotal = allErrors.filter((e) => e.resolved).length;
   const resolvedLimit = resolvedErrorsExpanded ? resolvedTotal : RESOLVED_ERRORS_PREVIEW;
-  const resolved = resolvedErrorsForDisplay(Store.state.errors, Store.state.taskAttempts, resolvedLimit);
+  const resolved = resolvedErrorsForDisplay(allErrors, Store.state.taskAttempts, resolvedLimit);
   // Полные ошибки (задание не решено) и мини-ошибки (решено неидеально:
   // подсказка, неверные попытки, медленно) — разные пункты одного списка.
   const majors = open.filter((e) => errorKindOf(e) === "major");
@@ -6745,17 +6755,22 @@ function screenErrors(root) {
   const groupCards = (errs, chipClass) => {
     const bySkill = {};
     for (const e of errs) {
-      (bySkill[e.skill] = bySkill[e.skill] || []).push(e);
+      const key = (e && e.skill) || "";
+      (bySkill[key] = bySkill[key] || []).push(e);
     }
     return Object.entries(bySkill).map(([skillId, list]) => {
-      const sk = DataAPI.skill(skillId);
+      // Навык мог исчезнуть из каталога после записи ошибки (переименование
+      // темы): вместо падения всего раздела показываем карточку по подтеме.
+      const sk = skillId ? DataAPI.skill(skillId) : null;
+      const title = sk ? sk.name : ((list[0] && list[0].sub) || "Тема обновлена");
+      const ege = sk ? (sk.ege || "") : "";
       const subs = {};
-      list.forEach((e) => { subs[e.sub] = (subs[e.sub] || 0) + 1; });
+      list.forEach((e) => { const s = (e && e.sub) || "без темы"; subs[s] = (subs[s] || 0) + 1; });
       return `
       <div class="card error-group">
         <div class="error-group__head">
-          <div style="font-weight:650;font-size:15px">${sk.name}</div>
-          <span class="chip">${sk.ege}</span>
+          <div style="font-weight:650;font-size:15px">${esc(title)}</div>
+          ${ege ? `<span class="chip">${esc(ege)}</span>` : ""}
           <div class="error-group__count"><span class="chip ${chipClass}">${list.length} ${plural(list.length, "ошибка", "ошибки", "ошибок")}</span></div>
         </div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Частые проблемы:</div>
@@ -6775,7 +6790,7 @@ function screenErrors(root) {
     <div class="card card--glow" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px">
       <div>
         <div class="stat-num mono">${open.length}</div>
-        <div class="stat-label">открытых ошибок (полных: ${majors.length} · мини: ${minors.length}) · закрыто за всё время: ${Store.state.errorsResolved}</div>
+        <div class="stat-label">открытых ошибок (полных: ${majors.length} · мини: ${minors.length}) · закрыто: ${resolvedTotal}</div>
       </div>
       <div style="margin-left:auto">
         <button class="btn btn--primary btn--lg" ${open.length ? "" : "disabled"} onclick="startErrorsReview()">
@@ -6788,11 +6803,12 @@ function screenErrors(root) {
     <div class="section-title">Закрытые · ${resolvedTotal}</div>
     <div class="card" style="padding:8px 16px">
       ${resolved.map((e) => {
-        const t = DataAPI.task(e.taskId);
+        const t = (e && e.taskId) ? DataAPI.task(e.taskId) : null;
+        const label = (t && t.sub) || (e && e.sub) || "Задание обновлено";
         const closedAt = errorResolutionTimestamp(e, Store.state.taskAttempts);
         return `<div style="display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px">
           <span style="color:var(--success)">${icon("check")}</span>
-          <span style="color:var(--text-2)">${esc(t ? t.sub : e.sub)}</span>
+          <span style="color:var(--text-2)">${esc(label)}</span>
           <span style="margin-left:auto;color:var(--muted);font-size:12px">${relTime(closedAt)}</span>
         </div>`;
       }).join("")}
@@ -6814,10 +6830,23 @@ function reviewQueueForErrors(errors) {
   const taskIds = [];
   const errorMap = {}; // presentedTaskId -> исходный taskId ошибки
   const groups = {};
-  errors.forEach((e) => { (groups[e.sub] = groups[e.sub] || []).push(e); });
+  asSafeArray(errors).forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    const key = (e.sub || "") + "‖" + ((e.skill || ""));
+    ((groups[key] = groups[key] || []).push(e));
+  });
 
   for (const group of Object.values(groups)) {
-    const pool = DataAPI.practiceTasks().filter((t) => t.sub === group[0].sub);
+    const head = group[0] || {};
+    // Подтема могла быть переименована после записи ошибки: пул по старому
+    // названию пуст, а навык жив. Тогда повторяем по навыку, а не бросаем
+    // группу: иначе ошибка вечно висит открытой без способа её закрыть.
+    let pool = DataAPI.practiceTasks().filter((t) => t && t.sub === head.sub);
+    if (!pool.length && head.skill) pool = DataAPI.practiceTasksBySkill(head.skill).slice();
+    if (!pool.length && head.taskId) {
+      const orig = DataAPI.task(head.taskId);
+      if (orig && !DataAPI.taskHasMissingVisual(orig)) pool = [orig];
+    }
     // A subtopic can end up with fewer practiceable tasks than open errors in
     // it (the catalog changed since the error was recorded: the task lost its
     // required visual, or was removed entirely). That must not sink the whole
@@ -6859,18 +6888,18 @@ function reviewQueueForErrors(errors) {
 }
 
 function buildErrorsReviewSession() {
-  const open = Store.state.errors.filter((e) => !e.resolved);
+  const open = asSafeArray(Store.state.errors).filter((e) => e && !e.resolved);
   if (!open.length) return null;
 
   /* Частые подтемы идут раньше. Внутри подтемы каждый вопрос уникален:
      это исключает дубли и даёт второе, похожее задание, когда оно есть.
      Полные ошибки — раньше мини-ошибок: сначала закрываем реальные пробелы. */
   const subFreq = {};
-  open.forEach((e) => { subFreq[e.sub] = (subFreq[e.sub] || 0) + 1; });
+  open.forEach((e) => { const k = (e && e.sub) || ""; subFreq[k] = (subFreq[k] || 0) + 1; });
   const sorted = open.slice().sort((a, b) => {
     const ka = errorKindOf(a), kb = errorKindOf(b);
     if (ka !== kb) return ka === "major" ? -1 : 1;
-    return subFreq[b.sub] - subFreq[a.sub];
+    return (subFreq[(b && b.sub) || ""] || 0) - (subFreq[(a && a.sub) || ""] || 0);
   });
   const queue = reviewQueueForErrors(sorted);
   if (!queue || !queue.taskIds.length) return null;
@@ -6883,7 +6912,7 @@ function buildErrorsReviewSession() {
 }
 
 function startErrorsReview() {
-  const open = Store.state.errors.filter((e) => !e.resolved);
+  const open = asSafeArray(Store.state.errors).filter((e) => e && !e.resolved);
   if (!open.length) return toast("Открытых ошибок нет", "", "check");
   const q = buildErrorsReviewSession();
   if (!q) return toast("Не удалось подобрать задания. Попробуй ещё раз.", "", "x");
