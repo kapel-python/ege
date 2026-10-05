@@ -161,17 +161,27 @@ function check(name, cond, detail) {
     && det.includes("Проверок сочинений") && det.includes("Ходов ИИ"));
   await page.screenshot({ path: shot("sub-manage.png") });
 
-  // отмена продления
+  // отмена продления — через подтверждающее .dlg-окно
   await page.click('#actionsRow [data-act="ask-cancel"]');
-  check("подтверждение отмены", await page.isVisible("#confirmSlot .confirm"));
-  await page.click('#confirmSlot .confirm button:has-text("Да, отменить")');
-  await page.waitForSelector('#statusPill:has-text("без продления")', { timeout: 10000 });
-  check("отмена: без продления", true);
+  await page.waitForSelector('#cancel-modal-root .dlg', { timeout: 10000 });
+  check("отмена: модалка подтверждения", true);
+  await page.click('#cancelGoBtn');
+  await page.waitForFunction(() => {
+    const sub = document.getElementById("actionsSub");
+    return sub && sub.textContent.includes("Автопродление выключено");
+  }, { timeout: 10000 });
+  check("отмена: продление выключено", true);
+  det = await page.textContent("#content");
+  check("отмена: плашка Plus без статусной таблетки",
+    det.includes("Plus") && !det.includes("без продления") && !det.includes("Plus активен"));
 
   // возврат продления
   await page.click('#actionsRow [data-act="resume"]');
-  await page.waitForSelector('#statusPill:has-text("Plus активен")', { timeout: 10000 });
-  check("resume: активна", true);
+  await page.waitForFunction(() => {
+    const sub = document.getElementById("actionsSub");
+    return sub && sub.textContent.includes("Продление держит доступ");
+  }, { timeout: 10000 });
+  check("resume: продление вернулось", true);
 
   // --- 4. публичная страница залогиненным Plus ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });

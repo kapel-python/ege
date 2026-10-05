@@ -26,6 +26,7 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
+<link rel="stylesheet" href="/css/dlg.css?v=2">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -158,6 +159,8 @@
   .ring-card__val{font-family:var(--font-display);font-size:38px;font-weight:700;letter-spacing:-0.03em;
     font-variant-numeric:tabular-nums;margin-top:-120px;height:100px;display:flex;
     align-items:center;justify-content:center;line-height:1;}
+  /* цифра сочинения сидит чуть ниже оптического центра — поднимаем на пару px */
+  #essayLeft{position:relative;top:-2px;}
   .ring-card__total{font-size:13px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;}
   .ring-card__label{font-weight:700;font-size:15px;margin-top:10px;}
   .ring-card__sub{font-size:12.5px;color:var(--text-faint);}
@@ -187,9 +190,6 @@
   .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
   .tariff-link{margin-top:16px;font-size:13.5px;color:var(--text-dim);}
   .tariff-link a{color:var(--accent);font-weight:650;}
-  .confirm{margin-top:16px;padding:14px 16px;border-radius:var(--radius-md);background:var(--surface-3);
-    border:1px solid var(--card-border);font-size:13.5px;color:var(--text-dim);display:grid;gap:12px;}
-  .confirm__actions{display:flex;gap:8px;flex-wrap:wrap;}
   .section{padding:clamp(20px,4vw,32px) 0 0;}
   .section-label{display:inline-flex;align-items:center;gap:8px;font-size:clamp(12px,1.5vw,13px);font-weight:700;
     letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:12px;}
@@ -244,7 +244,6 @@
     </a>
   </div>
   <div class="hero">
-    <span class="chip chip--gold" id="heroChip">ege easy <span class="plus">Plus</span></span>
     <h1 id="heroTitle">Управление <span class="grad">подпиской</span></h1>
     <p class="hero-sub" id="heroSub">Загружаем статус…</p>
   </div>
@@ -315,6 +314,7 @@
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Лимиты в разы больше</b> — <span id="perkLimits">10 проверок сочинений и 50 ходов ИИ в день</span>.</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>ИИ</b> — разбор ошибок, план на неделю и ответы по твоему прогрессу. Сейчас бесплатен всем — 10 ходов в день.</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>«Мои сочинения»</b> — все проверки, разборы и график баллов в конце Пути. Раздел входит в Plus.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Личный план от ИИ</b> — смотрит твой прогресс и собирает маршрут на любой срок, от одного дня до года: темы по неделям с теорией и заданиями, а в профиле всегда видно, что учить сегодня.</span></li>
         </ul>
       </div>
     </section>
@@ -336,7 +336,6 @@
         <h2 class="card-title">Подписка</h2>
         <p class="card-sub" id="actionsSub">…</p>
         <div class="actions" id="actionsRow"></div>
-        <div id="confirmSlot"></div>
         <p class="tariff-link">Подробнее о тарифе — на <a href="/subscription">странице <span class="plus">Plus</span></a>.</p>
       </div>
     </section>
@@ -358,6 +357,8 @@
     </div>
   </div>
 </div>
+
+<div id="cancel-modal-root"></div>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
@@ -529,7 +530,7 @@
     var plus = !!(st && st.active);
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 10 : 5);
-    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 25 : 5);
+    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 50 : 10);
 
     /* герой */
     var pill = document.getElementById("statusPill");
@@ -540,8 +541,8 @@
     var plabel = document.getElementById("periodLabel");
     if (plus) {
       var left = daysLeft(st.expiresAt);
-      pill.className = "chip " + (cancelled ? "chip--warn" : "chip--ok");
-      pill.innerHTML = cancelled ? "без продления" : PLUS_WORD + " активен";
+      pill.className = "chip chip--gold";
+      pill.innerHTML = PLUS_WORD;
       var periodText = st.period === "year" ? "год · " + PRICE_YEAR + " ₽" : "месяц · " + PRICE_MONTH + " ₽";
       meta.textContent = "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
       heroSub.textContent = cancelled
@@ -559,7 +560,7 @@
       pill.className = "chip chip--muted";
       pill.textContent = "бесплатный план";
       meta.innerHTML = "5 проверок сочинений и 10 ходов ИИ в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год (−33%).";
-      heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает только лимиты. ИИ сейчас бесплатен всем — 10 ходов в день.";
+      heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает лимиты и добавляет личный план от ИИ. Сам ИИ сейчас бесплатен всем — 10 ходов в день.";
       meter.hidden = true;
       plabel.hidden = true;
     }
@@ -577,8 +578,6 @@
     /* действия */
     var sub = document.getElementById("actionsSub");
     var row = document.getElementById("actionsRow");
-    var slot = document.getElementById("confirmSlot");
-    slot.innerHTML = "";
     row.innerHTML = "";
     function btn(cls, text, act){
       var b = document.createElement("button");
@@ -626,28 +625,63 @@
     }
   }
 
+  /* Отмена — подтверждающим .dlg-окном из единой dlg-системы
+     (css/dlg.css, как подтверждения на ege-result.html), а не строчным
+     блоком: мисклик мимо кнопки исключён, Esc/фон/«Назад» закрывают. */
+  var cancelPrevFocus = null;
   function askCancel(){
-    var slot = document.getElementById("confirmSlot");
-    if (slot.firstChild) return;
-    var box = document.createElement("div");
-    box.className = "confirm";
-    box.innerHTML = "<span>Отменить автопродление? Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план.</span>";
-    var actions = document.createElement("div");
-    actions.className = "confirm__actions";
-    var yes = document.createElement("button");
-    yes.type = "button";
-    yes.className = "btn btn--sm btn-ghost";
-    yes.textContent = "Да, отменить";
-    yes.onclick = function(){ doPost("/api/subscription/cancel", yes, "Отменяем…", "Автопродление выключено — доступ до конца срока сохранён"); };
-    var no = document.createElement("button");
-    no.type = "button";
-    no.className = "btn btn--sm btn-ghost";
-    no.textContent = "Назад";
-    no.onclick = function(){ slot.innerHTML = ""; };
-    actions.appendChild(yes);
-    actions.appendChild(no);
-    box.appendChild(actions);
-    slot.appendChild(box);
+    var root = document.getElementById("cancel-modal-root");
+    if (!root || root.innerHTML) return;
+    try { cancelPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null; }
+    catch(e){ cancelPrevFocus = null; }
+    root.innerHTML = '<div class="dlg-backdrop">'
+      + '<div class="dlg" role="dialog" aria-modal="true" aria-label="Отмена автопродления">'
+      + '<button class="dlg__close" type="button" aria-label="Закрыть окно">×</button>'
+      + '<div class="dlg__eyebrow">Подписка ' + PLUS_WORD + '</div>'
+      + '<div class="dlg__text" style="margin-top:10px;font-size:16px;font-weight:700;color:var(--text)">Отменить автопродление?</div>'
+      + '<div class="dlg__text">Доступ сохранится до конца оплаченного срока, потом вернётся бесплатный план. Прогресс и история никуда не денутся.</div>'
+      + '<div class="dlg__actions">'
+      + '<button class="btn btn-ghost btn--sm" type="button" data-cancel-act="back">Назад</button>'
+      + '<button class="btn btn-primary btn--sm" type="button" id="cancelGoBtn" data-cancel-act="go">Да, отменить</button>'
+      + '</div></div></div>';
+    /* Обработчики — свойствами, а не инлайн-атрибутами: весь скрипт живёт
+       внутри IIFE, глобальных имён confirmCancel/closeCancelModal нет. */
+    var backdrop = root.querySelector(".dlg-backdrop");
+    if (backdrop) backdrop.onclick = function(e){ if (e.target === this) closeCancelModal(); };
+    var xBtn = root.querySelector(".dlg__close");
+    if (xBtn) xBtn.onclick = closeCancelModal;
+    var backBtn = root.querySelector('[data-cancel-act="back"]');
+    if (backBtn) backBtn.onclick = closeCancelModal;
+    var goBtn = root.querySelector('[data-cancel-act="go"]');
+    if (goBtn) goBtn.onclick = confirmCancel;
+    document.addEventListener("keydown", cancelEscHandler);
+    var dlg = root.querySelector(".dlg");
+    if (dlg) { dlg.setAttribute("tabindex", "-1"); try { dlg.focus({ preventScroll: true }); } catch(e){} }
+  }
+  function cancelEscHandler(e){
+    if (e && e.key === "Escape") closeCancelModal();
+  }
+  function closeCancelModal(){
+    var root = document.getElementById("cancel-modal-root");
+    if (!root || !root.innerHTML) return;
+    root.innerHTML = "";
+    document.removeEventListener("keydown", cancelEscHandler);
+    if (cancelPrevFocus && cancelPrevFocus.isConnected) {
+      try { cancelPrevFocus.focus({ preventScroll: true }); } catch(e){}
+    }
+    cancelPrevFocus = null;
+  }
+  function confirmCancel(){
+    var b = document.getElementById("cancelGoBtn");
+    setBusy(b, true, "Отменяем…");
+    api("/api/subscription/cancel", {}).then(function(){
+      closeCancelModal();
+      toast("Автопродление выключено — доступ до конца срока сохранён");
+      reload();
+    }).catch(function(err){
+      setBusy(b, false);
+      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
+    });
   }
 
   function doPost(path, btn, busyLabel, okText){

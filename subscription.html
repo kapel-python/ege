@@ -271,10 +271,6 @@
 <main>
   <section class="hero">
     <div class="wrap hero-content">
-      <span class="chip">
-        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
-        ege easy <span class="plus">Plus</span>
-      </span>
       <h1>Готовься <span class="grad">в своём темпе</span></h1>
       <p class="hero-sub">С <span class="plus">Plus</span> дневные лимиты выше: <b>10 проверок сочинений</b> и <b>50 ходов ИИ</b> вместо 5 и 10 на бесплатном тарифе.
         Задания, навыки, прогноз баллов и разборы остаются <b>бесплатными и без ограничений</b>.</p>
@@ -322,8 +318,8 @@
   <section class="section">
     <div class="wrap">
       <div class="section-label rv">что меняется</div>
-      <h2 class="section-title rv">Всё для подготовки — бесплатно. Plus увеличивает лимиты</h2>
-      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Plus увеличивает только лимиты. ИИ сейчас бесплатен всем — 10 ходов в день.</p>
+      <h2 class="section-title rv">Всё для подготовки — бесплатно. Plus даёт больше</h2>
+      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Plus увеличивает лимиты и добавляет личный план от ИИ. Сам ИИ сейчас бесплатен всем — 10 ходов в день.</p>
       <div class="card-grid">
         <div class="card rv">
           <div class="card-icon" aria-hidden="true">
@@ -349,6 +345,14 @@
           <div class="card-big">вся история</div>
           <p class="card-text">Каждое проверенное сочинение сохраняется в «Моих сочинениях»: баллы, разборы и график роста. Раздел доступен с Plus.</p>
         </div>
+        <div class="card rv" style="--d:300ms">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8l-2.5 5.5L8 16l2.5-5.5L16 8z"/></svg>
+          </div>
+          <div class="card-title">План от ИИ</div>
+          <div class="card-big">от 1 дня до года</div>
+          <p class="card-text">ИИ смотрит твой прогресс и собирает личный маршрут: темы по неделям — с теорией и заданиями. В профиле всегда видно, что учить сегодня.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -367,8 +371,9 @@
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Разбор сочинений</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Базовые лимиты: <b>5</b> проверок в день</span></li>
-            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>5</b> ходов в день · сейчас бесплатно всем</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>10</b> ходов в день · сейчас бесплатно всем</span></li>
             <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>«Мои сочинения»: история и динамика баллов</span></li>
+            <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>Личный план от ИИ на любой срок</span></li>
           </ul>
         </div>
         <div class="card card--plus rv" id="plusCard" style="--d:100ms">
@@ -379,9 +384,10 @@
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Все задания и навыки</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Разбор сочинений</span></li>
-            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Лимиты Plus: <b>10</b> проверок и <b>25</b> ходов в день</span></li>
-            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>25</b> ходов в день</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Лимиты Plus: <b>10</b> проверок и <b>50</b> ходов в день</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>50</b> ходов в день</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>«Мои сочинения»: вся история и динамика баллов</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Личный план от ИИ на любой срок — от дня до года</span></li>
           </ul>
         </div>
       </div>
@@ -399,7 +405,7 @@
         </div>
         <div class="faq__item rv">
           <button class="faq__q" type="button" aria-expanded="false">Что изменится после оформления?<span class="faq__sign" aria-hidden="true"></span></button>
-          <div class="faq__a"><div><p>Только лимиты: 10 проверок сочинений и 50 ходов ИИ в день. Предмет, цель, уровень и весь прогресс остаются как были.</p></div></div>
+          <div class="faq__a"><div><p>Лимиты растут — 10 проверок сочинений и 50 ходов ИИ в день, плюс личный учебный план от ИИ на любой срок, от дня до года. Предмет, цель, уровень и весь прогресс остаются как были.</p></div></div>
         </div>
         <div class="faq__item rv">
           <button class="faq__q" type="button" aria-expanded="false">Где найти мои сочинения?<span class="faq__sign" aria-hidden="true"></span></button>

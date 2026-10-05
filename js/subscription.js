@@ -138,7 +138,7 @@ var Subscription = (function () {
     var left = daysLeft(st.expiresAt);
     var leftText = left <= 0 ? "срок вышел" : left + " " + plural(left, "день", "дня", "дней");
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : 10;
-    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : 25;
+    var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : 50;
     return `
     <a class="card sub-card sub-card--plus" href="/subscription/manage" aria-label="Управление подпиской Plus">
       <span class="sub-card__top">
