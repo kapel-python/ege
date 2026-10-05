@@ -245,6 +245,29 @@ def log_catch_up(conn: sqlite3.Connection, info: dict | None, *,
                      now_ms=now_ms)
 
 
+def delete_user_traces(conn: sqlite3.Connection, user_id: int) -> None:
+    """Убрать следы удалённого аккаунта: его строки — удалить, его авторство
+    чужих строк — обезличить (NULL вместо id).
+
+    У таблицы нет FK на users (котлы общие, владелец не всегда аккаунт),
+    поэтому каскад БД сюда не дотягивается — чистим явно в тех же местах,
+    где удаляется строка users, внутри их транзакции. Без коммита.
+    Не бросает."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return
+    try:
+        conn.execute("DELETE FROM quota_ledger WHERE user_id=?", (uid,))
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("UPDATE quota_ledger SET actor_user_id=NULL WHERE actor_user_id=?",
+                     (uid,))
+    except sqlite3.Error:
+        pass
+
+
 def read_entries(conn: sqlite3.Connection, *, user_id: int | None = None,
                  owner: str | None = None, limit: int = 100,
                  offset: int = 0) -> list[dict]:

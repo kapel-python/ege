@@ -186,6 +186,19 @@ check("empty owner ignored", QL.log_event(conn, owner="", kind="spend") is None)
 check("ledger table exists", conn.execute(
     "SELECT COUNT(*) c FROM quota_ledger").fetchone()["c"] > 0)
 
+# --- 10a. Чужое авторство обезличивается, а не удаляется ---
+conn.execute("INSERT INTO users(id,name,created_at) VALUES(2,'V',0)")
+SUB._top_up_buckets(conn, 1, 10, 50, int(time.time() * 1000),
+                     reason="subscription:grant", actor=2)
+QL.delete_user_traces(conn, 2)
+kept = [r for r in QL.read_entries(conn, owner="u:1", limit=500)
+        if r["kind"] == "topup" and r["actor_user_id"] is None]
+check("actor anonymized, row kept", len(kept) >= 1, str(len(kept)))
+
+# --- 10b. Удаление аккаунта уносит следы ---
+QL.delete_user_traces(conn, 1)
+left = QL.read_entries(conn, user_id=1, limit=500)
+check("own rows gone", len(left) == 0, str(len(left)))
 conn.close()
 os.unlink(path)
 print(f"\n{checks - failures}/{checks} ok")

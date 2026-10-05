@@ -10524,6 +10524,13 @@ def admin_delete_user(conn: sqlite3.Connection, user_id: int, actor_id: int) -> 
         raise KeyError("user not found")
     conn.execute("BEGIN")
     # ON DELETE CASCADE clears stats, progress, attempts and admin sessions.
+    # У журнала квот FK нет (котлы общие) — следы чистим явно, в той же
+    # транзакции: иначе удалённый аккаунт оставлял бы свои строки.
+    if _QL is not None:
+        try:
+            _QL.delete_user_traces(conn, user_id)
+        except Exception:
+            pass
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.execute("INSERT INTO admin_audit(actor_user_id, action, target_user_id, detail, created_at) VALUES (?,?,?,?,?)",
                  (actor_id, "delete-user", user_id, user["account_id"] or "", now_iso()))
@@ -15953,6 +15960,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_user(user_id): return
             if self.reject_if_blocked(conn, user_id):
                 return
+            # Журнал квот каскадом не чистится (нет FK) — убираем следы явно,
+            # иначе «удалить всё» оставляло бы строки с id удалённого.
+            if _QL is not None:
+                try:
+                    _QL.delete_user_traces(conn, user_id)
+                except Exception:
+                    pass
             conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
             self.send_json({"ok": True}, token=token)
         except sqlite3.Error as exc:
