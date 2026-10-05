@@ -65,14 +65,18 @@ def main() -> int:
 
     actions_block = map_block(js, "AUDIT_ACTIONS")
     detail_block = map_block(js, "AUDIT_DETAIL")
+    rows_block = map_block(js, "AUDIT_ROWS")
     action_keys = map_keys(actions_block)
     detail_keys = map_keys(detail_block)
+    rows_keys = map_keys(rows_block)
 
     missing_labels = sorted(actions - action_keys)
     check("у каждого действия есть подпись", not missing_labels, missing_labels)
     missing_details = sorted(actions - detail_keys)
     check("у каждого действия есть расшифровка", not missing_details, missing_details)
-    extra = sorted((action_keys | detail_keys) - actions)
+    missing_rows = sorted(actions - rows_keys)
+    check("у каждого действия есть строки модалки", not missing_rows, missing_rows)
+    extra = sorted((action_keys | detail_keys | rows_keys) - actions)
     # Мусор в картах не роняет ленту, но либо действие переименовали на
     # бэкенде, либо метку забыли удалить — видно сразу.
     check("в картах нет забытых действий", not extra, extra)

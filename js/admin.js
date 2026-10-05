@@ -1803,10 +1803,12 @@ function openUnblockUserModal(p, reload) {
    Лента вместо сырой таблицы: группировка по дням, фильтр по смыслу
    (Входы / Пользователи / Подписка / Провайдеры / Обращения), поиск по
    тексту и человеческие расшифровки деталей вместо сырого detail.
+   Карточка — кнопка целиком: клик открывает полную расшифровку в общей
+   модалке админки (openModal — та же система, что остальные окна раздела).
    Неизвестное действие рисуется сырым кодом, а не пустотой — иначе новая
    запись бэкенда молча исчезла бы из ленты. Покрытие меток проверяет
    test/audit-log.py: каждое действие из server.py обязано иметь запись
-   в AUDIT_ACTIONS и расшифровку в AUDIT_DETAIL. */
+   в AUDIT_ACTIONS, расшифровку в AUDIT_DETAIL и строки в AUDIT_ROWS. */
 
 const AUDIT_CATS = [
   { id: "all", label: "Все" },
@@ -2001,9 +2003,11 @@ function auditCardHTML(e) {
     ? `<span class="mono">${esc(e.actorAccount)}</span>${e.actorId === me ? " (ты)" : ""}`
     : "—";
   const target = e.targetAccount
-    ? `<a href="#/users/${esc(e.targetAccount)}" class="mono">${esc(e.targetAccount)}</a>${e.targetId === me ? " (ты)" : ""}`
+    ? `<span class="mono">${esc(e.targetAccount)}</span>${e.targetId === me ? " (ты)" : ""}`
     : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
-  return `<article class="a-audit">
+  const id = Number(e.id) || 0;
+  return `<button type="button" class="a-audit a-audit--btn" onclick="openAuditDetail(${id})"
+      aria-label="${esc(`${label}: ${human || label}`)}">
     <div class="a-audit__head">
       <span class="a-chip ${cls}">${esc(label)}</span>
       ${plus ? `<span class="a-chip a-chip--accent">Plus</span>` : ""}
@@ -2012,7 +2016,161 @@ function auditCardHTML(e) {
     <div class="a-audit__text">${esc(human || label)}</div>
     <div class="a-audit__meta">${actor}<span class="a-audit__arrow">→</span>${target}</div>
     ${human || !raw ? "" : `<div class="a-audit__raw mono">${esc(raw)}</div>`}
-  </article>`;
+  </button>`;
+}
+
+/* Подробные строки для модалки: действие -> [[подпись, значение]].
+   Та же человеческая расшифровка, что в AUDIT_DETAIL, но разложенная по
+   строкам; общих «Кто / Кому / Когда» здесь нет — их добавляет модалка. */
+function auditPendingRows(detail) {
+  const parts = String(detail || "").split(/\s+/).filter(Boolean);
+  const rows = [];
+  if (parts[0]) rows.push(["Код", auditCode(parts[0])]);
+  if (parts[1]) rows.push(["IP", parts[1]]);
+  return rows;
+}
+
+function auditPairsRows(detail) {
+  // Цепочки моделей и приоритеты: {"high":"x",...} -> строки по слотам.
+  try {
+    const obj = JSON.parse(detail);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
+    return Object.entries(obj).slice(0, 4).map(([k, v]) => [PROV_SLOT_LABELS[k] || k, String(v)]);
+  } catch (e) { return []; }
+}
+
+const AUDIT_ROWS = {
+  "admin-login": () => [],
+  "admin-logout": () => [],
+  "admin-login-pending": (e) => auditPendingRows(e.detail),
+  "admin-login-approved": (e) => auditPendingRows(e.detail),
+  "admin-login-denied": (e) => auditPendingRows(e.detail),
+  "admin-login-expired": (e) => auditPendingRows(e.detail),
+  "admin-login-cancelled": () => [],
+  "grant-xp": (e) => {
+    const m = String(e.detail || "").match(/^\s*([+-]?\d+)\s*(.*)$/);
+    if (!m) return [];
+    const rows = [["Изменение", `${m[1]} XP`]];
+    if (m[2]) rows.push(["Причина", m[2]]);
+    return rows;
+  },
+  reset: (e) => [["Сброшено", AUDIT_RESET_LABELS[String(e.detail || "").trim()] || String(e.detail || "")]],
+  "update-profile": (e) => {
+    try {
+      const obj = JSON.parse(e.detail || "");
+      if (!obj || typeof obj !== "object") return [];
+      const rows = [];
+      if (obj.name) rows.push(["Имя", obj.name]);
+      if (obj.selfLevel) rows.push(["Самооценка", LEVEL_LABELS[obj.selfLevel] || obj.selfLevel]);
+      if (obj.goal) rows.push(["Цель", GOAL_LABELS[obj.goal] || obj.goal]);
+      return rows;
+    } catch (err) { return []; }
+  },
+  "delete-user": (e) => (e.detail ? [["Аккаунт", String(e.detail)]] : []),
+  "block-user": (e) => {
+    const parts = String(e.detail || "").split(/\s+/).filter(Boolean);
+    const dur = BLOCK_DURATIONS.find((d) => d.id === parts[0]);
+    if (!dur) return [];
+    const rows = [["Срок", dur.title]];
+    rows.push(["До", dur.secs == null ? "навсегда" : fmtDateTime(Number(e.ts) + dur.secs * 1000)]);
+    const reason = parts.slice(1).join(" ");
+    if (reason) rows.push(["Причина", reason]);
+    return rows;
+  },
+  "unblock-user": () => [],
+  "ai-limit": (e) => {
+    const m = String(e.detail || "").match(/limit=(\d+)\s+remaining=(\d+)/);
+    if (!m) return [];
+    const rows = [["Сочинения", `лимит ${m[1]} · остаток ${m[2]}`]];
+    const agent = String(e.detail || "").split("agent:")[1] || "";
+    const am = agent.match(/limit=(\d+)\s+remaining=(\d+)/);
+    if (am) rows.push(["ИИ", `лимит ${am[1]} · остаток ${am[2]}`]);
+    return rows;
+  },
+  "subscription-grant": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+until\s+(\d+)/);
+    if (!m) return [];
+    return [["Срок", m[1] === "year" ? "год" : "месяц"], ["До", fmtDateTime(Number(m[2]))]];
+  },
+  "subscription-revoke": () => [["Режим", "доступ закрыт сразу"]],
+  "subscription-refund": (e) => {
+    const m = String(e.detail || "").match(/payment=(\S+)\s+(\d+)/);
+    if (!m) return [];
+    return [["Сумма", auditRub(m[2])], ["Платёж", m[1]]];
+  },
+  "subscription-waitlist-grant": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+x(\d+)/);
+    if (!m) return [];
+    const n = Number(m[2]);
+    return [["Срок", m[1] === "year" ? "год" : "месяц"],
+      ["Получили", `${n} ${plural(n, "человек", "человека", "человек")}`]];
+  },
+  "providers.judge": (e) => {
+    const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
+    if (!text) return [];
+    const parts = text.split("→").map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 2) return [["Было", parts[0]], ["Стало", parts[1]]];
+    return [["Судья", text]];
+  },
+  "ai-provider-create": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-reset": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-apply": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-update": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-delete": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-slots": (e) => auditPairsRows(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
+  "ai-provider-models": (e) => auditPairsRows(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
+  "support-read": (e) => {
+    const m = String(e.detail || "").match(/message\s+(\d+)/);
+    return m ? [["Обращение", `№ ${m[1]}`]] : [];
+  },
+};
+
+function auditModalRows(e) {
+  const fn = AUDIT_ROWS[e.action];
+  if (fn) return fn(e) || [];
+  // Будущее действие без разбора: данные видны, но подписаны.
+  const rows = [["Действие", String(e.action || "—")]];
+  if (e.detail) rows.push(["Данные", String(e.detail)]);
+  return rows;
+}
+
+/* Детали записи в общей модалке админки: вся информация человеческим
+   языком, сырых кодов нет (кроме будущих действий — там разбирать нечего).
+   Переход к пользователю — кнопкой внутри: ссылка в карточке-кнопке
+   ломала бы разметку вложенным интерактивом. */
+function openAuditDetail(id) {
+  const e = (A.auditById || {})[Number(id)];
+  if (!e) return;
+  const info = auditActionOf(e);
+  const cat = (AUDIT_CATS.find((c) => c.id === info[0]) || {}).label || info[1];
+  const rows = auditModalRows(e).slice();
+  const me = A.session?.user?.id;
+  const actor = e.actorAccount
+    ? `${e.actorAccount}${e.actorId === me ? " (ты)" : ""}` : "—";
+  const target = e.targetAccount
+    ? `${e.targetAccount}${e.targetId === me ? " (ты)" : ""}`
+    : (e.targetId ? `id ${e.targetId} (удалён)` : "—");
+  if (/ \[Plus\]$/.test(String(e.detail || ""))) rows.push(["Направление", "Plus"]);
+  rows.push(["Кто", actor], ["Кому", target], ["Когда", fmtDateTime(e.ts)]);
+  const hasTarget = !!e.targetAccount;
+  openModal(`
+    <div class="a-modal__title">${esc(info[1])}</div>
+    <div class="a-modal__desc">${esc(cat)} · ${esc(fmtDateTime(e.ts))}</div>
+    <div class="a-modal__form"><div class="a-kv">
+      ${rows.map(([k, v]) => `<div class="a-kv__item"><div class="a-kv__k">${esc(k)}</div><div class="a-kv__v">${esc(v)}</div></div>`).join("")}
+    </div></div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mClose">Закрыть</button>
+      ${hasTarget ? `<button class="btn btn--primary" id="mUser">Открыть пользователя</button>` : ""}
+    </div>`, (modal) => {
+    modal.querySelector("#mClose").onclick = closeModal;
+    if (hasTarget) {
+      modal.querySelector("#mUser").onclick = () => {
+        closeModal();
+        location.hash = `#/users/${encodeURIComponent(e.targetAccount)}`;
+      };
+    }
+  });
 }
 
 function auditTab() {
@@ -2048,7 +2206,7 @@ async function screenAudit() {
   renderShell("audit", `
     <div class="a-toolbar">
       <input class="a-input" id="auditSearch" placeholder="Поиск: действие, детали, аккаунт…" value="${esc(A.lastAuditQuery || "")}">
-      <span class="a-seg" role="group" aria-label="Категория действий">
+      <span class="a-seg a-seg--wrap" role="group" aria-label="Категория действий">
         ${AUDIT_CATS.map((c) => `<button class="a-seg__btn${c.id === auditTab() ? " a-seg__btn--active" : ""}" data-audit-tab="${c.id}">${esc(c.label)}</button>`).join("")}
       </span>
       <span class="spacer"></span>
@@ -2080,6 +2238,9 @@ function drawAuditList(entries) {
   if (!list) return;
   const tab = auditTab();
   const found = auditFiltered(entries, tab, A.lastAuditQuery || "");
+  // Карточки открывают модалку по id: держим карту показанных записей.
+  A.auditById = {};
+  found.forEach((e) => { A.auditById[Number(e.id) || 0] = e; });
   const count = document.getElementById("auditCount");
   if (count) count.textContent = `${found.length} из ${entries.length}`;
   if (!found.length) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/* Регресс раздела «Журнал» в админке: лента вместо сырой таблицы.
+/* Регресс раздела «Журнал» в админке: лента вместо сырой таблицы
+ * (48 браузерных проверок).
  *
  * Живой сервер на temp-БД и свободном порте, прод не трогается. Пользователи
  * заводятся настоящим claim, записи журнала — прямым INSERT через python3
@@ -12,7 +13,12 @@
  *   A3 поиск сужает ленту; неизвестное действие бэкенда видно сырым кодом
  *      только во «Всех», а не пустотой;
  *   A4 группировка по дням (Сегодня/Вчера/дата);
- *   A5 ноль ошибок консоли, мобильный вид рисуется.
+ *   A5 клик по карточке открывает модалку деталей (общая openModal
+ *      админки, не новая система): все данные строками человеческим языком
+ *      (Изменение/Причина/Сумма/Слоты/Кто/Кому/Когда), сырых кодов нет,
+ *      Escape закрывает, «Открыть пользователя» ведёт к профилю;
+ *   A6 мобильный вид: лента рисуется, вкладки переносятся и не выезжают
+ *      за 390px, тап открывает ту же модалку.
  *
  * Запуск: node test/audit-log-ui.js
  * Нужен playwright-core и Chromium; путь можно задать EGE_CHROME.
@@ -250,6 +256,49 @@ async function main() {
     const plusText = await page.$eval("#auditList", (el) => el.innerText);
     t("в «Подписке» чужого нет", !plusText.includes("future-action-xyz"));
 
+    section("A5 детали в модалке");
+    await page.getByRole("button", { name: "Все", exact: true }).click();
+    await sleep(150);
+    // Карточка выдачи XP: модалка со строками, без сырого кода.
+    await page.getByRole("button", { name: "+100 XP" }).click();
+    await page.waitForSelector(".a-modal", { timeout: 10000 });
+    const xpModal = await page.$eval(".a-modal", (el) => el.innerText);
+    t("модалка XP открылась", xpModal.includes("Корректировка XP"));
+    for (const row of ["Изменение", "+100 XP", "Причина", "за урок", "Кто", "Кому", "Когда"]) {
+      t(`строка модалки: ${row}`, xpModal.includes(row), "нет в модалке");
+    }
+    t("сырого grant-xp в модалке нет", !xpModal.includes("grant-xp"));
+    await page.keyboard.press("Escape");
+    await sleep(150);
+    t("Escape закрывает модалку", (await page.$(".a-modal")) === null);
+    // Возврат подписки: сумма и платёж отдельными строками.
+    await page.getByRole("button", { name: "199,00" }).click();
+    await page.waitForSelector(".a-modal", { timeout: 10000 });
+    const refundModal = await page.$eval(".a-modal", (el) => el.innerText);
+    t("модалка возврата: сумма и платёж",
+      refundModal.includes("199,00") && refundModal.includes("AbC123xYz9"), refundModal.slice(0, 120));
+    t("сырого subscription-refund нет", !refundModal.includes("subscription-refund"));
+    await page.keyboard.press("Escape");
+    await sleep(150);
+    // Цепочка моделей: слоты отдельными строками, не JSON.
+    await page.getByRole("button", { name: "Приоритеты" }).click();
+    await page.waitForSelector(".a-modal", { timeout: 10000 });
+    const slotsModal = await page.$eval(".a-modal", (el) => el.innerText);
+    t("модалка приоритетов: слоты строками",
+      slotsModal.includes("Высокий") && slotsModal.includes("closerouter"), slotsModal.slice(0, 120));
+    t("сырого JSON цепочки нет", !slotsModal.includes('{"high"'));
+    await page.keyboard.press("Escape");
+    await sleep(150);
+    // Переход к пользователю — кнопкой из модалки.
+    await page.getByRole("button", { name: "+100 XP" }).click();
+    await page.waitForSelector("#mUser", { timeout: 10000 });
+    await page.click("#mUser");
+    await sleep(300);
+    t("кнопка ведёт к пользователю",
+      page.url().includes(`#/users/${ca.accountId}`) && (await page.$(".a-modal")) === null, page.url());
+    await page.goto(`${BASE}/admin#/audit`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".a-audit", { timeout: 15000 });
+
     section("A4 группы по дням + мобильный вид");
     await page.getByRole("button", { name: "Все", exact: true }).click();
     await sleep(150);
@@ -258,7 +307,7 @@ async function main() {
     for (const g of groups) groupLabels.push(await g.innerText());
     t("групп три (Сегодня/Вчера/дата)", groupLabels.length === 3, groupLabels.join("|"));
     t("есть «Сегодня» и «Вчера»", groupLabels.includes("Сегодня") && groupLabels.includes("Вчера"));
-    const mob = await browser.newPage({ viewport: { width: 390, height: 780 } });
+    const mob = await browser.newPage({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
     mob.on("pageerror", (e) => errors.push("mob:" + String(e)));
     await mob.goto(`${BASE}/admin#/audit`, { waitUntil: "domcontentloaded" });
     // Форма входа появляется после асинхронной пробы сессии: мгновенный
@@ -273,6 +322,19 @@ async function main() {
     }
     await mob.waitForSelector(".a-audit", { timeout: 15000 });
     t("мобильная лента рисуется (29 + вход с телефона)", (await mob.$$(".a-audit")).length === 30);
+    const overflow = await mob.evaluate(() => {
+      const seg = document.querySelector("#adminScreen .a-seg");
+      return seg ? { sw: seg.scrollWidth, cw: seg.clientWidth,
+        doc: document.documentElement.scrollWidth, win: window.innerWidth } : null;
+    });
+    t("вкладки влезают в 390px без выезда",
+      !!overflow && overflow.sw <= overflow.cw + 1 && overflow.doc <= overflow.win + 1,
+      JSON.stringify(overflow));
+    // Тап по карточке открывает ту же модалку, что клик на десктопе.
+    await mob.getByRole("button", { name: "+100 XP" }).tap();
+    await mob.waitForSelector(".a-modal", { timeout: 10000 });
+    const mobModal = await mob.$eval(".a-modal", (el) => el.innerText);
+    t("модалка открывается тапом", mobModal.includes("Корректировка XP") && mobModal.includes("Когда"));
     await mob.close();
 
     t("ноль ошибок консоли", errors.length === 0, errors.slice(0, 3).join(" / "));

@@ -377,6 +377,11 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 }
 .a-seg__btn:hover { color: var(--text); background: var(--surface-3); }
 .a-seg__btn--active { color: var(--text); background: var(--surface); box-shadow: 0 1px 4px var(--shadow); }
+/* Вкладки журнала на телефоне в одну строку не влезают (Все/Входы/
+   Пользователи/Подписка/Провайдеры/Обращения) — переносимся, а не вылезаем
+   за край экрана. Остальные .a-seg (короткие периоды графика) живут одной
+   строкой как раньше. */
+.a-seg--wrap { flex-wrap: wrap; max-width: 100%; }
 .a-detail { margin-top: 12px; }
 .a-detail:empty { margin-top: 0; }
 .a-detail-hint { font-size: 12.5px; color: var(--muted); padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 10px; }
@@ -619,8 +624,11 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 /* ---------- audit: журнал действий ---------- */
 
-/* Та же карточка, что у обращений, но без раскрытия: действие уже
-   рассказано одной строкой (чип + расшифровка + кто → кому). */
+/* Та же карточка, что у обращений: чип + расшифровка + кто → кому.
+   Карточка — кнопка целиком: клик открывает детали в общей модалке
+   (openModal, та же система, что остальные окна админки). Отдельной ссылки
+   внутри нет осознанно: интерактив в кнопке ломал бы разметку, переход —
+   кнопкой «Открыть пользователя» в самой модалке. */
 .a-audit {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -629,6 +637,16 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   overflow: hidden;
 }
 .a-audit:hover { border-color: var(--border-strong); }
+.a-audit--btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.a-audit--btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .a-audit__head {
   display: flex;
   align-items: center;
