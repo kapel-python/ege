@@ -12,7 +12,7 @@
     abort: null, stick: true, lock: 0, creating: null, accountId: null,
     timers: [], turn: null, pendingBail: null, newThreadId: null, printing: false,
     follow: true, printTarget: null, gliding: false, glideFeed: null, progTop: null,
-    cache: { accountId: null, threads: null, messages: {} },
+    cache: { accountId: null, threads: null, threadsAt: 0, messages: {} },
   };
   var RING = 94.25, QUOTA_FALLBACK = 10;
   /* Окно подхвата хода (после перемонтирования экрана) и параметры ожидания
@@ -1061,8 +1061,16 @@
      «Путь → ИИ → Путь → ИИ» начинался с пустой колонки и загрузки. */
   function cacheOn() { return S.cache && S.cache.accountId === S.accountId; }
   function cacheHasThreads() { return cacheOn() && Array.isArray(S.cache.threads) && S.cache.threads.length > 0; }
-  function cacheDrop() { S.cache = { accountId: S.accountId, threads: null, messages: {} }; }
-  function cacheThreads(list) { if (!cacheOn()) cacheDrop(); S.cache.threads = list; }
+  function cacheDrop() { S.cache = { accountId: S.accountId, threads: null, threadsAt: 0, messages: {} }; }
+  function cacheThreads(list) { if (!cacheOn()) cacheDrop(); S.cache.threads = list; S.cache.threadsAt = Date.now(); }
+  /* Свежесть списка: тихая сверка после префетча/монта не должна дублировать
+     только что выполненный запрос. Окно 30 с — как кэш статуса подписки;
+     ручное «Обновить чат» и смена аккаунта (cacheDrop) вне окна. */
+  function threadsFresh() {
+    try {
+      return cacheOn() && S.cache.threadsAt && (Date.now() - S.cache.threadsAt < 30000);
+    } catch (_) { return false; }
+  }
   function cachedMessages(id) {
     if (!cacheOn() || id == null) return null;
     var hit = S.cache.messages[id];
@@ -3724,7 +3732,7 @@
       // Возврат на раздел в открытой вкладке: каркас и переписка рисуются из
       // кэша мгновенно, сеть только сверяет их на фоне.
       mountFrame();
-      loadThreads();
+      if (!threadsFresh()) loadThreads();
       return;
     }
     // Состояние списка уже известно (пусть даже пустое — префетч render
@@ -3734,7 +3742,7 @@
     // и знаем», и пустой блок тогда честен, а не преждевременен.
     if (cacheOn() && Array.isArray(S.cache.threads)) {
       mountFrame();
-      loadThreads();
+      if (!threadsFresh()) loadThreads();
       return;
     }
     // Холодный первый вход: экранная анимация приложения держится до ответа

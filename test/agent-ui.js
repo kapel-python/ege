@@ -401,7 +401,7 @@ check("экранная анимация приложения, а не свой 
 check("каркас строится после ответа списка, а не до",
   /screenLoader\("Открываем чаты…"\);\s*\n\s*loadThreads\(function first/.test(spaCode)
   && spaCode.includes("function mountFrame")
-  && /if \(cacheHasThreads\(\)\) \{[\s\S]{0,80}mountFrame\(\);\s*\n\s*loadThreads\(\);/.test(spaCode));
+  && /mountFrame\(\);\s*\n\s*if \(!threadsFresh\(\)\) loadThreads\(\);/.test(spaCode));
 check("известный доступ пропускает повторный гейт без второго лоадера",
   /Subscription\.cachedAgentAccess\(\) === true\) \{\s*\n\s*openAgentBody\(mg\);\s*\n\s*return;/.test(spaCode)
   && spaCode.includes('screenLoader("Проверяем доступ…")'));
@@ -411,6 +411,9 @@ check("треды греются до отрисовки раздела (тре�
   && /route === "ai"[\s\S]{0,400}AgentScreen\.prefetchThreads\(\)/.test(appJs));
 check("известное пустое состояние тоже без лоадера",
   /cacheOn\(\) && Array\.isArray\(S\.cache\.threads\)\) \{/.test(spaCode));
+check("тихая сверка не дублирует только что выполненный запрос",
+  /function threadsFresh\(\) \{[\s\S]{0,200}30000/.test(spaCode)
+  && /if \(!threadsFresh\(\)\) loadThreads\(\);/.test(spaCode));
 check("пустой блок не показывается на всякий случай",
   !/renderCachedQuota\(\);\s*\n\s*syncInput\(\);\s*\n\s*syncViewport\(\);\s*\n\s*showEmpty\(true\)/.test(spaCode)
   && spaCode.includes("function paintMessages")
