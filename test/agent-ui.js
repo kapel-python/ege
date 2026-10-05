@@ -69,6 +69,19 @@ check("тап по кружку открывает окно, а не тост",
   /quota\.addEventListener\("click", clickQuota\)/.test(spaCode)
   && /function clickQuota\(\)[\s\S]{0,400}?openQuotaInfoModal\(\);/.test(spaCode)
   && !/quota\.addEventListener\("click"[\s\S]{0,700}?say\("Осталось/.test(spaCode));
+/* Причина фермы доезжает до кружка без потерь: fetchQuota хранит reason в
+   S.quota (setQuota), клик при нуле несёт её в openLimitModal, та — первым
+   аргументом в общую модалку, а 429-ветка пробрасывает reason из ответа.
+   В общей модалке ветка фермы первая: никакой opts.text её не перебивает,
+   таймер выключен, апсейла нет. */
+check("кружок показывает ферму, а не обычное окно (reason сквозит)",
+  /q\.reason === "farm_suspected"/.test(spaCode)
+  && /openLimitModal\(st, null\)/.test(spaCode)
+  && /openAiLimitModal\(quota \|\| \{ limit/.test(spaCode)
+  && /reason: res\.data\.reason/.test(spaCode)
+  && /const farm = !burst && status && status\.reason === "farm_suspected";/.test(appJs)
+  && /const text = farm \? farmText/.test(appJs)
+  && /подозрение на ферму аккаунтов/.test(appJs));
 /* Автопоказ окна исчерпания: ход потратился в ноль с готовым ответом —
    взводим в settle, стреляем в конце печати (те же точки, где дописывается
    ответ), окно — ровно то же, что по клику на круг (clickQuota). Снятие —
