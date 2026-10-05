@@ -8106,7 +8106,7 @@ function profileAchievementsHTML(achievements) {
   }).join("");
   const rest = sorted.length - VISIBLE;
   return `<div class="badge-grid" id="profile-ach-grid">${items}</div>`
-    + (rest > 0 ? `<div class="profile-more"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileAchievements(this)" data-rest="${rest}">Показать ещё · осталось ${rest}</button></div>` : ``);
+    + (rest > 0 ? `<div class="profile-more"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileAchievements(this)">Показать ещё · осталось ${rest}</button></div>` : ``);
 }
 
 function toggleProfileAchievements(btn) {
