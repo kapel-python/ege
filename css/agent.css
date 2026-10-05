@@ -337,17 +337,21 @@ a.agent__link--int { border-style: dashed; }
 .agent__act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .agent__act[hidden] { display: none; }
 /* Плашка режима правки над полем: карандаш кладёт вопрос в поле без спросу,
-   крестик отменяет (иначе оставалось бы только отправить). */
-.agent__editbar { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto 8px; }
+   крестик отменяет (иначе оставалось бы только отправить). Крестик — большим
+   кругом, сидящим НА верхней кромке поля (не внутри него и не в пустоте
+   сверху): его нельзя не заметить. Ряд наползает на композер отрицательным
+   отступом, клики мимо крестика пропускает вниз (pointer-events). */
+.agent__editbar { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto -18px; padding: 0 4px; position: relative; z-index: 2; pointer-events: none; }
 .agent__editbar[hidden] { display: none; }
 .agent__editbar-tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--agent-ink-3); }
 .agent__edit-x {
-  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: none;
-  border-radius: 8px; cursor: pointer; border: 1px solid transparent; background: transparent;
+  display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: none;
+  margin-right: 14px; border-radius: 50%; cursor: pointer; pointer-events: auto;
+  border: 1px solid var(--border-strong); background: var(--surface); box-shadow: var(--card-shadow);
   color: var(--agent-ink-3);
 }
-.agent__edit-x svg { width: 15px; height: 15px; }
-.agent__edit-x:hover { background: var(--soft-hover); color: var(--text); }
+.agent__edit-x svg { width: 16px; height: 16px; }
+.agent__edit-x:hover { color: var(--text); }
 .agent__edit-x:focus { outline: none; }
 .agent__edit-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .agent__time { margin-left: 6px; font-size: 12px; line-height: 1; color: var(--agent-ink-3); white-space: nowrap; }
