@@ -14690,18 +14690,56 @@ class Handler(BaseHTTPRequestHandler):
                         proposal = {}
                     if not approve:
                         conn.execute("UPDATE agent_messages SET status='cancelled' WHERE id=?", (mid,))
-                        _agent_add_message(conn, tid, user_id, "assistant", "Отменено.")
                         try:
                             refresh_streak(conn, user_id, subject)
                         except Exception:
                             pass
                         conn.commit()
+                        # Отмена — тоже ответ модели, а не шаблон: история уже
+                        # содержит отменённый шаг («Отменено учеником»), сверху
+                        # кладём пометку и зовём модель БЕЗ инструментов.
+                        # Стоит 1 жетон хода; нет жетона или сбой модели —
+                        # честный шаблон без кнопок, как раньше.
+                        cancel_final = "Отменено."
+                        cancel_suggests: list = []
+                        try:
+                            if _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm"):
+                                try:
+                                    cancel_label = str((proposal or {}).get("label")
+                                                       or msg["tool_name"] or "действие")
+                                    cancel_hist = _agent_history_for_model(conn, tid)
+                                    cancel_msgs = _AGENT.build_messages(
+                                        _AGENT.AGENT_SYSTEM, cancel_hist,
+                                        f"Я нажал(а) «Отмена»: «{cancel_label}» не применяем. "
+                                        "Коротко подтверди отмену и предложи 1–2 следующих шага.")
+                                    cancel_chat = _agent_chat_fn({"n": 0}, tid, ai_tier_for(conn, user_id))
+                                    cancel_parsed = cancel_chat(cancel_msgs, [], None)
+                                    cancel_text = str((cancel_parsed or {}).get("text") or "").strip()
+                                    if not cancel_text:
+                                        raise ValueError("пустой ответ модели")
+                                    cancel_final, cancel_suggests = _agent_final_payload(
+                                        cancel_text, [], cancel_text)
+                                    _agent_add_message(conn, tid, user_id, "assistant", cancel_final,
+                                                       suggests=cancel_suggests)
+                                    try:
+                                        refresh_streak(conn, user_id, subject)
+                                    except Exception:
+                                        pass
+                                    conn.commit()
+                                except Exception:
+                                    try:
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm_fail")
+                                    except sqlite3.Error:
+                                        pass
+                                    try:
+                                        conn.rollback()
+                                    except sqlite3.Error:
+                                        pass
+                        except sqlite3.Error:
+                            pass
                         quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
-                        # После отмены — без кнопок-шаблонов: их неоткуда взять
-                        # (модель тут не отвечала), а дежурный набор — это и
-                        # есть заглушка.
-                        self.send_json({"ok": True, "approved": False, "final": "Отменено.",
-                                        "steps": [], "suggests": [],
+                        self.send_json({"ok": True, "approved": False, "final": cancel_final,
+                                        "steps": [], "suggests": cancel_suggests,
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла (каждый его
                     # запрос к ИИ — тоже жетон, та же по-запросная логика).

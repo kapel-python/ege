@@ -7,7 +7,8 @@ Temp-БД, живой сервер, мок провайдера (без сети
   * ответ без tools — финальный текст и одно списание квоты;
   * ответ с tools — цикл отрабатывает, шаги в базе и в ответе (каждый запрос
     к ИИ — жетон: вопрос+шаг+ответ на 1 инструмент стоят 2);
-  * действие — confirm без записи, approve меняет, отмена пишет «Отменено»;
+  * действие — confirm без записи, approve меняет, отмена зовёт модель
+    (текст + кнопки её слов за 1 жетон; без жетона/при сбое — шаблон «Отменено»);
   * длинный цикл — обрыв ответом по собранным данным (вызов без tools);
   * 10 простых ходов — ок, 11-й — 429 AI_LIMIT; 502 возвращает всё списанное ходом;
   * повтор того же вопроса — снова модель за жетон, кэша повторов нет;
@@ -934,6 +935,45 @@ def main():
             check("cancel -> Отменено",
                   status == 200 and body.get("final") == "Отменено.", f"{status} {body}")
 
+            section("отмена зовёт модель, а не шаблон")
+            with lock:
+                script.clear()
+                script.append({"text": None, "tool_calls": [{"id": "c4", "name": "reset_progress", "arguments": {}}]})
+            status, body = turn(a, tid_a, "сбрось мой прогресс")
+            check("reset -> pending", status == 200 and body.get("pending") is True, f"{status} {body}")
+            cancel_id2 = (body.get("steps") or [{}])[0].get("id")
+            _, q_before = a.request(base, "GET", "/api/agent/limits", None)
+            with lock:
+                script.clear()
+                script.append({"text": "Понял, сброс отменён. Продолжим учёбу?\n```suggest\n"
+                                       "[{\"label\":\"План\",\"ask\":\"Сделай план на неделю\"}]\n```",
+                               "tool_calls": []})
+            status, body = a.request(base, "POST", "/api/agent/turns/confirm",
+                                     {"messageId": cancel_id2, "approve": False})
+            check("cancel -> текст модели, а не шаблон",
+                  status == 200 and body.get("final") == "Понял, сброс отменён. Продолжим учёбу?",
+                  f"{status} {body}")
+            check("cancel -> кнопки модели",
+                  body.get("suggests") == [{"label": "План", "ask": "Сделай план на неделю"}],
+                  f"{body.get('suggests')}")
+            _, q_after = a.request(base, "GET", "/api/agent/limits", None)
+            check("ответ на отмену стоит 1 жетон",
+                  (q_before.get("remaining") or 0) - (q_after.get("remaining") or 0) == 1,
+                  f"{q_before} -> {q_after}")
+            conn2 = server.connect()
+            try:
+                trow = conn2.execute("SELECT id FROM agent_threads WHERE id=? OR public_id=?",
+                                     (tid_a, tid_a)).fetchone()
+                row = conn2.execute("SELECT content, suggests_json FROM agent_messages"
+                                    " WHERE thread_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",
+                                    (int(trow["id"]),)).fetchone() if trow else None
+                check("ответ на отмену записан в историю",
+                      row and row["content"] == "Понял, сброс отменён. Продолжим учёбу?"
+                      and "Сделай план на неделю" in (row["suggests_json"] or ""),
+                      str(dict(row) if row else None))
+            finally:
+                conn2.close()
+
             section("длинный цикл без ответа модели -> честный 502, а не шаблон")
             with lock:
                 script.clear()
@@ -1398,7 +1438,9 @@ def main():
                                           "```")[1]
                   == [{"label": "я умный", "ask": "Докажи, что ты умнее меня, ИИ."}])
             check("промпт запрещает готовые ответы в кнопках (только вопрос/подсказка)",
-                  "в кнопки класть запрещено" in agent.AGENT_SYSTEM
+                  "СТРОГО ЗАПРЕЩЕНО" in agent.AGENT_SYSTEM
+                  and "Проверь мой ответ: 12313" in agent.AGENT_SYSTEM
+                  and "без чисел, без ответов, без решений" in agent.AGENT_SYSTEM
                   and "дай подсказку" in agent.AGENT_SYSTEM)
             check("промпт запрещает заканчивать ход обещанием продолжить (2c)",
                   "Не заканчивай ход обещанием продолжить" in agent.AGENT_SYSTEM
