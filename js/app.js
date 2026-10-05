@@ -5730,7 +5730,7 @@ function sessionSelfCheckAreaHtml() {
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
     </div>
     <div style="margin-top:10px">
-      <button class="btn btn--primary" id="selfRevealBtn" onclick="sessionSelfReveal()">Сверить с решением</button>
+      <button class="btn btn--primary" id="selfRevealBtn" onclick="askSessionSelfReveal()">Сверить с решением</button>
     </div>`;
 }
 
@@ -5749,6 +5749,25 @@ function sessionSelfHint() {
     if (S.selfHintLevel >= 3) { btn.disabled = true; btn.textContent = "Все подсказки открыты"; }
     else btn.innerHTML = `${icon("bulb")} Подсказка ${S.selfHintLevel + 1}`;
   }
+}
+
+/* «Сверить с решением» открывает официальный разбор — случайный тап стоил бы
+   самостоятельной работы, поэтому сначала подтверждение тем же .dlg-диалогом,
+   что выход из тренировки. Сам sessionSelfReveal остаётся прямым действием
+   (его дёргает подтверждение) и держит проверку S.answered. */
+function askSessionSelfReveal() {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  openConfirmDialog({
+    eyebrow: "Самопроверка",
+    title: "Сверить с решением?",
+    text: "Откроется официальное решение — сравни со своим и честно отметь результат.",
+    iconName: "bulb",
+    cancelText: "Решу сам(а)",
+    confirmText: "Сверить",
+    danger: false,
+    onConfirm: () => sessionSelfReveal(),
+  });
 }
 
 function sessionSelfReveal() {
@@ -5822,7 +5841,7 @@ function sessionHint() {
   if (S.answered) return;
   const help = sessionAvailableHelp();
   if (!help) return;
-  if (help.type === "solution") return sessionShowAnswer();
+  if (help.type === "solution") return askSessionShowAnswer();
 
   S.hintLevel = help.level;
   S.hintsUsed++;
@@ -5834,6 +5853,24 @@ function sessionHint() {
   slot.innerHTML = `<div class="hint-box ${level > 1 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${level}.</b> ${mathText(levels[level - 1])}</div>`;
   renderSessionHintControl();
   renderHintXpNote(t, S.hintLevel);
+}
+
+/* «Показать решение» после исчерпанных подсказок — тоже через подтверждение:
+   ответ и разбор открываются сразу, задание засчитывается как нерешённое.
+   Сам sessionShowAnswer остаётся прямым действием (его дёргает подтверждение). */
+function askSessionShowAnswer() {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  openConfirmDialog({
+    eyebrow: "Подсказки закончились",
+    title: "Показать решение?",
+    text: "Ответ и разбор откроются сразу, задание засчитается как нерешённое и уйдёт в повторение.",
+    iconName: "bulb",
+    cancelText: "Подумаю ещё",
+    confirmText: "Показать",
+    danger: false,
+    onConfirm: () => sessionShowAnswer(),
+  });
 }
 
 function sessionShowAnswer() {
