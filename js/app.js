@@ -2318,17 +2318,28 @@ function streakTier(days) {
    низ экрана, а экран агента держит свою колонку ровно в dvh, поэтому резерв под
    неё нужно снять из той же высоты, что и шапку. На десктопе меню скрыто (height
    0) — резерв автоматически схлопывается, отдельно его чистить не нужно. */
+let topbarROAttached = false;
 function syncTopbarHeight() {
   try {
     const bar = document.getElementById("topbar");
     if (bar) {
-      const h = Math.round(bar.getBoundingClientRect().height);
+      // ResizeObserver ловит переносы панели (мобильный wrap, подгрузка
+      // шрифтов, появление чипов) — надёжнее resize/orientation.
+      if (!topbarROAttached && typeof ResizeObserver !== "undefined") {
+        topbarROAttached = true;
+        try {
+          new ResizeObserver(() => { try { syncTopbarHeight(); } catch (_) {} }).observe(bar);
+        } catch (_) { topbarROAttached = false; }
+      }
+      // Округление ВВЕРХ: липкая шапка сессии должна чуть заходить под
+      // topbar, а не оставлять щель, в которую видно прокрутку.
+      const h = Math.ceil(bar.getBoundingClientRect().height);
       document.documentElement.style.setProperty("--topbar-h", `${h}px`);
     }
   } catch (_) {}
   try {
     const nav = document.getElementById("bottomnav");
-    const navH = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+    const navH = nav ? Math.ceil(nav.getBoundingClientRect().height) : 0;
     document.documentElement.style.setProperty("--bottomnav-h", `${navH}px`);
   } catch (_) {}
 }
@@ -2338,15 +2349,18 @@ try {
 } catch (_) {}
 
 function renderTopbar() {
-  syncTopbarHeight();
+  // Замер — ПОСЛЕ обновления вёрстки (раньше мерялось старое содержимое,
+  // и переменная отставала на один рендер) + повтор на следующем кадре,
+  // когда браузер доложит финальную раскладку.
   if (isSubjectChoiceLocked()) {
     document.getElementById("topbar").innerHTML = `
       <div class="topbar__spacer"></div>
       <span class="chip">Сначала выбери предмет…</span>
       <div class="topbar__spacer"></div>`;
+    syncTopbarHeight();
     return;
   }
-  if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; return; }
+  if (!Store.state.onboarded) { document.getElementById("topbar").innerHTML = ""; syncTopbarHeight(); return; }
   const li = levelInfo();
   const dark = Theme.current() === "dark";
   // В шапке оставляем только быстрый контекст: уровень, статус предмета
@@ -2370,6 +2384,8 @@ function renderTopbar() {
     ${locked ? `<span class="chip chip--locked hide-mobile">${esc(lockedStatus)}</span>` : ""}
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
     <div class="streak-chip streak-chip--clickable ${streakTier(streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${streak} дн</div>`;
+  syncTopbarHeight();
+  try { requestAnimationFrame(() => syncTopbarHeight()); } catch (_) {}
 }
 
 /* ============================================================
@@ -3487,6 +3503,14 @@ function screenTraining(root) {
     `;
 }
 
+/* Заголовок сессии миссии: все миссии каталога уже называются «Практика: …»,
+   поэтому префикс «Миссия:» клеится к названию без этого слова — иначе
+   получается «Миссия: Практика: …». */
+function missionSessionTitle(m) {
+  const base = String((m && m.title) || "").replace(/^Практика:\s*/, "");
+  return `Миссия: ${base}`;
+}
+
 function startMission(missionId) {
   const m = DataAPI.mission(missionId);
   if (!m) { go("training"); return; }
@@ -3503,7 +3527,7 @@ function startMission(missionId) {
   const rawFrom = (Store.state.missionsDone[missionId] || missionProgress(m) >= allIds.length) ? 0 : missionProgress(m);
   const from = Math.min(Math.max(rawFrom, 0), Math.max(allIds.length - 1, 0));
   Session.start({
-    title: `Миссия: ${m.title}`,
+    title: missionSessionTitle(m),
     taskIds: allIds.slice(from),
     mode: "mission",
     missionId,
@@ -3614,7 +3638,7 @@ function freshSessionForRoute(route, param) {
     const rawFrom = (Store.state.missionsDone[param] || missionProgress(m) >= allIds.length) ? 0 : missionProgress(m);
     const from = Math.min(Math.max(rawFrom, 0), Math.max(allIds.length - 1, 0));
     Session.cur = {
-      title: `Миссия: ${m.title}`, taskIds: allIds.slice(from), mode: "mission",
+      title: missionSessionTitle(m), taskIds: allIds.slice(from), mode: "mission",
       missionId: param, bossId: null, xpReward: m.xp, offset: from, total: allIds.length,
       hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
       startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,

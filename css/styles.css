@@ -1228,10 +1228,14 @@ body {
      странице навигации просто не было видно. top — высота верхней панели,
      её измеряет syncTopbarHeight(), иначе шапка заезжала бы под topbar. */
   position: sticky;
-  top: var(--topbar-h, 0px);
+  /* Нахлёст 1px под низ topbar вместо щели: округление замера вниз и
+     подгрузка шрифтов давали волосную щель, в которую было видно
+     прокручивающийся контент. Лишний пиксель сверху компенсирован
+     padding-top, позиция содержимого не меняется; z-index топбара выше. */
+  top: calc(var(--topbar-h, 0px) - 1px);
   z-index: 5;
-  padding: 8px 0;
-  margin: -8px 0 12px;
+  padding: 9px 0 8px;
+  margin: -9px 0 12px;
   background: var(--bg);
 }
 .session-head__title { font-size: 15px; font-weight: 600; }
