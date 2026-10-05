@@ -1459,6 +1459,19 @@ async function render() {
       }
     } catch (_) {}
   }
+  // ИИ: список чатов едет ВМЕСТЕ с разделом, а не после него — иначе после
+  // лоадеров приезжает третий («Открываем чаты…»). Та же 2-секундная гонка,
+  // гость пропускается (ему нечего греть, гейт мгновенный).
+  if (route === "ai") {
+    try {
+      if (Store.accountId && typeof AgentScreen !== "undefined" && AgentScreen && AgentScreen.prefetchThreads) {
+        await Promise.race([
+          AgentScreen.prefetchThreads().catch(() => null),
+          new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
+        ]);
+      }
+    } catch (_) {}
+  }
   const fn = {
     dashboard: screenDashboard,
     path: screenPath,

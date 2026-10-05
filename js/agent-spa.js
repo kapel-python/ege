@@ -3687,11 +3687,52 @@
     openAgentBody(mg);
   }
   // Тело раздела после гейта: кэш мгновенно, холодный вход под лоадером.
+  /* Прогрев списка чатов из render(): раздел рисуется сразу из кэша, без
+     третьего лоадера «Открываем чаты…». Best-effort под той же 2-секундной
+     гонкой, что префетч профиля: не успели — холодный путь с лоадером как
+     раньше, лишнего запроса нет (пустой кэш всё равно тянул бы этот же
+     список, полный — пропускаем без сети). Учётку синхронизируем как маунт
+     (иначе cacheOn() ложен и прогрев уходит чужому аккаунту); сам маунт
+     свой сброс при этом пропускает. */
+  function prefetchThreads() {
+    try {
+      var acc = null;
+      try { acc = (typeof Store !== "undefined" && Store.accountId) || null; } catch (_) { acc = null; }
+      if (!acc) return Promise.resolve(null);
+      if (acc !== S.accountId) {
+        S.accountId = acc;
+        S.threads = []; S.currentId = null;
+        S.quota = { limit: QUOTA_FALLBACK, remaining: QUOTA_FALLBACK, resetInSec: null };
+        S.serverBusy = null; S._busyWatch = null;
+        cacheDrop();
+      }
+      if (cacheHasThreads()) return Promise.resolve(true);
+      return api("GET", "/api/agent/threads").then(function (res) {
+        if (res.status === 200 && res.data && Array.isArray(res.data.threads)) {
+          S.threads = res.data.threads;
+          if (res.data.quota) { try { setQuota(res.data.quota); } catch (_) {} }
+          try { cacheThreads(res.data.threads); } catch (_) {}
+          return true;
+        }
+        return null;
+      }).catch(function () { return null; });
+    } catch (_) { return Promise.resolve(null); }
+  }
   function openAgentBody(mg) {
     if (S.mountGen !== mg) return;
     if (cacheHasThreads()) {
       // Возврат на раздел в открытой вкладке: каркас и переписка рисуются из
       // кэша мгновенно, сеть только сверяет их на фоне.
+      mountFrame();
+      loadThreads();
+      return;
+    }
+    // Состояние списка уже известно (пусть даже пустое — префетч render
+    // успел раньше): каркас сразу, тихая сверка в фоне. S.cache.threads
+    // равен null лишь до первого успешного запроса (сброс аккаунта чистит
+    // через cacheDrop), а массив — пусть и пустой — означает «спросили
+    // и знаем», и пустой блок тогда честен, а не преждевременен.
+    if (cacheOn() && Array.isArray(S.cache.threads)) {
       mountFrame();
       loadThreads();
       return;
@@ -3721,6 +3762,6 @@
     send: send, selectThread: selectThread, state: S, setQuota: setQuota,
     confirmStep: confirmStep, emptyVisible: emptyVisible, screen: screenAgent,
     planProposal: planProposalOf, planDialog: planProposalDialog,
-    pendingStepState: pendingStepState,
+    pendingStepState: pendingStepState, prefetchThreads: prefetchThreads,
   };
 })();
