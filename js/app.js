@@ -7992,6 +7992,8 @@ function screenProfile(root) {
       ${profileProgressHTML}
     </div>
 
+    <div id="plan-card"></div>
+
     <div class="section-title" style="margin-top:34px">Подписка</div>
     <div id="sub-card"><div class="card"><div class="empty">Загружаем подписку…</div></div></div>
 
@@ -8056,11 +8058,318 @@ function screenProfile(root) {
   // аккаунта» иногда отсутствует при живой сессии (или наоборот).
   try { loadDevicesSection(); } catch (_) {}
   try { if (typeof Subscription !== "undefined") Subscription.mountCard(); } catch (_) {}
+  try { mountPlanCard(); } catch (_) {}
   try { revalidateProfileAuth(); } catch (_) {}
   // Отказ привязки Google возвращает человека сюда (см. routeGoogleReturn):
   // это единственный экран, где живёт кнопка «Привязать Google» и где окно
   // про занятый аккаунт имеет смысл.
   try { showGoogleLinkRefusal(); } catch (_) {}
+}
+
+/* ============================================================
+   Учебный план в профиле (#plan-card, строго над #sub-card).
+   Тихий GET /api/plan при отрисовке профиля — той же обёрткой, что
+   остальные запросы /api/* (ApiClient: same-origin кука, отдельного
+   CSRF-токена нет). Гость/ошибка сети: блок не рисуется вовсе (пустой
+   div), профиль работает как раньше, в консоль ничего не пишем.
+   Активный план: заголовок + горизонт, тонкий прогресс-бар
+   «закрыто X из Y», ТЕКУЩАЯ тема крупно (название, освоение %,
+   «Перейти» + «Закрыть тему»), остальные открытые темы периода —
+   компактными строками, закрытые — в свёрнутом <details>.
+   Закрытие — через общий openConfirmDialog + POST
+   /api/plan/topics/close; ответ сервера сразу перерисовывает блок
+   (второго GET не надо). 409 LOCKED и другие коды состояния —
+   тост с текстом сервера + свежая перерисовка через GET.
+   «Перейти» ведёт в практику темы существующими средствами:
+   startSkillPractice сам выбирает визит/миссию/сочинение, а для
+   неизвестного навыка уводит на #/path.
+   Чистые помощники ниже (studyPlanDaysWord/studyPlanCloseHint/
+   studyPlanPick) — без DOM-зависимостей, их покрывает
+   test/study-plan-ui.js.
+   ============================================================ */
+
+function studyPlanDaysWord(n) {
+  n = Math.floor(Number(n) || 0);
+  const a = Math.abs(n) % 10, b = Math.abs(n) % 100;
+  if (a === 1 && b !== 11) return "день";
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return "дня";
+  return "дней";
+}
+
+function studyPlanTopicsWord(n) {
+  n = Math.floor(Number(n) || 0);
+  const a = Math.abs(n) % 10, b = Math.abs(n) % 100;
+  if (a === 1 && b !== 11) return "тема";
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return "темы";
+  return "тем";
+}
+
+function studyPlanFmtDate(ms) {
+  const d = new Date(Number(ms));
+  if (Number.isNaN(d.getTime())) return "позже";
+  try {
+    return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  } catch (_) {
+    return "позже";
+  }
+}
+
+/* Подсказка у серой кнопки: чего не хватает для закрытия (время ИЛИ
+   освоение — closeReasons пусто = рано и не освоено). closeable=true —
+   подсказки нет, кнопка активна. */
+function studyPlanCloseHint(t) {
+  if (!t || t.closeable) return "";
+  const reasons = Array.isArray(t.closeReasons) ? t.closeReasons : [];
+  const parts = [];
+  if (reasons.indexOf("time") < 0) parts.push("откроется " + studyPlanFmtDate(t.availableAt));
+  if (reasons.indexOf("mastered") < 0) {
+    parts.push("освой тему — сейчас " + Math.max(0, Math.floor(Number(t.mastery) || 0)) + "%");
+  }
+  if (!parts.length) return "";
+  const s = parts.join(" · ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* Выбор текущей темы: первый открытый топик текущего периода
+   (index === currentIndex; запасной путь — первый период с открытыми).
+   done — все закрытые темы плана для свёрнутого <details>. */
+function studyPlanPick(active) {
+  if (!active || !Array.isArray(active.periods) || !active.periods.length) return null;
+  const periods = active.periods;
+  let cur = null;
+  for (const p of periods) {
+    if (p && p.index === active.currentIndex) { cur = p; break; }
+  }
+  if (!cur) {
+    for (const p of periods) {
+      const ts = (p && p.topics) || [];
+      if (ts.some((t) => t && t.state !== "done")) { cur = p; break; }
+    }
+  }
+  if (!cur) return null;
+  const topics = Array.isArray(cur.topics) ? cur.topics : [];
+  const open = topics.filter((t) => t && t.state !== "done");
+  if (!open.length) return null;
+  const done = [];
+  for (const p of periods) {
+    for (const t of ((p && p.topics) || [])) {
+      if (t && t.state === "done") done.push(t);
+    }
+  }
+  return { period: cur, current: open[0], rest: open.slice(1), done };
+}
+
+function studyPlanFindTopic(skillId) {
+  try {
+    const periods = (planCache.state && planCache.state.active && planCache.state.active.periods) || [];
+    for (const p of periods) {
+      for (const t of ((p && p.topics) || [])) {
+        if (t && String(t.skillId) === String(skillId)) return t;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+let planMountGen = 0;
+let planCache = { subject: null, state: null };
+
+/* Тихая подгрузка блока: только для залогиненных, только на профиле.
+   Любой отказ (401 гостя, сеть) — пустой div, без тостов и ошибок. */
+function mountPlanCard() {
+  let box = null;
+  try { box = document.getElementById("plan-card"); } catch (_) { box = null; }
+  if (!box) return;
+  let accountId = null, subject = "";
+  try { accountId = Store.accountId || null; subject = String(Store.subject || ""); } catch (_) {}
+  if (!accountId) { box.innerHTML = ""; return; }
+  const my = ++planMountGen;
+  const qs = subject ? "?subject=" + encodeURIComponent(subject) : "";
+  ApiClient.get("/api/plan" + qs).then((res) => {
+    if (my !== planMountGen) return;
+    let live = null;
+    try { live = document.getElementById("plan-card"); } catch (_) { live = null; }
+    if (!live || !live.isConnected) return;
+    try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
+    planCache = { subject: (res && res.subject) || subject, state: res || null };
+    live.innerHTML = planCardHTML(res);
+  }).catch(() => {
+    if (my !== planMountGen) return;
+    try {
+      const live = document.getElementById("plan-card");
+      if (live) live.innerHTML = "";
+    } catch (_) {}
+  });
+}
+
+/* Перерисовка из готового состояния (ответ POST close — второго GET
+   не надо; те же стражи, что у mountPlanCard). */
+function planRenderState(res) {
+  let live = null;
+  try { live = document.getElementById("plan-card"); } catch (_) { live = null; }
+  if (!live || !live.isConnected) return;
+  try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
+  try {
+    planCache = { subject: (res && res.subject) || planCache.subject, state: res || null };
+  } catch (_) {}
+  live.innerHTML = planCardHTML(res);
+}
+
+function planRowHTML(t) {
+  const sid = String((t && t.skillId) || "");
+  return `<button class="plan-card__row" type="button" onclick="startSkillPractice('${esc(sid)}')">`
+    + `<span class="plan-card__row-name">${esc((t && t.name) || sid || "Тема")}</span>`
+    + `<span class="plan-card__row-go">Перейти ${icon("arrow")}</span></button>`;
+}
+
+function planCardHTML(res) {
+  if (!res || typeof res !== "object") return "";
+  const active = res.active || null;
+  if (!active) {
+    // Без активного плана блок не рисуем; исключение — компактная строка
+    // про прошлый выполненный план.
+    if (res.lastDone && res.lastDone.title) {
+      return `<div class="section-title" style="margin-top:34px">Учебный план</div>`
+        + `<div class="card plan-card"><div class="plan-card__past">Прошлый план «${esc(res.lastDone.title)}» — выполнен</div></div>`;
+    }
+    return "";
+  }
+  const progress = active.progress || {};
+  const closed = Math.max(0, Math.floor(Number(progress.closed) || 0));
+  const total = Math.max(0, Math.floor(Number(progress.total) || 0));
+  const pct = total > 0 ? (closed / total) * 100 : 0;
+  const pick = studyPlanPick(active);
+  const horizon = active.daysLabel ? String(active.daysLabel) : (Math.max(0, Math.floor(Number(active.days) || 0)) + " " + studyPlanDaysWord(active.days || 0));
+  let nowHTML = "";
+  if (pick) {
+    const cur = pick.current;
+    const sid = String(cur.skillId || "");
+    const mastery = Math.max(0, Math.floor(Number(cur.mastery) || 0));
+    const hint = studyPlanCloseHint(cur);
+    const restHTML = pick.rest.length
+      ? `<div class="plan-card__label">Дальше в этом периоде</div>`
+        + pick.rest.map(planRowHTML).join("")
+      : "";
+    const doneHTML = pick.done.length
+      ? `<details class="plan-card__done"><summary>Пройденные (${pick.done.length})</summary>`
+        + `<div class="plan-card__done-body">${pick.done.map(planRowHTML).join("")}</div></details>`
+      : "";
+    nowHTML = `
+      <div class="plan-card__now">
+        <div class="plan-card__label">Сейчас · ${esc(String((pick.period && pick.period.label) || "период"))}</div>
+        <div class="plan-card__topic">${esc(cur.name || sid || "Тема")}</div>
+        <div class="plan-card__mastery">Освоение — ${mastery}%${cur.mastered ? " · освоена" : ""}</div>
+        <div class="plan-card__actions">
+          <button class="btn btn--primary" type="button" onclick="startSkillPractice('${esc(sid)}')">Перейти</button>
+          ${cur.closeable
+            ? `<button class="btn btn--ghost" type="button" onclick="askPlanTopicClose('${esc(sid)}')">Закрыть тему</button>`
+            : `<button class="btn btn--ghost" type="button" disabled title="${esc(hint || "Тема ещё не готова к закрытию")}">Закрыть тему</button>`}
+        </div>
+        ${hint ? `<div class="plan-card__hint">${esc(hint)}</div>` : ""}
+      </div>
+      ${restHTML}
+      ${doneHTML}`;
+  } else {
+    nowHTML = `<div class="plan-card__past">План «${esc(active.title || "План")}» — выполнен</div>`;
+  }
+  return `<div class="section-title" style="margin-top:34px">Учебный план</div>`
+    + `<div class="card plan-card">`
+    + `<div class="plan-card__top">`
+    + `<span class="plan-card__mark" aria-hidden="true">${icon("compass")}</span>`
+    + `<span class="plan-card__who">`
+    + `<span class="plan-card__name">${esc(active.title || "Учебный план")}</span>`
+    + `<span class="plan-card__sub">${esc(horizon)} · закрыто ${closed} из ${total}</span>`
+    + `</span></div>`
+    + `<div class="plan-card__meter">${progressBar(pct, "progress--thin")}`
+    + `<span class="plan-card__meter-label">Закрыто <b>${closed} из ${total}</b></span></div>`
+    + nowHTML
+    + `<div class="plan-card__actions"><button class="btn btn--ghost" type="button" onclick="openPlanFullDialog()">Весь план</button></div>`
+    + `</div>`;
+}
+
+/* Закрытие темы: подтверждение общим диалогом, дальше POST. Текст ошибки
+   берёт у сервера (там человеческий текст), коды состояния — свежая
+   перерисовка через GET: гонка LOCKED иначе оставила бы серую кнопку. */
+function askPlanTopicClose(skillId) {
+  const t = studyPlanFindTopic(skillId);
+  if (!t || !t.closeable) return;
+  const name = String(t.name || t.skillId || "тему");
+  const mastery = Math.max(0, Math.floor(Number(t.mastery) || 0));
+  openConfirmDialog({
+    eyebrow: "Учебный план",
+    iconName: "check",
+    title: "Закрыть тему «" + name + "»?",
+    text: "Освоение темы — <b>" + mastery + "%</b>. "
+      + "Закрытая тема уйдёт в пройденные, план двинется дальше.",
+    cancelText: "Отмена",
+    confirmText: "Закрыть тему",
+    danger: false,
+    onConfirm: () => planTopicClose(String(t.skillId || "")),
+  });
+}
+
+function planTopicClose(skillId) {
+  if (!skillId) return;
+  const before = studyPlanFindTopic(skillId);
+  const beforeName = before ? String(before.name || before.skillId || "") : "";
+  const subject = planCache.subject || "";
+  ApiClient.post("/api/plan/topics/close", { skillId, subject }).then((res) => {
+    planRenderState(res);
+    toast(esc(beforeName ? "Тема «" + beforeName + "» закрыта" : "Тема закрыта — так держать"), "", "check");
+  }).catch((err) => {
+    const payload = (err && err.payload) || {};
+    const code = payload.code || "";
+    const msg = String(payload.error || (err && err.message) || "Не удалось закрыть тему");
+    if (code === "GUEST_PENDING" || (err && (err.status === 401 || err.status === 403))) {
+      try {
+        const live = document.getElementById("plan-card");
+        if (live) live.innerHTML = "";
+      } catch (_) {}
+      return;
+    }
+    toast(esc(msg), "", code === "LOCKED" ? "lock" : "info");
+    // Состояние могло измениться (гонка, закрытие с другого устройства) —
+    // перерисовываем свежим GET, молча при отказе.
+    if (code) mountPlanCard();
+  });
+}
+
+/* «Весь план»: все периоды/темы/статусы + подсказка, почему сейчас эта тема. */
+function openPlanFullDialog() {
+  const st = planCache.state;
+  if (!st || !st.active) return;
+  const active = st.active;
+  const pick = studyPlanPick(active);
+  const curSid = pick ? String(pick.current.skillId || "") : "";
+  const periods = Array.isArray(active.periods) ? active.periods : [];
+  const body = periods.map((p) => {
+    const label = String((p && p.label) || "Период");
+    const pdays = Math.max(0, Math.floor(Number((p && p.days) || 0)));
+    const future = active.currentIndex != null && p && p.index > active.currentIndex;
+    const lis = ((p && p.topics) || []).map((t) => {
+      const name = String((t && t.name) || (t && t.skillId) || "Тема");
+      const mastery = Math.max(0, Math.floor(Number((t && t.mastery) || 0)));
+      if (t && t.state === "done") return `<li><span class="plan-card__tick" aria-hidden="true">✓</span> ${esc(name)}</li>`;
+      const mark = String((t && t.skillId) || "") === curSid
+        ? `<span class="chip chip--accent">сейчас</span> `
+        : "";
+      return `<li>${mark}${esc(name)} <span class="plan-card__dlg-muted">— освоение ${mastery}%</span></li>`;
+    }).join("");
+    return `<p><b>${esc(label)}</b> <span class="plan-card__dlg-muted">(${pdays} ${studyPlanDaysWord(pdays)})</span>`
+      + (future ? ` ${icon("lock")}` : "") + `</p>`
+      + (lis ? `<ul>${lis}</ul>` : "");
+  }).join("");
+  const why = pick
+    ? `<p class="plan-card__why">Почему сейчас эта тема: идёт «${esc(String((pick.period && pick.period.label) || "период"))}» — `
+      + `тема закрывается, когда выйдет её срок или освоение станет достаточным.</p>`
+    : "";
+  openInfoDialog({
+    eyebrow: "Учебный план",
+    icon: "compass",
+    title: String(active.title || "Учебный план"),
+    text: body + why,
+    closeText: "Понятно",
+  });
 }
 
 /* Лёгкая сверка auth-среза профиля с сервером (GET /api/auth/session, без

@@ -94,6 +94,121 @@ a.sub-card:hover { border-color: var(--accent-ring); }
   margin-top: 14px;
 }
 
+/* ---------- учебный план в профиле (#plan-card) ----------
+   Та же дизайн-система, что у соседней #sub-card: .card даёт фон
+   и скругление, .btn — кнопки, токены — из css/styles.css (своих
+   палитр нет, тёмная тема читается теми же переменными).
+   Кнопки не ниже 44px, строки-«Перейти» — не ниже 48px. */
+.plan-card { display: grid; gap: 14px; }
+.plan-card .btn { min-height: 44px; }
+.plan-card__top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.plan-card__mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: linear-gradient(140deg, var(--accent-soft), rgba(154, 123, 255, 0.14));
+  border: 1px solid var(--accent-ring);
+  color: var(--accent-ink);
+}
+.plan-card__mark svg { width: 22px; height: 22px; }
+.plan-card__who { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.plan-card__name {
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.plan-card__sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.plan-card__meter { display: grid; gap: 6px; }
+.plan-card__meter-label { display: block; font-size: 12px; color: var(--muted); }
+.plan-card__meter-label b { color: var(--text-2); font-weight: 700; }
+.plan-card__now {
+  display: grid;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.plan-card__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.plan-card__topic { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.plan-card__mastery { font-size: 13px; color: var(--text-2); }
+.plan-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.plan-card__hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.plan-card__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.plan-card__row:hover { border-color: var(--accent-ring); }
+.plan-card__row-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.plan-card__row-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+.plan-card__row-go svg { width: 14px; height: 14px; }
+.plan-card__done { border-top: 1px solid var(--border); padding-top: 4px; }
+.plan-card__done summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.plan-card__done-body { display: grid; gap: 8px; padding: 4px 0 2px; }
+.plan-card__past { font-size: 14px; color: var(--text-2); line-height: 1.55; }
+.plan-card__tick { color: var(--success-ink); font-weight: 800; }
+.plan-card__dlg-muted { color: var(--text-2); }
+.plan-card__why {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-card .progress__fill { transition: none; }
+  .plan-card .progress__fill::after { animation: none; }
+}
+
 /* апсейл в модалке лимита: одна строка, не блок */
 .dlg__upsell {
   margin-top: 12px;
@@ -113,4 +228,8 @@ a.sub-card:hover { border-color: var(--accent-ring); }
   .sub-card__actions .btn { flex: 1 1 auto; }
   .sub-card--free .sub-card__top { flex-wrap: wrap; }
   .sub-card--free .btn { flex: 1 1 auto; }
+  .plan-card__top { gap: 12px; }
+  .plan-card__mark { width: 42px; height: 42px; }
+  .plan-card__actions .btn { flex: 1 1 auto; }
+  .plan-card__now { padding: 12px 14px; }
 }

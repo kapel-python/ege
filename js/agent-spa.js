@@ -1424,6 +1424,86 @@
                        args: args || {}, result: result || {}, status: "dropped" } });
     } catch (_) {}
   }
+  /* ---------- учебный план: предпросмотр предложения ----------
+     Шаг plan_apply в needs_confirm несёт proposal {action: "plan_apply", days,
+     title, periods: [{index, label, days, topics: [{skillId, name, lessonId,
+     taskIds}], topicIds}]} и человеческую подпись label. В живой ленте оно
+     лежит в st.proposal, в истории — в st.result (paintMessages кладёт
+     m.result и туда, и туда), поэтому смотрим оба места плюс сам tool.
+     Кнопки Применить/Отмена не трогаем: третья ghost-кнопка только показывает
+     содержимое через общий openInfoDialog, текст собирается с esc() на
+     каждой строке модели. */
+  function planProposalOf(st) {
+    if (!st || typeof st !== "object") return null;
+    var r = st.result, p = st.proposal;
+    if (r && typeof r === "object" && r.action === "plan_apply") return r;
+    if (p && typeof p === "object" && p.action === "plan_apply") return p;
+    if (st.tool === "plan_apply") {
+      if (r && typeof r === "object" && r.periods) return r;
+      if (p && typeof p === "object" && p.periods) return p;
+    }
+    return null;
+  }
+  function planDaysWord(n) {
+    n = Math.floor(Number(n) || 0);
+    var a = Math.abs(n) % 10, b = Math.abs(n) % 100;
+    if (a === 1 && b !== 11) return "день";
+    if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return "дня";
+    return "дней";
+  }
+  function planTasksWord(n) {
+    n = Math.floor(Number(n) || 0);
+    var a = Math.abs(n) % 10, b = Math.abs(n) % 100;
+    if (a === 1 && b !== 11) return "задание";
+    if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return "задания";
+    return "заданий";
+  }
+  function planTopicBits(t) {
+    // Одна строка темы: название + что внутри (урок/число заданий).
+    var name = String((t && t.name) || (t && t.skillId) || "Тема");
+    var tasks = (t && Array.isArray(t.taskIds)) ? t.taskIds.length : 0;
+    var extra = (t && t.lessonId ? "урок" : "без урока") + " · "
+      + tasks + " " + planTasksWord(tasks);
+    return { name: name, extra: extra };
+  }
+  function planProposalDialog(prop) {
+    // {eyebrow, title, text} для общего openInfoDialog. HTML собирается
+    // конкатенацией, каждая строка модели — через esc(), сырых вставок нет.
+    prop = (prop && typeof prop === "object") ? prop : {};
+    var days = Math.max(0, Math.floor(Number(prop.days) || 0));
+    var periods = Array.isArray(prop.periods) ? prop.periods : [];
+    var topicCount = 0;
+    periods.forEach(function (p) {
+      if (p && Array.isArray(p.topics)) topicCount += p.topics.length;
+    });
+    var head = "Горизонт — " + days + " " + planDaysWord(days)
+      + " · периодов: " + periods.length + " · тем: " + topicCount;
+    var parts = periods.map(function (p) {
+      var label = String((p && p.label) || "Период");
+      var pdays = Math.max(0, Math.floor(Number(p && p.days) || 0));
+      var rows = (p && Array.isArray(p.topics) ? p.topics : []).map(function (t) {
+        var line = planTopicBits(t);
+        return "<li><b>" + esc(line.name) + "</b> — " + esc(line.extra) + "</li>";
+      }).join("");
+      return "<p><b>" + esc(label) + "</b> (" + pdays + " " + planDaysWord(pdays) + ")</p>"
+        + (rows ? "<ul>" + rows + "</ul>" : "");
+    }).join("");
+    return {
+      eyebrow: "Учебный план",
+      title: String(prop.title || "Учебный план"),
+      text: "<p>" + esc(head) + "</p>" + parts,
+    };
+  }
+  function openPlanProposal(prop) {
+    var dlg = planProposalDialog(prop);
+    try {
+      if (typeof openInfoDialog === "function") {
+        openInfoDialog({ eyebrow: dlg.eyebrow, title: dlg.title, text: dlg.text, closeText: "Понятно" });
+        return;
+      }
+    } catch (_) {}
+    try { say(dlg.title); } catch (_) {}
+  }
   function stepFill(p) {
     var st = p.st, body = p.body, li = p.li;
     body.textContent = "";
@@ -1448,6 +1528,18 @@
       apply.addEventListener("click", function () { confirmStep(st.id, true, [apply, cancel]); });
       cancel.addEventListener("click", function () { confirmStep(st.id, false, [apply, cancel]); });
       acts.appendChild(apply); acts.appendChild(cancel);
+      // Учебный план: третья кнопка показывает содержимое предложения до
+      // решения. confirmStep трогает только первые две кнопки, эта — лишь
+      // открывает предпросмотр через общий openInfoDialog.
+      var planProp = planProposalOf(st);
+      if (planProp) {
+        (function (prop) {
+          var show = el("button", "btn btn--ghost btn--sm", "Показать план");
+          show.type = "button";
+          show.addEventListener("click", function () { openPlanProposal(prop); });
+          acts.appendChild(show);
+        })(planProp);
+      }
       body.appendChild(acts);
     } else if (st.status === "dropped") {
       // Честная подпись вместо кнопок: предложение не применено, потому что
@@ -3604,5 +3696,6 @@
   window.AgentScreen = {
     send: send, selectThread: selectThread, state: S, setQuota: setQuota,
     confirmStep: confirmStep, emptyVisible: emptyVisible, screen: screenAgent,
+    planProposal: planProposalOf, planDialog: planProposalDialog,
   };
 })();
