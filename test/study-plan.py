@@ -155,6 +155,8 @@ except agent.PlanStateError as exc:
     check("foreign skill rejects", exc.code == "NOT_IN_PLAN", exc.code)
 
 check("threshold is 75", agent.TOPIC_MASTERED_AT == 75)
+st6d = agent.study_plan_state(conn, 1, "profile_math")
+check("threshold rides along state", st6d["active"]["masteredAt"] == 75)
 # --- 6. Окно темы — конец периода; замок периода — время ИЛИ завершение ---
 prop6 = agent.propose_action(conn, 1, "profile_math", "plan_apply",
                              {"days": 14, "periods": [{"days": 7, "skillIds": ["sk_a"]},

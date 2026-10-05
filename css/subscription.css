@@ -180,6 +180,20 @@ a.sub-card:hover { border-color: var(--accent-ring); }
   white-space: nowrap;
 }
 .plan-card__row-go svg { width: 14px; height: 14px; }
+.plan-card__row--locked {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.plan-card__row-lock { display: inline-flex; color: var(--muted); }
+.plan-card__row-lock svg { width: 16px; height: 16px; }
+.plan-card__go { display: grid; gap: 10px; margin-top: 4px; }
+.plan-dlg-period + .plan-dlg-period {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.plan-dlg-period p { margin: 0 0 8px; }
+.plan-dlg-period ul { margin: 0; }
 .plan-card__done { border-top: 1px solid var(--border); padding-top: 4px; }
 .plan-card__done summary {
   cursor: pointer;

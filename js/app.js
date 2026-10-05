@@ -1437,6 +1437,27 @@ async function render() {
     }
     if (my !== renderSeq || currentRoute() !== route) return;
   }
+  // Профиль: подписка и учебный план едут ВМЕСТЕ со страницей, а не после
+  // неё — иначе карточки догоняют первый кадр вторым запросом (дёргание).
+  // Ждём недолго (2 с): при лежащей сети страница всё равно рисуется,
+  // карточки догрузятся обычным путём. Гость — пропускаем, ему нечего.
+  if (route === "profile") {
+    try {
+      const jobs = [];
+      try {
+        if (Store.accountId) {
+          if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
+          if (typeof planPrefetch === "function") jobs.push(planPrefetch());
+        }
+      } catch (_) {}
+      if (jobs.length) {
+        await Promise.race([
+          Promise.allSettled(jobs),
+          new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
+        ]);
+      }
+    } catch (_) {}
+  }
   const fn = {
     dashboard: screenDashboard,
     path: screenPath,
@@ -8285,7 +8306,22 @@ function studyPlanFindTopic(skillId) {
 }
 
 let planMountGen = 0;
-let planCache = { subject: null, state: null };
+let planCache = { subject: null, state: null, at: 0 };
+const PLAN_CACHE_FRESH_MS = 30000;
+
+/* Предзагрузка блока плана для экрана профиля (пара Subscription.prefetch):
+   кладётся в тот же planCache — screenProfile рисует карточку из готовых
+   данных вместе с первым кадром, без догоняющего запроса. */
+function planPrefetch() {
+  let accountId = null, subject = "";
+  try { accountId = Store.accountId || null; subject = String(Store.subject || ""); } catch (_) {}
+  if (!accountId) return Promise.resolve(null);
+  const qs = subject ? "?subject=" + encodeURIComponent(subject) : "";
+  return ApiClient.get("/api/plan" + qs).then((res) => {
+    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now() };
+    return planCache.state;
+  }).catch(() => null);
+}
 
 /* Тихая подгрузка блока: только для залогиненных, только на профиле.
    Любой отказ (401 гостя, сеть) — пустой div, без тостов и ошибок. */
@@ -8296,6 +8332,14 @@ function mountPlanCard() {
   let accountId = null, subject = "";
   try { accountId = Store.accountId || null; subject = String(Store.subject || ""); } catch (_) {}
   if (!accountId) { box.innerHTML = ""; return; }
+  // Кэш свежий (предзагрузка в render) — рисуем синхронно, без запроса:
+  // карточка появляется вместе со страницей, а не догоняет её.
+  try {
+    if (planCache.state && planCache.subject === subject && (Date.now() - (planCache.at || 0)) < PLAN_CACHE_FRESH_MS) {
+      box.innerHTML = planCardHTML(planCache.state);
+      return;
+    }
+  } catch (_) {}
   const my = ++planMountGen;
   const qs = subject ? "?subject=" + encodeURIComponent(subject) : "";
   ApiClient.get("/api/plan" + qs).then((res) => {
@@ -8304,7 +8348,7 @@ function mountPlanCard() {
     try { live = document.getElementById("plan-card"); } catch (_) { live = null; }
     if (!live || !live.isConnected) return;
     try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
-    planCache = { subject: (res && res.subject) || subject, state: res || null };
+    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now() };
     live.innerHTML = planCardHTML(res);
   }).catch(() => {
     if (my !== planMountGen) return;
@@ -8323,16 +8367,106 @@ function planRenderState(res) {
   if (!live || !live.isConnected) return;
   try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
   try {
-    planCache = { subject: (res && res.subject) || planCache.subject, state: res || null };
+    planCache = { subject: (res && res.subject) || planCache.subject, state: res || null, at: Date.now() };
   } catch (_) {}
   live.innerHTML = planCardHTML(res);
 }
 
 function planRowHTML(t) {
   const sid = String((t && t.skillId) || "");
-  return `<button class="plan-card__row" type="button" onclick="startSkillPractice('${esc(sid)}')">`
+  return `<button class="plan-card__row" type="button" onclick="askPlanTopicGo('${esc(sid)}')">`
     + `<span class="plan-card__row-name">${esc((t && t.name) || sid || "Тема")}</span>`
     + `<span class="plan-card__row-go">Перейти ${icon("arrow")}</span></button>`;
+}
+
+/* Куда ведёт «Перейти»: теория, практика или выбор. Чистая, покрыта тестом. */
+function planGoChoice(t) {
+  const hasLesson = !!(t && t.lessonId);
+  const hasPractice = !!(t && Array.isArray(t.taskIds) && t.taskIds.length);
+  if (hasLesson && hasPractice) return "both";
+  if (hasLesson) return "theory";
+  return "practice";
+}
+
+/* «Перейти» из блока плана: если есть и теория, и практика — выбор
+   модалкой (теория = +40% освоения сразу, так и написано в подсказке,
+   а вела туда лишь текстовая строка); если что-то одно — сразу туда. */
+function askPlanTopicGo(skillId) {
+  const t = studyPlanFindTopic(skillId);
+  if (!t) return;
+  const sid = String(t.skillId || "");
+  const choice = planGoChoice(t);
+  if (choice === "theory") {
+    try { Lesson.start(String(t.lessonId)); } catch (_) {}
+    return;
+  }
+  if (choice === "practice") {
+    try { startSkillPractice(sid); } catch (_) {}
+    return;
+  }
+  const name = String(t.name || sid || "Тема");
+  openInfoDialog({
+    eyebrow: "Учебный план",
+    icon: "compass",
+    title: name,
+    text: `<div class="plan-card__go">`
+      + `<button class="btn btn--primary" type="button" onclick="closeDeviceModal();Lesson.start('${esc(String(t.lessonId))}')">Открыть теорию</button>`
+      + `<button class="btn btn--ghost" type="button" onclick="closeDeviceModal();startSkillPractice('${esc(sid)}')">Открыть практику</button>`
+      + `</div>`,
+    closeText: "Позже",
+  });
+}
+
+/* Конец периода в мс (startsAt плана + накопленные дни) — для текста
+   «дождись конца …». Чистая, покрыта тестом. */
+function studyPlanPeriodEnd(active, periodIdx) {
+  try {
+    const periods = (active && active.periods) || [];
+    let end = Number(active && active.startsAt) || 0;
+    if (!(end > 0)) return null;
+    for (const p of periods) {
+      const days = Math.max(0, Math.floor(Number((p && p.days) || 0)));
+      end += days * 86400000;
+      if (p && p.index === periodIdx) return end;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/* Серая строка «дальше в этом периоде»: не ведёт в практику, а объясняет,
+   что сначала закрывается текущая тема (75% или срок). */
+function planLockedRowHTML(t) {
+  const sid = String((t && t.skillId) || "");
+  return `<button class="plan-card__row plan-card__row--locked" type="button" onclick="openPlanLockedDialog('${esc(sid)}')">`
+    + `<span class="plan-card__row-lock" aria-hidden="true">${icon("lock")}</span>`
+    + `<span class="plan-card__row-name">${esc((t && t.name) || sid || "Тема")}</span></button>`;
+}
+
+/* Модалка недоступной темы: что именно её открывает (порог из API,
+   не захардкожен; дата конца периода). */
+function openPlanLockedDialog(skillId) {
+  const st = planCache.state;
+  const active = st && st.active;
+  if (!active) return;
+  const pick = studyPlanPick(active);
+  const cur = pick ? pick.current : null;
+  const bar = Number(active.masteredAt);
+  const need = Number.isFinite(bar) && bar > 0 ? Math.floor(bar) : 75;
+  const target = studyPlanFindTopic(skillId);
+  const period = pick ? pick.period : null;
+  const endMs = period ? studyPlanPeriodEnd(active, period.index) : null;
+  const endText = endMs ? studyPlanFmtDate(endMs) : "конца периода";
+  const periodLabel = (period && period.label) || "период";
+  openInfoDialog({
+    eyebrow: "Учебный план",
+    icon: "lock",
+    title: `«${String((target && target.name) || "Тема")}» пока недоступна`,
+    text: `Сначала закрой «${esc(String((cur && cur.name) || "текущую тему"))}»: `
+      + `доведи освоение до ${need}% — или дождись конца «${esc(periodLabel)}» (${esc(endText)}).`,
+    closeText: "Понятно",
+  });
 }
 
 function planCardHTML(res) {
@@ -8361,7 +8495,7 @@ function planCardHTML(res) {
     const hint = studyPlanCloseHint(cur);
     const restHTML = pick.rest.length
       ? `<div class="plan-card__label">Дальше в этом периоде</div>`
-        + pick.rest.map(planRowHTML).join("")
+        + pick.rest.map((t) => planLockedRowHTML(t)).join("")
       : "";
     const doneHTML = pick.done.length
       ? `<details class="plan-card__done"><summary>Пройденные (${pick.done.length})</summary>`
@@ -8373,7 +8507,7 @@ function planCardHTML(res) {
         <div class="plan-card__topic">${esc(cur.name || sid || "Тема")}</div>
         <div class="plan-card__mastery">Освоение — ${mastery}%${cur.mastered ? " · освоена" : ""}</div>
         <div class="plan-card__actions">
-          <button class="btn btn--primary" type="button" onclick="startSkillPractice('${esc(sid)}')">Перейти</button>
+          <button class="btn btn--primary" type="button" onclick="askPlanTopicGo('${esc(sid)}')">Перейти</button>
           ${cur.closeable
             ? `<button class="btn btn--ghost" type="button" onclick="askPlanTopicClose('${esc(sid)}')">Закрыть тему</button>`
             : `<button class="btn btn--ghost" type="button" disabled title="${esc(hint || "Тема ещё не готова к закрытию")}">Закрыть тему</button>`}
@@ -8470,14 +8604,18 @@ function openPlanFullDialog() {
       const name = String((t && t.name) || (t && t.skillId) || "Тема");
       const mastery = Math.max(0, Math.floor(Number((t && t.mastery) || 0)));
       if (t && t.state === "done") return `<li><span class="plan-card__tick" aria-hidden="true">✓</span> ${esc(name)}</li>`;
-      const mark = String((t && t.skillId) || "") === curSid
+      // Чип «сейчас» — только на вхождении темы в ТЕКУЩЕМ периоде: одна и та
+      // же тема встречается в нескольких периодах (ротация), и сравнение
+      // только по skillId дублировало чип (живой баг со скрина).
+      const mark = (pick && pick.period && p && p.index === pick.period.index
+          && String((t && t.skillId) || "") === curSid)
         ? `<span class="chip chip--accent">сейчас</span> `
         : "";
       return `<li>${mark}${esc(name)} <span class="plan-card__dlg-muted">— освоение ${mastery}%</span></li>`;
     }).join("");
-    return `<p><b>${esc(label)}</b> <span class="plan-card__dlg-muted">(${pdays} ${studyPlanDaysWord(pdays)})</span>`
+    return `<div class="plan-dlg-period"><p><b>${esc(label)}</b> <span class="plan-card__dlg-muted">(${pdays} ${studyPlanDaysWord(pdays)})</span>`
       + (future ? ` ${icon("lock")}` : "") + `</p>`
-      + (lis ? `<ul>${lis}</ul>` : "");
+      + (lis ? `<ul>${lis}</ul>` : "") + `</div>`;
   }).join("");
   const why = pick
     ? `<p class="plan-card__why">Почему сейчас эта тема: идёт «${esc(String((pick.period && pick.period.label) || "период"))}» — `
@@ -8486,6 +8624,7 @@ function openPlanFullDialog() {
   openInfoDialog({
     eyebrow: "Учебный план",
     icon: "compass",
+    wide: true,
     title: String(active.title || "Учебный план"),
     text: body + why,
     closeText: "Понятно",
@@ -8926,7 +9065,7 @@ function openInfoDialog(opts) {
   const text = o.text || "";
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="dlg${o.wide ? " dlg--wide" : ""}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
         <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
         <div class="dlg__eyebrow">${esc(o.eyebrow || "")}</div>
         <div class="dlg-device">

@@ -76,7 +76,7 @@ check("B: активный блок — заголовок, горизонт, п
   && /progressBar\(pct, "progress--thin"\)/.test(appJs));
 check("B: текущая тема крупно + «Перейти» в практику + «Закрыть тему»",
   /plan-card__topic/.test(appJs)
-  && /onclick="startSkillPractice\('/.test(appJs)
+  && /onclick="askPlanTopicGo\('/.test(appJs)
   && /onclick="askPlanTopicClose\('/.test(appJs));
 check("B: серой кнопке — disabled и мелкая причина (hint из closeReasons)",
   /studyPlanCloseHint\(cur\)/.test(appJs)
@@ -253,7 +253,8 @@ function extractFn(src, name) {
 let P = null;
 try {
   const names = ["studyPlanDaysWord", "studyPlanTopicsWord", "studyPlanFmtDate",
-    "studyPlanCloseHint", "studyPlanPick", "planPeriodLocked", "planRowHTML", "planCardHTML"];
+    "studyPlanCloseHint", "studyPlanPick", "planPeriodLocked", "planGoChoice",
+    "studyPlanPeriodEnd", "planRowHTML", "planLockedRowHTML", "planCardHTML"];
   const bundle = names.map((n) => extractFn(appJs, n)).join("\n");
   new vm.Script(bundle, { filename: "study-plan-pure.js" });
   const sandbox = {
@@ -262,7 +263,7 @@ try {
   };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planPeriodLocked, planCardHTML };", sandbox);
+  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planPeriodLocked, planGoChoice, studyPlanPeriodEnd, planCardHTML, planLockedRowHTML };", sandbox);
   P = sandbox.__P;
   check("чистые функции профиля извлекаются и компилируются", true);
 } catch (e) {
@@ -323,19 +324,38 @@ if (P) {
     html.includes("План на 7 дней") && html.includes("7 дней") && html.includes("закрыто 1 из 3"));
   check("card: текущая тема крупно + Перейти + серая Закрыть с hint",
     html.includes("Производная") && html.includes("Освоение — 42%")
-    && html.includes("startSkillPractice('n09_derivative')")
+    && html.includes("askPlanTopicGo('n09_derivative')")
     && /<button class="btn btn--ghost" type="button" disabled/.test(html)
     && /plan-card__hint/.test(html) && /Откроется/.test(html));
   check("card: остальные открытые компактно, закрытые в details",
     html.includes("Дальше в этом периоде") && html.includes("Предел")
     && /<summary>Пройденные \(1\)<\/summary>/.test(html) && html.includes("Интеграл"));
   check("card: «Весь план» на месте", html.includes("openPlanFullDialog()"));
+  check("card: дальше в периоде — серые строки с модалкой, не практика",
+    html.includes("plan-card__row--locked") && html.includes("openPlanLockedDialog(")
+    && !html.includes("Дальше в этом периоде</div><button class=\"plan-card__row\" type"));
+  check("modal: разделители периодов и широкая модалка",
+    /plan-dlg-period/.test(appJs) && /dlg--wide/.test(appJs) && /wide: true/.test(appJs));
+  check("modal: чип «сейчас» только в текущем периоде",
+    /p\.index === pick\.period\.index/.test(appJs));
+  check("profile: предзагрузка подписки и плана до отрисовки",
+    /route === "profile"/.test(appJs) && /Subscription\.prefetch\(\)/.test(appJs)
+    && /planPrefetch\(\)/.test(appJs) && /Promise\.allSettled/.test(appJs));
   check("lock: серверный флаг бьёт индекс",
     P.planPeriodLocked({ currentIndex: 5 }, { index: 0, locked: true }) === true
     && P.planPeriodLocked({ currentIndex: 0 }, { index: 3, locked: false }) === false);
   check("lock: без флага — старый фолбэк по индексу",
     P.planPeriodLocked({ currentIndex: 0 }, { index: 1 }) === true
     && P.planPeriodLocked({ currentIndex: 1 }, { index: 1 }) === false);
+  check("go: оба раздела → both, один → своё",
+    P.planGoChoice({ lessonId: "l", taskIds: ["t"] }) === "both"
+    && P.planGoChoice({ lessonId: "l", taskIds: [] }) === "theory"
+    && P.planGoChoice({ taskIds: ["t"] }) === "practice"
+    && P.planGoChoice({}) === "practice");
+  check("periodEnd: конец считается от startsAt",
+    P.studyPlanPeriodEnd({ startsAt: 1000000000000, periods: [{ index: 0, days: 7 }, { index: 1, days: 7 }] }, 1)
+      === 1000000000000 + 14 * 86400000
+    && P.studyPlanPeriodEnd(null, 0) === null);
   check("card: XSS в названии экранирован",
     P.planCardHTML({ ok: true, active: sample({ title: "<script>alert(1)</script>" }), lastDone: null })
       .includes("&lt;script&gt;"));

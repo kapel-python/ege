@@ -173,6 +173,14 @@ var Subscription = (function () {
     var box;
     try { box = document.getElementById("sub-card"); } catch (_) { box = null; }
     if (!box) return;
+    // Кэш свежий (предзагрузка в render) — рисуем синхронно: карточка
+    // появляется вместе со страницей, а не догоняет её вторым запросом.
+    try {
+      var fast = peek();
+      if (fast && !fast.guest) {
+        box.innerHTML = (fast.active ? plusCardHTML(fast) : freeCardHTML());
+      }
+    } catch (_) {}
     status(false).then(function (st) {
       var live;
       try { live = document.getElementById("sub-card"); } catch (_) { live = null; }
@@ -185,8 +193,25 @@ var Subscription = (function () {
     });
   }
 
+  /* Предзагрузка для экрана профиля: те же 30-секундные кэши, просто
+     заранее — чтобы карточки рисовались из готовых данных вместе
+     с первым кадром, а не догоняли его вторым запросом (дёргание).
+     peek — синхронный срез кэша (null — нет данных). */
+  function prefetch() {
+    try { return status(false); } catch (_) { return Promise.resolve(null); }
+  }
+  function peek() {
+    try {
+      var id = accountId();
+      if (!id || cache.accountId !== id || !cache.status) return null;
+      return cache.status;
+    } catch (_) { return null; }
+  }
+
   return {
     status: status,
+    prefetch: prefetch,
+    peek: peek,
     mountCard: mountCard,
     cachedAgentAccess: cachedAgentAccess,
     ensureAgentAccess: ensureAgentAccess,
