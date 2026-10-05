@@ -43,6 +43,10 @@ conn.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, created_at I
 conn.execute("CREATE TABLE user_subjects(user_id INT, subject TEXT, onboarded INT DEFAULT 0, self_level TEXT, goal_id TEXT, state_version INT DEFAULT 0, PRIMARY KEY(user_id,subject))")
 conn.execute("CREATE TABLE skills(id TEXT PRIMARY KEY, name TEXT, subject TEXT, display_order INT)")
 conn.execute("CREATE TABLE user_progress(user_id INT, subject TEXT, skill_id TEXT, solved INT, correct INT, progress INT)")
+conn.execute("CREATE TABLE lessons(id TEXT PRIMARY KEY, skill_id TEXT, title TEXT, metadata_json TEXT)")
+conn.execute("CREATE TABLE completed_lessons(user_id INT, subject TEXT, lesson_id TEXT)")
+conn.execute("CREATE TABLE task_attempts(id INTEGER PRIMARY KEY, user_id INT, subject TEXT, task_id TEXT, skill_id TEXT, correct INT, hint_level INT, created_at INT)")
+conn.execute("CREATE TABLE diagnostics(id INTEGER PRIMARY KEY, user_id INT, task_id TEXT, correct INT, created_at INT, subject TEXT)")
 now = int(time.time() * 1000)
 conn.execute("INSERT INTO users(id,name,created_at) VALUES(1,'Стёпа',?)", (now - 10 * 86400000,))
 conn.execute("INSERT INTO user_subjects(user_id,subject,onboarded,self_level,goal_id) VALUES(1,'profile_math',1,'base','g80')")
@@ -59,7 +63,8 @@ check("no raw subject id", "profile_math" not in sys_text)
 check("student name quoted", "«Стёпа»" in sys_text)
 check("forecast line", "Прогноз:" in sys_text and "Что подтянуть:" in sys_text,
       str([ln for ln in sys_text.splitlines() if ln.startswith("Прогноз")]))
-check("gains human names", "«Параметр»" in sys_text and "n19_parameter" not in sys_text)
+check("forecast numbers match dashboard formula",
+      "Прогноз: сейчас ~6 из 100, разброс 0–18." in sys_text)
 check("base prompt intact", sys_text.startswith(agent.AGENT_SYSTEM))
 check("context marker", "КОНТЕКСТ ХОДА" in sys_text)
 
@@ -77,6 +82,39 @@ check("title empty safe", agent.subject_title("") == "" and agent.subject_title(
 
 msgs = agent.build_messages(sys_text, [], "привет")
 check("system carries context", msgs[0]["role"] == "system" and "Профильная математика" in msgs[0]["content"])
+
+# --- Формула как в браузере: теория, затухание, диагностика, насыщение ---
+conn.execute("INSERT INTO users(id,name,created_at) VALUES(2,'У',?)", (now - 10 * 86400000,))
+conn.execute("INSERT INTO user_subjects(user_id,subject,onboarded) VALUES(2,'profile_math',1)")
+conn.execute("INSERT INTO skills VALUES('sA','Теория','profile_math',10)")
+conn.execute("INSERT INTO skills VALUES('sB','Диагностика','profile_math',11)")
+conn.execute("INSERT INTO skills VALUES('sC','Давность','profile_math',12)")
+conn.execute("INSERT INTO lessons VALUES('lA','sA','Урок А','{}')")
+conn.execute("INSERT INTO completed_lessons VALUES(2,'profile_math','lA')")
+for i in range(12):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,1,0,?)", (f"tA{i}", "sA", now - i * 60000))
+conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+             " VALUES(2,'profile_math','tB','sB',1,0,?)", (now,))
+conn.execute("INSERT INTO diagnostics(user_id,task_id,correct,created_at,subject)"
+             " VALUES(2,'tB',1,?,'profile_math')", (now,))
+conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+             " VALUES(2,'profile_math','tC','sC',1,0,?)", (now - 90 * 86400000,))
+conn.commit()
+check("theory 40 + saturated practice = 100",
+      agent._skill_mastery(conn, 2, "profile_math", "sA") == 100)
+check("diagnostic counts double",
+      agent._skill_mastery(conn, 2, "profile_math", "sB") == 17,
+      str(agent._skill_mastery(conn, 2, "profile_math", "sB")))
+check("90-day-old attempt decayed",
+      agent._skill_mastery(conn, 2, "profile_math", "sC") == 1,
+      str(agent._skill_mastery(conn, 2, "profile_math", "sC")))
+
+conn.execute("ALTER TABLE skills ADD COLUMN locked INT DEFAULT 0")
+conn.execute("INSERT INTO skills VALUES('x1','Закрытая','profile_math',13,1)")
+got = agent._weighted_skills(conn, "profile_math", {"x1": 3, "n09_derivative": 1})
+check("locked out, unlocked in",
+      [s for s, _ in got] == ["n09_derivative"], str(got))
 
 conn.close()
 os.unlink(path)

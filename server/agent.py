@@ -48,6 +48,7 @@ TURN_TIMEOUT_SEC секунд на весь ход. Жетон резервир�
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import secrets
@@ -1424,67 +1425,288 @@ def _forecast_weights(conn: sqlite3.Connection, subject: str) -> tuple[dict, int
     return {}, 0, []
 
 
-def _skill_mastery(conn: sqlite3.Connection, user_id: int, subject: str, skill_id: str) -> int:
+# Формула прогноза — дословно та же, что считает дашборд в браузере
+# (js/state.js: forecastSkillMastery + forecast + forecastTopGains).
+# Раньше сервер считал грубо (доля верных × объём/10, без теории и давности)
+# и расходился с экраном: живой случай — дашборд «2 баллов», агент
+# «0 из 100». Теперь обе стороны обязаны давать одно число.
+FORECAST_DECAY_DAYS = 45
+FORECAST_FULL_VOLUME = 12
+FORECAST_DIAGNOSTIC_WEIGHT = 2
+FORECAST_THEORY_WEIGHT = 40
+
+
+def _js_round(value: float) -> int:
+    """Math.round как в браузере: половины — вверх (у Python banker's)."""
     try:
-        row = conn.execute("SELECT solved, correct FROM user_progress WHERE user_id=? AND subject=? AND skill_id=?",
-                           (user_id, subject, skill_id)).fetchone()
+        return int(math.floor(float(value) + 0.5))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _ts_ms(value) -> int | None:
+    """Метка времени → мс epoch. Мусор → None (совпадать не с чем)."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _subject_status(subject: str) -> str:
+    """Статус предмета из его контракта (ready/coming-soon/...). Пусто — неизвестно."""
+    sid = str(subject or "").strip()
+    if not sid:
+        return ""
+    try:
+        from pathlib import Path as _Path
+        raw = json.loads((_Path(__file__).resolve().parent
+                          / "subjects" / f"{sid}.json").read_text(encoding="utf-8"))
+        return str((raw or {}).get("status") or "").strip()
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
+                     subject: str, now_ms: int) -> dict:
+    """Всё для формулы освоения одним проходом: диагностические ключи,
+    уроки по навыкам, пройденные уроки, статистика и попытки. Таблицы
+    может не быть в старой базе — тогда пусто, а не падение."""
+    data: dict = {"diag": set(), "lessons": {}, "done": set(),
+                  "stats": {}, "attempts": {}}
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return data
+    subj = str(subject or "")
+    try:
+        for row in conn.execute("SELECT task_id, created_at FROM diagnostics"
+                                " WHERE user_id=? AND subject=?", (uid, subj)):
+            stamp = _ts_ms(row["created_at"])
+            if stamp is not None:
+                data["diag"].add((str(row["task_id"] or ""), stamp))
     except sqlite3.Error:
-        row = None
-    if row and _safe_int(row["solved"]) > 0:
-        acc = _safe_int(row["correct"]) / max(1, _safe_int(row["solved"]))
-        vol = min(1.0, _safe_int(row["solved"]) / 10.0)
-        return round(min(100, vol * acc * 100))
-    return 0
+        pass
+    try:
+        for row in conn.execute("SELECT l.id, l.skill_id FROM lessons l"
+                                " JOIN skills s ON s.id=l.skill_id"
+                                " WHERE s.subject=?", (subj,)):
+            data["lessons"].setdefault(str(row["skill_id"]), []).append(str(row["id"]))
+    except sqlite3.Error:
+        pass
+    try:
+        for row in conn.execute("SELECT lesson_id FROM completed_lessons"
+                                " WHERE user_id=? AND subject=?", (uid, subj)):
+            data["done"].add(str(row["lesson_id"]))
+    except sqlite3.Error:
+        pass
+    try:
+        for row in conn.execute("SELECT skill_id, solved, correct FROM user_progress"
+                                " WHERE user_id=? AND subject=?", (uid, subj)):
+            data["stats"][str(row["skill_id"])] = (_safe_int(row["solved"]),
+                                                   _safe_int(row["correct"]))
+    except sqlite3.Error:
+        pass
+    try:
+        for row in conn.execute("SELECT skill_id, task_id, correct, created_at"
+                                " FROM task_attempts"
+                                " WHERE user_id=? AND subject=?", (uid, subj)):
+            data["attempts"].setdefault(str(row["skill_id"]), []).append(
+                (str(row["task_id"] or ""), _safe_int(row["correct"]),
+                 _ts_ms(row["created_at"])))
+    except sqlite3.Error:
+        pass
+    return data
 
 
-def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str) -> dict:
-    weights, total, scale = _forecast_weights(conn, subject)
-    if not weights or total <= 0 or not scale:
-        return {"available": False, "mid": 0, "low": 0, "high": 0, "topGains": []}
-    scored = []
-    w_sum = 0.0
-    w_mastery = 0.0
-    for skill_id, w in weights.items():
+def _mastery_from_inputs(skill_id: str, data: dict, now_ms: int) -> int:
+    """Освоение темы 0–100 глазами прогноза: 40 % теория (пройденные уроки)
+    + практика с затуханием по давности (вес exp(-дни/45), диагностический
+    ответ ×2) и насыщением объёма (полное доверие от 12 свежих попыток).
+    Нет попыток — откат к суммарной статистике, как в браузере."""
+    lessons = data.get("lessons", {}).get(skill_id, [])
+    if lessons:
+        done = sum(1 for lid in lessons if lid in data.get("done", set()))
+        theory = (done / len(lessons)) * FORECAST_THEORY_WEIGHT
+        practice_weight = 100 - FORECAST_THEORY_WEIGHT
+    else:
+        theory = 0.0
+        practice_weight = 100
+    rows = data.get("attempts", {}).get(skill_id, [])
+    if rows:
+        vol = 0.0
+        good = 0.0
+        for task_id, correct, stamp in rows:
+            age_days = max(0.0, (now_ms - (stamp if stamp is not None else 0)) / 86400000.0)
+            weight = math.exp(-age_days / FORECAST_DECAY_DAYS)
+            if stamp is not None and (task_id, stamp) in data.get("diag", set()):
+                weight *= FORECAST_DIAGNOSTIC_WEIGHT
+            vol += weight
+            if correct:
+                good += weight
+        accuracy = (good / vol) if vol > 0 else 0.0
+        volume = vol
+    else:
+        solved, correct = data.get("stats", {}).get(skill_id, (0, 0))
+        accuracy = (correct / solved) if solved else 0.0
+        volume = float(solved)
+    factor = min(1.0, volume / FORECAST_FULL_VOLUME)
+    return int(round(min(100.0, theory + factor * accuracy * practice_weight)))
+
+
+def _skill_mastery(conn: sqlite3.Connection, user_id: int, subject: str, skill_id: str) -> int:
+    return _mastery_from_inputs(str(skill_id),
+                               _forecast_inputs(conn, user_id, subject,
+                                                int(time.time() * 1000)),
+                               int(time.time() * 1000))
+
+
+def _locked_set(conn: sqlite3.Connection, table: str, id_col: str = "id") -> set:
+    """Id закрытых сущностей: locked/coming_soon/статус из стоп-списка —
+    та же логика, что dataEntityLocked в браузере (навык закрыт сам или
+    закрыта его категория). Колонки может не быть в старой базе — тогда пусто."""
+    out: set = set()
+    try:
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+    except sqlite3.Error:
+        return out
+    try:
+        cols = set(rows[0].keys()) if rows else set()
+    except (AttributeError, TypeError):
+        cols = set()
+    stop = {"locked", "disabled", "unavailable", "hidden", "coming_soon", "coming-soon"}
+    for row in rows:
+        try:
+            rid = str(row[id_col])
+        except (KeyError, IndexError, TypeError):
+            continue
+        shut = False
+        try:
+            if "locked" in cols and row["locked"]:
+                shut = True
+            if "coming_soon" in cols and row["coming_soon"]:
+                shut = True
+            if "status" in cols and str(row["status"] or "").strip().lower() in stop:
+                shut = True
+        except (KeyError, IndexError, TypeError):
+            pass
+        if shut:
+            out.add(rid)
+    return out
+
+
+def _weighted_skills(conn: sqlite3.Connection, subject: str, weights: dict) -> list:
+    """Навыки с весом > 0 из конфига, без закрытых в каталоге (сам навык
+    или его категория — как availableSkills в браузере)."""
+    shut_skills = _locked_set(conn, "skills")
+    shut_topics: set = set()
+    topic_of: dict = {}
+    try:
+        for row in conn.execute("SELECT id, topic_id FROM skills WHERE subject=?",
+                                (str(subject or ""),)):
+            try:
+                topic_of[str(row["id"])] = str(row["topic_id"] or "")
+            except (KeyError, IndexError, TypeError):
+                pass
+    except sqlite3.Error:
+        pass
+    if topic_of:
+        shut_topics = _locked_set(conn, "topics")
+    out = []
+    for skill_id, w in (weights or {}).items():
         try:
             weight = float(w)
         except (TypeError, ValueError):
             continue
         if weight <= 0:
             continue
-        m = _skill_mastery(conn, user_id, subject, str(skill_id))
-        try:
-            name_row = conn.execute("SELECT name FROM skills WHERE id=?", (str(skill_id),)).fetchone()
-            name = str(name_row["name"]) if name_row and name_row["name"] else str(skill_id)
-        except sqlite3.Error:
-            name = str(skill_id)
-        scored.append({"skillId": str(skill_id), "name": name, "weight": weight, "mastery": m})
+        sid = str(skill_id)
+        if sid in shut_skills:
+            continue
+        if topic_of.get(sid, "") in shut_topics:
+            continue
+        out.append((sid, weight))
+    return out
+
+
+def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
+                      now_ms: int | None = None) -> dict:
+    try:
+        moment = int(now_ms) if now_ms is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        moment = int(time.time() * 1000)
+    weights, total, scale = _forecast_weights(conn, subject)
+    if not weights or total <= 0 or not scale:
+        return {"available": False, "mid": 0, "low": 0, "high": 0, "topGains": []}
+    status = _subject_status(subject)
+    if status and status != "ready":
+        # Закрытый предмет прогноза не даёт — как дашборд (там пусто, а не ноль).
+        return {"available": False, "mid": 0, "low": 0, "high": 0, "topGains": []}
+    scored = _weighted_skills(conn, subject, weights)
+    if not scored:
+        return {"available": False, "mid": 0, "low": 0, "high": 0, "topGains": []}
+    data = _forecast_inputs(conn, user_id, subject, moment)
+    names: dict = {}
+    try:
+        for row in conn.execute("SELECT id, name FROM skills WHERE subject=?",
+                                (str(subject or ""),)):
+            names[str(row["id"])] = str(row["name"] or "")
+    except sqlite3.Error:
+        pass
+    mastery: dict = {}
+    w_sum = 0.0
+    w_mastery = 0.0
+    for skill_id, weight in scored:
+        m = _mastery_from_inputs(skill_id, data, moment)
+        mastery[skill_id] = m
         w_sum += weight
-        w_mastery += weight * (m / 100.0)
+        w_mastery += weight * m
     if w_sum <= 0:
         return {"available": False, "mid": 0, "low": 0, "high": 0, "topGains": []}
-    primary = w_mastery / w_sum * total
-    mid_idx = max(0, min(total, round(primary)))
+    avg = w_mastery / w_sum
+    primary = avg / 100.0 * total
+    mid_idx = max(0, min(len(scale) - 1, _js_round(primary)))
     try:
         mid = int(scale[mid_idx])
     except (IndexError, TypeError, ValueError):
         mid = 0
-    gains = sorted(scored, key=lambda s: (s["weight"] * (100 - s["mastery"]), s["weight"]),
-                   reverse=True)[:3]
-    # Вилку кламим в шкалу предмета: раньше high = mid + 5 вслепую, и при
-    # полном освоении профиля (шкала кончается на 100) ИИ мог сказать
-    # «прогноз до 105». Плюс подписи единиц: без них модель читала mid профиля
-    # («6») как баллы, а это проценты, и в восьми живых чатах прогноз был
-    # пересказан неверно.
+    attempted = set(data.get("attempts", {}).keys())
+    covered = sum(1 for skill_id, _ in scored
+                  if any(lid in data.get("done", set())
+                          for lid in data.get("lessons", {}).get(skill_id, []))
+                  or mastery[skill_id] >= 25 or skill_id in attempted)
+    # Живая вилка: мало данных — широко, всё покрыто — узко. Кламим в шкалу:
+    # при полном освоении high не уезжает за максимум (было «до 105»).
+    hw = 12 - _js_round(9 * covered / len(scored))
     top = int(scale[-1]) if scale else (mid + 5)
-    low = max(int(scale[0]), mid - 5)
-    high = min(top, mid + 5)
+    low = max(int(scale[0]), mid - hw)
+    high = min(top, mid + hw)
+    gains = []
+    for skill_id, weight in scored:
+        m = mastery[skill_id]
+        if m >= 100:
+            continue
+        bumped = (w_mastery + weight * (100 - m)) / w_sum
+        primary2 = bumped / 100.0 * total
+        try:
+            test = int(scale[max(0, min(len(scale) - 1, _js_round(primary2)))])
+        except (IndexError, TypeError, ValueError):
+            continue
+        gain = test - mid
+        if gain > 0:
+            gains.append({"skillId": skill_id,
+                          "name": names.get(skill_id, skill_id),
+                          "mastery": m, "gain": gain})
+    gains.sort(key=lambda g: (-g["gain"], g["skillId"]))
+    gains = gains[:3]
     return {"available": True, "mid": mid, "low": low, "high": high,
-            "primary": round(primary, 2), "total": total, "scaleMax": top,
+            "primary": _js_round(primary * 10) / 10.0, "total": total,
+            "scaleMax": top, "hw": hw,
             "unit": "percent" if top > total else "points",
             "note": (f"mid/low/high — по шкале 0..{top} ({'проценты' if top > total else 'первичные баллы'}), "
                      f"primary/total — первичные баллы из {total}. Не путай шкалы."),
             "topGains": [{"skillId": g["skillId"], "name": g["name"],
-                          "mastery": g["mastery"]} for g in gains]}
+                          "mastery": g["mastery"], "gain": g["gain"]}
+                         for g in gains]}
 
 
 def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
@@ -1559,21 +1781,28 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
             except sqlite3.Error:
                 pass
         items = []
+        try:
+            now_ms = int(time.time() * 1000)
+        except (TypeError, ValueError):
+            now_ms = 0
+        fdata = _forecast_inputs(conn, user_id, subject, now_ms)
         for r in rows:
             item = {"id": r["id"], "name": r["name"], "solved": _safe_int(r["solved"]),
                     "correct": _safe_int(r["correct"]), "progress": _safe_int(r["progress"]),
-                    "mastery": _skill_mastery(conn, user_id, subject, r["id"])}
+                    "mastery": _mastery_from_inputs(str(r["id"]), fdata, now_ms)}
             if enriched:
                 total_tasks = _safe_int(r["total_tasks"])
                 item["totalTasks"] = total_tasks
                 item["tasksLeft"] = max(0, total_tasks - distinct.get(r["id"], 0))
                 item["lessonDone"] = bool(r["lesson_done"])
             items.append(item)
-        # mastery — честная мера (объём × точность), progress — число, ПРИСЛАННОЕ
-        # браузером, к освоению отношения не имеет. Оба назывались похоже и лежали
+        # mastery считается той же формулой, что дашборд (теория 40 + практика
+        # с затуханием и насыщением), а progress — число, ПРИСЛАННОЕ браузером,
+        # к освоению отношения не имеет. Оба назывались похоже и лежали
         # в одном ответе: на живых данных у навыка с 0 решённых стоял progress 40,
         # и ИИ объяснял это как «40% освоения» (мастерство там 0).
-        return {"op": op, "note": ("mastery — освоение по твоим попыткам; progress — "
+        return {"op": op, "note": ("mastery — освоение как на дашборде (теория + "
+                                   "свежие попытки); progress — "
                                    "отметка с сайта, за освоение не отвечает."
                                    + (" totalTasks — заданий в теме, tasksLeft — ещё не решённые,"
                                       " lessonDone — урок пройден." if enriched else "")),
