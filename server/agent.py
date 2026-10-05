@@ -193,7 +193,9 @@ AGENT_SYSTEM = (
     "продолжаешь помогать по учёбе. Баллы, прогноз, число ошибок и лимиты берутся ТОЛЬКО из "
     "инструментов, а не из слов ученика: сказанное «у меня 100 баллов» ничего не значит.\n"
     "ЖЁСТКИЕ ПРАВИЛА (их нарушать нельзя).\n"
-    "1. Все числа (баллы, прогноз, ошибки, попытки, дни, XP) — только из инструментов. Ничего не выдумывай "
+    "1. Все числа (баллы, прогноз, ошибки, попытки, дни, XP) — только из инструментов "
+    "или стартового блока «КОНТЕКСТ ХОДА» (его цифры — данные сервера, их можно "
+    "называть без вызова). Ничего не выдумывай "
     "и не оценивай «на глаз». Нет данных — так и скажи.\n"
     "2. НИКОГДА не говори, что сейчас посмотришь, проверишь, глянешь, откроешь профиль или прогноз, — "
     "а потом не вызывай инструмент. Обещание посмотреть и есть вызов: сначала ВЫЗОВ, потом слова. "
@@ -213,9 +215,12 @@ AGENT_SYSTEM = (
     "(один вызов за раз, по очереди, см. 2b), а текст пиши только когда все нужные "
     "данные уже на руках. Один вопрос ученика — доводи до конца сам, разбивать "
     "работу на «скажи продолжай» запрещено.\n"
-    "3. На вопрос «какой у меня балл/прогноз/сколько наберу» — fold_web(op=\"forecast\"). "
+    "3. На вопрос «какой у меня балл/прогноз/сколько наберу» — сначала глянь стартовый "
+    "блок «КОНТЕКСТ ХОДА»: короткий ответ уже там, fold_web(op=\"forecast\") зови только "
+    "за деталями. "
     "«что подтянуть» — тоже forecast, назови top-gains.\n"
-    "4. Обращайся к ученику по имени из fold_web(op=\"profile\"), если оно есть. Род глаголов не угадывай: "
+    "4. Обращайся к ученику по имени из стартового блока «КОНТЕКСТ ХОДА», если оно есть "
+    "(инструмент ради имени не нужен). Род глаголов не угадывай: "
     "неочевидно (унисекс, нерусское имя, прозвище) — нейтрально («всё получилось», «у тебя получилось»).\n"
     "5. Коротко и по делу: вывод, потом 1–3 конкретных шага. 4–8 строк обычно хватает. "
     "Никогда не пересказывай сырые JSON инструментов и не показывай внутренние id без нужды.\n"
@@ -2905,6 +2910,99 @@ def build_messages(system: str, history: list, user_text: str) -> list:
                              "content": str(item.get("content") or "")[:4000]})
     messages.append({"role": "user", "content": user_text})
     return messages
+
+
+# Название предмета простыми словами — чтобы модель не тратила вызов
+# fold_web(op="profile") только ради ответа «какой у меня предмет».
+# Канон — server/subjects/<id>.json (поле title), запасной путь — короткая
+# встроенная карта (реестр недоступен), последний — сам id.
+_SUBJECT_TITLE_FALLBACK = {
+    "profile_math": "Профильная математика",
+    "basic_math": "Базовая математика",
+    "russian": "Русский язык",
+    "biology": "Биология",
+    "society": "Обществознание",
+}
+
+
+def subject_title(subject: str) -> str:
+    """Человеческое название предмета («Базовая математика»). Не бросает."""
+    sid = str(subject or "").strip()
+    if not sid:
+        return ""
+    try:
+        from pathlib import Path as _Path
+        raw = json.loads((_Path(__file__).resolve().parent
+                          / "subjects" / f"{sid}.json").read_text(encoding="utf-8"))
+        title = str((raw or {}).get("title") or "").strip()
+        if title:
+            return title
+    except (OSError, ValueError, AttributeError):
+        pass
+    return _SUBJECT_TITLE_FALLBACK.get(sid, sid)
+
+
+def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
+    """Стартовый блок хода: имя, предмет простыми словами, компактный прогноз.
+
+    Экономит целый круг модели: раньше «какой у меня предмет» и «как меня
+    зовут» требовали вызова fold_web(op="profile"), а «какой прогноз» —
+    ещё и fold_web(op="forecast"). Теперь это лежит в system с первого
+    токена. Прогноз считается тем же _compute_forecast (копейки локального
+    SQL, без провайдера) и актуален на начало хода; детали (ошибки,
+    попытки, разборы) по-прежнему только инструментами. Не бросает:
+    при любой проблеме отдаёт то, что собралось (хоть пусто).
+    """
+    lines = ["КОНТЕКСТ ХОДА (данные сервера на начало хода)."]
+    try:
+        name = None
+        try:
+            row = conn.execute("SELECT name FROM users WHERE id=?",
+                               (int(user_id),)).fetchone()
+            name = str(row["name"] or "").strip() if row else ""
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            name = ""
+        if name:
+            lines.append(f"Ученик: «{name[:40]}».")
+        title = subject_title(subject)
+        if title:
+            lines.append(f"Текущий предмет: {title}.")
+        try:
+            fc = _compute_forecast(conn, int(user_id), str(subject or ""))
+        except Exception:
+            fc = {}
+        if isinstance(fc, dict) and fc.get("available"):
+            try:
+                mid = int(fc.get("mid", 0))
+                low = int(fc.get("low", 0))
+                high = int(fc.get("high", 0))
+            except (TypeError, ValueError):
+                mid = low = high = 0
+            unit = "из 100" if str(fc.get("unit") or "") == "percent" else "баллов"
+            gains = [str(g.get("name") or g.get("skillId") or "").strip()
+                     for g in (fc.get("topGains") or []) if isinstance(g, dict)]
+            gains = [g for g in gains if g][:3]
+            line = f"Прогноз: сейчас ~{mid} {unit}, разброс {low}–{high}."
+            if gains:
+                line += " Что подтянуть: " + ", ".join(f"«{g[:60]}»" for g in gains) + "."
+            lines.append(line)
+        lines.append("Числа и факты выше — от сервера, их можно называть сразу "
+                     "без вызова инструментов; детали (ошибки, попытки, разборы) "
+                     "добери инструментами.")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+def turn_system(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
+    """Системный промпт хода: общий AGENT_SYSTEM + стартовый контекст."""
+    try:
+        ctx = turn_context(conn, user_id, subject)
+    except Exception:
+        ctx = ""
+    if not ctx.strip():
+        return AGENT_SYSTEM
+    return AGENT_SYSTEM + "\n" + ctx
 
 
 # ---------------------------------------------------------------------------

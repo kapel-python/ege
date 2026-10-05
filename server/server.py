@@ -14602,7 +14602,7 @@ class Handler(BaseHTTPRequestHandler):
                         # приходилось подтверждать одно и то же действие ВТОРОЙ раз,
                         # и имя менялось только после этого.
                         history = _agent_history_for_model(conn, tid)
-                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, "")
+                        messages = _AGENT.build_messages(_AGENT.turn_system(conn, int(user_id), subject), history, "")
                         # Убираем пустой trailing user (confirm — не новый вопрос):
                         # модель продолжает с результатом инструмента.
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
@@ -14909,7 +14909,7 @@ class Handler(BaseHTTPRequestHandler):
                                         if str(thread["title"] or "") not in ("Новый чат", "")
                                         else _AGENT.thread_title_for(text))
                         history = _agent_history_for_model(conn, tid, before_seq=replace_from)
-                        messages = _AGENT.build_messages(_AGENT.AGENT_SYSTEM, history, text)
+                        messages = _AGENT.build_messages(_AGENT.turn_system(conn, int(user_id), subject), history, text)
                         cost = {"n": 0}
                         _raw_chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
                         _first_call = {"done": False}
