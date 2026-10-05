@@ -8105,7 +8105,7 @@ function profileAchievementsHTML(achievements) {
           </div>`;
   }).join("");
   const rest = sorted.length - VISIBLE;
-  return `<div class="badge-grid" id="profile-ach-grid" data-collapsed="true">${items}</div>`
+  return `<div class="badge-grid" id="profile-ach-grid">${items}</div>`
     + (rest > 0 ? `<div class="profile-more"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileAchievements(this)" data-rest="${rest}">Показать ещё · осталось ${rest}</button></div>` : ``);
 }
 
@@ -8115,10 +8115,12 @@ function toggleProfileAchievements(btn) {
     if (!grid) return;
     const extra = grid.querySelectorAll("[data-profile-ach-extra]");
     if (!extra.length) return;
-    const collapsed = grid.getAttribute("data-collapsed") !== "false";
-    extra.forEach((el) => { if (collapsed) el.removeAttribute("hidden"); else el.setAttribute("hidden", ""); });
-    grid.setAttribute("data-collapsed", collapsed ? "false" : "true");
-    if (btn) btn.textContent = collapsed ? "Скрыть" : `Показать ещё · осталось ${extra.length}`;
+    extra.forEach((el) => el.removeAttribute("hidden"));
+    // Раскрытие одностороннее: кнопки «Скрыть» нет — после показа всего
+    // убираем и саму кнопку «Показать ещё».
+    const more = btn && btn.closest ? btn.closest(".profile-more") : null;
+    if (more) more.remove();
+    else if (btn && btn.remove) btn.remove();
   } catch (_) {}
 }
 
@@ -8132,7 +8134,7 @@ function profileTimelineHTML(timeline, contentUnavailable) {
                 <div class="timeline__text">${esc(t && t.text || "Событие профиля")}</div>
               </div>`).join("");
   const rest = list.length - VISIBLE;
-  return `<div class="timeline" id="profile-timeline" data-collapsed="true">${items}</div>`
+  return `<div class="timeline" id="profile-timeline">${items}</div>`
     + (rest > 0 ? `<div class="profile-more profile-more--left"><button class="btn btn--primary btn--sm" type="button" onclick="toggleProfileTimeline(this)">Показать ещё · осталось ${rest}</button></div>` : ``);
 }
 
@@ -8142,10 +8144,12 @@ function toggleProfileTimeline(btn) {
     if (!box) return;
     const extra = box.querySelectorAll("[data-profile-timeline-extra]");
     if (!extra.length) return;
-    const collapsed = box.getAttribute("data-collapsed") !== "false";
-    extra.forEach((el) => { if (collapsed) el.removeAttribute("hidden"); else el.setAttribute("hidden", ""); });
-    box.setAttribute("data-collapsed", collapsed ? "false" : "true");
-    if (btn) btn.textContent = collapsed ? "Скрыть" : `Показать ещё · осталось ${extra.length}`;
+    extra.forEach((el) => el.removeAttribute("hidden"));
+    // Раскрытие одностороннее: кнопки «Скрыть» нет — после показа всего
+    // убираем и саму кнопку «Показать ещё».
+    const more = btn && btn.closest ? btn.closest(".profile-more") : null;
+    if (more) more.remove();
+    else if (btn && btn.remove) btn.remove();
   } catch (_) {}
 }
 

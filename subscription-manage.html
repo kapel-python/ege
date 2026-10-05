@@ -264,7 +264,7 @@
   <div id="content" hidden>
     <!-- статус -->
     <section class="card card--hero rv" id="statusCard">
-      <h2 class="card-title"><span id="statusPill" class="chip chip--muted">…</span></h2>
+      <h2 class="card-title"><span id="statusPill">…</span></h2>
       <p class="card-sub" id="statusMeta">…</p>
       <div class="meter meter--plus" id="periodMeter" hidden>
         <span class="meter__fill" id="periodFill"></span>
@@ -541,7 +541,7 @@
     var plabel = document.getElementById("periodLabel");
     if (plus) {
       var left = daysLeft(st.expiresAt);
-      pill.className = "chip chip--gold";
+      pill.className = "";
       pill.innerHTML = PLUS_WORD;
       var periodText = st.period === "year" ? "год · " + PRICE_YEAR + " ₽" : "месяц · " + PRICE_MONTH + " ₽";
       meta.textContent = "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
@@ -557,8 +557,8 @@
       var perk = document.getElementById("perkLimits");
       if (perk) perk.textContent = essay + " проверок сочинений и " + agent + " ходов ИИ в день";
     } else {
-      pill.className = "chip chip--muted";
-      pill.textContent = "бесплатный план";
+      pill.className = "";
+      pill.textContent = "Бесплатный план";
       meta.innerHTML = "5 проверок сочинений и 10 ходов ИИ в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год (−33%).";
       heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает лимиты и добавляет личный план от ИИ. Сам ИИ сейчас бесплатен всем — 10 ходов в день.";
       meter.hidden = true;
