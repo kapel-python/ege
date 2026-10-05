@@ -42,8 +42,10 @@
   --warn-ink: #9a5b00;
   --streak-viol: #6d28d9;
   --streak-viol-soft: rgba(109, 40, 217, 0.12);
-  --streak-hot-neon: #ff2244;
-  --streak-hot-glow: rgba(255, 34, 68, 0.55);
+  --streak-hot: #9a3412;
+  --streak-hot-soft: rgba(234, 88, 12, 0.12);
+  --streak-hot-neon: #ea580c;
+  --streak-hot-glow: rgba(234, 88, 12, 0.55);
   --streak-viol-neon: #7c3aed;
   --streak-viol-glow: rgba(124, 58, 237, 0.45);
   --radius: 14px;
@@ -95,8 +97,10 @@
   --warn-ink: #fcd34d;
   --streak-viol: #c4b5fd;
   --streak-viol-soft: rgba(196, 181, 253, 0.14);
-  --streak-hot-neon: #ff5c7a;
-  --streak-hot-glow: rgba(255, 92, 122, 0.6);
+  --streak-hot: #fdba74;
+  --streak-hot-soft: rgba(251, 146, 60, 0.14);
+  --streak-hot-neon: #fb923c;
+  --streak-hot-glow: rgba(251, 146, 60, 0.6);
   --streak-viol-neon: #c084fc;
   --streak-viol-glow: rgba(192, 132, 252, 0.55);
   --chrome-bg: rgba(10, 12, 17, 0.80);
@@ -641,11 +645,13 @@ body {
   0%, 100% { box-shadow: 0 0 0 0 var(--warn-soft); }
   50% { box-shadow: 0 0 14px 0 var(--warn-soft); }
 }
-/* Уровни огня серии: 7–30 дней — красный, 31+ — фиолетовый.
-   Каждый уровень усиливает всё сразу: цвет, размах качания, искры, свечение. */
+/* Уровни огня серии: 7–30 дней — оранжевый костёр, 31+ — фиолетовый.
+   Красный здесь не используется осознанно: это цвет ошибок, а серия —
+   повод для радости. Каждый уровень усиливает всё сразу: цвет, размах
+   качания, искры, свечение. */
 .streak-chip--hot {
-  color: var(--danger-ink);
-  background: var(--danger-soft);
+  color: var(--streak-hot);
+  background: var(--streak-hot-soft);
   border: 1px solid var(--streak-hot-glow);
   animation: streak-breathe-hot 1.8s ease-in-out infinite;
 }
