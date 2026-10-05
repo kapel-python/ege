@@ -116,6 +116,40 @@ def _load_agent_module():
 _AGENT = _load_agent_module()
 
 
+def _load_quota_ledger_module():
+    """Load the quota ledger module (server/quota_ledger.py). Failure is not
+    fatal: without it quotas work as before, just with no ledger rows."""
+    import importlib.util
+
+    ledger_path = Path(__file__).resolve().parent / "quota_ledger.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_quota_ledger", ledger_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_QL = _load_quota_ledger_module()
+
+
+def _ledger_catch_up(conn: sqlite3.Connection, info, *, owner: str,
+                     limit: int, reason: str, actor: int | None,
+                     now_ms: int | None = None) -> None:
+    """Залогировать итог зарядки бакета. Молча пропускает пустое и
+    отсутствие модуля журнала: квота первична, журнал вторичен."""
+    if _QL is None or not isinstance(info, dict) or not info.get("applied"):
+        return
+    try:
+        _QL.log_catch_up(conn, info, owner=owner, limit=limit,
+                         reason=reason, actor=actor, now_ms=now_ms)
+    except Exception:
+        pass
+
+
 def _load_oauth_module():
     """Load the external-login module (server/oauth.py).
 
@@ -8260,7 +8294,9 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
     states: list = []
     for owner in owners:
         owner_limit = ai_limit_for_owner(conn, owner)
-        _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
+        _ledger_catch_up(conn, _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms),
+                         owner=owner, limit=owner_limit, reason="essay:status",
+                         actor=user_id, now_ms=now_ms)
         row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage WHERE owner=?",
                            (owner,)).fetchone()
         if row:
@@ -8312,7 +8348,8 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
 
 
 def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
-                         fp_key: str | None, fp_net: str | None) -> list[str] | None:
+                         fp_key: str | None, fp_net: str | None,
+                         *, reason: str = "essay:check") -> list[str] | None:
     """Атомарно списать одну проверку. Возвращает затронутые бакеты (для
     refund) либо None, если списывать нечего.
 
@@ -8348,11 +8385,49 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
     # а лишь пропускается — иначе старый из другого браузера упирался бы в
     # чужую сеть. Возврат точен: в списке только реально тронутые.
     must_set = set(check_owners)
+    try:
+        spent_by = int(user_id)
+    except (TypeError, ValueError):
+        spent_by = 0
     for owner in spend_owners:
         owner_limit = ai_limit_for_owner(conn, owner)
-        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                     " VALUES (?,?,NULL)", (owner, owner_limit))
-        _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
+        cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                           " VALUES (?,?,NULL)", (owner, owner_limit))
+        if cur.rowcount and _QL is not None:
+            try:
+                _QL.log_event(conn, owner=owner, kind="init", reason=reason,
+                              delta=owner_limit, count_before=None,
+                              count_after=owner_limit, limit=owner_limit,
+                              actor=spent_by, now_ms=now_ms)
+            except Exception:
+                pass
+        _ledger_catch_up(conn, _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms),
+                         owner=owner, limit=owner_limit, reason=reason,
+                         actor=spent_by, now_ms=now_ms)
+    # Остаток до списания — для журнала трат (один SELECT на всех,
+    # бакетов не больше трёх).
+    before: dict = {}
+    try:
+        q = ",".join("?" * len(spend_owners))
+        for brow in conn.execute(f"SELECT owner, count FROM ai_usage WHERE owner IN ({q})",
+                                 tuple(spend_owners)):
+            try:
+                before[str(brow["owner"])] = int(brow["count"])
+            except (TypeError, ValueError, KeyError, IndexError):
+                pass
+    except sqlite3.Error:
+        pass
+    def _log_spend(own: str, own_limit: int) -> None:
+        if _QL is None:
+            return
+        try:
+            was = before.get(own)
+            _QL.log_event(conn, owner=own, kind="spend", reason=reason,
+                          delta=-1, count_before=was,
+                          count_after=(was - 1 if was is not None else None),
+                          limit=own_limit, actor=spent_by, now_ms=now_ms)
+        except Exception:
+            pass
     touched: list[str] = []
     for owner in spend_owners:
         cur = conn.execute("""
@@ -8369,17 +8444,32 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
                 return None
             continue  # пустой ненаблюдаемый котёл: свой резерв жив
         touched.append(owner)
+        _log_spend(owner, ai_limit_for_owner(conn, owner))
     conn.commit()
     return touched
 
 
-def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
+def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None,
+                      *, reason: str = "essay:refund") -> None:
     """Вернуть резервацию: проверка не состоялась — лимит не потрачен.
     Жетон возвращается в каждый затронутый бакет; наполнившийся доверху
     гасит таймер. Вместе со списанием это даёт точное восстановление
     состояния «как до траты»: (3,NULL)→(2,t)→(3,NULL), (2,t)→(1,t)→(2,t)."""
     if not owners:
         return
+    # Остаток до возврата — для журнала (один SELECT на всех).
+    before: dict = {}
+    if _QL is not None:
+        try:
+            q = ",".join("?" * len(owners))
+            for brow in conn.execute(f"SELECT owner, count FROM ai_usage WHERE owner IN ({q})",
+                                     tuple(owners)):
+                try:
+                    before[str(brow["owner"])] = int(brow["count"])
+                except (TypeError, ValueError, KeyError, IndexError):
+                    pass
+        except sqlite3.Error:
+            pass
     try:
         for owner in owners:
             owner_limit = ai_limit_for_owner(conn, owner)
@@ -8389,6 +8479,17 @@ def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None) -> None:
                   timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END,
                   anchor_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE anchor_ms END
                 WHERE owner = ?""", (owner_limit, owner_limit, owner_limit, owner))
+            if _QL is not None:
+                try:
+                    was = before.get(str(owner))
+                    now_count = min(owner_limit, was + 1) if was is not None else None
+                    _QL.log_event(conn, owner=str(owner), kind="refund",
+                                  reason=reason, delta=1, count_before=was,
+                                  count_after=now_count, limit=owner_limit,
+                                  actor=_QL.owner_user_id(str(owner)),
+                                  now_ms=int(time.time() * 1000))
+                except Exception:
+                    pass
         conn.commit()
     except sqlite3.Error:
         try:
@@ -8430,9 +8531,20 @@ def ai_timeout_bonus_grant(conn: sqlite3.Connection, user_id: int) -> dict:
             conn.execute("ALTER TABLE users ADD COLUMN essay_timeout_bonus_day TEXT NOT NULL DEFAULT ''")
         except sqlite3.Error:
             pass
-    conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                 " VALUES (?,?,NULL)", (owner, owner_limit))
-    _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms)
+    cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                       " VALUES (?,?,NULL)", (owner, owner_limit))
+    if cur.rowcount and _QL is not None:
+        try:
+            _QL.log_event(conn, owner=owner, kind="init",
+                          reason="essay:timeout_bonus", delta=owner_limit,
+                          count_before=None, count_after=owner_limit,
+                          limit=owner_limit, actor=int(user_id), now_ms=now_ms)
+        except Exception:
+            pass
+    _ledger_catch_up(conn, _ai_usage_catch_up(conn, owner, now_ms, owner_limit, window_ms),
+                     owner=owner, limit=owner_limit,
+                     reason="essay:timeout_bonus", actor=int(user_id),
+                     now_ms=now_ms)
     row = conn.execute("SELECT count FROM ai_usage WHERE owner=?", (owner,)).fetchone()
     count = int(row["count"]) if row else owner_limit
     if count >= owner_limit:
@@ -8458,6 +8570,16 @@ def ai_timeout_bonus_grant(conn: sqlite3.Connection, user_id: int) -> dict:
           timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END,
           anchor_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE anchor_ms END
         WHERE owner = ?""", (owner_limit, owner_limit, owner_limit, owner))
+    if _QL is not None:
+        try:
+            _QL.log_event(conn, owner=owner, kind="bonus",
+                          reason="essay:timeout_bonus", delta=1,
+                          count_before=count,
+                          count_after=min(owner_limit, count + 1),
+                          limit=owner_limit, actor=int(user_id),
+                          now_ms=now_ms)
+        except Exception:
+            pass
     conn.commit()
     row = conn.execute("SELECT count FROM ai_usage WHERE owner=?", (owner,)).fetchone()
     return {"ok": True, "granted": True, "applied": True,
@@ -8513,7 +8635,8 @@ def _validate_ai_limit_payload(raw_limit, has_limit: bool,
         raise ValueError("нужны limit, remaining или refill")
 
 
-def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
+def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict,
+                       *, actor: int | None = None) -> dict:
     """Ручное управление ИИ-лимитом из админки.
 
     payload: {"limit": int|null, "remaining": int|null, "refill": bool}.
@@ -8555,7 +8678,7 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
             _validate_ai_limit_payload(raw_limit if has_limit else None, has_limit,
                                        raw_remaining if has_remaining else None, has_remaining,
                                        refill)
-        _AGENT.admin_agent_quota_set(conn, user_id, agent_payload)
+        _AGENT.admin_agent_quota_set(conn, user_id, agent_payload, actor=actor)
     if not has_limit and not has_remaining and not refill:
         return admin_ai_limit_status(conn, user_id)
     now_ms = int(time.time() * 1000)
@@ -8584,9 +8707,17 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
                     (user_id, new_limit, now_ms))
         eff = ai_effective_limit(conn, user_id)
         owner = f"u:{user_id}"
+        try:
+            before_row = conn.execute("SELECT count FROM ai_usage WHERE owner=?",
+                                      (owner,)).fetchone()
+            count_before = int(before_row["count"]) if before_row else None
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            count_before = None
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
                      " VALUES (?,?,NULL)", (owner, eff))
-        _ai_usage_catch_up(conn, owner, now_ms, eff, window_ms)
+        _ledger_catch_up(conn, _ai_usage_catch_up(conn, owner, now_ms, eff, window_ms),
+                         owner=owner, limit=eff, reason="admin:ai_limit",
+                         actor=actor, now_ms=now_ms)
         if refill:
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL WHERE owner=?",
                          (eff, owner))
@@ -8629,6 +8760,26 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
                 anchor = int(anchor) if anchor is not None else timer
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=?, anchor_ms=? WHERE owner=?",
                          (count, timer, anchor, owner))
+        if _QL is not None:
+            try:
+                after_row = conn.execute("SELECT count FROM ai_usage WHERE owner=?",
+                                         (owner,)).fetchone()
+                count_after = int(after_row["count"]) if after_row else None
+                _QL.log_event(conn, owner=owner, kind="admin",
+                              reason="admin:ai_limit",
+                              delta=((count_after - count_before)
+                                     if count_after is not None
+                                     and count_before is not None else 0),
+                              count_before=count_before,
+                              count_after=count_after,
+                              limit=ai_effective_limit(conn, user_id),
+                              actor=actor,
+                              meta={"payload": {k: payload.get(k) for k in
+                                                ("limit", "remaining", "refill")
+                                                if k in payload}},
+                              now_ms=now_ms)
+            except Exception:
+                pass
         if own_txn:
             conn.commit()
     except Exception:
@@ -8639,6 +8790,64 @@ def admin_ai_limit_set(conn: sqlite3.Connection, user_id: int, payload: dict) ->
                 pass
         raise
     return admin_ai_limit_status(conn, user_id)
+
+
+def admin_quota_log(conn: sqlite3.Connection, user_id: int,
+                      limit: int = 100, offset: int = 0,
+                      owner: str | None = None) -> dict:
+    """Журнал квот для карточки админа: текущие бакеты + последние записи.
+
+    Без owner — записи пользователя (свои бакеты agent:/u: и его следы
+    в общих котлах: видно и свои траты, и чужие возвраты). С owner —
+    весь бакет целиком (так видно, КТО выел общий котёл устройства:
+    у чужих трат actor чужой). Только чтение, живые пробы не делает."""
+    if not conn.execute("SELECT id FROM users WHERE id=?", (int(user_id),)).fetchone():
+        raise KeyError("user not found")
+    if _QL is None:
+        return {"ok": True, "user": {"id": int(user_id)}, "buckets": [],
+                "entries": [], "unavailable": True}
+    owners = [f"agent:{int(user_id)}", f"u:{int(user_id)}"]
+    buckets = []
+    try:
+        states = _QL.read_buckets(conn, owners)
+    except Exception:
+        states = {}
+    for own in owners:
+        state = states.get(own)
+        try:
+            if own.startswith("agent:"):
+                lim = int(_AGENT.agent_effective_limit(conn, int(user_id))) if _AGENT else None
+            else:
+                lim = int(ai_effective_limit(conn, int(user_id)))
+        except (sqlite3.Error, TypeError, ValueError, AttributeError):
+            lim = None
+        buckets.append({"owner": own, "product": _QL.product_of(own),
+                        "limit": lim,
+                        "count": state.get("count") if state else None,
+                        "timerMs": state.get("timer_ms") if state else None,
+                        "anchorMs": state.get("anchor_ms") if state else None})
+    try:
+        entries = _QL.read_entries(conn, user_id=int(user_id),
+                                   owner=(owner or None),
+                                   limit=limit, offset=offset)
+    except Exception:
+        entries = []
+    items = []
+    for row in entries:
+        try:
+            moment = int(row.get("created_at_ms") or 0)
+            at = dt.datetime.fromtimestamp(moment / 1000).strftime("%Y-%m-%d %H:%M:%S") if moment else ""
+        except (TypeError, ValueError, OverflowError, OSError):
+            at = ""
+        items.append({"id": row.get("id"), "at": at, "owner": row.get("owner"),
+                      "product": row.get("product"), "kind": row.get("kind"),
+                      "reason": row.get("reason"), "delta": row.get("delta"),
+                      "before": row.get("count_before"),
+                      "after": row.get("count_after"),
+                      "limit": row.get("quota_limit"),
+                      "actor": row.get("actor_user_id")})
+    return {"ok": True, "user": {"id": int(user_id)}, "buckets": buckets,
+            "entries": items}
 
 
 def user_for(conn: sqlite3.Connection, handler: BaseHTTPRequestHandler) -> tuple[int | None, str | None]:
@@ -13225,7 +13434,7 @@ class Handler(BaseHTTPRequestHandler):
                     admin_audit(conn, actor_id, "unblock-user", target_id, "")
                     result = {"ok": True, "wasBlocked": was}
                 elif action == "ailimit":
-                    result = admin_ai_limit_set(conn, target_id, payload)
+                    result = admin_ai_limit_set(conn, target_id, payload, actor=actor_id)
                     agent_note = ""
                     if isinstance(result.get("agent"), dict):
                         ag = result["agent"]
@@ -13246,7 +13455,7 @@ class Handler(BaseHTTPRequestHandler):
                         if not isinstance(period, str):
                             raise ValueError("period должен быть month или year")
                         result = _SUB.admin_grant(conn, target_id, period.strip().lower(),
-                                                  note=payload.get("note", ""))
+                                                  note=payload.get("note", ""), actor=actor_id)
                         admin_audit(conn, actor_id, "subscription-grant", target_id,
                                     f"{period} until {result.get('expiresAt')}"[:200])
                     elif op == "revoke":
@@ -13942,7 +14151,7 @@ class Handler(BaseHTTPRequestHandler):
                     # не вызывалась (детерминированный вердикт), резервировать
                     # было нечего и возвращать тоже.
                     if usage_owners and not usage_spent:
-                        ai_usage_refund(conn, usage_owners)
+                        ai_usage_refund(conn, usage_owners, reason="essay:check_fail")
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass
@@ -14137,7 +14346,7 @@ class Handler(BaseHTTPRequestHandler):
                             owed = 0
                         if owed > 0:
                             try:
-                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net, reason="agent:confirm_fail")
                             except sqlite3.Error:
                                 pass
                             spent["n"] = 0
@@ -14146,7 +14355,7 @@ class Handler(BaseHTTPRequestHandler):
                     # turns). Вход — атомарный резерв первого запроса resume:
                     # без остатка resume не начинаем, действие не применяем.
                     confirm_spent = {"n": 0}
-                    if not _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net):
+                    if not _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm"):
                         _confirm_quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _confirm_cleanup()
                         retry = int(_confirm_quota.get("resetInSec") or _confirm_quota.get("windowSec") or 3600)
@@ -14205,13 +14414,13 @@ class Handler(BaseHTTPRequestHandler):
                                     return _raw_cf(messages, tools, budget)
                                 except Exception:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm_fail")
                                     except sqlite3.Error:
                                         pass
                                     confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
                                     raise
                             try:
-                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                reserved = _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm")
                             except sqlite3.Error:
                                 reserved = False
                             if reserved:
@@ -14221,7 +14430,7 @@ class Handler(BaseHTTPRequestHandler):
                             except Exception:
                                 if reserved:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm_fail")
                                     except sqlite3.Error:
                                         pass
                                     confirm_spent["n"] = max(0, int(confirm_spent.get("n") or 0) - 1)
@@ -14382,7 +14591,7 @@ class Handler(BaseHTTPRequestHandler):
                             owed = 0
                         if owed > 0:
                             try:
-                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
+                                _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net, reason="agent:turn_fail")
                             except sqlite3.Error:
                                 pass
                             turn_spent["n"] = 0
@@ -14516,7 +14725,7 @@ class Handler(BaseHTTPRequestHandler):
                                     return _raw_chat_fn(messages, tools, budget)
                                 except Exception:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:turn_fail")
                                     except sqlite3.Error:
                                         pass
                                     turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
@@ -14532,7 +14741,7 @@ class Handler(BaseHTTPRequestHandler):
                             except Exception:
                                 if reserved:
                                     try:
-                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                        _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:turn_fail")
                                     except sqlite3.Error:
                                         pass
                                     turn_spent["n"] = max(0, int(turn_spent.get("n") or 0) - 1)
@@ -14679,9 +14888,9 @@ class Handler(BaseHTTPRequestHandler):
                             # сюда попадаем только при неуспехе — возвращаем всё списанное ходом.
                             try:
                                 if owed > 0:
-                                    _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net)
+                                    _AGENT.agent_quota_refund_many(conn, int(user_id), owed, ag_fp_key, ag_fp_net, reason="agent:turn_fail")
                                 elif usage_spent:
-                                    _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net)
+                                    _AGENT.agent_quota_refund(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:turn_fail")
                             except sqlite3.Error:
                                 pass
                             turn_spent["n"] = 0
@@ -14854,6 +15063,30 @@ class Handler(BaseHTTPRequestHandler):
                     if detail is None:
                         self.send_json({"error": "Пользователь не найден"}, 404); return
                     self.send_json({"user": detail}); return
+                if len(parts) == 6 and parts[3] == "users" and parts[5] == "quota-log":
+                    # Журнал квот: бакеты + последние записи (только чтение).
+                    target_id = resolve_admin_target(conn, parts[4])
+                    if target_id is None:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    from urllib.parse import parse_qs
+                    args = parse_qs(parsed.query)
+                    try:
+                        raw_limit = args.get("limit", [None])[0]
+                        raw_offset = args.get("offset", [None])[0]
+                        log_limit = 100 if raw_limit is None else int(str(raw_limit).strip())
+                        log_offset = 0 if raw_offset is None else int(str(raw_offset).strip())
+                    except (TypeError, ValueError, AttributeError):
+                        self.send_json({"error": "Некорректные параметры пагинации"}, 400); return
+                    if not 1 <= log_limit <= 500 or not 0 <= log_offset <= 1_000_000:
+                        self.send_json({"error": "Некорректные параметры пагинации"}, 400); return
+                    raw_owner = args.get("owner", [None])[0]
+                    want_owner = str(raw_owner).strip()[:128] if raw_owner else None
+                    try:
+                        payload = admin_quota_log(conn, target_id, log_limit,
+                                                  log_offset, want_owner)
+                    except KeyError:
+                        self.send_json({"error": "Пользователь не найден"}, 404); return
+                    self.send_json(payload); return
                 self.send_json({"error": "Not found"}, 404); return
             except sqlite3.Error as exc:
                 rid = log_request_error("admin-get", exc)

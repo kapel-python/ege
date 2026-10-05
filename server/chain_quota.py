@@ -77,10 +77,17 @@ def ensure_anchor_col(conn: sqlite3.Connection) -> None:
 
 
 def catch_up(conn: sqlite3.Connection, owner: str, now_ms: int,
-             limit: int, window_ms: int) -> None:
+             limit: int, window_ms: int) -> dict | None:
     """Ленивая зарядка третями: за каждый созревший 8-часовой тик от якоря —
     треть запаса (см. cum). Идемпотентно, без коммита (коммит за вызывателем,
-    чья транзакция уже открыта первым INSERT)."""
+    чья транзакция уже открыта первым INSERT).
+
+    Возвращает описание применённого изменения (для журнала
+    quota_ledger.log_catch_up) либо None, если менять было нечего:
+    {"applied": "accrue"|"cap"|"chain_start", "count_before":..,
+     "count_after":.., "inc":.., "ticks_total":.., "ticks_done":..,
+     "full": bool}. Старые вызыватели возврат игнорируют — поведение
+    зарядки от этого не меняется."""
     ensure_anchor_col(conn)
     try:
         row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage"
@@ -103,8 +110,10 @@ def catch_up(conn: sqlite3.Connection, owner: str, now_ms: int,
                 conn.execute("UPDATE ai_usage SET timer_ms=?, anchor_ms=? WHERE owner=?",
                              (now_ms, now_ms, owner))
             except sqlite3.Error:
-                pass
-        return
+                return None
+            return {"applied": "chain_start", "count_before": count,
+                    "count_after": count, "inc": 0, "limit": limit}
+        return None
     if anchor is None:
         # Цепочка от старой версии (был только timer_ms): якорем считаем его.
         try:
@@ -124,10 +133,11 @@ def catch_up(conn: sqlite3.Connection, owner: str, now_ms: int,
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
                          " WHERE owner=?", (limit, owner))
         except sqlite3.Error:
-            pass
-        return
+            return None
+        return {"applied": "cap", "count_before": count,
+                "count_after": limit, "inc": limit - count, "limit": limit}
     if now_ms < anchor or window_ms <= 0:
-        return
+        return None
     if timer < anchor:
         timer = anchor
     total = (now_ms - anchor) // window_ms
@@ -140,22 +150,27 @@ def catch_up(conn: sqlite3.Connection, owner: str, now_ms: int,
                              (timer, owner))
             except sqlite3.Error:
                 pass
-        return
+        return None
     inc = cum(total, limit) - cum(done, limit)
     if inc <= 0 and count < limit:
         inc = 1  # лимит 1: cum(1) = 0, но стоять тик без жетона нельзя
     if inc <= 0:
-        return
+        return None
     new_count = min(limit, count + inc)
+    full = new_count >= limit
     try:
-        if new_count >= limit:
+        if full:
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
                          " WHERE owner=?", (new_count, owner))
         else:
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=? WHERE owner=?",
                          (new_count, anchor + total * window_ms, owner))
     except sqlite3.Error:
-        pass
+        return None
+    return {"applied": "accrue", "count_before": count,
+            "count_after": new_count, "inc": new_count - count,
+            "ticks_total": total, "ticks_done": done,
+            "limit": limit, "full": full}
 
 
 def count_at(state, t_ms: int, now_ms: int, limit: int, window_ms: int) -> int:

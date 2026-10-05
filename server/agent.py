@@ -773,6 +773,42 @@ def _load_chain_quota_module():
 
 _CHAIN = _load_chain_quota_module()
 
+
+def _load_quota_log_module():
+    """Журнал начислений (server/quota_ledger.py): кто/когда/почему менял
+    бакеты квот. Строгая загрузка не нужна: без журнала квота работает
+    как раньше, просто строк в quota_ledger не будет."""
+    import importlib.util
+    from pathlib import Path as _Path
+
+    ledger_path = _Path(__file__).resolve().parent / "quota_ledger.py"
+    try:
+        spec = importlib.util.spec_from_file_location("ege_agent_quota_ledger", ledger_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
+_QL = _load_quota_log_module()
+
+
+def _ledger_catch_up(conn: sqlite3.Connection, info, *, owner: str,
+                     limit: int, reason: str, actor: int | None,
+                     now_ms: int | None = None) -> None:
+    """Залогировать итог зарядки бакета. Молча пропускает пустое и
+    отсутствие модуля журнала: квота первична, журнал вторичен."""
+    if _QL is None or not isinstance(info, dict) or not info.get("applied"):
+        return
+    try:
+        _QL.log_catch_up(conn, info, owner=owner, limit=limit,
+                         reason=reason, actor=actor, now_ms=now_ms)
+    except Exception:
+        pass
+
 # Исторические имена — алиасы единой реализации (см. server/chain_quota.py).
 CHAIN_FULL_TICKS = _CHAIN.FULL_TICKS
 _chain_cum = _CHAIN.cum
@@ -860,9 +896,18 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     check = _agent_check_owners(conn, user_id, fp_key, fp_net, now_ms)
     device_owners = check[1:]
     if not device_owners:
-        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
-                     (owner, limit))
-        _quota_catch_up(conn, owner, now_ms, limit, window_ms)
+        cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
+                           (owner, limit))
+        if cur.rowcount and _QL is not None:
+            try:
+                _QL.log_event(conn, owner=owner, kind="init", reason="agent:status",
+                              delta=limit, count_before=None, count_after=limit,
+                              limit=limit, actor=user_id, now_ms=now_ms)
+            except Exception:
+                pass
+        _ledger_catch_up(conn, _quota_catch_up(conn, owner, now_ms, limit, window_ms),
+                         owner=owner, limit=limit, reason="agent:status",
+                         actor=user_id, now_ms=now_ms)
         row = conn.execute("SELECT count, timer_ms FROM ai_usage WHERE owner=?", (owner,)).fetchone()
         conn.commit()
         count = int(row["count"]) if row else limit
@@ -880,9 +925,19 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     states: list = []
     for own in owners:
         own_limit = _agent_device_limit_for_owner(conn, own)
-        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
-                     (own, own_limit))
-        _quota_catch_up(conn, own, now_ms, own_limit, window_ms)
+        cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
+                           (own, own_limit))
+        if cur.rowcount and _QL is not None:
+            try:
+                _QL.log_event(conn, owner=own, kind="init", reason="agent:status",
+                              delta=own_limit, count_before=None,
+                              count_after=own_limit, limit=own_limit,
+                              actor=user_id, now_ms=now_ms)
+            except Exception:
+                pass
+        _ledger_catch_up(conn, _quota_catch_up(conn, own, now_ms, own_limit, window_ms),
+                         owner=own, limit=own_limit, reason="agent:status",
+                         actor=user_id, now_ms=now_ms)
         row = conn.execute("SELECT count, timer_ms, anchor_ms FROM ai_usage WHERE owner=?",
                            (own,)).fetchone()
         if row:
@@ -924,7 +979,9 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
 
 
 def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
-                        fp_key: str | None = None, fp_net: str | None = None) -> bool:
+                        fp_key: str | None = None, fp_net: str | None = None,
+                        *, reason: str = "agent:turn",
+                        actor: int | None = None) -> bool:
     """Списать один запрос к ИИ. True — списано, False — квота пуста.
 
     Трата греет и котлы устройства (`ak:/an:`) ВСЕГДА, когда отпечатки
@@ -946,11 +1003,49 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
     must_set = set(check)
     gate = len(check) > 1
     device_owners = _agent_device_owners(fp_key, fp_net) if not exempt else []
+    try:
+        spent_by = int(user_id) if actor is None else int(actor)
+    except (TypeError, ValueError):
+        spent_by = int(user_id)
     for own in [owner] + device_owners:
         own_limit = _agent_device_limit_for_owner(conn, own)
-        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
-                     (own, own_limit))
-        _quota_catch_up(conn, own, now_ms, own_limit, window_ms)
+        cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
+                           (own, own_limit))
+        if cur.rowcount and _QL is not None:
+            try:
+                _QL.log_event(conn, owner=own, kind="init", reason=reason,
+                              delta=own_limit, count_before=None,
+                              count_after=own_limit, limit=own_limit,
+                              actor=spent_by, now_ms=now_ms)
+            except Exception:
+                pass
+        _ledger_catch_up(conn, _quota_catch_up(conn, own, now_ms, own_limit, window_ms),
+                         owner=own, limit=own_limit, reason=reason,
+                         actor=spent_by, now_ms=now_ms)
+    # Остаток до списания — для журнала трат (один SELECT на всех,
+    # бакетов не больше трёх).
+    before: dict = {}
+    try:
+        q = ",".join("?" * (len(device_owners) + 1))
+        for brow in conn.execute(f"SELECT owner, count FROM ai_usage WHERE owner IN ({q})",
+                                 tuple([owner] + device_owners)):
+            try:
+                before[str(brow["owner"])] = int(brow["count"])
+            except (TypeError, ValueError, KeyError, IndexError):
+                pass
+    except sqlite3.Error:
+        pass
+    def _log_spend(own: str, own_limit: int) -> None:
+        if _QL is None:
+            return
+        try:
+            was = before.get(own)
+            _QL.log_event(conn, owner=own, kind="spend", reason=reason,
+                          delta=-1, count_before=was,
+                          count_after=(was - 1 if was is not None else None),
+                          limit=own_limit, actor=spent_by, now_ms=now_ms)
+        except Exception:
+            pass
     cur = conn.execute("""
         UPDATE ai_usage SET count = count - 1,
           timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END,
@@ -961,6 +1056,7 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
     if cur.rowcount == 0:
         conn.rollback()
         return False
+    _log_spend(owner, limit)
     if gate:
         for own in device_owners:
             cur = conn.execute("UPDATE ai_usage SET count = count - 1,"
@@ -972,24 +1068,29 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
             if cur.rowcount == 0 and own in must_set:
                 conn.rollback()
                 return False
+            if cur.rowcount:
+                _log_spend(own, _agent_device_limit_for_owner(conn, own))
     else:
         # Plus/грант (читают только своё, см. _agent_check_owners): котёл
         # греем в меру (пустой не трогаем и не блокируем им свой резерв) —
         # чтобы возврат ниже не рисовал жетон из воздуха, пустой котёл
         # возврату не подлежит (см. refund).
         for own in device_owners:
-            conn.execute("UPDATE ai_usage SET count = count - 1,"
-                         " timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END,"
-                         " anchor_ms = CASE WHEN timer_ms IS NULL THEN ?"
-                         " WHEN anchor_ms IS NULL THEN timer_ms ELSE anchor_ms END"
-                         " WHERE owner = ? AND count > 0",
-                         (now_ms, now_ms, own))
+            cur = conn.execute("UPDATE ai_usage SET count = count - 1,"
+                               " timer_ms = CASE WHEN timer_ms IS NULL THEN ? ELSE timer_ms END,"
+                               " anchor_ms = CASE WHEN timer_ms IS NULL THEN ?"
+                               " WHEN anchor_ms IS NULL THEN timer_ms ELSE anchor_ms END"
+                               " WHERE owner = ? AND count > 0",
+                               (now_ms, now_ms, own))
+            if cur.rowcount:
+                _log_spend(own, _agent_device_limit_for_owner(conn, own))
     conn.commit()
     return True
 
 
 def agent_quota_refund_many(conn: sqlite3.Connection, user_id: int, n: int,
-                            fp_key: str | None = None, fp_net: str | None = None) -> None:
+                            fp_key: str | None = None, fp_net: str | None = None,
+                            *, reason: str = "agent:refund") -> None:
     """Вернуть n запросов к ИИ (для отката целого хода при неуспехе).
 
     По одному за раз через agent_quota_refund: таймер полного кармана гасится
@@ -1002,11 +1103,12 @@ def agent_quota_refund_many(conn: sqlite3.Connection, user_id: int, n: int,
     except (TypeError, ValueError):
         return
     for _ in range(min(count, MAX_TOOL_STEPS + MAX_TOOL_RETRIES + 4)):
-        agent_quota_refund(conn, int(user_id), fp_key, fp_net)
+        agent_quota_refund(conn, int(user_id), fp_key, fp_net, reason=reason)
 
 
 def agent_quota_refund(conn: sqlite3.Connection, user_id: int,
-                       fp_key: str | None = None, fp_net: str | None = None) -> None:
+                       fp_key: str | None = None, fp_net: str | None = None,
+                       *, reason: str = "agent:refund") -> None:
     # Возврат зеркален резерву, но намеренно проще него: резерв давнего
     # аккаунта пустой котёл не трогает (WHERE count>0), а возврат каплет
     # +1 с MIN-капом. Разница — at most один лишний жетон котла за каждый
@@ -1018,6 +1120,23 @@ def agent_quota_refund(conn: sqlite3.Connection, user_id: int,
     owner = _agent_owner(user_id)
     owners = [owner] if _agent_device_exempt(conn, user_id) else [owner] + _agent_device_owners(fp_key, fp_net)
     try:
+        spent_by = int(user_id)
+    except (TypeError, ValueError):
+        spent_by = 0
+    # Остаток до возврата — для журнала (один SELECT на всех).
+    before: dict = {}
+    if _QL is not None and owners:
+        try:
+            q = ",".join("?" * len(owners))
+            for brow in conn.execute(f"SELECT owner, count FROM ai_usage WHERE owner IN ({q})",
+                                     tuple(owners)):
+                try:
+                    before[str(brow["owner"])] = int(brow["count"])
+                except (TypeError, ValueError, KeyError, IndexError):
+                    pass
+        except sqlite3.Error:
+            pass
+    try:
         for own in owners:
             own_limit = _agent_device_limit_for_owner(conn, own)
             conn.execute("""
@@ -1025,6 +1144,16 @@ def agent_quota_refund(conn: sqlite3.Connection, user_id: int,
                   timer_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE timer_ms END,
                   anchor_ms = CASE WHEN count + 1 >= ? THEN NULL ELSE anchor_ms END
                 WHERE owner = ?""", (own_limit, own_limit, own_limit, own))
+            if _QL is not None:
+                try:
+                    was = before.get(own)
+                    now_count = min(own_limit, was + 1) if was is not None else None
+                    _QL.log_event(conn, owner=own, kind="refund", reason=reason,
+                                  delta=1, count_before=was,
+                                  count_after=now_count, limit=own_limit,
+                                  actor=spent_by, now_ms=int(time.time() * 1000))
+                except Exception:
+                    pass
         conn.commit()
     except sqlite3.Error:
         try:
@@ -1052,7 +1181,8 @@ def admin_agent_quota_status(conn: sqlite3.Connection, user_id: int) -> dict:
     }
 
 
-def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict) -> dict:
+def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict,
+                          *, actor: int | None = None) -> dict:
     """Ручное управление квотой ходов агента из админки.
 
     payload: {"limit": int|null, "remaining": int|null, "refill": bool}.
@@ -1101,9 +1231,17 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
                     (user_id, new_limit, now_ms))
         eff = agent_effective_limit(conn, user_id)
         owner = _agent_owner(user_id)
+        try:
+            before_row = conn.execute("SELECT count FROM ai_usage WHERE owner=?",
+                                      (owner,)).fetchone()
+            count_before = int(before_row["count"]) if before_row else None
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            count_before = None
         conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
                      " VALUES (?,?,NULL)", (owner, eff))
-        _quota_catch_up(conn, owner, now_ms, eff, window_ms)
+        _ledger_catch_up(conn, _quota_catch_up(conn, owner, now_ms, eff, window_ms),
+                         owner=owner, limit=eff, reason="admin:agent_quota",
+                         actor=actor, now_ms=now_ms)
         if refill:
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL WHERE owner=?",
                          (eff, owner))
@@ -1146,6 +1284,26 @@ def admin_agent_quota_set(conn: sqlite3.Connection, user_id: int, payload: dict)
                 anchor = int(anchor) if anchor is not None else timer
             conn.execute("UPDATE ai_usage SET count=?, timer_ms=?, anchor_ms=? WHERE owner=?",
                          (count, timer, anchor, owner))
+        if _QL is not None:
+            try:
+                after_row = conn.execute("SELECT count FROM ai_usage WHERE owner=?",
+                                         (owner,)).fetchone()
+                count_after = int(after_row["count"]) if after_row else None
+                _QL.log_event(conn, owner=owner, kind="admin",
+                              reason="admin:agent_quota",
+                              delta=((count_after - count_before)
+                                     if count_after is not None
+                                     and count_before is not None else 0),
+                              count_before=count_before,
+                              count_after=count_after,
+                              limit=agent_effective_limit(conn, user_id),
+                              actor=actor,
+                              meta={"payload": {k: payload.get(k) for k in
+                                                ("limit", "remaining", "refill")
+                                                if k in payload}},
+                              now_ms=now_ms)
+            except Exception:
+                pass
         if own_txn:
             conn.commit()
     except Exception:

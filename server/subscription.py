@@ -48,6 +48,22 @@ import os
 import secrets
 import sqlite3
 import time
+from pathlib import Path as _Path
+
+try:
+    import importlib.util as _ilu
+
+    _ledger_spec = _ilu.spec_from_file_location(
+        "ege_sub_quota_ledger", _Path(__file__).resolve().parent / "quota_ledger.py")
+    if _ledger_spec is not None and _ledger_spec.loader is not None:
+        _ledger_mod = _ilu.module_from_spec(_ledger_spec)
+        _ledger_spec.loader.exec_module(_ledger_mod)
+    else:
+        _ledger_mod = None
+except Exception:
+    _ledger_mod = None
+
+_QL = _ledger_mod
 
 PLAN_PLUS = "plus"
 
@@ -440,25 +456,58 @@ def _sync_mirror(conn: sqlite3.Connection, user_id: int, value: str | None) -> N
 
 
 def _top_up_buckets(conn: sqlite3.Connection, user_id: int, essay_limit: int,
-                    agent_limit: int, now_ms: int) -> None:
+                    agent_limit: int, now_ms: int,
+                    *, reason: str = "subscription:topup",
+                    actor: int | None = None) -> None:
     """Долить карманы до полного при активации: «лимиты уже увеличены».
     Трогаем только аккаунтные бакеты (u:/agent:); device-бакеты антиабуза
     не трогаем сознательно — иначе одна покупка отмывала бы ферму.
     Только вверх: грант админа выше Plus покупка не срезает (лимит считается
-    как max, остаток обязан ему соответствовать)."""
+    как max, остаток обязан ему соответствовать).
+
+    Каждую доливку пишем в журнал квот (kind topup): кто, какой бакет,
+    было → стало. Без журнала доливка была невидимой прибавкой."""
     ensure_ai_usage_table(conn)
+    try:
+        log_actor = int(actor) if actor is not None else int(user_id)
+    except (TypeError, ValueError):
+        log_actor = int(user_id)
     for owner, level in ((f"u:{int(user_id)}", int(essay_limit)),
                          (f"agent:{int(user_id)}", int(agent_limit))):
-        conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
-                     " VALUES (?,?,NULL)", (owner, level))
-        conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
-                     " WHERE owner=? AND count<?",
-                     (level, owner, level))
+        try:
+            row = conn.execute("SELECT count FROM ai_usage WHERE owner=?",
+                               (owner,)).fetchone()
+            was = int(row["count"]) if row else None
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            was = None
+        cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms)"
+                           " VALUES (?,?,NULL)", (owner, level))
+        if cur.rowcount and _QL is not None:
+            try:
+                _QL.log_event(conn, owner=owner, kind="init", reason=reason,
+                              delta=level, count_before=None,
+                              count_after=level, limit=level,
+                              actor=log_actor, now_ms=now_ms)
+            except Exception:
+                pass
+        cur = conn.execute("UPDATE ai_usage SET count=?, timer_ms=NULL, anchor_ms=NULL"
+                           " WHERE owner=? AND count<?",
+                           (level, owner, level))
+        if cur.rowcount and _QL is not None and was is not None:
+            try:
+                _QL.log_event(conn, owner=owner, kind="topup", reason=reason,
+                              delta=level - was, count_before=was,
+                              count_after=level, limit=level,
+                              actor=log_actor, now_ms=now_ms)
+            except Exception:
+                pass
 
 
 def _activate_row(conn: sqlite3.Connection, user_id: int, period: str,
                   provider: str, now_ms: int, essay_limit: int,
-                  agent_limit: int, external_id: str | None = None) -> dict:
+                  agent_limit: int, external_id: str | None = None,
+                  *, reason: str = "subscription:purchase",
+                  actor: int | None = None) -> dict:
     """Создать/продлить строку подписки. Продления складываются:
     expires растёт от max(now, expires), а не перезаписывается."""
     ensure_subscription_schema(conn)
@@ -488,7 +537,8 @@ def _activate_row(conn: sqlite3.Connection, user_id: int, period: str,
                       expires, provider, external_id, now_ms, now_ms))
         sub_id = int(cur.lastrowid)
     _sync_mirror(conn, user_id, PLAN_PLUS)
-    _top_up_buckets(conn, user_id, essay_limit, agent_limit, now_ms)
+    _top_up_buckets(conn, user_id, essay_limit, agent_limit, now_ms,
+                    reason=reason, actor=actor)
     return {"subscriptionId": sub_id, "expiresAt": expires, "startedAt": started}
 
 
@@ -677,7 +727,8 @@ def webhook_payment(conn: sqlite3.Connection, provider_payment_id: str,
                 conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=? WHERE id=?",
                              (PAY_SUCCEEDED, now_ms, int(pay["id"])))
                 act = _activate_row(conn, int(pay["user_id"]), period, str(pay.get("provider")),
-                                    now_ms, essay_limit, agent_limit)
+                                    now_ms, essay_limit, agent_limit,
+                                    reason="subscription:webhook")
                 conn.execute("UPDATE subscription_payments SET subscription_id=? WHERE id=?",
                              (act["subscriptionId"], int(pay["id"])))
                 _end(conn, own, True)
@@ -731,7 +782,8 @@ def webhook_recurring(conn: sqlite3.Connection, user_id: int, provider_payment_i
         if pid is None:
             raise ValueError("не удалось записать платёж")
         act = _activate_row(conn, int(user_id), period, provider, now_ms,
-                            essay_limit, agent_limit)
+                            essay_limit, agent_limit,
+                            reason="subscription:recurring")
         conn.execute("UPDATE subscription_payments SET subscription_id=? WHERE id=?",
                      (act["subscriptionId"], pid))
         _end(conn, own, True)
@@ -786,7 +838,7 @@ def resume_subscription(conn: sqlite3.Connection, user_id: int,
 def admin_grant(conn: sqlite3.Connection, user_id: int, period: str,
                 essay_limit: int = PLUS_ESSAY_LIMIT,
                 agent_limit: int = PLUS_AGENT_LIMIT,
-                note: str = "") -> dict:
+                note: str = "", actor: int | None = None) -> dict:
     """Ручная выдача Plus из админки (оплата 0₽ provider=manual — для аудита
     в истории видно, что это грант, а не деньги)."""
     ensure_subscription_schema(conn)
@@ -798,7 +850,8 @@ def admin_grant(conn: sqlite3.Connection, user_id: int, period: str,
     own = _begin(conn)
     try:
         act = _activate_row(conn, int(user_id), period, PROVIDER_MANUAL,
-                            now_ms, essay_limit, agent_limit)
+                            now_ms, essay_limit, agent_limit,
+                            reason="subscription:grant", actor=actor)
         for _ in range(20):
             try:
                 conn.execute("""INSERT INTO subscription_payments
