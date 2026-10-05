@@ -253,7 +253,7 @@ function extractFn(src, name) {
 let P = null;
 try {
   const names = ["studyPlanDaysWord", "studyPlanTopicsWord", "studyPlanFmtDate",
-    "studyPlanCloseHint", "studyPlanPick", "planRowHTML", "planCardHTML"];
+    "studyPlanCloseHint", "studyPlanPick", "planPeriodLocked", "planRowHTML", "planCardHTML"];
   const bundle = names.map((n) => extractFn(appJs, n)).join("\n");
   new vm.Script(bundle, { filename: "study-plan-pure.js" });
   const sandbox = {
@@ -262,7 +262,7 @@ try {
   };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planCardHTML };", sandbox);
+  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planPeriodLocked, planCardHTML };", sandbox);
   P = sandbox.__P;
   check("чистые функции профиля извлекаются и компилируются", true);
 } catch (e) {
@@ -325,6 +325,12 @@ if (P) {
     html.includes("Дальше в этом периоде") && html.includes("Предел")
     && /<summary>Пройденные \(1\)<\/summary>/.test(html) && html.includes("Интеграл"));
   check("card: «Весь план» на месте", html.includes("openPlanFullDialog()"));
+  check("lock: серверный флаг бьёт индекс",
+    P.planPeriodLocked({ currentIndex: 5 }, { index: 0, locked: true }) === true
+    && P.planPeriodLocked({ currentIndex: 0 }, { index: 3, locked: false }) === false);
+  check("lock: без флага — старый фолбэк по индексу",
+    P.planPeriodLocked({ currentIndex: 0 }, { index: 1 }) === true
+    && P.planPeriodLocked({ currentIndex: 1 }, { index: 1 }) === false);
   check("card: XSS в названии экранирован",
     P.planCardHTML({ ok: true, active: sample({ title: "<script>alert(1)</script>" }), lastDone: null })
       .includes("&lt;script&gt;"));

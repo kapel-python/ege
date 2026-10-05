@@ -8419,6 +8419,13 @@ function planTopicClose(skillId) {
   });
 }
 
+/* Замок периода: сервер присылает locked (срок не наступил и предыдущие
+   не закрыты); без поля — старый фолбэк по индексу. */
+function planPeriodLocked(active, p) {
+  if (p && typeof p.locked === "boolean") return p.locked;
+  return !!(active && active.currentIndex != null && p && p.index > active.currentIndex);
+}
+
 /* «Весь план»: все периоды/темы/статусы + подсказка, почему сейчас эта тема. */
 function openPlanFullDialog() {
   const st = planCache.state;
@@ -8430,7 +8437,7 @@ function openPlanFullDialog() {
   const body = periods.map((p) => {
     const label = String((p && p.label) || "Период");
     const pdays = Math.max(0, Math.floor(Number((p && p.days) || 0)));
-    const future = active.currentIndex != null && p && p.index > active.currentIndex;
+    const future = planPeriodLocked(active, p);
     const lis = ((p && p.topics) || []).map((t) => {
       const name = String((t && t.name) || (t && t.skillId) || "Тема");
       const mastery = Math.max(0, Math.floor(Number((t && t.mastery) || 0)));

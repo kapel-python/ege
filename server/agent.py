@@ -2607,10 +2607,20 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
             continue
         topics_in = p.get("topics") if isinstance(p.get("topics"), list) else []
         p_start = cursor
-        cursor += pdays * day_ms
-        allot = (pdays * day_ms / len(topics_in)) if topics_in else pdays * day_ms
+        p_end = cursor + pdays * day_ms
+        cursor = p_end
+        # Окно темы — ВЕСЬ период, а не его доля: делить неделю пополам
+        # давало дробные дедлайны («откроется 9 октября» при старте 5-го),
+        # которые противоречат модели «неделя = 7 дней». Темы периода идут
+        # параллельно; следующий период запрещён РАНЬШЕ своего срока.
+        # Разблокировка периода — тоже ИЛИ: предыдущие закрыты ИЛИ его
+        # срок уже наступил (медленного не держим взаперти).
+        prev_done = all(
+            all(t.get("state") == "done" for t in pp.get("topics", []))
+            for pp in out_periods)
+        unlocked = bool(prev_done or moment >= p_start)
         out_topics = []
-        for tpos, t in enumerate(topics_in):
+        for t in topics_in:
             if not isinstance(t, dict):
                 continue
             sid = str(t.get("skillId") or t.get("skill_id") or "").strip()
@@ -2625,7 +2635,7 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
             except Exception:
                 mastery = 0
             mastered = mastery >= TOPIC_MASTERED_AT
-            available_at = int(p_start + (tpos + 1) * allot)
+            available_at = int(p_end)
             time_ok = moment >= available_at
             out_topics.append({
                 "skillId": sid,
@@ -2639,12 +2649,14 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
                 "closeReasons": [r for r in (["time"] if time_ok else [])
                                  + (["mastered"] if mastered else [])],
                 "availableAt": available_at,
-                "allotDays": max(1, int(round(allot / day_ms))),
+                "allotDays": pdays,
             })
         if current_idx is None and any(t["state"] == "open" for t in out_topics):
             current_idx = pidx
         out_periods.append({"index": pidx, "label": str(p.get("label") or f"Период {pidx + 1}")[:64],
-                            "days": pdays, "topics": out_topics})
+                            "days": pdays, "startsAt": int(p_start),
+                            "locked": bool(not unlocked),
+                            "topics": out_topics})
     try:
         title = str(plan["title"])
         days_total = int(plan["days_total"])

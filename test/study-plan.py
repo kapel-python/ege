@@ -155,6 +155,36 @@ except agent.PlanStateError as exc:
     check("foreign skill rejects", exc.code == "NOT_IN_PLAN", exc.code)
 
 check("threshold is 75", agent.TOPIC_MASTERED_AT == 75)
+# --- 6. Окно темы — конец периода; замок периода — время ИЛИ завершение ---
+prop6 = agent.propose_action(conn, 1, "profile_math", "plan_apply",
+                             {"days": 14, "periods": [{"days": 7, "skillIds": ["sk_a"]},
+                                                       {"days": 7, "skillIds": ["sk_b"]}]})
+agent.apply_action(conn, 1, "profile_math", "plan_apply", prop6)
+st6 = agent.study_plan_state(conn, 1, "profile_math")
+pa, pb = st6["active"]["periods"]
+check("periods share one window each",
+      pa["topics"][0]["availableAt"] == st6["active"]["startsAt"] + 7 * 86400000
+      and pb["topics"][0]["availableAt"] == st6["active"]["startsAt"] + 14 * 86400000)
+check("future period locked, current open",
+      pa["locked"] is False and pb["locked"] is True)
+for i in range(12):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(1,'profile_math',?,?,1,0,?)", (f"mz{i}", "sk_a", now - i * 60000))
+conn.execute("CREATE TABLE IF NOT EXISTS completed_lessons(user_id INT, subject TEXT, lesson_id TEXT)")
+conn.execute("INSERT INTO completed_lessons VALUES(1,'profile_math','les_a')")
+conn.commit()
+agent.study_plan_close_topic(conn, 1, "profile_math", "sk_a")
+st6c = agent.study_plan_state(conn, 1, "profile_math")
+check("completion unlocks next period early",
+      st6c["active"]["periods"][1]["locked"] is False)
+agent.apply_action(conn, 1, "profile_math", "plan_apply", prop6)
+conn.execute("UPDATE study_plans SET starts_at_ms=? WHERE status='active'", (now - 10 * 86400000,))
+conn.commit()
+st6b = agent.study_plan_state(conn, 1, "profile_math")
+pa6, pb6 = st6b["active"]["periods"]
+check("time unlocks future period",
+      pb6["locked"] is False and pa6["topics"][0]["closeable"] is True)
+
 conn.close()
 os.unlink(path)
 print(f"\n{checks - failures}/{checks} ok")
