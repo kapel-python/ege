@@ -5872,7 +5872,32 @@ function renderSessionHintControl() {
   const control = document.getElementById("hintControl");
   if (!control) return;
   const help = sessionAvailableHelp();
-  control.innerHTML = !help ? "" : `<button class="btn btn--ghost btn--sm" id="hintBtn" onclick="sessionHint()">${icon("bulb")} ${help.type === "solution" ? "Показать решение" : `Подсказка ${help.level}`}</button>`;
+  control.innerHTML = !help ? "" : `<button class="btn btn--ghost btn--sm" id="hintBtn" onclick="askSessionHint()">${icon("bulb")} ${help.type === "solution" ? "Показать решение" : `Подсказка ${help.level}`}</button>`;
+}
+
+/* Каждая подсказка — только после подтверждения (как «Показать решение»
+   ниже): цена подсказки — срезанная награда и ослабленное свидетельство
+   в освоении темы, и это решение должно быть явным, а не случайным тапом.
+   Сам sessionHint остаётся прямым действием (его дёргает подтверждение). */
+function askSessionHint() {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  const help = sessionAvailableHelp();
+  if (!help || help.type !== "hint") {
+    if (help && help.type === "solution") return askSessionShowAnswer();
+    return;
+  }
+  const cut = help.level <= 1 ? "×0.6" : "×0.3";
+  openConfirmDialog({
+    eyebrow: `Подсказка ${help.level}`,
+    title: `Открыть подсказку ${help.level}?`,
+    text: `Подсказка ${help.level} из 3. Бонус за верный ответ станет меньше (${cut}), а в освоении темы попытка засчитается слабее.`,
+    iconName: "bulb",
+    cancelText: "Подумаю ещё",
+    confirmText: "Открыть",
+    primary: true,
+    onConfirm: () => sessionHint(),
+  });
 }
 
 function sessionHint() {

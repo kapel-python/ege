@@ -1779,6 +1779,15 @@ const FORECAST_DECAY_DAYS = 45;
 /* Полное доверие практике — от 12 свежих попыток; дальше насыщение:
    10 лёгких подряд уже не дают «мастера», нужен объём посвежее. */
 const FORECAST_FULL_VOLUME = 12;
+/* Ошибки забываются быстрее знаний: неверная попытка затухает за 14 дней
+   (полураспад ~10), верная — за 45. Свежие данные от асимметрии не меняются,
+   старые ошибки перестают душить точность через пару недель, а не полтора
+   месяца. */
+const FORECAST_FORGIVE_DAYS = 14;
+/* Вес попытки с подсказкой — тем же коэффициентом, что режет награду
+   в attemptXp: подсказка — свидетельство слабее (0.6), разбор — ещё слабее
+   (0.3). Индекс — уровень подсказки 0–3 (3 = показан ответ). */
+const FORECAST_HINT_WEIGHTS = [1, 0.6, 0.3, 0.3];
 /* Диагностический ответ — холодный экзаменационный образец: без подсказок,
    тренировочного контекста и повторов. Один верный диагностический ответ
    несёт больше свидетельства, чем рутинная попытка, поэтому в объёме прогноза
@@ -1872,10 +1881,23 @@ function forecastSkillMastery(skillId, now) {
     if (!a || dataIdValue(a.skill) !== dataIdValue(skillId)) continue;
     seen = true;
     const ageDays = Math.max(0, (ts - (Number(a.ts) || 0)) / 86400000);
-    const w = Math.exp(-ageDays / FORECAST_DECAY_DAYS);
+    // Прощение: ошибки забываются быстрее знаний (полураспад ~10 дней
+    // против ~31): исправившийся ученик не тащит старую ошибку полтора
+    // месяца. Свежие данные от этого не меняются вообще.
+    const w = Math.exp(-ageDays / (a.correct ? FORECAST_DECAY_DAYS : FORECAST_FORGIVE_DAYS));
     const dw = diagKeys.has(`${a.taskId}|${Number(a.ts) || 0}`) ? FORECAST_DIAGNOSTIC_WEIGHT : 1;
-    vol += dw * w;
-    if (a.correct) good += dw * w;
+    // Подсказка: свидетельство слабее — тем же коэффициентом, что режет
+    // награду в attemptXp (0.6/0.3). Сложность: звёзды задания напрямую.
+    const hw = Array.isArray(FORECAST_HINT_WEIGHTS)
+      ? (FORECAST_HINT_WEIGHTS[Math.max(0, Math.min(3, Number(a.hintLevel) || 0))] ?? 1) : 1;
+    let diff = 1;
+    try {
+      const t = (typeof DataAPI !== "undefined" && DataAPI.task) ? DataAPI.task(a.taskId) : null;
+      diff = Math.max(1, Math.min(5, Number(t && t.diff) || 1));
+    } catch (_) { diff = 1; }
+    const weight = dw * hw * diff * w;
+    vol += weight;
+    if (a.correct) good += weight;
   }
   let accuracy, volume;
   if (seen) {

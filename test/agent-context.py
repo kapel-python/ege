@@ -109,6 +109,44 @@ check("diagnostic counts double",
 check("90-day-old attempt decayed",
       agent._skill_mastery(conn, 2, "profile_math", "sC") == 1,
       str(agent._skill_mastery(conn, 2, "profile_math", "sC")))
+conn.execute("INSERT INTO skills VALUES('sH','Подсказка','profile_math',14)")
+conn.execute("INSERT INTO skills VALUES('sH0','Без подсказки','profile_math',15)")
+conn.execute("INSERT INTO skills VALUES('sD1','Лёгкая','profile_math',16)")
+conn.execute("INSERT INTO skills VALUES('sD4','Сложная','profile_math',17)")
+conn.execute("INSERT INTO skills VALUES('sF','Прощение','profile_math',18)")
+conn.execute("INSERT INTO skills VALUES('sF0','Чистый след','profile_math',19)")
+conn.execute("CREATE TABLE tasks(id TEXT PRIMARY KEY, skill_id TEXT, topic TEXT, difficulty INT)")
+conn.execute("INSERT INTO tasks VALUES('t_d1','sD1','Л',1)")
+conn.execute("INSERT INTO tasks VALUES('t_d4','sD4','С',4)")
+for i in range(12):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,1,1,?)", (f"tH{i}", "sH", now - i * 60000))
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,1,0,?)", (f"tH0{i}", "sH0", now - i * 60000))
+for i in range(3):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math','t_d1','sD1',1,0,?)", (now - i * 60000,))
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math','t_d4','sD4',1,0,?)", (now - i * 60000,))
+for i in range(10):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,1,0,?)", (f"tF{i}", "sF", now - i * 60000))
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,0,0,?)", (f"tFo{i}", "sF", now - 30 * 86400000 - i * 3600000))
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(2,'profile_math',?,?,1,0,?)", (f"tF0{i}", "sF0", now - i * 60000))
+conn.commit()
+check("hint weakens evidence (60 vs 100)",
+      agent._skill_mastery(conn, 2, "profile_math", "sH") == 60
+      and agent._skill_mastery(conn, 2, "profile_math", "sH0") == 100,
+      str((agent._skill_mastery(conn, 2, "profile_math", "sH"),
+           agent._skill_mastery(conn, 2, "profile_math", "sH0"))))
+check("stars count directly (100 vs 25)",
+      agent._skill_mastery(conn, 2, "profile_math", "sD4") == 100
+      and agent._skill_mastery(conn, 2, "profile_math", "sD1") == 25)
+check("forgiveness: old mistakes barely drag (83 == 83)",
+      agent._skill_mastery(conn, 2, "profile_math", "sF") == 83
+      and agent._skill_mastery(conn, 2, "profile_math", "sF0") == 83)
 
 conn.execute("ALTER TABLE skills ADD COLUMN locked INT DEFAULT 0")
 conn.execute("INSERT INTO skills VALUES('x1','Закрытая','profile_math',13,1)")
@@ -138,6 +176,13 @@ check("DIAG weight synced with js", agent.FORECAST_DIAGNOSTIC_WEIGHT == _js_cons
 m = _re.search(r"theoryWeight\s*=\s*lessons\.length\s*\?\s*(\d+)", _state_js)
 check("THEORY weight synced with js", agent.FORECAST_THEORY_WEIGHT == (int(m.group(1)) if m else None),
       f"py={agent.FORECAST_THEORY_WEIGHT}")
+m = _re.search(r"const\s+FORECAST_FORGIVE_DAYS\s*=\s*(\d+)", _state_js)
+check("FORGIVE synced with js", agent.FORECAST_FORGIVE_DAYS == (int(m.group(1)) if m else None),
+      f"py={agent.FORECAST_FORGIVE_DAYS}")
+m = _re.search(r"const\s+FORECAST_HINT_WEIGHTS\s*=\s*\[([^\]]+)\]", _state_js)
+js_hw = tuple(float(x) for x in m.group(1).split(",")) if m else None
+check("HINT weights synced with js", tuple(agent.FORECAST_HINT_WEIGHTS) == js_hw,
+      f"py={tuple(agent.FORECAST_HINT_WEIGHTS)} js={js_hw}")
 
 conn.close()
 os.unlink(path)

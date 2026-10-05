@@ -1454,6 +1454,12 @@ FORECAST_DECAY_DAYS = 45
 FORECAST_FULL_VOLUME = 12
 FORECAST_DIAGNOSTIC_WEIGHT = 2
 FORECAST_THEORY_WEIGHT = 40
+# Ошибки забываются быстрее знаний: неверная попытка затухает за 14 дней,
+# верная — за 45. Зеркало js/state.js (там же лежит обоснование).
+FORECAST_FORGIVE_DAYS = 14
+# Вес попытки с подсказкой — тем же коэффициентом, что режет награду
+# (0.6/0.3). Индекс — уровень подсказки 0–3. Зеркало js/state.js.
+FORECAST_HINT_WEIGHTS = (1.0, 0.6, 0.3, 0.3)
 
 
 def _js_round(value: float) -> int:
@@ -1465,6 +1471,40 @@ def _js_round(value: float) -> int:
 
 
 def _ts_ms(value) -> int | None:
+    """Метка времени → мс epoch. Мусор → None (совпадать не с чем)."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _hint_weight(level) -> float:
+    """Вес свидетельства по уровню подсказки (0 — сам). Мусор → 1."""
+    try:
+        idx = max(0, min(3, int(level or 0)))
+    except (TypeError, ValueError):
+        return 1.0
+    try:
+        return float(FORECAST_HINT_WEIGHTS[idx])
+    except (IndexError, TypeError, ValueError):
+        return 1.0
+
+
+def _task_difficulties(conn: sqlite3.Connection) -> dict:
+    """Сложность заданий (звёзды 1–5) по id. Нет таблицы — пусто."""
+    try:
+        return {str(r["id"]): r["difficulty"]
+                for r in conn.execute("SELECT id, difficulty FROM tasks")}
+    except sqlite3.Error:
+        return {}
+
+
+def _diff_weight(raw) -> float:
+    """Звёзды напрямую: 1 звезда — единица веса, 5 — впятеро."""
+    try:
+        return max(1.0, min(5.0, float(raw if raw is not None else 1)))
+    except (TypeError, ValueError):
+        return 1.0
     """Метка времени → мс epoch. Мусор → None (совпадать не с чем)."""
     try:
         return int(str(value).strip())
@@ -1492,7 +1532,7 @@ def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
     уроки по навыкам, пройденные уроки, статистика и попытки. Таблицы
     может не быть в старой базе — тогда пусто, а не падение."""
     data: dict = {"diag": set(), "lessons": {}, "done": set(),
-                  "stats": {}, "attempts": {}}
+                  "stats": {}, "attempts": {}, "diff": {}}
     try:
         uid = int(user_id)
     except (TypeError, ValueError):
@@ -1527,22 +1567,40 @@ def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
     except sqlite3.Error:
         pass
     try:
-        for row in conn.execute("SELECT skill_id, task_id, correct, created_at"
-                                " FROM task_attempts"
+        for row in conn.execute("SELECT skill_id, task_id, correct, created_at,"
+                                " hint_level FROM task_attempts"
                                 " WHERE user_id=? AND subject=?", (uid, subj)):
+            try:
+                hint = row["hint_level"]
+            except (KeyError, IndexError):
+                hint = 0
             data["attempts"].setdefault(str(row["skill_id"]), []).append(
                 (str(row["task_id"] or ""), _safe_int(row["correct"]),
-                 _ts_ms(row["created_at"])))
+                 _ts_ms(row["created_at"]), hint))
     except sqlite3.Error:
+        try:
+            for row in conn.execute("SELECT skill_id, task_id, correct, created_at"
+                                    " FROM task_attempts"
+                                    " WHERE user_id=? AND subject=?", (uid, subj)):
+                data["attempts"].setdefault(str(row["skill_id"]), []).append(
+                    (str(row["task_id"] or ""), _safe_int(row["correct"]),
+                     _ts_ms(row["created_at"]), 0))
+        except sqlite3.Error:
+            pass
+    try:
+        data["diff"] = _task_difficulties(conn)
+    except Exception:
         pass
     return data
 
 
 def _mastery_from_inputs(skill_id: str, data: dict, now_ms: int) -> int:
     """Освоение темы 0–100 глазами прогноза: 40 % теория (пройденные уроки)
-    + практика с затуханием по давности (вес exp(-дни/45), диагностический
-    ответ ×2) и насыщением объёма (полное доверие от 12 свежих попыток).
-    Нет попыток — откат к суммарной статистике, как в браузере."""
+    + практика с затуханием по давности, прощением старых ошибок (неверная
+    попытка затухает за 14 дней, верная за 45), весом подсказки (тем же,
+    что режет награду) и звёздами сложности напрямую. Насыщение объёма —
+    полное доверие от 12 свежих попыток. Нет попыток — откат к суммарной
+    статистике, как в браузере."""
     lessons = data.get("lessons", {}).get(skill_id, [])
     if lessons:
         done = sum(1 for lid in lessons if lid in data.get("done", set()))
@@ -1552,14 +1610,22 @@ def _mastery_from_inputs(skill_id: str, data: dict, now_ms: int) -> int:
         theory = 0.0
         practice_weight = 100
     rows = data.get("attempts", {}).get(skill_id, [])
+    diff_map = data.get("diff", {}) if isinstance(data, dict) else {}
     if rows:
         vol = 0.0
         good = 0.0
-        for task_id, correct, stamp in rows:
+        for row in rows:
+            try:
+                task_id, correct, stamp, hint = row
+            except (TypeError, ValueError):
+                continue
             age_days = max(0.0, (now_ms - (stamp if stamp is not None else 0)) / 86400000.0)
-            weight = math.exp(-age_days / FORECAST_DECAY_DAYS)
+            decay = FORECAST_DECAY_DAYS if correct else FORECAST_FORGIVE_DAYS
+            weight = math.exp(-age_days / decay)
             if stamp is not None and (task_id, stamp) in data.get("diag", set()):
                 weight *= FORECAST_DIAGNOSTIC_WEIGHT
+            weight *= _hint_weight(hint)
+            weight *= _diff_weight(diff_map.get(task_id, 1))
             vol += weight
             if correct:
                 good += weight

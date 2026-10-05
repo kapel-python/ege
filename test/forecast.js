@@ -234,6 +234,53 @@ const testBody = async () => {
     t("русский: mid внутри вилки", strong.low <= strong.mid && strong.mid <= strong.high);
   }
 
+  /* 13. Подсказки, сложность, прощение: вес свидетельства, а не счётчик. */
+  DataAPI.load(serverLikePayload("profile_math", "server/catalog.json"));
+  Store.ready = false;
+  {
+    const sid = skills[5].id;
+    const mkHint = (hint) => {
+      Store.reset();
+      for (let i = 0; i < 12; i++) {
+        Store.state.taskAttempts.push({ taskId: `h${hint}_${i}`, skill: sid, correct: true, hintLevel: hint, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
+      }
+      return forecastSkillMastery(sid, now);
+    };
+    const m0 = mkHint(0), m1 = mkHint(1);
+    t("подсказка: свидетельство слабее (×0.6)", m1 < m0 && Math.abs(m1 - 0.6 * m0) < 1, `m0=${m0} m1=${m1}`);
+  }
+  {
+    // n01 — задачи на 1 звезду, n19 — на 4: одинаковые 3 свежих верных.
+    const mkDiff = (taskIds, sid) => {
+      Store.reset();
+      taskIds.slice(0, 3).forEach((tid, i) => {
+        Store.state.taskAttempts.push({ taskId: tid, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
+      });
+      return forecastSkillMastery(sid, now);
+    };
+    const m1 = mkDiff(["n01_p1", "n01_p2", "n01_p3"], "n01_planimetry");
+    const m4 = mkDiff(["n19_p1", "n19_p2", "n19_p3"], "n19_parameter");
+    t("сложность: 4 звезды весят впятеро (60 против 15)", m4 === 60 && m1 === 15, `m1=${m1} m4=${m4}`);
+  }
+  {
+    // Прощение: 10 старых ошибок + 10 свежих верных ≈ 10 свежих верных.
+    const sid = skills[6].id;
+    Store.reset();
+    for (let i = 0; i < 10; i++) {
+      Store.state.taskAttempts.push({ taskId: `oldwrong_${i}`, skill: sid, correct: false, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - 30 * DAY - i * HOUR });
+    }
+    for (let i = 0; i < 10; i++) {
+      Store.state.taskAttempts.push({ taskId: `freshok_${i}`, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * HOUR });
+    }
+    const forgiven = forecastSkillMastery(sid, now);
+    t("прощение: старые ошибки почти не душат (== 50, без прощения было бы 40)", forgiven === 50, `m=${forgiven}`);
+    Store.reset();
+    for (let i = 0; i < 10; i++) {
+      Store.state.taskAttempts.push({ taskId: `clean_${i}`, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * HOUR });
+    }
+    t("прощение: чистый след даёт столько же", forecastSkillMastery(sid, now) === 50);
+  }
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };
