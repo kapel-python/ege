@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Опрос: как граждане распоряжаются свободными деньгами</title>
+  <desc id="desc">Столбчатая диаграмма: банковский вклад 31, тратят всё 25, наличные дома 24, ценные бумаги 12, затруднились ответить 8 процентов.</desc>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
+  <text x="20" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1e293b">Как распоряжаются свободными деньгами?</text>
+  <text x="20" y="56" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Опрос граждан, % опрошенных</text>
+  <text x="250" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">0</text>
+  <text x="316" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">10%</text>
+  <text x="382" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">20%</text>
+  <text x="448" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">30%</text>
+  <text x="514" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">40%</text>
+  <text x="580" y="80" font-family="Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">50%</text>
+  <line x1="250" y1="88" x2="250" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <line x1="316" y1="88" x2="316" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <line x1="382" y1="88" x2="382" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <line x1="448" y1="88" x2="448" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <line x1="514" y1="88" x2="514" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <line x1="580" y1="88" x2="580" y2="350" stroke="#64748b" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="20" y="115" font-family="Arial, sans-serif" font-size="15" fill="#1e293b">Банковский вклад</text>
+  <rect x="250" y="96" width="204.6" height="26" rx="4" fill="#0284c7"/>
+  <text x="463" y="115" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b">31%</text>
+  <text x="20" y="171" font-family="Arial, sans-serif" font-size="15" fill="#1e293b">Трачу всё, сбережений нет</text>
+  <rect x="250" y="152" width="165" height="26" rx="4" fill="#059669"/>
+  <text x="423" y="171" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b">25%</text>
+  <text x="20" y="227" font-family="Arial, sans-serif" font-size="15" fill="#1e293b">Наличные дома</text>
+  <rect x="250" y="208" width="158.4" height="26" rx="4" fill="#db2777"/>
+  <text x="417" y="227" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b">24%</text>
+  <text x="20" y="283" font-family="Arial, sans-serif" font-size="15" fill="#1e293b">Ценные бумаги</text>
+  <rect x="250" y="264" width="79.2" height="26" rx="4" fill="#b45309"/>
+  <text x="338" y="283" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b">12%</text>
+  <text x="20" y="339" font-family="Arial, sans-serif" font-size="15" fill="#1e293b">Затруднились ответить</text>
+  <rect x="250" y="320" width="52.8" height="26" rx="4" fill="#7c3aed"/>
+  <text x="311" y="339" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b">8%</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Иллюстрация: сберегательное поведение граждан по опросу</text>
+</svg>

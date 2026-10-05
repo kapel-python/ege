@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Рынок пшеницы: падение предложения, кривая S сдвигается в S1</title>
+  <desc id="desc">Спрос D неизменен. Предложение сдвигается влево из S в S1, равновесная цена растёт с P0 до P1.</desc>
+  <defs>
+    <marker id="up" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+    <marker id="mv" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0284c7"/></marker>
+  </defs>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
+  <text x="20" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1e293b">Рынок пшеницы: падение предложения (S → S1)</text>
+  <text x="20" y="56" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Спрос D неизменен, засуха погубила часть урожая</text>
+  <line x1="120" y1="64" x2="120" y2="335" stroke="#1e293b" stroke-width="2"/>
+  <line x1="110" y1="335" x2="590" y2="335" stroke="#1e293b" stroke-width="2"/>
+  <text x="112" y="56" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">P</text>
+  <text x="596" y="328" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#1e293b">Q</text>
+  <line x1="150" y1="310" x2="510" y2="90" stroke="#64748b" stroke-width="2"/>
+  <text x="514" y="84" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#64748b">S</text>
+  <line x1="90" y1="310" x2="450" y2="90" stroke="#0284c7" stroke-width="3" stroke-dasharray="10 6"/>
+  <text x="454" y="84" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#0284c7">S1</text>
+  <line x1="150" y1="110" x2="470" y2="330" stroke="#db2777" stroke-width="3"/>
+  <text x="474" y="326" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#db2777">D</text>
+  <line x1="238" y1="250" x2="198" y2="250" stroke="#0284c7" stroke-width="2" marker-end="url(#mv)"/>
+  <line x1="120" y1="216" x2="304" y2="216" stroke="#64748b" stroke-width="1" stroke-dasharray="5 4"/>
+  <line x1="304" y1="216" x2="304" y2="335" stroke="#64748b" stroke-width="1" stroke-dasharray="5 4"/>
+  <line x1="120" y1="196" x2="276" y2="196" stroke="#64748b" stroke-width="1" stroke-dasharray="5 4"/>
+  <line x1="276" y1="196" x2="276" y2="335" stroke="#64748b" stroke-width="1" stroke-dasharray="5 4"/>
+  <circle cx="304" cy="216" r="6" fill="#1e293b"/>
+  <circle cx="276" cy="196" r="6" fill="#1e293b"/>
+  <text x="112" y="221" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b" text-anchor="end">P0</text>
+  <text x="112" y="201" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1e293b" text-anchor="end">P1</text>
+  <text x="304" y="352" font-family="Arial, sans-serif" font-size="13" fill="#64748b" text-anchor="middle">Q0</text>
+  <text x="276" y="352" font-family="Arial, sans-serif" font-size="13" fill="#64748b" text-anchor="middle">Q1</text>
+  <line x1="86" y1="216" x2="86" y2="196" stroke="#059669" stroke-width="3" marker-end="url(#up)"/>
+  <text x="50" y="185" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#059669" text-anchor="middle">P↑</text>
+  <text x="20" y="378" font-family="Arial, sans-serif" font-size="14" fill="#1e293b">Фактор: неурожай → предложение ↓. Прогноз: объём продаж упадёт.</text>
+  <text x="20" y="404" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Иллюстрация: сдвиг предложения влево, равновесная цена растёт</text>
+</svg>
