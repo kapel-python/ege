@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Цель достигнута</title>
+<script>
+  /* Логика темы сайта: сохранённый выбор побеждает, при первом визите — тема устройства. */
+  try {
+    var _t = null;
+    try { _t = localStorage.getItem("ege_core_theme"); } catch (e) {}
+    if (_t === "dark") { document.documentElement.dataset.theme = "dark"; }
+    else if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) { document.documentElement.dataset.theme = "dark"; }
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="css/styles.css?v=48">
+<style>
+/* Токены и шрифт (--font) — из css/styles.css сайта, подключённого в <head>.
+   В конце файла есть .gc-nocss fallback — включается, только если сайт-стили не загрузились. */
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--font)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+
+/* ===== Окно ===== */
+.ov{position:fixed;top:0;left:0;right:0;height:var(--vh,100vh);z-index:200;display:flex;align-items:center;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));
+  background:var(--scrim);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);animation:fade .3s ease both}
+.card{position:relative;width:100%;max-width:560px;max-height:calc(var(--vh,100vh) - 32px);overflow:hidden;
+  background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:var(--card-shadow),0 30px 80px -20px rgba(0,0,0,.45);
+  transition:height .6s cubic-bezier(.22,1,.36,1);animation:cin .4s cubic-bezier(.22,1,.36,1) both}
+.card:focus{outline:none}
+#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+.s1{padding:34px 28px 28px;text-align:center;transition:opacity .28s ease,transform .28s ease,filter .28s ease}
+.s1.out{opacity:0;transform:translateY(-10px) scale(.98);filter:blur(6px)}
+.s2{display:flex;flex-direction:column;height:100%;animation:fade .4s ease both}
+
+/* герой-момент: число набирается, кольцо замыкается, вспышка */
+.hero1{position:relative;width:132px;height:132px;margin:0 auto 14px;display:grid;place-items:center;transition:filter .5s}
+.hero1 svg.ring{position:absolute;inset:0;width:100%;height:100%;fill:none}
+.hero1 .rt{stroke:var(--surface-3);stroke-width:6}
+.hero1 .rp{stroke:url(#rg);stroke-width:6;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;transform:rotate(-90deg);transform-origin:center}
+.hn{font-size:48px;line-height:1;letter-spacing:-.03em}
+.hero1 .flash{position:absolute;inset:-40px;border-radius:50%;background:radial-gradient(circle,var(--accent-glow),transparent 65%);opacity:0;pointer-events:none}
+.land .hero1{filter:drop-shadow(0 0 16px var(--accent-glow))}
+.land .flash{animation:flash .9s ease-out}
+.hero1 .ok{position:absolute;right:6px;bottom:8px;width:32px;height:32px;border-radius:50%;background:var(--success);display:grid;place-items:center;border:3px solid var(--surface);transform:scale(0)}
+.hero1 .ok svg{width:16px;height:16px;fill:none;stroke:#fff;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.land .ok{animation:pop .5s cubic-bezier(.34,1.4,.64,1) .15s forwards}
+
+.t1{font-size:28px;line-height:1.2;font-weight:800;letter-spacing:-.02em;margin:0 0 10px}
+.sub{font-size:15px;color:var(--text-2);margin:0 auto;max-width:400px}
+.t2{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin:6px 0 16px}
+.g{background:linear-gradient(90deg,var(--accent),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent;
+  font-variant-numeric:tabular-nums;font-weight:800;padding:0 .04em}
+
+/* печать по словам: fade без масок и курсора */
+.ww{display:inline-block;opacity:0;transform:translateY(3px);transition:opacity .26s ease,transform .3s cubic-bezier(.2,.7,.2,1)}
+.ww.is-in{opacity:1;transform:none}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 14px var(--font);padding:10px 18px;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:background .15s,box-shadow .15s,transform .1s}
+.btn:active{transform:scale(.98)}
+.btn.lg{padding:13px 26px;font-size:15px;width:100%}
+.btn.pri{background:var(--btn-primary-bg);color:#fff;box-shadow:var(--btn-primary-shadow)}
+.btn.pri:hover{background:var(--btn-primary-hover);box-shadow:var(--btn-primary-shadow),0 0 20px var(--accent-glow)}
+.btn.ghost{background:transparent;border-color:var(--border-strong);color:var(--text)}
+.btn.ghost:hover{background:var(--surface-3)}
+.btn:disabled{opacity:.45;cursor:default}
+.acts{display:grid;gap:10px;margin-top:26px;visibility:hidden;opacity:0}
+.acts.is-ready{visibility:visible;animation:rise .32s cubic-bezier(.2,.7,.2,1) forwards}
+
+/* экран 2 */
+.scroll{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:26px 22px max(24px,env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.rise{opacity:0;transform:translateY(8px)}
+.rise.is-in{animation:rise .32s cubic-bezier(.2,.7,.2,1) forwards}
+.eyebrow{display:flex;align-items:center;gap:12px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--border)}
+.blk{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--card-shadow);margin-bottom:14px}
+.hero{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.big{font-size:56px;line-height:1;letter-spacing:-.03em;font-weight:800}
+.mid{font-size:34px;line-height:1;letter-spacing:-.03em;font-weight:800}
+.hero span{color:var(--text-2);font-size:15px}
+#chart svg{width:100%;height:auto;display:block;overflow:visible}
+.ax{stroke:var(--border-strong);stroke-width:1.5}
+.gl{stroke:var(--success);stroke-width:1.5;stroke-dasharray:5 5;transform-box:fill-box;transform-origin:0 50%;transform:scaleX(0)}
+.glt{font:700 11px var(--font);fill:var(--success-ink);letter-spacing:.06em;text-transform:uppercase;opacity:0}
+.cv{fill:none;stroke:url(#gg);stroke-width:3.5;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1}
+.ar{fill:url(#ga);opacity:0}
+.vg{stroke:var(--border-strong);stroke-dasharray:3 4;opacity:0}
+.dot{fill:var(--surface);stroke:var(--accent);stroke-width:3;transform-box:fill-box;transform-origin:center;opacity:0}
+.dot.end{fill:var(--success);stroke:var(--surface);stroke-width:2.5}
+.halo{fill:var(--success-soft);transform-box:fill-box;transform-origin:center;opacity:0}
+.sc{font:800 15px var(--font);fill:var(--text);font-variant-numeric:tabular-nums;opacity:0}
+.dl{font:600 11.5px var(--font);fill:var(--muted);opacity:0}
+.run .gl{animation:sx .6s cubic-bezier(.22,1,.36,1) forwards}
+.run .glt{animation:fade .4s ease .5s forwards}
+.run .cv{animation:draw 1.6s cubic-bezier(.45,.05,.3,1) .3s forwards}
+.run .ar{animation:fade .8s ease 1.7s forwards}
+.run .dot{animation:pop .4s cubic-bezier(.34,1.4,.64,1) var(--d) both}
+.run .sc,.run .dl,.run .vg{animation:fade .4s ease var(--d) both}
+.run .halo{animation:pop .5s cubic-bezier(.34,1.4,.64,1) var(--d) both,pulse 2s ease-in-out calc(var(--d) + .6s) infinite}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+.tile{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px}
+.tile .v{font-size:26px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .v small{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0}
+.tile .l{font-size:12.5px;color:var(--muted);margin:2px 0 12px}
+.seg{display:flex;gap:3px}.seg i{flex:1;height:6px;border-radius:3px;background:var(--surface-3)}
+.run .seg i.on{background:linear-gradient(90deg,var(--accent),var(--violet));transition:background .3s calc(var(--i)*70ms + .3s)}
+.ring2{width:38px;height:38px;fill:none;stroke-linecap:round}
+.ring2 .t{stroke:var(--surface-3);stroke-width:4}
+.ring2 .p{stroke:var(--accent);stroke-width:4;stroke-dasharray:1;stroke-dashoffset:1;transform:rotate(-90deg);transform-origin:center}
+.ring2 .h{stroke:var(--text-2);stroke-width:2.5}
+.run .ring2 .p{animation:draw 1.2s cubic-bezier(.45,.05,.3,1) forwards}
+.trk{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.trk b{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--violet));transition:width 1.2s cubic-bezier(.22,1,.36,1)}
+.run .trk b{width:100%}
+.spark{width:60px;height:20px;fill:none}
+.spark path{stroke:var(--success);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1}
+.run .spark path{animation:draw 1s ease .3s forwards}
+.fl{width:34px;height:34px;--fl:var(--warn);transform-origin:50% 90%}
+.fl path{fill:var(--fl)}.fl.lv2{--fl:var(--danger)}.fl.lv3{--fl:var(--violet)}
+.run .fl{animation:sway 1.6s ease-in-out infinite}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;max-width:300px;margin:14px auto 0}
+.cal i{aspect-ratio:1;border-radius:5px;background:var(--surface-3)}
+.cal i.l1{background:color-mix(in srgb,var(--accent) 35%,var(--surface-3))}
+.cal i.l2{background:color-mix(in srgb,var(--accent) 65%,var(--surface-3))}
+.cal i.l3{background:linear-gradient(135deg,var(--accent),var(--violet))}
+.cal i{opacity:0}
+.run .cal i{animation:pop .3s cubic-bezier(.34,1.4,.64,1) calc(var(--i)*var(--st)) both}
+.ach{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:14px}
+.ach div{width:84px;text-align:center;font-size:12px;line-height:1.3;color:var(--text-2);opacity:0}
+.ach b{display:grid;place-items:center;width:52px;height:52px;margin:0 auto 6px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--violet));border:1px solid var(--accent-ring);box-shadow:0 0 24px -6px var(--accent-glow)}
+.ach svg{width:24px;height:24px;fill:#fff}
+.run .ach div{animation:pop .45s cubic-bezier(.34,1.4,.64,1) calc(var(--i)*.15s + .2s) both}
+.wish{text-align:center;padding:10px 6px 0}
+.t3{font-size:20px;line-height:1.35;font-weight:800;letter-spacing:-.02em;margin:0}
+.t3 .st{display:block;margin-top:8px;font-size:15px;font-weight:500;letter-spacing:0;color:var(--text-2)}
+.skip{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);font-size:12px;color:var(--text-2);background:var(--surface-3);border:1px solid var(--border);border-radius:999px;padding:5px 12px;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap}
+.skip.on{opacity:.95}
+
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes cin{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes sx{to{transform:scaleX(1)}}
+@keyframes pop{from{opacity:0;transform:scale(.3)}to{opacity:1;transform:scale(1)}}
+@keyframes pulse{50%{transform:scale(1.5);opacity:.5}}
+@keyframes flash{0%{opacity:0;transform:scale(.6)}25%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
+@keyframes sway{0%,100%{transform:skewX(-6deg) scaleY(1)}50%{transform:skewX(6deg) scaleY(1.08)}}
+@media (max-width:480px){.t1{font-size:24px}.big{font-size:46px}.s1{padding:28px 20px 22px}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}}
+
+/* ===== standalone-проверка и fallback без сайт-стилей ===== */
+:root.gc-nocss{
+  --bg:#e9edf4;--surface:#fff;--surface-2:#f0f3f8;--surface-3:#e3e8f1;
+  --border:rgba(30,41,59,.13);--border-strong:rgba(30,41,59,.24);
+  --text:#1b2233;--text-2:#4a5872;--muted:#57647e;
+  --accent:#6d7cff;--accent-soft:rgba(109,124,255,.16);--accent-glow:rgba(109,124,255,.35);--accent-ring:rgba(74,91,224,.32);
+  --violet:#9a7bff;--accent-ink:#4a5be0;--violet-ink:#7c3aed;
+  --success:#10b981;--success-soft:rgba(22,163,74,.14);--success-ink:#15803d;
+  --warn:#ffc46b;--danger:#ff6b6b;
+  --btn-primary-bg:#4a5be0;--btn-primary-hover:#3f51e0;--btn-primary-shadow:0 8px 18px -8px rgba(74,91,224,.55);
+  --scrim:rgba(15,23,42,.58);--card-shadow:0 1px 2px rgba(30,41,59,.07),0 12px 28px -18px rgba(30,41,59,.3);
+  --font:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+:root.gc-nocss[data-theme="dark"]{
+  --bg:#0a0c11;--surface:#12161f;--surface-2:#161b27;--surface-3:#1b2130;
+  --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.12);
+  --text:#e9ebf3;--text-2:#aab1c4;--muted:#6d7488;
+  --accent-ink:#a5b0ff;--violet-ink:#c4b5fd;
+  --btn-primary-bg:#6d7cff;--btn-primary-hover:#7d8aff;--btn-primary-shadow:none;
+  --success:#3ddc97;--success-ink:#86efac;--scrim:rgba(5,6,10,.70);--card-shadow:none;
+}
+.demo{max-width:560px;margin:48px auto;padding:24px;display:grid;gap:12px;justify-items:center;text-align:center}
+.demo span{color:var(--text-2);font-size:14px}
+.demo button{font:600 14px var(--font);padding:10px 18px;border-radius:10px;border:1px solid transparent;cursor:pointer;background:var(--btn-primary-bg);color:#fff}
+</style>
+</head>
+<body>
+
+<div class="ov" id="ov" role="dialog" aria-modal="true" aria-labelledby="h1" hidden>
+  <div class="sr" id="live" aria-live="polite"></div>
+  <div class="card" id="card" tabindex="-1">
+
+    <section class="s1" id="s1">
+      <div class="hero1" id="hero1">
+        <i class="flash"></i>
+        <svg class="ring" viewBox="0 0 132 132"><defs><linearGradient id="rg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="132" y2="132"><stop offset="0" style="stop-color:var(--accent)"/><stop offset="1" style="stop-color:var(--violet)"/></linearGradient></defs>
+          <circle class="rt" cx="66" cy="66" r="58"/><circle class="rp" id="rp" pathLength="1" cx="66" cy="66" r="58"/></svg>
+        <b class="g hn" id="hn">0</b>
+        <span class="ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      </div>
+      <h2 class="t1" id="h1"></h2>
+      <p class="sub" id="sub"></p>
+      <div class="acts" id="acts1">
+        <button class="btn pri lg" id="goP">Посмотреть прогресс</button>
+        <button class="btn ghost lg" id="cls1">Закрыть</button>
+      </div>
+    </section>
+
+    <section class="s2" id="s2" hidden>
+      <div class="scroll" id="sc">
+        <div class="eyebrow rise" id="e1">Твой путь</div>
+        <h3 class="t2" id="h2"></h3>
+
+        <div class="blk rise" id="bChart">
+          <div class="hero"><b class="g big" id="days">0</b><span id="daysL"></span></div>
+          <div id="chart"></div>
+        </div>
+
+        <div class="tiles rise" id="bTiles">
+          <div class="tile"><div class="v"><span id="vTop">0</span> <small id="vTopT"></small></div><div class="l">тем пройдено</div><div class="seg" id="seg"></div></div>
+          <div class="tile"><div class="v"><span id="vAvg">0</span> <small id="vAvgU"></small></div><div class="l" id="lAvg"></div>
+            <svg class="ring2" viewBox="0 0 38 38"><circle class="t" cx="19" cy="19" r="15"/><circle class="p" pathLength="1" cx="19" cy="19" r="15"/><path class="h" d="M19 11v8l5 3"/></svg></div>
+          <div class="tile"><div class="v">+<span id="vGain">0</span></div><div class="l" id="lGain"></div><div class="trk"><b></b></div></div>
+        </div>
+
+        <div class="tiles rise" id="bT2">
+          <div class="tile" id="tBest"><div class="v">+<span id="vBest">0</span></div><div class="l" id="lBest"></div>
+            <svg class="spark" viewBox="0 0 60 20"><path pathLength="1" d="M2 17C14 17 16 9 28 10S44 3 58 3"/></svg></div>
+          <div class="tile" id="tStr"><div class="v"><span id="vStr">0</span></div><div class="l">дней подряд</div>
+            <svg class="fl" id="flame" viewBox="0 0 24 24"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-4-1-6 1-10z"/></svg></div>
+        </div>
+
+        <div class="blk rise" id="bAct">
+          <div class="eyebrow">Активность</div>
+          <div class="hero" style="margin-top:12px"><b class="g mid" id="vAct">0</b><span id="lAct"></span></div>
+          <div class="cal" id="cal"></div>
+        </div>
+
+        <div class="blk rise" id="bAch">
+          <div class="eyebrow">Достижения</div>
+          <div class="ach" id="ach"></div>
+        </div>
+
+        <div class="wish rise" id="bWish"><p class="t3" id="wishT"></p></div>
+
+        <div class="acts" id="acts2"><button class="btn pri lg" id="done">Закрыть</button></div>
+      </div>
+      <div class="skip" id="skip" aria-hidden="true">Нажми на экран, чтобы ускорить</div>
+    </section>
+  </div>
+  <canvas id="fx" aria-hidden="true"></canvas>
+</div>
+
+<script>
+(function(){
+/* ============================================================
+   КАК ВЫЗЫВАТЬ (реальные данные вместо заглушек):
+   openGoalCelebration({
+     goal: 60,                                   // целевой балл
+     history: [{t:'2026-08-16', score:34}, ...], // история прогноза: дата + балл (от старта до достижения цели)
+     topicsDone: 41, topicsTotal: 52,            // пройдено тем / всего (topicsTotal можно не передавать)
+     avg: {value:19, unit:'мин', label:'в среднем на тему'},
+     streak: 14,                                 // необязательно: текущая серия дней (плитка скроется, если нет)
+     activity: ['2026-08-16', ...],              // необязательно: даты занятий (или [{t, value}]) — блок скроется, если нет
+     achievements: ['Неделя в строю', ...],      // необязательно: названия открытых достижений (до 4 показываются)
+     sound: false,                               // необязательно: тихий звук в момент достижения (по умолчанию выкл.)
+     onClose: function(){}
+   });
+   Первый экран закрыть/пропустить нельзя. После «Посмотреть прогресс» клики по экрану ускоряют анимацию.
+   При интеграции вызывает проверка прогноза, когда forecast.mid достиг цели:
+   openGoalCelebration(collectGoalData(goalNum)).
+   ============================================================ */
+var DEMO={goal:60,history:[{t:'2026-08-16',score:34},{t:'2026-08-25',score:38},{t:'2026-09-03',score:44},{t:'2026-09-14',score:50},{t:'2026-09-23',score:55},{t:'2026-10-02',score:60}],
+  topicsDone:41,topicsTotal:52,avg:{value:19,unit:'мин',label:'в среднем на тему'},streak:14,
+  activity:(function(){var a=[],s=+new Date('2026-08-16');for(var i=0;i<=47;i++){if(i%7!==3&&i%11!==5)a.push({t:new Date(s+i*864e5).toISOString().slice(0,10),value:1+(i*7)%4})}return a})(),
+  achievements:['Неделя в строю','Первая сотня','Безошибочная серия','Первый босс']};
+var COPY={sub:'Прогноз вышел на целевой уровень — это стоит отметить.',live:'Цель достигнута: ',
+  wish:'<strong class="g">Удачи на ЕГЭ!</strong><span class="st">Ты проделал большую работу. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
+
+var $=function(i){return document.getElementById(i)};
+var RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var root=document.documentElement;
+/* Тема уже выставлена в <head> по логике сайта (ege_core_theme).
+   Здесь только fallback: если сайт-стили не загрузились — включаем локальные токены. */
+addEventListener('load',function(){setTimeout(function(){
+  try{if(!getComputedStyle(root).getPropertyValue('--surface').trim())root.classList.add('gc-nocss')}catch(e){}},0)});
+
+var ov=$('ov'),card=$('card'),s1=$('s1'),s2=$('s2'),sc=$('sc'),cv=$('fx');
+var dead=true,timers=[],pend=[],raf=0,userScrolled=false,lastFocus=null,onCloseCb=null,prevOverflow='',skipOn=false,skipTick=0;
+
+function wait(ms){return new Promise(function(r){var id=setTimeout(r,RM?Math.min(ms,30):ms);timers.push(id);pend.push(function(){clearTimeout(id);r()})})}
+function plural(n,f){var a=Math.abs(n)%100,b=a%10;return a>10&&a<20?f[2]:b>1&&b<5?f[1]:b===1?f[0]:f[2]}
+function vh(){return window.visualViewport?visualViewport.height:innerHeight}
+function fit(){ov.style.setProperty('--vh',vh()+'px');if(!ov.hidden&&!s2.hidden)card.style.height=Math.min(660,vh()-32)+'px'}
+
+/* мгновенно доигрывает все конечные анимации/переходы внутри окна */
+function ff(){if(!card.getAnimations)return;void card.offsetWidth;
+  card.getAnimations({subtree:true}).forEach(function(a){try{var t=a.effect&&a.effect.getComputedTiming();if(t&&t.iterations!==Infinity)a.finish()}catch(e){}})}
+function skipClick(){skipTick++;pend.splice(0).forEach(function(f){f()});ff()}
+
+/* печать по словам */
+function prep(el){var out=[];(function walk(n){Array.prototype.slice.call(n.childNodes).forEach(function(c){
+  if(c.nodeType===3){var f=document.createDocumentFragment();c.textContent.split(/(\s+)/).forEach(function(s){
+    if(!s)return;if(/^\s+$/.test(s)){f.append(s)}else{var w=document.createElement('span');w.className='ww';w.textContent=s;out.push(w);f.append(w)}});c.replaceWith(f)}
+  else if(c.classList&&(c.classList.contains('g')||c.classList.contains('ww'))){c.classList.add('ww');out.push(c)}
+  else walk(c)})})(el);return out}
+function arm(el){el._w=prep(el)}
+async function type(el){var ws=el._w||prep(el),step=Math.min(45,Math.max(24,900/Math.max(ws.length,1))),tk=skipTick;
+  for(var i=0;i<ws.length;i++){if(dead)return;
+    if(skipTick!==tk){for(;i<ws.length;i++)ws[i].classList.add('is-in');ff();return}
+    ws[i].classList.add('is-in');await wait(step)}
+  if(skipTick===tk)await wait(260)}
+
+function follow(el){if(userScrolled||dead)return;sc.scrollTo({top:Math.max(0,el.offsetTop+el.offsetHeight-sc.clientHeight+20),behavior:RM?'auto':'smooth'})}
+async function reveal(el){el.classList.add('is-in');follow(el);await wait(380)}
+function count(el,to,dur){var t0=performance.now(),tk=skipTick;if(RM){el.textContent=to;return}
+  (function f(n){var k=Math.min(1,(n-t0)/(dur||1000));if(skipTick!==tk)k=1;el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1&&!dead)requestAnimationFrame(f)})(t0)}
+
+/* герой: число набирается, кольцо замыкается */
+function heroCount(goal,dur){return new Promise(function(res){
+  var hn=$('hn'),rp=$('rp');if(RM){hn.textContent=goal;rp.style.strokeDashoffset=0;return res()}
+  var t0=performance.now();(function f(n){if(dead)return res();var k=Math.min(1,(n-t0)/dur),e=1-Math.pow(1-k,3);
+    hn.textContent=Math.round(goal*e);rp.style.strokeDashoffset=1-e;if(k<1)requestAnimationFrame(f);else res()})(t0)})}
+function chime(){try{var A=new(window.AudioContext||window.webkitAudioContext)(),t=A.currentTime;if(A.resume)A.resume();
+  [660,880,1320].forEach(function(fr,i){var o=A.createOscillator(),g=A.createGain(),s=t+i*.09;o.type='sine';o.frequency.value=fr;
+    g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.06,s+.02);g.gain.exponentialRampToValueAtTime(.0001,s+.9);
+    o.connect(g);g.connect(A.destination);o.start(s);o.stop(s+1)})}catch(e){}}
+
+/* фейерверки */
+function fireworks(){return new Promise(function(res){
+  if(RM)return res();
+  var x=cv.getContext('2d'),dpr=devicePixelRatio||1,W=innerWidth,H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;x.setTransform(dpr,0,0,dpr,0,0);
+  var cs=getComputedStyle(root),cols=['--accent','--violet','--success'].map(function(v){return cs.getPropertyValue(v).trim()});
+  var R=[],P=[],n=0,N=6,t0=performance.now(),last=t0,next=0;
+  function launch(){var tx=W*(.15+Math.random()*.7);R.push({sx:tx+(Math.random()-.5)*80,tx:tx,ty:H*(.12+Math.random()*.32),t:0,c:cols[n%3]});n++}
+  function boom(r){for(var i=0;i<60;i++){var a=i/60*Math.PI*2+Math.random()*.2,s=1.6+Math.random()*3.4;
+    P.push({x:r.tx,y:r.ty,px:r.tx,py:r.ty,vx:Math.cos(a)*s,vy:Math.sin(a)*s,age:0,life:900+Math.random()*700,c:i%5===0?cols[(n+1)%3]:r.c})}}
+  (function frame(now){
+    if(dead){x.clearRect(0,0,W,H);return res()}
+    var dt=Math.min(now-last,40),k=dt/16.6;last=now;x.clearRect(0,0,W,H);
+    if(n<N&&now-t0>=next){launch();next+=380}
+    x.lineCap='round';x.lineWidth=2;
+    R=R.filter(function(r){r.t+=dt;var e=Math.min(1,r.t/650),y=H+(r.ty-H)*(1-Math.pow(1-e,3)),px=r.sx+(r.tx-r.sx)*e;
+      x.globalAlpha=.8;x.strokeStyle=r.c;x.beginPath();x.moveTo(px-(r.tx-r.sx)*.04,y+22);x.lineTo(px,y);x.stroke();
+      if(e>=1){boom(r);return false}return true});
+    P=P.filter(function(p){p.age+=dt;if(p.age>p.life)return false;p.px=p.x;p.py=p.y;p.vx*=Math.pow(.985,k);p.vy=p.vy*Math.pow(.985,k)+.045*k;p.x+=p.vx*k;p.y+=p.vy*k;
+      x.globalAlpha=1-p.age/p.life;x.strokeStyle=p.c;x.beginPath();x.moveTo(p.px,p.py);x.lineTo(p.x,p.y);x.stroke();return true});
+    if(n<N||R.length||P.length)raf=requestAnimationFrame(frame);else{x.clearRect(0,0,W,H);res()}
+  })(t0)})}
+
+/* график: всегда 4 отметки, независимо от длительности */
+function chart(d){
+  var pts=d.history.map(function(p){return{t:+new Date(p.t),s:p.score}}).sort(function(a,b){return a.t-b.t});
+  if(pts.length<2)pts=[pts[0],{t:pts[0].t+864e5,s:pts[0].s}];
+  var t0=pts[0].t,t1=pts[pts.length-1].t,span=Math.max(1,Math.round((t1-t0)/864e5));
+  function at(f){var T=t0+f*(t1-t0),i=1;while(i<pts.length-1&&pts[i].t<T)i++;var a=pts[i-1],b=pts[i];return b.t===a.t?b.s:a.s+(b.s-a.s)*Math.min(1,Math.max(0,(T-a.t)/(b.t-a.t)))}
+  var F=[0,1/3,2/3,1],S=F.map(function(f){return Math.round(at(f))});
+  var all=S.concat([d.goal]),lo=Math.min.apply(0,all)-6,hi=Math.max.apply(0,all)+6;
+  var X=function(f){return 30+420*f},Y=function(v){return 40+(hi-v)/(hi-lo)*118},B=168;
+  var path='M'+X(0)+' '+Y(S[0]);
+  for(var i=1;i<4;i++){var m=(X(F[i-1])+X(F[i]))/2;path+=' C'+m+' '+Y(S[i-1])+' '+m+' '+Y(S[i])+' '+X(F[i])+' '+Y(S[i])}
+  var L=['Старт','День '+Math.round(span/3),'День '+Math.round(span*2/3),'День '+span],A=['start','middle','middle','end'];
+  var h='<svg viewBox="0 0 480 196" role="img" aria-label="График прогноза: 4 отметки от старта до цели">'+
+   '<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="30" y1="0" x2="450" y2="0"><stop offset="0" style="stop-color:var(--accent)"/><stop offset="1" style="stop-color:var(--violet)"/></linearGradient>'+
+   '<linearGradient id="ga" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="'+B+'"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.22"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs>'+
+   '<line class="ax" x1="30" x2="450" y1="'+B+'" y2="'+B+'"/>'+
+   '<line class="gl" x1="30" x2="450" y1="'+Y(d.goal)+'" y2="'+Y(d.goal)+'"/><text class="glt" x="450" y="'+(Y(d.goal)-8)+'" text-anchor="end">цель '+d.goal+'</text>'+
+   '<path class="ar" d="'+path+' L450 '+B+' L30 '+B+' Z"/><path class="cv" pathLength="1" d="'+path+'"/>';
+  for(var j=0;j<4;j++){var dl=(.3+F[j]*1.6).toFixed(2)+'s',cx=X(F[j]),cy=Y(S[j]),end=j===3;
+    h+='<g style="--d:'+dl+'"><line class="vg" x1="'+cx+'" x2="'+cx+'" y1="'+(cy+8)+'" y2="'+B+'"/>'+
+      (end?'<circle class="halo" cx="'+cx+'" cy="'+cy+'" r="11"/>':'')+
+      '<circle class="dot'+(end?' end':'')+'" cx="'+cx+'" cy="'+cy+'" r="'+(end?7:5.5)+'"/>'+
+      '<text class="sc" x="'+cx+'" y="'+(cy-14)+'" text-anchor="'+A[j]+'">'+S[j]+'</text>'+
+      '<text class="dl" x="'+cx+'" y="188" text-anchor="'+A[j]+'">'+L[j]+'</text></g>'}
+  var w=Math.min(7,span),bg=0,bd=0;for(var k=0;k+w<=span;k++){var g=at((k+w)/span)-at(k/span);if(g>bg){bg=g;bd=k}}
+  return{html:h+'</svg>',days:span,t0:t0,gain:S[3]-S[0],from:S[0],to:S[3],best:{gain:Math.round(bg),a:bd,b:bd+w}}}
+
+/* календарь активности: ячеек не больше 42 при любой длительности */
+function calendar(act,t0,span){
+  var days=span+1,n=Math.min(42,days),arr=[],map={},i;
+  act.forEach(function(a){var s=typeof a==='string',k=Math.floor((+new Date(s?a:a.t)-t0)/864e5);if(k>=0&&k<=span)map[k]=(map[k]||0)+(s?1:(a.value||1))});
+  for(i=0;i<n;i++)arr.push(0);
+  Object.keys(map).forEach(function(k){arr[Math.min(n-1,Math.floor(k/days*n))]+=map[k]});
+  var mx=Math.max.apply(0,arr)||1;
+  return{n:n,active:Object.keys(map).length,days:days,lv:arr.map(function(v){var r=v/mx;return v?(r>.66?3:r>.33?2:1):0})}}
+
+var STAR='<svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4 6.1 20.5l1.2-6.5L2.5 9.4l6.6-.9z"/></svg>';
+
+/* ===== сценарий ===== */
+async function stage1(d){
+  await wait(380);s1.classList.add('run');
+  await heroCount(d.goal,1900);if(dead)return;
+  s1.classList.add('land');
+  if(!RM&&navigator.vibrate)navigator.vibrate([15,40,15]);
+  if(d.sound&&!RM)chime();
+  var fw=fireworks();
+  await wait(250);await type($('h1'));await wait(120);await type($('sub'));
+  await fw;await wait(200);if(dead)return;
+  $('acts1').classList.add('is-ready');$('goP').focus({preventScroll:true})}
+
+async function stage2(d){
+  var c=chart(d);
+  $('goP').disabled=$('cls1').disabled=true;s1.classList.add('out');await wait(300);if(dead)return;
+  card.style.height=card.offsetHeight+'px';s1.hidden=true;s2.hidden=false;card.offsetWidth;
+  card.style.height=Math.min(660,vh()-32)+'px';card.focus({preventScroll:true});await wait(600);if(dead)return;
+
+  $('chart').innerHTML=c.html;$('daysL').textContent=plural(c.days,['день','дня','дней'])+' в пути';
+  var tot=d.topicsTotal||d.topicsDone,on=Math.round(d.topicsDone/tot*12),sg='';
+  for(var i=0;i<12;i++)sg+='<i style="--i:'+i+'"'+(i<on?' class="on"':'')+'></i>';
+  $('seg').innerHTML=sg;$('vTopT').textContent=d.topicsTotal?'/ '+d.topicsTotal:'';
+  $('vAvgU').textContent=d.avg.unit;$('lAvg').textContent=d.avg.label;
+  $('lGain').textContent=c.from+' → '+c.to+' '+plural(c.gain,['балл','балла','баллов']);
+
+  var hasBest=c.best.gain>0,hasStr=d.streak>0;
+  $('tBest').hidden=!hasBest;$('tStr').hidden=!hasStr;$('bT2').hidden=!(hasBest||hasStr);
+  $('lBest').textContent='лучшая неделя · дни '+c.best.a+'–'+c.best.b;
+  $('flame').setAttribute('class','fl '+(d.streak>30?'lv3':d.streak>6?'lv2':'lv1'));
+  var cal=d.activity&&d.activity.length?calendar(d.activity,c.t0,c.days-0>0?Math.round(c.days):1):null;
+  $('bAct').hidden=!cal;
+  if(cal){var ch='';cal.lv.forEach(function(l,i){ch+='<i class="'+(l?'l'+l:'')+'" style="--i:'+i+'"></i>'});
+    $('cal').innerHTML=ch;$('cal').style.setProperty('--st',(1.2/cal.n).toFixed(3)+'s');
+    $('lAct').textContent='из '+cal.days+' '+plural(cal.days,['дня','дней','дней'])+' ты занимался'}
+  var ac=(d.achievements||[]).slice(0,4);$('bAch').hidden=!ac.length;
+  $('ach').innerHTML=ac.map(function(a,i){return '<div style="--i:'+i+'"><b>'+STAR+'</b>'+(a.title||a)+'</div>'}).join('');
+
+  skipOn=true;$('skip').classList.add('on');
+  await reveal($('e1'));await type($('h2'));if(dead)return;
+  await reveal($('bChart'));$('bChart').classList.add('run');count($('days'),c.days,1400);await wait(2500);if(dead)return;
+  await reveal($('bTiles'));$('bTiles').classList.add('run');
+  count($('vTop'),d.topicsDone,1100);count($('vAvg'),d.avg.value,1100);count($('vGain'),c.gain,1100);await wait(1600);if(dead)return;
+  if(!$('bT2').hidden){await reveal($('bT2'));$('bT2').classList.add('run');count($('vBest'),c.best.gain,1000);count($('vStr'),d.streak||0,1000);await wait(1400);if(dead)return}
+  if(!$('bAct').hidden){await reveal($('bAct'));$('bAct').classList.add('run');count($('vAct'),cal.active,1200);await wait(2000);if(dead)return}
+  if(!$('bAch').hidden){await reveal($('bAch'));$('bAch').classList.add('run');await wait(1400);if(dead)return}
+  await reveal($('bWish'));await type($('wishT'));await wait(250);if(dead)return;
+  skipOn=false;$('skip').classList.remove('on');
+  $('acts2').classList.add('is-ready');follow($('acts2'));$('done').focus({preventScroll:true})}
+
+function close(){
+  dead=true;skipOn=false;timers.forEach(clearTimeout);timers=[];pend=[];cancelAnimationFrame(raf);
+  ov.hidden=true;root.style.overflow=prevOverflow;if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  if(onCloseCb)onCloseCb()}
+
+window.openGoalCelebration=function(data){
+  var d=Object.assign({},DEMO,data||{});d.avg=Object.assign({},DEMO.avg,d.avg||{});
+  if(!ov.hidden)return;
+  dead=false;userScrolled=false;skipOn=false;pend=[];onCloseCb=d.onClose||null;lastFocus=document.activeElement;
+  prevOverflow=root.style.overflow;root.style.overflow='hidden';
+  card.style.height='';s1.hidden=false;s1.className='s1';s2.hidden=true;sc.scrollTop=0;$('skip').classList.remove('on');
+  Array.prototype.forEach.call(ov.querySelectorAll('.is-in,.is-ready,.run'),function(e){e.classList.remove('is-in','is-ready','run')});
+  $('hn').textContent='0';$('rp').style.strokeDashoffset=1;
+  fit();
+  $('h1').innerHTML='Твоя цель <b class="g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!';
+  $('sub').textContent=COPY.sub;$('live').textContent=COPY.live+d.goal;
+  $('h2').textContent='Вот как ты к этому шёл';$('wishT').innerHTML=COPY.wish;
+  [$('h1'),$('sub'),$('h2'),$('wishT')].forEach(arm);
+  $('goP').disabled=$('cls1').disabled=false;
+  ov.hidden=false;card.focus({preventScroll:true});
+  stage1(d);
+  $('goP').onclick=function(){stage2(d)};
+};
+
+/* закрыть можно только кнопками после анимации; Esc, фон и крестик не закрывают */
+$('cls1').onclick=close;$('done').onclick=close;
+addEventListener('resize',fit);if(window.visualViewport)visualViewport.addEventListener('resize',fit);
+card.addEventListener('click',function(e){if(skipOn&&!e.target.closest('button'))skipClick()});
+['wheel','touchstart'].forEach(function(e){sc.addEventListener(e,function(){userScrolled=true},{passive:true})});
+document.addEventListener('keydown',function(e){
+  if(ov.hidden)return;
+  if(e.key==='Tab'){var f=Array.prototype.filter.call(card.querySelectorAll('button'),function(b){return !b.disabled&&b.offsetParent!==null&&getComputedStyle(b.closest('.acts')||b).visibility!=='hidden'});
+    if(!f.length){e.preventDefault();card.focus();return}
+    var a=document.activeElement,i=f.indexOf(a);
+    if(e.shiftKey&&(i<=0)){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&(i===-1||i===f.length-1)){e.preventDefault();f[0].focus()}}
+  else if(e.key==='ArrowDown'||e.key==='PageDown'||e.key===' '||e.key==='ArrowUp'||e.key==='PageUp')userScrolled=true});
+
+/* ===== STANDALONE-ПРОВЕРКА: файл открыт сам по себе, вне сайта.
+   При интеграции этот блок удали — окно вызывает проверка прогноза
+   в момент достижения цели: openGoalCelebration(data). ===== */
+(function(){
+  if(document.getElementById('app'))return;
+  var bar=document.createElement('div');bar.className='demo';
+  var hint=document.createElement('span');hint.textContent='Окно «Цель достигнута» — демо (цель 60).';
+  var b=document.createElement('button');b.type='button';b.textContent='Показать';
+  b.onclick=function(){window.openGoalCelebration()};
+  bar.appendChild(hint);bar.appendChild(b);document.body.insertBefore(bar,ov);
+  if(/(?:\?|&)demo=1(?:&|$)/.test(location.search))setTimeout(function(){window.openGoalCelebration()},600)})();
+})();
+</script>
+</body>
+</html>
