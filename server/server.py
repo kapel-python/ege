@@ -7721,22 +7721,61 @@ def _seo_subject_skills(conn: sqlite3.Connection, subject: str) -> list:
     return skills
 
 
+def _seo_task_meta(raw) -> dict:
+    """metadata_json задачи как dict. Битый/пустой JSON — {}. Не бросает."""
+    try:
+        data = json.loads(raw or "{}")
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
-                       limit: int = 2) -> list:
-    """Пара примеров заданий навыка для SEO-страницы. Не бросает."""
+                      limit: int = 2) -> list:
+    """Пара примеров заданий навыка для SEO-страницы.
+
+    Кроме формулировки вытаскиваем поля единого окна практики (js/app.js):
+    подсказки по уровням (metadata.hints), способ проверки (check:"self" —
+    вторая часть сверяется с решением, без поля ввода), вес задания и
+    формат ответа. Не бросает.
+    """
     try:
         rows = conn.execute(
-            "SELECT t.statement, t.answer, t.hint,"
-            " t.explanation FROM tasks t JOIN skills s ON s.id=t.skill_id"
+            "SELECT t.statement, t.answer, t.hint, t.explanation,"
+            " t.task_type, t.difficulty, t.metadata_json"
+            " FROM tasks t JOIN skills s ON s.id=t.skill_id"
             " WHERE s.subject=? AND t.skill_id=? ORDER BY t.id LIMIT ?",
             (subject, skill_id, max(1, int(limit))),
         ).fetchall()
     except (sqlite3.Error, ValueError, TypeError):
         return []
-    return [{"statement": str(r["statement"] or ""),
-             "answer": str(r["answer"] or ""),
-             "hint": str(r["hint"] or ""),
-             "explanation": str(r["explanation"] or "")} for r in (rows or [])]
+    samples = []
+    for r in (rows or []):
+        meta = _seo_task_meta(r["metadata_json"])
+        hints = meta.get("hints")
+        if not (isinstance(hints, list) and hints):
+            hints = [r["hint"]] if (r["hint"] or "").strip() else []
+        check = str(meta.get("check") or ("self" if meta.get("selfCheck") else "")) \
+            or str(r["task_type"] or "")
+        try:
+            points = int(meta.get("points")) if meta.get("points") is not None else 0
+        except (ValueError, TypeError):
+            points = 0
+        try:
+            difficulty = max(0, min(5, int(r["difficulty"])))
+        except (ValueError, TypeError):
+            difficulty = 0
+        samples.append({
+            "statement": str(r["statement"] or ""),
+            "answer": str(r["answer"] or ""),
+            "explanation": str(r["explanation"] or ""),
+            "hints": [str(h) for h in hints if str(h or "").strip()][:3],
+            "self": check == "self",
+            "points": points,
+            "difficulty": difficulty,
+            "value_type": str(meta.get("valueType") or ""),
+        })
+    return samples
 
 
 def _seo_lesson_title(conn: sqlite3.Connection, skill_id: str) -> str:
@@ -7764,6 +7803,51 @@ def _seo_skill_short(name: str, num: int) -> str:
         if text.startswith(prefix):
             return text[len(prefix):].strip() or text
     return text
+
+
+def _seo_points_label(n: int) -> str:
+    """«1 первичный балл» / «2 первичных балла» / «3 первичных балла»."""
+    if n <= 0:
+        return ""
+    last, tens = n % 10, n % 100
+    if last == 1 and tens != 11:
+        word = "балл"
+    elif last in (2, 3, 4) and tens not in (12, 13, 14):
+        word = "балла"
+    else:
+        word = "баллов"
+    return f"{n} первичн{'ый' if n == 1 else 'ых'} {word}"
+
+
+def _seo_format_caption(value_type: str, answer: str) -> str:
+    """Подпись «Формат ответа: …» — та же логика, что answerFormatHint в
+    js/app.js, чтобы окно на SEO-странице выглядело как окно практики."""
+    vt = str(value_type or "")
+    if "целое" in vt:
+        return "целое число (в градусах)" if "градус" in vt else "целое число"
+    if "дробь" in vt:
+        return "десятичная дробь (запятая или точка)"
+    if "единиц" in vt:
+        return "число с единицей измерения"
+    a = str(answer or "").strip().replace(" ", "")
+    if re.fullmatch(r"[+-]?\d+", a):
+        return "целое число"
+    if re.fullmatch(r"[+-]?[\d.,]+(/[+-]?[\d.,]+)?", a):
+        return "десятичная дробь (запятая или точка)"
+    if re.search(r"[a-zA-Zа-яёА-ЯЁπ√∞]", a):
+        return "выражение"
+    return ""
+
+
+def _seo_stars(difficulty: int) -> str:
+    """Звёзды сложности как в приложении (stars в js/app.js): 1..5, off — бледные."""
+    d = max(1, min(5, int(difficulty or 0)))
+    return ("<span class='seo-stars' aria-label='Сложность "
+            + str(d) + " из 5' role='img'>"
+            + "".join(f"<span aria-hidden='true'>★</span>" if i <= d
+                      else "<span class='seo-stars__off' aria-hidden='true'>★</span>"
+                      for i in range(1, 6))
+            + "</span>")
 
 
 # Единый дизайн SEO-страниц: те же токены, шрифты, шапка и подвал, что у
@@ -7839,7 +7923,14 @@ def seo_task_urls(conn, base: str) -> list:
 
 def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                          num: int) -> bytes | None:
-    """SSR-страница «Задание N ЕГЭ по предмету». None — нет такого номера."""
+    """SSR-страница «Задание N ЕГЭ по предмету». None — нет такого номера.
+
+    Блок примеров повторяет единое окно практики (js/app.js): чипы с номером,
+    темой и сложностью; подсказки по уровням, которые открываются по одной;
+    часть 1 — поле ввода с автоматической проверкой; часть 2 (check:"self") —
+    без ввода ответа: «Сверить с решением», официальный разбор и честная
+    отметка «Решил(а) верно / Не получилось».
+    """
     info = SUBJECTS.get(subject) or {}
     title = str(info.get("title") or subject)
     genitive = _seo_genitive(subject)
@@ -7853,33 +7944,107 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     hub = f"{base}/ege/{subject}/"
     skill_name = skill["name"]
     short = _seo_skill_short(skill_name, num)
+    self_exam = bool(samples) and all(s["self"] for s in samples)
+    part_label = ("Часть 2 · развёрнутый ответ" if self_exam
+                  else "Часть 1 · краткий ответ")
     h1 = f"Задание {num} ЕГЭ по {genitive} — {short}"
     page_title = f"Задание {num} ЕГЭ по {genitive} ({short}): разбор и практика | ege easy"
     desc = (f"Задание {num} ЕГЭ по {genitive} ({skill_name}): что проверяется,"
-            f" примеры с разбором и бесплатная практика без регистрации.")
+            f" примеры с подсказками и разбором, бесплатная практика без регистрации.")
     cta = f"/dashboard#/skill/{skill['id']}?seo_subject={subject}"
+    if self_exam:
+        about = (f"Задание {num} ({skill_name}) — задача второй части экзамена по"
+                 f" {genitive}: здесь нужен не короткий ответ, а развёрнутая запись"
+                 f" решения на бумаге. Автопроверки у таких номеров нет и не"
+                 f" должно быть — реши сам и сверься с официальным решением, как"
+                 f" это делают эксперты на настоящей проверке.")
+        check_note = ("развёрнутый ответ — реши на бумаге и сверься")
+    else:
+        about = (f"Задание {num} ({skill_name}) — вопрос первой части экзамена по"
+                 f" {genitive}: короткий ответ, который проверяется автоматически."
+                 f" Ниже — реальные формулировки из тренажёра с подсказками и"
+                 f" разбором; проверка работает прямо на этой странице.")
+        check_note = "короткий ответ — проверяется автоматически"
+    # Данные для панели фактов: вес и формат берём из самих заданий навыка.
+    points = max((s["points"] for s in samples), default=0)
+    facts = [f"<div class='seo-fact'><span>Экзамен</span><b>{_seo_esc(title)}</b></div>",
+             f"<div class='seo-fact'><span>Формат</span><b>{_seo_esc(check_note)}</b></div>"]
+    if points > 0:
+        facts.append(f"<div class='seo-fact'><span>Вес в демоверсии</span>"
+                     f"<b>{_seo_points_label(points)}</b></div>")
+    facts.append(f"<div class='seo-fact'><span>Тема</span><b>{_seo_esc(short)}</b></div>")
+    facts.append("<div class='seo-fact'><span>Теория</span><b>"
+                 + (_seo_esc(f"урок «{lesson}»") if lesson
+                    else "формулы и разбор темы — в тренажёре")
+                 + "</b></div>")
+    # --- окно примера: те же элементы, что в практике ---
+    def stars_html(d):
+        return _seo_stars(d)
+
+    def format_badge(is_self):
+        return ("<span class='seo-tag'>развёрнутый ответ</span>" if is_self
+                else "<span class='seo-tag'>краткий ответ</span>")
+
     sample_blocks = []
     for i, task in enumerate(samples):
         first = (i == 0)
+        hints_html = "".join(
+            f"<div class='seo-hint{' seo-hint--first' if j == 0 else ''}'"
+            f" data-level='{j + 1}' hidden>"
+            f"<b>Подсказка {j + 1}.</b> {_seo_esc(h).replace(chr(10), '<br>')}"
+            f"</div>"
+            for j, h in enumerate(task["hints"]))
+        solution_rows = ""
+        if task["explanation"]:
+            # Часть 1 — «Разбор.» (как sessionShowAnswer в app.js),
+            # часть 2 — «Официальное решение.» (как sessionSelfReveal).
+            row_label = "Официальное решение" if task["self"] else "Разбор"
+            solution_rows += (f"<div class='seo-solution__row'><b>{row_label}.</b>"
+                              f"<p>{_seo_esc(task['explanation']).replace(chr(10), '<br>')}</p></div>")
+        if task["answer"]:
+            solution_rows += ("<div class='seo-solution__row'><b>Ответ.</b>"
+                              f"<p>{_seo_esc(task['answer'])}</p></div>")
+        solution = f"<div class='seo-solution' hidden>{solution_rows}</div>"
+        if task["self"]:
+            answer_area = ("<button type='button' class='btn btn-primary seo-reveal-btn'>"
+                           "Сверить с решением</button>")
+        else:
+            caption = _seo_format_caption(task["value_type"], task["answer"])
+            answer_area = (f"<form class='seo-check' data-answer='{_seo_esc(task['answer'])}'>"
+                           "<div class='answer-row'>"
+                           "<input class='answer-input' name='v' autocomplete='off' placeholder='Ответ'>"
+                           "<button type='submit' class='btn btn-primary'>Ответить</button></div>"
+                           + (f"<div class='seo-check__caption'>Формат ответа: {_seo_esc(caption)}</div>"
+                              if caption else "")
+                           + "</form>")
+        if task["hints"]:
+            hint_btn = ("<button type='button' class='btn btn-ghost btn--sm seo-hint-btn'>"
+                        "Подсказка 1</button>")
+        elif solution_rows:
+            # Подсказок нет, но разбор есть: кнопка сразу открывает решение.
+            hint_btn = ("<button type='button' class='btn btn-ghost btn--sm seo-hint-btn'"
+                        " data-mode='solution'>Показать решение</button>")
+        else:
+            hint_btn = ""
         sample_blocks.append(
-            f'<article class="seo-task">'
-            f'<h3>Пример {i + 1}</h3>'
-            f'<p class="seo-task__text">{_seo_esc(_seo_short(task["statement"])).replace(chr(10), "<br>")}</p>'
-            + (f'<details class="seo-task__hint"><summary>Подсказка</summary>'
-               f'<p>{_seo_esc(task["hint"]).replace(chr(10), "<br>")}</p></details>'
-               if task["hint"] else "")
-            + (f'<details class="seo-task__answer"><summary>Ответ и разбор</summary>'
-               f'<p><b>Ответ: {_seo_esc(task["answer"])}</b></p>'
-               + (f'<p>{_seo_esc(task["explanation"]).replace(chr(10), "<br>")}</p>'
-                  if task["explanation"] else "")
-               + f'</details>' if task["answer"] else "")
-            + (f'<form class="seo-check" data-answer="{_seo_esc(task["answer"])}">'
-               f'<label>Проверь себя: <input type="text" name="v" autocomplete="off"'
-               f' placeholder="Твой ответ"></label> '
-               f'<button type="submit">Проверить</button> '
-               f'<span class="seo-check__res" aria-live="polite"></span></form>'
-               if first and task["answer"] else "")
-            + f'</article>')
+            f"<article class='seo-window' data-kind='{'self' if task['self'] else 'auto'}'>"
+            "<div class='seo-window__tags'>"
+            f"<span class='seo-tag seo-tag--accent'>№ {num}</span>"
+            f"<span class='seo-tag'>Пример {i + 1}</span>"
+            + format_badge(task["self"])
+            + stars_html(task["difficulty"])
+            + (f"<span class='seo-tag seo-tag--points'>{_seo_points_label(task['points'])}</span>"
+               if task["points"] > 0 else "")
+            + "</div>"
+            f"<div class='seo-window__text'>{_seo_esc(_seo_short(task['statement'], 1200)).replace(chr(10), '<br>')}</div>"
+            f"<div class='seo-hints'>{hints_html}</div>"
+            f"<div class='seo-window__tools'>{hint_btn}"
+            + (f"<span class='seo-window__note'>{_seo_esc(check_note)}</span>" if task["self"] else "")
+            + "</div>"
+            f"<div class='seo-window__answer'>{answer_area}</div>"
+            + solution
+            + "<div class='seo-feedback' aria-live='polite'></div>"
+            + "</article>")
     samples_html = ("\n".join(sample_blocks) if sample_blocks
                     else "<p>Примеры заданий появятся здесь в ближайшее время.</p>")
     ld_samples = [{"@type": "Question", "name": f"Пример {i + 1} задания {num}",
@@ -7895,31 +8060,61 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
         {"@type": "BreadcrumbList", "itemListElement": [
             {"@type": "ListItem", "position": 1, "name": "ege easy",
              "item": base + "/"},
-            {"@type": "ListItem", "position": 2, "name": title, "item": hub},
-            {"@type": "ListItem", "position": 3,
+            {"@type": "ListItem", "position": 2, "name": "Все задания",
+             "item": base + "/ege/"},
+            {"@type": "ListItem", "position": 3, "name": title, "item": hub},
+            {"@type": "ListItem", "position": 4,
              "name": f"Задание {num}", "item": url}]}]}
     # Сырой </script> из данных каталога закрыл бы JSON-LD блок досрочно —
     # экранируем как <\/ (валидный JSON-escape), как принято для инлайн-JSON.
     ld_json = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
-    crumb = (f'<a href="/ege/">Все задания</a><span>·</span>'
-             f'<a href="{_seo_esc(hub)}">{_seo_esc(title)} — все номера</a>')
-    body_main = f"""<span class="chip">Задание {num} · {_seo_esc(title)}</span>
+    crumb = (f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
+             f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+             f"<a href='/ege/'>Все задания</a>"
+             f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+             f"<a href='{_seo_esc(hub)}'>{_seo_esc(title)}</a>"
+             f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+             f"<span class='seo-crumb__here' aria-current='page'>Задание {num}</span>")
+    body_main = f"""<div class="seo-hero">
+<div class="seo-badges">
+<span class="seo-badge seo-badge--accent">Задание {num}</span>
+<span class="seo-badge">{_seo_esc(title)}</span>
+<span class="seo-badge">{_seo_esc(part_label)}</span>
+</div>
 <h1>{_seo_esc(h1)}</h1>
-<p class="seo-sub">{_seo_esc(desc)}</p>
-<div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать задание {num} без регистрации →</a></div>
+<p class="seo-hero__lead">Разбор номера «{_seo_esc(short)}»: как устроено задание, настоящие формулировки из тренажёра с подсказками и официальным решением. Окно практики открывается сразу — без регистрации и онбординга.</p>
+<div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать задание {num} без регистрации →</a><a class="btn btn-ghost" href="{_seo_esc(hub)}">Все номера {_seo_esc(genitive)}</a></div>
+</div>
+<section class="seo-facts">
+<div class="seo-facts__about">
 <h2>Что проверяется</h2>
-<p>Номер {num} ({_seo_esc(skill_name)}) — часть экзамена по {_seo_esc(genitive)}. Ниже — примеры реальных формулировок из тренажёра: разбери их, а затем закрепи в интерактивной практике, где считаются опыт, ошибки и прогноз балла.</p>
-{h2_lesson if (h2_lesson := (f'<h2>Теория: {_seo_esc(lesson)}</h2><p>Пошаговый разбор темы — в уроке «{_seo_esc(lesson)}» внутри практики по кнопке выше.</p>' if lesson else '')) else ''}
+<p>{_seo_esc(about)}</p>
+<p class="seo-facts__note">Окно примера ниже — то же, что в приложении: подсказки по одной, {("сверка с официальным решением" if self_exam else "автопроверка ответа")} и разбор.</p>
+</div>
+<aside class="seo-facts__panel" aria-label="Кратко о задании">
+{''.join(facts)}
+</aside>
+</section>
 <h2>Примеры задания {num}</h2>
+<section class="seo-tasks">
 {samples_html}
-<h2>Частые вопросы</h2>
-<h3>Можно ли решать без регистрации?</h3>
-<p>Да: нажми кнопку выше — задание откроется сразу, без имени и онбординга. Прогресс сохранится после того, как укажешь имя.</p>
-<h3>Сколько баллов даёт задание {num}?</h3>
-<p>Первичный вес номера зависит от предмета и года — точный вес и твой прогнозный балл показывает тренажёр после нескольких решённых вариантов.</p>
-<div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Перейти к практике →</a></div>"""
-    # Проверка ответа — внешний js/seo-check.js (подключён в shell.html):
-    # в server.py инлайн-скриптам не место, а CSP только 'self' и так покрыт.
+</section>
+<section class="seo-features">
+<h2>Как устроена практика в тренажёре</h2>
+<div class="seo-features__grid">
+<div class="seo-feature"><b>Опыт за каждое решение</b><p>Чистое решение без подсказок ценится выше: опыт, уровни и серии растут с каждым заданием, а не за клики.</p></div>
+<div class="seo-feature"><b>Ошибки не пропадают</b><p>Нерешённое возвращается в работу над ошибками — тренажёр приведёт к заданию снова, пока оно не закроется без помощи.</p></div>
+<div class="seo-feature"><b>Прогноз балла</b><p>После нескольких решённых номеров тренажёр показывает прогнозный балл и говорит, какие темы подтянуть, чтобы его поднять.</p></div>
+</div>
+</section>
+<div class="seo-cta"><div class="seo-cta__inner">
+<div class="seo-cta__title">Закрепи задание {num} в тренажёре</div>
+<p class="seo-cta__text">Окно практики откроется сразу — без имени и онбординга. Прогресс сохранится, как только укажешь имя.</p>
+<div class="seo-cta__row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать без регистрации →</a></div>
+</div></div>"""
+    # Проверка ответа и окно подсказок — внешний js/seo-check.js
+    # (подключён в shell.html): в server.py инлайн-скриптам не место,
+    # а CSP только 'self' и так покрыт.
     return _seo_shell(
         title=page_title, desc=desc, canonical=url,
         robots="index, follow, max-image-preview:large", og_type="article",
@@ -7935,22 +8130,42 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
     genitive = _seo_genitive(subject)
     url = f"{base}/ege/{subject}/"
     skills = _seo_subject_skills(conn, subject)
-    items = "\n".join(
-        f'<li><a href="{_seo_esc(f"{base}/ege/{subject}/zadanie-{s["num"]}/")}">'
-        f'Задание {s["num"]} — {_seo_esc(_seo_skill_short(s["name"], s["num"]))}</a></li>'
-        for s in skills)
     desc = (f"Все задания ЕГЭ по {genitive} ({title}): разбор каждого номера,"
-            f" примеры и бесплатная практика без регистрации.")
-    body_main = f"""<span class="chip">{_seo_esc(title)}</span>
+            f" примеры с подсказками и бесплатная практика без регистрации.")
+    cta = f"/dashboard?seo_subject={subject}"
+    nums = "\n".join(
+        f"<a class='seo-num' href='{_seo_esc(base + '/ege/' + subject + '/zadanie-' + str(s['num']) + '/')}'>"
+        f"<span class='seo-num__badge' aria-hidden='true'>{s['num']}</span>"
+        f"<span class='seo-num__body'><span class='seo-num__name'>"
+        f"Задание {s['num']} — {_seo_esc(_seo_skill_short(s['name'], s['num']))}</span>"
+        f"<span class='seo-num__meta'>разбор, подсказки и практика</span></span>"
+        f"<span class='seo-num__arrow' aria-hidden='true'>→</span></a>"
+        for s in skills)
+    body_main = f"""<div class="seo-hero">
+<div class="seo-badges">
+<span class="seo-badge seo-badge--accent">{_seo_esc(title)}</span>
+<span class="seo-badge">{len(skills)} номеров экзамена</span>
+</div>
 <h1>Все задания ЕГЭ по {_seo_esc(genitive)}</h1>
-<p class="seo-sub">{_seo_esc(desc)}</p>
-<ol class="seo-list">
-{items}
-</ol>"""
+<p class="seo-hero__lead">Каждый номер экзамена — отдельная страница: что проверяется, настоящие формулировки с подсказками и разбором, практика без регистрации. Выбирай номер — или открой тренажёр, он сам подберёт, что решать.</p>
+<div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать без регистрации →</a></div>
+</div>
+<section class="seo-nums">
+{nums}
+</section>
+<div class="seo-cta"><div class="seo-cta__inner">
+<div class="seo-cta__title">Подготовка по {_seo_esc(genitive)} — в одном окне</div>
+<p class="seo-cta__text">Теория маленькими шагами, практика на настоящих заданиях, работа над ошибками и прогноз балла. Начать можно без регистрации.</p>
+<div class="seo-cta__row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Открыть тренажёр →</a></div>
+</div></div>"""
     return _seo_shell(
         title=f"Все задания ЕГЭ по {genitive} — разбор и практика | ege easy",
         desc=desc, canonical=url, robots="index, follow", og_type="website",
-        ld_json="", crumb='<a href="/ege/">Все предметы</a>',
+        ld_json="", crumb=(f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
+                           f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+                           f"<a href='/ege/'>Все задания</a>"
+                           f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+                           f"<span class='seo-crumb__here' aria-current='page'>{_seo_esc(title)}</span>"),
         body_main=body_main)
 
 
@@ -7965,23 +8180,35 @@ def seo_render_index(base: str) -> bytes | None:
         genitive = _seo_genitive(sid)
         titles.append(str(info.get("title") or sid))
         cards.append(
-            f'<li><a href="{_seo_esc(f"{base}/ege/{sid}/")}">'
-            f'Задания ЕГЭ по {_seo_esc(genitive)}<span>{_seo_esc(str(info.get("title") or sid))} — разбор всех номеров</span></a></li>')
+            f"<a class='seo-subj' href='{_seo_esc(f'{base}/ege/{sid}/')}'>"
+            f"<span class='seo-subj__icon' aria-hidden='true'>"
+            f"{_seo_esc(str(info.get('title') or sid)[:1].upper())}</span>"
+            f"<span class='seo-subj__body'><span class='seo-subj__name'>"
+            f"Задания ЕГЭ по {_seo_esc(genitive)}</span>"
+            f"<span class='seo-subj__meta'>разбор всех номеров · практика без регистрации</span></span>"
+            f"<span class='seo-num__arrow' aria-hidden='true'>→</span></a>")
     # Description собирается из реестра, а не захардкожен: новый предмет
     # попадает и в карточки, и в meta без правок кода.
     desc = (f"Все задания ЕГЭ по номерам ({', '.join(titles)}): разбор каждого"
-            f" номера и бесплатная практика без регистрации.")
-    body_main = f"""<span class="chip">ege easy · подготовка к ЕГЭ</span>
+            f" номера с подсказками и бесплатная практика без регистрации.")
+    body_main = f"""<div class="seo-hero">
+<div class="seo-badges">
+<span class="seo-badge seo-badge--accent">ege easy</span>
+<span class="seo-badge">подготовка к ЕГЭ</span>
+</div>
 <h1>Задания ЕГЭ по номерам</h1>
-<p class="seo-sub">Выбери предмет — внутри каждый номер экзамена с разбором и практикой без регистрации.</p>
-<ul class="seo-list">
+<p class="seo-hero__lead">Выбери предмет — внутри каждый номер экзамена: что проверяется, настоящие формулировки с подсказками и разбором, практика без регистрации. Прогресс и прогноз балла считает тренажёр.</p>
+</div>
+<section class="seo-nums">
 {chr(10).join(cards)}
-</ul>"""
+</section>"""
     return _seo_shell(
         title="Задания ЕГЭ по номерам — разбор и практика | ege easy",
         desc=desc,
         canonical=f"{base}/ege/", robots="index, follow", og_type="website",
-        ld_json="", crumb="Все задания",
+        ld_json="", crumb=(f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
+                           f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
+                           f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
         body_main=body_main)
 
 

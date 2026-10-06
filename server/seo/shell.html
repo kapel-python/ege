@@ -46,20 +46,24 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
-<link rel="stylesheet" href="/css/seo.css?v=1">
+<link rel="stylesheet" href="/css/seo.css?v=2">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 %%LD_BLOCK%%
 </head>
 <body>
 <div data-ege-header></div>
-<main><div class="wrap"><div class="seo-hero">
-<nav class="seo-crumb" aria-label="Хлебные крошки"><a href="/">ege easy</a><span>·</span>%%CRUMB%%</nav>
+<!-- Подшапка страницы: полоса с хлебными крошками прямо под общей
+     шапкой сайта. Сама шапка (site-header.js) не трогается. -->
+<div class="seo-bar"><div class="seo-bar__inner">
+<nav class="seo-crumb" aria-label="Хлебные крошки">%%CRUMB%%</nav>
+</div></div>
+<main><div class="wrap"><div class="seo-page">
 %%BODY_MAIN%%
 </div></div></main>
 <div data-ege-footer></div>
 <script src="/js/site-header.js?v=1"></script>
 <script src="/js/footer.js?v=5"></script>
-<script src="/js/seo-check.js?v=1"></script>
+<script src="/js/seo-check.js?v=2"></script>
 </body>
 </html>
