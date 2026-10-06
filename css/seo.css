@@ -87,13 +87,19 @@ main{padding-bottom:clamp(48px,8vw,80px);}
   color:var(--accent);font-weight:600;}
 
 /* ---------- hero ---------- */
-.seo-hero{position:relative;padding:clamp(36px,6vw,64px) 0 clamp(20px,3vw,28px);}
-/* overflow:hidden здесь нельзя: он режет блюр свечения жёсткой гранью.
-   Горизонтальный вылет гасит overflow-x:hidden у body. */
-.seo-hero::before{content:'';position:absolute;top:-30%;left:0;width:640px;height:640px;
+.seo-hero{position:relative;padding:clamp(36px,6vw,64px) 0 clamp(20px,3vw,28px);
+  /* overflow:clip (а не hidden): свечения ::before/::after шире hero
+     (640/520px) и без обрезки расползали layout до 660px на мобильном —
+     документ становился шире экрана: Chrome разрешал pinch-zoom-out до
+     0.59 с серыми полями, хотя страница и так влезает. clip, в отличие
+     от банального среза, ещё и не создаёт scroll-контейнер. */
+  overflow:clip;}
+.seo-hero::before{content:'';position:absolute;top:-30%;left:50%;transform:translateX(-50%);
+  width:min(640px,100%);height:640px;max-height:120%;
   background:radial-gradient(circle,var(--glow-green) 0%,transparent 70%);
   filter:blur(90px);pointer-events:none;}
-.seo-hero::after{content:'';position:absolute;top:10%;right:-10%;width:520px;height:520px;
+.seo-hero::after{content:'';position:absolute;top:10%;right:0;
+  width:min(520px,80%);height:520px;max-height:100%;
   background:radial-gradient(circle,var(--glow-accent) 0%,transparent 70%);
   filter:blur(90px);pointer-events:none;}
 .seo-hero>*{position:relative;z-index:1;}
