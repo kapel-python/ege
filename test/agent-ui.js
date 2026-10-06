@@ -480,8 +480,13 @@ check("известный доступ пропускает повторный �
   && spaCode.includes('screenLoader("Проверяем доступ…")'));
 check("треды греются до отрисовки раздела (третьего лоадера нет)",
   spaCode.includes("prefetchThreads: prefetchThreads")
+  && spaCode.includes("hasFreshThreads: threadsFresh")
   && /function prefetchThreads\(\) \{[\s\S]{0,900}cacheHasThreads\(\)/.test(spaCode)
-  && /route === "ai"[\s\S]{0,400}AgentScreen\.prefetchThreads\(\)/.test(appJs));
+  && /const warm = typeof AgentScreen[\s\S]{0,200}hasFreshThreads/.test(appJs)
+  && /if \(!warm && Store\.accountId/.test(appJs));
+check("«Новый чат» шлёт явный предмет (не stale через current_subject_for)",
+  /var wantSubject = null;/.test(spaCode)
+  && /api\("POST", "\/api\/agent\/threads", wantSubject \? \{ subject: wantSubject \} : \{\}\)/.test(spaCode));
 check("известное пустое состояние тоже без лоадера",
   /cacheOn\(\) && Array\.isArray\(S\.cache\.threads\)\) \{/.test(spaCode));
 check("тихая сверка не дублирует только что выполненный запрос",

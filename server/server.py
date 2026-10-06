@@ -14633,19 +14633,28 @@ class Handler(BaseHTTPRequestHandler):
                         created_at = int(keep["created_at"] or now_ms)
                         reused = True
                         try:
-                            # Предмет мог поменяться, и переиспользованный чат
-                            # обязан быть СВЕЖИМ в списке (сортировка по
-                            # updated_at): «Новый чат» только что нажали.
-                            conn.execute("UPDATE agent_threads SET subject=?, updated_at=? WHERE id=? AND user_id=?",
-                                         (subject, now_ms, tid, int(user_id)))
+                            # Переиспользование — только в СВОЁМ предмете:
+                            # пустой чат живёт в предмете создания, и смена
+                            # предмета его не перекрашивает (живой баг: чат
+                            # создан в обществе, предмет сменили — чат «стал»
+                            # чужим без спроса). Чужой чат не трогаем вообще:
+                            # молча делаем новый, как если бы пустых не было.
+                            if str(keep["subject"] or "") != subject:
+                                raise ValueError("пустой чат из другого предмета")
+                            # Предмет тот же — чат обязан быть СВЕЖИМ в списке
+                            # (сортировка по updated_at): «Новый чат» только
+                            # что нажали.
+                            conn.execute("UPDATE agent_threads SET updated_at=? WHERE id=? AND user_id=?",
+                                         (now_ms, tid, int(user_id)))
                             for extra in rows[1:]:
                                 eid = int(extra["id"])
                                 conn.execute("DELETE FROM agent_messages WHERE thread_id=?", (eid,))
                                 conn.execute("DELETE FROM agent_threads WHERE id=? AND user_id=?", (eid, int(user_id)))
                             conn.commit()
-                        except sqlite3.Error:
+                        except (sqlite3.Error, ValueError):
                             # Чистка — утешительная, создание важнее: на отказе
-                            # просто делаем новый чат, как раньше.
+                            # просто делаем новый чат, как раньше. ValueError —
+                            # чужой пустой чат (см. выше): новый без чистки.
                             try:
                                 conn.rollback()
                             except sqlite3.Error:

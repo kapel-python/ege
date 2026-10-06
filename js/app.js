@@ -1459,12 +1459,37 @@ async function render() {
       }
     } catch (_) {}
   }
+  // Профиль: подписка, план и устройства едут ВМЕСТЕ со страницей, а не
+  // после неё — иначе карточки догоняют первый кадр вторым-третьим запросом
+  // (дёргание). Та же 2-секундная гонка, гость пропускается.
+  if (route === "profile") {
+    try {
+      const jobs = [];
+      try {
+        if (Store.accountId) {
+          if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
+          if (typeof planPrefetch === "function") jobs.push(planPrefetch());
+        }
+      } catch (_) {}
+      if (jobs.length) {
+        await Promise.race([
+          Promise.allSettled(jobs),
+          new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
+        ]);
+      }
+    } catch (_) {}
+  }
   // ИИ: список чатов едет ВМЕСТЕ с разделом, а не после него — иначе после
   // лоадеров приезжает третий («Открываем чаты…»). Та же 2-секундная гонка,
   // гость пропускается (ему нечего греть, гейт мгновенный).
+  // Только НЕ для быстрых возвратов с живым кэшем: префетч дёргает сеть и
+  // перерисовывает список/заголовок поверх отрисованного — раздел «мигает»
+  // при каждом возврате из профиля. Кэш свежий — пропускаем без сети.
   if (route === "ai") {
     try {
-      if (Store.accountId && typeof AgentScreen !== "undefined" && AgentScreen && AgentScreen.prefetchThreads) {
+      const warm = typeof AgentScreen !== "undefined" && AgentScreen && AgentScreen.hasFreshThreads
+        ? AgentScreen.hasFreshThreads() : false;
+      if (!warm && Store.accountId && typeof AgentScreen !== "undefined" && AgentScreen && AgentScreen.prefetchThreads) {
         await Promise.race([
           AgentScreen.prefetchThreads().catch(() => null),
           new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),

@@ -935,6 +935,26 @@ def main():
             check("cancel -> Отменено",
                   status == 200 and body.get("final") == "Отменено.", f"{status} {body}")
 
+            section("пустой чат не перекрашивается сменой предмета")
+            conn2 = server.connect()
+            try:
+                sub_row = conn2.execute("SELECT current_subject FROM users WHERE name='Аня'").fetchone()
+                cur_thread = conn2.execute("SELECT id, subject FROM agent_threads WHERE id=? OR public_id=?",
+                                           (tid_a, tid_a)).fetchone()
+                cur_subj = cur_thread["subject"] if cur_thread else None
+                other = "russian" if (cur_subj or "") != "russian" else "profile_math"
+            finally:
+                conn2.close()
+            status, body = a.request(base, "POST", "/api/subject", {"subject": other})
+            check("смена предмета ok", status == 200, f"{status} {body}")
+            status, body = a.request(base, "POST", "/api/agent/threads", {})
+            check("в чужом предмете — новый чат, а не перекрашенный пустой",
+                  status == 200 and (body.get("thread") or {}).get("subject") == other
+                  and (body.get("thread") or {}).get("id") != (cur_thread["id"] if cur_thread else -1),
+                  f"{status} {body}")
+            status, body = a.request(base, "POST", "/api/subject", {"subject": cur_subj or "profile_math"})
+            check("возврат предмета ok", status == 200, f"{status} {body}")
+
             section("отмена зовёт модель, а не шаблон")
             with lock:
                 script.clear()

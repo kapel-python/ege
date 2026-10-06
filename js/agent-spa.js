@@ -1353,7 +1353,11 @@
      нечем объяснить. Поле не трогаем — недописанный вопрос не должен пропасть
      оттого, что человек нажал «Новый чат». Сервер переиспользует пустой чат и
      сам (подстраховка для старой вкладки и чужих клиентов), здесь запрос и
-     строка в списке не появляются вовсе. */
+     строка в списке не появляются вовсе.
+     Пустой чат живёт в ПРЕДМЕТЕ СВОЕГО СОЗДАНИЯ, а не в текущем: смена
+     предмета на сайте его не перекрашивает (был живой баг: чат создан в
+     обществе, предмет сменили — чат «стал» другим предметом без спроса),
+     и сервер это подтверждает (валидация в POST /api/agent/threads). */
   function newChat() {
     if (currentChatEmpty()) {
       showEmpty(true);
@@ -1367,7 +1371,12 @@
   }
   function createThread() {
     if (S.creating) return S.creating;
-    S.creating = api("POST", "/api/agent/threads", {}).then(function (res) {
+    // Предмет — ЯВНО текущий: пустой чат наследует предмет создания и смена
+    // предмета его не перекрашивает (комментарий у newChat). Без этого новый
+    // чат цеплялся бы к stale-предмету через current_subject_for на сервере.
+    var wantSubject = null;
+    try { wantSubject = (typeof Store !== "undefined" && Store.subject) || null; } catch (_) {}
+    S.creating = api("POST", "/api/agent/threads", wantSubject ? { subject: wantSubject } : {}).then(function (res) {
       if (res.status === 200 && res.data && res.data.thread) {
         var th = res.data.thread;
         // Сервер отдаёт уже существующий ПУСТОЙ чат вместо нового — тогда он
@@ -3896,5 +3905,6 @@
     confirmStep: confirmStep, emptyVisible: emptyVisible, screen: screenAgent,
     planProposal: planProposalOf, planDialog: planProposalDialog,
     pendingStepState: pendingStepState, prefetchThreads: prefetchThreads,
+    hasFreshThreads: threadsFresh,
   };
 })();
