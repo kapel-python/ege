@@ -155,6 +155,23 @@ def main():
         check("/dashboard по-прежнему noindex",
               headers.get("X-Robots-Tag") == "noindex, nofollow",
               str(headers.get("X-Robots-Tag")))
+
+        # JSON-LD не разрывается данными каталога: сырой </script> в ответе
+        # обязан уехать как <\/, иначе блок закроется досрочно (XSS-вектор).
+        conn = server.connect()
+        try:
+            row = conn.execute(
+                "SELECT t.id FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                " WHERE s.subject='russian' ORDER BY t.id LIMIT 1").fetchone()
+            conn.execute("UPDATE tasks SET answer=? WHERE id=?",
+                         ("x</script><script>alert(1)</script>", row["id"]))
+            conn.commit()
+            poisoned = server.seo_render_task_page(
+                "http://localhost:2026", conn, "russian", 1).decode("utf-8", "replace")
+        finally:
+            conn.close()
+        check("JSON-LD экранирует </script> из данных",
+              "</script><script>" not in poisoned and "<\\/script>" in poisoned)
         httpd.shutdown()
 
     print("ALL OK" if not fails else f"{len(fails)} FAILURES")

@@ -7841,6 +7841,9 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
             {"@type": "ListItem", "position": 2, "name": title, "item": hub},
             {"@type": "ListItem", "position": 3,
              "name": f"Задание {num}", "item": url}]}]}
+    # Сырой </script> из данных каталога закрыл бы JSON-LD блок досрочно —
+    # экранируем как <\/ (валидный JSON-escape), как принято для инлайн-JSON.
+    ld_json = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
     body = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -7855,7 +7858,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
 <meta property="og:title" content="{_seo_esc(page_title)}">
 <meta property="og:description" content="{_seo_esc(desc)}">
 <meta property="og:url" content="{_seo_esc(url)}">
-<script type="application/ld+json">{json.dumps(ld, ensure_ascii=False)}</script>
+<script type="application/ld+json">{ld_json}</script>
 <style>
 body{{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;margin:0 auto;max-width:760px;padding:24px 16px;line-height:1.65;color:#0e1526}}
 a{{color:#0277b6}}.seo-cta{{display:inline-block;margin:20px 0;padding:14px 28px;border-radius:999px;background:#0277b6;color:#fff!important;text-decoration:none;font-weight:600}}
