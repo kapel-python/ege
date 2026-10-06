@@ -8361,7 +8361,7 @@ function studyPlanCloseHint(t) {
     parts.push("освой тему — сейчас " + Math.max(0, Math.floor(Number(t.mastery) || 0)) + "%");
   }
   if (!parts.length) return "";
-  const s = parts.join(" · ");
+  const s = parts.join(". ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 

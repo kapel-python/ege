@@ -279,7 +279,7 @@ if (P) {
   }
   check("closeHint: рано и не освоено — обе части",
     (() => { const h = P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000, mastery: 42 });
-      return /Откроется .+ · /.test(h) && /освой тему — сейчас 42%/.test(h); })(),
+      return /Откроется .+\. /.test(h) && /освой тему — сейчас 42%$/.test(h) && !/·/.test(h); })(),
     P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000, mastery: 42 }));
   check("closeHint: непройденный урок — первый и с бонусом",
     (() => { const h = P.studyPlanCloseHint({ closeable: false, closeReasons: [], availableAt: 1791604800000,
