@@ -1437,47 +1437,42 @@ async function render() {
     }
     if (my !== renderSeq || currentRoute() !== route) return;
   }
-  // Профиль: подписка, учебный план и устройства едут ВМЕСТЕ со страницей,
-  // а не после неё — иначе карточки догоняют первый кадр вторым запросом
-  // (дёргание). Ждём недолго (2 с): при лежащей сети страница всё равно
-  // рисуется, карточки догрузятся обычным путём. Гость — пропускаем, ему нечего.
+  // Профиль: подписка и план едут ВМЕСТЕ со страницей, а не после неё —
+  // иначе карточки догоняют первый кадр вторым запросом (дёргание).
+  // Но ждать их с ВИСЯЩИМ СТАРЫМ экраном нельзя: переход из ИИ секунду
+  // показывал чат (остальные разделы рисуются сразу). Поэтому сначала
+  // синхронная проверка тёплого кэша: всё свежее — рендер сразу, без
+  // лоадера и ожидания; иначе — лоадер СРАЗУ, и только потом ждём
+  // (потолок 2 с, гость — без ожидания вообще).
   if (route === "profile") {
+    let profileWarm = false;
     try {
-      const jobs = [];
+      const peek = (typeof Subscription !== "undefined" && Subscription.peek) ? Subscription.peek() : null;
+      profileWarm = !!Store.accountId && !!peek && !peek.guest && !!planPeek();
+    } catch (_) { profileWarm = false; }
+    if (!profileWarm) {
+      try { document.getElementById("screen").innerHTML = pageLoaderHTML("Открываем профиль…"); } catch (_) {}
       try {
-        if (Store.accountId) {
-          if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
-          if (typeof planPrefetch === "function") jobs.push(planPrefetch());
-          if (typeof devicesPrefetch === "function") jobs.push(devicesPrefetch());
+        const jobs = [];
+        try {
+          if (Store.accountId) {
+            if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
+            if (typeof planPrefetch === "function") jobs.push(planPrefetch());
+            if (typeof devicesPrefetch === "function") jobs.push(devicesPrefetch());
+          }
+        } catch (_) {}
+        if (jobs.length) {
+          await Promise.race([
+            Promise.allSettled(jobs),
+            new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
+          ]);
         }
       } catch (_) {}
-      if (jobs.length) {
-        await Promise.race([
-          Promise.allSettled(jobs),
-          new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
-        ]);
-      }
-    } catch (_) {}
-  }
-  // Профиль: подписка, план и устройства едут ВМЕСТЕ со страницей, а не
-  // после неё — иначе карточки догоняют первый кадр вторым-третьим запросом
-  // (дёргание). Та же 2-секундная гонка, гость пропускается.
-  if (route === "profile") {
-    try {
-      const jobs = [];
-      try {
-        if (Store.accountId) {
-          if (typeof Subscription !== "undefined" && Subscription.prefetch) jobs.push(Subscription.prefetch());
-          if (typeof planPrefetch === "function") jobs.push(planPrefetch());
-        }
-      } catch (_) {}
-      if (jobs.length) {
-        await Promise.race([
-          Promise.allSettled(jobs),
-          new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000)),
-        ]);
-      }
-    } catch (_) {}
+    } else {
+      // Тёплый заход: устройства освежаем, но не ждём — строка подтянется
+      // сама, весь экран уже отрисован из кэша.
+      try { if (typeof devicesPrefetch === "function") devicesPrefetch(); } catch (_) {}
+    }
   }
   // ИИ: список чатов едет ВМЕСТЕ с разделом, а не после него — иначе после
   // лоадеров приезжает третий («Открываем чаты…»). Та же 2-секундная гонка,
@@ -8432,7 +8427,7 @@ function studyPlanFindTopic(skillId) {
 }
 
 let planMountGen = 0;
-let planCache = { subject: null, state: null, at: 0 };
+let planCache = { subject: null, state: null, at: 0, account: null };
 const PLAN_CACHE_FRESH_MS = 30000;
 
 /* Предзагрузка блока плана для экрана профиля (пара Subscription.prefetch):
@@ -8444,13 +8439,27 @@ function planPrefetch() {
   if (!accountId) return Promise.resolve(null);
   const qs = subject ? "?subject=" + encodeURIComponent(subject) : "";
   return ApiClient.get("/api/plan" + qs).then((res) => {
-    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now() };
+    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now(),
+                    account: (function(){ try { return Store.accountId || null; } catch (_) { return null; } })() };
     return planCache.state;
   }).catch(() => null);
 }
 
 /* Тихая подгрузка блока: только для залогиненных, только на профиле.
    Любой отказ (401 гостя, сеть) — пустой div, без тостов и ошибок. */
+/* Синхронный срез кэша плана для render(): тёплый — рисуем профиль сразу,
+   без лоадера и ожидания. Холодный — null, render покажет лоадер первым. */
+function planPeek() {
+  try {
+    const subj = String(Store.subject || "");
+    if (!Store.accountId || planCache.account !== Store.accountId) return null;
+    if (planCache.state && planCache.subject === subj && (Date.now() - (planCache.at || 0)) < PLAN_CACHE_FRESH_MS) {
+      return planCache.state;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function mountPlanCard() {
   let box = null;
   try { box = document.getElementById("plan-card"); } catch (_) { box = null; }
@@ -8474,7 +8483,8 @@ function mountPlanCard() {
     try { live = document.getElementById("plan-card"); } catch (_) { live = null; }
     if (!live || !live.isConnected) return;
     try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
-    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now() };
+    planCache = { subject: (res && res.subject) || subject, state: res || null, at: Date.now(),
+                    account: (function(){ try { return Store.accountId || null; } catch (_) { return null; } })() };
     live.innerHTML = planCardHTML(res);
   }).catch(() => {
     if (my !== planMountGen) return;
@@ -8493,7 +8503,8 @@ function planRenderState(res) {
   if (!live || !live.isConnected) return;
   try { if (typeof currentRoute === "function" && currentRoute() !== "profile") return; } catch (_) {}
   try {
-    planCache = { subject: (res && res.subject) || planCache.subject, state: res || null, at: Date.now() };
+    planCache = { subject: (res && res.subject) || planCache.subject, state: res || null, at: Date.now(),
+                    account: (function(){ try { return Store.accountId || null; } catch (_) { return null; } })() };
   } catch (_) {}
   live.innerHTML = planCardHTML(res);
 }

@@ -341,6 +341,13 @@ if (P) {
   check("profile: предзагрузка подписки и плана до отрисовки",
     /route === "profile"/.test(appJs) && /Subscription\.prefetch\(\)/.test(appJs)
     && /planPrefetch\(\)/.test(appJs) && /Promise\.allSettled/.test(appJs));
+  check("profile: один блок предзагрузки (без дубля)",
+    (appJs.match(/if \(route === "profile"\)/g) || []).length === 1);
+  check("profile: тёплый кэш — сразу рендер, холодный — лоадер ДО ожидания",
+    /profileWarm = !!Store\.accountId/.test(appJs)
+    && /Subscription\.peek\(\)/.test(appJs) && /planPeek\(\)/.test(appJs)
+    && /pageLoaderHTML\("Открываем профиль…"\)/.test(appJs)
+    && appJs.indexOf('pageLoaderHTML("Открываем профиль…")') < appJs.indexOf("Promise.allSettled"));
   check("lock: серверный флаг бьёт индекс",
     P.planPeriodLocked({ currentIndex: 5 }, { index: 0, locked: true }) === true
     && P.planPeriodLocked({ currentIndex: 0 }, { index: 3, locked: false }) === false);
