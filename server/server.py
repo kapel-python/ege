@@ -7663,6 +7663,329 @@ def _inject_ssr_payload(handler, conn: sqlite3.Connection, page_name: str, data:
         return data
 
 
+# ---------------------------------------------------------------------------
+# Программные SEO-страницы заданий: /ege/<subject>/zadanie-<N>/.
+#
+# Поиск приводит людей запросами вида «задание 17 ЕГЭ русский» — раньше нам
+# было нечего выдать: в индексе жили только лендинг и тариф, а приложение
+# за онбордингом робот не видит. Эти страницы отдаются сервером сразу с
+# текстом (SSR): H1, описание, примеры заданий с разбором, FAQ и CTA
+# «решать без регистрации» (ссылка в приложение с ?seo_subject= — предмет
+# подставляется сам, профиль не заводится, см. публичный вход в js/app.js).
+# Страницы только читают каталог: ни строк в users, ни кук они не создают.
+# ---------------------------------------------------------------------------
+# Короткие русские названия предметов для заголовков вида
+# «Задание 17 ЕГЭ по русскому языку».
+SEO_SUBJECT_GENITIVE = {
+    "profile_math": "профильной математике",
+    "basic_math": "базовой математике",
+    "russian": "русскому языку",
+    "biology": "биологии",
+    "society": "обществознанию",
+}
+
+
+def _seo_exam_num(value) -> int | None:
+    """«№17» / 17 / «17» -> 17. Не номер — None. Не бросает."""
+    try:
+        text = str(value or "").replace("№", "").strip()
+        num = int(text)
+        return num if 1 <= num <= 99 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _seo_subject_skills(conn: sqlite3.Connection, subject: str) -> list:
+    """Навыки предмета по возрастанию номера: [{id, name, num}]. Не бросает."""
+    try:
+        rows = conn.execute(
+            "SELECT id, name, ege FROM skills WHERE subject=? ORDER BY id", (subject,)
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    skills = []
+    for row in rows or []:
+        num = _seo_exam_num((row["ege"] or ""))
+        if num is None:
+            continue
+        skills.append({"id": str(row["id"]), "name": str(row["name"] or ""),
+                       "num": num})
+    skills.sort(key=lambda s: s["num"])
+    return skills
+
+
+def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
+                       limit: int = 2) -> list:
+    """Пара примеров заданий навыка для SEO-страницы. Не бросает."""
+    try:
+        rows = conn.execute(
+            "SELECT t.id, t.topic, t.exam_number, t.statement, t.answer, t.hint,"
+            " t.explanation FROM tasks t JOIN skills s ON s.id=t.skill_id"
+            " WHERE s.subject=? AND t.skill_id=? ORDER BY t.id LIMIT ?",
+            (subject, skill_id, max(1, int(limit))),
+        ).fetchall()
+    except (sqlite3.Error, ValueError, TypeError):
+        return []
+    return [{"id": str(r["id"]), "topic": str(r["topic"] or ""),
+             "statement": str(r["statement"] or ""),
+             "answer": str(r["answer"] or ""),
+             "hint": str(r["hint"] or ""),
+             "explanation": str(r["explanation"] or "")} for r in (rows or [])]
+
+
+def _seo_lesson_title(conn: sqlite3.Connection, skill_id: str) -> str:
+    try:
+        row = conn.execute("SELECT title FROM lessons WHERE skill_id=? ORDER BY id LIMIT 1",
+                           (skill_id,)).fetchone()
+    except sqlite3.Error:
+        return ""
+    if not row:
+        return ""
+    try:
+        return str(row["title"] or "")
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
+def _seo_esc(text) -> str:
+    return html.escape(str(text or ""), quote=True)
+
+
+def _seo_short(text, limit: int = 600) -> str:
+    """Обрезка примера задания до разумной длины для страницы (по словам)."""
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0] or text[:limit]
+    return cut + "…"
+
+
+def seo_task_urls(conn, base: str) -> list:
+    """Все канонические URL заданий для sitemap.xml. Не бросает."""
+    urls: list = []
+    try:
+        subjects = [r for r in SUBJECT_IDS
+                    if not _status_is_locked((SUBJECTS[r] or {}).get("status"))]
+    except Exception:
+        return urls
+    for subject in subjects:
+        for skill in _seo_subject_skills(conn, subject):
+            urls.append(f"{base}/ege/{subject}/zadanie-{skill['num']}/")
+    return urls
+
+
+def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
+                         num: int):
+    """SSR-страница «Задание N ЕГЭ по предмету». None — нет такого номера."""
+    info = SUBJECTS.get(subject) or {}
+    title = str(info.get("title") or subject)
+    genitive = SEO_SUBJECT_GENITIVE.get(subject, title)
+    skill = next((s for s in _seo_subject_skills(conn, subject)
+                  if s["num"] == num), None)
+    if skill is None:
+        return None
+    samples = _seo_task_samples(conn, subject, skill["id"], 2)
+    lesson = _seo_lesson_title(conn, skill["id"])
+    url = f"{base}/ege/{subject}/zadanie-{num}/"
+    hub = f"{base}/ege/{subject}/"
+    skill_name = skill["name"]
+    h1 = f"{skill_name}: задание {num} ЕГЭ по {genitive}"
+    page_title = f"Задание {num} ЕГЭ по {genitive}: разбор и практика | ege easy"
+    desc = (f"Задание {num} ЕГЭ по {genitive} ({skill_name}): что проверяется,"
+            f" примеры с разбором и бесплатная практика без регистрации.")
+    cta = f"/dashboard#/skill/{skill['id']}?seo_subject={subject}"
+    sample_blocks = []
+    for i, task in enumerate(samples):
+        first = (i == 0)
+        sample_blocks.append(
+            f'<article class="seo-task">'
+            f'<h3>Пример {i + 1}</h3>'
+            f'<p class="seo-task__text">{_seo_esc(_seo_short(task["statement"])).replace(chr(10), "<br>")}</p>'
+            + (f'<details class="seo-task__hint"><summary>Подсказка</summary>'
+               f'<p>{_seo_esc(task["hint"]).replace(chr(10), "<br>")}</p></details>'
+               if task["hint"] else "")
+            + (f'<details class="seo-task__answer"><summary>Ответ и разбор</summary>'
+               f'<p><b>Ответ: {_seo_esc(task["answer"])}</b></p>'
+               + (f'<p>{_seo_esc(task["explanation"]).replace(chr(10), "<br>")}</p>'
+                  if task["explanation"] else "")
+               + f'</details>' if task["answer"] else "")
+            + (f'<form class="seo-check" data-answer="{_seo_esc(task["answer"])}">'
+               f'<label>Проверь себя: <input type="text" name="v" autocomplete="off"'
+               f' placeholder="Твой ответ"></label> '
+               f'<button type="submit">Проверить</button> '
+               f'<span class="seo-check__res" aria-live="polite"></span></form>'
+               if first and task["answer"] else "")
+            + f'</article>')
+    samples_html = ("\n".join(sample_blocks) if sample_blocks
+                    else "<p>Примеры заданий появятся здесь в ближайшее время.</p>")
+    ld_samples = [{"@type": "Question", "name": f"Пример {i + 1} задания {num}",
+                   "acceptedAnswer": {"@type": "Answer", "text": t["answer"][:200]}}
+                  for i, t in enumerate(samples) if t["answer"]][:2]
+    ld = {"@context": "https://schema.org", "@graph": [
+        {"@type": "Course", "name": f"{title} — подготовка к ЕГЭ",
+         "provider": {"@type": "Organization", "name": "ege easy",
+                      "url": base}},
+        {"@type": "PracticeProblem", "name": h1, "url": url,
+         "about": skill_name, "educationalLevel": "ЕГЭ",
+         "hasPart": ld_samples},
+        {"@type": "BreadcrumbList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "ege easy",
+             "item": base + "/"},
+            {"@type": "ListItem", "position": 2, "name": title, "item": hub},
+            {"@type": "ListItem", "position": 3,
+             "name": f"Задание {num}", "item": url}]}]}
+    body = f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_seo_esc(page_title)}</title>
+<meta name="description" content="{_seo_esc(desc)}">
+<link rel="canonical" href="{_seo_esc(url)}">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="ege easy">
+<meta property="og:title" content="{_seo_esc(page_title)}">
+<meta property="og:description" content="{_seo_esc(desc)}">
+<meta property="og:url" content="{_seo_esc(url)}">
+<script type="application/ld+json">{json.dumps(ld, ensure_ascii=False)}</script>
+<style>
+body{{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;margin:0 auto;max-width:760px;padding:24px 16px;line-height:1.65;color:#0e1526}}
+a{{color:#0277b6}}.seo-cta{{display:inline-block;margin:20px 0;padding:14px 28px;border-radius:999px;background:#0277b6;color:#fff!important;text-decoration:none;font-weight:600}}
+.seo-task{{border:1px solid #e0e6f0;border-radius:14px;padding:18px;margin:18px 0}}
+.seo-task details{{margin-top:10px}}.seo-check{{margin-top:12px}}.seo-check input{{padding:8px 12px;border:1px solid #c6cfdd;border-radius:8px;max-width:220px}}
+.seo-check button{{padding:8px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;font-weight:600;cursor:pointer}}
+nav.seo-nav{{display:flex;gap:16px;flex-wrap:wrap;margin:24px 0;font-size:15px}}
+</style>
+</head>
+<body>
+<nav class="seo-nav"><a href="/">ege easy</a><a href="/ege/">Все задания</a><a href="{_seo_esc(hub)}">{_seo_esc(title)} — все номера</a></nav>
+<h1>{_seo_esc(h1)}</h1>
+<p>{_seo_esc(desc)}</p>
+<a class="seo-cta" href="{_seo_esc(cta)}">Решать задание {num} без регистрации →</a>
+<h2>Что проверяется</h2>
+<p>Номер {num} ({_seo_esc(skill_name)}) — часть экзамена по {genitive}. Ниже — примеры реальных формулировок из тренажёра: разбери их, а затем закрепи в интерактивной практике, где считаются опыт, ошибки и прогноз балла.</p>
+{h2_lesson if (h2_lesson := (f'<h2>Теория: {_seo_esc(lesson)}</h2><p>Пошаговый разбор темы — в уроке «{_seo_esc(lesson)}» внутри практики по кнопке выше.</p>' if lesson else '')) else ''}
+<h2>Примеры задания {num}</h2>
+{samples_html}
+<h2>Частые вопросы</h2>
+<h3>Можно ли решать без регистрации?</h3>
+<p>Да: нажми кнопку выше — задание откроется сразу, без имени и онбординга. Прогресс сохранится после того, как укажешь имя.</p>
+<h3>Сколько баллов даёт задание {num}?</h3>
+<p>Первичный вес номера зависит от предмета и года — точный вес и твой прогнозный балл показывает тренажёр после нескольких решённых вариантов.</p>
+<a class="seo-cta" href="{_seo_esc(cta)}">Перейти к практике →</a>
+<script>
+document.querySelectorAll('.seo-check').forEach(function(f){{
+  f.addEventListener('submit', function(e){{
+    e.preventDefault();
+    var want = (f.getAttribute('data-answer') || '').trim().toLowerCase().replace(/\\s+/g, ' ').replace(',', '.');
+    var got = ((new FormData(f)).get('v') || '').toString().trim().toLowerCase().replace(/\\s+/g, ' ').replace(',', '.');
+    var el = f.querySelector('.seo-check__res');
+    if (!got) {{ el.textContent = 'Введи ответ выше.'; return; }}
+    el.textContent = (got === want) ? 'Верно! Так держать — дальше больше в тренажёре.' : 'Пока не сошлось — открой ответ и разбор выше.';
+  }});
+}});
+</script>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
+def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
+    """Хаб предмета: все номера со ссылками. None — неизвестный предмет."""
+    info = SUBJECTS.get(subject)
+    if info is None:
+        return None
+    title = str(info.get("title") or subject)
+    genitive = SEO_SUBJECT_GENITIVE.get(subject, title)
+    url = f"{base}/ege/{subject}/"
+    skills = _seo_subject_skills(conn, subject)
+    items = "\n".join(
+        f'<li><a href="{_seo_esc(f"{base}/ege/{subject}/zadanie-{s["num"]}/")}">'
+        f'Задание {s["num"]} — {_seo_esc(s["name"])}</a></li>' for s in skills)
+    desc = (f"Все задания ЕГЭ по {genitive} ({title}): разбор каждого номера,"
+            f" примеры и бесплатная практика без регистрации.")
+    body = f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Все задания ЕГЭ по {genitive} — разбор и практика | ege easy</title>
+<meta name="description" content="{_seo_esc(desc)}">
+<link rel="canonical" href="{_seo_esc(url)}">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ege easy">
+<meta property="og:title" content="Все задания ЕГЭ по {genitive} | ege easy">
+<meta property="og:url" content="{_seo_esc(url)}">
+</head>
+<body style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;margin:0 auto;max-width:760px;padding:24px 16px;line-height:1.65">
+<nav><a href="/">ege easy</a> · <a href="/ege/">Все предметы</a></nav>
+<h1>Все задания ЕГЭ по {genitive}</h1>
+<p>{_seo_esc(desc)}</p>
+<ol>
+{items}
+</ol>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
+def seo_render_index(base: str) -> bytes:
+    """Хаб /ege/: все предметы со ссылками. Только registry, без БД."""
+    cards = []
+    for sid in SUBJECT_IDS:
+        info = SUBJECTS.get(sid) or {}
+        if _status_is_locked(info.get("status")):
+            continue
+        genitive = SEO_SUBJECT_GENITIVE.get(sid, str(info.get("title") or sid))
+        cards.append(
+            f'<li><a href="{_seo_esc(f"{base}/ege/{sid}/")}">'
+            f'Задания ЕГЭ по {genitive} ({_seo_esc(str(info.get("title") or sid))})</a></li>')
+    body = f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Задания ЕГЭ по номерам — разбор и практика | ege easy</title>
+<meta name="description" content="Все задания ЕГЭ по номерам: математика, русский язык, биология, обществознание. Разбор каждого номера и бесплатная практика без регистрации.">
+<link rel="canonical" href="{_seo_esc(base)}/ege/">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ege easy">
+<meta property="og:title" content="Задания ЕГЭ по номерам | ege easy">
+<meta property="og:url" content="{_seo_esc(base)}/ege/">
+</head>
+<body style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;margin:0 auto;max-width:760px;padding:24px 16px;line-height:1.65">
+<nav><a href="/">ege easy</a></nav>
+<h1>Задания ЕГЭ по номерам</h1>
+<p>Выбери предмет — внутри каждый номер экзамена с разбором и практикой без регистрации.</p>
+<ul>
+{chr(10).join(cards)}
+</ul>
+</body>
+</html>"""
+    return body.encode("utf-8")
+
+
+def serve_seo_page(self, data: bytes) -> None:
+    """Индексируемая SEO-страница: noindex НЕ ставим, кэш — час."""
+    accept = self.headers.get("Accept-Encoding", "") or ""
+    encoding = None
+    if len(data) > 1024 and "gzip" in accept.lower():
+        data = gzip.compress(data, compresslevel=5)
+        encoding = "gzip"
+    self.send_response(200)
+    self.send_header("Content-Type", "text/html; charset=utf-8")
+    self.send_header("Cache-Control", "public, max-age=3600")
+    self.send_security_headers()
+    if encoding:
+        self.send_header("Content-Encoding", encoding)
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    self.wfile.write(data)
+
+
 def support_token_secret(conn: sqlite3.Connection) -> str:
     """Stable per-deployment secret for support HMACs. Never leaves the server.
 
@@ -16120,6 +16443,57 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", "/subscription")
             self.send_security_headers()
             self.end_headers(); return
+        elif path == '/ege' or path == '/ege/':
+            # Хаб программных SEO-страниц: список предметов. Индексируется
+            # (в sitemap.xml и robots.txt), профиля и кук не создаёт.
+            serve_seo_page(self, seo_render_index(public_base_url(self)))
+            return
+        elif path.startswith('/ege/'):
+            # /ege/<subject>/ — хаб номеров; /ege/<subject>/zadanie-<N>/ —
+            # страница номера с разбором. Без слэша — 301 на канон со слэшем.
+            rest = path[len('/ege/'):].strip('/')
+            parts = [p for p in rest.split('/') if p]
+            base = public_base_url(self)
+            if len(parts) == 1 and is_known_subject(parts[0]):
+                if not path.endswith('/'):
+                    self.send_response(301)
+                    self.send_header("Location", f"/ege/{parts[0]}/")
+                    self.send_security_headers()
+                    self.end_headers(); return
+                conn = connect()
+                try:
+                    data = seo_render_hub(base, conn, resolve_subject(parts[0]))
+                finally:
+                    try: conn.close()
+                    except Exception: pass
+                if data is None:
+                    self.serve_not_found_page(); return
+                serve_seo_page(self, data)
+                return
+            if (len(parts) == 2 and is_known_subject(parts[0])
+                    and parts[1].startswith('zadanie-')):
+                try:
+                    num = int(parts[1][len('zadanie-'):])
+                except (ValueError, TypeError):
+                    self.serve_not_found_page(); return
+                if not path.endswith('/'):
+                    self.send_response(301)
+                    self.send_header("Location", f"/ege/{parts[0]}/zadanie-{num}/")
+                    self.send_security_headers()
+                    self.end_headers(); return
+                conn = connect()
+                try:
+                    data = seo_render_task_page(base, conn, resolve_subject(parts[0]), num)
+                except sqlite3.Error:
+                    data = None
+                finally:
+                    try: conn.close()
+                    except Exception: pass
+                if data is None:
+                    self.serve_not_found_page(); return
+                serve_seo_page(self, data)
+                return
+            self.serve_not_found_page(); return
         elif path == '/essay' or path.startswith('/essay/'):
             # Красивая ссылка на результат: /essay/<sid|public_id> отдаёт тот
             # же ege-result.html; id страница берёт из пути сама (число —
@@ -16136,16 +16510,40 @@ class Handler(BaseHTTPRequestHandler):
             # Карта сайта строится на лету: <loc> обязаны быть абсолютными,
             # а домен зависит от деплоя — берём его из хоста запроса
             # (EGE_PUBLIC_URL в приоритете, см. public_base_url).
-            # В sitemap — только публичный лендинг; /dashboard, /admin
-            # и /api/* закрыты от индексации и в robots.txt, и мета-тегами.
+            # В sitemap — только публичное: лендинг, тариф и SEO-страницы
+            # заданий (/ege/); /dashboard, /admin и /api/* закрыты от
+            # индексации и в robots.txt, и мета-тегами.
             base = public_base_url(self)
             lastmod = today()
+            urls = [f'  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>'
+                    '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n',
+                    f'  <url><loc>{base}/subscription</loc><lastmod>{lastmod}</lastmod>'
+                    '<changefreq>monthly</changefreq><priority>0.6</priority></url>\n',
+                    f'  <url><loc>{base}/ege/</loc><lastmod>{lastmod}</lastmod>'
+                    '<changefreq>weekly</changefreq><priority>0.8</priority></url>\n']
+            try:
+                sm_conn = connect()
+                try:
+                    for sid in SUBJECT_IDS:
+                        info = SUBJECTS.get(sid) or {}
+                        if _status_is_locked(info.get("status")):
+                            continue
+                        urls.append(
+                            f'  <url><loc>{base}/ege/{sid}/</loc><lastmod>{lastmod}</lastmod>'
+                            '<changefreq>weekly</changefreq><priority>0.7</priority></url>\n')
+                    for loc in seo_task_urls(sm_conn, base):
+                        urls.append(
+                            f'  <url><loc>{loc}</loc><lastmod>{lastmod}</lastmod>'
+                            '<changefreq>monthly</changefreq><priority>0.6</priority></url>\n')
+                finally:
+                    try: sm_conn.close()
+                    except Exception: pass
+            except Exception:
+                pass
             body = (
                 '<?xml version="1.0" encoding="UTF-8"?>\n'
                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                f'  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>'
-                '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n'
-                '</urlset>'
+                + "".join(urls) + '</urlset>\n'
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/xml; charset=utf-8")

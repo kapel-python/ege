@@ -104,5 +104,32 @@ t("сервер: noindex-список покрывает terms/privacy/manage/eg
 t("сервер: несуществующие URL отдают фирменную 404", server.includes("serve_not_found_page") &&
   server.includes('ROOT / "404.html"') && exists("404.html") && exists("about.html"));
 
+/* ---- программные SEO-страницы заданий /ege/<subject>/zadanie-<N>/ ---- */
+if (exists("robots.txt")) {
+  const robots = read("robots.txt");
+  t("robots.txt разрешает /ege/", /^Allow:\s*\/ege\//m.test(robots));
+}
+t("сервер: маршрут /ege/ (хаб предметов)", server.includes("path == '/ege'"));
+t("сервер: рендер страницы задания (seo_render_task_page)", server.includes("def seo_render_task_page"));
+t("сервер: рендер хаба предмета и индекса (seo_render_hub/index)", server.includes("def seo_render_hub") && server.includes("def seo_render_index"));
+t("сервер: sitemap включает /ege/ и номера заданий", server.includes("/ege/") && server.includes("seo_task_urls") && server.includes("zadanie-"));
+t("сервер: sitemap по-прежнему без /dashboard", !/<loc>\{base\}\/dashboard/.test(server));
+t("сервер: SEO-страницы без X-Robots-Tag (индексируются)", (() => {
+  const i = server.indexOf("def serve_seo_page");
+  if (i < 0) return false;
+  const body = server.slice(i, i + 1200);
+  return body.includes("text/html") && !body.includes("X-Robots-Tag");
+})());
+t("сервер: страница задания с canonical и PracticeProblem", server.includes("PracticeProblem") && server.includes("rel=\"canonical\""));
+t("сервер: CTA ведёт в приложение с seo_subject", server.includes("seo_subject"));
+
+/* ---- публичный вход из поиска (без онбординга) ---- */
+const appSrc = read("js/app.js");
+t("приложение: PUBLIC_TASK_ROUTES определён", /const PUBLIC_TASK_ROUTES = new Set/.test(appSrc));
+t("приложение: публичный вход читает seo_subject", appSrc.includes('hashQueryValue("seo_subject")'));
+t("приложение: публичный вход не показывает онбординг", appSrc.includes("!publicTaskEntry"));
+t("приложение: routeParam срезает ?seo_subject", /\.split\("\?"\)\[0\]/.test(appSrc));
+t("приложение: плашка сохранения прогресса", appSrc.includes("syncPublicBanner"));
+
 console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
 process.exit(fails ? 1 : 0);

@@ -8,7 +8,8 @@
   - `python3 test/admin-inbox.py` (контракт endpoint'ов обращений: поля `{id,message,status,source,createdAt}`, системные обращения `source='system'` с дедуплем и полными правами обычного обращения)
   - `python3 test/admin-block.py` (контракт бана: маршрут `POST /api/admin/users/<ref>/block|unblock`, сверка действий панели с backend'ом, явный 404 вместо общего «Not found», сроки/self-block/неизвестный ref, 403 ACCOUNT_BLOCKED, ленивое истечение, аудит; свой temp-БД, живой сервер)
   - `node test/smoke.js`
-  - `node test/seo.js` (robots/sitemap/meta/иконки)
+  - `node test/seo.js` (robots/sitemap/meta/иконки + SEO-страницы /ege/ и публичный вход)
+  - `python3 test/seo-task-pages.py` (SEO-страницы заданий на живом сервере с temp-БД: /ege/, хаб предмета, страница номера с разбором и CTA, 301 на канон, 404, sitemap/robots, /dashboard по-прежнему noindex, профилей не заводит)
   - `node test/recommender.js` (сценарии движка «лучший следующий шаг»)
   - `node test/auth-merge.js` (409-конфликт при смене аккаунта: мерж блокируется)
   - `python3 test/perimeter-security.py` (периметр: подмена `X-Forwarded-For` прямым клиентом vs доверенный loopback-«прокси», мусорный XFF не становится ключом бакета, общий лимит на `/api/auth/*` и отсутствие аккаунтов-переростков, CSRF-гейт на ВСЕХ пишущих `/api/` (cross-site 403, свой Origin и запрос без Origin проходят), одинаковое время входа для несуществующего email, `X-Forwarded-Host`/Host-редирект без утечки мусора в `Location`, CRLF в Host не рвёт заголовки, NUL в пути даёт тихий отказ, обход каталога и служебные файлы не отдаются — temp-БД, живой сервер; тест проверен «с дырой»: с возвращённым доверием XFF и снятым CSRF-гейтом падает)

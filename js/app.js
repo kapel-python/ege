@@ -1174,11 +1174,14 @@ function routeParam() {
   const h = location.hash.replace(/^#\//, "");
   const i = h.indexOf("/");
   if (i < 0) return "";
+  // Хвост «?seo_subject=…» — параметр публичного входа со страниц /ege/,
+  // а не часть id (идёт незакодированным после ?). Срезаем его, иначе
+  // #/skill/r01?seo_subject=russian искал бы навык с мусором в id.
   // Ссылку вида #/lesson/% дописывает кто угодно. decodeURIComponent на
   // таком бросает URIError, а render() не ловит его — SPA застревал в
   // unhandled rejection до ручной правки адресной строки.
   try {
-    return decodeURIComponent(h.slice(i + 1));
+    return decodeURIComponent(h.slice(i + 1)).split("?")[0];
   } catch {
     return "";
   }
@@ -1203,6 +1206,38 @@ const TASK_FOCUS_ROUTES = new Set(["session", "practice", "boss", "daily", "revi
 /* Маршруты с живой сессией: перезагрузка восстанавливает место, а не
    сбрасывает на список. */
 const SESSION_ROUTES = new Set(["session", "practice", "boss", "daily", "review"]);
+
+/* Публичный вход из поиска (?seo_subject= в хэше со страниц /ege/): эти
+   разделы открываются без онбординга с подставленным предметом, а профиль
+   по-прежнему не заводится — ответы копятся локально до явного сохранения
+   (guest-ветка Store). Ошибки/статистика/сочинения исключены: им нечего
+   показать без записей пользователя. */
+const PUBLIC_TASK_ROUTES = new Set(["skill", "path", "training", "session",
+  "practice", "boss", "daily", "review", "lesson", "trials"]);
+
+/* Плашка публичного режима: видна, пока человек решает без регистрации.
+   Кнопка ведёт в обычный онбординг (предмет уже предустановлен), после
+   завершения плашка снимается следующим render(). */
+function syncPublicBanner(show) {
+  try {
+    let el = document.getElementById("public-banner");
+    const onboarded = !!(typeof Store !== "undefined" && Store.state && Store.state.onboarded);
+    if (!show || onboarded) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "public-banner";
+      el.innerHTML = `<span>Решаешь без регистрации — прогресс сохранится, когда укажешь имя.</span>`
+        + `<button type="button" onclick="try{Onboarding.show()}catch(_){}">Сохранить прогресс</button>`;
+      el.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:60;display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:14px;background:var(--surface-2,#10141c);color:var(--text,#fff);border:1px solid var(--card-border,rgba(255,255,255,.12));box-shadow:0 12px 32px rgba(0,0,0,.35);font-size:14px;";
+      const btn = el.querySelector("button");
+      if (btn) btn.style.cssText = "flex-shrink:0;padding:8px 16px;border-radius:999px;border:none;background:#0277b6;color:#fff;font-weight:600;cursor:pointer;";
+      document.body.appendChild(el);
+    }
+  } catch (_) {}
+}
 
 const Vendor = {
   _mathPromise: null,
@@ -1324,8 +1359,43 @@ async function render() {
   // а не registered: после отвязки единственного входа registered=false при
   // живой сессии, и такой человек тоже должен видеть пикер, а не онбординг.
   const postLoginRoute = route === "subject" && !!Store.accountId;
-  if (!Store.state.onboarded && !postLoginRoute && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
+  // Публичный вход из поиска: страницы /ege/<предмет>/zadanie-<N>/ ведут
+  // сюда с ?seo_subject= в хэше. Предмет подставляем сами (тихий переход
+  // гостя — сервер отвечает эхом без строки в users), онбординг не показываем
+  // и профиль не заводим: человек сразу решает, ответы копятся локально.
+  // Сохранение — позже одной кнопкой в плашке (обычный Onboarding.show()).
+  let publicTaskEntry = false;
+  if (!Store.state.onboarded && !Store.accountId && !postLoginRoute
+      && PUBLIC_TASK_ROUTES.has(route)) {
+    let seoSubject = "";
+    try { seoSubject = hashQueryValue("seo_subject"); } catch (_) {}
+    if (seoSubject) {
+      let known = false;
+      try {
+        known = !!(typeof DataAPI !== "undefined" && DataAPI.subjectInfo
+          && DataAPI.subjectInfo(seoSubject));
+      } catch (_) {}
+      if (known) {
+        publicTaskEntry = true;
+        try {
+          if (typeof Onboarding !== "undefined" && Onboarding) {
+            Onboarding.presetSubject = seoSubject;
+            try { sessionStorage.setItem("ege_onboard_preset_subject", seoSubject); } catch (_) {}
+          }
+        } catch (_) {}
+        try {
+          const cur = (typeof DataAPI !== "undefined" && DataAPI.currentSubject)
+            ? DataAPI.currentSubject() : null;
+          if (cur !== seoSubject && Store.switchSubject) await Store.switchSubject(seoSubject);
+        } catch (_) {}
+        if (currentRoute() !== route) return;
+        try { clearHashQuery(); } catch (_) {}
+      }
+    }
+  }
+  if (!Store.state.onboarded && !postLoginRoute && !publicTaskEntry && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
+  try { syncPublicBanner(publicTaskEntry); } catch (_) {}
   // Убираем старый футер сразу, ещё до ленивой загрузки формул. На фокусных
   // маршрутах это не даёт старому контенту мигнуть во время перехода.
   try { if (window.Footer) Footer.sync(route); } catch (_) {}
