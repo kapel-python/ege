@@ -478,9 +478,20 @@
   function quotaCacheKey() { return "ege_agent_quota:" + (S.accountId || ""); }
   function setQuota(q, cached) {
     if (!q) return;
+    // Новизна ответа: параллельные опросы/GET/POST могут вернуться не по
+    // порядку отправки — опоздавший ответ со старым остатком не должен
+    // откатывать кольцо назад (живой случай: кружок показал 498 при реальных
+    // 487). Сервер штампует каждый ответ квоты полем at (мс); применяем
+    // только не старее применённого. Без штампа (старый localStorage) —
+    // применяем как раньше.
+    var at = Number(q && q.at);
+    var cur = Number(S.quota && S.quota.at) || 0;
+    if (isFinite(at) && at >= 0 && isFinite(cur) && at < cur) return false;
     var limit = Math.max(1, Number(q.limit) || QUOTA_FALLBACK);
     var remaining = Math.max(0, Math.min(limit, Number(q.remaining) || 0));
     S.quota = { limit: limit, remaining: remaining, resetInSec: q.resetInSec == null ? null : Number(q.resetInSec) };
+    if (isFinite(at) && at >= 0) S.quota.at = at;
+    else if (isFinite(cur) && cur > 0) S.quota.at = cur;
     // Причина блокировки (ферма) едет тем же объектом: модалка по клику на
     // кружок обязана показать то же окно, что исчерпание, — с причиной.
     if (q && q.reason === "farm_suspected") S.quota.reason = "farm_suspected";

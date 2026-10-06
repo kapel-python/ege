@@ -18,6 +18,7 @@ const check = (name, cond, detail = "") => {
 const spaJs = read("js/agent-spa.js");
 const spaCss = read("css/agent.css");
 const srvCode = read("server/server.py");
+const srvAgent = read("server/agent.py");
 const appJs = read("js/app.js");
 const indexHtml = read("index.html");
 const agentHtml = read("agent.html");
@@ -175,6 +176,11 @@ check("опрос применяет квоту после каждого шаг
   && /function livePoll\(turn\)[\s\S]{0,900}?setQuota\(res\.data\.quota\)/.test(spaCode));
 check("открытие переписки тоже сверяет кольцо",
   /function loadThreadMessages\(force\)[\s\S]{0,700}?if \(res\.data\.quota\) setQuota\(res\.data\.quota\)/.test(spaCode));
+check("опоздавший ответ не откатывает кольцо (guard по at)",
+  /at < cur\) return false/.test(spaCode)
+  && /"at": now_ms/.test(srvAgent)
+  && /"at": _confirm_quota\.get\("at"\)/.test(srvCode)
+  && /"at": _quota_state\.get\("at"\)/.test(srvCode));
 check("ноль — полный красный круг, а не пустой трек",
   /remaining <= 0 \? 0 : \(RING/.test(spaCode)
   && /\.agent__quota\.zero \.q-ring \{ stroke: var\(--danger\); \}/.test(spaCss)

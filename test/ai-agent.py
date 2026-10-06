@@ -849,6 +849,8 @@ def main():
             check("usage.cost == 1", body.get("usage", {}).get("cost") == 1, str(body.get("usage")))
             status, quota = a.request(base, "GET", "/api/agent/limits", None)
             check("квота 9 из 10", quota.get("remaining") == 9 and quota.get("limit") == 10, str(quota))
+            check("квота штампована временем (at — число мс)",
+                  isinstance(quota.get("at"), (int, float)) and quota.get("at") > 0, str(quota.get("at")))
             check("заголовок детерминирован (первые 60)",
                   True, "")
             status, body = a.request(base, "GET", "/api/agent/threads", None)

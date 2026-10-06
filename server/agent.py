@@ -977,12 +977,13 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
         timer = int(row["timer_ms"]) if row and row["timer_ms"] is not None else None
         if count >= limit:
             return {"ok": True, "limit": limit, "remaining": count,
-                    "resetInSec": None, "windowSec": window_ms // 1000}
+                    "resetInSec": None, "windowSec": window_ms // 1000,
+                    "at": now_ms}
         start = timer if timer is not None else now_ms
         reset_ms = start + window_ms
         return {"ok": True, "limit": limit, "remaining": max(0, count),
                 "resetInSec": max(1, (reset_ms - now_ms + 999) // 1000),
-                "windowSec": window_ms // 1000}
+                "windowSec": window_ms // 1000, "at": now_ms}
     # Аккаунт на известном устройстве, читающий котёл: свой бакет + котлы.
     owners = [owner] + device_owners
     states: list = []
@@ -1023,7 +1024,8 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     dev_rem = min([p[0] for p in projected if p[4] != owner] or [own_rem])
     remaining = min(own_rem, dev_rem)
     payload: dict = {"ok": True, "limit": limit, "remaining": remaining,
-                     "windowSec": window_ms // 1000, "resetInSec": None}
+                     "windowSec": window_ms // 1000, "resetInSec": None,
+                     "at": now_ms}
     # Обвиняем в ферме, только если свой почти полон (сам потратил не больше
     # одного тика): тяжёлый сам с добитым чужими котлом получает обычное
     # окно исчерпания. Блокировка та же (остаток 0), модалка честная.

@@ -9082,6 +9082,7 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
         "remaining": remaining,
         "resetInSec": None if reset_ms is None else max(1, (reset_ms - now_ms + 999) // 1000),
         "windowSec": window_ms // 1000,
+        "at": now_ms,
     }
     # Подозрение на ферму: чужой котёл жмёт сильнее своего бакета — НО
     # обвиняем, только если свой почти полон (потратил сам не больше одного
@@ -15013,7 +15014,7 @@ class Handler(BaseHTTPRequestHandler):
                                               "Лимит проверок сочинений на сегодня исчерпан. Дождись таймера — проверки вернутся."),
                                     "code": AI_LIMIT_CODE, "limit": st["limit"],
                                     "remaining": st["remaining"], "resetInSec": st["resetInSec"],
-                                    "retryAfter": retry,
+                                    "retryAfter": retry, "at": st.get("at"),
                                     **({"reason": "farm_suspected"} if farm else {})},
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
@@ -15407,7 +15408,7 @@ class Handler(BaseHTTPRequestHandler):
                                                   "Ходы ИИ на сегодня закончились. Дождись таймера."),
                                         "code": AI_LIMIT_CODE, "limit": _confirm_quota["limit"],
                                         "remaining": _confirm_quota["remaining"], "resetInSec": _confirm_quota["resetInSec"],
-                                        "retryAfter": retry,
+                                        "retryAfter": retry, "at": _confirm_quota.get("at"),
                                         **({"reason": "farm_suspected"} if _confirm_farm else {})},
                                        429, token=token, headers={"Retry-After": str(retry)}); return
                     confirm_spent["n"] = 1
@@ -15716,7 +15717,7 @@ class Handler(BaseHTTPRequestHandler):
                                                       "Ходы ИИ на сегодня закончились. Дождись таймера."),
                                             "code": AI_LIMIT_CODE, "limit": _quota_state["limit"],
                                             "remaining": _quota_state["remaining"], "resetInSec": _quota_state["resetInSec"],
-                                            "retryAfter": retry,
+                                            "retryAfter": retry, "at": _quota_state.get("at"),
                                             **({"reason": "farm_suspected"} if _turn_farm else {})},
                                            429, token=token, headers={"Retry-After": str(retry)})
                             return
