@@ -8058,19 +8058,15 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
          "about": skill_name, "educationalLevel": "ЕГЭ",
          "hasPart": ld_samples},
         {"@type": "BreadcrumbList", "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "ege easy",
-             "item": base + "/"},
-            {"@type": "ListItem", "position": 2, "name": "Все задания",
+            {"@type": "ListItem", "position": 1, "name": "Все задания",
              "item": base + "/ege/"},
-            {"@type": "ListItem", "position": 3, "name": title, "item": hub},
-            {"@type": "ListItem", "position": 4,
+            {"@type": "ListItem", "position": 2, "name": title, "item": hub},
+            {"@type": "ListItem", "position": 3,
              "name": f"Задание {num}", "item": url}]}]}
     # Сырой </script> из данных каталога закрыл бы JSON-LD блок досрочно —
     # экранируем как <\/ (валидный JSON-escape), как принято для инлайн-JSON.
     ld_json = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
-    crumb = (f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
-             f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
-             f"<a href='/ege/'>Все задания</a>"
+    crumb = (f"<a href='/ege/'>Все задания</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
              f"<a href='{_seo_esc(hub)}'>{_seo_esc(title)}</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
@@ -8132,7 +8128,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
     skills = _seo_subject_skills(conn, subject)
     desc = (f"Все задания ЕГЭ по {genitive} ({title}): разбор каждого номера,"
             f" примеры с подсказками и бесплатная практика без регистрации.")
-    cta = f"/dashboard?seo_subject={subject}"
+    cta = f"/dashboard#/training?seo_subject={subject}"
     nums = "\n".join(
         f"<a class='seo-num' href='{_seo_esc(base + '/ege/' + subject + '/zadanie-' + str(s['num']) + '/')}'>"
         f"<span class='seo-num__badge' aria-hidden='true'>{s['num']}</span>"
@@ -8161,9 +8157,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
     return _seo_shell(
         title=f"Все задания ЕГЭ по {genitive} — разбор и практика | ege easy",
         desc=desc, canonical=url, robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
-                           f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
-                           f"<a href='/ege/'>Все задания</a>"
+        ld_json="", crumb=(f"<a href='/ege/'>Все задания</a>"
                            f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
                            f"<span class='seo-crumb__here' aria-current='page'>{_seo_esc(title)}</span>"),
         body_main=body_main)
@@ -8206,9 +8200,7 @@ def seo_render_index(base: str) -> bytes | None:
         title="Задания ЕГЭ по номерам — разбор и практика | ege easy",
         desc=desc,
         canonical=f"{base}/ege/", robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<a href='/'><span class='seo-crumb__home'>ege easy</span></a>"
-                           f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
-                           f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
+        ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
         body_main=body_main)
 
 
