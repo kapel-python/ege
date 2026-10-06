@@ -7909,7 +7909,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
 <p class="seo-sub">{_seo_esc(desc)}</p>
 <div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать задание {num} без регистрации →</a></div>
 <h2>Что проверяется</h2>
-<p>Номер {num} ({_seo_esc(skill_name)}) — часть экзамена по {genitive}. Ниже — примеры реальных формулировок из тренажёра: разбери их, а затем закрепи в интерактивной практике, где считаются опыт, ошибки и прогноз балла.</p>
+<p>Номер {num} ({_seo_esc(skill_name)}) — часть экзамена по {_seo_esc(genitive)}. Ниже — примеры реальных формулировок из тренажёра: разбери их, а затем закрепи в интерактивной практике, где считаются опыт, ошибки и прогноз балла.</p>
 {h2_lesson if (h2_lesson := (f'<h2>Теория: {_seo_esc(lesson)}</h2><p>Пошаговый разбор темы — в уроке «{_seo_esc(lesson)}» внутри практики по кнопке выше.</p>' if lesson else '')) else ''}
 <h2>Примеры задания {num}</h2>
 {samples_html}
@@ -7943,7 +7943,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
     desc = (f"Все задания ЕГЭ по {genitive} ({title}): разбор каждого номера,"
             f" примеры и бесплатная практика без регистрации.")
     body_main = f"""<span class="chip">{_seo_esc(title)}</span>
-<h1>Все задания ЕГЭ по {genitive}</h1>
+<h1>Все задания ЕГЭ по {_seo_esc(genitive)}</h1>
 <p class="seo-sub">{_seo_esc(desc)}</p>
 <ol class="seo-list">
 {items}
@@ -7955,7 +7955,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
         body_main=body_main)
 
 
-def seo_render_index(base: str) -> bytes:
+def seo_render_index(base: str) -> bytes | None:
     """Хаб /ege/: все предметы со ссылками. Только registry, без БД."""
     cards = []
     for sid in SUBJECT_IDS:
@@ -7965,7 +7965,7 @@ def seo_render_index(base: str) -> bytes:
         genitive = _seo_genitive(sid)
         cards.append(
             f'<li><a href="{_seo_esc(f"{base}/ege/{sid}/")}">'
-            f'Задания ЕГЭ по {genitive}<span>{_seo_esc(str(info.get("title") or sid))} — разбор всех номеров</span></a></li>')
+            f'Задания ЕГЭ по {_seo_esc(genitive)}<span>{_seo_esc(str(info.get("title") or sid))} — разбор всех номеров</span></a></li>')
     body_main = f"""<span class="chip">ege easy · подготовка к ЕГЭ</span>
 <h1>Задания ЕГЭ по номерам</h1>
 <p class="seo-sub">Выбери предмет — внутри каждый номер экзамена с разбором и практикой без регистрации.</p>
@@ -16458,7 +16458,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/ege' or path == '/ege/':
             # Хаб программных SEO-страниц: список предметов. Индексируется
             # (в sitemap.xml и robots.txt), профиля и кук не создаёт.
-            serve_seo_page(self, seo_render_index(public_base_url(self)))
+            # None — нет шаблона shell.html: честная фирменная 404, а не
+            # падение на len(None) с оборванным соединением.
+            data = seo_render_index(public_base_url(self))
+            if data is None:
+                self.serve_not_found_page(); return
+            serve_seo_page(self, data)
             return
         elif path.startswith('/ege/'):
             # /ege/<subject>/ — хаб номеров; /ege/<subject>/zadanie-<N>/ —

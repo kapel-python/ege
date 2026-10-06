@@ -161,6 +161,24 @@ def main():
         check("без остатков маркеров %%", st == 200 and "%%" not in body.decode("utf-8", "replace"),
               str(st))
 
+        # Пропавший shell.html — честная фирменная 404, а не оборванное
+        # соединение (None от рендера перехватывается роутом).
+        from pathlib import Path as _Path
+        real_dir, real_cache = server._SEO_TEMPLATE_DIR, dict(server._seo_template_cache)
+        server._SEO_TEMPLATE_DIR = _Path(tmp) / "no-such-dir"
+        server._seo_template_cache.clear()
+        try:
+            check("рендер без шаблона даёт None",
+                  server.seo_render_index("http://localhost:2026") is None)
+            st, _, _ = get("/ege/")
+            check("/ege/ без шаблона — фирменная 404", st == 404, str(st))
+        finally:
+            server._SEO_TEMPLATE_DIR = real_dir
+            server._seo_template_cache.clear()
+            server._seo_template_cache.update(real_cache)
+        st, _, _ = get("/ege/")
+        check("/ege/ после возврата шаблона снова 200", st == 200, str(st))
+
         # JSON-LD не разрывается данными каталога: сырой </script> в ответе
         # обязан уехать как <\/, иначе блок закроется досрочно (XSS-вектор).
         conn = server.connect()
