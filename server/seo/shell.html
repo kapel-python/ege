@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!-- Оболочка SEO-страниц заданий (/ege/). Дизайн — css/seo.css + общие
+     site-header/footer; сервер (server.py) подставляет только данные через
+     маркеры вида ПРОЦЕНТ-ПРОЦЕНТ NAME ПРОЦЕНТ-ПРОЦЕНТ за один проход (вставленное не пересканируется).
+     Маркеры: TITLE, DESC, CANONICAL, ROBOTS, OG_TYPE, LD_BLOCK, CRUMB,
+     BODY_MAIN. Значения TITLE/DESC/CANONICAL/ROBOTS/OG_TYPE сервер
+     экранирует; LD_BLOCK и BODY_MAIN — готовый HTML от сервера. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>%%TITLE%%</title>
+<meta name="description" content="%%DESC%%">
+<link rel="canonical" href="%%CANONICAL%%">
+<meta name="robots" content="%%ROBOTS%%">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
+<meta name="color-scheme" content="light dark">
+<meta property="og:type" content="%%OG_TYPE%%">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:site_name" content="ege easy">
+<meta property="og:title" content="%%TITLE%%">
+<meta property="og:description" content="%%DESC%%">
+<meta property="og:url" content="%%CANONICAL%%">
+<meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="%%TITLE%%">
+<meta name="twitter:description" content="%%DESC%%">
+<meta name="twitter:image" content="https://egeeasy.ru/assets/seo/og-image.png">
+<script>
+  /* Та же тема, что у лендинга и приложения: сохранённый выбор
+     (общий ключ ege_core_theme) → иначе системная. Без мигания. */
+  (function(){
+    try{
+      var saved=null;
+      try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
+      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
+      document.documentElement.setAttribute('data-theme',theme);
+    }catch(e){}
+  })();
+</script>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="stylesheet" href="/css/footer.css?v=8">
+<link rel="stylesheet" href="/css/site-header.css?v=1">
+<link rel="stylesheet" href="/css/seo.css?v=1">
+<link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+%%LD_BLOCK%%
+</head>
+<body>
+<div data-ege-header></div>
+<main><div class="wrap"><div class="seo-hero">
+<nav class="seo-crumb" aria-label="Хлебные крошки"><a href="/">ege easy</a><span>·</span>%%CRUMB%%</nav>
+%%BODY_MAIN%%
+</div></div></main>
+<div data-ege-footer></div>
+<script src="/js/site-header.js?v=1"></script>
+<script src="/js/footer.js?v=5"></script>
+<script src="/js/seo-check.js?v=1"></script>
+</body>
+</html>

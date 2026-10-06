@@ -7771,180 +7771,48 @@ def _seo_skill_short(name: str, num: int) -> str:
 # about.html/status.html (источник правды — about.html; версии css/js
 # сверяй с status.html). SEO-страницы обязаны выглядеть частью сайта:
 # человек из поиска должен узнать продукт, а не голый текст.
-_SEO_STYLE = """
-  *,*::before,*::after{box-sizing:border-box;}
-  html{scroll-behavior:smooth;color-scheme:light;-webkit-font-smoothing:antialiased;}
-  html[data-theme="dark"]{color-scheme:dark;}
-  body{margin:0;background:var(--surface-0);color:var(--text);
-    font-family:var(--font-body);font-size:clamp(15px,1.8vw,17px);
-    line-height:1.6;overflow-x:hidden;min-width:0;}
-  a{color:inherit;text-decoration:none;}
-  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
-  .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
-  main{padding-bottom:clamp(48px,8vw,80px);}
-  .seo-hero{padding:clamp(36px,6vw,64px) 0 clamp(20px,3vw,28px);}
-  .chip{display:inline-flex;align-items:center;gap:10px;padding:10px 20px;border-radius:var(--radius-pill);
-    background:var(--accent-dim);border:1px solid var(--muted-border);color:var(--accent);
-    font-size:clamp(13px,1.6vw,14px);font-weight:600;margin-bottom:clamp(16px,3vw,24px);}
-  h1{font-family:var(--font-display);font-size:clamp(28px,6vw,46px);font-weight:700;line-height:1.14;
-    letter-spacing:-0.02em;margin:0 0 clamp(14px,2.5vw,20px);overflow-wrap:anywhere;}
-  .seo-sub{font-size:clamp(15px,2vw,18px);color:var(--text-dim);line-height:1.7;margin:0 0 clamp(20px,3vw,28px);max-width:640px;}
-  h2{font-family:var(--font-display);font-size:clamp(22px,4vw,30px);font-weight:700;letter-spacing:-0.02em;
-    margin:clamp(28px,5vw,44px) 0 clamp(10px,2vw,14px);overflow-wrap:anywhere;}
-  h3{font-family:var(--font-display);font-size:clamp(17px,2.4vw,20px);font-weight:600;margin:0 0 10px;}
-  p{overflow-wrap:anywhere;}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;
-    padding:clamp(13px,2vw,16px) clamp(24px,4vw,32px);border-radius:var(--radius-pill);
-    font-weight:600;font-size:clamp(14px,1.8vw,16px);cursor:pointer;border:none;white-space:nowrap;
-    transition:transform 0.3s var(--ease-out),box-shadow 0.3s var(--ease-out);font-family:var(--font-body);}
-  .btn-primary{background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 50%,#2563EB 100%);color:#fff;
-    box-shadow:0 16px 32px -12px rgba(56,189,248,0.5);}
-  .btn-primary:hover{transform:translateY(-2px);}
-  .seo-cta-row{margin:clamp(20px,3vw,28px) 0;}
-  .seo-crumb{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 clamp(14px,2.5vw,20px);
-    font-size:clamp(13px,1.7vw,15px);color:var(--text-faint);}
-  .seo-crumb a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
-  .seo-task{background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
-    border:1px solid var(--card-border);border-radius:var(--radius-lg);
-    padding:clamp(20px,3.5vw,28px);margin:clamp(16px,3vw,24px) 0;
-    box-shadow:0 1px 0 var(--inset-line) inset,var(--shadow-sm);}
-  .seo-task__text{color:var(--text);margin:0 0 12px;}
-  .seo-task details{margin-top:10px;border:1px solid var(--card-border);border-radius:var(--radius-md);padding:10px 14px;}
-  .seo-task summary{cursor:pointer;font-weight:600;color:var(--accent);}
-  .seo-task details p{margin:8px 0 4px;color:var(--text-dim);}
-  .seo-check{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
-  .seo-check input{padding:10px 14px;border:1px solid var(--muted-border);border-radius:var(--radius-md);
-    background:var(--surface-1);color:var(--text);font:inherit;max-width:220px;}
-  .seo-check button{padding:10px 20px;border-radius:var(--radius-pill);border:none;background:var(--green);
-    color:#fff;font-weight:600;cursor:pointer;font-family:var(--font-body);}
-  .seo-check__res{font-size:14px;color:var(--text-dim);}
-  .seo-list{list-style:none;margin:clamp(16px,3vw,24px) 0;padding:0;display:grid;gap:12px;}
-  .seo-list a{display:block;background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-2);
-    border:1px solid var(--card-border);border-radius:var(--radius-md);
-    padding:clamp(14px,2.5vw,18px);font-weight:600;transition:border-color 0.3s var(--ease-out),transform 0.3s var(--ease-out);}
-  .seo-list a:hover{border-color:var(--card-border-hover);transform:translateY(-2px);}
-  .seo-list a span{display:block;font-weight:400;color:var(--text-dim);font-size:14px;margin-top:4px;}
-"""
+# Дизайн SEO-страниц живёт в файлах, а не в server.py: оболочка —
+# server/seo/shell.html (по HTTP не отдаётся: каталог server/ заблокирован),
+# стили — css/seo.css, проверка ответа — js/seo-check.js. Здесь только данные.
+_SEO_TEMPLATE_DIR = Path(__file__).resolve().parent / "seo"
+_seo_template_cache: dict = {}
 
-_SEO_TOKENS = """
-  :root,
-  :root[data-theme="light"]{
-    --surface-0:#F3F5FA;--surface-1:#FFFFFF;--surface-2:#FFFFFF;
-    --text:#0E1526;--text-dim:#48536B;--text-faint:#5B6579;
-    --accent:#0277B6;--accent-dim:rgba(2,119,182,0.10);
-    --green:#16a34a;--green-dim:rgba(21,128,61,0.10);--brand:#16a34a;
-    --hairline:rgba(15,23,42,0.08);
-    --card-border:rgba(15,23,42,0.10);--card-border-hover:rgba(15,23,42,0.20);
-    --sheen:rgba(15,23,42,0.03);--inset-line:rgba(15,23,42,0.05);
-    --muted-bg:rgba(15,23,42,0.06);--muted-border:rgba(15,23,42,0.12);
-    --glow-accent:rgba(2,119,182,0.14);
-    --shadow-sm:0 1px 2px rgba(15,23,42,0.06),0 16px 32px -20px rgba(15,23,42,0.22);
-    --radius-pill:999px;--radius-lg:20px;--radius-md:14px;
-    --font-body:'Inter',-apple-system,system-ui,sans-serif;
-    --font-display:'Manrope',var(--font-body);
-    --ease-out:cubic-bezier(0.16,1,0.3,1);
-  }
-  :root[data-theme="dark"]{
-    --surface-0:#05070C;--surface-1:#0A0D12;--surface-2:#0F131C;
-    --text:#F8F9FB;--text-dim:#A0A6B8;--text-faint:#666D82;
-    --accent:#38BDF8;--accent-dim:rgba(56,189,248,0.15);
-    --green:#6EE7B7;--green-dim:rgba(110,231,183,0.15);--brand:#6EE7B7;
-    --hairline:rgba(255,255,255,0.06);
-    --card-border:rgba(255,255,255,0.08);--card-border-hover:rgba(255,255,255,0.12);
-    --sheen:rgba(255,255,255,0.04);--inset-line:rgba(255,255,255,0.06);
-    --muted-bg:rgba(255,255,255,0.06);--muted-border:rgba(255,255,255,0.1);
-    --glow-accent:rgba(56,189,248,0.15);
-    --shadow-sm:0 20px 40px -20px rgba(0,0,0,0.5);
-    --radius-pill:999px;--radius-lg:20px;--radius-md:14px;
-    --font-body:'Inter',-apple-system,system-ui,sans-serif;
-    --font-display:'Manrope',var(--font-body);
-    --ease-out:cubic-bezier(0.16,1,0.3,1);
-  }
-"""
 
-_SEO_FONTS = """
-  @font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
-    src:url('/vendor/fonts/inter-cyrillic.woff2') format('woff2');
-    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;}
-  @font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
-    src:url('/vendor/fonts/inter-latin.woff2') format('woff2');
-    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
-  @font-face{font-family:'Manrope';font-style:normal;font-weight:400 800;font-display:swap;
-    src:url('/vendor/fonts/manrope-cyrillic.woff2') format('woff2');
-    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;}
-  @font-face{font-family:'Manrope';font-style:normal;font-weight:400 800;font-display:swap;
-    src:url('/vendor/fonts/manrope-latin.woff2') format('woff2');
-    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
-"""
-
-_SEO_THEME_SCRIPT = """<script>
-  /* Та же тема, что у лендинга и приложения: сохранённый выбор
-     (общий ключ ege_core_theme) → иначе системная. Без мигания. */
-  (function(){
-    try{
-      var saved=null;
-      try{saved=localStorage.getItem('ege_core_theme');}catch(e){}
-      var theme=(saved==='light'||saved==='dark')?saved:((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');
-      document.documentElement.setAttribute('data-theme',theme);
-    }catch(e){}
-  })();
-</script>"""
+def _seo_template(name: str) -> str | None:
+    """Прочитать шаблон с кэшем по mtime (правится без рестарта). Не бросает."""
+    try:
+        path = _SEO_TEMPLATE_DIR / name
+        mtime = path.stat().st_mtime
+        cached = _seo_template_cache.get(name)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        text = path.read_text(encoding="utf-8")
+        _seo_template_cache[name] = (mtime, text)
+        return text
+    except (OSError, ValueError):
+        return None
 
 
 def _seo_shell(*, title: str, desc: str, canonical: str, robots: str,
-               og_type: str, ld_json: str, crumb: str, body_main: str) -> bytes:
-    """Полная SEO-страница в едином дизайне сайта: шапка, подвал, тема."""
-    head = f"""<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>{_seo_esc(title)}</title>
-<meta name="description" content="{_seo_esc(desc)}">
-<link rel="canonical" href="{_seo_esc(canonical)}">
-<meta name="robots" content="{_seo_esc(robots)}">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
-<meta name="color-scheme" content="light dark">
-<meta property="og:type" content="{_seo_esc(og_type)}">
-<meta property="og:locale" content="ru_RU">
-<meta property="og:site_name" content="ege easy">
-<meta property="og:title" content="{_seo_esc(title)}">
-<meta property="og:description" content="{_seo_esc(desc)}">
-<meta property="og:url" content="{_seo_esc(canonical)}">
-<meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="{_seo_esc(title)}">
-<meta name="twitter:description" content="{_seo_esc(desc)}">
-<meta name="twitter:image" content="https://egeeasy.ru/assets/seo/og-image.png">
-{_SEO_THEME_SCRIPT}
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
-<link rel="manifest" href="/site.webmanifest">
-<link rel="stylesheet" href="/css/footer.css?v=8">
-<link rel="stylesheet" href="/css/site-header.css?v=1">
-<link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
-<style>{_SEO_FONTS}
-{_SEO_TOKENS}
-{_SEO_STYLE}
-</style>
-{('<script type="application/ld+json">' + ld_json + '</script>') if ld_json else ''}
-</head>
-<body>
-<div data-ege-header></div>
-<main><div class="wrap"><div class="seo-hero">
-<nav class="seo-crumb" aria-label="Хлебные крошки"><a href="/">ege easy</a><span>·</span>{crumb}</nav>
-{body_main}
-</div></div></main>
-<div data-ege-footer></div>
-<script src="/js/site-header.js?v=1"></script>
-<script src="/js/footer.js?v=5"></script>
-</body>
-</html>"""
-    return head.encode("utf-8")
+               og_type: str, ld_json: str, crumb: str, body_main: str) -> bytes | None:
+    """Собрать страницу из server/seo/shell.html. None — нет шаблона."""
+    tpl = _seo_template("shell.html")
+    if tpl is None:
+        return None
+    mapping = {
+        "TITLE": _seo_esc(title), "DESC": _seo_esc(desc),
+        "CANONICAL": _seo_esc(canonical), "ROBOTS": _seo_esc(robots),
+        "OG_TYPE": _seo_esc(og_type),
+        "LD_BLOCK": ('<script type="application/ld+json">' + ld_json + '</script>'
+                     if ld_json else ""),
+        "CRUMB": crumb, "BODY_MAIN": body_main,
+    }
+    # Один проход: вставленные значения не пересканируются, поэтому %% в
+    # данных каталога не могут сломать разметку. Неизвестный маркер —
+    # оставляем как есть (тест ловит остатки).
+    page = re.sub(r"%%([A-Z_]+)%%",
+                  lambda m: mapping.get(m.group(1), m.group(0)), tpl)
+    return page.encode("utf-8")
 
 
 def _seo_short(text, limit: int = 600) -> str:
@@ -8051,22 +7919,12 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
 <h3>Сколько баллов даёт задание {num}?</h3>
 <p>Первичный вес номера зависит от предмета и года — точный вес и твой прогнозный балл показывает тренажёр после нескольких решённых вариантов.</p>
 <div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Перейти к практике →</a></div>"""
-    check_script = """<script>
-document.querySelectorAll('.seo-check').forEach(function(f){
-  f.addEventListener('submit', function(e){
-    e.preventDefault();
-    var want = (f.getAttribute('data-answer') || '').trim().toLowerCase().replace(/\\s+/g, ' ').replace(',', '.');
-    var got = ((new FormData(f)).get('v') || '').toString().trim().toLowerCase().replace(/\\s+/g, ' ').replace(',', '.');
-    var el = f.querySelector('.seo-check__res');
-    if (!got) { el.textContent = 'Введи ответ выше.'; return; }
-    el.textContent = (got === want) ? 'Верно! Так держать — дальше больше в тренажёре.' : 'Пока не сошлось — открой ответ и разбор выше.';
-  });
-});
-</script>"""
+    # Проверка ответа — внешний js/seo-check.js (подключён в shell.html):
+    # в server.py инлайн-скриптам не место, а CSP только 'self' и так покрыт.
     return _seo_shell(
         title=page_title, desc=desc, canonical=url,
         robots="index, follow, max-image-preview:large", og_type="article",
-        ld_json=ld_json, crumb=crumb, body_main=body_main + check_script)
+        ld_json=ld_json, crumb=crumb, body_main=body_main)
 
 
 def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):

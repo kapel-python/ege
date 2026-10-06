@@ -120,8 +120,31 @@ t("сервер: SEO-страницы без X-Robots-Tag (индексирую�
   const body = server.slice(i, i + 1200);
   return body.includes("text/html") && !body.includes("X-Robots-Tag");
 })());
-t("сервер: страница задания с canonical и PracticeProblem", server.includes("PracticeProblem") && server.includes("rel=\"canonical\""));
+t("сервер: страница задания с canonical и PracticeProblem", server.includes("PracticeProblem") && server.includes("def seo_render_task_page"));
 t("сервер: CTA ведёт в приложение с seo_subject", server.includes("seo_subject"));
+
+/* ---- дизайн SEO-страниц живёт в файлах, а не в server.py ---- */
+t("SEO: шаблон оболочки server/seo/shell.html существует", exists("server/seo/shell.html"));
+t("SEO: стили css/seo.css существуют", exists("css/seo.css"));
+t("SEO: скрипт проверки js/seo-check.js существует", exists("js/seo-check.js"));
+t("SEO: canonical в шаблоне, PracticeProblem в рендере", (() => {
+  const shell = exists("server/seo/shell.html") ? read("server/seo/shell.html") : "";
+  return shell.includes('rel="canonical"') && server.includes("PracticeProblem")
+    && server.includes("LD_BLOCK") && shell.includes("%%LD_BLOCK%%");
+})());
+t("SEO: оболочка с шапкой/подвалом/темой сайта", (() => {
+  const shell = exists("server/seo/shell.html") ? read("server/seo/shell.html") : "";
+  return shell.includes("data-ege-header") && shell.includes("data-ege-footer")
+    && shell.includes("ege_core_theme") && shell.includes("/css/seo.css")
+    && shell.includes("/js/seo-check.js");
+})());
+t("SEO: в server.py не осталось инлайн-дизайна страниц", !server.includes("--surface-0:#F3F5FA")
+  && !server.includes("font-family:system-ui") && !server.includes("document.querySelectorAll('.seo-check')"));
+t("SEO: маркеры оболочки без пробелов в именах", (() => {
+  const shell = exists("server/seo/shell.html") ? read("server/seo/shell.html") : "";
+  const marks = shell.match(/%%[^%]*%%/g) || [];
+  return marks.length > 0 && marks.every((m) => /^%%[A-Z_]+%%$/.test(m));
+})());
 
 /* ---- публичный вход из поиска (без онбординга) ---- */
 const appSrc = read("js/app.js");

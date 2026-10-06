@@ -156,6 +156,11 @@ def main():
               headers.get("X-Robots-Tag") == "noindex, nofollow",
               str(headers.get("X-Robots-Tag")))
 
+        # В готовых страницах не осталось неподставленных маркеров оболочки.
+        st, _, body = get("/ege/russian/zadanie-17/")
+        check("без остатков маркеров %%", st == 200 and "%%" not in body.decode("utf-8", "replace"),
+              str(st))
+
         # JSON-LD не разрывается данными каталога: сырой </script> в ответе
         # обязан уехать как <\/, иначе блок закроется досрочно (XSS-вектор).
         conn = server.connect()
