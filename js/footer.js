@@ -42,11 +42,6 @@
             "<h3>Задания ЕГЭ</h3>" +
             "<ul>" +
               '<li><a class="ef-link" href="/ege/">Все задания по номерам <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
-              '<li><a class="ef-link" href="/ege/profile_math/">Профильная математика <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
-              '<li><a class="ef-link" href="/ege/basic_math/">Базовая математика <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
-              '<li><a class="ef-link" href="/ege/russian/">Русский язык <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
-              '<li><a class="ef-link" href="/ege/biology/">Биология <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
-              '<li><a class="ef-link" href="/ege/society/">Обществознание <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
             "</ul>" +
           "</nav>" +
           '<nav class="ef-col" aria-label="Компания">' +
