@@ -71,10 +71,16 @@ a{color:inherit;text-decoration:none;}
 main{padding-bottom:clamp(48px,8vw,80px);}
 .seo-page{min-width:0;}
 
-/* ---------- подшапка: хлебные крошки под общей шапкой сайта ---------- */
-.seo-bar{border-bottom:1px solid var(--hairline);
-  background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-1);}
-.seo-bar__inner{max-width:960px;margin:0 auto;padding:10px clamp(20px,4vw,32px);min-width:0;}
+/* ---------- подшапка: хлебные крошки под общей шапкой сайта ----------
+   Врезная карточка ровно по ширине контента (те же поля, что у .wrap),
+   а не полоса во всю ширину: край не упирается в экран. */
+.seo-bar{background:none;border-bottom:none;}
+.seo-bar__inner{max-width:calc(960px - 2*clamp(20px,4vw,32px));
+  width:calc(100% - 2*clamp(20px,4vw,32px));
+  margin:clamp(12px,2.5vw,18px) auto 0;padding:10px clamp(14px,2.5vw,20px);
+  background:linear-gradient(180deg,var(--sheen) 0%,transparent 100%),var(--surface-1);
+  border:1px solid var(--hairline);border-radius:var(--radius-md);
+  box-shadow:0 1px 0 var(--inset-line) inset;min-width:0;}
 .seo-crumb{display:flex;gap:4px;flex-wrap:wrap;align-items:center;
   font-size:clamp(12.5px,1.6vw,14px);color:var(--text-faint);}
 .seo-crumb a{display:inline-flex;align-items:center;padding:6px 12px;border-radius:var(--radius-pill);
