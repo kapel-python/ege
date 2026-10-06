@@ -8126,7 +8126,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
     genitive = _seo_genitive(subject)
     url = f"{base}/ege/{subject}/"
     skills = _seo_subject_skills(conn, subject)
-    desc = (f"Все задания ЕГЭ по {genitive} ({title}): разбор каждого номера,"
+    desc = (f"Все задания ЕГЭ по {genitive}: разбор каждого номера,"
             f" примеры с подсказками и бесплатная практика без регистрации.")
     cta = f"/dashboard#/training?seo_subject={subject}"
     nums = "\n".join(
