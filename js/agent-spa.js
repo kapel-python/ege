@@ -1172,7 +1172,9 @@
     if (leaving) S.turn = null;
     else if (S.turn && !S.turn.dead) S.turn.detached = true;
     // Чужой для вкладки ход жил в старом чате — новому композер не держим.
-    if (leaving) { S.serverBusy = null; S._busyWatch = null; }
+    // Таймер тоже останавливаем, иначе осиротевший интервал опрашивает старый
+    // чат вечно (каждый тик упирается в mismatch currentId и ничего не делает).
+    if (leaving) { if (S.serverBusy) liveStop(S.serverBusy); S.serverBusy = null; S._busyWatch = null; }
     S.printing = false;
     syncBusy();
     S.currentId = id;
@@ -2572,6 +2574,23 @@
     if (turn.liveNum) turn.liveNum.textContent = String(turn.liveShown);
     follow(450);
   }
+  // Финал чужого хода (перезагрузка/возврат посреди генерации): превью
+  // снести, опрос остановить, ленту подтянуть с сервера — иначе остаются
+  // вечный скелетон (watcher к тому моменту уже выдохся) или, хуже, снос
+  // превью без подгрузки финала (пустая лента с одним пузырём). Живой случай:
+  // уход из браузера на минуту при 63-секундном ходе — возврат показывал
+  // пустоту со «Стопом» до ручного refresh.
+  function finishServerBusy() {
+    var b = S.serverBusy;
+    if (b) {
+      try { if (b.liveTimer) clearInterval(b.liveTimer); } catch (_) {}
+      liveDrop(b);
+      S.serverBusy = null;
+    }
+    S._busyWatch = null;
+    syncBusy();
+    loadThreadMessages(true);
+  }
   function livePoll(turn) {
     if (!turn || turn.dead) return;
     var tid = turn.threadId;
@@ -2587,6 +2606,13 @@
       if (res.data.quota && res.data.busy) setQuota(res.data.quota);
       if (Array.isArray(res.data.liveSteps) && res.data.liveSteps.length) {
         liveAppendSteps(turn, res.data.liveSteps);
+      }
+      // Чужой ход завершился (был busy, стал idle): довести до финала одним
+      // подтягиванием и остановить опрос. Своему ходу финал рисует settleTurn
+      // из POST — здесь его не трогаем.
+      if (turn && turn === S.serverBusy) {
+        if (res.data.busy) { turn.seenBusy = true; }
+        else if (turn.seenBusy || (turn.liveShown || 0) > 0) { finishServerBusy(); return; }
       }
     }).catch(function () {});
   }
@@ -3060,8 +3086,10 @@
      (S.turn) уже подхвачен reattachTurn — его не трогаем. */
   function showServerBusy(wantId, res) {
     if (!res || !res.data || !res.data.busy) {
-      if (S.serverBusy) { liveDrop(S.serverBusy); S.serverBusy = null; syncBusy(); }
-      S._busyWatch = null;
+      // Ход больше не занят, а превью ещё на экране: довести до финала, а не
+      // просто снести (иначе пустая лента с одним пузырём до ручного refresh).
+      if (S.serverBusy) finishServerBusy();
+      else { S._busyWatch = null; syncBusy(); }
       return;
     }
     var t = S.turn;
@@ -3096,7 +3124,7 @@
       if (S.serverBusy) liveDrop(S.serverBusy);
       S.serverBusy = { threadId: wantId, text: bt, liveTimer: null, liveShown: 0,
                        liveEl: null, liveOl: null, liveNum: null,
-                       liveLoader: null, liveSkel: skelBusy };
+                       liveLoader: null, liveSkel: skelBusy, seenBusy: true };
     } else {
       S.serverBusy.text = bt;
       if (skelBusy && !S.serverBusy.liveEl) S.serverBusy.liveSkel = skelBusy;

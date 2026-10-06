@@ -431,6 +431,19 @@ check("перезагрузка посреди хода тоже видит жи
   /S\.serverBusy = \{ threadId: wantId, text: bt, liveTimer: null/.test(spaCode)
   && /livePoll\(S\.serverBusy\)/.test(spaCode)
   && /liveDrop\(S\.serverBusy\)/.test(spaCode));
+/* Возврат после завершения чужого хода: busy→idle доводит до финала
+   (подтяжка ленты + остановка опроса), а не оставляет вечный скелетон или
+   снос превью без финала. Живой случай: уход из браузера на минуту при
+   63-секундном ходе — возврат показывал пустоту со «Стопом» до refresh,
+   кольцо тоже стояло до обновления. */
+check("чужой ход доводится до финала, а не виснет (finishServerBusy)",
+  /function finishServerBusy\(\)/.test(spaCode)
+  && /liveDrop\(b\);\s*\n\s*S\.serverBusy = null;/.test(spaCode)
+  && /loadThreadMessages\(true\);/.test(spaCode)
+  && /turn === S\.serverBusy\) \{[\s\S]{0,220}?finishServerBusy\(\);/.test(spaCode)
+  && /seenBusy: true/.test(spaCode));
+check("смена чата останавливает осиротевший опрос чужого хода",
+  /if \(leaving\) \{ if \(S\.serverBusy\) liveStop\(S\.serverBusy\);/.test(spaCode));
 /* Клавиатура телефона: высоту держит CSS (колонка ровно в 100dvh), от focus
    требуется только освободить резерв под нижнее меню. Пин высоты в пикселях
    был причиной «поле съехало вверх и не вернулось». */
