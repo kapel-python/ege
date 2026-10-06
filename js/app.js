@@ -1175,16 +1175,34 @@ function routeParam() {
   const i = h.indexOf("/");
   if (i < 0) return "";
   // Хвост «?seo_subject=…» — параметр публичного входа со страниц /ege/,
-  // а не часть id (идёт незакодированным после ?). Срезаем его, иначе
-  // #/skill/r01?seo_subject=russian искал бы навык с мусором в id.
+  // а не часть id (идёт незакодированным после ?). Срезаем ДО decode:
+  // закодированный %3F внутри реального id должен выжить.
   // Ссылку вида #/lesson/% дописывает кто угодно. decodeURIComponent на
   // таком бросает URIError, а render() не ловит его — SPA застревал в
   // unhandled rejection до ручной правки адресной строки.
   try {
-    return decodeURIComponent(h.slice(i + 1)).split("?")[0];
+    return decodeURIComponent(h.slice(i + 1).split("?")[0]);
   } catch {
     return "";
   }
+}
+
+/* Снять из хэша только seo_subject, чужие параметры возврата (?error=,
+   ?fresh=, ?confirm=) не трогаем: общий clearHashQuery снёс бы и их. */
+function clearSeoSubjectParam() {
+  try {
+    const h = String(location.hash || "");
+    const i = h.indexOf("?");
+    if (i < 0) return;
+    const head = h.slice(0, i) || "#/dashboard";
+    const kept = h.slice(i + 1).split("&").filter((part) => {
+      const eq = part.indexOf("=");
+      const key = eq < 0 ? part : part.slice(0, eq);
+      return key && key !== "seo_subject";
+    });
+    const next = kept.length ? head + "?" + kept.join("&") : head;
+    if (next !== h) history.replaceState(null, "", next);
+  } catch (_) {}
 }
 
 /* Ленивая загрузка тяжёлой математики: katex (269 КБ) + jsxgraph (947 КБ) +
@@ -1389,13 +1407,17 @@ async function render() {
           if (cur !== seoSubject && Store.switchSubject) await Store.switchSubject(seoSubject);
         } catch (_) {}
         if (currentRoute() !== route) return;
-        try { clearHashQuery(); } catch (_) {}
+        try { clearSeoSubjectParam(); } catch (_) {}
       }
     }
   }
   if (!Store.state.onboarded && !postLoginRoute && !publicTaskEntry && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
-  try { syncPublicBanner(publicTaskEntry); } catch (_) {}
+  // Плашка видна весь публичный режим, а не один render: publicTaskEntry —
+  // одноразовый (входной render стирает ?seo_subject), а условие ниже живо,
+  // пока гость не завершил онбординг. Сюда неприлюдно не попасть: без
+  // seo_subject не-onboarded гость ушёл в Onboarding.show() строкой выше.
+  try { syncPublicBanner(!Store.state.onboarded && !Store.accountId && PUBLIC_TASK_ROUTES.has(route)); } catch (_) {}
   // Убираем старый футер сразу, ещё до ленивой загрузки формул. На фокусных
   // маршрутах это не даёт старому контенту мигнуть во время перехода.
   try { if (window.Footer) Footer.sync(route); } catch (_) {}

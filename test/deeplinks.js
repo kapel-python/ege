@@ -26,6 +26,8 @@ vm.createContext(sandbox);
 const code = [
   extract('function go('),
   extract('function currentRoute('),
+  extract('function hashQueryValue('),
+  extract('function clearSeoSubjectParam('),
   extract('function routeParam('),
   extract('function answerFormatHint('),
   extract('function sessionMatchesRoute('),
@@ -46,6 +48,33 @@ sandbox.location.hash = '#/dashboard';
 t('empty param', sandbox.routeParam() === '');
 sandbox.location.hash = '';
 t('empty hash -> dashboard', sandbox.currentRoute() === 'dashboard');
+
+// публичный вход из поиска: ?seo_subject= — не часть id/маршрута
+sandbox.location.hash = '#/skill/r01?seo_subject=russian';
+t('seo route stays skill', sandbox.currentRoute() === 'skill');
+t('seo param strips seo_subject', sandbox.routeParam() === 'r01');
+t('seo subject readable', sandbox.hashQueryValue('seo_subject') === 'russian');
+sandbox.location.hash = '#/skill/r01?foo=1&seo_subject=biology';
+t('seo subject after other params', sandbox.hashQueryValue('seo_subject') === 'biology');
+t('seo param with other params', sandbox.routeParam() === 'r01');
+sandbox.location.hash = '#/lesson/a%2Fb?seo_subject=x';
+t('seo encoded slash survives', sandbox.routeParam() === 'a/b');
+sandbox.location.hash = '#/skill/abc%3Fdef?seo_subject=russian';
+t('seo encoded question survives', sandbox.routeParam() === 'abc?def');
+sandbox.location.hash = '#/lesson/%';
+t('seo broken escape -> empty', sandbox.routeParam() === '');
+// clearSeoSubjectParam: сносит только seo_subject, чужие хвосты живут
+sandbox.history = { _url: '', replaceState(a, b, u) { this._url = u; } };
+sandbox.location.hash = '#/skill/r01?seo_subject=russian';
+sandbox.clearSeoSubjectParam();
+t('seo tail removed', sandbox.history._url === '#/skill/r01');
+sandbox.location.hash = '#/skill/r01?error=x&seo_subject=russian';
+sandbox.clearSeoSubjectParam();
+t('foreign tail kept', sandbox.history._url === '#/skill/r01?error=x');
+sandbox.location.hash = '#/skill/r01';
+sandbox.history._url = 'untouched';
+sandbox.clearSeoSubjectParam();
+t('no tail -> no-op', sandbox.history._url === 'untouched');
 
 // format hints
 t('int', sandbox.answerFormatHint('12', 'целое число') === 'целое число');

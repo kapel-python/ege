@@ -7726,15 +7726,14 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
     """Пара примеров заданий навыка для SEO-страницы. Не бросает."""
     try:
         rows = conn.execute(
-            "SELECT t.id, t.topic, t.exam_number, t.statement, t.answer, t.hint,"
+            "SELECT t.statement, t.answer, t.hint,"
             " t.explanation FROM tasks t JOIN skills s ON s.id=t.skill_id"
             " WHERE s.subject=? AND t.skill_id=? ORDER BY t.id LIMIT ?",
             (subject, skill_id, max(1, int(limit))),
         ).fetchall()
     except (sqlite3.Error, ValueError, TypeError):
         return []
-    return [{"id": str(r["id"]), "topic": str(r["topic"] or ""),
-             "statement": str(r["statement"] or ""),
+    return [{"statement": str(r["statement"] or ""),
              "answer": str(r["answer"] or ""),
              "hint": str(r["hint"] or ""),
              "explanation": str(r["explanation"] or "")} for r in (rows or [])]
@@ -7839,7 +7838,7 @@ def seo_task_urls(conn, base: str) -> list:
 
 
 def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
-                         num: int):
+                         num: int) -> bytes | None:
     """SSR-страница «Задание N ЕГЭ по предмету». None — нет такого номера."""
     info = SUBJECTS.get(subject) or {}
     title = str(info.get("title") or subject)
@@ -7927,7 +7926,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
         ld_json=ld_json, crumb=crumb, body_main=body_main)
 
 
-def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
+def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes | None:
     """Хаб предмета: все номера со ссылками. None — неизвестный предмет."""
     info = SUBJECTS.get(subject)
     if info is None:
@@ -7958,14 +7957,20 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
 def seo_render_index(base: str) -> bytes | None:
     """Хаб /ege/: все предметы со ссылками. Только registry, без БД."""
     cards = []
+    titles = []
     for sid in SUBJECT_IDS:
         info = SUBJECTS.get(sid) or {}
         if _status_is_locked(info.get("status")):
             continue
         genitive = _seo_genitive(sid)
+        titles.append(str(info.get("title") or sid))
         cards.append(
             f'<li><a href="{_seo_esc(f"{base}/ege/{sid}/")}">'
             f'Задания ЕГЭ по {_seo_esc(genitive)}<span>{_seo_esc(str(info.get("title") or sid))} — разбор всех номеров</span></a></li>')
+    # Description собирается из реестра, а не захардкожен: новый предмет
+    # попадает и в карточки, и в meta без правок кода.
+    desc = (f"Все задания ЕГЭ по номерам ({', '.join(titles)}): разбор каждого"
+            f" номера и бесплатная практика без регистрации.")
     body_main = f"""<span class="chip">ege easy · подготовка к ЕГЭ</span>
 <h1>Задания ЕГЭ по номерам</h1>
 <p class="seo-sub">Выбери предмет — внутри каждый номер экзамена с разбором и практикой без регистрации.</p>
@@ -7974,7 +7979,7 @@ def seo_render_index(base: str) -> bytes | None:
 </ul>"""
     return _seo_shell(
         title="Задания ЕГЭ по номерам — разбор и практика | ege easy",
-        desc="Все задания ЕГЭ по номерам: математика, русский язык, биология, обществознание. Разбор каждого номера и бесплатная практика без регистрации.",
+        desc=desc,
         canonical=f"{base}/ege/", robots="index, follow", og_type="website",
         ld_json="", crumb="Все задания",
         body_main=body_main)
