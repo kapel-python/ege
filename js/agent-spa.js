@@ -1193,6 +1193,16 @@
       return cacheOn() && S.cache.threadsAt && (Date.now() - S.cache.threadsAt < 30000);
     } catch (_) { return false; }
   }
+  // Тёплый кэш для render(): свежая выборка И тот же предмет. Смена предмета
+  // даёт false даже при свежей выборке — иначе префетч пропустился бы, а
+  // маунт признал бы старые плашки своими.
+  function hasFreshThreads() {
+    try {
+      var s = (typeof Store !== "undefined" && Store.subject) || null;
+      if (s !== S.subject) return false;
+    } catch (_) {}
+    return threadsFresh();
+  }
   function cachedMessages(id) {
     if (!cacheOn() || id == null) return null;
     var hit = S.cache.messages[id];
@@ -3778,6 +3788,17 @@
       S.serverBusy = null; S._busyWatch = null;
       cacheDrop();                     // чужие чаты в кэше не показываем
     }
+    // Смена предмета: сервер пересадил пустые чаты на новый предмет, а кэш
+    // списка ещё хранит старые плашки. Сбрасываем список (выбор чата и его
+    // сообщения не трогаем: тред остался тем же id) — префетч в render уже
+    // забрал свежий, маунт отрисует его без лишнего запроса.
+    var subjNow = null;
+    try { subjNow = (typeof Store !== "undefined" && Store.subject) || null; } catch (_) {}
+    if (subjNow !== S.subject) {
+      S.subject = subjNow;
+      try { if (S.cache) { S.cache.threads = null; S.cache.threadsAt = 0; } } catch (_) {}
+      try { S.threads = []; } catch (_) {}
+    }
     root = screenRoot;
     // Доступ уже известен из кэша (render ждёт его до хрома, дальше кэш
     // свежий) — лоадер «Проверяем доступ…» и повторный запрос не нужны:
@@ -3848,6 +3869,18 @@
         S.serverBusy = null; S._busyWatch = null;
         cacheDrop();
       }
+      // Предмет синхронизируем здесь же, а не только в маунте: сервер при
+      // смене предмета уже пересадил пустые чаты, а кэш ещё хранит старые
+      // плашки. Список сбрасываем целиком (выбор чата и сообщения не трогаем:
+      // тред остался тем же id) — следующий запрос заберёт свежий.
+      try {
+        var psubj = (typeof Store !== "undefined" && Store.subject) || null;
+        if (psubj !== S.subject) {
+          S.subject = psubj;
+          try { if (S.cache) { S.cache.threads = null; S.cache.threadsAt = 0; } } catch (_) {}
+          try { S.threads = []; } catch (_) {}
+        }
+      } catch (_) {}
       if (cacheHasThreads()) return Promise.resolve(true);
       return api("GET", "/api/agent/threads").then(function (res) {
         if (res.status === 200 && res.data && Array.isArray(res.data.threads)) {
@@ -3905,6 +3938,6 @@
     confirmStep: confirmStep, emptyVisible: emptyVisible, screen: screenAgent,
     planProposal: planProposalOf, planDialog: planProposalDialog,
     pendingStepState: pendingStepState, prefetchThreads: prefetchThreads,
-    hasFreshThreads: threadsFresh,
+    hasFreshThreads: hasFreshThreads,
   };
 })();

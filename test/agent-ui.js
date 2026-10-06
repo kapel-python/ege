@@ -480,10 +480,15 @@ check("известный доступ пропускает повторный �
   && spaCode.includes('screenLoader("Проверяем доступ…")'));
 check("треды греются до отрисовки раздела (третьего лоадера нет)",
   spaCode.includes("prefetchThreads: prefetchThreads")
-  && spaCode.includes("hasFreshThreads: threadsFresh")
+  && spaCode.includes("hasFreshThreads: hasFreshThreads")
+  && /function hasFreshThreads\(\) \{[\s\S]{0,300}Store\.subject[\s\S]{0,200}threadsFresh\(\)/.test(spaCode)
   && /function prefetchThreads\(\) \{[\s\S]{0,900}cacheHasThreads\(\)/.test(spaCode)
   && /const warm = typeof AgentScreen[\s\S]{0,200}hasFreshThreads/.test(appJs)
   && /if \(!warm && Store\.accountId/.test(appJs));
+check("смена предмета сбрасывает кэш списка (плашки не stale)",
+  /S\.subject = psubj;/.test(spaCode)
+  && /S\.cache\.threads = null; S\.cache\.threadsAt = 0;/.test(spaCode)
+  && /S\.subject = subjNow;/.test(spaCode));
 check("«Новый чат» шлёт явный предмет (не stale через current_subject_for)",
   /var wantSubject = null;/.test(spaCode)
   && /api\("POST", "\/api\/agent\/threads", wantSubject \? \{ subject: wantSubject \} : \{\}\)/.test(spaCode));

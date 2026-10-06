@@ -14205,6 +14205,26 @@ class Handler(BaseHTTPRequestHandler):
                                     "isAdmin": False})
                     return
                 subject = set_current_subject(conn, user_id, wanted)
+                try:
+                    # Пустые чаты ИИ следуют за предметом: чат без сообщений —
+                    # чистый лист, его предмет = текущий (иначе открытый пустой
+                    # чат «застревал» бы в старом предмете, а первый вопрос в
+                    # нём уходил бы туда же — ход читает thread.subject).
+                    # Чаты с сообщениями не трогаем; чат с ЖИВЫМ ходом выглядит
+                    # пустым (сообщения ещё не записаны) — его тоже не трогаем,
+                    # иначе сменился бы предмет посреди хода.
+                    for erow in _AGENT.empty_threads(conn, int(user_id)):
+                        eid = int(erow["id"])
+                        if _agent_busy_locked(eid):
+                            continue
+                        conn.execute("UPDATE agent_threads SET subject=? WHERE id=? AND user_id=?",
+                                     (subject, eid, int(user_id)))
+                    # Хендлер дальше не коммитит (set_current_subject закрыл
+                    # свою транзакцию сам): без этого UPDATE откатился бы
+                    # при close() — проверялось падением теста.
+                    conn.commit()
+                except sqlite3.Error:
+                    pass
                 self.send_json({"ok": True, "subject": subject,
                                 "catalog": catalog_summary_payload(conn, subject),
                                 "state": read_state(conn, user_id, subject),

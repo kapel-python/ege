@@ -935,25 +935,46 @@ def main():
             check("cancel -> Отменено",
                   status == 200 and body.get("final") == "Отменено.", f"{status} {body}")
 
-            section("пустой чат не перекрашивается сменой предмета")
+            section("пустой чат следует за предметом, непустой — стоит")
+            status, body = a.request(base, "POST", "/api/agent/threads", {})
+            fresh = body.get("thread") or {}
+            fresh_id = int(fresh.get("id") or 0)
+            fresh_subj = str(fresh.get("subject") or "")
+            check("свежий пустой чат создан", status == 200 and fresh_id > 0, f"{status} {fresh_id}")
+            other = "russian" if fresh_subj != "russian" else "profile_math"
+            status, body = a.request(base, "POST", "/api/subject", {"subject": other})
+            check("смена предмета ok", status == 200)
             conn2 = server.connect()
             try:
-                sub_row = conn2.execute("SELECT current_subject FROM users WHERE name='Аня'").fetchone()
-                cur_thread = conn2.execute("SELECT id, subject FROM agent_threads WHERE id=? OR public_id=?",
-                                           (tid_a, tid_a)).fetchone()
-                cur_subj = cur_thread["subject"] if cur_thread else None
-                other = "russian" if (cur_subj or "") != "russian" else "profile_math"
+                moved = conn2.execute("SELECT id, subject FROM agent_threads WHERE id=?",
+                                      (fresh_id,)).fetchone()
             finally:
                 conn2.close()
-            status, body = a.request(base, "POST", "/api/subject", {"subject": other})
-            check("смена предмета ok", status == 200, f"{status} {body}")
+            check("пустой чат пересажен на новый предмет (тот же id)",
+                  moved and int(moved["id"]) == fresh_id and moved["subject"] == other,
+                  str(dict(moved) if moved else None))
             status, body = a.request(base, "POST", "/api/agent/threads", {})
-            check("в чужом предмете — новый чат, а не перекрашенный пустой",
+            check("создание в новом предмете переиспользует его же",
                   status == 200 and (body.get("thread") or {}).get("subject") == other
-                  and (body.get("thread") or {}).get("id") != (cur_thread["id"] if cur_thread else -1),
-                  f"{status} {body}")
-            status, body = a.request(base, "POST", "/api/subject", {"subject": cur_subj or "profile_math"})
-            check("возврат предмета ok", status == 200, f"{status} {body}")
+                  and (body.get("thread") or {}).get("id") == fresh_id,
+                  f"{status} {(body.get('thread') or {}).get('id')}")
+            # Непустой чат смена предмета не трогает: пишем вопрос мокнутым
+            # ответом без инструментов, затем меняем предмет и сверяем.
+            with lock:
+                script.clear()
+                script.append({"text": "Понял.", "tool_calls": []})
+            status, body = turn(a, fresh_id, "привет")
+            check("вопрос в новом предмете ok", status == 200)
+            status, body = a.request(base, "POST", "/api/subject", {"subject": fresh_subj})
+            check("возврат предмета ok", status == 200)
+            conn2 = server.connect()
+            try:
+                stayed = conn2.execute("SELECT subject FROM agent_threads WHERE id=?",
+                                       (fresh_id,)).fetchone()
+            finally:
+                conn2.close()
+            check("чат с сообщениями остался в своём предмете",
+                  stayed and stayed["subject"] == other, str(dict(stayed) if stayed else None))
 
             section("отмена зовёт модель, а не шаблон")
             with lock:
