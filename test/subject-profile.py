@@ -247,7 +247,7 @@ def main():
                 "level": {"id": new_id, "subjectId": new_id, "name": "Информатика"},
                 "forecast": None,
                 "features": {"lessons": False, "practice": True, "forecast": False,
-                             "diagnostics": False, "missions": False, "bosses": False,
+                             "diagnostics": True, "missions": False, "bosses": False,
                              "daily": False, "path": True},
                 "metadata": {"availability": "ready", "topic": "Работа с текстом", "topicCount": 1},
                 "content": {"topics": {"source": "catalog", "keys": ["categories", "skills"]},

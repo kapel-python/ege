@@ -45,7 +45,7 @@ subject-id и отсутствие default subject.
 уникальность `level.id`, согласованность `status`/`locked`/`availability`
 с `features`, схему или смысл `metadata`, покрытие навыков и корректность
 значений `forecast.weights`, числовой диапазон/монотонность `scale`,
-а также содержимое `goals` и `diagnosticTasks`. Невалидные ссылки внутри
+а также тексты `label/desc` целей. Для `status: "ready"` дополнительно требуется онбординг-обязательное (общее правило без хардкода id): непустой `catalog.goals[]` (у каждой цели — непустые `id`/`label`), непустой `catalog.diagnosticTasks[]` (каждая запись — существующий id задания этого же каталога, без дублей) и `features.diagnostics: true` (иначе `DataAPI.diagnosticTasks()` вернёт `[]` и фронт уйдёт в короткий поток «предмет → имя» без вопросов про уровень/цель). Самооценка (`zero/base/confident`) — общее поле `user_subjects`, отдельных данных каталога не требует. Проверка — только на старте при добавлении предмета: пользователь по-прежнему может пропустить тест, тогда `goal`/`selfLevel` пустые. Для `locked`/`coming-soon`-скелета пустые `goals: []` и `diagnosticTasks: []` легальны. Невалидные ссылки внутри
 каталога (skill→topic, task/lesson/mission→skill, mission.tasks→tasks,
 boss→topic) ловятся отдельно при `install_catalog`; `daily.skill` и
 `diagnosticTasks` фильтруются при построении payload. Битый найденный
@@ -70,14 +70,17 @@ boss→topic) ловятся отдельно при `install_catalog`; `daily.s
 2. `server/catalog_informatics.json` — контент предмета. Для locked: пустые
    `tasks/lessons/missions/bosses/achievements`, `goals: []`,
    `diagnosticTasks: []`, `daily: {skill: "", target: 0, xp: 0, title: ""}`.
-   Для ready: реальные `categories/skills` + `goals[]` (варианты подготовки)
-   + `diagnosticTasks[]` (онбординг) + `daily`.
+   Для ready обязательны реальные `categories/skills` + непустой `goals[]`
+   (варианты подготовки: цель онбординга, у каждой — `id`/`label`) +
+   непустой `diagnosticTasks[]` (онбординг: id существующих заданий этого же
+   каталога, без дублей) + `daily`. Пустой `goals`/`diagnosticTasks` у ready
+   роняет старт с `SubjectContractError` (см. раздел «Валидация» выше).
 3. Не давать существующему id одной сущности переехать к другому предмету:
    загрузчик проверяет ownership для поддерживаемых связей
    (`skill→topic`, `task/lesson/mission→skill`, `mission.tasks→tasks`,
-   `boss→cat`). Уникальность между типами сущностей, дубли внутри одного
-   каталога и семантика `goals`/`daily`/`diagnosticTasks` не проверяются
-   автоматически.
+   `boss→cat`). Уникальность между типами сущностей и семантика
+   `goals`/`daily` не проверяются автоматически; дубли и ссылки
+   `diagnosticTasks` у ready проверяются реестром (см. «Валидация»).
 4. Перезапустить сервер. Предмет сам появится в `/api/subjects`, bootstrap,
    статусе, селекторе, Path, онбординге, админке — всё читает реестр.
 5. Если предмет ввёл свои `goal id` — добавить одну строку в `GOAL_LABELS`

@@ -207,7 +207,7 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice", "lessons", "forecast", "missions"} for key in REQUIRED_FEATURES},
+                "russian": {key: key in {"path", "practice", "lessons", "forecast", "missions", "diagnostics"} for key in REQUIRED_FEATURES},
                 "biology": {key: True for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
@@ -314,7 +314,7 @@ def main() -> int:
             russian_boot = payloads[("/api/bootstrap", "russian")]
             russian_catalog = russian_boot.get("catalog") or {}
             russian_missions = russian_catalog.get("missions") or []
-            empty_catalog_keys = ("bosses", "goals", "diagnosticTasks")
+            empty_catalog_keys = ("bosses",)
             # Пустой achievements в файле русского ставит стандартный набор
             # DEFAULT_ACHIEVEMENTS (как у профиля) — новый единый контракт.
             default_ach_ids = ("first-solve", "hundred", "series20", "nohints",
@@ -335,6 +335,8 @@ def main() -> int:
                 and russian_scale[0] == 0 and russian_scale[50] == 100
                 and russian_scale[28] == 55
                 and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
+                and {g.get("id") for g in (russian_catalog.get("goals") or [])} == {"g60", "g80", "g95"}
+                and (russian_catalog.get("diagnosticTasks") or []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"]
                 and [a.get("id") for a in (russian_catalog.get("achievements") or [])] == list(default_ach_ids)
                 and len(russian_catalog.get("tasks") or []) == 143
                 and len(russian_catalog.get("lessons") or []) == 26

@@ -103,9 +103,20 @@ def _builtin_definitions() -> dict:
             "availability": "ready", "order": 2,
             "catalogFile": "catalog_russian.json",
             "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
-            "forecast": None,
-            "features": {"lessons": True, "practice": True, "forecast": False,
-                         "diagnostics": False, "missions": False, "bosses": False,
+            "forecast": {"weights": {
+                "r01": 1, "r02": 1, "r03": 1, "r04": 1, "r05": 1, "r06": 1,
+                "r07": 1, "r08": 2, "r09": 1, "r10": 1, "r11": 1, "r12": 1,
+                "r13": 1, "r14": 1, "r15": 1, "r16": 1, "r17": 1, "r18": 1,
+                "r19": 1, "r20": 1, "r21": 1, "r22": 2, "r23": 1, "r24": 1,
+                "r25": 1, "r26": 1, "russian_essay_source": 22,
+            }, "total": 50, "scale": [
+                0, 3, 5, 8, 10, 12, 15, 17, 20, 22, 24, 27, 29, 32, 34, 36,
+                37, 39, 40, 42, 43, 45, 46, 48, 49, 51, 52, 54, 55, 57, 58,
+                60, 61, 63, 64, 66, 67, 69, 70, 72, 73, 75, 78, 81, 83, 86,
+                89, 91, 94, 97, 100,
+            ]},
+            "features": {"lessons": True, "practice": True, "forecast": True,
+                         "diagnostics": True, "missions": True, "bosses": False,
                          "daily": False, "path": True},
             "metadata": {"availability": "ready",
                          "topic": "Задания №1–26 и сочинение по тексту", "topicCount": 27},
@@ -196,6 +207,54 @@ def validate_definition(raw: dict, *, source: str, server_dir: Path) -> dict:
             if key not in catalog:
                 raise SubjectContractError(
                     f"{source} ({sid}): catalog {catalog_file} is missing {key!r}")
+    # Онбординг ready-предмета: уровень (selfLevel — общее поле user_subjects,
+    # отдельных данных не требует) + цель + диагностика. Фронт показывает
+    # полный поток «уровень → цель → диагностика» только когда у предмета
+    # есть шкала целей и диагностические задания (ready + diagnosticTasks);
+    # иначе уходит в короткий «предмет → имя» без вопросов. Поэтому готовый
+    # предмет обязан везти goals[] и diagnosticTasks[] с валидными ссылками,
+    # а флаг features.diagnostics — быть true (иначе DataAPI.diagnosticTasks()
+    # вернёт [] и цели/диагностика снова спрячутся). Проверка только на старте
+    # при добавлении предмета: пользователь по-прежнему может пропустить тест
+    # (skipTest/completeOnboardingWithoutTest) — goal/selfLevel тогда пустые.
+    if status == "ready":
+        goals = catalog.get("goals")
+        if not isinstance(goals, list) or not goals:
+            raise SubjectContractError(
+                f"{source} ({sid}): ready subject must define non-empty catalog goals "
+                f"(preparationVariants шкала, например g60/g80/g95)")
+        for goal in goals:
+            if not isinstance(goal, dict) or not isinstance(goal.get("id"), str) \
+                    or not goal["id"].strip():
+                raise SubjectContractError(
+                    f"{source} ({sid}): every catalog goal must have a non-empty string id")
+            if not isinstance(goal.get("label"), str) or not goal["label"].strip():
+                raise SubjectContractError(
+                    f"{source} ({sid}): every catalog goal must have a non-empty label")
+        diagnostics = catalog.get("diagnosticTasks")
+        if not isinstance(diagnostics, list) or not diagnostics:
+            raise SubjectContractError(
+                f"{source} ({sid}): ready subject must define non-empty catalog "
+                f"diagnosticTasks (onboarding-задания)")
+        task_ids = {str(item.get("id")) for item in catalog.get("tasks", [])
+                    if isinstance(item, dict) and item.get("id") is not None}
+        seen_diag: set[str] = set()
+        for task_id in diagnostics:
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise SubjectContractError(
+                    f"{source} ({sid}): every diagnosticTasks entry must be a non-empty task id string")
+            if task_id in seen_diag:
+                raise SubjectContractError(
+                    f"{source} ({sid}): duplicate diagnosticTasks entry {task_id!r}")
+            seen_diag.add(task_id)
+            if task_id not in task_ids:
+                raise SubjectContractError(
+                    f"{source} ({sid}): diagnosticTasks entry {task_id!r} "
+                    f"does not match any catalog task")
+        if not features.get("diagnostics"):
+            raise SubjectContractError(
+                f"{source} ({sid}): ready subject with diagnosticTasks must set "
+                f"features.diagnostics=true (иначе онбординг их не покажет)")
     metadata = raw.get("metadata", {})
     if not isinstance(metadata, dict):
         raise SubjectContractError(f"{source} ({sid}): metadata must be an object")

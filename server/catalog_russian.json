@@ -9,8 +9,8 @@
  "features": {
   "lessons": true,
   "practice": true,
-  "forecast": false,
-  "diagnostics": false,
+  "forecast": true,
+  "diagnostics": true,
   "missions": true,
   "bosses": false,
   "daily": false,
@@ -4775,8 +4775,30 @@
   "xp": 0,
   "title": ""
  },
- "goals": [],
- "diagnosticTasks": [],
+ "goals": [
+  {
+   "id": "g60",
+   "label": "60+ баллов",
+   "desc": "Уверенная база для поступления"
+  },
+  {
+   "id": "g80",
+   "label": "80+ баллов",
+   "desc": "Сильный результат для хорошего вуза"
+  },
+  {
+   "id": "g95",
+   "label": "95+ баллов",
+   "desc": "Максимум — топовые направления"
+  }
+ ],
+ "diagnosticTasks": [
+  "r01_1",
+  "r04_1",
+  "r09_1",
+  "r16_1",
+  "r22_1"
+ ],
  "visualAssets": [],
  "visualAudit": {
   "defaultStatus": "not-published",

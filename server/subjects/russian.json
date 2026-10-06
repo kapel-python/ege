@@ -103,7 +103,7 @@
   "lessons": true,
   "practice": true,
   "forecast": true,
-  "diagnostics": false,
+  "diagnostics": true,
   "missions": true,
   "bosses": false,
   "daily": false,

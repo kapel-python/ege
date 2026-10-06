@@ -8,7 +8,7 @@ catalog.subject = "russian";
 catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
-  { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: true, practice: true, missions: true, path: true } },
+  { id: "russian", title: "Русский язык", status: "ready", locked: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -52,7 +52,7 @@ check("русский предмет зарегистрирован и откр�
 check("тема «Сочинение по тексту» доступна", !!result.topic && result.topic.id === "russian_essay_source" && result.topic.locked !== true);
 check("категория темы видна", !!result.category);
 check("тестовая часть и сочинение: практика и уроки на месте",
-  result.content === true && result.tasks === 143 && result.practice === 143 && result.lessons === 26 && result.missions === 26 && result.diagnostics === 0);
+  result.content === true && result.tasks === 143 && result.practice === 143 && result.lessons === 26 && result.missions === 26 && result.diagnostics === 5);
 check("26 тем тестовой части по 5 заданий + сочинение с исходниками",
   result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 13 && result.sourceTasksHaveText === true);
 check("нет daily/достижений для предмета без них", result.daily === 0 && result.achievements === 0);

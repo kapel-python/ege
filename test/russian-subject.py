@@ -78,7 +78,8 @@ def main():
             assert russian["features"]["practice"] is True and russian["features"]["missions"] is True, russian
             assert russian["features"]["lessons"] is True, russian
             assert russian["features"]["forecast"] is True, russian
-            assert not any(russian["features"][k] for k in ("diagnostics", "bosses", "daily")), russian
+            assert russian["features"]["diagnostics"] is True, russian
+            assert not any(russian["features"][k] for k in ("bosses", "daily")), russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")
             assert status == 200, (status, boot)
@@ -135,7 +136,10 @@ def main():
             task_ids = {t.get("id") for t in catalog.get("tasks", [])}
             assert all(m.get("tasks") and all(t in task_ids for t in m["tasks"]) for m in missions), missions
             assert catalog.get("bosses", []) == [], catalog
-            assert catalog.get("diagnosticTasks", []) == [], catalog
+            assert catalog.get("diagnosticTasks", []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"], catalog
+            assert {g.get("id") for g in catalog.get("goals", [])} == {"g60", "g80", "g95"}, catalog.get("goals")
+            diag_ids = set(catalog.get("diagnosticTasks", []))
+            assert diag_ids <= task_ids, catalog.get("diagnosticTasks")
             # Уроки: по одному на каждую тему №1–26.
             lessons = catalog.get("lessons", [])
             assert len(lessons) == 26, len(lessons)
