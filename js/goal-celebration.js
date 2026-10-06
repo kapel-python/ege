@@ -5,7 +5,11 @@
    js/state.js, не серверный): как только mid впервые достигнет цель
    пользователя (число из его goal_id: g60/g80/g95...), окно показывается
    один раз для этой цели — на любом экране SPA (оверлей на body, поверх
-   всех окон сайта). Проверка — опросом каждые 5 с + отложенная проверка
+   всех окон сайта). Гарантия доставки: флаг «уже поздравили» ставится
+   только после фактического показа окна, а триггер смотрит и на пик
+   истории — поэтому даже вышедший из браузера (или просевший после
+   взятия цели прогноз) всё равно получит поздравление при следующем
+   визите. Проверка — опросом каждые 5 с + отложенная проверка
    после загрузки (событийного хука у прогноза нет: снапшоты пишутся из
    нескольких мест state.js, опрос покрывает их все с задержкой ≤5 с).
    Флаг «уже поздравили» — localStorage, ключ на (предмет, goal_id):
@@ -389,7 +393,9 @@ function collectGoalCelebrationData(){
     if(streak>0)data.streak=streak;
     if(activity.length)data.activity=activity;
     if(achNames.length)data.achievements=achNames;
-    return {subject:subject,goalId:String(gid),goal:goal,current:f.mid,data:data};
+    var peak=f.mid;
+    for(var pi=0;pi<hist.length;pi++){if(hist[pi].score>peak)peak=hist[pi].score}
+    return {subject:subject,goalId:String(gid),goal:goal,current:f.mid,peak:peak,data:data};
   }catch(e){return null}
 }
 
@@ -416,7 +422,10 @@ function maybeCelebrateGoal(){
     if(typeof document!=='undefined'&&document&&document.hidden)return false;
     if(gcIsOpen())return false;
     var c=collectGoalCelebrationData();if(!c)return false;
-    if(!(c.current>=c.goal))return false;
+    /* Гарантия доставки: флаг ставится только после реального показа окна.
+       Поэтому хватает и просевшего прогноза: раз пик истории брал цель,
+       а поздравления не было — показать сейчас, даже если текущий mid ниже. */
+    if(!(c.current>=c.goal||c.peak>=c.goal))return false;
     var key=gcFlagKey(c.subject,c.goalId);
     if(gcFlagGet(key))return false;
     var ok=false;

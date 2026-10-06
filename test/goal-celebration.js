@@ -185,6 +185,21 @@ const testBody = async () => {
   t("без истории отклоняется",
     globalThis.openGoalCelebration({ goal: 60, history: [], topicsDone: 1, avg: { value: 1 } }) === false);
 
+  /* 6. Гарантия доставки: пик истории брал цель, текущий просел — окно всё равно выходит. */
+  Store.reset();
+  Store.state.goal = "g60";
+  Store.state.forecastHistory = [
+    { date: "2026-09-01", low: 30, high: 42, mid: 36 },
+    { date: "2026-09-20", low: 58, high: 68, mid: 63 },
+  ];
+  lsMap.clear();
+  const cp = globalThis.collectGoalCelebrationData();
+  t("прекондиция пика: текущий ниже цели, пик выше",
+    cp && cp.current < 60 && cp.peak >= 60, cp && `${cp.current}/${cp.peak}`);
+  t("просевший прогноз: окно выходит по пику", globalThis.maybeCelebrateGoal() === true);
+  await new Promise((r) => setTimeout(r, 600));
+  el("gc-cls1").onclick();
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };
