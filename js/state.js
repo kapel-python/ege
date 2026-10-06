@@ -3188,6 +3188,11 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   if (!guardOnboardingSubject(s, subj)) return false;
   Store.subject = subj;
   s.subject = subj;
+  // Предмет выбран явно (онбординг): чужая SEO-ссылка дальше спросит
+  // модалкой, а не переключит молча.
+  try {
+    if (typeof markSubjectExplicit === "function") markSubjectExplicit(subj);
+  } catch (_) {}
 
   const learningAvailable = subjectLearningAvailable();
   if (!forecastConfigAvailable()) s.forecastHistory = [];
@@ -3285,6 +3290,10 @@ function completeOnboardingWithoutTest(subject, name) {
   if (!guardOnboardingSubject(s, subj)) return false;
   Store.subject = subj;
   s.subject = subj;
+  // Тот же явный выбор предмета (онбординг без теста) — см. applyOnboarding.
+  try {
+    if (typeof markSubjectExplicit === "function") markSubjectExplicit(subj);
+  } catch (_) {}
   const cleanedName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
   if (cleanedName) s.name = cleanedName;
   s.onboarded = true;

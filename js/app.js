@@ -1187,6 +1187,103 @@ function routeParam() {
   }
 }
 
+/* Названия предметов в нужном падеже для модалки чужой SEO-ссылки.
+   Винительный (metadata.accusative из реестра предметов) — «ведёт на ...»,
+   «переключить на ...»; именительный (title) — «открыто ...». В предложении
+   первая буква строчная. Нет accusative — честно подставляем title. */
+function seoSubjectCase(id, which) {
+  try {
+    const info = (typeof DataAPI !== "undefined" && DataAPI.subjectInfo)
+      ? DataAPI.subjectInfo(id) : null;
+    if (which === "acc" && info && info.metadata) {
+      const acc = info.metadata.accusative;
+      if (typeof acc === "string" && acc.trim()) return acc.trim();
+    }
+    const title = info && info.title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+  } catch (_) {}
+  return String(id || "");
+}
+
+function seoLowerFirst(text) {
+  const s = String(text || "");
+  return s ? s.charAt(0).toLowerCase() + s.slice(1) : s;
+}
+
+/* Предмет выбран явно в этой сессии (пикер, онбординг, подтверждённый
+   переход по ссылке) — тихое переключение увело бы его молча. sessionStorage:
+   новая сессия = чистый выбор, гость из поиска в первый раз не спрашивается.
+   Только presence флага, значение не важно. */
+function markSubjectExplicit(id) {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    sessionStorage.setItem("ege_subject_explicit", String(id || "1"));
+  } catch (_) {}
+}
+
+function explicitSubject() {
+  try {
+    if (typeof sessionStorage === "undefined") return "";
+    return sessionStorage.getItem("ege_subject_explicit") || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+/* Модалка чужой SEO-ссылки: ссылка ведёт на другой предмет, а у человека
+   уже выбран свой. Единый .dlg (openConfirmDialog), своего дизайна нет.
+   Подтверждение — тихий переход как у гостя; отмена (кнопка, крестик, фон,
+   Esc — всё идёт через onCancel) — стираем хвост и перерисовываем текущий
+   маршрут: гарды экранов сами уведут с чужого id (навык — на Путь своего
+   предмета). Падежи — из реестра (metadata.accusative), именительный — title.
+   Флаг seoModalOpen живёт на модуле: повторный render с тем же хвостом не
+   открывает вторую модалку поверх первой. */
+let seoModalOpen = false;
+/* Одноразовый пропуск онбординг-гейта после подтверждённого перехода:
+   confirm ведёт гостя сразу решать (как тихий вход), а не в онбординг.
+   Храним маршрут, для которого выдан: ушли в другое место, пока шёл
+   switchSubject, — пропуск сгорает без эффекта. */
+let seoConfirmedEntry = null;
+
+function openSeoSubjectMismatchModal(route, linkSubject, currentSubject) {
+  seoModalOpen = true;
+  const linkAccRaw = seoLowerFirst(seoSubjectCase(linkSubject, "acc"));
+  const curNomRaw = seoLowerFirst(seoSubjectCase(currentSubject, "nom"));
+  openConfirmDialog({
+    eyebrow: "Другой предмет",
+    title: "Переключить предмет?",
+    text: `Ссылка ведёт на ${esc(linkAccRaw)}, а у тебя открыто ${esc(curNomRaw)}.`,
+    iconName: "path",
+    cancelText: "Не переключать",
+    confirmText: `Переключить на ${linkAccRaw}`,
+    primary: true,
+    onConfirm: () => {
+      seoModalOpen = false;
+      seoSubjectMismatchConfirm(route, linkSubject);
+    },
+    onCancel: () => {
+      seoModalOpen = false;
+      try { clearSeoSubjectParam(); } catch (_) {}
+      try { render(); } catch (_) {}
+    },
+  });
+}
+
+async function seoSubjectMismatchConfirm(route, linkSubject) {
+  try {
+    if (typeof Onboarding !== "undefined" && Onboarding) {
+      Onboarding.presetSubject = linkSubject;
+      try { sessionStorage.setItem("ege_onboard_preset_subject", linkSubject); } catch (_) {}
+    }
+  } catch (_) {}
+  try { markSubjectExplicit(linkSubject); } catch (_) {}
+  try { if (Store.switchSubject) await Store.switchSubject(linkSubject); } catch (_) {}
+  if (currentRoute() !== route) { seoConfirmedEntry = null; return; }
+  seoConfirmedEntry = route;
+  try { clearSeoSubjectParam(); } catch (_) {}
+  try { render(); } catch (_) {}
+}
+
 /* Снять из хэша только seo_subject, чужие параметры возврата (?error=,
    ?fresh=, ?confirm=) не трогаем: общий clearHashQuery снёс бы и их. */
 function clearSeoSubjectParam() {
@@ -1378,38 +1475,72 @@ async function render() {
   // живой сессии, и такой человек тоже должен видеть пикер, а не онбординг.
   const postLoginRoute = route === "subject" && !!Store.accountId;
   // Публичный вход из поиска: страницы /ege/<предмет>/zadanie-<N>/ ведут
-  // сюда с ?seo_subject= в хэше. Предмет подставляем сами (тихий переход
-  // гостя — сервер отвечает эхом без строки в users), онбординг не показываем
-  // и профиль не заводим: человек сразу решает, ответы копятся локально.
-  // Сохранение — позже одной кнопкой в плашке (обычный Onboarding.show()).
+  // сюда с ?seo_subject= в хэше. Совпал с текущим — просто чистим хвост и
+  // идём дальше. Чужой предмет: «чистого» гостя (первый визит, выбирать
+  // было нечего) переключаем молча, как раньше; у кого предмет уже выбран
+  // (аккаунт, онбординг, явный выбор в этой сессии) — спрашиваем единым
+  // .dlg: тихий переход уводил бы чужой профиль или другую тему без спроса.
+  // Профиль по-прежнему не заводим: человек сразу решает, ответы копятся
+  // локально. Сохранение — позже одной кнопкой в плашке (обычный
+  // Onboarding.show()).
   let publicTaskEntry = false;
-  if (!Store.state.onboarded && !Store.accountId && !postLoginRoute
-      && PUBLIC_TASK_ROUTES.has(route)) {
-    let seoSubject = "";
-    try { seoSubject = hashQueryValue("seo_subject"); } catch (_) {}
-    if (seoSubject) {
-      let known = false;
+  let seoSubject = "";
+  let seoKnown = false;
+  try {
+    seoSubject = hashQueryValue("seo_subject");
+    seoKnown = !!(seoSubject && typeof DataAPI !== "undefined" && DataAPI.subjectInfo
+      && DataAPI.subjectInfo(seoSubject));
+  } catch (_) {
+    seoSubject = "";
+    seoKnown = false;
+  }
+  if (seoKnown && PUBLIC_TASK_ROUTES.has(route)) {
+    let curSubject = null;
+    try {
+      curSubject = (typeof DataAPI !== "undefined" && DataAPI.currentSubject)
+        ? DataAPI.currentSubject() : null;
+    } catch (_) {}
+    if (seoSubject !== curSubject) {
+      let established = false;
       try {
-        known = !!(typeof DataAPI !== "undefined" && DataAPI.subjectInfo
-          && DataAPI.subjectInfo(seoSubject));
+        established = !!Store.accountId || !!(Store.state && Store.state.onboarded)
+          || !!explicitSubject();
       } catch (_) {}
-      if (known) {
-        publicTaskEntry = true;
-        try {
-          if (typeof Onboarding !== "undefined" && Onboarding) {
-            Onboarding.presetSubject = seoSubject;
-            try { sessionStorage.setItem("ege_onboard_preset_subject", seoSubject); } catch (_) {}
-          }
-        } catch (_) {}
-        try {
-          const cur = (typeof DataAPI !== "undefined" && DataAPI.currentSubject)
-            ? DataAPI.currentSubject() : null;
-          if (cur !== seoSubject && Store.switchSubject) await Store.switchSubject(seoSubject);
-        } catch (_) {}
-        if (currentRoute() !== route) return;
-        try { clearSeoSubjectParam(); } catch (_) {}
+      if (established) {
+        if (!seoModalOpen) {
+          // Онбординг-оверлей гостя висит поверх всего: прячем, иначе
+          // модалка откроется под ним и её не будет видно.
+          try { Onboarding.hide(); } catch (_) {}
+          openSeoSubjectMismatchModal(route, seoSubject, curSubject);
+        }
+        return;
       }
     }
+  }
+  if (!Store.state.onboarded && !Store.accountId && !postLoginRoute
+      && PUBLIC_TASK_ROUTES.has(route)) {
+    if (seoKnown) {
+      publicTaskEntry = true;
+      try {
+        if (typeof Onboarding !== "undefined" && Onboarding) {
+          Onboarding.presetSubject = seoSubject;
+          try { sessionStorage.setItem("ege_onboard_preset_subject", seoSubject); } catch (_) {}
+        }
+      } catch (_) {}
+      try {
+        const cur = (typeof DataAPI !== "undefined" && DataAPI.currentSubject)
+          ? DataAPI.currentSubject() : null;
+        if (cur !== seoSubject && Store.switchSubject) await Store.switchSubject(seoSubject);
+      } catch (_) {}
+      if (currentRoute() !== route) return;
+      try { clearSeoSubjectParam(); } catch (_) {}
+    }
+  }
+  // Одноразовый пропуск из подтверждённой модалки: гость идёт сразу
+  // решать по чужой ссылке, как при тихом входе. Чужой маршрут — сгорает.
+  if (seoConfirmedEntry) {
+    if (seoConfirmedEntry === route) publicTaskEntry = true;
+    seoConfirmedEntry = null;
   }
   if (!Store.state.onboarded && !postLoginRoute && !publicTaskEntry && route !== "login" && route !== "register") { Onboarding.show(); try { if (window.Footer) Footer.hide(); } catch (_) {} return; }
   Onboarding.hide();
@@ -2312,6 +2443,9 @@ async function switchSubjectFromUI(sel) {
     try { closeDeviceModal(); } catch (_) {}
     await Store.switchSubject(id);
     subjectSwitching = false;
+    // Явный выбор предмета в этой сессии: чужая SEO-ссылка дальше спросит
+    // модалкой, а не переключит молча.
+    try { markSubjectExplicit(id); } catch (_) {}
     // Предмет выбран явно через профиль: онбординг нового предмета не должен
     // переспрашивать предмет — show() стартует сразу с вопросов.
     try {
@@ -9169,13 +9303,20 @@ function deviceModalEscHandler(e) {
 function closeDeviceModal() {
   const root = document.getElementById("device-modal-root");
   try { dlgConfirmPending = null; } catch (_) {}
-  if (!root || !root.innerHTML) return;
+  let onCancel = null;
+  try { onCancel = dlgCancelPending; dlgCancelPending = null; } catch (_) {}
+  if (!root || !root.innerHTML) {
+    // Окна не было (или уже закрыто): висячую отмену не копим — иначе она
+    // выстрелила бы при следующем закрытии чужого диалога.
+    return;
+  }
   root.innerHTML = "";
   document.removeEventListener("keydown", deviceModalEscHandler);
   if (deviceModalPrevFocus && deviceModalPrevFocus.isConnected) {
     deviceModalPrevFocus.focus({ preventScroll: true });
   }
   deviceModalPrevFocus = null;
+  if (onCancel) { try { onCancel(); } catch (_) {} }
 }
 
 /* Смена имени в профиле: то же .dlg-окно, что устройства и подтверждения
@@ -9263,13 +9404,19 @@ async function saveProfileName() {
    в профиле и кнопки «Выйти» в тренировке/уроке/практике/миссии/боссе.
    Никаких браузерных вызовов подтверждения — один визуальный стиль везде. */
 let dlgConfirmPending = null;
+/* Опциональный onCancel единого диалога: срабатывает при ЛЮБОМ закрытии без
+   подтверждения (кнопка отмены, крестик, тап по фону, Esc) — все они идут
+   через closeDeviceModal. Диалоги без onCancel ведут себя как раньше. */
+let dlgCancelPending = null;
 
 function openConfirmDialog(opts) {
   const o = opts || {};
   const onConfirm = typeof o.onConfirm === "function" ? o.onConfirm : null;
+  const onCancel = typeof o.onCancel === "function" ? o.onCancel : null;
   const root = deviceModalRoot();
   if (!root) { if (onConfirm) onConfirm(); return; }
   dlgConfirmPending = onConfirm;
+  dlgCancelPending = onCancel;
   try {
     if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
       deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -9307,6 +9454,9 @@ function openConfirmDialog(opts) {
 function dlgConfirmOk() {
   const fn = dlgConfirmPending;
   dlgConfirmPending = null;
+  // Подтверждение побеждает отмену: сбрасываем её до закрытия, иначе
+  // closeDeviceModal ниже вызвал бы и onCancel тоже.
+  try { dlgCancelPending = null; } catch (_) {}
   try { closeDeviceModal(); } catch (_) {}
   if (fn) { try { fn(); } catch (_) {} }
 }

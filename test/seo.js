@@ -154,5 +154,20 @@ t("приложение: публичный вход не показывает �
 t("приложение: routeParam срезает ?seo_subject", /\.split\("\?"\)\[0\]/.test(appSrc));
 t("приложение: плашка сохранения прогресса", appSrc.includes("syncPublicBanner"));
 
+/* ---- чужая SEO-ссылка при выбранном предмете: модалка, а не тихий переход ---- */
+t("приложение: модалка чужого предмета (openSeoSubjectMismatchModal)", /function openSeoSubjectMismatchModal/.test(appSrc));
+t("приложение: модалка спрашивает только при выбранном предмете", appSrc.includes("explicitSubject()"));
+t("приложение: confirm-диалог умеет onCancel (крестик/фон/Esc тоже отмена)", /onCancel/.test(appSrc) && /dlgCancelPending/.test(appSrc));
+t("приложение: падежи предмета из реестра (accusative)", /metadata\.accusative/.test(appSrc));
+for (const [sid, acc] of [["profile_math", "профильную математику"], ["basic_math", "базовую математику"],
+    ["russian", "русский язык"], ["biology", "биологию"], ["society", "обществознание"]]) {
+  t(`реестр ${sid}: винительный падеж «${acc}»`, (() => {
+    try {
+      const info = JSON.parse(read(`server/subjects/${sid}.json`));
+      return info && info.metadata && info.metadata.accusative === acc;
+    } catch (e) { return false; }
+  })());
+}
+
 console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
 process.exit(fails ? 1 : 0);

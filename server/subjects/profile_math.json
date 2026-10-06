@@ -21,7 +21,7 @@
     "scale": [0, 6, 11, 17, 22, 27, 34, 40, 46, 52, 58, 64, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 93, 94, 95, 96, 97, 98, 99, 100, 100, 100]
   },
   "features": {"lessons": true, "practice": true, "forecast": true, "diagnostics": true, "missions": true, "bosses": true, "daily": true, "path": true},
-  "metadata": {"genitive": "профильной математике"},
+  "metadata": {"genitive": "профильной математике", "accusative": "профильную математику"},
   "content": {
     "topics": {"source": "catalog", "keys": ["categories", "skills"]},
     "preparationVariants": {"source": "catalog", "key": "goals"},
