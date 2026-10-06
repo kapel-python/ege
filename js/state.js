@@ -491,19 +491,65 @@ const Store = {
   _tryBecomeTabLeader() {
     if (this.isTabLeader || this.leaderAcquireInFlight || !this.tabChannel) return;
     this.leaderAcquireInFlight = true;
-    navigator.locks.request(this.tabLockName || "ege-core-state-leader-v1", { ifAvailable: true }, async (lock) => {
+    let request;
+    try {
+      request = navigator.locks.request(this.tabLockName || "ege-core-state-leader-v1", { ifAvailable: true }, async (lock) => {
+        this.leaderAcquireInFlight = false;
+        if (!lock) return;
+        this.isTabLeader = true;
+        this.leaderTabId = this.tabId;
+        this.leaderSeenAt = Date.now();
+        this._announceLeaderStatus();
+        this.emit("tableader", { leader: true });
+        await new Promise((resolve) => { this.leaderLockRelease = resolve; });
+        this.leaderLockRelease = null;
+        this.isTabLeader = false;
+        if (this.leaderTabId === this.tabId) this.leaderTabId = null;
+      });
+    } catch (_) {
+      // Синхронный бросок locks.request (экзотика) не должен вечно
+      // блокировать выборы: иначе вкладка никогда не станет лидером и
+      // каждый save будет умирать с тостом «Не удалось сохранить прогресс».
       this.leaderAcquireInFlight = false;
-      if (!lock) return;
-      this.isTabLeader = true;
-      this.leaderTabId = this.tabId;
-      this.leaderSeenAt = Date.now();
-      this._announceLeaderStatus();
-      this.emit("tableader", { leader: true });
-      await new Promise((resolve) => { this.leaderLockRelease = resolve; });
-      this.leaderLockRelease = null;
-      this.isTabLeader = false;
-      if (this.leaderTabId === this.tabId) this.leaderTabId = null;
-    }).catch(() => { this.leaderAcquireInFlight = false; });
+      return;
+    }
+    request.catch(() => { this.leaderAcquireInFlight = false; });
+  },
+
+  // Свежий heartbeat лидера (тот же порог 2500 мс, что у heartbeat-таймера).
+  _leaderSeenFresh() {
+    try {
+      return Number(this.leaderSeenAt) > 0 && Date.now() - Number(this.leaderSeenAt) < 2500;
+    } catch (_) {
+      return false;
+    }
+  },
+
+  // Короткое ожидание собственного лидерства. Нужно для холодного старта:
+  // канал уже создан, а lock ещё не захвачен — слать save/action-request
+  // некому (свои сообщения игнорируются, другой вкладки может не быть),
+  // и без ожидания первый save умирал бы по 5-секундному таймауту с тостом.
+  // true — пишем напрямую (стали лидером / канала нет); false — шлём запрос
+  // лидеру (появился живой лидер либо время вышло — best effort). Не бросает.
+  _awaitLeadership(timeoutMs = 2000) {
+    if (this.isTabLeader || !this.tabChannel) return Promise.resolve(true);
+    try { this._tryBecomeTabLeader(); } catch (_) {}
+    const limit = Math.max(0, Number(timeoutMs) || 0);
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const check = () => {
+        try {
+          if (this.isTabLeader || !this.tabChannel) return resolve(true);
+          // Пока ждали, объявился живой лидер — дальше не ждём, шлём запрос.
+          if (this._leaderSeenFresh()) return resolve(false);
+          if (Date.now() - start >= limit) return resolve(false);
+        } catch (_) {
+          return resolve(false);
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
   },
 
   releaseTabLeadership() {
@@ -576,19 +622,40 @@ const Store = {
     }
   },
 
+  // Прямой путь лидера (или одиночной вкладки без канала).
+  _runLeaderActionDirect(action, data = {}) {
+    if (action === "switch-subject") return ApiClient.post("/api/subject", { subject: data.subject });
+    if (action === "reset") return ApiClient.delete("/api/state");
+    return Promise.reject(new Error("Неизвестное действие вкладки"));
+  },
+
   requestLeaderAction(action, data = {}) {
-    if (this.isTabLeader || !this.tabChannel) {
-      if (action === "switch-subject") return ApiClient.post("/api/subject", { subject: data.subject });
-      if (action === "reset") return ApiClient.delete("/api/state");
-      return Promise.reject(new Error("Неизвестное действие вкладки"));
-    }
+    if (this.isTabLeader || !this.tabChannel) return this._runLeaderActionDirect(action, data);
+    if (this._leaderSeenFresh()) return this._sendActionRequest(action, data);
+    return this._awaitLeadership(2000).then((direct) => {
+      if (direct && (this.isTabLeader || !this.tabChannel)) return this._runLeaderActionDirect(action, data);
+      return this._sendActionRequest(action, data);
+    });
+  },
+
+  _sendActionRequest(action, data = {}, isRetry = false) {
     const requestId = `${this.tabId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (!this.leaderRequests[requestId]) return;
         delete this.leaderRequests[requestId];
-        this._tryBecomeTabLeader();
-        reject(new Error("Главная вкладка недоступна: попробуй ещё раз"));
+        this._awaitLeadership(1500).then((direct) => {
+          if (direct && (this.isTabLeader || !this.tabChannel)) {
+            resolve(this._runLeaderActionDirect(action, data));
+            return;
+          }
+          if (!isRetry) {
+            resolve(this._sendActionRequest(action, data, true));
+            return;
+          }
+          try { this._tryBecomeTabLeader(); } catch (_) {}
+          reject(new Error("Главная вкладка недоступна: попробуй сохранить ещё раз"));
+        });
       }, 5000);
       this.leaderRequests[requestId] = {
         resolve: (result) => { clearTimeout(timeout); resolve(result); },
@@ -660,13 +727,41 @@ const Store = {
 
   requestLeaderSave(snapshot) {
     if (this.isTabLeader || !this.tabChannel) return this._saveSnapshot(snapshot);
+    // Лидер недавно объявлялся — обычный путь ведомой вкладки, без задержек.
+    if (this._leaderSeenFresh()) return this._sendSaveRequest(snapshot);
+    // Лидера не видно: холодный старт (lock ещё не захвачен) или умершая
+    // главная вкладка. Сначала пробуем забрать lock себе — в одиночной
+    // вкладке это миллисекунды, и save идёт напрямую без 5-секундного
+    // ожидания и тоста «Не удалось сохранить прогресс».
+    return this._awaitLeadership(2000).then((direct) => {
+      if (direct && (this.isTabLeader || !this.tabChannel)) return this._saveSnapshot(snapshot);
+      return this._sendSaveRequest(snapshot);
+    });
+  },
+
+  _sendSaveRequest(snapshot, isRetry = false) {
     const requestId = `${this.tabId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (!this.leaderRequests[requestId]) return;
         delete this.leaderRequests[requestId];
-        this._tryBecomeTabLeader();
-        reject(new Error("Главная вкладка недоступна: попробуй сохранить ещё раз"));
+        // Лидер мог умереть или, наоборот, только что появиться прямо во
+        // время ожидания: прежде чем падать с тостом — пробуем забрать lock
+        // себе (прямой save) или повторяем запрос один раз, если лидер
+        // только что объявился. Настоящие сетевые/серверные ошибки этим
+        // не маскируются: они приходят ответом save-result и тостят как раньше.
+        this._awaitLeadership(1500).then((direct) => {
+          if (direct && (this.isTabLeader || !this.tabChannel)) {
+            resolve(this._saveSnapshot(snapshot));
+            return;
+          }
+          if (!isRetry) {
+            resolve(this._sendSaveRequest(snapshot, true));
+            return;
+          }
+          try { this._tryBecomeTabLeader(); } catch (_) {}
+          reject(new Error("Главная вкладка недоступна: попробуй сохранить ещё раз"));
+        });
       }, 5000);
       this.leaderRequests[requestId] = {
         resolve: (result) => { clearTimeout(timeout); resolve(result); },
