@@ -73,6 +73,10 @@ weights, ни per-subject catalog paths.
    `content`-указатели (`topics → categories/skills`, `preparationVariants
    → goals`, `onboarding → diagnosticTasks`). `availability` и `metadata`
    необязательны; их семантика и взаимная согласованность не валидируются.
+   Для SEO-страниц заданий (`/ege/<id>/zadanie-<N>/`) положи в `metadata`
+   поле `genitive` — название предмета в дательном падеже («русскому языку»):
+   страницы, хабы и sitemap соберутся сами из реестра и каталога, без правок
+   кода. Нет `genitive` — заголовки честно используют `title`.
    Для locked скопировать форму полей с любого действующего контракта
    (`server/subjects/russian.json` — пример минимального ready, поля те же).
 2. Положить catalog в `server/` под basename из `catalogFile`: для locked —

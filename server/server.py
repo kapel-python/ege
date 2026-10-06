@@ -7675,14 +7675,21 @@ def _inject_ssr_payload(handler, conn: sqlite3.Connection, page_name: str, data:
 # Страницы только читают каталог: ни строк в users, ни кук они не создают.
 # ---------------------------------------------------------------------------
 # Короткие русские названия предметов для заголовков вида
-# «Задание 17 ЕГЭ по русскому языку».
-SEO_SUBJECT_GENITIVE = {
-    "profile_math": "профильной математике",
-    "basic_math": "базовой математике",
-    "russian": "русскому языку",
-    "biology": "биологии",
-    "society": "обществознанию",
-}
+# «Задание 17 ЕГЭ по русскому языку» берутся из единой точки — реестра
+# предметов (`server/subjects/<id>.json`, поле `metadata.genitive`).
+# Новому предмету достаточно указать его в своём JSON: код его не знает
+# и знать не должен. Нет genitive — честно подставляем title.
+def _seo_genitive(subject: str) -> str:
+    try:
+        info = SUBJECTS.get(subject) or {}
+        meta = info.get("metadata") or {}
+        genitive = meta.get("genitive") if isinstance(meta, dict) else None
+        if isinstance(genitive, str) and genitive.strip():
+            return genitive.strip()
+        title = info.get("title")
+        return str(title).strip() or subject
+    except Exception:
+        return subject
 
 
 def _seo_exam_num(value) -> int | None:
@@ -7779,7 +7786,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     """SSR-страница «Задание N ЕГЭ по предмету». None — нет такого номера."""
     info = SUBJECTS.get(subject) or {}
     title = str(info.get("title") or subject)
-    genitive = SEO_SUBJECT_GENITIVE.get(subject, title)
+    genitive = _seo_genitive(subject)
     skill = next((s for s in _seo_subject_skills(conn, subject)
                   if s["num"] == num), None)
     if skill is None:
@@ -7897,7 +7904,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str):
     if info is None:
         return None
     title = str(info.get("title") or subject)
-    genitive = SEO_SUBJECT_GENITIVE.get(subject, title)
+    genitive = _seo_genitive(subject)
     url = f"{base}/ege/{subject}/"
     skills = _seo_subject_skills(conn, subject)
     items = "\n".join(
@@ -7938,7 +7945,7 @@ def seo_render_index(base: str) -> bytes:
         info = SUBJECTS.get(sid) or {}
         if _status_is_locked(info.get("status")):
             continue
-        genitive = SEO_SUBJECT_GENITIVE.get(sid, str(info.get("title") or sid))
+        genitive = _seo_genitive(sid)
         cards.append(
             f'<li><a href="{_seo_esc(f"{base}/ege/{sid}/")}">'
             f'Задания ЕГЭ по {genitive} ({_seo_esc(str(info.get("title") or sid))})</a></li>')

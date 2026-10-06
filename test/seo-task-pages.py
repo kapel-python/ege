@@ -83,6 +83,25 @@ def main():
         check("хаб предмета 200", st == 200, str(st))
         check("хаб предмета со списком номеров", "zadanie-17/" in text and "zadanie-1/" in text)
 
+        # Все предметы — автоматически из реестра: хаб и первая страница
+        # номера обязаны существовать без ручной настройки под каждый id.
+        for sid in list(server.SUBJECT_IDS):
+            st, _, body = get(f"/ege/{sid}/")
+            hub_text = body.decode("utf-8", "replace")
+            if st != 200 or "zadanie-" not in hub_text:
+                check(f"хаб {sid} автоматический", False, str(st))
+                continue
+            first = re.search(r"zadanie-(\d+)/", hub_text)
+            if not first:
+                check(f"номера {sid} автоматические", False, "no links")
+                continue
+            st2, h2, b2 = get(f"/ege/{sid}/zadanie-{first.group(1)}/")
+            page = b2.decode("utf-8", "replace")
+            ok = (st == 200 and st2 == 200 and h2.get("X-Robots-Tag") is None
+                  and "<h1>" in page and "PracticeProblem" in page
+                  and f"seo_subject={sid}" in page)
+            check(f"страницы {sid} автоматические", ok, f"{st}/{st2}")
+
         users_before = server.connect()
         try:
             n_before = int(users_before.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"])
