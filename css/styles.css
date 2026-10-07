@@ -882,6 +882,12 @@ body {
     overflow-wrap: anywhere;
   }
   .forecast-mid { font-size: 46px; }
+  /* Матрицы смежности (9 колонок) влезают без скролла: компактные ячейки.
+     Широкие таблицы с длинными словами по-прежнему мотаются — там работает
+     тень-индикатор .task-table--more. */
+  .task-table { font-size: 13px; }
+  .task-table th,
+  .task-table td { padding: 5px 7px; }
 }
 .forecast-value {
   font-size: 44px;
