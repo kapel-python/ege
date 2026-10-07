@@ -3856,14 +3856,26 @@ def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str 
     if not key or not base_value:
         raise ValueError("Провайдер не настроен: нужен base URL и ключ")
     auth = "raw" if spec.get("auth") == "raw" else "bearer"
+    try:
+        spec_headers = dict(spec.get("extra_headers") or {})
+    except Exception:
+        spec_headers = {}
     deadline = min(30.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC)))
     started = time.monotonic()
+    list_headers = {
+        "Authorization": key if auth == "raw" else f"Bearer {key}",
+        "Accept": "application/json",
+        # Без внятного UA часть шлюзов (opencode-zen за Cloudflare, код 1010)
+        # режет запрос с дефолтным "Python-urllib/3.x" ещё до проверки ключа,
+        # и живой ключ выглядел бы неверным (401/403). Свой UA провайдера
+        # важнее дефолта.
+        "User-Agent": "ege-2026",
+    }
+    for name, value in spec_headers.items():
+        list_headers[str(name)] = str(value)
     request = urllib.request.Request(
         f"{base_value.rstrip('/')}/models",
-        headers={
-            "Authorization": key if auth == "raw" else f"Bearer {key}",
-            "Accept": "application/json",
-        },
+        headers=list_headers,
         method="GET",
     )
     try:
