@@ -148,7 +148,10 @@ const testBody = async () => {
 
   /* ---------- 8. Почти завершивший курс: боссы повержены, daily закрыт ---------- */
   makeStrongStudent(() => {
-    for (const sk of skills) Store.state.skillStats[sk.id] = { progress: 0, solved: 12, correct: 11, timeSec: 300 };
+    for (const sk of skills) {
+      const bank = DataAPI.practiceTasksBySkill(sk.id).length;
+      Store.state.skillStats[sk.id] = { progress: 0, solved: Math.max(12, bank), correct: Math.max(11, bank - 1), timeSec: 300 };
+    }
     Store.state.bossesDefeated = DataAPI.bosses().map((b) => b.id);
   });
   {
