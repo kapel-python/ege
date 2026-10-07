@@ -1882,6 +1882,53 @@ def parse_tool_message(message: dict) -> dict:
             "preamble": text if (text is not None and calls) else None}
 
 
+def _responses_post(url: str, body: dict, headers: dict, timeout: float) -> bytes:
+    """POST на Responses-совместимый URL с умным повтором при 400.
+
+    Модели одного шлюза поддерживают разный набор параметров: например,
+    gpt-6-luna на opencode-zen отвергает reasoning.effort=minimal и поле
+    temperature, а muse-spark-1.3 на них работает. Без повтора смена модели
+    в админке выглядела бы смертью всего провайдера, хотя шлюз жив.
+    Повтор — только по явному сигналу в теле 400 («unsupported ...
+    reasoning.effort» → effort low; «unsupported ... temperature» → без
+    temperature); обе правки применяются сразу, поэтому лишних запросов
+    максимум один. Остальные ошибки — как раньше, ключ в ошибку не попадает.
+    """
+    payload = dict(body)
+    for _ in range(3):
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=dict(headers),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return _read_upstream(response, MAX_UPSTREAM_BYTES, timeout)
+        except urllib.error.HTTPError as exc:
+            status = getattr(exc, "code", 0) or 0
+            try:
+                err_text = (exc.read() or b"").decode("utf-8", "replace")[:2000]
+            except Exception:
+                err_text = ""
+            low = err_text.lower()
+            if status == 400:
+                fixed = False
+                if ("reasoning" in low and "effort" in low and "support" in low
+                        and isinstance(payload.get("reasoning"), dict)
+                        and payload["reasoning"].get("effort") != "low"):
+                    payload["reasoning"] = {"effort": "low"}
+                    fixed = True
+                if ("temperature" in low and "support" in low
+                        and "temperature" in payload):
+                    del payload["temperature"]
+                    fixed = True
+                if fixed:
+                    continue
+            raise
+    raise AIError("провайдер ответил 400")
+
+
 def _responses_via_message(provider: str, messages: list[dict], *,
                          model_value: str, base_value: str, key: str, auth: str,
                          extra_headers: dict, effort: str,
@@ -1922,16 +1969,11 @@ def _responses_via_message(provider: str, messages: list[dict], *,
     }
     for name, value in (extra_headers or {}).items():
         headers[str(name)] = str(value)
-    request = urllib.request.Request(
-        f"{base_value.rstrip('/')}/responses",
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
     deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
     try:
-        with urllib.request.urlopen(request, timeout=deadline) as response:
-            raw = _read_upstream(response, MAX_UPSTREAM_BYTES, deadline)
+        raw = _responses_post(
+            f"{base_value.rstrip('/')}/responses",
+            body, headers, deadline)
     except urllib.error.HTTPError as exc:
         raise _http_error(exc) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -3890,6 +3932,9 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
     Ключ в ошибку не попадает никогда — только класс и короткий текст.
     Responses-провайдеры пробуются своим протоколом (`/responses`): chat-проба
     там всегда 400, и без этой ветки живой провайдер выглядел бы мёртвым.
+    Неподдерживаемые моделью параметры (effort minimal, temperature) проба
+    не гадает заранее — их правит общий `_responses_post` тем же повтором,
+    что и у живого трафика, поэтому кнопка «Проверить» врёт одинаково редко.
     Бюджет пробы шире токена (`RESPONSES_PROBE_MAX_TOKENS`): reasoning-модель
     сначала думает и только потом отвечает, при max_output_tokens=1 текста нет
     никогда. Успех — HTTP 200 + непустой текст в ответе."""
@@ -3911,15 +3956,10 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
         }
         for name, value in (extra_headers or {}).items():
             headers[str(name)] = str(value)
-        request = urllib.request.Request(
-            f"{base_url.rstrip('/')}/responses",
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = _read_upstream(response, MAX_UPSTREAM_BYTES, timeout)
+            raw = _responses_post(
+                f"{base_url.rstrip('/')}/responses",
+                body, headers, timeout)
         except urllib.error.HTTPError as exc:
             latency = int((time.monotonic() - started) * 1000)
             try:
