@@ -75,41 +75,72 @@ var PayFlow = (function () {
     } catch (e) {}
   }
 
-  /* ---------- единое окно .dlg ---------- */
-  var CARD_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
-  var CHECK_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  /* ---------- окно: та же .dlg-система, что везде ----------
+     Тот же контракт, что инфо-диалог устройства в профиле и окно о модели
+     на ege-result: корень #pay-modal-root, рендер через innerHTML,
+     закрытие — крестик / Esc / тап по фону, фокус возвращается вызвавшему.
+     Своей сборки модалок у оплаты нет. */
+  var payModalPrevFocus = null;
 
-  function openDlg(html, opts) {
-    closeDlg();
-    opts = opts || {};
-    var back = document.createElement("div");
-    back.className = "dlg-backdrop";
-    back.id = "payDlg";
-    back.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" aria-label="' + esc(opts.label || "Оплата Plus") + '">'
-      + (opts.locked ? "" : '<button class="dlg__close" type="button" data-x aria-label="Закрыть">×</button>')
-      + html + "</div>";
-    document.body.appendChild(back);
-    function onKey(e) { if (e.key === "Escape") closeDlg(); }
-    document.addEventListener("keydown", onKey);
-    back._dlgKey = onKey;
-    if (!opts.locked) {
-      back.addEventListener("click", function (e) {
-        if (e.target === back || e.target.closest("[data-x]")) closeDlg();
-      });
+  function payModalRoot() {
+    var root = null;
+    try { root = document.getElementById("pay-modal-root"); } catch (e) { root = null; }
+    if (!root) {
+      try {
+        root = document.createElement("div");
+        root.id = "pay-modal-root";
+        document.body.appendChild(root);
+      } catch (e) { return null; }
     }
-    try { document.body.style.overflow = "hidden"; } catch (e) {}
-    return back;
+    return root;
   }
-  function closeDlg() {
-    var back = document.getElementById("payDlg");
-    if (!back) return;
-    try { document.removeEventListener("keydown", back._dlgKey); } catch (e) {}
-    if (back.parentNode) back.parentNode.removeChild(back);
-    try { document.body.style.overflow = ""; } catch (e) {}
+
+  function payModalEscHandler(e) {
+    if (e.key === "Escape") closePayModal();
+  }
+
+  var payModalOnClose = null;
+  function openPayModal(html, label, onClose) {
+    var root = payModalRoot();
+    if (!root) return null;
+    payModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    payModalOnClose = (typeof onClose === "function") ? onClose : null;
+    root.innerHTML = '<div class="dlg-backdrop">'
+      + '<div class="dlg" role="dialog" aria-modal="true" aria-label="' + esc(label || "Оплата Plus") + '">'
+      + '<button class="dlg__close" type="button" data-close aria-label="Закрыть окно">'
+      + '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'
+      + "</button>"
+      + html + "</div></div>";
+    var back = root.firstChild;
+    back.addEventListener("click", function (e) {
+      if (e.target === back) closePayModal();
+    });
+    var x = root.querySelector("[data-close]");
+    if (x) x.addEventListener("click", closePayModal);
+    document.addEventListener("keydown", payModalEscHandler);
+    var dlg = root.querySelector(".dlg");
+    if (dlg) { dlg.setAttribute("tabindex", "-1"); try { dlg.focus({ preventScroll: true }); } catch (e) {} }
+    return root;
+  }
+  function closePayModal() {
+    var root = null;
+    try { root = document.getElementById("pay-modal-root"); } catch (e) { root = null; }
+    if (!root || !root.innerHTML) return;
+    root.innerHTML = "";
+    document.removeEventListener("keydown", payModalEscHandler);
+    if (payModalPrevFocus && payModalPrevFocus.isConnected) {
+      try { payModalPrevFocus.focus({ preventScroll: true }); } catch (e) {}
+    }
+    payModalPrevFocus = null;
+    var cb = payModalOnClose;
+    payModalOnClose = null;
+    if (cb) { try { cb(); } catch (e) {} }
   }
 
   function periodName(period) { return period === "year" ? "год" : "месяц"; }
   function periodDays(period) { return period === "year" ? "12 месяцев" : "30 дней"; }
+
+  var CARD_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
 
   /* ---------- шаг 1: подтверждение до генерации счёта ---------- */
   function buy(opts) {
@@ -117,7 +148,7 @@ var PayFlow = (function () {
     var period = opts.period === "year" ? "year" : "month";
     var price = Number(opts.price) || (period === "year" ? 1590 : 199);
     var cancelled = false;
-    var dlg = openDlg(
+    var root = openPayModal(
       '<div class="dlg__eyebrow">Подписка Plus</div>'
       + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
       + '<div class="dlg-device__name">Оформить Plus · ' + esc(periodName(period)) + "</div></div>"
@@ -129,11 +160,15 @@ var PayFlow = (function () {
       + "</div>"
       + '<div class="dlg__text">После нажатия откроется страница оплаты. Данные карты нам не попадают — к нам приходит только факт оплаты.</div>'
       + '<div class="dlg__actions">'
-      + '<button class="btn btn-ghost btn--sm" type="button" data-x>Отмена</button>'
+      + '<button class="btn btn-ghost btn--sm" type="button" data-cancel>Отмена</button>'
       + '<button class="btn btn-primary btn--sm" type="button" data-pay>Оплатить ' + esc(fmtSum(price * 100)) + " ₽</button>"
       + "</div>",
-      { label: "Подтверждение оплаты" });
-    var payBtn = dlg.querySelector("[data-pay]");
+      "Подтверждение оплаты",
+      function () { cancelled = true; });
+    if (!root) return { close: function () {} };
+    var payBtn = root.querySelector("[data-pay]");
+    var cancelBtn = root.querySelector("[data-cancel]");
+    if (cancelBtn) cancelBtn.addEventListener("click", closePayModal);
     payBtn.addEventListener("click", function () {
       if (cancelled) return;
       payBtn.disabled = true;
@@ -154,29 +189,29 @@ var PayFlow = (function () {
         errorDlg("Не получилось создать счёт", text, true);
       });
     });
-    var oldClose = closeDlg;
-    dlg.addEventListener("click", function (e) {
-      if (e.target === dlg || (e.target.closest && e.target.closest("[data-x]"))) cancelled = true;
-    });
-    return { close: function () { cancelled = true; oldClose(); } };
+    return { close: function () { cancelled = true; closePayModal(); } };
   }
 
   function errorDlg(title, text, retry) {
-    var dlg = openDlg(
+    var root = openPayModal(
       '<div class="dlg__eyebrow">Оплата</div>'
       + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
       + '<div class="dlg-device__name">' + esc(title) + "</div></div>"
       + '<div class="dlg__text">' + esc(text) + "</div>"
       + '<div class="dlg__actions">'
       + (retry ? '<button class="btn btn-primary btn--sm" type="button" data-retry>Попробовать снова</button>' : "")
-      + '<button class="btn btn-ghost btn--sm" type="button" data-x>Закрыть</button>'
+      + '<button class="btn btn-ghost btn--sm" type="button" data-closebtn>Закрыть</button>'
       + "</div>",
-      { label: String(title) });
-    if (retry) {
-      dlg.querySelector("[data-retry]").addEventListener("click", function () {
-        closeDlg();
+      String(title));
+    if (root && retry) {
+      root.querySelector("[data-retry]").addEventListener("click", function () {
+        closePayModal();
         window.dispatchEvent(new CustomEvent("pay:retry"));
       });
+    }
+    if (root) {
+      var cb = root.querySelector("[data-closebtn]");
+      if (cb) cb.addEventListener("click", closePayModal);
     }
   }
 
@@ -459,6 +494,6 @@ var PayFlow = (function () {
     buy: buy,
     bootReturn: bootReturn,
     renderPendingBanner: renderPendingBanner,
-    closeDlg: closeDlg
+    closeModal: closePayModal
   };
 })();

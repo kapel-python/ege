@@ -123,8 +123,8 @@ function check(name, cond, detail) {
   check("manage free: кольца и пустая история",
     mgFree.includes("Проверок сочинений") && mgFree.includes("Платежей пока нет"));
   await page.click('#actionsRow [data-act="buy"]');
-  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
-  const dlgFree = await page.textContent("#payDlg");
+  await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  const dlgFree = await page.textContent("#pay-modal-root");
   check("manage confirm-dlg: тариф и сумма",
     dlgFree.includes("Оформить Plus") && dlgFree.includes("199"));
   await page.keyboard.press("Escape");
@@ -133,11 +133,11 @@ function check(name, cond, detail) {
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
   await page.waitForSelector('body[data-sub="free"]', { timeout: 10000 });
   await page.click("#ctaBtn");
-  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
-  check("тариф confirm-dlg", (await page.textContent("#payDlg")).includes("К оплате"));
-  await page.click("#payDlg [data-pay]");
+  await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  check("тариф confirm-dlg", (await page.textContent("#pay-modal-root")).includes("К оплате"));
+  await page.click("#pay-modal-root [data-pay]");
   await page.waitForFunction(() => {
-    const d = document.getElementById("payDlg");
+    const d = document.getElementById("pay-modal-root");
     return d && /Не получилось создать счёт/.test(d.textContent);
   }, { timeout: 15000 });
   check("mock без ссылки: честная ошибка, не редирект", true);
@@ -185,10 +185,10 @@ function check(name, cond, detail) {
 
   // «Продлить Plus» у активного — окно-подтверждение, счёт не создаём
   await page.click('#actionsRow [data-act="buy"]');
-  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
-  check("plus confirm-dlg", (await page.textContent("#payDlg")).includes("Продлить Plus") || (await page.textContent("#payDlg")).includes("Оформить Plus"));
+  await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  check("plus confirm-dlg", (await page.textContent("#pay-modal-root")).includes("Продлить Plus") || (await page.textContent("#pay-modal-root")).includes("Оформить Plus"));
   await page.keyboard.press("Escape");
-  await page.waitForSelector("#payDlg", { state: "detached", timeout: 10000 });
+  await page.waitForSelector("#pay-modal-root .dlg", { state: "detached", timeout: 10000 });
 
   // --- 4. публичная страница залогиненным Plus ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
@@ -233,10 +233,10 @@ function check(name, cond, detail) {
   await p6.waitForSelector("#content:not([hidden])", { timeout: 15000 });
   // покупка в mock: счёт создаётся, ссылки нет — честная ошибка, счёт висит
   await p6.click('#actionsRow [data-act="buy"]');
-  await p6.waitForSelector("#payDlg .dlg", { timeout: 10000 });
-  await p6.click("#payDlg [data-pay]");
+  await p6.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  await p6.click("#pay-modal-root [data-pay]");
   await p6.waitForFunction(() => {
-    const d = document.getElementById("payDlg");
+    const d = document.getElementById("pay-modal-root");
     return d && /Не получилось создать счёт/.test(d.textContent);
   }, { timeout: 15000 });
   await p6.keyboard.press("Escape");
@@ -250,10 +250,10 @@ function check(name, cond, detail) {
   check("отмена счёта убирает баннер", true);
   // новый счёт + возврат ?pay=ok: ожидание тем же лоадером, mock-confirm сразу успех
   await p6.click('#actionsRow [data-act="buy"]');
-  await p6.waitForSelector("#payDlg .dlg", { timeout: 10000 });
-  await p6.click("#payDlg [data-pay]");
+  await p6.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  await p6.click("#pay-modal-root [data-pay]");
   await p6.waitForFunction(() => {
-    const d = document.getElementById("payDlg");
+    const d = document.getElementById("pay-modal-root");
     return d && /Не получилось создать счёт/.test(d.textContent);
   }, { timeout: 15000 });
   await p6.keyboard.press("Escape");
