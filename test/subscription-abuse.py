@@ -40,6 +40,12 @@ ADMIN_PASSWORD = b"test-subscription-abuse"
 os.environ["EGE_TRUSTED_PROXY"] = "1"
 os.environ["EGE_AI_RATE_MAX"] = "1000"
 os.environ["EGE_SUBSCRIPTION_MOCK"] = "1"
+# Mock-режим тестов: прод-ключи Platega из окружения хоста гасим, иначе
+# checkout уйдёт в настоящие деньги.
+for _k in ("EGE_PLATEGA_MERCHANT_ID", "EGE_PLATEGA_SECRET",
+           "EGE_PLATEGA_METHOD", "EGE_PLATEGA_BASE_URL",
+           "EGE_PLATEGA_TIMEOUT_SEC"):
+    os.environ.pop(_k, None)
 
 failures = 0
 checks = 0

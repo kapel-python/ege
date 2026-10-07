@@ -706,8 +706,43 @@
   }
 
   /* покупка: без аккаунта — в профиль (там онбординг),
-     с аккаунтом — честное «скоро» (провайдера оплаты нет) */
+     с аккаунтом — настоящий checkout: шлюз вернёт ссылку на оплату
+     (paymentUrl) — уходим на неё; без ссылки (mock-стенд/тесты) и когда
+     провайдер не настроен — честное «скоро» */
   var soonModal = document.getElementById("soonModal");
+  var buyBusy = false;
+  function setBuyBusy(busy, label){
+    buyBusy = busy;
+    [ctaBtn, buybarBtn].forEach(function(b){
+      if (!b) return;
+      b.disabled = !!busy;
+      if (busy) { b.setAttribute("data-label", b.textContent); b.textContent = label; }
+      else { var l = b.getAttribute("data-label"); if (l) b.textContent = l; }
+    });
+  }
+  function onBuy(){
+    if (subState.active) { window.location.href = "/dashboard#/profile"; return; }
+    // Статус ещё не проверили (медленная сеть): безопасный дефолт — профиль.
+    // Гостю там онбординг, залогиненному — карточка подписки с тем же окном.
+    if (!subState.checked || subState.guest) { window.location.href = "/dashboard#/profile"; return; }
+    if (buyBusy) return;
+    setBuyBusy(true, "Создаём счёт…");
+    fetch("/api/subscription/checkout", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, credentials: "same-origin", cache: "no-store", body: JSON.stringify({ period: current }) })
+      .then(function(resp){
+        return resp.json().catch(function(){ return {}; }).then(function(data){
+          return { status: resp.status, ok: resp.ok, data: data || {} };
+        });
+      })
+      .then(function(res){
+        if (res.ok && res.data.paymentUrl) { window.location.href = res.data.paymentUrl; return; }
+        setBuyBusy(false);
+        openSoon();
+      })
+      .catch(function(){
+        setBuyBusy(false);
+        openSoon();
+      });
+  }
   function openSoon(){
     if (!soonModal) return;
     soonModal.classList.add("is-open");
@@ -717,13 +752,6 @@
     if (!soonModal) return;
     soonModal.classList.remove("is-open");
     try { document.body.style.overflow = ""; } catch(e){}
-  }
-  function onBuy(){
-    if (subState.active) { window.location.href = "/dashboard#/profile"; return; }
-    // Статус ещё не проверили (медленная сеть): безопасный дефолт — профиль.
-    // Гостю там онбординг, залогиненному — карточка подписки с тем же окном.
-    if (!subState.checked || subState.guest) { window.location.href = "/dashboard#/profile"; return; }
-    openSoon();
   }
   if (ctaBtn) ctaBtn.addEventListener("click", onBuy);
   if (notifyBtn) notifyBtn.addEventListener("click", postNotify);

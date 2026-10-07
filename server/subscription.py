@@ -28,6 +28,11 @@
     pending-платёж, confirm/webhook его подтверждают. Включён только при
     EGE_SUBSCRIPTION_MOCK=1, иначе confirm отвечает отказом, а не
     «успешной оплатой»;
+  * ``platega`` — настоящий шлюз (см. раздел Platega в конце файла):
+    checkout заводит счёт в шлюзе и отдаёт ссылку на оплату, confirm
+    опрашивает живой статус, callback подтверждает по заголовкам
+    X-MerchantId/X-Secret. Активен при заданных EGE_PLATEGA_MERCHANT_ID
+    и EGE_PLATEGA_SECRET — тогда checkout по умолчанию идёт через него;
   * настоящий шлюз подключается сюда же: checkout создаёт pending с
     provider_payment_id шлюза, а POST /api/subscription/webhook
     подтверждает его по HMAC-подписи (EGE_SUBSCRIPTION_WEBHOOK_SECRET).
@@ -48,6 +53,9 @@ import os
 import secrets
 import sqlite3
 import time
+import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path as _Path
 
 try:
@@ -85,6 +93,7 @@ PAY_CANCELLED = "cancelled"
 
 PROVIDER_MANUAL = "manual"
 PROVIDER_MOCK = "mock"
+PROVIDER_PLATEGA = "platega"
 
 # Уровни Plus: проверки сочинений 5 -> 10 в день, запросы к ИИ 10 -> 50.
 PLUS_ESSAY_LIMIT = 10
@@ -550,7 +559,7 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
     ensure_subscription_schema(conn)
     if period not in PERIODS:
         raise ValueError("period должен быть month или year")
-    if provider not in (PROVIDER_MOCK, PROVIDER_MANUAL):
+    if provider not in (PROVIDER_MOCK, PROVIDER_MANUAL, PROVIDER_PLATEGA):
         raise ValueError("provider не поддерживается")
     if idempotency_key is not None and not isinstance(idempotency_key, str):
         raise ValueError("idempotency_key должен быть строкой")
@@ -579,7 +588,13 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
                                                "для завершённого платежа")
                 _end(conn, own, True)
                 return _payment_payload(existing)
-        provider_payment_id = f"{provider}_{secrets.token_hex(12)}"
+        if provider == PROVIDER_PLATEGA:
+            # Шлюз требует id транзакции строго в формате UUID — общий
+            # `platega_<hex>` сюда не годится, а повторное использование id
+            # шлюз отвергает («already exists»), поэтому свежий UUID на счёт.
+            provider_payment_id = str(uuid.uuid4())
+        else:
+            provider_payment_id = f"{provider}_{secrets.token_hex(12)}"
         pid, public_id = _insert_payment(conn, int(user_id), amount, period,
                                          provider, provider_payment_id, key, now_ms)
         _end(conn, own, True)
@@ -1208,3 +1223,380 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
                        "freeEssay": free_essay, "freeAgent": free_agent,
                        "agentRequiresPlus": agent_requires_plus()},
             "recent": recent}
+
+
+# ---------------------------------------------------------------------------
+# Platega — настоящий платёжный шлюз (https://app.platega.io, только stdlib).
+#
+# Поток:
+#   * checkout: заводим локальный pending (тот же create_checkout, но
+#     provider=platega и provider_payment_id — свежий UUID: шлюз требует id
+#     транзакции строго в этом формате), затем ОДИН POST
+#     /transaction/process — шлюз возвращает ссылку на оплату (redirect),
+#     её кладём в payload_json платежа и отдаём фронту (paymentUrl).
+#     Повтор с тем же idempotencyKey денег не трогает: если ссылка уже
+#     сохранена — возвращаем её без нового вызова шлюза.
+#   * ученик платит на стороне Platega (карты нам не попадают — как и
+#     требует приватность); шлюз зовёт наш POST /api/subscription/webhook
+#     с заголовками X-MerchantId/X-Secret и телом
+#     {id, amount, currency, status, paymentMethod}: CONFIRMED активирует
+#     (сумма сверяется со счётом), CANCELED гасит pending без активации.
+#     Ответ нужен за 60 с, иначе шлюз повторит ещё 3 раза каждые 5 минут —
+#     обработчик только локальная БД, идемпотентен с обеих сторон.
+#   * возврат из платёжной страницы (return/failedUrl) — на manage-страницу
+#     с ?pay=ok|fail: фронт сам добивает confirm (он для platega опрашивает
+#     живой статус GET /transaction/{id} и активирует только CONFIRMED).
+#
+# Сеть — ровно по одному вызову без ретраев: долбёжка шлюза карается
+# рейт-лимитом. Ошибка шлюза/сети — PlategaError (HTTP 503), а не выдуманный
+# успех: деньги активируются только по факту от шлюза.
+#
+# Конфиг окружения:
+#   EGE_PLATEGA_MERCHANT_ID / EGE_PLATEGA_SECRET — обязательные;
+#   EGE_PLATEGA_METHOD — 2 (СБП/QR), 10 (карты МИР) или 12 (международный);
+#   EGE_PLATEGA_BASE_URL — по умолчанию https://app.platega.io;
+#   EGE_PLATEGA_TIMEOUT_SEC — таймаут одного вызова (5..30, по умолч. 15).
+# ---------------------------------------------------------------------------
+
+PLATEGA_METHODS = (2, 10, 12)
+
+
+class PlategaError(RuntimeError):
+    """Шлюз недоступен или отклонил запрос. HTTP-маппинг — 503."""
+
+
+def platega_config() -> dict | None:
+    """Конфиг шлюза из окружения. None — не настроен (checkout честно
+    отвечает 503, фронт показывает «скоро», как раньше)."""
+    merchant = (os.environ.get("EGE_PLATEGA_MERCHANT_ID") or "").strip()
+    secret = (os.environ.get("EGE_PLATEGA_SECRET") or "").strip()
+    if not merchant or not secret:
+        return None
+    try:
+        method = int((os.environ.get("EGE_PLATEGA_METHOD") or "2").strip())
+    except (TypeError, ValueError):
+        method = 2
+    if method not in PLATEGA_METHODS:
+        method = 2
+    base = (os.environ.get("EGE_PLATEGA_BASE_URL")
+            or "https://app.platega.io").strip().rstrip("/")
+    if not base.lower().startswith(("http://", "https://")):
+        base = "https://app.platega.io"
+    timeout = _env_int("EGE_PLATEGA_TIMEOUT_SEC", 15, 5)
+    return {"merchant_id": merchant, "secret": secret, "base": base,
+            "method": method, "timeout": min(30, timeout)}
+
+
+def platega_enabled() -> bool:
+    return platega_config() is not None
+
+
+def _platega_error_text(raw: str) -> str:
+    """Человеческий текст из ответа шлюза ({"message": ...}), обрезанный."""
+    try:
+        data = json.loads(raw or "")
+        msg = str((data or {}).get("message") or "").strip()
+        return msg[:200] if msg else ""
+    except (ValueError, TypeError, AttributeError):
+        return (raw or "")[:200]
+
+
+def _platega_http(cfg: dict, method: str, path: str,
+                  body: dict | None = None) -> dict:
+    """Один вызов API шлюза. Без ретраев: повторный платёж заводит дубли."""
+    url = cfg["base"] + path
+    data = (json.dumps(body, ensure_ascii=False).encode("utf-8")
+            if body is not None else None)
+    req = urllib.request.Request(
+        url, data=data, method=method,
+        headers={"Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "X-MerchantId": cfg["merchant_id"],
+                 "X-Secret": cfg["secret"]})
+    try:
+        with urllib.request.urlopen(req, timeout=cfg["timeout"]) as resp:
+            raw = resp.read(65536)
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read(2048).decode("utf-8", "replace")
+        except Exception:
+            detail = ""
+        raise PlategaError(_platega_error_text(detail)
+                           or f"шлюз ответил HTTP {exc.code}")
+    except Exception as exc:
+        raise PlategaError(f"шлюз недоступен ({type(exc).__name__})")
+    try:
+        parsed = json.loads(raw.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        raise PlategaError("шлюз вернул не-JSON")
+    if not isinstance(parsed, dict):
+        raise PlategaError("шлюз вернул не-объект")
+    return parsed
+
+
+def platega_create_transaction(cfg: dict, txn_id: str, amount_rub: int,
+                               description: str, return_url: str,
+                               failed_url: str, payload: str) -> dict:
+    """Создать транзакцию в шлюзе. Один вызов — один счёт."""
+    resp = _platega_http(cfg, "POST", "/transaction/process", {
+        "paymentMethod": cfg["method"], "id": txn_id,
+        "paymentDetails": {"amount": int(amount_rub), "currency": "RUB"},
+        "description": str(description)[:200],
+        "return": return_url, "failedUrl": failed_url,
+        "payload": str(payload)[:128]})
+    redirect = resp.get("redirect")
+    if not redirect or not isinstance(redirect, str):
+        raise PlategaError("шлюз не вернул ссылку на оплату")
+    return {"redirect": redirect,
+            "status": str(resp.get("status") or "PENDING"),
+            "transactionId": str(resp.get("transactionId") or txn_id)}
+
+
+def platega_fetch_status(cfg: dict, txn_id: str) -> str:
+    """Живой статус транзакции: PENDING/CONFIRMЕD/EXPIRED/CANCELED/FAILED."""
+    resp = _platega_http(cfg, "GET", "/transaction/" + str(txn_id))
+    return str(resp.get("status") or "").strip().upper()
+
+
+def _payload_data(pay: dict) -> dict:
+    try:
+        data = json.loads(pay.get("payload_json") or "{}")
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def create_platega_checkout(conn: sqlite3.Connection, user_id: int,
+                            period: str,
+                            idempotency_key: str | None = None,
+                            return_url: str = "",
+                            failed_url: str = "") -> dict:
+    """Настоящий checkout: локальный pending + счёт в шлюзе.
+
+    Идемпотентен по ключу вместе с базовым create_checkout; ссылку шлюза
+    создаёт один раз и хранит в payload_json: повтор отдаёт сохранённую
+    без нового вызова. Счёт в шлюзе не создан (сеть легла) — pending живёт
+    для повтора тем же ключом, деньги никуда не ушли."""
+    cfg = platega_config()
+    if cfg is None:
+        raise PermissionError("оплата не настроена")
+    if period not in PERIODS:
+        raise ValueError("period должен быть month или year")
+    amount_kop = plus_price_kopecks(period)
+    if amount_kop <= 0 or amount_kop % 100:
+        raise ValueError("тариф не представим в рублях для шлюза")
+    created = create_checkout(conn, int(user_id), period,
+                              PROVIDER_PLATEGA, idempotency_key)
+    row = conn.execute("SELECT * FROM subscription_payments WHERE public_id=?",
+                       (created["paymentId"],)).fetchone()
+    pay = _row_to_dict(row)
+    if not pay:
+        raise KeyError("payment not found")
+    stored = _payload_data(pay)
+    if stored.get("paymentUrl"):
+        created["paymentUrl"] = stored["paymentUrl"]
+        return created
+    made = platega_create_transaction(
+        cfg, str(pay.get("provider_payment_id")), amount_kop // 100,
+        f"ege easy Plus · {'год' if period == PERIOD_YEAR else 'месяц'}",
+        return_url, failed_url, str(created["paymentId"]))
+    stored["paymentUrl"] = made["redirect"]
+    stored["plategaStatus"] = made["status"]
+    own = _begin(conn)
+    try:
+        conn.execute("UPDATE subscription_payments SET payload_json=? WHERE id=?",
+                     (json.dumps(stored, ensure_ascii=False)[:4000],
+                      int(pay["id"])))
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    created["paymentUrl"] = made["redirect"]
+    return created
+
+
+def _resolve_payment(conn: sqlite3.Connection, payment_ref,
+                     expected_user_id: int | None = None) -> dict | None:
+    """Найти платёж по int id (только с владельцем), public_id или
+    provider_payment_id. Владельца НЕ проверяет — это дело вызывателя."""
+    ensure_subscription_schema(conn)
+    if isinstance(payment_ref, bool):
+        return None
+    if isinstance(payment_ref, int) or str(payment_ref).isdigit():
+        if expected_user_id is None:
+            return None
+        row = conn.execute("SELECT * FROM subscription_payments WHERE id=?",
+                           (int(payment_ref),)).fetchone()
+    elif is_payment_public_id(payment_ref):
+        row = conn.execute("SELECT * FROM subscription_payments WHERE public_id=?",
+                           (payment_ref,)).fetchone()
+    elif isinstance(payment_ref, str) and payment_ref.strip():
+        row = conn.execute("SELECT * FROM subscription_payments"
+                           " WHERE provider_payment_id=?",
+                           (payment_ref.strip(),)).fetchone()
+    else:
+        return None
+    return _row_to_dict(row)
+
+
+def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
+    """Подтверждение platega-платежа: только по живому статусу шлюза.
+    CONFIRMED — активация (продления складываются, как у mock);
+    CANCELED/EXPIRED/FAILED — строка гасится, клиенту честный текст;
+    PENDING — «оплата ещё не прошла», срока не двигаем."""
+    cfg = platega_config()
+    if cfg is None:
+        raise PermissionError("оплата не настроена")
+    if pay.get("status") == PAY_SUCCEEDED:
+        sub = get_subscription(conn, int(pay["user_id"]))
+        return {"ok": True, "already": True,
+                "paymentId": pay.get("public_id"), "status": PAY_SUCCEEDED,
+                "expiresAt": (sub or {}).get("expires_at_ms")}
+    if pay.get("status") != PAY_PENDING:
+        raise ValueError(f"платёж уже {pay.get('status')}, подтвердить нельзя")
+    live = platega_fetch_status(cfg, str(pay.get("provider_payment_id")))
+    now_ms = NOW_MS()
+    if live == "CONFIRMED":
+        own = _begin(conn)
+        try:
+            conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=?"
+                         " WHERE id=?",
+                         (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+            act = _activate_row(conn, int(pay["user_id"]), str(pay.get("period")),
+                                PROVIDER_PLATEGA, now_ms,
+                                PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT)
+            conn.execute("UPDATE subscription_payments SET subscription_id=?"
+                         " WHERE id=?", (act["subscriptionId"], int(pay["id"])))
+            _end(conn, own, True)
+        except Exception:
+            _end(conn, own, False)
+            raise
+        return {"ok": True, "already": False, "paymentId": pay.get("public_id"),
+                "status": PAY_SUCCEEDED, **act}
+    if live in ("CANCELED", "EXPIRED", "FAILED"):
+        own = _begin(conn)
+        try:
+            conn.execute("UPDATE subscription_payments SET status=? WHERE id=?",
+                         (PAY_CANCELLED if live == "CANCELED" else PAY_FAILED,
+                          int(pay["id"])))
+            _end(conn, own, True)
+        except Exception:
+            _end(conn, own, False)
+            raise
+        raise ValueError("платёж отменён" if live == "CANCELED"
+                         else "срок оплаты истёк")
+    raise ValueError("оплата ещё не прошла")
+
+
+def confirm_resolved(conn: sqlite3.Connection, payment_ref,
+                     expected_user_id: int | None = None) -> dict:
+    """Подтвердить платёж любого провайдера по его строке: mock — как раньше
+    (только с EGE_SUBSCRIPTION_MOCK=1), platega — по живому статусу шлюза.
+    Чужой платёж неотличим от несуществующего (404), как у confirm_payment."""
+    pay = _resolve_payment(conn, payment_ref, expected_user_id)
+    if not pay:
+        raise KeyError("payment not found")
+    if (expected_user_id is not None
+            and int(pay.get("user_id") or 0) != int(expected_user_id)):
+        raise KeyError("payment not found")
+    provider = str(pay.get("provider") or "")
+    if provider == PROVIDER_MOCK:
+        return confirm_payment(conn, payment_ref, PROVIDER_MOCK,
+                               PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT,
+                               expected_user_id)
+    if provider == PROVIDER_PLATEGA:
+        return _confirm_platega(conn, pay)
+    raise ValueError("такой платёж подтвердить нельзя")
+
+
+def platega_webhook_auth(given_merchant: str, given_secret: str) -> bool:
+    """Сверка заголовков callback (X-MerchantId/X-Secret) с нашим конфигом.
+    Байтами через compare_digest: кривая подпись — False, а не исключение."""
+    cfg = platega_config()
+    if cfg is None:
+        return False
+    try:
+        mid_ok = hmac.compare_digest(
+            cfg["merchant_id"].encode("ascii"),
+            (given_merchant or "").strip().encode("ascii"))
+        sec_ok = hmac.compare_digest(
+            cfg["secret"].encode("ascii"),
+            (given_secret or "").strip().encode("ascii"))
+    except (AttributeError, ValueError, UnicodeEncodeError):
+        return False
+    return bool(mid_ok and sec_ok)
+
+
+def _platega_amount_kop(amount) -> int | None:
+    if isinstance(amount, bool):
+        return None
+    try:
+        return int(round(float(str(amount).strip().replace(",", ".")) * 100))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def platega_webhook(conn: sqlite3.Connection, txn_id: str, status: str,
+                    amount=None, currency=None) -> dict:
+    """Входящий callback шлюза (авторизация уже проверена вызывателем).
+    Сети не требует: находит наш pending по id транзакции, сверяет сумму
+    со счётом и активирует. Повтор CONFIRMED — идемпотентный no-op;
+    опоздавший CANCELED по уже успешному платежу доступ НЕ гасит
+    (возвраты — только через админку)."""
+    ensure_subscription_schema(conn)
+    if not isinstance(txn_id, str) or not txn_id.strip():
+        raise ValueError("нужен id транзакции")
+    status = str(status or "").strip().upper()
+    if status not in ("CONFIRMED", "CANCELED"):
+        raise ValueError("неизвестный статус вебхука")
+    pay = _row_to_dict(conn.execute(
+        "SELECT * FROM subscription_payments WHERE provider_payment_id=?",
+        (txn_id.strip(),)).fetchone())
+    if not pay or str(pay.get("provider") or "") != PROVIDER_PLATEGA:
+        raise KeyError("payment not found")
+    if currency is not None and str(currency or "").strip().upper() not in ("RUB", "RUR"):
+        raise ValueError("валюта платежа не RUB")
+    if amount is not None:
+        try:
+            have = int(pay.get("amount_kopecks") or 0)
+        except (TypeError, ValueError):
+            have = 0
+        want = _platega_amount_kop(amount)
+        if want is None or want != have:
+            raise ValueError("сумма платежа не совпадает со счётом")
+    now_ms = NOW_MS()
+    if pay.get("status") == PAY_SUCCEEDED:
+        sub = get_subscription(conn, int(pay["user_id"]))
+        return {"ok": True, "already": True, "paymentId": pay.get("public_id"),
+                "status": PAY_SUCCEEDED,
+                "expiresAt": (sub or {}).get("expires_at_ms")}
+    if status == "CONFIRMED":
+        if pay.get("status") != PAY_PENDING:
+            raise ValueError(f"платёж уже {pay.get('status')}, подтвердить нельзя")
+        own = _begin(conn)
+        try:
+            conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=?"
+                         " WHERE id=?",
+                         (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+            act = _activate_row(conn, int(pay["user_id"]), str(pay.get("period")),
+                                PROVIDER_PLATEGA, now_ms,
+                                PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT,
+                                reason="subscription:platega")
+            conn.execute("UPDATE subscription_payments SET subscription_id=?"
+                         " WHERE id=?", (act["subscriptionId"], int(pay["id"])))
+            _end(conn, own, True)
+        except Exception:
+            _end(conn, own, False)
+            raise
+        return {"ok": True, "already": False, "paymentId": pay.get("public_id"),
+                "status": PAY_SUCCEEDED, **act}
+    own = _begin(conn)
+    try:
+        if pay.get("status") == PAY_PENDING:
+            conn.execute("UPDATE subscription_payments SET status=? WHERE id=?",
+                         (PAY_CANCELLED, int(pay["id"])))
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "paymentId": pay.get("public_id"), "status": PAY_CANCELLED}

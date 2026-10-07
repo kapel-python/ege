@@ -119,9 +119,9 @@ function check(name, cond, detail) {
   const mgFree = await page.textContent("#content");
   check("manage free: кольца и пустая история",
     mgFree.includes("Проверок сочинений") && mgFree.includes("Платежей пока нет"));
-  await page.click('#actionsRow [data-act="soon"]');
+  await page.click('#actionsRow [data-act="buy"]');
   await page.waitForSelector("#soonModal.is-open");
-  check("manage soon-модалка", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
+  check("manage soon-модалка (mock без ссылки)", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
   await page.keyboard.press("Escape");
 
   // --- 2b. залогиненный free жмёт купить -> soon ---
@@ -172,8 +172,8 @@ function check(name, cond, detail) {
   check("manage plus: плашка Plus без статусной таблетки",
     det.includes("Plus") && !det.includes("без продления") && !det.includes("Plus активен"));
 
-  // «Продлить Plus» у активного — честное «скоро», деньги никуда не уходят
-  await page.click('#actionsRow [data-act="soon"]');
+  // «Продлить Plus» у активного — mock без ссылки: честное «скоро», деньги никуда не уходят
+  await page.click('#actionsRow [data-act="buy"]');
   await page.waitForSelector("#soonModal.is-open");
   check("plus soon-модалка", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
   await page.keyboard.press("Escape");

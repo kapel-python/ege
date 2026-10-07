@@ -17,6 +17,11 @@ os.environ["EGE_DB_PATH"] = str(Path(tmp) / "ege.sqlite3")
 os.environ["EGE_DISABLE_SYSTEMD"] = "1"
 os.environ["EGE_TRUSTED_PROXY"] = "1"
 os.environ["EGE_SUBSCRIPTION_MOCK"] = "1"
+# E2E на учебном mock: прод-ключи Platega из окружения хоста гасим.
+for _k in ("EGE_PLATEGA_MERCHANT_ID", "EGE_PLATEGA_SECRET",
+           "EGE_PLATEGA_METHOD", "EGE_PLATEGA_BASE_URL",
+           "EGE_PLATEGA_TIMEOUT_SEC"):
+    os.environ.pop(_k, None)
 salt = "e" * 32
 dk = hashlib.pbkdf2_hmac("sha256", b"e2e-admin", bytes.fromhex(salt), 210000)
 os.environ["EGE_ADMIN_PASSWORD_HASH"] = f"pbkdf2_sha256$210000${salt}${dk.hex()}"

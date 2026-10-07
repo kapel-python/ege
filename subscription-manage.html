@@ -519,8 +519,70 @@
     else { btn.disabled = false; var l = btn.getAttribute("data-label"); if (l) btn.textContent = l; }
   }
 
+  /* Последний статус — для выбора периода продления. */
+  var lastStatus = null;
+
+  /* Покупка: настоящий checkout, ссылка шлюза — редирект на оплату.
+     Без ссылки (mock-стенд) и при ненастроенном провайдере (503) —
+     честное «скоро», деньги никуда не уходят. */
+  var buyInFlight = false;
+  function buyFlow(btn, period){
+    if (buyInFlight) return;
+    buyInFlight = true;
+    setBusy(btn, true, "Создаём счёт…");
+    var key = "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    api("/api/subscription/checkout", { period: period, idempotencyKey: key }).then(function(res){
+      if (res && res.paymentUrl) { window.location.href = res.paymentUrl; return; }
+      buyInFlight = false;
+      setBusy(btn, false);
+      openSoon();
+    }).catch(function(err){
+      buyInFlight = false;
+      setBusy(btn, false);
+      if (err && err.status === 503) { openSoon(); return; }
+      toast((err && err.message) || "Не получилось создать счёт. Попробуй ещё раз.");
+    });
+  }
+
+  /* Возврат с платёжной страницы (?pay=ok|fail): ok — добиваем confirm
+     по свежайшему pending-счёту (для platega он опрашивает живой статус
+     шлюза), fail — честный тост без движений. Параметр из URL стираем,
+     чтобы обновление не перепроверяло. */
+  function cleanPayParam(){
+    try {
+      var u = new URL(window.location.href);
+      if (u.searchParams.has("pay")) {
+        u.searchParams.delete("pay");
+        var rest = u.searchParams.toString();
+        window.history.replaceState({}, "", u.pathname + (rest ? "?" + rest : "") + u.hash);
+      }
+    } catch(e){}
+  }
+  function confirmLatestPending(){
+    api("/api/subscription/payments?limit=10&offset=0").then(function(hist){
+      var list = (hist && hist.payments) || [];
+      var pend = null;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].status === "pending") { pend = list[i]; break; }
+      }
+      if (!pend) { cleanPayParam(); toast("Активных счетов нет — оформи новый"); return; }
+      api("/api/subscription/confirm", { paymentId: pend.publicId || pend.id }).then(function(){
+        cleanPayParam();
+        toast("Оплата прошла — Plus активен");
+        reload();
+      }, function(err){
+        cleanPayParam();
+        toast((err && err.message) || "Оплата ещё не прошла — попробуй чуть позже");
+      });
+    }).catch(function(err){
+      cleanPayParam();
+      toast((err && err.message) || "Не получилось проверить оплату");
+    });
+  }
+
   function renderAll(st, hist, essayLim, agentLim, notified){
     var plus = !!(st && st.active);
+    lastStatus = st || null;
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 10 : 5);
     var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 50 : 10);
@@ -582,11 +644,11 @@
       return b;
     }
     if (plus) {
-      sub.textContent = "Доступ действует до конца оплаченного срока.";
-      btn("btn-primary btn--sm", "Продлить Plus", "soon");
+      sub.textContent = "Доступ действует до конца оплаченного срока. Оплата — на стороне провайдера, данные карты нам не попадают.";
+      btn("btn-primary btn--sm", "Продлить Plus", "buy");
     } else {
-      sub.textContent = "Оплата пока подключается: кнопка честно скажет об этом, деньги никуда не уйдут. Нажми «Напомнить» — сообщим, когда её включат.";
-      btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "soon");
+      sub.textContent = "Оплата — на стороне провайдера: деньги и карта не проходят через нас, к нам попадает только факт оплаты.";
+      btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "buy");
       var nb = btn("btn-ghost btn--sm", notified ? "Ты в списке — сообщим о запуске" : "Напомнить о запуске", "notify");
       if (notified) nb.disabled = true;
     }
@@ -596,6 +658,11 @@
         var b = e.target.closest("[data-act]");
         if (!b || b.disabled) return;
         var act = b.getAttribute("data-act");
+        if (act === "buy") {
+          var per = (lastStatus && lastStatus.active && lastStatus.period === "year") ? "year" : "month";
+          buyFlow(b, per);
+          return;
+        }
         if (act === "soon") { openSoon(); return; }
         if (act === "notify") {
           setBusy(b, true, "Записываем…");
@@ -678,6 +745,13 @@
           document.getElementById("content").hidden = false;
           notifiedState = !!(res[3] && res[3].joined);
           renderAll(st, res[0], res[1], res[2], notifiedState);
+          var payFlag = null;
+          try { payFlag = new URLSearchParams(window.location.search).get("pay"); } catch(e){}
+          if (payFlag === "ok") confirmLatestPending();
+          else if (payFlag === "fail") {
+            cleanPayParam();
+            toast("Платёж не прошёл — деньги не списаны. Попробуй ещё раз.");
+          }
         });
       });
     }).catch(function(){

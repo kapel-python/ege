@@ -13932,6 +13932,13 @@ class Handler(BaseHTTPRequestHandler):
             key = payload.get("idempotencyKey", payload.get("idempotency_key"))
             if key is not None and not isinstance(key, str):
                 raise ValueError("idempotencyKey должен быть строкой")
+            if _SUB.platega_enabled():
+                # Настоящие деньги: счёт в шлюзе + ссылка на оплату.
+                base = public_base_url(self).rstrip("/")
+                return _SUB.create_platega_checkout(
+                    conn, int(user_id), period, key,
+                    base + "/subscription/manage?pay=ok",
+                    base + "/subscription/manage?pay=fail")
             return _SUB.create_checkout(conn, int(user_id), period,
                                         _SUB.PROVIDER_MOCK, key)
         if path == "/api/subscription/confirm":
@@ -13944,9 +13951,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("нужен paymentId")
             if isinstance(ref, str):
                 ref = ref.strip()
-            return _SUB.confirm_payment(conn, ref, _SUB.PROVIDER_MOCK,
-                                        _SUB.PLUS_ESSAY_LIMIT, _SUB.PLUS_AGENT_LIMIT,
-                                        int(user_id))
+            # Диспетчер по строке платежа: mock — как раньше, platega — по
+            # живому статусу шлюза. Чужие платежи по-прежнему неотличимы
+            # от несуществующих (404 через KeyError ниже).
+            return _SUB.confirm_resolved(conn, ref, int(user_id))
         if path == "/api/subscription/cancel":
             return _SUB.cancel_subscription(conn, int(user_id))
         if path == "/api/subscription/resume":
@@ -13958,7 +13966,12 @@ class Handler(BaseHTTPRequestHandler):
         raise ValueError("Неизвестное действие подписки")
 
     def handle_subscription_webhook(self, conn: sqlite3.Connection) -> None:
-        """Входящий вебхук платёжного шлюза: без сессии, только HMAC-подпись.
+        """Входящий вебхук платёжного шлюза: без сессии.
+
+        Platega (заголовки X-MerchantId/X-Secret, тело {id, amount,
+        currency, status, paymentMethod}) — сверка с нашим конфигом, сумма
+        со счётом, CONFIRMED активирует. Легаси-форма {providerPaymentId,
+        status, signature} — старый HMAC-контракт (EGE_SUBSCRIPTION_...).
         Секрет не задан — 503 «не настроено», а не тихий отказ."""
         assert _SUB is not None
         try:
@@ -13967,6 +13980,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Некорректный JSON"}, 400); return
         if not isinstance(payload, dict):
             self.send_json({"error": "Некорректный JSON"}, 400); return
+        platega_mid = (self.headers.get("X-MerchantId") or "").strip()
+        platega_sec = (self.headers.get("X-Secret") or "").strip()
+        if platega_mid or platega_sec:
+            if not _SUB.platega_enabled() or not _SUB.platega_webhook_auth(
+                    platega_mid, platega_sec):
+                self.send_json({"error": "Неверная подпись"}, 403); return
+            txn_id = payload.get("id", "")
+            status = payload.get("status", "")
+            if not isinstance(txn_id, str) or not txn_id.strip():
+                self.send_json({"error": "Нужен id транзакции"}, 400); return
+            if not isinstance(status, str) or not status.strip():
+                self.send_json({"error": "Нужен status"}, 400); return
+            try:
+                result = _SUB.platega_webhook(
+                    conn, txn_id.strip(), status.strip(),
+                    payload.get("amount"), payload.get("currency"))
+            except KeyError:
+                self.send_json({"error": "Платёж не найден"}, 404); return
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400); return
+            self.send_json(result); return
         if not _SUB.webhook_secret():
             self.send_json({"error": "Приём платежей не настроен"}, 503); return
         provider_payment_id = payload.get("providerPaymentId", "")
@@ -14185,6 +14219,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     result = self.handle_subscription_action(conn, user_id, path, payload)
                 except PermissionError as exc:
+                    self.send_json({"error": str(exc)}, 503, token=token); return
+                except _SUB.PlategaError as exc:
+                    # Шлюз лег или отверг счёт: честные 503, деньги не ушли.
                     self.send_json({"error": str(exc)}, 503, token=token); return
                 except KeyError:
                     self.send_json({"error": "Не найдено"}, 404, token=token); return
