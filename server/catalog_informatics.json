@@ -5002,10 +5002,142 @@
   "inf05_p1",
   "inf16_p1"
  ],
- "visualAssets": [],
+ "visualAssets": [
+  {
+   "id": "inf-graph-p1",
+   "src": "assets/informatics/inf-graph-p1.svg",
+   "type": "image",
+   "alt": "Граф дорог: посёлки-вершины, длины дорог у рёбер",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf01_p1",
+   "taskId": "inf01_p1",
+   "description": "Локальная SVG-схема для задания inf01_p1."
+  },
+  {
+   "id": "inf-graph-p2",
+   "src": "assets/informatics/inf-graph-p2.svg",
+   "type": "image",
+   "alt": "Граф дорог: посёлки-вершины, длины дорог у рёбер",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf01_p2",
+   "taskId": "inf01_p2",
+   "description": "Локальная SVG-схема для задания inf01_p2."
+  },
+  {
+   "id": "inf-graph-p3",
+   "src": "assets/informatics/inf-graph-p3.svg",
+   "type": "image",
+   "alt": "Граф дорог: посёлки-вершины, длины дорог у рёбер",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf01_p3",
+   "taskId": "inf01_p3",
+   "description": "Локальная SVG-схема для задания inf01_p3."
+  },
+  {
+   "id": "inf-graph-p4",
+   "src": "assets/informatics/inf-graph-p4.svg",
+   "type": "image",
+   "alt": "Граф дорог: посёлки-вершины, длины дорог у рёбер",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf01_p4",
+   "taskId": "inf01_p4",
+   "description": "Локальная SVG-схема для задания inf01_p4."
+  },
+  {
+   "id": "inf-graph-p5",
+   "src": "assets/informatics/inf-graph-p5.svg",
+   "type": "image",
+   "alt": "Граф дорог: посёлки-вершины, длины дорог у рёбер",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf01_p5",
+   "taskId": "inf01_p5",
+   "description": "Локальная SVG-схема для задания inf01_p5."
+  },
+  {
+   "id": "inf-db-p1",
+   "src": "assets/informatics/inf-db-p1.svg",
+   "type": "image",
+   "alt": "Схема базы данных: две таблицы с полями и связью",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf03_p1",
+   "taskId": "inf03_p1",
+   "description": "Локальная SVG-схема для задания inf03_p1."
+  },
+  {
+   "id": "inf-db-p2",
+   "src": "assets/informatics/inf-db-p2.svg",
+   "type": "image",
+   "alt": "Схема базы данных: две таблицы с полями и связью",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf03_p2",
+   "taskId": "inf03_p2",
+   "description": "Локальная SVG-схема для задания inf03_p2."
+  },
+  {
+   "id": "inf-db-p3",
+   "src": "assets/informatics/inf-db-p3.svg",
+   "type": "image",
+   "alt": "Схема базы данных: две таблицы с полями и связью",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf03_p3",
+   "taskId": "inf03_p3",
+   "description": "Локальная SVG-схема для задания inf03_p3."
+  },
+  {
+   "id": "inf-db-p4",
+   "src": "assets/informatics/inf-db-p4.svg",
+   "type": "image",
+   "alt": "Схема базы данных: две таблицы с полями и связью",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf03_p4",
+   "taskId": "inf03_p4",
+   "description": "Локальная SVG-схема для задания inf03_p4."
+  },
+  {
+   "id": "inf-db-p5",
+   "src": "assets/informatics/inf-db-p5.svg",
+   "type": "image",
+   "alt": "Схема базы данных: две таблицы с полями и связью",
+   "width": 640,
+   "ratio": 1.5238095238095237,
+   "source": "reconstructed: schematic exam figure; property-accurate, not an official exam figure",
+   "sourceId": "catalog_informatics.json:inf03_p5",
+   "taskId": "inf03_p5",
+   "description": "Локальная SVG-схема для задания inf03_p5."
+  }
+ ],
  "visualAudit": {
   "defaultStatus": "text-only",
-  "taskStatuses": {},
+  "taskStatuses": {
+   "inf01_p1": "published",
+   "inf01_p2": "published",
+   "inf01_p3": "published",
+   "inf01_p4": "published",
+   "inf01_p5": "published",
+   "inf03_p1": "published",
+   "inf03_p2": "published",
+   "inf03_p3": "published",
+   "inf03_p4": "published",
+   "inf03_p5": "published"
+  },
   "references": []
  }
 }
