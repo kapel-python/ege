@@ -778,13 +778,14 @@ async function shot(page, name) {
     await admin.click("#provBody .a-card__head button:has-text('Добавить')");
     await admin.waitForSelector("#provBaseUrl", { timeout: 15000 });
     t("на странице добавления есть сегмент шаблонов (по умолчанию OpenAI)",
-      await admin.locator("#provNewProtoSeg .a-seg2__btn").count() === 2
+      await admin.locator("#provNewProtoSeg .a-seg2__btn").count() === 3
+      && await admin.locator("#provNewProtoSeg .a-seg2__btn[data-proto='anthropic']").count() === 1
       && await admin.locator("#provNewProtoSeg .a-seg2__btn--on").getAttribute("data-proto") === "chat");
     t("мышление — сегмент из 5 (Стандарт по умолчанию), а не текст",
       await admin.locator("#provNewEffortSeg .a-seg2__btn").count() === 5
       && await admin.locator("#provNewEffortSeg .a-seg2__btn--on").getAttribute("data-effort") === "");
-    t("у OpenAI-шаблона нет блока заголовков, подклейка видна",
-      await admin.locator("#provNewHeaders").isHidden()
+    t("у OpenAI-шаблона заголовки видны (шлются при любом шаблоне), подклейка видна",
+      await admin.locator("#provNewHeaders").isVisible()
       && await admin.locator("#provMerge").isVisible());
     await admin.click("#provNewProtoSeg .a-seg2__btn[data-proto='responses']");
     t("шаблон Responses показывает заголовки и прячет подклейку",
@@ -822,7 +823,7 @@ async function shot(page, name) {
     await admin.click(".a-prov-card:has-text('Быстрый шлюз') .a-prov-card__open");
     await admin.waitForSelector("#provDetailModel", { timeout: 15000 });
     t("на странице свой провайдер видит шаблон (по умолчанию OpenAI)",
-      await admin.locator("#provProtoSeg .a-seg2__btn").count() === 2
+      await admin.locator("#provProtoSeg .a-seg2__btn").count() === 3
       && await admin.locator("#provProtoSeg .a-seg2__btn--on").getAttribute("data-proto") === "chat");
     await admin.click("#provProtoSeg .a-seg2__btn[data-proto='responses']");
     // Кнопки добавления заголовка — по тексту, id у неё нет.
@@ -855,13 +856,16 @@ async function shot(page, name) {
       && (await admin.locator("#provHeaders [data-hname]").inputValue()) === "x-test"
       && await admin.locator("#provMerge").isHidden());
     await shot(admin, "admin-providers-detail-responses.png");
-    // Живая проверка своим протоколом: шлюз chat-only → честные 404.
+    // Живая проверка: шлюз chat-only, на /responses отдаёт 404 — это ошибка
+    // формата, поэтому модель проверяется по chat, а шаблон переключается сам.
     await admin.click("#provModelProbeBtn");
     await admin.waitForFunction(
-      () => (document.querySelector("#provModelProbeResult") || {}).textContent.includes("404"),
+      () => (document.querySelector("#provModelProbeResult") || {}).textContent.includes("Её можно применять"),
       null, { timeout: 30000 });
-    t("кнопка «Проверить» идёт своим протоколом (404, а не успех по chat)",
-      (await admin.locator("#provModelProbeResult").innerText()).includes("404"));
+    t("проверка модели переключает шаблон на тот, которым модель ответила (404 на /responses — формат)",
+      await admin.locator("#provProtoSeg .a-seg2__btn--on").getAttribute("data-proto") === "chat"
+      && (await admin.locator("#provModelProbeResult").innerText()).includes("переключ"),
+      await admin.locator("#provModelProbeResult").innerText());
     // Возвращаем как было: chat без заголовков в отправке (скрытые хранятся).
     await admin.click("#provProtoSeg .a-seg2__btn[data-proto='chat']");
     await admin.click("#provDetailApply");

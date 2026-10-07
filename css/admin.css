@@ -879,6 +879,8 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .a-seg2__btn--on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .a-seg2__hint { font-size: 10.5px; font-weight: 500; color: var(--muted); }
 @media (max-width: 640px) { .a-seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.a-seg2--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 640px) { .a-seg2--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ---- Живой пинг моделей ---- */
 .a-ping {

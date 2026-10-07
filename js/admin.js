@@ -2635,7 +2635,15 @@ const PROV_SLOT_LABELS = { high: "Высокий", medium: "Средний", low
 const PROV_PROTOCOLS = [
   { id: "chat", label: "OpenAI", hint: "chat/completions — обычный формат" },
   { id: "responses", label: "Responses API", hint: "responses — новый формат OpenAI" },
+  { id: "anthropic", label: "Anthropic", hint: "messages — формат Claude, ключ в x-api-key" },
 ];
+function provProtoOf(id) {
+  return PROV_PROTOCOLS.some((p) => p.id === id) ? id : "chat";
+}
+function provProtoLabel(id) {
+  const f = PROV_PROTOCOLS.find((p) => p.id === provProtoOf(id));
+  return f ? f.label : "OpenAI";
+}
 /* Уровень мышления reasoning-модели — выбором, а не текстом: свободная строка
    здесь давала бы опечатки, которые сервер резал бы 400-й уже после нажатия.
    Пусто («Стандарт») = default шлюза, поле в запрос не едет вовсе. */
@@ -2653,8 +2661,8 @@ function provEffortLabel(id) {
 /* Сегмент шаблона протокола: тем же .a-seg2, что приоритет, — кнопки с
    подписью и пояснением, видно сразу оба формата. */
 function provProtoSegHTML(current, onclick) {
-  const cur = current === "responses" ? "responses" : "chat";
-  return `<div class="a-seg2" role="group" aria-label="Протокол API провайдера">
+  const cur = provProtoOf(current);
+  return `<div class="a-seg2 a-seg2--3" role="group" aria-label="Протокол API провайдера">
     ${PROV_PROTOCOLS.map((s) => `<button type="button" class="a-seg2__btn${s.id === cur ? " a-seg2__btn--on" : ""}"
         data-proto="${s.id}" onclick="${onclick}('${s.id}')" title="${esc(s.hint)}">
       ${esc(s.label)}<span class="a-seg2__hint">${esc(s.hint)}</span>
@@ -2735,15 +2743,17 @@ function provHeadersRead(boxId) {
 function paintProtoSeg(boxId, proto) {
   const box = document.getElementById(boxId);
   if (!box) return;
-  const cur = proto === "responses" ? "responses" : "chat";
+  const cur = provProtoOf(proto);
   box.querySelectorAll(".a-seg2__btn").forEach((b) => {
     b.classList.toggle("a-seg2__btn--on", (b.dataset.proto || "") === cur);
   });
 }
 function paintProtoBlocks(proto) {
-  const responses = (proto || "chat") === "responses";
-  document.querySelectorAll(".resp-only").forEach((n) => { n.hidden = !responses; });
-  document.querySelectorAll(".chat-only").forEach((n) => { n.hidden = responses; });
+  // Блоки «заголовки» и «подклейка» различают не значения, а семейство: у
+  // Responses и Anthropic свои заголовки и поле system, подклейка там не нужна.
+  const native = provProtoOf(proto) !== "chat";
+  document.querySelectorAll(".resp-only").forEach((n) => { n.hidden = !native; });
+  document.querySelectorAll(".chat-only").forEach((n) => { n.hidden = native; });
 }
 function setNewProto(proto) {
   paintProtoSeg("provNewProtoSeg", proto);
@@ -2776,7 +2786,7 @@ function setDetailEffort(effort) {
 function currentProto(boxId) {
   const on = document.querySelector(`#${boxId} .a-seg2__btn--on`);
   const v = on ? (on.dataset.proto || "") : "";
-  return v === "responses" ? "responses" : "chat";
+  return provProtoOf(v);
 }
 function currentEffort(boxId) {
   const on = document.querySelector(`#${boxId} .a-seg2__btn--on`);
@@ -2852,6 +2862,7 @@ function provCardHTML(p) {
         ${p.useWalletBalance ? `<span class="a-chip" title="Списывать предоплату кошелька">кошелёк</span>` : ""}
         ${p.mergeSystem ? `<span class="a-chip" title="System-промпт подклеивается к user (маршруты вроде anthropic)">merge system</span>` : ""}
         ${p.protocol === "responses" ? `<span class="a-chip" title="Новый формат OpenAI: instructions + input, ответ массивом output">Responses API</span>` : ""}
+        ${p.protocol === "anthropic" ? `<span class="a-chip" title="Формат Anthropic Messages: ключ в x-api-key, system отдельным полем">Anthropic</span>` : ""}
       </div>
     </button>
     <div class="a-prov-actions">
@@ -3254,7 +3265,7 @@ function screenProviderNew() {
           <div class="a-field">
             <label>Шаблон API</label>
             <div id="provNewProtoSeg">${provProtoSegHTML("chat", "setNewProto")}</div>
-            <span class="a-field__hint">Шаблон меняет поля формы: у Responses API свой формат запросов, ему нужны заголовки и не нужна подклейка system.</span>
+            <span class="a-field__hint">Шаблон меняет поля формы: у Responses API и Anthropic свой формат запросов, им нужны заголовки и не нужна подклейка system.</span>
           </div>
           <div class="a-form-grid">
             <div class="a-field">
@@ -3292,7 +3303,7 @@ function screenProviderNew() {
           </div>
         </section>
 
-        <section class="a-card resp-only" hidden>
+        <section class="a-card">
           <div class="a-card__head"><span class="a-card__title">Доп. заголовки HTTP</span></div>
           <div id="provNewHeaders">${provHeadersHTML({})}</div>
           <div class="a-actions-row" style="margin-top:8px">
@@ -3331,7 +3342,7 @@ function screenProviderNew() {
           <div class="a-card__head"><span class="a-card__title">Особенности шлюза</span></div>
           <label class="a-check"><input type="checkbox" id="provWallet"> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
           <div class="chat-only"><label class="a-check"><input type="checkbox" id="provMerge"> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label></div>
-          <div class="a-pnl__note resp-only" hidden>Для Responses API подклейка не применяется — system едет отдельным полем instructions.</div>
+          <div class="a-pnl__note resp-only" hidden>Для Responses API и Anthropic подклейка не применяется — system едет отдельным полем (instructions или system).</div>
           <div class="a-pnl__note">Оставьте пустым, если шлюз ведёт себя как обычный OpenAI API. Ошибка в этой настройке ломает все запросы, поэтому «проверить без сохранения» — правильный способ убедиться до добавления.</div>
         </section>
 
@@ -3659,7 +3670,7 @@ function applyProvPingEvent(evt) {
     // отвечает на главный вопрос «идёт ли вообще проверка».
     st.pending.forEach((m) => { st.results[m] = { ok: false, latencyMs: 0, error: "", pending: true }; });
   } else if (evt.kind === "result") {
-    st.results[evt.model] = { ok: !!evt.ok, latencyMs: evt.latencyMs || 0, error: evt.error || "" };
+    st.results[evt.model] = { ok: !!evt.ok, latencyMs: evt.latencyMs || 0, error: evt.error || "", protocol: evt.protocol || "" };
     if (st.order.indexOf(evt.model) < 0) st.order.push(evt.model);
     st.okCount = Object.values(st.results).filter((r) => r.ok).length;
     const still = Object.values(st.results).filter((r) => r.pending).length;
@@ -3847,6 +3858,7 @@ function screenProviderPage(id) {
         <div class="a-page-badges">
           ${p.builtin ? '<span class="a-chip">встроенный</span>' : '<span class="a-chip a-chip--accent">свой</span>'}
           ${p.protocol === "responses" ? '<span class="a-chip a-chip--accent" title="Новый формат OpenAI: instructions + input, ответ массивом output">Responses API</span>' : ""}
+          ${p.protocol === "anthropic" ? '<span class="a-chip a-chip--accent" title="Формат Anthropic Messages: ключ в x-api-key, system отдельным полем">Anthropic</span>' : ""}
           ${p.active ? '<span class="a-chip a-chip--success">активный</span>' : ""}
           ${p.enabled ? "" : '<span class="a-chip a-chip--warn">выключен</span>'}
           ${p.modelOverridden ? '<span class="a-chip a-chip--warn">модель изменена</span>' : ""}
@@ -3923,14 +3935,14 @@ function screenProviderPage(id) {
           ${provKvHTML("Адрес", esc(p.baseHost || p.baseUrl || "—"), true)}
           ${provKvHTML("Ключ", p.keySet ? `задан <span class="mono">${esc(p.keyHint || "")}</span>` : "не задан")}
           ${provKvHTML("Авторизация", p.auth === "raw" ? "сырой ключ" : "Bearer")}
-          ${provKvHTML("Протокол", p.protocol === "responses" ? "Responses API" : "OpenAI")}
+          ${provKvHTML("Протокол", esc(provProtoLabel(p.protocol)))}
           ${p.reasoningEffort ? provKvHTML("Мышление", esc(provEffortLabel(p.reasoningEffort))) : ""}
           <details class="a-fold"${p.builtin ? "" : " open"}>
             <summary>Изменить адрес, ключ и quirks</summary>
             ${p.builtin ? "" : `<div class="a-field">
               <label>Шаблон API</label>
               <div id="provProtoSeg">${provProtoSegHTML(p.protocol || "chat", "setDetailProto")}</div>
-              <span class="a-field__hint">Шаблон меняет поля формы: у Responses API свой формат запросов, ему нужны заголовки и не нужна подклейка system.</span>
+              <span class="a-field__hint">Шаблон меняет поля формы: у Responses API и Anthropic свой формат запросов, им нужны заголовки и не нужна подклейка system.</span>
             </div>`}
             <div class="a-field">
               <label for="provDetailBaseUrl">Base URL</label>
@@ -3947,17 +3959,17 @@ function screenProviderPage(id) {
               <span class="a-field__hint" id="provEffortNote">${provEffortNote(p.reasoningEffort || "")}</span>
             </div>`}
             <label class="a-check"><input type="checkbox" id="provWallet"${p.useWalletBalance ? " checked" : ""}> <span>Списывать предоплату кошелька (useWalletBalance)</span></label>
-            <div class="chat-only"${(!p.builtin && (p.protocol || "chat") === "responses") ? " hidden" : ""}><label class="a-check"><input type="checkbox" id="provMerge"${p.mergeSystem ? " checked" : ""}> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label></div>
-            ${p.builtin ? "" : `<div class="resp-only"${(p.protocol || "chat") === "responses" ? "" : " hidden"}>
-              <div class="a-pnl__note">Для Responses API подклейка не применяется — system едет отдельным полем instructions.</div>
-              <div class="a-field" style="margin-top:10px">
-                <label>Доп. заголовки HTTP</label>
-                <div id="provHeaders">${provHeadersHTML(p.extraHeaders || {})}</div>
-                <div class="a-actions-row" style="margin-top:8px">
-                  <button class="btn btn--soft btn--sm" type="button" onclick="provHeaderAdd('provHeaders')">+ Заголовок</button>
-                </div>
-                <span class="a-field__hint">Скрытые при другом шаблоне значения не стираются. Секретам здесь не место — значения видны в админке.</span>
+            <div class="chat-only"${(!p.builtin && provProtoOf(p.protocol) !== "chat") ? " hidden" : ""}><label class="a-check"><input type="checkbox" id="provMerge"${p.mergeSystem ? " checked" : ""}> <span>Подклеивать system-промпт к user (маршруты вроде anthropic)</span></label></div>
+            ${p.builtin ? "" : `<div class="resp-only"${provProtoOf(p.protocol) !== "chat" ? "" : " hidden"}>
+              <div class="a-pnl__note">Для Responses API и Anthropic подклейка не применяется — system едет отдельным полем (instructions или system).</div>
+            </div>
+            <div class="a-field" style="margin-top:10px">
+              <label>Доп. заголовки HTTP</label>
+              <div id="provHeaders">${provHeadersHTML(p.extraHeaders || {})}</div>
+              <div class="a-actions-row" style="margin-top:8px">
+                <button class="btn btn--soft btn--sm" type="button" onclick="provHeaderAdd('provHeaders')">+ Заголовок</button>
               </div>
+              <span class="a-field__hint">Шлются при любом шаблоне — без них шлюз может не пустить. Секретам здесь не место — значения видны в админке.</span>
             </div>`}
           </details>
           <div class="a-pnl__note">${p.builtin
@@ -4439,6 +4451,7 @@ function provDetailRenderList() {
       <span class="a-dot a-dot--${dot}"></span>
       <span class="a-model__name mono">${esc(mid)}</span>
       ${v && !v.pending ? `<span class="a-chip a-chip--accent">${esc(note)}</span>` : ""}
+      ${v && v.ok && v.protocol && v.protocol !== "chat" ? `<span class="a-chip" title="Модель ответила по этому протоколу">${esc(provProtoLabel(v.protocol))}</span>` : ""}
       ${isCur ? '<span class="a-chip a-chip--success">сейчас</span>' : '<span class="a-model__pick">выбрать</span>'}
     </button>`;
   }).join("") + (list.length > shown.length
@@ -4448,6 +4461,10 @@ function provDetailRenderList() {
 
 function pickProviderModel(model) {
   ProvDetail.model = model;
+  // Модель, которая ответила по другому протоколу (Claude — по Anthropic), сразу
+  // ставит свой шаблон: иначе выбор модели оставлял бы несовместимый формат.
+  const seen = ((ProvDetail.ping && ProvDetail.ping.results) || {})[model];
+  if (seen && seen.ok && seen.protocol) setDetailProto(seen.protocol);
   const el = document.getElementById("provDetailModel");
   if (el) el.value = model;
   // Верх цепочки — та же модель: выбор из списка/рейтинга ставит приоритет
@@ -4509,7 +4526,13 @@ async function probeProviderModel() {
   try {
     const r = await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/probe-model`, provTierBody({ model }));
     const p = r && r.probe;
-    if (p && p.ok) provVerdictOk(`Модель <span class="mono">${esc(model)}</span> отвечает (${fmtNum(p.latencyMs)} мс). Её можно применять.`);
+    // Перебор протоколов на сервере: если модель ответила не сохранённым шаблоном,
+    // он выставляется сам — сохранение провайдера закрепит его.
+    const before = currentProto("provProtoSeg");
+    if (p && p.ok && p.protocol) setDetailProto(p.protocol);
+    const via = p && p.ok && p.protocol && p.protocol !== before
+      ? ` Шаблон переключён на ${esc(provProtoLabel(p.protocol))} — сохрани провайдера.` : "";
+    if (p && p.ok) provVerdictOk(`Модель <span class="mono">${esc(model)}</span> отвечает (${fmtNum(p.latencyMs)} мс). Её можно применять.${via}`);
     else provVerdictBad(`Модель <span class="mono">${esc(model)}</span> не отвечает: ${esc((p && p.error) || "ошибка")}. Применить её можно, но проверки работать не будут.`);
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
@@ -4541,15 +4564,13 @@ async function applyProviderDetail() {
   payload.use_wallet_balance = !!(document.getElementById("provWallet") || {}).checked;
   payload.merge_system = !!(document.getElementById("provMerge") || {}).checked;
   // Шаблон, мышление и заголовки — той же кнопкой (свой провайдер; у
-  // встроенного этих полей нет и сервер их не примет). Заголовки едут только
-  // при активном шаблоне Responses: скрытые при chat значения сервер и так
-  // хранит, а пустая отправка их стёрла бы.
+  // встроенного этих полей нет и сервер их не примет). Заголовки едут при
+  // любом шаблоне: шлюз может требовать их и для chat (opencode без
+  // x-opencode-session не пускает ни один протокол).
   if (!((ProvDetail.data || {}).builtin)) {
     payload.protocol = currentProto("provProtoSeg");
     payload.reasoning_effort = currentEffort("provEffortSeg");
-    if (payload.protocol === "responses") {
-      payload.extra_headers = provHeadersRead("provHeaders");
-    }
+    payload.extra_headers = provHeadersRead("provHeaders");
   }
   if (!payload.model) { provDetailError("Впиши ID модели — без нее провайдер не сможет отвечать"); return; }
   // Цепочка — той же кнопкой: верх обязан совпадать с полем модели (иначе

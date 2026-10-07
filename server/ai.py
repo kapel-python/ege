@@ -36,6 +36,7 @@ has no third-party imports and this module must not add one.
 from __future__ import annotations
 
 import concurrent.futures
+import io
 import json
 import os
 import re
@@ -567,7 +568,20 @@ def model_student_label(provider: str, model: str = "", tier: str | None = None)
 # не поддерживают вовсе (замер 04.10: opencode.ai/zen отвечает на chat 400
 # ModelProtocolUnsupported, а на responses — 200). Встроенные провайдеры всегда
 # chat; responses задаётся только своему провайдеру.
-RESPONSE_PROTOCOLS = ("chat", "responses")
+# `anthropic` — Anthropic Messages API (`POST {base}/messages`, ключ в x-api-key,
+# system отдельным полем, ответ — content[] с блоками text/tool_use). Нужен
+# шлюзам, где Claude отвечает только по нему (замер 07.10: opencode zen/go на
+# chat и responses отвечает 400 ModelProtocolUnsupported, на messages — 200).
+RESPONSE_PROTOCOLS = ("chat", "responses", "anthropic")
+# Порядок перебора протоколов при проверке модели: сохранённый идёт первым.
+PROBE_PROTOCOL_ORDER = ("chat", "responses", "anthropic")
+# Дополнительная попытка (после ошибки формата) не должна съедать весь бюджет
+# пакетной проверки: формат-промах шлюз отдаёт за доли секунды, зависший — нет.
+PROBE_FALLBACK_TIMEOUT_SEC = 5.0
+ANTHROPIC_VERSION = "2023-06-01"
+ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
+# Пробе нужно не 1 токен: при max_tokens=1 Claude отдаёт пустой ответ.
+ANTHROPIC_MIN_MAX_TOKENS = 256
 # Уровень мышления reasoning-модели. Замерено на живом шлюзе 04.10 (один и тот
 # же вопрос «что такое ЕГЭ», модель muse-spark): high — 462 токена мышления,
 # minimal — 38, ответ одинаковый; `low` шлюз молча игнорирует (эхо high),
@@ -583,12 +597,12 @@ _RESERVED_HEADERS = frozenset({"authorization", "content-type", "content-length"
 
 
 def _clean_protocol(raw) -> str:
-    """Протокол провайдера: chat (обычный) или responses. Пусто = chat."""
+    """Протокол провайдера: chat (обычный), responses или anthropic. Пусто = chat."""
     value = str(raw or "").strip().lower()
     if not value:
         return "chat"
     if value not in RESPONSE_PROTOCOLS:
-        raise ValueError("protocol — chat или responses")
+        raise ValueError("protocol — chat, responses или anthropic")
     return value
 
 
@@ -1882,6 +1896,190 @@ def parse_tool_message(message: dict) -> dict:
             "preamble": text if (text is not None and calls) else None}
 
 
+def _anthropic_messages(messages: list) -> tuple[str, list]:
+    """Chat-сообщения → (system, messages[]) для Anthropic Messages API.
+
+    system уходит отдельным полем. Вызовы ассистента — блоками tool_use, их
+    результаты — блоками tool_result в user-сообщении; подряд идущие user-блоки
+    склеиваются, потому что результаты обязаны идти сразу за вызовами. Пустые
+    элементы пропускаются, совсем пустой список — AIInputError.
+    """
+    system: list[str] = []
+    out: list[dict] = []
+
+    def _add_user_blocks(blocks: list) -> None:
+        if out and out[-1]["role"] == "user":
+            out[-1]["content"].extend(blocks)
+        else:
+            out.append({"role": "user", "content": blocks})
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        if role == "system":
+            text = str(message.get("content") or "").strip()
+            if text:
+                system.append(text)
+        elif role == "user":
+            text = str(message.get("content") or "")
+            if text.strip():
+                _add_user_blocks([{"type": "text", "text": text}])
+        elif role == "assistant":
+            blocks: list[dict] = []
+            text = str(message.get("content") or "")
+            if text.strip():
+                blocks.append({"type": "text", "text": text})
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") if isinstance(call.get("function"), dict) else call
+                name = str((fn.get("name") if isinstance(fn, dict) else "") or "").strip()
+                if not name:
+                    continue
+                args = fn.get("arguments") if isinstance(fn, dict) else {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args or "{}")
+                    except ValueError:
+                        args = {}
+                if not isinstance(args, dict):
+                    args = {}
+                blocks.append({"type": "tool_use",
+                               "id": str(call.get("id") or call.get("tool_call_id") or ""),
+                               "name": name, "input": args})
+            if blocks:
+                out.append({"role": "assistant", "content": blocks})
+        elif role == "tool":
+            text = str(message.get("content") or "")
+            _add_user_blocks([{"type": "tool_result",
+                               "tool_use_id": str(message.get("tool_call_id")
+                                                  or message.get("id") or ""),
+                               "content": text if text.strip() else "{}"}])
+    if not out:
+        raise AIInputError("пустой список сообщений")
+    return ("\n\n".join(system), out)
+
+
+def _anthropic_tools(tools: list) -> list:
+    """Наши AGENT_TOOLS (chat-форма) → tools Anthropic: name/description/input_schema."""
+    if not isinstance(tools, list) or not tools:
+        raise AIInputError("tools должен быть непустым списком")
+    out = []
+    for tool in tools:
+        fn = (tool or {}).get("function") if isinstance(tool, dict) else None
+        if not isinstance(fn, dict) or not str(fn.get("name") or "").strip():
+            raise AIInputError("инструмент без имени")
+        params = fn.get("parameters")
+        out.append({"name": str(fn["name"]).strip(),
+                    "description": str(fn.get("description") or ""),
+                    "input_schema": params if isinstance(params, dict) and params
+                    else {"type": "object", "properties": {}}})
+    return out
+
+
+def _anthropic_tool_choice(tool_choice) -> dict:
+    """chat tool_choice → Anthropic: required → any, имя функции → tool, иначе auto."""
+    if isinstance(tool_choice, dict):
+        fn = tool_choice.get("function") if isinstance(tool_choice.get("function"), dict) else {}
+        name = str(fn.get("name") or "").strip()
+        return {"type": "tool", "name": name} if name else {"type": "auto"}
+    if str(tool_choice or "").strip().lower() == "required":
+        return {"type": "any"}
+    return {"type": "auto"}
+
+
+def _anthropic_headers(key: str, extra_headers: dict | None) -> dict:
+    """Заголовки Anthropic: ключ в x-api-key. Доп. заголовки шлюза — раньше
+    своих, чтобы записью нельзя было подменить ключ или версию протокола."""
+    headers: dict = {str(name): str(value) for name, value in (extra_headers or {}).items()}
+    headers.update({"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION,
+                    "Content-Type": "application/json"})
+    return headers
+
+
+def _anthropic_to_message(data: dict) -> dict:
+    """content[] Anthropic Messages API → chat-shaped message для parse_tool_message.
+
+    tool_use → tool_calls в chat-форме; thinking и прочие служебные блоки
+    пропускаются. Остановка по max_tokens без текста — AIError (повторяемый
+    отказ), пустой complete — AIFormatError.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("content"), list):
+        raise AIError("неожиданная структура ответа провайдера")
+    texts: list[str] = []
+    calls: list[dict] = []
+    for block in data["content"]:
+        if not isinstance(block, dict):
+            continue
+        kind = str(block.get("type") or "")
+        if kind == "text":
+            text = block.get("text")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+        elif kind == "tool_use":
+            name = str(block.get("name") or "").strip()
+            if not name:
+                continue
+            args = block.get("input")
+            calls.append({"id": str(block.get("id") or ""), "type": "function",
+                          "function": {"name": name,
+                                       "arguments": json.dumps(
+                                           args if isinstance(args, dict) else {},
+                                           ensure_ascii=False)}})
+    text = "\n\n".join(texts).strip()[:AI_REPLY_MAX] or None
+    if text is None and not calls:
+        if str(data.get("stop_reason") or "") == "max_tokens":
+            raise AIError("провайдер не завершил ответ")
+        raise AIFormatError("пустой ответ модели")
+    return {"content": text, "tool_calls": calls}
+
+
+def _anthropic_via_message(provider: str, messages: list[dict], *,
+                           model_value: str, base_value: str, key: str,
+                           extra_headers: dict, timeout: float | None = None,
+                           max_tokens: int | None = None, temperature: float | None = None,
+                           tools: list | None = None, tool_choice=None) -> dict:
+    """Один вызов по Anthropic Messages API. Возвращает chat-shaped message.
+
+    Мышление (reasoning_effort) этим протоколом не задаётся: у Claude оно
+    отдельный параметр thinking, а не effort шлюза. POST идёт через общий
+    `_responses_post` (он повторяет запрос только при явных 400 про параметры).
+    """
+    system, items = _anthropic_messages(messages)
+    body: dict[str, Any] = {
+        "model": model_value,
+        "max_tokens": (max(int(max_tokens), ANTHROPIC_MIN_MAX_TOKENS) if max_tokens
+                       else ANTHROPIC_DEFAULT_MAX_TOKENS),
+        "messages": items,
+        "temperature": min(1.0, max(0.0, float(
+            DEFAULT_TEMPERATURE if temperature is None else temperature))),
+    }
+    if system:
+        body["system"] = system
+    no_tools = isinstance(tool_choice, str) and tool_choice.strip().lower() == "none"
+    if tools is not None and not no_tools:
+        body["tools"] = _anthropic_tools(tools)
+        if tool_choice is not None:
+            body["tool_choice"] = _anthropic_tool_choice(tool_choice)
+    deadline = float(timeout if timeout is not None else _env("EGE_AI_TIMEOUT_SEC", default=str(DEFAULT_TIMEOUT_SEC)) or DEFAULT_TIMEOUT_SEC)
+    try:
+        raw = _responses_post(
+            f"{base_value.rstrip('/')}/messages",
+            body, _anthropic_headers(key, extra_headers), deadline)
+    except urllib.error.HTTPError as exc:
+        raise _http_error(exc) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AIError(f"провайдер недоступен: {type(exc).__name__}") from None
+    if len(raw) > MAX_UPSTREAM_BYTES:
+        raise AIError("ответ провайдера слишком большой")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise AIError("провайдер вернул не-JSON") from None
+    return _anthropic_to_message(data)
+
+
 def _responses_post(url: str, body: dict, headers: dict, timeout: float) -> bytes:
     """POST на Responses-совместимый URL с умным повтором при 400.
 
@@ -1908,9 +2106,10 @@ def _responses_post(url: str, body: dict, headers: dict, timeout: float) -> byte
         except urllib.error.HTTPError as exc:
             status = getattr(exc, "code", 0) or 0
             try:
-                err_text = (exc.read() or b"").decode("utf-8", "replace")[:2000]
+                raw_err = exc.read() or b""
             except Exception:
-                err_text = ""
+                raw_err = b""
+            err_text = raw_err.decode("utf-8", "replace")[:2000]
             low = err_text.lower()
             if status == 400:
                 fixed = False
@@ -1919,13 +2118,16 @@ def _responses_post(url: str, body: dict, headers: dict, timeout: float) -> byte
                         and payload["reasoning"].get("effort") != "low"):
                     payload["reasoning"] = {"effort": "low"}
                     fixed = True
-                if ("temperature" in low and "support" in low
+                if ("temperature" in low and ("support" in low or "deprecated" in low)
                         and "temperature" in payload):
                     del payload["temperature"]
                     fixed = True
                 if fixed:
                     continue
-            raise
+            # Тело уже прочитано: отдаём ошибку с ним же, иначе проба не увидит
+            # текст «protocol» и не сможет перейти на другой протокол.
+            raise urllib.error.HTTPError(exc.url, status, exc.msg, exc.hdrs,
+                                         io.BytesIO(raw_err)) from None
     raise AIError("провайдер ответил 400")
 
 
@@ -2027,7 +2229,8 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
     `reasoning_effort` — явный уровень мышления (minimal|low|medium|high);
     None = default из настроек провайдера (у своих — поле reasoning_effort,
     пусто = default шлюза). Протокол берётся из спека: responses-провайдеры
-    идут через `_responses_via_message`, остальные — как раньше.
+    идут через `_responses_via_message`, anthropic — через `_anthropic_via_message`,
+    остальные — как раньше.
     """
     tier = _normalize_tier(tier)
     try:
@@ -2077,6 +2280,12 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
             extra_headers=extra_headers, effort=effort,
             timeout=timeout, max_tokens=max_tokens,
             temperature=temperature, tools=tools, tool_choice=tool_choice)
+    if protocol == "anthropic":
+        return _anthropic_via_message(
+            provider, messages, model_value=model or model_value,
+            base_value=base_value, key=key, extra_headers=extra_headers,
+            timeout=timeout, max_tokens=max_tokens,
+            temperature=temperature, tools=tools, tool_choice=tool_choice)
     body: dict[str, Any] = {
         "model": model or model_value,
         "messages": _wire_messages(provider, messages, tier),
@@ -2103,6 +2312,7 @@ def _chat_via_message(provider: str, messages: list[dict], *, model: str | None 
         f"{base_value.rstrip('/')}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
+            **extra_headers,
             "Authorization": key if spec.get("auth") == "raw" else f"Bearer {key}",
             "Content-Type": "application/json",
         },
@@ -3935,10 +4145,96 @@ def list_models(name: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC, tier: str 
             "latencyMs": latency, "checkedAt": int(time.time() * 1000)}
 
 
+def _is_format_miss(status: int, low: str) -> bool:
+    """Ошибка говорит, что модели не тот протокол, а не что ключ или баланс плохи.
+
+    Шлюз пишет слово protocol (ModelProtocolUnsupported — замерено для всех трёх
+    форматов), либо маршрута нет совсем (404/405/415)."""
+    if "protocol" in low:
+        return True
+    return status in (404, 405, 415)
+
+
+def _probe_http_miss(exc, format_miss: list | None) -> None:
+    """Прочитать тело HTTP-ошибки один раз и отметить, что это ошибка формата."""
+    try:
+        low = (exc.read() or b"").decode("utf-8", "replace").lower()
+    except Exception:
+        low = ""
+    if format_miss is not None and _is_format_miss(getattr(exc, "code", 0) or 0, low):
+        format_miss.append(True)
+
+
+def _probe_status_text(status: int) -> str:
+    if status in (401, 403):
+        return "Неверный API-ключ (401/403)"
+    if status == 402:
+        return "На балансе нет средств (402)"
+    if status == 429:
+        return "Провайдер перегружен (429)"
+    return f"Провайдер ответил {status}"
+
+
+# Протокол, которым модель ответила в последний раз (в памяти процесса): следующая
+# проверка пробует его первым, и пакет не платит за перебор повторно. После
+# перезапуска память пуста, первая проверка снова идёт с перебором.
+_probe_protocol_memory: dict = {}
+_probe_protocol_lock = threading.Lock()
+
+
+def _probe_protocol_chain(first: str) -> list:
+    """Протоколы для проверки модели: сохранённый первым, остальные — по порядку."""
+    return [first] + [p for p in PROBE_PROTOCOL_ORDER if p != first]
+
+
+def _probe_by_protocols(*, base_url: str, key: str, model: str, auth: str,
+                        extra: dict, merge_system: bool, protocol: str,
+                        extra_headers: dict, timeout: float) -> tuple[bool, int, str, str]:
+    """Проверка модели всеми протоколами: сохранённый первым, при ошибке формата — следующий.
+
+    Перебор идёт ТОЛЬКО по прямому сигналу «формат не тот» (`_is_format_miss`):
+    ключ, баланс, таймаут перебором не лечатся. `timeout` — общий потолок на
+    модель, поэтому дополнительные попытки не растягивают пакетную проверку:
+    каждая следующая получает остаток бюджета. Возвращает (ok, latencyMs,
+    error, protocol): у живой модели — протокол, которым она ответила; у мёртвой
+    — сохранённый, потому что его ошибка честнее ошибки случайного протокола.
+    """
+    started = time.monotonic()
+    memo_key = (base_url.rstrip("/"), model)
+    with _probe_protocol_lock:
+        remembered = _probe_protocol_memory.get(memo_key)
+    first_error = ""
+    for index, proto in enumerate(_probe_protocol_chain(remembered or protocol or "chat")):
+        left = timeout - (time.monotonic() - started)
+        if index and left < 0.5:
+            break
+        miss: list = []
+        attempt = left if index == 0 else min(left, PROBE_FALLBACK_TIMEOUT_SEC)
+        ok, latency, error = _run_probe_request(
+            base_url=base_url, key=key, model=model, auth=auth, extra=extra,
+            merge_system=merge_system, protocol=proto, extra_headers=extra_headers,
+            timeout=max(0.5, attempt), format_miss=miss)
+        if ok:
+            with _probe_protocol_lock:
+                _probe_protocol_memory[memo_key] = proto
+            return True, latency, "", proto
+        if index == 0:
+            first_error = error
+            if remembered:
+                # Запомненный протокол перестал работать: забываем и перебираем заново.
+                with _probe_protocol_lock:
+                    _probe_protocol_memory.pop(memo_key, None)
+        if not miss:
+            break
+    total = int((time.monotonic() - started) * 1000)
+    return False, total, first_error, protocol or "chat"
+
+
 def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
                        extra: dict, merge_system: bool,
                        timeout: float, protocol: str = "chat",
-                       extra_headers: dict | None = None) -> tuple[bool, int, str]:
+                       extra_headers: dict | None = None,
+                       format_miss: list | None = None) -> tuple[bool, int, str]:
     """Один живой запрос «привет» (1 токен). Возвращает (ok, latencyMs, error).
 
     Ключ в ошибку не попадает никогда — только класс и короткий текст.
@@ -3974,10 +4270,7 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
                 body, headers, timeout)
         except urllib.error.HTTPError as exc:
             latency = int((time.monotonic() - started) * 1000)
-            try:
-                exc.read()
-            except Exception:
-                pass
+            _probe_http_miss(exc, format_miss)
             status = getattr(exc, "code", 0) or 0
             if status in (401, 403):
                 return False, latency, "Неверный API-ключ (401/403)"
@@ -4002,6 +4295,33 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
         except (AIError, AIFormatError, ValueError, UnicodeDecodeError) as exc:
             return False, latency, f"Ответ не похож на Responses-формат ({type(exc).__name__})"
         return True, latency, ""
+    if (protocol or "chat") == "anthropic":
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": "привет"}],
+            "max_tokens": ANTHROPIC_MIN_MAX_TOKENS,
+            "temperature": 0.0,
+        }
+        try:
+            raw = _responses_post(f"{base_url.rstrip('/')}/messages", body,
+                                  _anthropic_headers(key, extra_headers), timeout)
+        except urllib.error.HTTPError as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            _probe_http_miss(exc, format_miss)
+            return False, latency, _probe_status_text(getattr(exc, "code", 0) or 0)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            if isinstance(exc, TimeoutError) or "timed out" in type(exc).__name__.lower():
+                return False, latency, "Превышено время ожидания"
+            return False, latency, f"Недоступен: {type(exc).__name__}"
+        except Exception as exc:  # noqa: BLE001 — проба не роняет админку
+            return False, int((time.monotonic() - started) * 1000), f"Ошибка проверки: {type(exc).__name__}"
+        latency = int((time.monotonic() - started) * 1000)
+        try:
+            _anthropic_to_message(json.loads(raw))
+        except (AIError, AIFormatError, ValueError, UnicodeDecodeError) as exc:
+            return False, latency, f"Ответ не похож на Anthropic-формат ({type(exc).__name__})"
+        return True, latency, ""
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": "привет"}],
@@ -4013,6 +4333,7 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
         f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
+            **(extra_headers or {}),
             "Authorization": key if auth == "raw" else f"Bearer {key}",
             "Content-Type": "application/json",
         },
@@ -4023,10 +4344,7 @@ def _run_probe_request(*, base_url: str, key: str, model: str, auth: str,
             raw = _read_upstream(response, MAX_UPSTREAM_BYTES, timeout)
     except urllib.error.HTTPError as exc:
         latency = int((time.monotonic() - started) * 1000)
-        try:
-            exc.read()
-        except Exception:
-            pass
+        _probe_http_miss(exc, format_miss)
         status = getattr(exc, "code", 0) or 0
         if status in (401, 403):
             return False, latency, "Неверный API-ключ (401/403)"
@@ -4082,7 +4400,7 @@ def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC
                   "error": "Провайдер не настроен (нет ключа)",
                   "checkedAt": int(time.time() * 1000)}
         return result
-    ok, latency, error = _run_probe_request(
+    ok, latency, error, protocol = _probe_by_protocols(
         base_url=base_value, key=key, model=wanted,
         auth="raw" if spec.get("auth") == "raw" else "bearer",
         extra=spec.get("extra_body") or {}, merge_system=bool(spec.get("merge_system")),
@@ -4090,7 +4408,7 @@ def probe_model(name: str, model: str, timeout: float = PROBE_MANUAL_TIMEOUT_SEC
         extra_headers=spec.get("extra_headers") or {},
         timeout=min(60.0, max(3.0, float(timeout or PROBE_MANUAL_TIMEOUT_SEC))))
     return {"ok": ok, "latencyMs": latency, "error": error, "model": wanted,
-            "checkedAt": int(time.time() * 1000)}
+            "protocol": protocol, "checkedAt": int(time.time() * 1000)}
 
 
 def probe_models_plan(name: str, models: list | None = None, tier: str | None = None) -> dict:
@@ -4148,15 +4466,18 @@ def probe_models_plan(name: str, models: list | None = None, tier: str | None = 
 
 
 def probe_one(plan: dict, model: str, timeout: float = PROBE_MODELS_TIMEOUT_SEC) -> dict:
-    """Живой «привет» одной модели. Результат — всегда словарь, не исключение."""
-    ok, latency, error = _run_probe_request(
+    """Живой «привет» одной модели. Результат — всегда словарь, не исключение.
+
+    Если шлюз отверг сохранённый протокол именно по формату, модель проверяется
+    остальными (`_probe_by_protocols`); `protocol` в ответе — каким она ответила."""
+    ok, latency, error, protocol = _probe_by_protocols(
         base_url=plan["base_url"], key=plan["key"], model=str(model),
         auth=plan["auth"], extra=plan["extra"],
         merge_system=plan["merge_system"],
         protocol=str(plan.get("protocol") or "chat"),
         extra_headers=plan.get("extra_headers") or {},
         timeout=timeout)
-    return {"ok": bool(ok), "latencyMs": latency, "error": error}
+    return {"ok": bool(ok), "latencyMs": latency, "error": error, "protocol": protocol}
 
 
 def _probe_order(results: dict) -> list:
