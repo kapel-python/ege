@@ -1315,19 +1315,23 @@ body {
 .task-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
 }
 .task-table th,
 .task-table td {
   border: 1px solid var(--border);
-  padding: 6px 12px;
+  padding: 8px 14px;
   text-align: center;
   white-space: nowrap;
 }
 .task-table thead th { background: var(--bg-2); font-weight: 700; }
 .task-table tbody th { background: var(--bg-2); }
 .task-table td:first-child { font-weight: 600; }
+/* Знак «таблица продолжается»: тень у правого края, пока есть куда мотать.
+   Inset-тень — часть самого контейнера (не скроллится вместе с содержимым),
+   класс снимает paintTableScrollHint, когда скролл упёрся в конец. */
+.task-table-wrap.task-table--more { box-shadow: inset -28px 0 20px -18px rgba(0, 0, 0, 0.55); }
 /* Lightbox: клик по картинке внутри .task-visual открывает её крупно
    (единый делегированный обработчик onTaskVisualClick в js/app.js).
    Подложка тёмная в обеих темах, поэтому подпись и крестик — светлые. */

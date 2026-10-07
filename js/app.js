@@ -73,6 +73,44 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* Знак «таблица продолжается» (.task-table--more): тень у правого края
+   .task-table-wrap, пока содержимое выступает за видимую ширину.
+   Один делегированный scroll-слушатель + MutationObserver на новые таблицы
+   (рендерятся везде: задания, уроки, подсказки, разборы) — вместо правок
+   в каждом рендере. resize тоже пересчитывает: поворот телефона меняет
+   clientWidth без единого scroll-события. */
+function paintTableScrollHint(box) {
+  try {
+    if (!box || !box.classList || !box.classList.contains("task-table-wrap")) return;
+    const more = box.scrollWidth - box.clientWidth - box.scrollLeft > 2;
+    box.classList.toggle("task-table--more", more);
+  } catch (_) {}
+}
+function paintAllTableScrollHints() {
+  try {
+    document.querySelectorAll(".task-table-wrap").forEach(paintTableScrollHint);
+  } catch (_) {}
+}
+try {
+  document.addEventListener("scroll", (e) => {
+    const t = e && e.target;
+    if (t && t.classList && t.classList.contains("task-table-wrap")) paintTableScrollHint(t);
+  }, true);
+  window.addEventListener("resize", paintAllTableScrollHints);
+  if (typeof MutationObserver !== "undefined") {
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of (m.addedNodes || [])) {
+          try {
+            if (n.classList && n.classList.contains("task-table-wrap")) paintTableScrollHint(n);
+            else if (n.querySelectorAll) n.querySelectorAll(".task-table-wrap").forEach(paintTableScrollHint);
+          } catch (_) {}
+        }
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+} catch (_) {}
+
 /* ============================================================
    Блокировка аккаунта: глобальное полноэкранное состояние.
    Backend возвращает 403 + code ACCOUNT_BLOCKED на ЛЮБОМ
