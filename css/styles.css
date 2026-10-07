@@ -882,15 +882,6 @@ body {
     overflow-wrap: anywhere;
   }
   .forecast-mid { font-size: 46px; }
-  /* Матрицы смежности (9 колонок) влезают без скролла: компактные ячейки.
-     Широкие таблицы с длинными словами по-прежнему мотаются — там работает
-     тень-индикатор .task-table--more. */
-  .task-table { font-size: 13px; }
-  .task-table th,
-  .task-table td { padding: 5px 7px; }
-  /* Таблица — в край карточки (.task-card padding 28px съедал ширину):
-     full-bleed даёт +56px, скругления и боковые рамки убираются. */
-  .task-table-wrap { margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; }
 }
 .forecast-value {
   font-size: 44px;
@@ -1341,6 +1332,15 @@ body {
    Inset-тень — часть самого контейнера (не скроллится вместе с содержимым),
    класс снимает paintTableScrollHint, когда скролл упёрся в конец. */
 .task-table-wrap.task-table--more { box-shadow: inset -28px 0 20px -18px rgba(0, 0, 0, 0.55); }
+/* Мобильные переопределения — строго ПОСЛЕ базовых выше: при равной
+   специфичности побеждает более позднее правило, ранний @media-блок
+   базовые стили не перебивает (живой случай: full-bleed не применялся). */
+@media (max-width: 640px) {
+  .task-table { font-size: 13px; }
+  .task-table th,
+  .task-table td { padding: 5px 7px; }
+  .task-table-wrap { margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; }
+}
 /* Lightbox: клик по картинке внутри .task-visual открывает её крупно
    (единый делегированный обработчик onTaskVisualClick в js/app.js).
    Подложка тёмная в обеих темах, поэтому подпись и крестик — светлые. */
