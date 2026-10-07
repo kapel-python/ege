@@ -456,7 +456,7 @@ def model_title(provider: str, model: str, tier: str | None = None) -> str:
     if not pid or not mid:
         return ""
     try:
-        raw = _app_config_read(_MODEL_TITLES_KEY)
+        raw = _app_config_read(_tier_key(_MODEL_TITLES_KEY, tier))
     except Exception:
         return ""
     if not isinstance(raw, dict):
@@ -475,7 +475,7 @@ def set_model_title(provider: str, model: str, title: str, tier: str | None = No
     if not pid or not mid:
         raise ValueError("Нужны провайдер и модель для названия")
     try:
-        raw = _app_config_read(_MODEL_TITLES_KEY)
+        raw = _app_config_read(_tier_key(_MODEL_TITLES_KEY, tier))
     except Exception:
         raw = None
     store = dict(raw) if isinstance(raw, dict) else {}

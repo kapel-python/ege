@@ -196,6 +196,26 @@ def main() -> int:
               history.get("previous") and history["previous"].get("model") == "grok-4",
               history.get("previous"))
 
+        section("Названия раздельны по тирам")
+        # Тир уже запущен (как на проде, где ai_plus_custom_providers есть): иначе
+        # ensure_tier_clone на каждом обращении копирует обычные названия поверх плюса.
+        ai._app_config_write(ai._tier_key(ai._CUSTOM_KEY, "plus"), {})
+        m_plus = "anthropic/claude-sonnet-5"
+        ai.set_model_title("closerouter", m_plus, "Плюс Sonnet", "plus")
+        ai.set_model_title("closerouter", "anthropic/claude-opus-4.6", "Плюс Opus", "plus")
+        check("название плюса читается из плюса (раньше читалось из обычного и терялось)",
+              ai.model_title("closerouter", m_plus, "plus") == "Плюс Sonnet")
+        ai.set_model_title("closerouter", m_plus, "Обычный Sonnet", "free")
+        check("обычный тир не видит название плюса и наоборот",
+              ai.model_title("closerouter", m_plus, "free") == "Обычный Sonnet"
+              and ai.model_title("closerouter", m_plus, "plus") == "Плюс Sonnet")
+        check("запись в обычный не затирает названия плюса",
+              ai.model_title("closerouter", "anthropic/claude-opus-4.6", "plus") == "Плюс Opus")
+        ai.set_model_titles("closerouter", {m_plus: "Плюс Sonnet 2"}, "plus")
+        check("пакетная запись цепочки в плюс читает плюс и сохраняет соседей",
+              ai.model_title("closerouter", m_plus, "plus") == "Плюс Sonnet 2"
+              and ai.model_title("closerouter", "anthropic/claude-opus-4.6", "plus") == "Плюс Opus")
+
         section("Вшитых имён в коде не осталось")
         source = SERVER_PATH.read_text(encoding="utf-8")
         # Ищем присваивание в ЖИВОМ коде, а не любое упоминание: в комментарии
