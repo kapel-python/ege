@@ -34,8 +34,10 @@
 .dlg {
   width: 100%;
   max-width: 400px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong, var(--border));
+  /* --surface есть только в SPA и на ege-result: остальным страницам —
+     их --surface-2 (цепочка, а не копия значения, чтобы жили обе темы). */
+  background: var(--surface, var(--surface-2, #fff));
+  border: 1px solid var(--border-strong, var(--border, var(--card-border, rgba(15,23,42,0.12))));
   border-radius: 20px;
   padding: 24px;
   max-height: 86vh;
@@ -63,13 +65,13 @@
   right: 12px;
   background: none;
   border: none;
-  color: var(--muted, var(--text-soft));
+  color: var(--muted, var(--text-soft, var(--text-faint, inherit)));
   cursor: pointer;
   padding: 6px;
   border-radius: 8px;
 }
 .dlg__close:hover { color: var(--text); background: var(--surface-3, var(--surface-2)); }
-.dlg__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, var(--text-soft)); }
+.dlg__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, var(--text-soft, var(--text-faint, inherit))); }
 .dlg-device { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
 .dlg-device__icon {
   width: 52px;
@@ -87,9 +89,9 @@
 .dlg-device__name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .dlg-kv { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
 .dlg-kv__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; }
-.dlg-kv__row > span:first-child { color: var(--muted, var(--text-soft)); flex-shrink: 0; }
+.dlg-kv__row > span:first-child { color: var(--muted, var(--text-soft, var(--text-faint, inherit))); flex-shrink: 0; }
 .dlg-kv__row > span:last-child { text-align: right; overflow-wrap: anywhere; }
-.dlg__text { font-size: 14px; line-height: 1.6; color: var(--text-2, var(--text-soft)); margin-top: 14px; }
+.dlg__text { font-size: 14px; line-height: 1.6; color: var(--text-2, var(--text-soft, var(--text-dim, inherit))); margin-top: 14px; }
 .dlg__actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 /* Длинная подпись (например, «Переключить на профильную математику»)
    переносится в две строки, а не вылезает за край диалога. Короткие
