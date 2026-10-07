@@ -181,6 +181,55 @@ try {
    Нормализация ниже сохраняет совместимость со старыми строками каталога. */
 function mathText(value) {
   const source = String(value == null ? "" : value).replace(/\r\n?/g, "\n");
+  // Таблицы как на экзамене: блок из 2+ строк, начинающихся с `|`
+  // (ячейки разделены `|`, строка из одних дефисов — разделитель шапки).
+  // Ячейки — экранированный текст БЕЗ авто-KaTeX: иначе короткие значения
+  // («A–B : 12») разъезжались бы широкими пробелами вокруг знаков.
+  const tableParts = [];
+  const tablePlaceholder = (i) => `\u0000` + `§`.repeat(i + 1) + `\u0000`;
+  const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
+  const isTableSep = (line) => /^\s*\|[\s:|-]+\|\s*$/.test(line) && /-/.test(line);
+  const splitCells = (line) => {
+    let cells = line.trim().split("|").map((c) => c.trim());
+    if (cells.length && cells[0] === "") cells = cells.slice(1);
+    if (cells.length && cells[cells.length - 1] === "") cells = cells.slice(0, -1);
+    return cells;
+  };
+  const renderTable = (rows) => {
+    let header = null;
+    if (rows.length >= 2 && isTableSep(rows[1])) header = splitCells(rows[0]);
+    const body = header ? rows.slice(2) : rows;
+    const width = Math.max(...rows.map((r) => splitCells(r).length));
+    const rowHtml = (cells, tag) => {
+      const tds = cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join("");
+      const pad = width > cells.length ? `<${tag}></${tag}>`.repeat(width - cells.length) : "";
+      return `<tr>${tds}${pad}</tr>`;
+    };
+    const head = header ? `<thead>${rowHtml(header, "th")}</thead>` : "";
+    const bodyHtml = body.filter((r) => !isTableSep(r)).map((r) => rowHtml(splitCells(r), "td")).join("");
+    return `<div class="task-table-wrap"><table class="task-table">${head}<tbody>${bodyHtml}</tbody></table></div>`;
+  };
+  const lines = source.split("\n");
+  const kept = [];
+  let block = [];
+  const flush = () => {
+    if (block.length >= 2) {
+      tableParts.push(renderTable(block));
+      kept.push(tablePlaceholder(tableParts.length - 1));
+    } else {
+      kept.push(...block);
+    }
+    block = [];
+  };
+  for (const line of lines) {
+    if (isTableRow(line)) block.push(line);
+    else { flush(); kept.push(line); }
+  }
+  flush();
+  const tabled = kept.join("\n");
+  const restoreRe = /\u0000(§+)\u0000/g;
+  const restoreTables = (html) => String(html).replace(restoreRe, (_, marks) => tableParts[marks.length - 1] || "");
+  const mathTextBase = (text) => {
   const supers = { "⁰":"0", "¹":"1", "²":"2", "³":"3", "⁴":"4", "⁵":"5", "⁶":"6", "⁷":"7", "⁸":"8", "⁹":"9", "⁻":"-", "ⁿ":"n" };
   const subs = { "₀":"0", "₁":"1", "₂":"2", "₃":"3", "₄":"4", "₅":"5", "₆":"6", "₇":"7", "₈":"8", "₉":"9", "₋":"-", "ₙ":"n" };
   // Сбалансированные скобки: `2^(log_2(log_2(x)))` и `log_2(log_2(x))`
@@ -361,7 +410,7 @@ function mathText(value) {
     }
     return `<span class="math-fallback">${esc(latex)}</span>`;
   };
-  const normalized = normalize(source);
+  const normalized = normalize(text);
   const chunks = [];
   let cursor = 0;
   const re = /\\\[([\s\S]*?)\\\]|\\\(([^\n]*?)\\\)/g;
@@ -371,9 +420,11 @@ function mathText(value) {
     chunks.push(render(match[1] || match[2], !!match[1]));
     cursor = match.index + match[0].length;
   }
-  if (!chunks.length) return esc(normalized).replace(/\n/g, "<br>");
+  if (!chunks.length) return restoreTables(esc(normalized).replace(/\n/g, "<br>"));
   if (cursor < normalized.length) chunks.push(esc(normalized.slice(cursor)).replace(/\n/g, "<br>"));
-  return chunks.join("");
+  return restoreTables(chunks.join(""));
+  };
+  return mathTextBase(tabled);
 }
 
 function fmtTime(sec) {

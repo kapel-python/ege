@@ -48,7 +48,7 @@ jobs:
       # touches the production database.
       - name: Python tests
         run: |
-          for t in support-message russian-subject auth auth-audit device-dedup \
+          for t in support-message task-check-type russian-subject auth auth-audit device-dedup \
                    guest-onboarding onboard-subject subject-profile subject-contract \
                    subject-auth domain-state occ backup-hygiene http-edges \
                    essay-submission store-save-e2e seo-task-pages admin-inbox admin-block \

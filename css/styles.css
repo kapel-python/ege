@@ -1303,6 +1303,31 @@ body {
   line-height: 1.45;
   border-top: 1px solid var(--border);
 }
+/* Таблицы как на экзамене (блок строк на `|` в тексте задания):
+   горизонтальный скролл на узких экранах вместо слипшихся колонок. */
+.task-table-wrap {
+  overflow-x: auto;
+  margin: 14px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.task-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.task-table th,
+.task-table td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+.task-table thead th { background: var(--bg-2); font-weight: 700; }
+.task-table tbody th { background: var(--bg-2); }
+.task-table td:first-child { font-weight: 600; }
 /* Lightbox: клик по картинке внутри .task-visual открывает её крупно
    (единый делегированный обработчик onTaskVisualClick в js/app.js).
    Подложка тёмная в обеих темах, поэтому подпись и крестик — светлые. */

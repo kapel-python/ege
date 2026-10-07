@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Регрессия явного типа проверки заданий (`check: auto/self`).
+"""Регрессия явного типа проверки заданий (`check: auto/self`) и таблиц.
 
 Контракт: `check` опционален (по умолчанию `auto` — строгая сверка ответа),
 legacy `selfCheck: true` нормализуется в `self` (развёрнутый ответ: поля
@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -91,6 +92,49 @@ def main() -> int:
                 print(f"FAIL {path.name}:{task.get('id')}: selfCheck без check:self")
                 corpus_ok = False
     t(f"весь корпус каталогов проходит нормализацию ({total} заданий)", corpus_ok and total > 0)
+
+    # Таблицы `|`-блоков: рендер mathText собирает таблицу только из блока
+    # 2+ строк на `|`; одиночная строка с пайпами или рваная ширина колонок
+    # даст кашу вместо таблицы — ловим на уровне каталога, а не глазами.
+    def table_blocks_ok(text: str, tid: str, fname: str) -> bool:
+        ok = True
+        lines = text.split("\n")
+        i = 0
+        while i < len(lines):
+            if lines[i].strip().startswith("|"):
+                j = i
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    j += 1
+                block = lines[i:j]
+                if len(block) < 2:
+                    print(f"FAIL {fname}:{tid}: одиночная строка на `|` не станет таблицей")
+                    ok = False
+                widths = set()
+                for ln in block:
+                    if re.fullmatch(r"\s*\|[\s:|-]+\|\s*", ln) and "-" in ln:
+                        continue
+                    cells = [c.strip() for c in ln.strip().split("|")[1:-1]]
+                    widths.add(len(cells))
+                if len(widths) > 1:
+                    print(f"FAIL {fname}:{tid}: рваная ширина колонок {sorted(widths)}")
+                    ok = False
+                i = j
+            else:
+                i += 1
+        return ok
+
+    tables_ok = True
+    tables_total = 0
+    for path in catalogs:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for task in data.get("tasks", []):
+            for field in ("text", "solution", "hint"):
+                val = task.get(field)
+                if isinstance(val, str) and "|" in val:
+                    tables_total += 1
+                    if not table_blocks_ok(val, task.get("id"), path.name):
+                        tables_ok = False
+    t(f"таблицы `|`-блоков корректны ({tables_total} полей с пайпами)", tables_ok)
 
     print("TASK-CHECK-TYPE " + ("OK" if fails == 0 else f"FAILURES={fails}"))
     return 1 if fails else 0
