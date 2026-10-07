@@ -67,6 +67,61 @@ const Theme = {
 };
 
 
+/* Версия фронта: мобильный браузер держит старый index.html в бэк-кэше
+   вкладки и не ревалидирует его — ученик сидит на старой сборке и не знает.
+   checkAppUpdate сверяет meta app-build документа со свежей копией с сервера
+   (no-store, мимо кэша) и показывает липкий баннер с кнопкой перезагрузки.
+   Проверка — не чаще раза в 10 минут, на смене роута и возврате во вкладку;
+   сервер отдаёт HTML с no-cache, так что ложных срабатываний нет. */
+let appUpdateNotified = false;
+let appUpdateLastCheck = 0;
+function appBuildCurrent() {
+  try {
+    const m = document.querySelector('meta[name="app-build"]');
+    return m ? Number(m.content) || 0 : 0;
+  } catch (_) { return 0; }
+}
+function showAppUpdateBanner() {
+  if (appUpdateNotified) return;
+  appUpdateNotified = true;
+  try {
+    if (document.getElementById("app-update-banner")) return;
+    const bar = document.createElement("div");
+    bar.id = "app-update-banner";
+    bar.setAttribute("role", "status");
+    bar.style.cssText = "position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:200;display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:#1d4ed8;color:#fff;font-size:14px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.45)";
+    const label = document.createElement("span");
+    label.textContent = "Вышло обновление — подтянуть свежие задания и исправления?";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Обновить";
+    btn.style.cssText = "margin-left:auto;background:#fff;color:#1d4ed8;border:none;border-radius:10px;padding:8px 14px;font-weight:700;font-size:14px;cursor:pointer";
+    btn.onclick = () => { try { location.reload(); } catch (_) {} };
+    bar.appendChild(label);
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+  } catch (_) {}
+}
+async function checkAppUpdate() {
+  try {
+    const now = Date.now();
+    if (appUpdateNotified || now - appUpdateLastCheck < 10 * 60 * 1000) return;
+    appUpdateLastCheck = now;
+    const res = await fetch("/", { cache: "no-store", credentials: "same-origin" });
+    if (!res || !res.ok) return;
+    const html = await res.text();
+    const m = /<meta name="app-build" content="(\d+)"/.exec(html);
+    if (m && Number(m[1]) > appBuildCurrent()) showAppUpdateBanner();
+  } catch (_) {}
+}
+try {
+  window.addEventListener("hashchange", () => { try { checkAppUpdate(); } catch (_) {} });
+  document.addEventListener("visibilitychange", () => {
+    try { if (!document.hidden) checkAppUpdate(); } catch (_) {}
+  });
+  setTimeout(() => { try { checkAppUpdate(); } catch (_) {} }, 30000);
+} catch (_) {}
+
 /* ---------------- helpers ---------------- */
 
 function esc(s) {
