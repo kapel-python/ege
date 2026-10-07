@@ -348,7 +348,7 @@
           <p class="card-text">Ты начинаешь с короткой диагностики, а дальше идут миссии и боссы — проверки посерьёзнее.</p>
         </div>
       </div>
-      <div class="subj-note rv">Сейчас для занятий доступны <strong>профильная математика — все 20 номеров</strong>, <strong>базовая математика — все 21 номер</strong>, <strong>биология — все 28 линий</strong> и <strong>обществознание — все 25 заданий</strong>. Также доступен <strong>русский язык</strong>: тема «Итоговое сочинение» с практикой написания и проверкой работ.</div>
+      <div class="subj-note rv" id="subjects-note">Сейчас для занятий доступно <strong id="subjects-ready-count">несколько предметов</strong>. Полный список — в каталоге на дашборде.</div>
     </div>
   </section>
 
@@ -448,6 +448,44 @@
     },{threshold:0.12,rootMargin:"0px 0px -8% 0px"});
     for(var j=0;j<els.length;j++){io.observe(els[j]);}
   }catch(e){}
+})();
+
+/* Число доступных предметов берётся из того же места, что и каталог:
+   /api/subjects. Ни один id не зашит в код — когда предмет добавляют
+   в реестр, эта строка обновляется сама. */
+(function(){
+  "use strict";
+  var el = document.getElementById("subjects-ready-count");
+  if(!el) return;
+  function plural(n){
+    // предмет / предмета / предметов
+    var m10 = n % 10, m100 = n % 100;
+    if(m10 === 1 && m100 !== 11) return "предмет";
+    if(m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "предмета";
+    return "предметов";
+  }
+  function fallback(text){
+    el.textContent = text;
+  }
+  try{
+    if(!window.fetch) return;
+    fetch("/api/subjects", {credentials:"omit"}).then(function(r){
+      if(!r.ok) throw new Error("bad status");
+      return r.json();
+    }).then(function(data){
+      var subjects = (data && data.subjects) || [];
+      var ready = 0;
+      for(var i=0;i<subjects.length;i++){
+        var s = subjects[i] || {};
+        var locked = s.locked === true;
+        var availability = String(s.availability || s.status || "").toLowerCase();
+        var open = !locked && availability !== "locked" && availability !== "coming_soon";
+        if(open) ready++;
+      }
+      if(!ready){ fallback("несколько предметов"); return; }
+      el.textContent = ready + " " + plural(ready);
+    }).catch(function(){ fallback("несколько предметов"); });
+  }catch(e){ /* статичная фраза остаётся как есть */ }
 })();
 </script>
 </body>
