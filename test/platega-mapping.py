@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Platega-маппинг без сети: конфиг, авторизация callback, сверка сумм,
 активация по CONFIRMED, идемпотентность, CANCELED, confirm через заглушку
-HTTP (живой шлюз не трогается — ни одного внешнего запроса).
+HTTP (живой шлюз не трогается — ни одного внешнего запроса, 27 проверок).
 
 Запуск: python3 test/platega-mapping.py (из корня репозитория).
 """
@@ -125,6 +125,37 @@ def main():
     prov = [p for p in hist["payments"] if p["provider"] == "platega"]
     check("история хранит platega", len(prov) == 1 and prov[0]["status"] == "succeeded"
           and prov[0]["amountKopecks"] == 19900)
+
+    section("webhook: диапазон суммы с комиссией шлюза")
+    conn.execute("INSERT OR IGNORE INTO users (id) VALUES (3)")
+    conn.execute("INSERT OR IGNORE INTO users (id) VALUES (4)")
+    conn.execute("INSERT OR IGNORE INTO users (id) VALUES (5)")
+    conn.execute("INSERT OR IGNORE INTO users (id) VALUES (6)")
+    conn.commit()
+    c5a = SUB.create_checkout(conn, 3, "month", SUB.PROVIDER_PLATEGA, "r-1")
+    r5 = SUB.platega_webhook(conn, c5a["providerPaymentId"], "CONFIRMED", 212.93, "RUB")
+    check("номинал + комиссия (+7%) активирует", r5.get("ok") is True
+          and SUB.subscription_status(conn, 3)["active"] is True)
+    c5b = SUB.create_checkout(conn, 4, "month", SUB.PROVIDER_PLATEGA, "r-2")
+    try:
+        SUB.platega_webhook(conn, c5b["providerPaymentId"], "CONFIRMED", 198.99, "RUB")
+        under = False
+    except ValueError:
+        under = True
+    check("недоплата на копейку не активирует", under
+          and SUB.subscription_status(conn, 4)["active"] is False)
+    c5c = SUB.create_checkout(conn, 5, "month", SUB.PROVIDER_PLATEGA, "r-3")
+    try:
+        SUB.platega_webhook(conn, c5c["providerPaymentId"], "CONFIRMED", 278.60, "RUB")
+        over = False
+    except ValueError:
+        over = True
+    check("+40% сверху не активирует", over
+          and SUB.subscription_status(conn, 5)["active"] is False)
+    c5d = SUB.create_checkout(conn, 6, "month", SUB.PROVIDER_PLATEGA, "r-4")
+    r625 = SUB.platega_webhook(conn, c5d["providerPaymentId"], "CONFIRMED", 248.75, "RUB")
+    check("граница +25% активирует", r625.get("ok") is True
+          and SUB.subscription_status(conn, 6)["active"] is True)
 
     section("CANCELED по pending")
     co2 = SUB.create_checkout(conn, 2, "year", SUB.PROVIDER_PLATEGA, "key-2")

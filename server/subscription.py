@@ -1562,7 +1562,11 @@ def platega_webhook(conn: sqlite3.Connection, txn_id: str, status: str,
         except (TypeError, ValueError):
             have = 0
         want = _platega_amount_kop(amount)
-        if want is None or want != have:
+        # Шлюз кладёт свою комиссию поверх номинала (5₽ → 5.35, 199₽ →
+        # 212.93), поэтому требуем не копейку в копейку, а диапазон:
+        # не меньше счёта и не выше счёта +25%. Недоплата и чужой счёт
+        # по-прежнему не активируют.
+        if want is None or want < have or want * 100 > have * 125:
             raise ValueError("сумма платежа не совпадает со счётом")
     now_ms = NOW_MS()
     if pay.get("status") == PAY_SUCCEEDED:
