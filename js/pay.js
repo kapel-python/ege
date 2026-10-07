@@ -7,16 +7,17 @@
    Счёт живёт на сервере, а не в DOM: обновление страницы, закрытие
    ожидания и смена устройства его не теряют — добивают баннер
    «Счёт ждёт оплаты» (renderPendingBanner) и автопроверка при возврате.
-   Вечного окна нет: опрос — до ~2 минут, дальше «Проверь снова» /
-   «Закрыть»; неоплаченный счёт умирает сам через ~30 минут в шлюзе,
-   отменить можно кнопкой (POST payments/cancel, только свой pending).
+   Долгого опроса нет: максимум два автоматических запроса (~5 секунд),
+   дальше честное «Оплата не найдена» + ручная перепроверка; неоплаченный
+   счёт умирает сам через ~30 минут в шлюзе, отменить можно кнопкой
+   (POST payments/cancel, только свой pending). Успех сразу закрывает
+   ожидание и обновляет страницу — висящего «Оплата прошла!» нет.
    Зависимостей нет, стиль ES5 как на соседних страницах.
    ============================================================ */
 var PayFlow = (function () {
   "use strict";
 
-  var POLL_INTERVAL = 5000;
-  var POLL_MAX = 24; /* ~2 минуты автоожидания, дальше — вручную */
+  var CHECK_RETRY_MS = 5000; /* второй (и последний) автозапрос — через 5 с */
   var WAIT_KEY = "ege_pay_wait_v1";
 
   function esc(s) {
@@ -218,12 +219,17 @@ var PayFlow = (function () {
   /* ---------- шаг 2: ожидание после возврата ---------- */
   var waitState = null;
 
+  /* Лоадер — дословно тот же, что boot/ожидания приложения (loaderHTML
+     в js/app.js): тот же логотип в ядре, тот же бренд, та же полоса.
+     Своей анимации у оплаты нет. Токены логотипа — с fallback (в SPA
+     резолвятся родные): на страницах без --success/--violet круги иначе
+     пропадали бы. Тексты заголовка/подписи — параметры (состояние). */
+  var LOADER_LOGO = '<svg viewBox="0 0 44 44" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="20" cy="23" r="12" style="stroke:var(--accent, #0277B6)" stroke-width="3.6" stroke-linecap="round" stroke-dasharray="64 14" transform="rotate(-45 20 23)"/><circle cx="20" cy="23" r="6.8" style="stroke:var(--success, #16a34a)" stroke-width="2.6"/><circle cx="20" cy="23" r="2.3" style="fill:var(--violet, #7c3aed)"/><path d="M34 8v6M31 11h6" style="stroke:var(--success, #16a34a)" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="33" r="1.6" style="fill:var(--accent, #0277B6)" opacity=".8"/><circle cx="33.5" cy="30.5" r="1.3" style="fill:var(--violet, #7c3aed)" opacity=".7"/></svg>';
+
   function loaderHTML(title, sub) {
-    return '<div class="ege-loader" role="status">'
-      + '<div class="ege-loader__orbit"><div class="ege-loader__core">'
-      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>'
-      + "</div></div>"
-      + '<div class="ege-loader__brand">ege easy <span>plus</span></div>'
+    return '<div class="card ege-loader" role="status">'
+      + '<div class="ege-loader__orbit"><div class="ege-loader__core">' + LOADER_LOGO + "</div></div>"
+      + '<div class="ege-loader__brand">ege <span>easy</span></div>'
       + '<div class="ege-loader__title">' + esc(title) + "</div>"
       + '<div class="ege-loader__sub">' + esc(sub) + "</div>"
       + '<div class="ege-loader__bar"><i></i></div></div>';
@@ -272,7 +278,7 @@ var PayFlow = (function () {
     });
   }
 
-  function pollOnce(publicId) {
+  function checkOnce(publicId) {
     return api("/api/subscription/confirm", { paymentId: publicId }).then(function (res) {
       return { done: true, ok: true, res: res };
     }).catch(function (err) {
@@ -282,23 +288,92 @@ var PayFlow = (function () {
     });
   }
 
-  function pollUntil(publicId, onEvent) {
-    var n = 0;
+  /* Проверка счёта: максимум два автоматических запроса (сразу и через
+     5 секунд) — дальше честное «Оплата не найдена», а не бесконечный
+     опрос: каждый запрос идёт в живой шлюз, долбить его запрещено
+     (рейт-лимит). Ручная «Проверить снова» — тот же короткий цикл. */
+  function checkTwice(publicId, onEvent) {
     waitState = waitState || {};
     waitState.stopped = false;
-    function tick() {
-      if (!waitState || waitState.stopped) return;
-      n += 1;
-      onEvent({ type: "attempt", n: n });
-      pollOnce(publicId).then(function (r) {
-        if (!waitState || waitState.stopped) return;
-        if (r.done) { onEvent(r.ok ? { type: "ok" } : { type: "fail", message: r.message }); return; }
-        if (n >= POLL_MAX) { onEvent({ type: "timeout" }); return; }
-        waitState.timer = setTimeout(tick, POLL_INTERVAL);
-      });
+    function finish(r) {
+      onEvent(r.ok ? { type: "ok" } : { type: "fail", message: r.message });
     }
-    tick();
-    return { stop: stopWaitTimer };
+    onEvent({ type: "attempt", n: 1 });
+    checkOnce(publicId).then(function (r) {
+      if (!waitState || waitState.stopped) return;
+      if (r.done) { finish(r); return; }
+      waitState.timer = setTimeout(function () {
+        if (!waitState || waitState.stopped) return;
+        onEvent({ type: "attempt", n: 2 });
+        checkOnce(publicId).then(function (r2) {
+          if (!waitState || waitState.stopped) return;
+          if (r2.done) finish(r2);
+          else onEvent({ type: "notfound" });
+        });
+      }, CHECK_RETRY_MS);
+    });
+  }
+
+  /* Единый разбор исхода: успех сразу закрывает ожидание и обновляет
+     страницу — висящего «Оплата прошла!» нет. cfg: {sumText, period,
+     price, allowNew, onDone}. */
+  function paintOutcome(ev, ref, cfg) {
+    cfg = cfg || {};
+    if (ev.type === "attempt") {
+      waitBody(loaderHTML("Проверяем оплату…",
+        (ev.n === 1 ? "первый запрос" : "второй запрос · ещё ~5 секунд")
+        + (cfg.sumText ? " · " + cfg.sumText : "")));
+      return;
+    }
+    if (ev.type === "ok") {
+      cleanPayParam();
+      dropWait(ref);
+      hideWait();
+      if (cfg.onDone) cfg.onDone();
+      else window.location.reload();
+      return;
+    }
+    if (ev.type === "fail") {
+      cleanPayParam();
+      var failHtml = loaderHTML("Платёж не прошёл", ev.message)
+        + '<div class="paywait__actions">';
+      if (cfg.allowNew) {
+        failHtml += '<button class="btn btn-primary btn--sm" type="button" data-new>Создать новый счёт</button>';
+      }
+      failHtml += '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>';
+      waitBody(failHtml);
+      bindWaitButtons(cfg, ref);
+      return;
+    }
+    cleanPayParam();
+    waitBody(loaderHTML("Оплата не найдена", "два запроса — провайдер молчит")
+      + '<div class="paywait__note">Деньги без подтверждения не уходят. Счёт живёт ~30 минут — можно вернуться позже.</div>'
+      + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-recheck>Проверить снова</button>'
+      + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>'
+      + '<div class="paywait__note">Закрытие ничего не отменяет: счёт подберёт баннер ниже.</div>');
+    bindWaitButtons(cfg, ref);
+  }
+
+  function bindWaitButtons(cfg, ref) {
+    cfg = cfg || {};
+    var box = document.getElementById("payWait");
+    if (!box) return;
+    var c = box.querySelector("[data-close]");
+    if (c) c.addEventListener("click", stopWait);
+    var n = box.querySelector("[data-new]");
+    if (n) n.addEventListener("click", function () {
+      hideWait();
+      buy({ period: cfg.period || "month", price: cfg.price || 199 });
+    });
+    var r = box.querySelector("[data-recheck]");
+    if (r && ref) r.addEventListener("click", function () {
+      checkTwice(ref, function (ev) { paintOutcome(ev, ref, cfg); });
+    });
+  }
+
+  /* Старт проверки при уже показанном ожидании (оверлей поднимает вызыватель). */
+  function startCheck(ref, cfg) {
+    checkTwice(ref, function (ev) { paintOutcome(ev, ref, cfg || {}); });
   }
 
   function cleanPayParam() {
@@ -327,7 +402,7 @@ var PayFlow = (function () {
     }
     if (payFlag !== "ok") { cleanPayParam(); return; }
     showWait();
-    waitBody(loaderHTML("Проверяем оплату…", "первый запрос"));
+    waitBody(loaderHTML("Проверяем оплату…", "ищем счёт"));
     latestPending().then(function (pend) {
       if (!waitState) return;
       if (!pend) {
@@ -336,81 +411,23 @@ var PayFlow = (function () {
         api("/api/subscription/status").then(function (st) {
           if (!waitState) return;
           cleanPayParam();
+          hideWait();
           if (st && st.active) {
-            waitBody(loaderHTML("Оплата прошла!", "Plus уже активен"));
-            setTimeout(function () { opts.onPaid ? opts.onPaid() : window.location.reload(); }, 900);
+            if (opts.onPaid) opts.onPaid();
+            else window.location.reload();
           } else {
-            hideWait();
             errorDlg("Активных счетов нет", "Похоже, оплата не завершилась. Создай новый счёт.", false);
           }
         }).catch(function () { if (waitState) { hideWait(); cleanPayParam(); } });
         return;
       }
       var ref = pend.publicId || pend.id;
-      pollUntil(ref, function (ev) {
-        if (ev.type === "attempt") {
-          waitBody(loaderHTML("Проверяем оплату…", "запрос " + ev.n + " · счёт " + fmtSum(pend.amountKopecks) + " ₽"));
-        } else if (ev.type === "ok") {
-          cleanPayParam();
-          dropWait(ref);
-          waitBody(loaderHTML("Оплата прошла!", "Plus активен"));
-          setTimeout(function () { opts.onPaid ? opts.onPaid() : window.location.reload(); }, 900);
-        } else if (ev.type === "fail") {
-          cleanPayParam();
-          waitBody(loaderHTML("Платёж не прошёл", ev.message)
-            + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-new>Создать новый счёт</button>'
-            + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>');
-          bindWaitButtons(opts);
-        } else if (ev.type === "timeout") {
-          cleanPayParam();
-          waitBody(loaderHTML("Пока не видим оплату", "провайдер молчит уже ~2 минуты")
-            + '<div class="paywait__note">Деньги без подтверждения не уходят. Счёт живёт ~30 минут — можно вернуться позже, проверка добьёт.</div>'
-            + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-recheck>Проверить снова</button>'
-            + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>'
-            + '<div class="paywait__note">Закрытие ничего не отменяет: счёт подберёт баннер ниже.</div>');
-          bindWaitButtons(opts, ref);
-        }
+      startCheck(ref, {
+        sumText: fmtSum(pend.amountKopecks) + " ₽",
+        period: opts.period, price: opts.price, allowNew: true,
+        onDone: function () { if (opts.onPaid) opts.onPaid(); else window.location.reload(); }
       });
     }).catch(function () { hideWait(); cleanPayParam(); });
-  }
-
-  function bindWaitButtons(opts, ref) {
-    var box = document.getElementById("payWait");
-    if (!box) return;
-    var c = box.querySelector("[data-close]");
-    if (c) c.addEventListener("click", stopWait);
-    var n = box.querySelector("[data-new]");
-    if (n) n.addEventListener("click", function () {
-      hideWait();
-      buy({ period: (opts && opts.period) || "month", price: (opts && opts.price) || 199 });
-    });
-    var r = box.querySelector("[data-recheck]");
-    if (r && ref) r.addEventListener("click", function () {
-      waitBody(loaderHTML("Проверяем оплату…", "ещё раз"));
-      /* Повторный цикл с тем же разбором исходов: */
-      pollUntil(ref, function (ev) {
-        if (ev.type === "attempt") {
-          waitBody(loaderHTML("Проверяем оплату…", "запрос " + ev.n));
-        } else if (ev.type === "ok") {
-          cleanPayParam();
-          dropWait(ref);
-          waitBody(loaderHTML("Оплата прошла!", "Plus активен"));
-          setTimeout(function () { opts.onPaid ? opts.onPaid() : window.location.reload(); }, 900);
-        } else if (ev.type === "fail") {
-          cleanPayParam();
-          waitBody(loaderHTML("Платёж не прошёл", ev.message)
-            + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-new>Создать новый счёт</button>'
-            + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>');
-          bindWaitButtons(opts);
-        } else if (ev.type === "timeout") {
-          waitBody(loaderHTML("Пока не видим оплату", "провайдер всё ещё молчит")
-            + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-recheck>Проверить снова</button>'
-            + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>'
-            + '<div class="paywait__note">Счёт живёт ~30 минут с создания.</div>');
-          bindWaitButtons(opts, ref);
-        }
-      });
-    });
   }
 
   /* ---------- баннер незавершённого счёта ---------- */
@@ -453,23 +470,9 @@ var PayFlow = (function () {
       mkBtn(url ? "btn-ghost btn--sm" : "btn-primary btn--sm", "Проверить оплату", function () {
         showWait();
         waitBody(loaderHTML("Проверяем оплату…", "первый запрос"));
-        pollUntil(ref, function (ev) {
-          if (ev.type === "attempt") {
-            waitBody(loaderHTML("Проверяем оплату…", "запрос " + ev.n));
-          } else if (ev.type === "ok") {
-            dropWait(ref);
-            waitBody(loaderHTML("Оплата прошла!", "Plus активен"));
-            setTimeout(function () { opts.onChanged ? opts.onChanged() : window.location.reload(); }, 900);
-          } else if (ev.type === "fail") {
-            waitBody(loaderHTML("Платёж не прошёл", ev.message)
-              + '<div class="paywait__actions"><button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>');
-            bindWaitButtons(opts);
-          } else if (ev.type === "timeout") {
-            waitBody(loaderHTML("Пока не видим оплату", "провайдер молчит уже ~2 минуты")
-              + '<div class="paywait__actions"><button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>'
-              + '<div class="paywait__note">Счёт живёт ~30 минут с создания.</div>');
-            bindWaitButtons(opts);
-          }
+        startCheck(ref, {
+          sumText: fmtSum(pend.amountKopecks) + " ₽",
+          onDone: function () { if (opts.onChanged) opts.onChanged(); else window.location.reload(); }
         });
       });
       mkBtn("btn-ghost btn--sm", "Отменить счёт", function () {

@@ -217,12 +217,9 @@ def main():
     check("свой pending отменяется", cancelled.get("status") == "cancelled"
           and row["status"] == "cancelled"
           and SUB.subscription_status(conn, 1)["active"] is True)
-    try:
-        SUB.cancel_pending_payment(conn, 1, cc["paymentId"])
-        double_cancel = False
-    except ValueError:
-        double_cancel = True
-    check("повторная отмена 400", double_cancel)
+    again = SUB.cancel_pending_payment(conn, 1, cc["paymentId"])
+    check("повторная отмена идемпотентна (already, не 400)",
+          again.get("already") is True and again.get("status") == "cancelled")
     try:
         SUB.confirm_resolved(conn, cc["paymentId"], 1)
         dead = False
