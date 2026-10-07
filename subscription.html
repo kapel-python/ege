@@ -36,6 +36,8 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
+<link rel="stylesheet" href="/css/dlg.css?v=2">
+<link rel="stylesheet" href="/css/pay.css?v=1">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -109,8 +111,7 @@
   a{color:inherit;text-decoration:none;}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
   /* hidden обязан побеждать всегда: иначе .btn{display:inline-flex} ниже
-     перебивает UA-правило и элемент с hidden остаётся видимым
-     (живой случай — кнопка «Напомнить о запуске» у гостя). */
+     перебивает UA-правило и элемент с hidden остаётся видимым. */
   [hidden]{display:none!important;}
   .num{font-variant-numeric:tabular-nums;}
   .wrap{max-width:960px;margin:0 auto;padding:0 clamp(20px,4vw,32px);min-width:0;}
@@ -238,21 +239,6 @@
   .buybar__btn{margin-left:auto;flex:0 0 auto;padding:13px 22px;border:0;border-radius:12px;cursor:pointer;
     background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 50%,#2563EB 100%);color:#fff;font:inherit;
     font-size:14px;font-weight:700;}
-  /* модалка «скоро» */
-  .modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;
-    background:rgba(8,10,16,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
-  .modal.is-open{display:flex;}
-  .modal__box{position:relative;width:100%;max-width:420px;max-height:86dvh;overflow-y:auto;
-    padding:28px 24px 22px;border-radius:20px;background:var(--surface-2);
-    border:1px solid var(--card-border-hover);box-shadow:var(--shadow-lg);text-align:center;}
-  .modal__close{position:absolute;top:12px;right:12px;width:34px;height:34px;border:0;border-radius:50%;
-    background:var(--surface-0);color:var(--text-faint);cursor:pointer;font-size:18px;line-height:1;}
-  .modal__mark{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;margin:0 auto 14px;
-    background:var(--gold-dim);color:var(--gold);}
-  .modal__mark svg{width:26px;height:26px;}
-  .modal__title{font-family:var(--font-display);font-size:20px;font-weight:700;margin:0 0 8px;}
-  .modal__text{font-size:14px;color:var(--text-dim);line-height:1.65;margin:0 0 18px;}
-  .modal__actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
   /* появление */
   .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);
     transition-delay:var(--d,0ms);}
@@ -303,9 +289,7 @@
 
       <div class="cta-row" id="ctaRow">
         <button class="btn btn-primary" id="ctaBtn" type="button">Оформить Plus</button>
-        <button class="btn btn-ghost" id="notifyBtn" type="button" hidden>Напомнить о запуске</button>
         <a class="btn btn-ghost" href="/dashboard">Сначала посмотреть платформу</a>
-        <span class="cta-note" id="notifyNote" hidden>Оплата скоро появится. Нажми «Напомнить» — сообщим о запуске.</span>
       </div>
 
     </div>
@@ -428,25 +412,10 @@
   <button class="buybar__btn" type="button" id="buybarBtn">Оформить</button>
 </div>
 
-<div class="modal" id="soonModal" role="dialog" aria-modal="true" aria-label="Оплата пока недоступна">
-  <div class="modal__box">
-    <button class="modal__close" type="button" id="soonClose" aria-label="Закрыть">×</button>
-    <span class="modal__mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
-    </span>
-    <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text" id="soonText">Мы ещё подключаем оплату. Оставь заявку — сообщим, как только всё заработает.</p>
-    <div class="modal__actions">
-      <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
-      <a class="btn btn-ghost btn--sm" href="/dashboard#/profile">Открыть профиль</a>
-      <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
-    </div>
-  </div>
-</div>
-
 <div data-ege-footer></div>
 <script src="/js/site-header.js?v=1"></script>
 <script src="/js/footer.js?v=8"></script>
+<script src="/js/pay.js?v=1"></script>
 
 <!--SSR-DATA-->
 
@@ -571,53 +540,15 @@
      Plus — баннер вместо неё. Сессия читается отдельным запросом:
      /api/auth/session гостю отвечает 200 с user:null, поэтому лишнего
      401 в консоли нет; subscription/status дёргаем только залогиненным. */
-  var subState = { checked: false, active: false, guest: true, notified: false };
+  var subState = { checked: false, active: false, guest: true };
   var ctaRow = document.getElementById("ctaRow");
   var ctaBtn = document.getElementById("ctaBtn");
-  var notifyBtn = document.getElementById("notifyBtn");
-  var notifyNote = document.getElementById("notifyNote");
-  var soonNotify = document.getElementById("soonNotify");
   var activeBanner = document.getElementById("activeBanner");
   var activeText = document.getElementById("activeText");
 
   function fmtDate(ms){
     try { return new Date(Number(ms)).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }); }
     catch(e){ return ""; }
-  }
-
-  /* Лист ожидания: кнопка видна только залогиненному без Plus.
-     Нажавший попадёт в plus_waitlist — о запуске сообщим первым. */
-  function paintNotify(){
-    var show = subState.checked && !subState.guest && !subState.active;
-    if (notifyBtn) {
-      notifyBtn.hidden = !show;
-      notifyBtn.disabled = !!subState.notified;
-      notifyBtn.textContent = subState.notified ? "Ты в списке — сообщим о запуске" : "Напомнить о запуске";
-    }
-    if (notifyNote) notifyNote.hidden = !show;
-    if (soonNotify) {
-      soonNotify.disabled = !!subState.notified;
-      soonNotify.textContent = subState.notified ? "Записали — жди запуска" : "Напомнить о запуске";
-    }
-  }
-  function postNotify(){
-    if (!subState.checked || subState.guest) { window.location.href = "/dashboard#/profile"; return; }
-    if (subState.notified) return;
-    if (soonNotify) { soonNotify.disabled = true; soonNotify.textContent = "Записываем…"; }
-    fetch("/api/subscription/notify", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, credentials: "same-origin", cache: "no-store", body: "{}" })
-      .then(function(resp){
-        if (resp.status === 401 || resp.status === 403) { window.location.href = "/dashboard#/profile"; throw new Error("auth"); }
-        if (!resp.ok) throw new Error("http " + resp.status);
-        return resp.json();
-      })
-      .then(function(){
-        subState.notified = true;
-        paintNotify();
-      })
-      .catch(function(err){
-        if (err && err.message === "auth") return;
-        paintNotify(); /* честная ошибка: кнопка снова жива */
-      });
   }
 
   /* Единая отрисовка статуса — и для SSR-среза, вшитого сервером в HTML
@@ -645,19 +576,6 @@
           }
           var buybar = document.getElementById("buybar");
           if (buybar) { buybar.hidden = true; buybar.classList.remove("is-on"); }
-        } else if (!subState.guest) {
-          /* Залогинен без Plus: участие в листе ожидания едет в SSR-срезе,
-             без него — подтягиваем отдельным запросом (best-effort). */
-          if (data && typeof data.notifyJoined === "boolean") {
-            subState.notified = data.notifyJoined;
-            paintNotify();
-          } else {
-            fetch("/api/subscription/notify", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
-              .then(function(resp){ if (!resp.ok) throw new Error("http " + resp.status); return resp.json(); })
-              .then(function(nd){ subState.notified = !!(nd && nd.joined); paintNotify(); })
-              .catch(function(){ paintNotify(); });
-            paintNotify();
-          }
         }
   }
 
@@ -705,65 +623,21 @@
     fetchSubData();
   }
 
-  /* покупка: без аккаунта — в профиль (там онбординг),
-     с аккаунтом — настоящий checkout: шлюз вернёт ссылку на оплату
-     (paymentUrl) — уходим на неё; без ссылки (mock-стенд/тесты) и когда
-     провайдер не настроен — честное «скоро» */
-  var soonModal = document.getElementById("soonModal");
-  var buyBusy = false;
-  function setBuyBusy(busy, label){
-    buyBusy = busy;
-    [ctaBtn, buybarBtn].forEach(function(b){
-      if (!b) return;
-      b.disabled = !!busy;
-      if (busy) { b.setAttribute("data-label", b.textContent); b.textContent = label; }
-      else { var l = b.getAttribute("data-label"); if (l) b.textContent = l; }
-    });
-  }
+  /* покупка — единый флоу (js/pay.js): окно-подтверждение .dlg, затем
+     генерация счёта и редирект на шлюз. Без аккаунта — в профиль. */
   function onBuy(){
     if (subState.active) { window.location.href = "/dashboard#/profile"; return; }
     // Статус ещё не проверили (медленная сеть): безопасный дефолт — профиль.
-    // Гостю там онбординг, залогиненному — карточка подписки с тем же окном.
+    // Гостю там онбординг, залогиненному — страница управления.
     if (!subState.checked || subState.guest) { window.location.href = "/dashboard#/profile"; return; }
-    if (buyBusy) return;
-    setBuyBusy(true, "Создаём счёт…");
-    fetch("/api/subscription/checkout", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, credentials: "same-origin", cache: "no-store", body: JSON.stringify({ period: current }) })
-      .then(function(resp){
-        return resp.json().catch(function(){ return {}; }).then(function(data){
-          return { status: resp.status, ok: resp.ok, data: data || {} };
-        });
-      })
-      .then(function(res){
-        if (res.ok && res.data.paymentUrl) { window.location.href = res.data.paymentUrl; return; }
-        setBuyBusy(false);
-        openSoon();
-      })
-      .catch(function(){
-        setBuyBusy(false);
-        openSoon();
-      });
+    try {
+      PayFlow.buy({ period: current, price: (PLANS[current] || {}).price || 199 });
+    } catch (e) { window.location.href = "/subscription/manage"; }
   }
-  function openSoon(){
-    if (!soonModal) return;
-    soonModal.classList.add("is-open");
-    try { document.body.style.overflow = "hidden"; } catch(e){}
-  }
-  function closeSoon(){
-    if (!soonModal) return;
-    soonModal.classList.remove("is-open");
-    try { document.body.style.overflow = ""; } catch(e){}
-  }
+  window.addEventListener("pay:retry", onBuy);
   if (ctaBtn) ctaBtn.addEventListener("click", onBuy);
-  if (notifyBtn) notifyBtn.addEventListener("click", postNotify);
-  if (soonNotify) soonNotify.addEventListener("click", postNotify);
   var buybarBtn = document.getElementById("buybarBtn");
   if (buybarBtn) buybarBtn.addEventListener("click", onBuy);
-  var soonClose = document.getElementById("soonClose");
-  if (soonClose) soonClose.addEventListener("click", closeSoon);
-  var soonOk = document.getElementById("soonOk");
-  if (soonOk) soonOk.addEventListener("click", closeSoon);
-  if (soonModal) soonModal.addEventListener("click", function(e){ if (e.target === soonModal) closeSoon(); });
-  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeSoon(); });
 
   /* липкая панель: когда кнопка уехала за верхний край, только телефон */
   var buybar = document.getElementById("buybar");
@@ -772,7 +646,7 @@
     if (!buybar || !ctaRow) return;
     if (subState.active) return;
     if (window.innerWidth <= 720) {
-      var need = ctaRow.getBoundingClientRect().bottom < 0 && !soonModal.classList.contains("is-open");
+      var need = ctaRow.getBoundingClientRect().bottom < 0;
       if (need !== shown) {
         shown = need;
         buybar.hidden = !need;

@@ -28,6 +28,8 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
+<link rel="stylesheet" href="/css/dlg.css?v=2">
+<link rel="stylesheet" href="/css/pay.css?v=1">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -194,21 +196,6 @@
   .spin{width:44px;height:44px;border-radius:50%;margin:0 auto 16px;border:3px solid var(--accent-dim);
     border-top-color:var(--accent);animation:spin 0.8s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
-  /* модалка «скоро» */
-  .modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;
-    background:rgba(8,10,16,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
-  .modal.is-open{display:flex;}
-  .modal__box{position:relative;width:100%;max-width:420px;max-height:86dvh;overflow-y:auto;
-    padding:28px 24px 22px;border-radius:20px;background:var(--surface-2);
-    border:1px solid var(--card-border-hover);box-shadow:var(--shadow-lg);text-align:center;}
-  .modal__close{position:absolute;top:12px;right:12px;width:34px;height:34px;border:0;border-radius:50%;
-    background:var(--surface-0);color:var(--text-faint);cursor:pointer;font-size:18px;line-height:1;}
-  .modal__mark{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;margin:0 auto 14px;
-    background:var(--gold-dim);color:var(--gold);}
-  .modal__mark svg{width:26px;height:26px;}
-  .modal__title{font-family:var(--font-display);font-size:20px;font-weight:700;margin:0 0 8px;}
-  .modal__text{font-size:14px;color:var(--text-dim);line-height:1.65;margin:0 0 18px;}
-  .modal__actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));
     z-index:120;background:var(--surface-2);border:1px solid var(--card-border-hover);border-radius:14px;
     padding:12px 18px;font-size:13.5px;box-shadow:var(--shadow-lg);max-width:min(92vw,420px);text-align:center;}
@@ -330,6 +317,7 @@
       <div class="card rv">
         <h2 class="card-title">Подписка</h2>
         <p class="card-sub" id="actionsSub">…</p>
+        <div id="pendingSlot"></div>
         <div class="actions" id="actionsRow"></div>
         <p class="tariff-link">Подробнее о тарифе — на <a href="/subscription">странице <span class="plus">Plus</span></a>.</p>
       </div>
@@ -338,26 +326,12 @@
 </div>
 </main>
 
-<div class="modal" id="soonModal" role="dialog" aria-modal="true" aria-label="Оплата пока недоступна">
-  <div class="modal__box">
-    <button class="modal__close" type="button" id="soonClose" aria-label="Закрыть">×</button>
-    <span class="modal__mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>
-    </span>
-    <h2 class="modal__title">Оплата пока недоступна</h2>
-    <p class="modal__text">Мы ещё подключаем оплату. Оставь заявку — сообщим, как только всё заработает.</p>
-    <div class="modal__actions">
-      <button class="btn btn-primary btn--sm" type="button" id="soonNotify">Напомнить о запуске</button>
-      <button class="btn btn-ghost btn--sm" type="button" id="soonOk">Понятно</button>
-    </div>
-  </div>
-</div>
-
 <div class="toast" id="toast" role="status" hidden></div>
 
 <div data-ege-footer></div>
 <script src="/js/site-header.js?v=1"></script>
 <script src="/js/footer.js?v=8"></script>
+<script src="/js/pay.js?v=1"></script>
 
 <script>
 (function(){
@@ -513,76 +487,28 @@
     }).join("");
   }
 
-  function setBusy(btn, busy, label){
-    if (!btn) return;
-    if (busy) { btn.disabled = true; btn.setAttribute("data-label", btn.textContent); btn.textContent = label; }
-    else { btn.disabled = false; var l = btn.getAttribute("data-label"); if (l) btn.textContent = l; }
+  /* Период и цена для покупки/продления (обновляются в renderAll). */
+  var buyPeriod = "month";
+  var buyPrice = PRICE_MONTH;
+
+  function paidRefresh(){
+    toast("Оплата прошла — Plus активен");
+    reload();
   }
 
-  /* Последний статус — для выбора периода продления. */
-  var lastStatus = null;
-
-  /* Покупка: настоящий checkout, ссылка шлюза — редирект на оплату.
-     Без ссылки (mock-стенд) и при ненастроенном провайдере (503) —
-     честное «скоро», деньги никуда не уходят. */
-  var buyInFlight = false;
-  function buyFlow(btn, period){
-    if (buyInFlight) return;
-    buyInFlight = true;
-    setBusy(btn, true, "Создаём счёт…");
-    var key = "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-    api("/api/subscription/checkout", { period: period, idempotencyKey: key }).then(function(res){
-      if (res && res.paymentUrl) { window.location.href = res.paymentUrl; return; }
-      buyInFlight = false;
-      setBusy(btn, false);
-      openSoon();
-    }).catch(function(err){
-      buyInFlight = false;
-      setBusy(btn, false);
-      if (err && err.status === 503) { openSoon(); return; }
-      toast((err && err.message) || "Не получилось создать счёт. Попробуй ещё раз.");
-    });
-  }
-
-  /* Возврат с платёжной страницы (?pay=ok|fail): ok — добиваем confirm
-     по свежайшему pending-счёту (для platega он опрашивает живой статус
-     шлюза), fail — честный тост без движений. Параметр из URL стираем,
-     чтобы обновление не перепроверяло. */
-  function cleanPayParam(){
+  function startBuy(){
     try {
-      var u = new URL(window.location.href);
-      if (u.searchParams.has("pay")) {
-        u.searchParams.delete("pay");
-        var rest = u.searchParams.toString();
-        window.history.replaceState({}, "", u.pathname + (rest ? "?" + rest : "") + u.hash);
-      }
-    } catch(e){}
+      PayFlow.buy({ period: buyPeriod, price: buyPrice });
+    } catch (e) {
+      toast("Не получилось открыть оплату. Попробуй ещё раз.");
+    }
   }
-  function confirmLatestPending(){
-    api("/api/subscription/payments?limit=10&offset=0").then(function(hist){
-      var list = (hist && hist.payments) || [];
-      var pend = null;
-      for (var i = 0; i < list.length; i++) {
-        if (list[i] && list[i].status === "pending") { pend = list[i]; break; }
-      }
-      if (!pend) { cleanPayParam(); toast("Активных счетов нет — оформи новый"); return; }
-      api("/api/subscription/confirm", { paymentId: pend.publicId || pend.id }).then(function(){
-        cleanPayParam();
-        toast("Оплата прошла — Plus активен");
-        reload();
-      }, function(err){
-        cleanPayParam();
-        toast((err && err.message) || "Оплата ещё не прошла — попробуй чуть позже");
-      });
-    }).catch(function(err){
-      cleanPayParam();
-      toast((err && err.message) || "Не получилось проверить оплату");
-    });
-  }
+  window.addEventListener("pay:retry", startBuy);
 
-  function renderAll(st, hist, essayLim, agentLim, notified){
+  function renderAll(st, hist, essayLim, agentLim){
     var plus = !!(st && st.active);
-    lastStatus = st || null;
+    buyPeriod = (plus && st.period === "year") ? "year" : "month";
+    buyPrice = buyPeriod === "year" ? PRICE_YEAR : PRICE_MONTH;
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 10 : 5);
     var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 50 : 10);
@@ -649,34 +575,21 @@
     } else {
       sub.textContent = "Оплата — на стороне провайдера: деньги и карта не проходят через нас, к нам попадает только факт оплаты.";
       btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "buy");
-      var nb = btn("btn-ghost btn--sm", notified ? "Ты в списке — сообщим о запуске" : "Напомнить о запуске", "notify");
-      if (notified) nb.disabled = true;
     }
     if (!row.getAttribute("data-bound")) {
       row.setAttribute("data-bound", "1");
       row.addEventListener("click", function(e){
         var b = e.target.closest("[data-act]");
         if (!b || b.disabled) return;
-        var act = b.getAttribute("data-act");
-        if (act === "buy") {
-          var per = (lastStatus && lastStatus.active && lastStatus.period === "year") ? "year" : "month";
-          buyFlow(b, per);
-          return;
-        }
-        if (act === "soon") { openSoon(); return; }
-        if (act === "notify") {
-          setBusy(b, true, "Записываем…");
-          api("/api/subscription/notify", {}).then(function(){
-            toast("Записали — сообщим о запуске");
-            reload();
-          }).catch(function(err){
-            setBusy(b, false);
-            toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
-          });
-          return;
-        }
+        if (b.getAttribute("data-act") === "buy") { startBuy(); return; }
       });
     }
+    try {
+      PayFlow.renderPendingBanner(document.getElementById("pendingSlot"), {
+        onChanged: reload,
+        onError: toast
+      });
+    } catch (e) {}
   }
 
   function reload(){
@@ -685,45 +598,8 @@
     boot();
   }
 
-  /* soon-модалка (+ «Напомнить» — та же запись в лист ожидания,
-     что кнопка в списке действий: модалка не должна быть тупиком) */
-  var soonModal = document.getElementById("soonModal");
-  var soonNotify = document.getElementById("soonNotify");
-  var notifiedState = false;
-  function paintSoonNotify(){
-    if (!soonNotify) return;
-    soonNotify.disabled = notifiedState;
-    soonNotify.textContent = notifiedState ? "Записали — жди запуска" : "Напомнить о запуске";
-  }
-  function openSoon(){
-    if (!soonModal) return;
-    paintSoonNotify();
-    soonModal.classList.add("is-open");
-    try { document.body.style.overflow = "hidden"; } catch(e){}
-  }
-  function closeSoon(){
-    if (!soonModal) return;
-    soonModal.classList.remove("is-open");
-    try { document.body.style.overflow = ""; } catch(e){}
-  }
-  document.getElementById("soonClose").addEventListener("click", closeSoon);
-  document.getElementById("soonOk").addEventListener("click", closeSoon);
-  if (soonNotify) soonNotify.addEventListener("click", function(){
-    if (notifiedState) return;
-    soonNotify.disabled = true;
-    soonNotify.textContent = "Записываем…";
-    api("/api/subscription/notify", {}).then(function(){
-      notifiedState = true;
-      paintSoonNotify();
-      toast("Записали — сообщим о запуске");
-      reload();
-    }).catch(function(err){
-      paintSoonNotify();
-      toast((err && err.message) || "Не получилось. Попробуй ещё раз.");
-    });
-  });
-  soonModal.addEventListener("click", function(e){ if (e.target === soonModal) closeSoon(); });
-  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeSoon(); });
+  /* soon-модалка удалена: оплата подключена, подтверждение — .dlg
+     из js/pay.js, ожидание — .ege-loader из css/pay.css. */
 
   function boot(){
     api("/api/auth/session").then(function(sess){
@@ -734,24 +610,23 @@
         return;
       }
       return api("/api/subscription/status").then(function(st){
-        /* платежи, остатки и лист ожидания — best-effort, статус важнее */
+        /* платежи и остатки — best-effort, статус важнее */
         return Promise.all([
           api("/api/subscription/payments?limit=50&offset=0").catch(function(){ return null; }),
           api("/api/ai/limits").catch(function(){ return null; }),
-          api("/api/agent/limits").catch(function(){ return null; }),
-          api("/api/subscription/notify").catch(function(){ return null; })
+          api("/api/agent/limits").catch(function(){ return null; })
         ]).then(function(res){
           document.getElementById("loadingCard").hidden = true;
           document.getElementById("content").hidden = false;
-          notifiedState = !!(res[3] && res[3].joined);
-          renderAll(st, res[0], res[1], res[2], notifiedState);
-          var payFlag = null;
-          try { payFlag = new URLSearchParams(window.location.search).get("pay"); } catch(e){}
-          if (payFlag === "ok") confirmLatestPending();
-          else if (payFlag === "fail") {
-            cleanPayParam();
-            toast("Платёж не прошёл — деньги не списаны. Попробуй ещё раз.");
-          }
+          renderAll(st, res[0], res[1], res[2]);
+          /* Возврат с оплаты: ожидание тем же лоадером + опрос confirm. */
+          try {
+            PayFlow.bootReturn({
+              period: buyPeriod,
+              price: buyPrice,
+              onPaid: paidRefresh
+            });
+          } catch (e) {}
         });
       });
     }).catch(function(){

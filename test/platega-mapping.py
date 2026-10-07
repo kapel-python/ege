@@ -209,6 +209,39 @@ def main():
         missing = True
     check("неизвестный платёж 404", missing)
 
+    section("отмена своего pending-счёта")
+    cc = SUB.create_checkout(conn, 1, "month", SUB.PROVIDER_PLATEGA, "cx-1")
+    cancelled = SUB.cancel_pending_payment(conn, 1, cc["paymentId"])
+    row = conn.execute("SELECT status FROM subscription_payments WHERE public_id=?",
+                       (cc["paymentId"],)).fetchone()
+    check("свой pending отменяется", cancelled.get("status") == "cancelled"
+          and row["status"] == "cancelled"
+          and SUB.subscription_status(conn, 1)["active"] is True)
+    try:
+        SUB.cancel_pending_payment(conn, 1, cc["paymentId"])
+        double_cancel = False
+    except ValueError:
+        double_cancel = True
+    check("повторная отмена 400", double_cancel)
+    try:
+        SUB.confirm_resolved(conn, cc["paymentId"], 1)
+        dead = False
+    except ValueError:
+        dead = True
+    check("отменённый подтвердить нельзя", dead)
+    try:
+        SUB.cancel_pending_payment(conn, 2, cc["paymentId"])
+        alien_cancel = False
+    except KeyError:
+        alien_cancel = True
+    check("чужой счёт неотличим от несуществующего", alien_cancel)
+    try:
+        SUB.cancel_pending_payment(conn, 1, "QQQQQQQQQQ")
+        missing_cancel = False
+    except KeyError:
+        missing_cancel = True
+    check("неизвестный счёт 404", missing_cancel)
+
     section("mock-путь не сломан диспетчером")
     mock_co = SUB.create_checkout(conn, 1, "month", SUB.PROVIDER_MOCK, "m-1")
     mock_res = SUB.confirm_resolved(conn, mock_co["paymentId"], 1)

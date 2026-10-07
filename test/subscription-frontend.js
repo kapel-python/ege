@@ -1,5 +1,8 @@
 /* Фронт подписки Plus сквозняком: публичная страница, карточка профиля,
-   окно управления и покупка (mock-провайдер). Отмены и возврата в интерфейсе
+   окно управления и покупка (mock-провайдер). Флоу покупки: кнопка →
+   окно-подтверждение .dlg (тариф/сумма, счёт только после «Оплатить»),
+   в mock-стенде без ссылки шлюза — честная ошибка (окна «скоро» и кнопок
+   «Напомнить» в интерфейсе нет). Отмены и возврата в интерфейсе
    нет — только статус, срок и история (тест проверяет и отсутствие текстов).
    Самодостаточен: поднимает свой temp-сервер (test/subscription-frontend-server.py,
    прод не трогает), гоняет живой Chromium, в конце кладёт сервер.
@@ -58,7 +61,7 @@ function check(name, cond, detail) {
   check("h1 про Plus", (await page.textContent("h1")).includes("в своём темпе"));
   const body = await page.textContent("body");
   check("нет техвитрины", !body.includes("Что происходит после") && !body.includes("Как подписка выглядит"));
-  check("soon-модалка в DOM", body.includes("Оплата пока недоступна"));
+  check("ни «скоро», ни «напомнить» в DOM", !body.includes("Оплата пока недоступна") && !body.includes("Напомнить о запуске"));
   await page.screenshot({ path: shot("sub-public.png") });
 
   // переключатель периода
@@ -114,22 +117,30 @@ function check(name, cond, detail) {
   ]);
   check("карточка ведёт на manage", true);
 
-  // страница управления у бесплатного: кольца, история пуста, soon
+  // страница управления у бесплатного: кольца, история пуста, покупка — через .dlg
   await page.waitForSelector("#content:not([hidden])", { timeout: 15000 });
   const mgFree = await page.textContent("#content");
   check("manage free: кольца и пустая история",
     mgFree.includes("Проверок сочинений") && mgFree.includes("Платежей пока нет"));
   await page.click('#actionsRow [data-act="buy"]');
-  await page.waitForSelector("#soonModal.is-open");
-  check("manage soon-модалка (mock без ссылки)", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
+  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
+  const dlgFree = await page.textContent("#payDlg");
+  check("manage confirm-dlg: тариф и сумма",
+    dlgFree.includes("Оформить Plus") && dlgFree.includes("199"));
   await page.keyboard.press("Escape");
 
-  // --- 2b. залогиненный free жмёт купить -> soon ---
+  // --- 2b. залогиненный free жмёт купить на тарифе -> confirm, в mock — честная ошибка ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
   await page.waitForSelector('body[data-sub="free"]', { timeout: 10000 });
   await page.click("#ctaBtn");
-  await page.waitForSelector("#soonModal.is-open");
-  check("free soon-модалка на странице", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
+  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
+  check("тариф confirm-dlg", (await page.textContent("#payDlg")).includes("К оплате"));
+  await page.click("#payDlg [data-pay]");
+  await page.waitForFunction(() => {
+    const d = document.getElementById("payDlg");
+    return d && /Не получилось создать счёт/.test(d.textContent);
+  }, { timeout: 15000 });
+  check("mock без ссылки: честная ошибка, не редирект", true);
   await page.keyboard.press("Escape");
 
   // --- 3. mock-покупка настоящим API-путём ---
@@ -172,11 +183,12 @@ function check(name, cond, detail) {
   check("manage plus: плашка Plus без статусной таблетки",
     det.includes("Plus") && !det.includes("без продления") && !det.includes("Plus активен"));
 
-  // «Продлить Plus» у активного — mock без ссылки: честное «скоро», деньги никуда не уходят
+  // «Продлить Plus» у активного — окно-подтверждение, счёт не создаём
   await page.click('#actionsRow [data-act="buy"]');
-  await page.waitForSelector("#soonModal.is-open");
-  check("plus soon-модалка", (await page.textContent("#soonModal")).includes("Оплата пока недоступна"));
+  await page.waitForSelector("#payDlg .dlg", { timeout: 10000 });
+  check("plus confirm-dlg", (await page.textContent("#payDlg")).includes("Продлить Plus") || (await page.textContent("#payDlg")).includes("Оформить Plus"));
   await page.keyboard.press("Escape");
+  await page.waitForSelector("#payDlg", { state: "detached", timeout: 10000 });
 
   // --- 4. публичная страница залогиненным Plus ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
@@ -204,6 +216,58 @@ function check(name, cond, detail) {
   await guestMob.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await guestMob.waitForSelector("#buybar.is-on", { timeout: 10000 });
   check("buybar виден гостю после скролла", true);
+
+  // --- 6. ожидание, баннер и отмена незавершённого счёта ---
+  // Всё на mock-стенде: опрос идёт в тот же confirm, внешних вызовов нет.
+  const ctx6 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const p6 = await ctx6.newPage();
+  p6.on("pageerror", (e) => errors.push("p6 pageerror: " + String(e && e.message || e)));
+  await p6.goto(BASE + "/subscription/manage", { waitUntil: "domcontentloaded" });
+  await p6.evaluate(async () => {
+    await fetch("/api/profile/claim", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: "profile_math", onboarded: true, name: "Ожидание", selfLevel: "base", goal: "g60" }),
+    });
+  });
+  await p6.goto(BASE + "/subscription/manage", { waitUntil: "domcontentloaded" });
+  await p6.waitForSelector("#content:not([hidden])", { timeout: 15000 });
+  // покупка в mock: счёт создаётся, ссылки нет — честная ошибка, счёт висит
+  await p6.click('#actionsRow [data-act="buy"]');
+  await p6.waitForSelector("#payDlg .dlg", { timeout: 10000 });
+  await p6.click("#payDlg [data-pay]");
+  await p6.waitForFunction(() => {
+    const d = document.getElementById("payDlg");
+    return d && /Не получилось создать счёт/.test(d.textContent);
+  }, { timeout: 15000 });
+  await p6.keyboard.press("Escape");
+  await p6.goto(BASE + "/subscription/manage", { waitUntil: "domcontentloaded" });
+  await p6.waitForSelector("#content:not([hidden])", { timeout: 15000 });
+  await p6.waitForSelector(".pay-pending", { timeout: 10000 });
+  check("баннер незавершённого счёта", (await p6.textContent(".pay-pending")).includes("Счёт ждёт оплаты"));
+  // отмена своего pending — баннер уходит, подписки не было и нет
+  await p6.click(".pay-pending .btn:last-child");
+  await p6.waitForFunction(() => !document.querySelector(".pay-pending"), { timeout: 10000 });
+  check("отмена счёта убирает баннер", true);
+  // новый счёт + возврат ?pay=ok: ожидание тем же лоадером, mock-confirm сразу успех
+  await p6.click('#actionsRow [data-act="buy"]');
+  await p6.waitForSelector("#payDlg .dlg", { timeout: 10000 });
+  await p6.click("#payDlg [data-pay]");
+  await p6.waitForFunction(() => {
+    const d = document.getElementById("payDlg");
+    return d && /Не получилось создать счёт/.test(d.textContent);
+  }, { timeout: 15000 });
+  await p6.keyboard.press("Escape");
+  await p6.goto(BASE + "/subscription/manage?pay=ok", { waitUntil: "domcontentloaded" });
+  await p6.waitForSelector("#payWait .ege-loader", { timeout: 10000 });
+  check("ожидание тем же лоадером", true);
+  await p6.waitForFunction(() => /Оплата прошла/.test(document.body.textContent), { timeout: 30000 });
+  check("опрос дожал confirm до успеха", true);
+  await p6.waitForFunction(() => {
+    const pill = document.getElementById("statusPill");
+    return pill && /Plus/.test(pill.textContent);
+  }, { timeout: 15000 });
+  check("Plus активен после ожидания", true);
+  await ctx6.close();
 
   check("консоль без ошибок", errors.length === 0, errors.slice(0, 3).join(" / "));
   console.log(failures === 0 ? "E2E ALL OK" : `E2E FAILURES=${failures}`);

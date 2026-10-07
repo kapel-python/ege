@@ -1,0 +1,51 @@
+/* ============================================================
+   Оплата Plus: ожидание и незавершённый счёт (страницы вне SPA:
+   /subscription и /subscription/manage). Окна подтверждения — единая
+   .dlg-система (css/dlg.css), анимация — тот же .ege-loader, что в
+   приложении: это дословная копия блока из css/styles.css (маркер
+   .ege-loader), только токены — цепочками fallback на переменные
+   статичных страниц (--surface-2, --text-dim...), которых нет в SPA.
+   Править картинку лоадера — в styles.css, сюда переносить следом.
+   ============================================================ */
+.ege-loader { width: 100%; max-width: 340px; margin: 0 auto; text-align: center; padding-top: 34px; padding-bottom: 26px; }
+.ege-loader__orbit { width: 96px; height: 96px; margin: 0 auto 18px; position: relative; display: grid; place-items: center; }
+.ege-loader__orbit::before, .ege-loader__orbit::after { content: ""; position: absolute; border-radius: 50%; border: 3px solid transparent; }
+.ege-loader__orbit::before { inset: 0; border-top-color: var(--accent, #0277B6); border-right-color: var(--accent, #0277B6); animation: ege-spin 1s linear infinite; }
+.ege-loader__orbit::after { inset: 12px; border-top-color: var(--success, #16a34a); opacity: .75; animation: ege-spin 1.9s linear infinite reverse; }
+@keyframes ege-spin { to { transform: rotate(360deg); } }
+.ege-loader__core { width: 54px; height: 54px; border-radius: 17px; display: grid; place-items: center; background: var(--surface, var(--surface-2, #fff)); border: 1px solid var(--border, var(--card-border, rgba(15,23,42,0.1))); box-shadow: 0 8px 28px var(--accent-glow, var(--glow-accent, transparent)); animation: ege-pulse 1.7s ease-in-out infinite; }
+@keyframes ege-pulse { 50% { transform: scale(1.07); } }
+.ege-loader__core svg { width: 26px; height: 26px; animation: ege-svgspin 7s linear infinite; filter: drop-shadow(0 0 6px var(--accent-glow, var(--glow-accent, transparent))); }
+@keyframes ege-svgspin { to { transform: rotate(360deg); } }
+.ege-loader__brand { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; text-transform: lowercase; color: var(--text-2, var(--text-dim, #48536B)); }
+.ege-loader__brand span { color: var(--brand-green, var(--green, #16a34a)); }
+.ege-loader__title { margin-top: 8px; font-size: 16px; font-weight: 800; }
+.ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted, var(--text-faint, #5B6579)); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); min-height: 19px; }
+.ege-loader__bar { margin: 14px auto 0; height: 6px; max-width: 240px; border-radius: 99px; background: var(--surface-3, rgba(127,140,160,0.25)); overflow: hidden; }
+.ege-loader__bar > i { display: block; height: 100%; width: 30%; border-radius: 99px; background: linear-gradient(90deg, var(--success, #16a34a), var(--accent, #0277B6)); animation: ege-slide 1.4s ease-in-out infinite; }
+@keyframes ege-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+/* ---------- полноэкранное ожидание оплаты ----------
+   Состояние страницы, а не модалка: редирект провайдера выгрузил DOM,
+   историю ждёт тот же счёт на сервере — обновление страницы её не
+   теряет. Закрытие (крестик) останавливает опрос, счёт остаётся: его
+   добивают баннер «Счёт ждёт оплаты» и автопроверка при возврате. */
+.paywait { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: var(--surface-0, var(--surface-1, #fff)); animation: fadeIn 0.2s ease; }
+.paywait[hidden] { display: none; }
+.paywait__close { position: absolute; top: 14px; right: 14px; width: 38px; height: 38px; border: 0; border-radius: 50%;
+  background: var(--surface-3, rgba(127,140,160,0.25)); color: var(--text-faint, var(--text-dim, #48536B));
+  cursor: pointer; font-size: 20px; line-height: 1; }
+.paywait__actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.paywait__note { margin-top: 10px; font-size: 12.5px; color: var(--text-faint, var(--text-dim, #48536B)); }
+
+/* ---------- баннер незавершённого счёта ---------- */
+.pay-pending { border: 1px dashed var(--accent, #0277B6); border-radius: 14px; padding: 14px 16px; margin-top: 14px;
+  font-size: 13.5px; color: var(--text-dim, #48536B); }
+.pay-pending b { color: var(--text, #0E1526); }
+.pay-pending__row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ege-loader__orbit::before, .ege-loader__orbit::after, .ege-loader__core,
+  .ege-loader__core svg, .ege-loader__bar > i { animation-duration: 0.01ms !important; }
+}

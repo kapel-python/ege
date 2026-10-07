@@ -1488,6 +1488,32 @@ def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
     raise ValueError("оплата ещё не прошла")
 
 
+def cancel_pending_payment(conn: sqlite3.Connection, user_id: int,
+                           payment_ref) -> dict:
+    """Отменить свой неоплаченный счёт (передумал / дубль / завис).
+    Только чужой pending и только владелец: чужой неотличим от
+    несуществующего (404). Успешный/возвращённый трогать нельзя —
+    это деньги, их путь только через админский возврат."""
+    ensure_subscription_schema(conn)
+    pay = _resolve_payment(conn, payment_ref, user_id)
+    if not pay:
+        raise KeyError("payment not found")
+    if int(pay.get("user_id") or 0) != int(user_id):
+        raise KeyError("payment not found")
+    if pay.get("status") != PAY_PENDING:
+        raise ValueError("отменить можно только неоплаченный счёт")
+    own = _begin(conn)
+    try:
+        conn.execute("UPDATE subscription_payments SET status=? WHERE id=?",
+                     (PAY_CANCELLED, int(pay["id"])))
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "paymentId": pay.get("public_id"),
+            "status": PAY_CANCELLED}
+
+
 def confirm_resolved(conn: sqlite3.Connection, payment_ref,
                      expected_user_id: int | None = None) -> dict:
     """Подтвердить платёж любого провайдера по его строке: mock — как раньше

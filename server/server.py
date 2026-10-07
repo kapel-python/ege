@@ -13963,6 +13963,18 @@ class Handler(BaseHTTPRequestHandler):
             # «Напомнить о запуске»: лист ожидания месяца Plus в подарок
             # (см. договор в server/subscription.py). Идемпотентно.
             return _SUB.join_launch_waitlist(conn, int(user_id))
+        if path == "/api/subscription/payments/cancel":
+            # Отмена своего неоплаченного счёта (передумал/дубль/завис).
+            ref = payload.get("paymentId")
+            if isinstance(ref, bool):
+                raise ValueError("нужен paymentId")
+            if isinstance(ref, str) and ref.strip().isdigit():
+                ref = int(ref.strip())
+            if not isinstance(ref, int) and not (isinstance(ref, str) and ref.strip()):
+                raise ValueError("нужен paymentId")
+            if isinstance(ref, str):
+                ref = ref.strip()
+            return _SUB.cancel_pending_payment(conn, int(user_id), ref)
         raise ValueError("Неизвестное действие подписки")
 
     def handle_subscription_webhook(self, conn: sqlite3.Connection) -> None:
@@ -14183,6 +14195,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/subscription/checkout" or path == "/api/subscription/confirm" \
                 or path == "/api/subscription/cancel" or path == "/api/subscription/resume" \
                 or path == "/api/subscription/notify" \
+                or path == "/api/subscription/payments/cancel" \
                 or path == "/api/subscription/webhook":
             # Подписка Plus: покупка, продление, отмена, лист ожидания, вебхук.
             # Всё состояние — в server/subscription.py; здесь только HTTP:
