@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Platega-маппинг без сети: конфиг, авторизация callback, сверка сумм,
 активация по CONFIRMED, идемпотентность, CANCELED, confirm через заглушку
-HTTP (живой шлюз не трогается — ни одного внешнего запроса, 27 проверок).
+HTTP (живой шлюз не трогается — ни одного внешнего запроса, 39 проверок).
 
 Запуск: python3 test/platega-mapping.py (из корня репозитория).
 """
@@ -18,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 for _k in ("EGE_PLATEGA_MERCHANT_ID", "EGE_PLATEGA_SECRET",
            "EGE_PLATEGA_METHOD", "EGE_PLATEGA_BASE_URL",
-           "EGE_PLATEGA_TIMEOUT_SEC", "EGE_SUBSCRIPTION_MOCK"):
+           "EGE_PLATEGA_TIMEOUT_SEC", "EGE_SUBSCRIPTION_MOCK",
+           "EGE_PLUS_MONTH_SEC", "EGE_PLUS_YEAR_SEC"):
     os.environ.pop(_k, None)
 os.environ["EGE_SUBSCRIPTION_MOCK"] = "1"
 
@@ -238,6 +239,28 @@ def main():
     except KeyError:
         missing_cancel = True
     check("неизвестный счёт 404", missing_cancel)
+
+    section("календарный месяц/год (детерминировано, без часов)")
+    import calendar as _calmod
+    import datetime as _dtmod
+
+    def _ms(y, mo, d, h=12):
+        return _calmod.timegm(_dtmod.datetime(y, mo, d, h, 0).timetuple()) * 1000
+
+    def _ymd(ms):
+        t = _dtmod.datetime.fromtimestamp(ms / 1000, tz=_dtmod.timezone.utc)
+        return (t.year, t.month, t.day, t.hour)
+
+    check("7 окт + месяц = 7 ноя", _ymd(_ms(2026, 10, 7) + SUB.plus_period_ms("month", _ms(2026, 10, 7))) == (2026, 11, 7, 12))
+    check("31 янв + месяц = 28 фев (кламп)", _ymd(_ms(2026, 1, 31) + SUB.plus_period_ms("month", _ms(2026, 1, 31))) == (2026, 2, 28, 12))
+    check("31 янв високосного + месяц = 29 фев", _ymd(_ms(2024, 1, 31) + SUB.plus_period_ms("month", _ms(2024, 1, 31))) == (2024, 2, 29, 12))
+    check("29 фев + год = 28 фев следующего", _ymd(_ms(2024, 2, 29) + SUB.plus_period_ms("year", _ms(2024, 2, 29))) == (2025, 2, 28, 12))
+    check("7 окт + год = 7 окт следующего", _ymd(_ms(2026, 10, 7) + SUB.plus_period_ms("year", _ms(2026, 10, 7))) == (2027, 10, 7, 12))
+    os.environ["EGE_PLUS_MONTH_SEC"] = "60"
+    check("явный SEC-оврайд в секундах", SUB.plus_period_ms("month", _ms(2026, 10, 7)) == 60000)
+    os.environ.pop("EGE_PLUS_MONTH_SEC", None)
+    check("после снятия оверрайда снова календарь",
+          _ymd(_ms(2026, 10, 7) + SUB.plus_period_ms("month", _ms(2026, 10, 7))) == (2026, 11, 7, 12))
 
     section("mock-путь не сломан диспетчером")
     mock_co = SUB.create_checkout(conn, 1, "month", SUB.PROVIDER_MOCK, "m-1")

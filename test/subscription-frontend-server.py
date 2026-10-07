@@ -17,6 +17,9 @@ os.environ["EGE_DB_PATH"] = str(Path(tmp) / "ege.sqlite3")
 os.environ["EGE_DISABLE_SYSTEMD"] = "1"
 os.environ["EGE_TRUSTED_PROXY"] = "1"
 os.environ["EGE_SUBSCRIPTION_MOCK"] = "1"
+# Фиксированные длительности периодов (см. test/subscription.py).
+os.environ["EGE_PLUS_MONTH_SEC"] = str(30 * 86400)
+os.environ["EGE_PLUS_YEAR_SEC"] = str(365 * 86400)
 # E2E на учебном mock: прод-ключи Platega из окружения хоста гасим.
 for _k in ("EGE_PLATEGA_MERCHANT_ID", "EGE_PLATEGA_SECRET",
            "EGE_PLATEGA_METHOD", "EGE_PLATEGA_BASE_URL",

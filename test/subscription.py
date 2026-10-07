@@ -47,6 +47,11 @@ ADMIN_PASSWORD = b"test-subscription-admin"
 
 os.environ["EGE_TRUSTED_PROXY"] = "1"
 os.environ["EGE_AI_RATE_MAX"] = "1000"
+# Фиксированные длительности периодов: календарный месяц по умолчанию
+# проверяется отдельно (test/platega-mapping.py), а здесь все сроки —
+# про фиксированные 30/365 суток.
+os.environ["EGE_PLUS_MONTH_SEC"] = str(30 * 86400)
+os.environ["EGE_PLUS_YEAR_SEC"] = str(365 * 86400)
 # Тесты гоняют учебный mock-шлюз: прод-ключи Platega из окружения хоста
 # здесь гасим, иначе checkout уйдёт в настоящие деньги.
 for _k in ("EGE_PLATEGA_MERCHANT_ID", "EGE_PLATEGA_SECRET",

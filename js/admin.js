@@ -1571,8 +1571,8 @@ function bindUserActions(p) {
         ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
         : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 10 проверок сочинений и 50 ходов ИИ в день."}</div>
       <div class="a-modal__form" style="gap:10px">
-        <button class="choice-item" data-period="month"><b>Месяц — 199 ₽</b><span>30 суток доступа</span></button>
-        <button class="choice-item" data-period="year"><b>Год — 1590 ₽</b><span>365 суток доступа, −33% к помесячной оплате</span></button>
+        <button class="choice-item" data-period="month"><b>Месяц — 199 ₽</b><span>1 календарный месяц доступа</span></button>
+        <button class="choice-item" data-period="year"><b>Год — 1590 ₽</b><span>12 календарных месяцев доступа, −33% к помесячной оплате</span></button>
         <div class="a-field"><label>Заметка (необязательно)</label><input class="a-input" id="fSubNote" placeholder="например: победитель олимпиады" autocomplete="off"></div>
         <div id="mErr"></div>
       </div>
@@ -4729,8 +4729,8 @@ async function screenSubscription() {
     <div class="a-section-title">Тариф</div>
     <div class="a-card">
       <div class="a-kv">
-        <div class="a-kv__item"><div class="a-kv__k">Месяц</div><div class="a-kv__v">${fmtMoney(cfg.priceMonthKopecks)} · 30 суток</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Год</div><div class="a-kv__v">${fmtMoney(cfg.priceYearKopecks)} · 365 суток</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Месяц</div><div class="a-kv__v">${fmtMoney(cfg.priceMonthKopecks)} · календарный месяц</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Год</div><div class="a-kv__v">${fmtMoney(cfg.priceYearKopecks)} · 12 календарных месяцев</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Лимиты <span class="plus">Plus</span></div><div class="a-kv__v">${cfg.plusEssay} проверок · ${cfg.plusAgent} ходов в день</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Бесплатно</div><div class="a-kv__v">${cfg.freeEssay} проверок · ${cfg.freeAgent} ходов в день</div></div>
         <div class="a-kv__item"><div class="a-kv__k">ИИ</div><div class="a-kv__v">${cfg.agentRequiresPlus ? "только <span class=\"plus\">Plus</span>" : "открыт всем"}</div></div>

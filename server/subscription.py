@@ -5,8 +5,11 @@
 админку — сервер вызывает его из route-обработчиков.
 
 Модель:
-  * тариф один — ``plus``; период ``month`` (30 суток, 199₽) или ``year``
-    (365 суток, 1590₽, −33% к помесячной оплате). Цены и длительности переопределяются окружением
+  * тариф один — ``plus``; период ``month`` (календарный месяц: 7 окт →
+    7 ноя при любой длине месяца, 199₽) или ``year`` (+12 календарных
+    месяцев, 1590₽, −33% к помесячной оплате). Цены переопределяются
+    окружением, а длительности — только явными EGE_PLUS_{MONTH,YEAR}_SEC
+    в секундах (нужны тестам с короткими сроками; по умолчанию календарь);
     (см. EGE_PLUS_* ниже): тесты и деплой меняют их без правки кода;
   * активна = status в (active, cancelled) И expires_at_ms > now.
     ``cancelled`` — это «не продлевать»: доступ до конца срока живёт.
@@ -56,6 +59,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from calendar import monthrange as _monthrange
+from datetime import datetime as _datetime
+from datetime import timezone as _timezone
 from pathlib import Path as _Path
 
 try:
@@ -140,10 +146,49 @@ def plus_price_kopecks(period: str) -> int:
     return _env_int("EGE_PLUS_PRICE_MONTH_KOP", 19900)
 
 
-def plus_period_ms(period: str) -> int:
+def _add_calendar_months(base_ms: int, months: int) -> int:
+    """Прибавить календарные месяцы к моменту (UTC, без DST-сюрпризов):
+    7 окт + 1 мес = 7 ноя, 31 янв + 1 мес = 28 фев (кламп к концу месяца),
+    29 фев 2024 + 12 мес = 28 фев 2025. Время суток сохраняется."""
+    try:
+        base = int(base_ms)
+    except (TypeError, ValueError):
+        base = NOW_MS()
+    dt = _datetime.fromtimestamp(base / 1000, tz=_timezone.utc)
+    total = dt.month - 1 + int(months)
+    year, month = dt.year + total // 12, total % 12 + 1
+    day = min(dt.day, _monthrange(year, month)[1])
+    return int(dt.replace(year=year, month=month, day=day).timestamp() * 1000)
+
+
+def _env_seconds(name: str) -> int | None:
+    """Явный оверрайд длительности в секундах (для тестов). None — не задан,
+    действует календарь. Пустая строка — тоже «не задан»."""
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return max(1, int(float(str(raw).strip())))
+    except (TypeError, ValueError):
+        return None
+
+
+def plus_period_ms(period: str, base_ms: int | None = None) -> int:
+    """Длительность периода в мс от базы: календарный месяц / 12 месяцев
+    (7 окт → 7 ноя независимо от длины месяца — как у всех сервисов).
+    Явные EGE_PLUS_{MONTH,YEAR}_SEC переключают на фиксированные секунды
+    (нужны тестам с короткими сроками)."""
     if period == PERIOD_YEAR:
-        return _env_int("EGE_PLUS_YEAR_SEC", 365 * 24 * 3600) * 1000
-    return _env_int("EGE_PLUS_MONTH_SEC", 30 * 24 * 3600) * 1000
+        sec = _env_seconds("EGE_PLUS_YEAR_SEC")
+        if sec is not None:
+            return sec * 1000
+        base = int(base_ms) if base_ms is not None else NOW_MS()
+        return _add_calendar_months(base, 12) - base
+    sec = _env_seconds("EGE_PLUS_MONTH_SEC")
+    if sec is not None:
+        return sec * 1000
+    base = int(base_ms) if base_ms is not None else NOW_MS()
+    return _add_calendar_months(base, 1) - base
 
 
 def subscription_mock_enabled() -> bool:
@@ -518,16 +563,16 @@ def _activate_row(conn: sqlite3.Connection, user_id: int, period: str,
                   *, reason: str = "subscription:purchase",
                   actor: int | None = None) -> dict:
     """Создать/продлить строку подписки. Продления складываются:
-    expires растёт от max(now, expires), а не перезаписывается."""
+    expires растёт от max(now, expires) на календарный период (месяц — то
+    же число следующего месяца, год — +12 месяцев), а не перезаписывается."""
     ensure_subscription_schema(conn)
     sub = get_subscription(conn, user_id)
-    duration = plus_period_ms(period)
     if sub and sub.get("status") in (STATUS_ACTIVE, STATUS_CANCELLED):
         base = max(int(sub.get("expires_at_ms") or 0), now_ms)
-        expires = base + duration
         started = int(sub.get("started_at_ms") or now_ms)
     else:
-        started, expires = now_ms, now_ms + duration
+        base = started = now_ms
+    expires = base + plus_period_ms(period, base)
     if sub:
         conn.execute("""UPDATE subscriptions SET plan=?, status=?, period=?,
                         started_at_ms=?, expires_at_ms=?, cancel_at_period_end=0,

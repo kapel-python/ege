@@ -139,7 +139,7 @@ var PayFlow = (function () {
   }
 
   function periodName(period) { return period === "year" ? "год" : "месяц"; }
-  function periodDays(period) { return period === "year" ? "12 месяцев" : "30 дней"; }
+  function periodDays(period) { return period === "year" ? "12 месяцев" : "1 месяц"; }
 
   var CARD_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
 
