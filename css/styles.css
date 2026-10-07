@@ -888,6 +888,9 @@ body {
   .task-table { font-size: 13px; }
   .task-table th,
   .task-table td { padding: 5px 7px; }
+  /* Таблица — в край карточки (.task-card padding 28px съедал ширину):
+     full-bleed даёт +56px, скругления и боковые рамки убираются. */
+  .task-table-wrap { margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; }
 }
 .forecast-value {
   font-size: 44px;
