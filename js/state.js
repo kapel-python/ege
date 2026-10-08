@@ -1898,6 +1898,16 @@ const FORECAST_HINT_WEIGHTS = [1, 0.6, 0.3, 0.3];
    опознаётся по паре taskId+ts из домена diagnostics — практика по тому же
    заданию ей не засчитывается. */
 const FORECAST_DIAGNOSTIC_WEIGHT = 2;
+/* Порог показа прогноза: раньше него числа нет вообще — вместо «0 баллов»
+   честная плашка «пройди больше тем и практики». Пока темы не тронуты, они
+   тянут взвешенное среднее вниз, и число после первой диагностики выглядит
+   приговором, а не ориентиром. Порог — доля теории и тем с данными,
+   с минимальным полом: маленький предмет не запирает прогноз после одного
+   касания, большой не открывает его на 5% покрытия. */
+const FORECAST_READY_LESSON_SHARE = 0.2;
+const FORECAST_READY_TOPIC_SHARE = 0.25;
+const FORECAST_READY_MIN_LESSONS = 2;
+const FORECAST_READY_MIN_TOPICS = 3;
 
 function getForecastConfig() {
   try {
@@ -1954,6 +1964,28 @@ function forecastConfigAvailable() {
   if (typeof DataAPI.isSubjectLocked === "function" && DataAPI.isSubjectLocked()) return false;
   if (typeof DataAPI.hasLearningContent === "function" && !DataAPI.hasLearningContent()) return false;
   return forecastConfigIsUsable(getForecastConfig());
+}
+
+/* Что осталось до показа прогноза: сколько уроков и взвешенных тем с данными
+   нужно и сколько уже есть. Пока порог не набран, число не показываем нигде —
+   ни на дашборде, ни в статистике, ни в снимке истории. */
+function forecastReadiness(covered, totalTopics) {
+  const lessons = (typeof DataAPI !== "undefined" && typeof DataAPI.lessons === "function")
+    ? safeArray(DataAPI.lessons()) : [];
+  const completed = safeObject((Store.state || {}).completedLessons);
+  const totalLessons = lessons.length;
+  const doneLessons = totalLessons ? lessons.filter((l) => l && completed[l.id]).length : 0;
+  const needLessons = totalLessons
+    ? Math.max(FORECAST_READY_MIN_LESSONS, Math.ceil(totalLessons * FORECAST_READY_LESSON_SHARE))
+    : 0;
+  const needTopics = totalTopics
+    ? Math.max(FORECAST_READY_MIN_TOPICS, Math.ceil(totalTopics * FORECAST_READY_TOPIC_SHARE))
+    : 0;
+  return {
+    ready: doneLessons >= needLessons && covered >= needTopics,
+    doneLessons, needLessons, totalLessons,
+    covered, needTopics, totalTopics,
+  };
 }
 
 /* Освоение темы глазами прогноза: та же шкала 0–100, что у
@@ -2035,6 +2067,17 @@ function forecast() {
     const lessons = DataAPI.lessonsBySkill(s.id);
     const hasLesson = lessons.some((l) => !!safeObject(state.completedLessons)[l.id]);
     if (hasLesson || masteryById[s.id] >= 25 || attemptedSkills.has(s.id)) covered++;
+  }
+  const readiness = forecastReadiness(covered, skills.length);
+  if (!readiness.ready) {
+    // Мало данных: числа нет, есть честная плашка с прогрессом до порога.
+    return {
+      low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0,
+      empty: true, premature: true,
+      doneLessons: readiness.doneLessons, needLessons: readiness.needLessons,
+      totalLessons: readiness.totalLessons, covered: readiness.covered,
+      needTopics: readiness.needTopics, totalTopics: readiness.totalTopics,
+    };
   }
   const mastery = wSum ? wMastery / wSum : 0;
   const primary = (mastery / 100) * total;

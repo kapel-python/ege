@@ -83,13 +83,14 @@ const testBody = async () => {
     t("шкала: 0→0, 5→27 (порог), 30→99, 31→100", scale[0] === 0 && scale[5] === 27 && scale[30] === 99 && scale[31] === 100);
   }
 
-  /* 3. Новичок: низкий прогноз и широкая вилка. */
+  /* 3. Новичок: прогноза нет — вместо числа плашка «пройди больше тем и практики». */
   Store.reset();
   {
     const f = forecast();
-    t("новичок: прогноз низкий (mid ≤ 15)", f.mid <= 15, JSON.stringify(f));
-    t("новичок: вилка честно максимально широкая (hw = 12)", f.hw === 12 && f.high - f.low === 12, JSON.stringify(f));
-    t("новичок: low не уходит ниже нуля", f.low >= 0);
+    t("новичок: прогноз скрыт до порога (premature)", f.empty === true && f.premature === true, JSON.stringify(f));
+    t("новичок: прогресс до порога показан", f.needLessons > 0 && f.needTopics > 0 && f.doneLessons === 0 && f.covered === 0, JSON.stringify(f));
+    t("новичок: числа нет вообще", f.mid === 0 && f.low === 0 && f.high === 0);
+    t("новичок: снимок прогноза не пишется", recordForecastSnapshot() === null);
   }
 
   /* 4. Сильный ученик: высокий прогноз и узкая вилка. */
@@ -170,12 +171,12 @@ const testBody = async () => {
     const m = forecastSkillMastery(sid, now);
     t("откат: статистика без попыток даёт ненулевое освоение", m > 40, `m=${m}`);
     const f = forecast();
-    t("откат: общий прогноз считается и конечен", Number.isFinite(f.mid) && f.mid > 0, JSON.stringify(f));
+    t("откат: ниже порога общий прогноз скрыт, а не нулевой", f.premature === true, JSON.stringify(f));
   }
 
   /* 10. История и тренд совместимы с новым форматом. */
   {
-    Store.reset();
+    strongSetup();
     const snap = recordForecastSnapshot();
     t("снимок: пишется с конечным mid и датой", !!snap && Number.isFinite(snap.mid) && /^\d{4}-\d{2}-\d{2}$/.test(snap.date));
     // Старый снимок формата {date, low, high, mid} не ломает историю.
@@ -220,7 +221,7 @@ const testBody = async () => {
       scale[0] === 0 && scale[8] === 20 && scale[28] === 55 && scale[50] === 100);
     t("русский: total 50, конфиг доступен", forecastTotal() === 50 && forecastConfigAvailable() === true);
     const novice = forecast();
-    t("русский: новичок — низкий прогноз", novice.empty !== true && novice.mid <= 15, JSON.stringify(novice));
+    t("русский: новичок — прогноз скрыт до порога", novice.premature === true, JSON.stringify(novice));
     for (const sk of skillsRu) {
       const l = (DataAPI.lessonsBySkill(sk.id)[0]) || null;
       if (l) Store.state.completedLessons[l.id] = { ts: now - 3 * DAY };
@@ -279,6 +280,35 @@ const testBody = async () => {
       Store.state.taskAttempts.push({ taskId: `clean_${i}`, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * HOUR });
     }
     t("прощение: чистый след даёт столько же", forecastSkillMastery(sid, now) === 50);
+  }
+
+  /* 14. Порог показа: диагностика + один урок мало, доля уроков и тем открывает. */
+  DataAPI.load(serverLikePayload("profile_math", "server/catalog.json"));
+  Store.ready = false;
+  Store.reset();
+  {
+    const weighted = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+    const allLessons = DataAPI.lessons();
+    const needL = Math.max(2, Math.ceil(allLessons.length * 0.2));
+    const needT = Math.max(3, Math.ceil(weighted.length * 0.25));
+    // Первые шаги: диагностика по трём темам и один урок.
+    for (const sk of weighted.slice(0, 3)) {
+      Store.state.taskAttempts.push({ taskId: `${sk.id}_p1`, skill: sk.id, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now });
+    }
+    if (allLessons[0]) Store.state.completedLessons[allLessons[0].id] = { ts: now };
+    const early = forecast();
+    t("порог: диагностика и один урок — прогноза ещё нет",
+      early.premature === true && early.doneLessons < needL, JSON.stringify(early));
+    // Набираем ровно порог: уроки и темы с данными.
+    for (const l of allLessons.slice(0, needL)) Store.state.completedLessons[l.id] = { ts: now };
+    for (const sk of weighted.slice(0, needT)) {
+      Store.state.skillStats[sk.id] = { progress: 0, solved: 12, correct: 11, timeSec: 200 };
+    }
+    const opened = forecast();
+    t("порог: уроки и темы набраны — прогноз появился",
+      opened.premature !== true && opened.mid > 0 && Number.isFinite(opened.high),
+      JSON.stringify(opened));
+    t("порог: снимок прогноза теперь пишется", !!recordForecastSnapshot());
   }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");

@@ -1509,6 +1509,13 @@ FORECAST_FORGIVE_DAYS = 14
 # Вес попытки с подсказкой — тем же коэффициентом, что режет награду
 # (0.6/0.3). Индекс — уровень подсказки 0–3. Зеркало js/state.js.
 FORECAST_HINT_WEIGHTS = (1.0, 0.6, 0.3, 0.3)
+# Порог показа прогноза — зеркало js/state.js (FORECAST_READY_*): раньше
+# него числа нет ни на экране, ни в ответе агента — только «пройди больше
+# тем и практики». 20% уроков и 25% взвешенных тем с данными, пол — 2 и 3.
+FORECAST_READY_LESSON_SHARE = 0.2
+FORECAST_READY_TOPIC_SHARE = 0.25
+FORECAST_READY_MIN_LESSONS = 2
+FORECAST_READY_MIN_TOPICS = 3
 
 
 def _js_round(value: float) -> int:
@@ -1816,6 +1823,22 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
                   if any(lid in data.get("done", set())
                           for lid in data.get("lessons", {}).get(skill_id, []))
                   or mastery[skill_id] >= 25 or skill_id in attempted)
+    # Порог показа — зеркало forecastReadiness() в js/state.js: пока теория и
+    # покрытие тем ниже, прогноза нет, и агент не имеет права его озвучивать.
+    total_lessons = sum(len(v) for v in data.get("lessons", {}).values())
+    done_lessons = len(data.get("done", set()))
+    need_lessons = (max(FORECAST_READY_MIN_LESSONS,
+                        int(math.ceil(total_lessons * FORECAST_READY_LESSON_SHARE)))
+                    if total_lessons else 0)
+    need_topics = (max(FORECAST_READY_MIN_TOPICS,
+                       int(math.ceil(len(scored) * FORECAST_READY_TOPIC_SHARE)))
+                   if scored else 0)
+    if done_lessons < need_lessons or covered < need_topics:
+        return {"available": False, "premature": True, "mid": 0, "low": 0, "high": 0,
+                "doneLessons": done_lessons, "needLessons": need_lessons,
+                "totalLessons": total_lessons, "covered": covered,
+                "needTopics": need_topics, "totalTopics": len(scored),
+                "topGains": []}
     # Живая вилка: мало данных — широко, всё покрыто — узко. Кламим в шкалу:
     # при полном освоении high не уезжает за максимум (было «до 105»).
     hw = 12 - _js_round(9 * covered / len(scored))

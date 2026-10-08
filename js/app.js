@@ -594,6 +594,18 @@ function forecastNoteHTML() {
   return `Прогноз может быть точнее: у тебя пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}). Чтобы прогноз стал точнее — проходи уроки и практику`;
 }
 
+/* Плашка «прогноз рано считать»: не абстрактное «мало данных», а конкретный
+   прогресс до порога — сколько уроков и тем с данными осталось набрать. */
+function forecastPrematureText(f) {
+  const value = f && typeof f === "object" ? f : {};
+  const parts = [];
+  const needLessons = nonNegativeNumber(value.needLessons);
+  if (needLessons > 0) parts.push(`уроки ${Math.min(nonNegativeNumber(value.doneLessons), needLessons)} из ${needLessons}`);
+  const needTopics = nonNegativeNumber(value.needTopics);
+  if (needTopics > 0) parts.push(`темы с данными ${Math.min(nonNegativeNumber(value.covered), needTopics)} из ${needTopics}`);
+  return `Чтобы увидеть прогноз, пройди больше тем и практики.${parts.length ? ` Сейчас: ${parts.join(", ")}.` : ""}`;
+}
+
 function safeForecast() {
   // Пустой/coming-soon предмет не должен получать чужие веса профиля:
   // state.js исторически оставляет fallback-конфиг, а UI обязан показывать
@@ -3216,8 +3228,8 @@ function screenDashboard(root) {
         <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
         <div class="forecast-empty">
           <div class="forecast-empty__icon">${icon("stats")}</div>
-          <div class="forecast-empty__title">Прогноз появится позже</div>
-          <div class="forecast-empty__text">Пока считать не по чему: проходи уроки и практику — после первых шагов здесь будет твой диапазон баллов и шкала до цели.</div>
+          <div class="forecast-empty__title">${f.premature ? "Прогноз пока рано считать" : "Прогноз появится позже"}</div>
+          <div class="forecast-empty__text">${f.premature ? forecastPrematureText(f) : "Пока считать не по чему: проходи уроки и практику — после первых шагов здесь будет твой диапазон баллов и шкала до цели."}</div>
           <button class="btn btn--primary btn--sm" onclick="go('path')">Открыть путь</button>
         </div>` : `
         <div class="forecast-hero__top">
@@ -7528,7 +7540,7 @@ function screenStats(root) {
     <div class="card" style="margin-top:16px">
       <div style="font-weight:650;margin-bottom:10px">Текущий прогноз</div>
       ${f.empty
-        ? `<div class="stat-label">Пока считать не по чему — проходи уроки и практику, прогноз появится после первых шагов.</div>`
+        ? `<div class="stat-label">${f.premature ? forecastPrematureText(f) : "Пока считать не по чему — проходи уроки и практику, прогноз появится после первых шагов."}</div>`
         : `<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
              <div class="stat-num mono" style="margin:0">${f.mid}</div>
              <div class="stat-label">диапазон ${f.low}–${f.high} · ${forecastTrendLabel(trend)}</div>
