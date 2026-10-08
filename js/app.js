@@ -9770,7 +9770,7 @@ async function revokeDeviceSession(id) {
       try { if (typeof Onboarding !== "undefined" && Onboarding) Onboarding.presetSubject = null; } catch (_) {}
       await Store.refreshAfterAuth();
       toast("Сессия на этом устройстве завершена.", "", "check");
-      go("login");
+      go("dashboard");
       return;
     }
     toast("Выход на выбранном устройстве завершён.", "", "check");
@@ -10342,7 +10342,12 @@ async function logoutAccount() {
   try { AdminInbox.reset(); } catch (_) {}
   await Store.refreshAfterAuth();
   toast("Сессия завершена. Прогресс сохранён.", "", "check");
-  go("login");
+  // Выход ведёт на главную (#/dashboard), а не на экран входа: после выхода
+  // человек остаётся на сайте гостем и видит ту же стартовую страницу, что и
+  // при первом визите. Форму входа теперь достаёт один клик по «Войти» в
+  // профиле — раньше выход сам был способом туда попасть, и это путало:
+  // гость на логине выглядел как «выкинутый», хотя зайти мог прямо оттуда.
+  go("dashboard");
 }
 
 /* ============================================================
