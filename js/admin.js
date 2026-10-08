@@ -1847,6 +1847,7 @@ const AUDIT_ACTIONS = {
   "ai-provider-apply": ["providers", "Настройки провайдера", ""],
   "ai-provider-update": ["providers", "Правка провайдера", ""],
   "ai-provider-delete": ["providers", "Провайдер удалён", "a-chip--danger"],
+  "ai-provider-restore": ["providers", "Провайдер восстановлен", "a-chip--success"],
   "support-read": ["inbox", "Обращение прочитано", ""],
 };
 
@@ -1965,6 +1966,7 @@ const AUDIT_DETAIL = {
   "ai-provider-apply": (e) => auditProviderDetail(e.detail),
   "ai-provider-update": (e) => auditProviderDetail(e.detail),
   "ai-provider-delete": (e) => auditProviderDetail(e.detail),
+  "ai-provider-restore": (e) => auditProviderDetail(e.detail),
   "ai-provider-slots": (e) => auditCompactPairs(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
   "ai-provider-models": (e) => auditCompactPairs(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
   "support-read": (e) => {
@@ -2117,6 +2119,7 @@ const AUDIT_ROWS = {
   "ai-provider-apply": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
   "ai-provider-update": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
   "ai-provider-delete": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
+  "ai-provider-restore": (e) => (auditProviderDetail(e.detail) ? [["Провайдер", auditProviderDetail(e.detail)]] : []),
   "ai-provider-slots": (e) => auditPairsRows(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
   "ai-provider-models": (e) => auditPairsRows(String(e.detail || "").replace(/\s*\[Plus\]$/, "")),
   "support-read": (e) => {
@@ -2871,7 +2874,7 @@ function provCardHTML(p) {
         ${PROV_SLOT_OPTIONS.map((o) => `<option value="${o.id}"${(o.id || "") === (p.slot || "") ? " selected" : ""}>${esc(o.title)}</option>`).join("")}
       </select>
       <button class="btn btn--soft btn--sm" onclick="toggleProvider('${esc(p.id)}', ${p.enabled ? "false" : "true"})" title="${p.enabled ? "Убрать из ротации" : "Вернуть в ротацию"}">${p.enabled ? "Выключить" : "Включить"}</button>
-      ${p.builtin ? "" : `<button class="a-icon-btn a-icon-btn--danger" onclick="deleteProvider('${esc(p.id)}')" title="Удалить провайдера">${aicon("trash")}</button>`}
+      <button class="a-icon-btn a-icon-btn--danger" onclick="deleteProvider('${esc(p.id)}')" title="Удалить провайдера">${aicon("trash")}</button>
     </div>
   </div>`;
 }
@@ -2924,10 +2927,27 @@ function drawProviders() {
       <div class="a-card__sub" style="margin-top:8px">Активный${d.active ? `: <b>${esc(names[d.active] || d.active)}</b> — новые запросы идут сюда первым` : ": нет"}. Статус «Используется» — успех живого трафика за последние ${Number(d.recentWindowSec) || 60} с, холостых запросов ради него нет. «Пинг всех» — живой запрос «привет» каждому провайдеру с задержкой.</div>
       <div id="provPingAllResult" style="margin-top:12px">${Prov.ping && Prov.ping.results ? provPingRowsHTML(Prov.ping.results) : ""}</div>
     </div>
+    ${provDeletedCardHTML(d)}
     ${provJudgeCardHTML(judge, list, names, order)}
     ${Prov.error ? `<div class="a-error-banner" style="margin-bottom:14px">Не удалось обновить: ${esc(Prov.error)}</div>` : ""}
     <div class="a-prov-grid">
       ${list.map(provCardHTML).join("")}
+    </div>`;
+}
+
+/* Удалённые встроенные: их определения живут в коде, поэтому удаление их
+   только прячет — здесь же их можно вернуть одной кнопкой. Свои удалённые
+   не возвращаются никак (запись стёрта), и эта плашка о них молчит честно. */
+function provDeletedCardHTML(d) {
+  const gone = d && Array.isArray(d.deletedBuiltin) ? d.deletedBuiltin.filter(Boolean) : [];
+  if (!gone.length) return "";
+  return `
+    <div class="a-card" style="margin-bottom:14px">
+      <div class="a-card__head a-card__head--wrap">
+        <span class="a-card__title">Удалённые встроенные</span>
+      </div>
+      <div class="a-card__sub" style="margin-bottom:10px">Скрыты из ротации. Свои удалённые провайдеры не восстанавливаются — их записи стёрты.</div>
+      ${gone.map((id) => `<div class="a-actions-row" style="margin-top:8px"><span class="a-chip mono">${esc(id)}</span><button class="btn btn--soft btn--sm" onclick="restoreProvider('${esc(id)}')">Восстановить</button></div>`).join("")}
     </div>`;
 }
 
@@ -3179,20 +3199,79 @@ async function toggleProvider(id, enabled) {
   await screenProviders(true);
 }
 
+/* Удаление провайдера — встроенного и своего одинаково, всегда в два шага:
+   шаг 1 объясняет последствие (уйдёт из ротации сразу; встроенный можно
+   вернуть кнопкой «Восстановить»), шаг 2 требует ввести ID — как удаление
+   аккаунта требует Account ID. Нативный confirm() здесь был бы слабее:
+   его легко промахнуться, а удаление последнего рабочего провайдера
+   останавливает проверки сочинений и ИИ целиком. */
 async function deleteProvider(id) {
-  if (!confirm(`Удалить провайдера «${id}»? Из ротации он уйдёт сразу.`)) return;
-  let ok = false;
+  const p = provById(id);
+  const title = (p && (p.title || p.id)) || id;
+  const list = (Prov.data && Prov.data.providers) || [];
+  const others = list.filter((q) => q.id !== id && q.enabled !== false && q.configured !== false);
+  const lastWarn = others.length === 0
+    ? `<div class="a-modal__warn">Это последний рабочий провайдер направления: после удаления проверки сочинений и ИИ начнут отвечать 503.</div>`
+    : "";
+  const builtinNote = (p && p.builtin)
+    ? `<div class="a-modal__desc">Встроенный провайдер исчезнет из списка и ротации. Вернуть можно кнопкой «Восстановить» в списке.</div>`
+    : "";
+  openModal(`
+    <div class="a-modal__title" style="color:var(--danger)">Удалить провайдера «${esc(id)}»?</div>
+    <div class="a-modal__desc">«${esc(title)}» уйдёт из ротации сразу.</div>
+    ${builtinNote}
+    ${lastWarn}
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--danger-soft" id="mNext">Продолжить</button>
+    </div>`, (modal) => {
+    modal.classList.add("a-modal--danger");
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mNext").onclick = () => {
+      modal.innerHTML = `
+        <div class="a-modal__title" style="color:var(--danger)">Точно удалить «${esc(id)}»?</div>
+        <div class="a-modal__desc">Действие необратимо для своих провайдеров (запись стирается). Встроенный можно вернуть кнопкой «Восстановить».</div>
+        <div class="a-modal__form">
+          <div class="a-modal__warn"><b>Подтверждение:</b> введи ID провайдера <span class="mono">${esc(id)}</span></div>
+          <input class="a-input mono" id="fDelProv" placeholder="${esc(id)}" autocomplete="off">
+          <div id="mErr"></div>
+        </div>
+        <div class="a-modal__actions">
+          <button class="btn btn--soft" id="mCancel2">Отмена</button>
+          <button class="btn btn--danger-soft" id="mDo">Удалить навсегда</button>
+        </div>`;
+      modal.querySelector("#mCancel2").onclick = closeModal;
+      modal.querySelector("#mDo").onclick = async () => {
+        if (modal.querySelector("#fDelProv").value.trim() !== id) {
+          modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">ID не совпадает</div>`;
+          return;
+        }
+        try {
+          await AdminApi.request(`/api/admin/providers/${encodeURIComponent(id)}` + provTierQS(), { method: "DELETE" });
+          closeModal();
+          toast("Провайдер удалён");
+          // Со страницы провайдера уходим в список: настраивать удалённого больше
+          // нечего, а «обновить» оставило бы человека на карточке-призраке.
+          if (ProvDetail.id === id) { navigate("/providers"); return; }
+          await screenProviders(true);
+        } catch (e) {
+          if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+          modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message || "ошибка")}</div>`;
+        }
+      };
+    };
+  });
+}
+
+async function restoreProvider(id) {
   try {
-    await AdminApi.request(`/api/admin/providers/${encodeURIComponent(id)}` + provTierQS(), { method: "DELETE" });
-    toast("Провайдер удалён");
-    ok = true;
+    await AdminApi.post(`/api/admin/providers/${encodeURIComponent(id)}/restore` + provTierQS(), {});
+    toast("Провайдер восстановлен");
   } catch (e) {
     if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
-    toast(`Не удалось удалить: ${e.message || "ошибка"}`, "err");
+    toast(`Не удалось восстановить: ${e.message || "ошибка"}`, "err");
+    return;
   }
-  // Со страницы провайдера уходим в список: настраивать удалённого больше
-  // нечего, а «обновить» оставило бы человека на карточке-призраке.
-  if (ok && ProvDetail.id === id) { navigate("/providers"); return; }
   await screenProviders(true);
 }
 
@@ -3991,7 +4070,7 @@ function screenProviderPage(id) {
           <div class="a-card__sub">Сброс возвращает стандартные значения, удаление убирает провайдера из ротации.</div>
           <div class="a-actions-row">
             <button class="btn btn--soft btn--sm" id="provResetBtn" type="button">${aicon("reset")} Сбросить к стандартным</button>
-            ${p.builtin ? "" : `<button class="btn btn--soft btn--sm" id="provDetailDelete" type="button">${aicon("trash")} Удалить провайдера</button>`}
+            <button class="btn btn--soft btn--sm" id="provDetailDelete" type="button">${aicon("trash")} Удалить провайдера</button>
           </div>
         </section>
       </div>

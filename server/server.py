@@ -13418,7 +13418,7 @@ class Handler(BaseHTTPRequestHandler):
             parts = rest.strip("/").split("/")
             if len(parts) == 2 and parts[1] in ("probe", "probe-model", "probe-models",
                                                 "probe-models-stream", "apply", "reset",
-                                                "model-slots"):
+                                                "restore", "model-slots"):
                 pid = parts[0].strip().lower()
                 action = parts[1]
                 if not pid:
@@ -13427,13 +13427,35 @@ class Handler(BaseHTTPRequestHandler):
                 # Направление — из тела: у Plus свои записи, слоты и пробы.
                 tier = self._admin_ai_tier(payload)
                 tier_suffix = " [Plus]" if tier != "free" else ""
+                if action == "restore":
+                    # Вернуть удалённый встроенный (снять метку удаления).
+                    try:
+                        card = _AI.provider_restore(pid, tier)
+                    except KeyError:
+                        self.send_json({"error": "Провайдер не найден"}, 404)
+                        return True
+                    except ValueError as exc:
+                        self.send_json({"error": str(exc)}, 400)
+                        return True
+                    admin_audit(conn, actor_id, "ai-provider-restore", None,
+                                pid[:64] + tier_suffix)
+                    self.send_json({"ok": True, "provider": card,
+                                    "slots": _AI.providers_overview(tier).get("slots") or {}})
+                    return True
+                if _AI.provider_deleted(pid, tier):
+                    self.send_json({"error": "Провайдер не найден"}, 404)
+                    return True
                 # Смена модели и сброс — это запись, а не опрос: троттлинг
                 # им не нужен (и не должен мешать), пауза стоит только на
                 # пробах, которые реально ходят в провайдера.
                 if action in ("apply", "reset"):
                     try:
                         if action == "reset":
-                            _AI.provider_reset(pid, tier)
+                            try:
+                                _AI.provider_reset(pid, tier)
+                            except KeyError:
+                                self.send_json({"error": "Провайдер не найден"}, 404)
+                                return True
                             admin_audit(conn, actor_id, "ai-provider-reset", None,
                                         pid[:64] + tier_suffix)
                             self.send_json({"ok": True, "provider": _AI._public_provider_card(pid, tier)})
@@ -13689,6 +13711,11 @@ class Handler(BaseHTTPRequestHandler):
         # Направление — из тела: у Plus свои записи и слоты.
         tier = self._admin_ai_tier(payload)
         tier_suffix = " [Plus]" if tier != "free" else ""
+        if _AI.provider_deleted(pid, tier):
+            # Удалённый встроенный — как неизвестный: править нечего,
+            # восстановить — отдельным POST .../restore.
+            self.send_json({"error": "Провайдер не найден"}, 404)
+            return True
         try:
             builtin_ids = set(getattr(_AI, "PROVIDERS", {}) or {})
             if pid in builtin_ids:
@@ -13834,7 +13861,7 @@ class Handler(BaseHTTPRequestHandler):
         # Направление — из query (?tier=plus): у DELETE тела обычно нет.
         tier = self._admin_ai_tier()
         try:
-            _AI.custom_provider_delete(pid, tier)
+            _AI.provider_delete(pid, tier)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, 400)
             return True

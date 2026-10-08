@@ -198,6 +198,13 @@ _ENABLED_KEY = "ai_provider_enabled"
 # моделей провайдера) и вернуть стандартную кнопкой сброса. Пустой сброс
 # означает «снова из окружения», а не «удалить провайдер».
 _OVERRIDES_KEY = "ai_provider_overrides"
+# Удалённые ВСТРОЕННЫЕ провайдеры (tombstone {id: удалён_мс}): их определение
+# живёт в коде (PROVIDERS), поэтому «удалить» означает спрятать — убрать из
+# списка, слотов и ротации. Кастомные удаляются по-настоящему (запись
+# стирается), встроенные — меткой; вернуть можно кнопкой «Восстановить».
+# Как и остальные ключи, у каждого направления свой (free — исторический,
+# plus — с префиксом через _tier_key).
+_DELETED_KEY = "ai_deleted_providers"
 # Человеческие названия моделей: {providerId: {modelId: "название"}}. Именно
 # это название видит ученик на экране результата («проверено моделью …»), и
 # задаёт его админ в панели провайдеров. Раньше там стоял вшитый словарь
@@ -346,7 +353,7 @@ def ensure_tier_clone(tier: str) -> None:
         if _app_config_read(_tier_key(_CUSTOM_KEY, tier)) is not None:
             return
         for base in (_CUSTOM_KEY, _SLOTS_KEY, _ENABLED_KEY, _OVERRIDES_KEY,
-                     _MODEL_TITLES_KEY, _MODEL_SLOTS_KEY):
+                     _MODEL_TITLES_KEY, _MODEL_SLOTS_KEY, _DELETED_KEY):
             raw = _app_config_read(base)
             if raw is None:
                 continue
@@ -387,6 +394,7 @@ def _admin_snapshot(tier: str | None = None) -> tuple[dict, dict, dict, dict]:
             return (cached["customs"], cached["slots"],
                     cached["enabled"], cached["overrides"])
     customs, slots, enabled, overrides = {}, {"high": None, "medium": None, "low": None}, {}, {}
+    deleted: set[str] = set()
     try:
         raw_customs = _app_config_read(custom_key)
         if isinstance(raw_customs, dict):
@@ -408,15 +416,52 @@ def _admin_snapshot(tier: str | None = None) -> tuple[dict, dict, dict, dict]:
             for pid, entry in raw_overrides.items():
                 if isinstance(pid, str) and isinstance(entry, dict):
                     overrides[pid] = entry
+        # Метки удалённых встроенных: пишем словарём {id: ts}, читаем
+        # либерально (словарь или список) — формат внутренний, но дешёвая
+        # терпимость спасает от ручных правок конфига.
+        raw_deleted = _app_config_read(_tier_key(_DELETED_KEY, tier))
+        if isinstance(raw_deleted, dict):
+            for pid in raw_deleted.keys():
+                if isinstance(pid, str) and pid:
+                    deleted.add(pid)
+        elif isinstance(raw_deleted, (list, tuple)):
+            for pid in raw_deleted:
+                if isinstance(pid, str) and pid:
+                    deleted.add(pid)
     except Exception:
         pass
     with _admin_cache_lock:
         tiers = _admin_cache.get("tiers") or {}
         tiers[tier] = {"customs": customs, "slots": slots,
                        "enabled": enabled, "overrides": overrides,
+                       "deleted": deleted,
                        "version": _config_version()}
         _admin_cache = {"path": path, "tiers": tiers}
     return customs, slots, enabled, overrides
+
+
+def _deleted_ids(tier: str | None = None) -> set[str]:
+    """Метки удалённых встроенных провайдеров (копия, мутировать бессмысленно).
+
+    Читается из того же кэша, что _admin_snapshot, поэтому в hot path
+    (_spec_for при каждом запросе) это пара доступов под замком, а не чтение
+    БД. Запись — только через provider_delete/provider_restore с
+    _admin_invalidate, как у остальных ключей."""
+    tier = _normalize_tier(tier)
+    _admin_snapshot(tier)
+    with _admin_cache_lock:
+        tiers = _admin_cache.get("tiers") or {}
+        cached = tiers.get(tier) or {}
+        raw = cached.get("deleted")
+    return set(raw) if isinstance(raw, set) else set()
+
+
+def provider_deleted(pid: str, tier: str | None = None) -> bool:
+    """Удалён ли ВСТРОЕННЫЙ провайдер админом (tombstone). Не бросает."""
+    try:
+        return str(pid or "") in _deleted_ids(tier)
+    except Exception:
+        return False
 
 
 def _admin_invalidate(tier: str | None = None) -> None:
@@ -700,6 +745,11 @@ def _builtin_overrides(pid: str, tier: str | None = None) -> dict:
 def _spec_for(name: str, tier: str | None = None) -> dict:
     tier = _normalize_tier(tier)
     key = str(name or "")
+    if key in _deleted_ids(tier):
+        # Удалённый встроенный ведёт себя как неизвестный везде: ни карточки,
+        # ни ротации, ни проб, ни судьи. Отдельной ветки «удалён» нет
+        # осознанно — иначе каждое место пришлось бы учить новому состоянию.
+        raise KeyError(f"unknown provider {key!r}")
     builtin = PROVIDERS.get(key)
     if builtin is not None:
         spec = dict(builtin)
@@ -746,10 +796,11 @@ def _spec_for(name: str, tier: str | None = None) -> dict:
 
 
 def known_provider_ids(tier: str | None = None) -> list[str]:
-    """Все известные id: встроенные + кастомные из базы."""
+    """Все известные id: встроенные (кроме удалённых) + кастомные из базы."""
     tier = _normalize_tier(tier)
     customs, _slots, _enabled, _ov = _admin_snapshot(tier)
-    return list(PROVIDER_PRIORITY) + sorted(customs.keys())
+    gone = _deleted_ids(tier)
+    return [pid for pid in PROVIDER_PRIORITY if pid not in gone] + sorted(customs.keys())
 
 
 def default_slots() -> dict:
@@ -2920,24 +2971,50 @@ def custom_provider_update(pid: str, patch: dict, tier: str | None = None) -> di
     return entry
 
 
-def custom_provider_delete(pid: str, tier: str | None = None) -> None:
+def provider_delete(pid: str, tier: str | None = None) -> None:
+    """Удалить провайдер — встроенный и свой ровно одинаково.
+
+    Свой: запись стирается из ai_custom_providers (как раньше).
+    Встроенный: определение живёт в коде (PROVIDERS), поэтому пишется
+    метка в ai_deleted_providers — провайдер исчезает из списка, слотов,
+    ротации, проб и судьи, будто его нет. Вернуть — provider_restore.
+    В обоих случаях чистятся ссылки из слотов, переопределения, цепочки
+    моделей, записи выключателя и метки здоровья: мёртвый id не должен
+    красить статус после удаления.
+    """
     tier = _normalize_tier(tier)
-    customs, slots, _enabled, overrides = _admin_snapshot(tier)
+    pid = str(pid or "")
+    customs, slots, enabled, overrides = _admin_snapshot(tier)
     if pid in PROVIDERS:
-        raise ValueError("Встроенный провайдер удалить нельзя — его можно только отключить")
-    if pid not in customs:
+        gone = _deleted_ids(tier)
+        gone.add(pid)
+        _app_config_write(_tier_key(_DELETED_KEY, tier),
+                          {p: int(time.time() * 1000) for p in sorted(gone)})
+        for slot in PROVIDER_SLOTS:
+            if slots.get(slot) == pid:
+                slots[slot] = None
+        _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
+        # Переопределение удалённого — мёртвая запись, её тоже сносим:
+        # иначе после восстановления провайдер молча унаследовал бы модель
+        # из прошлой «жизни», а сброс обязан возвращать окружение.
+        if overrides.pop(pid, None) is not None:
+            _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
+        if enabled.pop(pid, None) is not None:
+            _app_config_write(_tier_key(_ENABLED_KEY, tier), enabled)
+    elif pid in customs:
+        customs.pop(pid, None)
+        for slot in PROVIDER_SLOTS:
+            if slots.get(slot) == pid:
+                slots[slot] = None
+        _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
+        _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
+        # Переопределение удалённого провайдера — мёртвая запись, её тоже сносим:
+        # иначе id можно было бы заново занять, и новый провайдер молча унаследовал
+        # бы чужую модель из прошлой «жизни» того же id.
+        if overrides.pop(pid, None) is not None:
+            _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
+    else:
         raise KeyError(f"unknown provider {pid!r}")
-    customs.pop(pid, None)
-    for slot in PROVIDER_SLOTS:
-        if slots.get(slot) == pid:
-            slots[slot] = None
-    _app_config_write(_tier_key(_CUSTOM_KEY, tier), customs)
-    _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
-    # Переопределение удалённого провайдера — мёртвая запись, её тоже сносим:
-    # иначе id можно было бы заново занять, и новый провайдер молча унаследовал
-    # бы чужую модель из прошлой «жизни» того же id.
-    if overrides.pop(pid, None) is not None:
-        _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
     try:
         all_chains = _read_model_slots_all(tier)
         if all_chains.pop(pid, None) is not None:
@@ -2950,6 +3027,26 @@ def custom_provider_delete(pid: str, tier: str | None = None) -> None:
     # иначе мёртвый id вечно красил бы статус после удаления.
     _drop_provider_marks(pid, tier)
     _admin_invalidate(tier)
+
+
+def provider_restore(pid: str, tier: str | None = None) -> dict:
+    """Вернуть удалённый встроенный провайдер (снять метку удаления).
+
+    Значения — из окружения (сброс при удалении убрал переопределения);
+    названия моделей удаление не трогало, поэтому подпись ученику
+    возвращается сама, а цепочка материализуется при следующем overview."""
+    tier = _normalize_tier(tier)
+    pid = str(pid or "")
+    if pid not in PROVIDERS:
+        raise ValueError("Восстановить можно только встроенный провайдер")
+    gone = _deleted_ids(tier)
+    if pid not in gone:
+        raise ValueError(f"Провайдер «{pid}» не удалён")
+    gone.discard(pid)
+    _app_config_write(_tier_key(_DELETED_KEY, tier),
+                      {p: int(time.time() * 1000) for p in sorted(gone)})
+    _admin_invalidate(tier)
+    return _public_provider_card(pid, tier)
 
 
 def provider_set_enabled(pid: str, enabled: bool, tier: str | None = None) -> None:
@@ -3252,7 +3349,9 @@ def providers_set_slots(slots: dict, tier: str | None = None) -> dict:
     if not isinstance(slots, dict):
         raise ValueError("Нужен объект slots")
     customs, current, _enabled, _ov = _admin_snapshot(tier)
-    known = set(PROVIDER_PRIORITY) | set(customs.keys())
+    # Удалённый встроенный в слот встать не может (known_provider_ids его уже
+    # не знает) — иначе ротация молча пропускала бы «мёртвый» слот.
+    known = set(known_provider_ids(tier))
     # Запись несуществующего id вместо опечатки создавала бы «мёртвый» слот,
     # который ротация пропускала бы молча — поэтому строгая проверка.
     cleaned: dict[str, str | None] = {}
@@ -3989,11 +4088,14 @@ def providers_overview(tier: str | None = None) -> dict:
     except Exception:
         pass
     customs, slots, _enabled, _ov = _admin_snapshot(tier)
+    gone = _deleted_ids(tier)
     slotted = [slots[s] for s in PROVIDER_SLOTS if slots.get(s)]
     rest = [pid for pid in list(PROVIDER_PRIORITY) + sorted(customs.keys()) if pid not in slotted]
     ids = slotted + rest
     # Слот мог указывать на удалённого — такого id уже нет, не показываем.
-    ids = [pid for pid in ids if pid in PROVIDERS or pid in customs]
+    # Удалённый встроенный тоже скрыт (вернуть — кнопкой «Восстановить»).
+    ids = [pid for pid in ids
+           if (pid in PROVIDERS or pid in customs) and pid not in gone]
     cards = []
     for pid in ids:
         try:
@@ -4022,6 +4124,7 @@ def providers_overview(tier: str | None = None) -> dict:
         "ok": True,
         "tier": tier,
         "providers": cards,
+        "deletedBuiltin": sorted(pid for pid in gone if pid in PROVIDERS),
         "order": order,
         "active": active,
         "preferred": order[0] if order else None,

@@ -211,7 +211,7 @@ def main() -> int:
           ai._provider_enabled("freegw", "free") is True
           and ai._provider_enabled("freegw", "plus") is False)
     ai.provider_set_enabled("freegw", True, "plus")
-    ai.custom_provider_delete("plusgw", "plus")
+    ai.provider_delete("plusgw", "plus")
     check("удаление в plus не трогает free",
           any(p["id"] == "freegw" for p in ai.providers_overview("free")["providers"])
           and not any(p["id"] == "plusgw" for p in ai.providers_overview("plus")["providers"]))

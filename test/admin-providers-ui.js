@@ -21,6 +21,8 @@
  *   P7 сброс у СВОЕГО возвращает модель, с которой он был добавлен
  *   P8 сброс у ВСТРОЕННОГО возвращает модель из окружения сервера
  *   P9 кнопка сброса есть у обоих типов провайдеров
+ *   P9c удаление в два шага (модалка + ввод ID) у своего и у встроенного,
+ *      плашка удалённых и кнопка «Восстановить»
  *   P10 ключ провайдера не появляется в DOM/ответах
  *
  * Запуск: node test/admin-providers-ui.js
@@ -972,6 +974,61 @@ async function shot(page, name) {
     await waitFreeTab();
     t("возврат на free, тир пережил навигацию по localStorage",
       await admin.evaluate(() => localStorage.getItem("ege_admin_prov_tier")) === "free");
+
+    // ---------------- P9c удаление в два шага + восстановление ------------
+    section("P9c удаление встроенного и своего одинаково, в два шага");
+    await admin.evaluate(async (gw) => {
+      await fetch("/api/admin/providers", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "delgw", title: "Шлюз на удаление",
+          base_url: gw + "/v1", model: "alpha-pro", api_key: "k" }) });
+    }, `http://127.0.0.1:${GATEWAY_PORT}`);
+    await openSection(admin);
+    const trashOf = (id) => `.a-prov-card:has(.a-prov-card__open[onclick*="/providers/${id}"]) button[onclick*="deleteProvider"]`;
+    t("корзина есть и у встроенного, и у своего",
+      await admin.locator(trashOf("closerouter")).count() === 1
+      && await admin.locator(trashOf("delgw")).count() === 1);
+    // Шаг 1: модалка с последствием, удаления ещё нет.
+    await admin.click(trashOf("delgw"));
+    await admin.waitForSelector(".a-modal-backdrop #mNext", { timeout: 15000 });
+    t("шаг 1: модалка предупреждает, провайдер ещё на месте",
+      (await admin.locator(".a-modal-backdrop").innerText()).includes("delgw")
+      && await admin.locator(trashOf("delgw")).count() === 1);
+    // Шаг 2: без ввода ID — отказ, с чужим ID — отказ, со своим — удаление.
+    await admin.click("#mNext");
+    await admin.waitForSelector(".a-modal-backdrop #fDelProv", { timeout: 15000 });
+    await admin.click("#mDo");
+    t("шаг 2 без ввода: отказ с подсказкой",
+      (await admin.locator(".a-modal-backdrop").innerText()).includes("ID не совпадает"));
+    await admin.fill("#fDelProv", "чужой");
+    await admin.click("#mDo");
+    t("шаг 2 с чужим ID: отказ",
+      (await admin.locator(".a-modal-backdrop").innerText()).includes("ID не совпадает"));
+    await admin.fill("#fDelProv", "delgw");
+    await admin.click("#mDo");
+    await admin.waitForFunction(() => !document.querySelector(".a-modal-backdrop"), null, { timeout: 20000 });
+    await admin.waitForFunction(() => !document.querySelector(".a-prov-card__open[onclick*='/providers/delgw']"), null, { timeout: 20000 });
+    t("свой удалён через модалку в два шага", true);
+    // Встроенный — тем же путём, затем восстановление из списка.
+    await admin.click(trashOf("closerouter"));
+    await admin.waitForSelector(".a-modal-backdrop #mNext", { timeout: 15000 });
+    t("встроенный: шаг 1 говорит про кнопку «Восстановить»",
+      (await admin.locator(".a-modal-backdrop").innerText()).includes("Восстановить"));
+    await admin.click("#mNext");
+    await admin.waitForSelector(".a-modal-backdrop #fDelProv", { timeout: 15000 });
+    await admin.fill("#fDelProv", "closerouter");
+    await admin.click("#mDo");
+    await admin.waitForFunction(() => !document.querySelector(".a-modal-backdrop"), null, { timeout: 20000 });
+    await admin.waitForFunction(() => !document.querySelector(".a-prov-card__open[onclick*='/providers/closerouter']"), null, { timeout: 20000 });
+    t("встроенный удалён тем же путём", true);
+    t("появилась плашка удалённых с кнопкой восстановления",
+      (await admin.locator("#provBody").innerText()).includes("Удалённые встроенные")
+      && await admin.locator("#provBody button:has-text('Восстановить')").count() === 1);
+    await admin.click("#provBody button:has-text('Восстановить')");
+    await admin.waitForSelector(".a-prov-card__open[onclick*='/providers/closerouter']", { timeout: 20000 });
+    t("встроенный восстановлен из списка", true);
+    t("плашка удалённых исчезла",
+      !(await admin.locator("#provBody").innerText()).includes("Удалённые встроенные"));
 
     // ---------------- ошибок в консоли нет --------------------------------
     section("P10 ошибок в консоли нет");
