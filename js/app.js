@@ -7378,7 +7378,7 @@ function screenTrials(root) {
       <div class="card">
         <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">СМЕШАННОЕ ИСПЫТАНИЕ</div>
         <div style="font-size:18px;font-weight:650;margin-top:8px">10 заданий из разных тем</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:6px">По одному заданию от каждой темы по кругу — проверка общей формы, а не отдельного навыка.</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Темы с ошибками и низкой точностью идут первыми, задание в теме каждый раз новое — проверка формы по всему предмету.</div>
         <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
           <span class="chip">${stars(3)}</span>
           <button class="btn btn--primary btn--sm" style="margin-left:auto" onclick="startMixedTrial()">Начать</button>
@@ -7440,7 +7440,7 @@ function startDaily() {
 function startMixedTrial() {
   Session.start({
     title: "Смешанное испытание",
-    taskIds: mixedSampleTaskIds(DataAPI.practiceTasks(), 10),
+    taskIds: mixedTrialTaskIds(10),
     mode: "quick",
   });
 }

@@ -2303,6 +2303,55 @@ function selectDailyTaskIds(date) {
   return selected;
 }
 
+/* «Смешанное испытание»: набор под ученика, а не первые N тем каталога.
+   Раньше повторный запуск всегда давал одни и те же задания — первые count
+   навыков по порядку и самый первый task в каждом. Теперь темы с открытыми
+   ошибками и низкой точностью идут первыми, а внутри темы задание ротируется:
+   нерешённые и давно не решённые раньше свежих, поэтому следующий запуск
+   берёт следующие задания, а не повторяет прошлые. Одна тема — одно задание
+   за круг, чтобы охват оставался широким. */
+function mixedTrialTaskIds(count) {
+  const total = Math.max(0, Math.floor(Number(count) || 0));
+  if (!total || !subjectLearningAvailable()) return [];
+  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill);
+  if (!pool.length) return [];
+  const ordered = pool.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  const bySkill = {};
+  for (const task of ordered) (bySkill[task.skill] = bySkill[task.skill] || []).push(task);
+  const state = Store.state || {};
+  const lastAttemptAt = {};
+  for (const attempt of safeArray(state.taskAttempts)) {
+    if (!attempt || !attempt.taskId) continue;
+    const key = String(attempt.taskId);
+    lastAttemptAt[key] = Math.max(Number(lastAttemptAt[key]) || 0, Number(attempt.ts) || 0);
+  }
+  const skillWeakness = (skillId) => {
+    const stats = safeObject(state.skillStats && state.skillStats[skillId]);
+    const accuracy = stats.solved ? Number(stats.correct) / Number(stats.solved) : 0;
+    const mastery = Number(skillProgress(skillId)) || 0;
+    return openErrorCount(skillId) * 8
+      + Math.max(0, 1 - accuracy) * 5
+      + Math.max(0, 100 - mastery) * 0.04;
+  };
+  const skillOrder = DataAPI.skills().map((sk) => sk.id).filter((id) => bySkill[id]);
+  const rankedSkills = skillOrder.slice().sort((a, b) => skillWeakness(b) - skillWeakness(a) || skillOrder.indexOf(a) - skillOrder.indexOf(b));
+  const picked = [];
+  for (let round = 0; picked.length < total && round < 10; round++) {
+    for (const skillId of rankedSkills) {
+      if (picked.length >= total) break;
+      const bank = (bySkill[skillId] || []).slice().sort((a, b) => {
+        const ta = lastAttemptAt[String(a.id)] || 0;
+        const tb = lastAttemptAt[String(b.id)] || 0;
+        if (ta !== tb) return ta - tb;
+        return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+      });
+      const next = bank[round];
+      if (next) picked.push(next);
+    }
+  }
+  return picked.map((task) => task.id);
+}
+
 function ensureDailyChallenge() {
   if (!Store.state) return;
   if (!subjectLearningAvailable()) {
