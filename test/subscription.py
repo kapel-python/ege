@@ -521,6 +521,31 @@ def main():
         check("счёт со скидкой и кодом в ответе",
               s == 200 and body["amountKopecks"] == 14900
               and body["promo"] == "TEST25", body)
+        # Личное правило: один код — один раз на аккаунт.
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "create", "code": "ONCE10", "kind": "percent", "value": 10})
+        assert s == 200, body
+        s, once = request(user, base, "/api/subscription/checkout", "POST",
+                          {"period": "month", "promoCode": "ONCE10",
+                           "idempotencyKey": "once-key-1"})
+        check("счёт с ONCE10 создан", s == 200 and once.get("promo") == "ONCE10", once)
+        s, body = request(user, base, "/api/subscription/checkout", "POST",
+                          {"period": "month", "promoCode": "ONCE10",
+                           "idempotencyKey": "once-key-2"})
+        check("второй висящий счёт с тем же кодом 400", s == 400, f"{s} {body}")
+        s, res = request(user, base, "/api/subscription/confirm", "POST",
+                         {"paymentId": once.get("paymentId")})
+        check("ONCE10 активирован", s == 200 and res.get("status") == "succeeded", res)
+        s, body = request(user, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "month", "code": "ONCE10"})
+        check("повторное применение этим человеком запрещено",
+              s == 400 and "уже использовал" in str(body), f"{s} {body}")
+        u7 = make_device("10.9.0.7")
+        onboard(u7, base, "Второй", "10.9.0.7")
+        s, body = request(u7, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "month", "code": "ONCE10"})
+        check("другому человеку код доступен",
+              s == 200 and body["finalKopecks"] == 17900, body)
         s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
                           {"action": "delete", "code": "TEST25"})
         check("неиспользованный код удаляется", s == 200 and body.get("deleted") is True, body)

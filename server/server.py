@@ -14004,7 +14004,7 @@ class Handler(BaseHTTPRequestHandler):
             period = payload.get("period", "month")
             if not isinstance(period, str):
                 raise ValueError("period должен быть month или year")
-            quote = _SUB.promo_quote(conn, code, period.strip().lower())
+            quote = _SUB.promo_quote(conn, code, period.strip().lower(), int(user_id))
             return {"ok": True, **quote}
         if path == "/api/subscription/payments/cancel":
             # Отмена своего неоплаченного счёта (передумал/дубль/завис).

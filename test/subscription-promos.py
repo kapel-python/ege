@@ -116,14 +116,37 @@ check("pending со скидкой",
       and out["promo"] == "LETO20"
       and out["discountKopecks"] == PRICE_M - exp_final,
       {k: out.get(k) for k in ("amountKopecks", "promo", "discountKopecks")})
-row = conn.execute("SELECT payload_json FROM subscription_payments WHERE public_id=?",
+row = conn.execute("SELECT payload_json, promo_code FROM subscription_payments WHERE public_id=?",
                    (out["paymentId"],)).fetchone()
 check("код в payload счёта", '"LETO20"' in (row["payload_json"] or ""))
+check("код в колонке promo_code", (row["promo_code"] or "") == "LETO20", row["promo_code"])
 used_before = sub.promo_get(conn, "LETO20")["used"]
 check("брошенный счёт код не сжигает", used_before == 0, used_before)
+try:
+    sub.create_checkout(conn, 1, "month", sub.PROVIDER_MOCK, "key-disc-2", "LETO20")
+    check("второй висящий счёт с тем же кодом не создаётся", False)
+except ValueError as e:
+    check("второй висящий счёт с тем же кодом не создаётся",
+          "неоплаченный счёт" in str(e), e)
 res = sub.confirm_payment(conn, out["paymentId"], sub.PROVIDER_MOCK, expected_user_id=1)
 check("mock-confirm активирует", res["status"] == "succeeded")
 check("использование засчитано", sub.promo_get(conn, "LETO20")["used"] == 1)
+try:
+    sub.promo_quote(conn, "LETO20", "month", user_id=1)
+    check("повторная активация тем же человеком заблокирована", False)
+except ValueError as e:
+    check("повторная активация тем же человеком заблокирована",
+          "уже использовал" in str(e), e)
+q_other = sub.promo_quote(conn, "LETO20", "month", user_id=2)
+check("другому человеку код доступен", q_other["finalKopecks"] == exp_final)
+try:
+    sub.create_checkout(conn, 1, "month", sub.PROVIDER_MOCK, "key-disc-3", "LETO20")
+    check("счёт после активации не создаётся", False)
+except ValueError as e:
+    check("счёт после активации не создаётся", "уже использовал" in str(e), e)
+out2 = sub.create_checkout(conn, 2, "month", sub.PROVIDER_MOCK, "key-disc-4", "LETO20")
+check("другому человеку счёт создаётся",
+      out2["status"] == "pending" and out2["promo"] == "LETO20")
 try:
     sub.create_checkout(conn, 2, "month", sub.PROVIDER_MOCK, "key-bad", "NOSUCHCODE")
     check("невалидный код в checkout отклоняется", False)
@@ -141,6 +164,25 @@ try:
     check("single-use исчерпан", False)
 except ValueError as e:
     check("single-use исчерпан", "исчерпан" in str(e), e)
+# 100% без лимита — но одному человеку всё равно один раз.
+sub.promo_create(conn, "freeu", "percent", 100)
+out = sub.create_checkout(conn, 1, "year", sub.PROVIDER_MOCK, "key-free-u", "FREEU")
+check("100% второй код активирован",
+      out["status"] == "succeeded" and out["provider"] == "promo")
+try:
+    sub.create_checkout(conn, 1, "year", sub.PROVIDER_MOCK, "key-free-u2", "FREEU")
+    check("100%-код одному человеку — один раз", False)
+except ValueError as e:
+    check("100%-код одному человеку — один раз", "уже использовал" in str(e), e)
+# Бэкфилл: у старых строк код лежал только в payload_json.
+conn.execute("INSERT INTO subscription_payments"
+             " (user_id, amount_kopecks, period, status, provider, public_id,"
+             "  payload_json, created_at_ms)"
+             " VALUES (3, 0, 'month', 'succeeded', 'promo', ?, ?, ?)",
+             (sub._new_payment_public_id(), '{"promo": "legacy"}', int(time.time() * 1000)))
+conn.commit()
+sub._backfill_payment_promo_codes(conn)
+check("бэкфилл promo_code из payload", sub.promo_used_by_user(conn, "LEGACY", 3) is True)
 ov = sub.subscription_overview(conn)
 check("промо 0₽ вне оборота, скидочный счёт — в обороте",
       ov["money"]["paidCount"] == 1 and ov["money"]["revenueKopecks"] == 15900,

@@ -269,7 +269,8 @@ def ensure_subscription_schema(conn: sqlite3.Connection) -> None:
           idempotency_key TEXT UNIQUE,
           payload_json TEXT NOT NULL DEFAULT '{}',
           created_at_ms INTEGER NOT NULL,
-          paid_at_ms INTEGER
+          paid_at_ms INTEGER,
+          promo_code TEXT
         )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_payments_user"
                  " ON subscription_payments(user_id)")
@@ -277,11 +278,18 @@ def ensure_subscription_schema(conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(subscription_payments)")}
         if "public_id" not in cols:
             conn.execute("ALTER TABLE subscription_payments ADD COLUMN public_id TEXT")
+        if "promo_code" not in cols:
+            conn.execute("ALTER TABLE subscription_payments ADD COLUMN promo_code TEXT")
     except sqlite3.Error:
         pass
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_payments_public"
                  " ON subscription_payments(public_id)")
+    # Правило «один код — один раз на аккаунт» читает колонку promo_code:
+    # у строк, заведённых до неё, код лежит в payload_json.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_payments_promo"
+                 " ON subscription_payments(promo_code, user_id)")
     _backfill_payment_public_ids(conn)
+    _backfill_payment_promo_codes(conn)
     try:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
         if "subscription" not in cols:
@@ -331,6 +339,44 @@ def _backfill_payment_public_ids(conn: sqlite3.Connection) -> None:
                     break
                 except sqlite3.IntegrityError:
                     continue
+        if own:
+            conn.commit()
+    except Exception:
+        if own:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        raise
+
+
+def _backfill_payment_promo_codes(conn: sqlite3.Connection) -> None:
+    """Проставить promo_code строкам, заведённым до колонки: код уже лежит
+    в payload_json, переносим его колонкой, чтобы правило «один код — один
+    раз на аккаунт» видело старые активации. Идемпотентно (только NULL),
+    транзакция — как у _backfill_payment_public_ids."""
+    try:
+        rows = conn.execute("SELECT id, payload_json FROM subscription_payments"
+                            " WHERE promo_code IS NULL"
+                            " AND payload_json LIKE '%\"promo\"%'").fetchall()
+    except sqlite3.Error:
+        return
+    updates: list[tuple[str, int]] = []
+    for r in rows:
+        try:
+            data = json.loads(r["payload_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        code = str((data or {}).get("promo") or "").strip().upper()
+        if code and PROMO_CODE_RE.match(code):
+            updates.append((code, int(r["id"])))
+    if not updates:
+        return
+    own = not conn.in_transaction
+    try:
+        for code, pid in updates:
+            conn.execute("UPDATE subscription_payments SET promo_code=?"
+                         " WHERE id=? AND promo_code IS NULL", (code, pid))
         if own:
             conn.commit()
     except Exception:
@@ -626,7 +672,7 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
     discount = 0
     amount = plus_price_kopecks(period)
     if promo_code is not None and str(promo_code).strip():
-        quote = promo_quote(conn, str(promo_code), period)
+        quote = promo_quote(conn, str(promo_code), period, int(user_id))
         promo, discount, amount = quote["code"], quote["discountKopecks"], quote["finalKopecks"]
     if amount == 0 and promo:
         return redeem_promo(conn, int(user_id), promo, period)
@@ -648,6 +694,19 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
                                                "для завершённого платежа")
                 _end(conn, own, True)
                 return _payment_payload(existing)
+        if promo:
+            # С одним кодом у человека — максимум один счёт: второй дал бы
+            # вторую активацию по тому же коду. Уже использован — отказ ещё
+            # на quote выше; висящий неоплаченный — честная просьба сначала
+            # завершить или отменить его (проверка внутри транзакции, поэтому
+            # два параллельных клика не создают два счёта).
+            row = conn.execute("SELECT 1 FROM subscription_payments"
+                               " WHERE user_id=? AND promo_code=? AND status=?"
+                               " LIMIT 1",
+                               (int(user_id), promo, PAY_PENDING)).fetchone()
+            if row:
+                raise ValueError("У тебя уже есть неоплаченный счёт с этим "
+                                 "промокодом — заверши или отмени его")
         if provider == PROVIDER_PLATEGA:
             # Шлюз требует id транзакции строго в формате UUID — общий
             # `platega_<hex>` сюда не годится, а повторное использование id
@@ -658,10 +717,11 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
         pid, public_id = _insert_payment(conn, int(user_id), amount, period,
                                          provider, provider_payment_id, key, now_ms)
         if promo:
-            conn.execute("UPDATE subscription_payments SET payload_json=? WHERE id=?",
+            conn.execute("UPDATE subscription_payments SET payload_json=?,"
+                         " promo_code=? WHERE id=?",
                          (json.dumps({"promo": promo,
                                       "discountKopecks": discount},
-                                     ensure_ascii=False), pid))
+                                     ensure_ascii=False), promo, pid))
         _end(conn, own, True)
     except Exception:
         _end(conn, own, False)
@@ -1381,10 +1441,43 @@ def promo_delete(conn: sqlite3.Connection, code: str) -> dict:
     return {"ok": True, "code": code, "deleted": True}
 
 
-def promo_quote(conn: sqlite3.Connection, code: str, period: str) -> dict:
+def promo_used_by_user(conn: sqlite3.Connection, code: str,
+                       user_id: int) -> bool:
+    """Активировал ли этот аккаунт код (status succeeded). Не бросает:
+    колонки может не быть в древней базе — тогда считаем «нет»."""
+    try:
+        code = promo_normalize(code)
+        row = conn.execute("SELECT 1 FROM subscription_payments"
+                           " WHERE user_id=? AND promo_code=? AND status=?"
+                           " LIMIT 1",
+                           (int(user_id), code, PAY_SUCCEEDED)).fetchone()
+        return row is not None
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def promo_pending_by_user(conn: sqlite3.Connection, code: str,
+                          user_id: int) -> bool:
+    """Есть ли у аккаунта неоплаченный счёт с этим кодом. Не бросает."""
+    try:
+        code = promo_normalize(code)
+        row = conn.execute("SELECT 1 FROM subscription_payments"
+                           " WHERE user_id=? AND promo_code=? AND status=?"
+                           " LIMIT 1",
+                           (int(user_id), code, PAY_PENDING)).fetchone()
+        return row is not None
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def promo_quote(conn: sqlite3.Connection, code: str, period: str,
+                user_id: int | None = None) -> dict:
     """Сколько будет стоить тариф с промокодом. Ошибки — человеческим текстом
-    для окна оплаты (код не найден / выключен / истёк / исчерпан / не тот тариф)."""
+    для окна оплаты (код не найден / выключен / истёк / исчерпан / не тот
+    тариф). С user_id — ещё и личное правило: один код аккаунту даётся один
+    раз, повторная активация невозможна (ошибка до создания счёта)."""
     ensure_promo_schema(conn)
+    ensure_subscription_schema(conn)
     if period not in PERIODS:
         raise ValueError("period должен быть month или year")
     try:
@@ -1403,6 +1496,8 @@ def promo_quote(conn: sqlite3.Connection, code: str, period: str) -> dict:
         raise ValueError("Промокод исчерпан")
     if str(promo.get("period") or "any") not in ("any", period):
         raise ValueError("Промокод не для этого тарифа")
+    if user_id is not None and promo_used_by_user(conn, code, int(user_id)):
+        raise ValueError("Ты уже использовал этот промокод")
     price = plus_price_kopecks(period)
     if str(promo.get("kind")) == "percent":
         discount = price * int(promo.get("value") or 0) // 100
@@ -1446,9 +1541,9 @@ def _consume_payment_promo(conn: sqlite3.Connection, pay: dict) -> None:
 def redeem_promo(conn: sqlite3.Connection, user_id: int, code: str,
                  period: str) -> dict:
     """Активация кодом на 100%: счёта и шлюза нет — Plus включается сразу.
-    Проверка лимита и списание — в одной транзакции: два одновременных
-    вызова на последний раз single-use кода дают одну активацию и одну
-    честную ошибку, а не две."""
+    Проверка лимита, правило «один код — один раз на аккаунт» и списание —
+    в одной транзакции: два одновременных вызова на последний раз single-use
+    кода (или на одного человека) дают одну активацию и одну честную ошибку."""
     ensure_subscription_schema(conn)
     ensure_promo_schema(conn)
     if period not in PERIODS:
@@ -1458,7 +1553,7 @@ def redeem_promo(conn: sqlite3.Connection, user_id: int, code: str,
     now_ms = NOW_MS()
     own = _begin(conn)
     try:
-        quote = promo_quote(conn, code, period)
+        quote = promo_quote(conn, code, period, int(user_id))
         if quote["finalKopecks"] != 0:
             raise ValueError("промокод не покрывает всё — оформи счёт со скидкой")
         promo_consume(conn, quote["code"])
@@ -1470,12 +1565,12 @@ def redeem_promo(conn: sqlite3.Connection, user_id: int, code: str,
                 cur = conn.execute("""INSERT INTO subscription_payments
                                 (user_id, subscription_id, amount_kopecks, currency, period,
                                  status, provider, provider_payment_id, idempotency_key,
-                                 public_id, payload_json, created_at_ms, paid_at_ms)
-                                VALUES (?,?,0,'RUB',?, 'succeeded','promo',NULL,NULL,?,?,?,?)""",
+                                 public_id, payload_json, created_at_ms, paid_at_ms, promo_code)
+                                VALUES (?,?,0,'RUB',?, 'succeeded','promo',NULL,NULL,?,?,?,?,?)""",
                                    (int(user_id), act["subscriptionId"], period,
                                     _new_payment_public_id(),
                                     json.dumps({"promo": quote["code"]}, ensure_ascii=False),
-                                    now_ms, now_ms))
+                                    now_ms, now_ms, quote["code"]))
                 break
             except sqlite3.IntegrityError:
                 continue
