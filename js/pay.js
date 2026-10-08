@@ -160,6 +160,8 @@ var PayFlow = (function () {
       + '<div class="dlg-kv__row"><span>Оплата</span><span>СБП / карта, на стороне провайдера</span></div>'
       + "</div>"
       + '<div class="dlg__text">После нажатия откроется страница оплаты. Данные карты нам не попадают — к нам приходит только факт оплаты.</div>'
+      + '<div class="dlg-promo"><label for="payPromo">Промокод</label>'
+      + '<input id="payPromo" type="text" placeholder="если есть" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16"></div>'
       + '<div class="dlg__actions">'
       + '<button class="btn btn-ghost btn--sm" type="button" data-cancel>Отмена</button>'
       + '<button class="btn btn-primary btn--sm" type="button" data-pay>Оплатить ' + esc(fmtSum(price * 100)) + " ₽</button>"
@@ -175,8 +177,28 @@ var PayFlow = (function () {
       payBtn.disabled = true;
       payBtn.textContent = "Создаём счёт…";
       var key = "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-      api("/api/subscription/checkout", { period: period, idempotencyKey: key }).then(function (res) {
+      var promoEl = root.querySelector("#payPromo");
+      var promoCode = promoEl ? String(promoEl.value || "").trim() : "";
+      var body = { period: period, idempotencyKey: key };
+      if (promoCode) body.promoCode = promoCode;
+      api("/api/subscription/checkout", body).then(function (res) {
         if (cancelled) return; /* окно закрыли, пока создавался счёт: редиректа нет, счёт подберёт баннер */
+        if (res && res.status === "succeeded") {
+          /* Код на 100%: счёта нет, Plus уже активен. */
+          openPayModal(
+            '<div class="dlg__eyebrow">Подписка Plus</div>'
+            + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
+            + '<div class="dlg-device__name">Промокод применён</div></div>'
+            + '<div class="dlg__text">Plus активен — лимиты уже увеличены. Приятной подготовки!</div>'
+            + '<div class="dlg__actions">'
+            + '<button class="btn btn-primary btn--sm" type="button" data-ok>Отлично</button>'
+            + "</div>",
+            "Промокод применён",
+            function () { try { window.location.reload(); } catch (e) {} });
+          var okBtn = root.querySelector("[data-ok]");
+          if (okBtn) okBtn.addEventListener("click", function () { try { window.location.reload(); } catch (e) { closePayModal(); } });
+          return;
+        }
         if (res && res.paymentUrl) {
           saveWait(res.paymentId, res.paymentUrl);
           window.location.href = res.paymentUrl;

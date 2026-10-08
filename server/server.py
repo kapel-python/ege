@@ -13959,15 +13959,19 @@ class Handler(BaseHTTPRequestHandler):
             key = payload.get("idempotencyKey", payload.get("idempotency_key"))
             if key is not None and not isinstance(key, str):
                 raise ValueError("idempotencyKey должен быть строкой")
+            promo = payload.get("promoCode", payload.get("promo_code"))
+            if promo is not None and not isinstance(promo, str):
+                raise ValueError("promoCode должен быть строкой")
+            promo = (promo or "").strip() or None
             if _SUB.platega_enabled():
                 # Настоящие деньги: счёт в шлюзе + ссылка на оплату.
                 base = public_base_url(self).rstrip("/")
                 return _SUB.create_platega_checkout(
                     conn, int(user_id), period, key,
                     base + "/subscription/manage?pay=ok",
-                    base + "/subscription/manage?pay=fail")
+                    base + "/subscription/manage?pay=fail", promo)
             return _SUB.create_checkout(conn, int(user_id), period,
-                                        _SUB.PROVIDER_MOCK, key)
+                                        _SUB.PROVIDER_MOCK, key, promo)
         if path == "/api/subscription/confirm":
             ref = payload.get("paymentId", payload.get("providerPaymentId"))
             if isinstance(ref, bool):
@@ -14542,6 +14546,110 @@ class Handler(BaseHTTPRequestHandler):
                 try: conn.rollback()
                 except sqlite3.Error: pass
                 rid = log_request_error("admin-waitlist", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            finally:
+                conn.close()
+            return
+        if path == "/api/admin/subscription/promos":
+            # Промокоды на скидку: create (код/тип/значение/тариф/лимит/срок/
+            # пометка) и set_active (выкл без удаления — история честна).
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                if _SUB is None:
+                    self.send_json({"error": "Движок подписки недоступен"}, 503); return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                op = payload.get("action", "")
+                if not isinstance(op, str):
+                    self.send_json({"error": "action должен быть create или set_active"}, 400); return
+                op = op.strip().lower()
+                if op == "create":
+                    try:
+                        promo = _SUB.promo_create(
+                            conn, payload.get("code"), payload.get("kind"),
+                            payload.get("value"), payload.get("period", "any"),
+                            payload.get("maxUses", payload.get("max_uses")),
+                            payload.get("expiresAt", payload.get("expires_at_ms")),
+                            payload.get("note", ""))
+                    except ValueError as exc:
+                        self.send_json({"error": f"Request failed: {exc}"}, 400); return
+                    admin_audit(conn, actor_id, "promo-create", None,
+                                f"{promo['code']} {promo['kind']} {promo['value']}"[:200])
+                    self.send_json({"ok": True, "promo": promo})
+                elif op == "set_active":
+                    code = payload.get("code", "")
+                    if not isinstance(code, str):
+                        self.send_json({"error": "нужен code"}, 400); return
+                    try:
+                        promo = _SUB.promo_set_active(
+                            conn, code, bool(payload.get("active", True)))
+                    except (ValueError, KeyError) as exc:
+                        status = 404 if isinstance(exc, KeyError) else 400
+                        self.send_json({"error": "Не найдено" if isinstance(exc, KeyError) else f"Request failed: {exc}"}, status); return
+                    admin_audit(conn, actor_id, "promo-toggle", None,
+                                f"{promo['code']} {'on' if promo['active'] else 'off'}"[:200])
+                    self.send_json({"ok": True, "promo": promo})
+                else:
+                    self.send_json({"error": "action должен быть create или set_active"}, 400); return
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-promos", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            finally:
+                conn.close()
+            return
+        if path == "/api/admin/subscription/bonus":
+            # Массовая выдача Plus: розыгрыш, условие, компенсация — повод
+            # в note. Получатели — account_id или числовые id, плюс пресет
+            # «ждущие из старого листа ожидания».
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                if _SUB is None:
+                    self.send_json({"error": "Движок подписки недоступен"}, 503); return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                period = payload.get("period", "month")
+                if not isinstance(period, str):
+                    self.send_json({"error": "period должен быть month или year"}, 400); return
+                recipients = payload.get("recipients", payload.get("accountIds", []))
+                if recipients is None:
+                    recipients = []
+                if not isinstance(recipients, list):
+                    self.send_json({"error": "recipients должен быть списком"}, 400); return
+                try:
+                    result = _SUB.admin_bonus(
+                        conn, recipients, period.strip().lower(),
+                        note=str(payload.get("note", "") or ""),
+                        include_waitlist=bool(payload.get("includeWaitlist", False)),
+                        actor=actor_id)
+                except ValueError as exc:
+                    self.send_json({"error": f"Request failed: {exc}"}, 400); return
+                admin_audit(conn, actor_id, "subscription-bonus", None,
+                            f"{result['period']} x{result['grantedCount']} {result['note']}"[:200])
+                self.send_json(result)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-bonus", exc)
                 self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
                                 "ref": rid}, 500)
             finally:

@@ -53,6 +53,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -100,6 +101,10 @@ PAY_CANCELLED = "cancelled"
 PROVIDER_MANUAL = "manual"
 PROVIDER_MOCK = "mock"
 PROVIDER_PLATEGA = "platega"
+# Оплата промокодом на 100%: денег нет, шлюз не задействован — в истории
+# видно, что Plus выдан по коду, а не куплен. В оборот не входит
+# (как manual): средний чек считают только настоящие платежи.
+PROVIDER_PROMO = "promo"
 
 # Уровни Plus: проверки сочинений 5 -> 10 в день, запросы к ИИ 10 -> 50.
 PLUS_ESSAY_LIMIT = 10
@@ -598,10 +603,13 @@ def _activate_row(conn: sqlite3.Connection, user_id: int, period: str,
 
 def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
                     provider: str = PROVIDER_MOCK,
-                    idempotency_key: str | None = None) -> dict:
+                    idempotency_key: str | None = None,
+                    promo_code: str | None = None) -> dict:
     """Создать pending-платёж. С идемпотентным ключом повтор возвращает тот
-    же платёж, а не заводит дубль. Своя транзакция."""
+    же платёж, а не заводит дубль. Своя транзакция. С промокодом на 100%
+    счёта не будет — Plus активируется сразу (redeem_promo)."""
     ensure_subscription_schema(conn)
+    ensure_promo_schema(conn)
     if period not in PERIODS:
         raise ValueError("period должен быть month или year")
     if provider not in (PROVIDER_MOCK, PROVIDER_MANUAL, PROVIDER_PLATEGA):
@@ -614,7 +622,14 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
     if not conn.execute("SELECT id FROM users WHERE id=?", (int(user_id),)).fetchone():
         raise KeyError("user not found")
     now_ms = NOW_MS()
+    promo = None
+    discount = 0
     amount = plus_price_kopecks(period)
+    if promo_code is not None and str(promo_code).strip():
+        quote = promo_quote(conn, str(promo_code), period)
+        promo, discount, amount = quote["code"], quote["discountKopecks"], quote["finalKopecks"]
+    if amount == 0 and promo:
+        return redeem_promo(conn, int(user_id), promo, period)
     own = _begin(conn)
     try:
         if key:
@@ -642,13 +657,22 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
             provider_payment_id = f"{provider}_{secrets.token_hex(12)}"
         pid, public_id = _insert_payment(conn, int(user_id), amount, period,
                                          provider, provider_payment_id, key, now_ms)
+        if promo:
+            conn.execute("UPDATE subscription_payments SET payload_json=? WHERE id=?",
+                         (json.dumps({"promo": promo,
+                                      "discountKopecks": discount},
+                                     ensure_ascii=False), pid))
         _end(conn, own, True)
     except Exception:
         _end(conn, own, False)
         raise
-    return {"ok": True, "paymentId": public_id, "providerPaymentId": provider_payment_id,
-            "amountKopecks": amount, "currency": "RUB", "period": period,
-            "status": PAY_PENDING, "provider": provider, "mock": provider == PROVIDER_MOCK}
+    out = {"ok": True, "paymentId": public_id, "providerPaymentId": provider_payment_id,
+           "amountKopecks": amount, "currency": "RUB", "period": period,
+           "status": PAY_PENDING, "provider": provider, "mock": provider == PROVIDER_MOCK}
+    if promo:
+        out["promo"] = promo
+        out["discountKopecks"] = discount
+    return out
 
 
 def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
@@ -711,6 +735,7 @@ def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
         # webhook_recurring — там деньги реально приходят снаружи.
         conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=? WHERE id=?",
                      (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+        _consume_payment_promo(conn, pay)
         act = _activate_row(conn, int(pay["user_id"]), str(pay.get("period")),
                             provider, now_ms, essay_limit, agent_limit)
         conn.execute("UPDATE subscription_payments SET subscription_id=? WHERE id=?",
@@ -724,13 +749,21 @@ def confirm_payment(conn: sqlite3.Connection, payment_ref: int | str,
 
 
 def _payment_payload(pay: dict) -> dict:
-    return {"ok": True, "paymentId": pay.get("public_id"),
-            "providerPaymentId": pay.get("provider_payment_id"),
-            "amountKopecks": int(pay.get("amount_kopecks") or 0),
-            "currency": pay.get("currency") or "RUB",
-            "period": pay.get("period"), "status": pay.get("status"),
-            "provider": pay.get("provider"),
-            "mock": pay.get("provider") == PROVIDER_MOCK}
+    out = {"ok": True, "paymentId": pay.get("public_id"),
+           "providerPaymentId": pay.get("provider_payment_id"),
+           "amountKopecks": int(pay.get("amount_kopecks") or 0),
+           "currency": pay.get("currency") or "RUB",
+           "period": pay.get("period"), "status": pay.get("status"),
+           "provider": pay.get("provider"),
+           "mock": pay.get("provider") == PROVIDER_MOCK}
+    try:
+        data = _payload_data(pay) or {}
+    except Exception:
+        data = {}
+    if data.get("promo"):
+        out["promo"] = data["promo"]
+        out["discountKopecks"] = int(data.get("discountKopecks") or 0)
+    return out
 
 
 def webhook_signature_valid(provider_payment_id: str, status: str,
@@ -786,6 +819,7 @@ def webhook_payment(conn: sqlite3.Connection, provider_payment_id: str,
                     raise ValueError("у платежа нет периода для продления")
                 conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=? WHERE id=?",
                              (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+                _consume_payment_promo(conn, pay)
                 act = _activate_row(conn, int(pay["user_id"]), period, str(pay.get("provider")),
                                     now_ms, essay_limit, agent_limit,
                                     reason="subscription:webhook")
@@ -1169,6 +1203,340 @@ def grant_launch_waitlist(conn: sqlite3.Connection, period: str = PERIOD_MONTH,
             "period": period}
 
 
+# ---------------------------------------------------------------------------
+# Поощрения: массовая выдача Plus и промокоды на скидку.
+#
+# Замена устаревшего листа ожидания в админке («Напомнить о запуске»):
+# вместо одной кнопки «выдать всем ждущим» — два гибких инструмента:
+#   * массовая выдача: месяц/год Plus списку аккаунтов с пометкой-поводом
+#     (розыгрыш, условие, компенсация) + пресет «ждущие из старого листа»;
+#   * промокоды: скидка в % или рублях на месяц/год/любой тариф, с лимитом
+#     использований и сроком. Код на 100% активирует Plus сразу без шлюза.
+# Правила простые и честные: скидка применяется к счёту в момент checkout
+# (запись сервера, не ввод пользователя), повторная проверка при активации
+# не урезает уже оплаченное — платёж чтут, даже если код тем временем
+# исчерпался; счётчик использований растёт только при успешной активации,
+# брошенные счета код не сжигают.
+# ---------------------------------------------------------------------------
+
+PROMO_KINDS = ("percent", "fixed")
+PROMO_PERIODS = (PERIOD_MONTH, PERIOD_YEAR, "any")
+PROMO_CODE_RE = re.compile(r"^[A-Z0-9]{4,16}$")
+BONUS_BATCH_MAX = 500
+
+
+def ensure_promo_schema(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+          code TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          value INTEGER NOT NULL,
+          period TEXT NOT NULL DEFAULT 'any',
+          max_uses INTEGER,
+          used_count INTEGER NOT NULL DEFAULT 0,
+          expires_at_ms INTEGER,
+          active INTEGER NOT NULL DEFAULT 1,
+          note TEXT NOT NULL DEFAULT '',
+          created_at_ms INTEGER NOT NULL
+        )""")
+    if not conn.in_transaction:
+        try:
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+
+def promo_normalize(raw) -> str:
+    code = str(raw or "").strip().upper()
+    if not PROMO_CODE_RE.match(code):
+        raise ValueError("код — 4–16 символов A–Z/0–9")
+    return code
+
+
+def promo_create(conn: sqlite3.Connection, code: str, kind: str, value: int,
+                 period: str = "any", max_uses: int | None = None,
+                 expires_at_ms: int | None = None, note: str = "") -> dict:
+    """Завести промокод. value: percent — 1–100, fixed — копейки (от 100).
+    max_uses/expires_at_ms — None значит «без ограничения»."""
+    ensure_promo_schema(conn)
+    code = promo_normalize(code)
+    kind = str(kind or "").strip().lower()
+    if kind not in PROMO_KINDS:
+        raise ValueError("kind должен быть percent или fixed")
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("value должен быть числом")
+    if kind == "percent" and not 1 <= value <= 100:
+        raise ValueError("percent — от 1 до 100")
+    if kind == "fixed" and value < 100:
+        raise ValueError("fixed — минимум 100 копеек (1 ₽)")
+    period = str(period or "any").strip().lower()
+    if period not in PROMO_PERIODS:
+        raise ValueError("period должен быть month, year или any")
+    if max_uses is not None:
+        try:
+            max_uses = int(max_uses)
+        except (TypeError, ValueError):
+            raise ValueError("max_uses должен быть числом")
+        if max_uses < 1:
+            raise ValueError("max_uses — минимум 1")
+    else:
+        max_uses = None
+    if expires_at_ms is not None:
+        try:
+            expires_at_ms = int(expires_at_ms)
+        except (TypeError, ValueError):
+            raise ValueError("expires_at_ms должен быть числом")
+        if expires_at_ms <= NOW_MS():
+            raise ValueError("срок уже прошёл — код истёк бы сразу")
+    else:
+        expires_at_ms = None
+    now_ms = NOW_MS()
+    own = _begin(conn)
+    try:
+        try:
+            conn.execute("""INSERT INTO promo_codes
+                            (code, kind, value, period, max_uses, used_count,
+                             expires_at_ms, active, note, created_at_ms)
+                            VALUES (?,?,?,?,?,0,?,?,?,?)""",
+                         (code, kind, value, period, max_uses, expires_at_ms,
+                          1, str(note or "")[:200], now_ms))
+        except sqlite3.IntegrityError:
+            raise ValueError("такой код уже есть")
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return promo_get(conn, code)
+
+
+def promo_get(conn: sqlite3.Connection, code: str) -> dict:
+    ensure_promo_schema(conn)
+    code = promo_normalize(code)
+    row = conn.execute("SELECT * FROM promo_codes WHERE code=?", (code,)).fetchone()
+    pay = _row_to_dict(row)
+    if not pay:
+        raise KeyError("promo not found")
+    return {"code": pay["code"], "kind": pay["kind"], "value": int(pay["value"]),
+            "period": pay["period"],
+            "maxUses": pay["max_uses"] if pay["max_uses"] is None else int(pay["max_uses"]),
+            "used": int(pay["used_count"] or 0),
+            "expiresAt": pay["expires_at_ms"], "active": bool(pay["active"]),
+            "note": pay["note"] or ""}
+
+
+def promo_list(conn: sqlite3.Connection) -> list[dict]:
+    ensure_promo_schema(conn)
+    try:
+        rows = conn.execute("SELECT * FROM promo_codes ORDER BY created_at_ms DESC"
+                            ).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = _row_to_dict(r) or {}
+        try:
+            out.append(promo_get(conn, str(d.get("code") or "")))
+        except (KeyError, ValueError):
+            continue
+    return out
+
+
+def promo_set_active(conn: sqlite3.Connection, code: str, active: bool) -> dict:
+    ensure_promo_schema(conn)
+    code = promo_normalize(code)
+    own = _begin(conn)
+    try:
+        cur = conn.execute("UPDATE promo_codes SET active=? WHERE code=?",
+                           (1 if active else 0, code))
+        if not cur.rowcount:
+            raise KeyError("promo not found")
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return promo_get(conn, code)
+
+
+def promo_quote(conn: sqlite3.Connection, code: str, period: str) -> dict:
+    """Сколько будет стоить тариф с промокодом. Ошибки — человеческим текстом
+    для окна оплаты (код не найден / выключен / истёк / исчерпан / не тот тариф)."""
+    ensure_promo_schema(conn)
+    if period not in PERIODS:
+        raise ValueError("period должен быть month или year")
+    try:
+        code = promo_normalize(code)
+    except ValueError:
+        raise ValueError("Промокод не найден")
+    row = conn.execute("SELECT * FROM promo_codes WHERE code=?", (code,)).fetchone()
+    promo = _row_to_dict(row)
+    if not promo:
+        raise ValueError("Промокод не найден")
+    if not promo.get("active"):
+        raise ValueError("Промокод выключен")
+    if promo.get("expires_at_ms") and int(promo["expires_at_ms"]) <= NOW_MS():
+        raise ValueError("Срок промокода истёк")
+    if promo.get("max_uses") is not None and int(promo.get("used_count") or 0) >= int(promo["max_uses"]):
+        raise ValueError("Промокод исчерпан")
+    if str(promo.get("period") or "any") not in ("any", period):
+        raise ValueError("Промокод не для этого тарифа")
+    price = plus_price_kopecks(period)
+    if str(promo.get("kind")) == "percent":
+        discount = price * int(promo.get("value") or 0) // 100
+    else:
+        discount = int(promo.get("value") or 0)
+    # Скидка — до целых рублей: шлюз выставляет счета в рублях, и копеечный
+    # остаток уронил бы создание счёта («тариф не представим»). Округляем
+    # ЦЕНУ вниз — скидка получается вверх, в пользу ученика.
+    final = max(0, price - discount)
+    final = (final // 100) * 100
+    discount = price - final
+    return {"code": code, "kind": promo["kind"], "value": int(promo.get("value") or 0),
+            "period": period, "priceKopecks": price,
+            "discountKopecks": price - final, "finalKopecks": final}
+
+
+def promo_consume(conn: sqlite3.Connection, code: str) -> None:
+    """Засчитать использование при успешной активации. Проверка лимита —
+    дело quote в момент checkout (платёж чтут, даже если код тем временем
+    исчерпался); здесь только счётчик. Присоединяется к чужой транзакции."""
+    ensure_promo_schema(conn)
+    try:
+        code = promo_normalize(code)
+    except ValueError:
+        return
+    conn.execute("UPDATE promo_codes SET used_count=used_count+1 WHERE code=?",
+                 (code,))
+
+
+def _consume_payment_promo(conn: sqlite3.Connection, pay: dict) -> None:
+    """Списать промокод платежа при его успешной активации (mock, platega,
+    вебхуки — все идут сюда). Без кода в платеже — no-op."""
+    try:
+        code = (_payload_data(pay) or {}).get("promo")
+    except Exception:
+        return
+    if code:
+        promo_consume(conn, code)
+
+
+def redeem_promo(conn: sqlite3.Connection, user_id: int, code: str,
+                 period: str) -> dict:
+    """Активация кодом на 100%: счёта и шлюза нет — Plus включается сразу.
+    Проверка лимита и списание — в одной транзакции: два одновременных
+    вызова на последний раз single-use кода дают одну активацию и одну
+    честную ошибку, а не две."""
+    ensure_subscription_schema(conn)
+    ensure_promo_schema(conn)
+    if period not in PERIODS:
+        raise ValueError("period должен быть month или year")
+    if not conn.execute("SELECT id FROM users WHERE id=?", (int(user_id),)).fetchone():
+        raise KeyError("user not found")
+    now_ms = NOW_MS()
+    own = _begin(conn)
+    try:
+        quote = promo_quote(conn, code, period)
+        if quote["finalKopecks"] != 0:
+            raise ValueError("промокод не покрывает всё — оформи счёт со скидкой")
+        promo_consume(conn, quote["code"])
+        act = _activate_row(conn, int(user_id), period, PROVIDER_PROMO,
+                            now_ms, PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT,
+                            reason="subscription:promo")
+        for _ in range(20):
+            try:
+                cur = conn.execute("""INSERT INTO subscription_payments
+                                (user_id, subscription_id, amount_kopecks, currency, period,
+                                 status, provider, provider_payment_id, idempotency_key,
+                                 public_id, payload_json, created_at_ms, paid_at_ms)
+                                VALUES (?,?,0,'RUB',?, 'succeeded','promo',NULL,NULL,?,?,?,?)""",
+                                   (int(user_id), act["subscriptionId"], period,
+                                    _new_payment_public_id(),
+                                    json.dumps({"promo": quote["code"]}, ensure_ascii=False),
+                                    now_ms, now_ms))
+                break
+            except sqlite3.IntegrityError:
+                continue
+        else:
+            raise ValueError("не удалось записать платёж")
+        conn.execute("UPDATE subscription_payments SET subscription_id=? WHERE id=?",
+                     (act["subscriptionId"], int(cur.lastrowid)))
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "paymentId": None, "amountKopecks": 0,
+            "discountKopecks": quote["discountKopecks"], "promo": quote["code"],
+            "period": period, "status": PAY_SUCCEEDED, "provider": PROVIDER_PROMO,
+            **act}
+
+
+def admin_bonus(conn: sqlite3.Connection, refs, period: str, note: str = "",
+                include_waitlist: bool = False,
+                actor: int | None = None) -> dict:
+    """Массовая выдача Plus: розыгрыш, условие, компенсация — любой повод
+    в note (видно в истории платежей). refs — account_id («a7k29x») или
+    числовые id; include_waitlist добавляет ждущих из старого листа ожидания
+    (их же помечает выданными, чтобы статистика листа осталась честной).
+    Каждому — обычный admin_grant: продления складываются, повтор безопасен."""
+    ensure_subscription_schema(conn)
+    ensure_plus_waitlist(conn)
+    if period not in PERIODS:
+        raise ValueError("period должен быть month или year")
+    note = str(note or "").strip()[:200] or "bonus"
+    raws: list[str] = []
+    for r in (refs or []):
+        text = str(r or "").strip()
+        if text and text not in raws:
+            raws.append(text)
+    if len(raws) > BONUS_BATCH_MAX:
+        raise ValueError(f"получателей больше {BONUS_BATCH_MAX} — разбей на части")
+    now_ms = NOW_MS()
+    own = _begin(conn)
+    granted: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        if include_waitlist:
+            rows = conn.execute("SELECT user_id FROM plus_waitlist"
+                                " WHERE granted_at_ms IS NULL ORDER BY user_id").fetchall()
+            for r in rows:
+                try:
+                    acc = conn.execute("SELECT account_id FROM users WHERE id=?",
+                                       (int(r["user_id"]),)).fetchone()
+                except sqlite3.Error:
+                    acc = None
+                if acc and acc["account_id"] and str(acc["account_id"]) not in raws:
+                    raws.append(str(acc["account_id"]))
+        pending_wait = {int(r["user_id"]) for r in
+                        conn.execute("SELECT user_id FROM plus_waitlist"
+                                     " WHERE granted_at_ms IS NULL").fetchall()}
+        for ref in raws:
+            uid = None
+            if ref.isdigit():
+                row = conn.execute("SELECT id, account_id FROM users WHERE id=?",
+                                   (int(ref),)).fetchone()
+            else:
+                row = conn.execute("SELECT id, account_id FROM users WHERE account_id=?",
+                                   (ref,)).fetchone()
+            if not row:
+                skipped.append({"ref": ref, "reason": "не найден"})
+                continue
+            uid = int(row["id"])
+            admin_grant(conn, uid, period, note=note, actor=actor)
+            if uid in pending_wait:
+                conn.execute("UPDATE plus_waitlist SET granted_at_ms=? WHERE user_id=?",
+                             (now_ms, uid))
+            granted.append({"ref": ref, "userId": uid,
+                            "accountId": row["account_id"]})
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "granted": granted, "grantedCount": len(granted),
+            "skipped": skipped, "skippedCount": len(skipped),
+            "period": period, "note": note}
+
+
 def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
                           free_agent: int = 10) -> dict:
     """Сводка для раздела «Подписка» в админке: люди, деньги, очередь.
@@ -1210,7 +1578,7 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
 
     money = one("SELECT COUNT(*) AS c, COALESCE(SUM(amount_kopecks),0) AS s"
                 " FROM subscription_payments"
-                " WHERE status='succeeded' AND provider<>'manual'") or {}
+                " WHERE status='succeeded' AND provider NOT IN ('manual','promo')") or {}
     try:
         paid_count, revenue = int(money["c"] or 0), int(money["s"] or 0)
     except (TypeError, ValueError, KeyError):
@@ -1227,6 +1595,16 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
                             " WHERE status='pending'"))
 
     waitlist = launch_waitlist_stats(conn)
+    promo_rows = promo_list(conn)
+    promo_used = 0
+    promo_active = 0
+    for pr in promo_rows:
+        try:
+            promo_used += int(pr.get("used") or 0)
+        except (TypeError, ValueError):
+            pass
+        if pr.get("active"):
+            promo_active += 1
 
     recent = []
     try:
@@ -1261,6 +1639,8 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
                       "pendingCount": pending_count},
             "waitlist": {"total": waitlist["total"], "pending": waitlist["pending"],
                          "granted": waitlist["granted"]},
+            "promos": {"total": len(promo_rows), "active": promo_active,
+                       "usedTotal": promo_used, "list": promo_rows},
             "config": {"priceMonthKopecks": plus_price_kopecks(PERIOD_MONTH),
                        "priceYearKopecks": plus_price_kopecks(PERIOD_YEAR),
                        "plusEssay": PLUS_ESSAY_LIMIT, "plusAgent": PLUS_AGENT_LIMIT,
@@ -1414,23 +1794,28 @@ def create_platega_checkout(conn: sqlite3.Connection, user_id: int,
                             period: str,
                             idempotency_key: str | None = None,
                             return_url: str = "",
-                            failed_url: str = "") -> dict:
+                            failed_url: str = "",
+                            promo_code: str | None = None) -> dict:
     """Настоящий checkout: локальный pending + счёт в шлюзе.
 
     Идемпотентен по ключу вместе с базовым create_checkout; ссылку шлюза
     создаёт один раз и хранит в payload_json: повтор отдаёт сохранённую
     без нового вызова. Счёт в шлюзе не создан (сеть легла) — pending живёт
-    для повтора тем же ключом, деньги никуда не ушли."""
+    для повтора тем же ключом, деньги никуда не ушли. Счёт выставляется на
+    записанную в платеже сумму (уже со скидкой, если был промокод);
+    код на 100% шлюза не касается — Plus уже активен."""
     cfg = platega_config()
     if cfg is None:
         raise PermissionError("оплата не настроена")
     if period not in PERIODS:
         raise ValueError("period должен быть month или year")
-    amount_kop = plus_price_kopecks(period)
+    created = create_checkout(conn, int(user_id), period,
+                              PROVIDER_PLATEGA, idempotency_key, promo_code)
+    if created.get("status") == PAY_SUCCEEDED:
+        return created
+    amount_kop = int(created.get("amountKopecks") or 0)
     if amount_kop <= 0 or amount_kop % 100:
         raise ValueError("тариф не представим в рублях для шлюза")
-    created = create_checkout(conn, int(user_id), period,
-                              PROVIDER_PLATEGA, idempotency_key)
     row = conn.execute("SELECT * FROM subscription_payments WHERE public_id=?",
                        (created["paymentId"],)).fetchone()
     pay = _row_to_dict(row)
@@ -1506,6 +1891,7 @@ def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
             conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=?"
                          " WHERE id=?",
                          (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+            _consume_payment_promo(conn, pay)
             act = _activate_row(conn, int(pay["user_id"]), str(pay.get("period")),
                                 PROVIDER_PLATEGA, now_ms,
                                 PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT)
@@ -1657,6 +2043,7 @@ def platega_webhook(conn: sqlite3.Connection, txn_id: str, status: str,
             conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=?"
                          " WHERE id=?",
                          (PAY_SUCCEEDED, now_ms, int(pay["id"])))
+            _consume_payment_promo(conn, pay)
             act = _activate_row(conn, int(pay["user_id"]), str(pay.get("period")),
                                 PROVIDER_PLATEGA, now_ms,
                                 PLUS_ESSAY_LIMIT, PLUS_AGENT_LIMIT,

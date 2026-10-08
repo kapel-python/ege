@@ -105,6 +105,16 @@
 .dlg--blocked .dlg-device__icon { background: var(--danger-soft, var(--red-soft)); color: var(--danger, var(--red)); }
 .dlg-kv__row--col { flex-direction: column; align-items: stretch; gap: 4px; }
 .dlg-kv__row--col > span:last-child { text-align: left; }
+/* Промокод в окне оплаты: подпись + короткое поле. Стили свои, потому что
+   .dlg — общая система без форм: тянуть сюда классы админки нельзя. */
+.dlg-promo { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13.5px; }
+.dlg-promo label { color: var(--muted, var(--text-soft, var(--text-faint, inherit))); flex-shrink: 0; }
+.dlg-promo input {
+  flex: 1 1 auto; min-width: 0; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--card-border, var(--ghost-ring, rgba(127, 127, 127, 0.35)));
+  background: transparent; color: inherit; font: inherit; text-transform: uppercase;
+}
+.dlg-promo input::placeholder { text-transform: none; opacity: 0.6; }
 .dlg__actions--single { justify-content: stretch; }
 .dlg__actions--single .btn { flex: 1 1 auto; }
 

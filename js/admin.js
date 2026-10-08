@@ -1839,6 +1839,9 @@ const AUDIT_ACTIONS = {
   "subscription-revoke": ["plus", "Доступ отозван", "a-chip--danger"],
   "subscription-refund": ["plus", "Возврат", "a-chip--warn"],
   "subscription-waitlist-grant": ["plus", "Plus очереди", "a-chip--success"],
+  "subscription-bonus": ["plus", "Plus списку", "a-chip--success"],
+  "promo-create": ["plus", "Промокод создан", "a-chip--success"],
+  "promo-toggle": ["plus", "Промокод вкл/выкл", ""],
   "providers.judge": ["providers", "Судья назначен", "a-chip--accent"],
   "ai-provider-create": ["providers", "Провайдер добавлен", "a-chip--success"],
   "ai-provider-slots": ["providers", "Приоритеты", ""],
@@ -1956,6 +1959,23 @@ const AUDIT_DETAIL = {
     if (!m) return "";
     const n = Number(m[2]);
     return `Plus на ${m[1] === "year" ? "год" : "месяц"} × ${n} ${plural(n, "человек", "человека", "человек")}`;
+  },
+  "subscription-bonus": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+x(\d+)\s*(.*)$/);
+    if (!m) return "";
+    const n = Number(m[2]);
+    return `Plus на ${m[1] === "year" ? "год" : "месяц"} × ${n}${m[3] ? ` · ${m[3]}` : ""}`;
+  },
+  "promo-create": (e) => {
+    const m = String(e.detail || "").match(/^(\S+)\s+(percent|fixed)\s+(\S+)/);
+    if (!m) return "";
+    const size = m[2] === "percent" ? `−${m[3]}%` : `−${auditRub(Number(m[3]) || 0)}`;
+    return `код ${m[1]} · ${size}`;
+  },
+  "promo-toggle": (e) => {
+    const m = String(e.detail || "").match(/^(\S+)\s+(on|off)/);
+    if (!m) return "";
+    return `код ${m[1]} ${m[2] === "on" ? "включён" : "выключен"}`;
   },
   "providers.judge": (e) => {
     const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
@@ -2106,6 +2126,26 @@ const AUDIT_ROWS = {
     const n = Number(m[2]);
     return [["Срок", m[1] === "year" ? "год" : "месяц"],
       ["Получили", `${n} ${plural(n, "человек", "человека", "человек")}`]];
+  },
+  "subscription-bonus": (e) => {
+    const m = String(e.detail || "").match(/^(month|year)\s+x(\d+)\s*(.*)$/);
+    if (!m) return [];
+    const n = Number(m[2]);
+    const rows = [["Срок", m[1] === "year" ? "год" : "месяц"],
+      ["Получили", `${n} ${plural(n, "человек", "человека", "человек")}`]];
+    if (m[3]) rows.push(["Повод", m[3]]);
+    return rows;
+  },
+  "promo-create": (e) => {
+    const m = String(e.detail || "").match(/^(\S+)\s+(percent|fixed)\s+(\S+)/);
+    if (!m) return [];
+    const size = m[2] === "percent" ? `−${m[3]}%` : `−${auditRub(Number(m[3]) || 0)}`;
+    return [["Код", m[1]], ["Скидка", size]];
+  },
+  "promo-toggle": (e) => {
+    const m = String(e.detail || "").match(/^(\S+)\s+(on|off)/);
+    if (!m) return [];
+    return [["Код", m[1]], ["Состояние", m[2] === "on" ? "включён" : "выключен"]];
   },
   "providers.judge": (e) => {
     const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
@@ -4797,6 +4837,8 @@ async function screenSubscription() {
     return;
   }
   const u = data.users, s = data.subs, m = data.money, w = data.waitlist, cfg = data.config;
+  const pr = data.promos || { list: [], total: 0, active: 0, usedTotal: 0 };
+  A.lastSub = data;
   const screen = `
     <div class="a-stats">
       ${statTile("Аккаунтов", fmtNum(u.total), `онбординг: ${fmtNum(u.onboarded)}`)}
@@ -4811,19 +4853,35 @@ async function screenSubscription() {
       ${statTile("Ожидают оплаты", fmtNum(m.pendingCount), "pending-платежи")}
     </div>
 
-    <div class="a-section-title">Лист ожидания</div>
-    <div class="a-card"${w.pending ? ' style="border-color:var(--accent-ring)"' : ""}>
-      <div class="a-card__head"><span class="a-card__title">«Напомнить о запуске»</span><span class="a-card__sub">${w.pending ? `ждут: ${fmtNum(w.pending)}` : "очередь пуста"}</span></div>
-      <div class="a-kv">
-        <div class="a-kv__item"><div class="a-kv__k">Нажали кнопку</div><div class="a-kv__v">${fmtNum(w.total)}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Ждут выдачи</div><div class="a-kv__v">${fmtNum(w.pending)}</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Уже получили</div><div class="a-kv__v">${fmtNum(w.granted)}</div></div>
+    <div class="a-section-title">Поощрения</div>
+    <div class="a-card" style="margin-bottom:14px">
+      <div class="a-card__head"><span class="a-card__title">Выдать Plus</span><span class="a-card__sub">розыгрыш · условие · компенсация</span></div>
+      <div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <div class="a-field"><label for="bonusPeriod">Срок</label>
+          <select class="a-select" id="bonusPeriod"><option value="month">Месяц</option><option value="year">Год</option></select>
+        </div>
+        <div class="a-field"><label for="bonusNote">Повод (попадёт в историю платежей)</label>
+          <input class="a-input" id="bonusNote" maxlength="200" placeholder="розыгрыш, условие, компенсация…" autocomplete="off">
+        </div>
       </div>
-      <div style="font-size:13.5px;color:var(--text-2);margin-top:12px">Выдача — месяц <span class="plus">Plus</span> каждому ждущему как ручной грант (платёж 0 ₽ в истории). У кого Plus уже есть — месяц добавится сверху. Повтор безопасен: получившие пропускаются.</div>
+      <div class="a-field" style="margin-top:10px"><label for="bonusRefs">Получатели — account ID, по одному в строке</label>
+        <textarea class="a-textarea" id="bonusRefs" rows="3" placeholder="a7k29x&#10;b3m81q" autocomplete="off" spellcheck="false"></textarea>
+        <span class="a-field__hint" id="bonusCount">получателей: 0</span>
+      </div>
+      ${w.pending ? `<label class="a-check"><input type="checkbox" id="bonusWaitlist" checked> <span>Плюс ждущие из старого листа ожидания — ${fmtNum(w.pending)} ${plural(w.pending, "человек", "человека", "человек")} (пометка «выдано» сохранится)</span></label>` : ""}
+      <div style="font-size:13.5px;color:var(--text-2);margin-top:12px">Каждому — месяц или год как ручной грант (0 ₽ в истории). У кого Plus уже есть — срок продлится. Неизвестные ID пропускаются с причиной.</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
-        <button class="btn btn--primary btn--sm" id="waitlistGrantBtn"${w.pending ? "" : " disabled title=\"Очередь пуста — выдавать некому\""}>Выдать месяц <span class="plus">Plus</span> — ${fmtNum(w.pending)} ${plural(w.pending, "человек", "человека", "человек")}</button>
+        <button class="btn btn--primary btn--sm" id="bonusBtn">Выдать Plus</button>
         <button class="btn btn--soft btn--sm" onclick="screenSubscription()">Обновить</button>
       </div>
+    </div>
+
+    <div class="a-card">
+      <div class="a-card__head"><span class="a-card__title">Промокоды</span><span class="a-card__sub">${fmtNum(pr.active)} активны · использований: ${fmtNum(pr.usedTotal)}</span></div>
+      <div class="a-card__sub" style="margin-bottom:10px">Скидка применяется к счёту в окне оплаты; код на 100% включает Plus сразу без шлюза. Выключенный код новые счета не даёт, оплаченные чтут.</div>
+      ${(pr.list && pr.list.length) ? `<div class="a-paylist">${pr.list.map(promoRowHTML).join("")}</div>`
+        : `<div class="a-empty"><div class="a-empty__title">Кодов пока нет</div><div class="a-empty__sub">Создай первый — например, на розыгрыш</div></div>`}
+      <div style="margin-top:12px"><button class="btn btn--soft btn--sm" id="promoNewBtn">+ Создать код</button></div>
     </div>
 
     <div class="a-section-title">Тариф</div>
@@ -4851,49 +4909,226 @@ async function screenSubscription() {
       : `<div class="a-empty"><div class="a-empty__title">Платежей пока нет</div><div class="a-empty__sub">Здесь появятся чеки после первой оплаты или выдачи</div></div>`}
     </div>`;
   renderShell("subscription", screen);
-  const grantBtn = document.getElementById("waitlistGrantBtn");
-  if (grantBtn && !grantBtn.disabled) {
-    grantBtn.onclick = () => openWaitlistGrantModal(w.pending);
+  const refsEl = document.getElementById("bonusRefs");
+  const countEl = document.getElementById("bonusCount");
+  const recountBonus = () => {
+    if (countEl) countEl.textContent = "получателей: " + parseBonusRefs(refsEl ? refsEl.value : "").length;
+  };
+  if (refsEl) refsEl.addEventListener("input", recountBonus);
+  recountBonus();
+  const bonusBtn = document.getElementById("bonusBtn");
+  if (bonusBtn) bonusBtn.onclick = openBonusModal;
+  const promoNewBtn = document.getElementById("promoNewBtn");
+  if (promoNewBtn) promoNewBtn.onclick = openPromoModal;
+}
+
+/* Получатели выдачи: account ID через пробелы/запятые/строки, без дублей. */
+function parseBonusRefs(text) {
+  const out = [];
+  String(text || "").split(/[\s,;]+/).forEach((t) => {
+    const s = t.trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  });
+  return out;
+}
+
+function promoSizeText(p) {
+  const v = Number(p.value) || 0;
+  const size = p.kind === "percent" ? `−${v}%` : `−${fmtMoney(v)}`;
+  const per = p.period === "month" ? "месяц" : p.period === "year" ? "год" : "любой тариф";
+  return `${size} · ${per}`;
+}
+
+function promoUseText(p) {
+  const used = fmtNum(p.used || 0);
+  return p.maxUses == null ? `${used} / ∞` : `${used} / ${fmtNum(p.maxUses)}`;
+}
+
+function promoExpText(p) {
+  if (!p.expiresAt) return "бессрочно";
+  const t = Number(p.expiresAt);
+  if (!Number.isFinite(t)) return "—";
+  const past = t <= Date.now();
+  return new Date(t).toLocaleDateString("ru-RU") + (past ? " (истёк)" : "");
+}
+
+function promoRowHTML(p) {
+  return `<div class="a-payrow">
+    <div class="a-payrow__main">
+      <div class="a-payrow__t mono">${esc(p.code)}${p.active ? "" : ' · <span style="color:var(--muted)">выкл</span>'}</div>
+      <div class="a-payrow__d">${esc(promoSizeText(p))} · ${esc(promoUseText(p))} · ${esc(promoExpText(p))}${p.note ? ` · ${esc(p.note)}` : ""}</div>
+    </div>
+    <div class="a-payrow__r"><button class="btn btn--soft btn--sm" onclick="togglePromo('${esc(p.code)}', ${p.active ? "false" : "true"})">${p.active ? "Выключить" : "Включить"}</button></div>
+  </div>`;
+}
+
+async function togglePromo(code, on) {
+  try {
+    await AdminApi.post("/api/admin/subscription/promos", { action: "set_active", code, active: !!on });
+    toast(on ? "Промокод включён" : "Промокод выключен");
+  } catch (e) {
+    if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
+    toast(`Не получилось: ${e.message || "ошибка"}`, "err");
+    return;
   }
+  await screenSubscription();
 }
 
 /* Подтверждение выдачи: кнопка оживает только при точном вводе числа.
    Число видно прямо в окне — сверять не с чем, кроме внимательности,
    и это весь смысл: случайный клик «Выдать» ничего не выдаёт. */
-function openWaitlistGrantModal(pending) {
-  const n = Number(pending) || 0;
-  if (n <= 0) return;
+function openBonusModal() {
+  const period = (document.getElementById("bonusPeriod") || {}).value === "year" ? "year" : "month";
+  const note = ((document.getElementById("bonusNote") || {}).value || "").trim();
+  const refs = parseBonusRefs((document.getElementById("bonusRefs") || {}).value);
+  const wlBox = document.getElementById("bonusWaitlist");
+  const wlPending = (A.lastSub && A.lastSub.waitlist && Number(A.lastSub.waitlist.pending)) || 0;
+  const includeWl = !!(wlBox && wlBox.checked && wlPending > 0);
+  const total = refs.length + (includeWl ? wlPending : 0);
+  if (total <= 0) { toast("Добавь получателей или отметь лист ожидания", "err"); return; }
+  const perName = period === "year" ? "год" : "месяц";
   openModal(`
-    <div class="a-modal__title">Выдать месяц <span class="plus">Plus</span> — ${fmtNum(n)} ${plural(n, "человек", "человека", "человек")}?</div>
-    <div class="a-modal__desc">Каждый ждущий получит месяц как ручной грант (0 ₽, пометка launch-waitlist). У кого Plus уже есть — срок продлится. Запись попадёт в журнал действий. Повторная выдача тех же людей невозможна.</div>
+    <div class="a-modal__title">Выдать <span class="plus">Plus</span> на ${perName} — ${fmtNum(total)} ${plural(total, "человек", "человека", "человек")}?</div>
+    <div class="a-modal__desc">Из списка: ${fmtNum(refs.length)}${includeWl ? `, из листа ожидания: ${fmtNum(wlPending)}` : ""}.${note ? ` Повод: ${esc(note)}.` : ""} У кого Plus уже есть — срок продлится. Запись попадёт в журнал действий.</div>
     <div class="a-modal__form">
-      <div class="a-modal__warn"><b>Подтверждение:</b> введи число <span class="mono">${fmtNum(n)}</span></div>
-      <input class="a-input mono" id="fGrant" placeholder="${fmtNum(n)}" autocomplete="off" inputmode="numeric">
+      <div class="a-modal__warn"><b>Подтверждение:</b> введи число <span class="mono">${fmtNum(total)}</span></div>
+      <input class="a-input mono" id="fBonus" placeholder="${fmtNum(total)}" autocomplete="off" inputmode="numeric">
       <div id="mErr"></div>
     </div>
     <div class="a-modal__actions">
       <button class="btn btn--soft" id="mCancel">Отмена</button>
-      <button class="btn btn--primary" id="mDo" disabled>Выдать ${fmtNum(n)} ${plural(n, "подписку", "подписки", "подписок")}</button>
+      <button class="btn btn--primary" id="mDo" disabled>Выдать ${fmtNum(total)} ${plural(total, "подписку", "подписки", "подписок")}</button>
     </div>`, (modal) => {
-    const input = modal.querySelector("#fGrant");
+    const input = modal.querySelector("#fBonus");
     const doBtn = modal.querySelector("#mDo");
     modal.querySelector("#mCancel").onclick = closeModal;
-    input.oninput = () => { doBtn.disabled = input.value.trim() !== String(n); };
+    input.oninput = () => { doBtn.disabled = input.value.trim() !== String(total); };
     input.focus();
     doBtn.onclick = async () => {
-      if (input.value.trim() !== String(n)) return;
+      if (input.value.trim() !== String(total)) return;
       doBtn.disabled = true;
       doBtn.textContent = "Выдаём…";
       try {
-        const result = await AdminApi.post("/api/admin/subscription/waitlist", { action: "grant", period: "month" });
+        const result = await AdminApi.post("/api/admin/subscription/bonus", {
+          recipients: refs, includeWaitlist: includeWl, period, note,
+        });
         closeModal();
-        toast(`Выдано подписок: ${fmtNum(result.grantedCount)}`);
+        openBonusResultModal(result);
         await screenSubscription();
       } catch (e) {
-        if (e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
         doBtn.disabled = false;
-        doBtn.textContent = `Выдать ${fmtNum(n)} ${plural(n, "подписку", "подписки", "подписок")}`;
+        doBtn.textContent = `Выдать ${fmtNum(total)} ${plural(total, "подписку", "подписки", "подписок")}`;
         modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
+/* Итог выдачи: сколько дошло, кого пропустили и почему. */
+function openBonusResultModal(result) {
+  const granted = Number(result.grantedCount) || 0;
+  const skipped = Array.isArray(result.skipped) ? result.skipped : [];
+  openModal(`
+    <div class="a-modal__title">Выдано: ${fmtNum(granted)}</div>
+    <div class="a-modal__desc">${granted ? "Plus уже у получателей." : "Никому не выдано — проверь список."}${skipped.length ? ` Пропущено: ${fmtNum(skipped.length)}.` : ""}</div>
+    ${skipped.length ? `<div class="a-modal__form">${skipped.map((s) => `<div class="a-prov-kv"><span class="mono">${esc(s.ref || "")}</span><b>${esc(s.reason || "")}</b></div>`).join("")}</div>` : ""}
+    <div class="a-modal__actions"><button class="btn btn--soft" id="mOk">Понятно</button></div>`, (modal) => {
+    modal.querySelector("#mOk").onclick = closeModal;
+  });
+}
+
+function randomPromoCode() {
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 6; i++) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+}
+
+/* Новый промокод: размер (процент или рубли), тариф, лимит использований,
+   срок и пометка-повод. Пустые лимит и срок — «без ограничений». */
+function openPromoModal() {
+  openModal(`
+    <div class="a-modal__title">Новый промокод</div>
+    <div class="a-modal__form">
+      <div class="a-field"><label for="fPromoCode">Код</label>
+        <div style="display:flex;gap:8px">
+          <input class="a-input mono" id="fPromoCode" maxlength="16" placeholder="LETO20" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
+          <button class="btn btn--soft" id="fPromoDice" type="button" title="Сгенерировать код">🎲</button>
+        </div>
+        <span class="a-field__hint">4–16 символов A–Z/0–9</span>
+      </div>
+      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+        <div class="a-field"><label for="fPromoKind">Тип скидки</label>
+          <select class="a-select" id="fPromoKind"><option value="percent">Процент</option><option value="fixed">Рубли</option></select>
+        </div>
+        <div class="a-field"><label for="fPromoValue">Размер</label>
+          <input class="a-input mono" id="fPromoValue" inputmode="numeric" placeholder="20">
+          <span class="a-field__hint" id="fPromoValueHint">% от тарифа</span>
+        </div>
+      </div>
+      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+        <div class="a-field"><label for="fPromoPeriod">Тариф</label>
+          <select class="a-select" id="fPromoPeriod"><option value="any">Любой</option><option value="month">Месяц</option><option value="year">Год</option></select>
+        </div>
+        <div class="a-field"><label for="fPromoMax">Использований (пусто — ∞)</label>
+          <input class="a-input mono" id="fPromoMax" inputmode="numeric" placeholder="∞">
+        </div>
+      </div>
+      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+        <div class="a-field"><label for="fPromoExp">Срок до (пусто — бессрочно)</label>
+          <input class="a-input" id="fPromoExp" type="date">
+        </div>
+        <div class="a-field"><label for="fPromoNote">Пометка</label>
+          <input class="a-input" id="fPromoNote" maxlength="200" placeholder="розыгрыш…" autocomplete="off">
+        </div>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mDo">Создать</button>
+    </div>`, (modal) => {
+    const kind = modal.querySelector("#fPromoKind");
+    const hint = modal.querySelector("#fPromoValueHint");
+    const syncHint = () => { hint.textContent = kind.value === "percent" ? "% от тарифа (100 = бесплатно)" : "рублей (покрывает всё = бесплатно)"; };
+    kind.onchange = syncHint;
+    syncHint();
+    modal.querySelector("#fPromoDice").onclick = () => { modal.querySelector("#fPromoCode").value = randomPromoCode(); };
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mDo").onclick = async () => {
+      const errBox = modal.querySelector("#mErr");
+      const val = (id) => (modal.querySelector(id) || {}).value;
+      let expiresAt = null;
+      const expRaw = (val("#fPromoExp") || "").trim();
+      if (expRaw) {
+        const m = expRaw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) { errBox.innerHTML = `<div class="a-modal__error">Дата — в формате ГГГГ-ММ-ДД</div>`; return; }
+        expiresAt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 0).getTime();
+        if (!Number.isFinite(expiresAt)) { errBox.innerHTML = `<div class="a-modal__error">Некорректная дата</div>`; return; }
+      }
+      const maxRaw = (val("#fPromoMax") || "").trim();
+      const body = {
+        action: "create",
+        code: (val("#fPromoCode") || "").trim(),
+        kind: val("#fPromoKind"),
+        value: (val("#fPromoValue") || "").trim(),
+        period: val("#fPromoPeriod"),
+        maxUses: maxRaw === "" ? null : maxRaw,
+        expiresAt,
+        note: (val("#fPromoNote") || "").trim(),
+      };
+      const doBtn = modal.querySelector("#mDo");
+      doBtn.disabled = true;
+      try {
+        const res = await AdminApi.post("/api/admin/subscription/promos", body);
+        closeModal();
+        toast(`Промокод ${res.promo.code} создан`);
+        await screenSubscription();
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        doBtn.disabled = false;
+        errBox.innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
       }
     };
   });
