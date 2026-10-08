@@ -327,8 +327,8 @@ def main():
         check("история: 2 записи и total",
               s == 200 and len(hist["payments"]) == 2 and hist["total"] >= 3
               and hist["payments"][0]["id"] > hist["payments"][1]["id"], hist)
-        check("у записи есть деньги и провайдер",
-              all(set(p) >= {"amountKopecks", "currency", "period", "status", "provider"}
+        check("у записи есть деньги, провайдер и заметка",
+              all(set(p) >= {"amountKopecks", "currency", "period", "status", "provider", "note"}
                   for p in hist["payments"]), hist["payments"])
         s, full = request(user, base, "/api/subscription/payments?limit=50&offset=0")
         check("история отдаёт publicId того же платежа",
@@ -349,9 +349,10 @@ def main():
               s == 200 and res["subscription"]["active"] is True, res)
         s, hist2 = request(user2, base, "/api/subscription/payments", "GET", None, "10.9.0.2")
         manual = [p for p in hist2["payments"] if p["provider"] == "manual"]
-        check("грант виден в истории как 0₽ manual",
+        check("грант виден в истории как 0₽ manual с заметкой",
               len(manual) == 1 and manual[0]["amountKopecks"] == 0
-              and manual[0]["status"] == "succeeded", manual)
+              and manual[0]["status"] == "succeeded"
+              and manual[0].get("note") == "тест", manual)
         buckets = {r["owner"]: r["count"] for r in db(
             "SELECT owner, count FROM ai_usage WHERE owner IN ('u:' || "
             "(SELECT id FROM users WHERE account_id=?), 'agent:' || "

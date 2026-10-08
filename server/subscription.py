@@ -1129,19 +1129,29 @@ def payment_history(conn: sqlite3.Connection, user_id: int, limit: int = 50,
     if not 0 <= offset <= 1_000_000_000:
         raise ValueError("offset вне диапазона")
     rows = conn.execute("""SELECT id, public_id, amount_kopecks, currency, period, status,
-                                  provider, provider_payment_id, created_at_ms, paid_at_ms
+                                  provider, provider_payment_id, created_at_ms, paid_at_ms,
+                                  payload_json
                            FROM subscription_payments WHERE user_id=?
                            ORDER BY id DESC LIMIT ? OFFSET ?""",
                         (int(user_id), limit, offset)).fetchall()
     total = conn.execute("SELECT COUNT(*) AS c FROM subscription_payments WHERE user_id=?",
                          (int(user_id),)).fetchone()
-    items = [{"id": r["id"], "publicId": r["public_id"],
-              "amountKopecks": r["amount_kopecks"],
-              "currency": r["currency"], "period": r["period"], "status": r["status"],
-              "provider": r["provider"],
-              "providerPaymentId": r["provider_payment_id"],
-              "createdAt": r["created_at_ms"], "paidAt": r["paid_at_ms"]}
-             for r in rows]
+    items = []
+    for r in rows:
+        row = _row_to_dict(r) or {}
+        # Заметка ручной выдачи («победитель олимпиады», «подарок…») лежит в
+        # payload_json; ученику показываем её в истории, чтобы грант не
+        # выглядел необъяснимым «выдано вручную».
+        note = str((_payload_data(row) or {}).get("note") or "").strip()[:200]
+        items.append({"id": row.get("id"), "publicId": row.get("public_id"),
+                      "amountKopecks": row.get("amount_kopecks"),
+                      "currency": row.get("currency"), "period": row.get("period"),
+                      "status": row.get("status"),
+                      "provider": row.get("provider"),
+                      "providerPaymentId": row.get("provider_payment_id"),
+                      "createdAt": row.get("created_at_ms"),
+                      "paidAt": row.get("paid_at_ms"),
+                      "note": note})
     return {"ok": True, "payments": items,
             "total": int(total["c"]) if total else 0,
             "limit": limit, "offset": offset}

@@ -474,18 +474,21 @@
     box.innerHTML = list.slice(0, 50).map(function(p){
       var ok = p.status === "succeeded";
       var sum = (Number(p.amountKopecks) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
-      var title = (Number(p.amountKopecks) === 0 && p.provider === "manual")
-        ? PLUS_WORD + " · выдано вручную"
-        : (Number(p.amountKopecks) === 0 && p.provider === "promo")
-          ? PLUS_WORD + " · по промокоду"
-          : PLUS_WORD + " · " + (p.period === "year" ? "год" : "месяц");
+      var note = String(p.note || "").trim();
+      var title = note
+        ? PLUS_WORD + " · " + note
+        : (Number(p.amountKopecks) === 0 && p.provider === "manual")
+          ? PLUS_WORD + " · выдано вручную"
+          : (Number(p.amountKopecks) === 0 && p.provider === "promo")
+            ? PLUS_WORD + " · по промокоду"
+            : PLUS_WORD + " · " + (p.period === "year" ? "год" : "месяц");
       return '<div class="hist__row">'
         + '<span class="hist__ico' + (ok ? " hist__ico--ok" : "") + '" aria-hidden="true">'
         + (ok
           ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>')
         + '</span>'
-        + '<span class="hist__what"><span class="hist__title">' + title + '</span><br>'
+        + '<span class="hist__what"><span class="hist__title">' + esc(title) + '</span><br>'
         + '<span class="hist__date">' + esc(fmtDate(p.paidAt || p.createdAt)) + '</span></span>'
         + '<span class="hist__sum num">' + esc(sum) + ' ₽ <small>' + esc(payStatusLabel(p)) + '</small></span>'
         + '</div>';
@@ -512,6 +515,15 @@
 
   function renderAll(st, hist, essayLim, agentLim){
     var plus = !!(st && st.active);
+    /* Заметка ручной выдачи («подарок…», «победитель олимпиады») из истории
+       платежей: объясняет, откуда Plus, вместо сухого «выдано вручную». */
+    var giftNote = "";
+    try {
+      var noted = ((hist && hist.payments) || []).filter(function(p){
+        return p && p.status === "succeeded" && String(p.note || "").trim();
+      });
+      if (noted.length) giftNote = String(noted[0].note).trim();
+    } catch (e) {}
     buyPeriod = (plus && st.period === "year") ? "year" : "month";
     buyPrice = buyPeriod === "year" ? PRICE_YEAR : PRICE_MONTH;
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
@@ -530,9 +542,12 @@
       pill.className = "";
       pill.innerHTML = PLUS_WORD;
       var periodText = st.period === "year" ? "год · " + PRICE_YEAR + " ₽" : "месяц · " + PRICE_MONTH + " ₽";
-      meta.textContent = "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
+      meta.textContent = giftNote
+        ? "Период: " + (st.period === "year" ? "год" : "месяц") + " · " + giftNote + " · доступ до " + fmtDate(st.expiresAt) + "."
+        : "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
       heroSub.textContent = cancelled
         ? "Доступ сохранится до конца оплаченного срока."
+        : giftNote ? "Подписка активна: " + giftNote + ". Лимиты уже увеличены."
         : "Подписка активна, лимиты уже увеличены.";
       meter.hidden = false;
       plabel.hidden = false;
