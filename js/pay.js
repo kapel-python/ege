@@ -542,7 +542,11 @@ var PayFlow = (function () {
       api("/api/subscription/payments?limit=10&offset=0").catch(function () { return null; })
     ]).then(function (res) {
       var st = res[0], hist = res[1];
-      if (!st || st.active) return; /* Plus уже активен — счёта не было или вебхук добежал */
+      if (!st) return; /* статус не пришёл — не выдумываем счёт */
+      /* Активный Plus больше НЕ прячет баннер: висящий счёт при активной
+         подписке — это неоплаченное продление или старый счёт после гранта,
+         и человеку нужна кнопка «Отменить счёт» (иначе он застревает:
+         промокод заблокирован старым счётом, а отменить его негде). */
       var list = (hist && hist.payments) || [];
       var pend = null;
       for (var i = 0; i < list.length; i++) {
@@ -603,7 +607,23 @@ var PayFlow = (function () {
             if (opts.onChanged) opts.onChanged();
             else window.location.reload();
           }
-        }).catch(function () {});
+        }).catch(function () {
+          /* Счёт мог истечь/отмениться на стороне шлюза — перечитываем
+             локальный статус: если он больше не pending, баннер и запрет
+             покупки должны уйти сами, без действий человека. */
+          api("/api/subscription/payments?limit=10&offset=0").then(function (hist) {
+            var list = (hist && hist.payments) || [];
+            for (var i = 0; i < list.length; i++) {
+              var p = list[i] || {};
+              if (p.publicId === ref || String(p.id) === String(ref)) {
+                if (p.status === "pending") return;
+                if (opts.onChanged) opts.onChanged();
+                else window.location.reload();
+                return;
+              }
+            }
+          }).catch(function () {});
+        });
       }
     });
   }

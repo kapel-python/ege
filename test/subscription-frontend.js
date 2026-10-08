@@ -211,6 +211,18 @@ function check(name, cond, detail) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paymentId: co.paymentId }),
     })).json();
+    /* Подчищаем pending от шага 2b: баннер «Счёт ждёт оплаты» теперь виден
+       и при активном Plus (правило: висящий счёт сначала завершить или
+       отменить), а дальше проверяем именно чистый экран управления Plus. */
+    const hist = await (await fetch("/api/subscription/payments?limit=10")).json();
+    for (const p of ((hist && hist.payments) || [])) {
+      if (p && p.status === "pending") {
+        await fetch("/api/subscription/payments/cancel", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId: p.publicId || p.id }),
+        });
+      }
+    }
     return { co, ok };
   });
   check("mock-покупка ok", bought.ok && bought.ok.ok === true, JSON.stringify(bought.ok).slice(0, 80));
@@ -331,6 +343,29 @@ function check(name, cond, detail) {
     return pill && /Plus/.test(pill.textContent);
   }, { timeout: 15000 });
   check("Plus активен после ожидания", true);
+
+  // --- активный Plus + висящий счёт: баннер виден, продления нет ----------
+  // Регресс застревания: счёт прятался при активной подписке, а промокод
+  // из-за него блокировался — отменить счёт было негде.
+  await p6.evaluate(async () => {
+    await fetch("/api/subscription/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ period: "month", idempotencyKey: "rest-" + Date.now() }),
+    });
+  });
+  await p6.goto(BASE + "/subscription/manage", { waitUntil: "domcontentloaded" });
+  await p6.waitForSelector(".pay-pending", { timeout: 15000 });
+  check("активный Plus + висящий счёт: баннер виден", true);
+  check("...продления нет и есть подсказка про счёт",
+    await p6.locator('#actionsRow [data-act="buy"]').count() === 0
+    && (await p6.textContent("#actionsSub")).includes("ждёт оплаты"),
+    await p6.textContent("#actionsSub"));
+  await p6.click(".pay-pending .btn:last-child");
+  await p6.waitForFunction(() => !document.querySelector(".pay-pending"), { timeout: 10000 });
+  await p6.waitForSelector('#actionsRow [data-act="buy"]', { timeout: 15000 });
+  check("после отмены счёта продление вернулось",
+    (await p6.textContent('#actionsRow [data-act="buy"]')).includes("Продлить"),
+    await p6.textContent('#actionsRow [data-act="buy"]'));
   await ctx6.close();
 
   /* Неверный промокод (проверка 2c) намеренно даёт один 400 — Chromium

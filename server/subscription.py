@@ -145,6 +145,14 @@ def _env_int(name: str, default: int, minimum: int = 0) -> int:
         return default
 
 
+# Сколько локально живёт неоплаченный счёт, прежде чем считаться отменённым.
+# Шлюз живёт заметно меньше (в интерфейсе обещано ~30 минут), но запас
+# большой осознанно: поздний CONFIRMED шлюза всё равно активирует счёт
+# (см. _confirm_platega/platega_webhook), поэтому это только гигиена —
+# вечный pending блокировал бы человеку промокод и покупку.
+PENDING_TTL_SEC = _env_int("EGE_PENDING_TTL_SEC", 3 * 3600, 60)
+
+
 def plus_price_kopecks(period: str) -> int:
     if period == PERIOD_YEAR:
         return _env_int("EGE_PLUS_PRICE_YEAR_KOP", 159000)
@@ -668,6 +676,7 @@ def create_checkout(conn: sqlite3.Connection, user_id: int, period: str,
     счёта не будет — Plus активируется сразу (redeem_promo)."""
     ensure_subscription_schema(conn)
     ensure_promo_schema(conn)
+    _expire_stale_pendings(conn)
     if period not in PERIODS:
         raise ValueError("period должен быть month или year")
     if provider not in (PROVIDER_MOCK, PROVIDER_MANUAL, PROVIDER_PLATEGA):
@@ -1124,10 +1133,37 @@ def admin_refund(conn: sqlite3.Connection, user_id: int,
     return out
 
 
+def _expire_stale_pendings(conn: sqlite3.Connection) -> int:
+    """Ленивая уборка: pending старше PENDING_TTL_SEC → cancelled.
+
+    Вызывается на чтении истории и перед созданием нового счёта. Не бросает;
+    присоединяется к чужой транзакции, свою неявную коммитит. Поздний
+    CONFIRMED шлюза по такой строке всё равно активирует — см.
+    _confirm_platega/platega_webhook."""
+    own = not conn.in_transaction
+    try:
+        cutoff = NOW_MS() - PENDING_TTL_SEC * 1000
+        cur = conn.execute("UPDATE subscription_payments SET status=?"
+                           " WHERE status=? AND created_at_ms<?",
+                           (PAY_CANCELLED, PAY_PENDING, cutoff))
+        count = int(cur.rowcount or 0)
+        if own:
+            conn.commit()
+        return count
+    except sqlite3.Error:
+        if own:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        return 0
+
+
 def payment_history(conn: sqlite3.Connection, user_id: int, limit: int = 50,
                     offset: int = 0) -> dict:
     """История платежей пользователя: свои записи, новые сверху."""
     ensure_subscription_schema(conn)
+    _expire_stale_pendings(conn)
     try:
         limit = int(limit)
     except (TypeError, ValueError):
@@ -2020,9 +2056,12 @@ def _resolve_payment(conn: sqlite3.Connection, payment_ref,
 
 def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
     """Подтверждение platega-платежа: только по живому статусу шлюза.
-    CONFIRMED — активация (продления складываются, как у mock);
-    CANCELED/EXPIRED/FAILED — строка гасится, клиенту честный текст;
-    PENDING — «оплата ещё не прошла», срока не двигаем."""
+
+    CONFIRMED активирует ЛЮБОЙ ещё не исполненный счёт (pending, локально
+    отменённый, просроченный по TTL): локальная отмена — это только
+    интерфейс, и если человек всё-таки заплатил, деньги обязаны стать
+    доступом, а не пропасть. Успешный повтор — already, возвращённый —
+    отказ. CANCELED/EXPIRED/FAILED гасят строку, PENDING — «ещё не прошла»."""
     cfg = platega_config()
     if cfg is None:
         raise PermissionError("оплата не настроена")
@@ -2031,8 +2070,8 @@ def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
         return {"ok": True, "already": True,
                 "paymentId": pay.get("public_id"), "status": PAY_SUCCEEDED,
                 "expiresAt": (sub or {}).get("expires_at_ms")}
-    if pay.get("status") != PAY_PENDING:
-        raise ValueError(f"платёж уже {pay.get('status')}, подтвердить нельзя")
+    if pay.get("status") == PAY_REFUNDED:
+        raise ValueError("платёж возвращён, подтвердить нельзя")
     live = platega_fetch_status(cfg, str(pay.get("provider_payment_id")))
     now_ms = NOW_MS()
     if live == "CONFIRMED":
@@ -2053,6 +2092,10 @@ def _confirm_platega(conn: sqlite3.Connection, pay: dict) -> dict:
             raise
         return {"ok": True, "already": False, "paymentId": pay.get("public_id"),
                 "status": PAY_SUCCEEDED, **act}
+    if pay.get("status") == PAY_CANCELLED:
+        # Локально счёт уже снят (человек отменил или истёк TTL), а шлюз
+        # подтверждения не даёт — гасить нечего, честный текст.
+        raise ValueError("счёт отменён")
     if live in ("CANCELED", "EXPIRED", "FAILED"):
         own = _begin(conn)
         try:
@@ -2186,8 +2229,13 @@ def platega_webhook(conn: sqlite3.Connection, txn_id: str, status: str,
                 "status": PAY_SUCCEEDED,
                 "expiresAt": (sub or {}).get("expires_at_ms")}
     if status == "CONFIRMED":
-        if pay.get("status") != PAY_PENDING:
-            raise ValueError(f"платёж уже {pay.get('status')}, подтвердить нельзя")
+        if pay.get("status") == PAY_REFUNDED:
+            # Возвращённый счёт не реактивируем: деньги уже вернули.
+            return {"ok": True, "already": True, "paymentId": pay.get("public_id"),
+                    "status": PAY_REFUNDED}
+        # Поздний CONFIRMED ещё не исполненного счёта (в т.ч. локально
+        # отменённого или просроченного по TTL) активируем: деньги пришли,
+        # и они обязаны превратиться в доступ.
         own = _begin(conn)
         try:
             conn.execute("UPDATE subscription_payments SET status=?, paid_at_ms=?"

@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 tmp = tempfile.mkdtemp(prefix="ege-sub-promos-")
 os.environ["EGE_DB_PATH"] = str(Path(tmp) / "ege.sqlite3")
 os.environ["EGE_SUBSCRIPTION_MOCK"] = "1"
+# TTL зависших счетов — минута: в тесте его проверяем, в проде дефолт 3 часа.
+os.environ["EGE_PENDING_TTL_SEC"] = "60"
 
 spec = importlib.util.spec_from_file_location("ege_sub_promos", ROOT / "server" / "subscription.py")
 assert spec and spec.loader
@@ -266,6 +268,33 @@ sub.promo_create(conn, "rkop", "fixed", 19850)
 q = sub.promo_quote(conn, "RKOP", "month")
 check("fixed с копейками: цена округляется вниз до рублей",
       q["finalKopecks"] % 100 == 0 and q["finalKopecks"] == 0, q)
+
+# --- TTL: зависший pending уходит в cancelled, свежий остаётся -------------
+now_ms = int(time.time() * 1000)
+old_ts = now_ms - (sub.PENDING_TTL_SEC + 60) * 1000
+for ts in (old_ts, now_ms - 1000):
+    conn.execute("INSERT INTO subscription_payments"
+                 " (user_id, amount_kopecks, period, status, provider, public_id,"
+                 "  payload_json, created_at_ms)"
+                 " VALUES (1, 200, 'month', 'pending', 'platega', ?, '{}', ?)",
+                 (sub._new_payment_public_id(), ts))
+conn.commit()
+n = sub._expire_stale_pendings(conn)
+statuses = [r["status"] for r in conn.execute(
+    "SELECT status FROM subscription_payments WHERE user_id=1 AND provider='platega'"
+    " ORDER BY created_at_ms").fetchall()]
+check("TTL: старый pending отменён, свежий остался",
+      n >= 1 and statuses.count("pending") == 1 and statuses.count("cancelled") >= 1,
+      statuses)
+# Просроченный счёт не должен блокировать промокод новому счёту.
+sub.promo_create(conn, "ttl2", "percent", 10)
+first = sub.create_checkout(conn, 1, "month", sub.PROVIDER_MOCK, "ttl-key-1", "TTL2")
+conn.execute("UPDATE subscription_payments SET created_at_ms=? WHERE public_id=?",
+             (old_ts, first["paymentId"]))
+conn.commit()
+second = sub.create_checkout(conn, 1, "month", sub.PROVIDER_MOCK, "ttl-key-2", "TTL2")
+check("просроченный счёт не блокирует код", second["status"] == "pending",
+      {k: second.get(k) for k in ("status", "promo", "amountKopecks")})
 
 print(f"\n{checks - failures}/{checks} ok")
 raise SystemExit(1 if failures else 0)

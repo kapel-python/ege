@@ -221,12 +221,15 @@ def main():
     again = SUB.cancel_pending_payment(conn, 1, cc["paymentId"])
     check("повторная отмена идемпотентна (already, не 400)",
           again.get("already") is True and again.get("status") == "cancelled")
+    # Шлюз по отменённому счёту НЕ подтверждает (PENDING) — отказ. Если бы
+    # шлюз сказал CONFIRMED, счёт обязан активироваться: см. секцию ниже.
+    fake_http.reply = {"status": "PENDING"}
     try:
         SUB.confirm_resolved(conn, cc["paymentId"], 1)
         dead = False
-    except ValueError:
-        dead = True
-    check("отменённый подтвердить нельзя", dead)
+    except ValueError as exc:
+        dead = "отменён" in str(exc)
+    check("отменённый без подтверждения шлюза — отказ", dead)
     try:
         SUB.cancel_pending_payment(conn, 2, cc["paymentId"])
         alien_cancel = False
@@ -239,6 +242,30 @@ def main():
     except KeyError:
         missing_cancel = True
     check("неизвестный счёт 404", missing_cancel)
+
+    section("поздний CONFIRMED отменённого счёта: деньги не теряются")
+    late1 = SUB.create_checkout(conn, 1, "month", SUB.PROVIDER_PLATEGA, "late-1")
+    SUB.cancel_pending_payment(conn, 1, late1["paymentId"])
+    fake_http.reply = {"status": "CONFIRMED"}
+    res_late = SUB.confirm_resolved(conn, late1["paymentId"], 1)
+    row = conn.execute("SELECT status FROM subscription_payments WHERE public_id=?",
+                       (late1["paymentId"],)).fetchone()
+    check("confirm по отменённому с CONFIRMED активирует",
+          res_late.get("ok") is True and row["status"] == "succeeded")
+    late2 = SUB.create_checkout(conn, 1, "year", SUB.PROVIDER_PLATEGA, "late-2")
+    SUB.cancel_pending_payment(conn, 1, late2["paymentId"])
+    res_wh = SUB.platega_webhook(conn, late2["providerPaymentId"], "CONFIRMED", 1590, "RUB")
+    row2 = conn.execute("SELECT status FROM subscription_payments WHERE public_id=?",
+                        (late2["paymentId"],)).fetchone()
+    check("вебхук по отменённому с CONFIRMED активирует",
+          res_wh.get("ok") is True and row2["status"] == "succeeded")
+    ref_co = SUB.create_checkout(conn, 1, "month", SUB.PROVIDER_PLATEGA, "late-3")
+    SUB.platega_webhook(conn, ref_co["providerPaymentId"], "CONFIRMED", 199, "RUB")
+    SUB.admin_refund(conn, 1, ref_co["paymentId"])
+    res_ref = SUB.platega_webhook(conn, ref_co["providerPaymentId"], "CONFIRMED", 199, "RUB")
+    check("CONFIRMED по возвращённому не реактивирует",
+          res_ref.get("already") is True and res_ref.get("status") == "refunded"
+          and SUB.subscription_status(conn, 1)["active"] is False)
 
     section("календарный месяц/год (детерминировано, без часов)")
     import calendar as _calmod
