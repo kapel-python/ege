@@ -130,6 +130,20 @@ function check(name, cond, detail) {
     dlgFree.includes("Оформить Plus") && dlgFree.includes("199"));
   await page.keyboard.press("Escape");
 
+  // период на manage выбирается: free может взять год, а не только месяц
+  check("manage free: сегмент периода виден, по умолчанию месяц",
+    await page.locator("#periodPick").isVisible()
+    && await page.locator('#periodPick [data-period="month"]').evaluate((el) => el.classList.contains("is-on")));
+  await page.click('#periodPick [data-period="year"]');
+  await page.click('#actionsRow [data-act="buy"]');
+  await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  const dlgYear = (await page.textContent("#pay-modal-root")).replace(/\u00a0/g, " ");
+  check("выбор года доходит до счёта (1590 ₽ и «год»)",
+    dlgYear.includes("год") && dlgYear.includes("1 590"), dlgYear.replace(/\s+/g, " ").slice(0, 120));
+  await page.keyboard.press("Escape");
+  await page.click('#periodPick [data-period="month"]');
+  check("возврат на месяц", await page.locator('#periodPick [data-period="month"]').evaluate((el) => el.classList.contains("is-on")));
+
   // --- 2b. залогиненный free жмёт купить на тарифе -> confirm, в mock — честная ошибка ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
   await page.waitForSelector('body[data-sub="free"]', { timeout: 10000 });
@@ -281,6 +295,10 @@ function check(name, cond, detail) {
   check("manage plus: плашка Plus без статусной таблетки",
     det.includes("Plus") && !det.includes("без продления") && !det.includes("Plus активен"));
 
+  check("manage plus: период продления по умолчанию — текущий (месяц)",
+    await page.locator("#periodPick").isVisible()
+    && await page.locator('#periodPick [data-period="month"]').evaluate((el) => el.classList.contains("is-on")));
+
   // «Продлить Plus» у активного — окно-подтверждение, счёт не создаём
   await page.click('#actionsRow [data-act="buy"]');
   await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
@@ -344,6 +362,7 @@ function check(name, cond, detail) {
   check("баннер незавершённого счёта", (await p6.textContent(".pay-pending")).includes("Счёт ждёт оплаты"));
   check("пока счёт ждёт оплаты, кнопки покупки нет",
     await p6.locator('#actionsRow [data-act="buy"]').count() === 0
+    && !(await p6.locator("#periodPick").isVisible())
     && (await p6.textContent("#actionsSub")).includes("ждёт оплаты"),
     await p6.textContent("#actionsSub"));
   // отмена своего pending — баннер уходит, покупка возвращается

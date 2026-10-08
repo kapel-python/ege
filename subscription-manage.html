@@ -185,6 +185,17 @@
   .hist__empty{font-size:13.5px;color:var(--text-faint);padding:10px 0;}
   /* действия */
   .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
+  /* Выбор периода при продлении/покупке: тот же смысл, что переключатель
+     на публичной странице тарифа, но без анимации — здесь он часть формы
+     действий. По умолчанию выбран текущий период подписки. */
+  .period-pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;}
+  .period-pick[hidden]{display:none;}
+  .period-pick__btn{padding:10px 18px;border-radius:999px;border:1px solid var(--card-border);
+    background:var(--surface-2);color:var(--text-dim);font:inherit;font-size:14px;font-weight:600;
+    cursor:pointer;transition:border-color .15s,background .15s,color .15s;}
+  .period-pick__btn:hover{border-color:var(--card-border-hover);color:var(--text);}
+  .period-pick__btn.is-on{border-color:var(--accent);background:var(--accent-dim);color:var(--text);}
+  .period-pick__btn b{color:var(--green, #16a34a);font-weight:700;}
   .tariff-link{margin-top:16px;font-size:13.5px;color:var(--text-dim);}
   .tariff-link a{color:var(--accent);font-weight:650;}
   .section{padding:clamp(20px,4vw,32px) 0 0;}
@@ -318,6 +329,10 @@
         <h2 class="card-title">Подписка</h2>
         <p class="card-sub" id="actionsSub">…</p>
         <div id="pendingSlot"></div>
+        <div class="period-pick" id="periodPick" hidden role="group" aria-label="Период подписки">
+          <button class="period-pick__btn" type="button" data-period="month" aria-pressed="false">Месяц · 199 ₽</button>
+          <button class="period-pick__btn" type="button" data-period="year" aria-pressed="false">Год · 1590 ₽ <b>−33%</b></button>
+        </div>
         <div class="actions" id="actionsRow"></div>
         <p class="tariff-link">Подробнее о тарифе — на <a href="/subscription">странице <span class="plus">Plus</span></a>.</p>
       </div>
@@ -495,9 +510,34 @@
     }).join("");
   }
 
-  /* Период и цена для покупки/продления (обновляются в renderAll). */
+  /* Период и цена для покупки/продления. По умолчанию — текущий период
+     подписки (месяц у бесплатных), но пользователь может выбрать любой:
+     сегмент #periodPick ниже. Выбор обновляет пару перед каждым счётом. */
   var buyPeriod = "month";
   var buyPrice = PRICE_MONTH;
+  var periodPickEl = document.getElementById("periodPick");
+
+  function syncPeriodPick(){
+    if (!periodPickEl) return;
+    var btns = periodPickEl.querySelectorAll("[data-period]");
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].getAttribute("data-period") === buyPeriod;
+      btns[i].classList.toggle("is-on", on);
+      btns[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+  function setBuyPeriod(p){
+    buyPeriod = p === "year" ? "year" : "month";
+    buyPrice = buyPeriod === "year" ? PRICE_YEAR : PRICE_MONTH;
+    syncPeriodPick();
+  }
+  if (periodPickEl) {
+    periodPickEl.addEventListener("click", function(e){
+      var b = e.target.closest("[data-period]");
+      if (!b || periodPickEl.hidden) return;
+      setBuyPeriod(b.getAttribute("data-period"));
+    });
+  }
 
   function paidRefresh(){
     toast("Оплата прошла — Plus активен");
@@ -524,8 +564,12 @@
       });
       if (noted.length) giftNote = String(noted[0].note).trim();
     } catch (e) {}
+    /* По умолчанию предлагаем тот же период, что уже оплачен (месяц —
+       бесплатным и месячным, год — годовым): продление тем же периодом
+       самый частый случай. Сегмент #periodPick позволяет выбрать другой. */
     buyPeriod = (plus && st.period === "year") ? "year" : "month";
     buyPrice = buyPeriod === "year" ? PRICE_YEAR : PRICE_MONTH;
+    syncPeriodPick();
     var cancelled = st.status === "cancelled" || st.cancelAtPeriodEnd === true;
     var essay = st.limits && st.limits.essay != null ? Number(st.limits.essay) : (plus ? 10 : 5);
     var agent = st.limits && st.limits.agent != null ? Number(st.limits.agent) : (plus ? 50 : 10);
@@ -596,14 +640,17 @@
       row.appendChild(b);
       return b;
     }
+    if (periodPickEl) periodPickEl.hidden = true;
     if (hasPending) {
       sub.textContent = "Есть счёт, который ждёт оплаты: заверши или отмени его — и покупка снова станет доступна.";
     } else if (plus) {
-      sub.textContent = "Доступ действует до конца оплаченного срока. Оплата — на стороне провайдера, данные карты нам не попадают.";
+      sub.textContent = "Доступ действует до конца оплаченного срока. Период продления — на выбор. Оплата — на стороне провайдера, данные карты нам не попадают.";
       btn("btn-primary btn--sm", "Продлить Plus", "buy");
+      if (periodPickEl) periodPickEl.hidden = false;
     } else {
-      sub.textContent = "Оплата — на стороне провайдера: деньги и карта не проходят через нас, к нам попадает только факт оплаты.";
-      btn("btn-primary btn--sm", "Оформить Plus · " + PRICE_MONTH + " ₽/мес", "buy");
+      sub.textContent = "Оплата — на стороне провайдера: деньги и карта не проходят через нас, к нам попадает только факт оплаты. Период — на выбор.";
+      btn("btn-primary btn--sm", "Оформить Plus", "buy");
+      if (periodPickEl) periodPickEl.hidden = false;
     }
     if (!row.getAttribute("data-bound")) {
       row.setAttribute("data-bound", "1");
