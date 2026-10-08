@@ -224,9 +224,6 @@
   .faq__item.is-open .faq__a{grid-template-rows:1fr;}
   .faq__a>div{overflow:hidden;}
   .faq__a p{font-size:13.5px;color:var(--text-dim);line-height:1.66;padding:2px 20px 18px;margin:0;max-width:72ch;}
-  /* PAYMENT-VERIFY-CSS: служебная пометка для согласования с банком.
-     Убрать вместе с блоком PAYMENT-VERIFY после регистрации кассы. */
-  .verify-note{font-size:12px;color:var(--text-faint);margin:0;}
   /* липкая панель покупки */
   .buybar{position:fixed;left:14px;right:14px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:60;
     display:none;align-items:center;gap:14px;padding:12px 12px 12px 18px;border-radius:18px;
@@ -299,7 +296,7 @@
     <div class="wrap">
       <div class="section-label rv">что меняется</div>
       <h2 class="section-title rv">Всё для подготовки — бесплатно. Plus даёт больше</h2>
-      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Plus увеличивает лимиты и добавляет личный план от ИИ. Сам ИИ сейчас бесплатен всем — 10 ходов в день.</p>
+      <p class="section-desc rv">Все задания, навыки, прогноз баллов и разбор сочинений доступны без подписки. Plus увеличивает лимиты и добавляет личный план от ИИ. На бесплатном тарифе ИИ — 10 ходов в день.</p>
       <div class="card-grid">
         <div class="card rv">
           <div class="card-icon" aria-hidden="true">
@@ -315,7 +312,7 @@
           </div>
           <div class="card-title">ИИ</div>
           <div class="card-big">50 ходов</div>
-          <p class="card-text">Разбор ошибок, план на неделю и ответы на основе твоего прогресса. Пока ИИ бесплатен всем — по 10 ходов в день.</p>
+          <p class="card-text">Разбор ошибок, план на неделю и ответы на основе твоего прогресса. На бесплатном тарифе — 10 ходов в день.</p>
         </div>
         <div class="card rv" style="--d:200ms">
           <div class="card-icon" aria-hidden="true">
@@ -351,7 +348,7 @@
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Прогноз баллов</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Разбор сочинений</span></li>
             <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Базовые лимиты: <b>5</b> проверок в день</span></li>
-            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>10</b> ходов в день · сейчас бесплатно всем</span></li>
+            <li class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ИИ: <b>10</b> ходов в день на бесплатном тарифе</span></li>
             <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>«Мои сочинения»: история и динамика баллов</span></li>
             <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg><span>Личный план от ИИ на любой срок</span></li>
           </ul>
@@ -389,20 +386,11 @@
         </div>
         <div class="faq__item rv">
           <button class="faq__q" type="button" aria-expanded="false">Как управлять подпиской?<span class="faq__sign" aria-hidden="true"></span></button>
-          <div class="faq__a"><div><p>Всё управление — в профиле: статус, срок и история платежей. Оплата скоро появится: оформить можно будет здесь и в профиле.</p></div></div>
+          <div class="faq__a"><div><p>Всё управление — в профиле и на странице управления: статус, срок и история платежей. Оплата — через провайдера (СБП/карта): после нажатия «Оформить» откроется страница оплаты, данные карты нам не попадают.</p></div></div>
         </div>
       </div>
     </div>
   </section>
-  <!-- PAYMENT-VERIFY-START: служебная пометка для согласования с банком.
-       Убрать после регистрации кассы (удалить весь блок между маркерами
-       PAYMENT-VERIFY-START / PAYMENT-VERIFY-END и правило .verify-note в <style>). -->
-  <section class="section" aria-label="Служебная пометка">
-    <div class="wrap">
-      <p class="verify-note">Служебная пометка для проверки платежей: Платега тест</p>
-    </div>
-  </section>
-  <!-- PAYMENT-VERIFY-END -->
 </main>
 
 <div class="buybar" id="buybar" hidden>

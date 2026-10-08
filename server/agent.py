@@ -687,8 +687,8 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
         pass
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_thread_seq ON agent_messages(thread_id, seq)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_tool_status ON agent_messages(thread_id, status)")
-    # Поле под будущую подписку: раздел бесплатен для всех зарегистрированных,
-    # подписки в проекте пока нет. NULL/'' = бесплатный доступ.
+    # Зеркало статуса Plus для глаз (источник правды — таблица subscriptions).
+    # NULL/'' = бесплатный доступ.
     try:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
         if "subscription" not in cols:
