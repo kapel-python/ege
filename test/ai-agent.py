@@ -380,10 +380,13 @@ def _knowledge_and_paging_probes(server):
         # 3. Поиск и открытие через границу предметов.
         other = agent.find_topics(conn, uid, subj, {"query": "задание 27"})
         other_tasks = other.get("tasks") or []
-        out["find_other"] = (bool(other.get("otherSubject"))
-                             and any(x["id"].startswith("re27_") for x in other_tasks)
-                             and all("subject" in x for x in other_tasks))
-        out["find_other_detail"] = [x["id"] for x in other_tasks[:3]]
+        # Номер ищется целым числом: «270 км» в выдачу «задания 27» не попадает.
+        # Какой именно предмет ответит первым, зависит от каталога (27 есть в
+        # русском, биологии и информатике), поэтому проверяем сам контракт.
+        out["find_other"] = (bool(other.get("otherSubject")) and bool(other_tasks)
+                             and all("subject" in x for x in other_tasks)
+                             and all(str(x.get("exam") or "").lstrip("№") == "27" for x in other_tasks))
+        out["find_other_detail"] = [(x["id"], x.get("exam")) for x in other_tasks[:3]]
         cross_task = agent.task_get(conn, uid, subj, {"taskId": "re27_1"})
         try:
             cross_lesson = agent.lesson_get(conn, uid, "russian", {"lessonId": "lesson_n01_opisannye"})
@@ -418,7 +421,8 @@ def _knowledge_and_paging_probes(server):
         out["essay_source_detail"] = (src.get("problem") or "")[:60]
         sk = agent.fold_web(conn, uid, subj, {"op": "skills"})
         first = next((s for s in sk.get("skills", []) if s["id"] == "n01_planimetry"), {})
-        out["skills_scale"] = (first.get("totalTasks", 0) == 7
+        real_total = conn.execute("SELECT COUNT(*) FROM tasks WHERE skill_id='n01_planimetry'").fetchone()[0]
+        out["skills_scale"] = (first.get("totalTasks") == real_total and real_total > 0
                                and isinstance(first.get("tasksLeft"), int)
                                and "lessonDone" in first)
         out["skills_scale_detail"] = {k: first.get(k) for k in ("totalTasks", "tasksLeft", "lessonDone", "mastery")}

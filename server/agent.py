@@ -3497,7 +3497,9 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         начало слова), а задания по производной уходили в хвост.
         """
         blob = " ".join(str(f or "") for f in fields).lower()
-        if digits and not any(d in blob for d in digits):
+        # Номер ищем как целое число, а не подстрокой: «задание 27» не должно
+        # находить «270 км» и «1270».
+        if digits and not any(int(d) in {int(n) for n in re.findall(r"\d+", blob)} for d in digits):
             return 0
         if not words:
             # Запрос только с номером («задание 27») — совпадение по цифрам уже
