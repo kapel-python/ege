@@ -160,19 +160,41 @@ async function main() {
     const rowText = await row.textContent();
     t("строка кода: размер и лимит использований",
       rowText.includes("−25%") && rowText.includes("/ 2"), rowText.replace(/\s+/g, " "));
-    await row.locator("button").click();
+    await row.locator("[data-promo-toggle]").click();
     await admin.waitForFunction(() => {
       const el = [...document.querySelectorAll(".a-payrow")].find((r) => r.textContent.includes("UITEST25"));
       return el && el.textContent.includes("выкл");
     }, null, { timeout: 20000 });
     t("выключение кода", true);
     const offRow = admin.locator(".a-payrow", { hasText: "UITEST25" });
-    await offRow.locator("button").click();
+    await offRow.locator("[data-promo-toggle]").click();
     await admin.waitForFunction(() => {
       const el = [...document.querySelectorAll(".a-payrow")].find((r) => r.textContent.includes("UITEST25"));
       return el && !el.textContent.includes("выкл");
     }, null, { timeout: 20000 });
     t("включение обратно", true);
+
+    // Рубли: ввод 198 — это 198 ₽, а не копейки (регресс: показывалось 1,98).
+    await admin.click("#promoNewBtn");
+    await admin.waitForSelector("#fPromoCode", { timeout: 15000 });
+    await admin.fill("#fPromoCode", "UITESTRUB");
+    await admin.selectOption("#fPromoKind", "fixed");
+    await admin.fill("#fPromoValue", "198");
+    await admin.click("#mDo");
+    await admin.waitForFunction(() => document.body.textContent.includes("UITESTRUB"), null, { timeout: 20000 });
+    const rubRow = admin.locator(".a-payrow", { hasText: "UITESTRUB" });
+    const rubText = await rubRow.textContent();
+    t("«Рубли»: 198 → −198 ₽ (не 1,98 ₽)",
+      rubText.includes("−198 ₽") && !rubText.includes("1,98"), rubText.replace(/\s+/g, " "));
+
+    // Неиспользованный код удаляется (чистка опечаток); кнопка есть только у used=0.
+    await rubRow.locator("[data-promo-del]").click();
+    await admin.waitForSelector(".a-modal-backdrop #mDo", { timeout: 15000 });
+    await admin.click("#mDo");
+    await admin.waitForFunction(
+      () => ![...document.querySelectorAll(".a-payrow")].some((r) => r.textContent.includes("UITESTRUB")),
+      null, { timeout: 20000 });
+    t("неиспользованный код удаляется", true);
 
     // ---------------- S3: массовая выдача ---------------------------------
     section("S3 массовая выдача с подтверждением числом");

@@ -521,6 +521,12 @@ def main():
         check("счёт со скидкой и кодом в ответе",
               s == 200 and body["amountKopecks"] == 14900
               and body["promo"] == "TEST25", body)
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "delete", "code": "TEST25"})
+        check("неиспользованный код удаляется", s == 200 and body.get("deleted") is True, body)
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "delete", "code": "TEST25"})
+        check("повторное удаление 404", s == 404, f"{s} {body}")
 
         section("гейт ИИ")
         agent = server._AGENT

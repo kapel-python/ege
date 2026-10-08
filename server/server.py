@@ -14566,7 +14566,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/admin/subscription/promos":
             # Промокоды на скидку: create (код/тип/значение/тариф/лимит/срок/
-            # пометка) и set_active (выкл без удаления — история честна).
+            # пометка), set_active (выкл без удаления — история честна) и
+            # delete (только НЕиспользованный — чистка опечаток; код с
+            # историей не удаляем, его можно выключить).
             if self.api_rate_limited(): return
             conn = connect()
             try:
@@ -14583,7 +14585,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "Некорректный JSON"}, 400); return
                 op = payload.get("action", "")
                 if not isinstance(op, str):
-                    self.send_json({"error": "action должен быть create или set_active"}, 400); return
+                    self.send_json({"error": "action должен быть create, set_active или delete"}, 400); return
                 op = op.strip().lower()
                 if op == "create":
                     try:
@@ -14611,8 +14613,21 @@ class Handler(BaseHTTPRequestHandler):
                     admin_audit(conn, actor_id, "promo-toggle", None,
                                 f"{promo['code']} {'on' if promo['active'] else 'off'}"[:200])
                     self.send_json({"ok": True, "promo": promo})
+                elif op == "delete":
+                    code = payload.get("code", "")
+                    if not isinstance(code, str) or not code.strip():
+                        self.send_json({"error": "нужен code"}, 400); return
+                    try:
+                        result = _SUB.promo_delete(conn, code)
+                    except KeyError:
+                        self.send_json({"error": "Не найдено"}, 404); return
+                    except ValueError as exc:
+                        self.send_json({"error": f"Request failed: {exc}"}, 400); return
+                    admin_audit(conn, actor_id, "promo-delete", None,
+                                str(result["code"])[:200])
+                    self.send_json(result)
                 else:
-                    self.send_json({"error": "action должен быть create или set_active"}, 400); return
+                    self.send_json({"error": "action должен быть create, set_active или delete"}, 400); return
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass

@@ -1850,6 +1850,7 @@ const AUDIT_ACTIONS = {
   "subscription-bonus": ["plus", "Plus списку", "a-chip--success"],
   "promo-create": ["plus", "Промокод создан", "a-chip--success"],
   "promo-toggle": ["plus", "Промокод вкл/выкл", ""],
+  "promo-delete": ["plus", "Промокод удалён", "a-chip--danger"],
   "providers.judge": ["providers", "Судья назначен", "a-chip--accent"],
   "ai-provider-create": ["providers", "Провайдер добавлен", "a-chip--success"],
   "ai-provider-slots": ["providers", "Приоритеты", ""],
@@ -1984,6 +1985,10 @@ const AUDIT_DETAIL = {
     const m = String(e.detail || "").match(/^(\S+)\s+(on|off)/);
     if (!m) return "";
     return `код ${m[1]} ${m[2] === "on" ? "включён" : "выключен"}`;
+  },
+  "promo-delete": (e) => {
+    const code = String(e.detail || "").trim();
+    return code ? `код ${code}` : "";
   },
   "providers.judge": (e) => {
     const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
@@ -2154,6 +2159,10 @@ const AUDIT_ROWS = {
     const m = String(e.detail || "").match(/^(\S+)\s+(on|off)/);
     if (!m) return [];
     return [["Код", m[1]], ["Состояние", m[2] === "on" ? "включён" : "выключен"]];
+  },
+  "promo-delete": (e) => {
+    const code = String(e.detail || "").trim();
+    return code ? [["Код", code]] : [];
   },
   "providers.judge": (e) => {
     const text = String(e.detail || "").replace(/\s*\[Plus\]$/, "");
@@ -4961,13 +4970,48 @@ function promoExpText(p) {
 }
 
 function promoRowHTML(p) {
+  /* Удалять можно только НЕиспользованные коды: у кода с историей кнопки нет,
+     его честная судьба — «Выключить» (платежи ссылаются на код). */
+  const canDelete = !Number(p.used || 0);
   return `<div class="a-payrow">
     <div class="a-payrow__main">
       <div class="a-payrow__t mono">${esc(p.code)}${p.active ? "" : ' · <span style="color:var(--muted)">выкл</span>'}</div>
       <div class="a-payrow__d">${esc(promoSizeText(p))} · ${esc(promoUseText(p))} · ${esc(promoExpText(p))}${p.note ? ` · ${esc(p.note)}` : ""}</div>
     </div>
-    <div class="a-payrow__r"><button class="btn btn--soft btn--sm" onclick="togglePromo('${esc(p.code)}', ${p.active ? "false" : "true"})">${p.active ? "Выключить" : "Включить"}</button></div>
+    <div class="a-payrow__r" style="gap:8px;display:flex;align-items:center">
+      <button class="btn btn--soft btn--sm" data-promo-toggle onclick="togglePromo('${esc(p.code)}', ${p.active ? "false" : "true"})">${p.active ? "Выключить" : "Включить"}</button>
+      ${canDelete ? `<button class="a-icon-btn a-icon-btn--danger" data-promo-del onclick="deletePromo('${esc(p.code)}')" title="Удалить неиспользованный код">${aicon("trash")}</button>` : ""}
+    </div>
   </div>`;
+}
+
+/* Удаление кода — чистка опечаток: сервер разрешает только used=0.
+   Использованный код кнопки не показывает вовсе; текст окна честно
+   объясняет, почему. */
+function deletePromo(code) {
+  openModal(`
+    <div class="a-modal__title" style="color:var(--danger)">Удалить промокод «${esc(code)}»?</div>
+    <div class="a-modal__desc">Код ещё не использовался — удаление безопасно. Коды с историей не удаляются: их можно выключить.</div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--danger-soft" id="mDo">Удалить</button>
+    </div>`, (modal) => {
+    modal.classList.add("a-modal--danger");
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mDo").onclick = async () => {
+      try {
+        await AdminApi.post("/api/admin/subscription/promos", { action: "delete", code });
+        closeModal();
+        toast("Промокод удалён");
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        modal.querySelector("#mDo").disabled = true;
+        toast(`Не получилось удалить: ${e.message || "ошибка"}`, "err");
+        return;
+      }
+      await screenSubscription();
+    };
+  });
 }
 
 async function togglePromo(code, on) {
@@ -5099,7 +5143,17 @@ function openPromoModal() {
     </div>`, (modal) => {
     const kind = modal.querySelector("#fPromoKind");
     const hint = modal.querySelector("#fPromoValueHint");
-    const syncHint = () => { hint.textContent = kind.value === "percent" ? "% от тарифа (100 = бесплатно)" : "рублей (покрывает всё = бесплатно)"; };
+    const valueInput = modal.querySelector("#fPromoValue");
+    const syncHint = () => {
+      const fixed = kind.value === "fixed";
+      /* «Рубли» — именно рубли: строку переводим в копейки при отправке
+         (сервер хранит копейки), иначе 198 ₽ превращались в 1,98 ₽. */
+      hint.textContent = fixed ? "рублей; можно с копейками (198 или 198,5)" : "% от тарифа (100 = бесплатно)";
+      if (valueInput) {
+        valueInput.placeholder = fixed ? "198" : "20";
+        valueInput.setAttribute("inputmode", fixed ? "decimal" : "numeric");
+      }
+    };
     kind.onchange = syncHint;
     syncHint();
     modal.querySelector("#fPromoDice").onclick = () => { modal.querySelector("#fPromoCode").value = randomPromoCode(); };
@@ -5116,11 +5170,32 @@ function openPromoModal() {
         if (!Number.isFinite(expiresAt)) { errBox.innerHTML = `<div class="a-modal__error">Некорректная дата</div>`; return; }
       }
       const maxRaw = (val("#fPromoMax") || "").trim();
+      /* Размер: процент — целое 1..100; рубли — переводим в копейки (сервер
+         хранит копейки), принимаем и копейки после запятой/точки. */
+      const kindVal = val("#fPromoKind") === "fixed" ? "fixed" : "percent";
+      const rawValue = String(val("#fPromoValue") || "").replace(",", ".").trim();
+      let promoValue;
+      if (kindVal === "fixed") {
+        const rub = Number(rawValue);
+        if (!rawValue || !Number.isFinite(rub) || rub <= 0) {
+          errBox.innerHTML = `<div class="a-modal__error">Размер — рубли, например 198 или 198,5</div>`; return;
+        }
+        promoValue = Math.round(rub * 100);
+        if (promoValue < 100) {
+          errBox.innerHTML = `<div class="a-modal__error">Минимум 1 ₽</div>`; return;
+        }
+      } else {
+        const pct = Number(rawValue);
+        if (!rawValue || !Number.isFinite(pct) || pct < 1 || pct > 100) {
+          errBox.innerHTML = `<div class="a-modal__error">Процент — от 1 до 100</div>`; return;
+        }
+        promoValue = Math.round(pct);
+      }
       const body = {
         action: "create",
         code: (val("#fPromoCode") || "").trim(),
-        kind: val("#fPromoKind"),
-        value: (val("#fPromoValue") || "").trim(),
+        kind: kindVal,
+        value: promoValue,
         period: val("#fPromoPeriod"),
         maxUses: maxRaw === "" ? null : maxRaw,
         expiresAt,

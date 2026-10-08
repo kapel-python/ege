@@ -191,5 +191,37 @@ check("откат: лист не тронут",
       sub.launch_waitlist_stats(conn)["pending"] == 502,
       sub.launch_waitlist_stats(conn))
 
+# --- удаление неиспользованных кодов ---------------------------------------
+sub.promo_create(conn, "delme", "fixed", 19800)
+check("delme создан", any(r["code"] == "DELME" for r in sub.promo_list(conn)))
+sub.promo_delete(conn, "delme")
+check("неиспользованный удалён",
+      not any(r["code"] == "DELME" for r in sub.promo_list(conn)))
+try:
+    sub.promo_delete(conn, "DELME")
+    check("повторное удаление — KeyError", False)
+except KeyError:
+    check("повторное удаление — KeyError", True)
+try:
+    sub.promo_delete(conn, "LETO20")  # использован выше (used=1)
+    check("использованный не удаляется", False)
+except ValueError as e:
+    check("использованный не удаляется", "использовался" in str(e), e)
+check("использованный на месте", any(r["code"] == "LETO20" for r in sub.promo_list(conn)))
+
+# --- fixed — это копейки (198 ₽ = 19800), включая границы ------------------
+sub.promo_create(conn, "r198", "fixed", 19800)
+q = sub.promo_quote(conn, "R198", "month")
+check("fixed 198 ₽ на месяц: остаток 1 ₽",
+      q["discountKopecks"] == 19800 and q["finalKopecks"] == 100, q)
+sub.promo_create(conn, "rfree", "fixed", 19900)
+q = sub.promo_quote(conn, "RFREE", "month")
+check("fixed «всё покрывает»: бесплатно",
+      q["discountKopecks"] == 19900 and q["finalKopecks"] == 0, q)
+sub.promo_create(conn, "rkop", "fixed", 19850)
+q = sub.promo_quote(conn, "RKOP", "month")
+check("fixed с копейками: цена округляется вниз до рублей",
+      q["finalKopecks"] % 100 == 0 and q["finalKopecks"] == 0, q)
+
 print(f"\n{checks - failures}/{checks} ok")
 raise SystemExit(1 if failures else 0)

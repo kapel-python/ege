@@ -1359,6 +1359,28 @@ def promo_set_active(conn: sqlite3.Connection, code: str, active: bool) -> dict:
     return promo_get(conn, code)
 
 
+def promo_delete(conn: sqlite3.Connection, code: str) -> dict:
+    """Удалить НЕиспользованный код (чистка опечаток и ошибочных условий).
+    Код с историей (used_count>0) не удаляем: платежи ссылаются на него,
+    честнее выключить — иначе статистика кодов теряла бы факты."""
+    ensure_promo_schema(conn)
+    code = promo_normalize(code)
+    own = _begin(conn)
+    try:
+        row = conn.execute("SELECT used_count FROM promo_codes WHERE code=?",
+                           (code,)).fetchone()
+        if not row:
+            raise KeyError("promo not found")
+        if int(row["used_count"] or 0) > 0:
+            raise ValueError("код уже использовался — его можно только выключить")
+        conn.execute("DELETE FROM promo_codes WHERE code=?", (code,))
+        _end(conn, own, True)
+    except Exception:
+        _end(conn, own, False)
+        raise
+    return {"ok": True, "code": code, "deleted": True}
+
+
 def promo_quote(conn: sqlite3.Connection, code: str, period: str) -> dict:
     """Сколько будет стоить тариф с промокодом. Ошибки — человеческим текстом
     для окна оплаты (код не найден / выключен / истёк / исчерпан / не тот тариф)."""
