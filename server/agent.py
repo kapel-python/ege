@@ -986,11 +986,12 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
 
     Для аккаунта с отпечатками остаток — минимум по своему бакету
     и котлам устройства (`ak:/an:`): ферма «вышел — новый аккаунт» упирается
-    в общий котёл. Обвинение `reason: "farm_suspected"` — только когда сам
-    аккаунт не тратил вовсе (свой бакет полон): потратил хоть один ход —
-    получает обычное окно исчерпания с таймером. Клиент по reason показывает
-    причину без таймера (время вслух не называем, чтобы не учить ферму
-    оптимизации)."""
+    в общий котёл. Обвинение `reason: "farm_suspected"` — только когда выеден
+    котёл КУКИ (тот же браузер) до нуля, а сам аккаунт не тратил вовсе (свой
+    бакет полон): одна сеть (класс, второе своё устройство) и свои траты
+    обвинения не дают — блок тот же, окно обычное, с таймером. Клиент по
+    reason показывает причину без таймера (время вслух не называем, чтобы
+    не учить ферму оптимизации)."""
     ensure_agent_schema(conn)
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     limit = agent_effective_limit(conn, user_id)
@@ -1066,11 +1067,15 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     payload: dict = {"ok": True, "limit": limit, "remaining": remaining,
                      "windowSec": window_ms // 1000, "resetInSec": None,
                      "at": now_ms}
-    # Обвиняем в ферме, только если на этом аккаунте не тратили вовсе (свой
-    # бакет полон): потратил хоть один ход — обычное окно исчерпания с
-    # таймером. Блокировка та же (остаток 0), модалка честная.
+    # Обвиняем в ферме, только если выеден котёл КУКИ (тот же браузер) до
+    # нуля и на этом аккаунте не тратили вовсе (свой бакет полон): одна сеть
+    # (класс, второе своё устройство) и свои траты обвинения не дают — блок
+    # тот же, окно обычное, с таймером. Модалка честная.
     own_lim = min([p[3] for p in projected if p[4] == owner] or [limit])
-    if dev_rem < own_rem and own_rem >= own_lim:
+    key_rems = [p[0] for p in projected if p[4].startswith("ak:")]
+    key_rem = min(key_rems) if key_rems else None
+    if (dev_rem < own_rem and own_rem >= own_lim
+            and key_rem is not None and key_rem <= 0):
         payload["reason"] = "farm_suspected"
     if remaining >= limit:
         return payload

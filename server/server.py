@@ -9104,10 +9104,10 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
     remaining — минимум по бакетам (аккаунт и, для свежего аккаунта,
     устройство); resetInSec — ближайший момент, когда этот минимум вырастет:
     если несколько бакетов делят минимум, ждать придётся последнего из них.
-    Когда чужой котёл душит аккаунт, который сам ещё не тратил (свой бакет
-    полон, а устройство беднее), ответ несёт reason="farm_suspected" — повод
-    для модалки без таймера. Потратил на этом аккаунте хоть один жетон —
-    причина не ставится: окно исчерпания обычное, с таймером.
+    Когда выеден котёл КУКИ (тот же браузер) до нуля, а аккаунт сам ещё не
+    тратил (свой бакет полон), ответ несёт reason="farm_suspected" — повод
+    для модалки без таймера. Одна сеть (класс, второе своё устройство) и
+    свои траты обвинения не дают: блок тот же, окно обычное, с таймером.
     """
     ensure_ai_usage_schema(conn)
     ensure_ai_user_limit_schema(conn)
@@ -9130,9 +9130,10 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
             except (KeyError, IndexError):
                 anchor = None
             anchor = int(anchor) if anchor is not None else None
-            states.append((int(row["count"]), timer, anchor, owner_limit))
+            states.append((int(row["count"]), timer, anchor, owner_limit, owner))
         else:
-            states.append((owner_limit, None, None, owner_limit))  # бакет ещё не заводился — карман полон
+            # бакет ещё не заводился — карман полон
+            states.append((owner_limit, None, None, owner_limit, owner))
     conn.commit()  # фиксируем ленивую зарядку
     remaining = min(_ai_usage_count_at((s[0], s[1], s[2]), now_ms, now_ms, s[3], window_ms)
                     for s in states)
@@ -9155,13 +9156,13 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
         "windowSec": window_ms // 1000,
         "at": now_ms,
     }
-    # Подозрение на ферму: чужой котёл жмёт сильнее своего бакета — НО
-    # обвиняем, только если на ЭТОМ аккаунте не тратили вовсе (свой бакет
-    # полон: own >= limit). Как только человек потратил свои жетоны (даже
-    # один), он получает обычное окно исчерпания с таймером, а не обвинение:
-    # живой ложняк — второй аккаунт, на котором честно тратили сами, а котёл
-    # выело прошлое «я» с того же браузера. Блокировка та же (остаток 0),
-    # модалка честная. Клиент по полю reason показывает причину без таймера:
+    # Подозрение на ферму: выеден котёл КУКИ (тот же браузер) до нуля, на
+    # ЭТОМ аккаунте не тратили вовсе (свой бакет полон: own >= limit) и
+    # девать некуда (remaining 0 — при живом остатке проверка пройдёт, и
+    # обвинять нельзя). Сеть бывает общей (класс, второе своё устройство):
+    # по одной сети не обвиняем — блок тот же, но модалка обычная, с
+    # таймером. Как только человек потратил свои жетоны (даже один) — тоже
+    # обычное окно. Клиент по полю reason показывает причину без таймера:
     # время вслух не называем, чтобы не учить ферму ротации.
     if len(owners) > 1:
         try:
@@ -9169,8 +9170,11 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
                                          now_ms, now_ms, states[0][3], window_ms)
             dev_rem = min(_ai_usage_count_at((s[0], s[1], s[2]), now_ms, now_ms, s[3], window_ms)
                           for s in states[1:])
+            key_rem = min((_ai_usage_count_at((s[0], s[1], s[2]), now_ms, now_ms, s[3], window_ms)
+                           for s in states[1:] if s[4].startswith("k:")), default=None)
             own_limit = states[0][3]
-            if dev_rem < own_rem and own_rem >= own_limit:
+            if (dev_rem < own_rem and own_rem >= own_limit
+                    and key_rem is not None and key_rem <= 0):
                 payload["reason"] = "farm_suspected"
         except (IndexError, TypeError, ValueError):
             pass
