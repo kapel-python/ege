@@ -116,6 +116,18 @@
 }
 .dlg-promo input::placeholder { text-transform: none; opacity: 0.6; }
 .dlg-promo .btn { flex: 0 0 auto; }
+/* Узкие экраны: строка «подпись + поле + кнопка» не помещается, и раньше
+   кнопка после переноса оставалась одинокой слева под полем. Теперь это
+   аккуратная форма в столбик: подпись, поле и «Применить» на всю ширину —
+   кнопку видно и в неё легко попасть пальцем. */
+@media (max-width: 480px){
+  .dlg-promo { align-items: stretch; }
+  .dlg-promo label,
+  .dlg-promo input,
+  .dlg-promo .btn { flex: 1 0 100%; }
+  .dlg-promo input { min-height: 44px; }
+  .dlg-promo .btn { text-align: center; }
+}
 .dlg-promo__state { margin-top: 8px; font-size: 13px; line-height: 1.5; }
 .dlg-promo__state[hidden] { display: none; }
 .dlg-promo__state--ok { color: var(--green, #15803d); }

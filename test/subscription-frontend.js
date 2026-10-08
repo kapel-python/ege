@@ -144,6 +144,25 @@ function check(name, cond, detail) {
   await page.click('#periodPick [data-period="month"]');
   check("возврат на месяц", await page.locator('#periodPick [data-period="month"]').evaluate((el) => el.classList.contains("is-on")));
 
+  // Мобильная раскладка промокода: «Применить» — под полем и на всю ширину,
+  // а не одинокой кнопкой слева после переноса.
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.click('#actionsRow [data-act="buy"]');
+  await page.waitForSelector("#payPromo", { timeout: 10000 });
+  const promoBoxes = await page.evaluate(() => {
+    const a = document.querySelector("#pay-modal-root [data-apply]").getBoundingClientRect();
+    const i = document.querySelector("#payPromo").getBoundingClientRect();
+    return { aTop: a.top, aLeft: a.left, aWidth: a.width, iBottom: i.bottom, iLeft: i.left, iWidth: i.width };
+  });
+  check("мобильный промокод: кнопка под полем и на всю ширину",
+    promoBoxes.aTop >= promoBoxes.iBottom - 1
+    && Math.abs(promoBoxes.aWidth - promoBoxes.iWidth) < 2
+    && Math.abs(promoBoxes.aLeft - promoBoxes.iLeft) < 2,
+    JSON.stringify(promoBoxes));
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForSelector("#pay-modal-root .dlg", { state: "detached", timeout: 10000 });
+
   // --- 2b. залогиненный free жмёт купить на тарифе -> confirm, в mock — честная ошибка ---
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
   await page.waitForSelector('body[data-sub="free"]', { timeout: 10000 });
