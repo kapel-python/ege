@@ -314,13 +314,26 @@ async function main() {
     await admin.waitForSelector("#subGrantBtn", { timeout: 20000 });
     const beforeGrant = await readExpiry();
     await admin.click("#subGrantBtn");
-    await admin.waitForSelector('[data-period="month"]', { timeout: 15000 });
-    await admin.click('[data-period="month"]');
-    await admin.waitForSelector("#fSubConfirm", { timeout: 15000 });
+    await admin.waitForSelector('#subPeriodSeg [data-period="month"]', { timeout: 15000 });
+    // Сегмент срока переключается молча (год → месяц), без выдачи и прыжков.
+    await admin.click('#subPeriodSeg [data-period="year"]');
+    const yearOn = await admin.locator('#subPeriodSeg [data-period="year"]')
+      .evaluate((el) => el.classList.contains("a-seg2__btn--on"));
+    await admin.click('#subPeriodSeg [data-period="month"]');
+    const monthOn = await admin.locator('#subPeriodSeg [data-period="month"]')
+      .evaluate((el) => el.classList.contains("a-seg2__btn--on"));
+    await admin.fill("#fSubNote", "смоук-повод");
     const midGrant = await readExpiry();
+    t("срок и причина — обычная форма: сегмент переключается, подтверждения нет, срок не менялся",
+      yearOn && monthOn && (await admin.locator("#fSubConfirm").count()) === 0 && midGrant === beforeGrant,
+      `before=${beforeGrant} mid=${midGrant}`);
+    await admin.click("#mNext");
+    await admin.waitForSelector("#fSubConfirm", { timeout: 15000 });
+    const confirmText = (await admin.textContent(".a-modal-backdrop")).replace(/\s+/g, " ");
     const deadBefore = await admin.locator("#mDo").isDisabled();
-    t("клик по сроку НЕ выдаёт: второй шаг с вводом Account ID, срок не изменился",
-      midGrant === beforeGrant && deadBefore, `before=${beforeGrant} mid=${midGrant}`);
+    t("подтверждение показывает причину и требует Account ID",
+      confirmText.includes("смоук-повод") && confirmText.includes("Account ID") && deadBefore,
+      confirmText.slice(0, 140));
     await admin.fill("#fSubConfirm", "чужой");
     const deadWrong = await admin.locator("#mDo").isDisabled();
     await admin.fill("#fSubConfirm", uBody.accountId);

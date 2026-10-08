@@ -881,6 +881,7 @@ table.a-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 @media (max-width: 640px) { .a-seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .a-seg2--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 640px) { .a-seg2--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.a-seg2--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 /* ---- Живой пинг моделей ---- */
 .a-ping {

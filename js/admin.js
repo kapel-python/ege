@@ -1579,24 +1579,42 @@ function bindUserActions(p) {
         ? `Срок растянется от конца текущего (до ${esc(fmtDate(cur.expiresAt))}), а не перезапишется. Карманы лимитов дольются до полного.`
         : "Доступ откроется сразу на выбранный срок. Карманы лимитов дольются до полного: 10 проверок сочинений и 50 ходов ИИ в день."}</div>
       <div class="a-modal__form" style="gap:10px">
-        <button class="choice-item" data-period="month"><b>Месяц — 199 ₽</b><span>1 календарный месяц доступа</span></button>
-        <button class="choice-item" data-period="year"><b>Год — 1590 ₽</b><span>12 календарных месяцев доступа, −33% к помесячной оплате</span></button>
-        <div class="a-field"><label>Заметка (необязательно)</label><input class="a-input" id="fSubNote" placeholder="например: победитель олимпиады" autocomplete="off"></div>
+        <div class="a-field"><label>Срок</label>
+          <div class="a-seg2 a-seg2--2" id="subPeriodSeg" role="group" aria-label="Срок подписки">
+            <button type="button" class="a-seg2__btn a-seg2__btn--on" data-period="month">Месяц<span class="a-seg2__hint">199 ₽ · 1 календарный месяц</span></button>
+            <button type="button" class="a-seg2__btn" data-period="year">Год<span class="a-seg2__hint">1590 ₽ · −33% к помесячной</span></button>
+          </div>
+        </div>
+        <div class="a-field"><label for="fSubNote">Причина / повод (необязательно)</label>
+          <input class="a-input" id="fSubNote" placeholder="например: победитель олимпиады" autocomplete="off">
+          <span class="a-field__hint">Попадёт в журнал действий и в историю платежей получателя.</span>
+        </div>
         <div id="mErr"></div>
       </div>
-      <div class="a-modal__actions"><button class="btn btn--soft" id="mCancel">Отмена</button></div>`, (modal) => {
+      <div class="a-modal__actions">
+        <button class="btn btn--soft" id="mCancel">Отмена</button>
+        <button class="btn btn--primary" id="mNext">Продолжить</button>
+      </div>`, (modal) => {
+      /* Срок и причина — ОБЫЧНАЯ форма: выбор сегментом ничего не выдаёт
+         и не прыгает в подтверждение (иначе до причины не добраться, не
+         делая всё в обратном порядке). Второй шаг — по «Продолжить»:
+         ввод Account ID как последняя защита дорогого действия. */
+      const seg = modal.querySelector("#subPeriodSeg");
+      let pickedPeriod = "month";
+      seg.querySelectorAll("[data-period]").forEach((periodBtn) => {
+        periodBtn.onclick = () => {
+          pickedPeriod = periodBtn.dataset.period;
+          seg.querySelectorAll("[data-period]").forEach((x) => {
+            x.classList.toggle("a-seg2__btn--on", x === periodBtn);
+          });
+        };
+      });
       modal.querySelector("#mCancel").onclick = closeModal;
-      modal.querySelectorAll("[data-period]").forEach((periodBtn) => {
-        /* Клик по сроку НИЧЕГО не выдаёт: второй шаг — ввод Account ID.
-           Plus — самый дорогой товар проекта, и один промах здесь стоит
-           подписки живому человеку (как удаление аккаунта и полный сброс,
-           где защита та же). */
-        periodBtn.onclick = () => openSubGrantConfirm({
-          isExtend,
-          cur,
-          period: periodBtn.dataset.period,
-          note: modal.querySelector("#fSubNote").value.trim(),
-        });
+      modal.querySelector("#mNext").onclick = () => openSubGrantConfirm({
+        isExtend,
+        cur,
+        period: pickedPeriod,
+        note: modal.querySelector("#fSubNote").value.trim(),
       });
     });
   };
