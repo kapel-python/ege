@@ -1915,16 +1915,19 @@ function weakestSkill(opts = {}) {
   return worst;
 }
 
-/* Последний незавершённый урок (по времени начала) — самое дешёвое
-   следующее действие: доучить то, что уже начато, а не открывать новое. */
+/* Последний незавершённый урок (по времени последнего касания) — самое
+   дешёвое следующее действие: доучить то, что уже начато, а не открывать
+   новое. У старых записей без ts берётся startTs: до появления ts это
+   единственная метка времени сессии. */
 function mostRecentOpenLesson() {
   const sessions = safeObject(Store.state && Store.state.lessonSessions);
-  let best = null;
+  let best = null, bestTs = -1;
   for (const lessonId of Object.keys(sessions)) {
     const lesson = DataAPI.lessonForAccess ? DataAPI.lessonForAccess(lessonId) : DataAPI.lesson(lessonId);
     if (!lesson) continue; // урок мог быть удалён/заблокирован после обновления
     const session = safeObject(sessions[lessonId]);
-    if (!best || Number(session.startTs || 0) > Number(best.session.startTs || 0)) best = { lessonId, session, lesson };
+    const ts = Number(session.ts) || Number(session.startTs) || 0;
+    if (!best || ts > bestTs) { best = { lessonId, session, lesson }; bestTs = ts; }
   }
   return best;
 }
@@ -2880,13 +2883,18 @@ function addTimeline(text) {
 /* ============================================================
    Рекомендации (rule-based)
 
-   Приоритет одного «что делать дальше» построен по стоимости и полезности
-   действия, а не по произвольному порядку проверок:
-   1) доучить начатый урок — уже открытый контекст, дешевле всего закончить;
-   2) накопленные открытые ошибки — конкретный, проверенный сигнал слабости;
-   3) самый слабый навык — но не тот, что только что интенсивно тренировали
+   Приоритет одного «что делать дальше» построен на двух правилах.
+   Первое — закончить начатое: любая незавершённая активность (открытый
+   урок, миссия с прогрессом, частичная ежедневная подборка) стоит выше
+   любого нового шага, а среди начатых первым идёт то, к чему позже
+   прикасались (startedTs). Качество не учитывается: завершение — это
+   факт, а не оценка.
+   Второе — для остального стоимость и полезность действия, а не
+   произвольный порядок проверок:
+   1) накопленные открытые ошибки — конкретный, проверенный сигнал слабости;
+   2) самый слабый навык — но не тот, что только что интенсивно тренировали
       (иначе рекомендация зацикливается на бессмысленном повторе);
-   4) испытания — босс, если открыт, иначе Daily Challenge, если не закрыт.
+   3) испытания — босс, если открыт, иначе Daily Challenge, если не закрыт.
    Каждый навык встречается в списке не больше одного раза за вызов.
    ============================================================ */
 
@@ -2960,6 +2968,7 @@ function skillSnapshot(skillId) {
     recentAccuracy: recent ? recentCorrect / recent : null,
     fatigued: recent >= NEXTSTEP_FATIGUE_TASKS,
     ageMs: lastTs ? now - lastTs : Infinity,
+    lastTs,
     openErrors: openErrorCount(skillId),
     stepErrors: lessonStepErrorsBySkill(skillId).length,
     lesson,
@@ -2990,6 +2999,25 @@ function weakestOf(pool, snaps) {
   return worst;
 }
 
+function candidateSkillId(cand) {
+  const p = (cand && cand.payload) || {};
+  if (p.skillId) return String(p.skillId);
+  const lesson = p.lessonId ? DataAPI.lesson(p.lessonId) : null;
+  return lesson && lesson.skill ? String(lesson.skill) : "";
+}
+
+/* Начатые кандидаты (startedTs > 0) всегда выше новых, между собой — по
+   убыванию свежести последнего шага. Урок, начатый позже миссии, вытесняет
+   её; миссия, к которой вернулись после урока, — наоборот. */
+function startedFirst(a, b) {
+  const at = Number(a && a.startedTs) || 0;
+  const bt = Number(b && b.startedTs) || 0;
+  if (!at && !bt) return 0;
+  if (!at) return 1;
+  if (!bt) return -1;
+  return bt - at;
+}
+
 function nextStepCandidates() {
   // Пустой/locked предмет или реестр без доступного контента: рекомендовать
   // нечего — экран показывает заглушку, а не действие с нулевым XP.
@@ -3012,6 +3040,7 @@ function nextStepCandidates() {
       text: `Продолжить урок «${openLesson.lesson.title}»`,
       reason: `Урок уже начат и сохранён на шаге ${Math.min((openLesson.session.idx || 0) + 1, DataAPI.lessonStepsCount(openLesson.lesson))} из ${DataAPI.lessonStepsCount(openLesson.lesson)} — доучить начатое проще всего.`,
       score: 92,
+      startedTs: Number(openLesson.session.ts) || Number(openLesson.session.startTs) || 0,
     });
   }
 
@@ -3022,6 +3051,36 @@ function nextStepCandidates() {
     if (snapshot) snaps[sk.id] = snapshot;
   }
   const mentionedSkills = () => Object.keys(snaps).filter((id) => mentioned.has(id));
+
+  /* 1b. Продолжить начатую тренировку. Урок — не единственная «начатая»
+     активность: миссия с прогрессом уже сохранена в состоянии. Завершение
+     начатого важнее любого нового шага, поэтому кандидат создаётся и при
+     высоком освоении, и когда урок этой же темы уже представлен: финальная
+     сортировка по startedTs сама решит, что из начатого свежее. Бросать
+     работу на половине хуже, чем начать новое. */
+  {
+    const doneMissions = safeObject(s.missionsDone);
+    for (const sk of (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())) {
+      const snap = snaps[sk.id];
+      if (!snap || !snap.mission) continue;
+      const mission = snap.mission;
+      if (doneMissions[mission.id]) continue;
+      const total = missionPracticeCount(mission);
+      const prog = missionProgress(mission);
+      if (!(total > 0 && prog > 0 && prog < total)) continue;
+      mentioned.add(sk.id);
+      push({
+        action: "practice",
+        payload: { missionId: mission.id, skillId: sk.id },
+        route: "#/training", icon: "target",
+        cta: "Продолжить",
+        text: `Продолжить тренировку по теме «${sk.name}» — ${prog}/${total}`,
+        reason: `Тренировка по «${sk.name}» уже начата — закончить её проще, чем начинать новое.`,
+        score: 88,
+        startedTs: snap.lastTs || 0,
+      });
+    }
+  }
 
   /* 2. Повторение слабых мест: накопленные открытые ошибки — самый
      конкретный сигнал пробела. Свежие ошибки «на горячую» не гоняем по
@@ -3254,12 +3313,21 @@ function nextStepCandidates() {
     }
   }
 
-  /* 6. Ежедневная подборка: стимул держать ритм, ниже работы над пробелами. */
+  /* 6. Ежедневная подборка: стимул держать ритм, ниже работы над пробелами.
+     Частично решённая — уже начатое дело: startedTs поднимает её выше
+     любого нового шага (см. startedFirst). */
   ensureDailyChallenge();
   const dailyIds = dailyTaskIds();
   if (dailyIds.length && !s.daily.done) {
     const goal = dailyIds.length;
     const partial = Math.min(s.daily.solved || 0, goal) > 0;
+    let dailyTs = 0;
+    if (partial) {
+      const inDaily = new Set([...dailyIds, ...safeArray(s.daily.countedTaskIds)].map(String));
+      for (const a of safeArray(s.taskAttempts)) {
+        if (inDaily.has(String(a.taskId))) dailyTs = Math.max(dailyTs, Number(a.ts) || 0);
+      }
+    }
     push({
       action: "daily",
       payload: {},
@@ -3270,6 +3338,7 @@ function nextStepCandidates() {
         ? `Подборка почти закрыта — один заход, и день засчитан.`
         : `Короткая подборка из ${goal} заданий поддержит ритм и серию дней.`,
       score: partial ? 52 : 40,
+      startedTs: dailyTs,
     });
   }
 
@@ -3319,7 +3388,19 @@ function nextStepCandidates() {
   }
 
   const priority = { "finish-lesson": 0, "lesson": 1, "errors-review": 2, "practice": 3, "essay": 3, "boss": 4, "daily": 5, "mixed": 6 };
-  return cands.sort((a, b) => b.score - a.score || priority[a.action] - priority[b.action]);
+  cands.sort((a, b) => startedFirst(a, b) || b.score - a.score || priority[a.action] - priority[b.action]);
+  /* Один навык — один кандидат. Правило нужно, когда «начатых» действий
+     одной темы несколько (например, открытый урок и начатая миссия):
+     после сортировки первым идёт самое свежее, а более раннее не должно
+     дублировать ту же тему отдельной подписью. */
+  const seenSkills = new Set();
+  return cands.filter((c) => {
+    const sid = candidateSkillId(c);
+    if (!sid) return true;
+    if (seenSkills.has(sid)) return false;
+    seenSkills.add(sid);
+    return true;
+  });
 }
 
 /* Лучший текущий шаг — голова ранжированного списка. Пересчитывается

@@ -135,6 +135,103 @@ const testBody = async () => {
       best && best.action === "practice" && best.payload.skillId === sid && /Продолжить/.test(best.text));
   }
 
+  /* ---------- 6b. Начатое — выше свежего, среди начатого первым самое свежее ---------- */
+  // Миссия начата два часа назад, урок открыт только что → блок показывает
+  // урок, хотя по очкам миссия «сильнее» (её тема почти не освоена).
+  makeStrongStudent(() => {
+    const sid = skills[2].id;
+    const m = missionOf(sid);
+    Store.state.skillStats[sid] = { progress: 0, solved: 10, correct: 6, timeSec: 400 };
+    Store.state.missionProgress[m.id] = 1;
+    Store.state.taskAttempts.unshift({
+      taskId: DataAPI.practiceTasksBySkill(sid)[0].id, skill: sid, correct: true,
+      hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - 2 * HOUR,
+    });
+    const lesson = lessonOf(skills[4].id);
+    delete Store.state.completedLessons[lesson.id];
+    Store.state.lessonSessions = {
+      [lesson.id]: { idx: 1, stepState: {}, xp: 0, wrongAttempts: 0, startTs: now - DAY, ts: now - 10 * 60 * 1000, returnRoute: "training" },
+    };
+  });
+  {
+    const best = bestNextStep();
+    t("свежий начатый урок вытесняет более раннюю начатую миссию",
+      best && best.action === "finish-lesson", best && best.action + ":" + best.text);
+  }
+  // Обратно: в миссию вернулись после урока → первой снова миссия.
+  makeStrongStudent(() => {
+    const sid = skills[2].id;
+    const m = missionOf(sid);
+    Store.state.skillStats[sid] = { progress: 0, solved: 10, correct: 6, timeSec: 400 };
+    Store.state.missionProgress[m.id] = 1;
+    Store.state.taskAttempts.unshift({
+      taskId: DataAPI.practiceTasksBySkill(sid)[0].id, skill: sid, correct: true,
+      hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - 60 * 1000,
+    });
+    const lesson = lessonOf(skills[4].id);
+    delete Store.state.completedLessons[lesson.id];
+    Store.state.lessonSessions = {
+      [lesson.id]: { idx: 1, stepState: {}, xp: 0, wrongAttempts: 0, startTs: now - DAY, ts: now - 2 * HOUR, returnRoute: "training" },
+    };
+  });
+  {
+    const best = bestNextStep();
+    t("продолженная позже миссия снова вытесняет урок",
+      best && best.action === "practice" && /Продолжить/.test(best.text), best && best.action + ":" + best.text);
+  }
+
+  /* ---------- 6c. Начатая миссия не выпадает при высоком освоении ---------- */
+  makeStrongStudent(() => {
+    const sid = skills[6].id;
+    const m = missionOf(sid);
+    for (const task of DataAPI.practiceTasksBySkill(sid)) {
+      Store.state.taskAttempts.push({
+        taskId: task.id, skill: sid, correct: true, hintLevel: 0,
+        seconds: 20, closesTaskId: null, ts: now - 3 * HOUR,
+      });
+    }
+    Store.state.missionProgress[m.id] = 1;
+  });
+  {
+    const m = missionOf(skills[6].id);
+    const c = nextStepCandidates().find((x) => x.action === "practice" && x.payload.missionId === m.id);
+    t("начатая миссия не выпадает из кандидатов при освоении темы ≥ 90%",
+      !!c && /Продолжить/.test(c.text), c ? c.text : "кандидата нет");
+  }
+  // Завершённая миссия «начатой» больше не считается.
+  makeStrongStudent(() => {
+    const sid = skills[2].id;
+    const m = missionOf(sid);
+    Store.state.skillStats[sid] = { progress: 0, solved: 10, correct: 6, timeSec: 400 };
+    Store.state.missionProgress[m.id] = missionPracticeCount(m);
+    Store.state.missionsDone[m.id] = { ts: now };
+    Store.state.taskAttempts.unshift({
+      taskId: DataAPI.practiceTasksBySkill(sid)[0].id, skill: sid, correct: true,
+      hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - 30 * 60 * 1000,
+    });
+  });
+  {
+    const m = missionOf(skills[2].id);
+    const c = nextStepCandidates().find((x) => x.action === "practice" && x.payload.missionId === m.id && /Продолжить/.test(x.text));
+    t("завершённая миссия не предлагается как начатая", !c, c ? c.text : "чисто");
+  }
+
+  /* ---------- 6d. Частично решённая подборка — выше свежих дел ---------- */
+  makeStrongStudent(() => {
+    ensureDailyChallenge();
+    const ids = dailyTaskIds();
+    Store.state.daily = { date: todayStr(), solved: 1, done: false, taskIds: ids, countedTaskIds: [ids[0]] };
+    Store.state.taskAttempts.unshift({
+      taskId: ids[0], skill: DataAPI.task(ids[0]).skill, correct: true,
+      hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - 30 * 60 * 1000,
+    });
+  });
+  {
+    const best = bestNextStep();
+    t("частично решённая ежедневная подборка идёт выше свежих кандидатов",
+      best && best.action === "daily" && /Закончить/.test(best.text), best && best.action + ":" + best.text);
+  }
+
   /* ---------- 7. Хороший ученик: почти всё освоено ---------- */
   makeStrongStudent(() => {
     for (const sk of skills) Store.state.skillStats[sk.id] = { progress: 0, solved: 12, correct: 11, timeSec: 300 };

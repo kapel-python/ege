@@ -1068,8 +1068,8 @@ const HELP = {
   nextstep: {
     title: "Что делать сейчас",
     body: `
-      <p>Здесь мы подсказываем, чем лучше заняться прямо сейчас: закончить начатый урок, повторить ошибки, потренировать слабую тему или написать сочинение.</p>
-      <p>Совет каждый раз подбирается под тебя — что сейчас полезнее всего.</p>
+      <p>Сначала подсказываем закончить то, что уже начато: урок, тренировку, сочинение или ежедневную подборку. Пока дело не доведено до конца, блок будет возвращать к нему — причём к самому свежему из начатого.</p>
+      <p>Если начатого нет, совет подбирается по слабым темам и ошибкам.</p>
       <p>Но это только совет: все разделы всегда открыты, можешь заниматься чем хочешь.</p>`,
   },
   forecast: {
@@ -3379,6 +3379,14 @@ function nextStepActionable(candidate) {
     }
     if (candidate.action === "daily") return dailyTaskIds().length > 0;
     if (candidate.action === "mixed") return DataAPI.practiceTasks().length > 0;
+    if (candidate.action === "resume") {
+      const S = storedSessionSnapshot();
+      if (!S || !(S.taskIds || []).some((id) => DataAPI.task(id))) return false;
+      if (payload.mode && S.mode !== payload.mode) return false;
+      if (payload.mode === "mission" && String(S.missionId || "") !== String(payload.missionId || "")) return false;
+      if (payload.mode === "boss" && String(S.bossId || "") !== String(payload.bossId || "")) return false;
+      return true;
+    }
   } catch (_) {
     return false;
   }
@@ -3390,13 +3398,151 @@ function nextStepActionable(candidate) {
    запускал подписанное на кнопке, а не свежий список по тому же индексу. */
 let lastNextStepsSnapshot = [];
 
+/* Незавершённая сессия практики: живой Session.cur, а после перезагрузки —
+   то же место, откуда его восстанавливает restoreSessionFromStorage.
+   Возвращаем лёгкий снимок: для кандидата блока нужны только mode, id и
+   время последнего касания. */
+function storedSessionSnapshot() {
+  const live = Session.cur;
+  if (live && Array.isArray(live.taskIds) && live.taskIds.length) {
+    return {
+      title: String(live.title || ""), taskIds: live.taskIds, mode: String(live.mode || "quick"),
+      missionId: live.missionId || null, bossId: live.bossId || null,
+      idx: Math.min(Math.max(Number(live.idx) || 0, 0), live.taskIds.length - 1),
+      lastTs: Number(live.lastTs) || Number(live.startTs) || 0,
+      essayDraftByTask: live.essayDraftByTask || {},
+      essayWrittenByTask: live.essayWrittenByTask || {},
+    };
+  }
+  try {
+    const d = JSON.parse(localStorage.getItem("ege_core_session") || "null");
+    if (!d || !Array.isArray(d.taskIds) || !d.taskIds.length) return null;
+    return {
+      title: String(d.title || ""), taskIds: d.taskIds, mode: String(d.mode || "quick"),
+      missionId: d.missionId || null, bossId: d.bossId || null,
+      idx: Math.min(Math.max(Number(d.idx) || 0, 0), d.taskIds.length - 1),
+      lastTs: Number(d.lastTs) || Number(d.startTs) || 0,
+      essayDraftByTask: d.essayDraftByTask || {},
+      essayWrittenByTask: d.essayWrittenByTask || {},
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/* «Продолжить начатое» из локальной сессии: сочинение, босс, повтор ошибок,
+   смешанное испытание, свободная тренировка. Урок, миссия с прогрессом и
+   ежедневная приходят из серверного состояния — сюда попадают лишь случаи,
+   о которых сервер ещё не знает (сессия открыта, но ни одного ответа не
+   сохранено), или то, что вообще живёт только на устройстве. */
+function localResumeCandidate() {
+  const S = storedSessionSnapshot();
+  if (!S || !(S.taskIds || []).some((id) => DataAPI.task(id))) return null;
+  const base = {
+    action: "resume",
+    route: "#/training", icon: "rotate", cta: "Продолжить",
+    startedTs: Number(S.lastTs) || 0,
+  };
+  const task = DataAPI.task(S.taskIds[Math.min(S.idx || 0, S.taskIds.length - 1)]);
+  if (S.mode === "mission") {
+    const m = S.missionId ? DataAPI.mission(S.missionId) : null;
+    if (!m || !missionPracticeIds(m).length || (Store.state.missionsDone || {})[m.id]) return null;
+    const total = missionPracticeCount(m), prog = missionProgress(m);
+    // С прогрессом ту же миссию уже продолжает движок из состояния БД.
+    if (prog > 0 && prog < total) return null;
+    return { ...base, kind: "mission", payload: { mode: "mission", missionId: m.id }, icon: "target",
+      text: `Продолжить тренировку «${missionSessionTitle(m)}»`,
+      reason: "Тренировка уже открыта на этом устройстве — вернись и доведи её до конца." };
+  }
+  if (S.mode === "boss") {
+    const boss = DataAPI.bosses().find((b) => String(b.id) === String(S.bossId || ""));
+    if (!boss || bossDefeated(boss) || !bossUnlocked(boss)) return null;
+    return { ...base, kind: "boss", payload: { mode: "boss", bossId: boss.id }, icon: "crown", route: "#/trials",
+      text: `Продолжить испытание «${String(boss.title || "Босс").replace(/^БОСС:\s*/, "")}»`,
+      reason: "Испытание уже начато — закончи его, результат сохранится." };
+  }
+  if (S.mode === "errors") {
+    if (!asSafeArray(Store.state.errors).some((e) => e && !e.resolved)) return null;
+    return { ...base, kind: "errors", payload: { mode: "errors" }, icon: "rotate", route: "#/errors",
+      text: "Закончить повторение слабых мест",
+      reason: "Разбор ошибок уже начат — продолжи с того же задания." };
+  }
+  if (S.mode === "daily") return null; // ежедневную продолжает движок по состоянию БД
+  // Сочинение в лёгком каталоге — стаб без type, поэтому кроме типа задания
+  // смотрим метки работы (черновик/отправка) и название сессии.
+  const essayDrafted = Object.keys(S.essayDraftByTask || {}).some((id) => String(S.essayDraftByTask[id] || "").trim());
+  const essayWritten = Object.keys(S.essayWrittenByTask || {}).length > 0;
+  if ((task && isLongTextTask(task)) || essayDrafted || essayWritten || /сочинение/i.test(String(S.title || ""))) {
+    return { ...base, kind: "essay", payload: { mode: "quick" }, icon: "pen",
+      text: `Продолжить сочинение${task && task.sub ? ` «${String(task.sub)}»` : ""}`,
+      reason: "Черновик сохранён — допиши начатую работу." };
+  }
+  if (/Смешанное испытание/i.test(String(S.title || ""))) {
+    return { ...base, kind: "mixed", payload: { mode: "quick" }, icon: "trials",
+      text: "Продолжить смешанное испытание",
+      reason: "Испытание уже начато — пройди его до конца." };
+  }
+  const cleanTitle = String(S.title || "").replace(/^Тренировка:\s*/, "");
+  return { ...base, kind: "quick", payload: { mode: "quick" }, icon: "training",
+    text: cleanTitle ? `Продолжить тренировку «${cleanTitle}»` : "Продолжить тренировку",
+    reason: "Тренировка уже открыта — закончи начатое, прежде чем начинать новое." };
+}
+
+/* Локальное «продолжить» встаёт на место кандидата движка о той же
+   активности (чтобы не было двух кнопок про одно и то же) и сортируется
+   вместе с начатыми кандидатами по свежести: последнее начатое — первым. */
+function mergeResumeCandidate(steps, local) {
+  const sameActivity = (c) => {
+    if (!c) return false;
+    const p = c.payload || {};
+    if (local.kind === "mission") return c.action === "practice" && String(p.missionId) === String(local.payload.missionId);
+    if (local.kind === "boss") return c.action === "boss" && String(p.bossId) === String(local.payload.bossId);
+    if (local.kind === "errors") return c.action === "errors-review";
+    if (local.kind === "mixed") return c.action === "mixed";
+    if (local.kind === "essay") return c.action === "essay";
+    return false;
+  };
+  return [local, ...steps.filter((c) => !sameActivity(c))].sort((a, b) => {
+    const at = Number(a.startedTs) || 0, bt = Number(b.startedTs) || 0;
+    if (!at && !bt) return 0;
+    if (!at) return 1;
+    if (!bt) return -1;
+    return bt - at;
+  });
+}
+
 function safeNextStepCandidates() {
   if (subjectContentState().locked) return [];
+  let steps = [];
   try {
-    return asSafeArray(nextStepCandidates()).filter(nextStepActionable);
+    steps = asSafeArray(nextStepCandidates()).filter(nextStepActionable);
   } catch (_) {
     return [];
   }
+  try {
+    const local = localResumeCandidate();
+    if (local) return mergeResumeCandidate(steps, local).filter(nextStepActionable);
+  } catch (_) {}
+  return steps;
+}
+
+/* Возврат в сохранённую сессию: глубина маршрута — в mode, место внутри —
+   в localStorage. Живой Session.cur уже на месте — восстанавливаем только
+   после перезагрузки. */
+function resumeStoredSession(candidate) {
+  const p = (candidate && candidate.payload) || {};
+  const route = p.mode === "mission" ? ["practice", p.missionId]
+    : p.mode === "boss" ? ["boss", p.bossId]
+    : p.mode === "errors" ? ["review"]
+    : p.mode === "daily" ? ["daily"] : ["session"];
+  if (!Session.cur || !sessionMatchesRoute(Session.cur, route[0], route[1])) {
+    if (!restoreSessionFromStorage(route[0], route[1])) {
+      toast("Сессия уже завершена или недоступна", "", "bulb");
+      try { render(); } catch (_) {}
+      return;
+    }
+  }
+  go(route[0], route[1]);
 }
 
 function runNextStep(index = 0) {
@@ -3433,6 +3579,7 @@ function runNextStep(index = 0) {
     case "boss": startBoss(c.payload.bossId); break;
     case "daily": startDaily(); break;
     case "mixed": startMixedTrial(); break;
+    case "resume": resumeStoredSession(c); break;
     default: go(c.route ? c.route.replace("#/", "") : "dashboard");
   }
 }
@@ -4029,6 +4176,9 @@ function persistSession() {
       title: S.title, taskIds: S.taskIds, mode: S.mode,
       missionId: S.missionId, bossId: S.bossId, xpReward: S.xpReward,
       offset: S.offset, total: S.total, idx: S.idx, errorMap: S.errorMap,
+      // Последнее касание сессии: «Что делать сейчас» по нему решает, какое
+      // из начатых дел показывать первым.
+      lastTs: Date.now(),
       essayDraftByTask: S.essayDraftByTask || {},
       // Какие сочинения уже написаны: без этого после перезагрузки «Далее»
       // пропадал бы у уже проверенных работ. Без текста — только факт.
@@ -4062,6 +4212,7 @@ function restoreSessionFromStorage(route, param) {
     idx: Math.min(Math.max(d.idx || 0, 0), ids.length - 1),
     results: [], hintsUsed: 0, startTs: Date.now(), taskStartTs: Date.now(),
     answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    lastTs: Number(d.lastTs) || Number(d.startTs) || Date.now(),
     essayDraftByTask: d.essayDraftByTask || {},
     essayWrittenByTask: d.essayWrittenByTask || {},
   };
@@ -4488,7 +4639,12 @@ function sessionAnswerAreaHtml(t, S) {
 
 /* Черновик живёт в состоянии сессии (и дублируется в localStorage через
    persistSession), поэтому перерисовка экрана — подсказка, выход из модалки —
-   не стирает текст. Ключ — id задания: в сессии может быть несколько тем. */
+   не стирает текст. Ключ — id задания: в сессии может быть несколько тем.
+   Набор текста дополнительно сохраняется в localStorage с коротким
+   дебаунсом, а на уходе со страницы — принудительно (pagehide/
+   visibilitychange ниже): «начал писать и закрыл браузер» не должен
+   терять работу, иначе блок «Что делать сейчас» не узнает о черновике. */
+let essayDraftPersistTimer = null;
 function sessionEssayWire(t) {
   const S = Session.cur;
   const input = document.getElementById("essayInput");
@@ -4517,6 +4673,11 @@ function sessionEssayWire(t) {
     // Правка после неудачной проверки возвращает кнопку отправки: текст
     // уже не тот, что сохранён, — это новая работа (см. essaySyncSubmitVisibility).
     essaySyncSubmitVisibility(t);
+    if (essayDraftPersistTimer) clearTimeout(essayDraftPersistTimer);
+    essayDraftPersistTimer = setTimeout(() => {
+      essayDraftPersistTimer = null;
+      try { persistSession(); } catch (_) {}
+    }, 1200);
   };
   input.addEventListener("input", update);
   update();
@@ -6843,6 +7004,9 @@ const Lesson = {
     Store.state.lessonSessions[this.cur.lesson.id] = {
       idx: this.cur.idx, stepState: this.cur.stepState, xp: this.cur.xp,
       wrongAttempts: this.cur.wrongAttempts, startTs: this.cur.startTs,
+      // Последнее касание урока: по нему «Что делать сейчас» выбирает самое
+      // свежее начатое дело (startTs — лишь запасной вариант старых записей).
+      ts: Date.now(),
       activeMs: normalizeLessonActiveMs(this.cur.activeMs),
       returnRoute: this.cur.returnRoute || "path",
     };
@@ -11150,10 +11314,12 @@ function bootstrapApp() {
       try {
         window.addEventListener("beforeunload", () => {
           pauseLessonClock();
+          try { persistSession(); } catch (_) {}
           Store.releaseTabLeadership();
         });
         window.addEventListener("pagehide", () => {
           pauseLessonClock();
+          try { persistSession(); } catch (_) {}
           Store.releaseTabLeadership();
         });
         window.addEventListener("storage", (e) => {
@@ -11162,8 +11328,15 @@ function bootstrapApp() {
           }
         });
         document.addEventListener("visibilitychange", () => {
-          if (document.hidden) pauseLessonClock();
-          else resumeLessonClock();
+          if (document.hidden) {
+            pauseLessonClock();
+            // Свежий черновик сочинения уходит в localStorage до того, как
+            // вкладку свернут/убьют: блок «Что делать сейчас» должен знать
+            // о недописанной работе.
+            try { persistSession(); } catch (_) {}
+          } else {
+            resumeLessonClock();
+          }
           if (!document.hidden) {
             Store.checkExternalUpdate(true).catch(() => {});
             try { revalidateProfileAuth(); } catch (_) {}

@@ -818,6 +818,57 @@ async function main() {
       row.includes("sessionNext()") && row.includes("Далее →"), row.slice(0, 100));
   }
 
+  /* ---------- 12. «Что делать сейчас»: недописанное сочинение — первым ---------- */
+  {
+    const { sandbox } = buildSandbox({});
+    const entered = await enterPractice(sandbox); // [re27_4]
+    const taskId = entered.taskIds[0];
+    run(sandbox, `
+      Session.cur.essayDraftByTask = { "${taskId}": "Я начал писать и вышел" };
+      persistSession();
+    `);
+    const first = run(sandbox, `(() => {
+      const c = safeNextStepCandidates()[0];
+      return c ? { action: c.action, kind: c.kind || "", text: c.text } : null;
+    })()`);
+    check("недописанное сочинение — первый пункт «Что делать сейчас»",
+      !!first && first.action === "resume" && first.kind === "essay" && /сочинение/i.test(first.text),
+      JSON.stringify(first));
+    // Перезагрузка: живой сессии нет, но черновик лежит в localStorage —
+    // блок обязан помнить о работе и вести ровно в неё.
+    run(sandbox, `Session.cur = null; globalThis.__goCalls = [];`);
+    const stored = run(sandbox, `(() => {
+      const c = safeNextStepCandidates()[0];
+      return c ? { action: c.action, kind: c.kind || "" } : null;
+    })()`);
+    check("после перезагрузки черновик в localStorage всё ещё первый",
+      !!stored && stored.action === "resume" && stored.kind === "essay", JSON.stringify(stored));
+    run(sandbox, `resumeStoredSession(safeNextStepCandidates()[0])`);
+    await flush();
+    const resumed = run(sandbox, `({
+      cur: Session.cur ? Session.cur.taskIds.join(",") : null,
+      draft: Session.cur && Session.cur.essayDraftByTask ? Session.cur.essayDraftByTask["${taskId}"] : null,
+      go: globalThis.__goCalls.slice(),
+    })`);
+    check("«Продолжить» возвращает ту же сессию вместе с черновиком",
+      resumed.cur === taskId && resumed.draft === "Я начал писать и вышел"
+      && resumed.go.some((c) => c[0] === "session"),
+      JSON.stringify(resumed));
+    // Дашборд: главная кнопка блока действительно ведёт в начатое сочинение.
+    run(sandbox, `screenDashboard(document.getElementById("screen"))`);
+    const dash = run(sandbox, `document.getElementById("screen").innerHTML`);
+    check("дашборд показывает начатое сочинение главной кнопкой блока",
+      /Что делать сейчас/.test(dash) && /Продолжить сочинение/.test(dash) && /runNextStep\(0\)/.test(dash),
+      dash.slice(0, 160));
+    // Закрытие сессии снимает кандидата: завершённое не предлагаем.
+    run(sandbox, `Session.cur = null; persistSession();`);
+    const after = run(sandbox, `(() => {
+      const c = safeNextStepCandidates().find((x) => x && x.action === "resume");
+      return c || null;
+    })()`);
+    check("после закрытия сессии «продолжить» из блока исчезает", after === null, JSON.stringify(after));
+  }
+
   console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
   process.exit(failures ? 1 : 0);
 }
