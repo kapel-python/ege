@@ -476,7 +476,7 @@
       var sum = (Number(p.amountKopecks) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
       var note = String(p.note || "").trim();
       var title = note
-        ? PLUS_WORD + " · " + note
+        ? PLUS_WORD + " · " + esc(note)
         : (Number(p.amountKopecks) === 0 && p.provider === "manual")
           ? PLUS_WORD + " · выдано вручную"
           : (Number(p.amountKopecks) === 0 && p.provider === "promo")
@@ -488,7 +488,7 @@
           ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>')
         + '</span>'
-        + '<span class="hist__what"><span class="hist__title">' + esc(title) + '</span><br>'
+        + '<span class="hist__what"><span class="hist__title">' + title + '</span><br>'
         + '<span class="hist__date">' + esc(fmtDate(p.paidAt || p.createdAt)) + '</span></span>'
         + '<span class="hist__sum num">' + esc(sum) + ' ₽ <small>' + esc(payStatusLabel(p)) + '</small></span>'
         + '</div>';
