@@ -2511,12 +2511,15 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     const err = (closesTaskId ? s.errors.find((e) => e && String(e.taskId) === String(closesTaskId) && !e.resolved) : null)
       || s.errors.find((e) => e && String(e.taskId) === String(task.id) && !e.resolved);
     if (err && (errorKindOf(err) === "major" || !imperfect)) {
+      const closedKind = errorKindOf(err);
       err.resolved = true;
       err.resolvedAt = Date.now();
       s.errorsResolved++;
       xp += XP_ERROR_RESOLVED;
       xpBreakdown.errorResolved += XP_ERROR_RESOLVED;
-      addTimeline(`Закрыта ошибка: ${task.sub}`);
+      // Мини-ошибка — это не провал, а закрепление: верное решение с
+      // подсказкой, которое довели до чистого. Разные слова и в ленте.
+      addTimeline(closedKind === "minor" ? `Закреплено: ${task.sub}` : `Закрыта ошибка: ${task.sub}`);
     } else if (err) {
       err.ts = Date.now();
     }
@@ -2964,10 +2967,10 @@ function nextStepCandidates() {
       payload: {},
       route: "#/errors", icon: "rotate",
       cta: "Повторить",
-      text: `Повторить слабые места — открыто ${openErrors.length} ${plural(openErrors.length, "ошибка", "ошибки", "ошибок")}`,
+      text: `Повторить слабые места — на разбор ${openErrors.length}`,
       reason: openErrors.length >= 3
-        ? `Накопилось несколько нерешённых ошибок — их повторение даст больше, чем новая тема.`
-        : `Открытая ошибка со временем забывается — закрой её, пока контекст свежий.`,
+        ? `Накопилось несколько незакрытых пунктов — их повторение даст больше, чем новая тема.`
+        : `Незакрытый пункт со временем забывается — закрой его, пока контекст свежий.`,
       score,
     });
   }

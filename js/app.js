@@ -1103,8 +1103,8 @@ const HELP = {
   errors: {
     title: "Ошибки",
     body: `
-      <p>Здесь собираются твои ошибки — по темам. «Требуют повторения» — задания, которые не решены. «Почти получилось» — решены, но неидеально: с подсказкой, после неверных попыток или слишком медленно, — такое закрывает только чистое решение без помощи.</p>
-      <p>Нажми «Повторить слабые места» — подберём похожие задания. Чистый верный ответ закроет ошибку и даст <b>+15 XP</b>.</p>`,
+      <p>Здесь собираются слабые места — по темам. «Требуют повторения» — задания, которые не решены. «Почти получилось» — решены верно, но с подсказкой, после неверных попыток или медленно: это не ошибка, а сигнал закрепить тему чистым решением, без помощи.</p>
+      <p>Нажми «Повторить слабые места» — подберём похожие задания. Чистое решение закроет пункт и даст <b>+15 XP</b>.</p>`,
   },
   trials: {
     title: "Испытания",
@@ -2331,7 +2331,7 @@ const SUBJECT_SECTION_COPY = {
   },
   errors: {
     title: "Ошибки",
-    sub: "Каждая ошибка — это точка роста. Повторяй слабые места, пока они не закроются.",
+    sub: "Ошибки — это нормально: разбери промахи и закрепи «почти получилось» чистым решением.",
     empty: "Список ошибок появится после первых заданий. Пока повторять нечего.",
   },
   trials: {
@@ -3163,6 +3163,8 @@ function screenDashboard(root) {
   const act = todayActivity();
   const errors = asSafeArray(s.errors);
   const openErrors = errors.filter((e) => e && !e.resolved).length;
+  const openMajorErrors = errors.filter((e) => e && !e.resolved && errorKindOf(e) === "major").length;
+  const openMinorErrors = openErrors - openMajorErrors;
   const d = DataAPI.daily() || {};
   ensureDailyChallenge();
   const dailyIds = asSafeArray(dailyTaskIds());
@@ -3282,10 +3284,10 @@ function screenDashboard(root) {
         <div><div class="action-card__title">Продолжить обучение</div>
         <div class="action-card__sub">${openLesson ? `Урок «${openLesson.lesson.title}» — шаг ${Math.min(nonNegativeNumber(openLesson.session.idx) + 1, Math.max(1, DataAPI.lessonStepsCount(openLesson.lesson)))}/${DataAPI.lessonStepsCount(openLesson.lesson)}` : activeMission ? `«${activeMission.title}» — ${missionProgress(activeMission)}/${missionPracticeCount(activeMission)}` : "Текущая тема по рекомендации"}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--warn" role="button" tabindex="0" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openErrors ? "startErrorsReview()" : "go('errors')"}}" aria-label="Повторить ошибки">
+      <div class="card card--hover action-card action-card--warn" role="button" tabindex="0" onclick="${openErrors ? "startErrorsReview()" : "go('errors')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openErrors ? "startErrorsReview()" : "go('errors')"}}" aria-label="Повторить слабые места">
         <div class="action-card__icon">${icon("rotate")}</div>
-        <div><div class="action-card__title">Повторить ошибки</div>
-        <div class="action-card__sub">${openErrors ? `Открыто ошибок: ${openErrors}` : "Все ошибки закрыты"}</div></div>
+        <div><div class="action-card__title">Повторить слабые места</div>
+        <div class="action-card__sub">${openErrors ? (openMajorErrors && openMinorErrors ? `Разобрать: ${openMajorErrors} · Закрепить: ${openMinorErrors}` : openMajorErrors ? `Разобрать: ${openMajorErrors}` : `Закрепить без подсказок: ${openMinorErrors}`) : "Всё разобрано и закреплено"}</div></div>
       </div>
       <div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="${dailyGoal ? "startDaily()" : "go('trials')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${dailyGoal ? "startDaily()" : "go('trials')"}}" aria-label="Ежедневная задача">
         <div class="action-card__icon">${icon("zap")}</div>
@@ -3335,7 +3337,7 @@ function screenDashboard(root) {
               ${progressBar(prog)}
               <div class="skill-row__pct">${prog}%</div>
               <div class="skill-row__tip">
-                ${errs ? `Открыто ошибок: <b>${errs}</b><br>` : "Ошибок нет — просто мало освоено<br>"}
+                ${errs ? `На разбор: <b>${errs}</b><br>` : "Пока чисто — просто мало освоено<br>"}
                 Нажми, чтобы открыть тему
               </div>
             </div>`).join("")
@@ -6622,7 +6624,7 @@ function sessionFinish(early = false) {
         <div class="stat-label" style="margin-bottom:8px">Проверялись навыки</div>
         <div class="error-subtopics">${checkedSkills.map((n) => `<span class="chip">${n}</span>`).join("")}</div>
       </div>` : ""}
-      ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто ошибок: <b>${errorsClosed}</b></div>` : ""}
+      ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто пунктов: <b>${errorsClosed}</b></div>` : ""}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         ${essayReportHref ? `<button class="btn btn--primary btn--lg" onclick="location.href='${esc(essayReportHref)}'">Разбор сочинения →</button>` : ""}
         <button class="btn ${essayReportHref ? "btn--ghost" : "btn--primary"} btn--lg" onclick="go('dashboard')">На главную</button>
@@ -7172,7 +7174,7 @@ function screenErrors(root) {
   const majors = open.filter((e) => errorKindOf(e) === "major");
   const minors = open.filter((e) => errorKindOf(e) === "minor");
 
-  const groupCards = (errs, chipClass) => {
+  const groupCards = (errs, chipClass, word = ["ошибка", "ошибки", "ошибок"]) => {
     const bySkill = {};
     for (const e of errs) {
       const key = (e && e.skill) || "";
@@ -7191,7 +7193,7 @@ function screenErrors(root) {
         <div class="error-group__head">
           <div style="font-weight:650;font-size:15px">${esc(title)}</div>
           ${ege ? `<span class="chip">${esc(ege)}</span>` : ""}
-          <div class="error-group__count"><span class="chip ${chipClass}">${list.length} ${plural(list.length, "ошибка", "ошибки", "ошибок")}</span></div>
+          <div class="error-group__count"><span class="chip ${chipClass}">${list.length} ${plural(list.length, ...word)}</span></div>
         </div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Частые проблемы:</div>
         <div class="error-subtopics">
@@ -7204,13 +7206,13 @@ function screenErrors(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Ошибки ${helpDot("errors")}</div>
-      <div class="page-sub">Каждая ошибка — это точка роста. Повторяй слабые места, пока они не закроются.</div>
+      <div class="page-sub">Ошибки — это нормально: разбери промахи и закрепи «почти получилось» чистым решением.</div>
     </div>
 
     <div class="card card--glow" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px">
       <div>
         <div class="stat-num mono">${open.length}</div>
-        <div class="stat-label">открытых ошибок (полных: ${majors.length} · мини: ${minors.length}) · закрыто: ${resolvedTotal}</div>
+        <div class="stat-label">на разбор (разобрать: ${majors.length} · закрепить: ${minors.length}) · закрыто: ${resolvedTotal}</div>
       </div>
       <div style="margin-left:auto">
         <button class="btn btn--primary btn--lg" ${open.length ? "" : "disabled"} onclick="startErrorsReview()">
@@ -7241,8 +7243,8 @@ function screenErrors(root) {
 
     ${majors.length ? `<div class="section-title">Требуют повторения</div>${groupCards(majors, "chip--danger")}` : ""}
     ${minors.length ? `<div class="section-title">Почти получилось — закрепи без подсказок</div>
-    <div style="font-size:13px;color:var(--muted);margin:-6px 0 12px">Решено, но неидеально: с подсказкой, после неверных попыток или слишком медленно. Чистое решение закроет пункт.</div>
-    ${groupCards(minors, "")}` : ""}
+    <div style="font-size:13px;color:var(--muted);margin:-6px 0 12px">Решено верно, но с подсказкой, после неверных попыток или медленно. Это не ошибка — чистый проход без помощи закроет пункт.</div>
+    ${groupCards(minors, "", ["на закрепление", "на закрепление", "на закрепление"])}` : ""}
     ${open.length === 0 ? `<div class="section-title">По навыкам</div><div class="card empty">Открытых ошибок нет. Новые появятся здесь после решений.</div>` : ""}`;
 }
 
@@ -7533,7 +7535,7 @@ function screenStats(root) {
     <div class="grid grid--4" style="margin-top:16px">
       <div class="card"><div class="stat-num mono">${streak}</div><div class="stat-label">дней подряд</div></div>
       <div class="card"><div class="stat-num mono">${bestSeries}</div><div class="stat-label">лучшая серия</div></div>
-      <div class="card"><div class="stat-num mono">${openErrs}</div><div class="stat-label">открытых ошибок</div></div>
+      <div class="card"><div class="stat-num mono">${openErrs}</div><div class="stat-label">слабых мест на разбор</div></div>
       <div class="card"><div class="stat-num mono">${lessons.length ? `${doneLessons}/${lessons.length}` : "—"}</div><div class="stat-label">уроков пройдено</div></div>
     </div>
 
@@ -7594,7 +7596,7 @@ function screenStats(root) {
         </div>
         <div class="card">
           <div style="font-weight:650;margin-bottom:10px">Требуют внимания</div>
-          ${weakest.length ? weakest.map((w) => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><div style="display:flex;justify-content:space-between;gap:8px"><span>${w.sk.name}</span><span class="chip chip--danger mono">${w.prog}%</span></div><div class="stat-label" style="margin-top:2px">${w.errs > 0 ? `открытых ошибок: ${w.errs}` : ""}${w.errs > 0 && w.acc != null ? " · " : ""}${w.acc != null ? `точность ${w.acc}%` : "пока нет ответов"}</div></div>`).join("")
+          ${weakest.length ? weakest.map((w) => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:14px"><div style="display:flex;justify-content:space-between;gap:8px"><span>${w.sk.name}</span><span class="chip chip--danger mono">${w.prog}%</span></div><div class="stat-label" style="margin-top:2px">${w.errs > 0 ? `на разбор: ${w.errs}` : ""}${w.errs > 0 && w.acc != null ? " · " : ""}${w.acc != null ? `точность ${w.acc}%` : "пока нет ответов"}</div></div>`).join("")
             : hasSignal ? `<div class="stat-label">Слабых мест нет — все темы в хорошем состоянии.</div>`
             : `<div class="stat-label">Пока рано — пройди несколько заданий, чтобы увидеть слабые темы.</div>`}
         </div>
