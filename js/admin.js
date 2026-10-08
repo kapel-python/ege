@@ -1586,15 +1586,50 @@ function bindUserActions(p) {
       </div>
       <div class="a-modal__actions"><button class="btn btn--soft" id="mCancel">Отмена</button></div>`, (modal) => {
       modal.querySelector("#mCancel").onclick = closeModal;
-      modal.querySelectorAll("[data-period]").forEach((btn) => {
-        btn.onclick = () => subPost({
-          action: "grant",
-          period: btn.dataset.period,
+      modal.querySelectorAll("[data-period]").forEach((periodBtn) => {
+        /* Клик по сроку НИЧЕГО не выдаёт: второй шаг — ввод Account ID.
+           Plus — самый дорогой товар проекта, и один промах здесь стоит
+           подписки живому человеку (как удаление аккаунта и полный сброс,
+           где защита та же). */
+        periodBtn.onclick = () => openSubGrantConfirm({
+          isExtend,
+          cur,
+          period: periodBtn.dataset.period,
           note: modal.querySelector("#fSubNote").value.trim(),
-        }, btn, isExtend ? "Plus продлён" : "Plus выдан");
+        });
       });
     });
   };
+
+  function openSubGrantConfirm(opts) {
+    const perName = opts.period === "year" ? "год" : "месяц";
+    const perText = opts.period === "year" ? "12 календарных месяцев" : "1 календарный месяц";
+    openModal(`
+      <div class="a-modal__title">${opts.isExtend ? 'Продлить <span class="plus">Plus</span>' : 'Выдать <span class="plus">Plus</span>'} на ${perName}?</div>
+      <div class="a-modal__desc">${opts.isExtend
+        ? `Срок растянется от конца текущего (до ${esc(fmtDate(opts.cur.expiresAt))}), а не перезапишется.`
+        : "Доступ откроется сразу на выбранный срок."} ${perText}, карманы лимитов дольются до полного.${opts.note ? ` Повод: ${esc(opts.note)}.` : ""} Запись попадёт в журнал и в историю платежей получателя (грант 0 ₽).</div>
+      <div class="a-modal__form">
+        <div class="a-modal__warn"><b>Подтверждение:</b> введи Account ID <span class="mono">${esc(ref)}</span></div>
+        <input class="a-input mono" id="fSubConfirm" placeholder="${esc(ref)}" autocomplete="off" spellcheck="false">
+        <div id="mErr"></div>
+      </div>
+      <div class="a-modal__actions">
+        <button class="btn btn--soft" id="mCancel">Отмена</button>
+        <button class="btn btn--primary" id="mDo" disabled>${opts.isExtend ? "Продлить" : "Выдать"} на ${perName}</button>
+      </div>`, (modal) => {
+      const input = modal.querySelector("#fSubConfirm");
+      const doBtn = modal.querySelector("#mDo");
+      modal.querySelector("#mCancel").onclick = closeModal;
+      input.oninput = () => { doBtn.disabled = input.value.trim() !== ref; };
+      input.focus();
+      doBtn.onclick = (ev) => {
+        if (input.value.trim() !== ref) return;
+        subPost({ action: "grant", period: opts.period, note: opts.note }, ev.target,
+                opts.isExtend ? "Plus продлён" : "Plus выдан");
+      };
+    });
+  }
 
   const subRevokeEl = document.getElementById("subRevokeBtn");
   if (subRevokeEl) subRevokeEl.onclick = () => {

@@ -220,6 +220,43 @@ async function main() {
     }, uBody.accountId, { timeout: 20000 });
     t("платёж-грант виден в ленте последних платежей", true);
 
+    // ---------------- S3b: выдача из карточки пользователя ----------------
+    section("S3b выдача Plus из карточки пользователя — только с подтверждением");
+    const readExpiry = () => admin.evaluate(async (acc) => {
+      const r = await fetch(`/api/admin/users/${acc}`, { credentials: "same-origin" });
+      const d = await r.json();
+      let found = 0;
+      const stack = [d];
+      while (stack.length) {
+        const x = stack.pop();
+        if (x && typeof x === "object") {
+          if (typeof x.expiresAt === "number") found = Math.max(found, x.expiresAt);
+          for (const k in x) stack.push(x[k]);
+        }
+      }
+      return found;
+    }, uBody.accountId);
+    await admin.goto(`${BASE}/admin#/users/${uBody.accountId}`, { waitUntil: "domcontentloaded" });
+    await admin.waitForSelector("#subGrantBtn", { timeout: 20000 });
+    const beforeGrant = await readExpiry();
+    await admin.click("#subGrantBtn");
+    await admin.waitForSelector('[data-period="month"]', { timeout: 15000 });
+    await admin.click('[data-period="month"]');
+    await admin.waitForSelector("#fSubConfirm", { timeout: 15000 });
+    const midGrant = await readExpiry();
+    const deadBefore = await admin.locator("#mDo").isDisabled();
+    t("клик по сроку НЕ выдаёт: второй шаг с вводом Account ID, срок не изменился",
+      midGrant === beforeGrant && deadBefore, `before=${beforeGrant} mid=${midGrant}`);
+    await admin.fill("#fSubConfirm", "чужой");
+    const deadWrong = await admin.locator("#mDo").isDisabled();
+    await admin.fill("#fSubConfirm", uBody.accountId);
+    const aliveExact = !(await admin.locator("#mDo").isDisabled());
+    t("чужая строка не подтверждает, точный Account ID — да", deadWrong && aliveExact);
+    await admin.click("#mDo");
+    await admin.waitForFunction(() => !document.querySelector(".a-modal-backdrop"), null, { timeout: 20000 });
+    const afterGrant = await readExpiry();
+    t("после подтверждения срок вырос", afterGrant > beforeGrant, `${beforeGrant} -> ${afterGrant}`);
+
     // ---------------- S4: ошибки страницы ---------------------------------
     section("S4 ошибки страницы");
     t("ни одной необработанной ошибки", !admin.errors.length, admin.errors.join(" | "));
