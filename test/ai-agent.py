@@ -1998,6 +1998,60 @@ def main():
             s3, b3 = turn(e, tid_e, "вопрос после busy")
             check("после release ход идёт", s3 == 200 and b3.get("final"), f"{s3} {b3}")
 
+            section("«Стоп» отменяет и серверный ход (POST /turns/cancel)")
+            c = Client("10.5.0.2")
+            claim(c, "Гоша")
+            status, body = new_thread(c)
+            tid_c = body["thread"]["id"]
+            gate = threading.Event()
+            first_slow = {"on": True}
+            saved_chat_cancel = ai.chat_with_tools
+
+            def cancel_chat(messages, tools, **kw):
+                with lock:
+                    slow = first_slow["on"]
+                    if slow:
+                        first_slow["on"] = False
+                if slow:
+                    # Первый вызов «летит» — в это время ученик жмёт «Стоп».
+                    gate.wait(timeout=10)
+                    return {"text": "Ответ отменённого хода.", "tool_calls": []}
+                return mock_chat(messages, tools, **kw)
+
+            ai.chat_with_tools = cancel_chat
+            try:
+                holder = {}
+
+                def fire_cancel_turn():
+                    holder["res"] = turn(c, tid_c, "привет")
+
+                th_cancel = threading.Thread(target=fire_cancel_turn, daemon=True)
+                th_cancel.start()
+                deadline = time.time() + 5
+                while time.time() < deadline and not server._agent_busy_locked(tid_c):
+                    time.sleep(0.05)
+                check("ход отмены держит слот", server._agent_busy_locked(tid_c))
+                sc, bc = c.request(base, "POST", "/api/agent/turns/cancel", {"threadId": tid_c})
+                check("cancel отдаёт слот сразу",
+                      sc == 200 and bc.get("cancelled") is True and bc.get("busy") is False,
+                      f"{sc} {bc}")
+                with lock:
+                    script.clear()
+                    script.append({"text": "Ответ после отмены.", "tool_calls": []})
+                s4, b4 = turn(c, tid_c, "второй вопрос")
+                check("после отмены новый ход не упирается в AGENT_BUSY",
+                      s4 == 200 and b4.get("final") == "Ответ после отмены.", f"{s4} {b4}")
+                gate.set()
+                th_cancel.join(timeout=15)
+                s5, b5 = c.request(base, "GET", f"/api/agent/threads/{tid_c}", None)
+                answers = [m.get("content") or "" for m in (b5.get("messages") or [])
+                           if m.get("role") == "assistant"]
+                check("отменённый ход не записал ответ",
+                      "Ответ отменённого хода." not in answers, str(answers)[:200])
+            finally:
+                gate.set()
+                ai.chat_with_tools = saved_chat_cancel
+
             section("подписка и удаление")
             conn2 = server.connect()
             try:

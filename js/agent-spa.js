@@ -441,6 +441,17 @@
       });
     });
   }
+  /* «Стоп» останавливает и сервер, не только запрос вкладки: иначе ход
+     продолжает держать слот треда, и новый вопрос или «Изменить» упирается в
+     AGENT_BUSY до конца чужого таймаута. Ответ не ждём (fire-and-forget):
+     сервер отдаёт слот сразу, а висящий вызов модели дорабатывает вхолостую
+     и ничего не записывает. */
+  function cancelServerTurn(tid) {
+    if (tid == null) return;
+    try {
+      api("POST", "/api/agent/turns/cancel", { threadId: Number(tid) }).catch(function () {});
+    } catch (_) {}
+  }
   function handleAuthError(res) {
     if (res.status === 401 && res.data && res.data.code === "GUEST_PENDING") {
       try { go("dashboard"); } catch (_) {}
@@ -3386,6 +3397,13 @@
       // уже не должен ждать его гвоздя в поле ввода.
       turn.detached = true;
       syncBusy();
+      if (turn.cancelled) {
+        // Кнопка «Стоп»: серверный ход отменён (POST /turns/cancel) — ждать
+        // нечего, ответ сюда не придёт. Композер свободен, можно писать заново
+        // или жать «Изменить» сразу, а не через обратный отсчёт AGENT_BUSY.
+        errorCard("Остановлено.", null, null);
+        return;
+      }
       errorCard("Остановлено. Если ответ уже готов — он появится ниже.",
         "Обновить чат", function () { loadThreadMessages(); });
       watchAnswer(turn.threadId, text, WATCH_TRIES);
@@ -3493,9 +3511,15 @@
       settle();
       liveDrop(turn);
       if (mg !== S.mountGen) return;
-      // Обрыв по «Стоп» — это не ошибка, а решение человека; сервер ход всё
-      // равно досчитает, а ответ подхватит watchAnswer.
-      if (turn.detached) { dropSkel(); watchAnswer(S.currentId, "", WATCH_TRIES); return; }
+      // Обрыв по «Стоп» — это не ошибка, а решение человека. Ход остановлен и
+      // на сервере (POST /turns/cancel) — ждать ответа нечего; старое поведение
+      // с watchAnswer осталось для обрыва без отмены (сеть, перемонтирование).
+      if (turn.detached) {
+        dropSkel();
+        if (turn.cancelled) { errorCard("Остановлено.", null, null); return; }
+        watchAnswer(S.currentId, "", WATCH_TRIES);
+        return;
+      }
       dropSkel();
       try { if (typeof onFail === "function") onFail(); } catch (_) {}
       if (btns) btns.forEach(function (b) { b.disabled = false; });
@@ -3685,15 +3709,22 @@
         try { bail(); } catch (_) {}
       } else if (turn && !turn.dead) {
         turn.detached = true;   // композер разблокируется, ответ ещё подхватим
+        // «Стоп» = остановить и сервер: слот отдаётся сразу, и новый вопрос
+        // или «Изменить» больше не упирается в AGENT_BUSY до конца хода.
+        turn.cancelled = true;
         if (S.abort) { try { S.abort.abort(); } catch (_) {} }
+        cancelServerTurn(tid);
       } else if (S.serverBusy) {
         // Перезагрузка посреди хода: рвать нечего (запроса вкладки нет) —
-        // просто освобождаем композер, ответ подхватит уже бегущий watchAnswer.
+        // останавливаем серверный ход и освобождаем композер.
         S.serverBusy = null;
+        cancelServerTurn(tid);
       }
       S.printing = false;
       syncBusy();
-      if (!S.pendingBail && !serverWait) watchAnswer(tid, text, WATCH_TRIES);
+      if (!S.pendingBail && !serverWait && !(turn && turn.cancelled)) {
+        watchAnswer(tid, text, WATCH_TRIES);
+      }
     });
     ui.feed.addEventListener("scroll", function () {
       // Своя доводка печати (значение сошлось точь-в-точь с progWrite) — это

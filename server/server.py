@@ -254,14 +254,19 @@ def AGENT_REPLY_MAX() -> int:
 # и длинный ход успевал его протухнуть: следующий вопрос в том же треде вставал
 # в цикл параллельно живому, а два писателя в один тред — это перепутанные
 # шаги в ленте. TTL теперь — окно жизни, а не длительность.
-_AGENT_BUSY: dict[int, tuple] = {}
+_AGENT_BUSY: dict[int, tuple] = {}  # tid -> (истекает, текст хода, токен)
 _AGENT_BUSY_LOCK = threading.Lock()
 _AGENT_BUSY_TTL_SEC = 95.0
 _AGENT_BUSY_TEXT_MAX = 400
+# Отмена хода: токен, который пометил для остановки _agent_busy_cancel.
+# Живой ход, чей вызов модели уже улетел, дорабатывает вхолостую, видит метку
+# перед следующим запросом к модели и завершается, ничего не записав.
+_AGENT_TURN_TOKEN = 0
+_AGENT_TURN_CANCELED: dict[int, float] = {}
 
 
-def _agent_busy_acquire(thread_id: int, text: str = "") -> bool:
-    """Взять слот треда. text — вопрос этого хода (обрезанный).
+def _agent_busy_acquire(thread_id: int, text: str = "") -> int | None:
+    """Взять слот треда. Возвращает токен хода или None, если слот занят.
 
     Текст лежит рядом со слотом не для красоты: по нему клиент отличает
     «слот держит МОЙ собственный ход» от «слот держит чужой ход». Живой случай
@@ -270,20 +275,67 @@ def _agent_busy_acquire(thread_id: int, text: str = "") -> bool:
     «сервер ещё считает, подождите 95 с» и снимал пузырёк вопроса, хотя
     собственный ответ приходил через несколько секунд. С текстом хода в
     ответе AGENT_BUSY первый случай опознаётся точно, и клиент молча ждёт
-    ответа вместо вранья про чужой занятый сервер."""
+    ответа вместо вранья про чужой занятый сервер.
+
+    Токен нужен отмене: освободить слот имеет право только тот ход, который
+    его взял, — иначе остановленный ход снял бы слот уже нового."""
+    global _AGENT_TURN_TOKEN
     now = time.monotonic()
     keep = str(text or "")[:_AGENT_BUSY_TEXT_MAX]
     with _AGENT_BUSY_LOCK:
         entry = _AGENT_BUSY.get(int(thread_id))
         if entry is not None and entry[0] > now:
+            return None
+        _AGENT_TURN_TOKEN += 1
+        token = _AGENT_TURN_TOKEN
+        _AGENT_BUSY[int(thread_id)] = (now + _AGENT_BUSY_TTL_SEC, keep, token)
+        return token
+
+
+def _agent_busy_release(thread_id: int, token: int | None = None) -> None:
+    """Освободить слот. С токеном — только если слот всё ещё принадлежит ходу:
+    отменённый ход не должен снять слот НОВОГО хода этого же треда."""
+    with _AGENT_BUSY_LOCK:
+        key = int(thread_id)
+        entry = _AGENT_BUSY.get(key)
+        if entry is None:
+            return
+        if token is not None and len(entry) > 2 and int(entry[2]) != int(token):
+            return
+        _AGENT_BUSY.pop(key, None)
+
+
+def _agent_busy_cancel(thread_id: int) -> bool:
+    """Остановить ход треда: слот отдаём СРАЗУ, токен помечаем отменённым.
+
+    Слот отдаётся сразу, а не после доработки висящего вызова модели: ученик
+    нажал «Стоп», чтобы отправлять дальше, и ждать ещё до 45 с чужого
+    таймаута он не должен. Уже улетевший вызов доработает вхолостую; перед
+    следующим шагом ход увидит метку (`_agent_turn_cancelled`) и завершится,
+    не записав ни ответа, ни шагов. Возвращает True, если было что отменять."""
+    with _AGENT_BUSY_LOCK:
+        key = int(thread_id)
+        entry = _AGENT_BUSY.get(key)
+        if entry is None or entry[0] <= time.monotonic():
             return False
-        _AGENT_BUSY[int(thread_id)] = (now + _AGENT_BUSY_TTL_SEC, keep)
+        token = int(entry[2]) if len(entry) > 2 else 0
+        _AGENT_BUSY.pop(key, None)
+        now = time.monotonic()
+        _AGENT_TURN_CANCELED[token] = now
+        # Старые метки не копим: живой ход снимает их сам, а брошенную
+        # (процесс/поток умер) подчищаем по возрасту.
+        for tok, at in list(_AGENT_TURN_CANCELED.items()):
+            if now - at > 3600:
+                _AGENT_TURN_CANCELED.pop(tok, None)
         return True
 
 
-def _agent_busy_release(thread_id: int) -> None:
+def _agent_turn_cancelled(token: int | None) -> bool:
+    """Помечен ли этот конкретный ход к отмене."""
+    if token is None:
+        return False
     with _AGENT_BUSY_LOCK:
-        _AGENT_BUSY.pop(int(thread_id), None)
+        return int(token) in _AGENT_TURN_CANCELED
 
 
 def _agent_busy_locked(thread_id: int) -> bool:
@@ -315,7 +367,8 @@ def _agent_busy_touch(thread_id: int) -> None:
         key = int(thread_id)
         entry = _AGENT_BUSY.get(key)
         if entry is not None:
-            _AGENT_BUSY[key] = (now + _AGENT_BUSY_TTL_SEC, entry[1])
+            _AGENT_BUSY[key] = (now + _AGENT_BUSY_TTL_SEC, entry[1],
+                                entry[2] if len(entry) > 2 else 0)
 
 
 def _agent_busy_retry_after(thread_id: int) -> int:
@@ -745,7 +798,8 @@ def _agent_call_timeout(budget) -> float | None:
     return max(1.0, min(float(_AI.DEFAULT_TIMEOUT_SEC), left))
 
 
-def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free"):
+def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
+                   turn_token: int | None = None):
     """chat_fn для _AGENT.run_cycle: один вызов модели и невидимые повторы.
 
     `tier` — направление маршрутизации (free/plus) на ВЕСЬ ход: решает
@@ -769,11 +823,18 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free")
     вовсе, и одна форматная ошибка после уже применённого действия отдавала
     502 с откатом шага.
     """
+    def _cancelled() -> bool:
+        return _agent_turn_cancelled(turn_token)
+
     def call(messages, tools, budget=None):
         cost["n"] += 1
         timeout = _agent_call_timeout(budget)
         if thread_id is not None:
             _agent_busy_touch(thread_id)
+        # Отмена ученика: новый вызов модели не начинаем, а уже начатый не
+        # используем — ответ остановленного хода писать нельзя.
+        if _cancelled():
+            raise _AGENT.AgentTurnCancelled()
         if not tools:
             # Финал по потолку шагов (_AGENT._summarize): вызов БЕЗ
             # инструментов — короткий текст по уже собранным данным. Потолок —
@@ -784,18 +845,26 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free")
             # high по as_judge в ai.chat).
             text = _AI.chat(messages, temperature=0.0, timeout=timeout,
                             reasoning_effort="minimal", tier=tier)
+            if _cancelled():
+                raise _AGENT.AgentTurnCancelled()
             return {"text": (text or "").strip()[:AGENT_REPLY_MAX()] or None,
                     "tool_calls": [], "preamble": None}
         failure: Exception | None = None
         for attempt, temperature in enumerate(_AGENT_RETRY_TEMPERATURES):
+            if _cancelled():
+                raise _AGENT.AgentTurnCancelled()
             if attempt and not _agent_retry_worthwhile(budget):
                 break
             try:
-                return _AI.chat_with_tools(messages, tools, temperature=temperature,
-                                           timeout=_agent_call_timeout(budget),
-                                           reasoning_effort="minimal", tier=tier)
+                parsed = _AI.chat_with_tools(messages, tools, temperature=temperature,
+                                             timeout=_agent_call_timeout(budget),
+                                             reasoning_effort="minimal", tier=tier)
             except (_AI.AIFormatError, _AI.AIError) as exc:
                 failure = exc
+                continue
+            if _cancelled():
+                raise _AGENT.AgentTurnCancelled()
+            return parsed
         raise failure  # noqa: B904 — повторяем ровно то, что поймали
 
     return call
@@ -15344,7 +15413,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "ref": rid}, 503 if locked else 500)
             finally: conn.close()
             return
-        if path == "/api/agent/threads" or path == "/api/agent/turns" or path == "/api/agent/turns/confirm" or path == "/api/plan/topics/close" or path.startswith("/api/agent/threads/"):
+        if path == "/api/agent/threads" or path == "/api/agent/turns" or path == "/api/agent/turns/confirm" or path == "/api/agent/turns/cancel" or path == "/api/plan/topics/close" or path.startswith("/api/agent/threads/"):
             if self.api_rate_limited(): return
             conn = connect()
             try:
@@ -15579,7 +15648,8 @@ class Handler(BaseHTTPRequestHandler):
                     # запрос к ИИ — тоже жетон, та же по-запросная логика).
                     # Живой снимок — как у обычного хода: resume тоже зовёт модель
                     # и может идти десятки секунд.
-                    if not _agent_busy_acquire(tid, "подтверждение действия"):
+                    confirm_token = _agent_busy_acquire(tid, "подтверждение действия")
+                    if not confirm_token:
                         wait = _agent_busy_retry_after(tid)
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
                                         "retryAfter": wait, "busyText": _agent_busy_text(tid)},
@@ -15591,8 +15661,9 @@ class Handler(BaseHTTPRequestHandler):
                         # может слать следующий запрос, а release в finally
                         # опаздывал — быстрый повтор видел занятый слот
                         # (400 AGENT_BUSY). finally ниже — страховка.
-                        _agent_busy_release(tid)
-                        _agent_live_clear(tid)
+                        _agent_busy_release(tid, confirm_token)
+                        if not _agent_turn_cancelled(confirm_token):
+                            _agent_live_clear(tid)
 
                     def _confirm_refund(spent):
                         try:
@@ -15663,7 +15734,8 @@ class Handler(BaseHTTPRequestHandler):
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}
-                        _raw_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _raw_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id),
+                                                 confirm_token)
                         _confirm_first = {"done": False}
 
                         def _chat_cf(messages, tools, budget=None):
@@ -15697,7 +15769,18 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             steps2, final2, pending2 = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_cf,
-                                on_step=lambda st: _agent_live_push(tid, st))
+                                on_step=lambda st: (None if _agent_turn_cancelled(confirm_token)
+                                                    else _agent_live_push(tid, st)))
+                            if _agent_turn_cancelled(confirm_token):
+                                raise _AGENT.AgentTurnCancelled()
+                        except _AGENT.AgentTurnCancelled:
+                            # «Стоп» после «Применить»: само действие УЖЕ
+                            # применено и остаётся (status='applied' выше), но
+                            # продолжение-ответ не пишем и жетоны возвращаем.
+                            _confirm_refund(confirm_spent)
+                            _confirm_cleanup()
+                            self.send_json({"ok": True, "approved": True, "cancelled": True},
+                                           token=token); return
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-confirm", exc)
                             _confirm_refund(confirm_spent)
@@ -15778,9 +15861,29 @@ class Handler(BaseHTTPRequestHandler):
                                         "final": final_clean, "suggests": suggests, "quota": quota,
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     finally:
-                        _agent_busy_release(tid)
-                        _agent_live_clear(tid)
+                        _agent_busy_release(tid, confirm_token)
+                        if not _agent_turn_cancelled(confirm_token):
+                            _agent_live_clear(tid)
                     return
+                # POST /api/agent/turns/cancel — «Стоп» ученика: слот треда
+                # отдаётся сразу, а считающийся ход помечается отменённым и,
+                # досчитав текущий вызов модели, ничего не записывает. Без
+                # этого остановка рвала только запрос клиента, и новый вопрос
+                # (или «изменить») упирался в AGENT_BUSY до конца хода.
+                if path == "/api/agent/turns/cancel":
+                    raw_tid = payload.get("threadId", payload.get("thread_id", payload.get("thread")))
+                    if isinstance(raw_tid, str):
+                        raw_tid = raw_tid.strip()
+                    if raw_tid is None or (isinstance(raw_tid, str) and not raw_tid):
+                        self.send_json({"error": "Нужен threadId", "code": "THREAD_BAD_REF"}, 400, token=token); return
+                    thread = _agent_thread_owned(conn, raw_tid, user_id)
+                    if thread is None:
+                        self.send_json({"error": "Чат не найден", "code": "THREAD_NOT_FOUND"}, 404, token=token); return
+                    tid = int(thread["id"])
+                    cancelled = _agent_busy_cancel(tid)
+                    _agent_live_clear(tid)
+                    self.send_json({"ok": True, "cancelled": bool(cancelled),
+                                    "busy": _agent_busy_locked(tid)}, token=token); return
                 # POST /api/agent/turns — начать ход {threadId, text}.
                 # threadId — числовой id (старые клиенты) или внешний public_id.
                 if path == "/api/agent/turns":
@@ -15804,7 +15907,8 @@ class Handler(BaseHTTPRequestHandler):
                         text = _AGENT.validate_turn_text(payload.get("text", ""))
                     except ValueError as exc:
                         self.send_json({"error": str(exc)}, 400, token=token); return
-                    if not _agent_busy_acquire(tid, text):
+                    turn_token = _agent_busy_acquire(tid, text)
+                    if not turn_token:
                         wait = _agent_busy_retry_after(tid)
                         self.send_json({"error": "Ход уже выполняется", "code": "AGENT_BUSY",
                                         "retryAfter": wait, "busyText": _agent_busy_text(tid)},
@@ -15830,7 +15934,7 @@ class Handler(BaseHTTPRequestHandler):
                                 # (95 с), и ученик не мог ни повторить вопрос, ни
                                 # подтвердить действие (оно тоже берёт слот).
                                 # Снимаем слот сами перед ответом — 400 тот же.
-                                _agent_busy_release(tid)
+                                _agent_busy_release(tid, turn_token)
                                 self.send_json({"error": "Прошлый ход ждёт подтверждения действия — сначала реши его.",
                                                 "code": "AGENT_PENDING"}, 400, token=token); return
                             replace_from = int(lu["seq"])
@@ -15855,8 +15959,12 @@ class Handler(BaseHTTPRequestHandler):
                                 pass
                             turn_spent["n"] = 0
                         usage_spent = False
-                        _agent_busy_release(tid)
-                        _agent_live_clear(tid)
+                        _agent_busy_release(tid, turn_token)
+                        # Отменённый ход не трогает live-снимок: слот уже мог
+                        # взять НОВЫЙ ход, и очистка снесла бы его шаги
+                        # (отменённый снимок погасил сам cancel-эндпоинт).
+                        if not _agent_turn_cancelled(turn_token):
+                            _agent_live_clear(tid)
                     try:
                         # Кэша повторов нет осознанно: каждый вопрос — инициатива
                         # ученика, и каждый ход идёт в модель заново за жетон,
@@ -15966,7 +16074,8 @@ class Handler(BaseHTTPRequestHandler):
                         history = _agent_history_for_model(conn, tid, before_seq=replace_from)
                         messages = _AGENT.build_messages(_AGENT.turn_system(conn, int(user_id), subject), history, text)
                         cost = {"n": 0}
-                        _raw_chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id))
+                        _raw_chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id),
+                                                      turn_token)
                         _first_call = {"done": False}
 
                         def _chat_fn(messages, tools, budget=None):
@@ -16042,7 +16151,18 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             steps, final, pending = _AGENT.run_cycle(
                                 conn, int(user_id), subject, messages, _chat_fn,
-                                on_step=lambda st: _agent_live_push(tid, st))
+                                on_step=lambda st: (None if _agent_turn_cancelled(turn_token)
+                                                    else _agent_live_push(tid, st)))
+                            # Отмена после последнего шага: ход мог завершиться
+                            # между проверкой в chat_fn и этой точкой — писать
+                            # ответ уже нельзя, ученик его остановил.
+                            if _agent_turn_cancelled(turn_token):
+                                raise _AGENT.AgentTurnCancelled()
+                        except _AGENT.AgentTurnCancelled:
+                            # Ученик нажал «Стоп»: модель досчитает вхолостую,
+                            # ответ/шаги НЕ пишем, жетоны возвращаем.
+                            _turn_cleanup()
+                            self.send_json({"ok": True, "cancelled": True}, token=token); return
                         except _AI.AIUnavailable as exc:
                             rid = log_request_error("agent-unavailable", exc)
                             _turn_cleanup()
@@ -16158,8 +16278,9 @@ class Handler(BaseHTTPRequestHandler):
                         _turn_cleanup()
                         self.send_json({"error": "Функция временно недоступна.", "ref": rid}, 503, token=token); return
                     finally:
-                        _agent_busy_release(tid)
-                        _agent_live_clear(tid)
+                        _agent_busy_release(tid, turn_token)
+                        if not _agent_turn_cancelled(turn_token):
+                            _agent_live_clear(tid)
                         try:
                             owed = int(turn_spent.get("n") or 0)
                         except (TypeError, ValueError):

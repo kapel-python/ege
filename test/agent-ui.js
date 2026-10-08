@@ -782,6 +782,12 @@ check("«Стоп» работает на обоих этапах: обрыв з
   (spaJs.match(/ui\.stopBtn\.addEventListener\("click"[\s\S]{0,700}?if \(S\.pendingBail\) \{[\s\S]{0,160}?try \{ bail\(\); \} catch \(_\) \{\}/) || []).length === 1
   && (spaJs.match(/ui\.stopBtn\.addEventListener\("click"[\s\S]{0,700}?turn\.detached = true;/) || []).length === 1
   && /watchAnswer\(tid, text, WATCH_TRIES\)/.test(spaCode));
+check("«Стоп» останавливает и серверный ход, а не только запрос вкладки",
+  spaCode.includes("function cancelServerTurn")
+  && /turn\.cancelled = true;[\s\S]{0,220}cancelServerTurn\(tid\)/.test(spaCode)
+  && /api\("POST", "\/api\/agent\/turns\/cancel"/.test(spaCode)
+  && /\(turn && turn\.cancelled\) \|\| !serverWait|!\(turn && turn\.cancelled\)/.test(spaCode)
+  && /if \(turn\.cancelled\) \{[\s\S]{0,160}Остановлено\./.test(spaCode));
 check("плейсхолдер различает «отвечает» и «пишет ответ»",
   spaCode.includes("ИИ пишет ответ…") && spaCode.includes("ИИ отвечает…"));
 

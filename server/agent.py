@@ -112,6 +112,12 @@ class AgentInputError(ValueError):
     случаев, когда чинить нечего и ход всё-таки надо оборвать."""
 
 
+class AgentTurnCancelled(Exception):
+    """Ход остановлен учеником: сервер не должен ни писать ответ, ни звать
+    модель дальше — только вернуть жетоны и освободить слот (см.
+    POST /api/agent/turns/cancel в server.py)."""
+
+
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
     try:
         return max(minimum, int(float(os.environ.get(name) or default)))
@@ -4641,6 +4647,10 @@ def _summarize(chat_fn, messages: list) -> str:
                         "content": "Без вызовов инструментов. Только текст ответа."})
         try:
             parsed = chat_fn(ask, [], budget) or {}
+        except AgentTurnCancelled:
+            # Отмена ученика — не «сбой финала»: глотать её нельзя, иначе
+            # сервер посчитает ход завершённым и запишет пустой ответ.
+            raise
         except Exception:  # noqa: BLE001 — ответ без модели лучше 502
             break
         text = parsed.get("text")
