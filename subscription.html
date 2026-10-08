@@ -157,6 +157,8 @@
     font-weight:600;color:var(--text-dim);padding:8px 16px;border-radius:var(--radius-pill);cursor:pointer;}
   .billing__opt[aria-selected="true"]{color:var(--text);}
   .cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:clamp(20px,3vw,28px);align-items:center;}
+  .pending-note{margin:14px 0 0;font-size:14px;line-height:1.6;color:var(--text-dim);max-width:560px;}
+  .pending-note a{color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:2px;}
   .cta-note{font-size:13px;color:var(--text-faint);width:100%;}
   .trust{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0;padding:0;}
   .trust li{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text-dim);
@@ -288,6 +290,7 @@
         <button class="btn btn-primary" id="ctaBtn" type="button">Оформить Plus</button>
         <a class="btn btn-ghost" href="/dashboard">Сначала посмотреть платформу</a>
       </div>
+      <p class="pending-note" id="pendingNote" hidden>У тебя есть счёт, который ждёт оплаты. <a href="/subscription/manage">Завершить или отменить</a> — и покупка снова станет доступна.</p>
 
     </div>
   </section>
@@ -533,11 +536,40 @@
      Plus — баннер вместо неё. Сессия читается отдельным запросом:
      /api/auth/session гостю отвечает 200 с user:null, поэтому лишнего
      401 в консоли нет; subscription/status дёргаем только залогиненным. */
-  var subState = { checked: false, active: false, guest: true };
+  var subState = { checked: false, active: false, guest: true, pending: false, pendingChecked: false };
   var ctaRow = document.getElementById("ctaRow");
   var ctaBtn = document.getElementById("ctaBtn");
   var activeBanner = document.getElementById("activeBanner");
   var activeText = document.getElementById("activeText");
+
+  /* Свободному пользователю с висящим счётом кнопка покупки на публичной
+     странице НЕ показывается: сначала завершить или отменить счёт в
+     управлении (та же логика, что на странице управления). Гостя не
+     проверяем — счёта у него быть не может. */
+  function markPending(){
+    subState.pending = true;
+    if (ctaBtn) ctaBtn.style.display = "none";
+    var note = document.getElementById("pendingNote");
+    if (note) note.hidden = false;
+    var bb = document.getElementById("buybar");
+    if (bb) { bb.hidden = true; bb.classList.remove("is-on"); }
+  }
+
+  function checkPending(){
+    if (subState.pendingChecked) return;
+    subState.pendingChecked = true;
+    try {
+      fetch("/api/subscription/payments?limit=10&offset=0", { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" })
+        .then(function(resp){ return resp.ok ? resp.json() : null; })
+        .then(function(hist){
+          var list = (hist && hist.payments) || [];
+          for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].status === "pending") { markPending(); return; }
+          }
+        })
+        .catch(function(){});
+    } catch(e){}
+  }
 
   function fmtDate(ms){
     try { return new Date(Number(ms)).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }); }
@@ -571,6 +603,7 @@
           var buybar = document.getElementById("buybar");
           if (buybar) { buybar.hidden = true; buybar.classList.remove("is-on"); }
         }
+        if (!subState.guest && !subState.active) checkPending();
   }
 
   function fetchSubData(){
@@ -620,6 +653,7 @@
   /* покупка — единый флоу (js/pay.js): окно-подтверждение .dlg, затем
      генерация счёта и редирект на шлюз. Без аккаунта — в профиль. */
   function onBuy(){
+    if (subState.pending) { window.location.href = "/subscription/manage"; return; }
     if (subState.active) { window.location.href = "/dashboard#/profile"; return; }
     // Статус ещё не проверили (медленная сеть): безопасный дефолт — профиль.
     // Гостю там онбординг, залогиненному — страница управления.
@@ -638,7 +672,7 @@
   var shown = false;
   function syncBuybar(){
     if (!buybar || !ctaRow) return;
-    if (subState.active) return;
+    if (subState.active || subState.pending) return;
     if (window.innerWidth <= 720) {
       var need = ctaRow.getBoundingClientRect().bottom < 0;
       if (need !== shown) {

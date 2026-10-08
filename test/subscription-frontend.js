@@ -144,6 +144,34 @@ function check(name, cond, detail) {
   check("mock без ссылки: честная ошибка, не редирект", true);
   await page.keyboard.press("Escape");
 
+  // --- 2b2. публичная страница: free + висящий счёт => покупки нет --------
+  const pendRef = await page.evaluate(async () => {
+    const hist = await (await fetch("/api/subscription/payments?limit=10")).json();
+    const p = ((hist && hist.payments) || []).find((x) => x && x.status === "pending");
+    return p ? (p.publicId || p.id) : null;
+  });
+  check("счёт от шага 2b висит", !!pendRef);
+  await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.body.getAttribute("data-sub") === "free", { timeout: 10000 });
+  await page.waitForFunction(() => {
+    const b = document.getElementById("ctaBtn");
+    const n = document.getElementById("pendingNote");
+    return b && b.style.display === "none" && n && !n.hidden;
+  }, { timeout: 10000 });
+  check("free + висящий счёт: кнопки покупки нет, есть заметка", true);
+  await page.evaluate(async (ref) => {
+    await fetch("/api/subscription/payments/cancel", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentId: ref }),
+    });
+  }, pendRef);
+  await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => {
+    const b = document.getElementById("ctaBtn");
+    return b && b.style.display !== "none";
+  }, { timeout: 10000 });
+  check("после отмены счёта кнопка покупки вернулась", true);
+
   // --- 2c. промокод: «Применить» считает скидку ДО создания счёта ---
   const promoMade = await (async () => {
     const login = await fetch(BASE + "/api/admin/login", {
