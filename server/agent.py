@@ -3468,7 +3468,7 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     # полкаталога.
     hooks = {"тема", "темы", "задача", "задачи", "задание", "задания", "урок", "уроки",
              "разобрать", "разбор", "объясни", "объяснить", "научи", "практика",
-             "подтянуть", "повторить", "теория", "домашка", "домашнее"}
+             "подтянуть", "повторить", "теория", "домашка", "домашнее", "егэ", "огэ"}
     words = [w for w in re.split(r"[^\w]+", query.lower())
              if len(w) >= 3 and w not in hooks]
     # Название самого предмета («профильная математика») есть в каждом его
@@ -3532,6 +3532,20 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                              (subject,)).fetchall()
     lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l JOIN skills s ON s.id=l.skill_id"
                            " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
+    # Слово, которого нет ни в одном названии каталога («ЕГЭ», «пожалуйста»), —
+    # шум из формулировки ученика, а не признак. Раньше оно обнуляло выдачу
+    # («задача ЕГЭ стереометрия» — ноль при живых заданиях по стереометрии).
+    # Если совпадений нет вообще — слова остаются, и выдача честно пустая.
+    vocab = set()
+    for r in skills:
+        vocab.update(re.split(r"[^\w]+", str(r["name"] or "").lower()))
+    for r in tasks:
+        vocab.update(re.split(r"[^\w]+", f"{r['topic'] or ''} {r['sname'] or ''}".lower()))
+    for r in lessons:
+        vocab.update(re.split(r"[^\w]+", str(r["title"] or "").lower()))
+    vocab.discard("")
+    known = [w for w in words if any(t.startswith(w[:6] if len(w) > 6 else w) for t in vocab)]
+    words = known or words
 
     def rank(rows, score, take, render):
         scored = [(score(r), r) for r in rows]

@@ -163,10 +163,14 @@ def _find_topics_probes(server) -> dict:
                                   {"query": "задача на производную по профильной математике"})
         out["mixed_ok"] = any(t["id"].startswith("n09") for t in mixed.get("tasks", []))
         try:
-            agent.find_topics(conn, uid, "profile_math", {"query": "задача профильная математика"})
+            agent.find_topics(conn, uid, "profile_math", {"query": "задача профильная математика ЕГЭ"})
             out["subject_only_ok"] = False
         except ValueError as exc:
             out["subject_only_ok"] = "нужна тема" in str(exc)
+        # Живой случай: «ЕГЭ» из формулировки ученика обнуляло выдачу по стереометрии.
+        noisy = agent.find_topics(conn, uid, "profile_math", {"query": "задача ЕГЭ стереометрия"})
+        out["noise_ok"] = bool(noisy.get("tasks")) and all(
+            "стерео" in (t.get("skillName") or "").lower() for t in noisy["tasks"][:3])
 
         phantom = []
         for q, subj in (("производная", "profile_math"), ("логарифмы", "profile_math"),
@@ -1615,6 +1619,8 @@ def main():
                   cap["mixed_ok"])
             check("запрос только из названия предмета просит тему, а не говорит «нет в каталоге»",
                   cap["subject_only_ok"])
+            check("«ЕГЭ» и другие слова вне каталога не обнуляют поиск («задача ЕГЭ стереометрия»)",
+                  cap["noise_ok"])
             section("errors: старая открытая ошибка видна + точечный поиск")
             cap = _errors_probes(server)
             check("первая открытая ошибка видна в списке по умолчанию", cap["old_visible"],
