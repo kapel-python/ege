@@ -8858,7 +8858,6 @@ AI_LIMIT_CODE = "AI_LIMIT"
 # (статус, 429, клиентские фолбэки) читает её через ai_usage_max().
 AI_USAGE_MAX_DEFAULT = 5
 AI_USAGE_WINDOW_DEFAULT_SEC = 8 * 3600
-AI_USAGE_DEVICE_TRUST_DEFAULT_SEC = 24 * 3600
 
 
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
@@ -8875,10 +8874,6 @@ def ai_usage_max() -> int:
 
 def ai_usage_window_ms() -> int:
     return _env_int("EGE_AI_USAGE_WINDOW_SEC", AI_USAGE_WINDOW_DEFAULT_SEC) * 1000
-
-
-def ai_usage_device_trust_ms() -> int:
-    return _env_int("EGE_AI_USAGE_DEVICE_TRUST_SEC", AI_USAGE_DEVICE_TRUST_DEFAULT_SEC) * 1000
 
 
 # Персональный потолок ИИ-проверок, который ставит админ из карточки
@@ -8966,7 +8961,7 @@ def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
         # учеников получит лимит чуть раньше срока; это допустимо.
         conn.execute("DROP TABLE ai_usage")
     # Одна строка на бакет: owner — 'u:<user_id>' (аккаунт), 'k:<hmac>' (кука
-    # устройства), 'n:<hmac>' (сеть); count — жетоны в кармане; timer_ms —
+    # устройства); count — жетоны в кармане; timer_ms —
     # граница отыгранных 8-часовых тиков (NULL = карман полон, таймер стоит);
     # anchor_ms — якорь цепочки, момент первой траты (NULL = цепочки нет).
     # За тик возвращается треть запаса (см. _bucket_cum), полный — за 24 часа.
@@ -8990,9 +8985,11 @@ def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
 
 
 def ai_usage_device_fp(conn: sqlite3.Connection, handler) -> tuple[str | None, str | None]:
-    """Отпечаток устройства для антиабуза — МЕЖАККАУНТНЫЙ (без user_id в HMAC),
-    иначе новый аккаунт на том же браузере был бы неуловим. Храним только
-    HMAC: ни сырой куки, ни IP в базе не появляется."""
+    """Отпечаток устройства — МЕЖАККАУНТНЫЙ (без user_id в HMAC), иначе новый
+    аккаунт на том же браузере был бы неуловим. Первый элемент (кука) — котёл
+    квоты; второй (сеть) остался для ключа share-view, в квотах сеть больше
+    не участвует (один IP — класс/школа). Храним только HMAC: ни сырой куки,
+    ни IP в базе не появляется."""
     try:
         secret = device_fingerprint_secret(conn).encode("utf-8")
     except sqlite3.Error:
@@ -9012,60 +9009,46 @@ def ai_usage_device_fp(conn: sqlite3.Connection, handler) -> tuple[str | None, s
     return key, net
 
 
-def _ai_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bool:
-    """Аккаунт младше доверенного возраста — к нему применяется бюджет устройства.
-    Возраст неизвестен → считаем давним (лучше недожать, чем пережать)."""
-    try:
-        row = conn.execute("SELECT created_at FROM users WHERE id=?", (user_id,)).fetchone()
-        created_ms = int(row["created_at"]) if row else 0
-    except (sqlite3.Error, TypeError, ValueError):
-        return False
-    return 0 <= now_ms - created_ms < ai_usage_device_trust_ms()
-
-
 def _ai_usage_owners(conn: sqlite3.Connection, user_id: int,
-                     fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
+                     fp_key: str | None) -> list[str]:
     """Бакеты, по которым ЧИТАЕТСЯ остаток этого пользователя: всегда аккаунт,
     плюс котёл КУКИ — тоже всегда (один браузер = почти наверняка один
-    человек: старый второй в том же браузере упирается в выеденный котёл),
-    плюс котёл СЕТИ — только свежему (один IP может быть целым классом,
-    давних по сети не судим).
+    человек: второй аккаунт в том же браузере упирается в выеденный котёл,
+    даже старый).
 
-    Исключения из чтения котла (остаток — только свой u:-бакет):
+    СЕТЬ в бюджет не входит вовсе: один IP — целый класс/школа, чужие траты
+    не должны блокировать новичка (решение продукта). От скриптовых бурь
+    остаётся сетка `ai_take` (60/мин на аккаунт, 300/мин на адрес).
+
+    Исключение из чтения котла (остаток — только свой u:-бакет):
     персональный грант админа выше общего лимита (иначе котёл с потолком 5
     душил бы грант 100 через min()) и активный Plus (квота оплачена —
     честные 10/10 с момента покупки, см. «исчерпанный лимит + Plus»).
     Оба при этом котёл ГРЕЮТ как все (см. ai_usage_try_reserve): Plus
-    основного не прикрывает ферму рядом, грант — тоже. Без куки (слабый
-    сигнал) давний сетевым котлом не судится — только свежий."""
+    основного не прикрывает ферму рядом, грант — тоже."""
     owners = [f"u:{user_id}"]
     try:
         if ai_effective_limit(conn, user_id) > ai_usage_max():
             return owners
     except sqlite3.Error:
         pass
-    fresh = _ai_account_fresh(conn, user_id, now_ms)
     if fp_key:
         owners.append(f"k:{fp_key}")
-    if fp_net and fresh:
-        owners.append(f"n:{fp_net}")
     return owners
 
 
-def _ai_usage_spend_owners(user_id: int, fp_key: str | None, fp_net: str | None) -> list[str]:
+def _ai_usage_spend_owners(user_id: int, fp_key: str | None) -> list[str]:
     """Бакеты, которые греет КАЖДАЯ трата — любой возраст, любая подписка.
 
     Старый основной аккаунт раньше минусил только свой u:-бакет, и котёл
     устройства оставался холодным: свежая ферма рядом видела полный лимит.
-    Теперь трата всегда греет и котлы (k:/n:), а читают их все без льгот
-    (см. _ai_usage_owners): кука — любой возраст, сеть — только свежий.
+    Теперь трата всегда греет и котёл куки (k:), а читает его любой возраст
+    (см. _ai_usage_owners). Сеть не греется: она не котёл (класс/школа).
     Единственное исключение — грант админа выше базового (решает
     вызыватель): доверенный греет только свой бакет."""
     owners = [f"u:{user_id}"]
     if fp_key:
         owners.append(f"k:{fp_key}")
-    if fp_net:
-        owners.append(f"n:{fp_net}")
     return owners
 
 
@@ -9101,20 +9084,20 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
                     now_ms: int | None = None) -> dict:
     """Сколько проверок осталось и когда вернётся следующая.
 
-    remaining — минимум по бакетам (аккаунт и, для свежего аккаунта,
-    устройство); resetInSec — ближайший момент, когда этот минимум вырастет:
-    если несколько бакетов делят минимум, ждать придётся последнего из них.
+    remaining — минимум по бакетам (аккаунт и котёл куки браузера);
+    resetInSec — ближайший момент, когда этот минимум вырастет: если
+    несколько бакетов делят минимум, ждать придётся последнего из них.
     Когда выеден котёл КУКИ (тот же браузер) до нуля, а аккаунт сам ещё не
     тратил (свой бакет полон), ответ несёт reason="farm_suspected" — повод
-    для модалки без таймера. Одна сеть (класс, второе своё устройство) и
-    свои траты обвинения не дают: блок тот же, окно обычное, с таймером.
+    для модалки без таймера. Сеть не котёл вовсе (один IP — класс/школа),
+    а свои траты обвинения не дают: окно обычное, с таймером.
     """
     ensure_ai_usage_schema(conn)
     ensure_ai_user_limit_schema(conn)
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     limit = ai_effective_limit(conn, user_id)
     window_ms = ai_usage_window_ms()
-    owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
+    owners = _ai_usage_owners(conn, user_id, fp_key)
     states: list = []
     for owner in owners:
         owner_limit = ai_limit_for_owner(conn, owner)
@@ -9159,11 +9142,10 @@ def ai_usage_status(conn: sqlite3.Connection, user_id: int,
     # Подозрение на ферму: выеден котёл КУКИ (тот же браузер) до нуля, на
     # ЭТОМ аккаунте не тратили вовсе (свой бакет полон: own >= limit) и
     # девать некуда (remaining 0 — при живом остатке проверка пройдёт, и
-    # обвинять нельзя). Сеть бывает общей (класс, второе своё устройство):
-    # по одной сети не обвиняем — блок тот же, но модалка обычная, с
-    # таймером. Как только человек потратил свои жетоны (даже один) — тоже
-    # обычное окно. Клиент по полю reason показывает причину без таймера:
-    # время вслух не называем, чтобы не учить ферму ротации.
+    # обвинять нельзя). Сеть не котёл вовсе (один IP — класс/школа), а как
+    # только человек потратил свои жетоны (даже один) — обычное окно.
+    # Клиент по полю reason показывает причину без таймера: время вслух не
+    # называем, чтобы не учить ферму ротации.
     if len(owners) > 1:
         try:
             own_rem = _ai_usage_count_at((states[0][0], states[0][1], states[0][2]),
@@ -9193,18 +9175,17 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
     первой траты); трата из уже тикающего таймер не трогает — второй и
     третий запросы на расписание возврата не влияют.
 
-    Котёл устройства греется ВСЕГДА (см. _ai_usage_spend_owners): свой
-    бакет обязан списаться, иначе None; пустой котёл свежего аккаунта —
-    тоже None (ферма: котёл выели чужие траты); пустой котёл давнего или
-    доверенного аккаунта резерв не роняет — такой сосед своим остатком
-    не делится, а котёл в минус не уходит (возврат ниже точен: в списке
-    только реально тронутые бакеты).
+    Котёл куки греется ВСЕГДА (см. _ai_usage_spend_owners): свой бакет
+    обязан списаться, иначе None; пустой котёл куки — тоже None (ферма:
+    котёл выели чужие траты в том же браузере). Грант админа выше базового
+    котёл не греет вовсе (см. ниже), а сеть не участвует: она не котёл.
+    Возврат точен: в списке только реально тронутые бакеты.
     """
     ensure_ai_usage_schema(conn)
     ensure_ai_user_limit_schema(conn)
     now_ms = int(time.time() * 1000)
     window_ms = ai_usage_window_ms()
-    check_owners = _ai_usage_owners(conn, user_id, fp_key, fp_net, now_ms)
+    check_owners = _ai_usage_owners(conn, user_id, fp_key)
     try:
         _essay_custom = ai_custom_limit(conn, user_id)
         _essay_exempt = _essay_custom is not None and int(_essay_custom) > ai_usage_max()
@@ -9213,7 +9194,7 @@ def ai_usage_try_reserve(conn: sqlite3.Connection, user_id: int,
     # Грант админа — явное доверие человеку: котёл не греем вовсе (ни
     # чтение — см. _ai_usage_owners, ни запись). Ферма через гранты
     # невозможна, их выдаёт человек вручную. Plus под льготу не попадает.
-    spend_owners = [f"u:{user_id}"] if _essay_exempt else _ai_usage_spend_owners(user_id, fp_key, fp_net)
+    spend_owners = [f"u:{user_id}"] if _essay_exempt else _ai_usage_spend_owners(user_id, fp_key)
     # Требуют успеха только ЧИТАЕМЫЕ бакеты (свой + те котлы, что входят в
     # остаток): пустой ненаблюдаемый котёл (сеть у давнего) резерв не роняет,
     # а лишь пропускается — иначе старый из другого браузера упирался бы в

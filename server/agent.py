@@ -758,46 +758,23 @@ def thread_title_for(text: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Квота хода: тик 8 часов на owner `agent:<user_id>`, полный карман за 24 часа.
-# Плюс общий котёл устройства против фермы (см. ниже): `ak:<hmac>` (кука
-# браузера) и `an:<hmac>` (сеть). Котёл общий для свежих аккаунтов, потолок —
-# свободный базовый (agent_quota_max): Plus котёл не расширяет, иначе покупка
-# Plus накачивала бы ферму.
+# Плюс общий котёл устройства против фермы (см. ниже): `ak:<hmac>` — кука
+# браузера (один браузер = один человек). Сеть не котёл: один IP — класс/
+# школа, чужие траты новичка не блокируют. Потолок котла — свободный базовый
+# (agent_quota_max): Plus котёл не расширяет, иначе покупка Plus накачивала
+# бы ферму.
 # ---------------------------------------------------------------------------
 def _agent_owner(user_id: int) -> str:
     return f"agent:{int(user_id)}"
 
 
-AGENT_DEVICE_TRUST_DEFAULT_SEC = 24 * 3600
-
-
-def agent_device_trust_ms() -> int:
-    """Возраст, до которого аккаунт считается свежим для антиабуза.
-
-    Та же ручка, что у проверок сочинений (EGE_AI_USAGE_DEVICE_TRUST_SEC):
-    одно бизнес-правило «аккаунту меньше суток» на оба продукта."""
-    return _env_int("EGE_AI_USAGE_DEVICE_TRUST_SEC",
-                    AGENT_DEVICE_TRUST_DEFAULT_SEC) * 1000
-
-
-def _agent_device_owners(fp_key: str | None, fp_net: str | None) -> list[str]:
-    """Бакеты-котлы устройства для ходов ИИ. Пустые отпечатки пропускаем."""
+def _agent_device_owners(fp_key: str | None) -> list[str]:
+    """Бакеты-котлы устройства для ходов ИИ: кука браузера. Сеть не котёл
+    (один IP — класс/школа), пустые отпечатки пропускаем."""
     owners: list[str] = []
     if fp_key:
         owners.append(f"ak:{fp_key}")
-    if fp_net:
-        owners.append(f"an:{fp_net}")
     return owners
-
-
-def _agent_account_fresh(conn: sqlite3.Connection, user_id: int, now_ms: int) -> bool:
-    """Аккаунт младше доверенного возраста. Возраст неизвестен — считаем
-    давним (лучше недожать, чем пережать), как у сочинений."""
-    try:
-        row = conn.execute("SELECT created_at FROM users WHERE id=?", (user_id,)).fetchone()
-        created_ms = int(row["created_at"]) if row else 0
-    except (sqlite3.Error, TypeError, ValueError):
-        return False
-    return 0 <= now_ms - created_ms < agent_device_trust_ms()
 
 
 def _agent_device_exempt(conn: sqlite3.Connection, user_id: int) -> bool:
@@ -817,11 +794,11 @@ def _agent_device_exempt(conn: sqlite3.Connection, user_id: int) -> bool:
 
 
 def _agent_check_owners(conn: sqlite3.Connection, user_id: int,
-                      fp_key: str | None, fp_net: str | None, now_ms: int) -> list[str]:
+                      fp_key: str | None) -> list[str]:
     """Бакеты, по которым ЧИТАЕТСЯ остаток ходов: всегда свой `agent:`, плюс
     котёл КУКИ `ak:` — тоже всегда (один браузер = почти наверняка один
-    человек), плюс котёл СЕТИ `an:` — только свежему (один IP может быть
-    целым классом, давних по сети не судим).
+    человек). Сеть не читается: один IP — класс/школа, чужие траты новичка
+    не блокируют (решение продукта); от бурь остаётся сетка `ai_take`.
 
     Без чтения котла (только свой бакет): грант админа выше базового
     (явное доверие человеку) и активный Plus (оплаченная квота — честные
@@ -835,18 +812,11 @@ def _agent_check_owners(conn: sqlite3.Connection, user_id: int,
     owners = [owner]
     if fp_key:
         owners.append(f"ak:{fp_key}")
-    if fp_net:
-        try:
-            fresh = _agent_account_fresh(conn, int(user_id), now_ms)
-        except (sqlite3.Error, TypeError, ValueError):
-            fresh = False
-        if fresh:
-            owners.append(f"an:{fp_net}")
     return owners
 
 
 def _agent_device_limit_for_owner(conn: sqlite3.Connection, owner: str) -> int:
-    """Потолок одного бакета: `agent:<id>` — персональный, `ak:/an:` — общий
+    """Потолок одного бакета: `agent:<id>` — персональный, `ak:` — общий
     свободный базовый (ферма не масштабируется ни Plus, ни грантами)."""
     if owner.startswith("agent:"):
         try:
@@ -985,19 +955,19 @@ def agent_quota_status(conn: sqlite3.Connection, user_id: int,
     доверенного аккаунта — ровно старый путь по одному `agent:`-бакету.
 
     Для аккаунта с отпечатками остаток — минимум по своему бакету
-    и котлам устройства (`ak:/an:`): ферма «вышел — новый аккаунт» упирается
-    в общий котёл. Обвинение `reason: "farm_suspected"` — только когда выеден
-    котёл КУКИ (тот же браузер) до нуля, а сам аккаунт не тратил вовсе (свой
-    бакет полон): одна сеть (класс, второе своё устройство) и свои траты
-    обвинения не дают — блок тот же, окно обычное, с таймером. Клиент по
-    reason показывает причину без таймера (время вслух не называем, чтобы
-    не учить ферму оптимизации)."""
+    и котлу куки (`ak:`): ферма «вышел — новый аккаунт» в том же браузере
+    упирается в общий котёл. Обвинение `reason: "farm_suspected"` — только
+    когда выеден котёл КУКИ (тот же браузер) до нуля, а сам аккаунт не
+    тратил вовсе (свой бакет полон). Сеть не котёл (один IP — класс/школа),
+    свои траты тоже дают обычное окно с таймером. Клиент по reason показывает
+    причину без таймера (время вслух не называем, чтобы не учить ферму
+    оптимизации)."""
     ensure_agent_schema(conn)
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     limit = agent_effective_limit(conn, user_id)
     window_ms = agent_quota_window_ms()
     owner = _agent_owner(user_id)
-    check = _agent_check_owners(conn, user_id, fp_key, fp_net, now_ms)
+    check = _agent_check_owners(conn, user_id, fp_key)
     device_owners = check[1:]
     if not device_owners:
         cur = conn.execute("INSERT OR IGNORE INTO ai_usage (owner, count, timer_ms) VALUES (?,?,NULL)",
@@ -1098,25 +1068,24 @@ def agent_quota_reserve(conn: sqlite3.Connection, user_id: int,
                         actor: int | None = None) -> bool:
     """Списать один запрос к ИИ. True — списано, False — квота пуста.
 
-    Трата греет и котлы устройства (`ak:/an:`) ВСЕГДА, когда отпечатки
-    известны — даже у давнего аккаунта и даже у Plus/гранта: иначе старый
-    основной аккаунт исчерпывал бы только свой бакет, а свежая ферма рядом
-    видела бы холодный котёл и получала полный лимит (живая дыра).
-    Блокирует котёл только свежий аккаунт без админского гранта; давний
-    своим остатком не делится с соседями по компьютеру — его резерв при
-    пустом котле всё равно проходит (котёл при этом не уходит в минус)."""
+    Трата греет котёл куки (`ak:`) ВСЕГДА, когда отпечаток известен — даже
+    у давнего аккаунта и даже у Plus/гранта: иначе старый основной аккаунт
+    исчерпывал бы только свой бакет, а свежая ферма в том же браузере видела
+    бы холодный котёл и получала полный лимит (живая дыра). Блокирует котёл
+    любой аккаунт без админского гранта (Plus читает котёл, но греет его).
+    Сеть не участвует: она не котёл (один IP — класс/школа)."""
     ensure_agent_schema(conn)
     now_ms = int(time.time() * 1000)
     limit = agent_effective_limit(conn, user_id)
     window_ms = agent_quota_window_ms()
     owner = _agent_owner(user_id)
     exempt = _agent_device_exempt(conn, user_id)
-    check = _agent_check_owners(conn, user_id, fp_key, fp_net, now_ms)
-    # Требует успеха только ЧИТАЕМОЕ (свой + котлы из остатка): пустой
-    # ненаблюдаемый котёл (сеть у давнего) резерв не роняет.
+    check = _agent_check_owners(conn, user_id, fp_key)
+    # Требует успеха только ЧИТАЕМОЕ (свой + котёл куки): пустой
+    # ненаблюдаемый котёл резерв не роняет.
     must_set = set(check)
     gate = len(check) > 1
-    device_owners = _agent_device_owners(fp_key, fp_net) if not exempt else []
+    device_owners = _agent_device_owners(fp_key) if not exempt else []
     try:
         spent_by = int(user_id) if actor is None else int(actor)
     except (TypeError, ValueError):
@@ -1223,8 +1192,8 @@ def agent_quota_refund_many(conn: sqlite3.Connection, user_id: int, n: int,
 def agent_quota_refund(conn: sqlite3.Connection, user_id: int,
                        fp_key: str | None = None, fp_net: str | None = None,
                        *, reason: str = "agent:refund") -> None:
-    # Возврат зеркален резерву, но намеренно проще него: резерв давнего
-    # аккаунта пустой котёл не трогает (WHERE count>0), а возврат каплет
+    # Возврат зеркален резерву, но намеренно проще него: резерв пустой
+    # котёл не трогает (WHERE count>0), а возврат каплет
     # +1 с MIN-капом. Разница — at most один лишний жетон котла за каждый
     # неуспешный ход на горячем устройстве; ходы падают редко, жетон
     # растворяется в цепочке. Точный учёт «что именно списалось» потребовал
@@ -1232,7 +1201,7 @@ def agent_quota_refund(conn: sqlite3.Connection, user_id: int,
     ensure_agent_schema(conn)
     limit = agent_effective_limit(conn, user_id)
     owner = _agent_owner(user_id)
-    owners = [owner] if _agent_device_exempt(conn, user_id) else [owner] + _agent_device_owners(fp_key, fp_net)
+    owners = [owner] if _agent_device_exempt(conn, user_id) else [owner] + _agent_device_owners(fp_key)
     try:
         spent_by = int(user_id)
     except (TypeError, ValueError):
