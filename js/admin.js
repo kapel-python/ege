@@ -5005,9 +5005,10 @@ function promoExpText(p) {
 }
 
 function promoRowHTML(p) {
-  /* Удалять можно только НЕиспользованные коды: у кода с историей кнопки нет,
-     его честная судьба — «Выключить» (платежи ссылаются на код). */
-  const canDelete = !Number(p.used || 0);
+  /* Кнопка удаления видна ВСЕГДА: у использованного кода она не исчезает,
+     а открывает окно с предупреждением (и предложением выключить) — иначе
+     «кнопка пропала» выглядит как поломка. */
+  const used = Number(p.used || 0);
   return `<div class="a-payrow">
     <div class="a-payrow__main">
       <div class="a-payrow__t mono">${esc(p.code)}${p.active ? "" : ' · <span style="color:var(--muted)">выкл</span>'}</div>
@@ -5015,29 +5016,49 @@ function promoRowHTML(p) {
     </div>
     <div class="a-payrow__r" style="gap:8px;display:flex;align-items:center">
       <button class="btn btn--soft btn--sm" data-promo-toggle onclick="togglePromo('${esc(p.code)}', ${p.active ? "false" : "true"})">${p.active ? "Выключить" : "Включить"}</button>
-      ${canDelete ? `<button class="a-icon-btn a-icon-btn--danger" data-promo-del onclick="deletePromo('${esc(p.code)}')" title="Удалить неиспользованный код">${aicon("trash")}</button>` : ""}
+      <button class="a-icon-btn a-icon-btn--danger" data-promo-del onclick="deletePromo('${esc(p.code)}', ${used}, ${p.active ? "true" : "false"})" title="Удалить код">${aicon("trash")}</button>
     </div>
   </div>`;
 }
 
-/* Удаление кода — чистка опечаток: сервер разрешает только used=0.
-   Использованный код кнопки не показывает вовсе; текст окна честно
-   объясняет, почему. */
-function deletePromo(code) {
+/* Удаление кода. Неиспользованный уходит сразу; использованный — с честным
+   предупреждением: подписки и строки платежей остаются, а чтобы просто
+   остановить применение, есть «Выключить» (код остаётся в истории). */
+function deletePromo(code, used, active) {
+  used = Number(used) || 0;
+  const canOff = used > 0 && active === true;
   openModal(`
     <div class="a-modal__title" style="color:var(--danger)">Удалить промокод «${esc(code)}»?</div>
-    <div class="a-modal__desc">Код ещё не использовался — удаление безопасно. Коды с историей не удаляются: их можно выключить.</div>
+    <div class="a-modal__desc">${used
+      ? `Код уже использован ${fmtNum(used)} ${plural(used, "раз", "раза", "раз")}. Из списка и статистики он исчезнет, но выданные подписки и строки платежей останутся нетронутыми. Если цель — просто остановить применение, лучше выключить: код останется в истории.`
+      : "Код ещё не использовался — удаление безопасно."}</div>
     <div class="a-modal__actions">
       <button class="btn btn--soft" id="mCancel">Отмена</button>
+      ${canOff ? `<button class="btn btn--soft" id="mOff">Выключить код</button>` : ""}
       <button class="btn btn--danger-soft" id="mDo">Удалить</button>
     </div>`, (modal) => {
     modal.classList.add("a-modal--danger");
     modal.querySelector("#mCancel").onclick = closeModal;
+    const offBtn = modal.querySelector("#mOff");
+    if (offBtn) offBtn.onclick = async () => {
+      try {
+        await AdminApi.post("/api/admin/subscription/promos", { action: "set_active", code, active: false });
+        closeModal();
+        toast("Промокод выключен");
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        toast(`Не получилось выключить: ${e.message || "ошибка"}`, "err");
+        return;
+      }
+      await screenSubscription();
+    };
     modal.querySelector("#mDo").onclick = async () => {
       try {
-        await AdminApi.post("/api/admin/subscription/promos", { action: "delete", code });
+        const res = await AdminApi.post("/api/admin/subscription/promos", { action: "delete", code });
         closeModal();
-        toast("Промокод удалён");
+        toast(res && res.used
+          ? `Промокод удалён (использований: ${fmtNum(res.used)}) — подписки и платежи не тронуты`
+          : "Промокод удалён");
       } catch (e) {
         if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
         modal.querySelector("#mDo").disabled = true;

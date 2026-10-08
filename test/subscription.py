@@ -551,6 +551,12 @@ def main():
         check("другому человеку код доступен",
               s == 200 and body["finalKopecks"] == 17900, body)
         s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "delete", "code": "ONCE10"})
+        check("использованный код удаляется, used в ответе",
+              s == 200 and body.get("deleted") is True and body.get("used") == 1, body)
+        s, st = request(user, base, "/api/subscription/status")
+        check("удаление кода не гасит подписку", s == 200 and st["active"] is True, st)
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
                           {"action": "delete", "code": "TEST25"})
         check("неиспользованный код удаляется", s == 200 and body.get("deleted") is True, body)
         s, body = request(admin, base, "/api/admin/subscription/promos", "POST",

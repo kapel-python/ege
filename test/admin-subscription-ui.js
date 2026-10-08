@@ -110,6 +110,22 @@ async function loginAdmin(page) {
   }, ADMIN_PASSWORD);
 }
 
+/* Куки из ответа Node-fetch: логин и claim ставят несколько штук, в одиночном
+   set-cookie приходит только первая. */
+function collectCookies(res) {
+  const raw = typeof res.headers.getSetCookie === "function"
+    ? res.headers.getSetCookie() : [res.headers.get("set-cookie")];
+  return raw.map((c) => String(c || "").split(";")[0]).filter(Boolean).join("; ");
+}
+function mergeCookies(a, b) {
+  const map = new Map();
+  for (const part of String(a + "; " + b).split("; ")) {
+    const k = part.split("=")[0];
+    if (k && k.trim()) map.set(k.trim(), part.trim());
+  }
+  return [...map.values()].join("; ");
+}
+
 async function main() {
   const server = await startServer();
   let browser = null;
@@ -195,6 +211,64 @@ async function main() {
       () => ![...document.querySelectorAll(".a-payrow")].some((r) => r.textContent.includes("UITESTRUB")),
       null, { timeout: 20000 });
     t("неиспользованный код удаляется", true);
+
+    // ---------------- S2b: использованный код -----------------------------
+    section("S2b использованный код: кнопка удаления не пропадает");
+    const usedCode = "UITESTUSED";
+    const madeUsed = await admin.evaluate(async (code) => {
+      const r = await fetch("/api/admin/subscription/promos", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create", code, kind: "percent", value: 5 }),
+      });
+      return r.status;
+    }, usedCode);
+    t("код для сценария создан", madeUsed === 200, String(madeUsed));
+    // Настоящая сессия ученика: device-кука со страницы, claim, счёт, активация.
+    let uCookies = collectCookies(await fetch(BASE + "/dashboard"));
+    const claimRes = await fetch(BASE + "/api/profile/claim", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: uCookies, Origin: BASE },
+      body: JSON.stringify({ subject: "profile_math", onboarded: true, name: "Использованный",
+                             selfLevel: "base", goal: "g60" }),
+    });
+    uCookies = mergeCookies(uCookies, collectCookies(claimRes));
+    const coRes = await fetch(BASE + "/api/subscription/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: uCookies, Origin: BASE },
+      body: JSON.stringify({ period: "month", promoCode: usedCode }),
+    });
+    const co = await coRes.json();
+    const confRes = await fetch(BASE + "/api/subscription/confirm", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: uCookies, Origin: BASE },
+      body: JSON.stringify({ paymentId: co.paymentId }),
+    });
+    const conf = await confRes.json();
+    t("код активирован пользователем",
+      coRes.status === 200 && confRes.status === 200 && conf.status === "succeeded",
+      `${coRes.status}/${confRes.status}`);
+    await admin.goto(`${BASE}/admin#/subscription`, { waitUntil: "domcontentloaded" });
+    await admin.reload({ waitUntil: "domcontentloaded" });
+    await admin.waitForSelector("#promoNewBtn", { timeout: 20000 });
+    const usedRow = admin.locator(".a-payrow", { hasText: usedCode });
+    await usedRow.locator("[data-promo-del]").waitFor({ timeout: 15000 });
+    t("у использованного кода кнопка удаления НЕ пропадает",
+      await usedRow.locator("[data-promo-del]").count() === 1
+      && (await usedRow.textContent()).includes("1 /"),
+      (await usedRow.textContent()).replace(/\s+/g, " ").slice(0, 120));
+    await usedRow.locator("[data-promo-del]").click();
+    await admin.waitForSelector(".a-modal-backdrop #mOff", { timeout: 15000 });
+    const usedModal = (await admin.textContent(".a-modal-backdrop")).replace(/\s+/g, " ");
+    t("окно предупреждает про использование и предлагает выключение",
+      usedModal.includes("уже использован") && usedModal.includes("Выключить код"),
+      usedModal.slice(0, 160));
+    await admin.click("#mDo");
+    await admin.waitForFunction((code) =>
+      ![...document.querySelectorAll(".a-payrow")].some((r) => r.textContent.includes(code)),
+      usedCode, { timeout: 20000 });
+    t("использованный код удалён из списка", true);
+    const stRes = await fetch(BASE + "/api/subscription/status", { headers: { Cookie: uCookies } });
+    const st = await stRes.json();
+    t("подписка пользователя удалением кода не тронута",
+      stRes.status === 200 && st.active === true, JSON.stringify(st).slice(0, 100));
 
     // ---------------- S3: массовая выдача ---------------------------------
     section("S3 массовая выдача с подтверждением числом");

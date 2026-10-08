@@ -244,12 +244,14 @@ try:
     check("повторное удаление — KeyError", False)
 except KeyError:
     check("повторное удаление — KeyError", True)
-try:
-    sub.promo_delete(conn, "LETO20")  # использован выше (used=1)
-    check("использованный не удаляется", False)
-except ValueError as e:
-    check("использованный не удаляется", "использовался" in str(e), e)
-check("использованный на месте", any(r["code"] == "LETO20" for r in sub.promo_list(conn)))
+res = sub.promo_delete(conn, "LETO20")  # использован выше (used=1)
+check("использованный удаляется, used в ответе",
+      res.get("used") == 1
+      and not any(r["code"] == "LETO20" for r in sub.promo_list(conn)), res)
+check("платёж хранит код после удаления",
+      sub.promo_used_by_user(conn, "LETO20", 1) is True)
+check("подписка не тронута удалением кода",
+      sub.subscription_status(conn, 1)["active"] is True)
 
 # --- fixed — это копейки (198 ₽ = 19800), включая границы ------------------
 sub.promo_create(conn, "r198", "fixed", 19800)

@@ -1442,9 +1442,13 @@ def promo_set_active(conn: sqlite3.Connection, code: str, active: bool) -> dict:
 
 
 def promo_delete(conn: sqlite3.Connection, code: str) -> dict:
-    """Удалить НЕиспользованный код (чистка опечаток и ошибочных условий).
-    Код с историей (used_count>0) не удаляем: платежи ссылаются на него,
-    честнее выключить — иначе статистика кодов теряла бы факты."""
+    """Удалить код из списка — и неиспользованный, и использованный.
+
+    Удалённое определение кода не трогает последствия: выданные подписки
+    и строки платежей живут своими записями, а правило «один код — один раз
+    на аккаунт» читает `subscription_payments.promo_code`, а не определение.
+    В ответе едет `used` — админка предупреждает, если код уже применяли
+    (для «просто остановить применение» есть выключение)."""
     ensure_promo_schema(conn)
     code = promo_normalize(code)
     own = _begin(conn)
@@ -1453,14 +1457,13 @@ def promo_delete(conn: sqlite3.Connection, code: str) -> dict:
                            (code,)).fetchone()
         if not row:
             raise KeyError("promo not found")
-        if int(row["used_count"] or 0) > 0:
-            raise ValueError("код уже использовался — его можно только выключить")
+        used = int(row["used_count"] or 0)
         conn.execute("DELETE FROM promo_codes WHERE code=?", (code,))
         _end(conn, own, True)
     except Exception:
         _end(conn, own, False)
         raise
-    return {"ok": True, "code": code, "deleted": True}
+    return {"ok": True, "code": code, "deleted": True, "used": used}
 
 
 def promo_used_by_user(conn: sqlite3.Connection, code: str,
