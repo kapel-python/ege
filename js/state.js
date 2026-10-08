@@ -1600,7 +1600,7 @@ function practiceAttemptQuality(attempt) {
 function practiceTaskIdsForSkill(skillId) {
   if (!skillIsAccessible(skillId)) return [];
   return DataAPI.practiceTasksBySkill(skillId).slice()
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
     .map((task) => task.id);
 }
 
