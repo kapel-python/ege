@@ -3471,6 +3471,15 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
              "подтянуть", "повторить", "теория", "домашка", "домашнее"}
     words = [w for w in re.split(r"[^\w]+", query.lower())
              if len(w) >= 3 and w not in hooks]
+    # Название самого предмета («профильная математика») есть в каждом его
+    # задании по определению: как обязательное слово оно обнуляет выдачу.
+    title_tokens = [t for t in re.split(r"[^\w]+", subject_title(subject).lower()) if t]
+    content_words = [w for w in words
+                     if not any(t.startswith(w[:6] if len(w) > 6 else w) for t in title_tokens)]
+    if words and not content_words and not re.findall(r"\d+", query):
+        raise ValueError("в запросе только название предмета — нужна тема "
+                         "(например «производная» или «площадь»)")
+    words = content_words or words
     digits = re.findall(r"\d+", query)
     if not words and not digits:
         raise ValueError(f"в запросе «{query}» нет слов длиной от 3 символов — нечего искать")

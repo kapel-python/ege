@@ -157,6 +157,17 @@ def _find_topics_probes(server) -> dict:
         out["empty_found"] = empty.get("found")
         out["empty_ok"] = not empty.get("found") and "нет ничего похожего" in (empty.get("note") or "")
 
+        # Название предмета в запросе не должно обнулять выдачу («профильная
+        # математика» есть в каждом задании предмета по определению).
+        mixed = agent.find_topics(conn, uid, "profile_math",
+                                  {"query": "задача на производную по профильной математике"})
+        out["mixed_ok"] = any(t["id"].startswith("n09") for t in mixed.get("tasks", []))
+        try:
+            agent.find_topics(conn, uid, "profile_math", {"query": "задача профильная математика"})
+            out["subject_only_ok"] = False
+        except ValueError as exc:
+            out["subject_only_ok"] = "нужна тема" in str(exc)
+
         phantom = []
         for q, subj in (("производная", "profile_math"), ("логарифмы", "profile_math"),
                         ("векторы", "profile_math"), ("вероятность", "profile_math"),
@@ -1596,6 +1607,10 @@ def main():
                   cap["rank_ok"], str(cap["rank"]))
             check("на несуществующую тему — честный пустой ответ, а не весь каталог",
                   cap["empty_ok"], str(cap["empty_found"]))
+            check("название предмета в запросе не обнуляет поиск (тема + «профильная математика»)",
+                  cap["mixed_ok"])
+            check("запрос только из названия предмета просит тему, а не говорит «нет в каталоге»",
+                  cap["subject_only_ok"])
             section("errors: старая открытая ошибка видна + точечный поиск")
             cap = _errors_probes(server)
             check("первая открытая ошибка видна в списке по умолчанию", cap["old_visible"],
