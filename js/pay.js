@@ -166,6 +166,7 @@ var PayFlow = (function () {
       + '<div class="dlg-kv__row" id="payDiscountRow" hidden><span>Скидка по промокоду</span><span id="payDiscount" style="font-weight:700"></span></div>'
       + '<div class="dlg-kv__row"><span>Срок</span><span>' + esc(periodDays(period)) + "</span></div>"
       + '<div class="dlg-kv__row"><span>Оплата</span><span>СБП / карта, на стороне провайдера</span></div>'
+      + '<div class="dlg-kv__row" id="payFeeRow"><span>Комиссия</span><span>7%</span></div>'
       + "</div>"
       + '<div class="dlg__text">После нажатия откроется страница оплаты. Данные карты нам не попадают — к нам приходит только факт оплаты.</div>'
       + '<div class="dlg-promo"><label for="payPromo">Промокод</label>'
@@ -186,6 +187,7 @@ var PayFlow = (function () {
     var amountEl = root.querySelector("#payAmount");
     var discountRow = root.querySelector("#payDiscountRow");
     var discountEl = root.querySelector("#payDiscount");
+    var feeRow = root.querySelector("#payFeeRow");
     var promoState = root.querySelector("#payPromoState");
     if (cancelBtn) cancelBtn.addEventListener("click", closePayModal);
 
@@ -193,6 +195,9 @@ var PayFlow = (function () {
       if (amountEl) amountEl.textContent = fmtSum(kopecks) + " ₽";
       if (payBtn) payBtn.textContent = Number(kopecks) === 0
         ? "Активировать Plus" : "Оплатить " + fmtSum(kopecks) + " ₽";
+      /* 100%-код: счёта и шлюза нет, комиссию платить не с чего — строка
+         «Комиссия» скрывается вместе с суммой. */
+      if (feeRow) feeRow.hidden = Number(kopecks) === 0;
     }
     function clearApplied() {
       applied = null;

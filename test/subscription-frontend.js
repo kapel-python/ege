@@ -128,6 +128,8 @@ function check(name, cond, detail) {
   const dlgFree = await page.textContent("#pay-modal-root");
   check("manage confirm-dlg: тариф и сумма",
     dlgFree.includes("Оформить Plus") && dlgFree.includes("199"));
+  check("в окне оплаты видна комиссия 7%",
+    dlgFree.includes("Комиссия") && dlgFree.includes("7%"));
   await page.keyboard.press("Escape");
 
   // период на manage выбирается: free может взять год, а не только месяц
@@ -221,10 +223,15 @@ function check(name, cond, detail) {
       method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ action: "create", code: "E2E20", kind: "percent", value: 20 }),
     });
-    return { login: login.status, create: made.status };
+    const made100 = await fetch(BASE + "/api/admin/subscription/promos", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ action: "create", code: "E2E100", kind: "percent", value: 100 }),
+    });
+    return { login: login.status, create: made.status, create100: made100.status };
   })();
   check("промокод для сценария создан",
-    promoMade.login === 200 && promoMade.create === 200, JSON.stringify(promoMade));
+    promoMade.login === 200 && promoMade.create === 200 && promoMade.create100 === 200,
+    JSON.stringify(promoMade));
 
   await page.click("#ctaBtn");
   await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
@@ -256,6 +263,21 @@ function check(name, cond, detail) {
   const amountBad = (await page.textContent("#payAmount")).trim();
   check("неверный код: ошибка у поля, цена базовая",
     amountBad === "199 ₽", amountBad);
+
+  // 100% код: счёта и шлюза нет — сумма 0, комиссия скрыта, кнопка «Активировать».
+  await page.fill("#payPromo", "E2E100");
+  await page.click("#pay-modal-root [data-apply]");
+  await page.waitForFunction(() => {
+    const b = document.querySelector("#pay-modal-root [data-pay]");
+    return b && /Активировать Plus/.test(b.textContent);
+  }, { timeout: 15000 });
+  const zeroState = await page.evaluate(() => ({
+    amount: (document.getElementById("payAmount") || {}).textContent || "",
+    feeHidden: document.getElementById("payFeeRow").hidden === true,
+  }));
+  check("100% код: сумма 0 и комиссия скрыта",
+    zeroState.amount.trim() === "0 ₽" && zeroState.feeHidden, JSON.stringify(zeroState));
+
   // Единственный ожидаемый 4xx прогона: Chrome печатает его в консоль
   // (иногда двумя строками) — при финальной проверке вырезается, остальные
   // сетевые ошибки по-прежнему валят тест.
