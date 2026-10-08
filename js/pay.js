@@ -592,6 +592,19 @@ var PayFlow = (function () {
         });
       });
       el.appendChild(box);
+      /* Один тихий автодобор для НАСТОЯЩЕГО шлюза (platega): человек закрыл
+         вкладку на странице оплаты и вернулся позже, а вебхук задержался —
+         при открытии страницы подписка включится сама, без кнопки. Это не
+         опрос: один confirm на открытие (в него входит живой статус шлюза).
+         Mock не трогаем: его pending — состояние dev/тестов, а не деньги. */
+      if (opts.autoCheck && pend.provider === "platega" && !waitState) {
+        api("/api/subscription/confirm", { paymentId: ref }).then(function (res) {
+          if (res && res.status === "succeeded") {
+            if (opts.onChanged) opts.onChanged();
+            else window.location.reload();
+          }
+        }).catch(function () {});
+      }
     });
   }
 

@@ -600,7 +600,8 @@
     try {
       PayFlow.renderPendingBanner(document.getElementById("pendingSlot"), {
         onChanged: reload,
-        onError: toast
+        onError: toast,
+        autoCheck: true
       });
     } catch (e) {}
   }
