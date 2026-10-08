@@ -456,7 +456,9 @@
   }
 
   function payStatusLabel(p){
-    if (p.status === "succeeded") return "оплачено";
+    if (p.status === "succeeded") {
+      return Number(p.amountKopecks) === 0 ? "активирован" : "оплачено";
+    }
     if (p.status === "pending") return "ожидает";
     if (p.status === "refunded") return "возвращено";
     if (p.status === "failed") return "не прошло";
@@ -472,9 +474,11 @@
     box.innerHTML = list.slice(0, 50).map(function(p){
       var ok = p.status === "succeeded";
       var sum = (Number(p.amountKopecks) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
-      var title = (p.provider === "manual" && Number(p.amountKopecks) === 0)
+      var title = (Number(p.amountKopecks) === 0 && p.provider === "manual")
         ? PLUS_WORD + " · выдано вручную"
-        : PLUS_WORD + " · " + (p.period === "year" ? "год" : "месяц");
+        : (Number(p.amountKopecks) === 0 && p.provider === "promo")
+          ? PLUS_WORD + " · по промокоду"
+          : PLUS_WORD + " · " + (p.period === "year" ? "год" : "месяц");
       return '<div class="hist__row">'
         + '<span class="hist__ico' + (ok ? " hist__ico--ok" : "") + '" aria-hidden="true">'
         + (ok

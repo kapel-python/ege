@@ -173,5 +173,23 @@ try:
 except ValueError:
     check("период валидируется", True)
 
+# --- лимит пачки учитывает и слияние с листом ожидания ---------------------
+now = int(time.time() * 1000)
+for i in range(1000, 1502):
+    conn.execute("INSERT INTO users (id, account_id) VALUES (?,?)",
+                 (i, f"wl{i}"))
+    conn.execute("INSERT OR IGNORE INTO plus_waitlist"
+                 " (user_id, created_at_ms, granted_at_ms) VALUES (?,?,NULL)",
+                 (i, now))
+conn.commit()
+try:
+    sub.admin_bonus(conn, ["aaa111"], "month", include_waitlist=True)
+    check("лимит учитывает лист ожидания", False)
+except ValueError:
+    check("лимит учитывает лист ожидания", True)
+check("откат: лист не тронут",
+      sub.launch_waitlist_stats(conn)["pending"] == 502,
+      sub.launch_waitlist_stats(conn))
+
 print(f"\n{checks - failures}/{checks} ok")
 raise SystemExit(1 if failures else 0)

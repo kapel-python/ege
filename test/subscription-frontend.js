@@ -47,6 +47,7 @@ function check(name, cond, detail) {
   const browser0 = await chromium.launch();
   browser = browser0;
   const errors = [];
+  let promoNegativeChecked = false;
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   ctx.on("page", (p) => {
     p.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
@@ -141,6 +142,63 @@ function check(name, cond, detail) {
     return d && /Не получилось создать счёт/.test(d.textContent);
   }, { timeout: 15000 });
   check("mock без ссылки: честная ошибка, не редирект", true);
+  await page.keyboard.press("Escape");
+
+  // --- 2c. промокод: «Применить» считает скидку ДО создания счёта ---
+  const promoMade = await (async () => {
+    const login = await fetch(BASE + "/api/admin/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "e2e-admin" }),
+    });
+    /* Логин ставит НЕСКОЛЬКО кук (сессия, админ, устройство): нужны все —
+       на `set-cookie` в одиночном заголовке Node отдаёт только первую. */
+    const raw = typeof login.headers.getSetCookie === "function"
+      ? login.headers.getSetCookie()
+      : [login.headers.get("set-cookie")];
+    const cookie = raw.map((c) => String(c || "").split(";")[0]).filter(Boolean).join("; ");
+    const made = await fetch(BASE + "/api/admin/subscription/promos", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ action: "create", code: "E2E20", kind: "percent", value: 20 }),
+    });
+    return { login: login.status, create: made.status };
+  })();
+  check("промокод для сценария создан",
+    promoMade.login === 200 && promoMade.create === 200, JSON.stringify(promoMade));
+
+  await page.click("#ctaBtn");
+  await page.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  await page.fill("#payPromo", "e2e20");
+  await page.click("#pay-modal-root [data-apply]");
+  await page.waitForFunction(() => {
+    const s = document.getElementById("payPromoState");
+    return s && !s.hidden && /применён/.test(s.textContent);
+  }, { timeout: 15000 });
+  const amountApplied = (await page.textContent("#payAmount")).trim();
+  const dlgApplied = (await page.textContent("#pay-modal-root")).replace(/\s+/g, " ");
+  check("«Применить»: код применён, скидка и новая сумма",
+    amountApplied === "159 ₽" && dlgApplied.includes("−40 ₽")
+    && dlgApplied.includes("Оплатить 159 ₽"), `${amountApplied} | ${dlgApplied.slice(0, 140)}`);
+
+  // Правка кода после применения сбрасывает скидку — сумма не «залипает».
+  await page.fill("#payPromo", "E2E21");
+  await page.waitForFunction(() => (document.getElementById("payAmount") || {}).textContent === "199 ₽",
+    { timeout: 10000 });
+  check("правка кода сбрасывает скидку", true);
+
+  // Неверный код: честная ошибка у поля, цена базовая, счёт не создаётся.
+  await page.fill("#payPromo", "NOSUCH");
+  await page.click("#pay-modal-root [data-apply]");
+  await page.waitForFunction(() => {
+    const s = document.getElementById("payPromoState");
+    return s && !s.hidden && /не найден/i.test(s.textContent);
+  }, { timeout: 15000 });
+  const amountBad = (await page.textContent("#payAmount")).trim();
+  check("неверный код: ошибка у поля, цена базовая",
+    amountBad === "199 ₽", amountBad);
+  // Единственный ожидаемый 4xx прогона: Chrome печатает его в консоль
+  // (иногда двумя строками) — при финальной проверке вырезается, остальные
+  // сетевые ошибки по-прежнему валят тест.
+  promoNegativeChecked = true;
   await page.keyboard.press("Escape");
 
   // --- 3. mock-покупка настоящим API-путём ---
@@ -269,7 +327,13 @@ function check(name, cond, detail) {
   check("Plus активен после ожидания", true);
   await ctx6.close();
 
-  check("консоль без ошибок", errors.length === 0, errors.slice(0, 3).join(" / "));
+  /* Неверный промокод (проверка 2c) намеренно даёт один 400 — Chromium
+     печатает его консолью, иногда двумя строками. Вырезаем только его;
+     любая другая сетевая ошибка остаётся провалом. */
+  const realErrors = promoNegativeChecked
+    ? errors.filter((m) => !/Failed to load resource.*status of 400/.test(m))
+    : errors;
+  check("консоль без ошибок", realErrors.length === 0, realErrors.slice(0, 3).join(" / "));
   console.log(failures === 0 ? "E2E ALL OK" : `E2E FAILURES=${failures}`);
   } finally {
     try { if (browser) await browser.close(); } catch (_) {}

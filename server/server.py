@@ -13994,6 +13994,18 @@ class Handler(BaseHTTPRequestHandler):
             # «Напомнить о запуске»: лист ожидания месяца Plus в подарок
             # (см. договор в server/subscription.py). Идемпотентно.
             return _SUB.join_launch_waitlist(conn, int(user_id))
+        if path == "/api/subscription/promo/quote":
+            # Проверка промокода из окна оплаты: считает цену и объясняет
+            # отказ, счёта не создаёт. Код нормализует движок (регистр,
+            # формат); период валидирует он же.
+            code = payload.get("code", payload.get("promoCode"))
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("Введи промокод")
+            period = payload.get("period", "month")
+            if not isinstance(period, str):
+                raise ValueError("period должен быть month или year")
+            quote = _SUB.promo_quote(conn, code, period.strip().lower())
+            return {"ok": True, **quote}
         if path == "/api/subscription/payments/cancel":
             # Отмена своего неоплаченного счёта (передумал/дубль/завис).
             ref = payload.get("paymentId")
@@ -14226,6 +14238,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/subscription/checkout" or path == "/api/subscription/confirm" \
                 or path == "/api/subscription/cancel" or path == "/api/subscription/resume" \
                 or path == "/api/subscription/notify" \
+                or path == "/api/subscription/promo/quote" \
                 or path == "/api/subscription/payments/cancel" \
                 or path == "/api/subscription/webhook":
             # Подписка Plus: покупка, продление, отмена, лист ожидания, вебхук.

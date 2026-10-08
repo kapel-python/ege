@@ -376,7 +376,7 @@ def main():
         base_wait = ov["waitlist"] if s == 200 else {}
         check("обзор отдаёт все блоки",
               s == 200 and set(ov) >= {"users", "subs", "money", "waitlist",
-                                       "config", "recent"}
+                                       "promos", "config", "recent"}
               and ov["config"]["priceMonthKopecks"] == 19900
               and ov["config"]["plusEssay"] == 10
               and ov["config"]["freeEssay"] == 5, ov)
@@ -480,6 +480,47 @@ def main():
         left_pay = db("SELECT COUNT(*) c FROM subscription_payments WHERE user_id=?", (uid,))[0]["c"]
         check("удаление сносит подписку и платежи каскадом",
               left == 0 and left_pay == 0, (left, left_pay))
+
+        section("промокоды: quote и скидка")
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "create", "code": "TEST25", "kind": "percent", "value": 25})
+        check("админ заводит код", s == 200 and body["promo"]["code"] == "TEST25", body)
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "create", "code": "TEST25", "kind": "percent", "value": 10})
+        check("повтор кода 400", s == 400, f"{s} {body}")
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "set_active", "code": "TEST25", "active": False})
+        check("выключение кода", s == 200 and body["promo"]["active"] is False, body)
+        s, body = request(user, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "month", "code": "test25"})
+        check("выключенный код не считается", s == 400, f"{s} {body}")
+        s, body = request(admin, base, "/api/admin/subscription/promos", "POST",
+                          {"action": "set_active", "code": "TEST25", "active": True})
+        assert s == 200, body
+        s, body = request(user, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "month", "code": " test25 "})
+        check("quote: регистр/пробелы, скидка 25%, цена вниз до рублей",
+              s == 200 and body["discountKopecks"] == 5000
+              and body["finalKopecks"] == 14900, body)
+        s, body = request(user, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "week", "code": "TEST25"})
+        check("чужой период 400", s == 400, f"{s} {body}")
+        s, body = request(user, base, "/api/subscription/promo/quote", "POST",
+                          {"code": "TEST25"})
+        check("без периода — месяц по умолчанию",
+              s == 200 and body["period"] == "month", body)
+        s, body = request(guest, base, "/api/subscription/promo/quote", "POST",
+                          {"period": "month", "code": "TEST25"})
+        check("гостю quote 401", s == 401, f"{s} {body}")
+        s, ov = request(admin, base, "/api/admin/subscription/overview")
+        codes = [p["code"] for p in (ov.get("promos") or {}).get("list", [])] if s == 200 else []
+        check("обзор показывает коды", "TEST25" in codes, codes)
+        s, body = request(user, base, "/api/subscription/checkout", "POST",
+                          {"period": "month", "promoCode": "TEST25",
+                           "idempotencyKey": "promo-key-1"})
+        check("счёт со скидкой и кодом в ответе",
+              s == 200 and body["amountKopecks"] == 14900
+              and body["promo"] == "TEST25", body)
 
         section("гейт ИИ")
         agent = server._AGENT

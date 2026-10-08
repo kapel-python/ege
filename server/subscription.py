@@ -1507,6 +1507,10 @@ def admin_bonus(conn: sqlite3.Connection, refs, period: str, note: str = "",
                     acc = None
                 if acc and acc["account_id"] and str(acc["account_id"]) not in raws:
                     raws.append(str(acc["account_id"]))
+            # Лимит проверяем и ПОСЛЕ слияния с листом: иначе 400 явных плюс
+            # вся очередь в сумме могли бы превысить пачку.
+            if len(raws) > BONUS_BATCH_MAX:
+                raise ValueError(f"получателей больше {BONUS_BATCH_MAX} — разбей на части")
         pending_wait = {int(r["user_id"]) for r in
                         conn.execute("SELECT user_id FROM plus_waitlist"
                                      " WHERE granted_at_ms IS NULL").fetchall()}
@@ -1542,10 +1546,11 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
     """Сводка для раздела «Подписка» в админке: люди, деньги, очередь.
     Чистое чтение (кроме ensure схем): безопасно дёргать хоть каждую минуту.
 
-    Деньги считаются только по настоящим платежам (provider != 'manual'):
-    ручные гранты — 0₽ и в оборот/средний чек не входят, иначе один грант
-    ронял бы средний чек почти до нуля. Возвраты — отдельными числами:
-    оборот НЕ уменьшается на возвраты (видно и то, и другое)."""
+    Деньги считаются только по настоящим платежам (provider не manual/promo):
+    ручные гранты и промо-активации — 0₽ и в оборот/средний чек не входят,
+    иначе один грант ронял бы средний чек почти до нуля. Возвраты —
+    отдельными числами: оборот НЕ уменьшается на возвраты (видно и то,
+    и другое)."""
     ensure_subscription_schema(conn)
     ensure_plus_waitlist(conn)
     now_ms = NOW_MS()

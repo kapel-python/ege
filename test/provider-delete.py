@@ -118,9 +118,15 @@ clean = ai.validate_custom_payload(
     {"id": "tmpgw", "title": "tmp", "base_url": "https://tmp.example",
      "model": "m", "api_key": "k"}, tier="free")
 ai.custom_provider_create(clean, "free")
-check("свой создан", "tmpgw" in ids("free"))
+ai.provider_set_enabled("tmpgw", False, "free")
+check("свой создан и выключен", "tmpgw" in ids("free")
+      and ai._provider_enabled("tmpgw", "free") is False)
 ai.provider_delete("tmpgw", "free")
 check("свой стёрт", "tmpgw" not in ids("free"))
+ai.custom_provider_create(clean, "free")
+check("повторное добавление того же id — снова включён",
+      ai._provider_enabled("tmpgw", "free") is True)
+ai.provider_delete("tmpgw", "free")
 try:
     ai.provider_restore("tmpgw", "free")
     check("свой не восстанавливается", False)

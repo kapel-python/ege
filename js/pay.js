@@ -144,24 +144,34 @@ var PayFlow = (function () {
   var CARD_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
 
   /* ---------- шаг 1: подтверждение до генерации счёта ---------- */
+  /* Промокод применяется ЯВНО: кнопка «Применить» проверяет код на сервере
+     (/api/subscription/promo/quote), показывает скидку и новую сумму до
+     создания счёта. Правка кода после применения сбрасывает расчёт — иначе
+     на экране висела бы скидка от другого кода. Если код введён, но не
+     применён, «Оплатить» сначала применит его (и остановится, если код
+     неверный), чтобы сумма на кнопке никогда не расходилась со счётом. */
   function buy(opts) {
     opts = opts || {};
     var period = opts.period === "year" ? "year" : "month";
     var price = Number(opts.price) || (period === "year" ? 1590 : 199);
     var cancelled = false;
+    var applied = null; /* {code, discountKopecks, finalKopecks} */
     var root = openPayModal(
       '<div class="dlg__eyebrow">Подписка Plus</div>'
       + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
       + '<div class="dlg-device__name">Оформить Plus · ' + esc(periodName(period)) + "</div></div>"
       + '<div class="dlg-kv">'
       + '<div class="dlg-kv__row"><span>Тариф</span><span>Plus · ' + esc(periodName(period)) + "</span></div>"
-      + '<div class="dlg-kv__row"><span>К оплате</span><span><b>' + esc(fmtSum(price * 100)) + ' ₽</b></span></div>'
+      + '<div class="dlg-kv__row"><span>К оплате</span><span><b id="payAmount">' + esc(fmtSum(price * 100)) + ' ₽</b></span></div>'
+      + '<div class="dlg-kv__row" id="payDiscountRow" hidden><span>Скидка по промокоду</span><span id="payDiscount" style="font-weight:700"></span></div>'
       + '<div class="dlg-kv__row"><span>Срок</span><span>' + esc(periodDays(period)) + "</span></div>"
       + '<div class="dlg-kv__row"><span>Оплата</span><span>СБП / карта, на стороне провайдера</span></div>'
       + "</div>"
       + '<div class="dlg__text">После нажатия откроется страница оплаты. Данные карты нам не попадают — к нам приходит только факт оплаты.</div>'
       + '<div class="dlg-promo"><label for="payPromo">Промокод</label>'
-      + '<input id="payPromo" type="text" placeholder="если есть" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16"></div>'
+      + '<input id="payPromo" type="text" placeholder="если есть" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16">'
+      + '<button class="btn btn-ghost btn--sm" type="button" data-apply>Применить</button></div>'
+      + '<div class="dlg-promo__state" id="payPromoState" hidden></div>'
       + '<div class="dlg__actions">'
       + '<button class="btn btn-ghost btn--sm" type="button" data-cancel>Отмена</button>'
       + '<button class="btn btn-primary btn--sm" type="button" data-pay>Оплатить ' + esc(fmtSum(price * 100)) + " ₽</button>"
@@ -171,45 +181,115 @@ var PayFlow = (function () {
     if (!root) return { close: function () {} };
     var payBtn = root.querySelector("[data-pay]");
     var cancelBtn = root.querySelector("[data-cancel]");
+    var applyBtn = root.querySelector("[data-apply]");
+    var promoInput = root.querySelector("#payPromo");
+    var amountEl = root.querySelector("#payAmount");
+    var discountRow = root.querySelector("#payDiscountRow");
+    var discountEl = root.querySelector("#payDiscount");
+    var promoState = root.querySelector("#payPromoState");
     if (cancelBtn) cancelBtn.addEventListener("click", closePayModal);
+
+    function paintPrice(kopecks) {
+      if (amountEl) amountEl.textContent = fmtSum(kopecks) + " ₽";
+      if (payBtn) payBtn.textContent = Number(kopecks) === 0
+        ? "Активировать Plus" : "Оплатить " + fmtSum(kopecks) + " ₽";
+    }
+    function clearApplied() {
+      applied = null;
+      if (discountRow) discountRow.hidden = true;
+      paintPrice(price * 100);
+    }
+    function stateLine(text, ok) {
+      if (!promoState) return;
+      promoState.hidden = !text;
+      promoState.className = "dlg-promo__state dlg-promo__state--" + (ok ? "ok" : "err");
+      promoState.textContent = text || "";
+    }
+    /* Проверить код на сервере. true — применён (или кода нет), false — отказ. */
+    function applyCode() {
+      var code = String(promoInput && promoInput.value || "").trim().toUpperCase();
+      if (promoInput) promoInput.value = code;
+      if (!code) {
+        clearApplied();
+        stateLine("", true);
+        return Promise.resolve(true);
+      }
+      applyBtn.disabled = true;
+      var keep = applyBtn.textContent;
+      applyBtn.textContent = "Проверяем…";
+      return api("/api/subscription/promo/quote", { period: period, code: code }).then(function (q) {
+        applied = q;
+        if (discountRow) discountRow.hidden = false;
+        if (discountEl) discountEl.textContent = "−" + fmtSum(q.discountKopecks) + " ₽";
+        paintPrice(q.finalKopecks);
+        stateLine("Промокод " + q.code + " применён: скидка " + fmtSum(q.discountKopecks) + " ₽", true);
+        return true;
+      }, function (err) {
+        clearApplied();
+        stateLine((err && err.message) || "Промокод не подошёл", false);
+        return false;
+      }).then(function (res) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = keep;
+        return res;
+      });
+    }
+    if (applyBtn) applyBtn.addEventListener("click", function () { applyCode(); });
+    if (promoInput) promoInput.addEventListener("input", function () {
+      /* Код изменили после применения — скидка больше не про него. */
+      if (applied && String(promoInput.value || "").trim().toUpperCase() !== applied.code) {
+        clearApplied();
+        stateLine("Нажми «Применить», чтобы проверить код", false);
+      }
+    });
+
     payBtn.addEventListener("click", function () {
       if (cancelled) return;
       payBtn.disabled = true;
-      payBtn.textContent = "Создаём счёт…";
-      var key = "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-      var promoEl = root.querySelector("#payPromo");
-      var promoCode = promoEl ? String(promoEl.value || "").trim() : "";
-      var body = { period: period, idempotencyKey: key };
-      if (promoCode) body.promoCode = promoCode;
-      api("/api/subscription/checkout", body).then(function (res) {
-        if (cancelled) return; /* окно закрыли, пока создавался счёт: редиректа нет, счёт подберёт баннер */
-        if (res && res.status === "succeeded") {
-          /* Код на 100%: счёта нет, Plus уже активен. */
-          openPayModal(
-            '<div class="dlg__eyebrow">Подписка Plus</div>'
-            + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
-            + '<div class="dlg-device__name">Промокод применён</div></div>'
-            + '<div class="dlg__text">Plus активен — лимиты уже увеличены. Приятной подготовки!</div>'
-            + '<div class="dlg__actions">'
-            + '<button class="btn btn-primary btn--sm" type="button" data-ok>Отлично</button>'
-            + "</div>",
-            "Промокод применён",
-            function () { try { window.location.reload(); } catch (e) {} });
-          var okBtn = root.querySelector("[data-ok]");
-          if (okBtn) okBtn.addEventListener("click", function () { try { window.location.reload(); } catch (e) { closePayModal(); } });
-          return;
-        }
-        if (res && res.paymentUrl) {
-          saveWait(res.paymentId, res.paymentUrl);
-          window.location.href = res.paymentUrl;
-          return;
-        }
-        errorDlg("Не получилось создать счёт", "Провайдер не вернул ссылку на оплату. Деньги не списаны.", true);
-      }).catch(function (err) {
+      var typed = String(promoInput && promoInput.value || "").trim();
+      /* Не применён, но введён — применяем сами и не создаём счёт при отказе. */
+      var prep = applied ? Promise.resolve(true) : (typed ? applyCode() : Promise.resolve(true));
+      prep.then(function (ok) {
         if (cancelled) return;
-        if (err && err.status === 401) { window.location.href = "/dashboard#/profile"; return; }
-        var text = (err && err.message) || "Попробуй ещё раз — деньги не списаны.";
-        errorDlg("Не получилось создать счёт", text, true);
+        if (ok === false) {
+          payBtn.disabled = false;
+          return;
+        }
+        payBtn.textContent = "Создаём счёт…";
+        var key = "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+        var body = { period: period, idempotencyKey: key };
+        if (applied) body.promoCode = applied.code;
+        else if (typed) body.promoCode = typed;
+        api("/api/subscription/checkout", body).then(function (res) {
+          if (cancelled) return; /* окно закрыли, пока создавался счёт: редиректа нет, счёт подберёт баннер */
+          if (res && res.status === "succeeded") {
+            /* Код на 100%: счёта нет, Plus уже активен. */
+            openPayModal(
+              '<div class="dlg__eyebrow">Подписка Plus</div>'
+              + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
+              + '<div class="dlg-device__name">Промокод применён</div></div>'
+              + '<div class="dlg__text">Plus активен — лимиты уже увеличены. Приятной подготовки!</div>'
+              + '<div class="dlg__actions">'
+              + '<button class="btn btn-primary btn--sm" type="button" data-ok>Отлично</button>'
+              + "</div>",
+              "Промокод применён",
+              function () { try { window.location.reload(); } catch (e) {} });
+            var okBtn = root.querySelector("[data-ok]");
+            if (okBtn) okBtn.addEventListener("click", function () { try { window.location.reload(); } catch (e) { closePayModal(); } });
+            return;
+          }
+          if (res && res.paymentUrl) {
+            saveWait(res.paymentId, res.paymentUrl);
+            window.location.href = res.paymentUrl;
+            return;
+          }
+          errorDlg("Не получилось создать счёт", "Провайдер не вернул ссылку на оплату. Деньги не списаны.", true);
+        }).catch(function (err) {
+          if (cancelled) return;
+          if (err && err.status === 401) { window.location.href = "/dashboard#/profile"; return; }
+          var text = (err && err.message) || "Попробуй ещё раз — деньги не списаны.";
+          errorDlg("Не получилось создать счёт", text, true);
+        });
       });
     });
     return { close: function () { cancelled = true; closePayModal(); } };

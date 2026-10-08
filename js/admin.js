@@ -1051,6 +1051,14 @@ function subPayChip(status) {
   return `<span class="a-chip ${found[0]}">${esc(found[1])}</span>`;
 }
 
+/* Человеческая подпись провайдера платежа: manual — ручной грант,
+   promo — активация промокодом (0 ₽), остальное — технический id шлюза. */
+function payProviderLabel(provider) {
+  if (provider === "manual") return "вручную";
+  if (provider === "promo") return "промокод";
+  return esc(provider || "");
+}
+
 function fmtMoney(kop) {
   return `${fmtNum((Number(kop) || 0) / 100)} ₽`;
 }
@@ -1082,7 +1090,7 @@ function subCard(sub, payments) {
         <div class="a-payrow">
           <div class="a-payrow__main">
             <div class="a-payrow__t"><span class="plus">Plus</span> · ${pm.period === "year" ? "год" : "месяц"}</div>
-            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}</div>
           </div>
           <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
         </div>`).join("")}</div>` : "";
@@ -1608,7 +1616,7 @@ function bindUserActions(p) {
     const succeeded = (p.subscriptionPayments || []).filter((pm) => pm.status === "succeeded");
     if (!succeeded.length) { toast("Возвращать нечего: успешных платежей нет", "err"); return; }
     const options = succeeded.map((pm) => `
-      <button class="choice-item" data-payment="${pm.id}"><b>${fmtMoney(pm.amountKopecks)} · ${pm.period === "year" ? "год" : "месяц"}</b><span>${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</span></button>`).join("");
+      <button class="choice-item" data-payment="${pm.id}"><b>${fmtMoney(pm.amountKopecks)} · ${pm.period === "year" ? "год" : "месяц"}</b><span>${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}</span></button>`).join("");
     openModal(`
       <div class="a-modal__title" style="color:var(--danger)">Возврат — ${esc(p.accountId || "")}</div>
       <div class="a-modal__desc">Платёж пометится как возвращённый навсегда, доступ <span class="plus">Plus</span> закроется сразу. Повторно вернуть тот же платёж нельзя.</div>
@@ -4902,7 +4910,7 @@ async function screenSubscription() {
         <div class="a-payrow">
           <div class="a-payrow__main">
             <div class="a-payrow__t">${pm.accountId ? `<a href="#/users/${esc(pm.accountId)}" class="mono">${esc(pm.accountId)}</a>` : "<span style=\"color:var(--muted)\">—</span>"} · ${pm.period === "year" ? "год" : "месяц"}</div>
-            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${pm.provider === "manual" ? "вручную" : esc(pm.provider || "")}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}</div>
           </div>
           <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
         </div>`).join("")}</div>`
@@ -5058,7 +5066,7 @@ function openPromoModal() {
         </div>
         <span class="a-field__hint">4–16 символов A–Z/0–9</span>
       </div>
-      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+      <div class="a-form-grid">
         <div class="a-field"><label for="fPromoKind">Тип скидки</label>
           <select class="a-select" id="fPromoKind"><option value="percent">Процент</option><option value="fixed">Рубли</option></select>
         </div>
@@ -5067,7 +5075,7 @@ function openPromoModal() {
           <span class="a-field__hint" id="fPromoValueHint">% от тарифа</span>
         </div>
       </div>
-      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+      <div class="a-form-grid">
         <div class="a-field"><label for="fPromoPeriod">Тариф</label>
           <select class="a-select" id="fPromoPeriod"><option value="any">Любой</option><option value="month">Месяц</option><option value="year">Год</option></select>
         </div>
@@ -5075,7 +5083,7 @@ function openPromoModal() {
           <input class="a-input mono" id="fPromoMax" inputmode="numeric" placeholder="∞">
         </div>
       </div>
-      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+      <div class="a-form-grid">
         <div class="a-field"><label for="fPromoExp">Срок до (пусто — бессрочно)</label>
           <input class="a-input" id="fPromoExp" type="date">
         </div>

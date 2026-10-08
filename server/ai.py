@@ -3010,9 +3010,12 @@ def provider_delete(pid: str, tier: str | None = None) -> None:
         _app_config_write(_tier_key(_SLOTS_KEY, tier), slots)
         # Переопределение удалённого провайдера — мёртвая запись, её тоже сносим:
         # иначе id можно было бы заново занять, и новый провайдер молча унаследовал
-        # бы чужую модель из прошлой «жизни» того же id.
+        # бы чужую модель из прошлой «жизни» того же id. Выключатель — по той же
+        # причине: без очистки повторно добавленный id стартовал бы «выключенным».
         if overrides.pop(pid, None) is not None:
             _app_config_write(_tier_key(_OVERRIDES_KEY, tier), overrides)
+        if enabled.pop(pid, None) is not None:
+            _app_config_write(_tier_key(_ENABLED_KEY, tier), enabled)
     else:
         raise KeyError(f"unknown provider {pid!r}")
     try:
