@@ -557,6 +557,7 @@
           if (activeBanner) {
             activeBanner.hidden = false;
             var parts = [];
+            if (data.note) parts.push(String(data.note));
             if (data.expiresAt) parts.push("доступ до " + fmtDate(data.expiresAt));
             if (data.limits && data.limits.essay) parts.push(data.limits.essay + " проверок в день");
             if (data.limits && data.limits.agent) parts.push(data.limits.agent + " ходов ИИ в день");

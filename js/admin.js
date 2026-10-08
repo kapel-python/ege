@@ -1090,7 +1090,7 @@ function subCard(sub, payments) {
         <div class="a-payrow">
           <div class="a-payrow__main">
             <div class="a-payrow__t"><span class="plus">Plus</span> · ${pm.period === "year" ? "год" : "месяц"}</div>
-            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}${pm.note ? ` · ${esc(pm.note)}` : ""}</div>
           </div>
           <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
         </div>`).join("")}</div>` : "";
@@ -4954,7 +4954,7 @@ async function screenSubscription() {
         <div class="a-payrow">
           <div class="a-payrow__main">
             <div class="a-payrow__t">${pm.accountId ? `<a href="#/users/${esc(pm.accountId)}" class="mono">${esc(pm.accountId)}</a>` : "<span style=\"color:var(--muted)\">—</span>"} · ${pm.period === "year" ? "год" : "месяц"}</div>
-            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}</div>
+            <div class="a-payrow__d">${fmtDateTime(pm.paidAt || pm.createdAt)} · ${payProviderLabel(pm.provider)}${pm.note ? ` · ${esc(pm.note)}` : ""}</div>
           </div>
           <div class="a-payrow__r"><span>${fmtMoney(pm.amountKopecks)}</span>${subPayChip(pm.status)}</div>
         </div>`).join("")}</div>`

@@ -353,6 +353,9 @@ def main():
               len(manual) == 1 and manual[0]["amountKopecks"] == 0
               and manual[0]["status"] == "succeeded"
               and manual[0].get("note") == "тест", manual)
+        s, st2 = request(user2, base, "/api/subscription/status", "GET", None, "10.9.0.2")
+        check("статус подписки несёт заметку гранта",
+              s == 200 and st2.get("note") == "тест", st2)
         buckets = {r["owner"]: r["count"] for r in db(
             "SELECT owner, count FROM ai_usage WHERE owner IN ('u:' || "
             "(SELECT id FROM users WHERE account_id=?), 'agent:' || "

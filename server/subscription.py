@@ -520,13 +520,25 @@ def subscription_status(conn: sqlite3.Connection, user_id: int,
         # отвечает 403, а статус врал бы фронту «доступ открыт».
         return {"ok": True, "plan": None, "active": False, "status": None,
                 "period": None, "startedAt": None, "expiresAt": None,
-                "cancelAtPeriodEnd": False,
+                "cancelAtPeriodEnd": False, "note": "",
                 "limits": {"essay": None, "agent": None,
                            "agentAccess": agent_access_allowed(conn, user_id, now_ms)}}
+    # Заметка ручной выдачи («подарок…») — из платежа текущей подписки:
+    # страница подписки показывает её в баннере активного Plus.
+    note = ""
+    try:
+        row = conn.execute("SELECT payload_json FROM subscription_payments"
+                           " WHERE user_id=? AND subscription_id=? AND status='succeeded'"
+                           " ORDER BY id DESC LIMIT 1",
+                           (int(user_id), int(sub.get("id") or 0))).fetchone()
+        note = str((_payload_data(_row_to_dict(row) or {}) or {}).get("note") or "").strip()[:200]
+    except sqlite3.Error:
+        note = ""
     return {"ok": True, "plan": sub.get("plan"), "active": active,
             "status": sub.get("status"), "period": sub.get("period"),
             "startedAt": sub.get("started_at_ms"), "expiresAt": sub.get("expires_at_ms"),
             "cancelAtPeriodEnd": bool(sub.get("cancel_at_period_end")),
+            "note": note,
             "limits": {"essay": PLUS_ESSAY_LIMIT if active else None,
                        "agent": PLUS_AGENT_LIMIT if active else None,
                        "agentAccess": agent_access_allowed(conn, user_id, now_ms)}}
@@ -1742,18 +1754,21 @@ def subscription_overview(conn: sqlite3.Connection, free_essay: int = 5,
     try:
         rows = conn.execute("""SELECT p.amount_kopecks, p.currency, p.period, p.status,
                                       p.provider, p.created_at_ms, p.paid_at_ms,
+                                      p.payload_json,
                                       u.account_id
                                FROM subscription_payments p
                                LEFT JOIN users u ON u.id = p.user_id
                                ORDER BY p.id DESC LIMIT 10""").fetchall()
         for r in rows:
-            recent.append({"accountId": r["account_id"],
-                           "amountKopecks": r["amount_kopecks"],
-                           "currency": r["currency"] or "RUB",
-                           "period": r["period"], "status": r["status"],
-                           "provider": r["provider"],
-                           "createdAt": r["created_at_ms"],
-                           "paidAt": r["paid_at_ms"]})
+            row = _row_to_dict(r) or {}
+            recent.append({"accountId": row.get("account_id"),
+                           "amountKopecks": row.get("amount_kopecks"),
+                           "currency": row.get("currency") or "RUB",
+                           "period": row.get("period"), "status": row.get("status"),
+                           "provider": row.get("provider"),
+                           "createdAt": row.get("created_at_ms"),
+                           "paidAt": row.get("paid_at_ms"),
+                           "note": str((_payload_data(row) or {}).get("note") or "").strip()[:200]})
     except sqlite3.Error:
         pass
 
