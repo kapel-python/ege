@@ -51,6 +51,10 @@ conn.execute("CREATE TABLE user_errors(id INTEGER PRIMARY KEY, user_id INT, subj
 now = int(time.time() * 1000)
 conn.execute("INSERT INTO users(id,name,created_at) VALUES(1,'У',?)", (now - 10 * 86400000,))
 conn.execute("INSERT INTO user_subjects(user_id,subject,onboarded) VALUES(1,'profile_math',1)")
+# Основной пользователь — Plus: план от ИИ без подписки не создаётся
+# (гейт проверяется ниже отдельным бесплатным пользователем).
+assert agent._SUB is not None
+agent._SUB.admin_grant(conn, 1, "month", note="тест: план от ИИ — Plus")
 conn.execute("INSERT INTO skills VALUES('sk_a','Альфа','profile_math',1)")
 conn.execute("INSERT INTO skills VALUES('sk_b','Бета','profile_math',2)")
 conn.execute("INSERT INTO skills VALUES('sk_c','Гамма','profile_math',3)")
@@ -274,6 +278,53 @@ ctx_other = agent.turn_context(conn, 1, "society")
 check("context other subject",
       "есть в другом предмете" in ctx_other and "Русский язык" in ctx_other,
       " | ".join(ctx_other.splitlines()[-3:-1]))
+
+# --- 9. План от ИИ: создание только с Plus ---
+# Бесплатный (id 2): инструментов создания плана у модели нет, а прямой вызов
+# упирается в жёсткую проверку. plan_get (просмотр) остаётся бесплатным.
+conn.execute("INSERT INTO users(id,name,created_at) VALUES(2,'Ф',?)", (now - 86400000,))
+conn.execute("INSERT INTO user_subjects(user_id,subject,onboarded) VALUES(2,'profile_math',1)")
+conn.commit()
+check("доступ к плану: Plus true, бесплатный false",
+      agent.plan_access_allowed(conn, 1) is True and agent.plan_access_allowed(conn, 2) is False)
+for call_name, fn in (
+    ("plan_draft", lambda: agent.execute_read_tool(conn, 2, "profile_math", "plan_draft", {"days": 7})),
+    ("plan_apply (propose)", lambda: agent.propose_action(
+        conn, 2, "profile_math", "plan_apply",
+        {"days": 7, "periods": [{"days": 7, "skillIds": ["sk_a"]}]})),
+    ("plan_apply (apply)", lambda: agent.apply_action(conn, 2, "profile_math", "plan_apply", {})),
+):
+    try:
+        fn()
+        check(f"бесплатный: {call_name} отклонён", False, "вызов прошёл")
+    except ValueError as exc:
+        check(f"бесплатный: {call_name} отклонён с текстом про Plus",
+              "Plus" in str(exc), str(exc)[:120])
+check("бесплатный: plan_get доступен",
+      agent.execute_read_tool(conn, 2, "russian", "plan_get", {})["hasPlan"] is False)
+ctx_free = agent.turn_context(conn, 2, "profile_math")
+check("бесплатный: контекст говорит про Plus и plan_draft",
+      "Тариф ученика: бесплатный" in ctx_free and "plan_draft" in ctx_free,
+      ctx_free[-160:])
+check("Plus: в контексте нет строки про бесплатный тариф",
+      "Тариф ученика: бесплатный" not in agent.turn_context(conn, 1, "profile_math"))
+seen = {}
+
+
+def capture(messages, tools, budget=None):
+    seen["tools"] = [t.get("function", {}).get("name") for t in tools]
+    return {"text": "ок", "tool_calls": []}
+
+
+agent.run_cycle(conn, 2, "profile_math", [{"role": "user", "content": "план"}], capture,
+                deadline=time.monotonic() + 10)
+check("бесплатный: модель не получает plan_draft/plan_apply",
+      "plan_draft" not in seen["tools"] and "plan_apply" not in seen["tools"]
+      and "plan_get" in seen["tools"], str(seen["tools"]))
+agent.run_cycle(conn, 1, "profile_math", [{"role": "user", "content": "план"}], capture,
+                deadline=time.monotonic() + 10)
+check("Plus: модель получает инструменты плана",
+      "plan_draft" in seen["tools"] and "plan_apply" in seen["tools"], str(seen["tools"]))
 
 conn.close()
 os.unlink(path)

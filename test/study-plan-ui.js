@@ -119,6 +119,17 @@ check("B: prefers-reduced-motion уважается",
 check("B: нет новых глобальных классов с общими именами",
   !/^\.(card|btn|progress|chip)\s*\{/m.test(planCss));
 
+/* ================= C. План от ИИ — функция Plus (фронт-стена) ================= */
+const subJs = read("js/subscription.js");
+check("C: статус подписки несёт planAccess, модуль отдаёт cachedPlanAccess",
+  /limits\.planAccess === false/.test(subJs)
+  && /function cachedPlanAccess\(\)/.test(subJs)
+  && /cachedPlanAccess: cachedPlanAccess/.test(subJs));
+check("C: пустой чат ИИ не предлагает план без доступа (флаг в списке подсказок)",
+  /SuggestPlan|s\[4\] !== 1|suggest\.filter/.test(spaJs)
+  && /cachedPlanAccess\(\) === false/.test(spaJs)
+  && /"Составь план подготовки на неделю"[\s\S]{0,120}"help", 1\]/.test(spaJs));
+
 /* ================= юнит: agent-spa helpers в VM ================= */
 const escReal = (s) => String(s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

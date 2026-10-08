@@ -626,6 +626,13 @@ def main() -> int:
             conn = server.connect()
             row = conn.execute("SELECT id FROM users WHERE name=? ORDER BY id DESC LIMIT 1", (name,)).fetchone()
             users[who] = int(row["id"])
+            if who == "math" and server._SUB is not None:
+                # План от ИИ — функция Plus: способность «собери план»
+                # проверяется у подписчика (бесплатному инструмент не дают).
+                try:
+                    server._SUB.admin_grant(conn, users[who], "month", note="тест: план")
+                except Exception:
+                    pass
             by = seeder(conn, users[who])
             if who == "math":
                 for tbl in ("user_stats", "user_progress", "user_errors", "task_attempts",

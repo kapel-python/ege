@@ -436,6 +436,13 @@ def main() -> int:
             c = server.connect()
             uid = int(c.execute("SELECT id FROM users WHERE name=? ORDER BY id DESC LIMIT 1", (name,)).fetchone()["id"])
             users[who] = uid
+            if who == "math" and server._SUB is not None:
+                # «Поднять баллы» и «собери план» требуют плана от ИИ, а он —
+                # функция Plus: основной пользователь теста — подписчик.
+                try:
+                    server._SUB.admin_grant(c, users[who], "month", note="тест: план")
+                except Exception:
+                    pass
             by = seeder(c, uid)
             if who == "math":
                 math_by = by

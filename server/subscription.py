@@ -530,7 +530,11 @@ def subscription_status(conn: sqlite3.Connection, user_id: int,
                 "period": None, "startedAt": None, "expiresAt": None,
                 "cancelAtPeriodEnd": False, "note": "",
                 "limits": {"essay": None, "agent": None,
-                           "agentAccess": agent_access_allowed(conn, user_id, now_ms)}}
+                           "agentAccess": agent_access_allowed(conn, user_id, now_ms),
+                           # План от ИИ — преимущество Plus независимо от флага
+                           # «ИИ только для Plus»: без подписки false, и фронт
+                           # не предлагает подсказку «Составь план».
+                           "planAccess": False}}
     # Заметка ручной выдачи («подарок…») — из платежа текущей подписки:
     # страница подписки показывает её в баннере активного Plus.
     note = ""
@@ -549,7 +553,9 @@ def subscription_status(conn: sqlite3.Connection, user_id: int,
             "note": note,
             "limits": {"essay": PLUS_ESSAY_LIMIT if active else None,
                        "agent": PLUS_AGENT_LIMIT if active else None,
-                       "agentAccess": agent_access_allowed(conn, user_id, now_ms)}}
+                       "agentAccess": agent_access_allowed(conn, user_id, now_ms),
+                       # Создание плана от ИИ = активная подписка (см. agent.plan_access_allowed).
+                       "planAccess": bool(active)}}
 
 
 def subscription_refresh(conn: sqlite3.Connection, user_id: int,

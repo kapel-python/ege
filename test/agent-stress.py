@@ -656,6 +656,13 @@ def main() -> int:
                 if not users[who]:
                     print(f"не нашли users.id после claim {who}")
                     return 2
+                if who == "math" and server._SUB is not None:
+                    # План от ИИ — функция Plus: сценарий плана идёт от
+                    # подписчика (бесплатному сервер инструмент не даёт).
+                    try:
+                        server._SUB.admin_grant(conn, users[who], "month", note="тест: план")
+                    except Exception:
+                        pass
                 ctx[who] = seed_fn(conn, int(users[who]))
                 for tbl, where, params in (
                         ("user_stats", "user_id=? AND subject=?", (users[who], subject)),

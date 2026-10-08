@@ -68,6 +68,31 @@ var Subscription = (function () {
     return true;
   }
 
+  /* Доступ к созданию плана от ИИ (преимущество Plus, не зависит от
+     флага EGE_AGENT_REQUIRES_PLUS). Сервер отдаёт готовое решение в
+     limits.planAccess: false — бесплатный (план с ИИ не предлагаем),
+     true — Plus, null — неизвестно (fail-open: подсказку показываем,
+     сервер всё равно не даст инструмент). */
+  function planAccessFromStatus(st) {
+    if (!st || typeof st !== "object" || st.guest) return null;
+    if (!st.limits || typeof st.limits !== "object") return null;
+    if (st.limits.planAccess === false) return false;
+    if (st.limits.planAccess === true) return true;
+    return null;
+  }
+
+  /* Синхронный срез из кэша — для отрисовки без мигания. Сети здесь нет. */
+  function cachedPlanAccess() {
+    try {
+      var id = accountId();
+      if (!id) return null;
+      if (cache.accountId !== id || !cache.status) return null;
+      return planAccessFromStatus(cache.status);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /* Синхронный срез из кэша — для отрисовки хрома без мигания.
      Сети здесь нет: неизвестно — null, вызыватель показывает раздел
      (fail-open), а точное решение доберёт ensureAgentAccess() до хрома. */
@@ -210,5 +235,6 @@ var Subscription = (function () {
     cachedAgentAccess: cachedAgentAccess,
     ensureAgentAccess: ensureAgentAccess,
     agentGate: agentGate,
+    cachedPlanAccess: cachedPlanAccess,
   };
 })();

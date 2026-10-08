@@ -150,6 +150,15 @@ def subscription_is_plus(conn: sqlite3.Connection, user_id: int) -> bool:
         return False
 
 
+def plan_access_allowed(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Доступно ли создание/применение плана от ИИ: только активный Plus.
+
+    От отдельного флага (EGE_AGENT_REQUIRES_PLUS) не зависит осознанно: тот
+    закрывает весь ИИ, а план — преимущество Plus из тарифа, поэтому подписка
+    нужна независимо от флага и на бесплатном ИИ."""
+    return subscription_is_plus(conn, user_id)
+
+
 def agent_access_allowed(conn: sqlite3.Connection, user_id: int) -> bool:
     """Доступен ли раздел ИИ. Пока флаг выключен — всем
     зарегистрированным, как раньше; с флагом — только Plus."""
@@ -490,6 +499,19 @@ AGENT_TOOLS: list = [
 ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress", "plan_apply"})
 READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_get", "plan_draft",
                         "find_topics", "project_info"})
+# План от ИИ — функция Plus: просмотр текущего плана (plan_get) бесплатен,
+# создание и применение (plan_draft/plan_apply) — только с активной подпиской.
+# Бесплатному пользователю инструментов создания в списке модели нет (см.
+# run_cycle), а прямой вызов упирается в жёсткую проверку (execute_read_tool/
+# propose_action/apply_action) — список инструментов не единственная стена.
+PLAN_PLUS_TOOLS = frozenset({"plan_draft", "plan_apply"})
+PLAN_PLUS_MESSAGE = ("Учебный план от ИИ — функция Plus: скажи ученику оформить "
+                     "подписку (страница «Оформить Plus») и не строй план сам.")
+
+
+def _tool_function_name(tool) -> str:
+    fn = tool.get("function") if isinstance(tool, dict) else None
+    return str((fn or {}).get("name") or "")
 
 
 def is_action_tool(name: str) -> bool:
@@ -3251,6 +3273,8 @@ def _propose_study_plan(conn: sqlite3.Connection, user_id: int,
 
 def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
     """Проверить аргументы действия и вернуть человекочитаемое предложение."""
+    if name in PLAN_PLUS_TOOLS and not plan_access_allowed(conn, user_id):
+        raise ValueError(PLAN_PLUS_MESSAGE)
     args = dict(args or {})
     if name == "update_profile":
         # Текущий профиль — чтобы отбросить поля, которые уже такие: модель любит
@@ -3374,6 +3398,10 @@ def propose_action(conn: sqlite3.Connection, user_id: int, subject: str, name: s
 
 
 def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str, proposal: dict) -> dict:
+    # Подтверждение могло прийти уже после окончания подписки: предложение
+    # Plus-периода не применяется бесплатным аккаунтом (та же стена, что на вызове).
+    if name in PLAN_PLUS_TOOLS and not plan_access_allowed(conn, user_id):
+        raise ValueError(PLAN_PLUS_MESSAGE)
     if name == "update_profile":
         patch = proposal.get("patch") or {}
         if "name" in patch:
@@ -3798,6 +3826,8 @@ def project_info(conn: sqlite3.Connection, user_id: int, subject: str, args: dic
 
 
 def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name: str, args: dict) -> dict:
+    if name in PLAN_PLUS_TOOLS and not plan_access_allowed(conn, user_id):
+        raise ValueError(PLAN_PLUS_MESSAGE)
     if name == "fold_web":
         return fold_web(conn, user_id, subject, args)
     if name == "lesson_get":
@@ -4120,6 +4150,18 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
         title = subject_title(subject)
         if title:
             lines.append(f"Текущий предмет: {title}.")
+        # Тариф: от него зависит, что модель вправе обещать. Создание плана —
+        # функция Plus (PLAN_PLUS_TOOLS): у бесплатного инструментов в списке
+        # нет, и модель обязана честно сказать про Plus, а не выдумывать план.
+        try:
+            plan_plus = plan_access_allowed(conn, int(user_id))
+        except Exception:
+            plan_plus = False
+        if not plan_plus:
+            lines.append("Тариф ученика: бесплатный. Создание и изменение учебного "
+                         "плана от ИИ — только по подписке Plus: не строй план и не "
+                         "зови plan_draft/plan_apply, а скажи оформить Plus. "
+                         "Посмотреть текущий план по-прежнему можно (plan_get).")
         try:
             fc = _compute_forecast(conn, int(user_id), str(subject or ""))
         except Exception:
@@ -4324,6 +4366,16 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
     подписчика глушится, ход продолжается.
     """
     deadline = deadline if deadline is not None else (time.monotonic() + TURN_TIMEOUT_SEC)
+    # Инструменты хода: у бесплатного из списка выпадают создание/применение
+    # плана (функция Plus). Модель о тарифе знает из КОНТЕКСТА ХОДА и объяснит
+    # отказ словами; прямой вызов всё равно упрётся в жёсткую проверку ниже
+    # (execute_read_tool/propose_action/apply_action).
+    try:
+        plan_plus = plan_access_allowed(conn, user_id)
+    except Exception:
+        plan_plus = False
+    cycle_tools = AGENT_TOOLS if plan_plus else [
+        t for t in AGENT_TOOLS if _tool_function_name(t) not in PLAN_PLUS_TOOLS]
     steps: list = []
     failed = 0
     for _ in range(MAX_TOOL_STEPS + MAX_TOOL_RETRIES + 1):
@@ -4336,7 +4388,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             if steps:
                 return steps, _summarize(chat_fn, messages), None
             raise TimeoutError("ход превысил 90 секунд")
-        parsed = chat_fn(messages, AGENT_TOOLS, budget)
+        parsed = chat_fn(messages, cycle_tools, budget)
         text = parsed.get("text")
         calls = parsed.get("tool_calls") or []
         if len(calls) > 1:

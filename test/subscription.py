@@ -165,7 +165,8 @@ def main():
         s, st = request(user, base, "/api/subscription/status")
         check("статус без подписки", s == 200 and st["active"] is False
               and st["plan"] is None and st["limits"] == {
-                  "essay": None, "agent": None, "agentAccess": True}, st)
+                  "essay": None, "agent": None, "agentAccess": True,
+                  "planAccess": False}, st)
         s, lim = request(user, base, "/api/ai/limits")
         check("free-лимит сочинений 5", s == 200 and lim["limit"] == 5, lim)
         s, q = request(user, base, "/api/agent/limits")
@@ -244,7 +245,8 @@ def main():
         s, st = request(user, base, "/api/subscription/status")
         check("статус active + лимиты",
               s == 200 and st["active"] is True and st["status"] == "active"
-              and st["limits"] == {"essay": 10, "agent": 50, "agentAccess": True}, st)
+              and st["limits"] == {"essay": 10, "agent": 50, "agentAccess": True,
+                                   "planAccess": True}, st)
 
         section("продление складывается, отмена держит срок")
         s, co = request(user, base, "/api/subscription/checkout", "POST",
