@@ -82,7 +82,7 @@ check("кружок показывает ферму, а не обычное ок
   && /reason: res\.data\.reason/.test(spaCode)
   && /const farm = !burst && status && status\.reason === "farm_suspected";/.test(appJs)
   && /const text = farm \? farmText/.test(appJs)
-  && /подозрение на ферму аккаунтов/.test(appJs));
+  && /Попробуй чуть позже/.test(appJs));
 /* Автопоказ окна исчерпания: ход потратился в ноль с готовым ответом —
    взводим в settle, стреляем в конце печати (те же точки, где дописывается
    ответ), окно — ровно то же, что по клику на круг (clickQuota). Снятие —

@@ -6288,7 +6288,7 @@ function openAiLimitModal(status, burstRetryAfterSec, opts) {
     ? o.plural
     : (n) => plural(n, "проверка", "проверки", "проверок");
   const farmText = `На этом устройстве лимит уже использован другим аккаунтом, поэтому доступ временно ограничен.`
-    + `<br><br>Причина: подозрение на ферму аккаунтов. Попробуй чуть позже.`
+    + `<br><br>Попробуй чуть позже.`
     + `${hasBalance ? `<br><br>Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`;
   const essayText = burst
     ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
