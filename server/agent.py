@@ -201,6 +201,12 @@ AGENT_SYSTEM = (
     "или стартового блока «КОНТЕКСТ ХОДА» (его цифры — данные сервера, их можно "
     "называть без вызова). Ничего не выдумывай "
     "и не оценивай «на глаз». Нет данных — так и скажи.\n"
+    "1a. Причину неудачи называй ТОЛЬКО из ответа инструмента (поле error/note). Нельзя говорить "
+    "«сайт требует…», «сайт не вернул», «запрос сработал некорректно», если инструмент такого не "
+    "сказал или вообще не вызывался. Не вызывал — значит не знаешь: вызови и тогда отвечай.\n"
+    "1b. Списки (сочинения, ошибки, попытки) запрашивай БЕЗ выдуманных номеров: «покажи мои "
+    "сочинения» = essay_history без submissionId и taskId. Номер работы бери только из списка, "
+    "который уже пришёл, а не из головы. Пустые поля не передавай вовсе.\n"
     "2. НИКОГДА не говори, что сейчас посмотришь, проверишь, глянешь, откроешь профиль или прогноз, — "
     "а потом не вызывай инструмент. Обещание посмотреть и есть вызов: сначала ВЫЗОВ, потом слова. "
     "Если просишь данные о прогрессе, профиле, ошибках, навыках, днях, попытках, сочинениях или плане — "
@@ -309,6 +315,9 @@ AGENT_SYSTEM = (
     "(«Профиль → Учебный план» — темы, сроки, кнопка «Закрыть тему»), одной фразой, без ссылки-кнопки. "
     "Срок между черновиком и применением не меняй: days в plan_apply = days из plan_draft; "
     "второй черновик за ход — только если ученик сам поменял срок.\n"
+    "- «план по теме» («план по планиметрии», «план на производную») — то же, но передай тему в "
+    "plan_draft(topic=…): она задаёт фокус плана. Периоды менять вручную под тему НЕЛЬЗЯ — "
+    "бери то, что вернул черновик; если там topicNote («навыка нет») — так и скажи ученику.\n"
     "- «что делать / с чего начать / распиши» → СНАЧАЛА plan_get (если в КОНТЕКСТЕ "
     "«плана нет» — пропусти), затем plan_draft(days=сколько назвали, иначе 7), "
     "затем plan_apply: вопрос про план, а не просьба «посмотреть».\n"
@@ -437,7 +446,9 @@ AGENT_TOOLS: list = [
               "days": {"type": "integer", "minimum": 1, "maximum": 365,
                        "description": "горизонт в днях: день 1, неделя 7, две недели 14, месяц 30, год 365"},
               "title": {"type": "string", "maxLength": 80,
-                        "description": "название плана человеческими словами"}},
+                        "description": "название плана человеческими словами"},
+              "topic": {"type": "string", "maxLength": 80,
+                        "description": "тема, на которую план (например «планиметрия», «производная»); без неё — по прогнозу"}},
            "additionalProperties": False}),
     _tool("plan_apply", "Применить план из plan_draft. Требует подтверждения ученика.",
           {"type": "object", "properties": {
@@ -2342,6 +2353,11 @@ def essay_history(conn: sqlite3.Connection, user_id: int, subject: str, args: di
                            " FROM essay_submissions WHERE id=? AND user_id=?",
                            (sub_id, user_id)).fetchone()
         if row is None:
+            if not total:
+                # Сочинений нет вообще: submissionId из головы модели тут ни при
+                # чём, и «не найдено» ученику звучало бы как поломка сайта.
+                return {"total": 0, "checked": 0, "essays": [],
+                        "note": "сочинений пока нет — ни одной работы на проверку не отправлено"}
             raise ValueError("сочинение не найдено — возьми submissionId из списка essays")
         blob = _essay_parse_blob(row["evaluation_result"])
         score, maximum = _essay_blob_scores(blob)
@@ -2541,6 +2557,19 @@ def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
         gains = [dict(g, name=names.get(str(g.get("skillId")),
                                         str(g.get("name") or g.get("skillId")))) for g in gains]
     order = [str(g["skillId"]) for g in gains if g.get("skillId")]
+    topic_note = None
+    topic = str(args.get("topic") or "").strip()[:80]
+    if topic:
+        # «План по планиметрии» — тема задаёт фокус, прогноз только если её нет.
+        try:
+            matched = find_topics(conn, user_id, subject, {"query": topic}).get("skills") or []
+        except ValueError:
+            matched = []
+        matched = [str(s["id"]) for s in matched if s.get("subject") == subject]
+        if matched:
+            order = matched
+        else:
+            topic_note = f"по теме «{topic}» навыка в каталоге этого предмета нет — план собран по прогнозу"
     if not order:
         try:
             order = [str(r["id"]) for r in conn.execute(
@@ -2582,10 +2611,13 @@ def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
                   for sid in focus]
         plan.append({"index": idx, "label": chunk["label"], "days": chunk["days"],
                      "topics": topics})
-    return {"days": days, "title": title, "forecast": fc.get("mid"),
-            "periods": plan,
-            "note": ("Черновик: ничего не применено. Применение — только через "
-                     "plan_apply с подтверждением ученика.")}
+    out = {"days": days, "title": title, "forecast": fc.get("mid"),
+           "periods": plan,
+           "note": ("Черновик: ничего не применено. Применение — только через "
+                    "plan_apply с подтверждением ученика.")}
+    if topic_note:
+        out["topicNote"] = topic_note
+    return out
 
 
 # Порог «тема пройдена» по освоению (та же шкала 0–100, что на дашборде).
@@ -3894,9 +3926,11 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         topic = (result or {}).get("topic")
         return f"Открываю задание «{topic}»" if topic else f"Открываю задание {args.get('taskId') or ''}".strip()
     if name == "essay_history":
-        sub = (args or {}).get("submissionId", (args or {}).get("submission_id"))
-        if sub is not None:
-            return f"Открываю сочинение №{sub}"
+        # По результату, а не по аргументам: модель нередко шлёт submissionId
+        # «для списка», и подпись «Открываю сочинение №1» врала бы ученику.
+        essay = (result or {}).get("essay") or {}
+        if essay.get("submissionId") is not None:
+            return f"Открываю сочинение №{essay['submissionId']}"
         if (args or {}).get("taskId"):
             return "Смотрю сочинения по этому заданию"
         return "Смотрю твои сочинения"
@@ -4235,6 +4269,17 @@ def _emit_live_step(on_step, step: dict) -> None:
         pass
 
 
+def _drop_empty_args(args: dict) -> dict:
+    """Пустые аргументы — это «не задано», а не значение.
+
+    Живой случай: модель передавала update_profile(name=…, selfLevel="", goal="").
+    Пустая строка проходила проверку «поле задано» и падала ошибкой «неизвестный
+    уровень», а ученику уходило «сайт требует уровень и цель». То же для taskId="".
+    """
+    return {k: v for k, v in args.items()
+            if v is not None and not (isinstance(v, str) and not v.strip())}
+
+
 def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: list,
               chat_fn, *, deadline: float | None = None, on_step=None) -> tuple[list, str | None, dict | None]:
     """Один проход модель↔инструменты. Возвращает (steps, final, pending).
@@ -4310,7 +4355,7 @@ def run_cycle(conn: sqlite3.Connection, user_id: int, subject: str, messages: li
             return steps, _summarize(chat_fn, messages), None
         for call in calls:
             name = str(call.get("name") or "")
-            call_args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            call_args = _drop_empty_args(call.get("arguments") if isinstance(call.get("arguments"), dict) else {})
             call_id = str(call.get("id") or "")
             if name in ACTION_TOOLS:
                 try:

@@ -192,6 +192,41 @@ def _find_topics_probes(server) -> dict:
         conn.close()
 
 
+def _empty_args_probes(server) -> dict:
+    """Живой случай: модель шлёт selfLevel="" и goal="" рядом с name — пустые
+    строки должны быть «не задано», а не ошибкой «неизвестный уровень»; и
+    essay_history у ученика без сочинений — пустой список, а не «не найдено»."""
+    conn = server.connect()
+    try:
+        agent = server._AGENT
+        uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        out = {}
+        out["clean_drops"] = agent._drop_empty_args(
+            {"name": "Проба", "selfLevel": "", "goal": "  ", "taskId": None, "limit": 0}) == {"name": "Проба", "limit": 0}
+        try:
+            prop = agent.propose_action(conn, uid, "profile_math", "update_profile",
+                                        agent._drop_empty_args({"name": "Проба-Имя-7", "selfLevel": "", "goal": ""}))
+            out["name_only_ok"] = prop.get("patch") == {"name": "Проба-Имя-7"}
+            out["name_only_detail"] = str(prop.get("patch"))
+        except ValueError as exc:
+            out["name_only_ok"] = False
+            out["name_only_detail"] = str(exc)
+        empty = agent.essay_history(conn, 999999, "russian", {"submissionId": 1})
+        out["essay_empty_ok"] = empty.get("total") == 0 and empty.get("essays") == [] and "пока нет" in (empty.get("note") or "")
+        out["essay_empty_detail"] = str(empty)[:160]
+        out["essay_label_ok"] = agent.describe_step("essay_history", {"submissionId": 1}, empty) == "Смотрю твои сочинения"
+        # «План по планиметрии» — тема задаёт фокус; неизвестная тема — честная заметка.
+        by_topic = agent.plan_draft(conn, uid, "profile_math", {"days": 7, "topic": "планиметрия"})
+        focus = [t["skillId"] for p in by_topic["periods"] for t in p["topics"]]
+        out["plan_topic_ok"] = bool(focus) and all(sid.endswith("planimetry") for sid in focus) and "topicNote" not in by_topic
+        out["plan_topic_detail"] = focus[:4]
+        missing = agent.plan_draft(conn, uid, "profile_math", {"days": 7, "topic": "квантовая хромодинамика"})
+        out["plan_topic_missing_ok"] = "навыка в каталоге" in (missing.get("topicNote") or "")
+        return out
+    finally:
+        conn.close()
+
+
 def _errors_probes(server) -> dict:
     """Старая открытая ошибка обязана быть ВИДНА модели (живой замер
     agent-hard: вопрос «отметь ошибку по n01_p1» при 12 ошибках — модель
@@ -1603,6 +1638,19 @@ def main():
             check("потолок ответа действительно шире прежних 8000",
                   agent.AGENT_REPLY_MAX > 8000, str(agent.AGENT_REPLY_MAX))
 
+            section("пустые аргументы модели и пустое сочинение")
+            ea = _empty_args_probes(server)
+            check("пустые строки и null в аргументах — «не задано»", ea["clean_drops"])
+            check("update_profile с пустыми selfLevel/goal меняет только имя",
+                  ea["name_only_ok"], ea["name_only_detail"])
+            check("essay_history без сочинений — пустой список с пояснением, не «не найдено»",
+                  ea["essay_empty_ok"], ea["essay_empty_detail"])
+            check("подпись шага для сочинений не выдумывает номер работы",
+                  ea["essay_label_ok"])
+            check("план по теме «планиметрия» строится по её навыку, не по прогнозу",
+                  ea["plan_topic_ok"], str(ea.get("plan_topic_detail")))
+            check("план по теме вне каталога — честная заметка topicNote",
+                  ea["plan_topic_missing_ok"])
             section("find_topics: поиск по каталогу вместо угадывания id")
             cap = _find_topics_probes(server)
             check("поиск по теме находит существующие задания", cap["deriv_ok"], str(cap["deriv"]))

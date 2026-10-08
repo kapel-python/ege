@@ -82,8 +82,9 @@ CAPS = [
     dict(id=4, group="данные", key="forecast", subject="math",
          text="какой у меня прогноз на егэ?",
          want="прогноз назван с правильной шкалой (проценты у профиля)",
-         all=[lambda r: r["tools"] or "не вызвал инструмент",
-              lambda r: re.search(r"\d{1,3}", r["answer"])],
+         # Короткий прогноз уже в блоке «КОНТЕКСТ ХОДА» (правило 3): инструмент
+         # нужен только за деталями, поэтому вызов тут не требуем — важна цифра.
+         all=[lambda r: re.search(r"\d{1,3}", r["answer"]) or "нет числа прогноза"],
          some=[lambda r: ("процент" in r["answer"].lower() or "%" in r["answer"]
                           or "балл" in r["answer"].lower()), "шкала не подписана"]),
     dict(id=5, group="данные", key="activity", subject="math",
@@ -482,7 +483,16 @@ def run_cap(cli, base, cap, seed_numbers, tasks_by_skill, resolve_skill, resolve
     # наполняется в main из живой БД, а не из воздуха).
     opened = [(s.get("args") or {}).get("taskId") for s in steps if s.get("tool") == "task_get"]
     out["task_exists"] = bool(opened) and all(x in VALID_TASKS for x in opened if x)
-    out["weeks_distinct"] = len({m for m in re.findall(r"Неделя\s+(\d)", out["answer"])}) >= 2
+    plan_periods = next(((s.get("args") or {}).get("periods") or []
+                         for s in steps if s.get("tool") == "plan_apply"), [])
+    week_labels = {m for m in re.findall(r"Неделя\s+(\d)", out["answer"])}
+    if not week_labels and plan_periods:
+        # План уходит на подтверждение: текста ответа нет, периоды лежат в
+        # аргументах plan_apply (карточка подтверждения показывает их же).
+        out["weeks_distinct"] = (len(plan_periods) >= 2 and len(
+            {tuple(sorted(p.get("skillIds") or [])) for p in plan_periods}) >= 2)
+    else:
+        out["weeks_distinct"] = len(week_labels) >= 2
     out["asks_clarify"] = bool(re.search(
         r"как[а-я]*\s+(ошибк|именно)|котор[а-я]+|обе[и]?\b|какую|уточни", out["answer"], re.IGNORECASE))
     out["promise"] = bool(PROMISE_RE.search(out["answer"]))
