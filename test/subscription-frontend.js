@@ -302,10 +302,16 @@ function check(name, cond, detail) {
   await p6.waitForSelector("#content:not([hidden])", { timeout: 15000 });
   await p6.waitForSelector(".pay-pending", { timeout: 10000 });
   check("баннер незавершённого счёта", (await p6.textContent(".pay-pending")).includes("Счёт ждёт оплаты"));
-  // отмена своего pending — баннер уходит, подписки не было и нет
+  check("пока счёт ждёт оплаты, кнопки покупки нет",
+    await p6.locator('#actionsRow [data-act="buy"]').count() === 0
+    && (await p6.textContent("#actionsSub")).includes("ждёт оплаты"),
+    await p6.textContent("#actionsSub"));
+  // отмена своего pending — баннер уходит, покупка возвращается
   await p6.click(".pay-pending .btn:last-child");
   await p6.waitForFunction(() => !document.querySelector(".pay-pending"), { timeout: 10000 });
   check("отмена счёта убирает баннер", true);
+  await p6.waitForSelector('#actionsRow [data-act="buy"]', { timeout: 15000 });
+  check("после отмены кнопка покупки вернулась", true);
   // новый счёт + возврат ?pay=ok: ожидание тем же лоадером, mock-confirm сразу успех
   await p6.click('#actionsRow [data-act="buy"]');
   await p6.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });

@@ -565,6 +565,12 @@
     var sub = document.getElementById("actionsSub");
     var row = document.getElementById("actionsRow");
     row.innerHTML = "";
+    /* Пока висит неоплаченный счёт, баннер выше предлагает его завершить
+       или отменить — кнопок «Оформить/Продлить» здесь нет: иначе человек
+       заводит второй счёт поверх первого. Условие совпадает с условием
+       показа баннера (он молчит при активном Plus), поэтому кнопка и баннер
+       не могут разъехаться. */
+    var hasPending = ((hist && hist.payments) || []).some(function(p){ return p && p.status === "pending"; });
     function btn(cls, text, act){
       var b = document.createElement("button");
       b.type = "button";
@@ -574,7 +580,9 @@
       row.appendChild(b);
       return b;
     }
-    if (plus) {
+    if (!plus && hasPending) {
+      sub.textContent = "Есть счёт, который ждёт оплаты: заверши или отмени его — и покупка снова станет доступна.";
+    } else if (plus) {
       sub.textContent = "Доступ действует до конца оплаченного срока. Оплата — на стороне провайдера, данные карты нам не попадают.";
       btn("btn-primary btn--sm", "Продлить Plus", "buy");
     } else {
