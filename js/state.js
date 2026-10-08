@@ -1476,6 +1476,84 @@ function isEssayTask(task) {
   return !!task && (task.type === "long_text" || task.answerType === "long_text");
 }
 
+/* ============================================================
+   CTA «привяжи аккаунт» для гостя с прогрессом.
+   Гость после онбординга — полноценный аккаунт этого браузера, но без
+   email/пароля вход с другого устройства невозможен. Считаем ОСМЫСЛЕННЫЕ
+   учебные шаги (новое верное решение = 1, первое прохождение урока = 3,
+   завершённая миссия = 3, побеждённый босс = 4 — повторные верные ответы
+   по уже освоенному заданию шагом не считаются) и на порогах [8, 20, 40]
+   один раз показываем на экране результата просьбу привязать аккаунт.
+   Живёт в localStorage: счётчик глобальный (по всем предметам), не
+   завязан на жизненный цикл состояния предмета и не пишется в сеть.
+   ============================================================ */
+const GUEST_CTA_LS_KEY = "ege_guest_cta_v1";
+const GUEST_SAVE_CTA_MILESTONES = [8, 20, 40];
+const GUEST_STEP_LESSON = 3;
+const GUEST_STEP_MISSION = 3;
+const GUEST_STEP_BOSS = 4;
+
+function isGuestWithProgress() {
+  try { return !!(Store && Store.accountId && !(Store.auth && Store.auth.registered)); }
+  catch (_) { return false; }
+}
+
+function guestCtaRead() {
+  try {
+    const data = JSON.parse(localStorage.getItem(GUEST_CTA_LS_KEY) || "{}");
+    return data && typeof data === "object" ? data : {};
+  } catch (_) { return {}; }
+}
+
+function guestCtaWrite(data) {
+  try { localStorage.setItem(GUEST_CTA_LS_KEY, JSON.stringify(data || {})); } catch (_) {}
+}
+
+function bumpGuestSteps(amount) {
+  if (!isGuestWithProgress() || !(Number(amount) > 0)) return;
+  const data = guestCtaRead();
+  data.steps = Math.min(100000, (Number(data.steps) || 0) + Number(amount));
+  guestCtaWrite(data);
+}
+
+/* Порог, достигнутый, но ещё не показанный (0 — показывать нечего). */
+function guestSaveCtaPending() {
+  if (!isGuestWithProgress()) return 0;
+  const data = guestCtaRead();
+  const steps = Number(data.steps) || 0;
+  const shown = safeArray(data.shown).map(Number);
+  for (const milestone of GUEST_SAVE_CTA_MILESTONES) {
+    if (steps >= milestone && !shown.includes(milestone)) return milestone;
+  }
+  return 0;
+}
+
+/* Блок для экранов результата. Пустая строка — порог не достигнут или
+   аккаунт уже привязан. Показ отметает ВСЕ достигнутые пороги сразу:
+   рывок на два порога между экранами не должен показывать блок дважды. */
+function guestSaveCtaHTML() {
+  const pending = guestSaveCtaPending();
+  if (!pending) return "";
+  const data = guestCtaRead();
+  const steps = Number(data.steps) || 0;
+  const shown = new Set(safeArray(data.shown).map(Number));
+  for (const milestone of GUEST_SAVE_CTA_MILESTONES) {
+    if (steps >= milestone) shown.add(milestone);
+  }
+  data.shown = [...shown];
+  guestCtaWrite(data);
+  const s = Store.state || {};
+  const solved = Math.max(0, Number(s.totalSolved) || 0);
+  const lessons = Object.keys(safeObject(s.completedLessons)).length;
+  const what = solved
+    ? `У тебя уже решено ${solved} ${plural(solved, "задание", "задания", "заданий")}${lessons ? ` и пройдено ${lessons} ${plural(lessons, "урок", "урока", "уроков")}` : ""}`
+    : lessons ? `У тебя уже пройдено ${lessons} ${plural(lessons, "урок", "урока", "уроков")}` : "Ты уже занимаешься";
+  return `<div style="margin:22px auto 0;max-width:640px;padding:14px 16px;border:1px solid var(--card-border,rgba(255,255,255,.12));border-radius:14px;background:var(--surface-2,#10141c);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;text-align:left;font-size:13.5px;color:var(--text-2,var(--text))">
+    <div style="min-width:220px;flex:1"><b style="color:var(--text,var(--text))">Аккаунт не привязан.</b> ${what}. Пока ты занимаешься в этом браузере — всё сохраняется, но войти с другого устройства не получится.</div>
+    <button class="btn btn--primary btn--sm" type="button" onclick="go('register')">Войти или зарегистрироваться</button>
+  </div>`;
+}
+
 function levelInfo() {
   let xp = Math.max(0, Number(Store.state && Store.state.xp) || 0);
   let level = 1;
@@ -2498,6 +2576,8 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     xp = parts.total;
     xpBreakdown = { attempt: parts.attempt, correctBonus: parts.correctBonus, errorResolved: 0 };
     st.progress = skillProgress(skillId);
+    // Осмысленный шаг гостя: впервые освоенное задание (повторы не считаются).
+    if (!alreadyMastered) bumpGuestSteps(1);
 
     /* закрытие ошибки: по этому заданию или по исходному заданию,
        которое оно заменяет в повторении (умное повторение) */
@@ -2687,6 +2767,7 @@ function completeLesson(lesson, inputXp, result = {}) {
   st.progress = skillProgress(skillId);
   recordForecastSnapshot();
   addTimeline(`Урок пройден: «${lesson.title}»`);
+  if (firstCompletion) bumpGuestSteps(GUEST_STEP_LESSON);
   Store.save();
   checkAchievements();
   return { firstCompletion, totalXp, baseXp, stepsXp };
@@ -2712,6 +2793,7 @@ function completeMission(mission) {
   Store.state.missionsDone[canonical.id] = { ts: Date.now() };
   addTimeline(`Миссия завершена: «${canonical.title || "Тренировка"}»`);
   addXp(canonical.xp, "mission");
+  bumpGuestSteps(GUEST_STEP_MISSION);
   Store.emit("missiondone", canonical);
   Store.save();
   return true;
@@ -2736,6 +2818,7 @@ function defeatBoss(boss) {
   Store.state.bossesDefeated.push(canonical.id);
   addTimeline(`Босс повержен: ${String(canonical.title || "Босс").replace("БОСС: ", "")}`);
   addXp(canonical.xp, "boss");
+  bumpGuestSteps(GUEST_STEP_BOSS);
   /* рывок навыков ветки */
   const cat = String(canonical.cat || canonical.category || "");
   for (const s of DataAPI.availableSkills().filter((x) => String(DataAPI._skillCategoryId(x)) === cat)) {

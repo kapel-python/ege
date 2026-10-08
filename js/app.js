@@ -6625,6 +6625,7 @@ function sessionFinish(early = false) {
         <div class="error-subtopics">${checkedSkills.map((n) => `<span class="chip">${n}</span>`).join("")}</div>
       </div>` : ""}
       ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто пунктов: <b>${errorsClosed}</b></div>` : ""}
+      ${guestSaveCtaHTML()}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         ${essayReportHref ? `<button class="btn btn--primary btn--lg" onclick="location.href='${esc(essayReportHref)}'">Разбор сочинения →</button>` : ""}
         <button class="btn ${essayReportHref ? "btn--ghost" : "btn--primary"} btn--lg" onclick="go('dashboard')">На главную</button>
@@ -7139,6 +7140,7 @@ function lessonFinish() {
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${L.wrongAttempts}</div><div class="stat-label">осмысленных ошибок</div></div>
       </div>
       <div class="lesson-result-note ${independent && independent.status === "solved" ? "lesson-result-note--ok" : ""}">${!independent ? `${icon("info")} В этом уроке нет самостоятельного задания.` : independent.status === "solved" ? `${icon("check")} Самостоятельное задание решено.` : `${icon("bulb")} Самостоятельное задание сохранено для повторения.`}</div>
+      ${guestSaveCtaHTML()}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${lesson.skill}')">${icon("target")} Закрепить на практике</button>
         <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
@@ -10360,6 +10362,9 @@ async function logoutAccount() {
   try { Session.cur = null; } catch (_) {}
   try { deactivateLessonClock(); } catch (_) {}
   try { localStorage.removeItem("ege_core_session"); } catch (_) {}
+  // Счётчик CTA «привяжи аккаунт» принадлежит прежнему профилю: свежий гость
+  // на этом браузере начинает с нуля, а не наследует его шаги.
+  try { localStorage.removeItem("ege_guest_cta_v1"); } catch (_) {}
   // Admin-кэш прошлого аккаунта недействителен: трём до смены, чтобы чужой
   // inbox ни кадром не мелькнул в новой сессии. Флаг isAdmin приедёт из
   // свежего bootstrap — fail-closed.
