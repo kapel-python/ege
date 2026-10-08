@@ -1480,15 +1480,15 @@ function isEssayTask(task) {
    CTA «привяжи аккаунт» для гостя с прогрессом.
    Гость после онбординга — полноценный аккаунт этого браузера, но без
    email/пароля вход с другого устройства невозможен. Считаем ОСМЫСЛЕННЫЕ
-   учебные шаги (новое верное решение = 1, первое прохождение урока = 3,
-   завершённая миссия = 3, побеждённый босс = 4 — повторные верные ответы
-   по уже освоенному заданию шагом не считаются) и на порогах [8, 20, 40]
-   один раз показываем на экране результата просьбу привязать аккаунт.
-   Живёт в localStorage: счётчик глобальный (по всем предметам), не
-   завязан на жизненный цикл состояния предмета и не пишется в сеть.
+   Учёбные шаги считаются (новое верное решение = 1, первое прохождение
+   урока = 3, завершённая миссия = 3, побеждённый босс = 4 — повторные
+   верные ответы по уже освоенному заданию шагом не считаются) и ровно
+   ОДИН раз, на пороге 8, показываем на экране результата просьбу привязать
+   аккаунт. Кто хотел — зарегистрируется сразу; напоминать повторно —
+   только бесить тех, кто осознанно не привязал и продолжает заниматься.
    ============================================================ */
 const GUEST_CTA_LS_KEY = "ege_guest_cta_v1";
-const GUEST_SAVE_CTA_MILESTONES = [8, 20, 40];
+const GUEST_SAVE_CTA_MILESTONE = 8;
 const GUEST_STEP_LESSON = 3;
 const GUEST_STEP_MISSION = 3;
 const GUEST_STEP_BOSS = 4;
@@ -1522,24 +1522,18 @@ function guestSaveCtaPending() {
   const data = guestCtaRead();
   const steps = Number(data.steps) || 0;
   const shown = safeArray(data.shown).map(Number);
-  for (const milestone of GUEST_SAVE_CTA_MILESTONES) {
-    if (steps >= milestone && !shown.includes(milestone)) return milestone;
-  }
-  return 0;
+  return steps >= GUEST_SAVE_CTA_MILESTONE && !shown.includes(GUEST_SAVE_CTA_MILESTONE) ? GUEST_SAVE_CTA_MILESTONE : 0;
 }
 
 /* Блок для экранов результата. Пустая строка — порог не достигнут или
-   аккаунт уже привязан. Показ отметает ВСЕ достигнутые пороги сразу:
-   рывок на два порога между экранами не должен показывать блок дважды. */
+   аккаунт уже привязан. Показывается ровно один раз: порог отмечается
+   показанным сразу же, поэтому после закрытия блок больше не вернётся. */
 function guestSaveCtaHTML() {
   const pending = guestSaveCtaPending();
   if (!pending) return "";
   const data = guestCtaRead();
-  const steps = Number(data.steps) || 0;
   const shown = new Set(safeArray(data.shown).map(Number));
-  for (const milestone of GUEST_SAVE_CTA_MILESTONES) {
-    if (steps >= milestone) shown.add(milestone);
-  }
+  shown.add(pending);
   data.shown = [...shown];
   guestCtaWrite(data);
   const s = Store.state || {};

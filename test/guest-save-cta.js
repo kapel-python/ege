@@ -1,8 +1,9 @@
 /* Сценарные тесты CTA «привяжи аккаунт» для гостя с прогрессом
-   (bumpGuestSteps / guestSaveCtaHTML). Проверяем пороги [8, 20, 40],
-   что считаются только ОСМЫСЛЕННЫЕ шаги (повтор уже освоенного задания —
-   нет), что урок и миссия весят больше одного задания, что блок показывается
-   один раз на порог и что зарегистрированному аккаунту он не показывается. */
+   (bumpGuestSteps / guestSaveCtaHTML). Блок показывается РОВНО ОДИН РАЗ:
+   на пороге 8 осмысленных шагов. Проверяем, что считаются только
+   ОСМЫСЛЕННЫЕ шаги (повтор уже освоенного задания — нет), что урок и
+   миссия весят больше одного задания, что после показа блок больше не
+   возвращается и что зарегистрированному аккаунту он не показывается. */
 const fs = require("fs");
 const src = fs.readFileSync("js/data.js", "utf8") + "\n" + fs.readFileSync("js/state.js", "utf8");
 const testBody = async () => {
@@ -67,16 +68,15 @@ const testBody = async () => {
     t("миссия: +3 шага", (Number(guestCtaRead().steps) || 0) === 3, guestCtaRead().steps);
   } else t("миссия: +3 шага (миссий в каталоге нет — пропуск)", true);
 
-  /* 7. Порог 20 и 40: каждый показывается один раз. */
+  /* 6. Порог 40 и любые новые шаги: показ был ОДИН раз, блок не возвращается. */
   reset();
-  for (let i = 0; i < 20; i++) bumpGuestSteps(1);
-  t("порог 20: блок появился", guestSaveCtaHTML() !== "");
-  t("порог 20: повторно нет", guestSaveCtaHTML() === "");
-  for (let i = 0; i < 25; i++) bumpGuestSteps(1);
-  t("порог 40: блок появился", guestSaveCtaHTML() !== "");
-  t("порог 40: повторно нет", guestSaveCtaHTML() === "");
+  for (let i = 0; i < 8; i++) bumpGuestSteps(1);
+  t("порог 8: блок появился", guestSaveCtaHTML() !== "");
+  t("показ один раз: до 40 и дальше блока нет", guestSaveCtaHTML() === "" && guestSaveCtaPending() === 0);
+  for (let i = 0; i < 60; i++) bumpGuestSteps(1);
+  t("60+ шагов: блока всё ещё нет", guestSaveCtaHTML() === "");
 
-  /* 8. Зарегистрированному аккаунту блока нет, шаги не считаются. */
+  /* 7. Зарегистрированному аккаунту блока нет, шаги не считаются. */
   reset();
   Store.auth = { registered: true, email: "x@y.ru", providers: [], googleEnabled: false, hasPassword: true };
   for (let i = 0; i < 30; i++) bumpGuestSteps(1);
