@@ -4356,6 +4356,9 @@ function renderTask(root) {
     // текстовый ответ не отражает полноту доказательства и записи решения.
     // Ученик решает на бумаге, сверяется с официальным решением и честно
     // отмечает результат сам — так же, как реально проверяют часть 2 ЕГЭ.
+  } else if (isMatchingAnswerTask(t) && matchingAnswerLetters(t).length) {
+    sessionMatchWire();
+    renderSessionHintControl();
   } else {
     const input = document.getElementById("answerInput");
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") sessionSubmit(); });
@@ -4600,6 +4603,29 @@ function essayClearReadonly() {
   if (legacy && (!slot || !slot.contains(legacy))) legacy.remove();
 }
 
+/* Ответ-таблица как в бланке ЕГЭ: буквы сверху, по клетке-цифре под каждой.
+   Ученик не держит последовательность в голове и не путает порядок — цифры
+   вписываются прямо под буквы. Собираем строку из клеток при проверке. */
+function sessionMatchingAreaHtml(t, letters) {
+  return `
+    <div class="match-answer">
+      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке ЕГЭ.</div>
+      <div class="match-answer__scroll">
+        <table class="match-answer__table" role="group" aria-label="Ответ по буквам">
+          <thead><tr>${letters.map((l) => `<th scope="col">${esc(l)}</th>`).join("")}</tr></thead>
+          <tbody><tr>${letters.map((l, i) => `<td><input class="match-answer__cell" type="text" inputmode="numeric" autocomplete="off" maxlength="1" data-match-cell="${i}" aria-label="Ответ для ${esc(l)}"></td>`).join("")}</tr></tbody>
+        </table>
+      </div>
+    </div>
+    <button class="btn btn--primary btn--lg match-answer__submit" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
+    <div class="session-tools">
+      <span id="hintControl"></span>
+      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
+      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
+    </div>
+    ${sessionBackNavHtml()}`;
+}
+
 function sessionAnswerAreaHtml(t, S) {
   if (isLongTextTask(t)) return `
     <div id="essayReadonlySlot"></div>
@@ -4623,6 +4649,8 @@ function sessionAnswerAreaHtml(t, S) {
       <button class="btn btn--primary" id="essaySubmitBtn" disabled onclick="sessionEssaySubmit()">Отправить сочинение</button>
     </div>`;
   if (isSelfCheckTask(t)) return sessionSelfCheckAreaHtml(t);
+  const matchLetters = isMatchingAnswerTask(t) ? matchingAnswerLetters(t) : [];
+  if (matchLetters.length) return sessionMatchingAreaHtml(t, matchLetters);
   return `
     <div class="answer-row">
       <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
@@ -6589,13 +6617,89 @@ function renderHintXpNote(t, hintLevel) {
     : `сейчас за верный: +${full.total} XP · попытка: +${attempt.total} XP`;
 }
 
+/* Обвязка таблицы-ответа: цифра вводится в свою клетку, курсор сам идёт
+   дальше; Backspace на пустой клетке — назад; стрелки двигают; вставка
+   строки «21364» раскладывается по клеткам. Enter проверяет ответ. */
+function sessionMatchCells() {
+  return Array.from(document.querySelectorAll("[data-match-cell]"));
+}
+
+function sessionAnswerValue() {
+  const cells = sessionMatchCells();
+  if (cells.length) return cells.map((c) => String(c.value || "").replace(/\D/g, "")).join("");
+  const input = document.getElementById("answerInput");
+  return input ? input.value.trim() : "";
+}
+
+function sessionFlashAnswer(wrong) {
+  const cells = sessionMatchCells();
+  if (cells.length) {
+    const cls = wrong ? "match-answer__cell--wrong" : "match-answer__cell--correct";
+    cells.forEach((c) => c.classList.add(cls));
+    if (wrong) setTimeout(() => cells.forEach((c) => c.classList.remove(cls)), 420);
+    return;
+  }
+  const input = document.getElementById("answerInput");
+  if (!input) return;
+  if (wrong) {
+    input.classList.add("answer-input--wrong");
+    setTimeout(() => input.classList.remove("answer-input--wrong"), 420);
+  } else {
+    input.classList.add("answer-input--correct");
+  }
+}
+
+function sessionDisableAnswer() {
+  const cells = sessionMatchCells();
+  if (cells.length) {
+    cells.forEach((c) => { c.disabled = true; c.classList.add("match-answer__cell--correct"); });
+    return;
+  }
+  const input = document.getElementById("answerInput");
+  if (input) { input.disabled = true; input.classList.add("answer-input--correct"); }
+}
+
+function sessionMatchWire() {
+  const cells = sessionMatchCells();
+  if (!cells.length) return;
+  const focusAt = (i) => {
+    const cell = cells[Math.max(0, Math.min(cells.length - 1, i))];
+    if (cell) { try { cell.focus(); cell.select(); } catch (_) { cell.focus(); } }
+  };
+  cells.forEach((cell, i) => {
+    cell.addEventListener("input", () => {
+      cell.value = String(cell.value || "").replace(/\D/g, "").slice(-1);
+      if (cell.value && i < cells.length - 1) focusAt(i + 1);
+    });
+    cell.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); sessionSubmit(); return; }
+      if (e.key === "Backspace" && !cell.value && i > 0) { e.preventDefault(); focusAt(i - 1); return; }
+      if (e.key === "ArrowLeft" && i > 0) { e.preventDefault(); focusAt(i - 1); return; }
+      if (e.key === "ArrowRight" && i < cells.length - 1) { e.preventDefault(); focusAt(i + 1); return; }
+    });
+    cell.addEventListener("paste", (e) => {
+      const raw = (e.clipboardData || window.clipboardData);
+      const digits = String((raw && raw.getData && raw.getData("text")) || "").replace(/\D/g, "");
+      if (!digits) return;
+      e.preventDefault();
+      for (let k = 0; k < cells.length; k++) cells[k].value = digits[k] || "";
+      focusAt(Math.min(digits.length, cells.length - 1));
+    });
+  });
+  focusAt(0);
+}
+
 function sessionSubmit() {
   const S = Session.cur;
   if (S.answered) return;
-  const input = document.getElementById("answerInput");
   const t = Session.task();
-  const val = input.value.trim();
-  if (!val) { input.classList.add("answer-input--wrong"); setTimeout(() => input.classList.remove("answer-input--wrong"), 400); return; }
+  const cells = sessionMatchCells();
+  if (cells.length) {
+    const empty = cells.find((c) => !String(c.value || "").trim());
+    if (empty) { empty.focus(); sessionFlashAnswer(true); return; }
+  }
+  const val = sessionAnswerValue();
+  if (!val) { sessionFlashAnswer(true); return; }
 
   const correct = checkAnswer(t, val);
   if (!correct) {
@@ -6603,8 +6707,7 @@ function sessionSubmit() {
     // Ошибка только открывает следующий уровень помощи. Саму подсказку
     // ученик запрашивает кнопкой; после нажатия она исчезает до новой ошибки.
     renderSessionHintControl();
-    input.classList.add("answer-input--wrong");
-    setTimeout(() => input.classList.remove("answer-input--wrong"), 420);
+    sessionFlashAnswer(true);
     const help = sessionAvailableHelp();
     const message = help && help.type === "solution"
       ? "Все подсказки уже открыты — при необходимости можно показать решение."
@@ -6626,9 +6729,9 @@ function sessionSubmit() {
   sessionHideBackNav();
   Session.stopTimer();
 
-  input.disabled = true;
-  input.classList.add("answer-input--correct");
-  document.getElementById("submitBtn").style.display = "none";
+  sessionDisableAnswer();
+  const submitBtn = document.getElementById("submitBtn");
+  if (submitBtn) submitBtn.style.display = "none";
 
   document.getElementById("feedbackSlot").innerHTML = `
     <div class="feedback feedback--ok">

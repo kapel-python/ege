@@ -2262,6 +2262,37 @@ function countWords(text) {
 }
 
 /* ============================================================
+   Задания-«таблицы соответствия»: ответ — цифра под каждой буквой
+   (А, Б, В, Г, Д), как в бланке ЕГЭ. Пока включено только для №22
+   русского (проверяем на живом пользователе), но разбор букв общий.
+   Буквы берём из самого текста задания: явный список «(АБВГ)» либо
+   метки строк «А) …». Если структура не распознана — пустой список,
+   и экран задания остаётся с обычным полем ввода.
+   ============================================================ */
+const MATCHING_ANSWER_SKILLS = new Set(["r22"]);
+
+function isMatchingAnswerTask(task) {
+  return !!(task && MATCHING_ANSWER_SKILLS.has(String(task.skill || task.skillId || "")));
+}
+
+function matchingAnswerLetters(task) {
+  if (!task || task.type !== "short_answer") return [];
+  const answer = String(task.answer || "").trim();
+  if (!/^\d{2,8}$/.test(answer)) return [];
+  const text = String(task.text || "");
+  // Явный список букв: «(АБВГ)» / «(ABCD)».
+  const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/);
+  if (explicit && explicit[1].length === answer.length) return explicit[1].split("");
+  // Метки строк «А) …», «A) …».
+  const labels = [];
+  const re = /(?:^|\n)\s*([А-ЯA-Z])\)\s/g;
+  let m;
+  while ((m = re.exec(text)) !== null) labels.push(m[1]);
+  if (labels.length === answer.length) return labels;
+  return [];
+}
+
+/* ============================================================
    Проверка ответов
    ============================================================ */
 
