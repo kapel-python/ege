@@ -1871,6 +1871,12 @@ body {
 .mission-card__foot { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
 .mission-card__bar { flex: 1; }
 .mission-card--done { border-color: rgba(61, 220, 151, 0.3); }
+/* Кнопки действий («Начать тренировку» / «Пройти ещё раз» и т.д.)
+   чуть ниже контента: базовый gap даёт 10px, добавляем ещё 4px. */
+.mission-card > div:has(.btn) { margin-top: 4px; }
+/* Кнопка урока («Начать урок» / «Пройти ещё раз») — блочная карточка
+   без flex-gap, поэтому отступ задаём напрямую. */
+.lesson-card > .btn { margin-top: 8px; }
 
 /* ---------- errors ---------- */
 
