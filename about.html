@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>О нас — ege easy | Как устроена подготовка к ЕГЭ</title>
-<meta name="description" content="ege easy — подготовка к ЕГЭ по шести предметам: теория по шагам, реальные задания экзамена, прогноз балла и проверка сочинений по критериям ФИПИ. Рассказываем, как это работает.">
+<meta name="description" content="ege easy — подготовка к ЕГЭ: профильная и базовая математика, информатика, биология, обществознание и русский язык с проверкой сочинений по критериям ФИПИ. Теория по шагам, реальные задания и прогноз балла.">
 <link rel="canonical" href="https://egeeasy.ru/about">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
@@ -14,7 +14,7 @@
 <meta property="og:locale" content="ru_RU">
 <meta property="og:site_name" content="ege easy">
 <meta property="og:title" content="О нас — ege easy | Как устроена подготовка к ЕГЭ">
-<meta property="og:description" content="Шесть предметов: теория по шагам, реальные задания ЕГЭ, прогноз балла и проверка сочинений по критериям ФИПИ. Рассказываем, как устроена подготовка.">
+<meta property="og:description" content="Теория по шагам, реальные задания ЕГЭ, прогноз балла и проверка сочинений по критериям ФИПИ. Рассказываем, как устроена подготовка.">
 <meta property="og:url" content="https://egeeasy.ru/about">
 <meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="ege easy — о проекте подготовки к ЕГЭ">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="О нас — ege easy | Как устроена подготовка к ЕГЭ">
-<meta name="twitter:description" content="Шесть предметов: теория по шагам, реальные задания ЕГЭ, прогноз балла и проверка сочинений по критериям ФИПИ.">
+<meta name="twitter:description" content="Теория по шагам, реальные задания ЕГЭ, прогноз балла и проверка сочинений по критериям ФИПИ.">
 <meta name="twitter:image" content="https://egeeasy.ru/assets/seo/og-image.png">
 <script>
   /* Та же тема, что у лендинга и приложения: сохранённый выбор
@@ -276,7 +276,7 @@
         О нас
       </span>
       <h1>ege easy — место, где ты понимаешь, а не угадываешь</h1>
-      <p class="hero-sub">Подготовка к ЕГЭ в одном приложении. Шесть предметов: профильная и базовая математика, информатика, биология, обществознание и русский язык с проверкой сочинений по критериям ФИПИ.</p>
+      <p class="hero-sub">Подготовка к ЕГЭ в одном приложении: профильная и базовая математика, информатика, биология, обществознание и русский язык с проверкой сочинений по критериям ФИПИ.</p>
       <div class="hero-visual" aria-hidden="true">
         <div class="xp-row">
           <span class="xp-level">Твой уровень растёт вместе с тобой</span>
@@ -440,9 +440,6 @@
     if(m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "предмета";
     return "предметов";
   }
-  function fallback(text){
-    el.textContent = text;
-  }
   try{
     if(!window.fetch) return;
     fetch("/api/subjects", {credentials:"omit"}).then(function(r){
@@ -458,9 +455,9 @@
         var open = !locked && availability !== "locked" && availability !== "coming_soon";
         if(open) ready++;
       }
-      if(!ready){ fallback("шесть предметов"); return; }
+      if(!ready) return;               /* пусто/неизвестно — остаётся статичный текст */
       el.textContent = ready + " " + plural(ready);
-    }).catch(function(){ fallback("шесть предметов"); });
+    }).catch(function(){ /* сети нет — статичная фраза остаётся как есть */ });
   }catch(e){ /* статичная фраза остаётся как есть */ }
 })();
 </script>
