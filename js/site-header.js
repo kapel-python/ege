@@ -5,7 +5,7 @@
    Подключение на новой странице:
      <link rel="stylesheet" href="/css/site-header.css?v=1">
      <div data-ege-header></div>
-     <script defer src="/js/site-header.js?v=1"></script>
+     <script defer src="/js/site-header.js?v=2"></script>
    Скрипт сам вмонтирует шапку во все [data-ege-header].
    Варианты — в шапке site-header.css.
 
@@ -56,7 +56,7 @@
   function build(slot) {
     var variant = slot.getAttribute("data-ege-header") || "";
     var ctaHref = slot.getAttribute("data-cta-href") || "/dashboard";
-    var ctaText = slot.getAttribute("data-cta-text") || "начать подготовку";
+    var ctaText = slot.getAttribute("data-cta-text") || "Начать подготовку";
     var maxw = slot.getAttribute("data-maxw") || "";
 
     var tmp = document.createElement("div");

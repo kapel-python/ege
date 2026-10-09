@@ -7,12 +7,12 @@
    Подключение на новой странице (две строки + слот):
      <link rel="stylesheet" href="/css/site-header.css?v=1">
      <div data-ege-header></div>
-     <script defer src="/js/site-header.js?v=1"></script>
+     <script defer src="/js/site-header.js?v=2"></script>
    Варианты слота:
      data-ege-header="back"  — вместо CTA ссылка «← К практике»
                                (ege-result.html);
      data-cta-href / data-cta-text — свой CTA вместо
-                               «начать подготовку»;
+                               «Начать подготовку»;
      data-maxw="720" — ширина шапки под контент (ege-result).
    Лендинг (main.html) держит свою шапку с якорными ссылками:
    туда ставится только кнопка <button class="eh-toggle"> —
