@@ -207,7 +207,9 @@ def main() -> int:
             expected_matrices = {
                 "profile_math": {key: True for key in REQUIRED_FEATURES},
                 "basic_math": {key: True for key in REQUIRED_FEATURES},
-                "russian": {key: key in {"path", "practice", "lessons", "forecast", "missions", "diagnostics"} for key in REQUIRED_FEATURES},
+                # Русский — полноценный ready-предмет: подборка и боссы включены
+                # (у тестовой части №1–26 есть чем их наполнять).
+                "russian": {key: True for key in REQUIRED_FEATURES},
                 "biology": {key: True for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
@@ -314,7 +316,7 @@ def main() -> int:
             russian_boot = payloads[("/api/bootstrap", "russian")]
             russian_catalog = russian_boot.get("catalog") or {}
             russian_missions = russian_catalog.get("missions") or []
-            empty_catalog_keys = ("bosses",)
+            russian_bosses = russian_catalog.get("bosses") or []
             # Пустой achievements в файле русского ставит стандартный набор
             # DEFAULT_ACHIEVEMENTS (как у профиля) — новый единый контракт.
             default_ach_ids = ("first-solve", "hundred", "series20", "nohints",
@@ -334,7 +336,11 @@ def main() -> int:
                 and russian_weights.get("russian_essay_source") == 22
                 and russian_scale[0] == 0 and russian_scale[50] == 100
                 and russian_scale[28] == 55
-                and all(russian_catalog.get(key) == [] for key in empty_catalog_keys)
+                # Боссы — по веткам тестовой части №1–26; сочинение боссом
+                # не закрывается (ИИ-проверяемый поток, не быстрый ответ).
+                and len(russian_bosses) == 5
+                and {b.get("cat") for b in russian_bosses} == {"rus_text", "rus_norms", "rus_spelling", "rus_punct", "rus_analysis"}
+                and all(b.get("size", 0) > 0 and b.get("xp", 0) > 0 for b in russian_bosses)
                 and {g.get("id") for g in (russian_catalog.get("goals") or [])} == {"g60", "g80", "g95"}
                 and (russian_catalog.get("diagnosticTasks") or []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"]
                 and [a.get("id") for a in (russian_catalog.get("achievements") or [])] == list(default_ach_ids)
@@ -344,7 +350,10 @@ def main() -> int:
                 and len(russian_missions) == 26
                 and {m.get("skill") for m in russian_missions} == {f"r{i:02d}" for i in range(1, 27)}
                 and isinstance(russian_catalog.get("daily"), dict)
-                and (russian_catalog.get("daily") or {}).get("target") == 0
+                # Ежедневная подборка из коротких заданий: сочинения клиент
+                # в подборку не берёт (см. selectDailyTaskIds в js/state.js).
+                and (russian_catalog.get("daily") or {}).get("target") == 6
+                and (russian_catalog.get("daily") or {}).get("xp") == 60
             )
             check(
                 "RUSSIAN CONTENT bootstrap catalog",

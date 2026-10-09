@@ -79,7 +79,9 @@ def main():
             assert russian["features"]["lessons"] is True, russian
             assert russian["features"]["forecast"] is True, russian
             assert russian["features"]["diagnostics"] is True, russian
-            assert not any(russian["features"][k] for k in ("bosses", "daily")), russian
+            # Подборка и боссы включены: у тестовой части №1–26 есть чем
+            # набирать ежедневную подборку и боссы по веткам категорий.
+            assert russian["features"]["bosses"] is True and russian["features"]["daily"] is True, russian
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={rid}")
             assert status == 200, (status, boot)
@@ -135,7 +137,18 @@ def main():
             assert {m.get("skill") for m in missions} == {f"r{i:02d}" for i in range(1, 27)}, missions
             task_ids = {t.get("id") for t in catalog.get("tasks", [])}
             assert all(m.get("tasks") and all(t in task_ids for t in m["tasks"]) for m in missions), missions
-            assert catalog.get("bosses", []) == [], catalog
+            # Боссы — по одному на ветку тестовой части (№1–26); сочинение
+            # (russian_writing) боссом не закрывается: это ИИ-проверяемый поток.
+            russian_bosses = catalog.get("bosses", [])
+            assert len(russian_bosses) == 5, russian_bosses
+            assert {b.get("cat") for b in russian_bosses} == {
+                "rus_text", "rus_norms", "rus_spelling", "rus_punct", "rus_analysis"
+            }, russian_bosses
+            assert all(b.get("size", 0) > 0 and b.get("xp", 0) > 0 for b in russian_bosses), russian_bosses
+            assert all(b.get("cat") in {c.get("id") for c in catalog.get("categories", [])} for b in russian_bosses), russian_bosses
+            # Ежедневная подборка: короткие задания тестовой части, без сочинений.
+            daily_cfg = catalog.get("daily") or {}
+            assert daily_cfg.get("target") == 6 and daily_cfg.get("xp") == 60, daily_cfg
             assert catalog.get("diagnosticTasks", []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"], catalog
             assert {g.get("id") for g in catalog.get("goals", [])} == {"g60", "g80", "g95"}, catalog.get("goals")
             diag_ids = set(catalog.get("diagnosticTasks", []))
@@ -321,7 +334,7 @@ def main():
             assert public_counts.get("tasks") == 143, public_russian
             assert public_counts.get("skills") == 27, public_russian
             assert public_counts.get("missions") == 26, public_russian
-            assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 0, public_russian
+            assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 5, public_russian
 
             # Наследие старой системы сочинений (skill russian_essay, миссия
             # russian_essay_practice, задания re_1_*/re_2_*/re_3_*) остаётся в

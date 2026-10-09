@@ -2451,7 +2451,9 @@ function selectDailyTaskIds(date) {
   const daily = DataAPI.daily();
   const target = Math.max(0, Math.floor(Number(daily.target) || 0));
   if (!target) return [];
-  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill);
+  /* Сочинения (long_text) в подборку не берём: это отдельный поток — одно
+     сочинение за визит, редактор и ИИ-проверка вместо карточки ответа. */
+  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill && !isEssayTask(task));
   if (!pool.length) return [];
   const historyIds = new Set(dailyHistory().flatMap((entry) => safeArray(entry && entry.taskIds).map(dataIdValue)));
   const now = Date.now();
@@ -2477,7 +2479,9 @@ function selectDailyTaskIds(date) {
 function mixedTrialTaskIds(count) {
   const total = Math.max(0, Math.floor(Number(count) || 0));
   if (!total || !subjectLearningAvailable()) return [];
-  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill);
+  /* Без сочинений: смешанное испытание — быстрая проверка коротких ответов,
+     сочинение живёт в своём потоке (одно за визит, редактор, ИИ-проверка). */
+  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill && !isEssayTask(task));
   if (!pool.length) return [];
   const ordered = pool.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
   const bySkill = {};

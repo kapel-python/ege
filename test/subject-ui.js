@@ -250,8 +250,11 @@ const routeEvidence = routes.map((route) => ({
   route,
   nonEmpty: rendered[route].html.trim().length > 0,
   title: titleOf(rendered[route].html),
+  // Задачные экраны рисуют сессию со своей шапкой вместо page-title.
+  taskScreen: /class="session-wrap"/.test(rendered[route].html),
 }));
-const invalidSections = routeEvidence.filter((item) => !item.nonEmpty || !item.title);
+const invalidSections = routeEvidence.filter((item) =>
+  !item.nonEmpty || (!item.title && !item.taskScreen));
 check(
   `SECTION PARITY non-empty/title (${routes.length} routes)`,
   invalidSections.length === 0,
@@ -279,10 +282,17 @@ const exitEvidence = taskRoutes.map((route) => ({
   expected: parents[route],
   helper: rendered[route].parent,
   nonEmpty: rendered[route].html.trim().length > 0,
+  // Сессия, начатая сразу с адреса (задачный экран вместо редиректа).
+  taskScreen: /class="session-wrap"/.test(rendered[route].html),
 }));
-const badExits = exitEvidence.filter((item) =>
-  item.hash !== "#/" + item.redirect || item.helper !== item.expected || !item.nonEmpty
-);
+/* Ежедневная подборка на включённой фиче стартует сессию прямо с адреса
+   #/daily и остаётся на нём — это адрес активной сессии, его же восстанавливает
+   restoreSessionFromStorage (sessionMatchesRoute по mode === "daily"). Ровно так
+   же ведут себя все предметы с подборкой. Остальные задачные маршруты без
+   параметров и сессии по-прежнему уходят на родительский раздел. */
+const badExits = exitEvidence.filter((item) => item.route === "daily"
+  ? !(item.taskScreen && item.hash === "#/daily" && item.helper === item.expected && item.nonEmpty)
+  : item.hash !== "#/" + item.redirect || item.helper !== item.expected || !item.nonEmpty);
 check(
   `TASK-ROUTE EXIT parent controls (${taskRoutes.length} routes)`,
   badExits.length === 0,
@@ -301,13 +311,18 @@ vm.runInContext(`
     xpBefore,
     xpAfter: Store.state.xp,
     daily: dailyTaskIds(),
+    dailyTypes: dailyTaskIds().map((id) => {
+      const t = DataAPI.task(id);
+      return t ? String(t.type || t.answerType || "") : "missing";
+    }),
     dailyState: Store.state.daily,
   };
 `, sandbox);
 const fake = sandbox.fakeLearningResult;
 /* Предмет открыт: поверхности честно предлагают реальную практику и
-   начисляют XP; выключенные фичи (daily) по-прежнему молчат, а включённый
-   прогноз русского (шкала ФИПИ 50→100) отдаётся конфигом. */
+   начисляют XP; ежедневная подборка собирается из коротких заданий
+   (сочинения long_text в неё не попадают), а прогноз русского
+   (шкала ФИПИ 50→100) отдаётся конфигом. */
 check("LEARNING SURFACES recommendations", Array.isArray(fake.next) && fake.next.length > 0);
 check("LEARNING SURFACES content selector", fake.content === true);
 check("LEARNING SURFACES forecast config", fake.forecast !== null && fake.forecast.total === 50
@@ -321,12 +336,13 @@ check(
 check(
   "LEARNING SURFACES daily selection",
   Array.isArray(fake.daily)
-  && fake.daily.length === 0
-  && (fake.dailyState.date === null || typeof fake.dailyState.date === "string")
+  && fake.daily.length === 6
+  && fake.dailyTypes.every((type) => type !== "long_text" && type !== "missing")
+  && typeof fake.dailyState.date === "string"
   && fake.dailyState.solved === 0
   && fake.dailyState.done === false
   && Array.isArray(fake.dailyState.taskIds)
-  && fake.dailyState.taskIds.length === 0,
+  && fake.dailyState.taskIds.length === 6,
 );
 
 for (const id of SUBJECT_IDS) {

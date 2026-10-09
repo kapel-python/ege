@@ -40,8 +40,14 @@ vm.runInContext(`
     practice: DataAPI.practiceTasks().length,
     lessons: DataAPI.lessons().length,
     missions: DataAPI.missions().length,
+    bosses: DataAPI.bosses().length,
     diagnostics: DataAPI.diagnosticTasks().length,
     daily: DataAPI.daily().target,
+    dailyPicked: dailyTaskIds(),
+    dailyPickedTypes: dailyTaskIds().map((id) => {
+      const t = DataAPI.task(id);
+      return t ? String(t.type || t.answerType || "") : "missing";
+    }),
     achievements: DataAPI.achievements().length,
     next: nextStepCandidates(),
     wordCount: countWords("Привет, мир! Какой-то день — не «всё»."),
@@ -55,10 +61,16 @@ check("тестовая часть и сочинение: практика и у
   result.content === true && result.tasks === 143 && result.practice === 143 && result.lessons === 26 && result.missions === 26 && result.diagnostics === 5);
 check("26 тем тестовой части по 5 заданий + сочинение с исходниками",
   result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 13 && result.sourceTasksHaveText === true);
-check("нет daily/достижений для предмета без них", result.daily === 0 && result.achievements === 0);
+check("ежедневная подборка и боссы подключены к тестовой части",
+  result.daily === 6 && result.bosses === 5);
+check("своих достижений каталог не описывает — сервер подставляет стандартный набор",
+  result.achievements === 0);
+check("подборка дня берёт только короткие задания, без сочинений",
+  result.dailyPicked.length === 6
+  && result.dailyPickedTypes.every((type) => type !== "long_text" && type !== "missing"));
 check("рекомендации предлагают реальную практику", Array.isArray(result.next) && result.next.length > 0);
 check("подсчёт слов совпадает с серверным алгоритмом", result.wordCount === 6);
-vm.runInContext(`applyOnboarding("russian", null, null, [], "Тест"); globalThis.russianState = { xp: Store.state.xp, solved: Store.state.totalSolved, stats: Store.state.skillStats, attempts: Store.state.taskAttempts, timeline: Store.state.timeline, daily: Store.state.daily, lessons: Store.state.completedLessons, missions: Store.state.missionsDone, achievements: Store.state.achievements, adjustments: Store.state.xpAdjustments };`, sandbox);
+vm.runInContext(`Store.state = Store.defaultState(); applyOnboarding("russian", null, null, [], "Тест"); globalThis.russianState = { xp: Store.state.xp, solved: Store.state.totalSolved, stats: Store.state.skillStats, attempts: Store.state.taskAttempts, timeline: Store.state.timeline, daily: Store.state.daily, lessons: Store.state.completedLessons, missions: Store.state.missionsDone, achievements: Store.state.achievements, adjustments: Store.state.xpAdjustments };`, sandbox);
 check("онбординг не создаёт XP или фиктивную статистику", sandbox.russianState.xp === 0 && sandbox.russianState.solved === 0 && JSON.stringify(Object.keys(sandbox.russianState.stats).sort()) === JSON.stringify(result.skillIds.slice().sort()) && result.skillIds.includes("russian_essay_source"));
 check("профиль без событий: попыток/таймлайна/daily нет", sandbox.russianState.attempts.length === 0 && sandbox.russianState.timeline.length === 0 && sandbox.russianState.daily.taskIds.length === 0 && Object.keys(sandbox.russianState.lessons).length === 0 && Object.keys(sandbox.russianState.missions).length === 0 && Object.keys(sandbox.russianState.achievements).length === 0 && sandbox.russianState.adjustments.length === 0);
 /* Parity with the two published math subjects: a ready catalog keeps its

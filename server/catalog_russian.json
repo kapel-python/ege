@@ -12,8 +12,8 @@
   "forecast": true,
   "diagnostics": true,
   "missions": true,
-  "bosses": false,
-  "daily": false,
+  "bosses": true,
+  "daily": true,
   "path": true
  },
  "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
@@ -6721,13 +6721,59 @@
    "diff": 1
   }
  ],
- "bosses": [],
+ "bosses": [
+ {
+  "id": "boss-rus-text",
+  "cat": "rus_text",
+  "title": "БОСС: Текст и лексика",
+  "desc": "Смешанные задания №1–3 с кратким ответом из тренировочного банка.",
+  "size": 6,
+  "xp": 120,
+  "unlockAt": 40
+ },
+ {
+  "id": "boss-rus-norms",
+  "cat": "rus_norms",
+  "title": "БОСС: Нормы языка",
+  "desc": "Смешанные задания №4–8 с кратким ответом из тренировочного банка.",
+  "size": 8,
+  "xp": 120,
+  "unlockAt": 40
+ },
+ {
+  "id": "boss-rus-spelling",
+  "cat": "rus_spelling",
+  "title": "БОСС: Орфография",
+  "desc": "Смешанные задания №9–15 с кратким ответом из тренировочного банка.",
+  "size": 10,
+  "xp": 120,
+  "unlockAt": 40
+ },
+ {
+  "id": "boss-rus-punct",
+  "cat": "rus_punct",
+  "title": "БОСС: Пунктуация",
+  "desc": "Смешанные задания №16–21 с кратким ответом из тренировочного банка.",
+  "size": 8,
+  "xp": 120,
+  "unlockAt": 40
+ },
+ {
+  "id": "boss-rus-analysis",
+  "cat": "rus_analysis",
+  "title": "БОСС: Анализ текста",
+  "desc": "Смешанные задания №22–26 с кратким ответом из тренировочного банка.",
+  "size": 8,
+  "xp": 120,
+  "unlockAt": 40
+ }
+ ],
  "achievements": [],
  "daily": {
   "skill": "",
-  "target": 0,
-  "xp": 0,
-  "title": ""
+  "target": 6,
+  "xp": 60,
+  "title": "Ежедневная подборка: задания №1–26"
  },
  "goals": [
   {

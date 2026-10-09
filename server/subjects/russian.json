@@ -105,8 +105,8 @@
   "forecast": true,
   "diagnostics": true,
   "missions": true,
-  "bosses": false,
-  "daily": false,
+  "bosses": true,
+  "daily": true,
   "path": true
  },
  "metadata": {

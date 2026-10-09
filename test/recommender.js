@@ -328,8 +328,8 @@ const testBody = async () => {
     t("русский: у сочинения текст, причина и подпись без противоречий",
       !!essay && !!essay.text && !!essay.reason && essay.cta === "Написать"
       && /сочинение/i.test(essay.text));
-    t("русский: без боссов и daily по флагу предмета",
-      !cands.some((c) => c.action === "boss") && !cands.some((c) => c.action === "daily"));
+    t("русский: ежедневная подборка доступна, боссы ждут прокачки ветки",
+      cands.some((c) => c.action === "daily") && !cands.some((c) => c.action === "boss"));
   }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");

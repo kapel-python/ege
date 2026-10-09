@@ -4246,7 +4246,7 @@ function freshSessionForRoute(route, param) {
   } else if (route === "boss") {
     const boss = DataAPI.bosses().find((b) => b.id === param);
     if (!boss || !bossUnlocked(boss)) return false;
-    const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
+    const pool = DataAPI.practiceTasks().filter((t) => !isLongTextTask(t) && DataAPI.skill(t.skill).cat === boss.cat);
     Session.cur = {
       title: boss.title, taskIds: mixedSampleTaskIds(pool, boss.size), mode: "boss",
       missionId: null, bossId: boss.id, xpReward: 0, offset: 0, total: boss.size,
@@ -7750,7 +7750,10 @@ function startBoss(bossId) {
   const boss = DataAPI.bosses().find((b) => b.id === bossId);
   if (!boss) { go("trials"); return; }
   if (!bossUnlocked(boss)) return;
-  const pool = DataAPI.practiceTasks().filter((t) => DataAPI.skill(t.skill).cat === boss.cat);
+  /* Сочинения в бой не берём: босс — быстрая смешанная проверка коротких
+     ответов, сочинение проверяется ИИ в своём потоке. Категория сочинений
+     босса и не получит, но фильтр держит правило и для новых предметов. */
+  const pool = DataAPI.practiceTasks().filter((t) => !isLongTextTask(t) && DataAPI.skill(t.skill).cat === boss.cat);
   Session.start({
     title: boss.title,
     taskIds: mixedSampleTaskIds(pool, boss.size),
