@@ -45,6 +45,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/footer.css?v=8">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
+<link rel="stylesheet" href="/css/site-reveal.css?v=1">
 <link rel="stylesheet" href="/css/dlg.css?v=2">
 <style>
   :root,
@@ -415,64 +416,15 @@
   .dyn-delta.up { background: var(--green-soft); color: var(--green); }
   .dyn-delta.down { background: var(--red-soft); color: var(--red); }
 
-  /* ===== REVEAL (перенос из main.html: те же ease и расстояния) =====
-     Начальное состояние только под .js: без JS элементы видны сразу. */
+  /* ===== REVEAL — общий модуль css/site-reveal.css + js/site-reveal.js =====
+     (единая реализация на все страницы сайта) */
   :root { --ease-out: cubic-bezier(0.16,1,0.3,1); --ease-spring: cubic-bezier(0.34,1.4,0.64,1); }
 
-  .js .rv{
-    opacity:0;
-    transform:translateY(28px);
-    filter:blur(5px);
-    transition:
-      opacity 0.8s var(--ease-out),
-      transform 0.8s var(--ease-out),
-      filter 0.8s var(--ease-out),
-      background-color 0.2s ease,
-      border-color 0.2s ease;
-    transition-delay:var(--d,0ms);
-    will-change:opacity,transform;
-  }
-
-  .js .rv.in{
-    opacity:1;
-    transform:none;
-    filter:blur(0);
-  }
-
-  .js .rv-scale{
-    opacity:0;
-    transform:translateY(24px) scale(0.96);
-    filter:blur(5px);
-    transition:
-      opacity 0.8s var(--ease-out),
-      transform 0.8s var(--ease-spring),
-      filter 0.8s var(--ease-out),
-      background-color 0.2s ease,
-      border-color 0.2s ease;
-    transition-delay:var(--d,0ms);
-    will-change:opacity,transform;
-  }
-
-  .js .rv-scale.in{
-    opacity:1;
-    transform:none;
-    filter:blur(0);
-  }
-
-  /* после завершения появления снимаем задержку и will-change,
+  /* после завершения появления снимаем will-change,
      чтобы hover-эффекты карточек срабатывали мгновенно */
   .js .rv.in.done,
   .js .rv-scale.in.done{
-    transition-delay:0ms;
     will-change:auto;
-  }
-
-  /* LITE-ANIM: та же траектория, без blur и задержек (слабые GPU / slow-3g) */
-  html.lite-anim .rv,
-  html.lite-anim .rv-scale{
-    filter:none !important;
-    transition:opacity 0.6s var(--ease-out),transform 0.6s var(--ease-out),background-color 0.2s ease,border-color 0.2s ease !important;
-    transition-delay:0ms !important;
   }
 
   [hidden] { display: none !important; }
@@ -608,7 +560,7 @@
      относительный js/footer.js под вторым ломался бы в /essay/js/footer.js. -->
 <script defer src="/js/device-hints.js?v=1"></script>
 <script src="/js/site-header.js?v=2"></script>
-<script src="/js/footer.js?v=5"></script>
+<script src="/js/footer.js?v=9"></script>
 <script defer src="/js/ai-limit.js?v=1"></script>
 
 <script>
@@ -665,32 +617,11 @@ function showSkeleton() { document.body.classList.remove('state-error'); skeleto
 function showError() { skeletonEl.hidden = true; errorEl.hidden = false; resultEl.hidden = true; document.body.classList.add('state-error'); }
 function showResult() { document.body.classList.remove('state-error'); skeletonEl.hidden = true; errorEl.hidden = true; resultEl.hidden = false; }
 
-// ---------- Reveal по скроллу (перенос из main.html) ----------
-const revealObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      activateReveal(entry.target);
-      revealObserver.unobserve(entry.target);
-    }
-  });
-}, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' }) : null;
-
-function activateReveal(el) {
-  el.classList.add('in');
-  el.addEventListener('transitionend', function onEnd(e) {
-    if (e.target !== el || e.propertyName !== 'opacity') return;
-    el.classList.add('done');
-    el.removeEventListener('transitionend', onEnd);
-  });
-}
-
-/* Элементы, уже попавшие во вьюпорт, получают .in сразу; остальные —
-   по IntersectionObserver при скролле. Без observer всё видно сразу. */
+// ---------- Reveal по скроллу — общий модуль js/site-reveal.js ----------
+/* Своей реализации нет: единая на все страницы (css/site-reveal.css).
+   Динам-ика (результат, критерии) — SiteReveal.scan() после отрисовки. */
 function observeReveals(root) {
-  (root || document).querySelectorAll('.rv:not(.in), .rv-scale:not(.in)').forEach(el => {
-    if (revealObserver) revealObserver.observe(el);
-    else activateReveal(el);
-  });
+  if (window.SiteReveal) window.SiteReveal.scan(root);
 }
 
 // ---------- Рендер-хелперы ----------
@@ -2211,5 +2142,6 @@ if (shareBtnEl) shareBtnEl.addEventListener('click', () => onShareClick());
 // Публичный API для интеграции в реальный фронтенд:
 window.EgeEssayResult = { render, loadResult };
 </script>
+<script src="/js/site-reveal.js?v=1"></script>
 </body>
 </html>

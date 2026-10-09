@@ -38,6 +38,7 @@
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
+<link rel="stylesheet" href="/css/site-reveal.css?v=1">
 <style>
   @font-face{
     font-family:'Inter';
@@ -214,15 +215,12 @@
   .inline-link{color:var(--accent);font-weight:600;}
   .inline-link:hover{text-decoration:underline;}
   .cta-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:clamp(24px,4vw,36px);}
-  .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);transition-delay:var(--d,0ms);}
-  .js .rv.in{opacity:1;transform:none;}
   @media (max-width:480px){
     .cta-row .btn{width:100%;}
   }
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
     *,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important;}
-    .js .rv{opacity:1;transform:none;}
   }
 </style>
 </head>
@@ -359,30 +357,9 @@
 </main>
 
 <div data-ege-footer></div>
+<script src="/js/site-reveal.js?v=1"></script>
 <script src="/js/site-header.js?v=2"></script>
-<script src="js/footer.js?v=5"></script>
+<script src="js/footer.js?v=9"></script>
 
-<script>
-(function(){
-  "use strict";
-  try{
-    var els = document.querySelectorAll(".rv");
-    if(!("IntersectionObserver" in window) || !els.length){
-      for(var i=0;i<els.length;i++){els[i].classList.add("in");}
-      return;
-    }
-    var io = new IntersectionObserver(function(entries){
-      for(var k=0;k<entries.length;k++){
-        var e = entries[k];
-        if(e.isIntersecting){
-          e.target.classList.add("in");
-          io.unobserve(e.target);
-        }
-      }
-    },{threshold:0.12,rootMargin:"0px 0px -8% 0px"});
-    for(var j=0;j<els.length;j++){io.observe(els[j]);}
-  }catch(e){}
-})();
-</script>
 </body>
 </html>

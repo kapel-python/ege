@@ -29,6 +29,7 @@
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="css/footer.css?v=8">
+<link rel="stylesheet" href="/css/site-reveal.css?v=1">
 <link rel="stylesheet" href="/css/site-header.css?v=1">
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
@@ -315,7 +316,7 @@
 <main>
   <section class="hero">
     <div class="wrap hero-content">
-      <span class="chip">
+      <span class="chip rv">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         Состояние сервиса
       </span>
@@ -338,27 +339,27 @@
 
   <section class="section" id="statsSection" hidden>
     <div class="wrap">
-      <div class="section-label">В цифрах</div>
-      <h2 class="section-title">Что уже готово</h2>
-      <p class="section-desc">Всё, чем уже можно пользоваться.</p>
+      <div class="section-label rv">В цифрах</div>
+      <h2 class="section-title rv" style="--d:60ms">Что уже готово</h2>
+      <p class="section-desc rv" style="--d:120ms">Всё, чем уже можно пользоваться.</p>
       <div class="stat-grid" id="statGrid"></div>
     </div>
   </section>
 
   <section class="section" id="servicesSection" hidden>
     <div class="wrap">
-      <div class="section-label">Проверка</div>
-      <h2 class="section-title">Что работает</h2>
-      <p class="section-desc">Всё, от чего зависят твои занятия. Проверяем каждую минуту.</p>
+      <div class="section-label rv">Проверка</div>
+      <h2 class="section-title rv" style="--d:60ms">Что работает</h2>
+      <p class="section-desc rv" style="--d:120ms">Всё, от чего зависят твои занятия. Проверяем каждую минуту.</p>
       <div class="svc-grid" id="svcGrid"></div>
     </div>
   </section>
 
   <section class="section" id="subjectsSection" hidden>
     <div class="wrap">
-      <div class="section-label">Предметы</div>
-      <h2 class="section-title">Что сейчас доступно</h2>
-      <p class="section-desc">Открой предмет — увидишь темы, а в теме — задания, теорию и практику.</p>
+      <div class="section-label rv">Предметы</div>
+      <h2 class="section-title rv" style="--d:60ms">Что сейчас доступно</h2>
+      <p class="section-desc rv" style="--d:120ms">Открой предмет — увидишь темы, а в теме — задания, теорию и практику.</p>
       <div id="subjectsList"></div>
     </div>
   </section>
@@ -376,7 +377,8 @@
 
 <div data-ege-footer></div>
 <script src="/js/site-header.js?v=2"></script>
-<script src="js/footer.js?v=5"></script>
+<script src="js/footer.js?v=9"></script>
+<script src="/js/site-reveal.js?v=1"></script>
 
 <!--SSR-DATA-->
 
@@ -497,10 +499,11 @@
     ];
     var html = "";
     for (var i = 0; i < cards.length; i++){
-      html += '<div class="stat"><div class="stat-value">' + esc(cards[i].v) + '</div><div class="stat-label">' + esc(cards[i].l) + "</div></div>";
+      html += '<div class="stat rv"><div class="stat-value">' + esc(cards[i].v) + '</div><div class="stat-label">' + esc(cards[i].l) + "</div></div>";
     }
     statGrid.innerHTML = html;
     statsSection.hidden = false;
+    if (window.SiteReveal) window.SiteReveal.scan(statGrid);
   }
 
   function renderServices(services){
@@ -514,7 +517,7 @@
       if (s.checkAge){
         detail += " • последняя проверка: " + s.checkAge;
       }
-      html += '<div class="svc">'
+      html += '<div class="svc rv">'
         + '<span class="svc-dot' + (s.ok ? "" : " svc-dot--off") + '" aria-hidden="true"></span>'
         + '<div style="min-width:0;"><div class="svc-name">' + esc(s.label || s.id) + "</div>"
         + '<div class="svc-detail">' + esc(detail) + "</div></div>"
@@ -522,6 +525,7 @@
     }
     svcGrid.innerHTML = html;
     servicesSection.hidden = false;
+    if (window.SiteReveal) window.SiteReveal.scan(svcGrid);
   }
 
   function renderSkillFacts(skill){

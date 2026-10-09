@@ -1,0 +1,67 @@
+/* ============================================================
+   ege easy — единая анимация появления (reveal) для всех
+   статичных страниц: лендинг, тариф, управление, о нас,
+   контакты, статус, условия, приватность, ege-result.
+
+   Одна реализация на всех — больше ни на одной странице нет
+   своего .rv: расхождение порогов, длительностей и повторов
+   кода раньше давало «кашу» (где-то анимации, где-то нет).
+
+   Подключение на странице (две строки + слот):
+     <link rel="stylesheet" href="/css/site-reveal.css">
+     <div class="rv">…</div>            (+ --d:60ms для каскада)
+     <script src="/js/site-reveal.js"></script>   БЕЗ defer
+
+   Поведение — в js/site-reveal.js. Без JS класс .js не
+   ставится, поэтому блоки видны сразу (прогрессивное
+   улучшение). prefers-reduced-motion отключает движение.
+
+   ВАЖНО (урок из отладки): внутри блочного комментария нельзя
+   держать вложенные пары «слэш-звёздочка» — парсер закрывает
+   комментарий на первой закрывающей паре и заглатывает первое
+   правило (.js .rv терял transition, элементы мигали без
+   анимации). Transition разложен на отдельные свойства —
+   так надёжнее и читается проще.
+   ============================================================ */
+
+.js .rv{
+  opacity:0;
+  transform:translateY(24px);
+  transition-property:opacity,transform;
+  transition-duration:0.7s;
+  transition-timing-function:var(--ease-out,ease);
+  transition-delay:var(--d,0ms);
+}
+
+.js .rv.in{opacity:1;transform:none;}
+
+.js .rv-scale{
+  opacity:0;
+  transform:translateY(24px) scale(0.96);
+  transition-property:opacity,transform;
+  transition-duration:0.8s;
+  transition-timing-function:var(--ease-out,ease);
+  transition-delay:var(--d,0ms);
+}
+
+.js .rv-scale.in{opacity:1;transform:none;}
+
+/* для scale-элементов пружина на transform: ставим свой
+   timing на transform отдельно (для opacity остаётся --ease-out) */
+.js .rv-scale.in{
+  transition-timing-function:var(--ease-out,ease),var(--ease-spring,ease-out);
+  transition-delay:var(--d,0ms),var(--d,0ms);
+}
+
+/* после завершения появления снимаем задержку — hover-эффекты
+   срабатывают мгновенно, без остаточного transition-delay */
+.js .rv.in.done,
+.js .rv-scale.in.done{transition-delay:0ms;}
+
+/* lite-anim (слабые GPU / медленная сеть): та же траектория, короче */
+html.lite-anim .rv,
+html.lite-anim .rv-scale{transition-duration:0.45s;}
+
+@media (prefers-reduced-motion:reduce){
+  .js .rv,.js .rv-scale{opacity:1;transform:none;}
+}

@@ -86,6 +86,7 @@
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
+<link rel="stylesheet" href="/css/site-reveal.css?v=1">
 <style>
   @font-face{
     font-family:'Inter';
@@ -273,45 +274,9 @@
 
   section[id]{scroll-margin-top:90px;}
 
-  /* ===== REVEAL (blocks & cards) =====
-     Только opacity + transform: blur-анимации — главный источник
-     дёргания на мобильных GPU (десятки размытых слоёв разом).
-     will-change не вешаем заранее — браузер сам промоутит слои
-     на время transition, лишние слои при загрузке не нужны. */
-  .js .rv{
-    opacity:0;
-    transform:translateY(28px);
-    transition:
-      opacity 0.8s var(--ease-out),
-      transform 0.8s var(--ease-out);
-    transition-delay:var(--d,0ms);
-  }
-
-  .js .rv.in{
-    opacity:1;
-    transform:none;
-  }
-
-  .js .rv-scale{
-    opacity:0;
-    transform:translateY(24px) scale(0.96);
-    transition:
-      opacity 0.8s var(--ease-out),
-      transform 0.8s var(--ease-spring);
-    transition-delay:var(--d,0ms);
-  }
-
-  .js .rv-scale.in{
-    opacity:1;
-    transform:none;
-  }
-
-  /* после завершения появления снимаем задержку,
-     чтобы hover-эффекты срабатывали мгновенно */
-  .js .rv.in.done,
-  .js .rv-scale.in.done{
-    transition-delay:0ms;
-  }
+  /* ===== Появление блоков (.rv/.rv-scale) — общий модуль css/site-reveal.css:
+     на странице больше нет своих правил. Слово-эффекты заголовков
+     ([data-type]) остаются здесь — фишка лендинга. ===== */
 
   /* ===== TEXT REVEAL (word mask / blur-fade) ===== */
   .js [data-type]{visibility:hidden;}
@@ -1052,17 +1017,12 @@
       transition-duration:0.01ms !important;
       transition-delay:0ms !important;
     }
-    .js .rv,.js .rv-scale{opacity:1;transform:none;}
     .ww,.wf{transform:none;opacity:1;}
   }
 
-  /* ===== LITE-ANIM: та же траектория, короче и без задержек (слабые GPU / slow-3g) =====
-     Сильные устройства не затрагиваются: селектор только под html.lite-anim. */
-  html.lite-anim .rv,
-  html.lite-anim .rv-scale{
-    transition:opacity 0.6s var(--ease-out),transform 0.6s var(--ease-out),border-color 0.4s var(--ease-out),box-shadow 0.4s var(--ease-out) !important;
-    transition-delay:0ms !important;
-  }
+  /* ===== LITE-ANIM =====
+     Для .rv/.rv-scale — общий css/site-reveal.css. Здесь — только
+     слово-эффекты и фикс шапки. Сильные устройства не затрагиваются. */
   html.lite-anim .wf{
     transition:opacity 0.6s var(--ease-out),transform 0.6s var(--ease-out) !important;
     transition-delay:0ms !important;
@@ -1112,13 +1072,13 @@
       </span>
       <h1 data-type="mask">Узнай свой балл ЕГЭ заранее — и <span class="grad">подними</span> его до максимума</h1>
       <p class="hero-description" data-type="fade" data-delay="500">Решаешь настоящие задания, разбираешь ошибки и видишь, как растёт твой прогнозируемый балл. На одном сайте — профильная и базовая математика, информатика, биология, обществознание и русский язык с проверкой сочинений по критериям ФИПИ.</p>
-      <div class="hero-cta rv" style="--d:900ms">
+      <div class="hero-cta rv" style="--d:400ms">
         <a class="btn btn-primary" href="/dashboard">Начать подготовку</a>
         <a class="btn btn-ghost" href="#how">Как это работает</a>
       </div>
 
       <div class="hero-visual">
-        <div class="preview-card rv-scale" style="--d:1050ms">
+        <div class="preview-card rv-scale" style="--d:500ms">
           <svg aria-hidden="true" viewBox="0 0 240 40" width="100%" height="40" fill="none">
             <path d="M20 20 H220" stroke-width="2" style="stroke:var(--track)"/>
             <path class="anim-line" d="M20 20 H130" stroke-width="3" style="stroke:url(#prog)" pathLength="110"/>
@@ -1137,7 +1097,7 @@
           <div class="preview-caption">Карта тем</div>
         </div>
 
-        <div class="preview-card rv-scale" style="--d:1200ms">
+        <div class="preview-card rv-scale" style="--d:600ms">
           <div class="ring-wrap">
             <svg aria-hidden="true" viewBox="0 0 80 80" width="68" height="68">
               <circle cx="40" cy="40" r="32" fill="none" stroke-width="7" style="stroke:var(--track)"/>
@@ -1490,7 +1450,8 @@
 
 <div data-ege-footer></div>
 <script src="/js/site-header.js?v=2"></script>
-<script src="js/footer.js?v=5"></script>
+<script src="js/footer.js?v=9"></script>
+<script src="/js/site-reveal.js?v=1"></script>
 
 <script>
   try { var y = document.getElementById('year'); if (y) y.textContent = '© ' + new Date().getFullYear(); } catch (e) {}
@@ -1559,6 +1520,19 @@
   typedEls.forEach(el => {
     if (!reducedMotion) prepareTyped(el);
     el.classList.add('ready');
+    /* Печать слов запускается классом .in (.in .ww / .in .wf в стилях
+       страницы). Ставим его ОТДЕЛЬНЫМ КАДРОМ после нарезки: в той же
+       задаче браузер не увидит начальное состояние слов (translateY)
+       и transition не сыграет — заголовок просто появится. Общий
+       site-reveal.js ловит только .rv/.rv-scale, [data-type] не трогает. */
+    if (reducedMotion) {
+      el.classList.add('in');
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (window.SiteReveal) window.SiteReveal.markIn(el);
+      else el.classList.add('in');
+    });
   });
 
   /* Плавный скролл по якорным ссылкам внутри страницы */
@@ -1584,48 +1558,15 @@
     l.setAttribute('stroke-dashoffset', '110');
   });
 
-  /* ===== Появление при скролле ===== */
-  const revealEls = document.querySelectorAll('.rv, .rv-scale, [data-type]');
-
-  function activate(el) {
-    el.classList.add('in');
+  /* ===== Появление при скролле =====
+     Общий механизм — js/site-reveal.js (css/site-reveal.css):
+     он ставит .in и вспыхивает событие «rv:in» на элементе.
+     Свои SVG-анимации (кольцо, линия) запускаем по этому событию. */
+  document.addEventListener('rv:in', function (e) {
+    var el = e.target;
+    if (!el || !el.querySelectorAll) return;
     el.querySelectorAll('.anim-ring').forEach(animateRing);
     el.querySelectorAll('.anim-line').forEach(animateLine);
-    el.addEventListener('transitionend', function onEnd(e) {
-      if (e.target !== el || e.propertyName !== 'opacity') return;
-      el.classList.add('done');
-      el.removeEventListener('transitionend', onEnd);
-    });
-  }
-
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        activate(entry.target);
-        observer.unobserve(entry.target);
-      }
-    });
-  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
-
-  /* Критичный первый экран — наблюдаем сразу, чтобы медленная сеть не давала пустой hero.
-     Остальное — после шрифтов (локальные, с preload — обычно уже готовы),
-     чтобы вёрстка не пересчитывалась после подмены шрифта.
-     Таймаут-страховка на случай медленного диска. */
-  const criticalEls = Array.prototype.filter.call(revealEls, el =>
-    (el.closest && (el.closest('.hero') || el.tagName === 'HEADER'))
-  );
-  const deferredEls = Array.prototype.filter.call(revealEls, el =>
-    !(el.closest && (el.closest('.hero') || el.tagName === 'HEADER'))
-  );
-  criticalEls.forEach(el => observer.observe(el));
-
-  const fontsReady = Promise.race([
-    (document.fonts && document.fonts.ready) || Promise.resolve(),
-    new Promise(r => setTimeout(r, 800))
-  ]);
-
-  fontsReady.then(() => {
-    deferredEls.forEach(el => observer.observe(el));
   });
 
   /* ===== Анимация кольца прогресса и линии карты ===== */
@@ -1637,7 +1578,7 @@
     const target = 65;
     const total = 201;
     const text = document.getElementById('ring-value');
-    const duration = (reducedMotion || liteAnim) ? 0 : 1400;
+    const duration = (reducedMotion || liteAnim) ? 0 : 900;
     const start = performance.now();
     function frame(now) {
       const t = duration ? Math.min((now - start) / duration, 1) : 1;
@@ -1653,7 +1594,7 @@
     if (line.dataset.done) return;
     line.dataset.done = '1';
     const total = 110;
-    const duration = (reducedMotion || liteAnim) ? 0 : 1200;
+    const duration = (reducedMotion || liteAnim) ? 0 : 900;
     const start = performance.now();
     function frame(now) {
       const t = duration ? Math.min((now - start) / duration, 1) : 1;
