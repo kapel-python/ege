@@ -283,10 +283,19 @@ const testBody = async () => {
     t("пересчёт: до исправления есть кандидат «повторение ошибок»",
       nextStepCandidates().some((c) => c.action === "errors-review"));
     for (const task of tasks) recordAnswer(task, true, 0, 20);
+    /* Тема закрыта целиком, поэтому подборка пересобирается с нуля: задания,
+       которые ученик только что решил, уходят в конец очереди своей темы, и
+       «начатой» подборка не считается. Иначе разминочная практика по теме
+       случайно открывала бы ежедневную подборку, а правило «начатое выше
+       нового» ставило бы испытание выше урока (сценарий 6d). */
+    Store.state.daily = { date: null, solved: 0, done: false, taskIds: [] };
+    Store.state.dailyHistory = [];
+    ensureDailyChallenge();
     const after = nextStepCandidates();
     t("пересчёт: закрытые ошибки исчезают из кандидатов", !after.some((c) => c.action === "errors-review"));
     t("пересчёт: лучший шаг — обучение или тренировка (не испытание)",
-      after[0].action === "lesson" || after[0].action === "practice" || after[0].action === "finish-lesson");
+      after[0].action === "lesson" || after[0].action === "practice" || after[0].action === "finish-lesson",
+      after[0] && after[0].action + ":" + after[0].text);
   }
 
   /* ---------- 11. Устойчивость к осиротевшим данным ---------- */

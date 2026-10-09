@@ -2424,26 +2424,91 @@ function dailyTaskIdsForDate(date) {
   return item && Array.isArray(item.taskIds) ? item.taskIds : [];
 }
 
-function dailyCandidateScore(task, historyIds, now) {
+/* ============================================================
+   Ежедневная подборка
+
+   Подборка — не лотерея и не «первые N заданий каталога», а набор под
+   конкретного ученика: как миссии и «что делать сейчас», она смотрит на
+   открытые ошибки, точность и освоение тем. При этом одна и та же дата
+   всегда даёт один и тот же набор: сид дня (московская дата + аккаунт)
+   детерминированно перемешивает темы с равной необходимостью, поэтому
+   подборка меняется ровно в полноцу по МСК, а не на каждом рендере.
+   ============================================================ */
+
+/* Стабильный 32-битный хеш строки (FNV-1a): один и тот же текст всегда
+   даёт одно и то же «случайное» число. От него нужен детерминизм, а не
+   стойкость, поэтому простой хеш здесь лучше Math.random. */
+function dailyHash(text) {
+  let h = 0x811c9dc5;
+  const s = String(text);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/* Насколько теме сейчас нужна работа — те же сигналы, что у миссий и
+   рекомендаций: открытые ошибки весят больше всего, за ними точность,
+   нехватка освоения и совсем нетронутая тема. Тема, которую только что
+   интенсивно тренировали, сегодня уходит вниз: иначе подборка повторяет
+   только что сделанное вместо того, чтобы двигать дальше. */
+function dailySkillNeed(skillId) {
   const state = Store.state || {};
-  const stats = safeObject(state.skillStats && state.skillStats[task.skill]);
-  const attempts = safeArray(state.taskAttempts).filter((item) => item && String(item.taskId) === String(task.id));
-  const recentAttempts = attempts.filter((item) => now - Number(item.ts || 0) < 14 * 86400000);
-  const recentErrors = safeArray(state.errors).filter((item) => item && String(item.taskId) === String(task.id) && !item.resolved).length;
-  const accuracy = stats.solved ? stats.correct / stats.solved : 0;
-  const mastery = skillProgress(task.skill);
-  const coldStart = !state.totalSolved && !safeArray(state.taskAttempts).length && !safeArray(state.errors).length;
-  let score = 0;
-  score += recentErrors * 8;
-  score += Math.max(0, 1 - accuracy) * 5;
-  score += Math.max(0, 3 - Math.min(3, recentAttempts.length)) * 2;
-  // A new user gets approachable tasks; an active user gets a modest
-  // difficulty lift while weak skills and unresolved errors stay first.
-  score += coldStart ? (4 - task.diff) * 2 : task.diff * 0.6;
-  score += Math.max(0, 100 - mastery) * 0.04;
-  if (historyIds.has(dataIdValue(task.id))) score -= 18;
-  if (recentAttempts[0] && now - Number(recentAttempts[0].ts || 0) < 86400000) score -= 12;
-  return score;
+  const stats = safeObject(state.skillStats && state.skillStats[skillId]);
+  const solved = Math.max(0, Number(stats.solved) || 0);
+  const accuracy = solved ? Number(stats.correct) / solved : null;
+  let need = openErrorCount(skillId) * 12;
+  need += accuracy === null ? 6 : Math.max(0, 1 - accuracy) * 8;
+  need += Math.max(0, 100 - skillProgress(skillId)) * 0.05;
+  if (!solved) need += 4;
+  const recentCutoff = Date.now() - 2 * 3600 * 1000;
+  let recent = 0;
+  for (const a of safeArray(state.taskAttempts)) {
+    if (!a || String(a.skill) !== String(skillId)) continue;
+    if ((Number(a.ts) || 0) >= recentCutoff) recent++;
+  }
+  if (recent >= 4) need -= 6;
+  return need;
+}
+
+/* Очередь заданий темы для повторяющихся проходов: сперва то, чего
+   ученик ещё не решал, затем то, что давно не открывал. Сид дня
+   разводит задания, по которым истории нет вовсе, — иначе у любого
+   нового ученика первым всегда оказывался бы один и тот же номер. */
+function rotatedTaskBank(skillId, seedText) {
+  const bank = DataAPI.practiceTasksBySkill(skillId)
+    .filter((task) => task && task.id && !isEssayTask(task));
+  if (!bank.length) return [];
+  const solved = new Set();
+  const lastSeen = {};
+  for (const a of safeArray((Store.state || {}).taskAttempts)) {
+    if (!a || String(a.skill) !== String(skillId)) continue;
+    const id = dataIdValue(a.taskId);
+    if (!id) continue;
+    lastSeen[id] = Math.max(Number(lastSeen[id]) || 0, Number(a.ts) || 0);
+    if (a.correct) solved.add(id);
+  }
+  return bank.slice().sort((a, b) => {
+    const ia = dataIdValue(a.id), ib = dataIdValue(b.id);
+    if (solved.has(ia) !== solved.has(ib)) return solved.has(ia) ? 1 : -1;
+    const ta = lastSeen[ia] || 0, tb = lastSeen[ib] || 0;
+    if (ta !== tb) return ta - tb;
+    const ha = dailyHash(seedText + "|" + ia), hb = dailyHash(seedText + "|" + ib);
+    return ha - hb || ia.localeCompare(ib);
+  });
+}
+
+/* Слабость темы 0..∞: открытые ошибки, низкая точность, нехватка
+   освоения. Тот же смысл, что у skillSnapshot/слабых мест в «что делать
+   сейчас», — подборка и боссы смотрят на те же сигналы, что и миссии. */
+function skillWeakness(skillId, state) {
+  const s = state || Store.state || {};
+  const stats = safeObject(s.skillStats && s.skillStats[skillId]);
+  const accuracy = stats.solved ? Number(stats.correct) / Number(stats.solved) : 0;
+  return openErrorCount(skillId) * 8
+    + Math.max(0, 1 - accuracy) * 5
+    + Math.max(0, 100 - skillProgress(skillId)) * 0.04;
 }
 
 function selectDailyTaskIds(date) {
@@ -2455,18 +2520,69 @@ function selectDailyTaskIds(date) {
      сочинение за визит, редактор и ИИ-проверка вместо карточки ответа. */
   const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill && !isEssayTask(task));
   if (!pool.length) return [];
-  const historyIds = new Set(dailyHistory().flatMap((entry) => safeArray(entry && entry.taskIds).map(dataIdValue)));
-  const now = Date.now();
-  const ranked = pool.map((task) => ({ task, score: dailyCandidateScore(task, historyIds, now) }))
-    .sort((a, b) => b.score - a.score || String(a.task.id).localeCompare(String(b.task.id)));
-  const selected = ranked.filter((item) => !historyIds.has(dataIdValue(item.task.id))).slice(0, target).map((item) => item.task.id);
-  if (selected.length < target) {
-    for (const item of ranked) {
-      if (selected.length >= target) break;
-      if (!selected.includes(item.task.id)) selected.push(item.task.id);
+
+  const dayKey = String(date || dailyDateKey());
+  /* Сид дня: московская дата + аккаунт + предмет. Разные ученики получают
+     разную подборку, один ученик — одну и ту же весь день. */
+  const seed = `daily|${dayKey}|${String(Store.accountId || "")}|${currentSubjectId()}`;
+
+  /* Задания, которые уже были в подборке за последние две недели: повтор
+     подряд обесценивает день, поэтому внутри темы они уходят в конец. */
+  const dayStart = Date.parse(dayKey);
+  const recentDaily = new Set();
+  if (Number.isFinite(dayStart)) {
+    for (const entry of dailyHistory()) {
+      if (!entry || !entry.date) continue;
+      const entryDay = Date.parse(entry.date);
+      if (!Number.isFinite(entryDay) || entryDay < dayStart - 13 * 86400000) continue;
+      for (const id of safeArray(entry.taskIds)) recentDaily.add(dataIdValue(id));
     }
   }
-  return selected;
+
+  const bySkill = {};
+  for (const task of pool) (bySkill[task.skill] = bySkill[task.skill] || []).push(task);
+
+  /* Необходимость темы считаем один раз на выборку: иначе компаратор
+     сортировки пересчитывал бы её на каждое сравнение. */
+  const needById = {};
+  for (const skillId of Object.keys(bySkill)) needById[skillId] = dailySkillNeed(skillId);
+
+  const orderedSkills = Object.keys(bySkill).sort((a, b) => {
+    const need = (needById[b] || 0) - (needById[a] || 0);
+    if (need) return need;
+    const hash = dailyHash(seed + "|skill|" + a) - dailyHash(seed + "|skill|" + b);
+    return hash || String(a).localeCompare(String(b));
+  });
+
+  /* Очередь каждой темы: сперва нерешённое и давно не виденное, в самом
+     конце — то, что уже было в подборке последних двух недель. */
+  const queues = {};
+  for (const skillId of orderedSkills) queues[skillId] = rotatedTaskBank(skillId, seed);
+
+  /* Один день — широкий охват: сперва по одному заданию из самых «нужных»
+     тем. Если тем не хватило (узкий предмет), следующие круги добирают
+     задания из тех же тем по очереди. */
+  const maxPerSkill = Math.max(1, Math.ceil(target / 2));
+  const picked = [];
+  const used = new Set();
+  const perSkill = {};
+  for (let round = 0; picked.length < target; round++) {
+    const before = picked.length;
+    for (const skillId of orderedSkills) {
+      if (picked.length >= target) break;
+      const limit = round === 0 ? Math.min(maxPerSkill, queues[skillId].length) : queues[skillId].length;
+      if ((perSkill[skillId] || 0) >= limit) continue;
+      const next = queues[skillId].find((task) => !used.has(dataIdValue(task.id))
+        && (round > 0 || !recentDaily.has(dataIdValue(task.id))));
+      if (!next) continue;
+      picked.push(next.id);
+      used.add(dataIdValue(next.id));
+      perSkill[skillId] = (perSkill[skillId] || 0) + 1;
+    }
+    // Больше нечего добавить: банк предмета исчерпан.
+    if (picked.length === before) break;
+  }
+  return picked;
 }
 
 /* «Смешанное испытание»: набор под ученика, а не первые N тем каталога.
@@ -2475,15 +2591,21 @@ function selectDailyTaskIds(date) {
    ошибками и низкой точностью идут первыми, а внутри темы задание ротируется:
    нерешённые и давно не решённые раньше свежих, поэтому следующий запуск
    берёт следующие задания, а не повторяет прошлые. Одна тема — одно задание
-   за круг, чтобы охват оставался широким. */
-function mixedTrialTaskIds(count) {
+   за круг, чтобы охват оставался широким.
+
+   Необязательные аргументы нужны боссам: pool ограничивает набор веткой
+   босса, seedText разводит задания, по которым истории нет вовсе (сид дня),
+   чтобы у каждого нового ученика слепок ветки не начинался с одного и того
+   же номера. */
+function mixedTrialTaskIds(count, pool, seedText) {
   const total = Math.max(0, Math.floor(Number(count) || 0));
   if (!total || !subjectLearningAvailable()) return [];
   /* Без сочинений: смешанное испытание — быстрая проверка коротких ответов,
      сочинение живёт в своём потоке (одно за визит, редактор, ИИ-проверка). */
-  const pool = DataAPI.practiceTasks().filter((task) => task && task.id && task.skill && !isEssayTask(task));
-  if (!pool.length) return [];
-  const ordered = pool.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  const source = Array.isArray(pool) && pool.length ? pool : DataAPI.practiceTasks();
+  const playable = source.filter((task) => task && task.id && task.skill && !isEssayTask(task));
+  if (!playable.length) return [];
+  const ordered = playable.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
   const bySkill = {};
   for (const task of ordered) (bySkill[task.skill] = bySkill[task.skill] || []).push(task);
   const state = Store.state || {};
@@ -2493,14 +2615,6 @@ function mixedTrialTaskIds(count) {
     const key = String(attempt.taskId);
     lastAttemptAt[key] = Math.max(Number(lastAttemptAt[key]) || 0, Number(attempt.ts) || 0);
   }
-  const skillWeakness = (skillId) => {
-    const stats = safeObject(state.skillStats && state.skillStats[skillId]);
-    const accuracy = stats.solved ? Number(stats.correct) / Number(stats.solved) : 0;
-    const mastery = Number(skillProgress(skillId)) || 0;
-    return openErrorCount(skillId) * 8
-      + Math.max(0, 1 - accuracy) * 5
-      + Math.max(0, 100 - mastery) * 0.04;
-  };
   const skillOrder = DataAPI.skills().map((sk) => sk.id).filter((id) => bySkill[id]);
   const rankedSkills = skillOrder.slice().sort((a, b) => skillWeakness(b) - skillWeakness(a) || skillOrder.indexOf(a) - skillOrder.indexOf(b));
   const picked = [];
@@ -2511,6 +2625,11 @@ function mixedTrialTaskIds(count) {
         const ta = lastAttemptAt[String(a.id)] || 0;
         const tb = lastAttemptAt[String(b.id)] || 0;
         if (ta !== tb) return ta - tb;
+        if (seedText) {
+          const ha = dailyHash(seedText + "|task|" + String(a.id));
+          const hb = dailyHash(seedText + "|task|" + String(b.id));
+          if (ha !== hb) return ha - hb;
+        }
         return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
       });
       const next = bank[round];
@@ -2518,6 +2637,27 @@ function mixedTrialTaskIds(count) {
     }
   }
   return picked.map((task) => task.id);
+}
+
+/* Набор босса: смешанные задания его ветки. Раньше босс каждый раз брал
+   самый первый номер каждой темы — «Пройти снова» возвращало тот же слепок,
+   и часть тем ветки (номеров за пределами первых size навыков) в испытании
+   не встречалась вовсе. Теперь темы ветки идут по слабости, задание внутри
+   темы ротируется (нерешённое и давно не виденное впереди), а сид дня
+   разводит стартовый набор между учениками и между днями. */
+function bossTaskIds(boss) {
+  const canonical = DataAPI.bosses().find((item) => String(item.id) === String(boss && (boss.id || boss)));
+  if (!canonical || !subjectLearningAvailable()) return [];
+  const cat = String(canonical.cat || canonical.category || "");
+  if (!cat) return [];
+  const pool = DataAPI.practiceTasks().filter((task) => {
+    if (!task || !task.id || !task.skill || isEssayTask(task)) return false;
+    const skill = DataAPI.skill(task.skill);
+    return !!skill && String(DataAPI._skillCategoryId(skill)) === cat;
+  });
+  const size = Math.max(1, Math.floor(Number(canonical.size) || 0));
+  const seed = `boss|${dailyDateKey()}|${String(Store.accountId || "")}|${canonical.id}`;
+  return mixedTrialTaskIds(size, pool, seed);
 }
 
 function ensureDailyChallenge() {
@@ -2548,7 +2688,12 @@ function ensureDailyChallenge() {
     state.daily = Object.assign({ date, solved: 0, done: false, taskIds: [] }, existing, current);
     state.daily.taskIds = state.daily.taskIds.filter((id) => DataAPI.taskForAccess && DataAPI.taskForAccess(id));
     if (!state.daily.taskIds.length) {
+      /* Записи дня больше не существует в каталоге (контент обновился):
+         мусорная строка не должна блокировать пересборку — убираем её,
+         следующий вызов возьмёт свежий набор, а не пустой день. */
       state.daily = { date, solved: 0, done: false, taskIds: [] };
+      state.dailyHistory = dailyHistory().filter((entry) => !entry || entry.date !== date);
+      Store.save();
       return;
     }
     const selected = new Set(state.daily.taskIds.map(String));
@@ -2889,6 +3034,10 @@ function completeMission(mission) {
   return true;
 }
 
+/* Босс открывается, когда ветка пройдена до порога из каталога. Порог
+   достижим обычным путем: 40% — это ровно столько, сколько даёт полный
+   набор уроков ветки, поэтому босс обязан требовать меньше — иначе до него
+   не добраться никому, кто не решил всё разом. */
 function bossUnlocked(boss) {
   const canonical = DataAPI.bosses().find((item) => String(item.id) === String(boss && (boss.id || boss)));
   if (!canonical || !subjectLearningAvailable()) return false;
@@ -2904,17 +3053,17 @@ function defeatBoss(boss) {
   const canonical = DataAPI.bosses().find((item) => String(item.id) === String(boss && (boss.id || boss)));
   if (!canonical || !Store.state || !bossUnlocked(canonical) || bossDefeated(canonical)) return false;
   Store.state.bossesDefeated = safeArray(Store.state.bossesDefeated);
-  Store.state.skillStats = safeObject(Store.state.skillStats);
   Store.state.bossesDefeated.push(canonical.id);
   addTimeline(`Босс повержен: ${String(canonical.title || "Босс").replace("БОСС: ", "")}`);
   addXp(canonical.xp, "boss");
   bumpGuestSteps(GUEST_STEP_BOSS);
-  /* рывок навыков ветки */
-  const cat = String(canonical.cat || canonical.category || "");
-  for (const s of DataAPI.availableSkills().filter((x) => String(DataAPI._skillCategoryId(x)) === cat)) {
-    const st = Store.state.skillStats[s.id] || (Store.state.skillStats[s.id] = { progress: 0, solved: 0, correct: 0, timeSec: 0 });
-    st.progress = skillProgress(s.id);
-  }
+  /* Рывка навыков ветки здесь нет и быть не может: освоение считается из
+     реально решённых заданий и пройденных уроков, а не из флага «босс
+     повержен». Раньше цикл ниже переписывал skillStats.progress тем же
+     значением, что и так вычисляется, а экран результата обещал «+6% к
+     навыкам ветки» — обещание, которого не происходило. Награда босса —
+     XP, достижение и честный рост ветки за решённые в испытании задания
+     (его показывает screenSession/sessionFinish). */
   recordForecastSnapshot();
   Store.save();
   checkAchievements();

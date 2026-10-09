@@ -3165,7 +3165,10 @@ function screenDashboard(root) {
   const li = levelInfo();
   const f = safeForecast();
   const trend = forecastTrend();
-  const act = todayActivity();
+  /* Держим сегодняшний бакет активности живым (сайд-эффект todayActivity):
+     график «14 дней» и серия дней читают его ключ, поэтому вызов нужен, даже
+     если сам объект здесь больше не читается. */
+  todayActivity();
   const errors = asSafeArray(s.errors);
   const openErrors = errors.filter((e) => e && !e.resolved).length;
   const openMajorErrors = errors.filter((e) => e && !e.resolved && errorKindOf(e) === "major").length;
@@ -3226,9 +3229,9 @@ function screenDashboard(root) {
         </div>
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
         ${dailyEnabled ? `<div style="margin-top:18px;font-size:13px;color:var(--text-2)">
-          ${dailyGoal ? `Сегодня: <b class="mono">${Math.min(nonNegativeNumber(act.solved), dailyGoal)} / ${dailyGoal}</b> заданий` : "Ежедневная подборка пока не создана"}
+          ${dailyGoal ? `Ежедневная подборка: <b class="mono">${Math.min(dailySolved, dailyGoal)} / ${dailyGoal}</b> заданий${dailyDone ? " · выполнено" : ""}` : "Ежедневная подборка пока не создана"}
         </div>
-        <div style="margin-top:12px;max-width:340px">${progressBar(dailyGoal ? Math.min(nonNegativeNumber(act.solved) / dailyGoal, 1) * 100 : 0, "progress--thin progress--success")}</div>` : ""}
+        <div style="margin-top:12px;max-width:340px">${progressBar(dailyGoal ? Math.min(dailySolved / dailyGoal, 1) * 100 : 0, "progress--thin progress--success")}</div>` : ""}
       </div>
 
       <div class="card forecast-card forecast-hero">
@@ -4246,14 +4249,17 @@ function freshSessionForRoute(route, param) {
   } else if (route === "boss") {
     const boss = DataAPI.bosses().find((b) => b.id === param);
     if (!boss || !bossUnlocked(boss)) return false;
-    const pool = DataAPI.practiceTasks().filter((t) => !isLongTextTask(t) && DataAPI.skill(t.skill).cat === boss.cat);
+    const ids = bossTaskIds(boss);
+    if (!ids.length) return false;
     Session.cur = {
-      title: boss.title, taskIds: mixedSampleTaskIds(pool, boss.size), mode: "boss",
+      title: boss.title, taskIds: ids, mode: "boss",
       missionId: null, bossId: boss.id, xpReward: 0, offset: 0, total: boss.size,
       hideTopic: true, errorMap: null, idx: 0, results: [], hintsUsed: 0,
+      // Освоение ветки на старте: экран результата показывает честный рост
+      // за решённые в испытании задания, а не придуманный «+6%».
+      branchProgressStart: catProgress(boss.cat),
       startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
     };
-    if (!Session.cur.taskIds.length) { Session.cur = null; return false; }
   } else if (route === "daily") {
     Session.cur = {
       title: "Ежедневная задача", taskIds: dailyTaskIds(), mode: "daily",
@@ -6860,6 +6866,18 @@ function sessionFinish(early = false) {
 
   const isBossWin = boss && correct / solved >= 0.6 && bossDefeated(boss);
   const title = missionDone ? "Практика завершена" : boss ? (isBossWin ? "Испытание пройдено" : "Босс устоял") : "Тренировка завершена";
+  /* Освоение ветки «до/после»: честный эффект босса — задания, решённые в
+     испытании. Раньше здесь стояло обещание «навыки ветки повышены на +6%»,
+     которого в состоянии не происходило. */
+  const branchBefore = Number(S.branchProgressStart) || 0;
+  const branchAfter = boss ? catProgress(boss.cat) : 0;
+  const branchNote = boss && isBossWin
+    ? (branchBefore
+      ? (branchAfter !== branchBefore
+        ? `Навыки ветки «${DataAPI.category(boss.cat).name}»: ${branchBefore}% → ${branchAfter}% после смешанной проверки`
+        : `Навыки ветки «${DataAPI.category(boss.cat).name}» проверены смешанными заданиями — освоение ${branchAfter}%`)
+      : `Навыки ветки «${DataAPI.category(boss.cat).name}» освоены на ${branchAfter}%`)
+    : "";
 
   const checkedSkills = boss ? [...new Set(S.results.map((r) => {
     const t = DataAPI.task(r.taskId);
@@ -6891,6 +6909,10 @@ function sessionFinish(early = false) {
   const bonusSum = S.correctBonusSum || 0;
   const errSum = S.errorResolvedSum || 0;
   const missionXp = missionDone && mission ? mission.xp : 0;
+  // Награда босса начисляется в defeatBoss (там же, где и запись о победе),
+  // поэтому на экране результата её надо показать отдельной строкой — иначе
+  // пройденное испытание выглядело как «+0 XP».
+  const bossXp = boss && isBossWin ? Math.max(0, Number(boss.xp) || 0) : 0;
   const repeatNote = S.results.length && bonusSum === 0 && correct > 0
     ? `<div style="color:var(--muted);font-size:13px;margin-top:4px">Все задания уже были решены раньше — начислен только минимум за попытки.</div>` : "";
 
@@ -6898,16 +6920,17 @@ function sessionFinish(early = false) {
     <div class="result-wrap">
       <div class="result-title ${boss && !isBossWin ? "result-title--danger" : ""}">${title}</div>
       <div class="result-sub">${early ? "Сессия завершена досрочно — прогресс учтён." : esc(S.title)}</div>
-      <div class="result-xp mono">+${S.gainedXp + missionXp} XP</div>
+      <div class="result-xp mono">+${S.gainedXp + missionXp + bossXp} XP</div>
       <div class="result-breakdown">
         <div class="result-breakdown__row"><span>За выполнение заданий</span><b class="mono">+${attemptSum} XP</b></div>
         ${bonusSum ? `<div class="result-breakdown__row"><span>${essayOnly ? "За выполнение сочинений" : "За правильные ответы"}</span><b class="mono">+${bonusSum} XP</b></div>` : ""}
         ${errSum ? `<div class="result-breakdown__row"><span>За закрытие ошибок</span><b class="mono">+${errSum} XP</b></div>` : ""}
         ${missionXp ? `<div class="result-breakdown__row"><span>Бонус миссии</span><b class="mono">+${missionXp} XP</b></div>` : ""}
+        ${bossXp ? `<div class="result-breakdown__row"><span>Награда босса</span><b class="mono">+${bossXp} XP</b></div>` : ""}
       </div>
       ${missionDone && mission ? `<div style="color:var(--text-2)">Навык «${DataAPI.skill(mission.skill).name}» усилен · награда миссии +${mission.xp} XP</div>` : ""}
       ${repeatNote}
-      ${boss && isBossWin ? `<div style="color:var(--success)">Навыки ветки «${DataAPI.category(boss.cat).name}» повышены на +6%</div>` : ""}
+      ${branchNote ? `<div style="color:var(--success)">${branchNote}</div>` : ""}
       <div class="result-stats">
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${correct}/${solved}</div><div class="stat-label">${essayOnly ? "отправлено" : "правильно"}</div></div>
         <div class="card"><div class="mono" style="font-size:22px;font-weight:700">${fmtTime(totalTime)}</div><div class="stat-label">время</div></div>
@@ -7665,6 +7688,7 @@ function screenTrials(root) {
       <div class="card ${dailyDone ? "mission-card--done" : ""}">
         <div class="stat-label" style="letter-spacing:0.18em;font-weight:800">ЕЖЕДНЕВНАЯ ЗАДАЧА</div>
         <div style="font-size:18px;font-weight:650;margin-top:8px">${dailyGoal ? dailyTitle : "Подборка пока не создана"}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Задания выбираются по темам, которым нужна работа: открытые ошибки, точность и освоение. Один и тот же набор держится весь день и меняется в полночь по Москве.</div>
         ${dailyGoal ? `<div style="margin:14px 0 6px">${progressBar(Math.min(dailySolved / dailyGoal, 1) * 100, dailyDone ? "progress--success" : "")}</div>` : ""}
         <div style="display:flex;align-items:center;gap:12px">
           ${dailyGoal ? `
@@ -7700,6 +7724,9 @@ function screenTrials(root) {
           <div style="font-size:13px;color:var(--text-2);margin-top:8px">${b.desc}</div>
           <div style="margin:14px 0 6px">${progressBar(Math.min(cp / b.unlockAt, 1) * 100, unlocked ? "progress--success" : "progress--warn")}</div>
           <div style="font-size:12px;color:var(--muted)" class="mono">прогресс ветки: ${cp}% / ${b.unlockAt}% для доступа</div>
+          ${unlocked
+            ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Состав подбирается заново: темы с ошибками идут первыми, номера не повторяют прошлый заход.</div>`
+            : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Освоение ветки растёт от пройденных уроков и решённых заданий.</div>`}
           <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
             <span class="chip chip--accent mono">+${b.xp} XP</span>
             <span class="chip">${b.size} заданий</span>
@@ -7710,23 +7737,6 @@ function screenTrials(root) {
         </div>`;
       }).join("")}
     </div>`;
-}
-
-/* Сбор по-настоящему «смешанного» набора: по кругу берём по заданию от
-   каждой темы, чтобы набор покрывал разные навыки. Простой slice(0, N) по
-   сортировке id давал бы только самые «младшие» номера ЕГЭ (№1–№4). */
-function mixedSampleTaskIds(pool, count) {
-  const bySkill = {};
-  for (const t of orderedTasks(pool)) (bySkill[t.skill] = bySkill[t.skill] || []).push(t);
-  const order = DataAPI.skills().map((sk) => sk.id).filter((id) => bySkill[id]);
-  const picked = [];
-  for (let round = 0; picked.length < count && round < 10; round++) {
-    for (const sid of order) {
-      if (picked.length >= count) break;
-      if (bySkill[sid][round]) picked.push(bySkill[sid][round]);
-    }
-  }
-  return picked.map((t) => t.id);
 }
 
 function startDaily() {
@@ -7750,17 +7760,16 @@ function startBoss(bossId) {
   const boss = DataAPI.bosses().find((b) => b.id === bossId);
   if (!boss) { go("trials"); return; }
   if (!bossUnlocked(boss)) return;
-  /* Сочинения в бой не берём: босс — быстрая смешанная проверка коротких
-     ответов, сочинение проверяется ИИ в своём потоке. Категория сочинений
-     босса и не получит, но фильтр держит правило и для новых предметов. */
-  const pool = DataAPI.practiceTasks().filter((t) => !isLongTextTask(t) && DataAPI.skill(t.skill).cat === boss.cat);
   Session.start({
     title: boss.title,
-    taskIds: mixedSampleTaskIds(pool, boss.size),
+    taskIds: bossTaskIds(boss),
     mode: "boss",
     bossId: boss.id,
     hideTopic: true,
   });
+  // Освоение ветки на старте: экран результата покажет честный рост за
+  // решённые в испытании задания (см. sessionFinish).
+  if (Session.cur) Session.cur.branchProgressStart = catProgress(boss.cat);
 }
 
 /* ============================================================
