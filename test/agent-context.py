@@ -54,17 +54,22 @@ conn.execute("INSERT INTO skills VALUES('n09_derivative','Производная
 conn.execute("INSERT INTO skills VALUES('n19_parameter','Параметр','profile_math',2)")
 conn.execute("INSERT INTO skills VALUES('n20_numbers','Числа','profile_math',3)")
 conn.execute("INSERT INTO skills VALUES('n15_stereometry','Стереометрия','profile_math',4)")
+conn.execute("INSERT INTO lessons VALUES('lA','sA','Урок А','{}')")
 conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n09_derivative',10,8,0)")
+# Порог показа прогноза: 1 урок и 3 темы с данными (см. FORECAST_READY_*).
+conn.execute("INSERT INTO completed_lessons VALUES(1,'profile_math','lA')")
+conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n01_planimetry',10,8,0)")
+conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n02_vectors',10,8,0)")
 conn.commit()
 
 sys_text = agent.turn_system(conn, 1, "profile_math")
 check("subject plain words", "Профильная математика" in sys_text, sys_text[-400:])
 check("no raw subject id", "profile_math" not in sys_text)
 check("student name quoted", "«Стёпа»" in sys_text)
-check("forecast line", "Прогноз:" in sys_text and "Что подтянуть:" in sys_text,
-      str([ln for ln in sys_text.splitlines() if ln.startswith("Прогноз")]))
+check("forecast line", "Предварительный прогноз:" in sys_text and "Что подтянуть:" in sys_text,
+      str([ln for ln in sys_text.splitlines() if "рогноз" in ln and "сейчас" in ln]))
 check("forecast numbers match dashboard formula",
-      "Прогноз: сейчас ~6 из 100, разброс 0–18." in sys_text)
+      "Предварительный прогноз: сейчас ~11 из 100, разброс 0–22." in sys_text)
 check("base prompt intact", sys_text.startswith(agent.AGENT_SYSTEM))
 check("context marker", "КОНТЕКСТ ХОДА" in sys_text)
 
@@ -89,7 +94,6 @@ conn.execute("INSERT INTO user_subjects(user_id,subject,onboarded) VALUES(2,'pro
 conn.execute("INSERT INTO skills VALUES('sA','Теория','profile_math',10)")
 conn.execute("INSERT INTO skills VALUES('sB','Диагностика','profile_math',11)")
 conn.execute("INSERT INTO skills VALUES('sC','Давность','profile_math',12)")
-conn.execute("INSERT INTO lessons VALUES('lA','sA','Урок А','{}')")
 conn.execute("INSERT INTO completed_lessons VALUES(2,'profile_math','lA')")
 for i in range(12):
     conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"

@@ -1514,10 +1514,11 @@ FORECAST_FORGIVE_DAYS = 14
 FORECAST_HINT_WEIGHTS = (1.0, 0.6, 0.3, 0.3)
 # Порог показа прогноза — зеркало js/state.js (FORECAST_READY_*): раньше
 # него числа нет ни на экране, ни в ответе агента — только «пройди больше
-# тем и практики». 20% уроков и 25% взвешенных тем с данными, пол — 2 и 3.
-FORECAST_READY_LESSON_SHARE = 0.2
-FORECAST_READY_TOPIC_SHARE = 0.25
-FORECAST_READY_MIN_LESSONS = 2
+# тем и практики». Низкий намеренно: 1–2 урока и 3 темы с данными («первые
+# шаги»), дальше число показывается с пометкой «предварительный».
+FORECAST_READY_LESSON_SHARE = 0.05
+FORECAST_READY_TOPIC_SHARE = 0.1
+FORECAST_READY_MIN_LESSONS = 1
 FORECAST_READY_MIN_TOPICS = 3
 
 
@@ -1866,9 +1867,14 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
                           "mastery": m, "gain": gain})
     gains.sort(key=lambda g: (-g["gain"], g["skillId"]))
     gains = gains[:3]
+    # Предварительный — пока покрытие меньше половины: число уже показываем,
+    # но это оценка «по первым шагам», а не итог. Зеркало пометки в дашборде.
+    lesson_share = (done_lessons / total_lessons) if total_lessons else 1.0
+    topic_share = (covered / len(scored)) if scored else 1.0
+    preliminary = bool(lesson_share < 0.5 or topic_share < 0.5)
     return {"available": True, "mid": mid, "low": low, "high": high,
             "primary": _js_round(primary * 10) / 10.0, "total": total,
-            "scaleMax": top, "hw": hw,
+            "scaleMax": top, "hw": hw, "preliminary": preliminary,
             "unit": "percent" if top > total else "points",
             "note": (f"mid/low/high — по шкале 0..{top} ({'проценты' if top > total else 'первичные баллы'}), "
                      f"primary/total — первичные баллы из {total}. Не путай шкалы."),
@@ -4158,7 +4164,8 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
             gains = [str(g.get("name") or g.get("skillId") or "").strip()
                      for g in (fc.get("topGains") or []) if isinstance(g, dict)]
             gains = [g for g in gains if g][:3]
-            line = f"Прогноз: сейчас ~{mid} {unit}, разброс {low}–{high}."
+            prefix = "Предварительный прогноз" if fc.get("preliminary") else "Прогноз"
+            line = f"{prefix}: сейчас ~{mid} {unit}, разброс {low}–{high}."
             if gains:
                 line += " Что подтянуть: " + ", ".join(f"«{g[:60]}»" for g in gains) + "."
             lines.append(line)

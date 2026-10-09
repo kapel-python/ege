@@ -591,6 +591,7 @@ function forecastNoteHTML() {
   const c = forecastCoverage();
   if (c.full) return "Прогноз на основе всех пройденных уроков — оценка относительно точная. Это ориентир, а не официальный балл.";
   if (!c.totalLessons) return "Прогноз может быть точнее: данных пока мало. Чтобы прогноз стал точнее — проходи уроки и практику";
+  if (c.lessonPct < 50) return `Предварительная оценка по первым шагам: пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}), темы с данными: ${c.covered} из ${c.totalSkills}. Число поменяется по мере занятий — это ориентир, а не официальный балл.`;
   return `Прогноз может быть точнее: у тебя пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}). Чтобы прогноз стал точнее — проходи уроки и практику`;
 }
 
@@ -3239,7 +3240,7 @@ function screenDashboard(root) {
           <button class="btn btn--primary btn--sm" onclick="go('path')">Открыть путь</button>
         </div>` : `
         <div class="forecast-hero__top">
-          <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
+          <div class="stat-label">${(!f.empty && cov && !cov.full && (cov.lessonPct < 50 || (cov.totalSkills > 0 && cov.covered / cov.totalSkills < 0.5))) ? "Предварительный прогноз" : "Прогноз результата ЕГЭ"} ${helpDot("forecast")}</div>
           <span class="forecast-trend ${trend && trend.delta > 0 ? "forecast-trend--up" : trend && trend.delta < 0 ? "forecast-trend--down" : ""}">${forecastTrendLabel(trend)}</span>
         </div>
         <div class="forecast-mid">${f.mid}<small>баллов</small></div>
@@ -7812,7 +7813,7 @@ function screenStats(root) {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <div style="font-weight:650;margin-bottom:10px">Текущий прогноз</div>
+      <div style="font-weight:650;margin-bottom:10px">${(!f.empty && cov && (cov.lessonPct < 50 || (cov.totalSkills > 0 && cov.covered / cov.totalSkills < 0.5))) ? "Предварительный прогноз" : "Текущий прогноз"}</div>
       ${f.empty
         ? `<div class="stat-label">${f.premature ? forecastPrematureText(f) : "Пока считать не по чему — проходи уроки и практику, прогноз появится после первых шагов."}</div>`
         : `<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">

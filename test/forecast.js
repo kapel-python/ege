@@ -282,32 +282,29 @@ const testBody = async () => {
     t("прощение: чистый след даёт столько же", forecastSkillMastery(sid, now) === 50);
   }
 
-  /* 14. Порог показа: диагностика + один урок мало, доля уроков и тем открывает. */
+  /* 14. Порог показа: одна диагностика — рано, первый урок + три темы открывают. */
   DataAPI.load(serverLikePayload("profile_math", "server/catalog.json"));
   Store.ready = false;
   Store.reset();
   {
     const weighted = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
     const allLessons = DataAPI.lessons();
-    const needL = Math.max(2, Math.ceil(allLessons.length * 0.2));
-    const needT = Math.max(3, Math.ceil(weighted.length * 0.25));
-    // Первые шаги: диагностика по трём темам и один урок.
+    const needL = Math.max(1, Math.ceil(allLessons.length * 0.05));
+    const needT = Math.max(3, Math.ceil(weighted.length * 0.1));
+    // Только диагностика по трём темам, без уроков, — прогноза ещё нет.
     for (const sk of weighted.slice(0, 3)) {
       Store.state.taskAttempts.push({ taskId: `${sk.id}_p1`, skill: sk.id, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now });
     }
-    if (allLessons[0]) Store.state.completedLessons[allLessons[0].id] = { ts: now };
     const early = forecast();
-    t("порог: диагностика и один урок — прогноза ещё нет",
+    t("порог: одна диагностика без уроков — прогноза ещё нет",
       early.premature === true && early.doneLessons < needL, JSON.stringify(early));
-    // Набираем ровно порог: уроки и темы с данными.
-    for (const l of allLessons.slice(0, needL)) Store.state.completedLessons[l.id] = { ts: now };
-    for (const sk of weighted.slice(0, needT)) {
-      Store.state.skillStats[sk.id] = { progress: 0, solved: 12, correct: 11, timeSec: 200 };
-    }
+    // Первый урок при тех же трёх темах — прогноз появился (предварительный).
+    if (allLessons[0]) Store.state.completedLessons[allLessons[0].id] = { ts: now };
     const opened = forecast();
-    t("порог: уроки и темы набраны — прогноз появился",
+    t("порог: первый урок + три темы — прогноз появился",
       opened.premature !== true && opened.mid > 0 && Number.isFinite(opened.high),
       JSON.stringify(opened));
+    t("порог: ранний прогноз с широкой вилкой", opened.high - opened.low >= 8, JSON.stringify(opened));
     t("порог: снимок прогноза теперь пишется", !!recordForecastSnapshot());
   }
 
