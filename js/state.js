@@ -2293,8 +2293,8 @@ function matchingAnswerLetters(task) {
   if (!/^\d{2,8}$/.test(answer)) return [];
   const text = String(task.text || "");
   if (!MATCHING_ANSWER_RE.test(text)) return [];
-  // Явный список букв: «(АБВГ)» / «(ABCD)».
-  const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/);
+  // Явный список букв: «(АБВГ)», «(ABCD)» или «в порядке АБВ» (биология).
+  const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/) || text.match(/в порядке\s+([А-ЯA-Z]{2,8})/);
   if (explicit && explicit[1].length === answer.length && isConsecutiveLetterList(explicit[1])) {
     return explicit[1].split("");
   }
