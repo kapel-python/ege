@@ -2682,6 +2682,10 @@ function restoreChromeAfterResult(route) {
     syncChromeForRoute(route);
     if (window.Footer) Footer.sync(route);
   } catch (_) {}
+  // Экран результата рисуется напрямую (replaceState + innerHTML, мимо
+  // роутера), поэтому скролл от длинного последнего задания сохранялся —
+  // финиш открывался с середины/конца. Всегда начинаем сверху.
+  try { window.scrollTo(0, 0); } catch (_) {}
 }
 
 function renderSidebar(active) {
