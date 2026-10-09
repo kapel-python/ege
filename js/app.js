@@ -1247,7 +1247,7 @@ function currentRoute() {
   const h = location.hash.replace(/^#\//, "");
   // Хвост «?…» — ПАРАМЕТРЫ возврата (результат внешнего входа), а не часть
   // имени раздела. Без обрезки «#/login?error=…» давал маршрут
-  // «login?error=…», экран не совпадал, сайт падало в dashboard, и
+  // «login?error=…», экран не совпадал, сайт падал в dashboard, и
   // возврат из Google выглядел как «вход не сработал».
   return h.split("?")[0].split("/")[0] || "dashboard";
 }
