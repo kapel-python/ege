@@ -272,7 +272,7 @@ registry-driven, отдельных веток под предметы нет:
   `#subjects` (карточка + бейдж `Доступно`/`Скоро`).
 - `about.html`: meta/og-description, `hero-sub`, `subj-note` с составом
   курсов.
-- `index.html`: meta description приложения.
+- `index.html`: meta description сайта.
 - `llms.txt`: раздел `## Предметы` — одна строка на предмет.
 - `site.webmanifest`: `description` — только если меняется wording.
 - `status.html`: meta description.

@@ -8,7 +8,7 @@
      <script defer src="js/footer.js"></script>
    Скрипт сам вмонтирует футер во все [data-ege-footer].
 
-   Приложение (SPA, index.html): слот #siteFooterSlot, показом
+   Сайт (SPA, index.html): слот #siteFooterSlot, показом
    управляет Footer.sync(route) из render() в js/app.js.
    Страницы-исключения — в Footer.BLACKLIST ниже.
    ============================================================ */
@@ -79,8 +79,8 @@
     ai: true
   };
 
-  /* Ссылки платформы: внутри приложения — SPA-хэш без перезагрузки,
-     снаружи — абсолютный путь на приложение. */
+  /* Ссылки платформы: внутри сайта — SPA-хэш без перезагрузки,
+     снаружи — абсолютный путь на сайт. */
   function resolveLinks(root) {
     var inApp = false;
     try { inApp = !!document.getElementById("screen"); } catch (_) {}
@@ -118,7 +118,7 @@
     }
   }
 
-  /* Приложение: слот #siteFooterSlot (.main, после #screen).
+  /* Сайт: слот #siteFooterSlot (.main, после #screen).
      Вызывается в конце render(); чёрный список и оверлей онбординга
      футер скрывают. Повторный вызов узел не плодит. */
   function sync(route) {

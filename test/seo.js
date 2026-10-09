@@ -66,13 +66,13 @@ t("лендинг: JSON-LD URL абсолютные", !landing.includes('"url":"
 t("лендинг: декоративные svg скрыты от скринридеров",
   !/<svg(?![^>]*aria-hidden)/.test(landing.replace(/<script[\s\S]*?<\/script>/g, "")));
 
-/* ---- index.html (приложение — не индексируется) ---- */
+/* ---- index.html (сайт — не индексируется) ---- */
 const app = read("index.html");
-t("приложение: meta robots noindex", /<meta name="robots" content="noindex, nofollow">/.test(app));
+t("сайт: meta robots noindex", /<meta name="robots" content="noindex, nofollow">/.test(app));
 // noindex + canonical — конфликтующие сигналы: canonical может победить и
 // проиндексировать SPA-оболочку как дубль лендинга. На noindex-странице
 // canonical быть не должно.
-t("приложение: без canonical (конфликтует с noindex)", !/<link rel="canonical"/.test(app));
+t("сайт: без canonical (конфликтует с noindex)", !/<link rel="canonical"/.test(app));
 
 /* ---- server.py wiring ---- */
 const server = read("server/server.py");
@@ -121,7 +121,7 @@ t("сервер: SEO-страницы без X-Robots-Tag (индексирую�
   return body.includes("text/html") && !body.includes("X-Robots-Tag");
 })());
 t("сервер: страница задания с canonical и PracticeProblem", server.includes("PracticeProblem") && server.includes("def seo_render_task_page"));
-t("сервер: CTA ведёт в приложение с seo_subject", server.includes("seo_subject"));
+t("сервер: CTA ведёт в сайт с seo_subject", server.includes("seo_subject"));
 
 /* ---- дизайн SEO-страниц живёт в файлах, а не в server.py ---- */
 t("SEO: шаблон оболочки server/seo/shell.html существует", exists("server/seo/shell.html"));
@@ -148,17 +148,17 @@ t("SEO: маркеры оболочки без пробелов в именах"
 
 /* ---- публичный вход из поиска (без онбординга) ---- */
 const appSrc = read("js/app.js");
-t("приложение: PUBLIC_TASK_ROUTES определён", /const PUBLIC_TASK_ROUTES = new Set/.test(appSrc));
-t("приложение: публичный вход читает seo_subject", appSrc.includes('hashQueryValue("seo_subject")'));
-t("приложение: публичный вход не показывает онбординг", appSrc.includes("!publicTaskEntry"));
-t("приложение: routeParam срезает ?seo_subject", /\.split\("\?"\)\[0\]/.test(appSrc));
-t("приложение: плашка сохранения прогресса", appSrc.includes("syncPublicBanner"));
+t("сайт: PUBLIC_TASK_ROUTES определён", /const PUBLIC_TASK_ROUTES = new Set/.test(appSrc));
+t("сайт: публичный вход читает seo_subject", appSrc.includes('hashQueryValue("seo_subject")'));
+t("сайт: публичный вход не показывает онбординг", appSrc.includes("!publicTaskEntry"));
+t("сайт: routeParam срезает ?seo_subject", /\.split\("\?"\)\[0\]/.test(appSrc));
+t("сайт: плашка сохранения прогресса", appSrc.includes("syncPublicBanner"));
 
 /* ---- чужая SEO-ссылка при выбранном предмете: модалка, а не тихий переход ---- */
-t("приложение: модалка чужого предмета (openSeoSubjectMismatchModal)", /function openSeoSubjectMismatchModal/.test(appSrc));
-t("приложение: модалка спрашивает только при выбранном предмете", appSrc.includes("explicitSubject()"));
-t("приложение: confirm-диалог умеет onCancel (крестик/фон/Esc тоже отмена)", /onCancel/.test(appSrc) && /dlgCancelPending/.test(appSrc));
-t("приложение: падежи предмета из реестра (accusative)", /metadata\.accusative/.test(appSrc));
+t("сайт: модалка чужого предмета (openSeoSubjectMismatchModal)", /function openSeoSubjectMismatchModal/.test(appSrc));
+t("сайт: модалка спрашивает только при выбранном предмете", appSrc.includes("explicitSubject()"));
+t("сайт: confirm-диалог умеет onCancel (крестик/фон/Esc тоже отмена)", /onCancel/.test(appSrc) && /dlgCancelPending/.test(appSrc));
+t("сайт: падежи предмета из реестра (accusative)", /metadata\.accusative/.test(appSrc));
 for (const [sid, acc] of [["profile_math", "профильную математику"], ["basic_math", "базовую математику"],
     ["russian", "русский язык"], ["biology", "биологию"], ["society", "обществознание"]]) {
   t(`реестр ${sid}: винительный падеж «${acc}»`, (() => {

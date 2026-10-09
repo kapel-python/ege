@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Периметр: кому и откуда видно приложение.
+"""Периметр: кому и откуда видно сайт.
 
-Проблема, которую закрывает этот файл. Приложение слушало 0.0.0.0, поэтому
+Проблема, которую закрывает этот файл. Сайт слушало 0.0.0.0, поэтому
 его сокет доставался из интернета напрямую, мимо nginx: без TLS, без HSTS и
 без лимитов фронтенда. Вдобавок EGE_TRUSTED_PROXY=1 читала X-Forwarded-For от
 ЛЮБОГО соединения, а nginx писал заголовок через $proxy_add_x_forwarded_for,
@@ -315,7 +315,7 @@ def check_csrf() -> None:
                                         body={"subject": "profile_math", "onboarded": True})
             t("запрос с нашим Origin принимается", status == 200, status)
 
-            # Без Origin (curl, тесты, приложение) — принимаем.
+            # Без Origin (curl, тесты, сайт) — принимаем.
             status, _, _ = json_request(base, "/api/profile/claim", "POST",
                                         body={"subject": "profile_math", "onboarded": True})
             t("запрос без Origin (не браузер) принимается", status == 200, status)

@@ -1,5 +1,5 @@
 # ege easy — правила обхода для поисковых роботов.
-# В индексе нужны только лендинг (/) и тариф (/subscription). Приложение
+# В индексе нужны только лендинг (/) и тариф (/subscription). Сайт
 # (/dashboard), админка и API — приватные зоны. Служебные страницы (/about,
 # /status, /contacts, /terms, /privacy, /subscription/manage, /agent,
 # /ege-result.html, /404.html, отчёт по сочинению) обходиться могут — они

@@ -166,7 +166,7 @@ function req(pathname, body, cookies) {
 
   const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
   const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
-  // Куки и localStorage сессии — до загрузки приложения.
+  // Куки и localStorage сессии — до загрузки сайта.
   // Токен urlsafe и знак "=" вполне может содержать, поэтому режем по ПЕРВОМУ
   // "=" (split("=")[1] молча отдавал обрезанное значение).
   const sessionRaw = (jar.split("; ").find((c) => c.startsWith("ege_session=")) || "")

@@ -1,7 +1,7 @@
 /* SEO-страницы заданий (/ege/): единый дизайн сайта.
    Токены — те же, что в about.html/status.html (источник правды — about.html).
    Шрифты — общие вендорные. Шапка/подвал — site-header.css/footer.css.
-   Окно примера задания повторяет единое окно практики приложения
+   Окно примера задания повторяет единое окно практики сайта
    (css/styles.css: .task-card, .hint-box, .feedback, .answer-row) —
    те же состояния, чуть адаптированные под страницу без входа. */
 @font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
@@ -195,7 +195,7 @@ p{overflow-wrap:anywhere;}
 .seo-reveal-btn{margin-top:2px;}
 .seo-window__tools{margin-top:clamp(12px,2vw,16px);display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
 
-/* фидбек — те же состояния, что .feedback в приложении */
+/* фидбек — те же состояния, что .feedback на сайте */
 .seo-feedback{margin-top:clamp(12px,2vw,16px);}
 .seo-feedback__box{padding:16px 18px;border-radius:var(--radius-md);
   border:1px solid var(--card-border);background:var(--surface-1);

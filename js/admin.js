@@ -343,7 +343,7 @@ function renderShell(activeSection, screenHTML) {
         <header class="admin-topbar">
           <span class="admin-topbar__title">${esc(SECTIONS.find((s) => s.id === activeSection)?.title || "Пользователь")}</span>
           <span class="admin-topbar__spacer"></span>
-          <a class="btn btn--primary btn--sm admin-topbar__return" href="/dashboard" aria-label="Вернуться в приложение">${aicon("back")}<span>Вернуться в приложение</span></a>
+          <a class="btn btn--primary btn--sm admin-topbar__return" href="/dashboard" aria-label="Вернуться в сайт">${aicon("back")}<span>Вернуться в сайт</span></a>
           <span class="chip chip--accent hide-mobile">ADMIN</span>
         </header>
         <main class="admin-screen" id="adminScreen">${screenHTML}</main>
@@ -378,7 +378,7 @@ function renderLogin(error = "") {
           <input class="a-input" type="password" id="pwInput" placeholder="Админ-пароль" autocomplete="current-password" autofocus required>
           ${error ? `<div class="admin-login__error" id="loginError">${esc(error)}</div>` : ""}
           <button class="btn btn--primary btn--lg" type="submit" id="loginBtn" style="justify-content:center">Войти</button>
-          <div class="admin-login__hint">Текущий аккаунт: <span class="mono" id="whoami">проверяем…</span>.<br>Если нужно войти под другим аккаунтом — сначала выйди в основном приложении.</div>
+          <div class="admin-login__hint">Текущий аккаунт: <span class="mono" id="whoami">проверяем…</span>.<br>Если нужно войти под другим аккаунтом — сначала выйди в основном сайте.</div>
         </form>
       </div>
     </div>`;
@@ -903,7 +903,7 @@ function sortUsersFor(mode, list) {
    гость. `registered` приходит с сервера и означает ровно то же, что в
    auth_state_payload — «есть способ войти»: хеш пароля ИЛИ внешний вход
    (Google). Поэтому подпись не расходится с тем, что человек сам видит в
-   приложении. Одна функция на карточку списка и на страницу пользователя —
+   сайте. Одна функция на карточку списка и на страницу пользователя —
    иначе «гость» в двух местах выглядел бы по-разному. Метка «Google» рядом с
    почтой отвечает на вопрос поддержки «как он вообще входит» — у аккаунта
    только с Google пароля нет. */

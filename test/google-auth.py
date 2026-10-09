@@ -397,7 +397,7 @@ def main():
             # аккаунту нужен онбординг (он и начинается с выбора предмета),
             # поэтому возврата к пикеру выбора предмета тут быть не должно.
             st, hd, body = full_google_login(opener, base, fake, expect_fragment="/dashboard")
-            check("вход -> 302 в приложение", st == 302, st)
+            check("вход -> 302 в сайт", st == 302, st)
             check("сессия выдана", bool(cookie_value(jar, "ege_session")))
             check("nonce сгорел", cookie_value(jar, "ege_oauth_nonce") in (None, ""))
             # Ровно одна новая строка: вход нового адреса заводит ОДИН аккаунт.
@@ -501,7 +501,7 @@ def main():
             st, hd, _ = request(opener3, base, "/api/auth/google")
             st, hd, _ = request_url(opener3, location_of(hd))
             st, hd, _ = request_url(opener3, location_of(hd))
-            check("занятый адрес сразу ведёт в приложение, без экрана пароля",
+            check("занятый адрес сразу ведёт в сайт, без экрана пароля",
                   query_of_fragment(fragment_of(location_of(hd))).get("error") is None
                   and fragment_of(location_of(hd)).startswith("/subject"),
                   fragment_of(location_of(hd)))
@@ -642,7 +642,7 @@ def main():
             st, hd, _ = request_url(fresh_dev, location_of(hd))
             st, hd, _ = request_url(fresh_dev, location_of(hd))
             fragment = fragment_of(location_of(hd))
-            check("новый аккаунт: сразу в приложение, без пикера выбора предмета",
+            check("новый аккаунт: сразу в сайт, без пикера выбора предмета",
                   fragment.startswith("/dashboard") and "fresh=1" in fragment, fragment)
             check("аккаунт действительно заведён", count_users(server) == before_fresh + 1,
                   count_users(server))

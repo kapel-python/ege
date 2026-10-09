@@ -1683,7 +1683,7 @@ def main():
                   and "find_topics" in agent.READ_TOOLS,
                   str([t["function"]["name"] for t in agent.AGENT_TOOLS]))
 
-            section("project_info: справка о приложении вместо выдумок")
+            section("project_info: справка о сайте вместо выдумок")
             # База знаний — один файл agent_knowledge.md рядом с модулем: модель
             # зовёт инструмент и получает ВЕСЬ текст. Проверяем и содержимое:
             # ученику положено знать лимиты, но НЕ положено — техническое нутро.
