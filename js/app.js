@@ -3174,6 +3174,7 @@ function screenDashboard(root) {
   ensureDailyChallenge();
   const dailyIds = asSafeArray(dailyTaskIds());
   const dailyGoal = Math.max(0, dailyIds.length || nonNegativeNumber(d.target));
+  const dailyEnabled = DataAPI.subjectFeature(DataAPI.currentSubject(), "daily");
   const dailyDone = s.daily && s.daily.date === todayStr() && !!s.daily.done;
   const dailySolved = s.daily && s.daily.date === todayStr() ? nonNegativeNumber(s.daily.solved) : 0;
   const openLesson = mostRecentOpenLesson();
@@ -3224,10 +3225,10 @@ function screenDashboard(root) {
           </div>
         </div>
         <div style="margin-top:16px">${progressBar(li.pct)}</div>
-        <div style="margin-top:18px;font-size:13px;color:var(--text-2)">
+        ${dailyEnabled ? `<div style="margin-top:18px;font-size:13px;color:var(--text-2)">
           ${dailyGoal ? `Сегодня: <b class="mono">${Math.min(nonNegativeNumber(act.solved), dailyGoal)} / ${dailyGoal}</b> заданий` : "Ежедневная подборка пока не создана"}
         </div>
-        <div style="margin-top:12px;max-width:340px">${progressBar(dailyGoal ? Math.min(nonNegativeNumber(act.solved) / dailyGoal, 1) * 100 : 0, "progress--thin progress--success")}</div>
+        <div style="margin-top:12px;max-width:340px">${progressBar(dailyGoal ? Math.min(nonNegativeNumber(act.solved) / dailyGoal, 1) * 100 : 0, "progress--thin progress--success")}</div>` : ""}
       </div>
 
       <div class="card forecast-card forecast-hero">
@@ -3294,11 +3295,11 @@ function screenDashboard(root) {
         <div><div class="action-card__title">Повторить слабые места</div>
         <div class="action-card__sub">${openErrors ? (openMajorErrors && openMinorErrors ? `Разобрать: ${openMajorErrors} · Закрепить: ${openMinorErrors}` : openMajorErrors ? `Разобрать: ${openMajorErrors}` : `Закрепить без подсказок: ${openMinorErrors}`) : "Всё разобрано и закреплено"}</div></div>
       </div>
-      <div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="${dailyGoal ? "startDaily()" : "go('trials')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${dailyGoal ? "startDaily()" : "go('trials')"}}" aria-label="Ежедневная задача">
+      ${dailyEnabled ? `<div class="card card--hover action-card action-card--success" role="button" tabindex="0" onclick="${dailyGoal ? "startDaily()" : "go('trials')"}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${dailyGoal ? "startDaily()" : "go('trials')"}}" aria-label="Ежедневная задача">
         <div class="action-card__icon">${icon("zap")}</div>
         <div><div class="action-card__title">Ежедневная задача</div>
         <div class="action-card__sub">${dailyGoal ? (dailyDone ? "Выполнена · можно повторить без награды" : `${dailySolved} / ${dailyGoal} · +${esc(nonNegativeNumber(d.xp))} XP`) : "Подборка появится после подключения заданий"}</div></div>
-      </div>
+      </div>` : ""}
       <div class="card card--hover action-card action-card--violet" role="button" tabindex="0" onclick="go('trials')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('trials')}" aria-label="Испытания">
         <div class="action-card__icon">${icon("crown")}</div>
         <div><div class="action-card__title">Испытания</div>
