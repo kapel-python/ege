@@ -4356,7 +4356,7 @@ function renderTask(root) {
     // текстовый ответ не отражает полноту доказательства и записи решения.
     // Ученик решает на бумаге, сверяется с официальным решением и честно
     // отмечает результат сам — так же, как реально проверяют часть 2 ЕГЭ.
-  } else if (isMatchingAnswerTask(t) && matchingAnswerLetters(t).length) {
+  } else if (matchingAnswerLetters(t).length) {
     sessionMatchWire();
     renderSessionHintControl();
   } else {
@@ -4649,7 +4649,7 @@ function sessionAnswerAreaHtml(t, S) {
       <button class="btn btn--primary" id="essaySubmitBtn" disabled onclick="sessionEssaySubmit()">Отправить сочинение</button>
     </div>`;
   if (isSelfCheckTask(t)) return sessionSelfCheckAreaHtml(t);
-  const matchLetters = isMatchingAnswerTask(t) ? matchingAnswerLetters(t) : [];
+  const matchLetters = matchingAnswerLetters(t);
   if (matchLetters.length) return sessionMatchingAreaHtml(t, matchLetters);
   return `
     <div class="answer-row">
@@ -6686,7 +6686,6 @@ function sessionMatchWire() {
       focusAt(Math.min(digits.length, cells.length - 1));
     });
   });
-  focusAt(0);
 }
 
 function sessionSubmit() {

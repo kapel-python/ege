@@ -2263,16 +2263,28 @@ function countWords(text) {
 
 /* ============================================================
    Задания-«таблицы соответствия»: ответ — цифра под каждой буквой
-   (А, Б, В, Г, Д), как в бланке ЕГЭ. Пока включено только для №22
-   русского (проверяем на живом пользователе), но разбор букв общий.
-   Буквы берём из самого текста задания: явный список «(АБВГ)» либо
-   метки строк «А) …». Если структура не распознана — пустой список,
+   (А, Б, В, Г, Д), как в бланке ЕГЭ. Буквы берём из самого текста
+   задания: явный список «(АБВГ)»/«(ABCD)» или метки строк «А) …».
+   Включаем только настоящие соответствия: в тексте должно быть
+   «соответствие» (или «под каждой буквой/точкой»), иначе мультивыбор
+   («укажите варианты»), физика с «(RC)» и русский с «(НЕ)» ошибочно
+   попали бы в таблицу. Если структура не распознана — пустой список,
    и экран задания остаётся с обычным полем ввода.
    ============================================================ */
-const MATCHING_ANSWER_SKILLS = new Set(["r22"]);
+const MATCHING_ANSWER_RE = /соответстви|под каждой буквой|под каждой точкой/i;
+const MATCHING_CYR = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ";
+const MATCHING_LAT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-function isMatchingAnswerTask(task) {
-  return !!(task && MATCHING_ANSWER_SKILLS.has(String(task.skill || task.skillId || "")));
+/* Явный список букв-подписей должен быть строго подряд от А/A: «АБВГ»,
+   «ABCD». Тогда «(RC)», «(НЕ)», «(ПО)» отсеиваются сами собой. */
+function isConsecutiveLetterList(seq) {
+  const s = String(seq || "");
+  if (s.length < 2) return false;
+  const base = MATCHING_CYR.includes(s[0]) ? MATCHING_CYR
+    : MATCHING_LAT.includes(s[0]) ? MATCHING_LAT : "";
+  if (!base) return false;
+  for (let i = 0; i < s.length; i++) if (base.indexOf(s[i]) !== i) return false;
+  return true;
 }
 
 function matchingAnswerLetters(task) {
@@ -2280,9 +2292,12 @@ function matchingAnswerLetters(task) {
   const answer = String(task.answer || "").trim();
   if (!/^\d{2,8}$/.test(answer)) return [];
   const text = String(task.text || "");
+  if (!MATCHING_ANSWER_RE.test(text)) return [];
   // Явный список букв: «(АБВГ)» / «(ABCD)».
   const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/);
-  if (explicit && explicit[1].length === answer.length) return explicit[1].split("");
+  if (explicit && explicit[1].length === answer.length && isConsecutiveLetterList(explicit[1])) {
+    return explicit[1].split("");
+  }
   // Метки строк «А) …», «A) …».
   const labels = [];
   const re = /(?:^|\n)\s*([А-ЯA-Z])\)\s/g;

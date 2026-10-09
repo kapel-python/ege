@@ -1,45 +1,38 @@
-/* Тесты разбора заданий-«таблиц соответствия» (matchingAnswerLetters /
-   isMatchingAnswerTask). Пока в интерфейсе включено только для №22 русского,
-   но сам разбор букв общий: явный список «(АБВГ)» или метки строк «А) …».
-   Если структура не распознана — пустой список, экран остаётся с обычным
-   полем ввода (мультивыбор и «укажите варианты» не должны попадать в таблицу). */
+/* Тесты разбора заданий-«таблиц соответствия» (matchingAnswerLetters).
+   Таблица включается только для настоящих соответствий: в тексте есть
+   «соответствие»/«под каждой буквой», а буквы берутся из списка «(АБВГ)»/
+   «(ABCD)» или из меток строк «А) …». Мультивыбор («укажите варианты»),
+   физика с «(RC)» и русский с «(НЕ)»/«(ПО)» в таблицу попадать НЕ должны. */
 const fs = require("fs");
 const src = fs.readFileSync("js/state.js", "utf8");
 const ru = JSON.parse(fs.readFileSync("server/catalog_russian.json", "utf8"));
 const basic = JSON.parse(fs.readFileSync("server/catalog_basic.json", "utf8"));
+const soc = JSON.parse(fs.readFileSync("server/catalog_society.json", "utf8"));
+const prof = JSON.parse(fs.readFileSync("server/catalog.json", "utf8"));
 const taskOf = (catalog, id) => catalog.tasks.find((t) => t.id === id);
 
 const testBody = async () => {
   let fails = 0;
   const t = (name, cond, extra) => { console.log((cond ? "ok   " : "FAIL ") + name + (cond || !extra ? "" : " | " + extra)); if (!cond) fails++; };
+  const letters = (cat, id) => matchingAnswerLetters(taskOf(cat, id)).join("");
 
-  /* 1. №22: буквы А–Д, длина = длине ответа. */
-  const r22 = ["r22_1", "r22_2", "r22_3", "r22_4", "r22_5"].map((id) => taskOf(ru, id));
-  t("№22: у всех заданий распознаны 5 букв",
-    r22.every((x) => matchingAnswerLetters(x).join("") === "АБВГД"),
-    r22.map((x) => matchingAnswerLetters(x).join("")).join(" | "));
+  /* 1. Настоящие соответствия: буквы А–Д. */
+  t("№22: буквы А–Д", ["r22_1", "r22_2", "r22_3", "r22_4", "r22_5"].every((id) => letters(ru, id) === "АБВГД"));
+  t("№8: буквы А–Д", letters(ru, "r08_1") === "АБВГД", letters(ru, "r08_1"));
+  t("обществознание: буквы А–Д", letters(soc, "soc03_p1") === "АБВГД" && letters(soc, "soc15_p1") === "АБВГД");
+  t("база: явный список (АБВГ)", letters(basic, "b02_p1") === "АБВГ", letters(basic, "b02_p1"));
+  t("база: явный список (ABCD)", letters(basic, "b18_p1") === "ABCD", letters(basic, "b18_p1"));
 
-  /* 2. В интерфейсе — только №22 (другие скиллы не включаем). */
-  t("включено только для №22", isMatchingAnswerTask(taskOf(ru, "r22_1")) === true);
-  t("другие задания не включаются",
-    isMatchingAnswerTask(taskOf(ru, "r09_1")) === false
-    && isMatchingAnswerTask(taskOf(basic, "b02_p1")) === false
-    && isMatchingAnswerTask({ skill: "r01" }) === false);
+  /* 2. Ложные срабатывания отсеяны: не соответствия. */
+  t("русский «укажите варианты» (НЕ): без таблицы", letters(ru, "r13_3") === "", letters(ru, "r13_3"));
+  t("русский «оба слова слитно» (ПО): без таблицы", letters(ru, "r14_2") === "", letters(ru, "r14_2"));
+  t("физика с формулой (RC): без таблицы", letters(prof, "n10_a2") === "", letters(prof, "n10_a2"));
+  t("мультивыбор r09: без таблицы", letters(ru, "r09_1") === "", letters(ru, "r09_1"));
 
-  /* 3. Разбор букв общий: явный список «(АБВГ)» / «(ABCD)». */
-  t("явный список (АБВГ)", matchingAnswerLetters(taskOf(basic, "b02_p1")).join("") === "АБВГ",
-    matchingAnswerLetters(taskOf(basic, "b02_p1")).join(""));
-  t("явный список (ABCD)", matchingAnswerLetters(taskOf(basic, "b18_p1")).join("") === "ABCD",
-    matchingAnswerLetters(taskOf(basic, "b18_p1")).join(""));
-
-  /* 4. Мультивыбор и «укажите варианты» не превращаются в таблицу. */
-  const r09 = taskOf(ru, "r09_1");
-  t("мультивыбор r09: без буквенной таблицы", matchingAnswerLetters(r09).length === 0,
-    matchingAnswerLetters(r09).join(""));
-
-  /* 5. Защита от чужого типа/ответа. */
-  t("не short_answer: пусто", matchingAnswerLetters({ type: "long_text", answer: "12", text: "А) x" }).length === 0);
+  /* 3. Защита от чужого типа/ответа. */
+  t("не short_answer: пусто", matchingAnswerLetters({ type: "long_text", answer: "12", text: "Установите соответствие" }).length === 0);
   t("ответ не цифры: пусто", matchingAnswerLetters({ type: "short_answer", answer: "АБ", text: "А) x\nБ) y" }).length === 0);
+  t("список не от А: пусто", matchingAnswerLetters({ type: "short_answer", answer: "12", text: "Установите соответствие (БВ)" }).length === 0);
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
