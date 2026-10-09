@@ -179,7 +179,11 @@ function check(name, cond, detail) {
   check("mock без ссылки: честная ошибка, не редирект", true);
   await page.keyboard.press("Escape");
 
-  // --- 2b2. публичная страница: free + висящий счёт => покупки нет --------
+  // --- 2b2. публичная страница: free + висящий счёт ---------------------
+  // Кнопка покупки ОСТАЁТСЯ на месте (клик ведёт на manage, где баннер
+  // счёта предложит завершить или отменить), рядом — заметка о счёте.
+  // Прятать кнопку нельзя: ghost прыгает на её место и выглядит как
+  // подмена «Оформить Plus» на «Попробовать бесплатно».
   const pendRef = await page.evaluate(async () => {
     const hist = await (await fetch("/api/subscription/payments?limit=10")).json();
     const p = ((hist && hist.payments) || []).find((x) => x && x.status === "pending");
@@ -191,9 +195,14 @@ function check(name, cond, detail) {
   await page.waitForFunction(() => {
     const b = document.getElementById("ctaBtn");
     const n = document.getElementById("pendingNote");
-    return b && b.style.display === "none" && n && !n.hidden;
+    return b && b.style.display !== "none" && n && !n.hidden;
   }, { timeout: 10000 });
-  check("free + висящий счёт: кнопки покупки нет, есть заметка", true);
+  check("free + висящий счёт: кнопка на месте, рядом заметка", true);
+  await Promise.all([
+    page.waitForURL(/\/subscription\/manage/, { waitUntil: "commit" }),
+    page.click("#ctaBtn"),
+  ]);
+  check("клик по «Оформить» при счёте ведёт на manage", true);
   await page.evaluate(async (ref) => {
     await fetch("/api/subscription/payments/cancel", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -202,10 +211,10 @@ function check(name, cond, detail) {
   }, pendRef);
   await page.goto(BASE + "/subscription", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => {
-    const b = document.getElementById("ctaBtn");
-    return b && b.style.display !== "none";
+    const n = document.getElementById("pendingNote");
+    return n && n.hidden;
   }, { timeout: 10000 });
-  check("после отмены счёта кнопка покупки вернулась", true);
+  check("после отмены счёта заметка ушла", true);
 
   // --- 2c. промокод: «Применить» считает скидку ДО создания счёта ---
   const promoMade = await (async () => {

@@ -211,9 +211,6 @@
     z-index:120;background:var(--surface-2);border:1px solid var(--card-border-hover);border-radius:14px;
     padding:12px 18px;font-size:13.5px;box-shadow:var(--shadow-lg);max-width:min(92vw,420px);text-align:center;}
   .toast[hidden]{display:none;}
-  .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);
-    transition-delay:var(--d,0ms);}
-  .js .rv.in{opacity:1;transform:none;}
   @media (max-width:720px){
     .grid--2{grid-template-columns:1fr;}
   }
@@ -221,7 +218,6 @@
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
     *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important;}
-    .js .rv{opacity:1;transform:none;}
   }
 </style>
 </head>
@@ -256,7 +252,7 @@
 
   <div id="content" hidden>
     <!-- статус -->
-    <section class="card card--hero rv" id="statusCard">
+    <section class="card card--hero" id="statusCard">
       <h2 class="card-title"><span id="statusPill">…</span></h2>
       <p class="card-sub" id="statusMeta">…</p>
       <div class="meter meter--plus" id="periodMeter" hidden>
@@ -267,9 +263,9 @@
 
     <!-- лимиты сегодня -->
     <section class="section">
-      <div class="section-label rv">осталось сегодня</div>
+      <div class="section-label">осталось сегодня</div>
       <div class="grid grid--2">
-        <div class="card ring-card rv">
+        <div class="card ring-card">
           <svg class="svg-defs" width="0" height="0" aria-hidden="true"><defs>
             <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stop-color="#38BDF8"/><stop offset="100%" stop-color="#6EE7B7"/>
@@ -285,7 +281,7 @@
           <div class="ring-card__sub" id="essaySub">…</div>
           <div class="ring-card__reset" id="essayReset" hidden></div>
         </div>
-        <div class="card ring-card rv" style="--d:100ms">
+        <div class="card ring-card">
           <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
             <circle class="ring__track" cx="70" cy="70" r="54"/>
             <circle class="ring__bar" id="agentRing" cx="70" cy="70" r="54"/>
@@ -301,8 +297,8 @@
 
     <!-- преимущества -->
     <section class="section">
-      <div class="section-label rv">что входит</div>
-      <div class="card rv">
+      <div class="section-label">что входит</div>
+      <div class="card">
         <ul class="perks">
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Вдвое больше практики</b> — <span id="perkLimits">10 проверок сочинений и 50 обращений к ИИ в день</span>.</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Наставник рядом</b> — объяснит ошибку, соберёт план на неделю и ответит с учётом твоего прогресса.</span></li>
@@ -314,8 +310,8 @@
 
     <!-- списания -->
     <section class="section">
-      <div class="section-label rv">списания</div>
-      <div class="card rv">
+      <div class="section-label">списания</div>
+      <div class="card">
         <h2 class="card-title">История платежей</h2>
         <p class="card-sub">Каждый платёж и каждая выдача — своей строкой.</p>
         <div class="hist" id="payHist"></div>
@@ -324,8 +320,8 @@
 
     <!-- действия -->
     <section class="section">
-      <div class="section-label rv">действия</div>
-      <div class="card rv">
+      <div class="section-label">действия</div>
+      <div class="card">
         <h2 class="card-title">Подписка</h2>
         <p class="card-sub" id="actionsSub">…</p>
         <div id="pendingSlot"></div>
@@ -386,23 +382,6 @@
     var ms = Number(expiresAt) - Date.now();
     return ms > 0 ? Math.ceil(ms / 86400000) : 0;
   }
-
-  /* появление при скролле */
-  try {
-    var nodes = [].slice.call(document.querySelectorAll(".rv"));
-    if (reduce || !("IntersectionObserver" in window)) {
-      nodes.forEach(function(n){ n.classList.add("in"); });
-    } else {
-      var io = new IntersectionObserver(function(entries){
-        entries.forEach(function(en){
-          if (!en.isIntersecting) return;
-          en.target.classList.add("in");
-          io.unobserve(en.target);
-        });
-      }, { threshold: 0.1 });
-      nodes.forEach(function(n){ io.observe(n); });
-    }
-  } catch(e){}
 
   var toastTimer = null;
   function toast(text){

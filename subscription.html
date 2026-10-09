@@ -238,10 +238,6 @@
   .buybar__btn{margin-left:auto;flex:0 0 auto;padding:13px 22px;border:0;border-radius:12px;cursor:pointer;
     background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 50%,#2563EB 100%);color:#fff;font:inherit;
     font-size:14px;font-weight:700;}
-  /* появление */
-  .js .rv{opacity:0;transform:translateY(24px);transition:opacity 0.7s var(--ease-out),transform 0.7s var(--ease-out);
-    transition-delay:var(--d,0ms);}
-  .js .rv.in{opacity:1;transform:none;}
   @media (max-width:720px){
     .card-grid{grid-template-columns:1fr;}
   }
@@ -249,7 +245,6 @@
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
     *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important;}
-    .js .rv{opacity:1;transform:none;}
   }
 </style>
 </head>
@@ -290,18 +285,18 @@
         <a class="btn btn-ghost" href="/dashboard">Попробовать бесплатно</a>
         <span class="cta-note">Оплата картой или СБП · данные карты нам не передаются</span>
       </div>
-      <p class="pending-note" id="pendingNote" hidden>У тебя есть счёт, который ждёт оплаты. <a href="/subscription/manage">Завершить или отменить</a> — и покупка снова станет доступна.</p>
+      <p class="pending-note" id="pendingNote" hidden>Начатая оплата ещё ждёт тебя: <a href="/subscription/manage">завершить или отменить</a> её — и оформление продолжится.</p>
 
     </div>
   </section>
 
   <section class="section">
     <div class="wrap">
-      <div class="section-label rv">возможности Plus</div>
-      <h2 class="section-title rv">Подготовка без потолка — с наставником рядом</h2>
-      <p class="section-desc rv">Каждое сочинение — с проверкой по критериям и разбором ошибок. Каждый день — с понятным маршрутом под твой уровень и цель.</p>
+      <div class="section-label">возможности Plus</div>
+      <h2 class="section-title">Подготовка без потолка — с наставником рядом</h2>
+      <p class="section-desc">Каждое сочинение — с проверкой по критериям и разбором ошибок. Каждый день — с понятным маршрутом под твой уровень и цель.</p>
       <div class="card-grid">
-        <div class="card rv">
+        <div class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12z"/></svg>
           </div>
@@ -309,7 +304,7 @@
           <div class="card-big">10 в день</div>
           <p class="card-text">Каждая работа — по критериям ФИПИ, с разбором ошибок и динамикой баллов. Вдвое больше ежедневной практики.</p>
         </div>
-        <div class="card rv" style="--d:100ms">
+        <div class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/></svg>
           </div>
@@ -317,7 +312,7 @@
           <div class="card-big">50 обращений</div>
           <p class="card-text">Объяснит ошибку простыми словами, соберёт план на неделю и ответит с учётом твоего прогресса.</p>
         </div>
-        <div class="card rv" style="--d:200ms">
+        <div class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l4 4 5-7 5 7 4-4v11H3z"/></svg>
           </div>
@@ -325,7 +320,7 @@
           <div class="card-big">вся динамика</div>
           <p class="card-text">Все работы, баллы и график роста — в разделе «Мои сочинения». Видно, что уже выросло, а что подтянуть.</p>
         </div>
-        <div class="card rv" style="--d:300ms">
+        <div class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8l-2.5 5.5L8 16l2.5-5.5L16 8z"/></svg>
           </div>
@@ -339,10 +334,10 @@
 
   <section class="section">
     <div class="wrap">
-      <div class="section-label rv">тарифы</div>
-      <h2 class="section-title rv">Старт — попробовать. Plus — сдать на максимум</h2>
+      <div class="section-label">тарифы</div>
+      <h2 class="section-title">Старт — попробовать. Plus — сдать на максимум</h2>
       <div class="card-grid" style="margin-top:clamp(20px,3vw,28px);">
-        <div class="card rv" id="baseCard">
+        <div class="card" id="baseCard">
           <div class="plan-name">Старт</div>
           <div class="plan-price">0 <small>₽</small></div>
           <div class="plan-period">навсегда</div>
@@ -356,7 +351,7 @@
             <li class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Маршрут подготовки под твою цель</span></li>
           </ul>
         </div>
-        <div class="card card--plus rv" id="plusCard" style="--d:100ms">
+        <div class="card card--plus" id="plusCard">
           <div class="plan-name"><span class="plus">Plus</span></div>
           <div class="plan-price"><span class="num" data-price>199</span> <small data-price-suffix>₽ / мес</small></div>
           <div class="plan-period">1590 ₽ в год · −33%</div>
@@ -374,22 +369,22 @@
 
   <section class="section">
     <div class="wrap">
-      <div class="section-label rv">вопросы</div>
-      <h2 class="section-title rv">Коротко о важном</h2>
+      <div class="section-label">вопросы</div>
+      <h2 class="section-title">Коротко о важном</h2>
       <div class="faq" style="margin-top:clamp(20px,3vw,28px);">
-        <div class="faq__item rv">
+        <div class="faq__item">
           <button class="faq__q" type="button" aria-expanded="false">Что даст Plus с первого дня?<span class="faq__sign" aria-hidden="true"></span></button>
           <div class="faq__a"><div><p>Больше практики и наставник рядом: 10 проверок сочинений в день, 50 обращений к ИИ, личный маршрут и история баллов с динамикой. Предмет, цель и весь прогресс сохраняются.</p></div></div>
         </div>
-        <div class="faq__item rv">
+        <div class="faq__item">
           <button class="faq__q" type="button" aria-expanded="false">Где найти мои сочинения?<span class="faq__sign" aria-hidden="true"></span></button>
           <div class="faq__a"><div><p>В конце Пути — раздел «Мои сочинения»: все работы, разборы и график роста. Он открывается вместе с Plus.</p></div></div>
         </div>
-        <div class="faq__item rv">
+        <div class="faq__item">
           <button class="faq__q" type="button" aria-expanded="false">Как управлять подпиской?<span class="faq__sign" aria-hidden="true"></span></button>
           <div class="faq__a"><div><p>Всё — в профиле и на странице управления: срок, чеки и продление. Оплата — через защищённую страницу картой или СБП: данные карты нам не передаются.</p></div></div>
         </div>
-        <div class="faq__item rv">
+        <div class="faq__item">
           <button class="faq__q" type="button" aria-expanded="false">У меня есть промокод — куда его ввести?<span class="faq__sign" aria-hidden="true"></span></button>
           <div class="faq__a"><div><p>В окно оплаты, в поле для кода: скидка пересчитается сразу, ещё до оплаты. Если код покрывает стоимость полностью, Plus активируется сразу без оплаты.</p></div></div>
         </div>
@@ -417,23 +412,6 @@
 (function(){
   "use strict";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  /* появление при скролле */
-  try {
-    var nodes = [].slice.call(document.querySelectorAll(".rv"));
-    if (reduce || !("IntersectionObserver" in window)) {
-      nodes.forEach(function(n){ n.classList.add("in"); });
-    } else {
-      var io = new IntersectionObserver(function(entries){
-        entries.forEach(function(en){
-          if (!en.isIntersecting) return;
-          en.target.classList.add("in");
-          io.unobserve(en.target);
-        });
-      }, { threshold: 0.1 });
-      nodes.forEach(function(n){ io.observe(n); });
-    }
-  } catch(e){}
 
   /* период оплаты: меняется только цена */
   var PLANS = {
@@ -540,17 +518,16 @@
   var activeBanner = document.getElementById("activeBanner");
   var activeText = document.getElementById("activeText");
 
-  /* Свободному пользователю с висящим счётом кнопка покупки на публичной
-     странице НЕ показывается: сначала завершить или отменить счёт в
-     управлении (та же логика, что на странице управления). Гостя не
-     проверяем — счёта у него быть не может. */
+  /* Висящий счёт НЕ прячет кнопку покупки: желание купить от счёта
+     не зависит, клик ведёт на manage (onBuy), где баннер предложит
+     завершить или отменить. Прятать нельзя: ghost-кнопка прыгает
+     на место primary и выглядит как подмена «Оформить Plus» на
+     «Попробовать бесплатно». Гостя не проверяем — счёта у него
+     быть не может. */
   function markPending(){
     subState.pending = true;
-    if (ctaBtn) ctaBtn.style.display = "none";
     var note = document.getElementById("pendingNote");
     if (note) note.hidden = false;
-    var bb = document.getElementById("buybar");
-    if (bb) { bb.hidden = true; bb.classList.remove("is-on"); }
   }
 
   function checkPending(){
@@ -670,7 +647,7 @@
   var shown = false;
   function syncBuybar(){
     if (!buybar || !ctaRow) return;
-    if (subState.active || subState.pending) return;
+    if (subState.active) return;
     if (window.innerWidth <= 720) {
       var need = ctaRow.getBoundingClientRect().bottom < 0;
       if (need !== shown) {
