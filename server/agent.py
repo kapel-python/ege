@@ -1512,6 +1512,9 @@ FORECAST_FORGIVE_DAYS = 14
 # Вес попытки с подсказкой — тем же коэффициентом, что режет награду
 # (0.6/0.3). Индекс — уровень подсказки 0–3. Зеркало js/state.js.
 FORECAST_HINT_WEIGHTS = (1.0, 0.6, 0.3, 0.3)
+# Сочинение в topGains — только для готовых (зеркало js/state.js):
+# тестовая часть освоена хотя бы наполовину либо сочинение уже пробовали.
+ESSAY_READY_MASTERY = 50
 # Порог показа прогноза — зеркало js/state.js (FORECAST_READY_*): раньше
 # него числа нет ни на экране, ни в ответе агента — только «пройди больше
 # тем и практики». Низкий намеренно: 1–2 урока и 3 темы с данными («первые
@@ -1849,10 +1852,34 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
     top = int(scale[-1]) if scale else (mid + 5)
     low = max(int(scale[0]), mid - hw)
     high = min(top, mid + hw)
+    # Сочинение в topGains — только для готовых (зеркало essayReadyForGains
+    # в js/state.js): вес 22/50 иначе всегда побеждает, и новичок видит
+    # «+43» в первый день. Готовность: тестовая часть освоена хотя бы
+    # наполовину либо сочинение уже пробовали (попытка или отправка).
+    try:
+        essay_skills = {str(r[0]) for r in conn.execute(
+            "SELECT DISTINCT skill_id FROM tasks WHERE task_type='long_text'")}
+    except sqlite3.Error:
+        essay_skills = set()
+    essay_skills &= {str(sid) for sid, _ in scored}
+    attempted = set(data.get("attempts", {}).keys())
+    essay_tried = any(s in attempted for s in essay_skills)
+    if not essay_tried:
+        try:
+            essay_tried = conn.execute(
+                "SELECT 1 FROM essay_submissions WHERE user_id=? AND subject=? LIMIT 1",
+                (user_id, subject)).fetchone() is not None
+        except sqlite3.Error:
+            pass
+    ew = sum(w for sid, w in scored if sid not in essay_skills)
+    ewm = sum(w * mastery.get(sid, 0) for sid, w in scored if sid not in essay_skills)
+    essay_ready = (not essay_skills) or essay_tried or (ew > 0 and ewm / ew >= ESSAY_READY_MASTERY)
     gains = []
     for skill_id, weight in scored:
         m = mastery[skill_id]
         if m >= 100:
+            continue
+        if skill_id in essay_skills and not essay_ready:
             continue
         bumped = (w_mastery + weight * (100 - m)) / w_sum
         primary2 = bumped / 100.0 * total

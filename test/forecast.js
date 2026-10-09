@@ -308,6 +308,54 @@ const testBody = async () => {
     t("порог: снимок прогноза теперь пишется", !!recordForecastSnapshot());
   }
 
+  /* 15. Сочинение в топ-приросте — только для готовых. */
+  DataAPI.load(serverLikePayload("russian", "server/catalog_russian.json"));
+  Store.ready = false;
+  Store.reset();
+  {
+    // Новичок тестовой части: 2 урока + попытки по 3 темам, сочинение не тронуто.
+    for (const sid of ["r01", "r02"]) {
+      const l = (DataAPI.lessonsBySkill(sid)[0]) || null;
+      if (l) Store.state.completedLessons[l.id] = { ts: now };
+    }
+    for (const sid of ["r01", "r02", "r04"]) {
+      for (let i = 0; i < 5; i++) {
+        Store.state.taskAttempts.push({ taskId: `${sid}_x${i}`, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
+      }
+    }
+    const f = forecast();
+    t("сочинение: прогноз открыт (порог первых шагов пройден)", f.premature !== true, JSON.stringify(f));
+    const gains = forecastTopGains(5);
+    t("сочинение: новичку сочинение не предлагается",
+      !gains.some((g) => g.skillId === "russian_essay_source"),
+      JSON.stringify(gains.map((g) => g.skillId)));
+    t("сочинение: тестовые темы предлагаются", gains.length > 0);
+    // Первая проба сочинения — оно появляется в рекомендациях.
+    Store.state.taskAttempts.push({ taskId: "re27_1", skill: "russian_essay_source", correct: true, hintLevel: 0, seconds: 300, closesTaskId: null, ts: now });
+    const gains2 = forecastTopGains(5);
+    t("сочинение: после первой пробы сочинение предлагается",
+      gains2.some((g) => g.skillId === "russian_essay_source"),
+      JSON.stringify(gains2.map((g) => g.skillId)));
+  }
+
+  /* 16. Сочинение появляется и без пробы — когда тестовая часть освоена наполовину. */
+  Store.reset();
+  {
+    const weighted = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0 && s.id !== "russian_essay_source");
+    for (const sk of weighted.slice(0, 15)) {
+      const l = (DataAPI.lessonsBySkill(sk.id)[0]) || null;
+      if (l) Store.state.completedLessons[l.id] = { ts: now };
+      for (let i = 0; i < 12; i++) {
+        Store.state.taskAttempts.push({ taskId: `estrong_${sk.id}_${i}`, skill: sk.id, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
+      }
+    }
+    const gains = forecastTopGains(5);
+    t("сочинение: при освоенной тестовой части сочинение предлагается",
+      gains.some((g) => g.skillId === "russian_essay_source"),
+      JSON.stringify(gains.map((g) => g.skillId)));
+  }
+
+
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
   process.exit(fails ? 1 : 0);
 };

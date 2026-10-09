@@ -2173,9 +2173,49 @@ function forecast() {
 /* «Что даст +N»: какой прирост тестового балла принесёт полное
    закрытие каждой темы. Считается через ту же цепочку
    (взвешенное среднее → первичные → шкала), поэтому вклад тем
-   определяется конфигом текущего предмета. */
-function forecastTopGains(n = 3) {
-  if (!forecastConfigAvailable()) return [];
+   определяется конфигом текущего предмета. Сочинение в этот список
+   попадает только для готовых (см. essayReadyForGains ниже): его вес
+   22 из 50 иначе всегда побеждал бы, и новичок видел бы «Закрой
+   сочинение — будет +43» в первый же день. */
+const ESSAY_READY_MASTERY = 50;
+
+/* Навыки сочинений: хотя бы одно задание long_text. Пусто — в предмете
+   сочинений нет и гейтить нечего. */
+function essaySkillIds(skills) {
+  const out = [];
+  for (const s of skills) {
+    const sid = s && String(s.id || s.skillId || "");
+    if (!sid || out.includes(sid)) continue;
+    let tasks = [];
+    try { tasks = (typeof DataAPI !== "undefined" && DataAPI.tasksBySkill) ? DataAPI.tasksBySkill(sid) : []; } catch (_) { tasks = []; }
+    if (safeArray(tasks).some(isEssayTask)) out.push(sid);
+  }
+  return out;
+}
+
+/* Готовность к подсказке про сочинение: тестовая часть освоена хотя бы
+   наполовину (среднее освоение неэссеистических тем ≥ 50) либо сочинение
+   уже пробовали писать — тогда это осознанный путь. Само сочинение
+   доступно как раньше (Путь, рекомендации); здесь речь только про
+   агрессивную кнопку «что даст больше всего». */
+function essayReadyForGains(skills, masteryById) {
+  const essay = essaySkillIds(skills);
+  if (!essay.length) return { ready: true, essay };
+  const attempted = new Set(safeArray(Store.state && Store.state.taskAttempts)
+    .map((a) => a && String(a.skill || a.skillId || "")).filter(Boolean));
+  if (essay.some((id) => attempted.has(id))) return { ready: true, essay };
+  let ew = 0, ewm = 0;
+  for (const s of skills) {
+    const sid = String(s.id);
+    if (essay.includes(sid)) continue;
+    const w = skillEgeWeight(sid);
+    ew += w;
+    ewm += w * (Number(masteryById[sid]) || 0);
+  }
+  return { ready: ew > 0 && ewm / ew >= ESSAY_READY_MASTERY, essay };
+}
+
+function forecastTopGains(n = 3) {  if (!forecastConfigAvailable()) return [];
   const scale = forecastScale(), total = forecastTotal();
   if (!scale.length || !(total > 0)) return [];
   const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
@@ -2194,8 +2234,11 @@ function forecastTopGains(n = 3) {
     wMastery += w * m;
   }
   if (!wSum) return [];
+  const essayGate = essayReadyForGains(skills, masteryById);
   const gains = [];
   for (const s of skills) {
+    const sid = String(s.id);
+    if (!essayGate.ready && essayGate.essay.includes(sid)) continue;
     const m = masteryById[s.id];
     if (m >= 100) continue;
     const w = skillEgeWeight(s.id);
