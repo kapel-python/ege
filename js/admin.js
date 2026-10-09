@@ -1080,8 +1080,8 @@ function subCard(sub, payments) {
         <div class="a-kv__item"><div class="a-kv__k">Лимиты</div><div class="a-kv__v">${sub.limits && sub.limits.essay != null ? `${sub.limits.essay} проверок · ${sub.limits.agent} ходов в день` : "—"}</div></div>
       </div>${range}` : `
       <div style="font-size:13.5px;color:var(--text-2)">${sub && sub.plan
-        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений и 10 ходов ИИ в день.`
-        : "Бесплатный тариф: 5 проверок сочинений и 10 ходов ИИ в день. Выдача открывает 10 проверок и 50 ходов ИИ в день сразу."}</div>`;
+        ? `Была <span class="plus">Plus</span>, сейчас — ${esc(subStatusText(sub))}${sub.expiresAt ? ` (срок вышел ${esc(fmtDate(sub.expiresAt))})` : ""}. Бесплатный тариф: 5 проверок сочинений в день, персональный ИИ недоступен.`
+        : "Бесплатный тариф: 5 проверок сочинений в день, персональный ИИ недоступен. Выдача открывает 10 проверок и 50 ходов ИИ в день сразу."}</div>`;
   // Платежи — стопкой строк, а не таблицей: таблица на телефоне уезжала
   // за край карточки (горизонтальный скролл внутри — не чтение).
   const history = (payments && payments.length) ? `
@@ -1653,7 +1653,7 @@ function bindUserActions(p) {
   if (subRevokeEl) subRevokeEl.onclick = () => {
     openModal(`
       <div class="a-modal__title" style="color:var(--danger)">Отменить доступ <span class="plus">Plus</span> — ${esc(p.accountId || "")}?</div>
-      <div class="a-modal__desc">Доступ закроется <b>сразу</b>, лимиты вернутся к бесплатным (5 проверок, 10 ходов ИИ в день). История платежей сохранится — деньги в аудите останутся как доход. Для возврата денег есть отдельное действие «Возврат».</div>
+      <div class="a-modal__desc">Доступ закроется <b>сразу</b>, лимиты вернутся к бесплатным (5 проверок, ИИ недоступен). История платежей сохранится — деньги в аудите останутся как доход. Для возврата денег есть отдельное действие «Возврат».</div>
       <div class="a-modal__actions">
         <button class="btn btn--soft" id="mCancel">Отмена</button>
         <button class="btn btn--danger-soft" id="mDo">Отменить доступ</button>
@@ -4960,7 +4960,7 @@ async function screenSubscription() {
         <div class="a-kv__item"><div class="a-kv__k">Месяц</div><div class="a-kv__v">${fmtMoney(cfg.priceMonthKopecks)} · календарный месяц</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Год</div><div class="a-kv__v">${fmtMoney(cfg.priceYearKopecks)} · 12 календарных месяцев</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Лимиты <span class="plus">Plus</span></div><div class="a-kv__v">${cfg.plusEssay} проверок · ${cfg.plusAgent} ходов в день</div></div>
-        <div class="a-kv__item"><div class="a-kv__k">Бесплатно</div><div class="a-kv__v">${cfg.freeEssay} проверок · ${cfg.freeAgent} ходов в день</div></div>
+        <div class="a-kv__item"><div class="a-kv__k">Бесплатно</div><div class="a-kv__v">${cfg.freeEssay} проверок${cfg.agentRequiresPlus ? "" : " · " + cfg.freeAgent + " ходов в день"}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">ИИ</div><div class="a-kv__v">${cfg.agentRequiresPlus ? "только <span class=\"plus\">Plus</span>" : "открыт всем"}</div></div>
         <div class="a-kv__item"><div class="a-kv__k">Ручных грантов</div><div class="a-kv__v">${fmtNum(m.manualGrants)}</div></div>
       </div>

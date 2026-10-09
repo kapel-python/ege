@@ -213,12 +213,13 @@ def webhook_secret() -> str:
 
 
 def agent_requires_plus() -> bool:
-    """Флаг будущего «ИИ только по подписке».
+    """Флаг «ИИ только по подписке».
 
-    Выключен по умолчанию: текущие бесплатные пользователи ничего не
-    теряют, Plus только поднимает потолки. Когда продукт будет готов
-    закрыть ИИ для бесплатного тарифа — один флаг, без правок
-    кода: endpoints начнут отвечать 403 SUBSCRIPTION_REQUIRED.
+    В коде выключен по умолчанию (значит, раздел открыт всем), прод
+    включает переменной EGE_AGENT_REQUIRES_PLUS=1 в /etc/ege-2026.env —
+    без единой правки кода: endpoints начинают отвечать 403
+    SUBSCRIPTION_REQUIRED, а /api/subscription/status отдаёт
+    limits.agentAccess=false, и фронт прячет «ИИ» из навигации.
     """
     return (os.environ.get("EGE_AGENT_REQUIRES_PLUS") or "").strip() == "1"
 
