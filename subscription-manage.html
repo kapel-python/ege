@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Управление подпиской — ege easy Plus</title>
-<meta name="description" content="Управление подпиской ege easy Plus: статус, лимиты и история платежей.">
+<meta name="description" content="Управление подпиской ege easy Plus: статус, остатки и история платежей.">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
@@ -267,7 +267,7 @@
 
     <!-- лимиты сегодня -->
     <section class="section">
-      <div class="section-label rv">лимиты сегодня</div>
+      <div class="section-label rv">осталось сегодня</div>
       <div class="grid grid--2">
         <div class="card ring-card rv">
           <svg class="svg-defs" width="0" height="0" aria-hidden="true"><defs>
@@ -304,10 +304,10 @@
       <div class="section-label rv">что входит</div>
       <div class="card rv">
         <ul class="perks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Лимиты в разы больше</b> — <span id="perkLimits">10 проверок сочинений и 50 ходов ИИ в день</span>.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>ИИ</b> — разбор ошибок, план на неделю и ответы по твоему прогрессу. Персональный ИИ доступен с Plus.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>«Мои сочинения»</b> — все проверки, разборы и график баллов в конце Пути. Раздел входит в Plus.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Личный план от ИИ</b> — смотрит твой прогресс и собирает маршрут на любой срок, от одного дня до года: темы по неделям с теорией и заданиями, а в профиле всегда видно, что учить сегодня.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Вдвое больше практики</b> — <span id="perkLimits">10 проверок сочинений и 50 обращений к ИИ в день</span>.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Наставник рядом</b> — объяснит ошибку, соберёт план на неделю и ответит с учётом твоего прогресса.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>«Мои сочинения»</b> — все работы, разборы и график баллов в конце Пути.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Маршрут до экзамена</b> — темы по неделям с теорией и заданиями: каждый день понятно, что учить.</span></li>
         </ul>
       </div>
     </section>
@@ -591,8 +591,8 @@
         : "Период: " + periodText + " · доступ до " + fmtDate(st.expiresAt) + ".";
       heroSub.textContent = cancelled
         ? "Доступ сохранится до конца оплаченного срока."
-        : giftNote ? "Подписка активна: " + giftNote + ". Лимиты уже увеличены."
-        : "Подписка активна, лимиты уже увеличены.";
+        : giftNote ? "Подписка активна: " + giftNote + ". Все возможности уже с тобой."
+        : "Подписка активна, все возможности уже с тобой.";
       meter.hidden = false;
       plabel.hidden = false;
       var total = Number(st.expiresAt) - Number(st.startedAt);
@@ -600,12 +600,12 @@
       requestAnimationFrame(function(){ fill.style.width = Math.round(frac * 100) + "%"; });
       plabel.innerHTML = "Осталось <b>" + esc(left <= 0 ? "срок вышел" : left + " " + plural(left, "день", "дня", "дней")) + "</b> подписки";
       var perk = document.getElementById("perkLimits");
-      if (perk) perk.textContent = essay + " проверок сочинений и " + agent + " ходов ИИ в день";
+      if (perk) perk.textContent = essay + " проверок сочинений и " + agent + " обращений к ИИ в день";
     } else {
       pill.className = "";
-      pill.textContent = "Бесплатный план";
-      meta.innerHTML = "5 проверок сочинений в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год (−33%).";
-      heroSub.innerHTML = "Задания, прогноз и разборы бесплатны. " + PLUS_WORD + " увеличивает лимиты проверок и открывает персонального ИИ с личным планом от него.";
+      pill.textContent = "Старт";
+      meta.innerHTML = "Сейчас: 5 проверок сочинений в день · " + PLUS_WORD + ": " + PRICE_MONTH + " ₽ в месяц, " + PRICE_YEAR + " ₽ в год (−33%).";
+      heroSub.innerHTML = "Ты на Старте. " + PLUS_WORD + " — это больше проверок каждый день, наставник рядом и маршрут до самого экзамена.";
       meter.hidden = true;
       plabel.hidden = true;
     }
@@ -644,11 +644,11 @@
     if (hasPending) {
       sub.textContent = "Есть счёт, который ждёт оплаты: заверши или отмени его — и покупка снова станет доступна.";
     } else if (plus) {
-      sub.textContent = "Доступ действует до конца оплаченного срока. Период продления — на выбор. Оплата — на стороне провайдера, данные карты нам не попадают.";
+      sub.textContent = "Доступ — до конца оплаченного срока. Период продления — на выбор. Оплата — картой или СБП на защищённой странице.";
       btn("btn-primary btn--sm", "Продлить Plus", "buy");
       if (periodPickEl) periodPickEl.hidden = false;
     } else {
-      sub.textContent = "Оплата — на стороне провайдера: деньги и карта не проходят через нас, к нам попадает только факт оплаты. Период — на выбор.";
+      sub.textContent = "Безопасная оплата картой или СБП. Карту не привязываем, данные не храним. Период — на выбор.";
       btn("btn-primary btn--sm", "Оформить Plus", "buy");
       if (periodPickEl) periodPickEl.hidden = false;
     }
