@@ -6400,7 +6400,7 @@ function sessionSelfCheckAreaHtml() {
   const back = sessionBackBtnHtml();
   return `
     <div class="session-tools">
-      <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="sessionSelfHint()">${icon("bulb")} Подсказка 1</button>
+      <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="askSessionSelfHint()">${icon("bulb")} Подсказка 1</button>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
     </div>
@@ -6408,6 +6408,31 @@ function sessionSelfCheckAreaHtml() {
       ${back || "<span></span>"}
       <button class="btn btn--primary" id="selfRevealBtn" onclick="askSessionSelfReveal()">Сверить с решением</button>
     </div>`;
+}
+
+/* Подсказка части 2 — тоже только после подтверждения, как в части 1
+   (askSessionHint ниже): цена та же — sessionSelfResult режет бонус через
+   recordAnswer теми же ×0.6/×0.3 и ослабляет свидетельство в освоении темы,
+   поэтому решение должно быть явным, а не случайным тапом. Лестницу от
+   ошибок сюда не тянем: у самопроверки нет ввода и счётчика попыток
+   (S.attempts всегда 0) — гейтить нечем, все три уровня доступны сразу.
+   Сам sessionSelfHint остаётся прямым действием (его дёргает подтверждение). */
+function askSessionSelfHint() {
+  const S = Session.cur;
+  if (!S || S.answered) return;
+  if ((S.selfHintLevel || 0) >= 3) return;
+  const level = (S.selfHintLevel || 0) + 1;
+  const cut = level <= 1 ? "×0.6" : "×0.3";
+  openConfirmDialog({
+    eyebrow: `Подсказка ${level}`,
+    title: `Открыть подсказку ${level}?`,
+    text: `Подсказка ${level} из 3. Бонус за верный ответ станет меньше (${cut}), а в освоении темы попытка засчитается слабее.`,
+    iconName: "bulb",
+    cancelText: "Подумаю ещё",
+    confirmText: "Открыть",
+    primary: true,
+    onConfirm: () => sessionSelfHint(),
+  });
 }
 
 function sessionSelfHint() {
