@@ -13178,13 +13178,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Нужен идентификатор запроса"}, 400)
             return
         ensure_admin_pending_schema(conn)
-        # Решения втягиваются лениво, здесь: фонового потока нет, а ждать
-        # решения некому, кроме этого опроса. Мёртвый Bot API — тишина,
-        # опрос всё равно отвечает текущим состоянием заявки.
-        telegram_ingest_updates(conn, ADMIN_LOGIN_STATUS_WAIT_SEC)
-        row = conn.execute("SELECT id, user_id, short, ip, status, expires_at, message_id "
-                           "FROM admin_login_pending "
-                           "WHERE token=?", (token_digest(raw),)).fetchone()
+        # Проверка владельца заявки ДО долгого опроса Bot API: чужой браузер
+        # не должен запускать telegram_ingest_updates (20s long-poll).
+        row = conn.execute("SELECT id, user_id FROM admin_login_pending WHERE token=?",
+                           (token_digest(raw),)).fetchone()
         if not row:
             self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
             return
@@ -13192,6 +13189,21 @@ class Handler(BaseHTTPRequestHandler):
         if user_id is None or int(user_id) != int(row["user_id"]):
             # Чужой браузер (или сессия потеряна): тот же 404, что и
             # несуществующая заявка — по ответу их не различить.
+            self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
+            return
+        # Решения втягиваются лениво, здесь: фонового потока нет, а ждать
+        # решения некому, кроме этого опроса. Мёртвый Bot API — тишина,
+        # опрос всё равно отвечает текущим состоянием заявки.
+        telegram_ingest_updates(conn, ADMIN_LOGIN_STATUS_WAIT_SEC)
+        # Состояние перечитываем ПОСЛЕ втягивания: решение владельца (approve/
+        # deny/просрочка) могло примениться только что, и в старом снимке
+        # строка осталась бы pending.
+        row = conn.execute("SELECT id, user_id, short, ip, status, expires_at, message_id "
+                           "FROM admin_login_pending WHERE token=?",
+                           (token_digest(raw),)).fetchone()
+        if not row:
+            # Заявку закрыли и удалили между проверками — ответ тот же, что
+            # у несуществующей.
             self.send_json({"error": "Запрос не найден", "code": "PENDING_NOT_FOUND"}, 404)
             return
         now_ms = int(time.time() * 1000)
@@ -17471,6 +17483,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             conn.execute("DELETE FROM users WHERE id=?", (user_id,)); conn.commit()
+            admin_audit(conn, int(user_id), "profile-deleted", int(user_id),
+                        f"user self-deleted via DELETE /api/state")
             self.send_json({"ok": True}, token=token)
         except sqlite3.Error as exc:
             try: conn.rollback()

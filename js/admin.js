@@ -1892,6 +1892,7 @@ const AUDIT_ACTIONS = {
   "grant-xp": ["users", "Корректировка XP", "a-chip--warn"],
   reset: ["users", "Сброс", "a-chip--warn"],
   "update-profile": ["users", "Правка профиля", ""],
+  "profile-deleted": ["users", "Профиль удалён", "a-chip--danger"],
   "delete-user": ["users", "Удаление аккаунта", "a-chip--danger"],
   "block-user": ["users", "Блокировка", "a-chip--danger"],
   "unblock-user": ["users", "Разблокировка", "a-chip--success"],
@@ -1985,6 +1986,7 @@ const AUDIT_DETAIL = {
       return parts.join(" · ");
     } catch (err) { return ""; }
   },
+  "profile-deleted": () => "",
   "delete-user": (e) => (e.detail ? `аккаунт ${e.detail}` : ""),
   "block-user": (e) => {
     // "1d причина" / "permanent причина".
@@ -2154,6 +2156,7 @@ const AUDIT_ROWS = {
       return rows;
     } catch (err) { return []; }
   },
+  "profile-deleted": () => [],
   "delete-user": (e) => (e.detail ? [["Аккаунт", String(e.detail)]] : []),
   "block-user": (e) => {
     const parts = String(e.detail || "").split(/\s+/).filter(Boolean);
