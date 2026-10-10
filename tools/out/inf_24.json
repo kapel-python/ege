@@ -1,0 +1,227 @@
+[
+ {
+  "src_id": "76692",
+  "condition": "Текстовый файл состоит из цифр от 1 до 9, знаков операций «+», «–» и «*» (сложение, вычитание и умножение) и заглавных латинских букв A, B, C, D. \nНазовём правильной суммой строку, содержащую последовательность из одного или более десятичных чисел, в которой между соседними числами стоит ровно один знак «+» или «-» и нет других знаков. \nПримеры правильных сумм: «23», «115+6», «1980+12−123−51+3». \nНазовём результатом правильной суммы число, которое получится при выполнении записанных в соответствующей строке сложений. Например, результат правильной суммы «2+3» — число 5, а результат правильной суммы «1+2−8+3» — число −2. \nНайдите в данной строке расположенную непосредственно после буквы С правильную сумму с наибольшим результатом.\nВ ответе запишите результат найденной суммы. Гарантируется, что ответ не превышает 2 · 109.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Юрия Красильникова на языке Python.\nimport re\ns = re.findall(r'C[1-9]+(?:[+\\-][1-9]+)*', open('24.txt').readline())\nans = -10**20\nfor x in s:\n stop = [i for i in range(len(x)) if x[i] in '+-']\n stop += [len(x)]\n m = max([eval(x[1:t]) for t in stop])\n ans = max(ans,m)\nprint(ans)\nОтвет: 221.\nПриведём решение Юрия Красильникова на языке Python.\ndef calc(s):\n t=0\n i=0\n while s[i] in '123456789':\n t=t*10+int(s[i])\n i+=1\n ans=[t]\n while True:\n op=s[i]\n if op not in '+-': return max(ans)\n i+=1\n if s[i] not in '123456789': return max(ans)\n t=0\n while s[i] in '123456789':\n t=t*10+int(s[i])\n i+=1\n ans.append(ans[-1]+(t if op == '+' else -t))\na = open('24.txt').readline().split('C')[1:]\nprint(max([calc(x+'!') for x in a if len(x) > 0 and x[0] in '123456789']))\nПриведём решение Сергея Донец на PascalABC.NET:\nbegin\nReadAllText('24.txt').Matches('C(\\d+(?:[+-]\\d+)*)')\n.Select(m-> m.Groups[1].Value.Matches('[+-]?\\d+')\n.Select(x-> x.Value.ToInteger)\n.Scan(0, (acc, x)-> acc + x).Max).Max.Print;\nend.",
+  "answer": "221",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=76692",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "63073",
+  "condition": "Текстовый файл содержит только заглавные буквы латинского алфавита (ABC…Z). Определите максимальное количество идущих подряд символов, среди которых каждая из букв C и D встречается не более двух раз.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nf = open(\"24.txt\").readline()\nmaxi = 0\nfor i in range (len(f)-1):\n C = 0\n D = 0\n count = 0\n for j in range(i, len(f)):\n count += 1\n if f[j] == 'C':\n C += 1\n elif f[j] == 'D':\n D += 1\n if C > 2 or D > 2:\n maxi = max(maxi, count - 1)\n break\nprint(maxi) \nОтвет: 253.\nПриведём решение Ильи Андрианова на языке Python.\ns = open('24.txt').readline()\ns = s.replace('C', 'C ').replace('D', 'D ').split()\nmaxi = 0\nfor i in range(len(s)-4):\n r = s[i] + s[i+1] + s[i+2] + s[i+3] + s[i+4][:-1]\n if r.count('C') == 2 and r.count('D') == 2:\n maxi = max(maxi, len(r))\nprint(maxi)",
+  "answer": "253",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=63073",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "33769",
+  "condition": "Текстовый файл содержит только заглавные буквы латинского алфавита (ABC…Z). Определите символ, который чаще всего встречается в файле после двух одинаковых символов.\nНапример, в тексте CCCBBABAABCC есть комбинации CCC, CCB, BBA и AAB. Чаще всего — 2 раза — после двух одинаковых символов стоит B, в ответе для этого случая надо написать B.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nДля решения этой задачи считаем строку из файла. Инициализируем строковую переменную s1 со значением ABCDEFGHIJKLMNOPQRSTUVWXYZ. Посимвольно перебираем строку из файла, каждый раз проверяя, равен ли текущий символ следующему символу, и, если условие выполняется, будем вставлять в строку s1 символ, идущий между после двух одинаковых символов в считанной строке, таким образом, чтобы в строке s1 соответствующие символы стояли рядом друг с другом (например, если из файла была считана строка AABAAB, строка s1 после выполнения алгоритма будет выглядеть так: ABBBCDEFGHIJKLMNOPQRSTUVWXYZ. После этого посчитаем длину самой длинной цепочки символов и таким образом получим ответ.\nПриведём решение данной задачи на языке Pascal.\nvar \nlen, max, count: longint;\ns, s1: string;\nmaxC: char;\nf: text;\nbegin\n assign(f,'C:\\Users\\Александр\\Desktop\\РешуЕГЭ\\24.txt');\n reset(f);\n readln(f, s);\n len := length(s);\n s1 := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';\n for i:integer := 1 to len-2 do begin\n if (s[i] = s[i+1]) then\n s1 := s1.Substring(0, s1.LastIndexOf(s[i+2])) + s[i+2] + s1.Substring(s1.LastIndexOf(s[i+2]));\n end;\n len := length(s1);\n max := 1;\n count := 0;\n for i:integer := 1 to len-1 do begin\n if (s1[i] = s1[i+1]) then count := count + 1\n else count := 0;\n if count > max then begin\n max := count;\n maxC := s1[i];\n end;\n end;\n writeln(maxC);\nend.\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — K.\nОтвет: K.\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём другое решение на языке Python.\nf = open(\"24.txt\") \ns = f.readline()\na = [0] * 26\nmaxi = 0\nfor i in range(len(s) - 1):\n if s[i] == s[i + 1]:\n a[ord(s[i + 2]) - 65] += 1\nfor i in range(26):\n if a[i] > maxi:\n maxi = a[i]\n index = i\nprint(chr(index + 65))\nПриведём другое решение на языке Python.\nf = open('24.txt')\ns = f.read()\nmas = []\nm = 0\nk = 0\nfor i in range(len(s)-2):\n if s[i] == s[i+1]:\n mas.append(s[i+2])\nalf = 'QWERTYUIOPASDFGHJKLZXCVBNM'\nfor n in alf:\n if m \nПриведём решение Чернявского Степана на языке Python.\nfrom collections import Counter\nl = ''\nf = open('24.txt').read()\nfor i in range(len(f)-2):\n if f[i] == f[i+1]:\n l += f[i+2]\nprint(Counter(l).most_common()[0][0])\nПриведём решение Юрия Красильникова на языке Python.\ns = open('24.txt').readline()\na = [s[i+1] for i in range(1,len(s)-1) if s[i-1]==s[i]]\nm = max([a.count(c) for c in set(a)])\nprint(*[c for c in set(a) if a.count(c)==m])\nПриведём решение Михаила Митрофанова (Владимир) на языке Python.\nf = open('24.txt').readline()\nalf = list('QWERTYUIOPASDFGHJKLZXCVBNM')\ncount = [0] * 26\nfor x in range(2,len(f)):\n if f[x-2] == f[x-1]:\n count[alf.index(f[x])] += 1\nprint(alf[count.index(max(count))])",
+  "answer": "K",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=33769",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "27695",
+  "condition": "Текстовый файл состоит не более чем из 106 символов L, D и R. Определите максимальное количество идущих подряд символов, среди которых каждые два соседних различны.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Николая Чуркина (Тимашевск) на языке Python.\nf = open('24.txt').readline()\nk = 1\nm = 0\nfor i in range(len(f)-1):\n if f[i] != f[i+1]:\n k += 1\n m = max(m, k)\n else:\n k = 1\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 45.\nОтвет: 45.\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение Ильи Андрианова на языке Python.\ns = open('zadanie24_2.txt').readline()\nwhile 'DD' in s or 'RR' in s or 'LL' in s:\n s = s.replace('DD', 'D D').replace('RR', 'R R').replace('LL', 'L L')\nprint(max([len(x) for x in s.split()]))\nПриведём решение Ивана Новикова на языке Python.\na = open('zadanie24_2.txt').readline()\nm = 0\nx = 'LL RR DD'\nfor x1 in x.split():\n while x1 in a:a = a.replace(x1 , f'{x[0]} {x[1]}')\nfor b in a.split():\n m = max(len(b) , m)\nprint(m)\nПриведём другое решение данной задачи на языке Pascal.\nДля решения данной задачи будем посимвольно считывать текстовый файл. Объявим переменные: maxLen — максимальная длина последовательности, curLen — временное хранение длины последовательности, i — переменная для перебора всех символов, s — строка для работы с символами из файла. Алгоритм будет сравнивать значение текущего символа со значением предыдущего, и если символы будут удовлетворять нужным условиям, то значение счетчика будет увеличиваться на 1.\nПриведём решение данной задачи на языке Pascal.\nvar maxLen, curLen, i: integer; \n s: string;\nbegin\n assign(input, '24.txt'); \n readln(s);\n maxLen := 1;\n curLen := 1;\n for i:=2 to Length(s) do \n if s[i] <> s[i-1] then begin\n curLen := curLen + 1;\n if curLen > maxLen then\n maxLen := curLen;\n end\n else\n curLen := 1;\n writeln(maxLen); \nend.",
+  "answer": "45",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=27695",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "81808",
+  "condition": "Текстовый файл состоит из десятичных цифр и заглавных букв латинского алфавита. Определите в прилагаемом файле максимальное количество идущих подряд символов, среди которых подстрока 2025 встречается не менее 90 раз и при этом содержится ровно 80 букв Y.\nВ ответе запишите число — количество символов в найденной последовательности.\nДля выполнения этого задания следует написать программу.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\ns = 'Y' + open('DEMO_24.txt').readline() + 'Y'\nmaxi = 0\nn_y = [x for x in range(len(s)) if s[x] == 'Y']\nfor i in range(len(n_y) - 81):\n if s[n_y[i + 1]: n_y[i+81]].count('2025') >= 90:\n maxi = max(maxi, n_y[i + 81] - n_y[i] - 1)\nprint(maxi)\nОтвет: 2981.\nПриведём решение Юрия Красильникова на языке Python.\na=open('DEMO_24.txt').readline().strip().split('Y')\ndl=[len(x) for x in a]\nkol=[x.count('2025') for x in a]\nprint(max([sum(dl[i:i+81])+80 for i in range(len(dl)-80) if sum(kol[i:i+81]) >= 90]))",
+  "answer": "2981",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=81808",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "85737",
+  "condition": "Текстовый файл состоит из десятичных цифр и заглавных букв латинского алфавита. Определите в прилагаемом файле минимальное количество идущих подряд символов, среди которых буква Z встречается ровно 72 раза, гласная буква встречается ровно один раз, искомая последовательность заканчивается на эту единственную гласную букву.\nВ ответе запишите число — количество символов в найденной последовательности.\nДля выполнения этого задания следует написать программу.\nПримечание: A, E, I, O, U, Y — гласные буквы латинского алфавита.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nf = open('24.txt')\ns = f.readline()\ns = s[::-1]#будем искать последовательности начинающиеся на гласную\nfor i in 'EIOUY':\n s = s.replace(i, 'A')\ns = s.replace('A', '*A')\ns = s.split('*')\notv = []\nfor i in s:\n if i.count('Z') >= 72:\n srez = i.replace('Z', '*', 71)\n otv.append(len(i[:srez.index('Z') + 1]))\nprint(min(otv))\nОтвет: 134.\nПриведём решение Юрия Красильникова на языке Python.\nimport re\ns=open('24.txt').readline()[::-1]\na=[x.replace('Z','X',71) for x in re.findall(r'[AEIOUY][^AEIOUY]*',s) if x.count('Z')>71]\nprint(min([x.find('Z')+1 for x in a]))",
+  "answer": "134",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=85737",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "27698",
+  "condition": "Текстовый файл состоит не более чем из 106 символов L, D и R. Определите длину самой длинной последовательности, состоящей из символов R. Хотя бы один символ R находится в последовательности.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Николая Чуркина (Тимашевск) на языке Python.\nf = open('24.txt').readline()\nk = 1\nm = 1\nfor i in range(len(f)-1):\n if f[i] == 'R' and f[i+1] == 'R':\n k += 1\n m = max(m, k)\n else: k = 1\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 1.\nОтвет: 1.\nПриведём другое решение данной задачи на языке Pascal.\nДля решения данной задачи будем посимвольно считывать текстовый файл. Объявим переменные: maxLen — максимальная длина последовательности, curLen — временное хранение длины последовательности, i — переменная для перебора всех символов, s — строка для работы с символами из файла. Алгоритм будет сравнивать значение текущего символа со значением предыдущего, и если символы не будут различаться и будут являться буквой R, то значение счетчика будет увеличиваться на 1.\nПриведём решение данной задачи на языке Pascal.\nvar maxLen, curLen, i: integer; \n s: string;\nbegin\n assign(input, '24.txt'); \n readln(s);\n maxLen := 1;\n curLen := 1;\n for i:=2 to Length(s) do \n if (s[i] = s[i-1]) and (s[i] = 'R') then begin\n curLen := curLen + 1;\n if curLen > maxLen then\n maxLen := curLen;\n end\n else\n curLen := 1;\n writeln(maxLen);\nend.\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 1.",
+  "answer": "1",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=27698",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "45258",
+  "condition": "Текстовый файл состоит из символов A, B и C.\nОпределите максимальное количество идущих подряд пар символов AB или CB в прилагаемом файле.\nИскомая подпоследовательность должна состоять только из пар AB, или только из пар CB, или только из пар AB и CB в произвольном порядке следования этих пар.\nДля выполнения этого задания следует написать программу.\n24.txt",
+  "solution": "Решение. \nДля решения данной задачи считаем всю строку в переменную s. Заметим, что, исходя из условия, все пары CB можно заменить на AB, либо, наоборот, все пары AB заменить на CB. Далее перебором найдём наибольшую длину последовательности пар AB, встречающуюся в строке s.\nПриведём решение данной задачи на языке Pascal.\nvar \n s: string;\n i, count, maxCount: integer;\nbegin\n assign(input, 'C:\\24.txt');\n readln(s);\n count:=0;\n maxCount:=0;\n s := s.Replace('CB', 'AB');\n for i:=1 to 100 do\n if s.Contains('AB' * i) then begin \n maxCount := i;\n end;\n writeln(maxCount);\nend.\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 65.\nОтвет: 65.\nПриведём решение данной задачи на языке Python.\nf = open('24.txt')\nn=f.read()\nn=n.replace('AB','x')\nn=n.replace('CB','x')\nk=0\nm=0\nfor i in range(len(n)):\n if n[i]=='x':\n k+=1\n m=max(m,k)\n else:\n k=0\nprint(m)\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение Сергея Калугина на языке Python.\nf = open('107_24.txt').readline()\nf = f.replace('CB', '*')\nf = f.replace('AB', '*')\nf = f.replace('A', ' ')\nf = f.replace('B', ' ')\nf = f.replace('C', ' ')\na = f.split()\nprint(len(max(a,key=len)))\nПриведём решение Сергея Калугина на языке Python.\nf = open('107_24.txt').readline()\nmaxi = 0\ncnt = 0\ni = 0\nwhile i",
+  "answer": "65",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=45258",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "55641",
+  "condition": "Текстовый файл содержит строки различной длины, содержащие только заглавные буквы латинского алфавита (ABC…Z). В каждой строке файла определяется буква, которая чаще всего стоит сразу после буквы T, эта буква\nзаносится в отдельный список. Если несколько разных букв встречаются в строке сразу после Т одинаковое максимальное количество раз, в список заносятся все эти буквы. Определите, сколько раз встретится в этом списке самая частая в нём буква.\nЗадание 24\nПример.\nПусть файл содержит такие строки:\nATAAATTTATAXY\nXYTYYXYTAT\nЗдесь в первой строке сразу после T три раза стоит A и два раза — T. Чаще других стоит A, эта буква попадает в отдельный список.\nВо второй строке после T по одному разу стоят буквы Y и A, обе эти буквы попадают в список.\nВ итоге буква A попадает в список два раза, буква Y — один раз. Чаще других в списке встречается буква A — два раза. В ответе для этого примера надо записать число 2.",
+  "solution": "Решение. \nПриведем решение на языке Python.\nf = open('24.txt').readlines()\nli = []\nfor j in f:\n st = ''\n for x, y in zip(j, j[1:]):\n if x == 'T':\n st += y\n maxi = max(st.count(i) for i in set(st))\n for s in set(st):\n if st.count(s) == maxi:\n li += [s]\nprint(max(li.count(l) for l in set(li)))\nОтвет: 85.\nПриведем решение Сергея Соколова на языке Python.\nf = open('24.txt').readlines()\nlistABC = {}\nfor i in range(ord('A'), ord('Z')+1):\n listABC[ chr(i) ] = 0\nfor s in f:\n c = {}\n for i in range(1, len(s)):\n if s[i-1] in 'T':\n if not s[i] in c: c[ s[i] ] = 0\n c[ s[i] ] += 1\n max_value = max(c.values())\n max_keys = [k for k, v in c.items() if v == max_value]\n for i in max_keys:\n listABC[ i ] += 1\nprint( max(listABC.values()))",
+  "answer": "85",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=55641",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "56524",
+  "condition": "Текстовый файл содержит строки различной длины, содержащие только заглавные буквы латинского алфавита (ABC Z). Будем называть цепочкой группу идущих подряд одинаковых букв в одной строке. Определите, сколько раз буква, образующая самую длинную цепочку в файле, встречается в строке, содержащей эту цепочку. Если в файле есть несколько цепочек одинаковой максимальной длины, нужно выбрать ту из них, для которой общее количество образующих цепочку букв в соответствующей строке будет больше.\nЗадание 24\nПример.\nПусть файл содержит такие строки:\nABBAAABBABBXY\nXYYYXYAB\nЗдесь в первой строке есть цепочка длины 3, образованная буквами A, всего буква A в этой строке встречается 5 раз. Во второй строке тоже есть цепочка длины 3, но образующая эту цепочку буква Y встречается в этой строке всего 4 раза. 5 > 4, поэтому в ответе в данном случае надо записать число 5.",
+  "solution": "Решение. \nПриведем решение на языке Python.\nf = open('24.txt')\nmx=-1\nmxall=-1\nfor s in f:\n k=1\n for i in range(len(s)-1):\n if s[i]==s[i+1]:\n k+=1\n if k>mx:\n mx=k\n mxall=s.count(s[i])\n if k==mx:\n mxall = max(s.count(s[i]), mxall)\n else:\n k=1\nprint(mxall)",
+  "answer": "45",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=56524",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "72609",
+  "condition": "Текстовый файл состоит из цифр от 1 до 6, знаков операций «—» и «*» (вычитание и умножение) и заглавных латинских букв A, B, C, D. \nОпределите максимальное количество символов в непрерывной последовательности символов, состоящей из буквы В, за которой следует корректное арифметическое выражение с целыми неотрицательными числами, записанными в десятичной системе счисления.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\ns = open('24.txt').readline()\ns= s.replace('2','1').replace('3','1').replace('4','1').replace('5','1').replace('6','1')\ns = s.replace('*', '-').replace('A', ' ').replace('C', ' ').replace('D', ' ')\ns = s.replace('1B', '1 B').replace('--', '- -').replace('BB', 'B B').replace('-B', '- B').replace('B-', 'B -')\ns = sorted(s.split(), key = len, reverse = 1)\nfor i in s:\n if i[-1] == '-':\n i = i[:-1]\n if i[0] == 'B' and i.count('B') == 1:\n print(i, len(i))\n break\nОтвет: 68.\nПриведём решение Бориса Савельева на языке Python.\nf=open('24.txt').readline()\nf=f.replace('--',' ')\nf=f.replace('-*',' ')\nf=f.replace('*-',' ')\nf=f.replace('**',' ')\nf=f.replace('B-','B -')\nf=f.replace('-B','- B')\nf=f.replace('*B','* B')\nf=f.replace('B*','B *')\nf=f.replace('A',' ')\nf=f.replace('C',' ')\nf=f.replace('D',' ')\nf=f.replace(' *',' ')\nf=f.replace(' -',' ')\nf=f.replace('- ',' ')\nf=f.replace('* ',' ')\nf=f.replace('1B','1 B')\nf=f.replace('2B','2 B')\nf=f.replace('3B','3 B')\nf=f.replace('4B','4 B')\nf=f.replace('5B','5 B')\nf=f.replace('6B','6 B')\nf=f.split(' ')\nmaxi=0\nfor i in range (0,len(f)):\n s=f[i]\n if len(s) >= 1 and s[0]=='B':\n if maxi \nПриведём решение Евгения Романова на языке Python.\ns = open('24.txt').readline()\nm = ''\nfor i in range(len(s)):\n if s[i] == 'B':\n c = s[i]\n for j in range(i + 1, len(s)):\n if all(x not in c for x in ['B-', 'B*', 'A', 'C', 'D', '**', '--', '*-', '-*']) and s[j] != 'B':\n c += s[j]\n else:\n m = max(m, c[:-1].strip('*').strip('-'), key=len)\n break\nprint(len(m), m)",
+  "answer": "68",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=72609",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "51993",
+  "condition": "Текстовый файл содержит только буквы A, C, D, F, O. Определите длину самой длинной цепочки символов, которая начинается и заканчивается буквой F, а между двумя последовательными буквами F содержит не более двух букв A и произвольное количество других букв.\nЗадание 24",
+  "solution": "Решение. \nПриведем решение на языке Python.\ns = open('24.txt').readline().split('F')[1:-1]\nmx = 0\ncount = 1 \nfor i in range(len(s)):\n if s[i].count('A') \nОтвет: 266.\nПриведем решение Юрия Красильникова на языке Python.\na = open('24.txt').readline().split('F')[1:-1]\nb = 'F'+'F'.join([s if s.count('A')",
+  "answer": "266",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=51993",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "27699",
+  "condition": "Текстовый файл состоит не более чем из 106 символов L, D и R. Определите максимальную длину цепочки вида LDRLDRLDR... (составленной из фрагментов LDR, последний фрагмент может быть неполным).\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Чуркина Николая (Тимашевск) на языке Python.\nf = open('24.txt').readline()\nk = m = 0\nfor i in range(len(f)):\n if (f[i] == 'L' and k%3 == 0) or (f[i] == 'D' and k%3 == 1) or (f[i] == 'R' and k%3 == 2):\n k += 1\n m = max(m, k)\n elif f[i] == 'L': k = 1\n else: k = 0\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 15.\nОтвет: 15.\nПриведём решение Королёва Андрея на языке Python.\nf = open('24.txt').readline()\nd = f.replace('LDR','X')\ncnt = 0\nmax_len = 0\nfor g in range(len(d)):\n if d[g]=='X':\n cnt+=1\n else:\n max_len = max(max_len,cnt)\n cnt = 0\nprint(max_len * 3) # Так как Х — это 3 символа (LDR), длину цепочки умножаем на 3.\nПриведём решение Сергея Калугина на языке Python.\nf = open('24.txt').readline()\nf = f.replace('LDR', '***').replace('L', ' ').replace('D', ' ').replace('R', ' ').split()\nprint(len(max(f,key=len)))\n-->\nПриведём решение Ильи Андрианова на языке Python.\ns = open('zadanie24_2.txt').readline()\ncnt = 2\nmaxi = 0\nfor i in range(0, len(s)-2, 1):\n if s[i:i+3] in ('LDR', 'DRL', 'RLD'):\n cnt += 1\n maxi = max(maxi, cnt)\n else:\n cnt = 2\nprint(maxi)\nПриведём другое решение данной задачи на языке Pascal.\nДля решения данной задачи будем посимвольно считывать текстовый файл. Объявим переменные: s — строка для работы с символами из файла, maxCount — максимальная длина последовательности, count — временное хранение длины последовательности, i — переменная для перебора всех символов. Алгоритм будет сравнивать значения на трех позициях, и если символы будут удовлетворять нужным условиям, то значение счетчика будет увеличиваться на 1.\nПриведём решение данной задачи на языке Pascal.\nbegin\n var s: string;\n var i, count, maxCount: integer;\n assign(input, '24.txt');\n readln(s);\n count:=0;\n maxCount:=0;\n for i:=1 to Length(s) do\n if ((s[i]='L') and (count mod 3=0)) or \n ((s[i]='D') and (count mod 3=1)) or \n ((s[i]='R') and (count mod 3=2)) then begin \n count := count+1;\n if count > maxCount then\n maxCount := count;\n end\n else if s[i]='L' then count:=1\n else count := 0;\n writeln(maxCount);\nend.\nПриведём решение Севы Тимофеева на языке C++.\n#include\n#include\nusing namespace std;\nint main () {\nifstream fin(\"C:/Users/Сева/Downloads/zadanie24_2.txt\");\nchar a,b;\nint s=0,f=0,y=0;\nfin >> a;\nwhile(fin >> a){\nif(b=='L')y++;\nif(y>0){\n if(b=='L'&&a=='D')s++;\n if(b=='D'&&a=='R')s++;\n if(b=='R'&&a=='L')s++;\n if(s>f)f=s;\n if((b=='L'&&a!='D')   (b=='D'&&a!='R')   (b=='R'&&a!='L')){\n s=1;\n y=0;\n }\n }\n b=a;\n}\n cout",
+  "answer": "15",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=27699",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "52195",
+  "condition": "Текстовый файл содержит только буквы A, C, D, F, O. Определите длину самой длинной цепочки символов, которая начинается и заканчивается буквой D, а между двумя последовательными буквами D содержит не более двух букв O и произвольное количество других букв.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\ns = open('24.txt').readline().split('D')[1:-1]\nmx = 0\nc = 1 # =1 так, как цепочка должна начинаться с D\nfor i in range(len(s)):\n if s[i].count('O') \nВ результате работы программа должна вывести следующее: 255.\nОтвет: 255.\nПриведём решение Юрия Красильникова на языке Python.\na = [x if x.count('O')",
+  "answer": "255",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=52195",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "89243",
+  "condition": "Текстовый файл состоит из десятичных цифр и заглавных букв латинского алфавита. \nЗадание 24\nОпределите в прилагаемом файле последовательность из максимального количества символов, начинающуюся и заканчивающуюся одной и той же чётной цифрой, содержащую идущие подряд буквы и не содержащую других цифр, кроме первой и последней. Искомая последовательность должна содержать одинаковое количество гласных и согласных букв.\nЕсли таких несколько, выберите последовательность с наибольшим порядковым номером в файле её первого символа.\nВ ответе запишите число — порядковый номер в файле первого символа найденной последовательности. В прилагаемом файле нумерация символов начинается с нуля.\nДля выполнения этого задания следует написать программу.\nПримечание: A, E, I, O, U, Y — гласные буквы латинского алфавита; B, C, D, F, G, H, J, K, L, M, N, P, Q, R, S, T, V, W, X, Z — согласные буквы латинского алфавита.",
+  "solution": "Решение. \n##Приведём решение на языке Python.\ns = open('24.txt').readline()\notv = ''\nno_change = s\nmaxi = 0\nfor i in '0123456789':\n s = s.replace(i, i + '*' + i)\ns = s.split('*')\nfor i in s:\n if i[0] in '02468' and i[0] == i[-1]:\n if len(i) >= maxi:\n if sum(i.count(x) for x in 'AEIOUY') == sum(i.count(x) for x in 'BCDFGHJKLMNPQRSTVWXZ'):\n maxi = max(maxi, len(i))\n otv = i\nprint(no_change.rfind(otv))",
+  "answer": "3613619",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=89243",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "59849",
+  "condition": "Текстовый файл состоит не более чем из 106 символов латинского алфавита. Необходимо найти самую длинную подстроку, содержащую символы из алфавита 26-ричной системы счисления. В ответ записать длину последовательности символов, которая может являться числом в 26-ричной системе счисления.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nf=open('24.txt')\ns=f.readline()\nalfavit='0123456789ABCDEFGHIJKLMNOP'\nmx=0\ncnt=0\nfor i in range(len(s)):\n if s[i] in alfavit:\n cnt+=1\n if cnt>mx:\n mx=cnt\n else:\n cnt=0\nmx = max(cnt, mx)\nprint(mx)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 41.\nОтвет: 41.\nПримечание. \nПуть к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение Ильи Андрианова на языке Python.\ns = open('24_59849.txt').readline()\nalphabet = sorted('0123456789QWERTYUIOPASDFGHJKLZXCVBNM')\nfor x in alphabet[26:]:\n s = s.replace(x, ' ')\nprint(max([len(x) for x in s.split()]))",
+  "answer": "41",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=59849",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "29672",
+  "condition": "Текстовый файл содержит строки различной длины. Общий объём файла не превышает 1 Мбайт. Строки содержат только заглавные буквы латинского алфавита (ABC…Z). Определите количество строк, в которых буква E встречается чаще, чем буква A.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nДля решения этой задачи будем построчно считывать файл. В каждой строке с помощью цикла будем считать количество символов A и E, проверяя, является ли данный символ строки символом A или E, и увеличивая счётчики cntA и cntE соответственно. Следовательно, если по окончании итерации значение cntE будет больше значения cntA, переменную cntStr увеличиваем на 1.\nПриведём решение данной задачи на языке Pascal.\nvar \nstr: string;\ncntA, cntE: integer;\ncntStr: integer;\nf: text;\nbegin\n assign(f,'C:\\24.txt');\n reset(f);\n cntA := 0;\n cntE := 0;\n cntStr := 0;\n while not Eof(f) do begin\n readln(f, str);\n for k:integer := 1 to length(str) do begin\n if (str[k] = 'A') then\n cntA := cntA + 1\n else if (str[k] = 'E') then\n cntE := cntE + 1;\n end;\n if (cntE > cntA) then\n cntStr := cntStr + 1;\n cntE := 0;\n cntA := 0;\n end;\n writeln(cntStr);\nend.\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 467.\nОтвет: 467.\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение на языке Python.\nf = open('24.txt')\na = 0\nfor string in f:\n if(string.count('A') \nПриведём решение Николая Чуркина (Тимашевск) на языке Python.\nf = open('24.txt')\nc = 0\ni = f.readline()\nwhile i != '':\n if i.count('E') > i.count('A'): c += 1\n i = f.readline()\nprint(c)\nПриведём решение Юрия Красильникова на языке Python.\nprint(len([s for s in open('inf_22_10_20_24.txt') if s.count('E')>s.count('A')]))",
+  "answer": "467",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=29672",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "78049",
+  "condition": "Текстовый файл состоит из десятичных цифр и знаков арифметических операций «−» и «*» (вычитания и умножения).\nОпределите максимальное количество символов в непрерывной последовательности, являющейся корректным арифметическим выражением с целыми неотрицательными 6-ричными числами, в котором порядок действий слева направо совпадает с порядком действий по правилам математики. В этом выражении никакие два знака арифметических операций не стоят рядом, в записи чисел отсутствуют незначащие (ведущие) нули. В ответе укажите количество символов.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nfrom re import *\ntext = open('24.txt').readline()\ns = findall(r'(?=((?:0  [1-5][0-5]*)(?:\\*(?:0  [1-5][0-5]*))*(?:-(?:0  [1-5][0-5]*))*))',text)\nprint(len(max(s, key=len)))",
+  "answer": "51",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=78049",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "59817",
+  "condition": "Текстовый файл состоит из символов, обозначающих прописные буквы латинского алфавита. Определите максимальное количество идущих подряд символов, среди которых никакие две буквы из набора букв A, B и C (с учетом повторений) не записаны подряд.\nЗадание 24\nДля выполнения этого задания следует написать программу.",
+  "solution": "Решение. \nПриведём решение на языке Python.\nf = open('24.txt').readline()\nm = 0\nf = f.replace('A','1')\nf = f.replace('B','1')\nf = f.replace('C','1')\nwhile '11' in f:\n f = f.replace('11', '1 1')\nf = f.split()\nfor i in range(len(f)):\n m = max(m,len(f[i]))\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 49.\nОтвет: 49.\nПриведём решение Юрия Лысакова на языке Python.\nf = open('24.txt')\ns = f.read()\ncount, maxi = 1,0\ni = 0\nfor i in range(1,len(s)):\n if s[i-1] not in 'ABC' or s[i] not in 'ABC':\n count += 1\n else:\n maxi = max(maxi,count)\n count = 1\nprint(maxi)\nПриведём решение Юрия Красильникова на языке Python.\ns = open('24.txt').readline()\na = ''.join([' ' if s[i] in 'ABC' and s[i-1] in 'ABC' else '*' for i in range(1,len(s))]).split()\nprint(max(len(x) for x in a)+1)\nПриведём решение Ильи Андрианова на языке Python.\ns = open('24.txt').readline()\nfor x in 'AA BB CC AB AC BA BC CA CB'.split():\n s = s.replace(x, '* *')\nprint(max(len(x) for x in s.split()))",
+  "answer": "49",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=59817",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "38958",
+  "condition": "Текстовый файл содержит только заглавные буквы латинского алфавита (ABC…Z). Определите максимальное количество идущих подряд символов, среди которых не более одной буквы A.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nБудем посимвольно считывать файл. Каждую итерацию цикла while будем увеличивать счётчик k на единицу и использовать её как индекс. Если очередной считанный символ не является буквой A — будем увеличивать счётчик count на единицу. Также будем проверять, больше ли текущее значение счётчика count значения переменной maxlen. Если условие выполняется, будем обновлять значение переменной maxlen — это искомое значение. \nЕсли будет встречена буква A, будем проверять, встречена ли она в первый раз. Если до этого букв A в текущей последовательности не встречалось, будем запоминать текущую позицию буквы A и продолжать увеличивать значение счётчика count. Если буква A в текущей последовательности встречается во второй раз, будем присваивать значению счётчика count разность текущей итерации цикла while и индекса первой встреченной буквы A — таким образом будем учитывать и последовательность, начавшуюся от предыдущей встреченной буквы A. Также в этом случае обновим значение переменной i, отвечающей за хранение индекса последней встреченной буквы A.\nПриведём решение данной задачи на языке PascalABC.\nvar \ni, count, maxlen, countA, k: integer;\nc: char;\nf: text;\nbegin\n assign(f,'C:\\24.txt');\n reset(f);\n maxlen := 0;\n count := 0;\n countA := 0;\n k := 0;\n while not eof(f) do begin\n read(f, c);\n k := k + 1;\n if c <> 'A' then begin\n count := count + 1;\n if count > maxlen then maxlen := count;\n end\n else if countA = 0 then begin\n countA := 1;\n i := k;\n count := count + 1;\n if count > maxlen then maxlen := count;\n end\n else if countA = 1 then begin\n count := k - i;\n i := k;\n if count > maxlen then maxlen := count;\n end;\n end;\n writeln(maxlen);\nend.\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 337.\nОтвет: 337.\nПриведём решение Виктора Кима на языке Python.\nf = open(\"24.txt\")\nx = f.read()\ncount = count_old = m = 0\nfor i in x:\n if i == \"A\":\n m = max(m, count + count_old + 1)\n count_old = count\n count = 0\n else: \n count += 1\nm = max(m, count + count_old + 1)\nprint(m)\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение Бориса Савельева на языке Python.\nf = open('24.txt')\nans = 0\ns = f.readline().split('A')\nfor i in range (len(s)-1):\n ans = max(len(s[i])+len(s[i+1])+1,ans)\nprint(ans)",
+  "answer": "337",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=38958",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "59793",
+  "condition": "Текстовый файл состоит не более чем из 106 символов латинского алфавита. Определите минимальную подстроку, содержащую 120 символов V. Для выполнения этого задания следует написать программу.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nf = open('24.txt')\ns = f.readline()\nmini = 10**10\ncount = 0\npos = []\nfor i in range(len(s)-1):\n if s[i] == 'V':\n pos.append(i)\nfor j in range(1, len(pos)-119):\n count=pos[j+119] - pos[j] + 1\n if count \nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 1820.\nОтвет: 1820.\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.",
+  "answer": "1820",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=59793",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "27687",
+  "condition": "Текстовый файл состоит не более чем из 106 символов X, Y и Z. Определите длину самой длинной последовательности, состоящей из символов Y. Хотя бы один символ Y находится в последовательности.\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Николая Чуркина (Тимашевск) на языке Python.\nf = open('24.txt').readline()\nk = 1\nm = 1\nfor i in range(len(f)-1):\n if f[i] == 'Y' and f[i+1] == 'Y':\n k += 1\n m = max(m, k)\n else: k = 1\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 10.\nОтвет: 10.\nПриведём решение Артёма Гридина на языке Python.\nimport re\nprint(len(max(re.findall(r'Y+', open('24_demo.txt').readline()))))\nПриведём решение Михаила Глинского на языке Python.\nf = open('24_demo.txt')\ns = f.read()\nmlen = set()\nxlen = 1\nfor x in range(len(s)-1):\n if s[x]=='Y' and s[x+1]=='Y':\n xlen+=1\n else:\n mlen.add(xlen)\n xlen=1\nprint(max(mlen))\nПриведём другое решение данной задачи на языке Pascal.\nДля решения данной задачи будем посимвольно считывать текстовый файл. Объявим переменные: maxLen — максимальная длина последовательности, curLen — временное хранение длины последовательности, i — переменная для перебора всех символов, s — строка для работы с символами из файла. Алгоритм будет сравнивать значение текущего символа со значением предыдущего, и если символы не будут различаться и будут являться буквой Y, то значение счетчика будет увеличиваться на 1.\nПриведём решение данной задачи на языке Pascal.\nvar maxLen, curLen, i: integer; \n s: string;\nbegin\n assign(input, '24.txt'); \n readln(s);\n maxLen := 1;\n curLen := 1;\n for i:=2 to Length(s) do \n if (s[i] = s[i-1]) and (s[i] = 'Y') then begin\n curLen := curLen + 1;\n if curLen > maxLen then\n maxLen := curLen;\n end\n else\n curLen := 1;\n writeln(maxLen);\nend.\nПриведём решение Сергея Донец на PascalABC.NET:\nbegin\nReadAllText('24.txt').Select(c->c='Y'?'1':'0')\n.JoinToString.Split('0').Max(g -> g.Length).Print;\nend.",
+  "answer": "10",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=27687",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "27689",
+  "condition": "Текстовый файл состоит не более чем из 106 символов X, Y и Z. Определите максимальную длину цепочки вида XYZXYZXYZ... (составленной из фрагментов XYZ, последний фрагмент может быть неполным).\nДля выполнения этого задания следует написать программу. Ниже приведён файл, который необходимо обработать с помощью данного алгоритма.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение Чуркина Николая (Тимашевск) на языке Python.\nf = open('24.txt').readline()\nk = m = 0\nfor i in range(len(f)):\n if (f[i] == 'X' and k%3 == 0) or (f[i] == 'Y' and k%3 == 1) or (f[i] == 'Z' and k%3 == 2):\n k += 1\n m = max(m, k)\n elif f[i] == 'X': k = 1\n else: k = 0\nprint(m)\nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 13.\nОтвет: 13.\nПриведём решение Новикова Андрея на языке Python.\nimport re\nf = open('24_demo.txt').read()\nr = re.findall(r'(?:XYZ)+(?:XY  X)?', f)\nr = map(lambda x: len(x), r)\nprint(max(r))\nПриведём решение Фефелова Сергея на языке Python.\nf = open('24.txt').readline()\nk = mx = 0\nfor i in range(len(f)):\n if f[i-1:i+1] in 'XYZX' and k:\n k += 1\n elif f[i] == 'X':\n k = 1\n else:\n k = 0\n mx = max(mx, k)\nprint(mx)\nПриведём решение Пученко Дениса на языке Python.\nf=open('24.txt').readline()\nk = 1\nwhile ('XYZ' * k) in f:\n k = k + 1\nR = 'XYZ'*(k - 1)\nif (R + 'X') in f:\n if (R + 'XY') in f: print(len(R + 'XY'))\n else: print(len(R + 'X'))\nelse: print(len(R))\nПриведём решение Юрия Лысакова на языке Python.\nf = open(\"24_demo.txt\")\ns = f.read()\ns1 = 'XYZ'\na = s.split(s1)\nwhile len(a) > 1:\n s2 = s1\n s1 += 'XYZ'\n a = s.split(s1)\nif s2 + 'X' in s:\n s2 += 'X'\n if s2 + 'Y' in s:\n s2 += 'Y'\nprint(len(s2))\nПриведём решение Михаила Глинского на языке Python.\ns = open('24_demo.txt').readline()\nk = 1\nmk = 0\ns = s.replace('XYZ','***')\nif '*X' in s: s=s.replace('*X','**')\nfor i in range(len(s)-1):\n if s[i]=='*' and s[i+1]=='*':\n k+=1\n mk=max(mk,k)\n else: k=1\nprint(mk)\n-->\nПриведём решение Дмитрия Бурнина на языке Python.\nfrom re import *\ns = open('24_demo.txt').readline()\nreg = r'(?=((XYZ)+((XY)*  X*)*))'\nprint(max(([len(x.group(1)) for x in finditer(reg,s)])))\nПриведём решение Романа Шатило на языке Python.\ns = open('24_demo.txt').readline()\ns = s.replace('XYZ','***')\ns = s.replace('*X','*+').replace('+Y','*+')\ns = s.replace('+','+ ')\ns = s.replace('X',' ').replace('Y',' ').replace('Z',' ')\nprint(max(len(x) for x in s.split()))\nПриведём другое решение данной задачи на языке Pascal.\nДля решения данной задачи будем посимвольно считывать текстовый файл. Объявим переменные: s — строка для работы с символами из файла, maxCount — максимальная длина последовательности, count — временное хранение длины последовательности, i — переменная для перебора всех символов. Алгоритм будет сравнивать значения на трех позициях, если символы будут удовлетворять нужным условиям, то значение счетчика будет увеличиваться на 1.\nПриведём решение данной задачи на языке Pascal.\nbegin\n var s: string;\n var i, count, maxCount: integer;\n assign(input, '24.txt');\n readln(s);\n count:=0;\n maxCount:=0;\n for i:=1 to Length(s) do\n if ((s[i]='X') and (count mod 3=0)) or \n ((s[i]='Y') and (count mod 3=1)) or \n ((s[i]='Z') and (count mod 3=2)) then begin \n count := count+1;\n if count > maxCount then\n maxCount := count;\n end\n else if s[i]='X' then count:=1\n else count := 0;\n writeln(maxCount);\nend.\nПриведём решение Юрия Красильникова на языке Python.\ns = open('24_demo.txt').readline()\nm,t = 0,0\na = 'XYZ'\nfor c in s:\n if c == a[t%3]:\n t += 1\n m = max(t,m)\n elif c == 'X': t = 1\n else: t = 0\nprint(m)",
+  "answer": "13",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=27689",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "92201",
+  "condition": "Текстовый файл состоит не более чем из 106 символов и содержит только десятичные цифры, а также знаки «+» и «*» (сложения и умножения). Определите максимальное количество символов в непрерывной последовательности, являющейся корректным арифметическим выражением с целыми неотрицательными числами (без знака). В этом выражении никакие два знака арифметических операций не стоят рядом. В записи чисел отсутствуют незначащие (ведущие) нули. В ответе укажите количество символов в найденном выражении.\nЗадание 24",
+  "solution": "Решение. \nПриведём решение на языке Python.\nfrom re import *\ntext = open('24-1.txt').readline()\nnat = r'(([123456789][0123456789]*)  0)'\nreg = rf'(?=({nat}([-*]{nat})+))'\nprint(len(max([x.group(1) for x in finditer(reg, text)], key=len)))",
+  "answer": "154",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=92201",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "59702",
+  "condition": "Текстовый файл состоит из символов T, U, V, W, X, Y и Z.\nОпределите в прилагаемом файле максимальное количество идущих подряд символов (длину непрерывной подпоследовательности), среди которых символ Y встречается не более 150 раз.\nДля выполнения этого задания следует написать программу. \nЗадание 24",
+  "solution": "Решение. \nПриведём решение Галины Мозольковой на языке Python.\nf=open('24.txt')\ns=f.readline()\nf.close()\ns=s.split('Y')\nmax_len=0\nfor i in range(len(s)-150):\n st='Y'.join(s[i:i+151])\n if max_len \nВ результате работы данного алгоритма при вводе данных из файла в условии получаем ответ — 244.\nОтвет: 244.\nПримечание. Путь к файлу необходимо указать согласно расположению файла на Вашем компьютере.\nПриведём решение Дмитрия Казанцева на языке Python.\nf=open('24.txt')\ns=f.readline()\nlens=len(s)\nmas=[]\nfor i in range(lens):\n if s[i]=='Y':\n mas.append(i)\nif len(mas)\nПриведём решение Александра Тарасова на языке Python.\ns = open('24.txt').readline()[:-1]\na = [i for i in range(len(s)) if s[i]=='Y']\nmaxl = 0\nfor i in range(150,len(a)):\n maxl = max(a[i]-a[i-150],maxl)\nprint(maxl)",
+  "answer": "244",
+  "url": "https://inf-ege.sdamgia.ru/problem?id=59702",
+  "images": 0,
+  "tables": 0
+ }
+]
