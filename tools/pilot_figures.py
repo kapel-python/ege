@@ -16,6 +16,7 @@ import argparse
 import html
 import json
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -123,6 +124,52 @@ def strip_watermark_mark(svg: str) -> tuple[str, int]:
     return svg[:start] + svg[end:], n_paths
 
 
+CHROME = next(
+    (Path(p) / "chrome-headless-shell" for p in (
+        "/root/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64",
+        "/root/.cache/ms-playwright/chromium-1243/chrome-linux64",
+    ) if (Path(p) / "chrome-headless-shell").exists()
+    or (Path(p) / "chrome").exists()),
+    None)
+
+
+def rasterize(svg_path: Path, scale: float) -> Path:
+    """SVG -> PNG через headless Chrome (шрифт Times-метрик: Liberation Serif).
+    Пустые белые поля обрезаются. Возвращает путь к PNG; SVG удаляется."""
+    if CHROME is None:
+        raise RuntimeError("нет headless Chrome для растеризации")
+    out = svg_path.with_suffix(".png")
+    w = int(float(re.search(r'width="([\d.]+)', svg_path.read_text(encoding="utf-8", errors="ignore")).group(1)) * scale)
+    h = int(float(re.search(r'height="([\d.]+)', svg_path.read_text(encoding="utf-8", errors="ignore")).group(1)) * scale)
+    subprocess.run([str(CHROME), "--headless", "--disable-gpu", "--no-sandbox",
+                    "--hide-scrollbars", "--force-device-scale-factor=" + str(scale),
+                    "--window-size=" + str(w + 2) + "," + str(h + 2),
+                    "--default-background-color=FFFFFFFF",
+                    "--screenshot=" + str(out), svg_path.resolve().as_uri()],
+                   check=True, capture_output=True, timeout=180)
+    if not out.exists() or out.stat().st_size < 500:
+        raise RuntimeError("растеризация не дала файла")
+    png = out.read_bytes()
+    if png[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError("получился не PNG")
+    # Обрезка однотонных белых полей: в исходных PDF/Illustrator вокруг
+    # диаграммы часто остаётся пустое место, из-за него рисунок выглядел
+    # мелким в карточке. Возвращаем размеры содержимого.
+    from PIL import Image, ImageChops
+    im = Image.open(out).convert("RGB")
+    bg = Image.new("RGB", im.size, (255, 255, 255))
+    diff = ImageChops.difference(im, bg).convert("L")
+    bbox = diff.point(lambda p: 255 if p > 8 else 0).getbbox()
+    if bbox:
+        pad = 6
+        bbox = (max(0, bbox[0] - pad), max(0, bbox[1] - pad),
+                min(im.width, bbox[2] + pad), min(im.height, bbox[3] + pad))
+        im = im.crop(bbox)
+        im.save(out, optimize=True)
+    svg_path.unlink()
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("subject", choices=sorted(BASES))
@@ -133,6 +180,11 @@ def main() -> int:
     ap.add_argument("--strip-watermark", action="store_true",
                     help="вырезать узел вотермарки (fill-opacity:0.4); "
                          "происхождение остаётся в манифесте и карточке ассета")
+    ap.add_argument("--rasterize", type=float, default=0, metavar="SCALE",
+                    help="превратить чистый SVG в PNG (масштаб, например 2.5): "
+                         "подписи в SVG набраны Times New Roman, которого нет "
+                         "на телефонах — системный шрифт шире и текст вылезает "
+                         "за край. PNG рендерится одинаково везде.")
     args = ap.parse_args()
 
     base = BASES[args.subject]
@@ -190,6 +242,25 @@ def main() -> int:
                                       "url": url, "bytes": len(data), **info}
             print(f"  ok   {pid}[{k}]: {info['kind']} {info.get('width')}x{info.get('height')} "
                   f"{len(data) // 1024} КБ -> {name}")
+            if args.rasterize and info["kind"] == "svg":
+                # Растр не зависит от шрифтов устройства: подписи в SVG набраны
+                # Times New Roman, на телефоне его нет — текст вылезал за край.
+                try:
+                    png = rasterize(outdir / name, args.rasterize)
+                    from PIL import Image
+                    with Image.open(png) as im:
+                        png_size = im.size
+                    key = f"{pid}:{k}"
+                    manifest[key]["file"] = str(png.relative_to(ROOT))
+                    manifest[key]["kind"] = "png"
+                    manifest[key]["svg"] = str((outdir / name).relative_to(ROOT))
+                    manifest[key]["width"] = info["width"]
+                    manifest[key]["height"] = info["height"]
+                    manifest[key]["pngWidth"] = png_size[0]
+                    manifest[key]["pngHeight"] = png_size[1]
+                    print(f"       -> растр {png.stat().st_size // 1024} КБ (шрифтозависимость снята)")
+                except Exception as exc:
+                    print(f"  FAIL {pid}[{k}]: растеризация: {exc}")
     (outdir / f"manifest-line{args.line}.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"манифест: {len(manifest)} файлов")

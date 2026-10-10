@@ -35538,48 +35538,48 @@
   },
   {
    "id": "soc-src9424",
-   "src": "assets/society/soc-src9424.svg",
+   "src": "assets/society/soc-src9424.png",
    "type": "image",
    "alt": "Диаграмма к заданию (опрос, %)",
-   "width": 568,
-   "ratio": 3.1892,
-   "source": "диаграмма источника: https://soc-ege.sdamgia.ru/problem?id=9424"
+   "width": 640,
+   "ratio": 3.2268,
+   "source": "рисунок источника: https://soc-ege.sdamgia.ru/get_file?id=237301"
   },
   {
    "id": "soc-src13950",
-   "src": "assets/society/soc-src13950.svg",
+   "src": "assets/society/soc-src13950.png",
    "type": "image",
    "alt": "Диаграмма к заданию (опрос, %)",
-   "width": 280,
-   "ratio": 0.7937,
-   "source": "диаграмма источника: https://soc-ege.sdamgia.ru/problem?id=13950"
+   "width": 640,
+   "ratio": 0.7742,
+   "source": "рисунок источника: https://soc-ege.sdamgia.ru/get_file?id=236693"
   },
   {
    "id": "soc-src8147",
-   "src": "assets/society/soc-src8147.svg",
+   "src": "assets/society/soc-src8147.png",
    "type": "image",
    "alt": "Диаграмма к заданию (опрос, %)",
-   "width": 515,
-   "ratio": 2.4515,
-   "source": "диаграмма источника: https://soc-ege.sdamgia.ru/problem?id=8147"
+   "width": 640,
+   "ratio": 2.4342,
+   "source": "рисунок источника: https://soc-ege.sdamgia.ru/get_file?id=236664"
   },
   {
    "id": "soc-src11243",
-   "src": "assets/society/soc-src11243.svg",
+   "src": "assets/society/soc-src11243.png",
    "type": "image",
    "alt": "Диаграмма к заданию (опрос, %)",
-   "width": 386,
-   "ratio": 1.0347,
-   "source": "диаграмма источника: https://soc-ege.sdamgia.ru/problem?id=11243"
+   "width": 640,
+   "ratio": 1.034,
+   "source": "рисунок источника: https://soc-ege.sdamgia.ru/get_file?id=237323"
   },
   {
    "id": "soc-src8372",
-   "src": "assets/society/soc-src8372.svg",
+   "src": "assets/society/soc-src8372.png",
    "type": "image",
    "alt": "Диаграмма к заданию (опрос, %)",
-   "width": 269,
-   "ratio": 0.88,
-   "source": "диаграмма источника: https://soc-ege.sdamgia.ru/problem?id=8372"
+   "width": 640,
+   "ratio": 0.8808,
+   "source": "рисунок источника: https://soc-ege.sdamgia.ru/get_file?id=236669"
   }
  ],
  "visualAudit": {
