@@ -112,6 +112,12 @@ def strip_markup(raw: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", text)
     text = re.sub(r"<p[^>]*>", "\n", text)
     text = re.sub(r"</p>", "\n", text)
+    # Таблицы источника: ячейки разделяем « | », ряды — переводом строки.
+    # Без этого данные склеиваются в нечитаемое «1Английский15 400».
+    text = re.sub(r"</t[dh]>\s*", " | ", text)
+    text = re.sub(r"</tr>\s*", "\n", text)
+    text = re.sub(r"<table[^>]*>", "\n", text)
+    text = re.sub(r"</table>", "\n", text)
     text = re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
     # СДАМ ГИА режет слова невидимыми мягкими переносами: «По­яс­не­ние».
@@ -119,6 +125,11 @@ def strip_markup(raw: str) -> str:
     text = text.replace("\u202f", " ").replace("\xa0", " ")
     # Невидимые склейки источника: word joiner и zero-width.
     text = re.sub(r"[\u2060\u200b\u200c\u200d\ufeff]", "", text)
+    # Чистим разделители таблиц: лишние трубы, пустые края строк.
+    text = re.sub(r"[ \t]*\|[ \t]*", " | ", text)
+    text = re.sub(r"(?:[ \t]*\|)+[ \t]*(?=\n)", "", text)
+    text = re.sub(r"(?m)^[ \t]*(?:\|[ \t]*)+", "", text)
+    text = re.sub(r"(?:[ \t]*\|)+[ \t]*$", "", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n", text)
     return text.strip()
@@ -162,6 +173,9 @@ def parse_problem(base: str, pid: str) -> dict:
     answer_match = ANSWER_RE.search(page)
     answer_raw = strip_markup(answer_match.group(1)) if answer_match else ""
     answer = answer_raw.replace("Ответ:", "").strip().strip(".")
+    # «|» в ответе источника разделяет допустимые варианты (например, для
+    # заданий «соберите группу»). Сохраняем его без пробелов.
+    answer = re.sub(r"\s*\|\s*", "|", answer).strip("|")
 
     text = strip_markup(condition_raw)
     # Задания №1–3 и №22–26 идут с текстом-источником в отдельном блоке
@@ -183,6 +197,7 @@ def parse_problem(base: str, pid: str) -> dict:
     solution = re.sub(r"\s*Ответ:\s*[^\s.]+\.?\s*$", "", solution).strip()
 
     images = len(re.findall(r"<img", condition_raw))
+    tables = len(re.findall(r"<table", condition_raw, re.I))
     return {
         "src_id": pid,
         "condition": text,
@@ -190,6 +205,7 @@ def parse_problem(base: str, pid: str) -> dict:
         "answer": answer,
         "url": f"{base}/problem?id={pid}",
         "images": images,
+        "tables": tables,
     }
 
 
