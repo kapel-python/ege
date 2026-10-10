@@ -9575,7 +9575,7 @@
  "visualAssets": [
   {
    "id": "bio-cell",
-   "src": "assets/biology/bio-cell.svg",
+   "src": "assets/biology/bio-cell.svg?v=7ae5786761",
    "type": "image",
    "alt": "Животная клетка: ядро, митохондрия, ЭПС, комплекс Гольджи",
    "width": 640,
@@ -9588,7 +9588,7 @@
   },
   {
    "id": "bio-mitosis",
-   "src": "assets/biology/bio-mitosis.svg",
+   "src": "assets/biology/bio-mitosis.svg?v=2880810a56",
    "type": "image",
    "alt": "Фазы митоза: профаза, метафаза, анафаза, телофаза",
    "width": 640,
@@ -9601,7 +9601,7 @@
   },
   {
    "id": "bio-cross",
-   "src": "assets/biology/bio-cross.svg",
+   "src": "assets/biology/bio-cross.svg?v=64abeb7f25",
    "type": "image",
    "alt": "Решётка Пеннета для моногибридного скрещивания Аа × Аа",
    "width": 640,
@@ -9614,7 +9614,7 @@
   },
   {
    "id": "bio-pyramid",
-   "src": "assets/biology/bio-pyramid.svg",
+   "src": "assets/biology/bio-pyramid.svg?v=d7562e289f",
    "type": "image",
    "alt": "Экологическая пирамида биомасс по трофическим уровням",
    "width": 640,
@@ -9627,7 +9627,7 @@
   },
   {
    "id": "bio-heart",
-   "src": "assets/biology/bio-heart.svg",
+   "src": "assets/biology/bio-heart.svg?v=aaddbd7a3e",
    "type": "image",
    "alt": "Схема сердца: четыре камеры и аорта",
    "width": 640,
@@ -9640,7 +9640,7 @@
   },
   {
    "id": "bio-flower",
-   "src": "assets/biology/bio-flower.svg",
+   "src": "assets/biology/bio-flower.svg?v=6238e86723",
    "type": "image",
    "alt": "Схема цветка: тычинка, пестик, лепестки",
    "width": 640,

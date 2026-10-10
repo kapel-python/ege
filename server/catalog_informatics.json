@@ -52139,7 +52139,7 @@
  "visualAssets": [
   {
    "id": "inf-graph-p1",
-   "src": "assets/informatics/inf-graph-p1.svg",
+   "src": "assets/informatics/inf-graph-p1.svg?v=474d51c331",
    "type": "image",
    "alt": "Схема дорог: вершины — пункты A–H, рёбра — дороги",
    "width": 640,
@@ -52151,7 +52151,7 @@
   },
   {
    "id": "inf-graph-p2",
-   "src": "assets/informatics/inf-graph-p2.svg",
+   "src": "assets/informatics/inf-graph-p2.svg?v=c8108832d3",
    "type": "image",
    "alt": "Схема дорог: вершины — пункты A–H, рёбра — дороги",
    "width": 640,
@@ -52163,7 +52163,7 @@
   },
   {
    "id": "inf-graph-p3",
-   "src": "assets/informatics/inf-graph-p3.svg",
+   "src": "assets/informatics/inf-graph-p3.svg?v=89b10ad4a0",
    "type": "image",
    "alt": "Схема дорог: вершины — пункты A–H, рёбра — дороги",
    "width": 640,
@@ -52175,7 +52175,7 @@
   },
   {
    "id": "inf-graph-p4",
-   "src": "assets/informatics/inf-graph-p4.svg",
+   "src": "assets/informatics/inf-graph-p4.svg?v=eca2dd9432",
    "type": "image",
    "alt": "Схема дорог: вершины — пункты A–H, рёбра — дороги",
    "width": 640,
@@ -52187,7 +52187,7 @@
   },
   {
    "id": "inf-graph-p5",
-   "src": "assets/informatics/inf-graph-p5.svg",
+   "src": "assets/informatics/inf-graph-p5.svg?v=be8a4694f3",
    "type": "image",
    "alt": "Схема дорог: вершины — пункты A–H, рёбра — дороги",
    "width": 640,

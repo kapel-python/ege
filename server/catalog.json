@@ -38,7 +38,7 @@
   },
   {
    "id": "n01-p1-quad",
-   "src": "assets/tasks/n01/n01-p1-quad.svg",
+   "src": "assets/tasks/n01/n01-p1-quad.svg?v=aa6680e3d9",
    "type": "geometry",
    "alt": "Четырёхугольник ABCD с вписанной окружностью",
    "width": 640,
@@ -51,7 +51,7 @@
   },
   {
    "id": "n01-p2-midline",
-   "src": "assets/tasks/n01/n01-p2-midline.svg",
+   "src": "assets/tasks/n01/n01-p2-midline.svg?v=b92a663158",
    "type": "geometry",
    "alt": "Треугольник ABC со средней линией DE",
    "width": 640,
@@ -64,7 +64,7 @@
   },
   {
    "id": "n01-p3-bisector",
-   "src": "assets/tasks/n01/n01-p3-bisector.svg",
+   "src": "assets/tasks/n01/n01-p3-bisector.svg?v=8d61a339d3",
    "type": "geometry",
    "alt": "Треугольник ABC с биссектрисой AD",
    "width": 640,
@@ -77,7 +77,7 @@
   },
   {
    "id": "n03-p1-prism",
-   "src": "assets/tasks/n03/n03-p1-prism.svg",
+   "src": "assets/tasks/n03/n03-p1-prism.svg?v=f62b230695",
    "type": "geometry",
    "alt": "Треугольная призма с сечением по средней линии основания",
    "width": 640,
@@ -90,7 +90,7 @@
   },
   {
    "id": "n03-p2-box",
-   "src": "assets/tasks/n03/n03-p2-box.svg",
+   "src": "assets/tasks/n03/n03-p2-box.svg?v=84fd03c241",
    "type": "geometry",
    "alt": "Параллелепипед ABCDA1B1C1D1 с тетраэдром ABCB1",
    "width": 640,
@@ -103,7 +103,7 @@
   },
   {
    "id": "n12-p1-hyperbola",
-   "src": "assets/tasks/n12/n12-p1-hyperbola.svg",
+   "src": "assets/tasks/n12/n12-p1-hyperbola.svg?v=042dc6d503",
    "type": "graph",
    "alt": "График y = k/x через точку (5; 1)",
    "width": 640,
@@ -116,7 +116,7 @@
   },
   {
    "id": "n12-p3-exponential",
-   "src": "assets/tasks/n12/n12-p3-exponential.svg",
+   "src": "assets/tasks/n12/n12-p3-exponential.svg?v=bc1822f435",
    "type": "graph",
    "alt": "Убывающий график y = a^x через точки (0;1) и (-1;4)",
    "width": 640,
@@ -129,7 +129,7 @@
   },
   {
    "id": "n02-p2-vectors",
-   "src": "assets/tasks/n02/n02-p2-vectors.svg",
+   "src": "assets/tasks/n02/n02-p2-vectors.svg?v=8340a3cba9",
    "type": "geometry",
    "alt": "Координатная схема векторов a и b",
    "width": 640,
