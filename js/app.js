@@ -717,8 +717,9 @@ function openVisualLightbox(src, label) {
   root.id = "visual-lightbox-root";
   root.innerHTML =
     '<div class="visual-lightbox-backdrop" data-visual-lightbox-backdrop>' +
+      '<button class="visual-lightbox__zoom" type="button" data-visual-zoom aria-label="Увеличить рисунок">2×</button>' +
+      '<button class="visual-lightbox__close" type="button" data-visual-lightbox-close aria-label="Закрыть рисунок">' + icon("x") + "</button>" +
       '<div class="visual-lightbox" role="dialog" aria-modal="true" aria-label="' + esc(caption || "Увеличенный рисунок") + '">' +
-        '<button class="visual-lightbox__close" type="button" data-visual-lightbox-close aria-label="Закрыть рисунок">' + icon("x") + "</button>" +
         '<img class="visual-lightbox__img" src="' + esc(src) + '" alt="' + esc(caption || "Увеличенный рисунок") + '">' +
         (caption ? '<div class="visual-lightbox__caption">' + esc(caption) + "</div>" : "") +
       "</div>" +
@@ -732,6 +733,21 @@ function openVisualLightbox(src, label) {
   }
   const backdrop = root.querySelector("[data-visual-lightbox-backdrop]");
   if (backdrop) backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeVisualLightbox(); });
+  // Зум 2×: широкие графики на телефоне иначе выходят мелкими — ширина
+  // ограничена экраном. После зума контейнер скроллится, детали видны.
+  const zoomBtn = root.querySelector("[data-visual-zoom]");
+  const box = root.querySelector(".visual-lightbox");
+  if (zoomBtn && box) {
+    const toggle = () => {
+      const on = box.classList.toggle("visual-lightbox--zoom");
+      zoomBtn.textContent = on ? "1×" : "2×";
+      zoomBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      if (!on) box.scrollTo({ top: 0, left: 0 });
+    };
+    zoomBtn.addEventListener("click", toggle);
+    const img = box.querySelector(".visual-lightbox__img");
+    if (img) img.addEventListener("dblclick", toggle);
+  }
 }
 
 function closeVisualLightbox() {
