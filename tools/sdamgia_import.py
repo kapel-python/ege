@@ -216,25 +216,47 @@ def main() -> int:
     ap.add_argument("count", type=int)
     ap.add_argument("--dry", action="store_true",
                     help="только показать результат, файл не писать")
+    ap.add_argument("--passes", type=int, default=1,
+                    help="сколько наборов собрать подряд (дедупликация по id); "
+                         "стоп, когда новых заданий нет")
+    ap.add_argument("--merge", action="store_true",
+                    help="дописать новые задания к существующему файлу, а не "
+                         "перезаписывать его")
     args = ap.parse_args()
 
     base = SUBJECTS[args.subject]
-    test_id = generate_set(base, args.line, args.count)
-    ids = problem_ids(base, test_id)
-    print(f"линия {args.line}: набор {test_id}, заданий найдено {len(ids)}")
+    path = OUT_DIR / f"{args.subject}_{args.line:02d}.json"
+    known: dict[str, dict] = {}
+    if args.merge and path.exists() and not args.dry:
+        try:
+            for item in json.loads(path.read_text(encoding="utf-8")):
+                known[str(item.get("src_id"))] = item
+        except (OSError, ValueError):
+            known = {}
+    print(f"линия {args.line}: уже известно {len(known)}, проходов {args.passes}")
 
-    items: list[dict] = []
-    for i, pid in enumerate(ids, 1):
-        item = parse_problem(base, pid)
-        items.append(item)
-        print(f"  {i:2}. id={pid:>7} отв={item['answer']!r:10} картинок={item['images']} "
-              f"{item['condition'][:60]!r}")
-        time.sleep(PAUSE)
+    fresh = 0
+    for p in range(args.passes):
+        test_id = generate_set(base, args.line, args.count)
+        ids = problem_ids(base, test_id)
+        new_ids = [pid for pid in ids if pid not in known]
+        print(f"  проход {p + 1}: набор {test_id}, заданий {len(ids)}, новых {len(new_ids)}")
+        if not new_ids:
+            break
+        for i, pid in enumerate(new_ids, 1):
+            item = parse_problem(base, pid)
+            known[pid] = item
+            fresh += 1
+            print(f"    {i:2}. id={pid:>7} отв={item['answer']!r:10} картинок={item['images']} "
+                  f"{item['condition'][:60]!r}")
+            time.sleep(PAUSE)
+
+    items = list(known.values())
+    print(f"линия {args.line}: всего уникальных {len(items)} (+{fresh} новых)")
 
     if args.dry:
         return 0
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUT_DIR / f"{args.subject}_{args.line:02d}.json"
     path.write_text(json.dumps(items, ensure_ascii=False, indent=1) + "\n",
                     encoding="utf-8")
     print(f"записано {len(items)} заданий -> {path.relative_to(ROOT)}")
