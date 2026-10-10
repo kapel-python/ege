@@ -88,6 +88,7 @@ for (const [subject, cat] of Object.entries(catalogs)) {
   let noHint = 0, noAnswer = 0, noText = 0, orphan = 0, badVisual = 0, selfNoSolution = 0;
   let wrongRejected = 0, emptyAccepted = 0, threw = 0, sepBad = 0, orderBad = 0, commaOnNumber = 0;
   const samples = [];
+  const blockedTasks = [];
 
   for (const s of skills.values()) {
     const hints = (s.metadata || {}).hints;
@@ -102,7 +103,10 @@ for (const [subject, cat] of Object.entries(catalogs)) {
     if (!isLong && !answer) noAnswer++;
     if (!text.trim()) noText++;
     if (t.skill && !skills.has(t.skill)) orphan++;
-    if ((t.visual || {}).required && !assetIds.has(String(t.visual.assetId || ""))) badVisual++;
+    if ((t.visual || {}).required && !assetIds.has(String(t.visual.assetId || ""))) {
+      badVisual++;
+      blockedTasks.push(t);
+    }
     if (isSelf && !answer && !String(t.solution || "").trim()) selfNoSolution++;
     if (isLong || isSelf || !answer) continue;
 
@@ -152,7 +156,13 @@ for (const [subject, cat] of Object.entries(catalogs)) {
   check(`${subject}: число не съедает запятую как разделитель`, commaOnNumber === 0, `${commaOnNumber}: ${samples.slice(0, 3).join("; ")}`);
   check(`${subject}: порядок важен только там, где смысловой`, orderBad === 0, `${orderBad}: ${samples.slice(0, 3).join("; ")}`);
   // Задания без рисунка сервер не отдаёт — это зазор контента, не поломка ядра.
-  if (badVisual) console.log(`     · ${subject}: заданий требуют рисунок без ассета: ${badVisual} (не отдаются клиенту)`);
+  // Но такая блокировка обязана быть объяснена: молча пропавшее задание —
+  // это невидимая дыра, которую никто не починит.
+  if (badVisual) {
+    const silent = blockedTasks.filter((t) => !String((t.visual || {}).note || "").trim()).map((t) => t.id);
+    check(`${subject}: неотдаваемое задание объяснено причиной`, silent.length === 0, silent.join(","));
+    console.log(`     · ${subject}: не отдаётся из-за рисунка: ${badVisual} (все с причиной)`);
+  }
   if (selfNoSolution) console.log(`     · ${subject}: заданий на самопроверку без решения: ${selfNoSolution}`);
 }
 
