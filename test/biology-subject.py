@@ -86,11 +86,13 @@ def main():
             assert not [s for s in skills if s.get("locked")], skills
 
             tasks = catalog.get("tasks", [])
-            assert len(tasks) == 126, len(tasks)
+            assert len(tasks) == 284, len(tasks)
             short = [t for t in tasks if t.get("type") == "short_answer"]
             extended = [t for t in tasks if t.get("type") == "extended_answer"]
-            assert len(short) == 105 and len(extended) == 21, (len(short), len(extended))
-            # Часть 1: 21 линия по 5 заданий.
+            assert len(short) == 263 and len(extended) == 21, (len(short), len(extended))
+            # Часть 1: темы по 15 заданий (единая система); темы, где задание
+            # построено на официальном рисунке, источник текстом не отдаёт —
+            # там остаётся 5 (bio05, 09, 13) или 13 (bio06, дошли не все).
             per_skill: dict[str, int] = {}
             for t in short:
                 per_skill.setdefault(t.get("skill"), 0)
@@ -100,7 +102,10 @@ def main():
                              "bio25_humanadv", "bio26_genbioadv", "bio27_cytology",
                              "bio28_genetics"}]
             assert set(per_skill) == set(part1_skills), sorted(set(per_skill) ^ set(part1_skills))
-            assert all(v == 5 for v in per_skill.values()), per_skill
+            assert all(v >= 5 for v in per_skill.values()), per_skill
+            assert all(v == 15 for sid, v in per_skill.items() if sid not in
+                       {"bio05_cellfig", "bio09_divfig", "bio13_humanfig",
+                        "bio06_cellmatch", "bio10_divmatch", "bio14_humanmatch"}), per_skill
             # Часть 2: 7 линий по 3 задания, у каждого есть образец решения.
             per_adv: dict[str, int] = {}
             for t in extended:
@@ -161,7 +166,7 @@ def main():
             assert set(audit) == task_ids, len(audit)
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={SID}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 126, (status, len(task_details.get("tasks", [])))
+            assert status == 200 and len(task_details.get("tasks", [])) == 284, (status, len(task_details.get("tasks", [])))
             status, lesson_details = request(opener, base, f"/api/catalog-lessons?subject={SID}")
             assert status == 200 and len(lesson_details.get("lessons", [])) == 28, (status, lesson_details)
 
@@ -206,11 +211,11 @@ def main():
             public_bio = next((s for s in public.get("subjects", []) if s.get("id") == SID), None)
             assert public_bio, public
             public_counts = public_bio.get("counts", {})
-            assert public_counts.get("tasks") == 126, public_bio
+            assert public_counts.get("tasks") == 284, public_bio
             assert public_counts.get("skills") == 28, public_bio
             assert public_counts.get("lessons") == 28, public_bio
             assert public_counts.get("missions") == 28 and public_counts.get("bosses") == 2, public_bio
-            print("Biology subject integration OK: 28 lines, 126 tasks, 28 lessons,"
+            print("Biology subject integration OK: 28 lines, 284 tasks (263 доступны), 28 lessons,"
                   " forecast 57->100, state isolated")
         finally:
             httpd.shutdown()

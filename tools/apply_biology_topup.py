@@ -90,9 +90,8 @@ def task_from_source(old: dict, raw: dict, n: int, new_id: str) -> dict:
     out = {k: task[k] for k in (
         "id", "skill", "sub", "num", "diff", "text", "answer", "hint", "hints",
         "solution", "type", "points", "source", "sourceId") if k in task}
-    for k, v in old.items():
-        if k not in out:
-            out[k] = v
+    # Ничего не наследуем от задания-шаблона: иначе новое задание получит
+    # чужую схему (visual) или прошлые варианты ответа (accept).
     if len(alts) > 1:
         out["accept"] = alts
     return out

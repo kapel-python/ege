@@ -3884,6 +3884,23 @@ function openLockedSkillModal(skillId) {
     </div>`, "Информация о закрытой теме");
 }
 
+/* Подпись ошибки: «подтема · задание N из M». Текст задания не цитируем —
+   в подписях была простыня обрывков условий. Номер — позиция задания внутри
+   темы (совпадает с порядком практики), поэтому ошибку можно найти. */
+function taskErrorLabel(error) {
+  if (!error) return "";
+  const task = error.taskId && typeof DataAPI !== "undefined" && DataAPI.task
+    ? DataAPI.task(String(error.taskId)) : null;
+  if (!task) return String(error.sub || "").trim();
+  const skillId = String(task.skill || "");
+  let list = [];
+  try { list = (DataAPI.tasksBySkill ? DataAPI.tasksBySkill(skillId) : []).slice(); } catch (_) { list = []; }
+  const index = list.findIndex((t) => t && String(t.id) === String(task.id));
+  const sub = String(task.sub || "").trim();
+  const pos = index >= 0 ? `задание ${index + 1} из ${list.length}` : "";
+  return [sub, pos].filter(Boolean).join(" · ") || "задание";
+}
+
 function openSkillModal(skillId) {
   const sk = subjectSkillById(skillId);
   if (!sk) return;
@@ -3893,7 +3910,7 @@ function openSkillModal(skillId) {
   const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
   const status = topicStatus(sk);
   const skillErrors = asSafeArray(Store.state.errors).filter((e) => e && e.skill === skillId && !e.resolved);
-  const subs = [...new Set(skillErrors.map((e) => e.sub).filter(Boolean))];
+  const subs = [...new Set(skillErrors.map((e) => taskErrorLabel(e)).filter(Boolean))];
   const missions = asSafeArray(DataAPI.missions()).filter((m) => m && m.skill === skillId);
   const doneMissions = Store.state.missionsDone || {};
   const mission = missions.find((m) => !doneMissions[m.id] && missionPracticeIds(m).length)
