@@ -56,7 +56,10 @@ PAUSE = 0.25
 # выше сolnb-кнопки, поэтому режем точно по ней, а не по общим div-ам.
 SOL_ANCHOR_RE = re.compile(r'id="soltb\d+"')
 ANSWER_RE = re.compile(r'<div class="answer"[^>]*>(.*?)</div>', re.S)
-SOLUTION_RE = re.compile(r'id="sol(\d+)"[^>]*>(.*?)(?=<div class="answer")', re.S)
+# Начало блока решения задания. Конец блока ищем вручную (см. _solution_block):
+# у части 1 он закрыт следующим <div class="answer">, у развёрнутых заданий
+# части 2 машинного блока ответа нет вовсе — там конец это «Спрятать критерии».
+SOLUTION_START_RE = re.compile(r'id="sol\d+"[^>]*>')
 
 
 def get(base: str, path: str) -> str:
@@ -146,6 +149,25 @@ def extract_div(page: str, match: re.Match) -> str:
     return page[tag_end:]
 
 
+def _solution_block(page: str, from_pos: int) -> str:
+    """HTML блока решения, начиная с позиции after_pos (после якоря «пояснение»).
+
+    Конец блока — первый из маркеров: машинный ответ части 1
+    (`<div class="answer">`) или критерии части 2 (`<div class="prob_crits">`).
+    У развёрнутых заданий части 2 машинного ответа нет, поэтому прежний
+    регекс с обязательным lookahead на answer их решение терял."""
+    start = SOLUTION_START_RE.search(page, from_pos)
+    if not start:
+        return ""
+    s = start.end()
+    end = len(page)
+    for marker in ('<div class="answer"', '<div class="prob_crits"'):
+        found = page.find(marker, s)
+        if found != -1:
+            end = min(end, found)
+    return page[s:end]
+
+
 def parse_problem(base: str, pid: str) -> dict:
     page = get(base, f"/problem?id={pid}")
 
@@ -163,8 +185,7 @@ def parse_problem(base: str, pid: str) -> dict:
         raise RuntimeError(f"задание {pid}: не найден блок условия")
     condition_raw = head[body.end():]
 
-    sol = SOLUTION_RE.search(page[anchor.start():])
-    solution_raw = sol.group(2) if sol else ""
+    solution_raw = _solution_block(page, anchor.start())
     # На источнике в конце блока решения идёт «Правило: …» — для нашей
     # подсказки оно не нужно, режем по маркеру.
     solution_raw = re.split(r"<img class=\"nodraw\"", solution_raw)[0]
@@ -195,6 +216,8 @@ def parse_problem(base: str, pid: str) -> dict:
     # убираем, иначе рендер соберёт из строки с пайпом ложную таблицу.
     solution = solution.replace("|", "")
     solution = re.sub(r"\s*Ответ:\s*[^\s.]+\.?\s*$", "", solution).strip()
+    # Хвостовая кнопка источника у развёрнутых заданий («Спрятать критерии»).
+    solution = re.sub(r"\s*Спрятать (?:критерии|пояснение)\s*$", "", solution).strip()
 
     images = len(re.findall(r"<img", condition_raw))
     tables = len(re.findall(r"<table", condition_raw, re.I))
