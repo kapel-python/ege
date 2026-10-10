@@ -1213,7 +1213,7 @@ function showLevelUp(to) {
     <div class="levelup-box">
       <div class="levelup-box__label">НОВЫЙ УРОВЕНЬ</div>
       <div class="levelup-box__level">${to}</div>
-      <div class="levelup-box__sub">Новый уровень подготовки</div>
+      <div class="levelup-box__sub">Новый уровень · ${esc(currentSubjectLabel())}</div>
     </div>`;
   div.onclick = () => div.remove();
   root.appendChild(div);
@@ -2141,6 +2141,18 @@ function subjectDisplayShort(subject) {
     : subject;
   const text = String(value == null ? "" : value).trim();
   return text || subjectDisplayName(subject);
+}
+
+/* Уровень и XP считаются ПО ПРЕДМЕТУ, а не по аккаунту. Без подписи смена
+   предмета выглядит как «прогресс упал» (было Level 4 в русском — стало 2
+   в базе). Поэтому рядом с уровнем/опытом всегда называем предмет. */
+function currentSubjectLabel(short = false) {
+  try {
+    const info = subjectInfoSafe();
+    return short ? subjectDisplayShort(info) : subjectDisplayName(info);
+  } catch (_) {
+    return "Предмет";
+  }
 }
 
 function subjectDisplayTitle(id) {
@@ -3440,6 +3452,7 @@ function screenDashboard(root) {
     return;
   }
   const li = levelInfo();
+  const subjectLabel = currentSubjectLabel();
   const f = safeForecast();
   const trend = forecastTrend();
   /* Держим сегодняшний бакет активности живым (сайд-эффект todayActivity):
@@ -3494,6 +3507,7 @@ function screenDashboard(root) {
 
     <div class="hero">
       <div class="card card--glow">
+        ${subjectLabel ? `<div class="subject-name">${esc(subjectLabel)}</div>` : ""}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
             <div class="stat-label">Уровень подготовки</div>
@@ -4962,7 +4976,7 @@ function sessionAnswerAreaHtml(t, S) {
       <input class="answer-input" id="answerInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
       <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
     </div>
-    ${answerFormatCaption(t.answer, t.valueType)}
+    ${answerFormatCaption(t.answer, t.valueType, t.text)}
     <div class="session-tools">
       <span id="hintControl"></span>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
@@ -7265,9 +7279,15 @@ function answerInputMode(answer) {
 /* Подсказка ожидаемого формата ответа — чтобы ученик всегда понимал,
    что вводить: целое, дробь или выражение. valueType из каталога
    приоритетнее, иначе выводим формат по виду самого ответа. */
-function answerFormatHint(answer, valueType) {
+function answerFormatHint(answer, valueType, text) {
   const vt = String(valueType || "");
-  if (/цифр|последовательност/i.test(vt)) return "последовательность цифр (например, 245)";
+  const isMulti = typeof isMultiSelectTask === "function"
+    && isMultiSelectTask({ answer, valueType: vt, text });
+  if (/цифр|последовательност/i.test(vt)) {
+    return isMulti ? "несколько цифр по возрастанию, например 245" : "последовательность цифр (например, 245)";
+  }
+  // Мультивыбор без явного valueType: ответ — набор номеров.
+  if (isMulti) return "несколько цифр по возрастанию, например 245";
   if (/целое/.test(vt)) return /градус/.test(vt) ? "целое число (в градусах)" : "целое число";
   if (/дробь/.test(vt)) return "десятичная дробь (запятая или точка)";
   if (/единиц/.test(vt)) return "число с единицей измерения";
@@ -7278,8 +7298,8 @@ function answerFormatHint(answer, valueType) {
   return "";
 }
 
-function answerFormatCaption(answer, valueType) {
-  const hint = answerFormatHint(answer, valueType);
+function answerFormatCaption(answer, valueType, text) {
+  const hint = answerFormatHint(answer, valueType, text);
   return hint ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hint)}</div>` : "";
 }
 
@@ -7404,8 +7424,9 @@ const LESSON_STEP_LABELS = {
 function lessonFields(step) {
   if (Array.isArray(step.fields) && step.fields.length) return step.fields;
   const task = step.taskId ? DataAPI.task(step.taskId) : null;
-  const valueType = step.valueType || (task && task.valueType) || lessonInlineDigitSeq(step);
-  return [{ id: "answer", label: "Ответ", answer: step.answer || (task && task.answer), valueType, errorType: step.errorType }];
+  const valueType = step.valueType || (task && task.valueType) || lessonInlineDigitSeq(step) || (lessonMatchingTask(step) ? "последовательность цифр" : "");
+  const text = (task && task.text) || step.text || "";
+  return [{ id: "answer", label: "Ответ", answer: step.answer || (task && task.answer), valueType, text, errorType: step.errorType }];
 }
 
 /* Inline-ответ-код шага урока: valueType в шаге не задан, но ответ — набор
@@ -7420,6 +7441,22 @@ function lessonInlineDigitSeq(step) {
 }
 
 function lessonTask(step) { return step.taskId ? DataAPI.task(step.taskId) : null; }
+
+/* Соответствие в уроке: задание из банка (taskId) или inline-код шага.
+   Возвращает {task, letters} либо null. По нему рисуем таблицу-бланк и
+   понимаем, что ответ — набор цифр по буквам (порядок смысловой). */
+function lessonMatchingTask(step) {
+  if (!step) return null;
+  const banked = lessonTask(step);
+  const bankedLetters = banked ? matchingAnswerLetters(banked) : [];
+  if (banked && bankedLetters.length) return { task: banked, letters: bankedLetters };
+  if (step.answer) {
+    const inline = { type: "short_answer", answer: String(step.answer), text: String(step.text || "") };
+    const letters = matchingAnswerLetters(inline);
+    if (letters.length) return { task: inline, letters };
+  }
+  return null;
+}
 
 /* Текст шага и текст задания из банка — один и тот же: второй показ лишний.
    Такое бывает, когда текст шага слово в слово повторяет bank text. */
@@ -7548,21 +7585,54 @@ function lessonFeedbackHtml(step, state) {
   return state.feedback || "";
 }
 
+/* Таблица-ответ как в бланке ЕГЭ для шагов-соответствий в уроке: цифра
+   под каждой буквой. Так ученик не держит порядок в голове и не путает
+   код — тот же принцип, что и в обычной практике. */
+function lessonMatchTableHtml(letters, value, done) {
+  const v = String(value || "");
+  return `
+    <div class="match-answer">
+      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке ЕГЭ.</div>
+      <div class="match-answer__scroll">
+        <table class="match-answer__table" role="group" aria-label="Ответ по буквам">
+          <thead><tr>${letters.map((l) => `<th scope="col">${esc(l)}</th>`).join("")}</tr></thead>
+          <tbody><tr>${letters.map((l, i) => `<td><input class="match-answer__cell" type="text" inputmode="numeric" autocomplete="off" maxlength="1" data-lesson-match-cell="${i}" value="${esc(v[i] || "")}" aria-label="Ответ для ${esc(l)}" ${done ? "disabled" : ""}></td>`).join("")}</tr></tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function lessonMatchValue() {
+  return Array.from(document.querySelectorAll("[data-lesson-match-cell]"))
+    .map((c) => String(c.value || "").replace(/\D/g, "").slice(-1)).join("");
+}
+
+function lessonCaptureMatchDraft() {
+  lessonCaptureDraft("answer", lessonMatchValue());
+}
+
 function lessonActionHtml(step, state) {
   const fields = lessonFields(step);
+  const match = lessonMatchingTask(step);
   const isDone = state.status === "solved" || state.status === "shown";
   const help = lessonAvailableHelp(state);
-  return `
-    ${lessonHintsHtml(step, state)}
-    <div class="lesson-answer-grid ${fields.length > 1 ? "lesson-answer-grid--multiple" : ""}">
+  const answerArea = match
+    ? `${lessonMatchTableHtml(match.letters, isDone ? String(fields[0].answer || "") : (state.draft["answer"] || ""), isDone)}
+       ${isDone ? "" : `<button class="btn btn--primary match-answer__submit" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}`
+    : `<div class="lesson-answer-grid ${fields.length > 1 ? "lesson-answer-grid--multiple" : ""}">
       ${fields.map((field) => `
         <label class="lesson-answer-field">
           <span>${esc(field.label || "Ответ")}</span>
           <input class="answer-input" id="lessonInput-${esc(field.id)}" data-lesson-field="${esc(field.id)}" placeholder="${esc(field.label || "Ответ")}" autocomplete="off" inputmode="${answerInputMode(field.answer)}" value="${esc(state.draft[field.id] || "")}" ${isDone ? "disabled" : ""}>
         </label>`).join("")}
       ${isDone ? "" : `<button class="btn btn--primary lesson-check-btn" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}
-    </div>
-    ${isDone ? "" : (() => { const hints = [...new Set(fields.map((f) => answerFormatHint(f.answer, f.valueType)).filter(Boolean))]; return hints.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hints.join(" · "))}</div>` : ""; })()}
+    </div>`;
+  // Для таблицы-бланка отдельная подпись формата лишняя: подсказка уже в ней.
+  const hints = (isDone || match) ? [] : [...new Set(fields.map((f) => answerFormatHint(f.answer, f.valueType, f.text)).filter(Boolean))];
+  return `
+    ${lessonHintsHtml(step, state)}
+    ${answerArea}
+    ${hints.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hints.join(" · "))}</div>` : ""}
     ${isDone ? "" : `<div class="session-tools lesson-tools">
       ${help ? `<button class="btn btn--ghost btn--sm" id="lessonHintBtn" onclick="lessonHint()">${icon("bulb")} ${help.type === "solution" ? "Показать решение" : `Подсказка ${help.level}`}</button>` : ""}
       <span>${help ? "Подсказка останется на экране до конца задания" : "Следующая подсказка откроется после ошибки"}</span>
@@ -7615,6 +7685,36 @@ function screenLesson(root) {
       input.addEventListener("input", () => lessonCaptureDraft(input.dataset.lessonField, input.value));
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") lessonSubmit(); });
     });
+    // Клетки таблицы-бланка: как в практике — цифра под буквой, автопереход,
+    // стрелки/Backspace, вставка строки цифр. Без автофокуса: экран урока
+    // должен открываться сверху, без выезжающей клавиатуры.
+    const cells = Array.from(document.querySelectorAll("[data-lesson-match-cell]"));
+    const focusAt = (i) => {
+      const cell = cells[Math.max(0, Math.min(cells.length - 1, i))];
+      if (cell) { try { cell.focus(); cell.select(); } catch (_) { cell.focus(); } }
+    };
+    cells.forEach((cell, i) => {
+      cell.addEventListener("input", () => {
+        cell.value = String(cell.value || "").replace(/\D/g, "").slice(-1);
+        if (cell.value && i < cells.length - 1) focusAt(i + 1);
+        lessonCaptureMatchDraft();
+      });
+      cell.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); lessonSubmit(); return; }
+        if (e.key === "Backspace" && !cell.value && i > 0) { e.preventDefault(); focusAt(i - 1); return; }
+        if (e.key === "ArrowLeft" && i > 0) { e.preventDefault(); focusAt(i - 1); return; }
+        if (e.key === "ArrowRight" && i < cells.length - 1) { e.preventDefault(); focusAt(i + 1); return; }
+      });
+      cell.addEventListener("paste", (e) => {
+        const raw = (e.clipboardData || window.clipboardData);
+        const digits = String((raw && raw.getData && raw.getData("text")) || "").replace(/\D/g, "");
+        if (!digits) return;
+        e.preventDefault();
+        for (let k = 0; k < cells.length; k++) cells[k].value = digits[k] || "";
+        focusAt(Math.min(digits.length, cells.length - 1));
+        lessonCaptureMatchDraft();
+      });
+    });
   }
 }
 
@@ -7638,7 +7738,7 @@ function lessonHint() {
 
 function lessonErrorType(step, values) {
   const fields = lessonFields(step);
-  const wrong = fields.find((field) => !checkAnswer({ answer: field.answer, valueType: field.valueType }, values[field.id]));
+  const wrong = fields.find((field) => !checkAnswer({ answer: field.answer, valueType: field.valueType, text: field.text }, values[field.id]));
   return (wrong && wrong.errorType) || step.errorType || "Ошибка в учебном шаге";
 }
 
@@ -7648,22 +7748,33 @@ function lessonSubmit() {
   const state = Lesson.stateFor(step);
   if (!L || state.status !== "active") return;
   const fields = lessonFields(step);
+  const match = lessonMatchingTask(step);
   const values = {};
   let complete = true;
-  fields.forEach((field) => {
-    const input = document.getElementById(`lessonInput-${field.id}`);
-    values[field.id] = input ? input.value.trim() : (state.draft[field.id] || "");
-    state.draft[field.id] = values[field.id];
-    if (!values[field.id]) complete = false;
-  });
+  if (match) {
+    const assembled = lessonMatchValue();
+    state.draft["answer"] = assembled;
+    values["answer"] = assembled;
+    if (assembled.length < match.letters.length) complete = false;
+  } else {
+    fields.forEach((field) => {
+      const input = document.getElementById(`lessonInput-${field.id}`);
+      values[field.id] = input ? input.value.trim() : (state.draft[field.id] || "");
+      state.draft[field.id] = values[field.id];
+      if (!values[field.id]) complete = false;
+    });
+  }
   if (!complete) {
     document.querySelectorAll("[data-lesson-field]").forEach((input) => {
       if (!input.value.trim()) { input.classList.add("answer-input--wrong"); setTimeout(() => input.classList.remove("answer-input--wrong"), 400); }
     });
+    document.querySelectorAll("[data-lesson-match-cell]").forEach((cell) => {
+      if (!String(cell.value || "").trim()) { cell.classList.add("match-answer__cell--wrong"); setTimeout(() => cell.classList.remove("match-answer__cell--wrong"), 400); }
+    });
     Lesson.persist();
     return;
   }
-  const correct = fields.every((field) => checkAnswer({ answer: field.answer, valueType: field.valueType }, values[field.id]));
+  const correct = fields.every((field) => checkAnswer({ answer: field.answer, valueType: field.valueType, text: field.text }, values[field.id]));
   if (!correct) {
     const errorType = lessonErrorType(step, values);
     state.attempts++;
@@ -9198,6 +9309,7 @@ function screenProfile(root) {
   const subjectState = subjectContentState();
   const contentUnavailable = subjectState.empty || subjectState.locked;
   const li = levelInfo();
+  const subjectLabel = currentSubjectLabel();
   const solved = nonNegativeNumber(s.totalSolved);
   const acc = solved ? Math.round(nonNegativeNumber(s.totalCorrect) / solved * 100) : 0;
   const avgTime = solved ? Math.round(nonNegativeNumber(s.totalTimeSec) / solved) : 0;
@@ -9218,6 +9330,7 @@ function screenProfile(root) {
   const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip streak-chip--clickable profile-card__streak ${streakChipClass(profileStreakView)}" title="${esc(streakChipTitle(profileStreakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${profileStreakView.shown} дн</div>`;
   const profileProgressHTML = `
       <div class="profile-card__progress">
+        ${subjectLabel ? `<div class="subject-name">${esc(subjectLabel)}</div>` : ""}
         <div class="profile-card__level">
           <span class="level-chip__badge">Уровень ${esc(li.level)}</span>
           <span class="profile-card__xp mono">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</span>
@@ -11390,7 +11503,7 @@ const Onboarding = {
           <input class="answer-input" id="diagInput" placeholder="Ответ" autocomplete="off" inputmode="${answerInputMode(t.answer)}">
           <button class="btn btn--primary" onclick="Onboarding.answerDiag()">Ответить</button>
         </div>
-        ${answerFormatCaption(t.answer, t.valueType)}
+        ${answerFormatCaption(t.answer, t.valueType, t.text)}
         <div id="diagFeedback"></div>
       </div>
       ${this.backHtml()}`;

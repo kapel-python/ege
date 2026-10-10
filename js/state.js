@@ -2385,7 +2385,7 @@ function matchingAnswerLetters(task) {
    ============================================================ */
 
 function normalizeAnswer(str) {
-  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".").replace(/[−–—]/g, "-");
+  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(/ё/g, "е").replace(/,/g, ".").replace(/[−–—]/g, "-");
 }
 
 /* Задания, где ответ — НАБОР цифр, а не число: мультивыбор («укажите номера
@@ -2398,6 +2398,20 @@ function isDigitSequenceTask(task) {
   if (!/^\d{2,8}$/.test(answer)) return false;
   if (/(цифр|последовательност)/i.test(String(task.valueType || ""))) return true;
   return matchingAnswerLetters(task).length > 0;
+}
+
+/* Настоящий мультивыбор («укажите варианты ответов, в которых…»): ответ —
+   НАБОР номеров, а не последовательность. В бланке ЕГЭ их пишут по
+   возрастанию, но записанный в порядке находки набор — тот же ответ,
+   поэтому порядок не важен. Соответствия (буква→цифра) и «последовательность
+   цифр» сюда не попадают: у них порядок смысловой. */
+const MULTISELECT_TASK_RE = /укажите\s+(?:все\s+)?варианты|выберите\s+(?:все\s+)?(?:варианты|номера|ответы)|номера\s+ответов/i;
+function isMultiSelectTask(task) {
+  if (!task) return false;
+  const answer = String(task.answer ?? "").trim();
+  if (!/^\d{2,8}$/.test(answer)) return false;
+  if (matchingAnswerLetters(task).length > 0) return false;
+  return MULTISELECT_TASK_RE.test(String(task.text || ""));
 }
 
 /* Чистая последовательность цифр без разделителей (порядок важен). */
@@ -2419,11 +2433,18 @@ function checkAnswer(task, input) {
   const expected = String(task.answer);
   // Набор цифр проверяем как строку: разделители между цифрами (запятая,
   // точка с запятой, пробел, точка) не должны ломать верный ответ — «2,4,5»
-  // и «2 4 5» равны «245», а порядок по-прежнему важен.
+  // и «2 4 5» равны «245». У последовательностей и кодов соответствия порядок
+  // смысловой, а у мультивыбора ответ — множество, и порядок не важен.
   if (isDigitSequenceTask(task)) {
     const wanted = [task.answer, ...((Array.isArray(task.accept) ? task.accept : []).map(String))]
       .map(digitSequenceValue).filter(Boolean);
-    return wanted.includes(digitSequenceValue(input));
+    const got = digitSequenceValue(input);
+    if (!got) return false;
+    if (isMultiSelectTask(task)) {
+      const asSet = (s) => s.split("").sort().join("");
+      return wanted.map(asSet).includes(asSet(got));
+    }
+    return wanted.includes(got);
   }
   // Задачи с несколькими верными вариантами (например, «запишите какой-нибудь
   // один набор»): поле accept перечисляет все допустимые ответы из условия.

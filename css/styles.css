@@ -594,6 +594,11 @@ body {
 .level-chip__bar { width: 130px; }
 .level-chip__xp { font-size: 11px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
 
+/* Название текущего предмета у уровня/опыта: акцентный цвет и жирный — как
+   предмет в шапке агента. Нужно, чтобы «уровень сам по себе» не читался как
+   потерянный прогресс при смене предмета (уровень и XP считаются по предмету). */
+.subject-name { color: var(--accent-ink); font-weight: 700; margin-bottom: 10px; }
+
 .streak-chip {
   display: flex;
   align-items: center;
