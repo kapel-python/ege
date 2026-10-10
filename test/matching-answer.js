@@ -21,7 +21,8 @@ const testBody = async () => {
   t("№22: буквы А–Д", ["r22_1", "r22_2", "r22_3", "r22_4", "r22_5"].every((id) => letters(ru, id) === "АБВГД"));
   t("№8: буквы А–Д", letters(ru, "r08_1") === "АБВГД", letters(ru, "r08_1"));
   t("обществознание: буквы А–Д", letters(soc, "soc03_p1") === "АБВГД" && letters(soc, "soc15_p1") === "АБВГД");
-  t("биология «в порядке АБВ»: буквы АБВ", letters(bio, "bio06_p1") === "АБВ" && letters(bio, "bio10_p1") === "АБВ" && letters(bio, "bio14_p1") === "АБВ" && letters(bio, "bio19_p1") === "АБВ");
+  t("биология «в порядке АБВ»: буквы АБВ", letters(bio, "bio06_p1") === "АБВ" && letters(bio, "bio10_p1") === "АБВ" && letters(bio, "bio14_p1") === "АБВ");
+  t("биология №19: соответствие на 6 позиций", letters(bio, "bio19_p1") === "АБВГДЕ", letters(bio, "bio19_p1"));
   t("база: явный список (АБВГ)", letters(basic, "b02_p1") === "АБВГ", letters(basic, "b02_p1"));
   t("база: явный список (ABCD)", letters(basic, "b18_p1") === "ABCD", letters(basic, "b18_p1"));
 

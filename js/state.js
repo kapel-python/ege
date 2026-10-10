@@ -2336,10 +2336,16 @@ function matchingAnswerLetters(task) {
   if (!/^\d{2,8}$/.test(answer)) return [];
   const text = String(task.text || "");
   if (!MATCHING_ANSWER_RE.test(text)) return [];
-  // Явный список букв: «(АБВГ)», «(ABCD)» или «в порядке АБВ» (биология).
-  const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/) || text.match(/в порядке\s+([А-ЯA-Z]{2,8})/);
-  if (explicit && explicit[1].length === answer.length && isConsecutiveLetterList(explicit[1])) {
-    return explicit[1].split("");
+  // Явный список букв: «(АБВГ)», «(ABCD)», «в порядке АБВ» (биология) или
+  // «соответствующем буквам: А Б В» (письма через пробелы — задания-таблицы).
+  const explicit = text.match(/\(([А-ЯA-Z]{2,8})\)/)
+    || text.match(/в порядке\s+([А-ЯA-Z]{2,8})/)
+    || text.match(/буквам:\s*([А-ЯA-Z](?:\s+[А-ЯA-Z])+)/);
+  if (explicit) {
+    const seq = explicit[1].replace(/\s+/g, "");
+    if (seq.length === answer.length && isConsecutiveLetterList(seq)) {
+      return seq.split("");
+    }
   }
   // Метки строк «А) …», «A) …».
   const labels = [];
@@ -2347,6 +2353,14 @@ function matchingAnswerLetters(task) {
   let m;
   while ((m = re.exec(text)) !== null) labels.push(m[1]);
   if (labels.length === answer.length) return labels;
+  // Метки в скобках «______ (А)» (заполнение таблиц): в тексте идут не по
+  // порядку, а ответ записывают в алфавитном — сортируем.
+  const paren = [];
+  const parenRe = /\(([А-ЯA-Z])\)/g;
+  while ((m = parenRe.exec(text)) !== null) {
+    if (!paren.includes(m[1])) paren.push(m[1]);
+  }
+  if (paren.length === answer.length && answer.length >= 2) return paren.slice().sort();
   return [];
 }
 

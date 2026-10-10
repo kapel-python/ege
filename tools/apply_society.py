@@ -27,6 +27,9 @@ CATALOG = ROOT / "server" / "catalog_society.json"
 OUT_DIR = ROOT / "tools" / "out"
 
 ANALOG_RE = re.compile(r"тренировочный вариант", re.I)
+# Единая система: столько заданий держим в каждой теме. Поднять до 30 —
+# поменять одну константу и прогнать добор заново.
+TARGET = 15
 FIG_RE = re.compile(
     r"на\s+рисунк|на\s+диаграмм|на\s+график|изображ[её]н|показан\w*\s+на"
     r"|см\.\s*рисун", re.I)
@@ -60,13 +63,13 @@ def sub_from(text: str) -> str:
     return line[:56].rstrip(" ,;:") or "Задание"
 
 
-def task_from_source(old: dict, n: int, raw: dict) -> dict:
+def task_from_source(old: dict, n: int, raw: dict, new_id: str | None = None) -> dict:
     alts = [x.strip() for x in (raw["answer"] or "").split("|") if x.strip()]
     text = (raw["condition"] or "").strip()
     text = re.sub(r"(?m)^(\s*)A\)", r"\1А)", text)
     hint, hints = hints_from(raw.get("solution") or "")
     task = {
-        "id": old["id"],
+        "id": new_id or old["id"],
         "skill": old["skill"],
         "sub": sub_from(text),
         "num": f"№{n}",
@@ -91,9 +94,54 @@ def task_from_source(old: dict, n: int, raw: dict) -> dict:
     return out
 
 
+def next_suffix(group: list[dict]) -> int:
+    best = 0
+    for t in group:
+        m = re.search(r"_p(\d+)$", t.get("id") or "")
+        if m:
+            best = max(best, int(m.group(1)))
+    return best + 1
+
+
+def topup(data: dict, target: int = TARGET) -> list[dict]:
+    """Добрать тестовые темы (№1–16, кроме рисунков) до target новыми id.
+    Существующие задания не трогаем; берём только неиспользованные sourceId."""
+    tasks = data["tasks"]
+    added: list[dict] = []
+    for n in range(1, 17):
+        skill = f"soc{n:02d}_" + {
+            1: "concepts", 2: "society", 3: "match", 4: "situ", 5: "econ",
+            6: "factors", 7: "market", 8: "socrel", 9: "diagram", 10: "polity",
+            11: "party", 12: "rights", 13: "fed", 14: "law", 15: "tax",
+            16: "slide"}[n]
+        if skill in SKIP_SKILLS:
+            print(f"№{n:2} {skill:16} пропуск (рисунки)")
+            continue
+        group = sorted([t for t in tasks if t["skill"] == skill], key=lambda t: t["id"])
+        need = target - len(group)
+        if need <= 0:
+            print(f"№{n:2} {skill:16} уже {len(group)} — ок")
+            continue
+        used = {t.get("sourceId") for t in group}
+        path = OUT_DIR / f"soc_{n:02d}.json"
+        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        pool = [r for r in raw if usable(r) and f"sdamgia-{r['src_id']}" not in used]
+        k = next_suffix(group)
+        take = pool[:need]
+        for r in take:
+            new_id = f"soc{n:02d}_p{k}"
+            k += 1
+            added.append(task_from_source(group[0], n, r, new_id))
+        print(f"№{n:2} {skill:16} было {len(group)}, добрано {len(take)}"
+              f"{'' if len(take) == need else f' (не хватило пула!)'}")
+    return added
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--analyze", action="store_true")
+    ap.add_argument("--topup", action="store_true",
+                    help="только добрать темы до TARGET, ничего не заменяя")
     args = ap.parse_args()
 
     data = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -126,6 +174,14 @@ def main() -> int:
         print(f"№{n:2} {skill:16} замен {take} — {note}")
 
     if args.analyze:
+        return 0
+
+    if args.topup:
+        added = topup(data)
+        data["tasks"] = tasks + added
+        data["tasks"].sort(key=lambda t: (t.get("skill") or "", t.get("id") or ""))
+        CATALOG.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"добрано: {len(added)}; всего: {len(data['tasks'])}")
         return 0
 
     data["tasks"] = [new_by_id.get(t["id"], t) for t in tasks]

@@ -26,8 +26,13 @@ CATALOG = ROOT / "server" / "catalog_basic.json"
 OUT_DIR = ROOT / "tools" / "out"
 
 # Эти темы содержат задания, которые без рисунка не решить: не трогаем.
+# Эти темы содержат задания, которые без рисунка не решить: при замене их
+# не трогаем, при ДОБОРЕ дополняем текстовыми, рисунки сохраняем.
 VISUAL_SKILLS = {"b03_tables", "b07_functions", "b09_grid",
                  "b11_practstereo", "b18_inequalities"}
+# Единая система: столько заданий держим в каждой теме. Поднять до 30 —
+# поменять одну константу и прогнать добор заново.
+TARGET = 15
 MATCHING_RE = re.compile(r"соответстви|под каждой буквой|под каждой точкой", re.I)
 EXPLICIT_RE = re.compile(r"\(([А-ЯA-Z]{2,8})\)")
 ROW_LABEL_RE = re.compile(r"(?:^|\n)\s*([А-ЯA-Z])\)\s")
@@ -143,9 +148,52 @@ def task_from_source(n: int, idx: int, raw: dict, skill: str) -> dict:
     return out
 
 
+def next_suffix(group: list[dict], prefix: str) -> int:
+    best = 0
+    for t in group:
+        m = re.match(re.escape(prefix) + r"_p(\d+)$", t.get("id") or "")
+        if m:
+            best = max(best, int(m.group(1)))
+    return best + 1
+
+
+def topup(data: dict, skills: dict[int, str], target: int = TARGET) -> list[dict]:
+    """Добрать все темы до target новыми id. Существующие задания (включая
+    официальные с рисунками) не трогаем; берём только текстовые задания
+    источника с неиспользованными sourceId."""
+    tasks = data["tasks"]
+    added: list[dict] = []
+    for n in range(1, 22):
+        skill = skills.get(n)
+        if not skill:
+            continue
+        group = sorted([t for t in tasks if t.get("skill") == skill],
+                       key=lambda t: t.get("id") or "")
+        need = target - len(group)
+        if need <= 0:
+            print(f"№{n:2} {skill:20} уже {len(group)} — ок")
+            continue
+        used = {t.get("sourceId") for t in group}
+        path = OUT_DIR / f"mathb_{n:02d}.json"
+        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        pool = [r for r in raw
+                if not r.get("images") and not FIG_RE.search(r.get("condition") or "")
+                and f"sdamgia-{r['src_id']}" not in used]
+        k = next_suffix(group, f"b{n:02d}")
+        take = pool[:need]
+        for r in take:
+            added.append(task_from_source(n, k, r, skill))
+            k += 1
+        print(f"№{n:2} {skill:20} было {len(group)}, добрано {len(take)}"
+              f"{'' if len(take) == need else ' (не хватило пула!)'}")
+    return added
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--analyze", action="store_true")
+    ap.add_argument("--topup", action="store_true",
+                    help="только добрать темы до TARGET, ничего не заменяя")
     args = ap.parse_args()
 
     data = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -174,6 +222,19 @@ def main() -> int:
         print(f"{flag} №{n:2} {skill:20} {got:>2} заданий  {note}")
 
     if args.analyze:
+        return 0
+
+    if args.topup:
+        tasks = data["tasks"]
+        added = topup(data, skills)
+        data["tasks"] = tasks + added
+        data["tasks"].sort(key=lambda t: (t.get("skill") or "", t.get("id") or ""))
+        audit = data.get("visualAudit")
+        if isinstance(audit, dict) and isinstance(audit.get("taskStatuses"), dict):
+            for t in added:
+                audit["taskStatuses"][t["id"]] = "text-only"
+        CATALOG.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"добрано: {len(added)}; всего: {len(data['tasks'])}")
         return 0
 
     missing = [s for s, ts in rebuilt.items() if len(ts) != 15]

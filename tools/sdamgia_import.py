@@ -50,7 +50,7 @@ SUBJECTS = {
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"
 TIMEOUT = 40
 RETRIES = 3
-PAUSE = 0.7
+PAUSE = 0.25
 
 # Маркеры «здесь начинается решение» на странице задания: условие лежит
 # выше сolnb-кнопки, поэтому режем точно по ней, а не по общим div-ам.
