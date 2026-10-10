@@ -1608,6 +1608,12 @@ function yesterdayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function dayBeforeYesterdayStr() {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
+  d.setDate(d.getDate() - 2);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function todayActivity() {
   const empty = { solved: 0, correct: 0, xp: 0 };
   if (!Store.state || !subjectLearningAvailable()) return empty;
@@ -1622,7 +1628,17 @@ function touchStreak() {
   if (!s || !subjectLearningAvailable()) return;
   const today = todayStr();
   if (s.lastActiveDate === today) return;
-  s.streak = s.lastActiveDate === yesterdayStr() ? s.streak + 1 : 1;
+  if (s.lastActiveDate === yesterdayStr()) {
+    s.streak = (Number(s.streak) || 0) + 1;
+  } else if (s.lastActiveDate === dayBeforeYesterdayStr() && (Number(s.streak) || 0) >= 2) {
+    // Оттайка замороженной серии: вчера пропущен, позавчера цепочка была
+    // >= 2 (порог — STREAK_FROZEN_MIN_DAYS в server.py). Сервер при записи
+    // простит пропуск автомостом, локально продолжаем сразу верным числом,
+    // чтобы счётчик и таймлайн не мигали единицей до перезагрузки.
+    s.streak = (Number(s.streak) || 0) + 1;
+  } else {
+    s.streak = 1;
+  }
   s.lastActiveDate = today;
   if (s.streak > 1) addTimeline(`Серия: ${s.streak} дн. подряд`);
 }

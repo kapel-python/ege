@@ -9952,7 +9952,7 @@ def refresh_derived_stats(conn: sqlite3.Connection, user_id: int, subject: str) 
         streak, last = 0, None
     else:
         try:
-            streak, last = _derive_streak(streak_activity_dates(conn, user_id, subject))
+            streak, last = streak_display_for_write(conn, user_id, subject)
         except Exception:
             prev = conn.execute(
                 "SELECT streak, last_active_date FROM user_stats WHERE user_id=? AND subject=?", (user_id, subject)
@@ -10655,7 +10655,7 @@ def refresh_streak(conn: sqlite3.Connection, user_id: int, subject: str) -> tupl
         if subject_is_locked(subject):
             return 0, None
         ensure_subject_rows(conn, user_id, subject)
-        streak, last = _derive_streak(streak_activity_dates(conn, user_id, subject))
+        streak, last = streak_display_for_write(conn, user_id, subject)
         conn.execute(
             "INSERT INTO user_stats(user_id,subject,streak,last_active_date)"
             " VALUES(?,?,?,?)"
@@ -10672,6 +10672,304 @@ def refresh_streak(conn: sqlite3.Connection, user_id: int, subject: str) -> tupl
         return 0, None
     except Exception:
         return 0, None
+
+
+# ---------------------------------------------------------------------------
+# Серия: заморозка и восстановление.
+#
+# Правила отображения — одни для сервера и клиента (зеркало — streakLocalStatus
+# в js/app.js, править парой):
+# - серия = дни с учёбой подряд (как раньше, streak_activity_dates);
+# - пропустил ровно 1 полный день (last == сегодня-2, серия была >= 2) —
+#   серия ЗАМОРОЖЕНА: огонёк синий, позанимался сегодня — оттаяла бесплатно
+#   (продолжилась как frozenValue+1, пропуск прощается автоматически);
+# - пропустил 2+ дня подряд — серия ПОТЕРЯНА: показывается 0, вернуть прошлое
+#   значение можно кнопкой «Восстановить» (3 раза в месяц на предмет);
+# - серия в 1 день не морозится: спасать там нечего, она молча начинается
+#   заново. Новым пользователям без активности окно не показывается никогда.
+#
+# Мосты (streak_bridges) — прощённые пропуски: дают непрерывность цепочки,
+# но в длину серии НЕ считаются (display = длина цепочки − мосты в ней),
+# иначе восстановление раздувало бы серию фейковыми днями. kind='auto' —
+# бесплатная оттайка за учёбу в замороженный день (лимит не тратит),
+# kind='manual' — платное восстановление (3/мес). Журнал платных —
+# streak_restores, месячный ключ — московский YYYY-MM дня восстановления.
+# Лимит — на предмет: серия тоже живёт в разрезе предмета, общий котёл на
+# аккаунт наказывал бы тех, кто учит два предмета.
+# ---------------------------------------------------------------------------
+STREAK_RESTORE_MONTHLY_LIMIT = 3
+STREAK_FROZEN_MIN_DAYS = 2
+
+
+class StreakRestoreError(ValueError):
+    """Отказ восстановления серии: у ошибки есть машинный code для клиента."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+def ensure_streak_schema(conn: sqlite3.Connection) -> None:
+    """Таблицы заморозки/восстановления серии. Идемпотентно, транзакцией
+    владеет вызыватель (как остальные ensure_*)."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS streak_bridges ("
+        " user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+        " subject TEXT NOT NULL DEFAULT 'profile_math',"
+        " bridge_date TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'auto',"
+        " created_at TEXT NOT NULL,"
+        " PRIMARY KEY(user_id, subject, bridge_date))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS streak_restores ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+        " subject TEXT NOT NULL DEFAULT 'profile_math',"
+        " month_key TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " restored_value INTEGER NOT NULL DEFAULT 0,"
+        " gap_from TEXT, gap_to TEXT)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_streak_restores_month"
+        " ON streak_restores(user_id, subject, month_key)"
+    )
+
+
+def streak_month_key(today_s: str | None = None) -> str:
+    """Московский календарный месяц 'YYYY-MM' — ключ лимита восстановлений."""
+    try:
+        day = today_s or today()
+        return str(day)[:7]
+    except Exception:
+        return today()[:7]
+
+
+def _streak_bridge_dates(conn: sqlite3.Connection, user_id: int, subject: str) -> set:
+    try:
+        rows = conn.execute(
+            "SELECT bridge_date FROM streak_bridges WHERE user_id=? AND subject=? LIMIT 1000",
+            (user_id, subject),
+        ).fetchall()
+    except sqlite3.Error:
+        return set()
+    out = set()
+    for r in rows:
+        try:
+            day = str(r["bridge_date"])[:10]
+            dt.date.fromisoformat(day)
+            out.add(day)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _streak_trailing_run(dates: set) -> list:
+    """Подряд идущие дни цепочкой назад от самого позднего (по возрастанию).
+    Пустое множество — пустой список."""
+    clean = sorted(d for d in dates if isinstance(d, str) and len(d) == 10)
+    if not clean:
+        return []
+    try:
+        last = dt.date.fromisoformat(clean[-1])
+    except ValueError:
+        return []
+    run = [clean[-1]]
+    for i in range(len(clean) - 2, -1, -1):
+        try:
+            cur = dt.date.fromisoformat(clean[i + 1])
+            prev = dt.date.fromisoformat(clean[i])
+        except ValueError:
+            break
+        if (cur - prev).days == 1:
+            run.append(clean[i])
+        else:
+            break
+    run.reverse()
+    return run
+
+
+def _streak_restores_used(conn: sqlite3.Connection, user_id: int, subject: str, month_key: str) -> int:
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM streak_restores WHERE user_id=? AND subject=? AND month_key=?",
+            (user_id, subject, month_key),
+        ).fetchone()
+        return max(0, int(row["c"] or 0)) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        return 0
+
+
+def streak_status(conn: sqlite3.Connection, user_id: int, subject: str,
+                  today_s: str | None = None) -> dict:
+    """Авторитетный статус серии для чтения и модалок. Не пишет, не бросает
+    (ошибка — нулевой 'lost'). Поле streak здесь — ЧИСЛО ДЛЯ ПОКАЗА:
+    frozen — замороженное значение, lost — 0, прошлое — во frozenValue."""
+    try:
+        ensure_streak_schema(conn)
+        if subject_is_locked(subject):
+            raise ValueError("locked")
+        today_s = today_s or today()
+        today_d = dt.date.fromisoformat(today_s[:10])
+        activity = streak_activity_dates(conn, user_id, subject)
+        bridges = _streak_bridge_dates(conn, user_id, subject)
+        effective = set(activity) | set(bridges)
+        run = _streak_trailing_run(effective)
+        month_key = streak_month_key(today_s)
+        used = _streak_restores_used(conn, user_id, subject, month_key)
+        left = max(0, STREAK_RESTORE_MONTHLY_LIMIT - used)
+        if not run:
+            return {"streak": 0, "status": "lost", "lastActiveDate": None,
+                    "displayDate": None,
+                    "daysSince": None, "frozenValue": 0,
+                    "restoresUsed": used, "restoresLeft": left,
+                    "monthKey": month_key, "canRestore": False}
+        bridges_in_run = sum(1 for d in run if d not in activity)
+        display = max(0, len(run) - bridges_in_run)
+        last_eff = run[-1]
+        try:
+            days_since = max(0, (today_d - dt.date.fromisoformat(last_eff)).days)
+        except ValueError:
+            days_since = 0
+        # Последняя РЕАЛЬНАЯ учёба (не мост) — для подписи «когда занимался».
+        real_last = None
+        try:
+            real_days = sorted(d for d in activity if isinstance(d, str) and len(d) == 10)
+            real_last = real_days[-1] if real_days else None
+        except Exception:
+            real_last = None
+        if days_since <= 1:
+            status = "active"
+            shown = display
+            frozen_value = display
+        elif days_since == 2 and display >= STREAK_FROZEN_MIN_DAYS:
+            status = "frozen"
+            shown = display
+            frozen_value = display
+        else:
+            status = "lost"
+            frozen_value = display if display >= STREAK_FROZEN_MIN_DAYS else 0
+            shown = 0
+        return {"streak": shown, "status": status,
+                # lastActiveDate — последняя РЕАЛЬНАЯ учёба (подпись «когда
+                # занимался»); displayDate — конец эффективной цепочки (включая
+                # мосты): именно от неё клиент считает показ active/frozen/lost
+                # и именно она лежит в user_stats.last_active_date.
+                "lastActiveDate": real_last, "displayDate": last_eff, "daysSince": days_since,
+                "frozenValue": frozen_value if status == "lost" else display,
+                "restoresUsed": used, "restoresLeft": left,
+                "monthKey": month_key,
+                "canRestore": bool(status == "lost" and frozen_value >= STREAK_FROZEN_MIN_DAYS and left > 0)}
+    except Exception:
+        return {"streak": 0, "status": "lost", "lastActiveDate": None,
+                "displayDate": None,
+                "daysSince": None, "frozenValue": 0,
+                "restoresUsed": 0, "restoresLeft": STREAK_RESTORE_MONTHLY_LIMIT,
+                "monthKey": streak_month_key(), "canRestore": False}
+
+
+def streak_display_for_write(conn: sqlite3.Connection, user_id: int, subject: str) -> tuple[int, str | None]:
+    """Число и effective-last для user_stats после учебной записи. Может
+    кидать sqlite3.Error (вызыватель держит fallback, как раньше с _derive).
+
+    Бесплатная оттайка: сегодня позанимался, вчера пропустил, а позавчера
+    цепочка была >= 2 — вчерашний день прощается мостом 'auto' (лимит цел),
+    серия продолжается как было+1. Пропуск в 2+ дня мостом не закрывается —
+    это уже платное восстановление кнопкой."""
+    ensure_streak_schema(conn)
+    if subject_is_locked(subject):
+        return 0, None
+    ensure_subject_rows(conn, user_id, subject)
+    today_s = today()
+    today_d = dt.date.fromisoformat(today_s)
+    activity = streak_activity_dates(conn, user_id, subject)
+    bridges = _streak_bridge_dates(conn, user_id, subject)
+    yesterday_s = (today_d - dt.timedelta(days=1)).isoformat()
+    day_before_s = (today_d - dt.timedelta(days=2)).isoformat()
+    if today_s in activity and yesterday_s not in activity and yesterday_s not in bridges \
+            and day_before_s in activity:
+        before = _streak_trailing_run({d for d in (set(activity) | set(bridges)) if d <= day_before_s})
+        before_display = len(before) - sum(1 for d in before if d not in activity)
+        if before_display >= STREAK_FROZEN_MIN_DAYS:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO streak_bridges(user_id, subject, bridge_date, kind, created_at)"
+                    " VALUES(?,?,?,?,?)",
+                    (user_id, subject, yesterday_s, "auto", now_iso()),
+                )
+                bridges.add(yesterday_s)
+            except sqlite3.Error:
+                pass
+    effective = set(activity) | set(bridges)
+    run = _streak_trailing_run(effective)
+    if not run:
+        return 0, None
+    display = max(0, len(run) - sum(1 for d in run if d not in activity))
+    return display, run[-1]
+
+
+def streak_restore(conn: sqlite3.Connection, user_id: int, subject: str,
+                   today_s: str | None = None) -> dict:
+    """Платное восстановление потерянной серии. Транзакцией владеет
+    вызыватель (BEGIN IMMEDIATE): проверка лимита и вставка идут в одной
+    транзакции, гонка двух кликов второй раз лимит не пробьёт.
+
+    Прощает ВЕСЬ текущий пропуск мостами 'manual' (в длину не считаются),
+    серия возвращается к frozenValue, last встаёт на вчера — статус сразу
+    'active'. Учиться всё равно нужно сегодня: иначе завтра пропуск снова
+    станет замороженным, а послезавтра — потерянным (за новый мост — новое
+    списание из лимита). Кидает StreakRestoreError с машинным code."""
+    ensure_streak_schema(conn)
+    if subject_is_locked(subject):
+        raise StreakRestoreError("SUBJECT_LOCKED", "Предмет пока заблокирован")
+    ensure_subject_rows(conn, user_id, subject)
+    today_s = today_s or today()
+    st = streak_status(conn, user_id, subject, today_s)
+    if st["status"] == "active":
+        raise StreakRestoreError("STREAK_ACTIVE", "Серия жива — восстанавливать нечего")
+    if st["status"] == "frozen":
+        raise StreakRestoreError("STREAK_FROZEN", "Серия заморожена — просто позанимайся сегодня, и она оттает бесплатно")
+    frozen_value = int(st.get("frozenValue") or 0)
+    if frozen_value < STREAK_FROZEN_MIN_DAYS:
+        raise StreakRestoreError("NOTHING_TO_RESTORE", "Спасать нечего: серии для восстановления нет")
+    if int(st.get("restoresLeft") or 0) <= 0:
+        raise StreakRestoreError("RESTORE_LIMIT", "Лимит восстановлений на этот месяц исчерпан")
+    today_d = dt.date.fromisoformat(today_s[:10])
+    yesterday_s = (today_d - dt.timedelta(days=1)).isoformat()
+    activity = streak_activity_dates(conn, user_id, subject)
+    bridges = _streak_bridge_dates(conn, user_id, subject)
+    effective = set(activity) | set(bridges)
+    run = _streak_trailing_run(effective)
+    if not run:
+        raise StreakRestoreError("NOTHING_TO_RESTORE", "Спасать нечего: серии для восстановления нет")
+    gap_from = (dt.date.fromisoformat(run[-1]) + dt.timedelta(days=1)).isoformat()
+    gap_to = yesterday_s
+    if gap_from <= gap_to:
+        cur = dt.date.fromisoformat(gap_from)
+        end = dt.date.fromisoformat(gap_to)
+        while cur <= end:
+            conn.execute(
+                "INSERT OR IGNORE INTO streak_bridges(user_id, subject, bridge_date, kind, created_at)"
+                " VALUES(?,?,?,?,?)",
+                (user_id, subject, cur.isoformat(), "manual", now_iso()),
+            )
+            cur += dt.timedelta(days=1)
+    # Гонка двух вкладок: лимит перепроверяем прямо перед записью журнала —
+    # транзакция вызывателя сериализует писателей, чужой коммит уже виден.
+    if _streak_restores_used(conn, user_id, subject, st["monthKey"]) >= STREAK_RESTORE_MONTHLY_LIMIT:
+        raise StreakRestoreError("RESTORE_LIMIT", "Лимит восстановлений на этот месяц исчерпан")
+    conn.execute(
+        "INSERT INTO streak_restores(user_id, subject, month_key, created_at, restored_value, gap_from, gap_to)"
+        " VALUES(?,?,?,?,?,?,?)",
+        (user_id, subject, st["monthKey"], now_iso(), frozen_value, gap_from, gap_to),
+    )
+    conn.execute(
+        "INSERT INTO user_stats(user_id,subject,streak,last_active_date)"
+        " VALUES(?,?,?,?)"
+        " ON CONFLICT(user_id,subject) DO UPDATE"
+        " SET streak=excluded.streak, last_active_date=excluded.last_active_date",
+        (user_id, subject, frozen_value, yesterday_s),
+    )
+    return streak_status(conn, user_id, subject, today_s)
 
 
 def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
@@ -11411,7 +11709,7 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         raise KeyError("user not found")
     groups = {
         "streak": {
-            "tables": [],
+            "tables": ["streak_bridges", "streak_restores"],
             "stats": "UPDATE user_stats SET streak=0, correct_series=0 WHERE user_id=?",
             "label": "Серия дней сброшена",
         },
@@ -11452,6 +11750,10 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
                         # Зрители ссылки — тоже прогресс-данные владельца:
                         # user_id на строках есть, удаляются тем же фильтром.
                         "essay_share_viewers",
+                        # Мосты и журнал восстановлений серии — тоже прогресс:
+                        # иначе сброшенная серия воскресала бы из мостов при
+                        # первой же учебной записи.
+                        "streak_bridges", "streak_restores",
                        # activity_events читает ИИ (fold_web op=history),
                        # поэтому после сброса ИИ продолжал бы рассказывать
                        # ученику про активность, которой уже нет.
@@ -15085,6 +15387,56 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"Request failed: {exc}"}, 400)
             finally: conn.close()
             return
+        if path == "/api/streak/restore":
+            # POST /api/streak/restore — платное восстановление потерянной
+            # серии (3 раза в месяц на предмет). Тело: {subject?}.
+            # Те же ворота, что у остальных доменов ученика: общий бакет,
+            # гость 401 (GUEST_PENDING), бан 403, CSRF — общий guard в do_POST.
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                user_id, token = user_for(conn, self)
+                if not self.require_user(user_id): return
+                if self.reject_if_blocked(conn, user_id):
+                    return
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    payload = {}
+                raw_subject = payload.get("subject")
+                subject = (resolve_subject(raw_subject)
+                           if is_known_subject(raw_subject)
+                           else current_subject_for(conn, user_id))
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    st = streak_restore(conn, int(user_id), subject)
+                except StreakRestoreError as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    code = exc.code or "STREAK_ERROR"
+                    status = 429 if code == "RESTORE_LIMIT" else (409 if code in ("STREAK_ACTIVE", "STREAK_FROZEN") else 400)
+                    self.send_json({"error": str(exc), "code": code}, status, token=token); return
+                try:
+                    bump_state_versions(conn, int(user_id), subject)
+                except sqlite3.Error:
+                    pass
+                conn.commit()
+                self.send_json({"ok": True, "subject": subject, "restored": True, **st}, token=token)
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("streak-restore", exc)
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                self.send_json({"error": "Не удалось восстановить серию. Попробуй ещё раз.",
+                                "ref": rid}, 503 if locked else 500)
+            except (ValueError, KeyError) as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                self.send_json({"error": f"Request failed: {exc}"}, 400)
+            finally: conn.close()
+            return
         if path == "/api/ai/timeout-bonus":
             # POST /api/ai/timeout-bonus — бонусный жетон за проверку, прождавшую
             # весь потолок без ответа провайдеров. Тело не читаем: доказывать
@@ -16871,6 +17223,29 @@ class Handler(BaseHTTPRequestHandler):
                                     "need": need,
                                     "pct": max(0, min(100, round(int(li["intoLevel"]) / need * 100))),
                                     "streak": streak}, token=token); return
+                if path == "/api/streak":
+                    # Статус серии: число для показа, frozen/lost, лимиты
+                    # восстановлений. Чтение, записи нет. Гостю — 401
+                    # GUEST_PENDING, как всем доменам ученика.
+                    if not self.require_user(user_id): return
+                    if self.reject_if_blocked(conn, user_id):
+                        return
+                    query = urlparse(self.path).query
+                    from urllib.parse import parse_qs
+                    args = parse_qs(query)
+                    raw_subject = args.get("subject", [None])[0]
+                    subject = (resolve_subject(raw_subject)
+                               if is_known_subject(raw_subject)
+                               else current_subject_for(conn, user_id))
+                    if subject_is_locked(subject):
+                        self.send_json({"error": "Предмет пока заблокирован", "subject": subject}, 423, token=token); return
+                    try:
+                        st = streak_status(conn, int(user_id), subject)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("streak", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500, token=token); return
+                    self.send_json({"ok": True, "subject": subject, **st}, token=token); return
                 if path == "/api/plan":
                     # Активный учебный план: периоды, темы, кликабельность
                     # закрытия, прогресс. Гостю — 401 GUEST_PENDING, как всем

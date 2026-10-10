@@ -12,7 +12,7 @@
 Здесь — только точка входа. Детали и живые случаи — в файлах ниже.
 
 - База и доступ: [docs/db-integrity.md](docs/db-integrity.md) (целостность БД, миграции, бюджеты, HMAC секретов), [docs/perimeter-security.md](docs/perimeter-security.md) (loopback, прокси, CSRF, лимиты, nginx, ufw, Telegram-2FA админки).
-- Пользователь и профиль: [docs/profile-subjects.md](docs/profile-subjects.md) (профиль = свойство предмета), [docs/auth-guest.md](docs/auth-guest.md) (гость, устройства, сессии), [docs/auth-google.md](docs/auth-google.md) (вход через Google), [docs/support-system.md](docs/support-system.md) (системные обращения в ленту).
+- Пользователь и профиль: [docs/profile-subjects.md](docs/profile-subjects.md) (профиль = свойство предмета), [docs/auth-guest.md](docs/auth-guest.md) (гость, устройства, сессии), [docs/auth-google.md](docs/auth-google.md) (вход через Google), [docs/support-system.md](docs/support-system.md) (системные обращения в ленту), [docs/streak-freeze.md](docs/streak-freeze.md) (заморозка и восстановление серии, лимиты).
 - ИИ: [docs/ai-providers.md](docs/ai-providers.md) (провайдеры, роутер, судья, failover, тиры, Responses API), [docs/ai-agent.md](docs/ai-agent.md) (персональный ИИ: цикл, инструменты, лента, печать, квоты), [docs/ai-limits.md](docs/ai-limits.md) (дневной бюджет проверок, антиабуз-ферма), [docs/quota-ledger.md](docs/quota-ledger.md) (журнал квот).
 - Деньги: [docs/subscription-plus.md](docs/subscription-plus.md) (Plus, checkout/webhook, гранты, гейты, waitlist).
 - Сочинения: [docs/essay-practice.md](docs/essay-practice.md) (один визит — одно сочинение), [docs/essay-check.md](docs/essay-check.md) (правила ФИПИ в коде, К7–К10, гейты, повтор, кэш/перепроверка, история).

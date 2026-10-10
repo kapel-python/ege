@@ -1063,7 +1063,8 @@ const HELP = {
     body: `
       <p>Серия — это сколько <b>дней подряд</b> ты занимаешься.</p>
       <p>Чтобы день засчитался, достаточно позаниматься: решить задание, пройти урок, написать сочинение или позаниматься с ИИ. Ошибаться можно — главное, что позанимался.</p>
-      <p>Пропустил день — серия начнётся заново.</p>
+      <p>Пропустил один день — серия <b>заморозится</b> и огонёк станет синим: позанимайся сегодня, и она оттает и продолжится бесплатно.</p>
+      <p>Пропустил два дня подряд — серия сгорит. Вернуть её можно кнопкой «Восстановить» по клику на огонёк — <b>3 раза в месяц</b> на предмет.</p>
       <p>Огонёк показывает длину серии: от <b>7 дней</b> он оранжевый, а от <b>31 дня</b> — фиолетовый.</p>`,
   },
   nextstep: {
@@ -2757,6 +2758,242 @@ function streakTier(days) {
   return "";
 }
 
+/* ---------------- серия: заморозка и восстановление ----------------
+   Зеркало серверных правил (streak_status в server.py, править парой).
+   Клиент считает только показ и триггеры модалок из streak/lastActiveDate
+   bootstrap-снапшота; авторитет по лимитам и самому восстановлению —
+   сервер (GET /api/streak, POST /api/streak/restore).
+   - last == сегодня/вчера → active, показываем streak как есть;
+   - last == позавчера и streak >= 2 → frozen (ледяной огонёк);
+   - иначе → lost: показываем 0, прошлое значение — во frozenValue. */
+var STREAK_FROZEN_MIN_DAYS = 2;
+
+function streakDayDiff(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+  const pa = Date.parse(a + "T12:00:00Z"), pb = Date.parse(b + "T12:00:00Z");
+  if (isNaN(pa) || isNaN(pb)) return null;
+  return Math.round((pb - pa) / 86400000);
+}
+
+function streakLocalStatus() {
+  let value = 0;
+  try { value = Math.max(0, Math.floor(Number(Store.state.streak) || 0)); } catch (_) { value = 0; }
+  let last = null;
+  try { last = Store.state.lastActiveDate || null; } catch (_) { last = null; }
+  const lost = (frozenValue) => ({ value, shown: 0, status: "lost", frozenValue });
+  if (typeof last !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(last)) return lost(0);
+  let gap = null;
+  try { gap = streakDayDiff(last, todayStr()); } catch (_) { gap = null; }
+  if (gap === null || gap < 0) return { value, shown: value, status: "active", frozenValue: value };
+  if (gap <= 1) return { value, shown: value, status: "active", frozenValue: value };
+  if (gap === 2 && value >= STREAK_FROZEN_MIN_DAYS) return { value, shown: value, status: "frozen", frozenValue: value };
+  return lost(value >= STREAK_FROZEN_MIN_DAYS ? value : 0);
+}
+
+function streakChipTitle(st) {
+  if (st.status === "frozen") return "Серия заморожена — нажми, чтобы узнать, как её вернуть";
+  if (st.status === "lost" && st.frozenValue >= STREAK_FROZEN_MIN_DAYS) return "Серия потеряна — нажми, чтобы восстановить";
+  return "Серия дней подряд — нажми, чтобы узнать, как это работает";
+}
+
+/* Клик по огоньку: заморожен — окно заморозки, потерян (было что спасать) —
+   окно восстановления с лимитами, иначе — обычная подсказка, как раньше. */
+function onStreakChipClick() {
+  let st = null;
+  try { st = streakLocalStatus(); } catch (_) { st = null; }
+  if (st && st.status === "frozen") { try { openStreakFrozenModal(); } catch (_) {} return; }
+  if (st && st.status === "lost" && st.frozenValue >= STREAK_FROZEN_MIN_DAYS) {
+    try { openStreakRestoreModal(); } catch (_) {} return;
+  }
+  try { openHelp("streak"); } catch (_) {}
+}
+
+function streakRestoreSubject() {
+  try { if (Store.subject) return String(Store.subject); } catch (_) {}
+  try { if (Store.state && Store.state.subject) return String(Store.state.subject); } catch (_) {}
+  return "";
+}
+
+/* Замороженная серия: то же .dlg-окно, что везде (openInfoDialog), своих
+   кнопок действий нет — только «Понятно»: вернуть серию можно лишь учёбой,
+   а не кнопкой. */
+function openStreakFrozenModal() {
+  let st = null;
+  try { st = streakLocalStatus(); } catch (_) { st = null; }
+  const n = Math.max(STREAK_FROZEN_MIN_DAYS, Math.floor(Number((st && (st.frozenValue || st.value)) || 0)) || STREAK_FROZEN_MIN_DAYS);
+  openInfoDialog({
+    eyebrow: "Серия дней",
+    icon: "flame",
+    title: "Серия заморожена",
+    text: "Вчера учёбы не было, поэтому серия <b>" + esc(String(n)) + " дн.</b> покрылась льдом. Если не позаниматься сегодня — она сгорит."
+      + "<br><br>Чтобы серия оттаяла, достаточно позаниматься: решить задание, пройти урок, написать сочинение или позаниматься с ИИ — и она станет <b>" + esc(String(n + 1)) + " дн.</b> Это бесплатно.",
+    closeText: "Понятно",
+  });
+}
+
+/* Потерянная серия: то же .dlg-окно, кнопки свои — «Понятно» и
+   «Восстановить». Лимиты (3 в месяц на предмет) показывает и считает
+   сервер; при исчерпанном лимите кнопка серая и не работает. */
+function openStreakRestoreModal() {
+  const root = deviceModalRoot();
+  if (!root) return;
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Восстановление серии">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Серия дней</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("flame")}</div>
+          <div class="dlg-device__name">Восстановление серии</div>
+        </div>
+        <div class="dlg__text">Загружаем данные серии…</div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+  const subj = streakRestoreSubject();
+  const qs = subj ? "?subject=" + encodeURIComponent(subj) : "";
+  ApiClient.get("/api/streak" + qs).then(
+    (res) => { try { renderStreakRestoreDialog(res); } catch (_) {} },
+    () => { try { renderStreakRestoreDialog(null); } catch (_) {} },
+  );
+}
+
+function renderStreakRestoreDialog(res) {
+  const root = deviceModalRoot();
+  if (!root || !root.innerHTML) return;
+  if (!res || res.status !== "lost" || typeof res.frozenValue !== "number") {
+    const alive = res && (res.status === "active" || res.status === "frozen");
+    openInfoDialog({
+      eyebrow: "Серия дней",
+      icon: "flame",
+      title: alive ? "Серия уже жива" : "Не получилось",
+      text: alive
+        ? "Пока окно открывалось, серия уже ожила — восстанавливать нечего. Так держать!"
+        : "Не удалось загрузить данные серии. Проверь соединение и попробуй ещё раз.",
+      closeText: "Понятно",
+    });
+    return;
+  }
+  const n = Math.max(0, Math.floor(Number(res.frozenValue) || 0));
+  const used = Math.max(0, Math.floor(Number(res.restoresUsed) || 0));
+  const left = Math.max(0, Math.floor(Number(res.restoresLeft) || 0));
+  const can = res.canRestore === true && left > 0 && n >= STREAK_FROZEN_MIN_DAYS;
+  const limitNote = left > 0
+    ? "Восстановление вернёт <b>" + esc(String(n)) + " дн.</b>, но сегодня всё равно нужно позаниматься — иначе завтра серия снова заморозится."
+    : "Лимит на этот месяц исчерпан — позанимайся, и серия начнётся заново.";
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="Восстановление серии">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Серия дней</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("flame")}</div>
+          <div class="dlg-device__name">Серия потеряна</div>
+        </div>
+        <div class="dlg__text">Два дня без учёбы подряд гасят огонёк. Прошлая серия — <b>${esc(String(n))} дн.</b></div>
+        <div class="dlg-kv">
+          <div class="dlg-kv__row"><span>Прошлая серия</span><span><b>${esc(String(n))} дн.</b></span></div>
+          <div class="dlg-kv__row"><span>Восстановлений в этом месяце</span><span><b>${esc(String(used))} из 3</b> · осталось ${esc(String(left))}</span></div>
+        </div>
+        <div class="dlg__text" id="streakRestoreNote">${limitNote}</div>
+        <div class="dlg__actions">
+          <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Понятно</button>
+          <button class="btn btn--primary" type="button" id="streakRestoreBtn" onclick="streakDoRestore()"${can ? "" : " disabled title=\"Лимит восстановлений исчерпан\""}>Восстановить</button>
+        </div>
+      </div>
+    </div>`;
+  const dlg = root.querySelector(".dlg");
+  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+}
+
+async function streakDoRestore() {
+  const btn = document.getElementById("streakRestoreBtn");
+  const note = document.getElementById("streakRestoreNote");
+  if (btn) btn.disabled = true;
+  const subj = streakRestoreSubject();
+  try {
+    const res = await ApiClient.post("/api/streak/restore", subj ? { subject: subj } : {});
+    try {
+      if (Store.state) {
+        Store.state.streak = Math.max(0, Math.floor(Number(res.streak) || 0));
+        // Дата для показа — эффективная (включая мосты), а не реальная учёба:
+        // иначе локальный пересчёт тут же снова показал бы 0 до перезагрузки.
+        Store.state.lastActiveDate = res.displayDate || res.lastActiveDate || null;
+      }
+      if (Store.lastSyncedState) {
+        Store.lastSyncedState.streak = Store.state ? Store.state.streak : 0;
+        Store.lastSyncedState.lastActiveDate = Store.state ? Store.state.lastActiveDate : null;
+      }
+    } catch (_) {}
+    try { closeDeviceModal(); } catch (_) {}
+    try { renderTopbar(); } catch (_) {}
+    try { render(); } catch (_) {}
+    toast("Серия восстановлена: <b>" + esc(String(Math.max(0, Math.floor(Number(res.streak) || 0)))) + " дн.</b>", "toast--xp", "flame");
+  } catch (e) {
+    const code = (e && (e.code || (e.payload && e.payload.code))) || "";
+    if (code === "STREAK_FROZEN") { try { openStreakFrozenModal(); } catch (_) {} return; }
+    if (code === "STREAK_ACTIVE") {
+      try { closeDeviceModal(); } catch (_) {}
+      try { renderTopbar(); render(); } catch (_) {}
+      return;
+    }
+    if (btn) btn.disabled = code === "RESTORE_LIMIT";
+    if (note) {
+      note.innerHTML = code === "RESTORE_LIMIT"
+        ? "Лимит на этот месяц исчерпан — позанимайся, и серия начнётся заново."
+        : esc((e && e.message) || "Не удалось восстановить серию. Попробуй ещё раз.");
+    }
+    if (code !== "RESTORE_LIMIT" && btn) btn.disabled = false;
+  }
+}
+
+/* Автопоказ замороженной серии: один раз за загрузку страницы, через
+   2 секунды после входа — и только внутри дашборда (этот код живёт лишь в
+   SPA index.html, статичные ege-result и прочие страницы его не исполняют).
+   Не поверх других окон, онбординга, пикера предмета и блокировки. */
+let streakFrozenAutoShown = false;
+
+function maybeScheduleStreakFrozenModal() {
+  if (streakFrozenAutoShown) return;
+  let st = null;
+  try { st = streakLocalStatus(); } catch (_) { return; }
+  if (!st || st.status !== "frozen") return;
+  try {
+    if (!Store.ready || !Store.state || !Store.state.onboarded) return;
+    if (typeof subjectLearningAvailable === "function" && !subjectLearningAvailable()) return;
+    if (typeof isSubjectChoiceLocked === "function" && isSubjectChoiceLocked()) return;
+    if (typeof accountBlocked !== "undefined" && accountBlocked) return;
+    const route = currentRoute();
+    if (route === "login" || route === "register" || route === "subject") return;
+  } catch (_) { return; }
+  streakFrozenAutoShown = true;
+  setTimeout(() => {
+    try {
+      let cur = null;
+      try { cur = streakLocalStatus(); } catch (_) { return; }
+      if (!cur || cur.status !== "frozen") return;
+      let busy = false;
+      try {
+        const dm = document.getElementById("device-modal-root");
+        const mm = document.getElementById("modal-root");
+        busy = !!((dm && dm.innerHTML) || (mm && mm.innerHTML));
+        if (typeof accountBlocked !== "undefined" && accountBlocked) busy = true;
+      } catch (_) {}
+      if (busy) return;
+      openStreakFrozenModal();
+    } catch (_) {}
+  }, 2000);
+}
+
 /* Высота верхней панели нужна липкой шапке сессии: без неё «Назад» и «Выйти»
    заезжали под topbar и пропадали. Панель переносится на узких экранах, поэтому
    меряем её фактическую высоту, а не считаем в CSS.
@@ -2816,7 +3053,9 @@ function renderTopbar() {
   const locked = subjectLearningUnavailable(subjectState);
   const lockedInfo = locked ? (subjectState.info || subjectInfoSafe()) : null;
   const lockedStatus = locked ? (subjectState.locked ? "Карта тем · скоро" : "Материалы скоро") : "";
-  const streak = nonNegativeNumber(Store.state.streak);
+  const streakView = (() => { try { return streakLocalStatus(); } catch (_) { return null; } })()
+    || { shown: nonNegativeNumber(Store.state.streak), status: "active", frozenValue: 0 };
+  const streak = streakView.shown;
   document.getElementById("topbar").innerHTML = `
     <div class="level-chip">
       <span class="level-chip__badge">УР. ${esc(li.level)}</span>
@@ -2829,7 +3068,7 @@ function renderTopbar() {
     <div class="topbar__spacer"></div>
     ${locked ? `<span class="chip chip--locked hide-mobile">${esc(lockedStatus)}</span>` : ""}
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
-    <div class="streak-chip streak-chip--clickable ${streakTier(streak)}" title="Серия дней подряд — нажми, чтобы узнать, как это работает" role="button" tabindex="0" onclick="openHelp('streak')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openHelp('streak')}">${icon("flame")} ${streak} дн</div>`;
+    <div class="streak-chip streak-chip--clickable ${streakView.status === "frozen" ? "streak-chip--frozen" : streakTier(streak)}" title="${esc(streakChipTitle(streakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${streak} дн</div>`;
   syncTopbarHeight();
   try { requestAnimationFrame(() => syncTopbarHeight()); } catch (_) {}
 }
@@ -8923,7 +9162,9 @@ function screenProfile(root) {
       <div class="section-title">Достижения</div>
       ${profileAchievementsHTML(achievements)}`;
 
-  const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip profile-card__streak ${streakTier(streak)}">${icon("flame")} ${streak} дн</div>`;
+  const profileStreakView = (() => { try { return streakLocalStatus(); } catch (_) { return null; } })()
+    || { shown: streak, status: "active", frozenValue: 0 };
+  const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip streak-chip--clickable profile-card__streak ${profileStreakView.status === "frozen" ? "streak-chip--frozen" : streakTier(profileStreakView.shown)}" title="${esc(streakChipTitle(profileStreakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${profileStreakView.shown} дн</div>`;
   const profileProgressHTML = `
       <div class="profile-card__progress">
         <div class="profile-card__level">
@@ -11520,6 +11761,7 @@ function bootstrapApp() {
         scheduleAdminSessionWatch();
       } catch (_) {}
       render();
+      try { maybeScheduleStreakFrozenModal(); } catch (_) {}
     } catch (error) {
       stopBootMsgs();
       if (isBlockedError(error)) {
