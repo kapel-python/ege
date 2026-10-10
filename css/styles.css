@@ -1435,7 +1435,7 @@ body {
   animation: fadeIn 0.2s ease;
 }
 /* Зум: только кнопка 2×. Картинка заполняет экран по одной из сторон. */
-.visual-lightbox { position: relative; max-width: 100%; }
+.visual-lightbox { position: relative; max-width: 100%; transform: translateX(-3.5vw); }
 .visual-lightbox__img { transition: transform .15s ease; }
 .visual-lightbox--zoom .visual-lightbox__img { transform: scale(2); transform-origin: center center; }
 .visual-lightbox__img {
