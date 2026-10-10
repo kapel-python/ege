@@ -108,32 +108,41 @@ def is_svg(data: bytes) -> bool:
 
 
 def strip_watermark_mark(svg: str) -> tuple[str, int]:
-    """Убирает узел вотермарки: ровно один <g> с fill-opacity:0.4 из <path>."""
+    """Убирает узлы вотермарки: <g fill-opacity:0.4>, внутри только <path>.
+
+    Обычно метка одна, но у части заданий (например, источник склеивает два
+    изображения) их две — прежняя версия требовала ровно один узел и роняла
+    импорт такого задания. Теперь убираем все метки, каждую проверяя на то,
+    что внутри лежат только контуры.
+    """
     nodes = list(re.finditer(r"<g\b[^>]*fill-opacity:0\.4[^>]*>", svg))
     if not nodes:
         return svg, 0
-    if len(nodes) != 1:
-        raise ValueError(f"узлов вотермарки: {len(nodes)}, нужен ровно 1")
-    start = nodes[0].start()
-    depth = 0
-    end = None
-    for m in re.finditer(r"<g\b[^>]*>|</g>", svg[start:]):
-        if m.group(0).startswith("</"):
-            if depth == 1:
-                end = start + m.end()
-                break
-            depth -= 1
-        else:
-            depth += 1
-    if end is None:
-        raise ValueError("не закрыт узел вотермарки")
-    block = svg[start:end]
-    inner = re.sub(r"^<g\b[^>]*>", "", block)
-    inner = re.sub(r"</g>\s*$", "", inner)
-    rest = re.sub(r"<path\b[^>]*/>|<path\b.*?</path>", "", inner, flags=re.S)
-    if rest.strip():
-        raise ValueError(f"внутри вотермарки не только контуры: {rest[:80]!r}")
-    return svg[:start] + svg[end:], len(re.findall(r"<path\b", block))
+    removed = 0
+    # Идём с конца: удаление верхнего узла не сдвигает позиции предыдущих.
+    for node in reversed(nodes):
+        start = node.start()
+        depth = 0
+        end = None
+        for m in re.finditer(r"<g\b[^>]*>|</g>", svg[start:]):
+            if m.group(0).startswith("</"):
+                if depth == 1:
+                    end = start + m.end()
+                    break
+                depth -= 1
+            else:
+                depth += 1
+        if end is None:
+            raise ValueError("не закрыт узел вотермарки")
+        block = svg[start:end]
+        inner = re.sub(r"^<g\b[^>]*>", "", block)
+        inner = re.sub(r"</g>\s*$", "", inner)
+        rest = re.sub(r"<path\b[^>]*/>|<path\b.*?</path>", "", inner, flags=re.S)
+        if rest.strip():
+            raise ValueError(f"внутри вотермарки не только контуры: {rest[:80]!r}")
+        svg = svg[:start] + svg[end:]
+        removed += len(re.findall(r"<path\b", block))
+    return svg, removed
 
 
 def _num(pattern: str, txt: str) -> float | None:
