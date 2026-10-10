@@ -117,9 +117,22 @@ def strip_markup(raw: str) -> str:
     # СДАМ ГИА режет слова невидимыми мягкими переносами: «По­яс­не­ние».
     text = text.replace("\u00ad", "").replace("&shy;", "")
     text = text.replace("\u202f", " ").replace("\xa0", " ")
+    # Невидимые склейки источника: word joiner и zero-width.
+    text = re.sub(r"[\u2060\u200b\u200c\u200d\ufeff]", "", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n", text)
     return text.strip()
+
+
+def extract_div(page: str, match: re.Match) -> str:
+    """Содержимое div, открытый тег которого найден в match (учёт вложенности)."""
+    tag_end = page.index(">", match.end()) + 1
+    depth = 1
+    for mt in re.finditer(r"<div\b[^>]*>|</div>", page[tag_end:], re.I):
+        depth += -1 if mt.group(0).startswith("</") else 1
+        if depth == 0:
+            return page[tag_end:tag_end + mt.start()]
+    return page[tag_end:]
 
 
 def parse_problem(base: str, pid: str) -> dict:
@@ -151,10 +164,22 @@ def parse_problem(base: str, pid: str) -> dict:
     answer = answer_raw.replace("Ответ:", "").strip().strip(".")
 
     text = strip_markup(condition_raw)
+    # Задания №1–3 и №22–26 идут с текстом-источником в отдельном блоке
+    # id="textNNN": он не входит в блок вопроса, поэтому приклеиваем его сверху.
+    passage = ""
+    pm = re.search(r'id="text\d+"', page)
+    if pm:
+        passage = strip_markup(extract_div(page, pm))
+        if passage:
+            text = passage + "\n\n" + text
     solution = strip_markup(solution_raw)
     # Служебные обвязки источника в решении нам не нужны: заголовок
     # «Пояснение (см. также Правило ниже)» и продублированный в конце ответ.
-    solution = re.sub(r"^Пояснение[^.]*\.\s*", "", solution)
+    solution = re.sub(r"^Пояснение\s*\([^)]*\)\.\s*", "", solution)
+    solution = re.sub(r"^Пояснение[^.\n]*\.\s*", "", solution)
+    # «|» в решении источника — маркер выделения фрагмента, а не таблица:
+    # убираем, иначе рендер соберёт из строки с пайпом ложную таблицу.
+    solution = solution.replace("|", "")
     solution = re.sub(r"\s*Ответ:\s*[^\s.]+\.?\s*$", "", solution).strip()
 
     images = len(re.findall(r"<img", condition_raw))

@@ -93,8 +93,8 @@ def main():
             source_tasks = [t for t in tasks if t.get("skill") == "russian_essay_source"]
             assert len(source_tasks) == 13, len(source_tasks)
             short_tasks = [t for t in tasks if t.get("type") == "short_answer"]
-            assert len(short_tasks) == 140, len(short_tasks)
-            assert len(tasks) == 153, "№4 — 15 заданий, остальные 25 тем по 5 + 13 сочинений"
+            assert len(short_tasks) == 390, len(short_tasks)
+            assert len(tasks) == 403, "26 тем по 15 заданий + 13 сочинений"
             assert all(t.get("type") == "long_text" for t in source_tasks), catalog
             assert all(t.get("sourceTextId") for t in source_tasks), "у задания 27 без исходника"
             # Каждая из 26 тем тестовой части представлена ровно 5 заданиями.
@@ -103,10 +103,8 @@ def main():
                 per_skill.setdefault(t.get("skill"), 0)
                 per_skill[t.get("skill")] += 1
             assert set(per_skill) == {f"r{i:02d}" for i in range(1, 27)}, sorted(per_skill)
-            # Линия №4 расширена до 15 реальных заданий, остальные темы — по 5.
-            expected_per_skill = {f"r{i:02d}": 5 for i in range(1, 27)}
-            expected_per_skill["r04"] = 15
-            assert per_skill == expected_per_skill, per_skill
+            # Каждая тема представлена 15 реальными заданиями.
+            assert all(v == 15 for v in per_skill.values()), per_skill
 
             # Исходники читаются сервером и содержат текст без разбора.
             status, source_detail = request(opener, base, f"/api/catalog-tasks?subject={rid}")
@@ -171,7 +169,7 @@ def main():
                 "свободное сочинение без исходника убрано"
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={rid}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 153, (status, len(task_details.get("tasks", [])))
+            assert status == 200 and len(task_details.get("tasks", [])) == 403, (status, len(task_details.get("tasks", [])))
             status, lessons = request(opener, base, f"/api/catalog-lessons?subject={rid}")
             assert status == 200 and len(lessons.get("lessons", [])) == 26, (status, lessons)
 
@@ -334,7 +332,7 @@ def main():
             public_russian = next((s for s in public.get("subjects", []) if s.get("id") == rid), None)
             assert public_russian, public
             public_counts = public_russian.get("counts", {})
-            assert public_counts.get("tasks") == 153, public_russian
+            assert public_counts.get("tasks") == 403, public_russian
             assert public_counts.get("skills") == 27, public_russian
             assert public_counts.get("missions") == 26, public_russian
             assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 5, public_russian
