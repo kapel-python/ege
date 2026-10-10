@@ -7267,6 +7267,7 @@ function answerInputMode(answer) {
    приоритетнее, иначе выводим формат по виду самого ответа. */
 function answerFormatHint(answer, valueType) {
   const vt = String(valueType || "");
+  if (/цифр|последовательност/i.test(vt)) return "последовательность цифр (например, 245)";
   if (/целое/.test(vt)) return /градус/.test(vt) ? "целое число (в градусах)" : "целое число";
   if (/дробь/.test(vt)) return "десятичная дробь (запятая или точка)";
   if (/единиц/.test(vt)) return "число с единицей измерения";
@@ -7403,7 +7404,19 @@ const LESSON_STEP_LABELS = {
 function lessonFields(step) {
   if (Array.isArray(step.fields) && step.fields.length) return step.fields;
   const task = step.taskId ? DataAPI.task(step.taskId) : null;
-  return [{ id: "answer", label: "Ответ", answer: step.answer || (task && task.answer), errorType: step.errorType }];
+  const valueType = step.valueType || (task && task.valueType) || lessonInlineDigitSeq(step);
+  return [{ id: "answer", label: "Ответ", answer: step.answer || (task && task.answer), valueType, errorType: step.errorType }];
+}
+
+/* Inline-ответ-код шага урока: valueType в шаге не задан, но ответ — набор
+   цифр, а текст говорит про соответствие/код («дай код из четырёх цифр»).
+   Помечаем как последовательность цифр, чтобы проверка принимала «1,2,4,3»
+   и подпись формата была честной. */
+function lessonInlineDigitSeq(step) {
+  const answer = String((step && step.answer) || "").trim();
+  if (!/^\d{2,8}$/.test(answer)) return "";
+  const text = String((step && step.text) || "");
+  return /соотнес|соответств|\bкод\b|цифр/i.test(text) ? "последовательность цифр" : "";
 }
 
 function lessonTask(step) { return step.taskId ? DataAPI.task(step.taskId) : null; }
@@ -7549,7 +7562,7 @@ function lessonActionHtml(step, state) {
         </label>`).join("")}
       ${isDone ? "" : `<button class="btn btn--primary lesson-check-btn" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}
     </div>
-    ${isDone ? "" : (() => { const hints = [...new Set(fields.map((f) => answerFormatHint(f.answer)).filter(Boolean))]; return hints.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hints.join(" · "))}</div>` : ""; })()}
+    ${isDone ? "" : (() => { const hints = [...new Set(fields.map((f) => answerFormatHint(f.answer, f.valueType)).filter(Boolean))]; return hints.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">Формат ответа: ${esc(hints.join(" · "))}</div>` : ""; })()}
     ${isDone ? "" : `<div class="session-tools lesson-tools">
       ${help ? `<button class="btn btn--ghost btn--sm" id="lessonHintBtn" onclick="lessonHint()">${icon("bulb")} ${help.type === "solution" ? "Показать решение" : `Подсказка ${help.level}`}</button>` : ""}
       <span>${help ? "Подсказка останется на экране до конца задания" : "Следующая подсказка откроется после ошибки"}</span>
@@ -7625,7 +7638,7 @@ function lessonHint() {
 
 function lessonErrorType(step, values) {
   const fields = lessonFields(step);
-  const wrong = fields.find((field) => !checkAnswer({ answer: field.answer }, values[field.id]));
+  const wrong = fields.find((field) => !checkAnswer({ answer: field.answer, valueType: field.valueType }, values[field.id]));
   return (wrong && wrong.errorType) || step.errorType || "Ошибка в учебном шаге";
 }
 
@@ -7650,7 +7663,7 @@ function lessonSubmit() {
     Lesson.persist();
     return;
   }
-  const correct = fields.every((field) => checkAnswer({ answer: field.answer }, values[field.id]));
+  const correct = fields.every((field) => checkAnswer({ answer: field.answer, valueType: field.valueType }, values[field.id]));
   if (!correct) {
     const errorType = lessonErrorType(step, values);
     state.attempts++;

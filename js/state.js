@@ -2385,7 +2385,24 @@ function matchingAnswerLetters(task) {
    ============================================================ */
 
 function normalizeAnswer(str) {
-  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".").replace(/−/g, "-");
+  return String(str).trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".").replace(/[−–—]/g, "-");
+}
+
+/* Задания, где ответ — НАБОР цифр, а не число: мультивыбор («укажите номера
+   ответов»), последовательность цифр и таблицы соответствия (код «1432»).
+   Для них запятая/точка с запятой/точка — разделитель, а не десятичная
+   запятая, поэтому «2,4,5» обязано равняться «245», а «1.2.4.3» — «1243». */
+function isDigitSequenceTask(task) {
+  if (!task) return false;
+  const answer = String(task.answer ?? "").trim();
+  if (!/^\d{2,8}$/.test(answer)) return false;
+  if (/(цифр|последовательност)/i.test(String(task.valueType || ""))) return true;
+  return matchingAnswerLetters(task).length > 0;
+}
+
+/* Чистая последовательность цифр без разделителей (порядок важен). */
+function digitSequenceValue(value) {
+  return String(value ?? "").replace(/[^\d]/g, "");
 }
 
 function numericAnswer(value) {
@@ -2400,6 +2417,14 @@ function numericAnswer(value) {
 function checkAnswer(task, input) {
   if (!task || input == null) return false;
   const expected = String(task.answer);
+  // Набор цифр проверяем как строку: разделители между цифрами (запятая,
+  // точка с запятой, пробел, точка) не должны ломать верный ответ — «2,4,5»
+  // и «2 4 5» равны «245», а порядок по-прежнему важен.
+  if (isDigitSequenceTask(task)) {
+    const wanted = [task.answer, ...((Array.isArray(task.accept) ? task.accept : []).map(String))]
+      .map(digitSequenceValue).filter(Boolean);
+    return wanted.includes(digitSequenceValue(input));
+  }
   // Задачи с несколькими верными вариантами (например, «запишите какой-нибудь
   // один набор»): поле accept перечисляет все допустимые ответы из условия.
   // Без него поведение прежнее — задания профиля его не несут.
@@ -2418,7 +2443,14 @@ function checkAnswer(task, input) {
     const b = normalizeAnswer(right);
     if (a === b) return true;
     const na = numericAnswer(a), nb = numericAnswer(b);
-    return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
+    if (Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6) return true;
+    // Словесный ответ: дефис, тире и пробел — один разделитель, поэтому
+    // «официально деловой» = «официально-деловой» = «официально–деловой».
+    if (/[a-zа-яё]/i.test(a) && /[a-zа-яё]/i.test(b)) {
+      const loose = (s) => s.replace(/[\s\-–—−]+/g, "");
+      if (loose(a) === loose(b)) return true;
+    }
+    return false;
   };
 
   // Order is immaterial for a set of roots. Matching each expected root once

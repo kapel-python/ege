@@ -358,12 +358,17 @@ function collectGoalCelebrationData(){
     var goal=gcGoalNum();if(!Number.isFinite(goal))return null;
     var f=null;
     try{if(typeof forecast==='function')f=forecast()}catch(e){f=null}
-    if(!f||f.empty||!Number.isFinite(f.mid))return null;
+    /* Гейт прогноза (мало охвата теории/тем) скрывает mid — но накопленную
+       историю и её пик это не отменяет. Если сейчас прогноз ещё пуст, а
+       записанный пик уже брал цель, окно всё равно должно дойти: пустой mid
+       берём за 0, а сбор прерываем только когда показывать вообще нечего. */
+    var fmid=(f&&!f.empty&&Number.isFinite(f.mid))?f.mid:0;
     var raw=Array.isArray(Store.state.forecastHistory)?Store.state.forecastHistory:[],hist=[];
     for(var i=0;i<raw.length;i++){var x=raw[i];
       if(x&&/^\d{4}-\d{2}-\d{2}$/.test(x.date||'')&&Number.isFinite(x.mid))hist.push({t:x.date,score:x.mid})}
     hist.sort(function(a,b){return a.t<b.t?-1:(a.t>b.t?1:0)});
-    if(!hist.length)hist.push({t:gcToday(),score:f.mid});
+    if(!hist.length&&!fmid)return null;
+    if(!hist.length)hist.push({t:gcToday(),score:fmid});
     var lessons=[];
     try{lessons=(DataAPI.lessons&&typeof DataAPI.lessons==='function')?DataAPI.lessons():[];if(!Array.isArray(lessons))lessons=[]}catch(e){lessons=[]}
     var done=0;
@@ -393,9 +398,9 @@ function collectGoalCelebrationData(){
     if(streak>0)data.streak=streak;
     if(activity.length)data.activity=activity;
     if(achNames.length)data.achievements=achNames;
-    var peak=f.mid;
+    var peak=fmid;
     for(var pi=0;pi<hist.length;pi++){if(hist[pi].score>peak)peak=hist[pi].score}
-    return {subject:subject,goalId:String(gid),goal:goal,current:f.mid,peak:peak,data:data};
+    return {subject:subject,goalId:String(gid),goal:goal,current:fmid,peak:peak,data:data};
   }catch(e){return null}
 }
 
