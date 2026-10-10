@@ -1,0 +1,62 @@
+{
+ "9424:0": {
+  "file": "assets/society/soc-src9424.png",
+  "url": "https://soc-ege.sdamgia.ru/get_file?id=237301",
+  "bytes": 174391,
+  "kind": "png",
+  "width": 568.4325,
+  "height": 178.2389,
+  "viewBox": "0 0 568.4325 178.2389",
+  "svg": "assets/society/soc-src9424.svg",
+  "pngWidth": 1423,
+  "pngHeight": 441
+ },
+ "13950:0": {
+  "file": "assets/society/soc-src13950.png",
+  "url": "https://soc-ege.sdamgia.ru/get_file?id=236693",
+  "bytes": 111652,
+  "kind": "png",
+  "width": 280.7073,
+  "height": 353.647,
+  "viewBox": "0 0 280.7073 353.647",
+  "svg": "assets/society/soc-src13950.svg",
+  "pngWidth": 689,
+  "pngHeight": 890
+ },
+ "8147:0": {
+  "file": "assets/society/soc-src8147.png",
+  "url": "https://soc-ege.sdamgia.ru/get_file?id=236664",
+  "bytes": 83017,
+  "kind": "png",
+  "width": 515.6274,
+  "height": 210.3346,
+  "viewBox": "0 0 515.6274 210.3346",
+  "svg": "assets/society/soc-src8147.svg",
+  "pngWidth": 1295,
+  "pngHeight": 532
+ },
+ "11243:0": {
+  "file": "assets/society/soc-src11243.png",
+  "url": "https://soc-ege.sdamgia.ru/get_file?id=237323",
+  "bytes": 198584,
+  "kind": "png",
+  "width": 386.8248,
+  "height": 373.8364,
+  "viewBox": "0 0 386.8248 373.8364",
+  "svg": "assets/society/soc-src11243.svg",
+  "pngWidth": 973,
+  "pngHeight": 941
+ },
+ "8372:0": {
+  "file": "assets/society/soc-src8372.png",
+  "url": "https://soc-ege.sdamgia.ru/get_file?id=236669",
+  "bytes": 121766,
+  "kind": "png",
+  "width": 269.4681,
+  "height": 306.2271,
+  "viewBox": "0 0 269.4681 306.2271",
+  "svg": "assets/society/soc-src8372.svg",
+  "pngWidth": 680,
+  "pngHeight": 772
+ }
+}

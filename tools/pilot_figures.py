@@ -138,12 +138,30 @@ def rasterize(svg_path: Path, scale: float) -> Path:
     Пустые белые поля обрезаются. Возвращает путь к PNG; SVG удаляется."""
     if CHROME is None:
         raise RuntimeError("нет headless Chrome для растеризации")
+    # Легенда вылезает за viewBox: корень SVG режет overflow:hidden, и текст
+    # обрезается. Расширяем холст (viewBox + width/height) с запасом, рендерим,
+    # затем обрезаем белые поля — так в PNG попадает весь текст.
+    txt = svg_path.read_text(encoding="utf-8", errors="ignore")
+    mw = re.search(r'<svg[^>]*\bwidth="([\d.]+)', txt)
+    mh = re.search(r'<svg[^>]*\bheight="([\d.]+)', txt)
+    mv = re.search(r'<svg[^>]*\bviewBox="([\d.\s-]+)"', txt)
+    if mw and mh:
+        w0, h0 = float(mw.group(1)), float(mh.group(1))
+        w1 = w0 * 1.7
+        txt = re.sub(r'(<svg[^>]*\bwidth=")[\d.]+(")', lambda m: m.group(1) + f"{w1:.2f}" + m.group(2), txt, count=1)
+        txt = re.sub(r'(<svg[^>]*\bheight=")[\d.]+(")', lambda m: m.group(1) + f"{h0:.2f}" + m.group(2), txt, count=1)
+        if mv:
+            parts = mv.group(1).split()
+            txt = re.sub(r'(<svg[^>]*\bviewBox=")[^"]+(")', lambda m: m.group(1) + f"{parts[0]} {parts[1]} {w1:.2f} {float(parts[3]):.2f}" + m.group(2), txt, count=1)
+        svg_path.write_text(txt, encoding="utf-8")
     out = svg_path.with_suffix(".png")
-    w = int(float(re.search(r'width="([\d.]+)', svg_path.read_text(encoding="utf-8", errors="ignore")).group(1)) * scale)
-    h = int(float(re.search(r'height="([\d.]+)', svg_path.read_text(encoding="utf-8", errors="ignore")).group(1)) * scale)
+    mw2 = re.search(r'width="([\d.]+)"', txt)
+    mh2 = re.search(r'height="([\d.]+)"', txt)
+    w = int(float(mw2.group(1)) * scale)
+    h = int(float(mh2.group(1)) * scale)
     subprocess.run([str(CHROME), "--headless", "--disable-gpu", "--no-sandbox",
                     "--hide-scrollbars", "--force-device-scale-factor=" + str(scale),
-                    "--window-size=" + str(w + 2) + "," + str(h + 2),
+                    "--window-size=" + str(w + 40) + "," + str(h + 40),
                     "--default-background-color=FFFFFFFF",
                     "--screenshot=" + str(out), svg_path.resolve().as_uri()],
                    check=True, capture_output=True, timeout=180)
