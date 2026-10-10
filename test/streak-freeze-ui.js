@@ -96,6 +96,11 @@ t("автопоказ: только дашборд-условия", src.includes
 t("модалка заморозки через .dlg", src.includes("Серия заморожена"));
 t("модалка восстановления: лимиты", src.includes("Восстановлений в этом месяце"));
 t("модалка восстановления: disabled", src.includes('id="streakRestoreBtn"') && src.includes("disabled"));
+t("восстановление: сначала данные, потом окно", src.includes("function openStreakRestoreDialog(res)"));
+t("восстановление: скелета-заглушки нет", !src.includes("Загружаем данные серии"));
+t("восстановление: защита от даблклика", src.includes("streakRestoreLoading"));
+t("потерянная серия: серый класс в чипе", src.includes("streakChipClass(streakView)") && src.includes("streak-chip--lost"));
+t("CSS: lost-переменные", fs.readFileSync(path.join(__dirname, "..", "css", "styles.css"), "utf8").includes("--streak-lost-soft"));
 t("CSS: frozen-переменные", fs.readFileSync(path.join(__dirname, "..", "css", "styles.css"), "utf8").includes("--streak-frozen-neon"));
 
 // Локальный touchStreak (js/state.js) продолжает замороженную серию сразу

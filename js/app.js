@@ -2809,6 +2809,14 @@ function streakChipTitle(st) {
   return "Серия дней подряд — нажми, чтобы узнать, как это работает";
 }
 
+/* Класс огонька по статусу: frozen — ледяной синий, lost — потухший серый,
+   иначе — уровень по длине. Потерянный перекрывает tier: серая шкала 0. */
+function streakChipClass(st) {
+  if (st.status === "frozen") return "streak-chip--frozen";
+  if (st.status === "lost") return "streak-chip--lost";
+  return streakTier(st.shown);
+}
+
 /* Клик по огоньку: заморожен — окно заморозки, потерян (было что спасать) —
    окно восстановления с лимитами, иначе — обычная подсказка, как раньше. */
 function onStreakChipClick() {
@@ -2846,42 +2854,35 @@ function openStreakFrozenModal() {
 
 /* Потерянная серия: то же .dlg-окно, кнопки свои — «Понятно» и
    «Восстановить». Лимиты (3 в месяц на предмет) показывает и считает
-   сервер; при исчерпанном лимите кнопка серая и не работает. */
+   сервер; при исчерпанном лимите кнопка серая и не работает.
+   Порядок строгий: СНАЧАЛА данные с сервера, ПОТОМ окно — иначе скелет
+   «Загружаем…» проскакивает на миллисекунду и тут же затирается. */
+let streakRestoreLoading = false;
+
 function openStreakRestoreModal() {
-  const root = deviceModalRoot();
-  if (!root) return;
-  try {
-    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
-      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-  } catch (_) {}
-  root.innerHTML = `
-    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
-      <div class="dlg" role="dialog" aria-modal="true" aria-label="Восстановление серии">
-        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
-        <div class="dlg__eyebrow">Серия дней</div>
-        <div class="dlg-device">
-          <div class="dlg-device__icon" aria-hidden="true">${icon("flame")}</div>
-          <div class="dlg-device__name">Восстановление серии</div>
-        </div>
-        <div class="dlg__text">Загружаем данные серии…</div>
-      </div>
-    </div>`;
-  document.removeEventListener("keydown", deviceModalEscHandler);
-  document.addEventListener("keydown", deviceModalEscHandler);
-  const dlg = root.querySelector(".dlg");
-  if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
+  if (streakRestoreLoading) return;
+  if (!deviceModalRoot()) return;
+  streakRestoreLoading = true;
   const subj = streakRestoreSubject();
   const qs = subj ? "?subject=" + encodeURIComponent(subj) : "";
   ApiClient.get("/api/streak" + qs).then(
-    (res) => { try { renderStreakRestoreDialog(res); } catch (_) {} },
-    () => { try { renderStreakRestoreDialog(null); } catch (_) {} },
+    (res) => { streakRestoreLoading = false; try { openStreakRestoreDialog(res); } catch (_) {} },
+    () => {
+      streakRestoreLoading = false;
+      try {
+        openInfoDialog({
+          eyebrow: "Серия дней",
+          icon: "flame",
+          title: "Не получилось",
+          text: "Не удалось загрузить данные серии. Проверь соединение и попробуй ещё раз.",
+          closeText: "Понятно",
+        });
+      } catch (_) {}
+    },
   );
 }
 
-function renderStreakRestoreDialog(res) {
-  const root = deviceModalRoot();
-  if (!root || !root.innerHTML) return;
+function openStreakRestoreDialog(res) {
   if (!res || res.status !== "lost" || typeof res.frozenValue !== "number") {
     const alive = res && (res.status === "active" || res.status === "frozen");
     openInfoDialog({
@@ -2895,6 +2896,13 @@ function renderStreakRestoreDialog(res) {
     });
     return;
   }
+  const root = deviceModalRoot();
+  if (!root) return;
+  try {
+    if (!(deviceModalPrevFocus && deviceModalPrevFocus.isConnected)) {
+      deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+  } catch (_) {}
   const n = Math.max(0, Math.floor(Number(res.frozenValue) || 0));
   const used = Math.max(0, Math.floor(Number(res.restoresUsed) || 0));
   const left = Math.max(0, Math.floor(Number(res.restoresLeft) || 0));
@@ -2923,6 +2931,8 @@ function renderStreakRestoreDialog(res) {
         </div>
       </div>
     </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
   const dlg = root.querySelector(".dlg");
   if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
 }
@@ -3080,7 +3090,7 @@ function renderTopbar() {
     <div class="topbar__spacer"></div>
     ${locked ? `<span class="chip chip--locked hide-mobile">${esc(lockedStatus)}</span>` : ""}
     <button class="btn btn--ghost theme-toggle" type="button" onclick="Theme.toggle()" aria-label="${dark ? "Включить светлую тему" : "Включить тёмную тему"}" aria-pressed="${dark}" title="${dark ? "Включить светлую тему" : "Включить тёмную тему"}">${icon(dark ? "sun" : "moon")}</button>
-    <div class="streak-chip streak-chip--clickable ${streakView.status === "frozen" ? "streak-chip--frozen" : streakTier(streak)}" title="${esc(streakChipTitle(streakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${streak} дн</div>`;
+    <div class="streak-chip streak-chip--clickable ${streakChipClass(streakView)}" title="${esc(streakChipTitle(streakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${streak} дн</div>`;
   syncTopbarHeight();
   try { requestAnimationFrame(() => syncTopbarHeight()); } catch (_) {}
 }
@@ -9176,7 +9186,7 @@ function screenProfile(root) {
 
   const profileStreakView = (() => { try { return streakLocalStatus(); } catch (_) { return null; } })()
     || { shown: streak, status: "active", frozenValue: 0 };
-  const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip streak-chip--clickable profile-card__streak ${profileStreakView.status === "frozen" ? "streak-chip--frozen" : streakTier(profileStreakView.shown)}" title="${esc(streakChipTitle(profileStreakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${profileStreakView.shown} дн</div>`;
+  const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip streak-chip--clickable profile-card__streak ${streakChipClass(profileStreakView)}" title="${esc(streakChipTitle(profileStreakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${profileStreakView.shown} дн</div>`;
   const profileProgressHTML = `
       <div class="profile-card__progress">
         <div class="profile-card__level">

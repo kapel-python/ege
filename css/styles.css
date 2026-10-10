@@ -52,6 +52,8 @@
   --streak-frozen-soft: rgba(14, 165, 233, 0.14);
   --streak-frozen-neon: #0284c7;
   --streak-frozen-glow: rgba(2, 132, 199, 0.45);
+  --streak-lost: #64748b;
+  --streak-lost-soft: rgba(100, 116, 139, 0.14);
   --radius: 14px;
   --radius-sm: 10px;
   --sidebar-w: 232px;
@@ -111,6 +113,8 @@
   --streak-frozen-soft: rgba(125, 211, 252, 0.14);
   --streak-frozen-neon: #38bdf8;
   --streak-frozen-glow: rgba(56, 189, 248, 0.5);
+  --streak-lost: #94a3b8;
+  --streak-lost-soft: rgba(148, 163, 184, 0.14);
   --chrome-bg: rgba(10, 12, 17, 0.80);
   --scrim: rgba(5, 6, 10, 0.70);
   --focus-scrim: rgba(8, 11, 22, 0.20);
@@ -782,6 +786,24 @@ body {
   0% { transform: translate(0, 0) scale(1); opacity: 0; }
   15% { opacity: 1; }
   100% { transform: translate(3px, -24px) scale(0.25); opacity: 0; }
+}
+/* Сгоревшая серия: огонёк потух — серый, без огня и искр. Анимаций нет
+   осознанно: мёртвая серия не дышит и не искрит, в отличие от живой. */
+.streak-chip--lost {
+  color: var(--streak-lost);
+  background: var(--streak-lost-soft);
+  border: 1px solid transparent;
+  box-shadow: none;
+  animation: none;
+}
+.streak-chip--lost svg {
+  animation: none;
+  filter: none;
+  opacity: 0.75;
+}
+.streak-chip--lost::before,
+.streak-chip--lost::after {
+  display: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .streak-chip, .streak-chip svg, .streak-chip::before, .streak-chip::after { animation: none; }
