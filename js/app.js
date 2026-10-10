@@ -6932,6 +6932,15 @@ function askSessionShowAnswer() {
   });
 }
 
+/* «Показать решение» после исчерпанных подсказок: ответ и разбор открываются
+   сразу, задание считается нерешённым и уходит в повторение.
+
+   Отрисовка идёт ДО отметки задания отвеченным. Отметка раньше отрисовки
+   устраивала ловушку: любое падение на полпути оставляло сессию мёртвой —
+   answered=true уже стоит, а решения на экране нет, и ни «Ответить», ни
+   «Пропустить», ни повторное «Показать решение» не отвечают. Живой случай:
+   миссия-соответствие. У задания-таблицы нет поля #answerInput (цифры живут
+   в клетках match-answer__cell), поэтому кнопка падала на нём. */
 function sessionShowAnswer() {
   const S = Session.cur;
   const t = Session.task();
@@ -6943,18 +6952,37 @@ function sessionShowAnswer() {
   S.gainedXp += xpShown;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
-  S.answered = true;
+
+  // Ответ показывается в том месте, где ученик его вводит: у соответствия
+  // это клетки бланка, у простого ввода — поле answerInput (см.
+  // sessionDisableAnswer). Оба варианта тихие, без падения на missing-элементе.
+  const answer = String(t.answer == null ? "" : t.answer);
+  const cells = sessionMatchCells();
+  if (cells.length) {
+    cells.forEach((c, i) => {
+      c.disabled = true;
+      c.value = answer[i] || "";
+      c.classList.add("match-answer__cell--wrong");
+    });
+  } else {
+    const input = document.getElementById("answerInput");
+    if (input) {
+      input.disabled = true;
+      input.value = answer;
+      input.classList.add("answer-input--wrong");
+    }
+  }
+  const submitBtn = document.getElementById("submitBtn");
+  if (submitBtn) submitBtn.style.display = "none";
+  const hintControl = document.getElementById("hintControl");
+  if (hintControl) hintControl.innerHTML = "";
+
   sessionHideBackNav();
   Session.stopTimer();
+  S.answered = true;
 
-  const input = document.getElementById("answerInput");
-  input.disabled = true;
-  input.value = t.answer;
-  input.classList.add("answer-input--wrong");
-  document.getElementById("submitBtn").style.display = "none";
-  document.getElementById("hintBtn").disabled = true;
-
-  document.getElementById("feedbackSlot").innerHTML = `
+  const slot = document.getElementById("feedbackSlot");
+  if (slot) slot.innerHTML = `
     <div class="feedback feedback--bad">
       <div class="feedback__head">
         ${icon("bulb")} Ответ показан

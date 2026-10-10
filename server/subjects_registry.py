@@ -255,6 +255,30 @@ def validate_definition(raw: dict, *, source: str, server_dir: Path) -> dict:
             raise SubjectContractError(
                 f"{source} ({sid}): ready subject with diagnosticTasks must set "
                 f"features.diagnostics=true (иначе онбординг их не покажет)")
+    # Единая система подсказок: у КАЖДОЙ темы готового предмета обязан быть
+    # набор для практики — metadata.hints ровно из трёх непустых строк. Без
+    # него js/app.js (topicHintLevels) откатывается к лестнице задания, а у
+    # ЕГЭ-банков это шаблон формата ответа («перечитай формулировку…»), то есть
+    # миссии, боссы, «ежедневка» и повторение показывают не помощь по теме.
+    # Поэтому отсутствие подсказок — такая же ошибка контракта, как пустые
+    # goals или diagnosticTasks: предмет не добавится.
+    skills = catalog.get("skills")
+    if not isinstance(skills, list) or not skills:
+        raise SubjectContractError(
+            f"{source} ({sid}): catalog {catalog_file} must define a non-empty skills list")
+    for skill in skills:
+        if not isinstance(skill, dict) or not isinstance(skill.get("id"), str) \
+                or not skill["id"].strip():
+            raise SubjectContractError(
+                f"{source} ({sid}): every catalog skill must have a non-empty string id")
+        meta = skill.get("metadata")
+        hints = meta.get("hints") if isinstance(meta, dict) else None
+        if not isinstance(hints, list) or len(hints) != 3 \
+                or not all(isinstance(h, str) and h.strip() for h in hints):
+            raise SubjectContractError(
+                f"{source} ({sid}): тема {skill['id']!r} без трёх подсказок "
+                f"metadata.hints — практика, миссии и боссы покажут шаблон "
+                f"формата вместо помощи по теме")
     metadata = raw.get("metadata", {})
     if not isinstance(metadata, dict):
         raise SubjectContractError(f"{source} ({sid}): metadata must be an object")
