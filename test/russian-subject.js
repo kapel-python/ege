@@ -58,9 +58,9 @@ check("русский предмет зарегистрирован и откр�
 check("тема «Сочинение по тексту» доступна", !!result.topic && result.topic.id === "russian_essay_source" && result.topic.locked !== true);
 check("категория темы видна", !!result.category);
 check("тестовая часть и сочинение: практика и уроки на месте",
-  result.content === true && result.tasks === 143 && result.practice === 143 && result.lessons === 26 && result.missions === 26 && result.diagnostics === 5);
-check("26 тем тестовой части по 5 заданий + сочинение с исходниками",
-  result.skills === 27 && result.testTopics === 26 && result.testTasks === 130 && result.sourceTasks === 13 && result.sourceTasksHaveText === true);
+  result.content === true && result.tasks === 153 && result.practice === 153 && result.lessons === 26 && result.missions === 26 && result.diagnostics === 5);
+check("26 тем тестовой части (№4 — 15 заданий) + сочинение с исходниками",
+  result.skills === 27 && result.testTopics === 26 && result.testTasks === 140 && result.sourceTasks === 13 && result.sourceTasksHaveText === true);
 check("ежедневная подборка и боссы подключены к тестовой части",
   result.daily === 6 && result.bosses === 5);
 check("своих достижений каталог не описывает — сервер подставляет стандартный набор",

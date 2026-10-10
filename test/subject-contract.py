@@ -288,14 +288,14 @@ def main() -> int:
                 short_skills[t.get("skill")] = short_skills.get(t.get("skill"), 0) + 1
             check(
                 "RUSSIAN CONTENT task details",
-                len(served_russian_tasks) == 143
+                len(served_russian_tasks) == 153
                 and len(russian_re27) == 13
-                and len(russian_short) == 130
+                and len(russian_short) == 140
                 and all(t.get("type") == "long_text" for t in russian_re27)
                 and all(t.get("sourceTextId") for t in russian_re27)
                 and all(not t.get("sourceTextId") for t in russian_short)
                 and set(short_skills) == {f"r{i:02d}" for i in range(1, 27)}
-                and all(v == 5 for v in short_skills.values())
+                and short_skills == {**{f"r{i:02d}": 5 for i in range(1, 27)}, "r04": 15}
                 and russian_tasks.get("visualAssets") == []
                 and isinstance(russian_tasks.get("visualAudit"), dict),
                 f"tasks={len(served_russian_tasks)} (re27={len(russian_re27)}, short={len(russian_short)}), "
@@ -344,7 +344,7 @@ def main() -> int:
                 and {g.get("id") for g in (russian_catalog.get("goals") or [])} == {"g60", "g80", "g95"}
                 and (russian_catalog.get("diagnosticTasks") or []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"]
                 and [a.get("id") for a in (russian_catalog.get("achievements") or [])] == list(default_ach_ids)
-                and len(russian_catalog.get("tasks") or []) == 143
+                and len(russian_catalog.get("tasks") or []) == 153
                 and len(russian_catalog.get("lessons") or []) == 26
                 and len(russian_catalog.get("skills") or []) == 27
                 and len(russian_missions) == 26

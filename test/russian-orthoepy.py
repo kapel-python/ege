@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""Ударение (задание №4): в каждом задании ровно одна ошибка.
+"""Ударение (задание №4) в актуальном формате ЕГЭ.
 
-Живой случай: в `r04_3` были помечены как неверные варианты, которые на самом
-деле норма (`слИвовый`, `кУхонный`, `тОрты`, `нарвалА`, `включЁнный` — все
-верны по орфоэпическому словнику ФИПИ), то есть задания с единственным верным
-ответом не существовало вовсе. Второй такой же случай — мини-задание урока
-`r04_s7` (`грУшевый` — норма, а не ошибка).
+С 2016 года задание №4 — не «найди одно слово с ошибкой», а «укажите варианты
+ответов, в которых ВЕРНО выделена ударная буква»; верных вариантов от двух до
+четырёх, ответ — последовательность цифр в порядке возрастания (например 135).
 
-Тест сверяет разметку задания с таблицей норм: каждая позиция, кроме ответа,
-обязана совпадать с нормой, а ответ — отличаться от неё ровно в одном.
-Ошибка «всё правильно» ловится сразу: расхождений с нормой ноль.
+История: раньше в каталоге лежали самописные «аналоги» старого формата, и в
+`r04_3` все пять вариантов были верны — задания не существовало. Сейчас все 15
+заданий линии №4 — реальные задания с Решу ЕГЭ, а ответ взят из блока ответа
+источника. Тест это фиксирует:
+
+  1) у задания ровно пять нумерованных вариантов;
+  2) ответ — возрастающая подстрока «1..5» длиной 2–4 (непустой, не все пять);
+  3) в каждом варианте помечен ударный гласный;
+  4) ответ совпадает с ключом источника (пришпилен по id задания);
+  5) текст без мягких переносов/узких пробелов источника.
+
+Отдельно проверяются мини-задания урока `lesson_r04` — они по-прежнему
+одноответные, и для них сверка идёт с таблицей норм (каждая позиция, кроме
+ответа, обязана совпадать с нормой; ответ — отличаться ровно в одном).
 """
 from __future__ import annotations
 
@@ -22,57 +31,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "server" / "catalog_russian.json"
 
-# Норма словника: слово без знака ударения -> индекс ударного гласного (0-based).
+# Ключи источника (Решу ЕГЭ, id задания) для 15 заданий линии №4 в проде.
+SOURCE_KEYS = {
+    "49129": "23", "45348": "123", "59497": "13", "45359": "235", "45336": "125",
+    "52520": "123", "45349": "135", "58358": "145", "60921": "14", "45327": "23",
+    "45364": "15", "65170": "1234", "56498": "135", "56930": "1235", "45317": "134",
+}
+
+# Норма словника для одноответных мини-заданий урока: слово без знака ударения
+# -> индекс ударного гласного (0-based).
 NORMS = {
-    "баловать": 5,   # баловАть
-    "звонит": 4,     # звонИт
-    "краны": 2,      # крАны
-    "начав": 3,      # начАв
-    "оптовый": 3,    # оптОвый
-    "досуг": 3,      # досУг
-    "каталог": 5,    # каталОг
-    "красивее": 4,   # красИвее
-    "средства": 2,   # срЕдства
-    "занятый": 1,    # зАнятый
-    "сливовый": 2,   # слИвовый
-    "кухонный": 1,   # кУхонный
-    "нарвала": 6,    # нарвалА
-    "торты": 1,      # тОрты
-    "брала": 4,      # бралА
-    "клала": 2,      # клАла
-    "лгала": 4,      # лгалА
-    "начал": 1,      # нАчал
-    "позвала": 6,    # позвалА
-    "добела": 5,     # добелА
-    "завидно": 3,    # завИдно
-    "издревле": 4,   # издрЕвле
-    "исчерпать": 3,  # исчЕрпать
-    "облегчить": 6,  # облегчИть
-    # слова мини-заданий урока lesson_r04
-    "договор": 5,    # договОр
-    "квартал": 5,    # квартАл
-    "цемент": 3,     # цемЕнт
-    "банты": 1,      # бАнты
-    "вручит": 4,     # вручИт
-    "закрепит": 6,   # закрепИт
-    "углубить": 5,   # углубИть
-    "углубит": 5,    # углубИт
-    "сверлит": 5,    # сверлИт
-    "тортов": 1,     # тОртов
-    "зайдет": 4,     # зайдЁт
-    "позвонишь": 6,  # позвонИшь
+    "оптовый": 3, "кухонный": 1, "сверлит": 5, "тортов": 1,
+    "договор": 5, "квартал": 5, "цемент": 3, "банты": 1,
+    "вручит": 4, "закрепит": 6, "углубить": 5, "углубит": 5,
+    "зайдет": 4, "позвонишь": 6, "начав": 3, "занятый": 1, "сливовый": 2,
 }
 
 WORD_RE = re.compile(r"[А-Яа-яЁё]+")
+OPTION_RE = re.compile(r"^\s*([1-5])\)\s*(.+?)\s*$")
 
 
 def plain(word: str) -> str:
-    """Слово без знака ударения и без ё-варианта, в нижнем регистре."""
     return word.lower().replace("ё", "е")
 
 
 def marked_index(word: str) -> int | None:
-    """Индекс ударного гласного по заглавной букве; ё считаем ударной."""
     lower = word.lower()
     for i, ch in enumerate(word):
         if ch in "Ёё":
@@ -83,9 +66,13 @@ def marked_index(word: str) -> int | None:
     return None
 
 
-def options_of(text: str) -> list[str]:
-    return [ln.strip() for ln in text.split("\n")
-            if ln.strip() and not ln.strip().startswith("В одном")]
+def options_of(text: str) -> list[tuple[str, str]]:
+    out = []
+    for line in text.split("\n"):
+        m = OPTION_RE.match(line)
+        if m:
+            out.append((m.group(1), m.group(2)))
+    return out
 
 
 def main() -> int:
@@ -98,33 +85,32 @@ def main() -> int:
         if not cond:
             fails += 1
 
-    def check_variants(label: str, word_rows: list[str], answer: str):
-        norm_hits, deviations = 0, []
-        for row in word_rows:
-            key = plain(row)
-            norm = NORMS.get(key)
-            if norm is None:
-                t(f"{label}: вариант {row!r} есть в таблице норм", False)
-                continue
-            idx = marked_index(row)
-            if idx is None:
-                t(f"{label}: у варианта {row!r} помечен ударный гласный", False)
-                continue
-            if idx == norm:
-                norm_hits += 1
-            else:
-                deviations.append(row)
-        t(f"{label}: все варианты размечены (норма у {norm_hits} из {len(word_rows)})",
-          norm_hits == len(word_rows) - 1)
-        t(f"{label}: ровно один вариант противоречит норме", len(deviations) == 1)
-        t(f"{label}: противоречащий норме вариант — это ответ {answer!r}",
-          len(deviations) == 1 and plain(deviations[0]) == plain(answer))
-
     tasks = [x for x in data.get("tasks", []) if x.get("skill") == "r04"]
-    t("задания №4 найдены", len(tasks) == 5)
-    for task in tasks:
-        check_variants(task["id"], options_of(task["text"]), task["answer"])
+    t("заданий №4 ровно 15", len(tasks) == 15)
+    t("все задания №4 — короткий ответ с цифровым ответом",
+      all(x.get("type") == "short_answer" and x.get("valueType") == "цифра" for x in tasks))
 
+    for task in tasks:
+        label = task["id"]
+        text, answer = task["text"], str(task["answer"])
+        opts = options_of(text)
+
+        t(f"{label}: пять нумерованных вариантов", [n for n, _ in opts] == ["1", "2", "3", "4", "5"])
+        t(f"{label}: ответ — возрастающая подстрока 1..5", bool(re.fullmatch(r"[1-5]+", answer))
+          and list(answer) == sorted(set(answer)))
+        t(f"{label}: верных вариантов от двух до четырёх", 2 <= len(answer) <= 4)
+        t(f"{label}: каждый вариант размечен (помечен ударный гласный)",
+          all(marked_index(w) is not None for _, w in opts))
+
+        pid = re.search(r"id=(\d+)", task.get("source") or "")
+        key = SOURCE_KEYS.get(pid.group(1)) if pid else None
+        t(f"{label}: ответ совпадает с ключом источника "
+          f"({pid.group(1) if pid else 'нет id'})", key is not None and key == answer)
+
+        clean = all(ch not in text for ch in "\u00ad\u202f\xa0")
+        t(f"{label}: в тексте нет мягких переносов и узких пробелов", clean)
+
+    # Мини-задания урока остаются одноответными — проверяем по таблице норм.
     lesson = next((x for x in data.get("lessons", []) if x.get("id") == "lesson_r04"), None)
     t("урок lesson_r04 найден", lesson is not None)
     if lesson:
@@ -134,7 +120,26 @@ def main() -> int:
             rows = [w for w in WORD_RE.findall(step.get("text") or "") if marked_index(w)]
             if len(rows) < 3:
                 continue
-            check_variants(f"урок {step['id']}", rows, step.get("answer") or "")
+            label = f"урок {step['id']}"
+            answer = step.get("answer") or ""
+            hits, deviations = 0, []
+            for row in rows:
+                norm = NORMS.get(plain(row))
+                if norm is None:
+                    t(f"{label}: вариант {row!r} есть в таблице норм", False)
+                    continue
+                idx = marked_index(row)
+                if idx is None:
+                    t(f"{label}: у варианта {row!r} помечен ударный гласный", False)
+                    continue
+                if idx == norm:
+                    hits += 1
+                else:
+                    deviations.append(row)
+            t(f"{label}: ровно один вариант противоречит норме", len(deviations) == 1)
+            t(f"{label}: противоречит норме вариант-ответ {answer!r}",
+              len(deviations) == 1 and plain(deviations[0]) == plain(answer))
+            t(f"{label}: прочие варианты — норма", hits == len(rows) - 1)
 
     print("RUSSIAN-ORTHOEPY " + ("OK" if fails == 0 else f"FAILURES={fails}"))
     return 1 if fails else 0
