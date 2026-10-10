@@ -105,6 +105,11 @@ t("touchStreak: оттайка", stateSrc.includes("dayBeforeYesterdayStr() && (
 t("touchStreak: хелпер позавчера", stateSrc.includes("function dayBeforeYesterdayStr()"));
 // Восстановление подставляет эффективную дату, иначе показ тут же вернулся бы к 0.
 t("restore: displayDate", src.includes("res.displayDate || res.lastActiveDate"));
+// Подсказка о серии: короткая, заголовок с предметом, «в этом предмете» жирно.
+t("подсказка: заголовок с предметом", src.includes("Серия дней • ${subj}"));
+t("подсказка: в этом предмете жирно", src.includes("занимаешься <b>в этом предмете</b>"));
+const helpBody = (src.match(/streak: \{[\s\S]*?body: `([\s\S]*?)`,\s*\}/) || [])[1] || "";
+t("подсказка: короткая (3 абзаца)", (helpBody.match(/<p>/g) || []).length === 3, String((helpBody.match(/<p>/g) || []).length));
 
 console.log(`\nchecks=${checks} failures=${failures}`);
 process.exit(failures ? 1 : 0);
