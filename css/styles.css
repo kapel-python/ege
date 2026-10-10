@@ -1413,6 +1413,9 @@ body {
   .task-table th,
   .task-table td { padding: 5px 7px; }
   .task-table-wrap { margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; }
+  /* Рисунок шире карточки (в край экрана), как таблицы: на телефоне
+     диаграмма мелкая, это даёт +~12% ширины. */
+  .task-visual { margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; max-width: none; }
 }
 /* Lightbox: клик по картинке внутри .task-visual открывает её крупно
    (единый делегированный обработчик onTaskVisualClick в js/app.js).
@@ -1442,7 +1445,11 @@ body {
   object-fit: contain;
   margin: 0 auto;
   border-radius: var(--radius-sm);
-  background: var(--bg-2);
+  /* Рисунок — всегда белый лист (как на ЕГЭ), в обеих темах: иначе
+     прозрачный SVG ложится на тёмную подложку и выглядит грязно.
+     Поля вокруг — чтобы не было ощущения обрезанности. */
+  background: #fff;
+  padding: 18px;
 }
 .visual-lightbox__close {
   position: absolute;
