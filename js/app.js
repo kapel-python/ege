@@ -650,6 +650,23 @@ function hintLevelsFor(item) {
   ];
 }
 
+/* Универсальные подсказки темы: один набор на всю тему (навык). В банках ЕГЭ
+   подсказки отдельных заданий — это шаблоны формата ответа («перечитай
+   формулировку: номера ответов»), а не помощь по теме. Поэтому в практике,
+   миссиях, боссах, «ежедневке» и повторении берём содержательные подсказки
+   темы, если они заданы (skill.metadata.hints); иначе — прежняя лестница
+   задания. Шаги уроков сюда не ходят: у них свои точные подсказки. */
+function topicHintLevels(t) {
+  try {
+    const skill = t && t.skill && typeof DataAPI !== "undefined" && DataAPI.skill
+      ? DataAPI.skill(t.skill) : null;
+    const topic = skill && skill.metadata && Array.isArray(skill.metadata.hints)
+      ? skill.metadata.hints.filter((h) => String(h == null ? "" : h).trim()) : [];
+    if (topic.length >= 3) return topic.slice(0, 3);
+  } catch (_) {}
+  return hintLevelsFor(t);
+}
+
 /* Visual material belongs to the task, so every flow can render it through
    this one helper. Missing or malformed assets stay local to the task card. */
 function taskVisualHtml(task, context = "task") {
@@ -6757,7 +6774,7 @@ function sessionSelfHint() {
   if (S.selfHintLevel >= 3) return;
   S.selfHintLevel++;
   const slot = document.getElementById("hintSlot");
-  const levels = hintLevelsFor(t);
+  const levels = topicHintLevels(t);
   slot.innerHTML = levels.slice(0, S.selfHintLevel).map((h, i) => `
     <div class="hint-box ${i > 0 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${i + 1}.</b> ${mathText(h)}</div>`).join("");
   const btn = document.getElementById("selfHintBtn");
@@ -6888,7 +6905,7 @@ function sessionHint() {
   S.hintLevel = help.level;
   S.hintsUsed++;
   const slot = document.getElementById("hintSlot");
-  const levels = hintLevelsFor(t);
+  const levels = topicHintLevels(t);
   const level = S.hintLevel;
   // На экране остаётся только актуальный уровень помощи, а не стопка из
   // всех трёх подсказок. Следующая появится лишь после следующей ошибки.
