@@ -94,7 +94,7 @@ const testBody = () => {
       && /Разбор по маркерам тропов/.test(env.feedback()), env.feedback().slice(0, 60));
     t("соответствие: доступен «Далее»", /sessionNext\(\)/.test(env.feedback()));
     t("соответствие: кнопка помощи убрана", /^\s*$/.test(env.control().innerHTML), env.control().innerHTML);
-    t("соответствие: ряд инструментов («Пропустить», XP-подпись) скрыт", __toolsHidden === 1, "toolsHidden=" + __toolsHidden);
+    t("соответствие: ряд инструментов (подсказка) скрыт", __toolsHidden === 1, "toolsHidden=" + __toolsHidden);
   }
 
   // 2. Обычное поле ввода: свой ответ не затирается, верный — в решении.

@@ -5079,11 +5079,9 @@ function sessionMatchingAreaHtml(t, letters) {
     <button class="btn btn--primary btn--lg match-answer__submit" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
     <div class="session-tools" id="sessionTools">
       <span id="hintControl"></span>
-      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
-      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
     </div>
     <div id="feedbackSlot"></div>
-    ${sessionBackNavHtml()}`;
+    ${sessionLiveNavHtml()}`;
 }
 
 function sessionAnswerAreaHtml(t, S) {
@@ -5119,11 +5117,9 @@ function sessionAnswerAreaHtml(t, S) {
     ${answerFormatCaption(t.answer, t.valueType, t.text)}
     <div class="session-tools" id="sessionTools">
       <span id="hintControl"></span>
-      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
-      <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
     </div>
     <div id="feedbackSlot"></div>
-    ${sessionBackNavHtml()}`;
+    ${sessionLiveNavHtml()}`;
 }
 
 /* Черновик живёт в состоянии сессии (и дублируется в localStorage через
@@ -5780,30 +5776,33 @@ function sessionHasNext() {
    «Назад» в шапке не дублируется: он ждёт в постоянном ряду навигации в
    конце карточки (sessionEssayNavHtml) — там он есть и на ненаписанном
    сочинении, и под готовым отчётом. */
-/* «Назад» живёт снизу слева — как у сочинений, а не в липкой шапке.
-   Ряд принадлежит состоянию ДО ответа: после ответа (верно / показано /
-   сверка открыта) вернуться уже нельзя, и ряд убирается через
-   sessionHideBackNav() в каждой ветке завершения. Обратная связь
-   (feedbackSlot) стоит НАД этим рядом: блок «пока не сходится» и отчёт —
-   часть задания, а навигация всегда последняя строка карточки. */
+/* Ряд навигации живой карточки: «Назад» слева, «Далее» справа. «Далее» до
+   ответа — это переход без ответа (sessionSkip: задание уйдёт в повторение,
+   XP не начисляется). Текст и место — те же, что у «Далее» в финальных
+   блоках (sessionFinishNavHtml): кнопка «вперёд» не меняет ни положения,
+   ни подписи, когда карточка переходит в завершённое состояние. Ряд
+   убирается sessionHideBackNav() при завершении — финальный блок приносит
+   свой. На первом задании слева пустой спан, чтобы «Далее» не прыгала. */
+function sessionLiveNavHtml() {
+  const back = sessionHasPrev()
+    ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
+    : "<span></span>";
+  return `<div class="session-nav" id="sessionBackNav">${back}<button class="btn btn--soft" onclick="sessionSkip()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+/* Кнопка «Назад» для рядов, которые собирают свою навигацию (самопроверка). */
 function sessionBackBtnHtml() {
   if (!sessionHasPrev()) return "";
   return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
-}
-function sessionBackNavHtml() {
-  const back = sessionBackBtnHtml();
-  if (!back) return "";
-  return `<div class="session-nav" id="sessionBackNav">${back}<span></span></div>`;
 }
 function sessionHideBackNav() {
   const row = document.getElementById("sessionBackNav");
   if (row) row.remove();
 }
 
-/* Ряд инструментов (подсказка · «Пропустить» · XP-подпись) — принадлежит
-   живому состоянию ДО ответа. Рядом с финальным блоком он показывал
-   мёртвую «Пропустить» (после ответа sessionSkip выходит по гварду сразу)
-   и подпись про XP, которые на отвеченном задании уже не заработать.
+/* Ряд инструментов (кнопка подсказки, у самопроверки — ещё «Подсказка N» и
+   подпись) — принадлежит живому состоянию ДО ответа. Рядом с финальным
+   блоком он уже ни к чему: помощь на отвеченном задании недоступна.
    Проверка на .remove — страховка тестовых песочниц с урезанным DOM. */
 function sessionHideToolsRow() {
   const row = document.getElementById("sessionTools");
@@ -6188,7 +6187,7 @@ function sessionEssayNextLabel() {
 }
 
 /* Ряд «вперёд» под результатом — тот же, что у обычных заданий. «Назад» здесь
-   нет: он жил в ряду ДО ответа (sessionBackNavHtml) и убран вместе с ним —
+   нет: он жил в ряду ДО ответа (sessionLiveNavHtml) и убран вместе с ним —
    после ответа вернуться уже нельзя. */
 function sessionNextHtml() {
   return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
@@ -6885,12 +6884,12 @@ function sessionSelfCheckAreaHtml() {
   return `
     <div class="session-tools" id="sessionTools">
       <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="askSessionSelfHint()">${icon("bulb")} Подсказка 1</button>
-      <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
     </div>
     <div id="feedbackSlot"></div>
     <div class="session-nav" id="sessionBackNav">
       ${back || "<span></span>"}
+      <button class="btn btn--soft" onclick="sessionSkip()">${esc(sessionNextLabel())}</button>
       <button class="btn btn--primary" id="selfRevealBtn" onclick="askSessionSelfReveal()">Сверить с решением</button>
     </div>`;
 }
@@ -7060,7 +7059,6 @@ function sessionHint() {
   // первой, а не вместо неё — ученик видит всю лестницу помощи.
   slot.innerHTML = sessionHintBoxesHtml(levels, level);
   renderSessionHintControl();
-  renderHintXpNote(t, S.hintLevel);
   // Уровень помощи фиксируется сразу: перезагрузка или «Назад»/«Вперёд»
   // не должны заставлять покупать подсказку заново.
   try { sessionPersistUi(); } catch (_) {}
@@ -7136,16 +7134,6 @@ function sessionShowAnswer() {
   const slot = document.getElementById("feedbackSlot");
   if (slot) slot.innerHTML = sessionShownFeedbackHtml(t);
   renderTopbar();
-}
-
-function renderHintXpNote(t, hintLevel) {
-  const el = document.getElementById("xpNote");
-  if (!el) return;
-  const full = attemptXp(t, true, hintLevel, false);
-  const attempt = attemptXp(t, false, hintLevel, false);
-  el.textContent = hintLevel === 0
-    ? `верный ответ: +${full.total} XP · попытка: +${attempt.total} XP`
-    : `сейчас за верный: +${full.total} XP · попытка: +${attempt.total} XP`;
 }
 
 /* ================= восстановление карточки из снимка =================
@@ -7260,8 +7248,6 @@ function sessionRestoreTaskUi(t) {
       if (input) input.value = st.draft;
     }
   }
-
-  if (!isSelfCheckTask(t)) renderHintXpNote(t, S.hintLevel);
 
   if (st && st.answered) sessionReplayFinish(t, st);
   else if (st && st.selfRevealed && isSelfCheckTask(t)) sessionReplaySelfReveal(t);
