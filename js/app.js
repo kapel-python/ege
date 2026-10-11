@@ -704,8 +704,12 @@ function taskVisualHtml(task, context = "task") {
   }
   const type = asset.type || visual.type || "image";
   const label = asset.alt || visual.alt || "Визуальный материал задания";
+  // Мелкие картинки (полоски формул) не распираем рамкой под aspect-ratio:
+  // иначе получается гигантский белый квадрат с мелким содержимым.
+  // Рамку держим только для крупных рисунков (там она резервирует место).
   const ratio = Number(asset.ratio || visual.ratio);
-  const ratioStyle = Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
+  const big = Number(asset.width || 0) >= 480;
+  const ratioStyle = big && Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
   const src = esc(asset.src);
   const caption = asset.caption || visual.caption;
   return '<figure class="task-visual task-visual--' + esc(type) + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
