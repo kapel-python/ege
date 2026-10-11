@@ -223,5 +223,1202 @@
   "url": "https://mathb-ege.sdamgia.ru/problem?id=530229",
   "images": 1,
   "tables": 0
+ },
+ {
+  "src_id": "506842",
+  "condition": "Найдите корень уравнения Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nЗапишем квадратное уравнение в стандартном виде: По теореме Виета \nОтвет: − 7.",
+  "answer": "-7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506842",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "530323",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведём в квадрат:",
+  "answer": "6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=530323",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "535689",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:\nОтвет: − 8.",
+  "answer": "-8",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=535689",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509192",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "4,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509192",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "3185",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nЛогарифмы двух выражений равны, если сами выражения равны и при этом положительны:",
+  "answer": "20",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=3185",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510893",
+  "condition": "Решите уравнение: Если уравнение имеет больше одного корня, в ответ укажите меньший из них.",
+  "solution": "Решение. \nЗапишем уравнение в виде и подберем корни, пользуясь теоремой, обратной теореме Виета: получим числа −1 и 8. Меньший из них равен −1.",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510893",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "518425",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПерейдем к одному основанию:\nОтвет: − 1.",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=518425",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "508388",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=508388",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514466",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдём к одному основанию степени:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514466",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "527019",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nЛогарифмы выражений равны, если сами выражения равны и при этом положительны:",
+  "answer": "3,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=527019",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506780",
+  "condition": "Найдите корень уравнения Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение, откуда В ответ запишем меньший из корней.",
+  "answer": "-7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506780",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509033",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "5,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509033",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "533922",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=533922",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "508991",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВыполним преобразования, используя формулу :",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=508991",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "500907",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат обе части уравнения:",
+  "answer": "6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=500907",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "536912",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "2,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=536912",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511457",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nПреобразуем уравнение:\nПо теореме Виета для квадратного уравнения: Таким образом, Наименьший корень",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511457",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512199",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат обе части уравнения:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512199",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "38183",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=38183",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510177",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получим:",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510177",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "11683",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=11683",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "105691",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nЗаметим, что и используем формулу Имеем:",
+  "answer": "0,4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=105691",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522688",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nРешим уравнение:",
+  "answer": "-0,6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522688",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506279",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506279",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506593",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nРаскрывая скобки перенесём выражения с переменной в левую часть, а числа — в правую, получим: откуда",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506593",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "530650",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=530650",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522375",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522375",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510913",
+  "condition": "Решите уравнение: Если уравнение имеет больше одного корня, в ответ укажите больший их них.",
+  "solution": "Решение. \nЗапишем уравнение в виде и подберем корни, пользуясь теоремой, обратной теореме Виета: получим числа −1 и 5. Больший из них равен 5.",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510913",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509632",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509632",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "26648",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=26648",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "2855",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=2855",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512219",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат обе части уравнения:",
+  "answer": "-11",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512219",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "513101",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "0,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=513101",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512669",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512669",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "100879",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "-3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=100879",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "2815",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "9",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=2815",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "528613",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=528613",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "26659",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=26659",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512475",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nНайдём корень уравнения:",
+  "answer": "7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512475",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "38827",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "0",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=38827",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506430",
+  "condition": "Найдите корень уравнения Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nЗапишем квадратное уравнение в стандартном виде: откуда В ответ запишем меньший из корней.",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506430",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "38233",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=38233",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "2943",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "3,75",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=2943",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "3281",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=3281",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512455",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nНайдём корень уравнения:",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512455",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "529104",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=529104",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512179",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат обе части уравнения:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512179",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "528126",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=528126",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "26646",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:\nОтвет: − 124.",
+  "answer": "-124",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=26646",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "525715",
+  "condition": "Найдите корень уравнения x2 = 4x. Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nИмеем:\nТаким образом, наибольшим корнем является:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=525715",
+  "images": 0,
+  "tables": 0
+ },
+ {
+  "src_id": "535308",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "-11",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=535308",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514077",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "0,75",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514077",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "529958",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nЛогарифмы чисел равны, если сами числа равны и при этом положительны:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=529958",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "508039",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "8",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=508039",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "77369",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nИспользуем формулы квадрата разности и квадрата суммы:",
+  "answer": "-6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=77369",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "520555",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=520555",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510159",
+  "condition": "Решите уравнение \nЕсли уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \n Таким образом, наибольший корень",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510159",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "515698",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=515698",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511671",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "4,4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511671",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "520575",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:\nОтвет: − 2.",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=520575",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "520615",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "0,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=520615",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "527699",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=527699",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "526998",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nНайдём корень уравнения:",
+  "answer": "6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=526998",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509962",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "67",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509962",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "518602",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение:",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=518602",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "527721",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "-3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=527721",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "2947",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "9,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=2947",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514784",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nПоследовательно получаем:\nТаким образом, меньший корень",
+  "answer": "-3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514784",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "513834",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "0,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=513834",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "530300",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведём в квадрат:",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=530300",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "2995",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "7,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=2995",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506390",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПеренесём выражения с переменной в левую часть, а числа — в правую, получим: откуда",
+  "answer": "-0,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506390",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506450",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведём уравнение в квадрат, перенесём выражения с переменной в левую часть, а числа — в правую, получим: откуда",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506450",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "105695",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nЗаметим, что и используем формулу Имеем:",
+  "answer": "0,7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=105695",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514807",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nПоследовательно получаем:\nТаким образом, больший корень",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514807",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522395",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522395",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512415",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nНайдём корень уравнения:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512415",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "536870",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=536870",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511651",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "4,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511651",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "525147",
+  "condition": "Найдите корень уравнения Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=525147",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514406",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "7",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514406",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512645",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nЛогарифмы выражений равны, если сами выражения равны и при этом положительны:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512645",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "77370",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=77370",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "26656",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=26656",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "533247",
+  "condition": "Решите уравнение Если уравнение имеет больше одного корня, в ответе запишите больший из них.",
+  "solution": "Решение. \nЗапишем квадратное уравнение в стандартном виде: откуда В ответ запишем меньший из корней.",
+  "answer": "9",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=533247",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522716",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nРешим уравнение:",
+  "answer": "2,4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522716",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511691",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "0,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511691",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506470",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506470",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "527678",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "18",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=527678",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "100757",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nКвадраты чисел равны, если сами числа равны или противоположны. Поэтому:",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=100757",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506715",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "6",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506715",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509692",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nНайдём корень уравнения:",
+  "answer": "22,4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509692",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "535204",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:\nОтвет: − 5.",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=535204",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511611",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "-32,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511611",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514057",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "1,25",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514057",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506695",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "8",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506695",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "513031",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3,2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=513031",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510218",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \n Приравниваем показатели в степенях:",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510218",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509672",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "8",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509672",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514760",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nПоследовательно получаем:\nТаким образом, меньший корень",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514760",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "13687",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=13687",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "523120",
+  "condition": "Найдите корень уравнения Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nПоследовательно получаем:\nОтвет: − 2.",
+  "answer": "-2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=523120",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "535286",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=535286",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "512960",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=512960",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514614",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВыполним преобразования, используя формулу :",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514614",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "528574",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=528574",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "523594",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nНайдём корни уравнения:\nТаким образом, наибольший корень x = 4.",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=523594",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "27465",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "11",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=27465",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "536849",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=536849",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522702",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nРешим уравнение:",
+  "answer": "-1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522702",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "533248",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=533248",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522431",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:\nОтвет: − 3.",
+  "answer": "-3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522431",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "536891",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "2,4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=536891",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514546",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514546",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "514881",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение:",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=514881",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "527842",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=527842",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "529909",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nЛогарифмы чисел равны, если сами числа равны и при этом положительны:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=529909",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "505377",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=505377",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "11649",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nВозведем в квадрат:",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=11649",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "529037",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=529037",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "515829",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nВыполним преобразования, используя формулы и :",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=515829",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "500951",
+  "condition": "Решите уравнение",
+  "solution": "Решение. \nВозведем в квадрат обе части уравнения:",
+  "answer": "-17",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=500951",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "509652",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение:",
+  "answer": "-9",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=509652",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510023",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите больший из них.",
+  "solution": "Решение. \nРешим квадратное уравнение:",
+  "answer": "-4",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510023",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "13537",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=13537",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "506862",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "3",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=506862",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "525537",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПоследовательно получаем:",
+  "answer": "3,2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=525537",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "528104",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "-5,5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=528104",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "26666",
+  "condition": "Найдите корень уравнения:",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "8",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=26666",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510683",
+  "condition": "Решите уравнение Если уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nТаким образом, наименьшим корнем является:",
+  "answer": "-5",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510683",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "510743",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \n##",
+  "answer": "-17",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=510743",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "511920",
+  "condition": "Найдите корень уравнения \nЕсли уравнение имеет более одного корня, в ответе укажите меньший из них.",
+  "solution": "Решение. \nРешим уравнение:\nМеньший корень равен 2.",
+  "answer": "2",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=511920",
+  "images": 1,
+  "tables": 0
+ },
+ {
+  "src_id": "522355",
+  "condition": "Найдите корень уравнения",
+  "solution": "Решение. \nПерейдем к одному основанию степени:",
+  "answer": "1",
+  "url": "https://mathb-ege.sdamgia.ru/problem?id=522355",
+  "images": 1,
+  "tables": 0
  }
 ]

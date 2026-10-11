@@ -81,7 +81,40 @@ def get_text(url: str) -> str:
     return get(url).decode("utf-8", "replace")
 
 
-def condition_images(base: str, pid: str) -> list[str]:
+# Подпись ряда («А)», «1)»…), к которому относится картинка. У формул
+# (class="tex") подпись стоит ПЕРЕД картинкой в той же строке; у графиков
+# соответствия — ПОСЛЕ (sdamgia кладёт её в <nobr>А) </nobr> под графиком).
+LABEL_EXACT_RE = re.compile(r'^((?:[А-Я]|\d{1,2})\))\s*$')
+LABEL_AFTER_RE = re.compile(r'^\s*((?:[А-Я]|\d{1,2})\))(?:\s|$)')
+
+
+def _visible_text(fragment: str) -> str:
+    t = re.sub(r"<[^>]+>", "", fragment)
+    t = html.unescape(t)
+    t = t.replace("\u00ad", "").replace("\u202f", " ").replace("\xa0", " ")
+    return t.strip()
+
+
+def _img_label(seg: str, m: re.Match) -> str:
+    """Подпись ряда для картинки m внутри фрагмента условия seg."""
+    src = m.group(1)
+    inline = 'class="tex"' in m.group(0) or "/formula/" in src
+    opens = list(re.finditer(r"<(?:p|td)\b[^>]*>", seg[: m.start()]))
+    if opens:
+        before = _visible_text(seg[opens[-1].end(): m.start()])
+        mb = LABEL_EXACT_RE.match(before)
+        if mb:
+            return mb.group(1)
+    if not inline:
+        stop = seg.find("<img", m.end())
+        window = seg[m.end(): stop if stop != -1 else m.end() + 250]
+        ma = LABEL_AFTER_RE.match(_visible_text(window))
+        if ma:
+            return ma.group(1)
+    return ""
+
+
+def condition_images(base: str, pid: str) -> list[dict]:
     page = get_text(f"{base}/problem?id={pid}")
     anchor = re.search(r'id="soltb\d+"', page)
     head = page[:anchor.start()] if anchor else page
@@ -89,11 +122,15 @@ def condition_images(base: str, pid: str) -> list[str]:
     if not m:
         raise RuntimeError(f"{pid}: нет блока условия")
     seg = head[m.end():]
-    srcs = []
-    for found in re.findall(r'<img[^>]*src="([^"]+)"[^>]*>', seg):
-        if found not in srcs:
-            srcs.append(found)
-    return srcs
+    entries: list[dict] = []
+    seen: set[str] = set()
+    for found in re.finditer(r'<img[^>]*src="([^"]+)"[^>]*>', seg):
+        src = found.group(1)
+        if src in seen:
+            continue
+        seen.add(src)
+        entries.append({"src": src, "label": _img_label(seg, found)})
+    return entries
 
 
 def abs_url(base: str, src: str, page_base: str | None = None) -> str:
@@ -218,8 +255,13 @@ def raster_dimensions(data: bytes) -> tuple[int | None, int | None]:
     return None, None
 
 
-def stitch(images: list[Path], out: Path) -> tuple[int, int]:
-    """Склеить несколько рисунков вертикально с подписями А) Б) В) Г)."""
+def stitch(images: list[Path], out: Path, labels: list[str] | None = None) -> tuple[int, int]:
+    """Склеить несколько рисунков вертикально.
+
+    Подписи — из HTML источника (какой строке принадлежит картинка);
+    подпись «А)» рисуется слева от своей картинки. Одинаковые подписи
+    подряд (несколько картинок в одной строке) не дублируются.
+    """
     from PIL import Image, ImageDraw, ImageFont
     crops = [Image.open(p).convert("RGB") for p in images]
     gap, margin, label_w = 24, 16, 64
@@ -231,11 +273,16 @@ def stitch(images: list[Path], out: Path) -> tuple[int, int]:
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 34)
     except Exception:
         font = ImageFont.load_default()
-    labels = "АБВГДЕЖЗ"
+    prev = ""
     y = margin
     for i, c in enumerate(crops):
+        lab = (labels[i] or "").strip() if labels and i < len(labels) else ""
+        if lab and lab == prev:
+            lab = ""
+        prev = (labels[i] or "").strip() if labels and i < len(labels) else ""
         canvas.paste(c, (margin + label_w, y))
-        draw.text((margin, y + c.height // 2 - 18), f"{labels[i]})", fill=(20, 20, 20), font=font)
+        if lab:
+            draw.text((margin, y + c.height // 2 - 18), lab, fill=(20, 20, 20), font=font)
         y += c.height + gap
     canvas.save(out, optimize=True)
     for p in images:
@@ -259,19 +306,21 @@ def import_task(subject: str, pid: str, scale: float = 2.5,
     outdir = ROOT / "assets" / ASSET_DIR[subject]
     outdir.mkdir(parents=True, exist_ok=True)
     try:
-        srcs = condition_images(base, pid)
+        entries = condition_images(base, pid)
     except Exception as exc:
         print(f"  FAIL {pid}: страница: {exc}", file=sys.stderr)
         return None
-    if no_inline_formulas and any("/formula/" in s for s in srcs):
+    if no_inline_formulas and any("/formula/" in e["src"] for e in entries):
         return None
     if figures_only:
-        srcs = [s for s in srcs if "get_file" in s]
-    if not srcs:
+        entries = [e for e in entries if "get_file" in e["src"]]
+    if not entries:
         return None
-    if expect is not None and len(srcs) != expect:
-        print(f"  SKIP {pid}: картинок {len(srcs)}, ждали {expect}", file=sys.stderr)
+    if expect is not None and len(entries) != expect:
+        print(f"  SKIP {pid}: картинок {len(entries)}, ждали {expect}", file=sys.stderr)
         return None
+    srcs = [e["src"] for e in entries]
+    labels = [e.get("label") or "" for e in entries]
 
     singles: list[Path] = []
     urls: list[str] = []
@@ -334,9 +383,10 @@ def import_task(subject: str, pid: str, scale: float = 2.5,
                  "urls": urls, "width": w, "height": h}
     else:
         final = outdir / f"{subject}-src{pid}.png"
-        w, h = stitch(singles, final)
+        w, h = stitch(singles, final, labels)
         entry = {"file": str(final.relative_to(ROOT)), "kind": "stitched",
-                 "urls": urls, "width": w, "height": h, "parts": len(srcs)}
+                 "urls": urls, "width": w, "height": h, "parts": len(srcs),
+                 "labels": labels}
     return {"id": f"{subject}-src{pid}", **entry}
 
 

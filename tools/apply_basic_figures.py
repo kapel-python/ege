@@ -8,10 +8,13 @@
 visualAssets, и добавляет задание.
 
 Правила:
-  * трогаем только темы ниже TARGET (15) из списка FIGURE_SKILLS;
+  * трогаем только темы ниже TARGET (100) из FIGURE_SKILLS/FORMULA_SKILLS;
   * официальные задания ФИПИ и уже добавленные не трогаем;
-  * инлайновые формулы источника (ege.sdamgia.ru/formula/...) к рисунку не
-    относим — берём только get_file-рисунки;
+  * у «рисовальных» тем берём только get_file-рисунки: инлайновые формулы
+    источника (ege.sdamgia.ru/formula/...) к рисунку не относятся;
+  * у «формульных» тем (FIGURE_SKILLS -> FORMULA_SKILLS: b04/b14/b16/b17)
+    наоборот, SVG-формула — и есть содержание задания: скачиваем все
+    картинки задания, включая формулы, и клеим их в один PNG;
   * у задания может быть несколько фигур (4 графика) — склеиваем в один PNG;
   * схема задачи та же, что у apply_basic (плюс visual).
 
@@ -33,12 +36,21 @@ import figure_import  # noqa: E402
 
 CATALOG = ROOT / "server" / "catalog_basic.json"
 OUT_DIR = ROOT / "tools" / "out"
-TARGET = 15
+TARGET = 100
 # Темы, которые без рисунка не решить: их и добираем картинками.
 FIGURE_SKILLS = {
-    "b07_functions": 7, "b09_grid": 9, "b10_practplan": 10,
-    "b11_practstereo": 11, "b12_planimetry": 12, "b13_stereometry": 13,
+    "b03_tables": 3, "b07_functions": 7, "b09_grid": 9,
+    "b10_practplan": 10, "b11_practstereo": 11, "b12_planimetry": 12,
+    "b13_stereometry": 13, "b18_inequalities": 18,
 }
+# Формульные темы: выражения источник отдаёт SVG-формулами
+# (ege.sdamgia.ru/formula/...), текст их теряет. Скачиваем формулу как
+# рисунок задания — это в точности то, что показывает источник.
+FORMULA_SKILLS = {
+    "b04_formulas": 4, "b14_fractions": 14,
+    "b16_expressions": 16, "b17_equations": 17,
+}
+ALL_SKILLS = {**FIGURE_SKILLS, **FORMULA_SKILLS}
 
 
 def line_of_skill(skill: str) -> int:
@@ -73,9 +85,10 @@ def main() -> int:
     added: list[dict] = []
     new_assets: list[dict] = []
 
-    for skill, n in FIGURE_SKILLS.items():
+    for skill, n in ALL_SKILLS.items():
         if args.only and skill != args.only:
             continue
+        formula_mode = skill in FORMULA_SKILLS
         group = sorted([t for t in tasks if t.get("skill") == skill],
                        key=lambda t: t.get("id") or "")
         need = TARGET - len(group)
@@ -104,9 +117,20 @@ def main() -> int:
                 old = sys.stderr
                 sys.stderr = buf
                 try:
-                    entry = figure_import.import_task("mathb", pid, args.scale,
-                                                      figures_only=True,
-                                                      no_inline_formulas=True)
+                    # Рисовальные темы: сначала строгий режим (только
+                    # get_file-рисунки, без формул). Если задание из-за
+                    # формул не прошло — запасной проход: забираем ВСЕ
+                    # картинки (графики + формулы) с подписями строк из
+                    # HTML; провал скачивания любой картинки роняет весь
+                    # импорт, так что «полузадания» не появится.
+                    entry = figure_import.import_task(
+                        "mathb", pid, args.scale,
+                        figures_only=not formula_mode,
+                        no_inline_formulas=not formula_mode)
+                    if entry is None and not formula_mode:
+                        entry = figure_import.import_task(
+                            "mathb", pid, args.scale,
+                            figures_only=False, no_inline_formulas=False)
                 finally:
                     sys.stderr = old
                 if not entry:

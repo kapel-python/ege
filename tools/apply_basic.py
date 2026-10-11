@@ -32,7 +32,7 @@ VISUAL_SKILLS = {"b03_tables", "b07_functions", "b09_grid",
                  "b11_practstereo", "b18_inequalities"}
 # Единая система: столько заданий держим в каждой теме. Поднять до 30 —
 # поменять одну константу и прогнать добор заново.
-TARGET = 15
+TARGET = 100
 MATCHING_RE = re.compile(r"соответстви|под каждой буквой|под каждой точкой", re.I)
 EXPLICIT_RE = re.compile(r"\(([А-ЯA-Z]{2,8})\)")
 ROW_LABEL_RE = re.compile(r"(?:^|\n)\s*([А-ЯA-Z])\)\s")
