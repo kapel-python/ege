@@ -2408,7 +2408,7 @@ const DIGIT_SET_TASK_RE = /под\s+котор\S*\s+(?:они\s+)?указан|(
 function isDigitSequenceTask(task) {
   if (!task) return false;
   const answer = String(task.answer ?? "").trim();
-  if (!/^\d{2,8}$/.test(answer)) return false;
+  if (!/^\d{2,12}$/.test(answer)) return false;
   if (/(цифр|последовательност)/i.test(String(task.valueType || ""))) return true;
   const text = String(task.text || "");
   if (DIGIT_SEQUENCE_TEXT_RE.test(text)) return true;
@@ -2430,7 +2430,7 @@ function isDigitSequenceTask(task) {
 function isMultiSelectTask(task) {
   if (!task) return false;
   const answer = String(task.answer ?? "").trim();
-  if (!/^\d{2,8}$/.test(answer)) return false;
+  if (!/^\d{2,12}$/.test(answer)) return false;
   if (matchingAnswerLetters(task).length > 0) return false;
   const text = String(task.text || "");
   if (DIGIT_SEQUENCE_TEXT_RE.test(text)) return false;

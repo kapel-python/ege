@@ -69,8 +69,10 @@ def audit_catalog(path: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{name}: {tid}: пустое поле {fld}")
         if not str(t.get("text") or "").strip():
             hard.append(f"{name}: {tid}: пустой текст")
-        if not (str(t.get("answer") or "").strip() or str(t.get("solution") or "").strip()):
-            hard.append(f"{name}: {tid}: нет ни answer, ни solution")
+        # Сочинение (long_text) проверяет ИИ — машинного ключа нет по природе.
+        if t.get("type") not in ("long_text",):
+            if not (str(t.get("answer") or "").strip() or str(t.get("solution") or "").strip()):
+                hard.append(f"{name}: {tid}: нет ни answer, ни solution")
         for fld in ("text", "solution", "answer"):
             v = str(t.get(fld) or "")
             if HTML_TAG.search(v):

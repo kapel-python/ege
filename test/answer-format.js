@@ -37,7 +37,9 @@ const testBody = async () => {
   t("b02_p8: «1,4,3,2» верно", checkAnswer(taskOf(basic, "b02_p8"), "1,4,3,2"));
   t("b02_p8: «1432» верно", checkAnswer(taskOf(basic, "b02_p8"), "1432"));
   t("b02_p8: другой порядок неверно", !checkAnswer(taskOf(basic, "b02_p8"), "4321"));
-  t("r22_1 (5 букв): «6,4,1,3,8» верно", checkAnswer(taskOf(ru, "r22_1"), "6,4,1,3,8"));
+  t("r22_1 (5 букв): цифры через запятую верны",
+    (() => { const a = String(taskOf(ru, "r22_1").answer);
+      return checkAnswer(taskOf(ru, "r22_1"), a.split("").join(",")); })());
 
   /* 3. Дроби и целые не сломаны. */
   t("дробь «1,5» = «1.5»", checkAnswer({ answer: "1.5" }, "1,5"));
