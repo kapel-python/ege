@@ -533,8 +533,15 @@ function fmtTime(sec) {
 }
 
 function fmtClock(sec) {
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  // NaN/отрицательное (битая метка времени) не должно рисовать «NaN:NaN»
+  // или мусор — секундомер просто начинается с нуля. Часы выделяются
+  // отдельным сегментом: 1:05:09 читается лучше, чем 65:09.
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+    : `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
 function relTime(ts) {
@@ -4544,6 +4551,52 @@ function persistSession() {
    «Назад»/«Вперёд» и перезагрузка показывают карточку ровно в том виде, в
    каком её оставили. Снимать надо ДО смены S.idx — иначе снимется уже
    новое задание со старыми счётчиками. */
+/* Таймер принадлежит текущему заданию: накопленное активное время живёт
+   в снимке карточки (st.elapsedMs) и переживает F5 и «Назад»/«Вперёд»;
+   новое задание приносит своё время с нуля. Два предела:
+   - TASK_LIVE_DELTA_MAX_MS — максимальный ОДИН живой отрезок между
+     снимками: пауза длиннее получаса (свёрнутая вкладка, убитый процесс,
+     ночь с открытой страницей) — это не решение и в таймер не идёт
+     (как LESSON_CLOCK_MAX_GAP_MS у уроков);
+   - TASK_ELAPSED_MAX_MS — физический потолок одного задания: дольше
+     трёх часов задание не решают, и всё, что выше, — мусор старых
+     форматов и удвоений, а не время. Живой баг: битая taskStartTs
+     удваивала elapsedMs с каждого снимка — таймер дорастал до
+     619266343:45 (1178 лет) и хранился в localStorage вечно. */
+const TASK_LIVE_DELTA_MAX_MS = 30 * 60 * 1000;
+const TASK_ELAPSED_MAX_MS = 3 * 60 * 60 * 1000;
+
+function sessionTaskElapsedMs(st) {
+  const v = Number(st && st.elapsedMs);
+  return Number.isFinite(v) && v > 0 && v <= TASK_ELAPSED_MAX_MS ? v : 0;
+}
+
+/* Живой отрезок текущего задания: от последнего снимка/восстановления
+   до сейчас. Битые метки (NaN, будущее, ноль) дают 0. */
+function sessionTaskLiveMs(now = Date.now()) {
+  const S = Session.cur;
+  const start = Number(S && S.taskStartTs);
+  if (!Number.isFinite(start) || start <= 0 || start > now) return 0;
+  return Math.max(0, now - start);
+}
+
+/* Полное активное время текущего задания: накопленное (taskElapsedBaseMs)
+   плюс текущий живой отрезок от taskStartTs. Двухполевая модель — как
+   activeMs/activeSince у LessonClock: снимок ЗАКРЫВАЕТ живой отрезок
+   (taskStartTs = now) и переносит его в накопленное, поэтому
+   последовательные снимки не могут удвоить время. Раньше метка
+   откатывалась назад на весь накопленный отрезок, и каждый следующий
+   снимок засчитывал его повторно — таймер удваивался с каждой
+   перезагрузкой страницы (5 с → 24 с → 40 с → … → 3 ч за минуту
+   обновлений). Для отображения живой отрезок капируется на 30 минут,
+   при заморозке пауза длиннее получаса не считается вовсе. */
+function sessionTaskTotalMs(now = Date.now()) {
+  const S = Session.cur;
+  const base = Number(S && S.taskElapsedBaseMs);
+  const baseMs = Number.isFinite(base) && base > 0 ? Math.min(base, TASK_ELAPSED_MAX_MS) : 0;
+  return Math.min(baseMs + Math.min(sessionTaskLiveMs(now), TASK_LIVE_DELTA_MAX_MS), TASK_ELAPSED_MAX_MS);
+}
+
 function sessionCaptureTaskUi() {
   try {
     const S = Session.cur;
@@ -4556,12 +4609,18 @@ function sessionCaptureTaskUi() {
     st.attempts = S.attempts || 0;
     st.selfHintLevel = S.selfHintLevel || 0;
     st.answered = !!S.answered;
-    // Накопленное время задания переживает перезагрузку: taskStartTs
-    // сдвигаем назад на весь накопленный отрезок, чтобы секундомер на
-    // экране не обнулялся после каждого снимка.
-    st.elapsedMs = (Number(st.elapsedMs) || 0)
-      + Math.max(0, Date.now() - (S.taskStartTs || Date.now()));
-    S.taskStartTs = Date.now() - st.elapsedMs;
+    // Время задания: снимок закрывает живой отрезок и переносит его в
+    // накопленное — метка стартует заново с «сейчас», поэтому следующий
+    // снимок посчитает только новую дельту, а не всю историю повторно.
+    // Пауза длиннее получаса (свёрнутая вкладка, ночь с открытой
+    // страницей) — не решение и в накопленное не идёт.
+    const now = Date.now();
+    const live = sessionTaskLiveMs(now);
+    st.elapsedMs = Math.min(
+      sessionTaskElapsedMs(st) + (live > 0 && live <= TASK_LIVE_DELTA_MAX_MS ? live : 0),
+      TASK_ELAPSED_MAX_MS);
+    S.taskElapsedBaseMs = st.elapsedMs;
+    S.taskStartTs = now;
     if (!isLongTextTask(t) && !isSelfCheckTask(t)) {
       // Черновик снимаем только с живых полей ввода текущей карточки:
       // если DOM сейчас про другое (лоадер, другой экран) — не трогаем.
@@ -4861,7 +4920,7 @@ function renderTask(root) {
 
   Session.timerInt = setInterval(() => {
     const chip = document.getElementById("timerChip");
-    if (chip) chip.innerHTML = `${icon("clock")} ${fmtClock((Date.now() - S.taskStartTs) / 1000)}`;
+    if (chip) chip.innerHTML = `${icon("clock")} ${fmtClock(sessionTaskTotalMs() / 1000)}`;
   }, 1000);
 }
 
@@ -5601,7 +5660,7 @@ async function essayAutoResume(t, skipPoll) {
         if (evRes.ok && evData.submission && evData.submission.status === "ready") ready = evData.submission;
       } catch (_) {}
       if (ready) {
-        const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+        const seconds = sessionTaskTotalMs() / 1000;
         essayFinishReady(t, ready, saved.text, saved.wordCount, seconds);
         return;
       }
@@ -6331,7 +6390,7 @@ async function sessionEssayResume(taskId) {
       });
       const evData = await evRes.json().catch(() => ({}));
       if (evRes.ok && evData.submission && evData.submission.status === "ready") {
-        const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+        const seconds = sessionTaskTotalMs() / 1000;
         essayFinishReady(t, evData.submission, saved.text, saved.wordCount, seconds);
         return;
       }
@@ -6373,7 +6432,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount, busyRetried) {
   // Замер долгого ожидания: resume продолжает старый старт (тот же clientId),
   // иначе таймер минуты обнулялся бы каждой перезагрузкой.
   essayWaitBegin(clientId, text);
-  const seconds = Math.max(0, (Date.now() - S.taskStartTs) / 1000);
+  const seconds = sessionTaskTotalMs() / 1000;
 
   let aiRes = null, aiData = {};
   try {
@@ -6435,7 +6494,7 @@ async function essayRunChecksInner(t, text, clientId, wordCount, busyRetried) {
           } catch (_) {}
           if (ready) {
             const s = Session.cur;
-            const seconds = Math.max(0, (Date.now() - s.taskStartTs) / 1000);
+            const seconds = sessionTaskTotalMs() / 1000;
             essayFinishReady(t, ready, text, wordCount, seconds);
             return;
           }
@@ -7013,7 +7072,7 @@ function sessionSelfResult(correct) {
   const S = Session.cur;
   const t = Session.task();
   if (S.answered) return;
-  const seconds = (Date.now() - S.taskStartTs) / 1000;
+  const seconds = sessionTaskTotalMs() / 1000;
   const hintLevel = S.selfHintLevel || 0;
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
   const xp = recordAnswer(t, correct, hintLevel, seconds, closesTaskId, S.attempts || 0);
@@ -7132,7 +7191,7 @@ function sessionShowAnswer() {
   if (S.answered) return;
   S.hintLevel = 3;
   S.hintsUsed++;
-  const seconds = (Date.now() - S.taskStartTs) / 1000;
+  const seconds = sessionTaskTotalMs() / 1000;
   const xpShown = recordAnswer(t, false, 3, seconds);
   S.gainedXp += xpShown;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
@@ -7248,11 +7307,15 @@ function sessionRestoreTaskUi(t) {
   const S = Session.cur;
   if (!S || !t) return;
   const st = (S.taskUi || {})[t.id] || null;
+  // Таймер: накопленное активное время — из снимка (мусор старых форматов
+  // отбрасывается), живой отрезок начинается сейчас. Виртуального «старта
+  // в прошлом» нет — именно он удваивал время при каждом снимке.
+  S.taskElapsedBaseMs = sessionTaskElapsedMs(st);
+  S.taskStartTs = Date.now();
   if (isLongTextTask(t)) {
     // Сочинения: черновик и отметки живут в essayDraftByTask/essayWrittenByTask
     // и восстанавливаются своим путём (sessionEssayWire).
     S.hintLevel = 0; S.attempts = 0; S.selfHintLevel = 0; S.answered = false;
-    S.taskStartTs = Date.now();
     return;
   }
   S.hintLevel = (st && Number(st.hintLevel)) || 0;
@@ -7266,7 +7329,7 @@ function sessionRestoreTaskUi(t) {
   // показывает результат, повторно ответить нельзя.
   const skippedPending = !!st && st.kind === "skipped";
   S.answered = skippedPending ? false : !!(st && st.answered);
-  S.taskStartTs = Date.now() - ((st && Number(st.elapsedMs)) || 0);
+  S.taskStartTs = Date.now();
 
   const levels = topicHintLevels(t);
   const slot = document.getElementById("hintSlot");
@@ -7469,7 +7532,7 @@ function sessionSubmit() {
     return;
   }
 
-  const seconds = (Date.now() - S.taskStartTs) / 1000;
+  const seconds = sessionTaskTotalMs() / 1000;
   const hintLevel = S.hintLevel || 0;
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
   const xp = recordAnswer(t, true, hintLevel, seconds, closesTaskId, S.attempts || 0);
@@ -7497,7 +7560,7 @@ function sessionSkip() {
   const S = Session.cur;
   if (S.answered) return;
   const t = Session.task();
-  const seconds = (Date.now() - S.taskStartTs) / 1000;
+  const seconds = sessionTaskTotalMs() / 1000;
   // Пропуск — не попытка решения: XP за него не начисляется вовсе.
   // Иначе «пропустить всё» становилось способом фармить минимум за
   // каждую тему (босс/сочинение дают до 500, а 100 пропусков — 800+).

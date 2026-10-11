@@ -25,6 +25,7 @@ function mathText(s) { return String(s == null ? "" : s); }
 function renderTopbar() {}
 function sessionMarkTaskFinished() {}
 function sessionCaptureTaskUi() {}
+function sessionTaskTotalMs() { return 0; }
 var __toolsHidden = 0;
 function sessionHideToolsRow() { __toolsHidden++; }
 var __hasPrev = false;

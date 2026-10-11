@@ -348,6 +348,70 @@ function scenario(tasks, label, cat, subject) {
     && answerVal() === (wrong.slice(0, 3) || "12"));
 }
 
+/* Секция таймера (отдельно от основного сценария): время живёт на задании,
+   мусор старых форматов не хранится и не растёт, пауза — не решение. */
+function timerScenario(tasks, label, cat, subject) {
+  const tag = `${label}/таймер`;
+  const { sandbox } = buildSandbox(cat, subject);
+  run(sandbox, `DataAPI.load(__catalog)`);
+  const ids = tasks.map((t) => t.id);
+  run(sandbox, `Session.start({ title: "Таймер", taskIds: ${JSON.stringify(ids)}, mode: "practice" })`);
+  run(sandbox, `renderTask(document.getElementById("screen"))`);
+  run(sandbox, `sessionSkip()`);
+  run(sandbox, `sessionSkip()`);
+  check(`${tag}: на третьем задании`, run(sandbox, `Session.cur.idx`) === 2);
+  const stOf = () => `Session.cur.taskUi[${JSON.stringify(ids[2])}]`;
+
+  // Мусор старого формата (619266343:45 ≈ 3.7e13 мс) не должен переживать
+  // восстановление: таймер начинается с нуля, а не с 1178 лет
+  run(sandbox, `if (!Session.cur.taskUi) Session.cur.taskUi = {}; Session.cur.taskUi[${JSON.stringify(ids[2])}] = { elapsedMs: 37156000000000 };`);
+  run(sandbox, `persistSession()`);
+  const reload = () => {
+    run(sandbox, `Session.cur = null`);
+    const ok = run(sandbox, `restoreSessionFromStorage("session", null)`);
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    return ok;
+  };
+  check(`${tag}: мусорный elapsedMs сброшен при восстановлении`,
+    reload() === true && run(sandbox, `sessionTaskTotalMs()`) < 60000,
+    String(run(sandbox, `sessionTaskTotalMs()`)));
+
+  // Битая taskStartTs раньше добавляла полный Date.now() и удваивала
+  // elapsedMs с каждого снимка — теперь живой отрезок от неё нулевой
+  run(sandbox, `Session.cur.taskStartTs = 1`);
+  run(sandbox, `sessionCaptureTaskUi()`);
+  check(`${tag}: битая taskStartTs не раздувает elapsedMs`,
+    run(sandbox, `${stOf()}.elapsedMs`) < 5000, String(run(sandbox, `${stOf()}.elapsedMs`)));
+
+  // Живой отрезок до 30 минут — считается
+  run(sandbox, `Session.cur.taskStartTs = Date.now() - 10 * 60 * 1000`);
+  run(sandbox, `sessionCaptureTaskUi()`);
+  const beforeGap = run(sandbox, `${stOf()}.elapsedMs`);
+  check(`${tag}: живые 10 минут засчитаны`, beforeGap >= 10 * 60 * 1000 - 2000, String(beforeGap));
+
+  // Пауза длиннее 30 минут (вкладка открыта всю ночь) — не решение
+  run(sandbox, `Session.cur.taskStartTs = Date.now() - 8 * 60 * 60 * 1000`);
+  run(sandbox, `sessionCaptureTaskUi()`);
+  check(`${tag}: пауза сверх 30 минут не считается`,
+    Math.abs(run(sandbox, `${stOf()}.elapsedMs`) - beforeGap) < 5000,
+    `${beforeGap} -> ${run(sandbox, `${stOf()}.elapsedMs`)}`);
+
+  // Честное накопленное время переживает уход и возврат
+  run(sandbox, `sessionPrev()`);
+  run(sandbox, `sessionNext()`);
+  check(`${tag}: честное время задания переживает возврат`,
+    run(sandbox, `sessionTaskTotalMs()`) >= beforeGap - 2000,
+    String(run(sandbox, `sessionTaskTotalMs()`)));
+
+  // Цикл перезагрузок не раздувает таймер: живой баг — каждая F5
+  // удваивала время (5 с → 24 с → 40 с → … → 3 ч за минуту обновлений)
+  const beforeReloads = run(sandbox, `sessionTaskTotalMs()`);
+  for (let i = 0; i < 5; i++) reload();
+  check(`${tag}: пять перезагрузок подряд не добавляют времени`,
+    Math.abs(run(sandbox, `sessionTaskTotalMs()`) - beforeReloads) < 10000,
+    `${beforeReloads} -> ${run(sandbox, `sessionTaskTotalMs()`)}`);
+}
+
 const autoCheck = (t) => t && t.type !== "long_text" && (t.metadata || {}).check !== "self"
   && /^\d{1,6}$/.test(String(t.answer ?? "").trim()) && !(t.visual || {}).required;
 const pickN = (cat, n, pred) => (cat.tasks || []).filter(pred).slice(0, n);
@@ -362,6 +426,8 @@ const ruCat = JSON.parse(read("server/catalog_russian.json"));
 const matches = pickN(ruCat, 3, (t) => autoCheck(t) && /соответств|соотнес/i.test(String(t.text || "")) && String(t.answer ?? "").length >= 3);
 if (matches.length === 3) scenario(matches, "таблица", ruCat, "russian");
 else console.log(`     · таблица: заданий-соответствий для потока ${matches.length} — сценарий пропущен`);
+
+if (normals.length === 3) timerScenario(normals, "поле", mathCat, "profile_math");
 
 console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
 process.exitCode = failures ? 1 : 0;
