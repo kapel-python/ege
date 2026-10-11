@@ -1614,6 +1614,10 @@ body {
 .feedback--bad { background: var(--danger-soft); border: 1px solid rgba(255, 107, 107, 0.3); }
 .feedback--retry { background: var(--surface-2); border-color: var(--border-strong); }
 .feedback--retry .feedback__head { color: var(--warn-ink); }
+/* Пропущенное, но ещё ждущее ответа задание: не успех и не ошибка —
+   состояние «в ожидании», поэтому мягкий акцентный (сине-фиолетовый) тон. */
+.feedback--pending { background: var(--accent-soft); border: 1px solid var(--accent-ring); }
+.feedback--pending .feedback__head { color: var(--accent-ink); }
 .feedback__head { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
 .feedback--ok .feedback__head { color: var(--success-ink); }
 .feedback--bad .feedback__head { color: var(--danger-ink); }

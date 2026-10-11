@@ -4580,8 +4580,10 @@ function sessionPersistUi() {
 }
 
 /* Финальное состояние задания в снимок: kind различает верный ответ,
-   показанное решение, самопроверку и пропуск — при возврате на карточку
-   она перерисовывается в этом же состоянии (см. sessionReplayFinish). */
+   показанное решение и самопроверку — при возврате на карточку она
+   перерисовывается в этом же состоянии (см. sessionReplayFinish).
+   Пропуск ("skipped") — особый случай: он тоже попадает сюда, но при
+   возврате карточка не финализируется, а оживает (см. sessionRestoreTaskUi). */
 function sessionMarkTaskFinished(kind, xp) {
   const S = Session.cur;
   const t = Session.task();
@@ -4595,6 +4597,39 @@ function sessionMarkTaskFinished(kind, xp) {
   // Пишем сразу: F5 до нажатия «Далее» (или уход со страницы без
   // pagehide) не должен терять финальное состояние карточки.
   persistSession();
+}
+
+/* Результат — ровно один на задание. Пропущенное задание оживает при
+   возврате (sessionRestoreTaskUi), и поздний ответ ЗАМЕНЯЕТ запись
+   пропуска, а не добавляет вторую — иначе экран итогов посчитал бы
+   задание дважды: и как пропущенное, и как отвеченное. */
+function sessionRecordResult(entry) {
+  const S = Session.cur;
+  if (!S) return;
+  if (!S.results) S.results = [];
+  const i = S.results.findIndex((r) => r && r.taskId === entry.taskId);
+  if (i >= 0) S.results[i] = entry;
+  else S.results.push(entry);
+}
+
+/* Живая обратная связь («Пока не сходится», неверный формат записи) —
+   часть состояния карточки, как черновик и попытки: переживает «Далее»/
+   «Назад» и F5 (persistSession пишем сразу — уход без pagehide не должен
+   терять ошибку). При возврате на пропущенное задание она занимает
+   feedbackSlot ВМЕСТО плашки «можно ответить»: ученик уже пытался —
+   пусть видит свою ошибку, а не «свежий пропуск». Финальные блоки её
+   сменяют (kind меняется, replay идёт своим путём), новая ошибка —
+   перезаписывает. */
+function sessionSetPendingFeedback(html) {
+  const el = document.getElementById("feedbackSlot");
+  if (el) el.innerHTML = html;
+  const S = Session.cur;
+  const t = Session.task();
+  if (!S || !t) return;
+  if (!S.taskUi) S.taskUi = {};
+  const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
+  st.pendingFeedbackHtml = html;
+  try { sessionPersistUi(); } catch (_) {}
 }
 
 /* Черновик ответа при наборе: в память — сразу, в localStorage — с
@@ -6531,7 +6566,7 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
   S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
-  S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: 0, essay: true, wordCount, submissionId: submission.submissionId });
+  sessionRecordResult({ taskId: t.id, correct: true, skipped: false, seconds, hint: 0, essay: true, wordCount, submissionId: submission.submissionId });
   S.answered = true;
   if (S.essayDraftByTask) delete S.essayDraftByTask[t.id];
   if (!S.essayReadyByTask) S.essayReadyByTask = {};
@@ -6986,7 +7021,7 @@ function sessionSelfResult(correct) {
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
   S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
-  S.results.push({ taskId: t.id, correct, skipped: false, seconds, hint: hintLevel });
+  sessionRecordResult({ taskId: t.id, correct, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
   Session.stopTimer();
   sessionMarkTaskFinished("self", xp);
@@ -7101,7 +7136,7 @@ function sessionShowAnswer() {
   const xpShown = recordAnswer(t, false, 3, seconds);
   S.gainedXp += xpShown;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
-  S.results.push({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
+  sessionRecordResult({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
 
   // Свой ответ остаётся в поле ввода: верный ответ ученик видит в блоке
   // решения («ответ: …» + разбор), а перезаписывать поле ввода значило бы
@@ -7196,12 +7231,16 @@ function sessionSelfResultFeedbackHtml(correct, xp) {
     </div>`;
 }
 
-function sessionSkippedFeedbackHtml() {
+/* Плашка пропущенного задания. Пропуск — не ошибка и не результат, а
+   пауза: карточка живая, ввод доступен, «Далее» в ряду навигации уже
+   стоит. Мягкий акцентный тон отличает её от зелёного «верно» и
+   красного «не сходится». Навигацию в плашку не встраиваем — ряд
+   sessionLiveNavHtml уже под ней. */
+function sessionSkipNoticeHtml() {
   return `
-    <div class="feedback feedback--bad">
-      <div class="feedback__head">${icon("arrow")} Задание пропущено</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:10px">Пропуск не приносит опыта — задание вернётся в повторении.</div>
-      ${sessionFinishNavHtml("btn--soft")}
+    <div class="feedback feedback--pending">
+      <div class="feedback__head">${icon("info")} Пропущено</div>
+      <div class="feedback__solution">У тебя это задание пропущено, но ты можешь на него ответить.</div>
     </div>`;
 }
 
@@ -7219,7 +7258,14 @@ function sessionRestoreTaskUi(t) {
   S.hintLevel = (st && Number(st.hintLevel)) || 0;
   S.attempts = (st && Number(st.attempts)) || 0;
   S.selfHintLevel = (st && Number(st.selfHintLevel)) || 0;
-  S.answered = !!(st && st.answered);
+  // Пропущенное задание оживает: пропуск — не ответ, а пауза. Маркер —
+  // st.kind === "skipped": capture сбрасывает st.answered в false при
+  // любом снимке оживлённой карточки, а kind остаётся до реального
+  // ответа (sessionMarkTaskFinished перезапишет его на "correct"/"shown"/
+  // "self"). Верно решённое и показанное задание финальны — возврат
+  // показывает результат, повторно ответить нельзя.
+  const skippedPending = !!st && st.kind === "skipped";
+  S.answered = skippedPending ? false : !!(st && st.answered);
   S.taskStartTs = Date.now() - ((st && Number(st.elapsedMs)) || 0);
 
   const levels = topicHintLevels(t);
@@ -7249,8 +7295,20 @@ function sessionRestoreTaskUi(t) {
     }
   }
 
-  if (st && st.answered) sessionReplayFinish(t, st);
-  else if (st && st.selfRevealed && isSelfCheckTask(t)) sessionReplaySelfReveal(t);
+  // Живое состояние карточки при возврате: финальные блоки — своим
+  // replay; живая ошибка («Пока не сходится») — из снимка, она свежее и
+  // полезнее плашки; плашка «пропущено» — только когда попыток ещё не
+  // было. Пропуск вытесняет открытую сверку — её можно открыть заново
+  // на оживлённой карточке.
+  if (st && st.answered && !skippedPending) sessionReplayFinish(t, st);
+  else if (st && st.selfRevealed && isSelfCheckTask(t) && !skippedPending) sessionReplaySelfReveal(t);
+  else if (st && st.pendingFeedbackHtml) {
+    const slot = document.getElementById("feedbackSlot");
+    if (slot) slot.innerHTML = st.pendingFeedbackHtml;
+  } else if (skippedPending) {
+    const slot = document.getElementById("feedbackSlot");
+    if (slot) slot.innerHTML = sessionSkipNoticeHtml();
+  }
 }
 
 function sessionReplayFinish(t, st) {
@@ -7259,8 +7317,8 @@ function sessionReplayFinish(t, st) {
     if (kind === "correct") {
       sessionDisableAnswer();
     } else {
-      // Показанное решение или пропуск: поле остаётся с ответом ученика,
-      // блокируется и помечается — верный ответ и так виден в блоке решения.
+      // Показанное решение: поле остаётся с ответом ученика, блокируется
+      // и помечается — верный ответ и так виден в блоке решения.
       const cells = sessionMatchCells();
       if (cells.length) {
         cells.forEach((c) => { c.disabled = true; c.classList.add("match-answer__cell--wrong"); });
@@ -7286,7 +7344,6 @@ function sessionReplayFinish(t, st) {
   if (kind === "correct") slot.innerHTML = sessionCorrectFeedbackHtml(st.xp || 0);
   else if (kind === "shown") slot.innerHTML = sessionShownFeedbackHtml(t);
   else if (kind === "self") slot.innerHTML = sessionSelfResultFeedbackHtml(!!st.selfCorrect, st.xp || 0);
-  else if (kind === "skipped") slot.innerHTML = sessionSkippedFeedbackHtml();
 }
 
 /* Самопроверка открыта, но результат ещё не отмечен: карточка ждёт
@@ -7393,7 +7450,7 @@ function sessionSubmit() {
     renderSessionHintControl();
     sessionFlashAnswer(true);
     const digits = String(val).replace(/\D/g, "");
-    document.getElementById("feedbackSlot").innerHTML = `<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Неверный формат записи</div><div class="feedback__solution">В бланке ЕГЭ такой ответ записывают только цифрами, без запятых, точек и пробелов${digits ? ` — в твоём случае это <b class="mono">${esc(digits)}</b>` : ""}. Ошибка не влияет на прогресс. Перепиши ответ цифрами и попробуй ещё раз.</div></div>`;
+    sessionSetPendingFeedback(`<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Неверный формат записи</div><div class="feedback__solution">В бланке ЕГЭ такой ответ записывают только цифрами, без запятых, точек и пробелов${digits ? ` — в твоём случае это <b class="mono">${esc(digits)}</b>` : ""}. Ошибка не влияет на прогресс. Перепиши ответ цифрами и попробуй ещё раз.</div></div>`);
     return;
   }
 
@@ -7408,7 +7465,7 @@ function sessionSubmit() {
     const message = help && help.type === "solution"
       ? "Все подсказки уже открыты — при необходимости можно показать решение."
       : "Открылась следующая подсказка — можно попробовать ещё раз или посмотреть её.";
-    document.getElementById("feedbackSlot").innerHTML = `<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Пока не сходится</div><div class="feedback__solution">Ошибка не влияет на прогресс. ${message}</div></div>`;
+    sessionSetPendingFeedback(`<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Пока не сходится</div><div class="feedback__solution">Ошибка не влияет на прогресс. ${message}</div></div>`);
     return;
   }
 
@@ -7420,7 +7477,7 @@ function sessionSubmit() {
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.correctBonusSum = (S.correctBonusSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.correctBonus : 0);
   S.errorResolvedSum = (S.errorResolvedSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.errorResolved : 0);
-  S.results.push({ taskId: t.id, correct: true, skipped: false, seconds, hint: hintLevel });
+  sessionRecordResult({ taskId: t.id, correct: true, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
   sessionHideBackNav();
   Session.stopTimer();
@@ -7445,10 +7502,12 @@ function sessionSkip() {
   // Иначе «пропустить всё» становилось способом фармить минимум за
   // каждую тему (босс/сочинение дают до 500, а 100 пропусков — 800+).
   // Попытка всё равно фиксируется: задание уходит в повторение.
+  // При этом пропуск — пауза, а не ответ: вернувшись назад, ученик
+  // застанет живую карточку и сможет ответить (см. sessionRestoreTaskUi).
   const xpSkip = recordAnswer(t, false, S.hintLevel || 0, seconds, undefined, 0, undefined, true);
   S.gainedXp += xpSkip;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
-  S.results.push({ taskId: t.id, correct: false, skipped: true, seconds, hint: S.hintLevel || 0 });
+  sessionRecordResult({ taskId: t.id, correct: false, skipped: true, seconds, hint: S.hintLevel || 0 });
   S.answered = true;
   sessionMarkTaskFinished("skipped", xpSkip);
   sessionNext();

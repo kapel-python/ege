@@ -206,6 +206,8 @@ function scenario(tasks, label, cat, subject) {
   run(sandbox, `renderTask(document.getElementById("screen"))`);
 
   const answer = String(tasks[1].answer ?? "");
+  const answer0 = String(tasks[0].answer ?? "");
+  const wrong0 = answer0.split("").map((d) => (d === "1" ? "0" : "1")).join("") || "9";
   const wrong = answer.split("").map((d) => (d === "1" ? "0" : "1")).join("") || "9";
   const setValue = (v) => run(sandbox, `(() => {
     const cells = document.querySelectorAll("[data-match-cell]");
@@ -237,13 +239,53 @@ function scenario(tasks, label, cat, subject) {
     JSON.stringify(run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return a && { skipped: a.skipped, correct: a.correct }; })()`)));
   check(`${tag}: после пропуска сессия на втором задании`, run(sandbox, `Session.cur.idx`) === 1);
 
-  /* «Назад» на пропущенное: карточка в состоянии пропуска, не чистый бланк */
+  /* «Назад» на пропущенное: карточка ОЖИВАЕТ — пропуск не ответ, а пауза */
   run(sandbox, `sessionPrev()`);
-  check(`${tag}: назад на пропущенное — карточка отвечена`,
-    run(sandbox, `Session.cur.answered`) === true);
-  check(`${tag}: назад на пропущенное — блок «Задание пропущено»`,
-    /Задание пропущено/.test(html(sandbox, "feedbackSlot")), html(sandbox, "feedbackSlot").slice(0, 60));
-  check(`${tag}: назад на пропущенное — ввод заблокирован`, inputsDisabled() === true);
+  check(`${tag}: назад на пропущенное — карточка снова живая`,
+    run(sandbox, `Session.cur.answered`) === false);
+  check(`${tag}: назад на пропущенное — плашка «можно ответить»`,
+    /У тебя это задание пропущено, но ты можешь на него ответить/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 80));
+  check(`${tag}: назад на пропущенное — ввод доступен`, inputsDisabled() === false);
+  check(`${tag}: F5 не запирает пропущенное задание`,
+    reload() === true && run(sandbox, `Session.cur.answered`) === false
+      && /можешь на него ответить/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 60));
+
+  /* Ошибка на оживлённой карточке: живой фидбек важнее плашки и переживает
+     уход («Далее») и возврат — плашка не должна его перетирать */
+  setValue(wrong0);
+  run(sandbox, `sessionSubmit()`);
+  check(`${tag}: ошибка на оживлённой карточке видна`,
+    /Пока не сходится/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 80));
+  run(sandbox, `sessionSkip()`);
+  run(sandbox, `sessionPrev()`);
+  check(`${tag}: возврат после ошибки — блок ошибки, а не плашка`,
+    /Пока не сходится/.test(html(sandbox, "feedbackSlot"))
+      && !/можешь на него ответить/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 80));
+  check(`${tag}: F5 после ошибки — блок ошибки на месте`,
+    reload() === true && /Пока не сходится/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 60));
+
+  /* Поздний ответ на пропущенное: принят, запись пропуска ЗАМЕНЕНА */
+  setValue(answer0);
+  run(sandbox, `sessionSubmit()`);
+  check(`${tag}: поздний ответ на пропущенное принят`,
+    run(sandbox, `Session.cur.answered`) === true && /Правильно/.test(html(sandbox, "feedbackSlot")),
+    html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 80));
+  check(`${tag}: поздний ответ заменил запись пропуска — запись одна`,
+    run(sandbox, `Session.cur.results.length`) === 1
+      && run(sandbox, `Session.cur.results[0].correct`) === true
+      && run(sandbox, `Session.cur.results[0].skipped`) === false,
+    JSON.stringify(run(sandbox, `Session.cur.results`)));
+  /* Ответив, вернуться и перерешить уже нельзя — карточка финальна */
+  run(sandbox, `sessionNext()`);
+  run(sandbox, `sessionPrev()`);
+  check(`${tag}: после позднего ответа карточка финальна`,
+    run(sandbox, `Session.cur.answered`) === true && inputsDisabled() === true
+      && !/можешь на него ответить/.test(html(sandbox, "feedbackSlot")));
   run(sandbox, `sessionNext()`);
 
   /* --- 2. подсказки накапливаются, решение не затирает свой ответ --- */
