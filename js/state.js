@@ -3003,12 +3003,19 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     // заработанный прогресс: ошибка — нормальная часть обучения.
     // Upsert по task_id: повторный провал не плодит дубли одного задания, а
     // открытая мини-ошибка апгрейдится до полной.
-    const open = s.errors.find((e) => e && String(e.taskId) === String(task.id) && !e.resolved);
-    if (!open) {
-      s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: skillId, sub: task.sub, ts: Date.now(), resolved: false, kind: "major" });
-    } else if (errorKindOf(open) === "minor") {
-      open.kind = "major";
-      open.ts = Date.now();
+    //
+    // Пропуск — не ошибка: ученик не ответил, а отложил задание («пропущено,
+    // но ещё можно решить»). Попытка уже записана выше (уходит в повторение),
+    // но в список ошибок такой пункт не попадает — иначе «пропустить всё»
+    // раздувает раздел ошибок до сотен несуществующих провалов.
+    if (!skipped) {
+      const open = s.errors.find((e) => e && String(e.taskId) === String(task.id) && !e.resolved);
+      if (!open) {
+        s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: skillId, sub: task.sub, ts: Date.now(), resolved: false, kind: "major" });
+      } else if (errorKindOf(open) === "minor") {
+        open.kind = "major";
+        open.ts = Date.now();
+      }
     }
   }
 

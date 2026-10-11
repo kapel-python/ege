@@ -113,9 +113,25 @@ def main():
                 "subject": subject, "expectedVersion": error_create["stateVersion"], "resolved": True,
             })
             assert status == 200, (status, error_resolve)
+            # Пропуск — не ошибка: попытка со skipped=1 уходит на сервер раньше
+            # ошибки (старый закэшированный клиент), поэтому POST ошибки по тому
+            # же заданию и моменту не создаёт строку и не засоряет раздел.
+            status, skip_attempt = request(opener, base, "/api/events/attempts", "POST", {
+                "subject": subject, "expectedVersion": error_resolve["stateVersion"],
+                "events": [{"taskId": "n01_p3", "skill": "n01_planimetry", "correct": False,
+                            "hintLevel": 0, "seconds": 3, "ts": 1700000010000, "skipped": True}],
+            })
+            assert status == 200, (status, skip_attempt)
+            status, skip_error = request(opener, base, "/api/errors", "POST", {
+                "subject": subject, "expectedVersion": skip_attempt["stateVersion"],
+                "error": {"taskId": "n01_p3", "skill": "n01_planimetry", "sub": "Пропуск", "ts": 1700000010000},
+            })
+            assert status == 200 and skip_error.get("error") is None, (status, skip_error)
+            status, after_skip = request(opener, base, "/api/bootstrap")
+            assert all(e["taskId"] != "n01_p3" for e in after_skip["state"]["errors"]), after_skip["state"]["errors"]
             # Activity writes a delta event and keeps the daily read model. The
             # same aggregate retry must not create a duplicate activity event.
-            activity_body = {"subject": subject, "expectedVersion": error_resolve["stateVersion"],
+            activity_body = {"subject": subject, "expectedVersion": skip_error["stateVersion"],
                              "domains": {"activity": {"2023-11-14": {"solved": 2, "correct": 1, "xp": 30}}}}
             status, activity = request(opener, base, "/api/state-domains", "PATCH", activity_body)
             assert status == 200, (status, activity)

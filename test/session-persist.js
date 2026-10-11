@@ -238,6 +238,9 @@ function scenario(tasks, label, cat, subject) {
     run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return !!a && a.skipped === true && a.correct === false; })()`),
     JSON.stringify(run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return a && { skipped: a.skipped, correct: a.correct }; })()`)));
   check(`${tag}: после пропуска сессия на втором задании`, run(sandbox, `Session.cur.idx`) === 1);
+  check(`${tag}: пропуск НЕ попадает в ошибки`,
+    run(sandbox, `Store.state.errors.length`) === 0,
+    JSON.stringify(run(sandbox, `Store.state.errors`)));
 
   /* «Назад» на пропущенное: карточка ОЖИВАЕТ — пропуск не ответ, а пауза */
   run(sandbox, `sessionPrev()`);
@@ -259,6 +262,9 @@ function scenario(tasks, label, cat, subject) {
   check(`${tag}: ошибка на оживлённой карточке видна`,
     /Пока не сходится/.test(html(sandbox, "feedbackSlot")),
     html(sandbox, "feedbackSlot").replace(/<[^>]*>/g, "").slice(0, 80));
+  check(`${tag}: сам по себе неверный ответ ошибку не пишет (она появится при сдаче задания)`,
+    run(sandbox, `Store.state.errors.length`) === 0,
+    JSON.stringify(run(sandbox, `Store.state.errors`)));
   run(sandbox, `sessionSkip()`);
   run(sandbox, `sessionPrev()`);
   check(`${tag}: возврат после ошибки — блок ошибки, а не плашка`,

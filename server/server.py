@@ -5755,6 +5755,83 @@ def _ensure_error_kind_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE user_errors ADD COLUMN kind TEXT NOT NULL DEFAULT 'major'")
 
 
+_SKIP_ERRORS_CLEANUP_KEY = "skip_errors_cleanup_v3"
+
+
+def _cleanup_skip_errors(conn: sqlite3.Connection) -> None:
+    """Разовая чистка ошибок, созданных пропуском задания.
+
+    Пропуск — не провал, но старый клиент писал его в раздел ошибок как
+    полную ошибку (`major`), из-за чего раздел раздувался до сотен
+    несуществующих пунктов. Ни клиент, ни сервер больше такие записи не
+    создают (см. `_error_comes_from_skip`), здесь убираем накопленные.
+    Признак надёжный: попытка и ошибка пишутся одним сохранением и делят ts.
+
+    Два случая:
+      1. У попытки уже есть флаг `skipped=1` (клиент после 11 окт).
+      2. Легаси: до появления флага пропуск писался как обычный неверный
+         ответ (`skipped=0, correct=0, hint_level<3`; уровень подсказки
+         сохранялся на момент пропуска). Неверный ответ сам по себе (без сдачи
+         задания) попытку не создаёт вовсе, а «показать решение» даёт
+         `hint_level=3`, поэтому подсказка ниже 3 у авто-задачи = именно
+         пропуск. Самопроверку (`extended_answer`/`check=self`) исключаем —
+         там «не получилось» это честная ошибка.
+
+    Мини-ошибки (решено неидеально) не трогаем. Флаг в app_config делает
+    чистку однократной.
+    """
+    try:
+        done = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                            (_SKIP_ERRORS_CLEANUP_KEY,)).fetchone()
+    except sqlite3.Error:
+        return
+    if done is not None:
+        return
+    deleted = 0
+    try:
+        cur = conn.execute(
+            "DELETE FROM user_errors "
+            "WHERE kind <> 'minor' "
+            "AND EXISTS ("
+            "  SELECT 1 FROM task_attempts ta "
+            "  WHERE ta.user_id = user_errors.user_id AND ta.task_id = user_errors.task_id "
+            "    AND ta.skipped = 1 "
+            "    AND ABS(CAST(ta.created_at AS INTEGER) - CAST(user_errors.created_at AS INTEGER)) <= 2"
+            ") "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM task_attempts ta2 "
+            "  WHERE ta2.user_id = user_errors.user_id AND ta2.task_id = user_errors.task_id "
+            "    AND ta2.skipped = 0 AND ta2.correct = 0 "
+            "    AND CAST(ta2.created_at AS INTEGER) >= CAST(user_errors.created_at AS INTEGER) - 2"
+            ")"
+        )
+        deleted += int(cur.rowcount or 0)
+        cur = conn.execute(
+            "DELETE FROM user_errors "
+            "WHERE kind <> 'minor' AND resolved = 0 "
+            "AND EXISTS ("
+            "  SELECT 1 FROM task_attempts ta JOIN tasks t ON t.id = user_errors.task_id "
+            "  WHERE ta.user_id = user_errors.user_id AND ta.task_id = user_errors.task_id "
+            "    AND ta.skipped = 0 AND ta.correct = 0 AND ta.hint_level < 3 "
+            "    AND ABS(CAST(ta.created_at AS INTEGER) - CAST(user_errors.created_at AS INTEGER)) <= 2 "
+            "    AND COALESCE(t.task_type, '') <> 'extended_answer' "
+            "    AND COALESCE(t.metadata_json, '') NOT LIKE '%\"check\": \"self\"%' "
+            "    AND COALESCE(t.metadata_json, '') NOT LIKE '%\"check\":\"self\"%'"
+            ") "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM task_attempts ta2 "
+            "  WHERE ta2.user_id = user_errors.user_id AND ta2.task_id = user_errors.task_id "
+            "    AND ta2.skipped = 0 AND (ta2.correct = 1 OR ta2.hint_level >= 3) "
+            "    AND CAST(ta2.created_at AS INTEGER) >= CAST(user_errors.created_at AS INTEGER) - 2"
+            ")"
+        )
+        deleted += int(cur.rowcount or 0)
+        conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                     (_SKIP_ERRORS_CLEANUP_KEY, json.dumps({"deleted": deleted})))
+    except sqlite3.Error:
+        pass
+
+
 def _normalize_error_kind(value) -> str:
     """Вид ошибки: 'minor' — решено, но неидеально; всё остальное — 'major'.
 
@@ -6251,6 +6328,8 @@ def ensure_subject_schema(conn: sqlite3.Connection) -> None:
     # SCHEMA. Отсутствующий kind всегда читается как 'major', поэтому старые
     # записи и старые клиенты остаются полными ошибками без миграции данных.
     _ensure_error_kind_column(conn)
+    # Разовая чистка ошибок, созданных пропуском (баг старого клиента).
+    _cleanup_skip_errors(conn)
     # Activity is now event-sourced. Existing daily aggregates are preserved
     # and backfilled once as seed events, so no historical graph disappears.
     conn.execute("""CREATE TABLE IF NOT EXISTS activity_events (
@@ -10032,6 +10111,36 @@ def patch_skill_progress(conn: sqlite3.Connection, user_id: int, subject: str, s
     return {"skill": skill_id, "progress": progress, "solved": solved, "correct": correct, "timeSec": time_sec}
 
 
+def _error_comes_from_skip(conn: sqlite3.Connection, user_id: int, task_id, created) -> bool:
+    """True, если новая ошибка порождена пропуском, а не провалом.
+
+    Пропуск («задание отложено, но его ещё можно решить») — не ошибка, и в
+    раздел ошибок он попадать не должен. Свежий клиент и сам такую запись не
+    шлёт, но закэшированный старый JS мог: попытки уходят на сервер раньше
+    ошибок, поэтому сверяем момент времени. Попытка и ошибка пишутся одним
+    сохранением из одного вызова recordAnswer и делят ts, поэтому окно узкое.
+    Рядом лежащий несостоявшийся реальный ответ (неверный или самопроверка
+    «не получилось») означает полноценную ошибку — пропуск её не отменяет.
+    """
+    try:
+        ts = int(float(created))
+    except (TypeError, ValueError):
+        return False
+    skipped = conn.execute(
+        "SELECT 1 FROM task_attempts WHERE user_id=? AND task_id=? AND skipped=1 "
+        "AND ABS(CAST(created_at AS INTEGER)-?)<=2 LIMIT 1",
+        (user_id, str(task_id or ""), ts),
+    ).fetchone()
+    if skipped is None:
+        return False
+    real = conn.execute(
+        "SELECT 1 FROM task_attempts WHERE user_id=? AND task_id=? AND skipped=0 AND correct=0 "
+        "AND ABS(CAST(created_at AS INTEGER)-?)<=2 LIMIT 1",
+        (user_id, str(task_id or ""), ts),
+    ).fetchone()
+    return real is None
+
+
 def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
     """Создать ошибку как сущность со стабильным client-generated ID.
 
@@ -10064,6 +10173,10 @@ def create_error(conn: sqlite3.Connection, user_id: int, subject: str, value: di
     kind = _normalize_error_kind(value.get("kind"))
     client_id = _stable_client_id(value) or _fallback_client_id("error", [task_id, skill_id, created])
     _ensure_error_kind_column(conn)
+    # Пропуск не создаёт ошибку (см. _error_comes_from_skip): отвечаем null,
+    # чтобы старый клиент не считал сохранение ошибкой и не ретраил вечно.
+    if kind == "major" and _error_comes_from_skip(conn, user_id, task_id, created):
+        return None
     open_row = conn.execute(
         "SELECT id, task_id, skill_id, topic, created_at, resolved, client_id, kind FROM user_errors "
         "WHERE user_id=? AND subject=? AND task_id=? AND resolved=0 ORDER BY id LIMIT 1",
