@@ -4789,8 +4789,7 @@ function renderTask(root) {
 
         ${isLongTextTask(t) ? essayRepeatNoteHtml(t) : ""}
         ${sessionAnswerAreaHtml(t, S)}
-        <div id="feedbackSlot"></div>
-        ${isLongTextTask(t) ? '<div id="essayNavSlot"></div>' : ""}
+        ${isLongTextTask(t) ? '<div id="feedbackSlot"></div><div id="essayNavSlot"></div>' : ""}
       </div>
     </div>`;
 
@@ -4807,18 +4806,23 @@ function renderTask(root) {
     // отмечает результат сам — так же, как реально проверяют часть 2 ЕГЭ.
   } else if (matchingAnswerLetters(t).length) {
     sessionMatchWire();
-    renderSessionHintControl();
   } else {
     const input = document.getElementById("answerInput");
     input.addEventListener("input", sessionNoteDraft);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") sessionSubmit(); });
-    renderSessionHintControl();
   }
 
   // Подсказки, черновик и финальное состояние карточки — из снимка в
   // S.taskUi: после F5 и «Назад»/«Вперёд» карточка возвращается в том
   // виде, в каком её оставили, а не чистым бланком.
   sessionRestoreTaskUi(t);
+  // Кнопку подсказки рисуем только ПОСЛЕ восстановления состояния: до него
+  // S.answered/попытки/уровень ещё принадлежат предыдущему заданию, и
+  // sessionAvailableHelp на свежей карточке видел «задание уже отвечено» —
+  // кнопка пропадала до первой ошибки. Для завершённых карточек help = null,
+  // и кнопка остаётся скрытой, как раньше. У самопроверки своего слота
+  // hintControl нет — renderSessionHintControl молча выйдет по его отсутствию.
+  renderSessionHintControl();
 
   Session.timerInt = setInterval(() => {
     const chip = document.getElementById("timerChip");
@@ -5073,11 +5077,12 @@ function sessionMatchingAreaHtml(t, letters) {
       </div>
     </div>
     <button class="btn btn--primary btn--lg match-answer__submit" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
-    <div class="session-tools">
+    <div class="session-tools" id="sessionTools">
       <span id="hintControl"></span>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
     </div>
+    <div id="feedbackSlot"></div>
     ${sessionBackNavHtml()}`;
 }
 
@@ -5112,11 +5117,12 @@ function sessionAnswerAreaHtml(t, S) {
       <button class="btn btn--primary" id="submitBtn" onclick="sessionSubmit()">Ответить</button>
     </div>
     ${answerFormatCaption(t.answer, t.valueType, t.text)}
-    <div class="session-tools">
+    <div class="session-tools" id="sessionTools">
       <span id="hintControl"></span>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span id="xpNote" style="margin-left:auto;font-size:12px;color:var(--muted)">верный ответ: +${attemptXp(t, true, 0, false).total} XP · попытка: +${attemptXp(t, false, 0, false).total} XP</span>
     </div>
+    <div id="feedbackSlot"></div>
     ${sessionBackNavHtml()}`;
 }
 
@@ -5777,7 +5783,9 @@ function sessionHasNext() {
 /* «Назад» живёт снизу слева — как у сочинений, а не в липкой шапке.
    Ряд принадлежит состоянию ДО ответа: после ответа (верно / показано /
    сверка открыта) вернуться уже нельзя, и ряд убирается через
-   sessionHideBackNav() в каждой ветке завершения. */
+   sessionHideBackNav() в каждой ветке завершения. Обратная связь
+   (feedbackSlot) стоит НАД этим рядом: блок «пока не сходится» и отчёт —
+   часть задания, а навигация всегда последняя строка карточки. */
 function sessionBackBtnHtml() {
   if (!sessionHasPrev()) return "";
   return `<button class="btn btn--ghost btn--sm" id="sessionPrevBtn" onclick="sessionPrev()">← Назад</button>`;
@@ -5790,6 +5798,16 @@ function sessionBackNavHtml() {
 function sessionHideBackNav() {
   const row = document.getElementById("sessionBackNav");
   if (row) row.remove();
+}
+
+/* Ряд инструментов (подсказка · «Пропустить» · XP-подпись) — принадлежит
+   живому состоянию ДО ответа. Рядом с финальным блоком он показывал
+   мёртвую «Пропустить» (после ответа sessionSkip выходит по гварду сразу)
+   и подпись про XP, которые на отвеченном задании уже не заработать.
+   Проверка на .remove — страховка тестовых песочниц с урезанным DOM. */
+function sessionHideToolsRow() {
+  const row = document.getElementById("sessionTools");
+  if (row && typeof row.remove === "function") row.remove();
 }
 
 /* Отметка «сочинение написано» — на ней держится правило «Далее» у сочинений.
@@ -6174,6 +6192,20 @@ function sessionEssayNextLabel() {
    после ответа вернуться уже нельзя. */
 function sessionNextHtml() {
   return `<div class="session-nav"><span></span><button class="btn btn--primary" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
+}
+
+/* Ряд навигации в финальном блоке карточки: «Назад» слева, «Далее»/
+   «Завершить» справа. Без «Назад» цепочка назад обрывалась на первом же
+   завершённом задании: пропустил пару — и к первому вернуться уже нечем,
+   блок показывал только «Далее». Финальные блоки ведут себя как навигация
+   сочинений (sessionEssayNavHtml): назад можно шагать из любого состояния,
+   ответы и XP при этом не пересчитываются (см. sessionPrev). На первом
+   задании кнопки нет — вместо неё пустой спан, чтобы «Далее» не прыгала. */
+function sessionFinishNavHtml(btnClass) {
+  const back = sessionHasPrev()
+    ? `<button class="btn btn--ghost btn--sm" onclick="sessionPrev()">← Назад</button>`
+    : "<span></span>";
+  return `<div class="session-nav">${back}<button class="btn ${btnClass}" onclick="sessionNext()">${esc(sessionNextLabel())}</button></div>`;
 }
 
 /* Навигация у сочинения — постоянная строка в конце карточки, а не часть блока
@@ -6851,11 +6883,12 @@ function isSelfCheckTask(t) {
 function sessionSelfCheckAreaHtml() {
   const back = sessionBackBtnHtml();
   return `
-    <div class="session-tools">
+    <div class="session-tools" id="sessionTools">
       <button class="btn btn--ghost btn--sm" id="selfHintBtn" onclick="askSessionSelfHint()">${icon("bulb")} Подсказка 1</button>
       <button class="btn btn--ghost btn--sm" onclick="sessionSkip()">Пропустить →</button>
       <span style="margin-left:auto;font-size:12px;color:var(--muted)">развёрнутый ответ — реши на бумаге и сверься</span>
     </div>
+    <div id="feedbackSlot"></div>
     <div class="session-nav" id="sessionBackNav">
       ${back || "<span></span>"}
       <button class="btn btn--primary" id="selfRevealBtn" onclick="askSessionSelfReveal()">Сверить с решением</button>
@@ -6959,6 +6992,7 @@ function sessionSelfResult(correct) {
   Session.stopTimer();
   sessionMarkTaskFinished("self", xp);
   if (S.taskUi && S.taskUi[t.id]) S.taskUi[t.id].selfCorrect = !!correct;
+  sessionHideToolsRow();
 
   document.getElementById("feedbackSlot").innerHTML = sessionSelfResultFeedbackHtml(correct, xp);
   renderTopbar();
@@ -7092,6 +7126,7 @@ function sessionShowAnswer() {
   if (submitBtn) submitBtn.style.display = "none";
   const hintControl = document.getElementById("hintControl");
   if (hintControl) hintControl.innerHTML = "";
+  sessionHideToolsRow();
 
   sessionHideBackNav();
   Session.stopTimer();
@@ -7132,9 +7167,7 @@ function sessionCorrectFeedbackHtml(xp) {
         ${icon("check")} Правильно
         <span class="feedback__xp">+${xp} XP</span>
       </div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
+      ${sessionFinishNavHtml("btn--primary")}
     </div>`;
 }
 
@@ -7147,9 +7180,7 @@ function sessionShownFeedbackHtml(t) {
       </div>
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
       <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решишь его позже сам.</div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
+      ${sessionFinishNavHtml("btn--soft")}
     </div>`;
 }
 
@@ -7173,9 +7204,7 @@ function sessionSelfResultFeedbackHtml(correct, xp) {
         ${icon(correct ? "check" : "x")} ${correct ? "Отмечено как решено" : "Отмечено для повторения"}
         ${correct ? `<span class="feedback__xp">+${xp} XP</span>` : ""}
       </div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
+      ${sessionFinishNavHtml("btn--primary")}
     </div>`;
 }
 
@@ -7184,9 +7213,7 @@ function sessionSkippedFeedbackHtml() {
     <div class="feedback feedback--bad">
       <div class="feedback__head">${icon("arrow")} Задание пропущено</div>
       <div style="font-size:13px;color:var(--muted);margin-top:10px">Пропуск не приносит опыта — задание вернётся в повторении.</div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
+      ${sessionFinishNavHtml("btn--soft")}
     </div>`;
 }
 
@@ -7260,10 +7287,12 @@ function sessionReplayFinish(t, st) {
     if (submitBtn) submitBtn.style.display = "none";
     const hintControl = document.getElementById("hintControl");
     if (hintControl) hintControl.innerHTML = "";
+    sessionHideToolsRow();
     sessionHideBackNav();
   } else {
     const revealBtn = document.getElementById("selfRevealBtn");
     if (revealBtn) revealBtn.remove();
+    sessionHideToolsRow();
     sessionHideBackNav();
   }
   const slot = document.getElementById("feedbackSlot");
@@ -7369,6 +7398,19 @@ function sessionSubmit() {
   const val = sessionAnswerValue();
   if (!val) { sessionFlashAnswer(true); return; }
 
+  // Формат цифрового ответа — как в бланке ЕГЭ: только цифры, без запятых
+  // и пробелов. Раньше разделители молча вырезались и «5,1» засчитывалось
+  // как «51» — на настоящем бланке это потерянный балл, поэтому такой ввод
+  // не принимается, а причина объясняется отдельной обратной связью.
+  if (isDigitSequenceTask(t) && !/^\d+$/.test(String(val).trim())) {
+    S.attempts = (S.attempts || 0) + 1;
+    renderSessionHintControl();
+    sessionFlashAnswer(true);
+    const digits = String(val).replace(/\D/g, "");
+    document.getElementById("feedbackSlot").innerHTML = `<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Неверный формат записи</div><div class="feedback__solution">В бланке ЕГЭ такой ответ записывают только цифрами, без запятых, точек и пробелов${digits ? ` — в твоём случае это <b class="mono">${esc(digits)}</b>` : ""}. Ошибка не влияет на прогресс. Перепиши ответ цифрами и попробуй ещё раз.</div></div>`;
+    return;
+  }
+
   const correct = checkAnswer(t, val);
   if (!correct) {
     S.attempts = (S.attempts || 0) + 1;
@@ -7401,6 +7443,7 @@ function sessionSubmit() {
   sessionDisableAnswer();
   const submitBtn = document.getElementById("submitBtn");
   if (submitBtn) submitBtn.style.display = "none";
+  sessionHideToolsRow();
 
   document.getElementById("feedbackSlot").innerHTML = sessionCorrectFeedbackHtml(xp);
 
@@ -7609,10 +7652,12 @@ function answerFormatHint(answer, valueType, text) {
   const isMulti = typeof isMultiSelectTask === "function"
     && isMultiSelectTask({ answer, valueType: vt, text });
   if (/цифр|последовательност/i.test(vt)) {
-    return isMulti ? "несколько цифр по возрастанию, например 245" : "последовательность цифр (например, 245)";
+    return isMulti
+      ? "несколько цифр по возрастанию, без запятых и пробелов (например, 245)"
+      : "последовательность цифр без запятых и пробелов (например, 245)";
   }
   // Мультивыбор без явного valueType: ответ — набор номеров.
-  if (isMulti) return "несколько цифр по возрастанию, например 245";
+  if (isMulti) return "несколько цифр по возрастанию, без запятых и пробелов (например, 245)";
   if (/целое/.test(vt)) return /градус/.test(vt) ? "целое число (в градусах)" : "целое число";
   if (/дробь/.test(vt)) return "десятичная дробь (запятая или точка)";
   if (/единиц/.test(vt)) return "число с единицей измерения";

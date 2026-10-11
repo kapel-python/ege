@@ -25,7 +25,11 @@ function mathText(s) { return String(s == null ? "" : s); }
 function renderTopbar() {}
 function sessionMarkTaskFinished() {}
 function sessionCaptureTaskUi() {}
-` + extract("sessionMatchCells") + "\n" + extract("sessionShownFeedbackHtml") + "\n" + extract("sessionShowAnswer") + "\n";
+var __toolsHidden = 0;
+function sessionHideToolsRow() { __toolsHidden++; }
+var __hasPrev = false;
+function sessionHasPrev() { return __hasPrev; }
+` + extract("sessionMatchCells") + "\n" + extract("sessionFinishNavHtml") + "\n" + extract("sessionShownFeedbackHtml") + "\n" + extract("sessionShowAnswer") + "\n";
 
 const testBody = () => {
   let fails = 0;
@@ -90,6 +94,7 @@ const testBody = () => {
       && /Разбор по маркерам тропов/.test(env.feedback()), env.feedback().slice(0, 60));
     t("соответствие: доступен «Далее»", /sessionNext\(\)/.test(env.feedback()));
     t("соответствие: кнопка помощи убрана", /^\s*$/.test(env.control().innerHTML), env.control().innerHTML);
+    t("соответствие: ряд инструментов («Пропустить», XP-подпись) скрыт", __toolsHidden === 1, "toolsHidden=" + __toolsHidden);
   }
 
   // 2. Обычное поле ввода: свой ответ не затирается, верный — в решении.
@@ -122,6 +127,26 @@ const testBody = () => {
     sessionShowAnswer();
     sessionShowAnswer();
     t("повторный вызов — без второго результата", S.results.length === 1, "results=" + S.results.length);
+  }
+
+  // 5. «Назад» в финальном блоке: из завершённого задания можно шагнуть
+  //    ещё назад — раньше блок показывал только «Далее», и цепочка назад
+  //    обрывалась на первом же пропущенном/отвеченном задании.
+  {
+    __hasPrev = true;
+    let env = build({ input: false, cells: [1, 1] });
+    start({ id: "r22_1", answer: "11", solution: "Разбор." });
+    sessionShowAnswer();
+    const html = env.feedback();
+    t("финальный блок: «Назад» есть", /sessionPrev\(\)/.test(html));
+    t("финальный блок: «Назад» стоит левее «Далее»", html.indexOf("sessionPrev()") < html.indexOf("sessionNext()"));
+    // Первое задание сессии: возвращаться некуда — «Назад» нет, «Далее» на месте.
+    __hasPrev = false;
+    env = build({ input: false, cells: [1, 1] });
+    start({ id: "r22_1", answer: "11", solution: "Разбор." });
+    sessionShowAnswer();
+    t("финальный блок: на первом задании «Назад» нет, «Далее» на месте",
+      !/sessionPrev\(\)/.test(env.feedback()) && /sessionNext\(\)/.test(env.feedback()));
   }
 
   console.log(fails ? `\n${fails} FAILURES` : "\nALL OK");
