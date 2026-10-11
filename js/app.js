@@ -4777,8 +4777,6 @@ function renderTask(root) {
 
       <div class="card task-card">
         <div class="task-card__tags">
-          <span class="chip chip--accent">${t.num}</span>
-          ${S.hideTopic ? `<span class="chip">тема скрыта</span>` : `<span class="chip">${esc(t.sub)}</span>`}
           ${stars(t.diff)}
           <span class="chip timer-chip" style="margin-left:auto" id="timerChip">${icon("clock")} 00:00</span>
         </div>
