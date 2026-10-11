@@ -8607,6 +8607,24 @@ function findOpenError(taskId) {
     e && !e.resolved && String(e.taskId) === wanted) || null;
 }
 
+/* Набор для разбора ОДНОЙ ошибки: сначала именно это задание, и только если
+   оно выпало из практики — похожее из темы. Общий reviewQueueForErrors внутри
+   темы намеренно предпочитает НОВОЕ задание (чтобы повторение не сводилось к
+   запоминанию ответа), поэтому здесь своя, точная выборка: кнопка обещает
+   «пройти это задание», а не «похожее». */
+function errorReviewQueue(error) {
+  if (!error) return null;
+  const skill = String(error.skill || "");
+  let exact = null;
+  try {
+    if (skill && typeof DataAPI.practiceTasksBySkill === "function") {
+      exact = DataAPI.practiceTasksBySkill(skill).find((t) => t && String(t.id) === String(error.taskId)) || null;
+    }
+  } catch (_) { exact = null; }
+  if (exact) return { taskIds: [exact.id], errorMap: {} };
+  return reviewQueueForErrors([error]);
+}
+
 function openErrorReviewDialog(taskId) {
   const error = findOpenError(taskId);
   if (!error) { toast("Эта ошибка уже закрыта", "", "check"); return; }
@@ -8614,7 +8632,7 @@ function openErrorReviewDialog(taskId) {
   const topic = sk ? String(sk.name || "") : String(error.sub || "");
   const label = taskErrorLabel(error);
   const isMinor = errorKindOf(error) === "minor";
-  const q = reviewQueueForErrors([error]);
+  const q = errorReviewQueue(error);
   const sameTask = !!(q && q.taskIds.length && String(q.taskIds[0]) === String(error.taskId));
   const detail = [topic, label].filter(Boolean).map((x) => esc(x)).join(" · ");
   const what = isMinor
@@ -8634,7 +8652,7 @@ function openErrorReviewDialog(taskId) {
 }
 
 function startSingleErrorReview(error) {
-  const q = error ? reviewQueueForErrors([error]) : null;
+  const q = errorReviewQueue(error);
   if (!q || !q.taskIds.length) {
     toast("Не удалось подобрать задание. Попробуй ещё раз.", "", "x");
     return;

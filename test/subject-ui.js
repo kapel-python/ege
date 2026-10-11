@@ -465,6 +465,11 @@ check(
   && reviewDialogHtml.includes(">Не сейчас<"),
   reviewDialogHtml.slice(0, 160),
 );
+check(
+  "ERRORS confirmation promises the SAME task (no false 'unavailable' note)",
+  !reviewDialogHtml.includes("недоступно"),
+  reviewDialogHtml.includes("недоступно") ? "has note" : "no note",
+);
 // То же и в окне темы («Путь» → тема): «Типичные ошибки» — кликабельные
 // задания с подтверждением, а не безмолвные подписи.
 sandbox.openSkillModal("n03_stereometry");
@@ -476,6 +481,29 @@ check(
   && skillModalHtml.includes("openErrorReviewDialog(")
   && skillModalHtml.includes("Задание "),
   skillModalHtml.includes("Типичные ошибки") ? "modal ok" : "no modal",
+);
+// Русский: у r10 условие одинаково у 230 заданий (по всем темам), но разбор
+// ОДНОЙ ошибки обязан вести именно на исходное задание, а не на «похожее» с
+// тем же условием. Иначе окно лжёт про «исходное недоступно».
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  Store.state.errors = [
+    { clientId: "x1", taskId: "r10_1", skill: "r10", sub: "Укажите варианты ответов, в которых во всех словах одног", ts: 1, resolved: false, kind: "major" },
+  ];
+  globalThis.singleQ = errorReviewQueue(Store.state.errors[0]);
+  openErrorReviewDialog("r10_1");
+  globalThis.singleDialog = document.getElementById("device-modal-root").innerHTML;
+`, sandbox);
+check(
+  "ERRORS single review uses the exact task even when the prompt is shared",
+  sandbox.singleQ && sandbox.singleQ.taskIds.length === 1
+  && String(sandbox.singleQ.taskIds[0]) === "r10_1"
+  && sandbox.singleQ.errorMap && Object.keys(sandbox.singleQ.errorMap).length === 0
+  && !sandbox.singleDialog.includes("недоступно"),
+  JSON.stringify(sandbox.singleQ),
 );
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
