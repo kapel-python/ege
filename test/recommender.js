@@ -233,6 +233,9 @@ const testBody = async () => {
   }
 
   /* ---------- 7. Хороший ученик: почти всё освоено ---------- */
+  // 12 качественных решений = тема освоена независимо от размера банка
+  // (PRACTICE_FULL_VOLUME): банки выросли с ~15 до ~100 заданий, но
+  // эталонный объём практики остался прежним.
   makeStrongStudent(() => {
     for (const sk of skills) Store.state.skillStats[sk.id] = { progress: 0, solved: 12, correct: 11, timeSec: 300 };
   });

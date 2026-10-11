@@ -1651,12 +1651,27 @@ function touchStreak() {
    Теория: завершённый урок даёт полную долю; открытый, но незавершённый —
    пропорциональную (пройденные шаги / все шаги). Повторное открытие уже
    пройденного урока ничего не добавляет, сумма обрезана весом 40.
-   Практика: у каждого доступного задания темы равная доля (60/N, где N —
-   число решаемых заданий банка). Доля засчитывается сразу, как только
-   задание решено верно, — многократное прохождение не требуется. Качество
-   решения снижает долю (подсказки, долгое выполнение), но одна небольшая
-   ошибка не обнуляет прогресс. Зачёт идемпотентен: лучшее решение каждого
-   задания учитывается один раз, повторы сверх 60 не дают. */
+   Практика: доля освоения НЕ зависит от размера банка темы — знаменателем
+   служит эталонный объём PRACTICE_FULL_VOLUME (см. ниже). Доля
+   засчитывается сразу, как только задание решено верно, — многократное
+   прохождение не требуется. Качество решения снижает долю (подсказки,
+   долгое выполнение), но одна небольшая ошибка не обнуляет прогресс.
+   Зачёт идемпотентен: лучшее решение каждого задания учитывается один
+   раз, повторы сверх полного объёма не дают. */
+
+/* Полный объём практики темы: сколько лучших решений закрывают практическую
+   долю освоения (60 из 100, а темы без уроков — все 100). Эталон объёма,
+   а НЕ размер банка. Банки тем выросли с ~15 самописных заданий до ~100
+   настоящих из Решу ЕГЭ, но освоение — это «показал навык N качественными
+   решениями», а не «вычерпал весь банк»: иначе рост банка обнулял прогресс
+   живых учеников, а темы по 100 заданий становились недосматриваемыми.
+   Банк меньше эталона честно остаётся знаменателем (решить всё — освоено),
+   банк больше — счёт насыщается по эталону, остальные задания темы
+   остаются живым материалом миссий, повторов и ежедневных подборок.
+   Число совпадает с полным объёмом прогноза (FORECAST_FULL_VOLUME):
+   «тема освоена» и «прогноз доверяет теме» — один порог насыщения, без
+   рассинхрона между шкалой темы и шкалой балла. */
+const PRACTICE_FULL_VOLUME = 12;
 
 /* Качество одного решения 0..1: только верный ответ без показанного решения
    даёт долю. Одна подсказка — небольшая скидка, разбор — заметная, неверные
@@ -1737,12 +1752,15 @@ function skillTheoryProgress(skillId) {
    попыток — оценка по сводным счётчикам (тот же смысл: покрытие × точность),
    чтобы старые данные и внешние источники не давали ноль там, где работа была. */
 function skillPracticeDetail(skillId) {
-  if (!skillIsAccessible(skillId)) return { value: 0, weight: 0, bankSize: 0, distinctSolved: 0, qualitySum: 0 };
+  if (!skillIsAccessible(skillId)) return { value: 0, weight: 0, bankSize: 0, fullVolume: 0, distinctSolved: 0, qualitySum: 0 };
   const lessons = DataAPI.lessonsBySkill(skillId);
   const practiceWeight = lessons.length ? 60 : 100;
   const bank = DataAPI.practiceTasksBySkill(skillId);
   const bankSize = bank.length;
-  if (!bankSize) return { value: 0, weight: practiceWeight, bankSize: 0, distinctSolved: 0, qualitySum: 0 };
+  if (!bankSize) return { value: 0, weight: practiceWeight, bankSize: 0, fullVolume: 0, distinctSolved: 0, qualitySum: 0 };
+  // Знаменатель освоения: банк меньше эталона — весь банк (решить всё),
+  // больше — эталонный объём. От размера банка тема не «удлиняется».
+  const fullVolume = Math.min(bankSize, PRACTICE_FULL_VOLUME);
   const inBank = new Set(bank.map((task) => dataIdValue(task.id)));
   const best = new Map();
   let hasHistory = false;
@@ -1759,14 +1777,14 @@ function skillPracticeDetail(skillId) {
     const stats = safeObject(state.skillStats && state.skillStats[skillId]);
     const accuracy = stats.solved ? Number(stats.correct) / Number(stats.solved) : 0;
     const solved = Math.max(0, Number(stats.solved) || 0);
-    const value = Math.min(1, solved / bankSize) * accuracy * practiceWeight;
-    return { value, weight: practiceWeight, bankSize, distinctSolved: 0, qualitySum: 0 };
+    const value = Math.min(1, solved / fullVolume) * accuracy * practiceWeight;
+    return { value, weight: practiceWeight, bankSize, fullVolume, distinctSolved: 0, qualitySum: 0 };
   }
   let qualitySum = 0;
   for (const quality of best.values()) qualitySum += quality;
   const distinctSolved = best.size;
-  const value = Math.min(practiceWeight, (qualitySum / bankSize) * practiceWeight);
-  return { value, weight: practiceWeight, bankSize, distinctSolved, qualitySum };
+  const value = Math.min(practiceWeight, (qualitySum / fullVolume) * practiceWeight);
+  return { value, weight: practiceWeight, bankSize, fullVolume, distinctSolved, qualitySum };
 }
 
 function skillPracticeProgress(skillId) {
@@ -1796,14 +1814,15 @@ function skillProgressBreakdown(skillId) {
 
 /* Сколько ещё верных решений нужно до целевого освоения (дефолт 90):
    -1 — одними новыми решениями не дотянуть (осталось мало незакрытых
-   заданий — нужен повтор с лучшим качеством). Считается по той же формуле
-   60/N, поэтому честно для любого размера банка. */
+   заданий эталонного объёма — нужен повтор с лучшим качеством).
+   Считается по той же формуле, что и освоение (вес / эталонный объём),
+   поэтому честно для любого размера банка. */
 function practiceSolvesToTarget(skillId, target = 90) {
   const detail = skillPracticeDetail(skillId);
   const need = target - skillTheoryProgress(skillId) - detail.value;
   if (need <= 0) return 0;
   if (!detail.bankSize) return -1;
-  const perTask = detail.weight / detail.bankSize;
+  const perTask = detail.weight / Math.max(1, detail.fullVolume || Math.min(detail.bankSize, PRACTICE_FULL_VOLUME));
   const remaining = Math.max(0, detail.bankSize - detail.distinctSolved);
   if (remaining * perTask < need) return -1;
   return Math.ceil(need / perTask);
@@ -2391,10 +2410,13 @@ function normalizeAnswer(str) {
 /* Задания, где ответ — строка цифр, а не число: набор выбранных номеров
    («выберите верные суждения, запишите цифры, под которыми они указаны»),
    последовательность («установите последовательность») и коды соответствия
-   («1432», «для каждой величины»). Для всех них запятая, точка с запятой,
-   пробел и точка — разделитель цифр, а не десятичная запятая: «2,4,5» и
-   «2 4 5» равны «245», а «1.2.4.3» — «1243». Порядок важен только у
-   последовательностей и кодов; у набора номеров ответ — множество. */
+   («1432», «для каждой величины»). В бланке ЕГЭ такой ответ занимает клетки
+   с одиночными цифрами: запятой, точки с запятой, пробела и точки в клетке
+   нет, и инструкция ФИПИ прямо требует писать без запятых и других
+   дополнительных символов. Поэтому ввод должен быть только цифрами:
+   «2,4,5» и «2 4 5» — нарушение формата, а не другая запись «245».
+   Порядок важен только у последовательностей и кодов; у набора номеров
+   ответ — множество. */
 const DIGIT_SEQUENCE_TEXT_RE =
   /установите\s+(?:правильную\s+)?последовательность|расположите\s+в\s+(?:правильном\s+)?порядке|(?:запишите|восстановите)\s+последовательность|для\s+каждой\s+(?:величин|ячейк)|заполните\s+пустые\s+ячейк/i;
 
@@ -2461,8 +2483,13 @@ function checkAnswer(task, input) {
   if (isDigitSequenceTask(task)) {
     const wanted = [task.answer, ...((Array.isArray(task.accept) ? task.accept : []).map(String))]
       .map(digitSequenceValue).filter(Boolean);
-    const got = digitSequenceValue(input);
-    if (!got) return false;
+    // Формат бланка ЕГЭ: только цифры, по одной в клетке. Запятая, точка,
+    // точка с запятой и пробел внутри ответа — не разделители, а ошибка
+    // записи: на настоящем бланке «5,1» не считается ответом «51».
+    // Пробелы по краям — шум набора, их прощаем.
+    const raw = String(input).trim();
+    if (!/^\d+$/.test(raw)) return false;
+    const got = raw;
     if (isMultiSelectTask(task)) {
       const asSet = (s) => s.split("").sort().join("");
       return wanted.map(asSet).includes(asSet(got));

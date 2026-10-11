@@ -251,17 +251,26 @@ const testBody = async () => {
     t("подсказка: свидетельство слабее (×0.6)", m1 < m0 && Math.abs(m1 - 0.6 * m0) < 1, `m0=${m0} m1=${m1}`);
   }
   {
-    // n01 — задачи на 1 звезду, n19 — на 4: одинаковые 3 свежих верных.
+    // Сложность умножает вес свидетельства: одинаковое число свежих верных
+    // по заданиям разной звёздности даёт разное освоение. Задания берём по
+    // факту каталога, а не по номеру id: самописные аналоги заменены
+    // настоящими заданиями Решу ЕГЭ, и звёздность у них другая.
+    const pickByDiff = (sid, diff, n) => DataAPI.practiceTasksBySkill(sid)
+      .filter((x) => Number(x.diff) === diff).slice(0, n).map((x) => x.id);
     const mkDiff = (taskIds, sid) => {
       Store.reset();
-      taskIds.slice(0, 3).forEach((tid, i) => {
+      taskIds.forEach((tid, i) => {
         Store.state.taskAttempts.push({ taskId: tid, skill: sid, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
       });
       return forecastSkillMastery(sid, now);
     };
-    const m1 = mkDiff(["n01_p1", "n01_p2", "n01_p3"], "n01_planimetry");
-    const m4 = mkDiff(["n19_p1", "n19_p2", "n19_p3"], "n19_parameter");
-    t("сложность: 4 звезды весят впятеро (60 против 15)", m4 === 60 && m1 === 15, `m1=${m1} m4=${m4}`);
+    const easy = pickByDiff("n01_planimetry", 1, 2);
+    const hard = pickByDiff("n19_parameter", 4, 2);
+    const m1 = mkDiff(easy, "n01_planimetry");
+    const m4 = mkDiff(hard, "n19_parameter");
+    t("сложность: звёзды умножают вес (2 свежих: 10 у 1★ против 40 у 4★)",
+      easy.length === 2 && hard.length === 2 && m1 === 10 && m4 === 40,
+      `easy=${easy.length} hard=${hard.length} m1=${m1} m4=${m4}`);
   }
   {
     // Прощение: 10 старых ошибок + 10 свежих верных ≈ 10 свежих верных.

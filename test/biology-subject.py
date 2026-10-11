@@ -86,37 +86,37 @@ def main():
             assert not [s for s in skills if s.get("locked")], skills
 
             tasks = catalog.get("tasks", [])
-            assert len(tasks) == 284, len(tasks)
+            # Банк — настоящее содержание Решу ЕГЭ/ФИПИ (вырос с 284
+            # самописных до ~2700). Точные числа не прошиваем: состав банка
+            # живой, следующие пополнения его снова поменяют. Тест держит
+            # структурные инварианты и пол против потери контента.
             short = [t for t in tasks if t.get("type") == "short_answer"]
             extended = [t for t in tasks if t.get("type") == "extended_answer"]
-            assert len(short) == 263 and len(extended) == 21, (len(short), len(extended))
-            # Часть 1: темы по 15 заданий (единая система); темы, где задание
-            # построено на официальном рисунке, источник текстом не отдаёт —
-            # там остаётся 5 (bio05, 09, 13) или 13 (bio06, дошли не все).
+            part2_skills = {"bio22_experiment", "bio23_conclusion", "bio24_picture",
+                            "bio25_humanadv", "bio26_genbioadv", "bio27_cytology",
+                            "bio28_genetics"}
+            # Часть 1: все 21 линии с банком ~100 реальных заданий; слабейшие
+            # №13/14 — по 84 (потолок источника). Пол 80 ловит потерю контента.
             per_skill: dict[str, int] = {}
             for t in short:
                 per_skill.setdefault(t.get("skill"), 0)
                 per_skill[t.get("skill")] += 1
-            part1_skills = [s["id"] for s in skills if s["id"] not in
-                            {"bio22_experiment", "bio23_conclusion", "bio24_picture",
-                             "bio25_humanadv", "bio26_genbioadv", "bio27_cytology",
-                             "bio28_genetics"}]
+            part1_skills = [s["id"] for s in skills if s["id"] not in part2_skills]
             assert set(per_skill) == set(part1_skills), sorted(set(per_skill) ^ set(part1_skills))
-            assert all(v >= 5 for v in per_skill.values()), per_skill
-            assert all(v == 15 for sid, v in per_skill.items() if sid not in
-                       {"bio05_cellfig", "bio09_divfig", "bio13_humanfig",
-                        "bio06_cellmatch", "bio10_divmatch", "bio14_humanmatch"}), per_skill
-            # Часть 2: 7 линий по 3 задания, у каждого есть образец решения.
+            assert all(v >= 80 for v in per_skill.values()), per_skill
+            # Часть 2: 7 линий, самопроверка по модельному ответу.
             per_adv: dict[str, int] = {}
             for t in extended:
                 per_adv.setdefault(t.get("skill"), 0)
                 per_adv[t.get("skill")] += 1
                 assert t.get("solution"), t["id"]
-            assert len(per_adv) == 7 and all(v == 3 for v in per_adv.values()), per_adv
-            # Баллы линий: часть 1 — 1/2, часть 2 — 3.
+                assert t.get("check") == "self", t["id"]
+            assert set(per_adv) == part2_skills, sorted(set(per_adv) ^ set(part2_skills))
+            assert all(v >= 30 for v in per_adv.values()), per_adv
+            # Баллы линий: часть 1 — 1/2, часть 2 — 2/3 (№24 — двухбалльная).
             points = {t["id"]: t.get("points") for t in tasks}
             assert all(points[f"bio{i:02d}_p1"] in (1, 2) for i in range(1, 22)), points
-            assert all(points[f"bio{i}_p1"] == 3 for i in range(22, 29)), points
+            assert all(points[f"bio{i}_p1"] in (2, 3) for i in range(22, 29)), points
 
             # Прогноз: веса покрывают все 28 навыков, сумма 57, шкала до 100.
             forecast = catalog.get("forecast") or {}
@@ -152,23 +152,26 @@ def main():
             cat_ids = {c["id"] for c in catalog.get("categories", [])}
             assert all(b.get("cat") in cat_ids for b in bosses), bosses
 
-            # Визуал: 6 локальных SVG, каждая привязана к своему заданию.
+            # Визуал: настоящие рисунки источника (PNG) + локальные SVG-схемы.
+            # Каждый актив привязан к заданию и версионирован (?v=<хеш> от
+            # 673aa10): расширение проверяем по пути без query.
             assets = catalog.get("visualAssets", [])
-            assert len(assets) == 6, len(assets)
+            assert len(assets) > 1000, len(assets)
             for a in assets:
-                # src несёт версию картинки (?v=<хеш> от 673aa10): расширение
-                # проверяем по пути без query.
-                assert a.get("src", "").startswith("assets/biology/") and a["src"].split("?")[0].endswith(".svg"), a
-                assert a.get("taskId") in task_ids, a
+                assert a.get("src", "").startswith("assets/biology/") \
+                    and a["src"].split("?")[0].endswith((".svg", ".png")), a
+                if a.get("taskId"):
+                    assert a["taskId"] in task_ids, a
             visuals = [t for t in tasks if (t.get("visual") or {}).get("assetId")]
-            assert len(visuals) == 6, len(visuals)
             asset_ids = {a["id"] for a in assets}
-            assert {(t.get("visual") or {})["assetId"] for t in visuals} <= asset_ids, visuals
+            used_ids = {(t.get("visual") or {})["assetId"] for t in visuals}
+            assert used_ids <= asset_ids, "визуал без актива"
+            assert asset_ids <= used_ids, "актив без задания"
             audit = (catalog.get("visualAudit") or {}).get("taskStatuses") or {}
-            assert set(audit) == task_ids, len(audit)
+            assert set(audit) <= task_ids, len(audit)
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={SID}")
-            assert status == 200 and len(task_details.get("tasks", [])) == 284, (status, len(task_details.get("tasks", [])))
+            assert status == 200 and len(task_details.get("tasks", [])) == len(tasks), (status, len(task_details.get("tasks", [])))
             status, lesson_details = request(opener, base, f"/api/catalog-lessons?subject={SID}")
             assert status == 200 and len(lesson_details.get("lessons", [])) == 28, (status, lesson_details)
 
@@ -213,11 +216,12 @@ def main():
             public_bio = next((s for s in public.get("subjects", []) if s.get("id") == SID), None)
             assert public_bio, public
             public_counts = public_bio.get("counts", {})
-            assert public_counts.get("tasks") == 284, public_bio
+            assert public_counts.get("tasks") == len(tasks), public_bio
             assert public_counts.get("skills") == 28, public_bio
             assert public_counts.get("lessons") == 28, public_bio
             assert public_counts.get("missions") == 28 and public_counts.get("bosses") == 2, public_bio
-            print("Biology subject integration OK: 28 lines, 284 tasks (263 доступны), 28 lessons,"
+            print(f"Biology subject integration OK: 28 lines, {len(tasks)} real tasks"
+                  f" ({len(short)} коротких + {len(extended)} с самопроверкой), 28 lessons,"
                   " forecast 57->100, state isolated")
         finally:
             httpd.shutdown()

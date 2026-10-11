@@ -44,7 +44,13 @@ const calls = [];
 let cookie = "";
 async function fetchWithJar(path, options = {}) {
   calls.push([options.method || "GET", path]);
-  const res = await fetch(base + path, { ...options, headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}), ...(options.headers || {}) } });
+  // Accept-Encoding: identity — не косметика: undici в Node 22 (22.23.2,
+  // воспроизводится минимально) падает внутренним ассертом
+  // assert(!this.paused) на крупном gzip-ответе, когда HTTP/1.0-сервер
+  // закрывает соединение до конца декомпрессии. Сам сервер честен:
+  // http.get/curl/браузер читают то же тело целиком. Тест проверяет
+  // поведение Store.save, а не транспорт, — поэтому просим без сжатия.
+  const res = await fetch(base + path, { ...options, headers: { "Content-Type": "application/json", "Accept-Encoding": "identity", ...(cookie ? { Cookie: cookie } : {}), ...(options.headers || {}) } });
   const set = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
   if (set.length) cookie = set.map((x) => x.split(";")[0]).join("; ");
   return res;
