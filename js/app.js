@@ -4231,7 +4231,15 @@ function openSkillModal(skillId) {
   const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
   const status = topicStatus(sk);
   const skillErrors = asSafeArray(Store.state.errors).filter((e) => e && e.skill === skillId && !e.resolved);
-  const subs = [...new Set(skillErrors.map((e) => taskErrorLabel(e)).filter(Boolean))];
+  // Чип задания — кнопка (как в разделе «Ошибки»): закрываем окно темы и
+  // показываем .dlg-подтверждение перед разбором именно этого задания.
+  const errChips = skillErrors.map((e) => {
+    const id = e && e.taskId != null
+      ? ` onclick="closeModal();openErrorReviewDialog(decodeURIComponent('${encodeURIComponent(String(e.taskId))}'))"`
+      : "";
+    const chipClass = errorKindOf(e) === "minor" ? "" : "chip--danger";
+    return `<button type="button" class="chip ${chipClass} chip--action"${id}>${icon("rotate")}${esc(taskErrorLabel(e))}</button>`;
+  }).join("");
   const missions = asSafeArray(DataAPI.missions()).filter((m) => m && m.skill === skillId);
   const doneMissions = Store.state.missionsDone || {};
   const mission = missions.find((m) => !doneMissions[m.id] && missionPracticeIds(m).length)
@@ -4274,7 +4282,7 @@ function openSkillModal(skillId) {
 
     <div style="margin-top:20px">
       <div class="stat-label" style="margin-bottom:8px">Типичные ошибки</div>
-      ${subs.length ? `<div class="error-subtopics">${subs.map((x) => `<span class="chip chip--danger">${esc(x)}</span>`).join("")}</div>` : `<div style="font-size:13px;color:var(--muted)">Пока не выявлены.</div>`}
+      ${errChips ? `<div class="error-subtopics">${errChips}</div>` : `<div style="font-size:13px;color:var(--muted)">Пока не выявлены.</div>`}
     </div>
 
     ${lessonErrs.length ? `
@@ -8423,10 +8431,18 @@ function screenErrors(root) {
       const ege = sk ? (sk.ege || "") : "";
       // Внутри блока — конкретные задания, а не обрывки условий: у многих
       // вариантов одной темы условие начинается одинаково, и по нему нельзя
-      // понять, что именно решать. Подпись: «Задание 5 из 100».
+      // понять, что именно решать. Подпись: «Задание 5 из 100», а сам чип —
+      // кнопка: клик открывает .dlg-подтверждение и разбор именно этого
+      // задания (openErrorReviewDialog).
       const ordered = list.slice().sort((a, b) =>
         String((a && a.taskId) || "").localeCompare(String((b && b.taskId) || ""), undefined, { numeric: true }));
-      const labels = ordered.map((e) => taskErrorLabel(e)).filter(Boolean);
+      const chips = ordered.map((e) => {
+        const label = taskErrorLabel(e);
+        const id = e && e.taskId != null
+          ? ` onclick="openErrorReviewDialog(decodeURIComponent('${encodeURIComponent(String(e.taskId))}'))"`
+          : "";
+        return `<button type="button" class="chip ${chipClass} chip--action"${id}>${icon("rotate")}${esc(label)}</button>`;
+      }).join("");
       return `
       <div class="card error-group">
         <div class="error-group__head">
@@ -8436,7 +8452,7 @@ function screenErrors(root) {
         </div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Задания:</div>
         <div class="error-subtopics">
-          ${labels.map((label) => `<span class="chip ${chipClass}">${esc(label)}</span>`).join("") || `<span class="chip ${chipClass}">без темы</span>`}
+          ${chips || `<span class="chip ${chipClass}">без темы</span>`}
         </div>
       </div>`;
     }).join("");
@@ -8579,6 +8595,56 @@ function startErrorsReview() {
   if (!q) return toast("Не удалось подобрать задания. Попробуй ещё раз.", "", "x");
 
   Session.start(q);
+}
+
+/* Разбор одной ошибки из списка: сначала .dlg-подтверждение (openConfirmDialog
+   — тот же вид, что у устройств и остальных действий), потом сессия ровно на
+   это задание. Отдельная кнопка нужна, чтобы ученик понимал, что именно он
+   собирается пройти, и не запускал повторение случайным тапом. */
+function findOpenError(taskId) {
+  const wanted = String(taskId == null ? "" : taskId);
+  return asSafeArray(Store.state.errors).find((e) =>
+    e && !e.resolved && String(e.taskId) === wanted) || null;
+}
+
+function openErrorReviewDialog(taskId) {
+  const error = findOpenError(taskId);
+  if (!error) { toast("Эта ошибка уже закрыта", "", "check"); return; }
+  const sk = error.skill ? DataAPI.skill(error.skill) : null;
+  const topic = sk ? String(sk.name || "") : String(error.sub || "");
+  const label = taskErrorLabel(error);
+  const isMinor = errorKindOf(error) === "minor";
+  const q = reviewQueueForErrors([error]);
+  const sameTask = !!(q && q.taskIds.length && String(q.taskIds[0]) === String(error.taskId));
+  const detail = [topic, label].filter(Boolean).map((x) => esc(x)).join(" · ");
+  const what = isMinor
+    ? "Решено верно, но с подсказкой или после ошибок. Чистый проход без помощи закрепит этот пункт."
+    : "Здесь была ошибка. Реши задание заново — верный ответ закроет этот пункт.";
+  const note = q && !sameTask ? " Исходное задание сейчас недоступно — покажем похожее из этой темы." : "";
+  openConfirmDialog({
+    eyebrow: isMinor ? "Закрепление" : "Разбор ошибки",
+    iconName: "rotate",
+    title: isMinor ? "Закрепить это задание?" : "Пройти это задание ещё раз?",
+    text: `<div style="font-weight:600">${detail}</div><div style="margin-top:8px;color:var(--text-2)">${what}${note}</div>`,
+    cancelText: "Не сейчас",
+    confirmText: isMinor ? "Закрепить" : "Пройти",
+    primary: true,
+    onConfirm: () => startSingleErrorReview(error),
+  });
+}
+
+function startSingleErrorReview(error) {
+  const q = error ? reviewQueueForErrors([error]) : null;
+  if (!q || !q.taskIds.length) {
+    toast("Не удалось подобрать задание. Попробуй ещё раз.", "", "x");
+    return;
+  }
+  Session.start({
+    title: "Разбор ошибки",
+    taskIds: q.taskIds,
+    mode: "errors",
+    errorMap: q.errorMap,
+  });
 }
 
 /* ============================================================

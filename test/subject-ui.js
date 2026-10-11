@@ -432,7 +432,7 @@ check(
   `expanded=${errorsScreen.expandedCount}`,
 );
 // Внутри открытого блока — конкретные задания, а не обрывок условия:
-// «Задание №3 · 3 из 100» вместо цитаты «Открытая ошибка» и т.п.
+// «Задание 5 из 100» вместо цитаты «Открытая ошибка» и т.п.
 const openErrorLabel = sandbox.taskErrorLabel({ taskId: "n03_p3", skill: "n03_stereometry", sub: "Открытая ошибка" });
 check(
   "ERRORS task label names the task position, not the prompt text or topic number",
@@ -445,6 +445,37 @@ check(
   && errorsHtml.includes("Задания:")
   && !errorsHtml.includes("Открытая ошибка"),
   openErrorLabel,
+);
+// Клик по заданию сначала показывает .dlg-подтверждение, а не сразу стартует
+// разбор: ученик должен понимать, что именно собирается пройти.
+check(
+  "ERRORS task chips are actionable buttons",
+  errorsHtml.includes("chip--action") && errorsHtml.includes("openErrorReviewDialog("),
+  "",
+);
+sandbox.openErrorReviewDialog("n03_p3");
+const reviewDialogHtml = document.getElementById("device-modal-root").innerHTML;
+check(
+  "ERRORS clicking a task opens a .dlg confirmation before review",
+  /class="dlg"/.test(reviewDialogHtml)
+  && reviewDialogHtml.includes("Пройти это задание ещё раз?")
+  && reviewDialogHtml.includes("Разбор ошибки")
+  && reviewDialogHtml.includes("Задание ")
+  && reviewDialogHtml.includes(">Пройти<")
+  && reviewDialogHtml.includes(">Не сейчас<"),
+  reviewDialogHtml.slice(0, 160),
+);
+// То же и в окне темы («Путь» → тема): «Типичные ошибки» — кликабельные
+// задания с подтверждением, а не безмолвные подписи.
+sandbox.openSkillModal("n03_stereometry");
+const skillModalHtml = document.getElementById("modal-root").innerHTML;
+check(
+  "SKILL modal typical errors are actionable buttons",
+  skillModalHtml.includes("Типичные ошибки")
+  && skillModalHtml.includes("chip--action")
+  && skillModalHtml.includes("openErrorReviewDialog(")
+  && skillModalHtml.includes("Задание "),
+  skillModalHtml.includes("Типичные ошибки") ? "modal ok" : "no modal",
 );
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
