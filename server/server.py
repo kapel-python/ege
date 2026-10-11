@@ -11716,6 +11716,11 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
     """Targeted resets. Each clears only the named state; 'all-progress'
     wipes learning history but keeps the account row itself."""
     ensure_subject_schema(conn)
+    # Сброс чистит и таблицы с ленивой схемой (серия, сочинения): на свежей
+    # БД, где ни одна тропа их ещё не создала, DELETE падал бы с
+    # no such table. Схемы идемпотентны — просто гарантируем наличие.
+    ensure_streak_schema(conn)
+    ensure_essay_schema(conn)
     if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
         raise KeyError("user not found")
     groups = {

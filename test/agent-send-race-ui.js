@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Два живых бага отправки в ИИ (проверено на живом экране).
+/* Три живых бага отправки в ИИ (проверено на живом экране).
  *
  * БАГ 1 «повторю через 60 с»: при «Изменить и отправить», пока сервер ещё
  * считает прошлый (остановленный) ход, клиент показывал модалку с глухим
@@ -214,10 +214,12 @@ async function firstThreadId(jar) {
       await page.waitForSelector(".agent__loader", { timeout: 15000 });
       // Стоп: клиент отвязался, сервер считает дальше (слот занят ещё ~5 с).
       await page.click(".agent__stop");
-      // «Изменить и отправить» по своему вопросу.
-      await page.click(".agent__msg-user", { button: "right" });
-      await page.waitForSelector(".agent__msgmenu", { timeout: 5000 });
-      await page.getByText("Изменить и отправить").click();
+      // «Изменить и отправить» по своему вопросу: с редизайна действий
+      // это кнопка в ряду под последним пузырём (меню по правому клику
+      // больше нет — см. agent-ui.js «удержания сообщения нет»), видна
+      // только у последнего вопроса.
+      await page.waitForSelector('[data-act="edit"]:not([hidden])', { timeout: 5000 });
+      await page.click('[data-act="edit"]:not([hidden])');
       const inVal = await page.evaluate((s) => (document.querySelector(s) || {}).value || "", sel);
       check("БАГ1: правка положила текст обратно в поле", inVal.includes("вопрос один"), inVal.slice(0, 60));
       await page.fill(sel, inVal + " исправленный");
@@ -225,13 +227,19 @@ async function firstThreadId(jar) {
       await page.keyboard.press("Enter");
       // Сервер ещё считает — модалка законна, но она обязана ждать по флагу,
       // а не глухие 60–95 с, и помнить, что это ЗАМЕНА.
+      // NB: честного «ещё отвечает» здесь больше нет, и это правильно: Стоп
+      // с редизайна отменяет ход и на сервере (POST /turns/cancel), слот
+      // свободен — повтор уходит свежим ходом, занимать нечего. Ветка
+      // «свой ход держит слот» живёт в БАГ3 (mineBusy: модалки нет, ответ
+      // дорисовывается), а сама модалка retryWhenFree покрыта статикой
+      // agent-ui.js. Проверять тут было бы требование невозможного.
       try {
         await page.waitForSelector(".agent__ai button:has-text('Повторить сейчас')", { timeout: 15000 });
       } catch (_) {}
       const busyModal = await page.evaluate(() =>
         Array.prototype.some.call(document.querySelectorAll(".agent__ai"),
           (n) => /ещё отвечает|повторю через/.test(n.textContent || "")));
-      check("БАГ1: при живом ходе честно сказано «ещё отвечает»", busyModal);
+      check("БАГ1: при живом ходе модалки нет — слот свободен после отмены", !busyModal);
       // Ждём итог: повтор должен уйти СРАЗУ, как сервер освободился
       // (старый код ждал бы весь TTL ~95 с и ушёл бы дублем).
       await page.waitForFunction(() => {
@@ -287,9 +295,23 @@ async function firstThreadId(jar) {
       await page.fill(sel, TEXT);
       await page.keyboard.press("Enter");
       await page.waitForSelector(".agent__loader", { timeout: 15000 });
-      // Ровно то, что делает телефон: запрос жив, клиент от него отвязывается
-      // (499 в логах nginx), а сервер продолжает считать.
+      // Ровно то, что делает телефон: запрос уже улетел на сервер, а клиент
+      // от него отвязывается (499 в логах nginx — фон/пересборка экрана), и
+      // сервер об отмене НЕ узнаёт — продолжает считать.
+      // Это НЕ «успешный Стоп»: кнопка шлёт POST /turns/cancel и убивает ход
+      // на сервере — тогда ответу неоткуда взяться и сценарий проверял бы
+      // невозможное. Глушим отмену на сети: клиент остановился, сервер
+      // считает дальше.
+      let cancels = 0;
+      page.on("request", (r) => {
+        if (r.method() === "POST" && /\/api\/agent\/turns\/cancel$/.test(new URL(r.url()).pathname)) cancels++;
+      });
+      await page.route("**/api/agent/turns/cancel", (route) => route.abort());
       await page.click(".agent__stop");
+      await page.waitForTimeout(500);
+      await page.unroute("**/api/agent/turns/cancel");
+      check("БАГ3: клиент слал отмену, но сеть её не доставила (честный 499)",
+        cancels === 1, `POST /api/agent/turns/cancel: ${cancels}`);
       // Ученик не понимает, что произошло, и отправляет тот же вопрос снова.
       await page.fill(sel, TEXT);
       await page.keyboard.press("Enter");

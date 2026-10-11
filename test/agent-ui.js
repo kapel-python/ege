@@ -30,8 +30,14 @@ check("нет отдельного agent.css в корне", !exists("agent.css"
 
 /* --- проводка в SPA --- */
 check("index.html тянет css/agent.css", indexHtml.includes("css/agent.css"));
+// Порядок именно <script>-тегов, а не подстрок по файлу: в шапке есть
+// комментарий с упоминанием js/app.js раньше скриптов, и голый indexOf
+// ложно считал, что app.js подключён первым.
+const scriptOrder = [...indexHtml.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]);
+const spaPos = scriptOrder.findIndex((s) => s.includes("js/agent-spa.js"));
+const appPos = scriptOrder.findIndex((s) => /(^|\/)js\/app\.js(\?|$)/.test(s));
 check("index.html тянет js/agent-spa.js до app.js",
-  indexHtml.includes("js/agent-spa.js") && indexHtml.indexOf("js/agent-spa.js") < indexHtml.indexOf("js/app.js"));
+  spaPos >= 0 && appPos >= 0 && spaPos < appPos);
 check("роут ai ведёт на screenAgent", /ai:\s*screenAgent/.test(appJs));
 check("NAV: ИИ без внешнего href (без перезагрузки)",
   appJs.includes('{ route: "ai"') && !appJs.includes('href: "/agent"') && !appJs.includes("href: '/agent'"));
@@ -560,7 +566,7 @@ check("кэш раздела: список и переписка, привяза
   && spaCode.includes("cacheDrop") && spaCode.includes("MAX_CACHED_THREADS")
   && /acc !== S\.accountId[\s\S]{0,220}cacheDrop\(\)/.test(spaCode));
 check("кэш рисуется сразу, сеть только сверяет (sameMessages не даёт лишней перерисовки)",
-  spaCode.includes("sameMessages") && /if \(cached\) paintMessages\(cached\)/.test(spaCode)
+  spaCode.includes("sameMessages") && /if \(cached && cached\.length\) paintMessages\(cached\)/.test(spaCode)
   && /if \(!sameMessages\(cached, msgs\)\) paintMessages\(msgs\)/.test(spaCode));
 check("изменившийся тред выбрасывается из кэша (ход, confirm, удаление)",
   (spaCode.match(/cacheForget\(/g) || []).length >= 4);

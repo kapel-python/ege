@@ -3581,7 +3581,7 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     if not words and not digits:
         raise ValueError(f"в запросе «{query}» нет слов длиной от 3 символов — нечего искать")
 
-    def hit(*fields, bonus_field=None) -> int:
+    def hit(*fields, bonus_field=None, id_text=None) -> int:
         """Все содержательные слова должны совпасть; возвращаем их число.
 
         Совпадение по ОСНОВЕ, а не по целому слову: ученик пишет «логарифмы»,
@@ -3595,14 +3595,16 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         """
         blob = " ".join(str(f or "") for f in fields).lower()
         # Номер ищем как целое число, а не подстрокой: «задание 27» не должно
-        # находить «270 км» и «1270».
+        # находить «270 км» и «1270». И только по содержательным полям (тема,
+        # номер, название навыка), но НЕ по id: b01_p27 содержит «27», но это
+        # задание №1, а не №27. Словам id по-прежнему доступен (ниже).
         if digits and not any(int(d) in {int(n) for n in re.findall(r"\d+", blob)} for d in digits):
             return 0
         if not words:
             # Запрос только с номером («задание 27») — совпадение по цифрам уже
             # проверено выше, это полноценная находка.
             return 1 if digits else 0
-        tokens = re.split(r"[^\w]+", blob)
+        tokens = re.split(r"[^\w]+", blob + " " + str(id_text or "").lower())
         for w in words:
             stem = w[:6] if len(w) > 6 else w
             if not any(t.startswith(stem) for t in tokens if t):
@@ -3655,10 +3657,12 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
             "skills": rank(skill_rows, lambda r: hit(r["name"]), 6,
                            lambda n, r: {"id": r["id"], "name": r["name"],
                                          "subject": r["subject"], "match": n}),
-            # id включён в поиск: «задание 27» находит re27_* (в теме номера нет,
-            # а ученик называет именно номер задания из ключа).
-            "tasks": rank(task_rows, lambda r: hit(r["topic"], r["exam_number"], r["sname"], r["id"],
-                                                   bonus_field=r["sname"]), 8,
+            # id включён в поиск слов: «задание 27» находит re27_* (в теме
+            # номера нет, а ученик называет именно номер задания из ключа).
+            # Цифры по id НЕ матчим (см. hit): иначе b01_p27 отвечало бы на
+            # «задание 27», хотя это задание №1.
+            "tasks": rank(task_rows, lambda r: hit(r["topic"], r["exam_number"], r["sname"],
+                                                   bonus_field=r["sname"], id_text=r["id"]), 8,
                           lambda n, r: {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
                                         "skillName": r["sname"], "subject": r["subject"],
                                         "difficulty": _safe_int(r["difficulty"], 1)
@@ -3678,14 +3682,27 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         try:
             all_skills = conn.execute("SELECT id, name, subject FROM skills"
                                       " ORDER BY display_order").fetchall()
+            # Выборка — попредметно, а не одним ORDER BY t.id LIMIT: иначе
+            # первый по алфавиту предмет с большим банком (базовая математика,
+            # 2100 заданий) съедал весь лимит и остальные предметы в поиск
+            # вообще не попадали. Ранжирование при этом глобальное (take=8
+            # в rank), лимит 600 на предмет — как в своём предмете выше.
             try:
-                all_tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject"
-                                         " FROM tasks t JOIN skills s ON s.id=t.skill_id"
-                                         " ORDER BY t.id LIMIT 1200").fetchall()
+                subj_ids = [r["subject"] for r in conn.execute(
+                    "SELECT DISTINCT subject FROM skills ORDER BY subject").fetchall()]
             except sqlite3.Error:
-                all_tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject"
-                                         " FROM tasks t JOIN skills s ON s.id=t.skill_id"
-                                         " ORDER BY t.id LIMIT 1200").fetchall()
+                subj_ids = [subject]
+            all_tasks = []
+            for sid in subj_ids:
+                try:
+                    rows = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject"
+                                        " FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?"
+                                        " ORDER BY t.id LIMIT 600", (sid,)).fetchall()
+                except sqlite3.Error:
+                    rows = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject"
+                                        " FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?"
+                                        " ORDER BY t.id LIMIT 600", (sid,)).fetchall()
+                all_tasks.extend(rows)
             all_lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l"
                                        " JOIN skills s ON s.id=l.skill_id ORDER BY l.id LIMIT 800").fetchall()
         except sqlite3.Error:
@@ -4116,6 +4133,7 @@ SUBJECT_COMPACT = {
     "russian": "Русский",
     "biology": "Биология",
     "society": "Общество",
+    "informatics": "Информат",
 }
 SUBJECT_COMPACT_LEN = 8
 

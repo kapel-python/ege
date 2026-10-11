@@ -156,7 +156,9 @@ def main():
             assets = catalog.get("visualAssets", [])
             assert len(assets) == 6, len(assets)
             for a in assets:
-                assert a.get("src", "").startswith("assets/biology/") and a["src"].endswith(".svg"), a
+                # src несёт версию картинки (?v=<хеш> от 673aa10): расширение
+                # проверяем по пути без query.
+                assert a.get("src", "").startswith("assets/biology/") and a["src"].split("?")[0].endswith(".svg"), a
                 assert a.get("taskId") in task_ids, a
             visuals = [t for t in tasks if (t.get("visual") or {}).get("assetId")]
             assert len(visuals) == 6, len(visuals)

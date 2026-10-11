@@ -2805,8 +2805,14 @@
     if (wantId == null) { clearFeed(); showEmpty(true); return; }
     // Кэш рисуется мгновенно, сеть не ждём; без кэша — экранная анимация
     // внутри ленты (не пустой блок: про emptiness ещё не знаем).
+    // Пустой кэш мгновенно НЕ рисуем: paintMessages([]) чистит ленту и
+    // двигает feedGen — прилетевший следом свежий ответ тогда пропускает
+    // перерисовку по защите от затирания ниже, и лента остаётся пустой
+    // навсегда (живой случай: ответ, досчитанный сервером после обрыва
+    // запроса, так и не появлялся — вотчер уже исчерпан, повтора нет).
+    // Пустой чат дождётся своего GET с лоадером в ленте, как без кэша.
     var cached = cachedMessages(wantId);
-    if (cached) paintMessages(cached);
+    if (cached && cached.length) paintMessages(cached);
     else feedLoader("Читаем переписку…");
     return api("GET", "/api/agent/threads/" + wantId).then(function (res) {
       if (g !== S.mountGen || wantId !== S.currentId) return;
