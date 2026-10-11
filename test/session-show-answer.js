@@ -23,7 +23,9 @@ function icon() { return "<svg></svg>"; }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
 function mathText(s) { return String(s == null ? "" : s); }
 function renderTopbar() {}
-` + extract("sessionMatchCells") + "\n" + extract("sessionShowAnswer") + "\n";
+function sessionMarkTaskFinished() {}
+function sessionCaptureTaskUi() {}
+` + extract("sessionMatchCells") + "\n" + extract("sessionShownFeedbackHtml") + "\n" + extract("sessionShowAnswer") + "\n";
 
 const testBody = () => {
   let fails = 0;
@@ -78,9 +80,11 @@ const testBody = () => {
     const S = start({ id: "r22_1", skill: "r22", answer: "64138", solution: "Разбор по маркерам тропов." });
     sessionShowAnswer();
     t("соответствие: решение показано без падения", S.answered === true);
-    t("соответствие: клетки заполнены верным кодом",
-      env.cells.map((c) => c.value).join("") === "64138", env.cells.map((c) => c.value).join(""));
+    t("соответствие: клетки НЕ перезаписаны верным кодом — свой ответ остаётся",
+      env.cells.every((c) => c.value === ""), env.cells.map((c) => c.value).join(""));
     t("соответствие: клетки заблокированы", env.cells.every((c) => c.disabled));
+    t("соответствие: верный ответ виден в блоке решения",
+      /ответ:\s*64138/.test(env.feedback()), env.feedback().slice(0, 80));
     t("соответствие: на экране ответ и разбор",
       /Ответ показан/.test(env.feedback()) && /Разбор/.test(env.feedback())
       && /Разбор по маркерам тропов/.test(env.feedback()), env.feedback().slice(0, 60));
@@ -88,14 +92,16 @@ const testBody = () => {
     t("соответствие: кнопка помощи убрана", /^\s*$/.test(env.control().innerHTML), env.control().innerHTML);
   }
 
-  // 2. Обычное поле ввода: поведение прежнее.
+  // 2. Обычное поле ввода: свой ответ не затирается, верный — в решении.
   {
     const env = build({});
     const S = start({ id: "r04_5", skill: "r04", answer: "125", solution: "Ударение в прилагательных." });
     sessionShowAnswer();
     t("поле: решение показано", S.answered === true);
-    t("поле: ответ вписан и заблокирован",
-      document.getElementById("answerInput").value === "125" && document.getElementById("answerInput").disabled === true);
+    t("поле: свой ответ не затёрт и поле заблокировано",
+      document.getElementById("answerInput").value === "" && document.getElementById("answerInput").disabled === true);
+    t("поле: верный ответ виден в блоке решения",
+      /ответ:\s*125/.test(env.feedback()), env.feedback().slice(0, 80));
   }
 
   // 3. Вырожденный DOM: ни клеток, ни поля, ни кнопок — не должно убивать сессию.

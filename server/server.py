@@ -3510,7 +3510,8 @@ CREATE TABLE IF NOT EXISTS user_progress (
 CREATE TABLE IF NOT EXISTS task_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id),
   skill_id TEXT NOT NULL REFERENCES skills(id), correct INTEGER NOT NULL, hint_level INTEGER NOT NULL, seconds REAL NOT NULL,
-  closes_task_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT ''
+  closes_task_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, client_id TEXT NOT NULL DEFAULT '',
+  skipped INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS user_errors (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', task_id TEXT NOT NULL REFERENCES tasks(id),
@@ -5946,6 +5947,13 @@ def _backfill_append_client_ids(conn: sqlite3.Connection) -> None:
         if table == "task_attempts" and "closes_task_id" in columns:
             try:
                 conn.execute("UPDATE task_attempts SET closes_task_id='' WHERE closes_task_id IS NULL")
+            except sqlite3.Error:
+                pass
+        if table == "task_attempts" and "skipped" not in columns:
+            # Пропуск — не попытка решения: флаг нужен зеркалу формулы XP
+            # (derive_stats), чтобы «пропустить всё» не фармило минимум.
+            try:
+                conn.execute("ALTER TABLE task_attempts ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
             except sqlite3.Error:
                 pass
         # Backfill пустых client_id детерминированными ключами.
@@ -9813,7 +9821,7 @@ def read_state(conn: sqlite3.Connection, user_id: int | None, subject: str | Non
     for r in conn.execute("SELECT * FROM task_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 5000", (user_id, subject)):
         keys = r.keys()
         if not in_live(live_tasks, r["task_id"]): continue
-        state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "ts": timestamp_value(r["created_at"])})
+        state["taskAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "taskId": r["task_id"], "skill": r["skill_id"], "correct": bool(r["correct"]), "hintLevel": r["hint_level"], "seconds": r["seconds"], "closesTaskId": r["closes_task_id"] or None, "skipped": bool(r["skipped"]) if "skipped" in keys else False, "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT * FROM lesson_step_errors WHERE user_id=? AND subject=? ORDER BY lesson_id, step_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)):
         if not in_live(live_lessons, r["lesson_id"]): continue
         state["lessonStepErrors"][f'{r["lesson_id"]}:{r["step_id"]}'] = {"count": r["count"], "skill": r["skill_id"], "ts": timestamp_value(r["last_at"]), "types": json.loads(r["types_json"])}
@@ -9904,6 +9912,7 @@ def append_attempt_events(conn: sqlite3.Connection, user_id: int, subject: str, 
         closes_raw = event.get("closesTaskId")
         closes = closes_raw if isinstance(closes_raw, str) else ""
         correct = int(bool(event.get("correct")))
+        skipped = int(bool(event.get("skipped")))
         try:
             seconds_norm = str(float(seconds))
         except (TypeError, ValueError):
@@ -9911,10 +9920,10 @@ def append_attempt_events(conn: sqlite3.Connection, user_id: int, subject: str, 
         client_id = _stable_client_id(event) or _fallback_client_id("attempt", [
             event["taskId"], event["skill"], correct, hint, seconds_norm, closes, created])
         cur = conn.execute(
-            "INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at,client_id)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,seconds,closes_task_id,created_at,client_id,skipped)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
-            (user_id, subject, event["taskId"], event["skill"], correct, hint, seconds, closes, created, client_id),
+            (user_id, subject, event["taskId"], event["skill"], correct, hint, seconds, closes, created, client_id, skipped),
         )
         if cur.rowcount:
             inserted += 1
@@ -10353,6 +10362,8 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
 # ---------------------------------------------------------------------------
 # Единая формула XP за практику (зеркало js/state.js attemptXp).
 # Попытка (посещение задания) платит минимум всегда, верный ответ — бонус.
+# Исключение — пропуск (флаг skipped): он не платит ничего, это обрабатывается
+# в derive_stats до вызова формулы.
 # ---------------------------------------------------------------------------
 XP_ATTEMPT_BASE = 6
 XP_ATTEMPT_PER_DIFF = 2
@@ -11941,7 +11952,9 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
         total_solved += 1
         if hint_level > 0:
             hints_used += 1
-        is_correct = bool(a.get("correct")) and hint_level < 3
+        # Пропуск всегда не-верный (клиент пишет correct=false): не даём
+        # fabricated-полезной нагрузке числиться решённой через флаг skip.
+        is_correct = bool(a.get("correct")) and hint_level < 3 and not bool(a.get("skipped"))
         task_id = a.get("taskId")
         already_mastered = task_id in solved_once
         # Проверенное сочинение платит по шкале от балла AI (0–22), а не фикс
@@ -11952,8 +11965,13 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
         essay_score = essay_scores.get(task_id) if (
             is_correct and not already_mastered and task_id in essay_tasks) else None
         if essay_score is None:
-            # Попытка платит минимум всегда — практика никогда не даёт +0 XP.
-            xp += attempt_xp(tasks.get(task_id, 1), is_correct, hint_level, already_mastered)
+            # Пропущенное задание не платит вовсе: пропуск — не попытка
+            # решения, и «пропустить всё» не должно фарить минимум за тему
+            # (зеркало recordAnswer в js/state.js, флаг пишется в
+            # append_attempt_events).
+            if not bool(a.get("skipped")):
+                # Попытка платит минимум всегда — практика не даёт +0 XP.
+                xp += attempt_xp(tasks.get(task_id, 1), is_correct, hint_level, already_mastered)
         else:
             xp += essay_xp(essay_score)
         if is_correct:

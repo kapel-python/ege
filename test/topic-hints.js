@@ -52,8 +52,11 @@ const testBody = () => {
   t("меньше трёх подсказок темы — шаблон задания", topicHintLevels({ skill: "r09", hints: genericHints }).join("|") === genericHints.join("|"));
 
   // 6. Практика обязана ходить через тему, а не голый hintLevelsFor.
+  // Третий вызов — восстановление открытых подсказок при возврате на
+  // карточку (renderTask → sessionRestoreTaskUi): там тоже нужны
+  // содержательные подсказки темы, а не шаблон формата.
   const callSites = (appSrc.match(/= topicHintLevels\(t\)/g) || []).length;
-  t("практика использует подсказки темы (2 вызова)", callSites === 2, "вызовов: " + callSites);
+  t("практика использует подсказки темы (3 вызова)", callSites === 3, "вызовов: " + callSites);
 
   // 7. Каталог: у темы №22 действительно три содержательных подсказки.
   const catalog = JSON.parse(fs.readFileSync("server/catalog_russian.json", "utf8"));

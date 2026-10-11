@@ -4517,8 +4517,98 @@ function persistSession() {
       // Какие сочинения уже написаны: без этого после перезагрузки «Далее»
       // пропадал бы у уже проверенных работ. Без текста — только факт.
       essayWrittenByTask: S.essayWrittenByTask || {},
+      // Полное состояние сессии: результаты, счётчики и «временные»
+      // состояния карточек заданий (подсказки, черновик ответа, просмотр
+      // решения). Раньше после F5 они терялись: задания приходилось
+      // отвечать заново, а подсказки и решение открывать повторно.
+      // Снимок текущей карточки обновляется в sessionCaptureTaskUi ДО
+      // смены idx — поэтому здесь только сериализация.
+      results: S.results || [],
+      hintsUsed: S.hintsUsed || 0,
+      gainedXp: S.gainedXp || 0,
+      attemptXpSum: S.attemptXpSum || 0,
+      correctBonusSum: S.correctBonusSum || 0,
+      errorResolvedSum: S.errorResolvedSum || 0,
+      startTs: S.startTs || Date.now(),
+      taskUi: S.taskUi || {},
     }));
   } catch (_) {}
+}
+
+/* Снимок мгновенного состояния текущей карточки: уровни подсказок, число
+   ошибок, черновик ответа, просмотр решения. Ключ — id задания, поэтому
+   «Назад»/«Вперёд» и перезагрузка показывают карточку ровно в том виде, в
+   каком её оставили. Снимать надо ДО смены S.idx — иначе снимется уже
+   новое задание со старыми счётчиками. */
+function sessionCaptureTaskUi() {
+  try {
+    const S = Session.cur;
+    if (!S) return;
+    const t = Session.task();
+    if (!t) return;
+    if (!S.taskUi) S.taskUi = {};
+    const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
+    st.hintLevel = S.hintLevel || 0;
+    st.attempts = S.attempts || 0;
+    st.selfHintLevel = S.selfHintLevel || 0;
+    st.answered = !!S.answered;
+    // Накопленное время задания переживает перезагрузку: taskStartTs
+    // сдвигаем назад на весь накопленный отрезок, чтобы секундомер на
+    // экране не обнулялся после каждого снимка.
+    st.elapsedMs = (Number(st.elapsedMs) || 0)
+      + Math.max(0, Date.now() - (S.taskStartTs || Date.now()));
+    S.taskStartTs = Date.now() - st.elapsedMs;
+    if (!isLongTextTask(t) && !isSelfCheckTask(t)) {
+      // Черновик снимаем только с живых полей ввода текущей карточки:
+      // если DOM сейчас про другое (лоадер, другой экран) — не трогаем.
+      const cells = sessionMatchCells();
+      const input = document.getElementById("answerInput");
+      if (cells.length || input) st.draft = sessionAnswerValue();
+    }
+  } catch (_) {}
+}
+
+/* Снимок + запись в localStorage одной операцией — для точечных событий
+   (подсказка открыта, вкладка сворачивается), где idx ещё не менялся. */
+function sessionPersistUi() {
+  try { sessionCaptureTaskUi(); } catch (_) {}
+  persistSession();
+}
+
+/* Финальное состояние задания в снимок: kind различает верный ответ,
+   показанное решение, самопроверку и пропуск — при возврате на карточку
+   она перерисовывается в этом же состоянии (см. sessionReplayFinish). */
+function sessionMarkTaskFinished(kind, xp) {
+  const S = Session.cur;
+  const t = Session.task();
+  if (!S || !t) return;
+  try { sessionCaptureTaskUi(); } catch (_) {}
+  if (!S.taskUi) S.taskUi = {};
+  const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
+  st.answered = true;
+  st.kind = kind;
+  st.xp = Number(xp) || 0;
+  // Пишем сразу: F5 до нажатия «Далее» (или уход со страницы без
+  // pagehide) не должен терять финальное состояние карточки.
+  persistSession();
+}
+
+/* Черновик ответа при наборе: в память — сразу, в localStorage — с
+   коротким дебаунсом (как у сочинений), чтобы пережить F5 и уход со
+   страницы, но не дёргать запись на каждую клавишу. */
+let sessionDraftPersistTimer = null;
+function sessionNoteDraft() {
+  const S = Session.cur;
+  const t = Session.task();
+  if (!S || !t) return;
+  if (!S.taskUi) S.taskUi = {};
+  const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
+  st.draft = sessionAnswerValue();
+  if (sessionDraftPersistTimer) clearTimeout(sessionDraftPersistTimer);
+  sessionDraftPersistTimer = setTimeout(() => {
+    sessionDraftPersistTimer = null;
+    try { sessionPersistUi(); } catch (_) {}
+  }, 1200);
 }
 
 function sessionMatchesRoute(S, route, param) {
@@ -4538,14 +4628,36 @@ function restoreSessionFromStorage(route, param) {
   if (route !== "session" && !sessionMatchesRoute(d, route, param)) return false;
   const ids = d.taskIds.filter((id) => DataAPI.task(id));
   if (!ids.length) return false;
+  // Снимки карточек и результаты — только по живым заданиям каталога:
+  // удалённые из файлов узлы не должны попадать в восстановленную сессию.
+  const taskUi = {};
+  if (d.taskUi && typeof d.taskUi === "object") {
+    for (const [id, st] of Object.entries(d.taskUi)) {
+      if (ids.includes(id) && st && typeof st === "object") taskUi[id] = st;
+    }
+  }
+  const results = (Array.isArray(d.results) ? d.results : [])
+    .filter((r) => r && typeof r === "object" && ids.includes(r.taskId));
   Session.cur = {
     title: String(d.title || "Тренировка"), taskIds: ids, mode: d.mode,
     missionId: d.missionId || null, bossId: d.bossId || null, xpReward: d.xpReward || 0,
     offset: d.offset || 0, total: d.total || ids.length,
     hideTopic: d.mode === "boss", errorMap: d.errorMap || null,
     idx: Math.min(Math.max(d.idx || 0, 0), ids.length - 1),
-    results: [], hintsUsed: 0, startTs: Date.now(), taskStartTs: Date.now(),
-    answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+    // Мгновенные состояния карточек (подсказки/черновик/решение) и всё, что
+    // уже зафиксировано в этой сессии, восстанавливаются целиком: раньше
+    // после F5 приходилось отвечать заново — и попытка (вместе с XP)
+    // записывалась на сервер повторно. renderTask подтянет S.hintLevel/
+    // S.answered из taskUi текущего задания.
+    results, taskUi,
+    hintsUsed: Number(d.hintsUsed) || 0,
+    gainedXp: Number(d.gainedXp) || 0,
+    attemptXpSum: Number(d.attemptXpSum) || 0,
+    correctBonusSum: Number(d.correctBonusSum) || 0,
+    errorResolvedSum: Number(d.errorResolvedSum) || 0,
+    startTs: Number(d.startTs) || Date.now(),
+    taskStartTs: Date.now(),
+    answered: false, hintLevel: 0, attempts: 0,
     lastTs: Number(d.lastTs) || Number(d.startTs) || Date.now(),
     essayDraftByTask: d.essayDraftByTask || {},
     essayWrittenByTask: d.essayWrittenByTask || {},
@@ -4614,8 +4726,9 @@ function screenSession(root) {
   const S = Session.cur;
   if (!S) { go("training"); return; }
   Session.stopTimer();
-  S.answered = false;
-  S.taskStartTs = Date.now();
+  // answered/hintLevel/taskStartTs восстанавливает renderTask из снимка
+  // карточки (S.taskUi): после F5 или «Назад» задание возвращается в том
+  // состоянии, в каком его оставили, а не чистым бланком.
   renderTask(root);
 }
 
@@ -4646,9 +4759,6 @@ function renderTask(root) {
     }
   }
   const progressDone = S.offset + S.idx;
-  S.hintLevel = 0;
-  S.attempts = 0;
-  S.selfHintLevel = 0;
 
   root.innerHTML = `
     <div class="session-wrap">
@@ -4698,9 +4808,15 @@ function renderTask(root) {
     renderSessionHintControl();
   } else {
     const input = document.getElementById("answerInput");
+    input.addEventListener("input", sessionNoteDraft);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") sessionSubmit(); });
     renderSessionHintControl();
   }
+
+  // Подсказки, черновик и финальное состояние карточки — из снимка в
+  // S.taskUi: после F5 и «Назад»/«Вперёд» карточка возвращается в том
+  // виде, в каком её оставили, а не чистым бланком.
+  sessionRestoreTaskUi(t);
 
   Session.timerInt = setInterval(() => {
     const chip = document.getElementById("timerChip");
@@ -5624,11 +5740,13 @@ async function essayRestoreReady(t) {
 function sessionPrev() {
   const S = Session.cur;
   if (!S || S.idx <= 0) return;
+  // Снимок текущей карточки — до смены позиции (см. sessionNext).
+  try { sessionCaptureTaskUi(); } catch (_) {}
   S.idx--;
-  S.answered = false;
-  S.taskStartTs = Date.now();
   // Ответы и XP уже зафиксированы в recordAnswer — назад мы только
-  // перерисовываем карточку, прогресс не пересчитывается.
+  // перерисовываем карточку, прогресс не пересчитывается. Состояние
+  // (подсказки, черновик, решение) восстановит renderTask из снимка:
+  // «Назад»/«Вперёд» показывают карточку такой, какой её оставили.
   persistSession();
   renderTask(document.getElementById("screen"));
 }
@@ -6775,13 +6893,14 @@ function sessionSelfHint() {
   S.selfHintLevel++;
   const slot = document.getElementById("hintSlot");
   const levels = topicHintLevels(t);
-  slot.innerHTML = levels.slice(0, S.selfHintLevel).map((h, i) => `
-    <div class="hint-box ${i > 0 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${i + 1}.</b> ${mathText(h)}</div>`).join("");
+  slot.innerHTML = sessionHintBoxesHtml(levels, S.selfHintLevel);
   const btn = document.getElementById("selfHintBtn");
   if (btn) {
     if (S.selfHintLevel >= 3) { btn.disabled = true; btn.textContent = "Все подсказки открыты"; }
     else btn.innerHTML = `${icon("bulb")} Подсказка ${S.selfHintLevel + 1}`;
   }
+  // Уровень помощи фиксируется сразу — переживает F5 и навигацию.
+  try { sessionPersistUi(); } catch (_) {}
 }
 
 /* «Сверить с решением» открывает официальный разбор — случайный тап стоил бы
@@ -6810,16 +6929,15 @@ function sessionSelfReveal() {
   sessionHideBackNav();
   const btn = document.getElementById("selfRevealBtn");
   if (btn) btn.remove();
-  document.getElementById("feedbackSlot").innerHTML = `
-    <div class="feedback">
-      <div class="feedback__solution"><b>Официальное решение.</b>\n${mathText(t.solution)}</div>
-      <div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${mathText(t.answer)}</div>
-      <div style="margin-top:14px;color:var(--text-2);font-size:13px">Сравни со своим решением на бумаге и честно отметь результат — это и есть проверка части 2.</div>
-      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
-        <button class="btn btn--danger-soft" onclick="sessionSelfResult(false)">Не получилось</button>
-        <button class="btn btn--primary" onclick="sessionSelfResult(true)">Решил(а) верно</button>
-      </div>
-    </div>`;
+  // Сверка открыта, но результат ещё не отмечен: это состояние тоже
+  // фиксируем в снимке — перезагрузка возвращает карточку к выбору
+  // «Не получилось»/«Решил(а) верно», а не к чистому бланку.
+  try { sessionCaptureTaskUi(); } catch (_) {}
+  if (!S.taskUi) S.taskUi = {};
+  const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
+  st.selfRevealed = true;
+  persistSession();
+  document.getElementById("feedbackSlot").innerHTML = sessionSelfRevealFeedbackHtml(t);
 }
 
 function sessionSelfResult(correct) {
@@ -6837,17 +6955,10 @@ function sessionSelfResult(correct) {
   S.results.push({ taskId: t.id, correct, skipped: false, seconds, hint: hintLevel });
   S.answered = true;
   Session.stopTimer();
+  sessionMarkTaskFinished("self", xp);
+  if (S.taskUi && S.taskUi[t.id]) S.taskUi[t.id].selfCorrect = !!correct;
 
-  document.getElementById("feedbackSlot").innerHTML = `
-    <div class="feedback ${correct ? "feedback--ok" : "feedback--bad"}">
-      <div class="feedback__head">
-        ${icon(correct ? "check" : "x")} ${correct ? "Отмечено как решено" : "Отмечено для повторения"}
-        ${correct ? `<span class="feedback__xp">+${xp} XP</span>` : ""}
-      </div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
-    </div>`;
+  document.getElementById("feedbackSlot").innerHTML = sessionSelfResultFeedbackHtml(correct, xp);
   renderTopbar();
 }
 
@@ -6857,6 +6968,7 @@ function sessionSelfResult(correct) {
 function sessionAvailableHelp() {
   const S = Session.cur;
   if (!S) return null;
+  if (S.answered) return null; // задание завершено — помощь недоступна
   const maxLevel = Math.min(3, S.attempts + 1);
   if (S.hintLevel < maxLevel) return { type: "hint", level: S.hintLevel + 1 };
   return S.attempts >= 3 ? { type: "solution" } : null;
@@ -6907,11 +7019,15 @@ function sessionHint() {
   const slot = document.getElementById("hintSlot");
   const levels = topicHintLevels(t);
   const level = S.hintLevel;
-  // На экране остаётся только актуальный уровень помощи, а не стопка из
-  // всех трёх подсказок. Следующая появится лишь после следующей ошибки.
-  slot.innerHTML = `<div class="hint-box ${level > 1 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${level}.</b> ${mathText(levels[level - 1])}</div>`;
+  // Подсказки открываются одна за другой и остаются на экране все
+  // сразу, по порядку (как в самопроверке и уроках): вторая идёт ПОСЛЕ
+  // первой, а не вместо неё — ученик видит всю лестницу помощи.
+  slot.innerHTML = sessionHintBoxesHtml(levels, level);
   renderSessionHintControl();
   renderHintXpNote(t, S.hintLevel);
+  // Уровень помощи фиксируется сразу: перезагрузка или «Назад»/«Вперёд»
+  // не должны заставлять покупать подсказку заново.
+  try { sessionPersistUi(); } catch (_) {}
 }
 
 /* «Показать решение» после исчерпанных подсказок — тоже через подтверждение:
@@ -6953,22 +7069,20 @@ function sessionShowAnswer() {
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: false, answerShown: true, seconds, hint: 3 });
 
-  // Ответ показывается в том месте, где ученик его вводит: у соответствия
-  // это клетки бланка, у простого ввода — поле answerInput (см.
-  // sessionDisableAnswer). Оба варианта тихие, без падения на missing-элементе.
-  const answer = String(t.answer == null ? "" : t.answer);
+  // Свой ответ остаётся в поле ввода: верный ответ ученик видит в блоке
+  // решения («ответ: …» + разбор), а перезаписывать поле ввода значило бы
+  // стирать собственную работу — сравнить свой ответ с верным нельзя.
+  // Поле только блокируется и помечается как непринятое.
   const cells = sessionMatchCells();
   if (cells.length) {
-    cells.forEach((c, i) => {
+    cells.forEach((c) => {
       c.disabled = true;
-      c.value = answer[i] || "";
       c.classList.add("match-answer__cell--wrong");
     });
   } else {
     const input = document.getElementById("answerInput");
     if (input) {
       input.disabled = true;
-      input.value = answer;
       input.classList.add("answer-input--wrong");
     }
   }
@@ -6980,20 +7094,10 @@ function sessionShowAnswer() {
   sessionHideBackNav();
   Session.stopTimer();
   S.answered = true;
+  sessionMarkTaskFinished("shown", xpShown);
 
   const slot = document.getElementById("feedbackSlot");
-  if (slot) slot.innerHTML = `
-    <div class="feedback feedback--bad">
-      <div class="feedback__head">
-        ${icon("bulb")} Ответ показан
-        <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
-      </div>
-      <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решишь его позже сам.</div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
-    </div>`;
+  if (slot) slot.innerHTML = sessionShownFeedbackHtml(t);
   renderTopbar();
 }
 
@@ -7005,6 +7109,177 @@ function renderHintXpNote(t, hintLevel) {
   el.textContent = hintLevel === 0
     ? `верный ответ: +${full.total} XP · попытка: +${attempt.total} XP`
     : `сейчас за верный: +${full.total} XP · попытка: +${attempt.total} XP`;
+}
+
+/* ================= восстановление карточки из снимка =================
+   Снимок живёт в S.taskUi[taskId] (см. sessionCaptureTaskUi) и переживает
+   перезагрузку и «Назад»/«Вперёд»: подсказки дорисовываются, черновик
+   ответа возвращается в поле, финальные состояния (верно/показано/
+   самопроверка/пропуск) воспроизводятся теми же строителями, что и
+   живой путь, — карточка не «забывает» ничего из сделанного. */
+
+function sessionHintBoxesHtml(levels, count) {
+  return levels.slice(0, Math.max(0, count)).map((h, i) => `
+    <div class="hint-box ${i > 0 ? "hint-box--deep" : ""}">${icon("bulb")} <b>Подсказка ${i + 1}.</b> ${mathText(h)}</div>`).join("");
+}
+
+function sessionCorrectFeedbackHtml(xp) {
+  return `
+    <div class="feedback feedback--ok">
+      <div class="feedback__head">
+        ${icon("check")} Правильно
+        <span class="feedback__xp">+${xp} XP</span>
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
+      </div>
+    </div>`;
+}
+
+function sessionShownFeedbackHtml(t) {
+  return `
+    <div class="feedback feedback--bad">
+      <div class="feedback__head">
+        ${icon("bulb")} Ответ показан
+        <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
+      </div>
+      <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решишь его позже сам.</div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
+      </div>
+    </div>`;
+}
+
+function sessionSelfRevealFeedbackHtml(t) {
+  return `
+    <div class="feedback">
+      <div class="feedback__solution"><b>Официальное решение.</b>\n${mathText(t.solution)}</div>
+      <div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${mathText(t.answer)}</div>
+      <div style="margin-top:14px;color:var(--text-2);font-size:13px">Сравни со своим решением на бумаге и честно отметь результат — это и есть проверка части 2.</div>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn--danger-soft" onclick="sessionSelfResult(false)">Не получилось</button>
+        <button class="btn btn--primary" onclick="sessionSelfResult(true)">Решил(а) верно</button>
+      </div>
+    </div>`;
+}
+
+function sessionSelfResultFeedbackHtml(correct, xp) {
+  return `
+    <div class="feedback ${correct ? "feedback--ok" : "feedback--bad"}">
+      <div class="feedback__head">
+        ${icon(correct ? "check" : "x")} ${correct ? "Отмечено как решено" : "Отмечено для повторения"}
+        ${correct ? `<span class="feedback__xp">+${xp} XP</span>` : ""}
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
+      </div>
+    </div>`;
+}
+
+function sessionSkippedFeedbackHtml() {
+  return `
+    <div class="feedback feedback--bad">
+      <div class="feedback__head">${icon("arrow")} Задание пропущено</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Пропуск не приносит опыта — задание вернётся в повторении.</div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn--soft" onclick="sessionNext()">${sessionNextLabel()}</button>
+      </div>
+    </div>`;
+}
+
+function sessionRestoreTaskUi(t) {
+  const S = Session.cur;
+  if (!S || !t) return;
+  const st = (S.taskUi || {})[t.id] || null;
+  if (isLongTextTask(t)) {
+    // Сочинения: черновик и отметки живут в essayDraftByTask/essayWrittenByTask
+    // и восстанавливаются своим путём (sessionEssayWire).
+    S.hintLevel = 0; S.attempts = 0; S.selfHintLevel = 0; S.answered = false;
+    S.taskStartTs = Date.now();
+    return;
+  }
+  S.hintLevel = (st && Number(st.hintLevel)) || 0;
+  S.attempts = (st && Number(st.attempts)) || 0;
+  S.selfHintLevel = (st && Number(st.selfHintLevel)) || 0;
+  S.answered = !!(st && st.answered);
+  S.taskStartTs = Date.now() - ((st && Number(st.elapsedMs)) || 0);
+
+  const levels = topicHintLevels(t);
+  const slot = document.getElementById("hintSlot");
+  if (slot) {
+    if (isSelfCheckTask(t)) {
+      if (S.selfHintLevel > 0) slot.innerHTML = sessionHintBoxesHtml(levels, S.selfHintLevel);
+    } else if (S.hintLevel > 0) {
+      slot.innerHTML = sessionHintBoxesHtml(levels, S.hintLevel);
+    }
+  }
+  if (isSelfCheckTask(t)) {
+    const hb = document.getElementById("selfHintBtn");
+    if (hb && S.selfHintLevel > 0) {
+      if (S.selfHintLevel >= 3) { hb.disabled = true; hb.textContent = "Все подсказки открыты"; }
+      else hb.innerHTML = `${icon("bulb")} Подсказка ${S.selfHintLevel + 1}`;
+    }
+  }
+
+  // Черновик ответа возвращается в поле/клетки как был.
+  if (st && typeof st.draft === "string") {
+    const cells = sessionMatchCells();
+    if (cells.length) cells.forEach((c, i) => { c.value = st.draft[i] || ""; });
+    else {
+      const input = document.getElementById("answerInput");
+      if (input) input.value = st.draft;
+    }
+  }
+
+  if (!isSelfCheckTask(t)) renderHintXpNote(t, S.hintLevel);
+
+  if (st && st.answered) sessionReplayFinish(t, st);
+  else if (st && st.selfRevealed && isSelfCheckTask(t)) sessionReplaySelfReveal(t);
+}
+
+function sessionReplayFinish(t, st) {
+  const kind = st.kind || "";
+  if (!isSelfCheckTask(t)) {
+    if (kind === "correct") {
+      sessionDisableAnswer();
+    } else {
+      // Показанное решение или пропуск: поле остаётся с ответом ученика,
+      // блокируется и помечается — верный ответ и так виден в блоке решения.
+      const cells = sessionMatchCells();
+      if (cells.length) {
+        cells.forEach((c) => { c.disabled = true; c.classList.add("match-answer__cell--wrong"); });
+      } else {
+        const input = document.getElementById("answerInput");
+        if (input) { input.disabled = true; input.classList.add("answer-input--wrong"); }
+      }
+    }
+    const submitBtn = document.getElementById("submitBtn");
+    if (submitBtn) submitBtn.style.display = "none";
+    const hintControl = document.getElementById("hintControl");
+    if (hintControl) hintControl.innerHTML = "";
+    sessionHideBackNav();
+  } else {
+    const revealBtn = document.getElementById("selfRevealBtn");
+    if (revealBtn) revealBtn.remove();
+    sessionHideBackNav();
+  }
+  const slot = document.getElementById("feedbackSlot");
+  if (!slot) return;
+  if (kind === "correct") slot.innerHTML = sessionCorrectFeedbackHtml(st.xp || 0);
+  else if (kind === "shown") slot.innerHTML = sessionShownFeedbackHtml(t);
+  else if (kind === "self") slot.innerHTML = sessionSelfResultFeedbackHtml(!!st.selfCorrect, st.xp || 0);
+  else if (kind === "skipped") slot.innerHTML = sessionSkippedFeedbackHtml();
+}
+
+/* Самопроверка открыта, но результат ещё не отмечен: карточка ждёт
+   «Не получилось»/«Решил(а) верно» — как и до перезагрузки. */
+function sessionReplaySelfReveal(t) {
+  sessionHideBackNav();
+  const revealBtn = document.getElementById("selfRevealBtn");
+  if (revealBtn) revealBtn.remove();
+  const slot = document.getElementById("feedbackSlot");
+  if (slot) slot.innerHTML = sessionSelfRevealFeedbackHtml(t);
 }
 
 /* Обвязка таблицы-ответа: цифра вводится в свою клетку, курсор сам идёт
@@ -7060,6 +7335,7 @@ function sessionMatchWire() {
     cell.addEventListener("input", () => {
       cell.value = String(cell.value || "").replace(/\D/g, "").slice(-1);
       if (cell.value && i < cells.length - 1) focusAt(i + 1);
+      sessionNoteDraft();
     });
     cell.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); sessionSubmit(); return; }
@@ -7074,6 +7350,7 @@ function sessionMatchWire() {
       e.preventDefault();
       for (let k = 0; k < cells.length; k++) cells[k].value = digits[k] || "";
       focusAt(Math.min(digits.length, cells.length - 1));
+      sessionNoteDraft();
     });
   });
 }
@@ -7117,21 +7394,13 @@ function sessionSubmit() {
   S.answered = true;
   sessionHideBackNav();
   Session.stopTimer();
+  sessionMarkTaskFinished("correct", xp);
 
   sessionDisableAnswer();
   const submitBtn = document.getElementById("submitBtn");
   if (submitBtn) submitBtn.style.display = "none";
 
-  document.getElementById("feedbackSlot").innerHTML = `
-    <div class="feedback feedback--ok">
-      <div class="feedback__head">
-        ${icon("check")} Правильно
-        <span class="feedback__xp">+${xp} XP</span>
-      </div>
-      <div style="margin-top:14px;text-align:right">
-        <button class="btn btn--primary" onclick="sessionNext()">${sessionNextLabel()}</button>
-      </div>
-    </div>`;
+  document.getElementById("feedbackSlot").innerHTML = sessionCorrectFeedbackHtml(xp);
 
   renderTopbar();
 }
@@ -7141,15 +7410,24 @@ function sessionSkip() {
   if (S.answered) return;
   const t = Session.task();
   const seconds = (Date.now() - S.taskStartTs) / 1000;
-  const xpSkip = recordAnswer(t, false, S.hintLevel || 0, seconds);
+  // Пропуск — не попытка решения: XP за него не начисляется вовсе.
+  // Иначе «пропустить всё» становилось способом фармить минимум за
+  // каждую тему (босс/сочинение дают до 500, а 100 пропусков — 800+).
+  // Попытка всё равно фиксируется: задание уходит в повторение.
+  const xpSkip = recordAnswer(t, false, S.hintLevel || 0, seconds, undefined, 0, undefined, true);
   S.gainedXp += xpSkip;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
   S.results.push({ taskId: t.id, correct: false, skipped: true, seconds, hint: S.hintLevel || 0 });
+  S.answered = true;
+  sessionMarkTaskFinished("skipped", xpSkip);
   sessionNext();
 }
 
 function sessionNext() {
   const S = Session.cur;
+  // Снимок текущей карточки — до смены позиции: иначе sessionCaptureTaskUi
+  // снял бы уже СЛЕДУЮЩЕЕ задание со счётчиками предыдущего.
+  try { sessionCaptureTaskUi(); } catch (_) {}
   // Обычные задания — строго на следующее. Сочинение — на ближайшее
   // НАПИСАННОЕ впереди («Далее»), а если такого нет, то на следующее
   // ненаписанное («Написать ещё раз» → чистый бланк).
@@ -7160,8 +7438,8 @@ function sessionNext() {
   }
   persistSession();
   if (S.idx >= S.taskIds.length) return sessionFinish();
-  S.answered = false;
-  S.taskStartTs = Date.now();
+  // answered/hintLevel/taskStartTs восстановит renderTask из снимка
+  // карточки — задание вернётся в своём состоянии, а не чистым бланком.
   renderTask(document.getElementById("screen"));
 }
 
@@ -7621,12 +7899,19 @@ function lessonFeedbackHtml(step, state) {
       <div class="feedback__head">${icon("check")} Верно <span class="feedback__xp">+${state.xp || 0} XP</span></div>
       ${step.solution ? `<div class="feedback__solution"><b>Проверка.</b>\n${mathText(step.solution)}</div>` : ""}
     </div>`;
-  if (state.status === "shown") return `
+  if (state.status === "shown") {
+    // Верный ответ — здесь, в блоке решения: поле ввода ученика не
+    // перезаписывается (см. lessonActionHtml), свой ответ остаётся в поле.
+    const answers = lessonFields(step)
+      .map((f) => String(f.answer == null ? "" : f.answer).trim()).filter(Boolean);
+    return `
     <div class="feedback feedback--bad">
       <div class="feedback__head">${icon("bulb")} Решение показано</div>
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(step.solution || "Ответ показан на следующем шаге.")}</div>
+      ${answers.length ? `<div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${esc(answers.join(" · "))}</div>` : ""}
       <div style="font-size:13px;color:var(--muted);margin-top:10px">Шаг сохранён в слабых местах для повторения.</div>
     </div>`;
+  }
   return state.feedback || "";
 }
 
@@ -7662,7 +7947,13 @@ function lessonActionHtml(step, state) {
   const isDone = state.status === "solved" || state.status === "shown";
   const help = lessonAvailableHelp(state);
   const answerArea = match
-    ? `${lessonMatchTableHtml(match.letters, isDone ? String(fields[0].answer || "") : (state.draft["answer"] || ""), isDone)}
+    ? // Черновик ученика, а не верный ответ: при показе решения своё
+      // заполнение остаётся в клетках (верный ответ — в блоке решения).
+      // Для решённого шага черновик равен верному ответу; пустой черновик
+      // старых сессий добираем ответом, чтобы таблица не пустовала.
+      `${lessonMatchTableHtml(match.letters, state.status === "solved"
+        ? (state.draft["answer"] || String(fields[0].answer || ""))
+        : (state.draft["answer"] || ""), isDone)}
        ${isDone ? "" : `<button class="btn btn--primary match-answer__submit" id="lessonSubmitBtn" onclick="lessonSubmit()">Проверить</button>`}`
     : `<div class="lesson-answer-grid ${fields.length > 1 ? "lesson-answer-grid--multiple" : ""}">
       ${fields.map((field) => `
@@ -11926,12 +12217,12 @@ function bootstrapApp() {
       try {
         window.addEventListener("beforeunload", () => {
           pauseLessonClock();
-          try { persistSession(); } catch (_) {}
+          try { sessionPersistUi(); } catch (_) {}
           Store.releaseTabLeadership();
         });
         window.addEventListener("pagehide", () => {
           pauseLessonClock();
-          try { persistSession(); } catch (_) {}
+          try { sessionPersistUi(); } catch (_) {}
           Store.releaseTabLeadership();
         });
         window.addEventListener("storage", (e) => {
@@ -11944,8 +12235,8 @@ function bootstrapApp() {
             pauseLessonClock();
             // Свежий черновик сочинения уходит в localStorage до того, как
             // вкладку свернут/убьют: блок «Что делать сейчас» должен знать
-            // о недописанной работе.
-            try { persistSession(); } catch (_) {}
+            // о недописанной работе. Туда же — снимок карточки практики.
+            try { sessionPersistUi(); } catch (_) {}
           } else {
             resumeLessonClock();
           }

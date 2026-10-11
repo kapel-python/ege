@@ -2847,7 +2847,7 @@ function dailyTaskIds() {
    закрывается любым верным ответом, как раньше.
    ============================================================ */
 
-function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts, essayScore) {
+function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts, essayScore, skipped) {
   const s = Store.state;
   const taskRef = task && typeof task === "object" ? task.id : task;
   const canonical = task && DataAPI.taskForAccess ? DataAPI.taskForAccess(taskRef) : null;
@@ -2858,6 +2858,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
   hintLevel = Math.max(0, Math.min(3, Number(hintLevel) || 0));
   wrongAttempts = Math.max(0, Number(wrongAttempts) || 0);
   seconds = Math.max(0, Number(seconds) || 0);
+  skipped = !!skipped;
   if (hintLevel >= 3) correct = false; // посмотрел ответ = не решил сам
   s.taskAttempts = safeArray(s.taskAttempts);
   s.errors = safeArray(s.errors);
@@ -2879,6 +2880,10 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     wrongAttempts: correct ? wrongAttempts : 0,
     seconds: Number(seconds) || 0,
     closesTaskId: closesTaskId || null,
+    // Пропуск — не попытка решения: флаг едет на сервер (mirror в
+    // attempt_xp/derive_stats) и обнуляет XP, иначе «пропустить всё»
+    // фармит минимум за каждую тему.
+    skipped,
     ts: Date.now(),
   });
   s.taskAttempts = s.taskAttempts.slice(0, 5000);
@@ -2955,9 +2960,17 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     }
   } else {
     s.correctSeries = 0;
-    // За сам факт попытки платим минимум — практика никогда не даёт +0 XP.
-    xp = attemptXp(task, false, hintLevel, false).total;
-    xpBreakdown = { attempt: xp, correctBonus: 0, errorResolved: 0 };
+    if (skipped) {
+      // Пропуск не платит вовсе: «пропустить всё» не должен превращаться в
+      // способ фармить минимум XP за каждую тему. Попытка фиксируется
+      // (задание уйдёт в повторение), но денег за неё нет.
+      xp = 0;
+      xpBreakdown = { attempt: 0, correctBonus: 0, errorResolved: 0 };
+    } else {
+      // За сам факт попытки платим минимум — практика никогда не даёт +0 XP.
+      xp = attemptXp(task, false, hintLevel, false).total;
+      xpBreakdown = { attempt: xp, correctBonus: 0, errorResolved: 0 };
+    }
     // Неверный ответ остаётся сигналом для повторения, но не отнимает уже
     // заработанный прогресс: ошибка — нормальная часть обучения.
     // Upsert по task_id: повторный провал не плодит дубли одного задания, а
