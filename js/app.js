@@ -4092,7 +4092,12 @@ function screenPath(root) {
             const status = topicStatus(skill);
             const locked = status === "locked";
             const progressValue = nonNegativeNumber(skillProgress(skill.id));
-            const openAction = locked ? `openLockedSkillModal('${esc(skill.id)}')` : `go('skill', '${esc(skill.id)}')`;
+            /* Окно темы открываем напрямую, без смены маршрута: go('skill')
+               перерисовывает Путь и уводит карту наверх, поэтому после
+               закрытия окна ученик оказывался у первой темы, а не у той,
+               что открывал. Глубокая ссылка (#/skill/<id>) работает как
+               раньше — её открывает render(). */
+            const openAction = locked ? `openLockedSkillModal('${esc(skill.id)}')` : `openSkillModal('${esc(skill.id)}')`;
             const ege = skill.ege || skill.examNumber || "тема ЕГЭ";
             return `
             <div class="tree-node tree-node--${status}" data-topic-locked="${locked ? "true" : "false"}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(skill))}"${locked ? ' aria-haspopup="dialog"' : ""}>
@@ -4231,15 +4236,21 @@ function openSkillModal(skillId) {
   const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
   const status = topicStatus(sk);
   const skillErrors = asSafeArray(Store.state.errors).filter((e) => e && e.skill === skillId && !e.resolved);
+  // Тот же принцип, что в разделе «Ошибки»: ошибка — только реальный провал
+  // (неверный ответ / показанный ответ / самооценка «неверно решил»). «Почти
+  // получилось» (решено с подсказкой) — отдельный пункт «на закрепить», а не
+  // типичная ошибка. Пропуски темы сюда не попадают — они не ошибка.
   // Чип задания — кнопка (как в разделе «Ошибки»): закрываем окно темы и
   // показываем .dlg-подтверждение перед разбором именно этого задания.
-  const errChips = skillErrors.map((e) => {
+  const errorChips = (list) => list.map((e) => {
     const id = e && e.taskId != null
       ? ` onclick="closeModal();openErrorReviewDialog(decodeURIComponent('${encodeURIComponent(String(e.taskId))}'))"`
       : "";
     const chipClass = errorKindOf(e) === "minor" ? "" : "chip--danger";
     return `<button type="button" class="chip ${chipClass} chip--action"${id}>${icon("rotate")}${esc(taskErrorLabel(e))}</button>`;
   }).join("");
+  const majorChips = errorChips(skillErrors.filter((e) => errorKindOf(e) !== "minor"));
+  const minorChips = errorChips(skillErrors.filter((e) => errorKindOf(e) === "minor"));
   const missions = asSafeArray(DataAPI.missions()).filter((m) => m && m.skill === skillId);
   const doneMissions = Store.state.missionsDone || {};
   const mission = missions.find((m) => !doneMissions[m.id] && missionPracticeIds(m).length)
@@ -4280,10 +4291,16 @@ function openSkillModal(skillId) {
       return '<div style="margin-top:12px;font-size:13px;color:var(--muted)">Из чего складывается: ' + split + '.<br>' + hint + '</div>';
     })()}
 
+    ${(majorChips || minorChips) ? `
     <div style="margin-top:20px">
+      ${majorChips ? `
       <div class="stat-label" style="margin-bottom:8px">Типичные ошибки</div>
-      ${errChips ? `<div class="error-subtopics">${errChips}</div>` : `<div style="font-size:13px;color:var(--muted)">Пока не выявлены.</div>`}
-    </div>
+      <div class="error-subtopics">${majorChips}</div>` : ""}
+      ${minorChips ? `
+      <div class="stat-label" style="margin-bottom:8px${majorChips ? ";margin-top:16px" : ""}">Почти получилось — закрепи</div>
+      <div class="error-subtopics">${minorChips}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Решено верно, но с подсказкой или после ошибок. Это не ошибка — чистый проход без помощи закроет пункт.</div>` : ""}
+    </div>` : ""}
 
     ${lessonErrs.length ? `
     <div style="margin-top:16px">

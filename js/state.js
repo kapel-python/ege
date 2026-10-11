@@ -1876,8 +1876,11 @@ function skillStatus(skill) {
   if (p >= 70) return "completed";
   /* «Слабое место» — низкий прогресс при плохой точности. Тема, по которой
      мало, но стабильно верных ответов (в т.ч. одна верная диагностика) —
-     просто «в процессе», а не проблема. */
-  if (p < 35 && solved > 0 && Number(stats.correct) / solved < 0.6) return "weak";
+     просто «в процессе», а не проблема.
+     Слабое место возможно только если в теме был хотя бы один настоящий
+     провал: иначе «пропустил одно задание» — без единого ответа — выглядело
+     как слабая тема (skip раньше шёл в solved, роняя точность до нуля). */
+  if (p < 35 && solved > 0 && Number(stats.correct) / solved < 0.6 && skillMistakeCount(skill.id) > 0) return "weak";
   // Тему вообще не трогали: ни ответов, ни закрытого урока, ни открытого —
   // это не "слабое место" и не "в процессе", а честное "не начата".
   const lessons = DataAPI.lessonsBySkill(skill.id);
@@ -1891,6 +1894,19 @@ function skillStatus(skill) {
 function openErrorCount(skillId) {
   if (!skillIsAccessible(skillId)) return 0;
   return safeArray(Store.state && Store.state.errors).reduce((n, e) => n + (!e.resolved && String(e.skill) === String(skillId) ? 1 : 0), 0);
+}
+
+/* Сколько в теме было настоящих провалов: неверных ответов и открытий ответа
+   (подсказка 3 уровня тоже пишет correct=false). Пропуск сюда не попадает —
+   ученик не отвечал, он отложил задание. Не нужны отдельные счётчики в
+   состоянии: безо́бщий список попыток уже есть. */
+function skillMistakeCount(skillId) {
+  const wanted = String(skillId || "");
+  if (!wanted) return 0;
+  return safeArray(Store.state && Store.state.taskAttempts).reduce((n, a) => {
+    if (!a || String(a.skill) !== wanted || a.skipped || a.correct) return n;
+    return n + 1;
+  }, 0);
 }
 
 /* «Требует внимания» — только реальные проблемы: открытые ошибки или плохая

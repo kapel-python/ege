@@ -505,6 +505,68 @@ check(
   && !sandbox.singleDialog.includes("недоступно"),
   JSON.stringify(sandbox.singleQ),
 );
+/* Тема без ошибок не должна заявлять «Пока не выявлены.» — лучше молчать,
+   чем врать: раздел «Ошибки» тоже не рисует пустые блоки. Заодно проверяем,
+   что чипы «Почти получилось» уведены в свой пункт, а не в типичные ошибки. */
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  Store.state.errors = [
+    { clientId: "m1", taskId: "r10_1", skill: "r10", sub: "Укажите варианты", ts: 1, resolved: false, kind: "minor" },
+  ];
+  openSkillModal("r10");
+  globalThis.minorModal = document.getElementById("modal-root").innerHTML;
+  Store.state.errors = [];
+  openSkillModal("r10");
+  globalThis.emptyModal = document.getElementById("modal-root").innerHTML;
+`, sandbox);
+check(
+  "SKILL modal separates 'почти получилось' from typical errors and hides empty state",
+  sandbox.minorModal.includes("Почти получилось — закрепи")
+  && !sandbox.minorModal.includes("Типичные ошибки")
+  && !sandbox.emptyModal.includes("Типичные ошибки")
+  && !sandbox.emptyModal.includes("Пока не выявлены"),
+  sandbox.emptyModal.includes("Типичные ошибки") ? "stale block" : "ok",
+);
+/* Путь: клик по теме обязан открыть окно темы без перерисовки карты —
+   иначе render() увозит её наверх и после закрытия окна ученик видит
+   первую тему вместо шестнадцатой. */
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  screenPath(document.getElementById("screen"));
+  globalThis.pathHtml = document.getElementById("screen").innerHTML;
+`, sandbox);
+check(
+  "PATH topic opens the modal in place (no map re-render / scroll reset)",
+  sandbox.pathHtml.includes("openSkillModal(") && !sandbox.pathHtml.includes("go('skill'"),
+  sandbox.pathHtml.includes("go('skill'") ? "still navigates" : "in place",
+);
+/* «Слабое место» — только после настоящего провала. Пропуск задания в
+   нетронутой теме (0% освоения, точность 0/1) больше не делает тему слабой. */
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  Store.state.skillStats = { r10: { progress: 0, solved: 1, correct: 0, timeSec: 0 } };
+  Store.state.taskAttempts = [{ taskId: "r10_1", skill: "r10", correct: false, hintLevel: 0, skipped: true }];
+  globalThis.skipStatus = skillStatus(DataAPI.skill("r10"));
+  Store.state.taskAttempts = [{ taskId: "r10_1", skill: "r10", correct: false, hintLevel: 0, skipped: false }];
+  globalThis.wrongStatus = skillStatus(DataAPI.skill("r10"));
+  Store.state.taskAttempts = [];
+  Store.state.skillStats = { r10: { progress: 0, solved: 0, correct: 0, timeSec: 0 } };
+  globalThis.touchedNothing = skillStatus(DataAPI.skill("r10"));
+`, sandbox);
+check(
+  "PATH weak status requires a real mistake, not a skip",
+  sandbox.skipStatus === "in-progress" && sandbox.wrongStatus === "weak" && sandbox.touchedNothing === "not-started",
+  `skip=${sandbox.skipStatus}, wrong=${sandbox.wrongStatus}, empty=${sandbox.touchedNothing}`,
+);
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
 // уведомления. Параллельно проверяем, что обычные достижения по-прежнему видны.
