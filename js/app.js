@@ -4203,30 +4203,23 @@ function openLockedSkillModal(skillId) {
     </div>`, "Информация о закрытой теме");
 }
 
-/* Подпись ошибки для списков: «Задание №14 · 5 из 100».
+/* Подпись ошибки для списков: «Задание 5 из 100».
    Текст задания не цитируем: обрывок условия («В одном из выделенных…»)
    встречается у десятков вариантов одной темы и ничего не говорит о том,
-   какое задание имеется в виду. Конкретика — номер задания ЕГЭ и позиция
-   внутри темы (тот же порядок практики, что видит ученик), поэтому пункт
-   можно найти. Unknown-задание (нет в каталоге) — остаётся подпись по теме. */
+   какое задание имеется в виду. Показываем позицию задания внутри темы —
+   ровно тот счётчик, что ученик видит в практике («5 / 100»), поэтому пункт
+   легко найти. Номер темы не дублируем — он уже в заголовке блока/окна. */
 function taskErrorLabel(error) {
   if (!error) return "";
-  const skill = error.skill && typeof DataAPI !== "undefined" && DataAPI.skill
-    ? DataAPI.skill(String(error.skill)) : null;
-  const task = error.taskId && typeof DataAPI !== "undefined" && DataAPI.task
-    ? DataAPI.task(String(error.taskId)) : null;
-  const ege = String((skill && (skill.ege || skill.examNumber)) || (task && task.num) || "").trim();
   let list = [];
   try {
     list = typeof practiceTaskIdsForSkill === "function" ? practiceTaskIdsForSkill(error.skill) : [];
   } catch (_) { list = []; }
   const index = list.findIndex((id) => String(id) === String(error.taskId));
-  // Задание выпало из каталога (тема переименована/удалена): конкретики нет,
-  // оставляем сохранённую подпись, чтобы пункт не превратился в «Задание».
-  if (!ege && index < 0) return String(error.sub || "").trim() || "Задание";
-  const head = ege ? `Задание ${ege}` : "Задание";
-  const pos = index >= 0 ? `${index + 1} из ${list.length}` : "";
-  return [head, pos].filter(Boolean).join(" · ");
+  if (index >= 0) return `Задание ${index + 1} из ${list.length}`;
+  // Задание выпало из доступной практики (нет в каталоге / нужен рисунок):
+  // позиции и общего числа нет — оставляем сохранённую подпись.
+  return String(error.sub || "").trim() || "Задание";
 }
 
 function openSkillModal(skillId) {
@@ -8430,7 +8423,7 @@ function screenErrors(root) {
       const ege = sk ? (sk.ege || "") : "";
       // Внутри блока — конкретные задания, а не обрывки условий: у многих
       // вариантов одной темы условие начинается одинаково, и по нему нельзя
-      // понять, что именно решать. Подпись: «Задание №14 · 5 из 100».
+      // понять, что именно решать. Подпись: «Задание 5 из 100».
       const ordered = list.slice().sort((a, b) =>
         String((a && a.taskId) || "").localeCompare(String((b && b.taskId) || ""), undefined, { numeric: true }));
       const labels = ordered.map((e) => taskErrorLabel(e)).filter(Boolean);

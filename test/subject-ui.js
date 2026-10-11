@@ -435,13 +435,13 @@ check(
 // «Задание №3 · 3 из 100» вместо цитаты «Открытая ошибка» и т.п.
 const openErrorLabel = sandbox.taskErrorLabel({ taskId: "n03_p3", skill: "n03_stereometry", sub: "Открытая ошибка" });
 check(
-  "ERRORS task label names the EGE task and its position, not the prompt text",
-  /^Задание №3 · \d+ из \d+$/.test(openErrorLabel) && !openErrorLabel.includes("Открытая"),
+  "ERRORS task label names the task position, not the prompt text or topic number",
+  /^Задание \d+ из \d+$/.test(openErrorLabel) && !openErrorLabel.includes("Открытая") && !openErrorLabel.includes("№"),
   openErrorLabel,
 );
 check(
   "ERRORS open block chips show concrete tasks, not prompt excerpts",
-  errorsHtml.includes("Задание №3") && errorsHtml.includes("из 100")
+  errorsHtml.includes("Задание ") && errorsHtml.includes("из 100")
   && errorsHtml.includes("Задания:")
   && !errorsHtml.includes("Открытая ошибка"),
   openErrorLabel,
