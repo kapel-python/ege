@@ -204,6 +204,27 @@ def _solution_block(page: str, from_pos: int) -> str:
     return page[s:end]
 
 
+def images_zone_start(head: str, body_start: int) -> int:
+    """Начало зоны поиска картинок: обычно сам id=body, но у заданий
+    с рисунком («Рассмотрите рисунок…») он лежит в непосредственно
+    предшествующем pbody-блоке (живой случай — био №5).
+
+    Расширяем только при строгих условиях, иначе ловим мусор: разрыв
+    маленький (< 2000 знаков), без скриптов, внутри есть <img>.
+    На текст условия расширение НЕ влияет — только на подсчёт картинок.
+    """
+    opens = list(re.finditer(r'<div[^>]*class="pbody"[^>]*>', head[:body_start]))
+    if not opens:
+        return body_start
+    prev = opens[-1].start()
+    gap = head[prev:body_start]
+    if len(gap) > 2000 or "<script" in gap.lower():
+        return body_start
+    if "<img" not in gap:
+        return body_start
+    return prev
+
+
 def parse_problem(base: str, pid: str) -> dict:
     page = get(base, f"/problem?id={pid}")
 
@@ -223,7 +244,10 @@ def parse_problem(base: str, pid: str) -> dict:
     # Флаги строгого отбора — ДО подмены формул текстом (иначе меток нет).
     # Проверяем строго по тегам <img>, а не подстрокой по куску HTML: иначе
     # ловим мусор из ссылок и кнопок между условием и пояснением.
-    cond_tags = re.findall(r"<img\b[^>]*>", condition_raw)
+    # Зона картинок шире текста: рисунок может лежать в непосредственно
+    # предшествующем pbody-блоке (см. images_zone_start).
+    zone_raw = head[images_zone_start(head, body.start()):]
+    cond_tags = re.findall(r"<img\b[^>]*>", zone_raw)
     n_img = len(cond_tags)
     cond_fig = any("get_file" in (re.search(r'src="([^"]*)"', t) or [ "", ""])[1]
                    for t in cond_tags)

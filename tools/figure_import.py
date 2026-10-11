@@ -36,7 +36,10 @@ ROOT = Path(__file__).resolve().parents[1]
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"
 TIMEOUT = 40
 RETRIES = 3
-MAX_BYTES = 3_000_000
+MAX_BYTES = 8_000_000
+# Рисунки больше этого размера ужимаем: телефону не нужны 3-МБ простыни,
+# а детали схем на 1600px сохраняются.
+MAX_DIM = 1600
 
 BASES = {
     "soc": "https://soc-ege.sdamgia.ru",
@@ -114,6 +117,22 @@ def _img_label(seg: str, m: re.Match) -> str:
     return ""
 
 
+def _images_zone_start(head: str, body_start: int) -> int:
+    """То же, что images_zone_start из sdamgia_import (копия, чтобы скрипт
+    оставался автономным): рисунок может лежать в непосредственно
+    предшествующем pbody-блоке."""
+    opens = list(re.finditer(r'<div[^>]*class="pbody"[^>]*>', head[:body_start]))
+    if not opens:
+        return body_start
+    prev = opens[-1].start()
+    gap = head[prev:body_start]
+    if len(gap) > 2000 or "<script" in gap.lower():
+        return body_start
+    if "<img" not in gap:
+        return body_start
+    return prev
+
+
 def condition_images(base: str, pid: str) -> list[dict]:
     page = get_text(f"{base}/problem?id={pid}")
     anchor = re.search(r'id="soltb\d+"', page)
@@ -121,12 +140,12 @@ def condition_images(base: str, pid: str) -> list[dict]:
     m = re.search(r'id="body\d+"[^>]*class="pbody"[^>]*>', head)
     if not m:
         raise RuntimeError(f"{pid}: нет блока условия")
-    seg = head[m.end():]
+    seg = head[_images_zone_start(head, m.start()):]
     entries: list[dict] = []
     seen: set[str] = set()
     for found in re.finditer(r'<img[^>]*src="([^"]+)"[^>]*>', seg):
         src = found.group(1)
-        if src in seen:
+        if not src or src in seen:
             continue
         seen.add(src)
         entries.append({"src": src, "label": _img_label(seg, found)})
@@ -364,6 +383,10 @@ def import_task(subject: str, pid: str, scale: float = 2.5,
                     bbox = diff.point(lambda p: 255 if p > 8 else 0).getbbox()
                     if bbox:
                         im = im.crop(bbox)
+                # Тяжёлые простыни ужимаем до MAX_DIM: детали на 1600px целы,
+                # а вес падает в разы (живой случай — схемы био по 3.4 МБ).
+                if max(im.size) > MAX_DIM:
+                    im.thumbnail((MAX_DIM, MAX_DIM), Image.LANCZOS)
                 im.save(png, optimize=True)
                 raw.unlink(missing_ok=True)
         except Exception as exc:
@@ -387,6 +410,15 @@ def import_task(subject: str, pid: str, scale: float = 2.5,
         entry = {"file": str(final.relative_to(ROOT)), "kind": "stitched",
                  "urls": urls, "width": w, "height": h, "parts": len(srcs),
                  "labels": labels}
+    # Финальное ужимание любым путём (склейка и SVG-растер тоже бывают
+    # простынями): детали на 1600px целы, вес падает в разы.
+    from PIL import Image as _PILImage
+    with _PILImage.open(final) as _im:
+        if max(_im.size) > MAX_DIM:
+            _im = _im.convert("RGB")
+            _im.thumbnail((MAX_DIM, MAX_DIM), _PILImage.LANCZOS)
+            _im.save(final, optimize=True)
+            entry["width"], entry["height"] = _im.size
     return {"id": f"{subject}-src{pid}", **entry}
 
 
