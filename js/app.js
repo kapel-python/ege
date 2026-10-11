@@ -4274,11 +4274,20 @@ function openSkillModal(skillId) {
     </div>
     ${(() => {
       const b = skillProgressBreakdown(skillId);
-      const thMax = b.lessonTotal ? 40 : 0;
-      const prMax = b.lessonTotal ? 60 : 100;
+      // Числа — жирным и основным цветом: на серой мелкой подписи
+      // полужирный b терялся, и «8 из 40» читалось как обычный текст.
+      const num = (v) => '<b style="font-weight:700;color:var(--text)">' + v + '</b>';
       const split = b.lessonTotal
-        ? 'теория <b>' + b.theory + '</b> из 40 · практика <b>' + b.practice + '</b> из 60'
-        : 'урока по теме нет — весь прогресс из практики: <b>' + b.practice + '</b> из 100';
+        ? 'теория ' + num(b.theory) + ' из 40% · практика ' + num(b.practice) + ' из 60%'
+        : 'урока по теме нет — весь прогресс из практики: ' + num(b.practice) + ' из 100%';
+      /* Практика закрывается эталонным объёмом (PRACTICE_FULL_VOLUME = 12
+         качественных решений), а не размером банка миссии: 60% — это доля
+         освоения темы, а не 60% заданий. Без явной цифры это читалось как
+         «реши 60 заданий из миссии». */
+      const detail = typeof skillPracticeDetail === "function" ? skillPracticeDetail(skillId) : null;
+      const refNote = detail && detail.fullVolume
+        ? '<br>Практику закрывают ' + num(detail.fullVolume) + ' качественных решений' + (detail.bankSize > detail.fullVolume ? ' (весь банк темы — ' + num(detail.bankSize) + ')' : '') + '.'
+        : '';
       let hint;
       if (b.total >= 90) hint = 'Тема освоена.';
       else if (b.lessonTotal && b.lessonDone < b.lessonTotal) hint = 'Пройди урок — это сразу +40 к освоению.';
@@ -4288,7 +4297,7 @@ function openSkillModal(skillId) {
           ? 'До «освоена» (90%): примерно ' + k + ' ' + plural(k, 'верный ответ', 'верных ответа', 'верных ответов') + ' подряд.'
           : 'Точность сильно просела из-за старых ошибок — понадобится длинная серия верных ответов, чтобы её выправить.';
       }
-      return '<div style="margin-top:12px;font-size:13px;color:var(--muted)">Из чего складывается: ' + split + '.<br>' + hint + '</div>';
+      return '<div style="margin-top:12px;font-size:13px;color:var(--muted)">Из чего складывается: ' + split + '.' + refNote + '<br>' + hint + '</div>';
     })()}
 
     ${(majorChips || minorChips) ? `

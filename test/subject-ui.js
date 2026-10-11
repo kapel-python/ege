@@ -482,6 +482,17 @@ check(
   && skillModalHtml.includes("Задание "),
   skillModalHtml.includes("Типичные ошибки") ? "modal ok" : "no modal",
 );
+/* Разбор освоения («Из чего складывается»): проценты видны, числа —
+   жирным, а объём практики назван явно (эталонные 12 качественных
+   решений, а не «60% заданий миссии»). */
+check(
+  "SKILL modal breakdown shows percentages and the reference practice volume",
+  skillModalHtml.includes("из 40%")
+  && skillModalHtml.includes("из 60%")
+  && skillModalHtml.includes("font-weight:700")
+  && /Практику закрывают <b[^>]*>\d+<\/b> качественных решений/.test(skillModalHtml),
+  "",
+);
 // Русский: у r10 условие одинаково у 230 заданий (по всем темам), но разбор
 // ОДНОЙ ошибки обязан вести именно на исходное задание, а не на «похожее» с
 // тем же условием. Иначе окно лжёт про «исходное недоступно».
