@@ -431,6 +431,21 @@ check(
   errorsScreen.expandedCount === 12 && errorsScreen.expandedHtml.includes("Свернуть"),
   `expanded=${errorsScreen.expandedCount}`,
 );
+// Внутри открытого блока — конкретные задания, а не обрывок условия:
+// «Задание №3 · 3 из 100» вместо цитаты «Открытая ошибка» и т.п.
+const openErrorLabel = sandbox.taskErrorLabel({ taskId: "n03_p3", skill: "n03_stereometry", sub: "Открытая ошибка" });
+check(
+  "ERRORS task label names the EGE task and its position, not the prompt text",
+  /^Задание №3 · \d+ из \d+$/.test(openErrorLabel) && !openErrorLabel.includes("Открытая"),
+  openErrorLabel,
+);
+check(
+  "ERRORS open block chips show concrete tasks, not prompt excerpts",
+  errorsHtml.includes("Задание №3") && errorsHtml.includes("из 100")
+  && errorsHtml.includes("Задания:")
+  && !errorsHtml.includes("Открытая ошибка"),
+  openErrorLabel,
+);
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
 // уведомления. Параллельно проверяем, что обычные достижения по-прежнему видны.

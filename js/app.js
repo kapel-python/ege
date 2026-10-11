@@ -4203,21 +4203,30 @@ function openLockedSkillModal(skillId) {
     </div>`, "Информация о закрытой теме");
 }
 
-/* Подпись ошибки: «подтема · задание N из M». Текст задания не цитируем —
-   в подписях была простыня обрывков условий. Номер — позиция задания внутри
-   темы (совпадает с порядком практики), поэтому ошибку можно найти. */
+/* Подпись ошибки для списков: «Задание №14 · 5 из 100».
+   Текст задания не цитируем: обрывок условия («В одном из выделенных…»)
+   встречается у десятков вариантов одной темы и ничего не говорит о том,
+   какое задание имеется в виду. Конкретика — номер задания ЕГЭ и позиция
+   внутри темы (тот же порядок практики, что видит ученик), поэтому пункт
+   можно найти. Unknown-задание (нет в каталоге) — остаётся подпись по теме. */
 function taskErrorLabel(error) {
   if (!error) return "";
+  const skill = error.skill && typeof DataAPI !== "undefined" && DataAPI.skill
+    ? DataAPI.skill(String(error.skill)) : null;
   const task = error.taskId && typeof DataAPI !== "undefined" && DataAPI.task
     ? DataAPI.task(String(error.taskId)) : null;
-  if (!task) return String(error.sub || "").trim();
-  const skillId = String(task.skill || "");
+  const ege = String((skill && (skill.ege || skill.examNumber)) || (task && task.num) || "").trim();
   let list = [];
-  try { list = (DataAPI.tasksBySkill ? DataAPI.tasksBySkill(skillId) : []).slice(); } catch (_) { list = []; }
-  const index = list.findIndex((t) => t && String(t.id) === String(task.id));
-  const sub = String(task.sub || "").trim();
-  const pos = index >= 0 ? `задание ${index + 1} из ${list.length}` : "";
-  return [sub, pos].filter(Boolean).join(" · ") || "задание";
+  try {
+    list = typeof practiceTaskIdsForSkill === "function" ? practiceTaskIdsForSkill(error.skill) : [];
+  } catch (_) { list = []; }
+  const index = list.findIndex((id) => String(id) === String(error.taskId));
+  // Задание выпало из каталога (тема переименована/удалена): конкретики нет,
+  // оставляем сохранённую подпись, чтобы пункт не превратился в «Задание».
+  if (!ege && index < 0) return String(error.sub || "").trim() || "Задание";
+  const head = ege ? `Задание ${ege}` : "Задание";
+  const pos = index >= 0 ? `${index + 1} из ${list.length}` : "";
+  return [head, pos].filter(Boolean).join(" · ");
 }
 
 function openSkillModal(skillId) {
@@ -8419,8 +8428,12 @@ function screenErrors(root) {
       const sk = skillId ? DataAPI.skill(skillId) : null;
       const title = sk ? sk.name : ((list[0] && list[0].sub) || "Тема обновлена");
       const ege = sk ? (sk.ege || "") : "";
-      const subs = {};
-      list.forEach((e) => { const s = (e && e.sub) || "без темы"; subs[s] = (subs[s] || 0) + 1; });
+      // Внутри блока — конкретные задания, а не обрывки условий: у многих
+      // вариантов одной темы условие начинается одинаково, и по нему нельзя
+      // понять, что именно решать. Подпись: «Задание №14 · 5 из 100».
+      const ordered = list.slice().sort((a, b) =>
+        String((a && a.taskId) || "").localeCompare(String((b && b.taskId) || ""), undefined, { numeric: true }));
+      const labels = ordered.map((e) => taskErrorLabel(e)).filter(Boolean);
       return `
       <div class="card error-group">
         <div class="error-group__head">
@@ -8428,9 +8441,9 @@ function screenErrors(root) {
           ${ege ? `<span class="chip">${esc(ege)}</span>` : ""}
           <div class="error-group__count"><span class="chip ${chipClass}">${list.length} ${plural(list.length, ...word)}</span></div>
         </div>
-        <div style="font-size:13px;color:var(--muted);margin-top:6px">Частые проблемы:</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Задания:</div>
         <div class="error-subtopics">
-          ${Object.entries(subs).map(([sub, n]) => `<span class="chip ${chipClass}">${esc(sub)}${n > 1 ? ` ×${n}` : ""}</span>`).join("")}
+          ${labels.map((label) => `<span class="chip ${chipClass}">${esc(label)}</span>`).join("") || `<span class="chip ${chipClass}">без темы</span>`}
         </div>
       </div>`;
     }).join("");
