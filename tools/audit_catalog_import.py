@@ -31,10 +31,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 # Строгий HTML-тег: только известные теги, иначе «<iostream>» из C++ и «<» из
-# математики дают ложное срабатывание.
+# математики дают ложное срабатывание. После имени тега обязаны идти
+# пробел, слэш или '>' — иначе «a<0; a>2» читается как тег <a>.
 HTML_TAG = re.compile(
     r"</?(?:div|span|p|br|hr|a|b|i|u|em|strong|ul|ol|li|table|thead|tbody"
-    r"|tr|td|th|img|font|sup|sub|center|small|big|script|style)\b[^>\n]*>",
+    r"|tr|td|th|img|font|sup|sub|center|small|big|script|style)(?=[\s/>])[^>\n]*>",
     re.I)
 ENTITY = re.compile(r"&(nbsp|amp|quot|lt|gt|laquo|raquo|mdash|ndash|hellip|#\d+);")
 UI_RESIDUE = re.compile(
@@ -110,16 +111,29 @@ def audit_catalog(path: Path) -> tuple[list[str], list[str]]:
     for a_id in used - referenced:
         hard.append(f"{name}: осиротевший ассет {a_id}")
 
-    # дубли текста
+    # дубли текста. В математике у заданий-картинок текст — типовая
+    # подводка («Решите уравнение»), а различает их рисунок: такие дубли
+    # легитимны, если рисунки разные («близнецы»). Жёстко ловим: дубли
+    # в вычищенных предметах (общество, профиль), совпавший рисунок везде.
+    STRICT_DUPES = {"catalog_society.json", "catalog.json"}
     seen: dict[str, list[str]] = {}
+    visuals: dict[str, str | None] = {}
     for t in tasks:
         k = norm(t.get("text"))
         if k:
             seen.setdefault(k, []).append(t.get("id"))
+            visuals[t.get("id")] = (t.get("visual") or {}).get("assetId")
     for k, ids in seen.items():
         if len(ids) > 1:
+            vis = [visuals[i] for i in ids]
+            twins = len(set(vis)) == len(vis) and all(v is not None for v in vis)
             msg = f"{name}: дубли текста: {ids}"
-            (hard if is_society else soft).append(msg)
+            if twins:
+                soft.append(msg + " (близнецы: разные рисунки)")
+            elif is_society or name in STRICT_DUPES:
+                hard.append(msg)
+            else:
+                soft.append(msg)
 
     return hard, soft
 

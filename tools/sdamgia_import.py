@@ -107,6 +107,40 @@ def problem_ids(base: str, test_id: str) -> list[str]:
     return ids
 
 
+# Формулы источника в математике лежат картинками
+# `<img class="tex" ... alt="...">`: alt — словесное описание формулы
+# («2 в степени левая круглая скобка …»), без него в тексте остаются дыры
+# («а) Решите уравнение  б) Укажите корни»). Подставляем alt прямо в текст,
+# скобочные слова сворачиваем в настоящие скобки — это детерминировано и
+# безопасно, сами слова формул не трогаем.
+BRACKET_WORDS = (
+    ("левая круглая скобка", "("), ("правая круглая скобка", ")"),
+    ("левая квадратная скобка", "["), ("правая квадратная скобка", "]"),
+    ("левая фигурная скобка", "{"), ("правая фигурная скобка", "}"),
+)
+# Маркер формулы-картинки источника (инлайн-TeX и /formula/-растры).
+TEX_RE = re.compile(r'class="tex"|/formula/')
+
+
+def _formula_alt(match: re.Match) -> str:
+    tag = match.group(0)
+    if 'class="tex"' not in tag and "/formula/" not in tag:
+        return " "
+    found = re.search(r'alt="([^"]*)"', tag)
+    if not found:
+        return " "
+    alt = html.unescape(found.group(1)).replace("­", "")
+    for ru, en in BRACKET_WORDS:
+        alt = alt.replace(ru, en)
+    alt = re.sub(r"\s+", " ", alt).strip().rstrip(".").strip()
+    return f" ({alt}) " if alt else " "
+
+
+def sub_formula_alt(raw: str) -> str:
+    """Инлайновые формулы-рисунки -> их словесный alt-текст в скобках."""
+    return re.sub(r"<img\b[^>]*>", _formula_alt, raw)
+
+
 def strip_markup(raw: str) -> str:
     """HTML источника -> чистый текст: без софт-переносов и узких пробелов."""
     text = raw
@@ -134,6 +168,8 @@ def strip_markup(raw: str) -> str:
     text = re.sub(r"(?m)^[ \t]*(?:\|[ \t]*)+", "", text)
     text = re.sub(r"(?:[ \t]*\|)+[ \t]*$", "", text)
     text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"\s+\)", ")", text)
     text = re.sub(r"\n\s*\n+", "\n", text)
     return text.strip()
 
@@ -184,8 +220,20 @@ def parse_problem(base: str, pid: str) -> dict:
     if not body:
         raise RuntimeError(f"задание {pid}: не найден блок условия")
     condition_raw = head[body.end():]
+    # Флаги строгого отбора — ДО подмены формул текстом (иначе меток нет).
+    # Проверяем строго по тегам <img>, а не подстрокой по куску HTML: иначе
+    # ловим мусор из ссылок и кнопок между условием и пояснением.
+    cond_tags = re.findall(r"<img\b[^>]*>", condition_raw)
+    n_img = len(cond_tags)
+    cond_fig = any("get_file" in (re.search(r'src="([^"]*)"', t) or [ "", ""])[1]
+                   for t in cond_tags)
+    cond_tex = any('class="tex"' in t or "/formula/" in t for t in cond_tags)
+    condition_raw = sub_formula_alt(condition_raw)
 
     solution_raw = _solution_block(page, anchor.start())
+    sol_tex = any('class="tex"' in t or "/formula/" in t
+                  for t in re.findall(r"<img\b[^>]*>", solution_raw))
+    solution_raw = sub_formula_alt(solution_raw)
     # На источнике в конце блока решения идёт «Правило: …» — для нашей
     # подсказки оно не нужно, режем по маркеру.
     solution_raw = re.split(r"<img class=\"nodraw\"", solution_raw)[0]
@@ -203,8 +251,12 @@ def parse_problem(base: str, pid: str) -> dict:
     # id="textNNN": он не входит в блок вопроса, поэтому приклеиваем его сверху.
     passage = ""
     pm = re.search(r'id="text\d+"', page)
+    pass_tex = False
     if pm:
-        passage = strip_markup(extract_div(page, pm))
+        frag = extract_div(page, pm)
+        pass_tex = any('class="tex"' in t or "/formula/" in t
+                       for t in re.findall(r"<img\b[^>]*>", frag))
+        passage = strip_markup(sub_formula_alt(frag))
         if passage:
             text = passage + "\n\n" + text
     solution = strip_markup(solution_raw)
@@ -219,8 +271,14 @@ def parse_problem(base: str, pid: str) -> dict:
     # Хвостовая кнопка источника у развёрнутых заданий («Спрятать критерии»).
     solution = re.sub(r"\s*Спрятать (?:критерии|пояснение)\s*$", "", solution).strip()
 
-    images = len(re.findall(r"<img", condition_raw))
+    images = n_img
     tables = len(re.findall(r"<table", condition_raw, re.I))
+    # Флаги для строгого отбора без повторного скачивания страницы:
+    # has_figure — настоящий рисунок (чертёж/график, get_file) в условии;
+    # has_formula — формула-картинка (class="tex", /formula/) в условии,
+    # про passages или решении. Такие задания в банк не идут.
+    has_figure = cond_fig
+    has_formula = cond_tex or sol_tex or pass_tex
     return {
         "src_id": pid,
         "condition": text,
@@ -229,6 +287,8 @@ def parse_problem(base: str, pid: str) -> dict:
         "url": f"{base}/problem?id={pid}",
         "images": images,
         "tables": tables,
+        "has_figure": has_figure,
+        "has_formula": has_formula,
     }
 
 

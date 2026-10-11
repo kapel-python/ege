@@ -16,8 +16,14 @@ const testBody = async () => {
   t("все задания миссий существуют", DataAPI.missions().every((m) => m.tasks.every((id) => !!DataAPI.task(id))));
   t("диагностические задания существуют", DataAPI.diagnosticTasks().every((id) => !!DataAPI.task(id)));
   t("у каждого задания есть содержание", DataAPI.tasks().every((x) => (x.hint || (x.hints && x.hints.length)) && x.solution && x.text && x.answer));
-  t("каталог содержит 300 задач (80 официальных + 63 с Решу ЕГЭ + 157 аналогов)", DataAPI.tasks().length === 300);
+  t("каталог содержит 1855 задач (1775 с Решу ЕГЭ + 80 официальных, без аналогов)",
+    DataAPI.tasks().length === 1855
+    && DataAPI.tasks().every((x) => x.status !== "author-analog" && x.status !== "analog-openbank"));
   t("каждый из 20 номеров ЕГЭ представлен", DataAPI.skills().every((s) => DataAPI.tasksBySkill(s.id).length > 0));
+  t("темы держат ~100 заданий (№6 — 86, №13 — 31, №17 — 38: потолок источника)",
+    DataAPI.skills().every((s) => { const n = DataAPI.tasksBySkill(s.id).length;
+      return n === 100 || (s.id === "n06_random_var" && n === 86)
+        || (s.id === "n13_financial" && n === 31) || (s.id === "n17_optimization" && n === 38); }));
   // Каждый навык держит минимум 5 заданий — страница статуса показывает
   // профиль на уровне остальных предметов (всего > 120).
   t("у каждого навыка есть >= 5 заданий", DataAPI.skills()
@@ -29,10 +35,9 @@ const testBody = async () => {
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
   const visualAssets = DataAPI.visualAssets();
   t("реестр visual assets загружен", visualAssets.length >= 4 && visualAssets.every((asset) => asset.src && asset.type && asset.alt && asset.source && asset.sourceId));
-  t("реестр visual assets поддерживает SVG/PNG/JPG", ["svg", "image", "image"].every((type, index) => visualAssets[index].type === type)
-    && visualAssets.some((asset) => asset.src.endsWith(".svg"))
-    && visualAssets.some((asset) => asset.src.endsWith(".png"))
-    && visualAssets.some((asset) => asset.src.endsWith(".jpg")));
+  t("реестр visual assets — только PNG-рисунки источника (1306)",
+    visualAssets.length === 1306
+    && visualAssets.every((asset) => asset.type === "image" && /\.png(\?|$)/.test(asset.src)));
   t("аудит визуальных условий сохранён", DataAPI.visualAudit().defaultStatus === "text-only"
     && DataAPI.visualAudit().taskStatuses.n02_p2 === "visual-optional"
     && ["n02_p1", "n09_p1", "n09_p2", "n09_p3", "n12_p2"].every((id) => DataAPI.visualAudit().taskStatuses[id] === "visual-provided")
