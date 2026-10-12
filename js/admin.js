@@ -5405,9 +5405,10 @@ function openNewsCreateSheet(reload) {
   });
 }
 
-/* Лёгкий редактор в духе teletype: contenteditable + execCommand, без внешних
-   библиотек. Кнопки — переключатели: повторный клик снимает оформление
-   (Ж/К/Ч/З, H2/H3, цитата — тумблеры, списки переключаются сами).
+/* Лёгкий редактор в духе teletype: contenteditable без внешних библиотек.
+   Жирный/курсив/подчёркнутый/зачёркнутый — прямое DOM-оборачивание (работает
+   везде, в отличие от execCommand bold), H2 и цитата — тумблеры блоков.
+   Кнопки — переключатели: повторный клик снимает оформление.
    Пустой Enter в конце цитаты/заголовка выходит в обычный абзац. */
 function newsEditorToolbarHTML() {
   const b = (cmd, label, title) => `<button type="button" class="a-edbtn" data-ed="${cmd}" title="${esc(title || label)}" tabindex="-1">${label}</button>`;
@@ -5416,8 +5417,7 @@ function newsEditorToolbarHTML() {
     ${b("italic", "<i>К</i>", "Курсив (переключатель)")}
     ${b("underline", "<u>Ч</u>", "Подчёркнутый (переключатель)")}
     ${b("strike", "<s>З</s>", "Зачёркнутый (переключатель)")}
-    ${b("h2", "H2", "Заголовок (переключатель)")}
-    ${b("h3", "H3", "Подзаголовок (переключатель)")}
+    ${b("h2", "Заголовок", "Заголовок (переключатель)")}
     ${b("ul", "• Список", "Маркированный список (переключатель)")}
     ${b("ol", "1. Список", "Нумерованный список (переключатель)")}
     ${b("quote", "❝ Цитата", "Цитата (переключатель, пустой Enter — выход)")}
@@ -5473,7 +5473,7 @@ function newsEdUnwrapQuote(area, bq) {
   }
 }
 
-/* H2/H3 выкл: тот же блок становится обычным абзацем. */
+/* H2 выкл: тот же блок становится обычным абзацем. */
 function newsEdDowngradeHeading(block) {
   try {
     const p = document.createElement("p");
@@ -5483,6 +5483,97 @@ function newsEdDowngradeHeading(block) {
   } catch (e) {
     try { document.execCommand("formatBlock", false, "p"); } catch (_) {}
   }
+}
+
+/* Развернуть строчный тег: дети остаются, сам тег исчезает. */
+function newsEdUnwrap(el) {
+  const parent = el ? el.parentNode : null;
+  if (!parent) return [];
+  const kids = Array.from(el.childNodes);
+  kids.forEach((k) => parent.insertBefore(k, el));
+  el.remove();
+  return kids;
+}
+
+/* Ж/К/Ч/З вручную через DOM: выделение оборачиваем, повторный клик по тому
+   же оформлению — разворачиваем; пустой курсор внутри оформления — выходим
+   за него, вне — входим через пустую обёртку (невидимка чистится при
+   сохранении). Диапазон читаем ДО focus: в части браузеров focus роняет его. */
+function newsEdInlineFormat(area, tag) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) { try { area.focus(); } catch (e) {} return; }
+  let range = null;
+  try { range = sel.getRangeAt(0).cloneRange(); } catch (e) { try { area.focus(); } catch (_) {} return; }
+  if (range.commonAncestorContainer !== area && !area.contains(range.commonAncestorContainer)) {
+    try { area.focus(); } catch (e) {}
+    return;
+  }
+  try { area.focus(); } catch (e) {}
+  const TAG = tag.toUpperCase();
+  try {
+    if (range.collapsed) {
+      const el = newsEdInTag(area, range.startContainer, [TAG]);
+      if (el) {
+        // Выход из оформления: невидимка-разделитель за элементом и курсор
+        // за ней. Просто «курсор после <b>» не годится — браузер при печати
+        // наследует стиль соседнего оформления, и буква падает внутрь него.
+        // Невидимки чистятся при сохранении (newsEdCleanHtml).
+        const zw = document.createTextNode("\u200B");
+        el.after(zw);
+        const after = document.createRange();
+        after.setStartAfter(zw);
+        after.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(after);
+      } else {
+        const w = document.createElement(tag);
+        w.appendChild(document.createTextNode("\u200B"));
+        range.insertNode(w);
+        const r = document.createRange();
+        r.setStart(w.firstChild, 0);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+      return;
+    }
+    const sEl = newsEdInTag(area, range.startContainer, [TAG]);
+    const eEl = newsEdInTag(area, range.endContainer, [TAG]);
+    if (sEl && sEl === eEl) {
+      const kids = newsEdUnwrap(sEl);
+      const r = document.createRange();
+      if (kids.length) { r.setStartBefore(kids[0]); r.setEndAfter(kids[kids.length - 1]); }
+      else { r.setStart(range.startContainer, Math.min(range.startOffset, (range.startContainer.textContent || "").length)); r.collapse(true); }
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return;
+    }
+    const w = document.createElement(tag);
+    try {
+      range.surroundContents(w);
+    } catch (e) {
+      w.appendChild(range.extractContents());
+      range.insertNode(w);
+    }
+    const r = document.createRange();
+    r.selectNodeContents(w);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  } catch (e) { /* кривой диапазон — текст не трогаем */ }
+}
+
+/* Чистка HTML перед сохранением: невидимки входа в оформление и пустые
+   строчные обёртки. Серверный санитайзер всё равно режет лишнее следом. */
+function newsEdCleanHtml(html) {
+  try {
+    let s = String(html || "").replace(/\u200B/g, "");
+    for (let i = 0; i < 3; i++) {
+      const next = s.replace(/<(b|strong|i|em|u|s|strike|a|code)>(?:\s|<br\s*\/?>)*<\/\1>/gi, "");
+      if (next === s) break;
+      s = next;
+    }
+    return s.trim();
+  } catch (e) { return String(html || "").trim(); }
 }
 
 function newsEdToggleBlock(area, kind) {
@@ -5507,7 +5598,8 @@ function newsEdToggleBlock(area, kind) {
   try { document.execCommand("formatBlock", false, kind); } catch (e) {}
 }
 
-/* Подсветка активных кнопок под курсор. */
+/* Подсветка активных кнопок под курсор (предки, без queryCommandState:
+   оформление ставим вручную через DOM, ему и верим). */
 function newsEditorSyncToolbar(area) {
   try {
     const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
@@ -5516,17 +5608,18 @@ function newsEditorSyncToolbar(area) {
     if (!sel || !sel.rangeCount) return;
     const node = sel.anchorNode;
     if (!node || (node !== area && !area.contains(node))) return;
-    const q = (cmd) => { try { return document.queryCommandState(cmd); } catch (e) { return false; } };
+    const anc = (tags) => !!newsEdInTag(area, node, tags);
+    const blk = newsEdBlockOf(area, node);
+    const blkTag = blk ? (blk.tagName || "").toUpperCase() : "";
     const state = {
-      bold: q("bold"),
-      italic: q("italic"),
-      underline: q("underline"),
-      strike: q("strikeThrough") || q("strikethrough"),
-      h2: !!(newsEdBlockOf(area, node) && (newsEdBlockOf(area, node).tagName || "").toUpperCase() === "H2"),
-      h3: !!(newsEdBlockOf(area, node) && (newsEdBlockOf(area, node).tagName || "").toUpperCase() === "H3"),
-      ul: !!newsEdInTag(area, node, ["UL"]),
-      ol: !!newsEdInTag(area, node, ["OL"]),
-      quote: !!newsEdInTag(area, node, ["BLOCKQUOTE"]),
+      bold: anc(["B", "STRONG"]),
+      italic: anc(["I", "EM"]),
+      underline: anc(["U"]),
+      strike: anc(["S", "STRIKE", "DEL"]),
+      h2: blkTag === "H2",
+      ul: anc(["UL"]),
+      ol: anc(["OL"]),
+      quote: anc(["BLOCKQUOTE"]),
     };
     bar.querySelectorAll("[data-ed]").forEach((btn) => {
       btn.classList.toggle("on", !!state[btn.getAttribute("data-ed")]);
@@ -5584,43 +5677,84 @@ function newsEditorBindExit(area) {
   });
 }
 
+/* Вставка только текстом: из буфера не тащим чужие стили, классы и мусор —
+   переносы строк становятся абзацами. */
+function newsEditorBindPaste(area) {
+  area.addEventListener("paste", (e) => {
+    try {
+      e.preventDefault();
+      const clip = e.clipboardData || window.clipboardData;
+      const text = clip ? (clip.getData("text/plain") || "") : "";
+      if (!text) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (range.commonAncestorContainer !== area && !area.contains(range.commonAncestorContainer)) return;
+      area.focus();
+      const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+      const frag = document.createDocumentFragment();
+      lines.forEach((ln) => {
+        const p = document.createElement("p");
+        if (ln.trim() === "") p.innerHTML = "<br>";
+        else p.textContent = ln;
+        frag.appendChild(p);
+      });
+      const last = frag.lastChild;
+      if (area.textContent.trim() === "") {
+        area.innerHTML = "";
+        area.appendChild(frag);
+      } else {
+        range.deleteContents();
+        range.insertNode(frag);
+      }
+      if (last) newsPlaceCaret(last, false);
+      area.focus();
+      newsEditorSyncToolbar(area);
+    } catch (_) {}
+  });
+}
+
 function newsEditorBindToolbar(area) {
   const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
   if (!bar) return;
   A.newsEdArea = area;
-  area.addEventListener("keyup", () => newsEditorSyncToolbar(area));
-  area.addEventListener("mouseup", () => newsEditorSyncToolbar(area));
-  area.addEventListener("click", () => newsEditorSyncToolbar(area));
+  const sync = () => newsEditorSyncToolbar(area);
+  area.addEventListener("keyup", sync);
+  area.addEventListener("mouseup", sync);
+  area.addEventListener("click", sync);
+  area.addEventListener("input", sync);
   newsEditorBindExit(area);
+  newsEditorBindPaste(area);
+  const INLINE_TAG = { bold: "b", italic: "i", underline: "u", strike: "s" };
   bar.querySelectorAll("[data-ed]").forEach((btn) => {
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
-      area.focus();
       A.newsEdArea = area;
       const cmd = btn.getAttribute("data-ed");
       try {
-        if (cmd === "h2" || cmd === "h3" || cmd === "quote") newsEdToggleBlock(area, cmd);
+        if (INLINE_TAG[cmd]) newsEdInlineFormat(area, INLINE_TAG[cmd]);
+        else if (cmd === "h2" || cmd === "quote") newsEdToggleBlock(area, cmd);
         else if (cmd === "ul") document.execCommand("insertUnorderedList", false, null);
         else if (cmd === "ol") document.execCommand("insertOrderedList", false, null);
-        else if (cmd === "strike") {
-          if (!document.execCommand("strikeThrough", false, null)) document.execCommand("strikethrough", false, null);
-        } else if (cmd === "hr") document.execCommand("insertHorizontalRule", false, "");
+        else if (cmd === "hr") document.execCommand("insertHorizontalRule", false, "");
         else if (cmd === "link") {
+          area.focus();
           const url = window.prompt("Ссылка (https://…):", "https://");
           if (url == null) return;
           const href = String(url).trim();
           if (!/^https?:\/\/.+/i.test(href)) { toast("Нужна ссылка http(s)://", "err"); return; }
           document.execCommand("createLink", false, href);
         } else if (cmd === "cols") {
+          area.focus();
           document.execCommand("insertHTML", false,
             `<div class="news-cols"><div class="news-col">Колонка 1</div><div class="news-col">Колонка 2</div></div><p><br></p>`);
-        } else document.execCommand(cmd, false, null);
-      } catch (e) { /* execCommand может не поддерживаться — текст останется как есть */ }
-      area.focus();
-      setTimeout(() => newsEditorSyncToolbar(area), 0);
+        }
+      } catch (e) { /* неизвестная команда — текст не трогаем */ }
+      try { area.focus(); } catch (_) {}
+      setTimeout(sync, 0);
     });
   });
-  setTimeout(() => newsEditorSyncToolbar(area), 0);
+  setTimeout(sync, 0);
 }
 
 function newsToLocalInput(ms) {
@@ -5678,7 +5812,7 @@ function openNewsEditor(existing, reload) {
       const errBox = modal.querySelector("#mErr");
       errBox.innerHTML = "";
       const title = (modal.querySelector("#fNewsTitle").value || "").trim();
-      const bodyHtml = (area.innerHTML || "").trim();
+      const bodyHtml = newsEdCleanHtml(area.innerHTML);
       const showPage = pageBox.checked;
       const showModal = modalBox.checked;
       const untilRaw = (modal.querySelector("#fNewsUntil").value || "").trim();
@@ -5760,6 +5894,10 @@ async function screenNewsComposer(id) {
   area.innerHTML = (existing && existing.bodyHtml) || "";
   newsEditorBindToolbar(area);
   area.focus();
+  const titleInput = document.getElementById("cNewsTitle");
+  titleInput.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); area.focus(); }
+  };
   const pageBox = document.getElementById("cNewsPage");
   const modalBox = document.getElementById("cNewsModal");
   const untilWrap = document.getElementById("cNewsUntilWrap");
@@ -5769,7 +5907,7 @@ async function screenNewsComposer(id) {
     const errBox = document.getElementById("cErr");
     errBox.innerHTML = "";
     const title = (document.getElementById("cNewsTitle").value || "").trim();
-    const bodyHtml = (area.innerHTML || "").trim();
+    const bodyHtml = newsEdCleanHtml(area.innerHTML);
     const showPage = pageBox.checked;
     const showModal = modalBox.checked;
     const untilRaw = (document.getElementById("cNewsUntil").value || "").trim();

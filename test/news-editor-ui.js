@@ -74,6 +74,37 @@ window.__area = area;
     await page.waitForFunction(() => !!window.__area);
 
     t("нет кнопки Очистить", await page.$('[data-ed="clear"]') === null);
+    t("нет кнопки H3", await page.$('[data-ed="h3"]') === null);
+
+    // Ж: выделить слово, вкл, выкл повторным кликом.
+    await page.evaluate(() => {
+      const a = window.__area; a.innerHTML = "<p>жирный текст</p>"; a.focus();
+      const t0 = a.querySelector("p").firstChild;
+      const r = document.createRange(); r.setStart(t0, 0); r.setEnd(t0, 6);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.click('[data-ed="bold"]');
+    let h = await page.evaluate(() => window.__area.innerHTML);
+    t("Ж делает жирным", /<b>жирный<\/b>/.test(h), h);
+    // Выделение после оборачивания остаётся — повторный клик снимает.
+    await page.click('[data-ed="bold"]');
+    h = await page.evaluate(() => window.__area.innerHTML);
+    t("Ж выкл повторным кликом", !/<b>|<strong>/.test(h), h);
+
+    // Ж с пустым курсором: вкл -> печать жирным -> выкл -> печать обычным.
+    await page.evaluate(() => {
+      const a = window.__area; a.innerHTML = "<p><br></p>"; a.focus();
+      const p = a.querySelector("p");
+      const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.click('[data-ed="bold"]');
+    await page.keyboard.type("ABC");
+    await page.click('[data-ed="bold"]');
+    await page.keyboard.type("def");
+    h = await page.evaluate(() => window.__area.innerHTML);
+    t("печать жирным и выход из него",
+      /<b>ABC\u200B<\/b>\u200Bdef/.test(h) && !/<b>[^<]*def/.test(h), h);
 
     await page.evaluate(() => {
       const a = window.__area; a.innerHTML = "<p>hello world</p>"; a.focus();
@@ -81,7 +112,7 @@ window.__area = area;
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     });
     await page.click('[data-ed="italic"]');
-    let h = await page.evaluate(() => window.__area.innerHTML);
+    h = await page.evaluate(() => window.__area.innerHTML);
     t("курсив вкл", /<i>hello world<\/i>/.test(h), h);
     await page.click('[data-ed="italic"]');
     h = await page.evaluate(() => window.__area.innerHTML);
@@ -157,6 +188,21 @@ window.__area = area;
     await page.click('[data-ed="cols"]');
     h = await page.evaluate(() => window.__area.innerHTML);
     t("колонки вставлены", /news-cols/.test(h) && /news-col/.test(h), h.slice(0, 200));
+
+    // Вставка из буфера — только текст абзацами, разметка источника выкинута.
+    const pasted = await page.evaluate(() => {
+      const a = window.__area; a.innerHTML = ""; a.focus();
+      const dt = new DataTransfer();
+      dt.setData("text/html", '<b style="color:red" class="x">Цвет</b>');
+      dt.setData("text/plain", "Первая\nВторая");
+      a.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+      return a.innerHTML;
+    });
+    t("вставка только текстом", /<p>Первая<\/p><p>Вторая<\/p>/.test(pasted) && !/style=|class=/.test(pasted), pasted);
+
+    // Чистка перед сохранением: невидимки и пустые обёртки исчезают.
+    const cleaned = await page.evaluate(() => newsEdCleanHtml("<p><b>\u200B</b>ok</p><p><i></i></p>"));
+    t("clean убирает мусор", cleaned === "<p>ok</p><p></p>", JSON.stringify(cleaned));
   } finally {
     await browser.close();
   }
