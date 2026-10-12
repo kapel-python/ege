@@ -574,8 +574,11 @@ check(
   sandbox.dashHtml.includes("openSkillModal(") && !sandbox.dashHtml.includes("go('skill'"),
   sandbox.dashHtml.includes("go('skill'") ? "still navigates" : "in place",
 );
-/* «Слабое место» — только после настоящего провала. Пропуск задания в
-   нетронутой теме (0% освоения, точность 0/1) больше не делает тему слабой. */
+/* «Слабое место» — только при ненулевом освоении и настоящем провале.
+   Пропуск задания в нетронутой теме (0% освоения, точность 0/1) — «в процессе».
+   Один неверный ответ без единого верного (те же 0%) — тоже «в процессе»:
+   судить пока не по чему. Слабая — только тема, где уже есть зачётный
+   прогресс (верные ответы / шаги урока), но точность низкая. */
 vm.runInContext(`
   DataAPI.load(russianPayload);
   Store.subject = "russian";
@@ -585,15 +588,23 @@ vm.runInContext(`
   Store.state.taskAttempts = [{ taskId: "r10_1", skill: "r10", correct: false, hintLevel: 0, skipped: true }];
   globalThis.skipStatus = skillStatus(DataAPI.skill("r10"));
   Store.state.taskAttempts = [{ taskId: "r10_1", skill: "r10", correct: false, hintLevel: 0, skipped: false }];
-  globalThis.wrongStatus = skillStatus(DataAPI.skill("r10"));
+  globalThis.zeroStatus = skillStatus(DataAPI.skill("r10"));
+  Store.state.skillStats = { r10: { progress: 5, solved: 3, correct: 1, timeSec: 0 } };
+  Store.state.taskAttempts = [
+    { taskId: "r10_1", skill: "r10", correct: true, hintLevel: 0 },
+    { taskId: "r10_2", skill: "r10", correct: false, hintLevel: 0, skipped: false },
+    { taskId: "r10_3", skill: "r10", correct: false, hintLevel: 0, skipped: false },
+  ];
+  globalThis.realWeakStatus = skillStatus(DataAPI.skill("r10"));
   Store.state.taskAttempts = [];
   Store.state.skillStats = { r10: { progress: 0, solved: 0, correct: 0, timeSec: 0 } };
   globalThis.touchedNothing = skillStatus(DataAPI.skill("r10"));
 `, sandbox);
 check(
-  "PATH weak status requires a real mistake, not a skip",
-  sandbox.skipStatus === "in-progress" && sandbox.wrongStatus === "weak" && sandbox.touchedNothing === "not-started",
-  `skip=${sandbox.skipStatus}, wrong=${sandbox.wrongStatus}, empty=${sandbox.touchedNothing}`,
+  "PATH weak status needs progress above zero, not just a mistake",
+  sandbox.skipStatus === "in-progress" && sandbox.zeroStatus === "in-progress"
+  && sandbox.realWeakStatus === "weak" && sandbox.touchedNothing === "not-started",
+  `skip=${sandbox.skipStatus}, zero=${sandbox.zeroStatus}, weak=${sandbox.realWeakStatus}, empty=${sandbox.touchedNothing}`,
 );
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
