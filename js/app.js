@@ -12101,11 +12101,15 @@ const Onboarding = {
     const diagnosticTasks = DataAPI.diagnosticTasks();
     const t = DataAPI.task(diagnosticTasks[this.diagIdx]);
     this.diagAnswered = false;
+    // Подпись темы — имя навыка («№1 — Даты: события и годы»), а не первые
+    // слова условия (t.sub): так же, как в разборе ошибок и окне темы.
+    const sk = t && t.skill ? DataAPI.skill(t.skill) : null;
+    const topic = sk && sk.name ? sk.name : t.sub;
     body.innerHTML = `
       <div class="onboard-title" style="font-size:20px">Диагностика · ${this.diagIdx + 1} / ${diagnosticTasks.length}</div>
       <div class="onboard-sub">Короткий тест из ${diagnosticTasks.length} ${plural(diagnosticTasks.length, "задание", "задания", "заданий")} по разным темам — по нему построим карту навыков.</div>
       <div class="card task-card" style="margin-top:18px;padding:20px">
-        <div class="task-card__tags"><span class="chip chip--accent">${t.num}</span><span class="chip">${esc(t.sub)}</span></div>
+        <div class="task-card__tags"><span class="chip chip--accent">${t.num}</span><span class="chip">${esc(topic)}</span></div>
         <div class="task-card__text" style="font-size:15px">${mathText(t.text)}</div>
         ${taskVisualHtml(t, "diagnostic")}
         <div class="answer-row">
