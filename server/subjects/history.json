@@ -1,0 +1,123 @@
+{
+ "id": "history",
+ "title": "История",
+ "short": "История",
+ "description": "История (ЕГЭ): все 21 задание экзамена — даты и факты, деятели и культура, карты и изображения, источники, причинно-следственные связи, понятия, аргументы и тезис. Практика с кратким и развёрнутым ответом, прогноз баллов.",
+ "status": "ready",
+ "locked": false,
+ "comingSoon": false,
+ "availability": "ready",
+ "order": 6,
+ "catalogFile": "catalog_history.json",
+ "level": {
+  "id": "history",
+  "subjectId": "history",
+  "name": "История"
+ },
+ "forecast": {
+  "weights": {
+   "h01_dates": 2,
+   "h02_chrono": 1,
+   "h03_facts": 2,
+   "h04_table": 3,
+   "h05_persons": 2,
+   "h06_source": 2,
+   "h07_culture": 2,
+   "h08_image": 1,
+   "h09_map": 1,
+   "h10_map": 1,
+   "h11_maptext": 1,
+   "h12_mapchoice": 2,
+   "h13_attr": 2,
+   "h14_search": 2,
+   "h15_imgout": 2,
+   "h16_wow": 2,
+   "h17_causes": 3,
+   "h18_terms": 3,
+   "h19_termfact": 2,
+   "h20_args": 3,
+   "h21_thesis": 3
+  },
+  "total": 42,
+  "scale": [
+   0,
+   4,
+   8,
+   12,
+   16,
+   20,
+   24,
+   28,
+   32,
+   34,
+   37,
+   39,
+   42,
+   44,
+   46,
+   49,
+   51,
+   54,
+   56,
+   59,
+   61,
+   62,
+   63,
+   65,
+   66,
+   67,
+   68,
+   70,
+   71,
+   72,
+   74,
+   76,
+   78,
+   81,
+   83,
+   85,
+   87,
+   88,
+   90,
+   92,
+   95,
+   98,
+   100
+  ]
+ },
+ "features": {
+  "lessons": false,
+  "practice": true,
+  "forecast": true,
+  "diagnostics": true,
+  "missions": true,
+  "bosses": true,
+  "daily": true,
+  "path": true
+ },
+ "metadata": {
+  "genitive": "истории",
+  "accusative": "историю",
+  "availability": "ready",
+  "topic": "Все 21 задание ЕГЭ по истории",
+  "topicCount": 21,
+  "scaleNote": "provisional"
+ },
+ "content": {
+  "topics": {
+   "source": "catalog",
+   "keys": [
+    "categories",
+    "skills"
+   ]
+  },
+  "preparationVariants": {
+   "source": "catalog",
+   "key": "goals"
+  },
+  "onboarding": {
+   "source": "catalog",
+   "key": "diagnosticTasks"
+  }
+ }
+}

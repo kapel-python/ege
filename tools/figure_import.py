@@ -48,11 +48,13 @@ BASES = {
     "mathb": "https://mathb-ege.sdamgia.ru",
     "math": "https://math-ege.sdamgia.ru",
     "rus": "https://rus-ege.sdamgia.ru",
+    "his": "https://hist-ege.sdamgia.ru",
 }
 # Каталоги ассетов (в каталоге base-математика ссылается на assets/basic,
 # поэтому имя каталога не совпадает с кодом предмета).
 ASSET_DIR = {"soc": "society", "bio": "biology", "inf": "informatics",
-             "mathb": "basic", "math": "math", "rus": "russian"}
+             "mathb": "basic", "math": "math", "rus": "russian",
+             "his": "history"}
 
 CHROME = next(
     (Path(p) / "chrome-headless-shell" for p in (

@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CATALOGS = ["catalog.json", "catalog_basic.json", "catalog_society.json",
             "catalog_informatics.json", "catalog_biology.json",
-            "catalog_russian.json"]
+            "catalog_russian.json", "catalog_history.json"]
 
 
 def main() -> int:

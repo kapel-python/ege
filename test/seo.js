@@ -160,7 +160,7 @@ t("сайт: модалка спрашивает только при выбра�
 t("сайт: confirm-диалог умеет onCancel (крестик/фон/Esc тоже отмена)", /onCancel/.test(appSrc) && /dlgCancelPending/.test(appSrc));
 t("сайт: падежи предмета из реестра (accusative)", /metadata\.accusative/.test(appSrc));
 for (const [sid, acc] of [["profile_math", "профильную математику"], ["basic_math", "базовую математику"],
-    ["russian", "русский язык"], ["biology", "биологию"], ["society", "обществознание"]]) {
+    ["russian", "русский язык"], ["biology", "биологию"], ["society", "обществознание"], ["history", "историю"]]) {
   t(`реестр ${sid}: винительный падеж «${acc}»`, (() => {
     try {
       const info = JSON.parse(read(`server/subjects/${sid}.json`));

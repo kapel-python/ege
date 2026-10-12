@@ -45,6 +45,7 @@ SUBJECTS = {
     "soc": "https://soc-ege.sdamgia.ru",
     "mathb": "https://mathb-ege.sdamgia.ru",
     "math": "https://math-ege.sdamgia.ru",
+    "his": "https://hist-ege.sdamgia.ru",
 }
 
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"
