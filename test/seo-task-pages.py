@@ -133,6 +133,39 @@ def main():
         st, headers, _ = get("/ege/russian/zadanie-17", follow=False)
         check("без слэша 301 на канон", st == 301, str(st))
 
+        st, headers, _ = get("/ege", follow=False)
+        check("/ege без слэша 301 на /ege/",
+              st == 301 and (headers.get("Location") or "") == "/ege/", f"{st} {headers.get('Location')}")
+        st, headers, _ = get("/ege//russian/", follow=False)
+        check("двойной слэш 301 на канон",
+              st == 301 and (headers.get("Location") or "") == "/ege/russian/", f"{st} {headers.get('Location')}")
+        st, headers, _ = get("/ege/russian/zadanie-017/", follow=False)
+        check("zadanie-017 301 на zadanie-17/",
+              st == 301 and (headers.get("Location") or "") == "/ege/russian/zadanie-17/",
+              f"{st} {headers.get('Location')}")
+        st, headers, _ = get("/ege/russian?utm_source=x", follow=False)
+        check("редирект сохраняет query",
+              st == 301 and (headers.get("Location") or "") == "/ege/russian/?utm_source=x",
+              f"{st} {headers.get('Location')}")
+        st, headers, _ = get("/ege?utm_source=x", follow=False)
+        check("/ege редирект сохраняет query",
+              st == 301 and (headers.get("Location") or "") == "/ege/?utm_source=x",
+              f"{st} {headers.get('Location')}")
+
+        # Окно практики на SEO: accept-альтернативы, тип задания, рисунок,
+        # доступность поля ввода, актуальный footer.
+        st, _, body = get("/ege/russian/zadanie-1/")
+        task1 = body.decode("utf-8", "replace")
+        check("SEO отдаёт accept-альтернативы (data-accept)", "data-accept" in task1)
+        check("SEO отдаёт тип задания (data-type)", "data-type" in task1)
+        check("поле ввода с aria-label и inputmode",
+              "aria-label='Ответ'" in task1 and "inputmode=" in task1)
+        check("shell с актуальным footer.js?v=9", "footer.js?v=9" in task1)
+        st, _, body = get("/ege/history/zadanie-8/")
+        hist8 = body.decode("utf-8", "replace")
+        check("задание с рисунком показывает рисунок (seo-visual)",
+              st == 200 and "seo-visual" in hist8 and "<img" in hist8, str(st))
+
         st, headers, body = get("/ege/nope/")
         check("неизвестный предмет 404", st == 404, str(st))
         check("404 с noindex", headers.get("X-Robots-Tag") == "noindex, nofollow",

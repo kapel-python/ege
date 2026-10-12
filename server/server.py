@@ -7859,16 +7859,32 @@ def _seo_exam_num(value) -> int | None:
 
 
 def _seo_subject_skills(conn: sqlite3.Connection, subject: str) -> list:
-    """Навыки предмета по возрастанию номера: [{id, name, num}]. Не бросает."""
+    """Навыки предмета по возрастанию номера: [{id, name, num}]. Не бросает.
+
+    Закрытые навыки/темы (locked/coming-soon, как в практике через
+    _subject_skill_ids + available_category_ids) страниц не получают:
+    иначе висячая индексируемая страница вне навигации и выдачи."""
+
     try:
         rows = conn.execute(
-            "SELECT id, name, ege FROM skills WHERE subject=? ORDER BY id", (subject,)
+            "SELECT s.id, s.name, s.ege, s.status, s.locked, s.coming_soon,"
+            " t.status AS topic_status, t.locked AS topic_locked"
+            " FROM skills s JOIN topics t ON t.id=s.topic_id"
+            " WHERE s.subject=? ORDER BY s.id", (subject,)
         ).fetchall()
     except sqlite3.Error:
         return []
     skills = []
     for row in rows or []:
-        num = _seo_exam_num((row["ege"] or ""))
+        try:
+            if bool(row["locked"]) or bool(row["coming_soon"]) \
+                    or bool(row["topic_locked"]) \
+                    or _status_is_locked(row["status"]) \
+                    or _status_is_locked(row["topic_status"]):
+                continue
+            num = _seo_exam_num((row["ege"] or ""))
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
         if num is None:
             continue
         skills.append({"id": str(row["id"]), "name": str(row["name"] or ""),
@@ -7913,6 +7929,37 @@ def _seo_skill_hints(conn: sqlite3.Connection, skill_id: str) -> list:
     return cleaned if len(cleaned) >= 3 else []
 
 
+def _seo_visual_src(conn: sqlite3.Connection, subject: str, asset_id: str) -> dict | None:
+    """Статичный рисунок задания для SEO-страницы: {src, alt} или None.
+
+    Практика резолвит task.visual.assetId через visualAssets каталога
+    (DataAPI.visualAsset); здесь тот же источник — app_config
+    visualAssets:<subject> (с legacy-фолбэком для базового предмета через
+    _subject_config). src вида assets/... уже с ?v= — сервер дописывает
+    ведущий слэш. Не бросает."""
+    asset_id = str(asset_id or "").strip()
+    if not asset_id:
+        return None
+    try:
+        assets = _subject_config(conn, "visualAssets", subject, [])
+    except Exception:
+        return None
+    if not isinstance(assets, list):
+        return None
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        if str(asset.get("id") or "") != asset_id:
+            continue
+        src = str(asset.get("src") or "").strip()
+        if not src:
+            return None
+        if not src.startswith("/"):
+            src = "/" + src.lstrip("/")
+        return {"src": src, "alt": str(asset.get("alt") or "Рисунок к заданию")}
+    return None
+
+
 def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
                       limit: int = 2) -> list:
     """Пара примеров заданий навыка для SEO-страницы.
@@ -7922,29 +7969,72 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
     что topicHintLevels в практике; фолбэк — подсказки задания, как
     hintLevelsFor), способ проверки (check:"self" — вторая часть сверяется
     с решением, без поля ввода), вес задания и формат ответа. Не бросает.
+
+    Честная выборка как в _build_catalog_payload: нерешаемое (locked,
+    visual.required без ассета) в примеры не попадает; задания с живым
+    mathVisual (интерактивная схема, ей нужен движок тренажёра) уходят
+    в конец очереди — берём решаемое без рисунка или со статичным
+    рисунком. Сочинения (long_text) идут отдельным флагом: у них нет
+    поля ввода, только текст + подсказки темы.
     """
     try:
         rows = conn.execute(
-            "SELECT t.statement, t.answer, t.hint, t.explanation,"
+            "SELECT t.id, t.statement, t.answer, t.hint, t.explanation,"
             " t.task_type, t.difficulty, t.metadata_json"
             " FROM tasks t JOIN skills s ON s.id=t.skill_id"
-            " WHERE s.subject=? AND t.skill_id=? ORDER BY t.id LIMIT ?",
-            (subject, skill_id, max(1, int(limit))),
+            " WHERE s.subject=? AND t.skill_id=? ORDER BY t.id LIMIT 8",
+            (subject, skill_id),
         ).fetchall()
     except (sqlite3.Error, ValueError, TypeError):
         return []
     topic_hints = _seo_skill_hints(conn, skill_id)
-    samples = []
+    candidates = []
     for r in (rows or []):
-        meta = _seo_task_meta(r["metadata_json"])
+        try:
+            meta = _seo_task_meta(r["metadata_json"])
+        except (KeyError, IndexError, TypeError):
+            continue
+        # locked-задания практика обычному пользователю не отдаёт вообще.
+        try:
+            if _catalog_item_state(meta)[1]:
+                continue
+        except Exception:
+            pass
+        # Рисунок обязателен, но в сборке его нет — задание нерешаемо
+        # (практика такие блокирует через task_has_missing_visual).
+        try:
+            if task_has_missing_visual(meta):
+                continue
+        except Exception:
+            pass
+        is_long = str(r["task_type"] or "") == "long_text"
+        has_live = isinstance(meta.get("mathVisual"), dict)
+        try:
+            row_id = str(r["id"] or "")
+        except (KeyError, IndexError, TypeError):
+            row_id = ""
+        candidates.append((is_long, has_live, row_id, r, meta))
+    # Сначала обычные решаемые (сочинения и живые схемы — в конец),
+    # внутри группы — стабильно по id, как раньше.
+    candidates.sort(key=lambda c: (c[0], c[1], c[2]))
+    samples = []
+    for _, _, _, r, meta in candidates[:max(1, int(limit))]:
         if topic_hints:
             hints = topic_hints
         else:
             hints = meta.get("hints")
             if not (isinstance(hints, list) and hints):
                 hints = [r["hint"]] if (r["hint"] or "").strip() else []
-        check = str(meta.get("check") or ("self" if meta.get("selfCheck") else "")) \
-            or str(r["task_type"] or "")
+        check = str(meta.get("check") or ("self" if meta.get("selfCheck") else "")
+                    or "auto")
+        is_long = str(r["task_type"] or "") == "long_text"
+        acc = meta.get("accept")
+        accept = ([str(a) for a in acc if str(a or "").strip()][:12]
+                  if isinstance(acc, list) else [])
+        visual = None
+        vis = meta.get("visual")
+        if isinstance(vis, dict) and vis.get("assetId"):
+            visual = _seo_visual_src(conn, subject, str(vis.get("assetId") or ""))
         try:
             points = int(meta.get("points")) if meta.get("points") is not None else 0
         except (ValueError, TypeError):
@@ -7958,7 +8048,11 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
             "answer": str(r["answer"] or ""),
             "explanation": str(r["explanation"] or ""),
             "hints": [str(h) for h in hints if str(h or "").strip()][:3],
-            "self": check == "self",
+            "self": check == "self" and not is_long,
+            "longtext": is_long,
+            "accept": accept,
+            "task_type": str(r["task_type"] or ""),
+            "visual": visual,
             "points": points,
             "difficulty": difficulty,
             "value_type": str(meta.get("valueType") or ""),
@@ -7966,22 +8060,47 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
     return samples
 
 
-def _seo_lesson_title(conn: sqlite3.Connection, skill_id: str) -> str:
+def _seo_lesson(conn: sqlite3.Connection, skill_id: str) -> dict:
+    """Первый урок навыка: {id, title} или {}. Не бросает."""
     try:
-        row = conn.execute("SELECT title FROM lessons WHERE skill_id=? ORDER BY id LIMIT 1",
+        row = conn.execute("SELECT id, title FROM lessons WHERE skill_id=? ORDER BY id LIMIT 1",
                            (skill_id,)).fetchone()
     except sqlite3.Error:
-        return ""
+        return {}
     if not row:
-        return ""
+        return {}
     try:
-        return str(row["title"] or "")
+        title = str(row["title"] or "")
+        lid = str(row["id"] or "")
     except (KeyError, IndexError, TypeError):
-        return ""
+        return {}
+    if not lid or not title:
+        return {}
+    return {"id": lid, "title": title}
+
+
+def _seo_lesson_title(conn: sqlite3.Connection, skill_id: str) -> str:
+    lesson = _seo_lesson(conn, skill_id)
+    return lesson.get("title", "") if isinstance(lesson, dict) else ""
 
 
 def _seo_esc(text) -> str:
     return html.escape(str(text or ""), quote=True)
+
+
+def _seo_query_suffix(handler) -> str:
+    """Хвост '?query' для 301-редиректов /ege/: метки (?utm) не теряются.
+
+    Возвращает '' или '?…'. Бросать не должен: query от клиента —
+    произвольная строка, в Location уходит как есть (это только хвост,
+    не открытый редирект). Не бросает."""
+    try:
+        query = urlparse(handler.path).query
+    except Exception:
+        return ""
+    if not query:
+        return ""
+    return "?" + query
 
 
 def _seo_skill_short(name: str, num: int) -> str:
@@ -8007,10 +8126,19 @@ def _seo_points_label(n: int) -> str:
     return f"{n} первичн{'ый' if n == 1 else 'ых'} {word}"
 
 
-def _seo_format_caption(value_type: str, answer: str) -> str:
+def _seo_format_caption(value_type: str, answer: str, text: str = "") -> str:
     """Подпись «Формат ответа: …» — та же логика, что answerFormatHint в
     js/app.js, чтобы окно на SEO-странице выглядело как окно практики."""
     vt = str(value_type or "")
+    if re.search(r"цифр|последовательност", vt, re.IGNORECASE):
+        # Набор vs последовательность — по формулировке (как
+        # isMultiSelectTask в js/state.js, облегчённо: явные маркеры
+        # выбора нескольких вариантов).
+        if re.search(r"выберите|укажите\s+все|верные\s+(?:суждения|утверждения)"
+                     r"|номера\s+выбранных|набор\s+номеров",
+                     str(text or ""), re.IGNORECASE):
+            return "несколько цифр по возрастанию, без запятых и пробелов (например, 245)"
+        return "последовательность цифр без запятых и пробелов (например, 245)"
     if "целое" in vt:
         return "целое число (в градусах)" if "градус" in vt else "целое число"
     if "дробь" in vt:
@@ -8020,19 +8148,25 @@ def _seo_format_caption(value_type: str, answer: str) -> str:
     a = str(answer or "").strip().replace(" ", "")
     if re.fullmatch(r"[+-]?\d+", a):
         return "целое число"
-    if re.fullmatch(r"[+-]?[\d.,]+(/[+-]?[\d.,]+)?", a):
+    if re.fullmatch(r"[+-]?[\d.,]+", a) or re.fullmatch(r"[+-]?[\d.,]+/[+-]?[\d.,]+", a):
         return "десятичная дробь (запятая или точка)"
     if re.search(r"[a-zA-Zа-яёА-ЯЁπ√∞]", a):
         return "выражение"
     return ""
 
 
-def _seo_stars(difficulty: int) -> str:
-    """Звёзды сложности как на сайте (stars в js/app.js): 1..5, off — бледные."""
-    d = max(1, min(5, int(difficulty or 0)))
+def _seo_stars(difficulty) -> str:
+    """Звёзды сложности как на сайте (stars в js/app.js): 0..5.
+
+    0/NULL — все бледные (как stars(0) в практике); битые значения
+    не роняют рендер страницы. Не бросает."""
+    try:
+        d = max(0, min(5, int(difficulty or 0)))
+    except (ValueError, TypeError):
+        d = 0
     return ("<span class='seo-stars' aria-label='Сложность "
             + str(d) + " из 5' role='img'>"
-            + "".join(f"<span aria-hidden='true'>★</span>" if i <= d
+            + "".join(f"<span aria-hidden='true'>★</span>" if 1 <= i <= d
                       else "<span class='seo-stars__off' aria-hidden='true'>★</span>"
                       for i in range(1, 6))
             + "</span>")
@@ -8100,7 +8234,7 @@ def seo_task_urls(conn, base: str) -> list:
     urls: list = []
     try:
         subjects = [r for r in SUBJECT_IDS
-                    if not _status_is_locked((SUBJECTS[r] or {}).get("status"))]
+                    if not subject_is_locked(r)]
     except Exception:
         return urls
     for subject in subjects:
@@ -8119,6 +8253,8 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     без ввода ответа: «Сверить с решением», официальный разбор и честная
     отметка «Решил(а) верно / Не получилось».
     """
+    if subject_is_locked(subject):
+        return None
     info = SUBJECTS.get(subject) or {}
     title = str(info.get("title") or subject)
     genitive = _seo_genitive(subject)
@@ -8127,7 +8263,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     if skill is None:
         return None
     samples = _seo_task_samples(conn, subject, skill["id"], 2)
-    lesson = _seo_lesson_title(conn, skill["id"])
+    lesson = _seo_lesson(conn, skill["id"])
     url = f"{base}/ege/{subject}/zadanie-{num}/"
     hub = f"{base}/ege/{subject}/"
     skill_name = skill["name"]
@@ -8162,15 +8298,18 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                      f"<b>{_seo_points_label(points)}</b></div>")
     facts.append(f"<div class='seo-fact'><span>Тема</span><b>{_seo_esc(short)}</b></div>")
     facts.append("<div class='seo-fact'><span>Теория</span><b>"
-                 + (_seo_esc(f"урок «{lesson}»") if lesson
+                 + (f"<a href='{_seo_esc('/dashboard#/lesson/' + lesson['id'] + '?seo_subject=' + subject)}'>"
+                    f"урок «{_seo_esc(lesson['title'])}»</a>" if lesson
                     else "формулы и разбор темы — в тренажёре")
                  + "</b></div>")
     # --- окно примера: те же элементы, что в практике ---
     def stars_html(d):
         return _seo_stars(d)
 
-    def format_badge(is_self):
-        return ("<span class='seo-tag'>развёрнутый ответ</span>" if is_self
+    def format_badge(task):
+        if task.get("longtext"):
+            return "<span class='seo-tag'>письменная работа</span>"
+        return ("<span class='seo-tag'>развёрнутый ответ</span>" if task["self"]
                 else "<span class='seo-tag'>краткий ответ</span>")
 
     sample_blocks = []
@@ -8193,14 +8332,33 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
             solution_rows += ("<div class='seo-solution__row'><b>Ответ.</b>"
                               f"<p>{_seo_esc(task['answer'])}</p></div>")
         solution = f"<div class='seo-solution' hidden>{solution_rows}</div>"
-        if task["self"]:
+        if task.get("longtext"):
+            # Сочинение: поля ввода нет (как isLongTextTask в практике —
+            # редактор сочинения, а не короткий ответ). Только текст,
+            # подсказки темы и честная подпись про критерии ФИПИ.
+            answer_area = ("<div class='seo-check__caption'>Письменная работа —"
+                           " пишется на бумаге, проверяется по критериям ФИПИ"
+                           " в тренажёре.</div>")
+        elif task["self"]:
             answer_area = ("<button type='button' class='btn btn-primary seo-reveal-btn'>"
                            "Сверить с решением</button>")
         else:
-            caption = _seo_format_caption(task["value_type"], task["answer"])
-            answer_area = (f"<form class='seo-check' data-answer='{_seo_esc(task['answer'])}'>"
+            caption = _seo_format_caption(task["value_type"], task["answer"],
+                                          task["statement"])
+            accept_attr = (" data-accept='"
+                           + _seo_esc(json.dumps(task.get("accept") or [],
+                                                 ensure_ascii=False)) + "'"
+                           if task.get("accept") else "")
+            # inputmode как answerInputMode в js/app.js: буквы — текст,
+            # иначе цифровая клавиатура. label вместо голого плейсхолдера.
+            inputmode = ("text" if re.search(r"[a-zA-Zа-яёА-ЯЁ]",
+                                             task["answer"] or "")
+                         else "decimal")
+            answer_area = (f"<form class='seo-check' data-answer='{_seo_esc(task['answer'])}'"
+                           f"{accept_attr} data-type='{_seo_esc(task.get('task_type') or 'short_answer')}'>"
                            "<div class='answer-row'>"
-                           "<input class='answer-input' name='v' autocomplete='off' placeholder='Ответ'>"
+                           "<input class='answer-input' name='v' autocomplete='off'"
+                           f" placeholder='Ответ' aria-label='Ответ' inputmode='{inputmode}'>"
                            "<button type='submit' class='btn btn-primary'>Ответить</button></div>"
                            + (f"<div class='seo-check__caption'>Формат ответа: {_seo_esc(caption)}</div>"
                               if caption else "")
@@ -8214,18 +8372,29 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                         " data-mode='solution'>Показать решение</button>")
         else:
             hint_btn = ""
+        vis = task.get("visual")
+        visual_html = ""
+        if isinstance(vis, dict) and vis.get("src"):
+            visual_html = (
+                "<figure class='seo-visual'>"
+                f"<img src='{_seo_esc(vis['src'])}'"
+                f" alt='{_seo_esc(vis.get('alt') or 'Рисунок к заданию')}'"
+                " loading='lazy' decoding='async'>"
+                "</figure>")
+        kind = "self" if task["self"] else ("long" if task.get("longtext") else "auto")
         sample_blocks.append(
-            f"<article class='seo-window' data-kind='{'self' if task['self'] else 'auto'}'>"
+            f"<article class='seo-window' data-kind='{kind}'>"
             "<div class='seo-window__tags'>"
             f"<span class='seo-tag seo-tag--accent'>№ {num}</span>"
             f"<span class='seo-tag'>Пример {i + 1}</span>"
-            + format_badge(task["self"])
+            + format_badge(task)
             + stars_html(task["difficulty"])
             + (f"<span class='seo-tag seo-tag--points'>{_seo_points_label(task['points'])}</span>"
                if task["points"] > 0 else "")
             + "</div>"
             f"<div class='seo-window__text'>{_seo_esc(_seo_short(task['statement'], 1200)).replace(chr(10), '<br>')}</div>"
-            f"<div class='seo-hints'>{hints_html}</div>"
+            + visual_html
+            + f"<div class='seo-hints'>{hints_html}</div>"
             f"<div class='seo-window__tools'>{hint_btn}"
             + (f"<span class='seo-window__note'>{_seo_esc(check_note)}</span>" if task["self"] else "")
             + "</div>"
@@ -8306,14 +8475,19 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
 
 
 def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes | None:
-    """Хаб предмета: все номера со ссылками. None — неизвестный предмет."""
+    """Хаб предмета: все номера со ссылками.
+
+    None — неизвестный/закрытый предмет или ни одного открытого номера:
+    пустая индексируемая пустышка хуже честной 404."""
     info = SUBJECTS.get(subject)
-    if info is None:
+    if info is None or subject_is_locked(subject):
         return None
     title = str(info.get("title") or subject)
     genitive = _seo_genitive(subject)
     url = f"{base}/ege/{subject}/"
     skills = _seo_subject_skills(conn, subject)
+    if not skills:
+        return None
     desc = (f"Все задания ЕГЭ по {genitive}: разбор каждого номера,"
             f" примеры с подсказками и бесплатная практика без регистрации.")
     cta = f"/dashboard#/training?seo_subject={subject}"
@@ -8357,7 +8531,7 @@ def seo_render_index(base: str) -> bytes | None:
     titles = []
     for sid in SUBJECT_IDS:
         info = SUBJECTS.get(sid) or {}
-        if _status_is_locked(info.get("status")):
+        if subject_is_locked(sid):
             continue
         genitive = _seo_genitive(sid)
         titles.append(str(info.get("title") or sid))
@@ -17560,8 +17734,14 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/ege' or path == '/ege/':
             # Хаб программных SEO-страниц: список предметов. Индексируется
             # (в sitemap.xml и robots.txt), профиля и кук не создаёт.
+            # Канон — со слэшем: без слэша 301 (иначе дубль URL).
             # None — нет шаблона shell.html: честная фирменная 404, а не
             # падение на len(None) с оборванным соединением.
+            if path != '/ege/':
+                self.send_response(301)
+                self.send_header("Location", "/ege/" + _seo_query_suffix(self))
+                self.send_security_headers()
+                self.end_headers(); return
             data = seo_render_index(public_base_url(self))
             if data is None:
                 self.serve_not_found_page(); return
@@ -17569,14 +17749,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif path.startswith('/ege/'):
             # /ege/<subject>/ — хаб номеров; /ege/<subject>/zadanie-<N>/ —
-            # страница номера с разбором. Без слэша — 301 на канон со слэшем.
+            # страница номера с разбором. Канон — со слэшем и без ведущих
+            # нулей (zadanie-17, не zadanie-017): всё остальное — 301.
+            # Двойные слэши схлопываются разбором parts, но отдавать 200
+            # на неканоничном пути нельзя — только редирект. Query (?utm)
+            # на редиректе сохраняется. Закрытые предметы — фирменная 404.
             rest = path[len('/ege/'):].strip('/')
             parts = [p for p in rest.split('/') if p]
             base = public_base_url(self)
             if len(parts) == 1 and is_known_subject(parts[0]):
-                if not path.endswith('/'):
+                if subject_is_locked(parts[0]):
+                    self.serve_not_found_page(); return
+                canon = f"/ege/{parts[0]}/"
+                if path != canon:
                     self.send_response(301)
-                    self.send_header("Location", f"/ege/{parts[0]}/")
+                    self.send_header("Location", canon + _seo_query_suffix(self))
                     self.send_security_headers()
                     self.end_headers(); return
                 conn = connect()
@@ -17595,9 +17782,12 @@ class Handler(BaseHTTPRequestHandler):
                     num = int(parts[1][len('zadanie-'):])
                 except (ValueError, TypeError):
                     self.serve_not_found_page(); return
-                if not path.endswith('/'):
+                if subject_is_locked(parts[0]):
+                    self.serve_not_found_page(); return
+                canon = f"/ege/{parts[0]}/zadanie-{num}/"
+                if path != canon:
                     self.send_response(301)
-                    self.send_header("Location", f"/ege/{parts[0]}/zadanie-{num}/")
+                    self.send_header("Location", canon + _seo_query_suffix(self))
                     self.send_security_headers()
                     self.end_headers(); return
                 conn = connect()
@@ -17644,8 +17834,7 @@ class Handler(BaseHTTPRequestHandler):
                 sm_conn = connect()
                 try:
                     for sid in SUBJECT_IDS:
-                        info = SUBJECTS.get(sid) or {}
-                        if _status_is_locked(info.get("status")):
+                        if subject_is_locked(sid):
                             continue
                         urls.append(
                             f'  <url><loc>{base}/ege/{sid}/</loc><lastmod>{lastmod}</lastmod>'

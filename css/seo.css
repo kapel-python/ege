@@ -168,6 +168,19 @@ p{overflow-wrap:anywhere;}
 .seo-stars__off{color:var(--muted-border);}
 .seo-window__text{font-size:clamp(15.5px,1.9vw,17px);line-height:1.7;white-space:pre-line;
   overflow-wrap:anywhere;}
+/* Рисунок задания (task.visual.assetId из visualAssets каталога — тот же
+   источник, что DataAPI.visualAsset в практике). Без этого условия вида
+   «рассмотрите изображение» на SEO были нерешаемы. */
+.seo-visual{margin:14px 0 0;}
+.seo-visual img{max-width:100%;height:auto;display:block;border-radius:var(--radius-md);
+  border:1px solid var(--hairline);background:var(--surface-1);}
+/* Страховка скрытия: hidden обязан прятать всегда, даже если будущее
+   правило задаст display. Программный фокус кольца не даёт. */
+[hidden]{display:none !important;}
+.seo-hint:focus{outline:none;}
+/* Ссылка на урок в панели фактов. */
+.seo-fact a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
+.seo-fact a:hover{color:var(--text);}
 .seo-window__note{font-size:clamp(12px,1.5vw,13px);color:var(--text-faint);
   margin-bottom:clamp(12px,2vw,16px);}
 .seo-window__tools .seo-window__note{margin:0 0 0 auto;}

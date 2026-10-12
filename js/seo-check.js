@@ -99,7 +99,17 @@
       if (level >= total) return null;
       var box = hints[level];
       level += 1;
-      if (box) box.hidden = false;
+      if (box) {
+        box.hidden = false;
+        /* Фокус — на открытую подсказку: скринридер объявляет её сразу,
+           клавиатурный пользователь не теряет место. Кольца не будет
+           (.seo-hint:focus без outline), моуш-пользователям не мешает. */
+        try {
+          box.setAttribute("tabindex", "-1");
+          box.focus({ preventScroll: true });
+          if (box.scrollIntoView) box.scrollIntoView({ block: "nearest" });
+        } catch (_) {}
+      }
       if (hintBtn) {
         if (level >= total) {
           if (kind === "auto" && solution) {
@@ -146,6 +156,18 @@
       if (hintBtn) { hintBtn.disabled = true; }
       var revealBtn = win.querySelector(".seo-reveal-btn");
       if (revealBtn) revealBtn.remove();
+      /* После раскрытия решения ввод мёртв: повторный сабмит больше не
+         перезатрёт разбор на ok/bad. Фокус — на фидбек (там aria-live). */
+      var frozen = win.querySelector(".answer-input");
+      if (frozen) frozen.disabled = true;
+      try {
+        var fb = feedback.querySelector(".seo-feedback__box");
+        if (fb) {
+          fb.setAttribute("tabindex", "-1");
+          fb.focus({ preventScroll: true });
+          if (fb.scrollIntoView) fb.scrollIntoView({ block: "nearest" });
+        }
+      } catch (_) {}
       if (withMark) {
         feedback.querySelectorAll("[data-mark]").forEach(function (btn) {
           btn.addEventListener("click", function () {
@@ -235,6 +257,7 @@
 
         if (ok) {
           input.disabled = true;
+          if (hintBtn) hintBtn.disabled = true;
           input.classList.add("answer-input--correct");
           feedback.innerHTML = feedbackBox("ok", "Правильно",
             '<div class="seo-feedback__body">В тренажёре за чистое решение без подсказок начисляется больше опыта — закрепи это задание там.</div>');
