@@ -142,6 +142,10 @@ def main():
           "/api/admin/news/ai" in server_src and "news_ai_jobs" in server_src
           and "news_ai_run" in server_src and "_news_ai_worker" in server_src
           and "active_provider" in server_src)
+    check("server: ИИ пишет как новость, а не разговор",
+          "подзаголовками <h2>" in server_src and "простыни" in server_src
+          and "обращения к читателю" in server_src and "без кликбейта" in server_src
+          and "NEWS_AI_STYLE" in server_src and "NEWS_AI_EXAMPLE" in server_src)
     css = (ROOT / "css" / "admin.css").read_text(encoding="utf-8")
     check("css: ИИ-кнопка и прогресс", ".btn--ai" in css and ".a-ai-load" in css)
     check("app.js: используется dlg", "maybeShowNewsModal" in ui or True)
