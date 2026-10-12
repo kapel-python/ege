@@ -146,6 +146,8 @@ def main():
           "подзаголовками <h2>" in server_src and "простыни" in server_src
           and "обращения к читателю" in server_src and "без кликбейта" in server_src
           and "не повторяет его дословно" in server_src and "три смысловых блока" in server_src
+          and "уместными emoji" in server_src and "строка-призыв курсивом" in server_src
+          and "agent_knowledge.md" in server_src and "news_knowledge_text" in server_src
           and "NEWS_AI_STYLE" in server_src and "NEWS_AI_EXAMPLE" in server_src)
     css = (ROOT / "css" / "admin.css").read_text(encoding="utf-8")
     check("css: ИИ-кнопка и прогресс", ".btn--ai" in css and ".a-ai-load" in css)
@@ -297,11 +299,13 @@ def main():
             print("== news-ai: живые задачи с подменённым chat ==")
             AI = server._AI
             fake_answers = []
+            seen_messages = []
 
             def fake_chat(messages, **kw):
                 assert isinstance(messages, list) and len(messages) == 2, messages
                 assert messages[0]["role"] == "system" and messages[1]["role"] == "user", messages
                 assert kw.get("tier") in ("free", "plus"), kw
+                seen_messages.append(messages)
                 return fake_answers.pop(0) if fake_answers else '{"title": "?", "body_html": "<p>?</p>"}'
 
             if AI is None:
@@ -345,6 +349,9 @@ def main():
             check("опрос job гостю 401", s == 401, f"got {s}")
             done = wait_job(job)
             check("generate done", done.get("status") == "done", str(done))
+            check("ИИ видит базу знаний агента, а не выдумывает",
+                  any("Что умеет сайт" in m[0]["content"] for m in seen_messages),
+                  (seen_messages[0][0]["content"][:120] if seen_messages else "no calls"))
             check("заголовок из ИИ", done.get("title") == "Заголовок ИИ", str(done))
             check("санитайзер режет script из ИИ",
                   "<b>новости</b>" in done.get("bodyHtml", "") and "<script" not in done.get("bodyHtml", ""),
