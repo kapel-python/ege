@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Интеграционная регрессия предмета «История».
 
-Предмет открыт практикой без уроков: все 21 задание ЕГЭ-2026 — часть 1
+Предмет открыт с уроками: все 21 задание ЕГЭ-2026 — часть 1
 №1–12 с кратким ответом (автопроверка: цифры и слова, карты и изображения
 с локальными рисунками) и часть 2 №13–21 с самопроверкой по официальному
-разбору источника. Проверяются API, каталог, unlocked-состояние, прогноз
-(шкала 42 первичных → 100 тестовых, provisional) и изоляция состояния при
-переключении туда-обратно.
+разбору источника, по одному уроку на линию. Проверяются API, каталог,
+unlocked-состояние, прогноз (шкала 42 первичных → 100 тестовых,
+provisional) и изоляция состояния при переключении туда-обратно.
 """
 from __future__ import annotations
 
@@ -94,9 +94,9 @@ def main():
             assert hist.get("locked") is False, hist
             assert set(hist.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics",
                                                      "missions", "bosses", "daily", "path"}, hist
-            # Практика без уроков: уроки выключены, всё остальное включено.
-            assert hist["features"]["lessons"] is False, hist
-            assert all(v is True for k, v in hist["features"].items() if k != "lessons"), hist
+            # Уроки включены, всё остальное включено.
+            assert hist["features"]["lessons"] is True, hist
+            assert all(v is True for k, v in hist["features"].items()), hist
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={SID}")
             assert status == 200, (status, boot)
@@ -154,14 +154,23 @@ def main():
             assert goals == {"g60", "g80", "g95"}, goals
             assert len(catalog.get("diagnosticTasks", [])) == 6, catalog.get("diagnosticTasks")
             task_ids = {t["id"] for t in tasks}
+            task_skill = {t["id"]: t.get("skill") for t in tasks}
             assert set(catalog["diagnosticTasks"]) <= task_ids, catalog["diagnosticTasks"]
             diag_skills = {t["skill"] for t in tasks if t["id"] in set(catalog["diagnosticTasks"])}
             assert diag_skills <= PART1, diag_skills
             daily = catalog.get("daily") or {}
             assert daily.get("skill") in {s["id"] for s in skills} and daily.get("target", 0) > 0, daily
 
-            # Уроков нет (добавим позже), миссии — по одной на линию.
-            assert catalog.get("lessons", []) == [], catalog.get("lessons")
+            # Уроки: по одному на линию (21), миссии — по одной на линию.
+            lessons = catalog.get("lessons", [])
+            assert len(lessons) == 21, len(lessons)
+            assert {x.get("skill") for x in lessons} == set(SKILLS), lessons
+            assert all(x.get("steps") for x in lessons), lessons
+            for les in lessons:
+                assert les.get("skill") in set(SKILLS), les
+                ind = [s for s in les["steps"] if s.get("type") == "INDEPENDENT_TASK"]
+                assert ind and all(t.get("taskId") in task_ids and
+                                   task_skill.get(t.get("taskId")) == les["skill"] for t in ind), les
             missions = catalog.get("missions", [])
             assert len(missions) == 21, len(missions)
             for m in missions:
@@ -189,7 +198,7 @@ def main():
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={SID}")
             assert status == 200 and len(task_details.get("tasks", [])) == len(tasks), (status, len(task_details.get("tasks", [])))
             status, lesson_details = request(opener, base, f"/api/catalog-lessons?subject={SID}")
-            assert status == 200 and lesson_details.get("lessons", []) == [], (status, lesson_details)
+            assert status == 200 and len(lesson_details.get("lessons", [])) == 21, (status, lesson_details)
 
             # Переключение и запись в профиль не смешиваются с новым предметом.
             status, profile = request(opener, base, "/api/bootstrap?subject=profile_math")
@@ -234,10 +243,10 @@ def main():
             public_counts = public_hist.get("counts", {})
             assert public_counts.get("tasks") == len(tasks), public_hist
             assert public_counts.get("skills") == 21, public_hist
-            assert public_counts.get("lessons") == 0 and public_counts.get("missions") == 21, public_hist
+            assert public_counts.get("lessons") == 21 and public_counts.get("missions") == 21, public_hist
             assert public_counts.get("bosses") == 4, public_hist
             print(f"History subject integration OK: 21 lines, {len(tasks)} real tasks,"
-                  " practice without lessons, forecast 42->100, state isolated")
+                  " 21 lessons, forecast 42->100, state isolated")
         finally:
             httpd.shutdown()
             httpd.server_close()

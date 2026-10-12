@@ -365,11 +365,11 @@ const testBody = async () => {
   }
 
 
-  /* 17. Предмет без уроков (история): одна диагностика не открывает
-     «предварительный прогноз 0 баллов». Урокового порога здесь нет сам
-     собой (уроков 0), поэтому держат темы и практика; попытки диагностики
-     в счёт практики не идут. Регрессия живого кейса: 6 ответов диагностики
-     показывали mid=0 без флага empty. */
+  /* 17. История с уроками (21 урок): одна диагностика не открывает
+     «предварительный прогноз 0 баллов». Уроковый порог из контракта:
+     needLessons = max(1, ceil(21*0.05)) = 2, темы и практика держат
+     остальное; попытки диагностики в счёт практики не идут. Регрессия
+     живого кейса: 6 ответов диагностики показывали mid=0 без флага empty. */
   DataAPI.load(serverLikePayload("history", "server/catalog_history.json"));
   Store.ready = false;
   Store.reset();
@@ -386,14 +386,26 @@ const testBody = async () => {
       onlyDiag.empty === true && onlyDiag.premature === true, JSON.stringify(onlyDiag));
     t("история: плашка показывает прогресс практики",
       onlyDiag.doneAttempts === 0 && onlyDiag.needAttempts > 0, JSON.stringify(onlyDiag));
-    // Три ответа в практике (не диагностика) — первые шаги сделаны.
+    // Три ответа в практике (не диагностика) при нуле уроков — всё ещё рано:
+    // уроковый порог 2 не набран.
     const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
     for (let i = 0; i < 3; i++) {
       const sk = skills[i % skills.length];
       Store.state.taskAttempts.push({ taskId: `hist_practice_${i}`, skill: sk.id, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now });
     }
+    const noLessons = forecast();
+    t("история: практика без двух уроков — прогноза ещё нет",
+      noLessons.premature === true && noLessons.doneLessons < noLessons.needLessons,
+      JSON.stringify(noLessons));
+    t("история: уроковый порог — 2 из 21", noLessons.needLessons === 2 && noLessons.totalLessons === 21,
+      JSON.stringify({ need: noLessons.needLessons, total: noLessons.totalLessons }));
+    // Два пройденных урока при тех же трёх темах — прогноз появился.
+    for (let i = 0; i < 2; i++) {
+      const l = DataAPI.lessonsBySkill(skills[i].id)[0];
+      if (l) Store.state.completedLessons[l.id] = { ts: now };
+    }
     const opened = forecast();
-    t("история: диагностика + практика — прогноз появился",
+    t("история: 2 урока + темы + практика — прогноз появился",
       opened.premature !== true && Number.isFinite(opened.mid) && Number.isFinite(opened.high),
       JSON.stringify(opened));
     // Порог из контракта предмета, а не из хардкода движка.

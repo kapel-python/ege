@@ -1,7 +1,7 @@
 /* Client-side regression: an opened history subject exposes its real topics:
    part 1 №1–12 (auto-checked short-answer practice, maps/images with local
    visuals) and part 2 №13–21 (self-checked against the official solution).
-   Practice only: lessons are off and come later. */
+   Lessons are on: one per line. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_history.json", "utf8"));
@@ -9,7 +9,7 @@ catalog.subject = "history";
 catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", status: "ready", features: { lessons: true, practice: true, forecast: true } },
-  { id: "history", title: "История", status: "ready", locked: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
+  { id: "history", title: "История", status: "ready", locked: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -47,10 +47,10 @@ vm.runInContext(`
 `, sandbox);
 const result = sandbox.historyChecks;
 const EXPECTED_SKILLS = ["h01_dates", "h02_chrono", "h03_facts", "h04_table", "h05_persons", "h06_source", "h07_culture", "h08_image", "h09_map", "h10_map", "h11_maptext", "h12_mapchoice", "h13_attr", "h14_search", "h15_imgout", "h16_wow", "h17_causes", "h18_terms", "h19_termfact", "h20_args", "h21_thesis"];
-check("история зарегистрирована и открыта практикой без уроков", result.locked === false && result.available === true);
+check("история зарегистрирована и открыта с уроками", result.locked === false && result.available === true);
 check("21 тема экзамена на месте", result.skills === 21 && EXPECTED_SKILLS.every((id) => result.skillIds.includes(id)));
-check("практика открыта, уроков нет, миссии и боссы на месте",
-  result.content === true && result.tasks > 0 && result.practice === result.tasks && result.lessons === 0 && result.missions === 21 && result.bosses === 4);
+check("практика и уроки открыты, миссии и боссы на месте",
+  result.content === true && result.tasks > 0 && result.practice === result.tasks && result.lessons === 21 && result.missions === 21 && result.bosses === 4);
 check("часть 1 — автопроверка, часть 2 — самопроверка", result.auto > 0 && result.self > 0 && result.auto + result.self === result.tasks);
 check("карты и изображения — с рисунками", result.visuals >= 400);
 check("диагностика и ежедневная подборка подключены", result.diagnostics === 6 && result.daily === 5 && result.dailyPicked.length === 5);
@@ -68,7 +68,7 @@ const basicCatalog = JSON.parse(fs.readFileSync("server/catalog_basic.json", "ut
 const registry = [
   { id: "profile_math", title: "Профильная математика", status: "ready", locked: false, comingSoon: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
   { id: "basic_math", title: "Базовая математика", status: "ready", locked: false, comingSoon: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
-  { id: "history", title: "История", status: "ready", locked: false, comingSoon: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
+  { id: "history", title: "История", status: "ready", locked: false, comingSoon: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true } },
 ];
 function readyCatalog(source, id) {
   return { ...source, subject: id, subjects: registry, forecast: { weights: {}, total: 1, scale: [0, 1] } };
