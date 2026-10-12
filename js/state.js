@@ -104,6 +104,45 @@ function dataIdValue(value) {
   return "";
 }
 
+/* Группировка истории попыток по навыку: освоение, прогноз и снимки темы
+   раньше сканировали ВСЮ историю под каждый навык (навыки × попытки на
+   каждый рендер Главной — при 5000 попыток и 20 темах это сотни тысяч
+   итераций с exp и поиском заданий), теперь каждый читает только свой
+   бакет. История append-only (unshift/push/slice с заменой массива),
+   поэтому кэш живёт пока живы ссылка на массив и его длина. */
+let _attemptBucketsCache = { arr: null, len: -1, map: null };
+function attemptsBySkillMap() {
+  const list = safeArray(Store.state && Store.state.taskAttempts);
+  const cached = _attemptBucketsCache;
+  if (cached.arr === list && cached.len === list.length && cached.map) return cached.map;
+  const map = new Map();
+  for (const a of list) {
+    if (!a) continue;
+    const key = dataIdValue(a.skill);
+    if (!key) continue;
+    let bucket = map.get(key);
+    if (!bucket) { bucket = []; map.set(key, bucket); }
+    bucket.push(a);
+  }
+  _attemptBucketsCache = { arr: list, len: list.length, map };
+  return map;
+}
+
+/* Пары taskId+ts диагностических ответов: прогноз строил этот Set заново
+   под каждый навык (навыки × диагностики), теперь один на проход. */
+let _diagKeysCache = { arr: null, len: -1, set: null };
+function diagnosticAttemptKeys() {
+  const list = safeArray(Store.state && Store.state.diagnostics);
+  const cached = _diagKeysCache;
+  if (cached.arr === list && cached.len === list.length && cached.set) return cached.set;
+  const set = new Set();
+  for (const d of list) {
+    if (d && d.taskId) set.add(`${d.taskId}|${Number(d.ts) || 0}`);
+  }
+  _diagKeysCache = { arr: list, len: list.length, set };
+  return set;
+}
+
 const Store = {
   state: null,
   // Текущий предмет: часть снапшота (state.subject) и зеркало здесь для
@@ -1699,12 +1738,28 @@ function practiceAttemptQuality(attempt) {
 
 /* Полный банк практики навыка (реально решаемые задания, без требующих
    отсутствующего официального рисунка), стабильный порядок по id. Одно место,
-   откуда сессии берут состав практики, — поэтому показ всегда полный. */
+   откуда сессии берут состав практики, — поэтому показ всегда полный.
+   Сортировка с localeCompare дорогая, а результат зависит только от каталога
+   и предмета: кэшируем по навыку, отдаём копию (состав сессий местами
+   тасуют/режут, общий массив мутировать нельзя). */
+let _practiceIdsCache = { index: null, bySkill: new Map() };
 function practiceTaskIdsForSkill(skillId) {
   if (!skillIsAccessible(skillId)) return [];
-  return DataAPI.practiceTasksBySkill(skillId).slice()
+  // Индекс DataAPI уже сбрасывается при load/loadDetails/смене предмета,
+  // поэтому его identity — точный признак свежести производных выборок
+  // (loadDetails мутирует каталог на месте — ссылка каталога для этого
+  // не годится).
+  let index = null;
+  try { index = (typeof DataAPI !== "undefined" && DataAPI._index) ? DataAPI._index() : null; } catch (_) { index = null; }
+  if (_practiceIdsCache.index !== index) _practiceIdsCache = { index, bySkill: new Map() };
+  const key = dataIdValue(skillId);
+  const hit = _practiceIdsCache.bySkill.get(key);
+  if (hit) return hit.slice();
+  const ids = DataAPI.practiceTasksBySkill(skillId).slice()
     .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
     .map((task) => task.id);
+  _practiceIdsCache.bySkill.set(key, ids);
+  return ids.slice();
 }
 
 /* Состав тренировки по миссии — все задания её темы, а не урезанная тройка
@@ -1763,10 +1818,14 @@ function skillPracticeDetail(skillId) {
   const fullVolume = Math.min(bankSize, PRACTICE_FULL_VOLUME);
   const inBank = new Set(bank.map((task) => dataIdValue(task.id)));
   const best = new Map();
-  let hasHistory = false;
+  const bucket = attemptsBySkillMap().get(dataIdValue(skillId)) || [];
+  // История по этому навыку есть, если в его бакете хоть что-то лежит, —
+  // тот же смысл, что и флаг hasHistory ниже (любая попытка своей темы,
+  // даже мимо банка), только без скана всей истории.
+  let hasHistory = bucket.length > 0;
   const state = Store.state || {};
-  for (const attempt of safeArray(state.taskAttempts)) {
-    if (!attempt || dataIdValue(attempt.skill) !== dataIdValue(skillId)) continue;
+  for (const attempt of bucket) {
+    if (!attempt) continue;
     hasHistory = true;
     if (!inBank.has(dataIdValue(attempt.taskId))) continue;
     const quality = practiceAttemptQuality(attempt);
@@ -1903,10 +1962,12 @@ function openErrorCount(skillId) {
 function skillMistakeCount(skillId) {
   const wanted = String(skillId || "");
   if (!wanted) return 0;
-  return safeArray(Store.state && Store.state.taskAttempts).reduce((n, a) => {
-    if (!a || String(a.skill) !== wanted || a.skipped || a.correct) return n;
-    return n + 1;
-  }, 0);
+  let n = 0;
+  for (const a of attemptsBySkillMap().get(dataIdValue(skillId)) || []) {
+    if (!a || String(a.skill) !== wanted || a.skipped || a.correct) continue;
+    n += 1;
+  }
+  return n;
 }
 
 /* «Требует внимания» — только реальные проблемы: открытые ошибки или плохая
@@ -2119,7 +2180,7 @@ function forecastReadiness(covered, totalTopics) {
    затухающим по давности попыткам, а не за всё время. Если живых
    попыток нет (старые аккаунты, тестовые фикстуры) — откат к
    суммарной статистике, чтобы не показывать ноль там, где работа была. */
-function forecastSkillMastery(skillId, now) {
+function forecastSkillMastery(skillId, now, diagKeys) {
   const skill = skillIsAccessible(skillId) ? DataAPI.skill(skillId) : null;
   if (!skill) return 0;
   const state = Store.state || {};
@@ -2131,20 +2192,17 @@ function forecastSkillMastery(skillId, now) {
   const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
 
   const ts = Number(now) || Date.now();
-  const diagKeys = new Set();
-  for (const d of safeArray(state.diagnostics)) {
-    if (d && d.taskId) diagKeys.add(`${d.taskId}|${Number(d.ts) || 0}`);
-  }
+  const diag = diagKeys || diagnosticAttemptKeys();
   let vol = 0, good = 0, seen = false;
-  for (const a of safeArray(state.taskAttempts)) {
-    if (!a || dataIdValue(a.skill) !== dataIdValue(skillId)) continue;
+  for (const a of attemptsBySkillMap().get(dataIdValue(skillId)) || []) {
+    if (!a) continue;
     seen = true;
     const ageDays = Math.max(0, (ts - (Number(a.ts) || 0)) / 86400000);
     // Прощение: ошибки забываются быстрее знаний (полураспад ~10 дней
     // против ~31): исправившийся ученик не тащит старую ошибку полтора
     // месяца. Свежие данные от этого не меняются вообще.
     const w = Math.exp(-ageDays / (a.correct ? FORECAST_DECAY_DAYS : FORECAST_FORGIVE_DAYS));
-    const dw = diagKeys.has(`${a.taskId}|${Number(a.ts) || 0}`) ? FORECAST_DIAGNOSTIC_WEIGHT : 1;
+    const dw = diag.has(`${a.taskId}|${Number(a.ts) || 0}`) ? FORECAST_DIAGNOSTIC_WEIGHT : 1;
     // Подсказка: свидетельство слабее — тем же коэффициентом, что режет
     // награду в attemptXp (0.6/0.3). Сложность: звёзды задания напрямую.
     const hw = Array.isArray(FORECAST_HINT_WEIGHTS)
@@ -2172,21 +2230,27 @@ function forecastSkillMastery(skillId, now) {
   return Math.round(Math.min(100, theory + practice));
 }
 
-function forecast() {
-  if (!forecastConfigAvailable()) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
+/* Общий проход прогноза: взвешенные темы + освоение каждой за один скан
+   истории (бакеты attemptsBySkillMap + один Set диагностик), покрытие,
+   готовность. forecast()/forecastTopGains()/forecastTrend()/forecastAll()
+   ниже считают из него — раньше каждый делал свой полный проход
+   (навыки × попытки), и одна Главная стоила 4–5 таких проходов. */
+function forecastCompute() {
+  if (!forecastConfigAvailable()) return null;
   const scale = forecastScale(), total = forecastTotal();
-  if (!scale.length || !(total > 0)) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
+  if (!scale.length || !(total > 0)) return null;
   const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
     .filter((s) => skillEgeWeight(s.id) > 0);
-  if (!skills.length) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
+  if (!skills.length) return null;
   const now = Date.now();
   const state = Store.state || {};
+  const diagKeys = diagnosticAttemptKeys();
   const attemptedSkills = new Set(safeArray(state.taskAttempts).map((a) => a && a.skill).filter(Boolean));
   let wSum = 0, wMastery = 0, covered = 0;
   const masteryById = {};
   for (const s of skills) {
     const w = skillEgeWeight(s.id);
-    const m = forecastSkillMastery(s.id, now);
+    const m = forecastSkillMastery(s.id, now, diagKeys);
     masteryById[s.id] = m;
     wSum += w;
     wMastery += w * m;
@@ -2195,30 +2259,39 @@ function forecast() {
     if (hasLesson || masteryById[s.id] >= 25 || attemptedSkills.has(s.id)) covered++;
   }
   const readiness = forecastReadiness(covered, skills.length);
-  if (!readiness.ready) {
+  return { skills, now, diagKeys, masteryById, attemptedSkills, wSum, wMastery, covered, readiness, scale, total };
+}
+
+function forecastBaseFromCore(c) {
+  if (!c) return { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true };
+  if (!c.readiness.ready) {
     // Мало данных: числа нет, есть честная плашка с прогрессом до порога.
     return {
       low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0,
       empty: true, premature: true,
-      doneLessons: readiness.doneLessons, needLessons: readiness.needLessons,
-      totalLessons: readiness.totalLessons, covered: readiness.covered,
-      needTopics: readiness.needTopics, totalTopics: readiness.totalTopics,
+      doneLessons: c.readiness.doneLessons, needLessons: c.readiness.needLessons,
+      totalLessons: c.readiness.totalLessons, covered: c.readiness.covered,
+      needTopics: c.readiness.needTopics, totalTopics: c.readiness.totalTopics,
     };
   }
-  const mastery = wSum ? wMastery / wSum : 0;
-  const primary = (mastery / 100) * total;
-  const mid = scale[Math.max(0, Math.min(scale.length - 1, Math.round(primary)))] ?? 0;
+  const mastery = c.wSum ? c.wMastery / c.wSum : 0;
+  const primary = (mastery / 100) * c.total;
+  const mid = c.scale[Math.max(0, Math.min(c.scale.length - 1, Math.round(primary)))] ?? 0;
   /* Живой диапазон: мало данных — широко (±12), всё покрыто — узко (±3). */
-  const hw = 12 - Math.round((9 * covered) / skills.length);
+  const hw = 12 - Math.round((9 * c.covered) / c.skills.length);
   return {
     low: Math.max(0, mid - hw),
     // Потолок диапазона берём только из шкалы текущего предмета.
-    high: Math.min(scale[scale.length - 1], mid + hw),
+    high: Math.min(c.scale[c.scale.length - 1], mid + hw),
     mid,
     primary: Math.round(primary * 10) / 10,
     mastery: Math.round(mastery * 10) / 10,
     hw,
   };
+}
+
+function forecast() {
+  return forecastBaseFromCore(forecastCompute());
 }
 
 /* «Что даст +N»: какой прирост тестового балла принесёт полное
@@ -2266,40 +2339,31 @@ function essayReadyForGains(skills, masteryById) {
   return { ready: ew > 0 && ewm / ew >= ESSAY_READY_MASTERY, essay };
 }
 
-function forecastTopGains(n = 3) {  if (!forecastConfigAvailable()) return [];
-  const scale = forecastScale(), total = forecastTotal();
-  if (!scale.length || !(total > 0)) return [];
-  const skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
-    .filter((s) => skillEgeWeight(s.id) > 0);
-  if (!skills.length) return [];
-  const now = Date.now();
-  const base = forecast();
-  if (base.empty) return [];
-  let wSum = 0, wMastery = 0;
-  const masteryById = {};
-  for (const s of skills) {
-    const w = skillEgeWeight(s.id);
-    const m = forecastSkillMastery(s.id, now);
-    masteryById[s.id] = m;
-    wSum += w;
-    wMastery += w * m;
-  }
-  if (!wSum) return [];
-  const essayGate = essayReadyForGains(skills, masteryById);
+function forecastGainsFromCore(c, baseMid, n = 3) {
+  if (!c || !c.wSum) return [];
+  const essayGate = essayReadyForGains(c.skills, c.masteryById);
   const gains = [];
-  for (const s of skills) {
+  for (const s of c.skills) {
     const sid = String(s.id);
     if (!essayGate.ready && essayGate.essay.includes(sid)) continue;
-    const m = masteryById[s.id];
+    const m = c.masteryById[s.id];
     if (m >= 100) continue;
     const w = skillEgeWeight(s.id);
-    const mastery = (wMastery + w * (100 - m)) / wSum;
-    const primary = (mastery / 100) * total;
-    const test = scale[Math.max(0, Math.min(scale.length - 1, Math.round(primary)))] ?? 0;
-    const gain = test - base.mid;
+    const mastery = (c.wMastery + w * (100 - m)) / c.wSum;
+    const primary = (mastery / 100) * c.total;
+    const test = c.scale[Math.max(0, Math.min(c.scale.length - 1, Math.round(primary)))] ?? 0;
+    const gain = test - baseMid;
     if (gain > 0) gains.push({ skillId: s.id, name: s.name, gain });
   }
   return gains.sort((a, b) => b.gain - a.gain).slice(0, Math.max(0, n));
+}
+
+function forecastTopGains(n = 3) {
+  const c = forecastCompute();
+  if (!c) return [];
+  const base = forecastBaseFromCore(c);
+  if (base.empty) return [];
+  return forecastGainsFromCore(c, base.mid, n);
 }
 
 /* Снимок обновляется в течение текущего дня, а дни прошлого остаются
@@ -2329,12 +2393,67 @@ function forecastHistory(days = 14) {
   return safeArray(Store.state.forecastHistory).filter((x) => x && x.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function forecastTrendFromMid(mid, days = 14) {
+  const history = forecastHistory(days);
+  const firstPast = history.find((x) => x.date !== todayStr());
+  if (!firstPast) return null;
+  return { delta: mid - firstPast.mid, fromDate: firstPast.date };
+}
+
 function forecastTrend(days = 14) {
   const history = forecastHistory(days);
   const current = forecast();
   const firstPast = history.find((x) => x.date !== todayStr());
   if (!firstPast) return null;
   return { delta: current.mid - firstPast.mid, fromDate: firstPast.date };
+}
+
+/* Покрытие прогноза: уроки + темы с данными. Раньше жило в js/app.js и
+   считало освоение каждой темы своим проходом; теперь принимает готовую
+   карту освоений из общего прохода (forecastAll), а без неё считает сама —
+   поведение то же. */
+function forecastCoverage(masteryById, now) {
+  const lessons = DataAPI.lessons();
+  const state = Store.state || {};
+  const done = lessons.filter((l) => !!state.completedLessons && !!state.completedLessons[l.id]).length;
+  const lessonPct = lessons.length ? Math.round((done / lessons.length) * 100) : 100;
+  const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+  const ts = Number(now) || Date.now();
+  let covered = 0;
+  for (const s of skills) {
+    const hasLesson = DataAPI.lessonsBySkill(s.id).some((l) => !!state.completedLessons && !!state.completedLessons[l.id]);
+    const m = masteryById && Object.prototype.hasOwnProperty.call(masteryById, s.id)
+      ? masteryById[s.id]
+      : forecastSkillMastery(s.id, ts);
+    if (hasLesson || m >= 25) covered++;
+  }
+  return {
+    lessonPct, doneLessons: done, totalLessons: lessons.length,
+    covered, totalSkills: skills.length,
+    full: lessonPct === 100 && covered === skills.length,
+  };
+}
+
+/* Один проход вместо четырёх: база + тренд + топ-приросты + покрытие из
+   общего ядра. Главная и Статистика рисуются из него — раньше каждая
+   делала forecast(), forecastTrend(), forecastTopGains() и дважды
+   forecastCoverage(), то есть 5 полных сканов истории на рендер. */
+function forecastAll(n = 1) {
+  const c = forecastCompute();
+  if (!c) {
+    return {
+      base: { low: 0, high: 0, mid: 0, primary: 0, mastery: 0, hw: 0, empty: true },
+      trend: null, gains: [],
+      coverage: { lessonPct: 100, doneLessons: 0, totalLessons: 0, covered: 0, totalSkills: 0, full: false },
+    };
+  }
+  const base = forecastBaseFromCore(c);
+  return {
+    base,
+    trend: forecastTrendFromMid(base.mid),
+    gains: base.empty ? [] : forecastGainsFromCore(c, base.mid, n),
+    coverage: forecastCoverage(c.masteryById, c.now),
+  };
 }
 
 /* ============================================================
@@ -3357,7 +3476,7 @@ function skillSnapshot(skillId) {
   const now = Date.now();
   const cutoff = now - NEXTSTEP_FATIGUE_WINDOW_MS;
   let recent = 0, recentCorrect = 0, lastTs = 0;
-  for (const a of safeArray(s.taskAttempts)) {
+  for (const a of attemptsBySkillMap().get(dataIdValue(skillId)) || []) {
     if (!a || String(a.skill) !== String(skillId)) continue;
     const ts = Number(a.ts) || 0;
     if (ts > lastTs) lastTs = ts;

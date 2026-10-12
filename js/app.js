@@ -576,26 +576,11 @@ function forecastTrendLabel(trend) {
 /* Покрытие прогноза: сколько уроков пройдено и по скольким темам
    у алгоритма уже есть данные (урок или практика). Полное покрытие —
    все уроки закрыты и все темы с весом покрыты. */
-function forecastCoverage() {
-  const lessons = DataAPI.lessons();
-  const done = lessons.filter((l) => !!Store.state.completedLessons[l.id]).length;
-  const lessonPct = lessons.length ? Math.round((done / lessons.length) * 100) : 100;
-  const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
-  const now = Date.now();
-  let covered = 0;
-  for (const s of skills) {
-    const hasLesson = DataAPI.lessonsBySkill(s.id).some((l) => !!Store.state.completedLessons[l.id]);
-    if (hasLesson || forecastSkillMastery(s.id, now) >= 25) covered++;
-  }
-  return {
-    lessonPct, doneLessons: done, totalLessons: lessons.length,
-    covered, totalSkills: skills.length,
-    full: lessonPct === 100 && covered === skills.length,
-  };
-}
-
-function forecastNoteHTML() {
-  const c = forecastCoverage();
+/* Покрытие прогноза считает state.js (forecastCoverage): один общий проход
+   с базой и топ-приростами через forecastAll(), а не свой скан на каждый
+   вызов. Здесь — только подпись под ним. */
+function forecastNoteHTML(cov) {
+  const c = cov || forecastCoverage();
   if (c.full) return "Прогноз на основе всех пройденных уроков — оценка относительно точная. Это ориентир, а не официальный балл.";
   if (!c.totalLessons) return "Прогноз может быть точнее: данных пока мало. Чтобы прогноз стал точнее — проходи уроки и практику";
   if (c.lessonPct < 50) return `Предварительная оценка по первым шагам: пройдено ${c.lessonPct}% уроков (${c.doneLessons} из ${c.totalLessons}), темы с данными: ${c.covered} из ${c.totalSkills}. Число поменяется по мере занятий — это ориентир, а не официальный балл.`;
@@ -614,7 +599,7 @@ function forecastPrematureText(f) {
   return `Чтобы увидеть прогноз, пройди больше тем и практики.${parts.length ? ` Сейчас: ${parts.join(", ")}.` : ""}`;
 }
 
-function safeForecast() {
+function safeForecast(precomputed) {
   // Пустой/coming-soon предмет не должен получать чужие веса профиля:
   // state.js исторически оставляет fallback-конфиг, а UI обязан показывать
   // честное «скоро», а не 0–12 баллов из несуществующих тем.
@@ -622,8 +607,11 @@ function safeForecast() {
     const state = subjectContentState();
     if (state && (state.empty || state.locked)) return { low: 0, high: 0, mid: 0, empty: true };
   } catch (_) {}
+  // Главная/Статистика передают базу из forecastAll(), чтобы не считать
+  // прогноз заново поверх тренда, приростов и покрытия (один проход на
+  // экран вместо четырёх). Без аргумента — как раньше, своим проходом.
   let value = null;
-  try { value = forecast(); } catch (_) { value = null; }
+  try { value = (precomputed !== undefined) ? precomputed : forecast(); } catch (_) { value = null; }
   if (!value || typeof value !== "object") return { low: 0, high: 0, mid: 0, empty: true };
   const low = finiteNumber(value.low, 0);
   const high = finiteNumber(value.high, 0);
@@ -3481,8 +3469,13 @@ function screenDashboard(root) {
   }
   const li = levelInfo();
   const subjectLabel = currentSubjectLabel();
-  const f = safeForecast();
-  const trend = forecastTrend();
+  /* Прогноз одним проходом (база + тренд + топ-прирост + покрытие), а не
+     четырьмя полными сканами истории: Главная была самым тяжёлым экраном
+     именно из-за повторных пересчётов. Фолбэки — поведение как раньше. */
+  let fall = null;
+  try { fall = forecastAll(1); } catch (_) { fall = null; }
+  const f = safeForecast(fall ? fall.base : undefined);
+  const trend = fall ? fall.trend : forecastTrend();
   /* Держим сегодняшний бакет активности живым (сайд-эффект todayActivity):
      график «14 дней» и серия дней читают его ключ, поэтому вызов нужен, даже
      если сам объект здесь больше не читается. */
@@ -3511,9 +3504,9 @@ function screenDashboard(root) {
   const alts = steps.slice(1, 3);
   // Снимок подписей кнопок для runNextStep: см. комментарий там.
   try { lastNextStepsSnapshot = steps.map((c) => ({ action: c && c.action, payload: c && c.payload })); } catch (_) {}
-  const topGainRaw = forecastTopGains(1).find((item) => item && DataAPI.skill(item.skillId) && !topicIsLocked(DataAPI.skill(item.skillId))) || null;
+  const topGainRaw = ((fall ? fall.gains : null) || forecastTopGains(1)).find((item) => item && DataAPI.skill(item.skillId) && !topicIsLocked(DataAPI.skill(item.skillId))) || null;
   const topGain = topGainRaw ? { gain: nonNegativeNumber(topGainRaw.gain), skillId: topGainRaw.skillId, shortName: String(topGainRaw.name || "тема").replace(/^№\d+\s*[—–-]\s*/, "") } : null;
-  const cov = forecastCoverage();
+  const cov = fall ? fall.coverage : forecastCoverage();
   const goal = forecastGoalNum();
 
   /* Блок «Требуют внимания» показывает только реальные проблемы: открытые
@@ -3580,7 +3573,7 @@ function screenDashboard(root) {
           <div class="forecast-cover__row"><span>Уроки: ${cov.doneLessons} из ${cov.totalLessons}</span><span>Темы с данными: ${cov.covered} из ${cov.totalSkills}</span></div>
           ${progressBar(cov.lessonPct, "progress--thin")}
         </div>` : ""}
-        <div class="forecast-note">${forecastNoteHTML()}</div>`}
+        <div class="forecast-note">${forecastNoteHTML(cov)}</div>`}
       </div>
     </div>
 
@@ -8836,18 +8829,20 @@ function screenStats(root) {
     })
     .sort((a, b) => (a.prog - b.prog) || (b.errs - a.errs))
     .slice(0, 3);
-  const f = safeForecast();
+  let statsFall = null;
+  try { statsFall = forecastAll(3); } catch (_) { statsFall = null; }
+  const f = safeForecast(statsFall ? statsFall.base : undefined);
   let trend = null;
-  try { trend = forecastTrend(); } catch (_) { trend = null; }
+  try { trend = statsFall ? statsFall.trend : forecastTrend(); } catch (_) { trend = null; }
   let cov = null;
-  try { cov = forecastCoverage(); } catch (_) { cov = null; }
+  try { cov = statsFall ? statsFall.coverage : forecastCoverage(); } catch (_) { cov = null; }
   let gains = [];
   try {
-    gains = forecastTopGains(3)
+    gains = ((statsFall ? statsFall.gains : null) || forecastTopGains(3))
       .filter((g) => g && DataAPI.skill(g.skillId) && !topicIsLocked(DataAPI.skill(g.skillId)));
   } catch (_) { gains = []; }
   let forecastNote = "";
-  try { forecastNote = forecastNoteHTML(); } catch (_) { forecastNote = ""; }
+  try { forecastNote = forecastNoteHTML(cov); } catch (_) { forecastNote = ""; }
   const openErrs = asSafeArray(s.errors).filter((e) => e && !e.resolved).length;
   const streak = nonNegativeNumber(s.streak);
   const bestSeries = nonNegativeNumber(s.bestSeries);
