@@ -1,5 +1,5 @@
 /* ============================================================
-   ege easy — UI / router / screens
+   lemma go — UI / router / screens
    ============================================================ */
 
 /* ---------------- SVG icons ---------------- */
@@ -233,7 +233,7 @@ function showAccountBlocked(payload) {
           <div class="dlg-device__icon" aria-hidden="true">${icon("lock")}</div>
           <div class="dlg-device__name">Твой аккаунт заблокирован</div>
         </div>
-        <div class="dlg__text">Ты пока не можешь пользоваться разделами ege easy. Главная страница остаётся доступной.</div>
+        <div class="dlg__text">Ты пока не можешь пользоваться разделами lemma go. Главная страница остаётся доступной.</div>
         <div class="dlg-kv">
           <div class="dlg-kv__row dlg-kv__row--col"><span>Причина</span><span>${reason ? esc(reason) : "Причина не указана."}</span></div>
           <div class="dlg-kv__row"><span>Срок</span><span>${esc(fmtBlockedUntil(info))}</span></div>
@@ -2011,15 +2011,15 @@ function updateDocumentTitle(route) {
   try {
     const state = subjectContentState();
     if (state.locked && SUBJECT_CONTENT_ROUTES.has(route)) {
-      document.title = `${subjectDisplayName(state.info)} — закрытая тема — ege easy`;
+      document.title = `${subjectDisplayName(state.info)} — закрытая тема — lemma go`;
       return;
     }
     if (state.empty && EMPTY_SUBJECT_ROUTES.has(route)) {
-      document.title = `${subjectDisplayName(state.info)} — материалы скоро — ege easy`;
+      document.title = `${subjectDisplayName(state.info)} — материалы скоро — lemma go`;
       return;
     }
   } catch (_) {}
-  document.title = `${label} — ege easy`;
+  document.title = `${label} — lemma go`;
 }
 
 /* ============================================================
@@ -7182,7 +7182,7 @@ function openAiLimitModal(status, burstRetryAfterSec, opts) {
   const essayText = burst
     ? `Ты отправляешь проверки слишком часто. Подожди немного и попробуй снова — текст работы сохранён, ничего не потеряно.${hasBalance ? ` Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.` : ""}`
     : `Лимит — ${limit} ${pluralFn(limit)} в день: израсходованные возвращаются примерно по трети запаса каждые 8 часов (полный запас — за сутки).
-          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — вдвое больше проверок.</div>` : ""}`;
+          Сейчас доступно: <b><span data-ai-limit-left>${remaining}</span> из ${limit}</b>.${(!o.text && limit <= 5) ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">lemma go <span class="plus">Plus</span></a> — вдвое больше проверок.</div>` : ""}`;
   const name = farm ? "Доступ временно ограничен"
     : (o.name || (burst ? "Слишком частые запросы" : "Проверки на сегодня закончились"));
   const text = farm ? farmText : (typeof o.text === "function"
@@ -12780,7 +12780,7 @@ const LOADER_LOGO = '<svg viewBox="0 0 44 44" width="32" height="32" fill="none"
 function loaderHTML(sub) {
   return `<div class="card ege-loader">
     <div class="ege-loader__orbit"><div class="ege-loader__core">${LOADER_LOGO}</div></div>
-    <div class="ege-loader__brand">ege <span>easy</span></div>
+    <div class="ege-loader__brand">lemma <span>go</span></div>
     <div class="ege-loader__title">Загружаем</div>
     <div class="ege-loader__sub" data-loader-sub>${esc(sub || "Открываем страницу…")}</div>
     <div class="ege-loader__bar"><i></i></div>

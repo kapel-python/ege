@@ -1,5 +1,5 @@
 /* ============================================================
-   ege easy — единая шапка сайта (единственный источник разметки).
+   lemma go — единая шапка сайта (единственный источник разметки).
    Стили — в css/site-header.css.
 
    Подключение на новой странице:
@@ -68,9 +68,9 @@
         + ctaText.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</a>";
     }
     tmp.innerHTML = '<header class="eh-header"><div class="eh-inner">'
-      + '<a href="/" class="eh-logo" aria-label="ege easy — на главную">'
+      + '<a href="/" class="eh-logo" aria-label="lemma go — на главную">'
       + LOGO_BADGE
-      + '<span class="eh-logo-text">ege <em>easy</em></span></a>'
+      + '<span class="eh-logo-text">lemma <em>go</em></span></a>'
       + '<nav class="eh-actions" aria-label="Действия">'
       + toggleButtonHTML() + right
       + "</nav></div></header>";

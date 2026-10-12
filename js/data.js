@@ -1,4 +1,4 @@
-/* ege easy — client data service.
+/* lemma go — client data service.
    The catalog is loaded from the backend. This module keeps a short-lived
    read cache so rendering code can use synchronous selectors, while the
    backend remains the source of truth.

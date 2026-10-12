@@ -42,9 +42,9 @@ for (const img of ["assets/seo/icon-192.png", "assets/seo/icon-512.png",
 const landing = read("main.html");
 t("лендинг: lang=ru", /<html[^>]*lang="ru"/.test(landing));
 t("лендинг: ровно один h1", (landing.match(/<h1[\s>]/g) || []).length === 1);
-t("лендинг: canonical абсолютный на прод-домен", /<link rel="canonical" href="https:\/\/egeeasy\.ru\/">/.test(landing));
-t("лендинг: og:url и og:image абсолютные", /<meta property="og:url" content="https:\/\/egeeasy\.ru\/">/.test(landing) &&
-  /<meta property="og:image" content="https:\/\/egeeasy\.ru\/assets\/seo\/og-image\.png">/.test(landing));
+t("лендинг: canonical абсолютный на прод-домен", /<link rel="canonical" href="https:\/\/lemmago\.ru\/">/.test(landing));
+t("лендинг: og:url и og:image абсолютные", /<meta property="og:url" content="https:\/\/lemmago\.ru\/">/.test(landing) &&
+  /<meta property="og:image" content="https:\/\/lemmago\.ru\/assets\/seo\/og-image\.png">/.test(landing));
 t("лендинг: meta robots index", /<meta name="robots" content="index/.test(landing));
 t("лендинг: description 50+ символов", (() => {
   const m = landing.match(/<meta name="description" content="([^"]*)"/);
@@ -59,10 +59,10 @@ t("лендинг: theme-color", landing.includes('name="theme-color"'));
 t("лендинг: manifest + apple-touch-icon", landing.includes('rel="manifest"') &&
   landing.includes('rel="apple-touch-icon"'));
 t("лендинг: og:image существует в репо", (() => {
-  const m = landing.match(/<meta property="og:image" content="https:\/\/egeeasy\.ru(\/[^"]*)"/);
+  const m = landing.match(/<meta property="og:image" content="https:\/\/lemmago\.ru(\/[^"]*)"/);
   return !!m && exists(m[1].replace(/^\//, ""));
 })());
-t("лендинг: JSON-LD URL абсолютные", !landing.includes('"url":"/"') && landing.includes('"url":"https://egeeasy.ru/"'));
+t("лендинг: JSON-LD URL абсолютные", !landing.includes('"url":"/"') && landing.includes('"url":"https://lemmago.ru/"'));
 t("лендинг: декоративные svg скрыты от скринридеров",
   !/<svg(?![^>]*aria-hidden)/.test(landing.replace(/<script[\s\S]*?<\/script>/g, "")));
 

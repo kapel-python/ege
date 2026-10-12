@@ -118,7 +118,7 @@ def send_login_request(*, short: str, code: str, ip: str, when: str,
     cfg = require_configured()
     ttl_min = max(1, int(round(ttl_sec / 60)))
     text = (
-        "🔐 Вход в админ-панель ege easy\n\n"
+        "🔐 Вход в админ-панель lemma go\n\n"
         f"Код: {code}\n"
         f"IP: {ip}\n"
         f"Время: {when}\n"
@@ -263,13 +263,13 @@ def start_reply(is_owner: bool, chat_id: str) -> str:
     только его id (по нему владелец привяжет чат) и ничего лишнего."""
     if is_owner:
         return (
-            "🔐 Это служебный бот входа в админ-панель ege easy.\n\n"
+            "🔐 Это служебный бот входа в админ-панель lemma go.\n\n"
             "Этот чат привязан как владелец: заявки на вход с кодом, "
             "IP и кнопками «Подтвердить / Отклонить» приходят сюда.\n\n"
             "Команды: /start — это сообщение."
         )
     return (
-        "🔐 Это служебный бот входа в админ-панель ege easy.\n\n"
+        "🔐 Это служебный бот входа в админ-панель lemma go.\n\n"
         f"Этот чат ({chat_id}) не привязан как владелец — заявки сюда "
         "приходить не будут."
     )

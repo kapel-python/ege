@@ -1,5 +1,5 @@
 /* ============================================================
-   ege easy — единый футер сайта (единственный источник разметки).
+   lemma go — единый футер сайта (единственный источник разметки).
    Стили — в css/footer.css (подхватывает токены хоста).
 
    Подключение на новой странице:
@@ -20,11 +20,11 @@
       '<div class="ef-inner">' +
         '<div class="ef-grid">' +
           '<div class="ef-brand">' +
-            '<a class="ef-logo" href="/" aria-label="ege easy — на главную">' +
+            '<a class="ef-logo" href="/" aria-label="lemma go — на главную">' +
               '<span class="ef-badge" aria-hidden="true">' +
                 '<svg viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
               "</span>" +
-              "<span>ege <em>easy</em></span>" +
+              "<span>lemma <em>go</em></span>" +
             "</a>" +
             '<span class="ef-tagline">ЕГЭ без стресса</span>' +
             '<p class="ef-text">Понятная подготовка к ЕГЭ: теория по шагам, практика на реальных заданиях и видимый прогресс.</p>' +
@@ -57,7 +57,7 @@
           "</nav>" +
         "</div>" +
         '<div class="ef-bottom">' +
-          '<span>© <span data-ef-year>2026</span> ege easy — Готовься к ЕГЭ так, чтобы понимать, а не угадывать</span>' +
+          '<span>© <span data-ef-year>2026</span> lemma go — Готовься к ЕГЭ так, чтобы понимать, а не угадывать</span>' +
         "</div>" +
       "</div>" +
     "</footer>";

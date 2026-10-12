@@ -8548,7 +8548,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     part_label = ("Часть 2 · развёрнутый ответ" if self_exam
                   else "Часть 1 · краткий ответ")
     h1 = f"Задание {num} {exam} по {genitive} — {short}"
-    page_title = f"Задание {num} {exam} по {genitive} ({short}): разбор и практика | ege easy"
+    page_title = f"Задание {num} {exam} по {genitive} ({short}): разбор и практика | lemma go"
     desc = (f"Задание {num} {exam} по {genitive} ({skill_name}): что проверяется,"
             f" примеры с подсказками и разбором, бесплатная практика без регистрации.")
     cta = f"/dashboard#/skill/{skill['id']}?seo_subject={subject}"
@@ -8685,7 +8685,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                   for i, t in enumerate(samples) if t["answer"]][:2]
     ld = {"@context": "https://schema.org", "@graph": [
         {"@type": "Course", "name": f"{title} — подготовка к {exam}",
-         "provider": {"@type": "Organization", "name": "ege easy",
+         "provider": {"@type": "Organization", "name": "lemma go",
                       "url": base}},
         {"@type": "PracticeProblem", "name": h1, "url": url,
          "about": skill_name, "educationalLevel": exam,
@@ -8795,7 +8795,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
 <div class="seo-cta__row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Открыть тренажёр →</a></div>
 </div></div>"""
     return _seo_shell(
-        title=f"Все задания {exam} по {genitive} — разбор и практика | ege easy",
+        title=f"Все задания {exam} по {genitive} — разбор и практика | lemma go",
         desc=desc, canonical=url, robots="index, follow", og_type="website",
         ld_json="", crumb=(f"<a href='{prefix}/'>Все задания</a>"
                            f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
@@ -8837,7 +8837,7 @@ def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
             f" номера с подсказками и бесплатная практика без регистрации.")
     body_main = f"""<div class="seo-hero">
 <div class="seo-badges">
-<span class="seo-badge seo-badge--accent">ege easy</span>
+<span class="seo-badge seo-badge--accent">lemma go</span>
 <span class="seo-badge">подготовка к {label}</span>
 </div>
 <h1>Задания {label} по номерам</h1>
@@ -8847,7 +8847,7 @@ def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
 {chr(10).join(cards)}
 </section>"""
     return _seo_shell(
-        title=f"Задания {label} по номерам — разбор и практика | ege easy",
+        title=f"Задания {label} по номерам — разбор и практика | lemma go",
         desc=desc,
         canonical=f"{base}{prefix}/", robots="index, follow", og_type="website",
         ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
@@ -11984,7 +11984,7 @@ NEWS_AI_HTML_RULES = (
 )
 
 NEWS_AI_SYSTEM_GENERATE = (
-    "Ты — редактор новостей образовательного проекта ege easy (подготовка к ЕГЭ и ОГЭ). "
+    "Ты — редактор новостей образовательного проекта lemma go (подготовка к ЕГЭ и ОГЭ). "
     "Напиши новость по запросу пользователя. "
     "Верни СТРОГО один JSON-объект без пояснений и fences: "
     "{\"title\": \"заголовок до 200 символов\", \"body_html\": \"текст новости\"}. "
@@ -11992,7 +11992,7 @@ NEWS_AI_SYSTEM_GENERATE = (
 ) + NEWS_AI_HTML_RULES
 
 NEWS_AI_SYSTEM_REFINE = (
-    "Ты — редактор новостей образовательного проекта ege easy (подготовка к ЕГЭ и ОГЭ). "
+    "Ты — редактор новостей образовательного проекта lemma go (подготовка к ЕГЭ и ОГЭ). "
     "Перепиши новость по желанию пользователя: сохрани смысл и факты, заголовок меняй, "
     "только если об этом просят. "
     "Верни СТРОГО один JSON-объект без пояснений и fences: "
@@ -13619,7 +13619,7 @@ class Handler(BaseHTTPRequestHandler):
         """Фирменная страница 404 вместо текстовой заглушки BaseHTTPRequestHandler.
 
         Отдаёт 404.html с честным статусом 404 (не 200): поисковики не
-        индексируют мусор, а пользователь видит живую страницу ege easy
+        индексируют мусор, а пользователь видит живую страницу lemma go
         с понятным путём назад. Никогда не бросает: в худшем случае —
         старая заглушка send_error, но тоже с правильным статусом.
         """

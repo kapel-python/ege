@@ -3,20 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Новости — ege easy</title>
-<meta name="description" content="Новости ege easy: обновления платформы, новые предметы и важные изменения.">
-<link rel="canonical" href="https://egeeasy.ru/news">
+<title>Новости — lemma go</title>
+<meta name="description" content="Новости lemma go: обновления платформы, новые предметы и важные изменения.">
+<link rel="canonical" href="https://lemmago.ru/news">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F5FA">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05070C">
 <meta name="color-scheme" content="light dark">
 <meta property="og:type" content="website">
 <meta property="og:locale" content="ru_RU">
-<meta property="og:site_name" content="ege easy">
-<meta property="og:title" content="Новости — ege easy">
+<meta property="og:site_name" content="lemma go">
+<meta property="og:title" content="Новости — lemma go">
 <meta property="og:description" content="Обновления платформы, новые предметы и важные изменения.">
-<meta property="og:url" content="https://egeeasy.ru/news">
-<meta property="og:image" content="https://egeeasy.ru/assets/seo/og-image.png">
+<meta property="og:url" content="https://lemmago.ru/news">
+<meta property="og:image" content="https://lemmago.ru/assets/seo/og-image.png">
 <script>
 (function(){
   try{
@@ -97,7 +97,7 @@ h1{font-family:var(--font-display);font-size:clamp(30px,6vw,46px);line-height:1.
 <div data-ege-header></div>
 <main class="wrap">
   <div class="hero">
-    <span class="eyebrow">ege easy · обновления</span>
+    <span class="eyebrow">lemma go · обновления</span>
     <h1 id="pageTitle">Новости</h1>
     <p class="lead" id="pageLead">Обновления платформы, новые предметы и важные изменения — всё в одном месте.</p>
   </div>
@@ -151,7 +151,7 @@ h1{font-family:var(--font-display);font-size:clamp(30px,6vw,46px);line-height:1.
   async function loadList(){
     titleEl.textContent="Новости";
     leadEl.textContent="Обновления платформы, новые предметы и важные изменения — всё в одном месте.";
-    document.title="Новости — ege easy";
+    document.title="Новости — lemma go";
     var res=await fetch("/api/news",{credentials:"same-origin"});
     if(!res.ok) throw new Error("HTTP "+res.status);
     var data=await res.json();
@@ -169,7 +169,7 @@ h1{font-family:var(--font-display);font-size:clamp(30px,6vw,46px);line-height:1.
     var n=data.news;
     titleEl.textContent=n.title;
     leadEl.textContent=fmtDate(n.createdAt);
-    document.title=n.title+" — Новости ege easy";
+    document.title=n.title+" — Новости lemma go";
     // bodyHtml уже прошёл allowlist-санитайзер на сервере — вставляем как есть.
     root.innerHTML='<article class="news-detail"><button class="news-detail__back" id="backBtn">← Все новости</button>'
       +'<h1>'+esc(n.title)+'</h1>'

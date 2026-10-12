@@ -551,7 +551,7 @@
     // limit <= 10; у Plus и грантов его нет) и только в окне исчерпания:
     // справочное окно по кружку и burst-режим его не показывают.
     var upsell = limit <= 10
-      ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">ege easy <span class="plus">Plus</span></a> — 50 ходов ИИ в день.</div>`
+      ? `<div class="dlg__upsell">Нужно больше? <a href="/subscription">lemma go <span class="plus">Plus</span></a> — 50 ходов ИИ в день.</div>`
       : "";
     return "Ход — это один запрос к ИИ: вопрос, каждый шаг поиска и ответ считаются отдельно, поэтому длинный разбор тратит несколько ходов. Доступно " +
       "<b><span data-ai-limit-left>" + left + "</span> из " + limit + "</b> " +

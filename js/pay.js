@@ -336,7 +336,7 @@ var PayFlow = (function () {
   function loaderHTML(title, sub) {
     return '<div class="card ege-loader" role="status">'
       + '<div class="ege-loader__orbit"><div class="ege-loader__core">' + LOADER_LOGO + "</div></div>"
-      + '<div class="ege-loader__brand">ege <span>easy</span></div>'
+      + '<div class="ege-loader__brand">lemma <span>go</span></div>'
       + '<div class="ege-loader__title">' + esc(title) + "</div>"
       + '<div class="ege-loader__sub">' + esc(sub) + "</div>"
       + '<div class="ege-loader__bar"><i></i></div></div>';

@@ -1,5 +1,5 @@
 /* ============================================================
-   ege easy — Admin panel
+   lemma go — Admin panel
    Отдельный интерфейс управления. Все данные — только из
    /api/admin/*; авторизация — подписанная серверная admin-сессия
    в HttpOnly cookie (js не видит и не хранит её). Любой ответ 401
@@ -322,7 +322,7 @@ function renderShell(activeSection, screenHTML) {
       <aside class="admin-sidebar">
         <div class="admin-logo admin-logo--easy">
           <span class="easy-badge"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <span class="easy-name">ege <em>easy</em></span>
+          <span class="easy-name">lemma <em>go</em></span>
           <span class="logo-sub">admin panel</span>
         </div>
         <nav class="admin-nav">
@@ -375,7 +375,7 @@ function renderLogin(error = "") {
   A.root.innerHTML = `
     <div class="admin-login">
       <div class="admin-login__card">
-        <span class="admin-login__mark">ege <em>easy</em></span>
+        <span class="admin-login__mark">lemma <em>go</em></span>
         <div class="admin-login__title">Админ-панель</div>
         <div class="admin-login__sub">Закрытый раздел управления платформой. Введи админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к твоему аккаунту.</div>
         <form class="admin-login__form" id="loginForm">
@@ -443,7 +443,7 @@ function renderPendingLogin(pendingId, code, expiresAt) {
   A.root.innerHTML = `
     <div class="admin-login">
       <div class="admin-login__card">
-        <span class="admin-login__mark">ege <em>easy</em></span>
+        <span class="admin-login__mark">lemma <em>go</em></span>
         <div class="admin-login__title">Подтверди вход в Telegram</div>
         <div class="admin-login__sub">Пароль верный. Запрос с кодом <span class="mono" id="pendingCode">${esc(A.pendingLogin.code)}</span> уже у владельца — нажми «Подтвердить» в личном чате с ботом.</div>
         <div class="admin-login__error" id="pendingMsg" style="display:none"></div>
@@ -556,7 +556,7 @@ function pendingFailed(text) {
   A.root.innerHTML = `
     <div class="admin-login">
       <div class="admin-login__card">
-        <span class="admin-login__mark">ege <em>easy</em></span>
+        <span class="admin-login__mark">lemma <em>go</em></span>
         <div class="admin-login__title">Вход не подтверждён</div>
         <div class="admin-login__sub">${esc(text)}</div>
         <button class="btn btn--primary btn--lg" type="button" id="pendingBack" style="justify-content:center">Назад ко входу</button>

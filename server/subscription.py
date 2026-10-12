@@ -1,4 +1,4 @@
-"""Подписка ege easy Plus: тариф, сроки, платежи, продление.
+"""Подписка lemma go Plus: тариф, сроки, платежи, продление.
 
 Самодостаточный модуль (только stdlib): схема SQLite, чтение статуса и
 транзакционные мутаторы. Ничего не знает про HTTP, провайдеров ИИ и
@@ -2020,7 +2020,7 @@ def create_platega_checkout(conn: sqlite3.Connection, user_id: int,
         return created
     made = platega_create_transaction(
         cfg, str(pay.get("provider_payment_id")), amount_kop // 100,
-        f"ege easy Plus · {'год' if period == PERIOD_YEAR else 'месяц'}",
+        f"lemma go Plus · {'год' if period == PERIOD_YEAR else 'месяц'}",
         return_url, failed_url, str(created["paymentId"]))
     stored["paymentUrl"] = made["redirect"]
     stored["plategaStatus"] = made["status"]
