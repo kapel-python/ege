@@ -3023,7 +3023,14 @@ function streakChipTitle(st) {
    иначе — уровень по длине. Потерянный перекрывает tier: серая шкала 0. */
 function streakChipClass(st) {
   if (st.status === "frozen") return "streak-chip--frozen";
-  if (st.status === "lost") return "streak-chip--lost";
+  // lost красится в серый только когда было что терять (frozenValue >= 2):
+  // новый пользователь или 1 день учёбы — серия ещё не начиналась, гореть
+  // было нечему, поэтому обычный тёплый огонёк «0 дн», а не потухший.
+  // Порог тот же, что в клике/баннере/сервере, новой логики нет.
+  if (st.status === "lost") {
+    try { if (Number(st.frozenValue) >= STREAK_FROZEN_MIN_DAYS) return "streak-chip--lost"; } catch (_) {}
+    return streakTier(st.shown);
+  }
   return streakTier(st.shown);
 }
 
