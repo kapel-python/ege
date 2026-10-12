@@ -124,7 +124,7 @@ function plural(n, one, few, many) {
 }
 
 const GOAL_LABELS = { g60: "60+ баллов", g80: "80+ баллов", g95: "95+ баллов", g3: "Оценка 3 (база)", g4: "Оценка 4 (база)", g5: "Оценка 5 (база)" };
-const LEVEL_LABELS = { zero: "С нуля", base: "Базовый", confident: "Уверенный" };
+const LEVEL_LABELS = { zero: "С нуля", base: "Базовый", confident: "Уверенно решаю" };
 
 /* ---------- блокировки ---------- */
 
@@ -1369,7 +1369,7 @@ function bindUserActions(p) {
             <option value="" ${!p.selfLevel ? "selected" : ""}>Не указана</option>
             <option value="zero" ${p.selfLevel === "zero" ? "selected" : ""}>С нуля</option>
             <option value="base" ${p.selfLevel === "base" ? "selected" : ""}>Базовый</option>
-            <option value="confident" ${p.selfLevel === "confident" ? "selected" : ""}>Уверенный</option>
+            <option value="confident" ${p.selfLevel === "confident" ? "selected" : ""}>Уверенно решаю</option>
           </select>
         </div>
         <div class="a-field"><label>Цель</label>

@@ -7305,7 +7305,7 @@ function sessionShownFeedbackHtml(t) {
         <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
       </div>
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — решишь его позже сам.</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — вернёшься к нему позже.</div>
       ${sessionFinishNavHtml("btn--soft")}
     </div>`;
 }
@@ -12127,7 +12127,7 @@ const Onboarding = {
       <div class="choice-list">
         <button class="choice-item" onclick="Onboarding.pickLevel('zero')"><b>Начинаю с нуля</b><span>База школьной программы неустойчива</span></button>
         <button class="choice-item" onclick="Onboarding.pickLevel('base')"><b>Базовый уровень</b><span>Простые задания получаются, сложные — с трудом</span></button>
-        <button class="choice-item" onclick="Onboarding.pickLevel('confident')"><b>Уверенный</b><span>Решаю стабильно, хочу скорости и сложных тем</span></button>
+        <button class="choice-item" onclick="Onboarding.pickLevel('confident')"><b>Уверенно решаю</b><span>Решаю стабильно, хочу скорости и сложных тем</span></button>
       </div>
       ${this.backHtml()}`;
   },

@@ -1565,7 +1565,7 @@ def promo_quote(conn: sqlite3.Connection, code: str, period: str,
     if str(promo.get("period") or "any") not in ("any", period):
         raise ValueError("Промокод не для этого тарифа")
     if user_id is not None and promo_used_by_user(conn, code, int(user_id)):
-        raise ValueError("Ты уже использовал этот промокод")
+        raise ValueError("Этот промокод уже использован")
     price = plus_price_kopecks(period)
     if str(promo.get("kind")) == "percent":
         discount = price * int(promo.get("value") or 0) // 100
