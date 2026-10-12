@@ -50,12 +50,22 @@ SUBJECTS = {
     # парсер (селекторы soltb/body/answer/sol/prob_crits) переиспользуется
     # как есть; отличается только нумерация линий (1–25) и хост.
     "oge": "https://math-oge.sdamgia.ru",
+    # Волна ОГЭ (по образцу 7 предметов ЕГЭ): биология, общество,
+    # информатика, история. Ключ = префикс raw-файлов tools/out/<ключ>_NN.json.
+    "bio_oge": "https://bio-oge.sdamgia.ru",
+    "soc_oge": "https://soc-oge.sdamgia.ru",
+    "inf_oge": "https://inf-oge.sdamgia.ru",
+    "hist_oge": "https://hist-oge.sdamgia.ru",
 }
 
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"
 TIMEOUT = 40
 RETRIES = 3
-PAUSE = 0.25
+# Пауза между разборами заданий. Переменная окружения SDAMGIA_PAUSE
+# перекрывает дефолт: при параллельной работе нескольких предметов
+# (разные поддомены, один провайдер) каждый поток идёт вежливее.
+# Менять константу не нужно — только env на время операции.
+PAUSE = float(__import__("os").environ.get("SDAMGIA_PAUSE", "0.25") or 0.25)
 
 # Маркеры «здесь начинается решение» на странице задания: условие лежит
 # выше сolnb-кнопки, поэтому режем точно по ней, а не по общим div-ам.
@@ -160,6 +170,11 @@ def strip_markup(raw: str) -> str:
     text = re.sub(r"</tr>\s*", "\n", text)
     text = re.sub(r"<table[^>]*>", "\n", text)
     text = re.sub(r"</table>", "\n", text)
+    # ASCII-сравнения в тексте («X < 20», «НЕ (X<=7)»): «<» без буквы, «/»,
+    # «!» или «?» следом тегом быть не может — прячем от общей чистки, иначе
+    # она выедает всё до следующей «>» вместе с порогом (прецедент inf_oge:
+    # в банк уходило «НЕ (X» вместо «НЕ (X<=7)»). Возвращаем в самом конце.
+    text = re.sub(r"<(?![A-Za-z/!?])", "\x00LT\x00", text)
     text = re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
     # СДАМ ГИА режет слова невидимыми мягкими переносами: «По­яс­не­ние».
@@ -176,7 +191,7 @@ def strip_markup(raw: str) -> str:
     text = re.sub(r"\(\s+", "(", text)
     text = re.sub(r"\s+\)", ")", text)
     text = re.sub(r"\n\s*\n+", "\n", text)
-    return text.strip()
+    return text.replace("\x00LT\x00", "<").strip()
 
 
 def extract_div(page: str, match: re.Match) -> str:

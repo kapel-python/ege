@@ -4171,6 +4171,10 @@ _SUBJECT_TITLE_FALLBACK = {
     "informatics": "Информатика",
     "history": "История",
     "oge_math": "Математика (ОГЭ)",
+    "oge_biology": "Биология (ОГЭ)",
+    "oge_society": "Обществознание (ОГЭ)",
+    "oge_informatics": "Информатика (ОГЭ)",
+    "oge_history": "История (ОГЭ)",
 }
 
 
@@ -4204,6 +4208,10 @@ SUBJECT_COMPACT = {
     "informatics": "Информат",
     "history": "История",
     "oge_math": "ОГЭ мат",
+    "oge_biology": "ОГЭ био",
+    "oge_society": "ОГЭ общ",
+    "oge_informatics": "ОГЭ инф",
+    "oge_history": "ОГЭ ист",
 }
 SUBJECT_COMPACT_LEN = 8
 

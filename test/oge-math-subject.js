@@ -1,6 +1,6 @@
 /* Client-side regression: an opened oge_math subject exposes its real topics:
-   25 lines (part 1 short-answer + part 2 self-check), exam axis "oge",
-   locked №11/№18 (figures essential), no lessons, no essays. */
+   25 lines (part 1 incl. figure topics №11/№18 + part 2 self-check),
+   exam axis "oge", zero locked, no lessons, no essays. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_oge_math.json", "utf8"));
@@ -55,11 +55,11 @@ vm.runInContext(`
 const result = sandbox.ogeChecks;
 check("ось экзамена: oge_math=oge, profile_math=ege", result.exam === "oge" && result.examProfile === "ege");
 check("предмет открыт и доступен", result.locked === false && result.available === true);
-check("25 тем, locked ровно o11/o18", result.skills === 25 && JSON.stringify(result.lockedSkills) === JSON.stringify(["o11_functions", "o18_grid"]));
+check("25 тем, замков нет (№11/№18 открыты фигурами)", result.skills === 25 && result.lockedSkills.length === 0);
 check("у каждой темы 3 подсказки", result.hintsOk === true);
-check("задания на месте (23 открытые темы покрыты)", result.tasks >= 70 && result.practice >= 70);
+check("задания на месте (1416, все темы покрыты)", result.tasks === 1416 && result.practice === 1416);
 check("уроков нет (пилот без lessons)", result.lessons === 0);
-check("миссии покрывают открытые темы", result.missions === 23);
+check("миссии покрывают все 25 тем", result.missions === 25);
 check("3 босса по веткам", result.bosses === 3);
 check("диагностика непуста", result.diagnostics >= 6);
 check("цели-оценки g3/g4/g5", JSON.stringify(result.goals) === JSON.stringify(["g3", "g4", "g5"]));

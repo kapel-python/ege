@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER_PATH = ROOT / "server" / "server.py"
 
 RID = "oge_math"
-LOCKED_SKILLS = {"o11_functions", "o18_grid"}
+# Замков не осталось: №11 (графики) и №18 (решётка) открыты фигурами
+# (apply_oge_math_figures.py): все 153 задания с visual.assetId.
+LOCKED_SKILLS = set()
 
 
 def load_server(db_path: Path):
@@ -87,9 +89,14 @@ def main():
             assert oge["features"]["lessons"] is False, oge
             assert oge["features"]["practice"] is True and oge["features"]["forecast"] is True, oge
             assert oge["features"]["diagnostics"] is True and oge["features"]["missions"] is True, oge
-            # Остальные предметы остались на оси ege.
+            # Остальные предметы остались на оси ege; соседние oge_*
+            # (волна ОГЭ) на своих осях — их наличие не ломает изоляцию.
             exams = {s.get("id"): s.get("exam") for s in subjects.get("subjects", [])}
-            assert all(v == "ege" for k, v in exams.items() if k != RID), exams
+            for k, v in exams.items():
+                if k == RID or k.startswith("oge_"):
+                    assert v == "oge", (k, v)
+                else:
+                    assert v == "ege", (k, v)
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={RID}")
             assert status == 200, (status, boot)
@@ -115,14 +122,29 @@ def main():
             assert locked == LOCKED_SKILLS, locked
 
             tasks = catalog.get("tasks", [])
-            assert len(tasks) >= 70, len(tasks)
+            # Полный добор: 1263 задания. Поскилловые капы зафиксированы
+            # словарём (пулы источника исчерпаны, проходы с 0 новых):
+            # №1–5 — блочные капы (план/схема), №7/13/14 — фигурные линии,
+            # остальное — весь годный пул.
+            assert len(tasks) == 1416, len(tasks)
             task_ids = {t["id"] for t in tasks}
             per_skill: dict[str, int] = {}
             for t in tasks:
                 per_skill[t["skill"]] = per_skill.get(t["skill"], 0) + 1
-            # У каждой открытой темы есть задания; у locked — нет.
-            assert set(per_skill) == (set(by_id) - LOCKED_SKILLS), sorted(set(by_id) ^ set(per_skill) ^ LOCKED_SKILLS)
-            assert all(v >= 1 for v in per_skill.values()), per_skill
+            expected_caps = {"o01_pract": 7, "o02_pract": 2, "o03_pract": 3,
+                             "o04_pract": 2, "o05_pract": 1, "o06_numbers": 58,
+                             "o07_numline": 33, "o08_expr": 64,
+                             "o09_equations": 86, "o10_probability": 85,
+                             "o11_functions": 59, "o12_formulas": 79,
+                             "o13_inequalities": 31,
+                             "o14_progressions": 41, "o15_triangles": 100,
+                             "o16_circle": 97, "o17_quads": 73,
+                             "o18_grid": 94,
+                             "o19_statements": 54, "o20_equations2": 94,
+                             "o21_wordprob": 84, "o22_functions2": 74,
+                             "o23_geocalc": 60, "o24_geoproof": 54,
+                             "o25_geohard": 81}
+            assert per_skill == expected_caps, per_skill
             # Часть 2 — развернутый ответ с самопроверкой и весом 2.
             part2 = [t for t in tasks if t["skill"] in
                      {"o20_equations2", "o21_wordprob", "o22_functions2",
@@ -216,7 +238,7 @@ def main():
             assert public_oge, public
             assert public_oge.get("counts", {}).get("tasks") == len(tasks), public_oge
             print(f"OGE math subject integration OK: {len(tasks)} tasks, 25 skills "
-                  f"(2 locked), {len(missions)} missions, /oge/ SEO axis isolated")
+                  f"(0 locked), {len(missions)} missions, /oge/ SEO axis isolated")
         finally:
             httpd.shutdown()
             httpd.server_close()

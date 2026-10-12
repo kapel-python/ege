@@ -19,7 +19,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CATALOGS = ["catalog.json", "catalog_basic.json", "catalog_society.json",
             "catalog_informatics.json", "catalog_biology.json",
-            "catalog_russian.json", "catalog_oge_math.json"]
+            "catalog_russian.json", "catalog_oge_math.json",
+            "catalog_oge_biology.json", "catalog_oge_society.json",
+            "catalog_oge_informatics.json", "catalog_oge_history.json"]
 
 
 def natural(task: dict) -> tuple:

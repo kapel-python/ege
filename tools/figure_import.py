@@ -49,12 +49,21 @@ BASES = {
     "math": "https://math-ege.sdamgia.ru",
     "rus": "https://rus-ege.sdamgia.ru",
     "his": "https://hist-ege.sdamgia.ru",
+    # Волна ОГЭ: та же платформа, те же get_file-рисунки.
+    "oge": "https://math-oge.sdamgia.ru",
+    "bio_oge": "https://bio-oge.sdamgia.ru",
+    "soc_oge": "https://soc-oge.sdamgia.ru",
+    "inf_oge": "https://inf-oge.sdamgia.ru",
+    "hist_oge": "https://hist-oge.sdamgia.ru",
 }
 # Каталоги ассетов (в каталоге base-математика ссылается на assets/basic,
 # поэтому имя каталога не совпадает с кодом предмета).
 ASSET_DIR = {"soc": "society", "bio": "biology", "inf": "informatics",
              "mathb": "basic", "math": "math", "rus": "russian",
-             "his": "history"}
+             "his": "history",
+             "oge": "oge_math", "bio_oge": "oge_biology",
+             "soc_oge": "oge_society", "inf_oge": "oge_informatics",
+             "hist_oge": "oge_history"}
 
 CHROME = next(
     (Path(p) / "chrome-headless-shell" for p in (
@@ -94,10 +103,12 @@ LABEL_AFTER_RE = re.compile(r'^\s*((?:[А-Я]|\d{1,2})\))(?:\s|$)')
 
 
 def _visible_text(fragment: str) -> str:
+    # Тот же кейс, что в strip_markup: «<» без буквы// /!/? — текст, не тег.
+    fragment = re.sub(r"<(?![A-Za-z/!?])", "\x00LT\x00", fragment)
     t = re.sub(r"<[^>]+>", "", fragment)
     t = html.unescape(t)
     t = t.replace("\u00ad", "").replace("\u202f", " ").replace("\xa0", " ")
-    return t.strip()
+    return t.replace("\x00LT\x00", "<").strip()
 
 
 def _img_label(seg: str, m: re.Match) -> str:
