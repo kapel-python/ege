@@ -10401,7 +10401,7 @@ function screenProfile(root) {
           <span class="settings-row__title">Выйти из аккаунта</span>
           <span class="settings-row__sub">${(Store.auth && Store.auth.registered)
             ? "Прогресс не удалится и вернётся при следующем входе по email и паролю."
-            : "Осторожно: у аккаунта сейчас нет способа входа — после выхода зайти обратно не выйдет. Сначала привяжи Google выше."}</span>
+            : "Осторожно: у аккаунта сейчас нет способа входа — после выхода зайти обратно не выйдет. Сначала зарегистрируй email и пароль (экран «Регистрация», прогресс сохранится)."}</span>
         </span>
       </button>` : ""}
     </div>`;
@@ -11441,7 +11441,7 @@ function askLogoutAccount() {
     eyebrow: "Выход из аккаунта",
     title: "Выйти из аккаунта?",
     text: noEntry
-      ? "Осторожно: у аккаунта сейчас <b>нет способа входа</b> — ни пароля, ни Google. После выхода зайти обратно не выйдет. Сначала привяжи Google выше, иначе прогресс останется без владельца."
+      ? "Осторожно: у аккаунта сейчас <b>нет способа входа</b>. После выхода зайти обратно не выйдет — сначала зарегистрируй email и пароль (экран «Регистрация», прогресс сохранится)."
       : "Прогресс не удалится и вернётся при следующем входе по email и паролю.",
     iconName: "logout",
     cancelText: "Отмена",
@@ -11702,7 +11702,7 @@ function accountAuthHTML() {
         <span class="chip chip--warn">${icon("info")} нет способа входа</span>
         <span class="auth-status__email mono">${esc(auth.email)}</span>
       </div>
-      <div class="settings-row__sub" style="margin-top:6px">Привяжи Google ниже — и вход с другого устройства вернётся.</div>
+      <div class="settings-row__sub" style="margin-top:6px">Зарегистрируй email и пароль (экран «Регистрация») — и вход с другого устройства вернётся.</div>
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   return `
@@ -11829,7 +11829,10 @@ function screenLogin(root) {
        </div>`);
     return;
   }
-  const banner = errorReason && !GOOGLE_LINK_REFUSALS[errorReason]
+  // Баннер отказа Google — только пока вход включён: иначе ручной хвост
+  // ?error= в адресе рисовал бы упоминание выключенного сервиса.
+  const googleOn = !!(Store.auth && Store.auth.googleEnabled);
+  const banner = googleOn && errorReason && !GOOGLE_LINK_REFUSALS[errorReason]
     ? `<div class="auth-form__error is-visible" role="alert">${esc(GOOGLE_ERROR_TEXT[errorReason] || GOOGLE_ERROR_TEXT.failed)}</div>`
     : "";
   root.innerHTML = authScreenShell("Вход",
