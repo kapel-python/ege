@@ -2668,42 +2668,43 @@ function chooseSubjectFromDialog(id) {
   switchSubjectFromUI(id);
 }
 
-/* Мини-окно выбора направления (ЕГЭ/ОГЭ): кастомный попап у якоря,
-   не нативный <select>. Редкое действие — видна только тихая
-   строка-триггер, само окно живёт до клика мимо / Esc / выбора. */
-let examPopupPickCb = null;
-function examPopupEscHandler(e) {
-  if (e && e.key === "Escape") { try { closeExamPopup(); } catch (_) {} }
+/* Мини-окно выбора из короткого списка: кастомный попап у якоря,
+   не нативный <select>. Живёт до клика мимо / Esc / выбора. Каркас один
+   на всех: направление (ЕГЭ/ОГЭ), цель, и дальше что понадобится —
+   меняются только пункты. */
+let choicePopupPickCb = null;
+function choicePopupEscHandler(e) {
+  if (e && e.key === "Escape") { try { closeChoicePopup(); } catch (_) {} }
 }
-function closeExamPopup() {
-  try { document.removeEventListener("keydown", examPopupEscHandler); } catch (_) {}
+function closeChoicePopup() {
+  try { document.removeEventListener("keydown", choicePopupEscHandler); } catch (_) {}
   try {
     document.querySelectorAll(".exam-backdrop,.exam-popup").forEach((el) => el.remove());
   } catch (_) {}
-  examPopupPickCb = null;
+  choicePopupPickCb = null;
 }
-function examPopupPick(exam) {
-  const cb = examPopupPickCb;
-  closeExamPopup();
-  try { if (cb) cb(exam); } catch (_) {}
+function choicePopupPick(id) {
+  const cb = choicePopupPickCb;
+  closeChoicePopup();
+  try { if (cb) cb(id); } catch (_) {}
 }
-function openExamPopup(anchor, current, onPick) {
-  closeExamPopup();
-  const groups = subjectsByExam();
-  if (!anchor || !anchor.getBoundingClientRect || groups.length < 2) return;
+/* items: [{id, name, sub}]. currentId — id подсвеченного пункта. */
+function openChoicePopup(anchor, items, currentId, onPick) {
+  closeChoicePopup();
+  if (!anchor || !anchor.getBoundingClientRect || !items.length) return;
   const rect = anchor.getBoundingClientRect();
   const back = document.createElement("div");
   back.className = "exam-backdrop";
-  back.onclick = closeExamPopup;
+  back.onclick = closeChoicePopup;
   const pop = document.createElement("div");
   pop.className = "exam-popup";
   pop.setAttribute("role", "menu");
-  pop.innerHTML = groups.map((g) => {
-    const active = g.exam === current;
+  pop.innerHTML = items.map((it) => {
+    const active = String(it.id) === String(currentId);
     return `<button type="button" class="exam-popup__item${active ? " exam-popup__item--active" : ""}"
-        role="menuitemradio" aria-checked="${active}" onclick="examPopupPick('${g.exam}')">
-      <span class="exam-popup__name">${esc(examGroupLabel(g.exam))}</span>
-      <span class="exam-popup__count">${g.subjects.length}</span>
+        role="menuitemradio" aria-checked="${active}" onclick="choicePopupPick('${esc(it.id)}')">
+      <span class="exam-popup__name">${esc(it.name)}</span>
+      ${it.sub ? `<span class="exam-popup__count">${esc(it.sub)}</span>` : ""}
       <span class="exam-popup__check" aria-hidden="true">${active ? "✓" : ""}</span>
     </button>`;
   }).join("");
@@ -2715,8 +2716,15 @@ function openExamPopup(anchor, current, onPick) {
   if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - h - 6);
   pop.style.left = `${left}px`;
   pop.style.top = `${top}px`;
-  examPopupPickCb = onPick;
-  try { document.addEventListener("keydown", examPopupEscHandler); } catch (_) {}
+  choicePopupPickCb = onPick;
+  try { document.addEventListener("keydown", choicePopupEscHandler); } catch (_) {}
+}
+function openExamPopup(anchor, current, onPick) {
+  const groups = subjectsByExam();
+  if (groups.length < 2) return;
+  openChoicePopup(anchor,
+    groups.map((g) => ({ id: g.exam, name: examGroupLabel(g.exam), sub: String(g.subjects.length) })),
+    current, onPick);
 }
 /* Тихая строка-триггер мини-окна: «Направление: ЕГЭ · 11 класс ▾».
    current — ось для подписи и галочки, handler — имя колбэка выбора.
@@ -2733,6 +2741,44 @@ function examSwitchHTML(current, handler) {
    уже на ней, дальше один клик по предмету. */
 function examSwitchFromProfile(exam) {
   try { askSubjectDialog(exam === "oge" ? "oge" : "ege"); } catch (_) {}
+}
+/* Смена цели из профиля тем же мини-окном: пункты — шкала ТЕКУЩЕГО
+   предмета (DataAPI.goals()), плюс «Без цели» — честный null вместо
+   выдуманной. Пустая шкала — триггеру нечего открывать. */
+function goalSwitchHTML() {
+  let goals = [];
+  try { goals = DataAPI.goals() || []; } catch (_) { goals = []; }
+  if (!goals.length) return "";
+  const g = currentGoal();
+  const label = g ? g.label : "не выбрана";
+  return `<button class="exam-switch" type="button" onclick="openGoalPopup(this)"><span>Цель:</span><b>${esc(label)}</b><span class="exam-switch__chev" aria-hidden="true">▾</span></button>`;
+}
+function openGoalPopup(anchor) {
+  let goals = [];
+  try { goals = DataAPI.goals() || []; } catch (_) { goals = []; }
+  if (!goals.length) return;
+  const items = goals.map((g) => ({
+    id: String(g.id), name: String(g.label || g.id), sub: String(g.desc || ""),
+  }));
+  items.push({ id: "", name: "Без цели", sub: "убрать ориентир" });
+  const g = currentGoal();
+  openChoicePopup(anchor, items, g ? g.id : "", pickGoalFromProfile);
+}
+async function pickGoalFromProfile(id) {
+  if (typeof Store === "undefined" || !Store.state) return;
+  const next = id || null;
+  if ((Store.state.goal || null) === next) return;
+  const prev = Store.state.goal;
+  Store.state.goal = next;
+  try {
+    await Store.save();
+  } catch (_) {
+    Store.state.goal = prev;
+    try { toast("Не удалось сохранить цель. Проверь соединение.", "toast--error", "x"); } catch (_) {}
+    return;
+  }
+  try { toast(next ? "Цель обновлена" : "Цель убрана", "", "check"); } catch (_) {}
+  try { render(); } catch (_) {}
 }
 
 /* Честная подпись состава курса для выбора предмета: собирается из features
@@ -10395,6 +10441,16 @@ function screenProfile(root) {
             ${subjectCurrentButtonHTML()}
           </div>
           ${subjectState.empty ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : subjectState.locked ? `<div class="settings-row__sub">В реестре есть тема, но урок и практика пока не подключены. Пустые переходы скрыты.</div>` : ""}
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row__icon" aria-hidden="true">${icon("flag")}</div>
+        <div class="settings-row__body">
+          <div class="settings-row__title">Цель</div>
+          <div class="settings-row__sub">Ориентир подготовки по этому предмету. Можно убрать вовсе — лучше без цели, чем с выдуманной.</div>
+          <div class="settings-row__control">
+            ${goalSwitchHTML()}
+          </div>
         </div>
       </div>
       ${Store.accountId ? `
