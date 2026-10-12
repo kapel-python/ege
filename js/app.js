@@ -4078,7 +4078,10 @@ function runNextStep(index = 0) {
 function currentGoal() {
   const list = (typeof DataAPI !== "undefined" && DataAPI.goals) ? (DataAPI.goals() || []) : [];
   const g = list.find((x) => x && x.id === Store.state.goal);
-  return g || (list.length ? list[0] : null);
+  // Без выдуманной цели: нет выбранной — null, а не первая шкалы.
+  // Раньше здесь подставлялся list[0] (у ОГЭ — «Оценка 3»), и пропустивший
+  // онбординг видел чужую цель как свою при goal_id=NULL в базе.
+  return g || null;
 }
 function goalLabel() {
   const g = currentGoal();
@@ -12610,18 +12613,18 @@ const Onboarding = {
 
   pickLevel(v) { this.selfLevel = v; this.next(); },
   pickGoal(v) { this.goal = v; this.next(); },
-  /* Цель по умолчанию — первая из шкалы ТЕКУЩЕГО предмета (после switchSubject
-     DataAPI.goals() уже предметные). Хардкод g60 здесь ломал регистрацию базы:
-     сервер отклоняет чужую цель 400-й, когда у предмета есть своя шкала.
-     Выбранную ранее цель перепроверяем по текущей шкале: в finish() этот метод
-     вызывается уже после переключения, а выбор могли сделать до него — чужой
-     id заменяем первым валидным, иначе вся настройка (включая onboarded и имя)
-     не сохраняется и онбординг возвращается после перезагрузки. */
+  /* Цель по умолчанию — только явно выбранная и перепроверенная по шкале
+     ТЕКУЩЕГО предмета (после switchSubject DataAPI.goals() уже предметные).
+     Хардкод g60 здесь ломал регистрацию базы: сервер отклоняет чужую цель
+     400-й, когда у предмета есть своя шкала. Чужой id — невалиден, и вместо
+     подстановки первой цели шкалы («Оценка 3» вместо выбранных баллов)
+     честно возвращаем null: сервер принимает goal=None (см.
+     validate_profile_settings), настройка сохраняется, а цели у человека
+     просто нет, пока он её не выберет. */
   defaultGoal() {
     try {
       const list = DataAPI.goals() || [];
       if (list.some((g) => g && g.id === this.goal)) return this.goal;
-      if (list.length && list[0].id) return list[0].id;
     } catch (_) {}
     return null;
   },
