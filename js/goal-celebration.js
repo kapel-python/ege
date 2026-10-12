@@ -74,8 +74,8 @@ var GcTemplate=`<div class="gc-ov" id="gc-ov" role="dialog" aria-modal="true" ar
         </div>
 
         <div class="gc-tiles gc-rise" id="gc-bTiles">
-          <div class="gc-tile"><div class="gc-v"><span id="gc-vTop">0</span> <small id="gc-vTopT"></small></div><div class="gc-l">уроков пройдено</div><div class="gc-seg" id="gc-seg"></div></div>
-          <div class="gc-tile"><div class="gc-v"><span id="gc-vAvg">0</span> <small id="gc-vAvgU"></small></div><div class="gc-l" id="gc-lAvg"></div>
+          <div class="gc-tile" id="gc-tTop"><div class="gc-v"><span id="gc-vTop">0</span> <small id="gc-vTopT"></small></div><div class="gc-l">уроков пройдено</div><div class="gc-seg" id="gc-seg"></div></div>
+          <div class="gc-tile" id="gc-tAvg"><div class="gc-v"><span id="gc-vAvg">0</span> <small id="gc-vAvgU"></small></div><div class="gc-l" id="gc-lAvg"></div>
             <svg class="gc-ring2" viewBox="0 0 38 38"><circle class="gc-t" cx="19" cy="19" r="15"/><circle class="gc-p" pathLength="1" cx="19" cy="19" r="15"/><path class="gc-h" d="M19 11v8l5 3"/></svg></div>
           <div class="gc-tile"><div class="gc-v"><span id="gc-vGain">0</span></div><div class="gc-l" id="gc-lGain"></div><div class="gc-trk"><b></b></div></div>
         </div>
@@ -260,6 +260,7 @@ async function stage2(d){
   card.style.height=Math.min(660,vh()-32)+'px';card.focus({preventScroll:true});await wait(600);if(dead)return;
 
   $('gc-chart').innerHTML=c.html;$('gc-daysL').textContent=plural(c.days,['день','дня','дней'])+' в пути';
+  try{if($('gc-tTop'))$('gc-tTop').hidden=!!d.noLessons;if($('gc-tAvg'))$('gc-tAvg').hidden=!!d.noLessons}catch(e){}
   var tot=d.topicsTotal||d.topicsDone||1,on=Math.round(d.topicsDone/tot*12),sg='';
   for(var i=0;i<12;i++)sg+='<i style="--i:'+i+'"'+(i<on?' class="gc-on"':'')+'></i>';
   $('gc-seg').innerHTML=sg;$('gc-vTopT').textContent=d.topicsTotal?'/ '+d.topicsTotal:'';
@@ -307,6 +308,9 @@ function normalizeCelebration(input){
   var av=d.avg||{},avv=Number(av.value);if(!Number.isFinite(avv))avv=0;
   var out={goal:goal,history:hist,topicsDone:done,
     avg:{value:avv,unit:String(av.unit||''),label:String(av.label||'')}};
+  if(d.noLessons)out.noLessons=true;
+  if(d.goalTitle)out.goalTitle=String(d.goalTitle);
+  if(d.goalLive)out.goalLive=String(d.goalLive);
   if(tot)out.topicsTotal=tot;
   var st=Number(d.streak);out.streak=(Number.isFinite(st)&&st>0)?Math.floor(st):0;
   if(d.activity&&d.activity.length)out.activity=d.activity;
@@ -327,8 +331,8 @@ GcGlobal.openGoalCelebration=function(data){
   Array.prototype.forEach.call(ov.querySelectorAll('.gc-is-in,.gc-is-ready,.gc-run'),function(e){e.classList.remove('gc-is-in','gc-is-ready','gc-run')});
   $('gc-hn').textContent='0';$('gc-rp').style.strokeDashoffset=1;
   fit();
-  $('gc-h1').innerHTML='Твоя цель <b class="gc-g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!';
-  $('gc-sub').textContent=COPY.sub;$('gc-live').textContent=COPY.live+d.goal;
+  $('gc-h1').innerHTML=d.goalTitle||('Твоя цель <b class="gc-g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!');
+  $('gc-sub').textContent=COPY.sub;$('gc-live').textContent=d.goalLive||(COPY.live+d.goal);
   $('gc-h2').textContent='Вот твой путь к цели';$('gc-wishT').innerHTML=gcWishHTML();
   [$('gc-h1'),$('gc-sub'),$('gc-h2'),$('gc-wishT')].forEach(arm);
   $('gc-goP').disabled=$('gc-cls1').disabled=false;
@@ -408,6 +412,21 @@ function collectGoalCelebrationData(){
     try{streak=Math.max(0,Math.floor(Number(Store.state.streak)||0))}catch(e){}
     var data={goal:goal,history:hist,topicsDone:done,
       avg:{value:avgV,unit:'мин',label:'в среднем на урок'},sound:false,onClose:null};
+    /* Без уроков (все OGE) плитки уроков и среднего на урок не показываем:
+       done=0 и avgV=все минуты были бы враньём. Флаг едет в окно. */
+    if(!lessons.length)data.noLessons=true;
+    /* Заголовок для шкал-оценок (OGE): выбрана «Оценка 3», а не число —
+       так и поздравляем. У балльных шкал (ЕГЭ) тексты прежние. */
+    try{
+      var _ge='ege';
+      try{if(DataAPI&&typeof DataAPI.subjectExam==='function')_ge=DataAPI.subjectExam(subject)}catch(e){}
+      if(_ge==='oge'){
+        var _gl=null;
+        try{var _gs=(DataAPI.goals&&typeof DataAPI.goals==='function')?DataAPI.goals():[];
+          for(var _gi=0;_gi<_gs.length;_gi++){if(_gs[_gi]&&String(_gs[_gi].id)===String(gid)){_gl=String(_gs[_gi].label||'');break}}}catch(e){}
+        if(_gl){data.goalTitle='Твоя цель «'+_gl+'» достигнута!';data.goalLive='Цель достигнута: '+_gl;}
+      }
+    }catch(e){}
     if(lessons.length)data.topicsTotal=lessons.length;
     if(streak>0)data.streak=streak;
     if(activity.length)data.activity=activity;

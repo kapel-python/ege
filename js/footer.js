@@ -26,8 +26,8 @@
               "</span>" +
               "<span>lemma <em>go</em></span>" +
             "</a>" +
-            '<span class="ef-tagline">ЕГЭ без стресса</span>' +
-            '<p class="ef-text">Понятная подготовка к ЕГЭ: теория по шагам, практика на реальных заданиях и видимый прогресс.</p>' +
+            '<span class="ef-tagline">ЕГЭ и ОГЭ без стресса</span>' +
+            '<p class="ef-text">Понятная подготовка к экзаменам: теория по шагам, практика на реальных заданиях и видимый прогресс.</p>' +
           "</div>" +
           '<nav class="ef-col" aria-label="Платформа">' +
             "<h3>Платформа</h3>" +
@@ -38,10 +38,11 @@
               '<li><a class="ef-link" data-app-route="errors">Работа над ошибками <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
             "</ul>" +
           "</nav>" +
-          '<nav class="ef-col" aria-label="Задания ЕГЭ">' +
-            "<h3>Задания ЕГЭ</h3>" +
+          '<nav class="ef-col" aria-label="Задания по номерам">' +
+            "<h3>Задания по номерам</h3>" +
             "<ul>" +
-              '<li><a class="ef-link" href="/ege/">Все задания по номерам <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
+              '<li><a class="ef-link" href="/ege/">ЕГЭ — все задания по номерам <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
+              '<li><a class="ef-link" href="/oge/">ОГЭ — все задания по номерам <span class="ef-arr" aria-hidden="true">→</span></a></li>' +
             "</ul>" +
           "</nav>" +
           '<nav class="ef-col" aria-label="Компания">' +
@@ -57,7 +58,7 @@
           "</nav>" +
         "</div>" +
         '<div class="ef-bottom">' +
-          '<span>© <span data-ef-year>2026</span> lemma go — Готовься к ЕГЭ так, чтобы понимать, а не угадывать</span>' +
+          '<span>© <span data-ef-year>2026</span> lemma go — Готовься к экзаменам так, чтобы понимать, а не угадывать</span>' +
         "</div>" +
       "</div>" +
     "</footer>";

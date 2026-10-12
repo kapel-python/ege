@@ -1,7 +1,7 @@
 /* Окно «Цель достигнута». Классы/ключи/ids — под префиксом gc-, токены из styles.css. */
 
 /* Токены, шрифт и тема — из css/styles.css сайта. Своих :root-токенов у окна нет. */
-.gc-ov[hidden],.gc-s2[hidden]{display:none!important}
+.gc-ov[hidden],.gc-s2[hidden],.gc-tile[hidden]{display:none!important}
 .gc-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 
 /* ===== Окно ===== */

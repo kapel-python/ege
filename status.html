@@ -574,7 +574,8 @@
         var bodyId = "subj-body-" + idx;
         var countsLine = esc(counts.skills || 0) + " " + esc(plural(counts.skills || 0, "тема", "темы", "тем"))
           + " · " + esc(counts.tasks || 0) + " " + esc(plural(counts.tasks || 0, "задание", "задания", "заданий"))
-          + " · " + esc(counts.lessons || 0) + " " + esc(plural(counts.lessons || 0, "урок", "урока", "уроков"));
+          + " · " + esc(counts.lessons || 0) + " " + esc(plural(counts.lessons || 0, "урок", "урока", "уроков"))
+          + " · " + (subj.exam === "oge" ? "ОГЭ" : "ЕГЭ");
         var note = "";
         if ((counts.blockedTasks || 0) > 0){
           note = '<p class="subj-note">' + esc(counts.blockedTasks) + " "

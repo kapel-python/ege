@@ -266,7 +266,10 @@ AGENT_SYSTEM = (
     "слов mid/low/high/primary/topGains в ответе быть не должно — это внутренние имена полей. "
     "Читай поле `unit`/`note` и называй ту шкалу, о которой говоришь; "
     "«mid 6» — это не «6 баллов». Формула: «сейчас тянешь примерно на X» (mid) + "
-    "«разброс Y–Z» (low–high) + 1–3 темы из top-gains человеческими названиями.\n"
+    "«разброс Y–Z» (low–high) + 1–3 темы из top-gains человеческими названиями. "
+    "Если exam=«oge» — называй и ОЦЕНКУ: подбери её по шкале grades (label/desc) под mid "
+    "и скажи условия из desc, если они там есть (например, минимум баллов по геометрии). "
+    "Баллы без оценки для ОГЭ — неполный ответ.\n"
     "5д. Освоение навыка — это mastery, а не progress: progress присылает браузер и к "
     "освоению отношения не имеет (у нерешённых тем он бывает 40).\n"
     "5e. id заданий и уроков (taskId, skillId) бери ТОЛЬКО из результатов инструментов. "
@@ -274,7 +277,7 @@ AGENT_SYSTEM = (
     "инструмент вернёт тебе ошибку со списком допустимых id.\n"
     "5e2. Найденные id нужны ТОЛЬКО для последующих вызовов. В тексте ответа ученику их быть "
     "не должно: вместо «n09_p1» пиши «задание про точки минимума по графику производной». "
-    "Тот же запрет на внутренние id из названий навыков — но номер задания ЕГЭ из названия "
+    "Тот же запрет на внутренние id из названий навыков — но номер задания экзамена "
     "(«№15») ученику полезен, его оставляй.\n"
     "5b. Внутренние коды ученику лучше не показывать: вместо «задание re_3_4», «n01_planimetry», "
     "«fold_web», «lesson_get» говори словами, которые понимает человек — «задание на отрезки», "
@@ -289,7 +292,7 @@ AGENT_SYSTEM = (
        "project_info С ТЕМОЙ из вопроса (topic=«проверки» / «XP» / «устройства» / "
        "«сброс» / «профиль» — что спросили, то и передай) и отвечай ТОЛЬКО по "
        "вернувшемуся разделу: цифры (5 проверок, 10 вопросов, "
-       "150 слов, 22 балла) — оттуда, а не из головы. Всю справку проси только "
+       "150 слов, 22 балла — нормы сочинений русского предмета) — оттуда, а не из головы. Всю справку проси только "
        "на общий вопрос («что ты умеешь», «расскажи о сайте»). Технического нутра там нет "
        "и быть не должно: ученику не рассказываешь ни про какие внутренние "
        "механизмы, бюджеты и защиты — только то, что написано в справке.\n"
@@ -298,7 +301,8 @@ AGENT_SYSTEM = (
        "задание («начни с урока по стереометрии», «вот задача на пирамиду») — "
        "сначала ОТКРОЙ его lesson_get/task_get и давай ученику сам текст, а не "
        "пересказ выдачи («есть урок про…», «могу найти, если скажешь» — так нельзя: "
-       "поиск уже выполнен, открывай). Список вариантов без открытия допустим, только "
+       "поиск уже выполнен, открывай). В предмете без уроков lesson_get пуст — "
+       "там советуй тренировку или миссию, а не урок. Список вариантов без открытия допустим, только "
        "если ученик просил именно выбрать («что есть по теме»).\n"
     "6a. «Зови меня Катя», «назови меня…», «поменяй имя на…», «хочу, чтобы ты меня так называл» — это ТОЖЕ "
     "запрос на изменение профиля: зови update_profile(name=…). Молча поздороваться новым именем нельзя: "
@@ -425,7 +429,8 @@ AGENT_TOOLS: list = [
           "отрывок текста, автор и проблема исходника) вызови ЕЩЁ РАЗ "
           "с submissionId нужной работы. Не говори ученику "
           "«видно только последнее» — детали ЛЮБОЙ работы есть по её submissionId. "
-          "Сочинения живут в русском предмете: инструмент сам найдёт их из любого предмета.",
+          "Сочинения живут в русском предмете (ЕГЭ): инструмент сам найдёт их "
+          "из любого предмета. Ученику в предмете без сочинений их не предлагай.",
           {"type": "object", "properties": {
               "limit": {"type": "integer", "minimum": 1, "maximum": 30,
                         "description": "сколько последних показать в оглавлении (по умолчанию 10)"},
@@ -2020,7 +2025,8 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         # totalTasks — заданий в теме по каталогу; tasksLeft — по РАЗЛИЧНЫМ
         # верно решённым (solved считает попытки, а не задания: одно задание
         # трижды — это solved 3 при tasksLeft 0). lessonDone — урок навыка
-        # пройден (completed_lessons); уроков нет только у русского.
+        # пройден (completed_lessons); уроков нет у русского и у всех
+        # предметов ОГЭ (там lesson_done всегда 0 — отсутствие контента).
         try:
             rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct,"
                                 " COALESCE(p.progress,0) AS progress,"
@@ -2197,6 +2203,8 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
     if op == "forecast":
         data = _compute_forecast(conn, user_id, subject)
         data["op"] = op
+        data["exam"] = _subject_exam(subject)
+        data["grades"] = _subject_goals(conn, subject)
         return data
     raise ValueError(f"unknown op: {op}")
 
@@ -4193,6 +4201,41 @@ def subject_title(subject: str) -> str:
     except (OSError, ValueError, AttributeError):
         pass
     return _SUBJECT_TITLE_FALLBACK.get(sid, sid)
+
+
+def _subject_exam(subject: str) -> str:
+    """Ось экзамена предмета («ege»/«oge») из контракта. Не бросает."""
+    sid = str(subject or "").strip()
+    if not sid:
+        return "ege"
+    try:
+        from pathlib import Path as _Path
+        raw = json.loads((_Path(__file__).resolve().parent
+                          / "subjects" / f"{sid}.json").read_text(encoding="utf-8"))
+        exam = str((raw or {}).get("exam") or "").strip().lower()
+        if exam in ("ege", "oge"):
+            return exam
+    except (OSError, ValueError, AttributeError):
+        pass
+    return "ege"
+
+
+def _subject_goals(conn: sqlite3.Connection, subject: str) -> list:
+    """Цели предмета (id/label/desc) для перевода баллов в оценку. Не бросает."""
+    try:
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                           (f"goals:{subject}",)).fetchone()
+        goals = json.loads(row["value_json"]) if row else None
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        goals = None
+    out = []
+    if isinstance(goals, list):
+        for g in goals:
+            if isinstance(g, dict) and g.get("id"):
+                out.append({"id": str(g["id"]),
+                            "label": str(g.get("label") or ""),
+                            "desc": str(g.get("desc") or "")})
+    return out
 
 
 # Компактное имя предмета для заголовка окна чата («название • Проф мат»).

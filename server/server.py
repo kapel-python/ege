@@ -7778,6 +7778,7 @@ def _build_public_status(conn: sqlite3.Connection) -> dict:
             "id": sid,
             "title": info.get("title", sid),
             "short": info.get("short", sid),
+            "exam": _subject_exam(sid),
             "status": subject_status,
             "availability": info.get("availability", info.get("status", "ready")),
             "locked": subject_locked,
