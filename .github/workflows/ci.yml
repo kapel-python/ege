@@ -53,7 +53,7 @@ jobs:
                    subject-auth domain-state occ backup-hygiene http-edges \
                    essay-submission store-save-e2e seo-task-pages admin-inbox admin-block \
                    admin-inbox-security perimeter-security db-integrity-security \
-                   adversarial ai-essay ai-failover ai-limits essay-pipeline domain-switch; do
+                   adversarial ai-essay ai-failover ai-limits essay-pipeline domain-switch google-auth google-disabled; do
             echo "--- python test/$t.py"
             python3 "test/$t.py"
           done

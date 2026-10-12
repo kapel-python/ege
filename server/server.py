@@ -2522,7 +2522,19 @@ def touch_auth_identity(conn: sqlite3.Connection, provider: str, subject: str,
 
 
 def oauth_enabled() -> bool:
-    """Вход через Google включён только если есть и модуль, и ключи."""
+    """Вход через Google включён только если есть и модуль, и ключи — и вход
+    не запрещён явно.
+
+    EGE_GOOGLE_LOGIN_DISABLED=1 полностью выключает иностранный сервис входа:
+    кнопки «Войти/Зарегистрироваться через Google» и «Привязать Google»
+    не рисуются (клиент гейтится флагом googleEnabled из bootstrap), а старт
+    и колбэк отвечают 503 OAUTH_UNCONFIGURED. Отвязка уже привязанного
+    адреса (POST /api/auth/google/unlink) при этом остаётся доступной."""
+    try:
+        if (os.environ.get("EGE_GOOGLE_LOGIN_DISABLED") or "").strip() == "1":
+            return False
+    except Exception:
+        pass
     return bool(_OAUTH is not None and _OAUTH.is_configured())
 
 
