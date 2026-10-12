@@ -2966,6 +2966,10 @@ function openStreakRestoreDialog(res) {
   const used = Math.max(0, Math.floor(Number(res.restoresUsed) || 0));
   const left = Math.max(0, Math.floor(Number(res.restoresLeft) || 0));
   const can = res.canRestore === true && left > 0 && n >= STREAK_FROZEN_MIN_DAYS;
+  // Перерыв называем честно: серия после недели тишины — не «два дня»,
+  // а именно столько, сколько её не было. daysSince едет с сервера.
+  const gap = Math.max(0, Math.floor(Number(res.daysSince) || 0));
+  const gapLine = gap >= 2 ? `${gap} ${plural(gap, "день", "дня", "дней")} без учёбы подряд гасят огонёк. ` : "";
   const limitNote = left > 0
     ? "Восстановление вернёт <b>" + esc(String(n)) + " дн.</b>, но сегодня всё равно нужно позаниматься — иначе завтра серия снова заморозится."
     : "Лимит на этот месяц исчерпан — позанимайся, и серия начнётся заново.";
@@ -2978,9 +2982,10 @@ function openStreakRestoreDialog(res) {
           <div class="dlg-device__icon" aria-hidden="true">${icon("flame")}</div>
           <div class="dlg-device__name">Серия потеряна</div>
         </div>
-        <div class="dlg__text">Два дня без учёбы подряд гасят огонёк. Прошлая серия — <b>${esc(String(n))} дн.</b></div>
+        <div class="dlg__text">${gapLine}Прошлая серия — <b>${esc(String(n))} дн.</b></div>
         <div class="dlg-kv">
           <div class="dlg-kv__row"><span>Прошлая серия</span><span><b>${esc(String(n))} дн.</b></span></div>
+          ${gap >= 2 ? `<div class="dlg-kv__row"><span>Перерыв</span><span><b>${esc(String(gap))} ${esc(plural(gap, "день", "дня", "дней"))}</b></span></div>` : ""}
           <div class="dlg-kv__row"><span>Восстановлений в этом месяце</span><span><b>${esc(String(used))} из 3</b> · осталось ${esc(String(left))}</span></div>
         </div>
         <div class="dlg__text" id="streakRestoreNote">${limitNote}</div>
@@ -3464,6 +3469,44 @@ function toggleAdminMessage(id) {
   } catch (_) {}
 }
 
+/* Баннер возвращения: серия потеряна, но её можно вернуть — показываем
+   сразу на Главной, а не ждём клика по потухшему огоньку. Это состояние, а
+   не модалка: висит, пока серия потеряна и восстановление доступно; после
+   восстановления или исчерпания лимита исчезает сам. Крестик прячет баннер
+   до завтра (localStorage), а не навсегда — напоминание раз в день максимум.
+   Перерыв называем честно, а не фикцией непрерывности. */
+function streakReturnBannerHiddenToday() {
+  try { return localStorage.getItem("streakBannerHide") === todayStr(); }
+  catch (_) { return false; }
+}
+function hideStreakReturnBanner() {
+  try { localStorage.setItem("streakBannerHide", todayStr()); } catch (_) {}
+  try {
+    const el = document.getElementById("streakReturnBanner");
+    if (el) el.remove();
+  } catch (_) {}
+}
+function streakReturnBannerHtml() {
+  try {
+    if (streakReturnBannerHiddenToday()) return "";
+    const st = streakLocalStatus();
+    if (!st || st.status !== "lost" || (st.frozenValue || 0) < STREAK_FROZEN_MIN_DAYS) return "";
+    let gap = 0;
+    try {
+      const last = Store.state && Store.state.lastActiveDate;
+      gap = Math.max(0, streakDayDiff(last, todayStr()) || 0);
+    } catch (_) { gap = 0; }
+    const n = Math.max(0, Math.floor(Number(st.frozenValue) || 0));
+    const gapText = gap >= 2 ? ` · перерыв ${gap} ${plural(gap, "день", "дня", "дней")}` : "";
+    return `<div class="card" id="streakReturnBanner" style="margin-bottom:16px;display:flex;gap:12px;align-items:center">
+      <span style="color:var(--muted)" aria-hidden="true">${icon("flame")}</span>
+      <span style="font-size:14px;flex:1;min-width:200px">Огонёк погас, но серия жива в памяти: <b>${n} дн.</b>${gapText}. Верни её одной кнопкой — и позанимайся сегодня.</span>
+      <button class="btn btn--primary btn--sm" type="button" onclick="openStreakRestoreModal()">Вернуть серию</button>
+      <button class="btn btn--ghost btn--sm" type="button" onclick="hideStreakReturnBanner()" aria-label="Скрыть до завтра">×</button>
+    </div>`;
+  } catch (_) { return ""; }
+}
+
 function screenDashboard(root) {
   const s = Store.state;
   const subjectState = subjectContentState();
@@ -3540,6 +3583,7 @@ function screenDashboard(root) {
       <div class="page-title">Главная</div>
       <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось <b>примерно ${egeCountdownLabel()}</b></div>
     </div>
+    ${streakReturnBannerHtml()}
 
     <div class="hero">
       <div class="card card--glow">
