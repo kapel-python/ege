@@ -7886,14 +7886,42 @@ def _seo_task_meta(raw) -> dict:
         return {}
 
 
+def _seo_skill_hints(conn: sqlite3.Connection, skill_id: str) -> list:
+    """Универсальные подсказки темы (навыка): один набор на всю тему.
+
+    Зеркало topicHintLevels из js/app.js: практика, миссии, боссы,
+    «ежедневка» и повторение берут содержательные подсказки темы
+    (skills.metadata_json.hints, ровно 3), а не лестницу отдельного
+    задания — у ЕГЭ-банков это часто шаблон формата или спойлер ответа.
+    Не бросает: битый JSON / <3 подсказок — [] (вызыватель откатится
+    к подсказкам задания, как topicHintLevels -> hintLevelsFor)."""
+    try:
+        row = conn.execute("SELECT metadata_json FROM skills WHERE id=?",
+                           (skill_id,)).fetchone()
+    except sqlite3.Error:
+        return []
+    if not row:
+        return []
+    try:
+        meta = _seo_task_meta(row["metadata_json"])
+    except (KeyError, IndexError, TypeError):
+        return []
+    hints = meta.get("hints")
+    if not isinstance(hints, list):
+        return []
+    cleaned = [str(h) for h in hints if str(h or "").strip()][:3]
+    return cleaned if len(cleaned) >= 3 else []
+
+
 def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
                       limit: int = 2) -> list:
     """Пара примеров заданий навыка для SEO-страницы.
 
     Кроме формулировки вытаскиваем поля единого окна практики (js/app.js):
-    подсказки по уровням (metadata.hints), способ проверки (check:"self" —
-    вторая часть сверяется с решением, без поля ввода), вес задания и
-    формат ответа. Не бросает.
+    универсальные подсказки темы (skills.metadata.hints — тот же источник,
+    что topicHintLevels в практике; фолбэк — подсказки задания, как
+    hintLevelsFor), способ проверки (check:"self" — вторая часть сверяется
+    с решением, без поля ввода), вес задания и формат ответа. Не бросает.
     """
     try:
         rows = conn.execute(
@@ -7905,12 +7933,16 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
         ).fetchall()
     except (sqlite3.Error, ValueError, TypeError):
         return []
+    topic_hints = _seo_skill_hints(conn, skill_id)
     samples = []
     for r in (rows or []):
         meta = _seo_task_meta(r["metadata_json"])
-        hints = meta.get("hints")
-        if not (isinstance(hints, list) and hints):
-            hints = [r["hint"]] if (r["hint"] or "").strip() else []
+        if topic_hints:
+            hints = topic_hints
+        else:
+            hints = meta.get("hints")
+            if not (isinstance(hints, list) and hints):
+                hints = [r["hint"]] if (r["hint"] or "").strip() else []
         check = str(meta.get("check") or ("self" if meta.get("selfCheck") else "")) \
             or str(r["task_type"] or "")
         try:
