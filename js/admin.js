@@ -5337,11 +5337,14 @@ async function screenNews() {
       </div>
     </div>
     ${items.length ? cards : `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Новостей пока нет</div><div class="a-empty__sub">Создай первую — она сразу появится в ленте /news и/или в модалке для своих</div></div></div>`}`);
-  document.getElementById("newsNew").onclick = () => openNewsEditor(null, screenNews);
+  document.getElementById("newsNew").onclick = () => openNewsCreateSheet(screenNews);
   document.querySelectorAll("[data-news-edit]").forEach((b) => {
     b.onclick = () => {
       const n = items.find((x) => Number(x.id) === Number(b.getAttribute("data-news-edit")));
-      if (n) openNewsEditor(n, screenNews);
+      if (!n) return;
+      // Общая новость правится на полном холсте, модалка — в мини-окне.
+      if (n.showPage) navigate(`/news/${Number(n.id)}`);
+      else openNewsEditor(n, screenNews);
     };
   });
   document.querySelectorAll("[data-news-del]").forEach((b) => {
@@ -5349,45 +5352,259 @@ async function screenNews() {
   });
 }
 
+/* Шаг 1 создания: только заголовок и тип. Дальше сайт сам решает:
+   модалка для своих — мини-редактор в окне, общая новость — полный холст
+   #/news/new со всеми действиями. */
+function openNewsCreateSheet(reload) {
+  openModal(`
+    <div class="a-modal__title">Новая новость</div>
+    <div class="a-modal__desc">Сначала заголовок и тип — редактор подберётся сам.</div>
+    <div class="a-modal__form">
+      <div class="a-field"><label>Заголовок</label>
+        <input class="a-input" id="fNewsTitle" maxlength="200" placeholder="Что случилось">
+      </div>
+      <div class="a-field"><label>Тип новости</label>
+        <div class="a-typecards">
+          <label class="a-typecard"><input type="radio" name="fNewsKind" value="page" checked>
+            <span class="a-typecard__title">Общая новость</span>
+            <span class="a-typecard__sub">Лента /news · хранится бессрочно · полный холст</span>
+          </label>
+          <label class="a-typecard"><input type="radio" name="fNewsKind" value="modal" >
+            <span class="a-typecard__title">Только для своих</span>
+            <span class="a-typecard__sub">Модалка · обязательно со сроком · мини-редактор</span>
+          </label>
+        </div>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mNext">Продолжить</button>
+    </div>`, (modal) => {
+    const titleInput = modal.querySelector("#fNewsTitle");
+    titleInput.focus();
+    modal.querySelector("#mCancel").onclick = closeModal;
+    const next = () => {
+      const title = (titleInput.value || "").trim();
+      if (!title) {
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">Заголовок обязателен</div>`;
+        titleInput.focus();
+        return;
+      }
+      const kind = (modal.querySelector('input[name="fNewsKind"]:checked') || {}).value || "page";
+      closeModal();
+      if (kind === "modal") {
+        openNewsEditor({ title, bodyHtml: "", showPage: false, showModal: true }, reload);
+      } else {
+        A.newsDraftTitle = title;
+        navigate("/news/new");
+      }
+    };
+    modal.querySelector("#mNext").onclick = next;
+    titleInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); next(); } };
+  });
+}
+
 /* Лёгкий редактор в духе teletype: contenteditable + execCommand, без внешних
-   библиотек. Жирный/курсив/подчёркнутый/зачёркнутый, H2/H3, списки, цитата,
-   ссылка, разделитель, две колонки, очистка формата. Абзацы — Enter. */
+   библиотек. Кнопки — переключатели: повторный клик снимает оформление
+   (Ж/К/Ч/З, H2/H3, цитата — тумблеры, списки переключаются сами).
+   Пустой Enter в конце цитаты/заголовка выходит в обычный абзац. */
 function newsEditorToolbarHTML() {
-  const b = (cmd, label, title) => `<button type="button" class="a-edbtn" data-ed="${cmd}" title="${esc(title || label)}">${label}</button>`;
+  const b = (cmd, label, title) => `<button type="button" class="a-edbtn" data-ed="${cmd}" title="${esc(title || label)}" tabindex="-1">${label}</button>`;
   return `<div class="a-editor__bar" role="toolbar" aria-label="Форматирование">
-    ${b("bold", "<b>Ж</b>", "Жирный")}
-    ${b("italic", "<i>К</i>", "Курсив")}
-    ${b("underline", "<u>Ч</u>", "Подчёркнутый")}
-    ${b("strike", "<s>З</s>", "Зачёркнутый")}
-    ${b("h2", "H2", "Заголовок")}
-    ${b("h3", "H3", "Подзаголовок")}
-    ${b("ul", "• Список", "Маркированный список")}
-    ${b("ol", "1. Список", "Нумерованный список")}
-    ${b("quote", "❝ Цитата", "Цитата")}
+    ${b("bold", "<b>Ж</b>", "Жирный (переключатель)")}
+    ${b("italic", "<i>К</i>", "Курсив (переключатель)")}
+    ${b("underline", "<u>Ч</u>", "Подчёркнутый (переключатель)")}
+    ${b("strike", "<s>З</s>", "Зачёркнутый (переключатель)")}
+    ${b("h2", "H2", "Заголовок (переключатель)")}
+    ${b("h3", "H3", "Подзаголовок (переключатель)")}
+    ${b("ul", "• Список", "Маркированный список (переключатель)")}
+    ${b("ol", "1. Список", "Нумерованный список (переключатель)")}
+    ${b("quote", "❝ Цитата", "Цитата (переключатель, пустой Enter — выход)")}
     ${b("link", "🔗 Ссылка", "Ссылка (http/https)")}
     ${b("hr", "― Разделитель", "Горизонтальный разделитель")}
     ${b("cols", "▦ Колонки", "Две колонки")}
-    ${b("clear", "✕ Очистить", "Убрать форматирование")}
   </div>`;
+}
+
+/* Блок (H2/H3/цитата/абзац), в котором стоит курсор. */
+function newsEdBlockOf(area, node) {
+  let el = node instanceof Element ? node : (node ? node.parentElement : null);
+  while (el && el !== area) {
+    const tag = (el.tagName || "").toUpperCase();
+    if (tag === "BLOCKQUOTE" || tag === "H2" || tag === "H3" || tag === "H1" ||
+        tag === "P" || tag === "PRE" || tag === "LI" || tag === "DIV") return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function newsEdInTag(area, node, tags) {
+  let el = node instanceof Element ? node : (node ? node.parentElement : null);
+  while (el && el !== area) {
+    if (tags.includes((el.tagName || "").toUpperCase())) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function newsPlaceCaret(node, atStart) {
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(!!atStart);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {}
+}
+
+/* Цитата выкл: разворачиваем содержимое наружу, курсор — в абзац после. */
+function newsEdUnwrapQuote(area, bq) {
+  try {
+    const p = document.createElement("p");
+    p.innerHTML = "<br>";
+    bq.replaceWith(...Array.from(bq.childNodes), p);
+    // Пустые висячие строки внутри бывшего содержимого не оставляем.
+    newsPlaceCaret(p, true);
+    area.focus();
+  } catch (e) {
+    try { document.execCommand("formatBlock", false, "p"); } catch (_) {}
+  }
+}
+
+/* H2/H3 выкл: тот же блок становится обычным абзацем. */
+function newsEdDowngradeHeading(block) {
+  try {
+    const p = document.createElement("p");
+    p.innerHTML = block.innerHTML || "<br>";
+    block.replaceWith(p);
+    newsPlaceCaret(p, false);
+  } catch (e) {
+    try { document.execCommand("formatBlock", false, "p"); } catch (_) {}
+  }
+}
+
+function newsEdToggleBlock(area, kind) {
+  area.focus();
+  const sel = window.getSelection();
+  const node = sel && sel.rangeCount ? sel.anchorNode : null;
+  if (kind === "quote") {
+    const bq = newsEdInTag(area, node, ["BLOCKQUOTE"]);
+    if (bq) { newsEdUnwrapQuote(area, bq); return; }
+    try { document.execCommand("formatBlock", false, "blockquote"); } catch (e) {}
+    return;
+  }
+  // h2 / h3.
+  const tag = kind.toUpperCase();
+  const block = newsEdBlockOf(area, node);
+  const cur = block ? (block.tagName || "").toUpperCase() : "";
+  if (cur === tag) {
+    if (tag === "H2" || tag === "H3") newsEdDowngradeHeading(block);
+    else { try { document.execCommand("formatBlock", false, "p"); } catch (e) {} }
+    return;
+  }
+  try { document.execCommand("formatBlock", false, kind); } catch (e) {}
+}
+
+/* Подсветка активных кнопок под курсор. */
+function newsEditorSyncToolbar(area) {
+  try {
+    const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
+    if (!bar || !area.isConnected) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.anchorNode;
+    if (!node || (node !== area && !area.contains(node))) return;
+    const q = (cmd) => { try { return document.queryCommandState(cmd); } catch (e) { return false; } };
+    const state = {
+      bold: q("bold"),
+      italic: q("italic"),
+      underline: q("underline"),
+      strike: q("strikeThrough") || q("strikethrough"),
+      h2: !!(newsEdBlockOf(area, node) && (newsEdBlockOf(area, node).tagName || "").toUpperCase() === "H2"),
+      h3: !!(newsEdBlockOf(area, node) && (newsEdBlockOf(area, node).tagName || "").toUpperCase() === "H3"),
+      ul: !!newsEdInTag(area, node, ["UL"]),
+      ol: !!newsEdInTag(area, node, ["OL"]),
+      quote: !!newsEdInTag(area, node, ["BLOCKQUOTE"]),
+    };
+    bar.querySelectorAll("[data-ed]").forEach((btn) => {
+      btn.classList.toggle("on", !!state[btn.getAttribute("data-ed")]);
+    });
+  } catch (e) {}
+}
+
+/* Один глобальный слушатель подсветки на все редакторы новостей. */
+if (!window.__egeNewsEdSyncInstalled) {
+  window.__egeNewsEdSyncInstalled = true;
+  document.addEventListener("selectionchange", () => {
+    try {
+      const area = A.newsEdArea;
+      if (area && area.isConnected) newsEditorSyncToolbar(area);
+    } catch (e) {}
+  });
+}
+
+/* Пустой Enter в конце цитаты/заголовка — выход в обычный абзац. */
+function newsEditorBindExit(area) {
+  area.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    const sel = window.getSelection();
+    const node = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (!node) return;
+    const bq = newsEdInTag(area, node, ["BLOCKQUOTE"]);
+    if (bq) {
+      // Выходим, только если строка пустая: иначе Enter — новый абзац в цитате.
+      const block = newsEdBlockOf(area, node);
+      const text = ((block && block !== bq ? block.textContent : node.textContent) || "").trim();
+      const bqEmpty = (bq.textContent || "").trim() === "";
+      if (text === "" || bqEmpty) {
+        e.preventDefault();
+        try {
+          const p = document.createElement("p");
+          p.innerHTML = "<br>";
+          if (bqEmpty) bq.replaceWith(p);
+          else {
+            if (block && block !== bq && block.parentElement) block.remove();
+            bq.after(p);
+          }
+          newsPlaceCaret(p, true);
+          area.focus();
+        } catch (_) {}
+      }
+      return;
+    }
+    const block = newsEdBlockOf(area, node);
+    const tag = block ? (block.tagName || "").toUpperCase() : "";
+    if ((tag === "H2" || tag === "H3") && (block.textContent || "").trim() === "") {
+      e.preventDefault();
+      newsEdDowngradeHeading(block);
+      area.focus();
+    }
+  });
 }
 
 function newsEditorBindToolbar(area) {
   const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
   if (!bar) return;
+  A.newsEdArea = area;
+  area.addEventListener("keyup", () => newsEditorSyncToolbar(area));
+  area.addEventListener("mouseup", () => newsEditorSyncToolbar(area));
+  area.addEventListener("click", () => newsEditorSyncToolbar(area));
+  newsEditorBindExit(area);
   bar.querySelectorAll("[data-ed]").forEach((btn) => {
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
       area.focus();
+      A.newsEdArea = area;
       const cmd = btn.getAttribute("data-ed");
       try {
-        if (cmd === "h2" || cmd === "h3") document.execCommand("formatBlock", false, cmd);
-        else if (cmd === "quote") document.execCommand("formatBlock", false, "blockquote");
+        if (cmd === "h2" || cmd === "h3" || cmd === "quote") newsEdToggleBlock(area, cmd);
         else if (cmd === "ul") document.execCommand("insertUnorderedList", false, null);
         else if (cmd === "ol") document.execCommand("insertOrderedList", false, null);
-        else if (cmd === "clear") document.execCommand("removeFormat", false, null);
         else if (cmd === "strike") {
           if (!document.execCommand("strikeThrough", false, null)) document.execCommand("strikethrough", false, null);
-        } else if (cmd === "hr") document.execCommand("insertHorizontalRule", false, null);
+        } else if (cmd === "hr") document.execCommand("insertHorizontalRule", false, "");
         else if (cmd === "link") {
           const url = window.prompt("Ссылка (https://…):", "https://");
           if (url == null) return;
@@ -5400,8 +5617,10 @@ function newsEditorBindToolbar(area) {
         } else document.execCommand(cmd, false, null);
       } catch (e) { /* execCommand может не поддерживаться — текст останется как есть */ }
       area.focus();
+      setTimeout(() => newsEditorSyncToolbar(area), 0);
     });
   });
+  setTimeout(() => newsEditorSyncToolbar(area), 0);
 }
 
 function newsToLocalInput(ms) {
@@ -5489,6 +5708,103 @@ function openNewsEditor(existing, reload) {
   });
 }
 
+/* Полный холст общей новости: отдельная ссылка #/news/new (пусто) или
+   #/news/<id> (правка). Заголовок, большой редактор, показы и все действия
+   (сохранить, открыть, удалить, назад) — всё на одном экране. */
+async function screenNewsComposer(id) {
+  let existing = null;
+  if (id != null) {
+    try {
+      const data = await AdminApi.get("/api/admin/news");
+      existing = (data.news || []).find((x) => Number(x.id) === Number(id)) || null;
+    } catch (e) {
+      if (e.unauthorized) { A.session = null; renderLogin(e.message); return; }
+      renderShell("news", `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Ошибка</div><div class="a-empty__sub">${esc(e.message)}</div></div></div>`);
+      return;
+    }
+    if (!existing) {
+      renderShell("news", `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Новость не найдена</div><div class="a-empty__sub">Возможно, её удалили.</div><div style="margin-top:12px"><a class="btn btn--soft btn--sm" href="#/news">← Все новости</a></div></div></div>`);
+      return;
+    }
+  }
+  const draftTitle = (!existing && A.newsDraftTitle) ? A.newsDraftTitle : "";
+  A.newsDraftTitle = null;
+  const untilDefault = Date.now() + 7 * 86400000;
+  renderShell("news", `
+    <div style="margin-bottom:12px"><a class="btn btn--soft btn--sm" href="#/news">${aicon("back")} Все новости</a></div>
+    <div class="a-card a-compose">
+      <div class="a-compose__eyebrow">${existing ? `Новость #${Number(existing.id)} · ${esc(fmtDateTime(existing.createdAt))}` : "Новая общая новость · лента /news"}</div>
+      <input class="a-input a-compose__title" id="cNewsTitle" maxlength="200"
+        value="${esc(existing ? existing.title : draftTitle)}" placeholder="Заголовок новости">
+      <div class="a-editor a-compose__editor">
+        ${newsEditorToolbarHTML()}
+        <div class="a-editor__area a-compose__area" id="cNewsBody" contenteditable="true"
+          data-placeholder="Текст новости: пиши, Enter — новый абзац. Кнопки выше — переключатели: нажал — пишешь этим, нажал ещё раз — выключил."></div>
+      </div>
+      <div class="a-compose__row">
+        <label class="a-compose__check"><input type="checkbox" id="cNewsPage" ${!existing || existing.showPage ? "checked" : ""}> Лента /news</label>
+        <label class="a-compose__check"><input type="checkbox" id="cNewsModal" ${existing && existing.showModal ? "checked" : ""}> Модалка для своих</label>
+        <label class="a-compose__until" id="cNewsUntilWrap">до
+          <input class="a-input" type="datetime-local" id="cNewsUntil" value="${esc(newsToLocalInput(existing && existing.modalUntil ? existing.modalUntil : untilDefault))}">
+        </label>
+      </div>
+      <div class="a-field__hint">Лента хранится бессрочно · модалке нужен срок · новым пользователям (зарегистрированным после создания) модалка не показывается.</div>
+      <div id="cErr" style="margin-top:10px"></div>
+      <div class="a-compose__actions">
+        <button class="btn btn--primary" id="cSave">${existing ? "Сохранить" : "Опубликовать"}</button>
+        ${existing && existing.showPage ? `<a class="btn btn--soft" href="/news?id=${Number(existing.id)}" target="_blank" rel="noopener">Открыть</a>` : ""}
+        ${existing ? `<button class="btn btn--soft" id="cDel">Удалить</button>` : ""}
+      </div>
+    </div>`);
+  const area = document.getElementById("cNewsBody");
+  area.innerHTML = (existing && existing.bodyHtml) || "";
+  newsEditorBindToolbar(area);
+  area.focus();
+  const pageBox = document.getElementById("cNewsPage");
+  const modalBox = document.getElementById("cNewsModal");
+  const untilWrap = document.getElementById("cNewsUntilWrap");
+  const syncUntil = () => { untilWrap.style.display = modalBox.checked ? "" : "none"; };
+  modalBox.onchange = syncUntil; syncUntil();
+  document.getElementById("cSave").onclick = async () => {
+    const errBox = document.getElementById("cErr");
+    errBox.innerHTML = "";
+    const title = (document.getElementById("cNewsTitle").value || "").trim();
+    const bodyHtml = (area.innerHTML || "").trim();
+    const showPage = pageBox.checked;
+    const showModal = modalBox.checked;
+    const untilRaw = (document.getElementById("cNewsUntil").value || "").trim();
+    if (!title) { errBox.innerHTML = `<div class="a-modal__error">Заголовок обязателен</div>`; return; }
+    if (!showPage && !showModal) { errBox.innerHTML = `<div class="a-modal__error">Выбери хотя бы один показ: лента или модалка</div>`; return; }
+    let modalUntil = null;
+    if (showModal) {
+      if (!untilRaw) { errBox.innerHTML = `<div class="a-modal__error">Для модалки укажи срок действия</div>`; return; }
+      modalUntil = new Date(untilRaw).getTime();
+      if (!Number.isFinite(modalUntil) || modalUntil <= Date.now()) { errBox.innerHTML = `<div class="a-modal__error">Срок должен быть в будущем</div>`; return; }
+    }
+    const payload = { title, body_html: bodyHtml, show_page: showPage, show_modal: showModal, modal_until: modalUntil };
+    const btn = document.getElementById("cSave");
+    btn.disabled = true;
+    try {
+      if (existing) {
+        await AdminApi.put(`/api/admin/news/${Number(existing.id)}`, payload);
+        toast("Новость обновлена");
+        btn.disabled = false;
+        await screenNewsComposer(Number(existing.id));
+      } else {
+        const res = await AdminApi.post("/api/admin/news", payload);
+        toast("Новость опубликована");
+        navigate(`/news/${Number(res.news.id)}`);
+      }
+    } catch (e) {
+      if (e && e.unauthorized) { A.session = null; renderLogin(); return; }
+      btn.disabled = false;
+      errBox.innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+    }
+  };
+  const delBtn = document.getElementById("cDel");
+  if (delBtn) delBtn.onclick = () => openNewsDelete(Number(existing.id), () => navigate("/news"));
+}
+
 function openNewsDelete(id, reload) {
   openModal(`
     <div class="a-modal__title">Удалить новость?</div>
@@ -5544,7 +5860,10 @@ async function render() {
     }
     else await screenProviders();
   } else if (route.name === "news") {
-    await screenNews();
+    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+    if (parts[1] === "new") await screenNewsComposer(null);
+    else if (parts[1] && /^\d+$/.test(parts[1])) await screenNewsComposer(Number(parts[1]));
+    else await screenNews();
   } else if (route.name === "subscription") {
     await screenSubscription();
   } else {

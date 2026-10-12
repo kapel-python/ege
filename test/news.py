@@ -116,6 +116,12 @@ def main():
     check("admin: есть SECTIONS news", 'id: "news"' in ui or "id: 'news'" in ui)
     check("admin: есть screenNews", "screenNews" in ui)
     check("admin: есть редактор", "openNewsEditor" in ui and "fNewsBody" in ui)
+    check("admin: кнопки-переключатели без Очистить",
+          'data-ed="clear"' not in ui and "newsEditorSyncToolbar" in ui
+          and "newsEdToggleBlock" in ui)
+    check("admin: двухшаговое создание и холст",
+          "openNewsCreateSheet" in ui and "screenNewsComposer" in ui
+          and "/news/new" in ui)
     check("server: нет admin_blocked_tasks", "def admin_blocked_tasks" not in server_src)
     check("server: нет маршрута blocked-tasks", "blocked-tasks" not in server_src)
     check("server: есть news API", "/api/admin/news" in server_src and "/api/news/modal" in server_src)
