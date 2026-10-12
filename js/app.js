@@ -2597,10 +2597,9 @@ function subjectCurrentButtonHTML() {
   </button>`;
 }
 
-/* Диалог выбора предмета: два шага. Сначала только направление
-   (ЕГЭ/ОГЭ) — списком из 8 карточек никто не пользуется, все ищут свою
-   ось. Потом — предметы выбранного направления + кнопка «Назад».
-   Одна ось — сразу предметы, без лишнего шага. */
+/* Диалог выбора предмета: сразу предметы своей оси + тихая строка
+   «Не то направление?» внизу. Выбор направления — редкий, отдельного
+   экрана ему не положено. Одна ось — строки нет вообще. */
 let subjectDialogExam = null;
 function askSubjectDialog() {
   subjectDialogExam = null;
@@ -2608,10 +2607,6 @@ function askSubjectDialog() {
 }
 function chooseSubjectExamDialog(exam) {
   subjectDialogExam = exam === "oge" ? "oge" : "ege";
-  renderSubjectDialog();
-}
-function subjectDialogBack() {
-  subjectDialogExam = null;
   renderSubjectDialog();
 }
 function renderSubjectDialog() {
@@ -2640,33 +2635,12 @@ function renderSubjectDialog() {
       <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
     </button>`;
   };
-  const examCard = (g) => {
-    const here = g.exam === curExam;
-    return `<button type="button" class="subj-card${here ? " subj-card--active" : ""}"
-        onclick="chooseSubjectExamDialog('${g.exam}')"${here ? ` aria-current="true"` : ""}>
-      <span class="subj-card__badge">${g.exam === "oge" ? "9" : "11"}</span>
-      <span class="subj-card__body">
-        <span class="subj-card__name">${esc(examGroupLabel(g.exam))}</span>
-        <span class="subj-card__sub">${g.subjects.length} ${plural(g.subjects.length, "предмет", "предмета", "предметов")}${here ? " · сейчас здесь" : ""}</span>
-      </span>
-      <span class="subj-card__check" aria-hidden="true">${icon("arrow")}</span>
-    </button>`;
-  };
-  let title, sub, list;
-  const group = groups.find((g) => g.exam === subjectDialogExam);
-  if (groups.length > 1 && !group) {
-    title = "Что готовим?";
-    sub = "Выбери направление — дальше покажем его предметы.";
-    list = groups.map(examCard).join("");
-  } else {
-    const shown = group || groups[0];
-    title = "Какой предмет открываем?";
-    sub = "Прогресс, ошибки и статистика хранятся отдельно по каждому предмету — переключение ничего не стирает.";
-    list = (groups.length > 1
-      ? `<button class="btn btn--ghost btn--sm subj-back" type="button" onclick="subjectDialogBack()">← Назад к направлениям</button>`
-      : "")
-      + shown.subjects.map(card).join("");
-  }
+  // Предметы своей оси — сразу; чужая ось — тихой строкой внизу.
+  // subjectDialogExam null — ось текущего предмета.
+  const shown = groups.find((g) => g.exam === (subjectDialogExam || curExam)) || groups[0];
+  const other = groups.length > 1 ? groups.find((g) => g.exam !== shown.exam) : null;
+  const list = shown.subjects.map(card).join("")
+    + (other ? `<button class="dlg-subtle-link" type="button" onclick="chooseSubjectExamDialog('${other.exam}')">Не то направление? ${esc(examGroupLabel(other.exam))} →</button>` : "");
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Выбор предмета">
@@ -2674,9 +2648,9 @@ function renderSubjectDialog() {
         <div class="dlg__eyebrow">Предмет</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">${icon("layers")}</div>
-          <div class="dlg-device__name">${esc(title)}</div>
+          <div class="dlg-device__name">Какой предмет открываем?</div>
         </div>
-        <div class="dlg__text">${esc(sub)}</div>
+        <div class="dlg__text">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету — переключение ничего не стирает.</div>
         <div class="subj-list">${list}</div>
         <div class="dlg__actions">
           <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Закрыть</button>
@@ -12157,9 +12131,6 @@ const Onboarding = {
     // Какой предмет открывается прямо сейчас: на его кнопке крутится
     // спиннер, остальные погашены (см. stepSubject).
     this._pickingSubject = null;
-    // Выбранная ось на шаге предмета (двухшаговый выбор): новый показ —
-    // сначала направления.
-    this._examFilter = null;
     this.step = 0;
     this.subject = null;
     this.subjectSkipped = false;
@@ -12333,11 +12304,6 @@ const Onboarding = {
     // на выбранной — спиннер и «Открываем…».
     const picking = this._picking ? this._pickingSubject : null;
     const groups = subjectsByExam();
-    const examItem = (g) => `
-      <button class="choice-item"${picking ? " disabled" : ""} onclick="Onboarding.pickExam('${g.exam}')">
-        <b>${esc(examGroupLabel(g.exam))}</b>
-        <span>${g.subjects.length} ${plural(g.subjects.length, "предмет", "предмета", "предметов")}</span>
-      </button>`;
     const item = (s) => {
       const status = subjectAvailabilityLabel(s);
       const loading = !!(picking && s.id === picking);
@@ -12347,19 +12313,16 @@ const Onboarding = {
         : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
       return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
     };
-    // Две оси — сначала только направление (8 кнопок сразу никто не читает),
-    // потом предметы выбранной оси. Одна ось — сразу предметы.
-    const shown = groups.find((g) => g.exam === this._examFilter);
-    const directions = groups.length > 1 && !shown;
+    // Все предметы сразу с тихими подписями осей: направление выбирается
+    // один раз и не заслуживает отдельного шага даже здесь.
     body.innerHTML = `
-      <div class="onboard-title">${directions ? "Что готовим?" : "Какой предмет готовим?"}</div>
-      <div class="onboard-sub">${directions ? "Выбери направление — дальше покажем его предметы." : "Прогресс и настройки ведутся отдельно по каждому предмету."}</div>
-      <div class="choice-list">
-        ${directions
-          ? groups.map(examItem).join("")
-          : (shown || groups[0]).subjects.map(item).join("")
-            + (groups.length > 1 ? `<button class="choice-item" onclick="Onboarding.pickExam('')">← Назад к направлениям</button>` : "")}
-      </div>`;
+      <div class="onboard-title">Какой предмет готовим?</div>
+      <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
+      ${groups.map((g) => `
+        ${groups.length > 1 ? `<div class="subject-group-label">${esc(examGroupLabel(g.exam))}</div>` : ""}
+        <div class="choice-list">
+          ${g.subjects.map(item).join("")}
+        </div>`).join("")}`;
   },
 
   // Детали каталога (тексты заданий) и матвендор (katex/jsxgraph) — большой
@@ -12369,13 +12332,6 @@ const Onboarding = {
   warmSubjectAssets() {
     try { Store.ensureDetails().catch(() => {}); } catch (_) {}
     try { Vendor.ensureMath().catch(() => {}); } catch (_) {}
-  },
-
-  /* Фильтр оси на шаге выбора предмета (двухшаговый выбор: сначала
-     направление, потом предметы). Пусто — показываем направления. */
-  pickExam(exam) {
-    this._examFilter = exam === "oge" ? "oge" : (exam === "ege" ? "ege" : null);
-    try { this.render(); } catch (_) {}
   },
 
   pickSubject(v) {
