@@ -17,7 +17,7 @@ warning и продолжает работу. Порядок показа в UI 
 | `order` | Сортировка предметов (не отдаётся в API) |
 | `catalogFile` | Обычно bare basename вроде `catalog_informatics.json`; реестр соединяет `server_dir / catalogFile`, поэтому префикс `server/` в JSON не нужен |
 | `level` | Объект `{id, subjectId, name}` для строки `math_levels(id, subject_id, name)`; проверяются непустые строки, но не уникальность или смысл связей |
-| `forecast` | `{weights, total, scale}` или JSON `null`. Нет шкалы — `forecast: null` (тогда и флаг `features.forecast: false`); проверяется только форма объекта |
+| `forecast` | `{weights, total, scale}` + необязательный `readiness` (порог показа прогноза: `{minLessons, lessonShare, minTopics, topicShare, minAttempts}`, дефолты `1/0.05/3/0.1/3`) или JSON `null`. Нет шкалы — `forecast: null` (тогда и флаг `features.forecast: false`); проверяется только форма объекта |
 | `features` | Capabilities: ровно 8 boolean-флагов `lessons/practice/forecast/diagnostics/missions/bosses/daily/path`. Для locked обычно `false` везде, кроме `path: true`, но это соглашение, а не проверка registry |
 | `metadata` | Необязательный объект; любой dict принимается, схема и семантика не валидируются |
 | `content` | Указатели: `topics → catalog.categories/skills`, `preparationVariants → catalog.goals`, `onboarding → catalog.diagnosticTasks`. Реестр проверяет форму указателей и наличие ключей в catalog-файле |
@@ -35,7 +35,13 @@ warning и продолжает работу. Порядок показа в UI 
 id-формат, непустые строки, известный статус, типы `order`/`locked`/
 `comingSoon`, непустой `catalogFile` и читаемый JSON-объект каталога,
 непустые строки `level`, форму `forecast` (`weights` — непустой объект,
-`total` — положительное целое, `len(scale) == total+1`), ровно 8
+`total` — положительное целое, `len(scale) == total+1`, `readiness` —
+необязательный объект только с известными ключами: `minLessons/minTopics/
+minAttempts` — неотрицательные целые, `lessonShare/topicShare` — числа
+0..1; отсутствующие ключи добиваются дефолтами `1/0.05/3/0.1/3`, и именно
+нормализованный объект едет в `/api/subjects`, bootstrap и
+`app_config[forecast:<id>]` — клиент (`forecastReadiness` в `js/state.js`)
+и агент (`server/agent.py`) читают порог из одного контракта), ровно 8
 boolean-`features`, форму `content`-указателей и наличие указанных в них
 ключей (`categories/skills/goals/diagnosticTasks`). `metadata` проверяется
 только как объект. `load_definitions` также отклоняет повторяющиеся
@@ -65,7 +71,11 @@ boss→topic) ловятся отдельно при `install_catalog`; `daily.s
 
 1. `server/subjects/informatics.json` — скопировать с `russian.json`
    (locked-скелет) или `basic_math.json` (ready), поменять `id/title/short/
-   description/order/catalogFile/level/features/forecast`. Имя файла
+   description/order/catalogFile/level/features/forecast`. Порог показа
+   прогноза (`forecast.readiness`) можно не писать — встанут дефолты
+   `minLessons 1 / lessonShare 0.05 / minTopics 3 / topicShare 0.1 /
+   minAttempts 3` (см. «Поля контракта»); явный блок нужен, только если
+   предмету нужен свой порог. Имя файла
    `<id>.json` рекомендуется, но несовпадение имени и `id` — warning.
 2. `server/catalog_informatics.json` — контент предмета. Для locked: пустые
    `tasks/lessons/missions/bosses/achievements`, `goals: []`,

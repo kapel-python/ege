@@ -7,7 +7,7 @@ const src = fs.readFileSync("js/data.js", "utf8") + "\n" + fs.readFileSync("js/s
 /* Build the same public payload the server attaches to a ready subject. */
 function serverLikePayload(subjectId, catalogFile) {
   const catalog = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-  const contracts = ["profile_math", "basic_math", "russian"].map((id) =>
+  const contracts = ["profile_math", "basic_math", "russian", "history"].map((id) =>
     JSON.parse(fs.readFileSync(`server/subjects/${id}.json`, "utf8"))
   );
   const contract = contracts.find((item) => item.id === subjectId);
@@ -362,6 +362,44 @@ const testBody = async () => {
     t("сочинение: при освоенной тестовой части сочинение предлагается",
       gains.some((g) => g.skillId === "russian_essay_source"),
       JSON.stringify(gains.map((g) => g.skillId)));
+  }
+
+
+  /* 17. Предмет без уроков (история): одна диагностика не открывает
+     «предварительный прогноз 0 баллов». Урокового порога здесь нет сам
+     собой (уроков 0), поэтому держат темы и практика; попытки диагностики
+     в счёт практики не идут. Регрессия живого кейса: 6 ответов диагностики
+     показывали mid=0 без флага empty. */
+  DataAPI.load(serverLikePayload("history", "server/catalog_history.json"));
+  Store.ready = false;
+  Store.reset();
+  {
+    const diagIds = DataAPI.diagnosticTasks();
+    t("история: диагностика есть", diagIds.length >= 6, String(diagIds.length));
+    diagIds.forEach((id, i) => {
+      const task = DataAPI.task(id);
+      Store.state.diagnostics.push({ taskId: id, ts: now - i * 60000 });
+      Store.state.taskAttempts.push({ taskId: id, skill: task.skill, correct: i % 2 === 0, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now - i * 60000 });
+    });
+    const onlyDiag = forecast();
+    t("история: одна диагностика — прогноза нет, а не 0 баллов",
+      onlyDiag.empty === true && onlyDiag.premature === true, JSON.stringify(onlyDiag));
+    t("история: плашка показывает прогресс практики",
+      onlyDiag.doneAttempts === 0 && onlyDiag.needAttempts > 0, JSON.stringify(onlyDiag));
+    // Три ответа в практике (не диагностика) — первые шаги сделаны.
+    const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
+    for (let i = 0; i < 3; i++) {
+      const sk = skills[i % skills.length];
+      Store.state.taskAttempts.push({ taskId: `hist_practice_${i}`, skill: sk.id, correct: true, hintLevel: 0, seconds: 20, closesTaskId: null, ts: now });
+    }
+    const opened = forecast();
+    t("история: диагностика + практика — прогноз появился",
+      opened.premature !== true && Number.isFinite(opened.mid) && Number.isFinite(opened.high),
+      JSON.stringify(opened));
+    // Порог из контракта предмета, а не из хардкода движка.
+    const cfg = DataAPI.forecastConfig();
+    t("история: readiness едет в контракте",
+      !!cfg && !!cfg.readiness && cfg.readiness.minAttempts === 3, JSON.stringify(cfg && cfg.readiness));
   }
 
 

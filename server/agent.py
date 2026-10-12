@@ -1461,6 +1461,56 @@ def _day_of(value) -> str:
         return ""
 
 
+def _forecast_readiness_cfg(conn: sqlite3.Connection, subject: str) -> dict:
+    """Порог показа прогноза из контракта предмета (forecast.readiness).
+
+    Источники по приоритету — как у _forecast_weights: app_config
+    (install_catalog кладёт туда нормализованный объект реестра), иначе
+    subjects/*.json, иначе дефолты реестра. Новый предмет наследует
+    поведение автоматически, без ветвлений по id."""
+    defaults = {"minLessons": FORECAST_READY_MIN_LESSONS,
+                "lessonShare": FORECAST_READY_LESSON_SHARE,
+                "minTopics": FORECAST_READY_MIN_TOPICS,
+                "topicShare": FORECAST_READY_TOPIC_SHARE,
+                "minAttempts": FORECAST_READY_MIN_ATTEMPTS}
+    raw: dict = {}
+    try:
+        row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                           (f"forecast:{subject}",)).fetchone()
+        if row:
+            data = json.loads(row["value_json"])
+            if isinstance(data, dict) and isinstance(data.get("readiness"), dict):
+                raw = data["readiness"]
+    except (sqlite3.Error, ValueError, TypeError, AttributeError):
+        raw = {}
+    if not raw:
+        try:
+            from pathlib import Path as _Path
+            fc = json.loads((_Path(__file__).resolve().parent
+                             / "subjects" / f"{subject}.json").read_text(encoding="utf-8")
+                            ).get("forecast") or {}
+            if isinstance(fc, dict) and isinstance(fc.get("readiness"), dict):
+                raw = fc["readiness"]
+        except (OSError, ValueError, AttributeError):
+            raw = {}
+    cfg = dict(defaults)
+    for key in ("minLessons", "minTopics", "minAttempts"):
+        try:
+            value = int(raw.get(key, defaults[key]))
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            cfg[key] = value
+    for key in ("lessonShare", "topicShare"):
+        try:
+            share = float(raw.get(key, defaults[key]))
+        except (TypeError, ValueError):
+            continue
+        if 0.0 <= share <= 1.0:
+            cfg[key] = share
+    return cfg
+
+
 def _forecast_weights(conn: sqlite3.Connection, subject: str) -> tuple[dict, int, list]:
     """Веса/шкала прогноза: сначала app_config (install_catalog), иначе subjects/*.json."""
     try:
@@ -1515,14 +1565,18 @@ FORECAST_HINT_WEIGHTS = (1.0, 0.6, 0.3, 0.3)
 # Сочинение в topGains — только для готовых (зеркало js/state.js):
 # тестовая часть освоена хотя бы наполовину либо сочинение уже пробовали.
 ESSAY_READY_MASTERY = 50
-# Порог показа прогноза — зеркало js/state.js (FORECAST_READY_*): раньше
-# него числа нет ни на экране, ни в ответе агента — только «пройди больше
-# тем и практики». Низкий намеренно: 1–2 урока и 3 темы с данными («первые
-# шаги»), дальше число показывается с пометкой «предварительный».
+# Порог показа прогноза — зеркало js/state.js (forecastReadinessConfig):
+# раньше него числа нет ни на экране, ни в ответе агента — только «пройди
+# больше тем и практики». Низкий намеренно: уроки, темы с данными и
+# несколько попыток в практике («первые шаги»), дальше число показывается
+# с пометкой «предварительный». Числа — из контракта предмета
+# (forecast.readiness, дефолты — subjects_registry.DEFAULT_READINESS);
+# новый предмет наследует их автоматически, здесь только чтение.
 FORECAST_READY_LESSON_SHARE = 0.05
 FORECAST_READY_TOPIC_SHARE = 0.1
 FORECAST_READY_MIN_LESSONS = 1
 FORECAST_READY_MIN_TOPICS = 3
+FORECAST_READY_MIN_ATTEMPTS = 3
 
 
 def _js_round(value: float) -> int:
@@ -1830,21 +1884,31 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
                   if any(lid in data.get("done", set())
                           for lid in data.get("lessons", {}).get(skill_id, []))
                   or mastery[skill_id] >= 25 or skill_id in attempted)
-    # Порог показа — зеркало forecastReadiness() в js/state.js: пока теория и
-    # покрытие тем ниже, прогноза нет, и агент не имеет права его озвучивать.
+    # Порог показа — зеркало forecastReadiness() в js/state.js: пока теория,
+    # покрытие тем и практика ниже, прогноза нет, и агент не имеет права его
+    # озвучивать. Числа порога — из контракта предмета (forecast.readiness).
+    rcfg = _forecast_readiness_cfg(conn, subject)
     total_lessons = sum(len(v) for v in data.get("lessons", {}).values())
     done_lessons = len(data.get("done", set()))
-    need_lessons = (max(FORECAST_READY_MIN_LESSONS,
-                        int(math.ceil(total_lessons * FORECAST_READY_LESSON_SHARE)))
+    need_lessons = (max(rcfg["minLessons"],
+                        int(math.ceil(total_lessons * rcfg["lessonShare"])))
                     if total_lessons else 0)
-    need_topics = (max(FORECAST_READY_MIN_TOPICS,
-                       int(math.ceil(len(scored) * FORECAST_READY_TOPIC_SHARE)))
+    need_topics = (max(rcfg["minTopics"],
+                       int(math.ceil(len(scored) * rcfg["topicShare"])))
                    if scored else 0)
-    if done_lessons < need_lessons or covered < need_topics:
+    diag_keys = data.get("diag", set())
+    done_attempts = sum(
+        1 for rows in data.get("attempts", {}).values() for row in (rows or [])
+        if not (isinstance(row, (list, tuple)) and len(row) >= 3
+                and (str(row[0]), row[2]) in diag_keys))
+    need_attempts = rcfg["minAttempts"]
+    if (done_lessons < need_lessons or covered < need_topics
+            or done_attempts < need_attempts):
         return {"available": False, "premature": True, "mid": 0, "low": 0, "high": 0,
                 "doneLessons": done_lessons, "needLessons": need_lessons,
                 "totalLessons": total_lessons, "covered": covered,
                 "needTopics": need_topics, "totalTopics": len(scored),
+                "doneAttempts": done_attempts, "needAttempts": need_attempts,
                 "topGains": []}
     # Живая вилка: мало данных — широко, всё покрыто — узко. Кламим в шкалу:
     # при полном освоении high не уезжает за максимум (было «до 105»).

@@ -31,6 +31,23 @@ _KNOWN_STATUSES = {"ready", "coming-soon", "locked", "disabled", "unavailable"}
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# Порог показа прогноза — часть контракта предмета (вложен в forecast и
+# едет в bootstrap/app_config тем же объектом, без правок server.py).
+# Смысл: числа нет, пока ученик не сделал первые шаги — уроки И практику.
+# Уроков у предмета может не быть (история открыта практикой): тогда
+# уроковый порог пуст сам собой, а практику держит minAttempts.
+# Без попыток в практике диагностика в одиночку (6 ответов онбординга)
+# открывала бы «предварительный прогноз 0 баллов» — честная плашка вместо
+# числа обязана висеть, пока порог не набран. Значения по умолчанию равны
+# историческим константам движка; новый предмет наследует их автоматически.
+DEFAULT_READINESS = {
+    "minLessons": 1,
+    "lessonShare": 0.05,
+    "minTopics": 3,
+    "topicShare": 0.1,
+    "minAttempts": 3,
+}
+
 
 class SubjectContractError(ValueError):
     """Некорректный subjects/<id>.json: сервер не стартует с битым реестром."""
@@ -183,6 +200,32 @@ def validate_definition(raw: dict, *, source: str, server_dir: Path) -> dict:
         if not isinstance(scale, list) or len(scale) != total + 1:
             raise SubjectContractError(
                 f"{source} ({sid}): forecast.scale must be a list of total+1 numbers")
+        readiness_raw = forecast.get("readiness", {})
+        if not isinstance(readiness_raw, dict):
+            raise SubjectContractError(f"{source} ({sid}): forecast.readiness must be an object")
+        unknown = set(readiness_raw) - set(DEFAULT_READINESS)
+        if unknown:
+            raise SubjectContractError(
+                f"{source} ({sid}): unknown forecast.readiness keys {sorted(unknown)}")
+        readiness: dict = dict(DEFAULT_READINESS)
+        for key, value in readiness_raw.items():
+            if key in ("minLessons", "minTopics", "minAttempts"):
+                if not isinstance(value, int) or value < 0:
+                    raise SubjectContractError(
+                        f"{source} ({sid}): forecast.readiness.{key} must be a non-negative int")
+            else:
+                try:
+                    share = float(value)
+                except (TypeError, ValueError):
+                    raise SubjectContractError(
+                        f"{source} ({sid}): forecast.readiness.{key} must be a number 0..1")
+                if not 0.0 <= share <= 1.0:
+                    raise SubjectContractError(
+                        f"{source} ({sid}): forecast.readiness.{key} must be a number 0..1")
+                value = share
+            readiness[key] = value
+        forecast = {"weights": weights, "total": total, "scale": scale,
+                    "readiness": readiness}
     features = raw.get("features")
     if not isinstance(features, dict) or set(features) != set(REQUIRED_FEATURES):
         raise SubjectContractError(

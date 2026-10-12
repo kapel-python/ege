@@ -143,6 +143,11 @@ def main():
             weights = forecast.get("weights") or {}
             assert set(weights) == set(SKILLS), set(weights) ^ set(SKILLS)
             assert sum(weights.values()) == 42, sum(weights.values())
+            # Порог показа — часть контракта: едет тем же объектом до клиента
+            # и агента, новый предмет наследует поведение автоматически.
+            assert forecast.get("readiness") == {"minLessons": 1, "lessonShare": 0.05,
+                                                 "minTopics": 3, "topicShare": 0.1,
+                                                 "minAttempts": 3}, forecast.get("readiness")
 
             # Цели — общая шкала g60/g80/g95 (GOAL_LABELS в админке не трогаем).
             goals = {g["id"] for g in catalog.get("goals", [])}

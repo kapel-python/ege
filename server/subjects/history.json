@@ -39,6 +39,13 @@
    "h21_thesis": 3
   },
   "total": 42,
+  "readiness": {
+    "minLessons": 1,
+    "lessonShare": 0.05,
+    "minTopics": 3,
+    "topicShare": 0.1,
+    "minAttempts": 3
+  },
   "scale": [
    0,
    4,

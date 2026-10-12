@@ -2088,13 +2088,43 @@ const FORECAST_DIAGNOSTIC_WEIGHT = 2;
 /* Порог показа прогноза: раньше него числа нет вообще — вместо «0 баллов»
    честная плашка «пройди больше тем и практики». Пока темы не тронуты, они
    тянут взвешенное среднее вниз, и число после первой диагностики выглядит
-   приговором, а не ориентиром. Порог низкий намеренно: 1–2 урока и 3 темы
-   с данными — это «первые шаги», после которых число уже можно показать,
-   но только с пометкой «предварительный» и широкой вилкой (см. ниже). */
-const FORECAST_READY_LESSON_SHARE = 0.05;
-const FORECAST_READY_TOPIC_SHARE = 0.1;
-const FORECAST_READY_MIN_LESSONS = 1;
-const FORECAST_READY_MIN_TOPICS = 3;
+   приговором, а не ориентиром. Порог низкий намеренно: уроки, темы с данными
+   и несколько попыток в практике («первые шаги»), после которых число уже
+   можно показать, но только с пометкой «предварительный» и широкой вилкой
+   (см. ниже). Числа порога — из контракта предмета (forecast.readiness,
+   валидирует subjects_registry, дефолты ниже); новый предмет наследует их
+   автоматически. Уроковый порог пуст сам собой, когда уроков нет (история
+   открыта практикой): тогда держат темы и практика. Попытки диагностики
+   (холодные ответы онбординга) в счёт практики не идут — иначе одна
+   диагностика открывала бы «предварительный прогноз 0 баллов». */
+const FORECAST_READY_DEFAULTS = {
+  minLessons: 1, lessonShare: 0.05, minTopics: 3, topicShare: 0.1, minAttempts: 3,
+};
+const FORECAST_READY_LESSON_SHARE = FORECAST_READY_DEFAULTS.lessonShare;
+const FORECAST_READY_TOPIC_SHARE = FORECAST_READY_DEFAULTS.topicShare;
+const FORECAST_READY_MIN_LESSONS = FORECAST_READY_DEFAULTS.minLessons;
+const FORECAST_READY_MIN_TOPICS = FORECAST_READY_DEFAULTS.minTopics;
+const FORECAST_READY_MIN_ATTEMPTS = FORECAST_READY_DEFAULTS.minAttempts;
+
+function forecastReadinessConfig() {
+  const cfg = getForecastConfig() || {};
+  const raw = cfg.readiness && typeof cfg.readiness === "object" && !Array.isArray(cfg.readiness) ? cfg.readiness : {};
+  const intOr = (value, dflt) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 ? n : dflt;
+  };
+  const shareOr = (value, dflt) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : dflt;
+  };
+  return {
+    minLessons: intOr(raw.minLessons, FORECAST_READY_DEFAULTS.minLessons),
+    lessonShare: shareOr(raw.lessonShare, FORECAST_READY_DEFAULTS.lessonShare),
+    minTopics: intOr(raw.minTopics, FORECAST_READY_DEFAULTS.minTopics),
+    topicShare: shareOr(raw.topicShare, FORECAST_READY_DEFAULTS.topicShare),
+    minAttempts: intOr(raw.minAttempts, FORECAST_READY_DEFAULTS.minAttempts),
+  };
+}
 
 function getForecastConfig() {
   try {
@@ -2162,16 +2192,28 @@ function forecastReadiness(covered, totalTopics) {
   const completed = safeObject((Store.state || {}).completedLessons);
   const totalLessons = lessons.length;
   const doneLessons = totalLessons ? lessons.filter((l) => l && completed[l.id]).length : 0;
+  const cfg = forecastReadinessConfig();
   const needLessons = totalLessons
-    ? Math.max(FORECAST_READY_MIN_LESSONS, Math.ceil(totalLessons * FORECAST_READY_LESSON_SHARE))
+    ? Math.max(cfg.minLessons, Math.ceil(totalLessons * cfg.lessonShare))
     : 0;
   const needTopics = totalTopics
-    ? Math.max(FORECAST_READY_MIN_TOPICS, Math.ceil(totalTopics * FORECAST_READY_TOPIC_SHARE))
+    ? Math.max(cfg.minTopics, Math.ceil(totalTopics * cfg.topicShare))
     : 0;
+  // Практика — только недиагностические попытки: диагностика в одиночку
+  // порог открывать не должна (см. комментарий у FORECAST_READY_DEFAULTS).
+  const diag = diagnosticAttemptKeys();
+  let doneAttempts = 0;
+  for (const a of safeArray(Store.state && Store.state.taskAttempts)) {
+    if (!a) continue;
+    if (diag.has(`${a.taskId}|${Number(a.ts) || 0}`)) continue;
+    doneAttempts++;
+  }
+  const needAttempts = cfg.minAttempts;
   return {
-    ready: doneLessons >= needLessons && covered >= needTopics,
+    ready: doneLessons >= needLessons && covered >= needTopics && doneAttempts >= needAttempts,
     doneLessons, needLessons, totalLessons,
     covered, needTopics, totalTopics,
+    doneAttempts, needAttempts,
   };
 }
 
@@ -2272,6 +2314,7 @@ function forecastBaseFromCore(c) {
       doneLessons: c.readiness.doneLessons, needLessons: c.readiness.needLessons,
       totalLessons: c.readiness.totalLessons, covered: c.readiness.covered,
       needTopics: c.readiness.needTopics, totalTopics: c.readiness.totalTopics,
+      doneAttempts: c.readiness.doneAttempts, needAttempts: c.readiness.needAttempts,
     };
   }
   const mastery = c.wSum ? c.wMastery / c.wSum : 0;

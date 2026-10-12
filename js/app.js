@@ -596,6 +596,8 @@ function forecastPrematureText(f) {
   if (needLessons > 0) parts.push(`уроки ${Math.min(nonNegativeNumber(value.doneLessons), needLessons)} из ${needLessons}`);
   const needTopics = nonNegativeNumber(value.needTopics);
   if (needTopics > 0) parts.push(`темы с данными ${Math.min(nonNegativeNumber(value.covered), needTopics)} из ${needTopics}`);
+  const needAttempts = nonNegativeNumber(value.needAttempts);
+  if (needAttempts > 0) parts.push(`практика ${Math.min(nonNegativeNumber(value.doneAttempts), needAttempts)} из ${needAttempts}`);
   return `Чтобы увидеть прогноз, пройди больше тем и практики.${parts.length ? ` Сейчас: ${parts.join(", ")}.` : ""}`;
 }
 
