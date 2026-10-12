@@ -11736,6 +11736,159 @@ async function doUnlinkGoogle() {
 /* Старое имя сохраняем как синоним: кнопка и тесты знают unlinkGoogle. */
 function unlinkGoogle() { askUnlinkGoogle(); }
 
+/* Кнопка пароля под почтой в блоке «Данные»: хеша нет — «Установить пароль»,
+   хеш есть — «Сменить пароль». Условие — hasPassword из bootstrap, а не
+   registered: аккаунт «только через Google» зарегистрирован, но пароля у
+   него нет. В ветке «нет способа входа» кнопка тоже рисуется — она чинит
+   вход в один шаг, без экрана регистрации (тот ответил бы 409: почта уже
+   занята самим этим аккаунтом). */
+function passwordRowHTML() {
+  if (!Store.accountId) return "";
+  const hasPassword = !!(Store.auth && Store.auth.hasPassword);
+  return `
+    <div class="settings-row__sub" style="margin-top:12px">Пароль · ${hasPassword ? "задан" : "не задан"}</div>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn--soft btn--sm" type="button" onclick="openPasswordDialog()">${hasPassword ? "Сменить пароль" : "Установить пароль"}</button>
+    </div>`;
+}
+
+/* Смена/установка пароля: то же .dlg-окно, что имя и устройства
+   (device-modal-root + .dlg-backdrop/.dlg), своего дизайна нет.
+   Два шага в обоих сценариях: установка — «новый» → «подтверждение»,
+   смена — «текущий» → «новый + повтор». Повтор в одном шаге с новым —
+   это всё равно два окна, а опечатка без него закрыла бы вход с других
+   устройств. Минимум 8 символов — как на экране регистрации. */
+let passwordDialog = null;
+
+function openPasswordDialog() {
+  const root = deviceModalRoot();
+  if (!root) return;
+  const hasPassword = !!(typeof Store !== "undefined" && Store.auth && Store.auth.hasPassword);
+  passwordDialog = { mode: hasPassword ? "change" : "set", step: 1, first: "" };
+  paintPasswordDialog("", false);
+}
+
+function paintPasswordDialog(errorText, busy) {
+  const root = deviceModalRoot();
+  const dlg = passwordDialog;
+  if (!root || !dlg) return;
+  const isChange = dlg.mode === "change";
+  const title = isChange ? "Сменить пароль" : "Установить пароль";
+  const stepText = isChange
+    ? (dlg.step === 1 ? "Сначала введи текущий пароль." : "Придумай новый пароль — минимум 8 символов — и повтори его.")
+    : (dlg.step === 1 ? "Придумай пароль — минимум 8 символов." : "Повтори пароль, чтобы исключить опечатку.");
+  const fields = dlg.step === 1
+    ? (isChange
+      ? `<label class="auth-field"><span>Текущий пароль</span>
+           <input class="answer-input" id="pwdFirst" type="password" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();passwordDialogNext()}"></label>`
+      : `<label class="auth-field"><span>Новый пароль (минимум 8 символов)</span>
+           <input class="answer-input" id="pwdFirst" type="password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();passwordDialogNext()}"></label>`)
+    : (isChange
+      ? `<label class="auth-field"><span>Новый пароль (минимум 8 символов)</span>
+           <input class="answer-input" id="pwdNew" type="password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();passwordDialogSubmit()}"></label>
+         <label class="auth-field"><span>Повтори новый пароль</span>
+           <input class="answer-input" id="pwdRepeat" type="password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();passwordDialogSubmit()}"></label>`
+      : `<label class="auth-field"><span>Подтверди пароль</span>
+           <input class="answer-input" id="pwdRepeat" type="password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();passwordDialogSubmit()}"></label>`);
+  const primaryText = dlg.step === 1 ? "Далее" : (isChange ? "Сменить" : "Установить");
+  const primaryAction = dlg.step === 1 ? "passwordDialogNext()" : "passwordDialogSubmit()";
+  root.innerHTML = `
+    <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
+      <div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <button class="dlg__close" type="button" onclick="closeDeviceModal()" aria-label="Закрыть окно">${icon("x")}</button>
+        <div class="dlg__eyebrow">Аккаунт · шаг ${dlg.step} из 2</div>
+        <div class="dlg-device">
+          <div class="dlg-device__icon" aria-hidden="true">${icon("lock")}</div>
+          <div class="dlg-device__name">${esc(title)}</div>
+        </div>
+        <div class="dlg__text">${esc(stepText)}</div>
+        <div class="dlg__field">
+          ${fields}
+          <div class="dlg__error" id="pwdError" role="alert"${errorText ? "" : ` style="display:none"`}>${esc(errorText || "")}</div>
+        </div>
+        <div class="dlg__actions">
+          ${dlg.step === 1
+            ? `<button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Отмена</button>`
+            : `<button class="btn btn--soft" type="button" onclick="passwordDialogBack()">Назад</button>`}
+          <button class="btn btn--primary" id="pwdPrimary" type="button" onclick="${primaryAction}"${busy ? " disabled" : ""}>${esc(primaryText)}</button>
+        </div>
+      </div>
+    </div>`;
+  document.removeEventListener("keydown", deviceModalEscHandler);
+  document.addEventListener("keydown", deviceModalEscHandler);
+  const box = root.querySelector(".dlg");
+  if (box) { box.setAttribute("tabindex", "-1"); try { box.focus({ preventScroll: true }); } catch (_) {} }
+}
+
+function passwordDialogFail(text) {
+  const root = deviceModalRoot();
+  const errorEl = root ? root.querySelector("#pwdError") : null;
+  if (errorEl) { errorEl.textContent = text; errorEl.style.display = "block"; }
+  const btn = root ? root.querySelector("#pwdPrimary") : null;
+  if (btn) btn.disabled = false;
+}
+
+function passwordDialogNext() {
+  const root = deviceModalRoot();
+  const dlg = passwordDialog;
+  if (!root || !dlg) return;
+  const input = root.querySelector("#pwdFirst");
+  const value = input ? String(input.value || "") : "";
+  if (!value) { passwordDialogFail(dlg.mode === "change" ? "Введи текущий пароль." : "Придумай пароль — пустым он быть не может."); return; }
+  if (dlg.mode === "set" && value.length < 8) { passwordDialogFail("Пароль — минимум 8 символов."); return; }
+  dlg.first = value;
+  dlg.step = 2;
+  paintPasswordDialog("", false);
+}
+
+function passwordDialogBack() {
+  if (!passwordDialog) return;
+  passwordDialog.step = 1;
+  paintPasswordDialog("", false);
+}
+
+async function passwordDialogSubmit() {
+  const root = deviceModalRoot();
+  const dlg = passwordDialog;
+  if (!root || !dlg) return;
+  const btn = root.querySelector("#pwdPrimary");
+  let fresh = "";
+  if (dlg.mode === "set") {
+    const repeat = root.querySelector("#pwdRepeat");
+    fresh = repeat ? String(repeat.value || "") : "";
+    if (!fresh) { passwordDialogFail("Повтори пароль."); return; }
+    if (fresh !== dlg.first) { passwordDialogFail("Пароли не совпадают — проверь и введи ещё раз."); return; }
+  } else {
+    const pwNew = root.querySelector("#pwdNew");
+    const repeat = root.querySelector("#pwdRepeat");
+    fresh = pwNew ? String(pwNew.value || "") : "";
+    const again = repeat ? String(repeat.value || "") : "";
+    if (fresh.length < 8) { passwordDialogFail("Новый пароль — минимум 8 символов."); return; }
+    if (fresh !== again) { passwordDialogFail("Новые пароли не совпадают — проверь и введи ещё раз."); return; }
+  }
+  if (fresh.length > 72) { passwordDialogFail("Пароль — от 8 до 72 символов."); return; }
+  if (btn) btn.disabled = true;
+  try {
+    await AuthAPI.setPassword(fresh, dlg.mode === "change" ? dlg.first : undefined);
+  } catch (error) {
+    passwordDialogFail(authFormError(error, "Не удалось сохранить пароль. Попробуй ещё раз."));
+    return;
+  }
+  passwordDialog = null;
+  try { closeDeviceModal(); } catch (_) {}
+  try { await Store.refreshAfterAuth(); } catch (_) {}
+  try { replaceGoogleRow(); } catch (_) {}
+  try { toast("Пароль сохранён", "", "check"); } catch (_) {}
+  try {
+    if (typeof currentRoute === "function" && currentRoute() === "profile") render();
+  } catch (_) {}
+}
+
 function accountAuthHTML() {
   const auth = Store.auth || { registered: false, email: null, providers: [] };
   if (auth.registered) {
@@ -11744,6 +11897,7 @@ function accountAuthHTML() {
         <span class="chip chip--success">${icon("check")} привязан</span>
         <span class="auth-status__email mono">${esc(auth.email || "")}</span>
       </div>
+      ${passwordRowHTML()}
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   // Залогинен, но способа войти НЕТ (отвязал единственный Google, пароля не
@@ -11759,6 +11913,7 @@ function accountAuthHTML() {
         <span class="auth-status__email mono">${esc(auth.email)}</span>
       </div>
       <div class="settings-row__sub" style="margin-top:6px">Зарегистрируй email и пароль (экран «Регистрация») — и вход с другого устройства вернётся.</div>
+      ${passwordRowHTML()}
       <div id="google-row-holder">${googleRowHTML()}</div>`;
   }
   return `

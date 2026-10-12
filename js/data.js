@@ -917,7 +917,7 @@ const ApiClient = {
     try {
       const enforcePaths = ["/api/bootstrap", "/api/bootstrap-lite", "/api/subjects",
         "/api/auth/session", "/api/auth/devices", "/api/subject",
-        "/api/auth/google/unlink"];
+        "/api/auth/google/unlink", "/api/auth/password"];
       if (window.__egeBlocked && typeof path === "string"
           && enforcePaths.some((p) => path === p || path.indexOf(p + "?") === 0)) {
         window.__egeBlocked = null;
@@ -972,6 +972,14 @@ const AuthAPI = {
   },
   unlinkGoogle() {
     return ApiClient.post("/api/auth/google/unlink", {});
+  },
+  /* Пароль из профиля (кнопка под почтой): установка, когда хеша нет, и
+     смена, когда есть, — один эндпоинт, сервер различает сам. currentPassword
+     нужен только для смены; для установки его не шлём. */
+  setPassword(newPassword, currentPassword) {
+    const body = { newPassword };
+    if (currentPassword) body.currentPassword = currentPassword;
+    return ApiClient.post("/api/auth/password", body);
   },
   session() {
     return ApiClient.get("/api/auth/session");

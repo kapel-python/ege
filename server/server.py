@@ -14419,6 +14419,55 @@ class Handler(BaseHTTPRequestHandler):
                         "warning": None if has_password else
                         "Пароля у аккаунта нет — вход с другого устройства будет недоступен."})
 
+    def handle_auth_password(self, conn: sqlite3.Connection) -> None:
+        """POST /api/auth/password — установить или сменить пароль.
+
+        Один эндпоинт на оба случая из профиля (кнопка под почтой):
+        хеша нет — просто задаём новый («Установить пароль»), хеш есть —
+        требуем текущий («Сменить пароль»). Правила длины те же, что у
+        регистрации (8..72). Перебор текущего упирается в общий auth-бакет
+        неудач и per-IP бакет, как у входа. Сессия не перевыпускается:
+        меняется только хеш, остальные устройства продолжают работать.
+        """
+        ip = client_ip(self)
+        if not auth_login_allowed(ip):
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
+            return
+        user_id, _ = user_for(conn, self)
+        if not self.require_user(user_id):
+            return
+        if self.reject_if_blocked(conn, user_id):
+            return
+        try:
+            payload = self.read_json()
+        except (json.JSONDecodeError, ValueError):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "Некорректный запрос"}, 400)
+            return
+        new_password = payload.get("newPassword", payload.get("password"))
+        if not isinstance(new_password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(new_password) <= AUTH_PASSWORD_MAX_LENGTH:
+            self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
+            return
+        row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        if row is None:
+            self.send_json({"error": "Требуется вход"}, 401)
+            return
+        if row["password_hash"]:
+            current = payload.get("currentPassword", payload.get("current_password"))
+            if not isinstance(current, str) or not current:
+                self.send_json({"error": "Введи текущий пароль"}, 400)
+                return
+            if len(current) > AUTH_PASSWORD_MAX_LENGTH or not verify_password(current, row["password_hash"]):
+                auth_login_failed(ip)
+                self.send_json({"error": "Неверный текущий пароль"}, 401)
+                return
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
+        conn.commit()
+        auth_login_success(ip)
+        self.send_json({"ok": True, "hasPassword": True, "user": auth_user_payload(conn, user_id)})
+
     def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid/absent cookie: drop whatever
         # session row this token had and clear the cookie. Never mint a user.
@@ -15859,7 +15908,7 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
             return
         if path in ("/api/auth/register", "/api/auth/login", "/api/auth/logout",
-                    "/api/auth/google/unlink"):
+                    "/api/auth/google/unlink", "/api/auth/password"):
             # Общий per-IP бакет: без него на /api/auth/* не было НИКАКОГО
             # ограничения, а auth_login_allowed считает только неудачи и
             # очищается на успехе. Скрипт без кук, меняя email, получал
@@ -15873,6 +15922,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/auth/register": self.handle_auth_register(conn)
                 elif path == "/api/auth/login": self.handle_auth_login(conn)
                 elif path == "/api/auth/google/unlink": self.handle_auth_google_unlink(conn)
+                elif path == "/api/auth/password": self.handle_auth_password(conn)
                 else: self.handle_auth_logout(conn)
             except sqlite3.Error as exc:
                 try: conn.rollback()
