@@ -1,0 +1,93 @@
+{
+  "id": "oge_informatics",
+  "title": "Информатика (ОГЭ)",
+  "short": "ОГЭ",
+  "description": "Информатика (ОГЭ): задания с кратким ответом за 9 класс — практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "order": 10,
+  "catalogFile": "catalog_oge_informatics.json",
+  "level": {
+    "id": "oge_informatics",
+    "subjectId": "oge_informatics",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "oi01_memory": 1,
+      "oi02_decode": 1,
+      "oi03_logic": 1,
+      "oi04_models": 1,
+      "oi05_executor": 1,
+      "oi06_program": 1,
+      "oi07_network": 1,
+      "oi08_queries": 1,
+      "oi09_graphs": 1,
+      "oi10_numsys": 1,
+      "oi11_filesearch": 1,
+      "oi12_filecount": 1,
+      "oi13_office": 2,
+      "oi14_spreadsheet": 3,
+      "oi15_robot": 2,
+      "oi16_coding": 2
+    },
+    "total": 21,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ]
+  },
+  "features": {
+    "lessons": false,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "информатике",
+    "accusative": "информатику"
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

@@ -22,13 +22,18 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SERVER_DIR = ROOT / "server"
 SERVER_PATH = SERVER_DIR / "server.py"
-SUBJECTS = ("profile_math", "basic_math", "russian", "biology", "oge_math")
+SUBJECTS = ("profile_math", "basic_math", "russian", "biology", "oge_math",
+            "oge_biology", "oge_society", "oge_informatics", "oge_history")
 CATALOG_FILES = {
     "profile_math": "catalog.json",
     "basic_math": "catalog_basic.json",
     "russian": "catalog_russian.json",
     "biology": "catalog_biology.json",
     "oge_math": "catalog_oge_math.json",
+    "oge_biology": "catalog_oge_biology.json",
+    "oge_society": "catalog_oge_society.json",
+    "oge_informatics": "catalog_oge_informatics.json",
+    "oge_history": "catalog_oge_history.json",
 }
 REQUIRED_FEATURES = frozenset(
     {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}
@@ -212,9 +217,14 @@ def main() -> int:
                 # (у тестовой части №1–26 есть чем их наполнять).
                 "russian": {key: True for key in REQUIRED_FEATURES},
                 "biology": {key: True for key in REQUIRED_FEATURES},
-                # Математика ОГЭ — ready без уроков (пилот: практика, прогноз,
+                # Математика ОГЭ — ready без уроков (практика, прогноз,
                 # диагностика, миссии, боссы, подборка и путь).
                 "oge_math": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
+                # Волна ОГЭ: та же модель — всё, кроме уроков.
+                "oge_biology": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
+                "oge_society": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
+                "oge_informatics": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
+                "oge_history": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")

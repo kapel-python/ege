@@ -1,0 +1,113 @@
+{
+  "id": "oge_society",
+  "title": "Обществознание (ОГЭ)",
+  "short": "Общество",
+  "description": "Обществознание (ОГЭ): все 20 линий экзамена за 9 класс — человек и общество, экономика, политика и право, работа с текстом. Практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "order": 9,
+  "catalogFile": "catalog_oge_society.json",
+  "level": {
+    "id": "oge_society",
+    "subjectId": "oge_society",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "os01_concepts": 2,
+      "os02_table": 1,
+      "os03_compare": 1,
+      "os04_culture": 1,
+      "os05_man": 1,
+      "os06_social": 1,
+      "os07_photo": 3,
+      "os08_finance": 2,
+      "os09_agents": 1,
+      "os10_econ": 1,
+      "os11_politics": 1,
+      "os12_stats": 4,
+      "os13_law": 1,
+      "os14_match": 1,
+      "os15_socrel": 1,
+      "os16_lawjudge": 1,
+      "os17_significance": 2,
+      "os18_plan": 3,
+      "os19_analysis": 6,
+      "os20_examples": 3
+    },
+    "total": 37,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37
+    ]
+  },
+  "features": {
+    "lessons": false,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "обществознанию",
+    "accusative": "обществознание"
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

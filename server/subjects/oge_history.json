@@ -1,0 +1,114 @@
+{
+  "id": "oge_history",
+  "title": "История (ОГЭ)",
+  "short": "ОГЭ",
+  "description": "История (ОГЭ): задания №1–23 экзамена за 9 класс — практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "order": 11,
+  "catalogFile": "catalog_oge_history.json",
+  "level": {
+    "id": "oge_history",
+    "subjectId": "oge_history",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "oh01_dates": 2,
+      "oh02_sequence": 1,
+      "oh03_terms": 1,
+      "oh04_facts": 2,
+      "oh05_extraterm": 1,
+      "oh06_thesis": 1,
+      "oh07_stats": 2,
+      "oh08_map": 1,
+      "oh09_map2": 1,
+      "oh10_map3": 1,
+      "oh11_images": 1,
+      "oh12_scheme": 1,
+      "oh13_culture": 2,
+      "oh14_culture2": 1,
+      "oh15_world": 1,
+      "oh16_world2": 1,
+      "oh17_world3": 1,
+      "oh18_source": 2,
+      "oh19_source2": 2,
+      "oh20_source3": 2,
+      "oh21_errors": 3,
+      "oh22_compare": 2,
+      "oh23_situation": 3
+    },
+    "total": 35,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35
+    ]
+  },
+  "features": {
+    "lessons": false,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "истории",
+    "accusative": "историю"
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

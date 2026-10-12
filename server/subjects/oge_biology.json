@@ -1,0 +1,129 @@
+{
+  "id": "oge_biology",
+  "title": "Биология (ОГЭ)",
+  "short": "ОГЭ",
+  "description": "Биология (ОГЭ): все 26 номеров экзамена за 9 класс — практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "order": 8,
+  "catalogFile": "catalog_oge_biology.json",
+  "level": {
+    "id": "oge_biology",
+    "subjectId": "oge_biology",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "ob01_science": 1,
+      "ob02_kingdoms": 1,
+      "ob03_syscat": 1,
+      "ob04_graphics": 2,
+      "ob05_processes": 2,
+      "ob06_devices": 1,
+      "ob07_veracity": 2,
+      "ob08_structure": 1,
+      "ob09_divchoice": 2,
+      "ob10_gaps": 2,
+      "ob11_divmatch": 2,
+      "ob12_judgments": 1,
+      "ob13_morph": 3,
+      "ob14_humanfeat": 1,
+      "ob15_humanbody": 1,
+      "ob16_humanstruct": 2,
+      "ob17_humanchoice": 2,
+      "ob18_humanmatch": 2,
+      "ob19_ecodesc": 2,
+      "ob20_foodchain": 1,
+      "ob21_biorel": 2,
+      "ob22_biorole": 2,
+      "ob23_scimethod": 2,
+      "ob24_biotext": 3,
+      "ob25_biostat": 3,
+      "ob26_energy": 3
+    },
+    "total": 47,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+    ]
+  },
+  "features": {
+    "lessons": false,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "биологии",
+    "accusative": "биологию"
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

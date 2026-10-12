@@ -33,7 +33,7 @@
 процесс/логи (`EGE CORE`). Переименование разлогинит всех и порвёт
 пути бэкапов — ось экзамена их не касается.
 
-## Пилот: oge_math
+## Волна ОГЭ: oge_math, oge_biology, oge_society, oge_informatics, oge_history
 
 `server/subjects/oge_math.json` (`exam: oge`) + `server/catalog_oge_math.json`
 (сборка: `tools/apply_oge_math.py` из `tools/out/oge_*.json`,
