@@ -2786,10 +2786,21 @@ body {
 .subject-group-label { flex-basis: 100%; font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 4px 0 -2px; }
 .subj-group-label { font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 10px 0 -6px; }
 .subj-group-label:first-child { margin-top: 0; }
-/* Тихая строка смены направления в диалоге предмета: редкое действие,
-   поэтому не кнопка, а текстовая ссылка без рамки. */
-.dlg-subtle-link { align-self: center; background: none; border: none; font: inherit; font-size: 12.5px; color: var(--muted); cursor: pointer; padding: 8px; margin-top: 2px; }
-.dlg-subtle-link:hover { color: var(--text); text-decoration: underline; }
+/* Триггер и мини-окно выбора направления (см. openExamPopup в js/app.js):
+   редкое действие — тихая строка без рамки, само окно поверх всего. */
+.exam-switch { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; font: inherit; font-size: 12.5px; color: var(--muted); cursor: pointer; padding: 6px 2px; }
+.exam-switch:hover { color: var(--text); }
+.exam-switch b { font-weight: 650; color: var(--text-2); }
+.exam-switch:hover b { color: var(--text); }
+.exam-switch__chev { font-size: 10px; }
+.exam-backdrop { position: fixed; inset: 0; z-index: 290; background: transparent; }
+.exam-popup { position: fixed; z-index: 300; min-width: 230px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.22); padding: 6px; }
+.exam-popup__item { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; background: none; border: none; border-radius: 10px; font: inherit; color: var(--text); cursor: pointer; padding: 10px 12px; text-align: left; }
+.exam-popup__item:hover { background: var(--surface-2); }
+.exam-popup__item--active { background: var(--accent-soft); }
+.exam-popup__name { flex: 1; font-weight: 650; font-size: 14px; }
+.exam-popup__count { font-size: 12px; color: var(--muted); }
+.exam-popup__check { width: 18px; color: var(--accent-ink); font-weight: 800; }
 .subject-pill {
   display: inline-flex;
   align-items: center;
@@ -2854,7 +2865,6 @@ body {
 .subject-current__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .subject-current__name { font-size: 14px; font-weight: 750; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .subject-current__sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
-.subject-current__exam { align-self: flex-start; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 2px 8px; margin-top: 4px; }
 .subject-current__chev { flex-shrink: 0; font-size: 22px; line-height: 1; color: var(--muted); }
 
 /* Карточки предметов в диалоге выбора (та же dlg-модалка). */

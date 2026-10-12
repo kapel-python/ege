@@ -2572,37 +2572,35 @@ function subjectPickerHTML() {
     + `</div>`;
 }
 
-/* Одна кнопка с текущим предметом в профиле: открывает диалог выбора
-   на той же dlg-системе, что и остальные подтверждения. Пилюли
-   subjectPickerHTML оставлены для совместимости. */
+/* Одна кнопка с текущим предметом в профиле + тихая строка смены
+   направления под ней: кнопка открывает диалог предмета, строка —
+   мини-окно выбора оси. Пилюли subjectPickerHTML оставлены для
+   совместимости. */
 function subjectCurrentButtonHTML() {
   const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
   const info = subjectInfoSafe();
   const title = subjectDisplayName(info);
   if (subjects.length < 2) return `<b>${esc(title)}</b>`;
   const sub = subjectCourseLabel(info);
-  // Направление (ЕГЭ/ОГЭ) видно не открывая диалог: выбирается один раз,
-  // но найти его потом можно только здесь. Показываем только когда осей
-  // больше одной — иначе бейдж шум.
-  let examBadge = "";
-  try { if (hasMultipleExams()) examBadge = examGroupLabel(currentExam()); } catch (_) {}
+  let cur = "ege";
+  try { cur = currentExam(); } catch (_) {}
   return `<button type="button" class="subject-current" onclick="askSubjectDialog()" aria-haspopup="dialog" aria-label="Сменить предмет">
     <span class="subject-current__icon" aria-hidden="true">${icon("layers")}</span>
     <span class="subject-current__body">
       <span class="subject-current__name">${esc(title)}</span>
       ${sub ? `<span class="subject-current__sub">${esc(sub)}</span>` : ""}
-      ${examBadge ? `<span class="subject-current__exam">${esc(examBadge)}</span>` : ""}
     </span>
     <span class="subject-current__chev" aria-hidden="true">›</span>
-  </button>`;
+  </button>`
+  + examSwitchHTML(cur, "examSwitchFromProfile");
 }
 
 /* Диалог выбора предмета: сразу предметы своей оси + тихая строка
-   «Не то направление?» внизу. Выбор направления — редкий, отдельного
-   экрана ему не положено. Одна ось — строки нет вообще. */
+   «Направление: … ▾» сверху — она открывает мини-окно выбора оси.
+   Одна ось — строки нет вообще. */
 let subjectDialogExam = null;
-function askSubjectDialog() {
-  subjectDialogExam = null;
+function askSubjectDialog(exam) {
+  subjectDialogExam = exam === "oge" ? "oge" : (exam === "ege" ? "ege" : null);
   renderSubjectDialog();
 }
 function chooseSubjectExamDialog(exam) {
@@ -2635,12 +2633,11 @@ function renderSubjectDialog() {
       <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
     </button>`;
   };
-  // Предметы своей оси — сразу; чужая ось — тихой строкой внизу.
+  // Предметы своей оси — сразу; смена оси — через мини-окно по триггеру.
   // subjectDialogExam null — ось текущего предмета.
   const shown = groups.find((g) => g.exam === (subjectDialogExam || curExam)) || groups[0];
-  const other = groups.length > 1 ? groups.find((g) => g.exam !== shown.exam) : null;
-  const list = shown.subjects.map(card).join("")
-    + (other ? `<button class="dlg-subtle-link" type="button" onclick="chooseSubjectExamDialog('${other.exam}')">Не то направление? ${esc(examGroupLabel(other.exam))} →</button>` : "");
+  const list = examSwitchHTML(shown.exam, "chooseSubjectExamDialog")
+    + shown.subjects.map(card).join("");
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Выбор предмета">
@@ -2669,6 +2666,73 @@ function chooseSubjectFromDialog(id) {
     if (id === DataAPI.currentSubject()) { closeDeviceModal(); return; }
   } catch (_) {}
   switchSubjectFromUI(id);
+}
+
+/* Мини-окно выбора направления (ЕГЭ/ОГЭ): кастомный попап у якоря,
+   не нативный <select>. Редкое действие — видна только тихая
+   строка-триггер, само окно живёт до клика мимо / Esc / выбора. */
+let examPopupPickCb = null;
+function examPopupEscHandler(e) {
+  if (e && e.key === "Escape") { try { closeExamPopup(); } catch (_) {} }
+}
+function closeExamPopup() {
+  try { document.removeEventListener("keydown", examPopupEscHandler); } catch (_) {}
+  try {
+    document.querySelectorAll(".exam-backdrop,.exam-popup").forEach((el) => el.remove());
+  } catch (_) {}
+  examPopupPickCb = null;
+}
+function examPopupPick(exam) {
+  const cb = examPopupPickCb;
+  closeExamPopup();
+  try { if (cb) cb(exam); } catch (_) {}
+}
+function openExamPopup(anchor, current, onPick) {
+  closeExamPopup();
+  const groups = subjectsByExam();
+  if (!anchor || !anchor.getBoundingClientRect || groups.length < 2) return;
+  const rect = anchor.getBoundingClientRect();
+  const back = document.createElement("div");
+  back.className = "exam-backdrop";
+  back.onclick = closeExamPopup;
+  const pop = document.createElement("div");
+  pop.className = "exam-popup";
+  pop.setAttribute("role", "menu");
+  pop.innerHTML = groups.map((g) => {
+    const active = g.exam === current;
+    return `<button type="button" class="exam-popup__item${active ? " exam-popup__item--active" : ""}"
+        role="menuitemradio" aria-checked="${active}" onclick="examPopupPick('${g.exam}')">
+      <span class="exam-popup__name">${esc(examGroupLabel(g.exam))}</span>
+      <span class="exam-popup__count">${g.subjects.length}</span>
+      <span class="exam-popup__check" aria-hidden="true">${active ? "✓" : ""}</span>
+    </button>`;
+  }).join("");
+  document.body.appendChild(back);
+  document.body.appendChild(pop);
+  const w = pop.offsetWidth || 240, h = pop.offsetHeight || 120;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - w - 8));
+  let top = rect.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - h - 6);
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+  examPopupPickCb = onPick;
+  try { document.addEventListener("keydown", examPopupEscHandler); } catch (_) {}
+}
+/* Тихая строка-триггер мини-окна: «Направление: ЕГЭ · 11 класс ▾».
+   current — ось для подписи и галочки, handler — имя колбэка выбора.
+   Одна ось — пусто, триггеру нечего открывать. */
+function examSwitchHTML(current, handler) {
+  let show = false;
+  try { show = hasMultipleExams(); } catch (_) {}
+  if (!show) return "";
+  let label = "ЕГЭ · 11 класс";
+  try { label = examGroupLabel(current); } catch (_) {}
+  return `<button class="exam-switch" type="button" onclick="openExamPopup(this, '${esc(current)}', ${handler})"><span>Направление:</span><b>${esc(label)}</b><span class="exam-switch__chev" aria-hidden="true">▾</span></button>`;
+}
+/* Выбор направления из профиля: ось зафиксирована — открываем диалог
+   уже на ней, дальше один клик по предмету. */
+function examSwitchFromProfile(exam) {
+  try { askSubjectDialog(exam === "oge" ? "oge" : "ege"); } catch (_) {}
 }
 
 /* Честная подпись состава курса для выбора предмета: собирается из features
