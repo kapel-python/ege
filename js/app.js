@@ -3633,7 +3633,10 @@ function screenDashboard(root) {
             const solved = nonNegativeNumber(st.solved);
             const acc = solved ? Math.round(nonNegativeNumber(st.correct) / solved * 100) : 0;
             const locked = topicIsLocked(sk);
-            const action = locked ? `openLockedSkillModal('${esc(sk.id)}')` : `go('skill', '${esc(sk.id)}')`;
+            /* Окно темы открываем напрямую, без смены маршрута — как в Пути:
+               go('skill', ...) перерисовывал экран Путем и уводил с Главной,
+               хотя окно прекрасно живёт поверх неё. */
+            const action = locked ? `openLockedSkillModal('${esc(sk.id)}')` : `openSkillModal('${esc(sk.id)}')`;
             return `
             <div class="skill-row${locked ? " skill-row--locked" : ""}" role="button" tabindex="0" onclick="${action}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${action}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(sk))}">
               <div class="skill-row__name">${esc(topicDisplayName(sk))}</div>
@@ -3655,7 +3658,7 @@ function screenDashboard(root) {
         <div class="card">
           ${DataAPI.isSubjectEmpty() ? `<div class="empty">Навыков пока нет — они появятся вместе с материалами предмета.</div>`
           : weakSpots.length ? weakSpots.map(({ sk, prog, errs }) => `
-            <div class="skill-row" role="button" tabindex="0" onclick="go('skill', '${sk.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('skill', '${sk.id}')}" aria-label="Открыть тему ${esc(sk.name)}">
+            <div class="skill-row" role="button" tabindex="0" onclick="openSkillModal('${esc(sk.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSkillModal('${esc(sk.id)}')}" aria-label="Открыть тему ${esc(sk.name)}">
               <div class="skill-row__name">${sk.name}</div>
               ${progressBar(prog)}
               <div class="skill-row__pct">${prog}%</div>

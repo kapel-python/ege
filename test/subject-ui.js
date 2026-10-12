@@ -557,6 +557,23 @@ check(
   sandbox.pathHtml.includes("openSkillModal(") && !sandbox.pathHtml.includes("go('skill'"),
   sandbox.pathHtml.includes("go('skill'") ? "still navigates" : "in place",
 );
+/* Главная: клик по теме в «Навыках» и «Требуют внимания» обязан открыть окно
+   темы поверх Главной — go('skill', ...) переключал маршрут и уводил
+   в раздел Путь. Кнопка «что даст больше всего» — осознанная навигация
+   к теме, её не трогаем. */
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  screenDashboard(document.getElementById("screen"));
+  globalThis.dashHtml = document.getElementById("screen").innerHTML;
+`, sandbox);
+check(
+  "DASHBOARD topic opens the modal in place (stays on dashboard)",
+  sandbox.dashHtml.includes("openSkillModal(") && !sandbox.dashHtml.includes("go('skill'"),
+  sandbox.dashHtml.includes("go('skill'") ? "still navigates" : "in place",
+);
 /* «Слабое место» — только после настоящего провала. Пропуск задания в
    нетронутой теме (0% освоения, точность 0/1) больше не делает тему слабой. */
 vm.runInContext(`
