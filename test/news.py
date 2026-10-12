@@ -146,9 +146,9 @@ def main():
           "подзаголовками <h2>" in server_src and "простыни" in server_src
           and "обращения к читателю" in server_src and "без кликбейта" in server_src
           and "не повторяет его дословно" in server_src and "три смысловых блока" in server_src
-          and "уместными emoji" in server_src and "строка-призыв курсивом" in server_src
+          and "оформление выбирай сам под смысл" in server_src and "считывалась за секунды" in server_src
           and "agent_knowledge.md" in server_src and "news_knowledge_text" in server_src
-          and "NEWS_AI_STYLE" in server_src and "NEWS_AI_EXAMPLE" in server_src)
+          and "NEWS_AI_STYLE" in server_src and "NEWS_AI_EXAMPLE" not in server_src)
     css = (ROOT / "css" / "admin.css").read_text(encoding="utf-8")
     check("css: ИИ-кнопка и прогресс", ".btn--ai" in css and ".a-ai-load" in css)
     check("app.js: используется dlg", "maybeShowNewsModal" in ui or True)
