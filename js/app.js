@@ -10360,7 +10360,7 @@ function screenProfile(root) {
   const profileStreakHTML = contentUnavailable ? "" : `<div class="streak-chip streak-chip--clickable profile-card__streak ${streakChipClass(profileStreakView)}" title="${esc(streakChipTitle(profileStreakView))}" role="button" tabindex="0" onclick="onStreakChipClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onStreakChipClick()}">${icon("flame")} ${profileStreakView.shown} дн</div>`;
   const profileProgressHTML = `
       <div class="profile-card__progress">
-        ${subjectLabel ? `<div class="subject-name">${esc(subjectLabel)}</div>` : ""}
+        ${(() => { const goalTrigger = goalSwitchHTML(); return (subjectLabel || goalTrigger) ? `<div class="profile-goal-row">${subjectLabel ? `<div class="subject-name">${esc(subjectLabel)}</div>` : ""}${goalTrigger}</div>` : ""; })()}
         <div class="profile-card__level">
           <span class="level-chip__badge">Уровень ${esc(li.level)}</span>
           <span class="profile-card__xp mono">${esc(nonNegativeNumber(li.current))} / ${esc(nonNegativeNumber(li.need))} XP</span>
@@ -10441,16 +10441,6 @@ function screenProfile(root) {
             ${subjectCurrentButtonHTML()}
           </div>
           ${subjectState.empty ? `<div class="settings-row__sub">Материалы этого предмета пока готовятся — как только выйдут, обучение начнётся с чистого профиля.</div>` : subjectState.locked ? `<div class="settings-row__sub">В реестре есть тема, но урок и практика пока не подключены. Пустые переходы скрыты.</div>` : ""}
-        </div>
-      </div>
-      <div class="settings-row">
-        <div class="settings-row__icon" aria-hidden="true">${icon("flag")}</div>
-        <div class="settings-row__body">
-          <div class="settings-row__title">Цель</div>
-          <div class="settings-row__sub">Ориентир подготовки по этому предмету. Можно убрать вовсе — лучше без цели, чем с выдуманной.</div>
-          <div class="settings-row__control">
-            ${goalSwitchHTML()}
-          </div>
         </div>
       </div>
       ${Store.accountId ? `
