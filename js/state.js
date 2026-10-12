@@ -1662,6 +1662,33 @@ function dayBeforeYesterdayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/* Помощь по заданию исчерпана сегодня: ответ уже показывали (или открыли
+   все 3 подсказки) в этот календарный день — попытка с hintLevel 3
+   засчитывается как нерешённая, но факт показа фиксируется в taskAttempts.
+   Повторная подача того же задания сегодня — долбёжка стены: ответ уже
+   виден, а нового scaffolding нет. Такие задания откладываются до завтра
+   во всех потоках (миссии, повторение); день — московский, как todayStr. */
+function taskHelpExhaustedToday(taskId) {
+  try {
+    const want = String(taskId == null ? "" : taskId);
+    if (!want || !Store.state) return false;
+    const today = todayStr();
+    const list = safeArray(Store.state.taskAttempts);
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || String(a.taskId) !== want) continue;
+      if (Number(a.hintLevel) < 3) continue;
+      let day = null;
+      try {
+        const d = new Date(new Date(Number(a.ts)).toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
+        day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      } catch (_) { day = null; }
+      if (day === today) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 function todayActivity() {
   const empty = { solved: 0, correct: 0, xp: 0 };
   if (!Store.state || !subjectLearningAvailable()) return empty;

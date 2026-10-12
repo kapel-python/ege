@@ -4503,14 +4503,28 @@ function startMission(missionId) {
   // fresh restart instead of silently handing Session.start nothing to do.
   const rawFrom = (Store.state.missionsDone[missionId] || missionProgress(m) >= allIds.length) ? 0 : missionProgress(m);
   const from = Math.min(Math.max(rawFrom, 0), Math.max(allIds.length - 1, 0));
+  // Свежий старт (впервые или «Пройти ещё раз»): задания, по которым помощь
+  // уже исчерпана сегодня (ответ показывали), в сегодняшнюю сессию не берём —
+  // они отдыхают до завтра. Иначе повтор миссии подаёт то же задание с уже
+  // виденным ответом (живой случай: r22_2/r22_4 дважды за полчаса). Возобновление
+  // с середины не трогаем: там порядок и смещение уже зафиксированы прогрессом.
+  let ids = allIds.slice(from), off = from, tot = allIds.length;
+  if (rawFrom === 0 && typeof taskHelpExhaustedToday === "function") {
+    const rest = allIds.filter((id) => !taskHelpExhaustedToday(id));
+    if (!rest.length) {
+      toast("Задания этой темы сегодня уже с показом ответов — тяжёлое отдыхает до завтра. Загляни в урок темы.", "", "bulb");
+      return;
+    }
+    ids = rest; off = 0; tot = rest.length;
+  }
   Session.start({
     title: missionSessionTitle(m),
-    taskIds: allIds.slice(from),
+    taskIds: ids,
     mode: "mission",
     missionId,
     xpReward: m.xp,
-    offset: from,
-    total: allIds.length,
+    offset: off,
+    total: tot,
   });
 }
 
@@ -7297,6 +7311,19 @@ function sessionCorrectFeedbackHtml(xp) {
     </div>`;
 }
 
+/* Мост «провал → урок»: после показа ответа рядом лежит кнопка разбора
+   темы в уроке (первый урок навыка с шагами). Урок — точнее «задания
+   полегче»: теория и шаги именно того места, где ученик только что
+   застрял. Кнопки нет, только если у навыка нет уроков. */
+function sessionLessonBridgeHtml(t) {
+  try {
+    const lessons = (DataAPI.lessonsBySkill(t && t.skill) || [])
+      .filter((l) => l && DataAPI.lessonStepsCount(l) > 0);
+    if (!lessons.length) return "";
+    return `<div style="margin-top:10px"><button class="btn btn--soft btn--sm" type="button" onclick="go('lesson','${esc(String(lessons[0].id))}')">${icon("bulb")} Разобрать в уроке</button></div>`;
+  } catch (_) { return ""; }
+}
+
 function sessionShownFeedbackHtml(t) {
   return `
     <div class="feedback feedback--bad">
@@ -7305,7 +7332,8 @@ function sessionShownFeedbackHtml(t) {
         <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
       </div>
       <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — вернёшься к нему позже.</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — вернёшься к нему завтра: сегодня ответ уже виден, толку от повтора не будет.</div>
+      ${sessionLessonBridgeHtml(t)}
       ${sessionFinishNavHtml("btn--soft")}
     </div>`;
 }
@@ -7808,6 +7836,7 @@ function sessionFinish(early = false) {
       </div>` : ""}
       ${S.mode === "errors" ? `<div style="color:var(--text-2);margin-bottom:18px">Закрыто пунктов: <b>${errorsClosed}</b></div>` : ""}
       ${guestSaveCtaHTML()}
+      ${victoryLapHtml(S, solved, correct, essayOnly)}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         ${essayReportHref ? `<button class="btn btn--primary btn--lg" onclick="location.href='${esc(essayReportHref)}'">Разбор сочинения →</button>` : ""}
         <button class="btn ${essayReportHref ? "btn--ghost" : "btn--primary"} btn--lg" onclick="go('dashboard')">На главную</button>
@@ -7815,6 +7844,55 @@ function sessionFinish(early = false) {
       </div>
     </div>`;
   restoreChromeAfterResult(resultRoute);
+}
+
+/* «Закончить победой»: сессия из одних провалов (≥2 заданий, ни одного
+   верного) предлагает одно задание из сильной темы ученика — уйти с победой,
+   а не с третьим провалом подряд. Кнопка видна только когда её есть чем
+   построить: сильная тема (≥3 решённых, лучшая точность), несделанное и
+   не уставшее сегодня задание. Иначе — тихо ничего. */
+function victoryLapHtml(S, solved, correct, essayOnly) {
+  try {
+    if (essayOnly || correct > 0 || solved < 2) return "";
+    const stats = (Store.state && Store.state.skillStats) || {};
+    let best = null, bestAcc = -1;
+    for (const id of Object.keys(stats)) {
+      if (!id) continue;
+      try { if (typeof skillIsAccessible === "function" && !skillIsAccessible(id)) continue; } catch (_) { continue; }
+      const st = stats[id] || {};
+      const s = Number(st.solved) || 0, c = Number(st.correct) || 0;
+      if (s < 3) continue;
+      const acc = c / s;
+      if (acc > bestAcc) { bestAcc = acc; best = id; }
+    }
+    if (!best) return "";
+    const ids = orderedTasks(DataAPI.practiceTasksBySkill(best)).map((t) => t && t.id).filter(Boolean);
+    if (!ids.length) return "";
+    const doneIds = {};
+    for (const a of (Store.state.taskAttempts || [])) {
+      if (a && a.correct) doneIds[String(a.taskId)] = true;
+    }
+    const fresh = (id) => {
+      try { if (typeof taskHelpExhaustedToday === "function" && taskHelpExhaustedToday(id)) return false; }
+      catch (_) { return false; }
+      return true;
+    };
+    const pick = ids.find((id) => !doneIds[String(id)] && fresh(id)) || ids.find(fresh);
+    if (!pick) return "";
+    const sk = DataAPI.skill(best);
+    return `<div class="card" style="margin-bottom:18px;text-align:center">
+      <div style="font-size:14px;margin-bottom:10px">Тяжёлая сессия. Закончи победой: одно задание из сильной темы «${esc(sk && sk.name ? sk.name : best)}».</div>
+      <button class="btn btn--primary" type="button" onclick="startVictoryLap('${esc(String(pick))}')">Закончить победой</button>
+    </div>`;
+  } catch (_) { return ""; }
+}
+
+function startVictoryLap(taskId) {
+  try {
+    const t = DataAPI.task(taskId);
+    if (!t) return;
+    Session.start({ title: "Разминка на победу", taskIds: [taskId], mode: "quick" });
+  } catch (_) {}
 }
 
 function orderedTasks(arr) {
@@ -8581,9 +8659,20 @@ function reviewQueueForErrors(errors) {
     const key = (e.sub || "") + "‖" + ((e.skill || ""));
     ((groups[key] = groups[key] || []).push(e));
   });
+  // Уставшие сегодня ошибки (ответ уже показывали) — отдыхают до завтра:
+  // повторная подача задания с виденным ответом — долбёжка стены, а не
+  // повторение (живой случай: те же r22 дважды за полчаса после показа).
+  let deferredToday = 0;
+  const exhaustedToday = (id) => {
+    try { return typeof taskHelpExhaustedToday === "function" && taskHelpExhaustedToday(id); }
+    catch (_) { return false; }
+  };
 
   for (const group of Object.values(groups)) {
-    const head = group[0] || {};
+    const fresh = group.filter((e) => !exhaustedToday(e && e.taskId));
+    deferredToday += group.length - fresh.length;
+    if (!fresh.length) continue;
+    const head = fresh[0] || {};
     // Подтема могла быть переименована после записи ошибки: пул по старому
     // названию пуст, а навык жив. Тогда повторяем по навыку, а не бросаем
     // группу: иначе ошибка вечно висит открытой без способа её закрыть.
@@ -8599,11 +8688,15 @@ function reviewQueueForErrors(errors) {
     // review session for every other subtopic — skip only this group's errors
     // when there is truly nothing left to present for it.
     if (!pool.length) continue;
+    // Сегодня уже с показом ответов — не подаём и похожие: уставшее задание
+    // отдыхает целиком, а не заменяется соседом с тем же виденным ответом.
+    pool = pool.filter((t) => t && !exhaustedToday(t.id));
+    if (!pool.length) { deferredToday += fresh.length; continue; }
     const assigned = [];
     const used = new Set();
     const assign = (index) => {
-      if (index === group.length) return true;
-      const error = group[index];
+      if (index === fresh.length) return true;
+      const error = fresh[index];
       const candidates = pool.filter((t) => !used.has(t.id))
         .sort((a, b) => Number(a.id === error.taskId) - Number(b.id === error.taskId));
       for (const task of candidates) {
@@ -8615,7 +8708,7 @@ function reviewQueueForErrors(errors) {
       return false;
     };
     if (assign(0)) {
-      group.forEach((error, i) => {
+      fresh.forEach((error, i) => {
         const task = assigned[i];
         taskIds.push(task.id);
         if (task.id !== error.taskId) errorMap[task.id] = error.taskId;
@@ -8623,14 +8716,14 @@ function reviewQueueForErrors(errors) {
     } else {
       // Fewer distinct tasks than errors for this subtopic: reuse pool tasks
       // (a repeat of the same problem) rather than dropping the group.
-      group.forEach((error, i) => {
+      fresh.forEach((error, i) => {
         const task = pool[i % pool.length];
         taskIds.push(task.id);
         if (task.id !== error.taskId) errorMap[task.id] = error.taskId;
       });
     }
   }
-  return { taskIds, errorMap };
+  return { taskIds, errorMap, deferredToday };
 }
 
 function buildErrorsReviewSession() {
@@ -8661,9 +8754,22 @@ function startErrorsReview() {
   const open = asSafeArray(Store.state.errors).filter((e) => e && !e.resolved);
   if (!open.length) return toast("Открытых ошибок нет", "", "check");
   const q = buildErrorsReviewSession();
-  if (!q) return toast("Не удалось подобрать задания. Попробуй ещё раз.", "", "x");
+  if (!q) {
+    if (countDeferredErrors() > 0) return toast("Тяжёлые задания отдыхают до завтра — повторение вернётся завтра. Сегодня разбери теорию в уроке.", "", "bulb");
+    return toast("Не удалось подобрать задания. Попробуй ещё раз.", "", "x");
+  }
 
   Session.start(q);
+}
+
+/* Сколько открытых ошибок отложено кулдауном «ответ показывали сегодня».
+   Нужно, чтобы пустое повторение честно называло причину, а не роняло
+   заглушку «не удалось подобрать». */
+function countDeferredErrors() {
+  try {
+    if (typeof taskHelpExhaustedToday !== "function") return 0;
+    return asSafeArray(Store.state.errors).filter((e) => e && !e.resolved && taskHelpExhaustedToday(e.taskId)).length;
+  } catch (_) { return 0; }
 }
 
 /* Разбор одной ошибки из списка: сначала .dlg-подтверждение (openConfirmDialog
