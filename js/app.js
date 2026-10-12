@@ -4536,6 +4536,7 @@ const Session = {
       answered: false,
       hintLevel: 0,
       attempts: 0,
+      wrongs: 0,
       gainedXp: 0,
     };
     // Глубокий маршрут сессии: перезагрузка возвращает в ту же практику/босса.
@@ -4649,6 +4650,7 @@ function sessionCaptureTaskUi() {
     const st = S.taskUi[t.id] || (S.taskUi[t.id] = {});
     st.hintLevel = S.hintLevel || 0;
     st.attempts = S.attempts || 0;
+    st.wrongs = S.wrongs || 0;
     st.selfHintLevel = S.selfHintLevel || 0;
     st.answered = !!S.answered;
     // Время задания: снимок закрывает живой отрезок и переносит его в
@@ -4797,7 +4799,7 @@ function restoreSessionFromStorage(route, param) {
     errorResolvedSum: Number(d.errorResolvedSum) || 0,
     startTs: Number(d.startTs) || Date.now(),
     taskStartTs: Date.now(),
-    answered: false, hintLevel: 0, attempts: 0,
+    answered: false, hintLevel: 0, attempts: 0, wrongs: 0,
     lastTs: Number(d.lastTs) || Number(d.startTs) || Date.now(),
     essayDraftByTask: d.essayDraftByTask || {},
     essayWrittenByTask: d.essayWrittenByTask || {},
@@ -4821,7 +4823,7 @@ function freshSessionForRoute(route, param) {
       title: missionSessionTitle(m), taskIds: allIds.slice(from), mode: "mission",
       missionId: param, bossId: null, xpReward: m.xp, offset: from, total: allIds.length,
       hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
-      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, wrongs: 0, gainedXp: 0,
     };
   } else if (route === "boss") {
     const boss = DataAPI.bosses().find((b) => b.id === param);
@@ -4835,14 +4837,14 @@ function freshSessionForRoute(route, param) {
       // Освоение ветки на старте: экран результата показывает честный рост
       // за решённые в испытании задания, а не придуманный «+6%».
       branchProgressStart: catProgress(boss.cat),
-      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, wrongs: 0, gainedXp: 0,
     };
   } else if (route === "daily") {
     Session.cur = {
       title: "Ежедневная задача", taskIds: dailyTaskIds(), mode: "daily",
       missionId: null, bossId: null, xpReward: 0, offset: 0, total: null,
       hideTopic: false, errorMap: null, idx: 0, results: [], hintsUsed: 0,
-      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, wrongs: 0, gainedXp: 0,
     };
     Session.cur.total = Session.cur.taskIds.length;
     if (!Session.cur.taskIds.length) { Session.cur = null; return false; }
@@ -4853,7 +4855,7 @@ function freshSessionForRoute(route, param) {
       title: q.title, taskIds: q.taskIds, mode: "errors",
       missionId: null, bossId: null, xpReward: 0, offset: 0, total: q.taskIds.length,
       hideTopic: false, errorMap: q.errorMap, idx: 0, results: [], hintsUsed: 0,
-      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, gainedXp: 0,
+      startTs: Date.now(), taskStartTs: Date.now(), answered: false, hintLevel: 0, attempts: 0, wrongs: 0, gainedXp: 0,
     };
   } else {
     return false;
@@ -7357,11 +7359,12 @@ function sessionRestoreTaskUi(t) {
   if (isLongTextTask(t)) {
     // Сочинения: черновик и отметки живут в essayDraftByTask/essayWrittenByTask
     // и восстанавливаются своим путём (sessionEssayWire).
-    S.hintLevel = 0; S.attempts = 0; S.selfHintLevel = 0; S.answered = false;
+    S.hintLevel = 0; S.attempts = 0; S.wrongs = 0; S.selfHintLevel = 0; S.answered = false;
     return;
   }
   S.hintLevel = (st && Number(st.hintLevel)) || 0;
   S.attempts = (st && Number(st.attempts)) || 0;
+  S.wrongs = (st && Number(st.wrongs)) || 0;
   S.selfHintLevel = (st && Number(st.selfHintLevel)) || 0;
   // Пропущенное задание оживает: пропуск — не ответ, а пауза. Маркер —
   // st.kind === "skipped": capture сбрасывает st.answered в false при
@@ -7562,6 +7565,10 @@ function sessionSubmit() {
   const correct = checkAnswer(t, val);
   if (!correct) {
     S.attempts = (S.attempts || 0) + 1;
+    // Только настоящий неверный ввод — счётчик брошенных провалов.
+    // Ошибка формата записи сюда не входит: она честно говорит «ошибка не
+    // влияет на прогресс», и уход после неё остаётся чистым пропуском.
+    S.wrongs = (S.wrongs || 0) + 1;
     // Ошибка только открывает следующий уровень помощи. Саму подсказку
     // ученик запрашивает кнопкой; после нажатия она исчезает до новой ошибки.
     renderSessionHintControl();
@@ -7601,6 +7608,12 @@ function sessionSubmit() {
 function sessionSkip() {
   const S = Session.cur;
   if (S.answered) return;
+  // Недобитое задание с неверными ответами — уже не «отложил», а «не смог»:
+  // провал фиксируем попыткой и ошибкой на разбор, но без XP (иначе связка
+  // «ткнул мимо и вышел» фармила бы минимум за попытку). Карточка при этом
+  // остаётся живой (kind "skipped"): вернувшись, задание можно дорешать, а
+  // верный ответ сразу закроет созданную ошибку.
+  if (sessionRecordAbandonedFailure()) return sessionNext();
   const t = Session.task();
   const seconds = sessionTaskTotalMs() / 1000;
   // Пропуск — не попытка решения: XP за него не начисляется вовсе.
@@ -7618,6 +7631,27 @@ function sessionSkip() {
   S.answered = true;
   sessionMarkTaskFinished("skipped", xpSkip);
   sessionNext();
+}
+
+/* Брошенное после неверных ответов задание: провал фиксируется неверной
+   попыткой и major-ошибкой (upsert по заданию — как обычный неверный ответ),
+   но XP за него нет. Без этого «ответил неверно и вышел» исчезал бесследно:
+   ни попытки, ни ошибки — тема молчала, хотя ученик реально ошибся.
+   Чистый уход без попыток (S.wrongs == 0) — по-прежнему пропуск, не провал. */
+function sessionRecordAbandonedFailure() {
+  const S = Session.cur;
+  const t = S && !S.answered ? Session.task() : null;
+  if (!S || !t || (S.wrongs || 0) <= 0) return false;
+  const seconds = sessionTaskTotalMs() / 1000;
+  const hint = S.hintLevel || 0;
+  const xpFail = recordAnswer(t, false, hint, seconds, undefined, 0, undefined, false, true);
+  S.gainedXp += xpFail;
+  S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
+  sessionRecordResult({ taskId: t.id, correct: false, skipped: false, seconds, hint });
+  S.answered = true;
+  Session.stopTimer();
+  sessionMarkTaskFinished("skipped", xpFail);
+  return true;
 }
 
 function sessionNext() {
@@ -7642,6 +7676,9 @@ function sessionNext() {
 
 function sessionQuit() {
   Session.stopTimer();
+  // Уход с недобитого задания после неверных ответов — тоже провал, а не
+  // тишина: иначе «ответил неверно и сразу вышел» не оставлял бы следа.
+  sessionRecordAbandonedFailure();
   if (Session.cur && Session.cur.results.length > 0) return sessionFinish(true);
   Session.cur = null;
   persistSession();

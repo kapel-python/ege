@@ -444,6 +444,15 @@ const Store = {
       this.state.xpAdjustments = preserveLearningState ? safeArray(parsed.xpAdjustments) : [];
 
       this.lastSyncedState = JSON.parse(JSON.stringify(this.state));
+      // Старые диагностические провалы раньше не создавали ошибок — добираем
+      // их сейчас (идемпотентно: где разбор уже есть или задание с тех пор
+      // верно решили — пропускаем). Строго после снимка baseline, иначе save
+      // посчитает досозданные ошибки уже синхронизированными и не отправит.
+      try {
+        if (learningAvailable && seedMissingDiagnosticErrors() > 0) {
+          try { const p = this.save(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+        }
+      } catch (_) {}
       this.ready = true;
       this.lastSyncTs = Date.now();
       this.pendingExternalUpdate = false;
@@ -3057,7 +3066,7 @@ function dailyTaskIds() {
    закрывается любым верным ответом, как раньше.
    ============================================================ */
 
-function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts, essayScore, skipped) {
+function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAttempts, essayScore, skipped, noXp) {
   const s = Store.state;
   const taskRef = task && typeof task === "object" ? task.id : task;
   const canonical = task && DataAPI.taskForAccess ? DataAPI.taskForAccess(taskRef) : null;
@@ -3069,6 +3078,7 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
   wrongAttempts = Math.max(0, Number(wrongAttempts) || 0);
   seconds = Math.max(0, Number(seconds) || 0);
   skipped = !!skipped;
+  noXp = !!noXp;
   if (hintLevel >= 3) correct = false; // посмотрел ответ = не решил сам
   s.taskAttempts = safeArray(s.taskAttempts);
   s.errors = safeArray(s.errors);
@@ -3170,10 +3180,12 @@ function recordAnswer(task, correct, hintLevel, seconds, closesTaskId, wrongAtte
     }
   } else {
     s.correctSeries = 0;
-    if (skipped) {
+    if (skipped || noXp) {
       // Пропуск не платит вовсе: «пропустить всё» не должен превращаться в
       // способ фармить минимум XP за каждую тему. Попытка фиксируется
       // (задание уйдёт в повторение), но денег за неё нет.
+      // Брошенный после неверных ответов провал (noXp) — тоже без выплаты:
+      // иначе связка «ткнул мимо и вышел» фармила бы минимум за попытку.
       xp = 0;
       xpBreakdown = { attempt: 0, correctBonus: 0, errorResolved: 0 };
     } else {
@@ -4008,6 +4020,37 @@ function guardOnboardingSubject(state, subject) {
   return true;
 }
 
+/* Диагностический провал — тоже ошибка на разбор. Короткий тест при входе
+   в предмет раньше создавал попытку и статистику, но не пункт в ошибках:
+   тема молчала, хотя ученик реально ошибся. Досоздаём открытые major
+   везде, где провал есть, а разбора нет. Идемпотентно: открытая ошибка —
+   пропускаем (upsert, как в recordAnswer); задание, которое с тех пор верно
+   решили, — тоже пропускаем (доказанный навык заново разбирать не надо).
+   Поэтому же безопасен повторный прогон после каждой загрузки. */
+function seedMissingDiagnosticError(taskId, ts) {
+  const s = Store.state;
+  const task = taskId && DataAPI.taskForAccess ? DataAPI.taskForAccess(taskId) : null;
+  if (!s || !task || !subjectLearningAvailable()) return false;
+  const skillId = String(task.skill || task.skillId || "");
+  if (!skillId || !skillIsAccessible(skillId)) return false;
+  s.errors = safeArray(s.errors);
+  if (s.errors.some((e) => e && !e.resolved && String(e.taskId) === String(task.id))) return false;
+  if (safeArray(s.taskAttempts).some((a) => a && String(a.taskId) === String(task.id) && a.correct && !a.skipped)) return false;
+  s.errors.unshift({ clientId: newEntityId(), taskId: task.id, skill: skillId, sub: task.sub, ts: Number(ts) || Date.now(), resolved: false, kind: "major" });
+  return true;
+}
+
+function seedMissingDiagnosticErrors() {
+  const s = Store.state;
+  if (!s || !subjectLearningAvailable()) return 0;
+  let n = 0;
+  for (const d of safeArray(s.diagnostics)) {
+    if (!d || d.correct) continue;
+    try { if (seedMissingDiagnosticError(d.taskId, d.ts)) n++; } catch (_) {}
+  }
+  return n;
+}
+
 function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
   const s = Store.state;
   if (!s) return;
@@ -4056,6 +4099,8 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
     if (r.correct) s.totalCorrect = (Number(s.totalCorrect) || 0) + 1;
     s.taskAttempts.unshift({ id: newEntityId(), taskId: task.id, skill: skillId, correct: !!r.correct, hintLevel: 0, seconds: 0, closesTaskId: null, ts: diagnosticTs });
     s.diagnostics.unshift({ id: newEntityId(), taskId: task.id, correct: !!r.correct, ts: diagnosticTs });
+    // Промах в диагностике — сразу пункт на разбор, а не молчание темы.
+    if (!r.correct) { try { seedMissingDiagnosticError(task.id, diagnosticTs); } catch (_) {} }
     const activity = todayActivity();
     activity.solved++;
     if (r.correct) activity.correct++;

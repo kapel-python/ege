@@ -354,8 +354,109 @@ function scenario(tasks, label, cat, subject) {
     && answerVal() === (wrong.slice(0, 3) || "12"));
 }
 
-/* Секция таймера (отдельно от основного сценария): время живёт на задании,
-   мусор старых форматов не хранится и не растёт, пауза — не решение. */
+/* Брошенный провал: неверный ответ + уход (пропуск/выход) фиксирует неверную
+   попытку и major-ошибку без XP. Чистый уход без попыток — по-прежнему пропуск
+   без ошибки. Диагностические провалы сеют ошибки сразу и добираются задним
+   числом (seedMissingDiagnosticErrors идемпотентен). */
+function abandonScenario(tasks, label, cat, subject) {
+  const tag = `${label}/бросок`;
+  const wrongOf = (t) => String(t.answer ?? "").split("").map((d) => (d === "1" ? "0" : "1")).join("") || "9";
+  const setValue = (sandbox, v) => run(sandbox, `(() => {
+    const cells = document.querySelectorAll("[data-match-cell]");
+    if (cells.length) { cells.forEach((c, i) => { c.value = String(${JSON.stringify(v)}[i] || ""); }); return; }
+    const input = document.getElementById("answerInput");
+    if (input) input.value = ${JSON.stringify(v)};
+  })()`);
+
+  // 1. неверный ответ + пропуск: провал записан, XP нет, сессия идёт дальше
+  {
+    const { sandbox } = buildSandbox(cat, subject);
+    run(sandbox, `DataAPI.load(__catalog)`);
+    run(sandbox, `Session.start({ title: "Бросок", taskIds: ${JSON.stringify(tasks.map((t) => t.id))}, mode: "practice" })`);
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    const xpBefore = run(sandbox, `Store.state.xp`);
+    setValue(sandbox, wrongOf(tasks[0]));
+    run(sandbox, `sessionSubmit()`);
+    check(`${tag}: неверный ввод сам по себе ошибку не пишет`,
+      run(sandbox, `Store.state.errors.length`) === 0);
+    run(sandbox, `sessionSkip()`);
+    check(`${tag}: бросок после неверного не начисляет XP`,
+      run(sandbox, `Store.state.xp`) === xpBefore,
+      `${xpBefore} -> ${run(sandbox, `Store.state.xp`)}`);
+    check(`${tag}: бросок записан неверной попыткой, а не пропуском`,
+      run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return !!a && a.correct === false && !a.skipped; })()`),
+      JSON.stringify(run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return a && { skipped: !!a.skipped, correct: a.correct }; })()`)));
+    check(`${tag}: бросок создаёт открытую major-ошибку задания`,
+      run(sandbox, `(() => { const e = Store.state.errors.find((x) => x && !x.resolved && x.taskId === ${JSON.stringify(tasks[0].id)}); return !!e && e.kind === "major"; })()`),
+      JSON.stringify(run(sandbox, `Store.state.errors`)));
+    check(`${tag}: после броска сессия на втором задании`, run(sandbox, `Session.cur.idx`) === 1);
+    // Возврат: карточка живая, поздний верный ответ закрывает ошибку
+    run(sandbox, `sessionPrev()`);
+    check(`${tag}: возврат после броска — карточка живая`,
+      run(sandbox, `Session.cur.answered`) === false);
+    setValue(sandbox, String(tasks[0].answer ?? ""));
+    run(sandbox, `sessionSubmit()`);
+    check(`${tag}: поздний верный ответ закрыл ошибку броска`,
+      run(sandbox, `!Store.state.errors.some((x) => x && !x.resolved && x.taskId === ${JSON.stringify(tasks[0].id)} && x.kind === "major")`),
+      JSON.stringify(run(sandbox, `Store.state.errors`)));
+  }
+
+  // 2. неверный ответ + выход из сессии: провал тоже фиксируется
+  {
+    const { sandbox } = buildSandbox(cat, subject);
+    run(sandbox, `DataAPI.load(__catalog)`);
+    run(sandbox, `Session.start({ title: "Выход", taskIds: ${JSON.stringify(tasks.map((t) => t.id))}, mode: "practice" })`);
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    setValue(sandbox, wrongOf(tasks[0]));
+    run(sandbox, `sessionSubmit()`);
+    run(sandbox, `sessionQuit()`);
+    check(`${tag}: выход после неверного пишет неверную попытку`,
+      run(sandbox, `(() => { const a = Store.state.taskAttempts[0]; return !!a && a.correct === false && !a.skipped; })()`));
+    check(`${tag}: выход после неверного создаёт ошибку`,
+      run(sandbox, `Store.state.errors.some((x) => x && !x.resolved && x.taskId === ${JSON.stringify(tasks[0].id)} && x.kind === "major")`));
+  }
+
+  // 3. чистый выход без попыток: ничего не пишется, уход в тренировку
+  {
+    const { sandbox } = buildSandbox(cat, subject);
+    run(sandbox, `DataAPI.load(__catalog)`);
+    run(sandbox, `Session.start({ title: "Чистый выход", taskIds: ${JSON.stringify(tasks.map((t) => t.id))}, mode: "practice" })`);
+    run(sandbox, `renderTask(document.getElementById("screen"))`);
+    run(sandbox, `sessionQuit()`);
+    check(`${tag}: чистый выход не пишет попыток и ошибок`,
+      run(sandbox, `Store.state.taskAttempts.length`) === 0 && run(sandbox, `Store.state.errors.length`) === 0,
+      `attempts=${run(sandbox, `Store.state.taskAttempts.length`)}, errors=${run(sandbox, `Store.state.errors.length`)}`);
+    check(`${tag}: чистый выход ведёт в тренировку`,
+      JSON.stringify(run(sandbox, `globalThis.__goCalls`).slice(-1)) === JSON.stringify([["training", null]]),
+      JSON.stringify(run(sandbox, `globalThis.__goCalls`).slice(-1)));
+  }
+
+  // 4. диагностика сеет ошибки за провалы — сразу и добором
+  {
+    const { sandbox } = buildSandbox(cat, subject);
+    run(sandbox, `DataAPI.load(__catalog)`);
+    run(sandbox, `applyOnboarding(${JSON.stringify(subject)}, "base", null, [{ taskId: ${JSON.stringify(tasks[0].id)}, correct: false }, { taskId: ${JSON.stringify(tasks[1].id)}, correct: true }], "Тест")`);
+    check(`${tag}: диагностический провал — открытая major-ошибка`,
+      run(sandbox, `Store.state.errors.some((x) => x && !x.resolved && x.taskId === ${JSON.stringify(tasks[0].id)} && x.kind === "major")`),
+      JSON.stringify(run(sandbox, `Store.state.errors`)));
+    check(`${tag}: диагностический успех — без ошибки`,
+      !run(sandbox, `Store.state.errors.some((x) => x && x.taskId === ${JSON.stringify(tasks[1].id)})`));
+    // Добор: старый провал без разбора и без позднего верного — сеется
+    run(sandbox, `Store.state.errors = []; Store.state.taskAttempts = []; Store.state.diagnostics = [{ taskId: ${JSON.stringify(tasks[0].id)}, correct: false, ts: 1 }]`);
+    check(`${tag}: добор сеет старый провал без разбора`,
+      run(sandbox, `seedMissingDiagnosticErrors()`) === 1
+      && run(sandbox, `Store.state.errors.some((x) => x && !x.resolved && x.taskId === ${JSON.stringify(tasks[0].id)} && x.kind === "major")`));
+    check(`${tag}: повторный добор идемпотентен`,
+      run(sandbox, `seedMissingDiagnosticErrors()`) === 0
+      && run(sandbox, `Store.state.errors.length`) === 1);
+    // Поздний верный ответ отменяет нужду в разборе
+    run(sandbox, `Store.state.errors = []; Store.state.taskAttempts = [{ taskId: ${JSON.stringify(tasks[0].id)}, skill: ${JSON.stringify(String(tasks[0].skill || tasks[0].skillId || ""))}, correct: true }]`);
+    check(`${tag}: добор не сеет задание, которое с тех пор верно решили`,
+      run(sandbox, `seedMissingDiagnosticErrors()`) === 0
+      && run(sandbox, `Store.state.errors.length`) === 0,
+      JSON.stringify(run(sandbox, `Store.state.errors`)));
+  }
+}
 function timerScenario(tasks, label, cat, subject) {
   const tag = `${label}/таймер`;
   const { sandbox } = buildSandbox(cat, subject);
@@ -434,6 +535,9 @@ if (matches.length === 3) scenario(matches, "таблица", ruCat, "russian");
 else console.log(`     · таблица: заданий-соответствий для потока ${matches.length} — сценарий пропущен`);
 
 if (normals.length === 3) timerScenario(normals, "поле", mathCat, "profile_math");
+
+if (normals.length === 3) abandonScenario(normals.slice(0, 2), "поле", mathCat, "profile_math");
+else check("поле: два авто-проверяемых задания для броска", false, `найдено ${normals.length}`);
 
 console.log(failures ? `\n${failures} FAILURES` : "\nALL OK");
 process.exitCode = failures ? 1 : 0;
