@@ -2532,33 +2532,43 @@ const EMPTY_SUBJECT_ROUTES = new Set([
 ]);
 
 function subjectSwitcherHTML() {
-  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
-  if (subjects.length < 2) return "";
+  const groups = subjectsByExam();
+  const total = groups.reduce((n, g) => n + g.subjects.length, 0);
+  if (total < 2) return "";
   const cur = typeof DataAPI !== "undefined" && DataAPI.currentSubject ? DataAPI.currentSubject() : "";
+  const opt = (s) => {
+    const status = subjectAvailabilityLabel(s);
+    return `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(subjectDisplayName(s))}${status ? ` · ${esc(status)}` : ""}</option>`;
+  };
+  const inner = groups.length > 1
+    ? groups.map((g) => `<optgroup label="${esc(examGroupLabel(g.exam))}">${g.subjects.map(opt).join("")}</optgroup>`).join("")
+    : groups.map((g) => g.subjects.map(opt).join("")).join("");
   return `<select class="subject-select" onchange="switchSubjectFromUI(this)" aria-label="Выбрать предмет" title="Переключить предмет">
-    ${subjects.map((s) => {
-      const status = subjectAvailabilityLabel(s);
-      return `<option value="${esc(s.id)}" ${s.id === cur ? "selected" : ""}>${esc(subjectDisplayName(s))}${status ? ` · ${esc(status)}` : ""}</option>`;
-    }).join("")}
+    ${inner}
   </select>`;
 }
 
 /* Пилюли предметов для профиля вместо нативного селекта: оба предмета
    видны сразу, у недоступного — бейдж «скоро». */
 function subjectPickerHTML() {
-  const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
-  if (subjects.length < 2) return "";
+  const groups = subjectsByExam();
+  const total = groups.reduce((n, g) => n + g.subjects.length, 0);
+  if (total < 2) return "";
   const cur = DataAPI.currentSubject();
+  const pill = (s) => {
+    const active = s.id === cur;
+    const status = subjectAvailabilityLabel(s);
+    return `<button type="button" class="subject-pill${active ? " subject-pill--active" : ""}${status ? " subject-pill--soon" : ""}"
+      onclick="switchSubjectFromUI('${esc(s.id)}')" aria-pressed="${active}" aria-label="Открыть предмет ${esc(subjectDisplayName(s))}">
+      <span class="subject-pill__name">${esc(subjectDisplayName(s))}</span>
+      ${status ? `<span class="subject-pill__badge">${esc(status)}</span>` : ""}
+    </button>`;
+  };
   return `<div class="subject-picker" role="group" aria-label="Выбрать предмет">`
-    + subjects.map((s) => {
-        const active = s.id === cur;
-        const status = subjectAvailabilityLabel(s);
-        return `<button type="button" class="subject-pill${active ? " subject-pill--active" : ""}${status ? " subject-pill--soon" : ""}"
-          onclick="switchSubjectFromUI('${esc(s.id)}')" aria-pressed="${active}" aria-label="Открыть предмет ${esc(subjectDisplayName(s))}">
-          <span class="subject-pill__name">${esc(subjectDisplayName(s))}</span>
-          ${status ? `<span class="subject-pill__badge">${esc(status)}</span>` : ""}
-        </button>`;
-      }).join("")
+    + groups.map((g) =>
+      (groups.length > 1 ? `<span class="subject-group-label">${esc(examGroupLabel(g.exam))}</span>` : "")
+      + g.subjects.map(pill).join("")
+    ).join("")
     + `</div>`;
 }
 
@@ -2571,11 +2581,17 @@ function subjectCurrentButtonHTML() {
   const title = subjectDisplayName(info);
   if (subjects.length < 2) return `<b>${esc(title)}</b>`;
   const sub = subjectCourseLabel(info);
+  // Направление (ЕГЭ/ОГЭ) видно не открывая диалог: выбирается один раз,
+  // но найти его потом можно только здесь. Показываем только когда осей
+  // больше одной — иначе бейдж шум.
+  let examBadge = "";
+  try { if (hasMultipleExams()) examBadge = examGroupLabel(currentExam()); } catch (_) {}
   return `<button type="button" class="subject-current" onclick="askSubjectDialog()" aria-haspopup="dialog" aria-label="Сменить предмет">
     <span class="subject-current__icon" aria-hidden="true">${icon("layers")}</span>
     <span class="subject-current__body">
       <span class="subject-current__name">${esc(title)}</span>
       ${sub ? `<span class="subject-current__sub">${esc(sub)}</span>` : ""}
+      ${examBadge ? `<span class="subject-current__exam">${esc(examBadge)}</span>` : ""}
     </span>
     <span class="subject-current__chev" aria-hidden="true">›</span>
   </button>`;
@@ -2593,7 +2609,8 @@ function askSubjectDialog() {
       deviceModalPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     }
   } catch (_) {}
-  const cards = subjects.map((s) => {
+  const groups = subjectsByExam();
+  const card = (s) => {
     const active = s.id === cur;
     const status = subjectAvailabilityLabel(s);
     return `<button type="button" class="subj-card${active ? " subj-card--active" : ""}"
@@ -2605,7 +2622,11 @@ function askSubjectDialog() {
       </span>
       <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
     </button>`;
-  }).join("");
+  };
+  const cards = groups.map((g) =>
+    (groups.length > 1 ? `<div class="subj-group-label">${esc(examGroupLabel(g.exam))}</div>` : "")
+    + g.subjects.map(card).join("")
+  ).join("");
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Выбор предмета">
@@ -4005,6 +4026,45 @@ function examLabel() {
 function examCountdownHTML() {
   if (currentExam() !== "ege") return "";
   return ` • до ЕГЭ осталось <b>примерно ${egeCountdownLabel()}</b>`;
+}
+
+/* Группировка предметов по оси экзамена для всех списков выбора
+   (переключатель, пилюли, диалог, онбординг, пикер входа): текущая ось
+   первой, внутри — порядок реестра. Направление выбирается один раз,
+   но плоский список из 8 предметов без заголовков нечитаем — группы
+   это чинят без новых экранов и настроек. */
+function subjectsByExam(list) {
+  const all = asSafeArray(list !== undefined ? list
+    : (typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []));
+  const byExam = {};
+  for (const s of all) {
+    if (!s || !s.id) continue;
+    let exam = "ege";
+    try {
+      if (typeof DataAPI !== "undefined" && DataAPI && typeof DataAPI.subjectExam === "function")
+        exam = DataAPI.subjectExam(s.id);
+    } catch (_) {}
+    (byExam[exam] = byExam[exam] || []).push(s);
+  }
+  const order = [currentExam(), "ege", "oge"].filter((e, i, a) => a.indexOf(e) === i);
+  const groups = [];
+  for (const exam of order) {
+    if (byExam[exam] && byExam[exam].length) groups.push({ exam, subjects: byExam[exam] });
+  }
+  return groups;
+}
+function examGroupLabel(exam) {
+  return exam === "oge" ? "ОГЭ · 9 класс" : "ЕГЭ · 11 класс";
+}
+/* Есть ли что переключать: больше одной оси среди известных предметов. */
+function hasMultipleExams() {
+  const seen = {};
+  try {
+    for (const s of asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : [])) {
+      if (s && s.id && typeof DataAPI.subjectExam === "function") seen[DataAPI.subjectExam(s.id)] = true;
+    }
+  } catch (_) {}
+  return Object.keys(seen).length > 1;
 }
 
 /* Число цели для шкалы прогноза в баллах предмета: сначала ищем порог вида
@@ -11755,12 +11815,16 @@ function screenLoginSubject(root) {
     const sub = filtered
       ? "Показаны предметы, где у тебя уже есть прогресс. Остальные — под кнопкой ниже, прогресс никуда не денется."
       : "Один аккаунт может использоваться на разных устройствах — выбери, с каким предметом продолжить. Прогресс каждого предмета хранится отдельно и никуда не денется.";
+    const gs = subjectsByExam(visible);
+    const loginItem = (s) => {
+      const status = subjectAvailabilityLabel(s);
+      return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
+    };
     root.innerHTML = authScreenShell("Какой предмет открываем?", sub,
       `<div class="choice-list">
-        ${visible.map((s) => {
-          const status = subjectAvailabilityLabel(s);
-          return `<button class="choice-item${status ? " choice-item--soon" : ""}" onclick="chooseLoginSubject('${esc(s.id)}')"><b>${esc(subjectDisplayName(s))}${s.id === cur ? " · сейчас открыт" : ""}</b><span>${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}</span></button>`;
-        }).join("")}
+        ${gs.map((g) => `
+          ${gs.length > 1 ? `<div class="subject-group-label">${esc(examGroupLabel(g.exam))}</div>` : ""}
+          ${g.subjects.map(loginItem).join("")}`).join("")}
       </div>${filtered ? `<div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button class="btn btn--ghost" onclick="toggleLoginSubjectShowAll()">Показать все предметы</button></div>` : ""}`);
   };
   // Раскрытый полный список рисуем сразу, без запроса.
@@ -12219,27 +12283,30 @@ const Onboarding = {
   // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
   // предмета и не должен его определять.
   stepSubject(body) {
-    const subjects = asSafeArray(DataAPI.subjects());
     // Открываем предмет — это запрос POST /api/subject плюс пересборка
     // состояния (десятки мс, на мобильном сети — секунды). Раньше экран в это
     // время просто стоял, и выбор предмета выглядел зависшим на палец. Теперь
     // все кнопки погашены (повторные клики всё равно отбивает _picking), а
     // на выбранной — спиннер и «Открываем…».
     const picking = this._picking ? this._pickingSubject : null;
+    const groups = subjectsByExam();
+    const item = (s) => {
+      const status = subjectAvailabilityLabel(s);
+      const loading = !!(picking && s.id === picking);
+      const name = esc(subjectDisplayName(s));
+      const line = loading
+        ? "Открываем…"
+        : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
+      return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
+    };
     body.innerHTML = `
       <div class="onboard-title">Какой предмет готовим?</div>
       <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
-      <div class="choice-list">
-        ${subjects.map((s) => {
-          const status = subjectAvailabilityLabel(s);
-          const loading = !!(picking && s.id === picking);
-          const name = esc(subjectDisplayName(s));
-          const line = loading
-            ? "Открываем…"
-            : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
-          return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
-        }).join("")}
-      </div>`;
+      ${groups.map((g) => `
+        ${groups.length > 1 ? `<div class="subject-group-label">${esc(examGroupLabel(g.exam))}</div>` : ""}
+        <div class="choice-list">
+          ${g.subjects.map(item).join("")}
+        </div>`).join("")}`;
   },
 
   // Детали каталога (тексты заданий) и матвендор (katex/jsxgraph) — большой
