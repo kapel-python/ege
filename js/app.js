@@ -4309,7 +4309,7 @@ function openSkillModal(skillId) {
     ${(majorChips || minorChips) ? `
     <div style="margin-top:20px">
       ${majorChips ? `
-      <div class="stat-label" style="margin-bottom:8px">Типичные ошибки</div>
+      <div class="stat-label" style="margin-bottom:8px">Твои ошибки</div>
       <div class="error-subtopics">${majorChips}</div>` : ""}
       ${minorChips ? `
       <div class="stat-label" style="margin-bottom:8px${majorChips ? ";margin-top:16px" : ""}">Почти получилось — закрепи</div>

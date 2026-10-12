@@ -470,17 +470,17 @@ check(
   !reviewDialogHtml.includes("недоступно"),
   reviewDialogHtml.includes("недоступно") ? "has note" : "no note",
 );
-// То же и в окне темы («Путь» → тема): «Типичные ошибки» — кликабельные
+// То же и в окне темы («Путь» → тема): «Твои ошибки» — кликабельные
 // задания с подтверждением, а не безмолвные подписи.
 sandbox.openSkillModal("n03_stereometry");
 const skillModalHtml = document.getElementById("modal-root").innerHTML;
 check(
   "SKILL modal typical errors are actionable buttons",
-  skillModalHtml.includes("Типичные ошибки")
+  skillModalHtml.includes("Твои ошибки")
   && skillModalHtml.includes("chip--action")
   && skillModalHtml.includes("openErrorReviewDialog(")
   && skillModalHtml.includes("Задание "),
-  skillModalHtml.includes("Типичные ошибки") ? "modal ok" : "no modal",
+  skillModalHtml.includes("Твои ошибки") ? "modal ok" : "no modal",
 );
 /* Разбор освоения («Из чего складывается»): проценты видны, числа —
    жирным, а объём практики назван явно (эталонные 12 качественных
@@ -536,10 +536,10 @@ vm.runInContext(`
 check(
   "SKILL modal separates 'почти получилось' from typical errors and hides empty state",
   sandbox.minorModal.includes("Почти получилось — закрепи")
-  && !sandbox.minorModal.includes("Типичные ошибки")
-  && !sandbox.emptyModal.includes("Типичные ошибки")
+  && !sandbox.minorModal.includes("Твои ошибки")
+  && !sandbox.emptyModal.includes("Твои ошибки")
   && !sandbox.emptyModal.includes("Пока не выявлены"),
-  sandbox.emptyModal.includes("Типичные ошибки") ? "stale block" : "ok",
+  sandbox.emptyModal.includes("Твои ошибки") ? "stale block" : "ok",
 );
 /* Путь: клик по теме обязан открыть окно темы без перерисовки карты —
    иначе render() увозит её наверх и после закрытия окна ученик видит
