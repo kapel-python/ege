@@ -2537,7 +2537,7 @@ def oauth_redirect_uri(handler) -> str:
     cfg = _OAUTH.settings()
     if cfg.get("redirectUri"):
         return cfg["redirectUri"]
-    base = public_base_url(handler)
+    base = site_base_url(handler)
     return f"{base.rstrip('/')}{OAUTH_CALLBACK_PATH}"
 
 
@@ -3709,6 +3709,214 @@ def public_base_url(handler) -> str:
         return f"{proto}://{host}"
     except Exception:
         return "http://localhost:2026"
+
+
+# ---------------------------------------------------------------------------
+# Переезд на новый домен: тихая подготовка + автовключение.
+#
+# Пока EGE_PRIMARY_DOMAIN не задан, всё как раньше: canonical/sitemap/robots
+# строятся от хоста запроса, редиректов между доменами нет.
+# Как только задан (EGE_PRIMARY_DOMAIN=lemmago.ru), включается режим ожидания:
+# старый домен продолжает работать как основной, а первый же HTTPS-хит на
+# новый хост (то есть DNS уже резолвится, а сертификат уже валиден — иначе
+# nginx этот запрос бы не пропустил) сам фиксирует новый домен основным.
+# Флаг site_primary_live пишется в app_config (переживает рестарт), и дальше:
+#   * canonical/sitemap/robots/SEO-страницы — только новый домен;
+#   * GET-не-API со старых хостов — умный 301 на тот же путь+query нового
+#     (меняется только домен, egeeasy.ru/dashboard/profile едет на
+#     lemmago.ru/dashboard/profile);
+#   * /api/* и /.well-known/* — обслуживаются на обоих хостах (вебхуки шлюза
+#     и живые вкладки не рвутся; ACME-challenge certbot не уезжает).
+# EGE_PRIMARY_LIVE=1 форсит «включено», =0 — аварийный откат без правок кода.
+# Куки host-only: после переезда вход/гость заводятся заново — это ожидаемо,
+# а не баг (поделить куку между разными доменами второго уровня нельзя).
+# ---------------------------------------------------------------------------
+SITE_LEGACY_DOMAIN_DEFAULT = "egeeasy.ru"
+SITE_PRIMARY_LIVE_KEY = "site_primary_live"
+_SITE_PRIMARY_LIVE = {"on": False, "loaded_at": 0.0}
+_SITE_LEGACY_URL_PREFIXES = ("https://www.egeeasy.ru", "http://www.egeeasy.ru",
+                             "https://egeeasy.ru", "http://egeeasy.ru")
+
+
+def site_primary_domain() -> str:
+    """Целевой основной домен. Без env — старый дефолт (переезда нет)."""
+    try:
+        value = (os.environ.get("EGE_PRIMARY_DOMAIN") or "").strip().lower().rstrip(".")
+        if value and _is_plain_host(value):
+            return value
+    except Exception:
+        pass
+    return SITE_LEGACY_DOMAIN_DEFAULT
+
+
+def site_migration_armed() -> bool:
+    """Переезд вооружён: задан валидный новый основной домен."""
+    try:
+        return site_primary_domain() != SITE_LEGACY_DOMAIN_DEFAULT
+    except Exception:
+        return False
+
+
+def site_legacy_domains() -> set:
+    """Старые хосты, с которых после включения уводим 301 на новый."""
+    out: set = set()
+    try:
+        raw = (os.environ.get("EGE_LEGACY_DOMAINS") or "").strip().lower()
+        if raw:
+            for part in raw.replace(";", ",").split(","):
+                host = part.strip().rstrip(".")
+                if host and _is_plain_host(host):
+                    out.add(host)
+        else:
+            out = {SITE_LEGACY_DOMAIN_DEFAULT, "www." + SITE_LEGACY_DOMAIN_DEFAULT}
+        out.discard(site_primary_domain())
+    except Exception:
+        pass
+    return out
+
+
+def _site_request_host(handler) -> str:
+    """Голый хост запроса без порта (тот же гейт доверия, что у www-правила)."""
+    try:
+        host = (trusted_forwarded(handler, "X-Forwarded-Host")
+                or handler.headers.get("Host") or "").split(",")[0].strip().lower()
+        bare, _, _port = host.partition(":")
+        return bare
+    except Exception:
+        return ""
+
+
+def _site_request_https(handler) -> bool:
+    """Запрос пришёл по TLS: только такой хит доказывает рабочий сертификат."""
+    try:
+        if trusted_forwarded(handler, "X-Forwarded-Proto").lower() == "https":
+            return True
+        return os.environ.get("EGE_ADMIN_COOKIE_SECURE") == "1"
+    except Exception:
+        return False
+
+
+def site_primary_live() -> bool:
+    """Новый домен уже основной: форс env, иначе защёлка (память + app_config)."""
+    try:
+        force = (os.environ.get("EGE_PRIMARY_LIVE") or "").strip()
+        if force == "1":
+            return True
+        if force == "0":
+            return False
+        if not site_migration_armed():
+            return False
+        if _SITE_PRIMARY_LIVE["on"]:
+            return True
+        now = time.time()
+        if now - _SITE_PRIMARY_LIVE["loaded_at"] < 60:
+            return False
+        _SITE_PRIMARY_LIVE["loaded_at"] = now
+        conn = connect()
+        try:
+            row = conn.execute("SELECT value_json FROM app_config WHERE key=?",
+                               (SITE_PRIMARY_LIVE_KEY,)).fetchone()
+            if row and json.loads(row["value_json"]) is True:
+                _SITE_PRIMARY_LIVE["on"] = True
+                return True
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return False
+
+
+def site_note_primary_seen(handler) -> None:
+    """Первый HTTPS-хит на новый хост фиксирует его основным. Не бросает."""
+    try:
+        if not site_migration_armed() or _SITE_PRIMARY_LIVE["on"]:
+            return
+        if _site_request_host(handler) != site_primary_domain():
+            return
+        if not _site_request_https(handler):
+            # Голый HTTP-хит защёлку не ставит: сертификат им не доказать,
+            # а Host при прямом заходе на IP подставляет кто угодно.
+            return
+        _SITE_PRIMARY_LIVE["on"] = True
+        conn = connect()
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+            conn.execute("INSERT OR REPLACE INTO app_config(key, value_json) VALUES (?, ?)",
+                         (SITE_PRIMARY_LIVE_KEY, "true"))
+            conn.commit()
+        except sqlite3.Error:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def site_base_url(handler) -> str:
+    """База для canonical/sitemap/robots/SEO: явный env > новый (если включён)
+    > хост запроса (как раньше). Никогда не бросает."""
+    try:
+        env = (os.environ.get("EGE_PUBLIC_URL") or "").strip().rstrip("/")
+        if env:
+            return env
+        if site_primary_live():
+            return "https://" + site_primary_domain()
+    except Exception:
+        pass
+    return public_base_url(handler)
+
+
+def site_domain_redirect(handler, raw_path: str) -> str | None:
+    """Умный 301 со старого домена на новый (тот же путь+query) или None.
+
+    Только страницы (GET), только старые хосты, только после автовключения.
+    /api/* обслуживаются на обоих — иначе рвались бы вебхуки и живые вкладки;
+    /.well-known/* не трогаем ради ACME-challenge certbot."""
+    try:
+        if not site_migration_armed() or not site_primary_live():
+            return None
+        path = raw_path or "/"
+        if path.startswith("/api/") or path.startswith("/.well-known/"):
+            return None
+        host = _site_request_host(handler)
+        if not host or host == site_primary_domain():
+            return None
+        if host not in site_legacy_domains():
+            return None
+        if "\r" in path or "\n" in path or len(path) > 4096:
+            return None
+        return "https://" + site_primary_domain() + path
+    except Exception:
+        return None
+
+
+def site_rewrite_legacy_urls(data: bytes) -> bytes:
+    """Подмена абсолютных URL старого домена новым в отдаваемой статике
+    (.html canonical/og/JSON-LD, robots.txt Sitemap, llms.txt). До включения —
+    байты как есть. Не бросает."""
+    try:
+        if not data or not site_migration_armed() or not site_primary_live():
+            return data
+        primary = site_primary_domain()
+        if primary == SITE_LEGACY_DOMAIN_DEFAULT:
+            return data
+        replacement = ("https://" + primary).encode("ascii")
+        for prefix in _SITE_LEGACY_URL_PREFIXES:
+            data = data.replace(prefix.encode("ascii"), replacement)
+        return data
+    except Exception:
+        return data
 
 
 def timestamp_value(value):
@@ -13227,7 +13435,10 @@ def health_payload() -> dict:
         except Exception:
             backup = {}
     return {"ok": db["integrity"] == "ok", "uptimeSec": uptime,
-            "db": db, "backup": backup}
+            "db": db, "backup": backup,
+            "domain": {"primary": site_primary_domain(),
+                       "armed": site_migration_armed(),
+                       "live": site_primary_live()}}
 
 
 # ---------------------------------------------------------------------------
@@ -15240,7 +15451,7 @@ class Handler(BaseHTTPRequestHandler):
             promo = (promo or "").strip() or None
             if _SUB.platega_enabled():
                 # Настоящие деньги: счёт в шлюзе + ссылка на оплату.
-                base = public_base_url(self).rstrip("/")
+                base = site_base_url(self).rstrip("/")
                 return _SUB.create_platega_checkout(
                     conn, int(user_id), period, key,
                     base + "/subscription/manage?pay=ok",
@@ -15489,6 +15700,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True}, 202)
 
     def do_POST(self):
+        # Первый HTTPS-хит на новый хост может прийти и на API (health-чек
+        # мониторинга): он тоже доказывает рабочий домен+сертификат.
+        site_note_primary_seen(self)
         path = urlparse(self.path).path
         if not self.guard_csrf(path):
             return
@@ -17679,6 +17893,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        # Переезд на новый домен: фиксируем живость нового хоста, а старые
+        # хосты уводим умным 301 (тот же путь+query). До автовключения обе
+        # функции — no-op, поведение как раньше.
+        site_note_primary_seen(self)
+        _domain_loc = site_domain_redirect(self, self.path)
+        if _domain_loc:
+            self.send_response(301)
+            self.send_header("Location", _domain_loc)
+            self.send_security_headers()
+            self.end_headers()
+            return
         # Каноникализация хоста: www-дубль склеиваем 301-м редиректом на apex
         # (www.egeeasy.ru -> egeeasy.ru). Без этого поисковик видит две копии
         # каждой страницы и размывает вес между ними. Правило общее (любой
@@ -18498,7 +18723,7 @@ class Handler(BaseHTTPRequestHandler):
             exam = 'oge' if prefix == '/oge' else 'ege'
             rest = path[len(prefix) + 1:].strip('/')
             parts = [p for p in rest.split('/') if p]
-            base = public_base_url(self)
+            base = site_base_url(self)
             if len(parts) == 1 and is_known_subject(parts[0]):
                 if subject_is_locked(parts[0]) or _subject_exam(parts[0]) != exam:
                     self.serve_not_found_page(); return
@@ -18564,7 +18789,7 @@ class Handler(BaseHTTPRequestHandler):
             # В sitemap — только публичное: лендинг, тариф и SEO-страницы
             # заданий (/ege/ и /oge/); /dashboard, /admin и /api/* закрыты от
             # индексации и в robots.txt, и мета-тегами.
-            base = public_base_url(self)
+            base = site_base_url(self)
             lastmod = today()
             urls = [f'  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>'
                     '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n',
@@ -18654,6 +18879,12 @@ class Handler(BaseHTTPRequestHandler):
             # Файл мог исчезнуть или оказаться нечитаемым между stat и read —
             # это 404, а не трейсбек на весь ответ.
             self.serve_not_found_page(); return
+        # Переезд на новый домен: в .html (canonical/og/JSON-LD) и мета-файлах
+        # абсолютные URL старого домена подменяются новым — но только после
+        # автовключения. До него байты отдаются как есть. ETag считается уже
+        # после подмены, поэтому кэш не смешивает версии доменов.
+        if suffix in (".html",) or file_path.name in ("robots.txt", "llms.txt", "site.webmanifest"):
+            data = site_rewrite_legacy_urls(data)
         # SSR первых кадров /status и /subscription: данные едут вместе со
         # страницей (как префетч в профиле SPA), а не вторым запросом после
         # отрисовки. Своё соединение: в этой ветке общего conn нет, пишущие
@@ -19108,6 +19339,16 @@ if __name__ == "__main__":
                 pass
 
     def run_server() -> int:
+        if "--domain-status" in sys.argv[1:]:
+            # Статус переезда без запуска сервера: что станет основным и
+            # включилось ли уже (см. блок «Переезд на новый домен» выше).
+            print(json.dumps({
+                "primary": site_primary_domain(),
+                "legacy": sorted(site_legacy_domains()),
+                "armed": site_migration_armed(),
+                "live": site_primary_live(),
+            }, ensure_ascii=False, indent=2))
+            return 0
         if any(a == "--backup-now" or a == "--list-backups" or a == "--restore"
                or a.startswith("--restore=") for a in sys.argv[1:]):
             return run_backup_cli(sys.argv[1:])
