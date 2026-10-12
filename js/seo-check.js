@@ -13,7 +13,7 @@
    normalizeAnswer, строковое равенство + числовая эквивалентность с
    допуском 1e-6 (включая дроби a/b), кандидаты [data-answer,
    ...data-accept], мультикорни extended_answer («a, b» — порядок не
-   важен), строгий формат цифровых ответов /^\d{2,12}$/ как в бланке ЕГЭ.
+   важен), строгий формат цифровых ответов /^\d{2,12}$/ как в бланке экзамена.
    data-accept (JSON-массив строк) и data-type читаются defensive: нет
    атрибутов — работает только по data-answer. */
 (function () {
@@ -69,7 +69,7 @@
   var digitOnly = function (v) {
     return String(v == null ? "" : v).replace(/[^\d]/g, "");
   };
-  /* Эталон из одних цифр — ответ пишется по клеткам бланка ЕГЭ. */
+  /* Эталон из одних цифр — ответ пишется по клеткам бланка экзамена. */
   var isDigitAnswer = function (s) {
     return /^\d{2,12}$/.test(String(s == null ? "" : s).trim());
   };
@@ -208,7 +208,7 @@
         var ok = false;
 
         if (isDigitAnswer(expected)) {
-          /* Строгий формат бланка ЕГЭ: только цифры, по одной в клетке.
+          /* Строгий формат бланка экзамена: только цифры, по одной в клетке.
              «2,4,5» и «2 4 5» — нарушение формата, а не запись «245»
              (как isDigitSequenceTask + проверка формата в js/app.js).
              Пробелы по краям — шум набора, их прощаем. Без текста задания
@@ -220,7 +220,7 @@
             input.classList.add("answer-input--wrong");
             setTimeout(function () { input.classList.remove("answer-input--wrong"); }, 420);
             feedback.innerHTML = feedbackBox("bad", "Неверный формат записи",
-              '<div class="seo-feedback__body">В бланке ЕГЭ такой ответ записывают'
+              '<div class="seo-feedback__body">В бланке экзамена такой ответ записывают'
               + " только цифрами, без запятых, точек и пробелов"
               + (digits ? " — в твоём случае это <b class=\"mono\">" + esc(digits) + "</b>" : "")
               + ". Перепиши ответ цифрами и попробуй ещё раз.</div>");

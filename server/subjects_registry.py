@@ -92,7 +92,7 @@ def _builtin_definitions() -> dict:
         "profile_math": {
             "id": "profile_math", "title": "Профильная математика", "short": "Профиль",
             "description": "Профильная математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом баллов.",
-            "status": "ready", "locked": False, "comingSoon": False, "order": 0,
+            "status": "ready", "exam": "ege", "locked": False, "comingSoon": False, "order": 0,
             "catalogFile": "catalog.json",
             "level": {"id": "profile", "subjectId": "math", "name": "Профильный уровень"},
             "forecast": {"weights": profile_weights, "total": 33, "scale": profile_scale},
@@ -102,7 +102,7 @@ def _builtin_definitions() -> dict:
         "basic_math": {
             "id": "basic_math", "title": "Базовая математика", "short": "База",
             "description": "Базовая математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом оценки.",
-            "status": "ready", "locked": False, "comingSoon": False, "order": 1,
+            "status": "ready", "exam": "ege", "locked": False, "comingSoon": False, "order": 1,
             "catalogFile": "catalog_basic.json",
             "level": {"id": "basic", "subjectId": "math", "name": "Базовый уровень"},
             "forecast": {"weights": basic_weights, "total": 21,
@@ -116,7 +116,7 @@ def _builtin_definitions() -> dict:
             # опубликованный предмет честно, иначе аварийный старт без
             # subjects/*.json показывал бы готовый русский закрытым.
             "description": "Русский язык: полная программа ЕГЭ — задания №1–26 (текст, нормы, орфография, пунктуация) и сочинение (задание 27) с проверкой по критериям ФИПИ.",
-            "status": "ready", "locked": False, "comingSoon": False,
+            "status": "ready", "exam": "ege", "locked": False, "comingSoon": False,
             "availability": "ready", "order": 2,
             "catalogFile": "catalog_russian.json",
             "level": {"id": "russian", "subjectId": "russian", "name": "Русский язык"},
@@ -167,6 +167,12 @@ def validate_definition(raw: dict, *, source: str, server_dir: Path) -> dict:
         status = "coming-soon"
     if status not in _KNOWN_STATUSES:
         raise SubjectContractError(f"{source} ({sid}): unknown status {status!r}")
+    # Ось экзамена: ege (11 класс) или oge (9 класс). Отсутствует в старых
+    # контрактах — считается ege, поэтому существующие предметы не трогаем.
+    exam = str(raw.get("exam", "ege")).strip().lower()
+    if exam not in ("ege", "oge"):
+        raise SubjectContractError(
+            f"{source} ({sid}): unknown exam {exam!r} (ege/oge required)")
     for key in ("locked", "comingSoon"):
         if key in raw and not isinstance(raw[key], bool):
             raise SubjectContractError(f"{source} ({sid}): {key} must be boolean")
@@ -328,6 +334,7 @@ def validate_definition(raw: dict, *, source: str, server_dir: Path) -> dict:
     definition = {
         "id": sid, "title": raw["title"].strip(), "short": raw["short"].strip(),
         "description": raw["description"].strip(), "status": status,
+        "exam": exam,
         "locked": bool(raw.get("locked", False)),
         "comingSoon": bool(raw.get("comingSoon", False)),
         "order": order, "catalogFile": catalog_file.strip(),
@@ -394,6 +401,7 @@ def to_compat_subjects(definitions: dict) -> dict:
             "id": sid, "title": definition["title"], "short": definition["short"],
             "description": definition.get("description", ""),
             "status": definition.get("status", "ready"),
+            "exam": definition.get("exam", "ege"),
             "locked": bool(definition.get("locked", False)),
             "comingSoon": bool(definition.get("comingSoon", False)),
             "forecast": definition.get("forecast"),

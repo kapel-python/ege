@@ -1,0 +1,112 @@
+{
+  "id": "oge_math",
+  "title": "Математика (ОГЭ)",
+  "short": "ОГЭ",
+  "description": "Математика (ОГЭ): все 25 номеров экзамена за 9 класс — практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "order": 7,
+  "catalogFile": "catalog_oge_math.json",
+  "level": {
+    "id": "oge_math",
+    "subjectId": "oge_math",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "o01_pract": 1,
+      "o02_pract": 1,
+      "o03_pract": 1,
+      "o04_pract": 1,
+      "o05_pract": 1,
+      "o06_numbers": 1,
+      "o07_numline": 1,
+      "o08_expr": 1,
+      "o09_equations": 1,
+      "o10_probability": 1,
+      "o11_functions": 1,
+      "o12_formulas": 1,
+      "o13_inequalities": 1,
+      "o14_progressions": 1,
+      "o15_triangles": 1,
+      "o16_circle": 1,
+      "o17_quads": 1,
+      "o18_grid": 1,
+      "o19_statements": 1,
+      "o20_equations2": 2,
+      "o21_wordprob": 2,
+      "o22_functions2": 2,
+      "o23_geocalc": 2,
+      "o24_geoproof": 2,
+      "o25_geohard": 2
+    },
+    "total": 31,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ]
+  },
+  "features": {
+    "lessons": false,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "математике",
+    "accusative": "математику"
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

@@ -109,7 +109,8 @@ if (exists("robots.txt")) {
   const robots = read("robots.txt");
   t("robots.txt разрешает /ege/", /^Allow:\s*\/ege\//m.test(robots));
 }
-t("сервер: маршрут /ege/ (хаб предметов)", server.includes("path == '/ege'"));
+t("сервер: маршрут /ege/ (хаб предметов)", server.includes("'/ege'") && server.includes("seo_render_index"));
+t("сервер: маршрут /oge/ (хаб предметов ОГЭ)", server.includes("'/oge'") && server.includes("seo_render_index"));
 t("сервер: рендер страницы задания (seo_render_task_page)", server.includes("def seo_render_task_page"));
 t("сервер: рендер хаба предмета и индекса (seo_render_hub/index)", server.includes("def seo_render_hub") && server.includes("def seo_render_index"));
 t("сервер: sitemap включает /ege/ и номера заданий", server.includes("/ege/") && server.includes("seo_task_urls") && server.includes("zadanie-"));

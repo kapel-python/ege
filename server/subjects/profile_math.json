@@ -4,6 +4,7 @@
   "short": "Профиль",
   "description": "Профильная математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом баллов.",
   "status": "ready",
+  "exam": "ege",
   "locked": false,
   "comingSoon": false,
   "order": 0,

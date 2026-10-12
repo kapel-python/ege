@@ -24,6 +24,19 @@
 
 var COPY={sub:'Прогноз вышел на целевой уровень — это стоит отметить.',live:'Цель достигнута: ',
   wish:'<strong class="gc-g">Удачи на ЕГЭ!</strong><span class="st">За плечами — большая работа. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
+/* Тот же текст для ОГЭ: экзамен свой, пожелание — своё. Выбор — в момент
+   показа по DataAPI.subjectExam (см. openGoalCelebration): OGE-цели
+   числятся в первичных баллах (8/15/22 из desc), поэтому plural «балл»
+   ниже для них корректен и не ветвится. */
+var COPY_OGE_WISH='<strong class="gc-g">Удачи на ОГЭ!</strong><span class="st">За плечами — большая работа. Теперь главное — спокойствие и уверенность. Всё получится.</span>';
+function gcWishHTML(){
+  try{
+    if(typeof DataAPI!=='undefined'&&DataAPI&&typeof DataAPI.subjectExam==='function'
+      &&typeof currentSubjectId==='function'
+      &&DataAPI.subjectExam(currentSubjectId())==='oge')return COPY_OGE_WISH;
+  }catch(e){}
+  return COPY.wish;
+}
 
 var $=function(i){try{return (typeof document!=='undefined'&&document)?document.getElementById(i):null}catch(e){return null}};
 var RM=(typeof matchMedia!=='undefined')?matchMedia('(prefers-reduced-motion: reduce)').matches:false;
@@ -316,7 +329,7 @@ GcGlobal.openGoalCelebration=function(data){
   fit();
   $('gc-h1').innerHTML='Твоя цель <b class="gc-g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!';
   $('gc-sub').textContent=COPY.sub;$('gc-live').textContent=COPY.live+d.goal;
-  $('gc-h2').textContent='Вот твой путь к цели';$('gc-wishT').innerHTML=COPY.wish;
+  $('gc-h2').textContent='Вот твой путь к цели';$('gc-wishT').innerHTML=gcWishHTML();
   [$('gc-h1'),$('gc-sub'),$('gc-h2'),$('gc-wishT')].forEach(arm);
   $('gc-goP').disabled=$('gc-cls1').disabled=false;
   ov.hidden=false;card.focus({preventScroll:true});

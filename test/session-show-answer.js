@@ -30,7 +30,7 @@ var __toolsHidden = 0;
 function sessionHideToolsRow() { __toolsHidden++; }
 var __hasPrev = false;
 function sessionHasPrev() { return __hasPrev; }
-` + extract("sessionMatchCells") + "\n" + extract("sessionRecordResult") + "\n" + extract("sessionFinishNavHtml") + "\n" + extract("sessionShownFeedbackHtml") + "\n" + extract("sessionShowAnswer") + "\n";
+` + extract("sessionMatchCells") + "\n" + extract("sessionRecordResult") + "\n" + extract("sessionFinishNavHtml") + "\n" + extract("sessionLessonBridgeHtml") + "\n" + extract("sessionShownFeedbackHtml") + "\n" + extract("sessionShowAnswer") + "\n";
 
 const testBody = () => {
   let fails = 0;

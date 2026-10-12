@@ -549,6 +549,14 @@ const DataAPI = {
     const wanted = dataId(id || this.currentSubject());
     return (this._subjects || []).find((item) => dataId(item.id) === wanted) || null;
   },
+  /* Ось экзамена предмета: "oge" (9 класс) или "ege" (11 класс, дефолт).
+     Едет в subjectInfo.exam из _public_subject_info; старые кэши без поля
+     честно считаются ege. */
+  subjectExam(id) {
+    const info = this.subjectInfo(id);
+    const exam = info && typeof info.exam === "string" ? info.exam.trim().toLowerCase() : "ege";
+    return exam === "oge" ? "oge" : "ege";
+  },
   subjectStatus(id) {
     const info = this.subjectInfo(id);
     if (!info) return "locked";

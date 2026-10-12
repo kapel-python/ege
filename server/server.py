@@ -1118,12 +1118,16 @@ def _public_subject_info(subject: str) -> dict:
     metadata = info.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
+    exam = str(info.get("exam") or "ege").strip().lower()
+    if exam not in ("ege", "oge"):
+        exam = "ege"
     return {
         "id": subject,
         "title": info["title"],
         "short": info["short"],
         "description": info.get("description", ""),
         "status": info.get("status", "ready"),
+        "exam": exam,
         "locked": locked,
         "comingSoon": coming_soon,
         "availability": info.get("availability", info.get("status", "ready")),
@@ -1131,6 +1135,28 @@ def _public_subject_info(subject: str) -> dict:
         "features": dict(info.get("features", {})),
         "metadata": dict(metadata),
     }
+
+
+def _subject_exam(subject: str) -> str:
+    """Ось экзамена предмета: 'ege' (11 класс) или 'oge' (9 класс).
+
+    Единственная точка, где код узнаёт экзамен предмета; всё остальное
+    (SEO-префикс, подпись «ЕГЭ/ОГЭ») выводится из неё. Не бросает."""
+    try:
+        exam = str((SUBJECTS.get(subject) or {}).get("exam") or "ege").strip().lower()
+    except Exception:
+        return "ege"
+    return "oge" if exam == "oge" else "ege"
+
+
+def _exam_label(subject: str) -> str:
+    """«ЕГЭ» или «ОГЭ» для пользовательских строк предмета."""
+    return "ОГЭ" if _subject_exam(subject) == "oge" else "ЕГЭ"
+
+
+def _exam_prefix(subject: str) -> str:
+    """URL-префикс SEO-оси предмета: '/oge' или '/ege'."""
+    return "/oge" if _subject_exam(subject) == "oge" else "/ege"
 
 
 def subjects_payload() -> list:
@@ -8238,8 +8264,9 @@ def seo_task_urls(conn, base: str) -> list:
     except Exception:
         return urls
     for subject in subjects:
+        prefix = _exam_prefix(subject)
         for skill in _seo_subject_skills(conn, subject):
-            urls.append(f"{base}/ege/{subject}/zadanie-{skill['num']}/")
+            urls.append(f"{base}{prefix}/{subject}/zadanie-{skill['num']}/")
     return urls
 
 
@@ -8264,16 +8291,18 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
         return None
     samples = _seo_task_samples(conn, subject, skill["id"], 2)
     lesson = _seo_lesson(conn, skill["id"])
-    url = f"{base}/ege/{subject}/zadanie-{num}/"
-    hub = f"{base}/ege/{subject}/"
+    prefix = _exam_prefix(subject)
+    exam = _exam_label(subject)
+    url = f"{base}{prefix}/{subject}/zadanie-{num}/"
+    hub = f"{base}{prefix}/{subject}/"
     skill_name = skill["name"]
     short = _seo_skill_short(skill_name, num)
     self_exam = bool(samples) and all(s["self"] for s in samples)
     part_label = ("Часть 2 · развёрнутый ответ" if self_exam
                   else "Часть 1 · краткий ответ")
-    h1 = f"Задание {num} ЕГЭ по {genitive} — {short}"
-    page_title = f"Задание {num} ЕГЭ по {genitive} ({short}): разбор и практика | ege easy"
-    desc = (f"Задание {num} ЕГЭ по {genitive} ({skill_name}): что проверяется,"
+    h1 = f"Задание {num} {exam} по {genitive} — {short}"
+    page_title = f"Задание {num} {exam} по {genitive} ({short}): разбор и практика | ege easy"
+    desc = (f"Задание {num} {exam} по {genitive} ({skill_name}): что проверяется,"
             f" примеры с подсказками и разбором, бесплатная практика без регистрации.")
     cta = f"/dashboard#/skill/{skill['id']}?seo_subject={subject}"
     if self_exam:
@@ -8408,22 +8437,22 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                    "acceptedAnswer": {"@type": "Answer", "text": t["answer"][:200]}}
                   for i, t in enumerate(samples) if t["answer"]][:2]
     ld = {"@context": "https://schema.org", "@graph": [
-        {"@type": "Course", "name": f"{title} — подготовка к ЕГЭ",
+        {"@type": "Course", "name": f"{title} — подготовка к {exam}",
          "provider": {"@type": "Organization", "name": "ege easy",
                       "url": base}},
         {"@type": "PracticeProblem", "name": h1, "url": url,
-         "about": skill_name, "educationalLevel": "ЕГЭ",
+         "about": skill_name, "educationalLevel": exam,
          "hasPart": ld_samples},
         {"@type": "BreadcrumbList", "itemListElement": [
             {"@type": "ListItem", "position": 1, "name": "Все задания",
-             "item": base + "/ege/"},
+             "item": base + prefix + "/"},
             {"@type": "ListItem", "position": 2, "name": title, "item": hub},
             {"@type": "ListItem", "position": 3,
              "name": f"Задание {num}", "item": url}]}]}
     # Сырой </script> из данных каталога закрыл бы JSON-LD блок досрочно —
     # экранируем как <\/ (валидный JSON-escape), как принято для инлайн-JSON.
     ld_json = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
-    crumb = (f"<a href='/ege/'>Все задания</a>"
+    crumb = (f"<a href='{prefix}/'>Все задания</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
              f"<a href='{_seo_esc(hub)}'>{_seo_esc(title)}</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
@@ -8484,15 +8513,17 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
         return None
     title = str(info.get("title") or subject)
     genitive = _seo_genitive(subject)
-    url = f"{base}/ege/{subject}/"
+    prefix = _exam_prefix(subject)
+    exam = _exam_label(subject)
+    url = f"{base}{prefix}/{subject}/"
     skills = _seo_subject_skills(conn, subject)
     if not skills:
         return None
-    desc = (f"Все задания ЕГЭ по {genitive}: разбор каждого номера,"
+    desc = (f"Все задания {exam} по {genitive}: разбор каждого номера,"
             f" примеры с подсказками и бесплатная практика без регистрации.")
     cta = f"/dashboard#/training?seo_subject={subject}"
     nums = "\n".join(
-        f"<a class='seo-num' href='{_seo_esc(base + '/ege/' + subject + '/zadanie-' + str(s['num']) + '/')}'>"
+        f"<a class='seo-num' href='{_seo_esc(base + prefix + '/' + subject + '/zadanie-' + str(s['num']) + '/')}'>"
         f"<span class='seo-num__badge' aria-hidden='true'>{s['num']}</span>"
         f"<span class='seo-num__body'><span class='seo-num__name'>"
         f"Задание {s['num']} — {_seo_esc(_seo_skill_short(s['name'], s['num']))}</span>"
@@ -8504,7 +8535,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
 <span class="seo-badge seo-badge--accent">{_seo_esc(title)}</span>
 <span class="seo-badge">{len(skills)} номеров экзамена</span>
 </div>
-<h1>Все задания ЕГЭ по {_seo_esc(genitive)}</h1>
+<h1>Все задания {exam} по {_seo_esc(genitive)}</h1>
 <p class="seo-hero__lead">Каждый номер экзамена — отдельная страница: что проверяется, настоящие формулировки с подсказками и разбором, практика без регистрации. Выбирай номер — или открой тренажёр, он сам подберёт, что решать.</p>
 <div class="seo-cta-row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Решать без регистрации →</a></div>
 </div>
@@ -8517,51 +8548,61 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
 <div class="seo-cta__row"><a class="btn btn-primary" href="{_seo_esc(cta)}">Открыть тренажёр →</a></div>
 </div></div>"""
     return _seo_shell(
-        title=f"Все задания ЕГЭ по {genitive} — разбор и практика | ege easy",
+        title=f"Все задания {exam} по {genitive} — разбор и практика | ege easy",
         desc=desc, canonical=url, robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<a href='/ege/'>Все задания</a>"
+        ld_json="", crumb=(f"<a href='{prefix}/'>Все задания</a>"
                            f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
                            f"<span class='seo-crumb__here' aria-current='page'>{_seo_esc(title)}</span>"),
         body_main=body_main)
 
 
-def seo_render_index(base: str) -> bytes | None:
-    """Хаб /ege/: все предметы со ссылками. Только registry, без БД."""
+def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
+    """Хаб /ege/ или /oge/: предметы своей оси со ссылками.
+
+    Только registry, без БД. Пустая ось (нет открытых предметов экзамена) —
+    честный None вместо индексируемой пустышки: вызыватель отдаёт 404."""
+    exam = "oge" if str(exam or "").strip().lower() == "oge" else "ege"
+    label = "ОГЭ" if exam == "oge" else "ЕГЭ"
+    prefix = "/oge" if exam == "oge" else "/ege"
     cards = []
     titles = []
     for sid in SUBJECT_IDS:
         info = SUBJECTS.get(sid) or {}
         if subject_is_locked(sid):
             continue
+        if _subject_exam(sid) != exam:
+            continue
         genitive = _seo_genitive(sid)
         titles.append(str(info.get("title") or sid))
         cards.append(
-            f"<a class='seo-subj' href='{_seo_esc(f'{base}/ege/{sid}/')}'>"
+            f"<a class='seo-subj' href='{_seo_esc(f'{base}{prefix}/{sid}/')}'>"
             f"<span class='seo-subj__icon' aria-hidden='true'>"
             f"{_seo_esc(str(info.get('title') or sid)[:1].upper())}</span>"
             f"<span class='seo-subj__body'><span class='seo-subj__name'>"
-            f"Задания ЕГЭ по {_seo_esc(genitive)}</span>"
+            f"Задания {label} по {_seo_esc(genitive)}</span>"
             f"<span class='seo-subj__meta'>разбор всех номеров · практика без регистрации</span></span>"
             f"<span class='seo-num__arrow' aria-hidden='true'>→</span></a>")
+    if not cards:
+        return None
     # Description собирается из реестра, а не захардкожен: новый предмет
     # попадает и в карточки, и в meta без правок кода.
-    desc = (f"Все задания ЕГЭ по номерам ({', '.join(titles)}): разбор каждого"
+    desc = (f"Все задания {label} по номерам ({', '.join(titles)}): разбор каждого"
             f" номера с подсказками и бесплатная практика без регистрации.")
     body_main = f"""<div class="seo-hero">
 <div class="seo-badges">
 <span class="seo-badge seo-badge--accent">ege easy</span>
-<span class="seo-badge">подготовка к ЕГЭ</span>
+<span class="seo-badge">подготовка к {label}</span>
 </div>
-<h1>Задания ЕГЭ по номерам</h1>
+<h1>Задания {label} по номерам</h1>
 <p class="seo-hero__lead">Выбери предмет — внутри каждый номер экзамена: что проверяется, настоящие формулировки с подсказками и разбором, практика без регистрации. Прогресс и прогноз балла считает тренажёр.</p>
 </div>
 <section class="seo-nums">
 {chr(10).join(cards)}
 </section>"""
     return _seo_shell(
-        title="Задания ЕГЭ по номерам — разбор и практика | ege easy",
+        title=f"Задания {label} по номерам — разбор и практика | ege easy",
         desc=desc,
-        canonical=f"{base}/ege/", robots="index, follow", og_type="website",
+        canonical=f"{base}{prefix}/", robots="index, follow", og_type="website",
         ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
         body_main=body_main)
 
@@ -17731,36 +17772,42 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", "/subscription")
             self.send_security_headers()
             self.end_headers(); return
-        elif path == '/ege' or path == '/ege/':
-            # Хаб программных SEO-страниц: список предметов. Индексируется
-            # (в sitemap.xml и robots.txt), профиля и кук не создаёт.
-            # Канон — со слэшем: без слэша 301 (иначе дубль URL).
-            # None — нет шаблона shell.html: честная фирменная 404, а не
-            # падение на len(None) с оборванным соединением.
-            if path != '/ege/':
+        elif path in ('/ege', '/ege/', '/oge', '/oge/'):
+            # Хаб программных SEO-страниц: список предметов своей оси.
+            # Индексируется (в sitemap.xml и robots.txt), профиля и кук
+            # не создаёт. Канон — со слэшем: без слэша 301 (иначе дубль URL).
+            # None — нет шаблона shell.html или ось пуста: честная фирменная
+            # 404, а не падение на len(None) с оборванным соединением.
+            prefix = '/oge' if path.startswith('/oge') else '/ege'
+            exam = 'oge' if prefix == '/oge' else 'ege'
+            if path != prefix + '/':
                 self.send_response(301)
-                self.send_header("Location", "/ege/" + _seo_query_suffix(self))
+                self.send_header("Location", prefix + "/" + _seo_query_suffix(self))
                 self.send_security_headers()
                 self.end_headers(); return
-            data = seo_render_index(public_base_url(self))
+            data = seo_render_index(public_base_url(self), exam)
             if data is None:
                 self.serve_not_found_page(); return
             serve_seo_page(self, data)
             return
-        elif path.startswith('/ege/'):
-            # /ege/<subject>/ — хаб номеров; /ege/<subject>/zadanie-<N>/ —
+        elif path.startswith('/ege/') or path.startswith('/oge/'):
+            # /<ось>/<subject>/ — хаб номеров; /<ось>/<subject>/zadanie-<N>/ —
             # страница номера с разбором. Канон — со слэшем и без ведущих
             # нулей (zadanie-17, не zadanie-017): всё остальное — 301.
             # Двойные слэши схлопываются разбором parts, но отдавать 200
             # на неканоничном пути нельзя — только редирект. Query (?utm)
             # на редиректе сохраняется. Закрытые предметы — фирменная 404.
-            rest = path[len('/ege/'):].strip('/')
+            # Предмет чужой оси под чужим префиксом — тоже 404, а не
+            # утечка (/oge/profile_math/ и /ege/oge_math/ не существуют).
+            prefix = '/oge' if path.startswith('/oge/') else '/ege'
+            exam = 'oge' if prefix == '/oge' else 'ege'
+            rest = path[len(prefix) + 1:].strip('/')
             parts = [p for p in rest.split('/') if p]
             base = public_base_url(self)
             if len(parts) == 1 and is_known_subject(parts[0]):
-                if subject_is_locked(parts[0]):
+                if subject_is_locked(parts[0]) or _subject_exam(parts[0]) != exam:
                     self.serve_not_found_page(); return
-                canon = f"/ege/{parts[0]}/"
+                canon = f"{prefix}/{parts[0]}/"
                 if path != canon:
                     self.send_response(301)
                     self.send_header("Location", canon + _seo_query_suffix(self))
@@ -17782,9 +17829,9 @@ class Handler(BaseHTTPRequestHandler):
                     num = int(parts[1][len('zadanie-'):])
                 except (ValueError, TypeError):
                     self.serve_not_found_page(); return
-                if subject_is_locked(parts[0]):
+                if subject_is_locked(parts[0]) or _subject_exam(parts[0]) != exam:
                     self.serve_not_found_page(); return
-                canon = f"/ege/{parts[0]}/zadanie-{num}/"
+                canon = f"{prefix}/{parts[0]}/zadanie-{num}/"
                 if path != canon:
                     self.send_response(301)
                     self.send_header("Location", canon + _seo_query_suffix(self))
@@ -17820,7 +17867,7 @@ class Handler(BaseHTTPRequestHandler):
             # а домен зависит от деплоя — берём его из хоста запроса
             # (EGE_PUBLIC_URL в приоритете, см. public_base_url).
             # В sitemap — только публичное: лендинг, тариф и SEO-страницы
-            # заданий (/ege/); /dashboard, /admin и /api/* закрыты от
+            # заданий (/ege/ и /oge/); /dashboard, /admin и /api/* закрыты от
             # индексации и в robots.txt, и мета-тегами.
             base = public_base_url(self)
             lastmod = today()
@@ -17830,6 +17877,16 @@ class Handler(BaseHTTPRequestHandler):
                     '<changefreq>monthly</changefreq><priority>0.6</priority></url>\n',
                     f'  <url><loc>{base}/ege/</loc><lastmod>{lastmod}</lastmod>'
                     '<changefreq>weekly</changefreq><priority>0.8</priority></url>\n']
+            # Ось /oge/ — только когда в ней есть хоть один открытый предмет,
+            # иначе карта вела бы на честную 404 пустой оси.
+            try:
+                if any(not subject_is_locked(s) and _subject_exam(s) == "oge"
+                       for s in SUBJECT_IDS):
+                    urls.append(
+                        f'  <url><loc>{base}/oge/</loc><lastmod>{lastmod}</lastmod>'
+                        '<changefreq>weekly</changefreq><priority>0.8</priority></url>\n')
+            except Exception:
+                pass
             try:
                 sm_conn = connect()
                 try:
@@ -17837,7 +17894,7 @@ class Handler(BaseHTTPRequestHandler):
                         if subject_is_locked(sid):
                             continue
                         urls.append(
-                            f'  <url><loc>{base}/ege/{sid}/</loc><lastmod>{lastmod}</lastmod>'
+                            f'  <url><loc>{base}{_exam_prefix(sid)}/{sid}/</loc><lastmod>{lastmod}</lastmod>'
                             '<changefreq>weekly</changefreq><priority>0.7</priority></url>\n')
                     for loc in seo_task_urls(sm_conn, base):
                         urls.append(

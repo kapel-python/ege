@@ -32,6 +32,7 @@ const CATALOGS = {
   biology: "server/catalog_biology.json",
   informatics: "server/catalog_informatics.json",
   society: "server/catalog_society.json",
+  oge_math: "server/catalog_oge_math.json",
 };
 
 let failures = 0;

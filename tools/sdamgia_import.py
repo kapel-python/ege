@@ -46,6 +46,10 @@ SUBJECTS = {
     "mathb": "https://mathb-ege.sdamgia.ru",
     "math": "https://math-ege.sdamgia.ru",
     "his": "https://hist-ege.sdamgia.ru",
+    # ОГЭ: та же платформа СДАМ ГИА, та же вёрстка страниц заданий —
+    # парсер (селекторы soltb/body/answer/sol/prob_crits) переиспользуется
+    # как есть; отличается только нумерация линий (1–25) и хост.
+    "oge": "https://math-oge.sdamgia.ru",
 }
 
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"

@@ -85,8 +85,11 @@ def main():
 
         # Все предметы — автоматически из реестра: хаб и первая страница
         # номера обязаны существовать без ручной настройки под каждый id.
+        # Префикс оси — из контракта предмета (ege → /ege/, oge → /oge/).
         for sid in list(server.SUBJECT_IDS):
-            st, _, body = get(f"/ege/{sid}/")
+            exam = ((server.SUBJECTS.get(sid) or {}).get("exam") or "ege")
+            prefix = "/oge" if exam == "oge" else "/ege"
+            st, _, body = get(f"{prefix}/{sid}/")
             hub_text = body.decode("utf-8", "replace")
             if st != 200 or "zadanie-" not in hub_text:
                 check(f"хаб {sid} автоматический", False, str(st))
@@ -95,7 +98,7 @@ def main():
             if not first:
                 check(f"номера {sid} автоматические", False, "no links")
                 continue
-            st2, h2, b2 = get(f"/ege/{sid}/zadanie-{first.group(1)}/")
+            st2, h2, b2 = get(f"{prefix}/{sid}/zadanie-{first.group(1)}/")
             page = b2.decode("utf-8", "replace")
             ok = (st == 200 and st2 == 200 and h2.get("X-Robots-Tag") is None
                   and "<h1>" in page and "PracticeProblem" in page

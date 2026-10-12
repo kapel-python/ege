@@ -1119,9 +1119,9 @@ const HELP = {
       <p>Но это только совет: все разделы всегда открыты, можешь заниматься чем хочешь.</p>`,
   },
   forecast: {
-    title: "Прогноз результата ЕГЭ",
+    title: "Прогноз результата экзамена",
     body: `
-      <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в тестовые баллы по шкале этого года.</p>
+      <p>Примерная оценка твоего балла на экзамене: освоение каждой темы умножается на её цену в первичных баллах (вторая часть весит больше первой), а сумма переводится в итоговый балл по шкале этого года.</p>
       <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина диапазона показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
       <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, диапазон шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`,
   },
@@ -1144,7 +1144,7 @@ const HELP = {
     title: "Тренировка",
     body: `
       <p><b>Уроки</b> объясняют тему по шагам с самого начала. Очки дают только за первое прохождение, повтор нужен просто для закрепления.</p>
-      <p><b>Тренировки</b> — задания ЕГЭ по теме. Пройдёшь весь список до конца — получишь награду.</p>
+      <p><b>Тренировки</b> — задания экзамена по теме. Пройдёшь весь список до конца — получишь награду.</p>
       <p>Если бросил на середине — продолжишь с того же места.</p>`,
   },
   errors: {
@@ -1181,6 +1181,11 @@ function forecastHelpHTML() {
   const common = `
       <p>Старые ответы постепенно «выцветают»: месяц назад — вдвое легче сегодняшних. А ширина диапазона показывает уверенность: мало данных — широко, много свежей практики — узко.</p>
       <p>Точность зависит от покрытия: пройдены все уроки и по каждой теме есть данные — прогноз относительно точный; если часть уроков и тем ещё не закрыта, диапазон шире и цифра менее надёжна. Проходи уроки и практику — точность вырастет. Как оценка менялась по дням, видно в «Статистике».</p>`;
+  if (currentExam() === "oge") {
+    return `
+      <p>Примерный итог ОГЭ: прогноз показывает первичные баллы (максимум 31 — 19 за первую часть и 12 за вторую). Оценка «3» — от 8 баллов, «4» — от 15, «5» — от 22; для любой положительной оценки нужно не меньше 2 баллов по геометрии (задания №15–19 и №23–25).</p>`
+      + common;
+  }
   if (top === max) {
     return `
       <p>Примерный итог базового ЕГЭ: каждое из 21 заданий даёт 1 балл, поэтому прогноз показывает, сколько заданий ты решишь (7+ баллов — оценка «3», 12+ — «4», 17+ — «5»). Все темы весят одинаково.</p>`
@@ -1189,7 +1194,7 @@ function forecastHelpHTML() {
   const essayNote = (max === 50) ? `
       <p>Сочинение — почти половина экзамена: 22 из 50 первичных баллов. Без него выше ~55 тестовых не подняться, даже с идеальным тестом.</p>` : ``;
   return `
-      <p>Примерная оценка твоего балла на ЕГЭ: освоение каждой темы умножается на её цену в первичных баллах, а сумма переводится в тестовые баллы по шкале этого года.</p>`
+      <p>Примерная оценка твоего балла на экзамене: освоение каждой темы умножается на её цену в первичных баллах, а сумма переводится в тестовые баллы по шкале этого года.</p>`
       + essayNote
       + common;
 }
@@ -1210,13 +1215,14 @@ function openHelp(key) {
     return;
   }
   if (key === "forecast" && typeof forecastHelpHTML === "function") {
+    const examTitle = `Прогноз результата ${examLabel()}`;
     openModal(`
     <div class="stat-label">Подсказка</div>
-    <div style="font-size:20px;font-weight:700;margin-top:4px">Прогноз результата ЕГЭ</div>
+    <div style="font-size:20px;font-weight:700;margin-top:4px">${examTitle}</div>
     <div class="help-body">${forecastHelpHTML()}</div>
     <div style="margin-top:22px;display:flex;justify-content:flex-end">
       <button class="btn btn--primary" onclick="closeModal()">Понятно</button>
-    </div>`, "Прогноз результата ЕГЭ");
+    </div>`, examTitle);
     return;
   }
   const h = HELP[key];
@@ -2399,7 +2405,7 @@ function subjectStateCardHTML(state = subjectContentState(), options = {}) {
 const SUBJECT_SECTION_COPY = {
   training: {
     title: "Тренировка",
-    sub: "Уроки разбирают тему по шагам, тренировки закрепляют её на заданиях ЕГЭ.",
+    sub: "Уроки разбирают тему по шагам, тренировки закрепляют её на заданиях экзамена.",
     empty: "Уроки и тренировки появятся здесь вместе с материалами предмета.",
   },
   errors: {
@@ -2445,7 +2451,7 @@ const SUBJECT_SECTION_COPY = {
   },
   practice: {
     title: "Практика",
-    sub: "Закрепление выбранной темы на заданиях ЕГЭ.",
+    sub: "Закрепление выбранной темы на заданиях экзамена.",
     empty: "Практика по этой теме появится вместе с материалами предмета.",
   },
   boss: {
@@ -3581,7 +3587,7 @@ function screenDashboard(root) {
     ${adminInboxHTML()}
     <div class="page-head">
       <div class="page-title">Главная</div>
-      <div class="page-sub">цель: ${goalLabel()} • до ЕГЭ осталось <b>примерно ${egeCountdownLabel()}</b></div>
+      <div class="page-sub">цель: ${goalLabel()}${examCountdownHTML()}</div>
     </div>
     ${streakReturnBannerHtml()}
 
@@ -3607,7 +3613,7 @@ function screenDashboard(root) {
 
       <div class="card forecast-card forecast-hero">
         ${f.empty ? `
-        <div class="stat-label">Прогноз результата ЕГЭ ${helpDot("forecast")}</div>
+        <div class="stat-label">Прогноз результата ${examLabel()} ${helpDot("forecast")}</div>
         <div class="forecast-empty">
           <div class="forecast-empty__icon">${icon("stats")}</div>
           <div class="forecast-empty__title">${f.premature ? "Прогноз пока рано считать" : "Прогноз появится позже"}</div>
@@ -3615,7 +3621,7 @@ function screenDashboard(root) {
           <button class="btn btn--primary btn--sm" onclick="go('path')">Открыть путь</button>
         </div>` : `
         <div class="forecast-hero__top">
-          <div class="stat-label">${(!f.empty && cov && !cov.full && (cov.lessonPct < 50 || (cov.totalSkills > 0 && cov.covered / cov.totalSkills < 0.5))) ? "Предварительный прогноз" : "Прогноз результата ЕГЭ"} ${helpDot("forecast")}</div>
+          <div class="stat-label">${(!f.empty && cov && !cov.full && (cov.lessonPct < 50 || (cov.totalSkills > 0 && cov.covered / cov.totalSkills < 0.5))) ? "Предварительный прогноз" : `Прогноз результата ${examLabel()}`} ${helpDot("forecast")}</div>
           <span class="forecast-trend ${trend && trend.delta > 0 ? "forecast-trend--up" : trend && trend.delta < 0 ? "forecast-trend--down" : ""}">${forecastTrendLabel(trend)}</span>
         </div>
         <div class="forecast-mid">${f.mid}<small>баллов</small></div>
@@ -3980,6 +3986,27 @@ function goalLabel() {
   return g ? g.label : "не выбрана";
 }
 
+/* Ось экзамена текущего предмета: "oge" (9 класс) или "ege" (11 класс).
+   Едет из subjectInfo.exam; нет DataAPI или поля — честный ege. */
+function currentExam() {
+  try {
+    if (typeof DataAPI !== "undefined" && DataAPI && typeof DataAPI.subjectExam === "function"
+        && typeof DataAPI.currentSubject === "function")
+      return DataAPI.subjectExam(DataAPI.currentSubject());
+  } catch (_) {}
+  return "ege";
+}
+function examLabel() {
+  return currentExam() === "oge" ? "ОГЭ" : "ЕГЭ";
+}
+/* Обратный отсчёт до экзамена — только для ЕГЭ (даты известны, см.
+   EGE_EXAM_DAY_JUNE). У ОГЭ даты основного периода свои и год от года
+   плавают — вместо выдуманного числа честно ничего не показываем. */
+function examCountdownHTML() {
+  if (currentExam() !== "ege") return "";
+  return ` • до ЕГЭ осталось <b>примерно ${egeCountdownLabel()}</b>`;
+}
+
 /* Число цели для шкалы прогноза в баллах предмета: сначала ищем порог вида
    «12+ баллов» в desc (у базы цель — оценка, а баллы лежат в описании:
    «12+ баллов — уверенный результат»), иначе — первое число label
@@ -4153,7 +4180,7 @@ function screenPath(root) {
                что открывал. Глубокая ссылка (#/skill/<id>) работает как
                раньше — её открывает render(). */
             const openAction = locked ? `openLockedSkillModal('${esc(skill.id)}')` : `openSkillModal('${esc(skill.id)}')`;
-            const ege = skill.ege || skill.examNumber || "тема ЕГЭ";
+            const ege = skill.ege || skill.examNumber || "тема экзамена";
             /* Ошибка и освоение — две разные оси. Статус честно показывает
                освоение (0% — «в процессе», а не «слабое место»), а незакрытые
                ошибки видны отдельным маркером прямо на строке: промах учтён
@@ -4189,14 +4216,14 @@ function screenPath(root) {
     ? "Карта тем предмета: зарегистрированные темы и статус их материалов."
     : pathState.empty
       ? "Карта тем предмета появится вместе с материалами."
-      : "Карта тем ЕГЭ и твой прогресс по каждой.";
+      : "Карта тем экзамена и твой прогресс по каждой.";
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Путь ${helpDot("path")}</div>
       <div class="page-sub">${esc(pathDescription)} ${lockedCount ? "Закрытые темы отмечены замком — они не ведут в пустые уроки или практику." : "Нажми на тему — увидишь доступные материалы."}</div>
     </div>
     <div class="path-map">
-      <div class="tree-root"><div class="tree-root__node">ЕГЭ<small>${esc(subjectDisplayName(info))} · ${esc(pathProgressLabel(allSkills))}</small></div></div>
+      <div class="tree-root"><div class="tree-root__node">${examLabel()}<small>${esc(subjectDisplayName(info))} · ${esc(pathProgressLabel(allSkills))}</small></div></div>
       <div class="tree-connector-v"></div>
       <div class="tree-branches${groups.length === 1 ? " tree-branches--single" : ""}">${branches}</div>
     </div>
@@ -4254,7 +4281,7 @@ function openLockedSkillModal(skillId) {
   if (!sk) return;
   const category = topicCategory(sk);
   const categoryName = category ? subjectDisplayName(category) : "Темы предмета";
-  const ege = sk.ege || sk.examNumber || "тема ЕГЭ";
+  const ege = sk.ege || sk.examNumber || "тема экзамена";
   const hasLesson = topicHasLesson(sk);
   openModal(`
     <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
@@ -4321,7 +4348,7 @@ function openSkillModal(skillId) {
   const lessonErrs = lessonStepErrorsBySkill(skillId);
   const category = topicCategory(sk);
   const categoryName = category ? subjectDisplayName(category) : "Темы предмета";
-  const ege = sk.ege || sk.examNumber || "тема ЕГЭ";
+  const ege = sk.ege || sk.examNumber || "тема экзамена";
 
   openModal(`
     <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
@@ -4456,7 +4483,7 @@ function screenTraining(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-title">Тренировка ${helpDot("training")}</div>
-      <div class="page-sub">Здесь проходит обучение: уроки разбирают тему с нуля по шагам, тренировки закрепляют её на заданиях ЕГЭ.</div>
+      <div class="page-sub">Здесь проходит обучение: уроки разбирают тему с нуля по шагам, тренировки закрепляют её на заданиях экзамена.</div>
     </div>
 
     ${lessons.length > 0 ? `
@@ -5276,7 +5303,7 @@ function essayClearReadonly() {
 function sessionMatchingAreaHtml(t, letters) {
   return `
     <div class="match-answer">
-      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке ЕГЭ.</div>
+      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке экзамена.</div>
       <div class="match-answer__scroll">
         <table class="match-answer__table" role="group" aria-label="Ответ по буквам">
           <thead><tr>${letters.map((l) => `<th scope="col">${esc(l)}</th>`).join("")}</tr></thead>
@@ -7642,7 +7669,7 @@ function sessionSubmit() {
     renderSessionHintControl();
     sessionFlashAnswer(true);
     const digits = String(val).replace(/\D/g, "");
-    sessionSetPendingFeedback(`<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Неверный формат записи</div><div class="feedback__solution">В бланке ЕГЭ такой ответ записывают только цифрами, без запятых, точек и пробелов${digits ? ` — в твоём случае это <b class="mono">${esc(digits)}</b>` : ""}. Ошибка не влияет на прогресс. Перепиши ответ цифрами и попробуй ещё раз.</div></div>`);
+    sessionSetPendingFeedback(`<div class="feedback feedback--bad feedback--retry"><div class="feedback__head">${icon("x")} Неверный формат записи</div><div class="feedback__solution">В бланке экзамена такой ответ записывают только цифрами, без запятых, точек и пробелов${digits ? ` — в твоём случае это <b class="mono">${esc(digits)}</b>` : ""}. Ошибка не влияет на прогресс. Перепиши ответ цифрами и попробуй ещё раз.</div></div>`);
     return;
   }
 
@@ -8292,7 +8319,7 @@ function lessonMatchTableHtml(letters, value, done) {
   const v = String(value || "");
   return `
     <div class="match-answer">
-      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке ЕГЭ.</div>
+      <div class="match-answer__hint">${icon("info")} Впиши цифру под каждой буквой — как в бланке экзамена.</div>
       <div class="match-answer__scroll">
         <table class="match-answer__table" role="group" aria-label="Ответ по буквам">
           <thead><tr>${letters.map((l) => `<th scope="col">${esc(l)}</th>`).join("")}</tr></thead>
@@ -12295,8 +12322,14 @@ const Onboarding = {
   },
 
   stepGoal(body) {
+    // Цели-оценки (ОГЭ, база) спрашивают про оценку, цели-баллы — про баллы.
+    let gradeGoals = false;
+    try {
+      const goals = DataAPI.goals() || [];
+      gradeGoals = goals.length > 0 && goals.every((g) => /оценк/i.test(String((g && g.label) || "")));
+    } catch (_) {}
     body.innerHTML = `
-      <div class="onboard-title">Какая цель по баллам?</div>
+      <div class="onboard-title">${gradeGoals ? "Какая оценка нужна?" : "Какая цель по баллам?"}</div>
       <div class="onboard-sub">Сохраним её в профиле как ориентир подготовки.</div>
       <div class="choice-list">
         ${DataAPI.goals().map((g) => `<button class="choice-item" onclick="Onboarding.pickGoal('${g.id}')"><b>${g.label}</b><span>${g.desc}</span></button>`).join("")}

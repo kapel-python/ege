@@ -4,6 +4,7 @@
   "short": "База",
   "description": "Базовая математика (ЕГЭ): полный курс с уроками, практикой, диагностикой и прогнозом оценки.",
   "status": "ready",
+  "exam": "ege",
   "locked": false,
   "comingSoon": false,
   "order": 1,

@@ -22,12 +22,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SERVER_DIR = ROOT / "server"
 SERVER_PATH = SERVER_DIR / "server.py"
-SUBJECTS = ("profile_math", "basic_math", "russian", "biology")
+SUBJECTS = ("profile_math", "basic_math", "russian", "biology", "oge_math")
 CATALOG_FILES = {
     "profile_math": "catalog.json",
     "basic_math": "catalog_basic.json",
     "russian": "catalog_russian.json",
     "biology": "catalog_biology.json",
+    "oge_math": "catalog_oge_math.json",
 }
 REQUIRED_FEATURES = frozenset(
     {"lessons", "practice", "forecast", "diagnostics", "missions", "bosses", "daily", "path"}
@@ -211,6 +212,9 @@ def main() -> int:
                 # (у тестовой части №1–26 есть чем их наполнять).
                 "russian": {key: True for key in REQUIRED_FEATURES},
                 "biology": {key: True for key in REQUIRED_FEATURES},
+                # Математика ОГЭ — ready без уроков (пилот: практика, прогноз,
+                # диагностика, миссии, боссы, подборка и путь).
+                "oge_math": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")
