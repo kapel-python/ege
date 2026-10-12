@@ -145,6 +145,7 @@ def main():
     check("server: ИИ пишет как новость, а не разговор",
           "подзаголовками <h2>" in server_src and "простыни" in server_src
           and "обращения к читателю" in server_src and "без кликбейта" in server_src
+          and "не повторяет его дословно" in server_src and "три смысловых блока" in server_src
           and "NEWS_AI_STYLE" in server_src and "NEWS_AI_EXAMPLE" in server_src)
     css = (ROOT / "css" / "admin.css").read_text(encoding="utf-8")
     check("css: ИИ-кнопка и прогресс", ".btn--ai" in css and ".a-ai-load" in css)
