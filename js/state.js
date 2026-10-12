@@ -2617,6 +2617,29 @@ function matchingAnswerLetters(task) {
   return [];
 }
 
+/* Частичное раскрытие для заданий-соответствий: первая пара «буква — цифра».
+   Правило одно на все задания типа (авторская работа на каждое не нужна):
+   первая буква из matchingAnswerLetters и первая цифра ответа. Одной пары
+   достаточно, чтобы стронуться с места, остальное ученик соотносит сам —
+   это средняя ступень между стратегией и показом ответа. Неполный или
+   составной ответ (|), набор без позиций — не соответствия, раскрывать
+   нечего: возвращаем null. */
+function correspondenceRevealPair(task) {
+  try {
+    if (!task) return null;
+    if (isMultiSelectTask(task)) return null;
+    const letters = matchingAnswerLetters(task);
+    if (!letters.length) return null;
+    const answer = String(task.answer ?? "").trim();
+    if (!/^\d+$/.test(answer) || answer.length !== letters.length) return null;
+    const letter = letters[0], digit = answer[0];
+    return {
+      letter, digit,
+      text: `Раскрыта пара ${letter}: ${letter} — ${digit}. Вычеркни её и соотнеси остальные сам(а).`,
+    };
+  } catch (_) { return null; }
+}
+
 /* ============================================================
    Проверка ответов
    ============================================================ */

@@ -659,7 +659,19 @@ function topicHintLevels(t) {
       ? DataAPI.skill(t.skill) : null;
     const topic = skill && skill.metadata && Array.isArray(skill.metadata.hints)
       ? skill.metadata.hints.filter((h) => String(h == null ? "" : h).trim()) : [];
-    if (topic.length >= 3) return topic.slice(0, 3);
+    if (topic.length >= 3) {
+      // Задания-соответствия: средняя ступень — вычисленное частичное
+      // раскрытие (первая пара «буква — цифра»), а не общий текст. Правило
+      // одно на весь тип и работает на любом из 100 заданий темы; крайние
+      // ступени остаются содержательными подсказками темы.
+      try {
+        if (typeof correspondenceRevealPair === "function") {
+          const rev = correspondenceRevealPair(t);
+          if (rev && rev.text) return [topic[0], rev.text, topic[2]];
+        }
+      } catch (_) {}
+      return topic.slice(0, 3);
+    }
   } catch (_) {}
   return hintLevelsFor(t);
 }

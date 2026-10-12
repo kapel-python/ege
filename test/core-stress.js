@@ -64,7 +64,7 @@ const SET_RE = /под\s+котор\S*\s+(?:они\s+)?указан|(?:запи�
 const stateSrc = read("js/state.js");
 const stateBox = {};
 vm.createContext(stateBox);
-vm.runInContext(stateSrc + "\n;globalThis.__api = { checkAnswer, matchingAnswerLetters, isMultiSelectTask, isDigitSequenceTask };", stateBox);
+vm.runInContext(stateSrc + "\n;globalThis.__api = { checkAnswer, matchingAnswerLetters, isMultiSelectTask, isDigitSequenceTask, correspondenceRevealPair, taskHelpExhaustedToday, todayStr };", stateBox);
 const S = stateBox.__api;
 
 /* Лестница помощи шага урока/задания: та функция, что рисует подсказки на
@@ -87,7 +87,7 @@ for (const [subject, cat] of Object.entries(catalogs)) {
   const skills = new Map((cat.skills || []).map((s) => [s.id, s]));
   const assetIds = new Set(((cat.visualAssets || []).map((a) => String((a && a.id) || ""))));
   let noHint = 0, noAnswer = 0, noText = 0, orphan = 0, badVisual = 0, selfNoSolution = 0;
-  let wrongRejected = 0, emptyAccepted = 0, threw = 0, sepBad = 0, orderBad = 0, commaOnNumber = 0;
+  let wrongRejected = 0, emptyAccepted = 0, threw = 0, sepBad = 0, orderBad = 0, commaOnNumber = 0, revealBad = 0;
   const samples = [];
   const blockedTasks = [];
 
@@ -148,6 +148,18 @@ for (const [subject, cat] of Object.entries(catalogs)) {
         if (!set && revOK && rev !== answer && !acceptAllowsRev) { orderBad++; samples.push(`${t.id} «${answer}» порядок смысловой, но обратный принят`); }
       }
       for (const bad of HOSTILE) S.checkAnswer(t, bad);
+      // Частичное раскрытие — только у соответствий (буквы + позиционный
+      // код): первая буква и первая цифра, полный ответ в тексте ступени
+      // светиться не должен. У чисел и наборов раскрывать нечего.
+      try {
+        const la = S.matchingAnswerLetters(t);
+        const wantRev = la.length > 0 && /^\d+$/.test(answer) && answer.length === la.length;
+        const rev = S.correspondenceRevealPair(t);
+        if (!!rev !== wantRev) { revealBad++; samples.push(`${t.id} раскрытие ${!!rev} при ожидании ${wantRev}`); }
+        else if (rev && (rev.letter !== la[0] || rev.digit !== answer[0] || !String(rev.text || "").trim() || String(rev.text).includes(answer))) {
+          revealBad++; samples.push(`${t.id} кривое раскрытие`);
+        }
+      } catch (err) { threw++; samples.push(`${t.id} раскрытие: ${err.message}`); }
     } catch (err) { threw++; samples.push(`${t.id}: ${err.message}`); }
   }
   check(`${subject}: у каждой темы три подсказки`, noHint === 0, `без подсказок: ${noHint}`);
@@ -159,6 +171,7 @@ for (const [subject, cat] of Object.entries(catalogs)) {
   check(`${subject}: набор и код требуют только цифры`, sepBad === 0, `${sepBad}: ${samples.slice(0, 3).join("; ")}`);
   check(`${subject}: число не съедает запятую как разделитель`, commaOnNumber === 0, `${commaOnNumber}: ${samples.slice(0, 3).join("; ")}`);
   check(`${subject}: порядок важен только там, где смысловой`, orderBad === 0, `${orderBad}: ${samples.slice(0, 3).join("; ")}`);
+  check(`${subject}: частичное раскрытие только у соответствий и без утечки ответа`, revealBad === 0, `${revealBad}: ${samples.slice(0, 3).join("; ")}`);
   // Задания без рисунка сервер не отдаёт — это зазор контента, не поломка ядра.
   // Но такая блокировка обязана быть объяснена: молча пропавшее задание —
   // это невидимая дыра, которую никто не починит.
@@ -168,6 +181,27 @@ for (const [subject, cat] of Object.entries(catalogs)) {
     console.log(`     · ${subject}: не отдаётся из-за рисунка: ${badVisual} (все с причиной)`);
   }
   if (selfNoSolution) console.log(`     · ${subject}: заданий на самопроверку без решения: ${selfNoSolution}`);
+}
+
+/* Кулдаун уставших заданий: ответ показывали сегодня — повтор только завтра. */
+{
+  vm.runInContext("globalThis.__savedSt = Store.state;", stateBox);
+  try {
+    const noon = Date.parse(S.todayStr() + "T12:00:00+03:00");
+    const setAtt = (att) => vm.runInContext("Store.state = " + JSON.stringify({ taskAttempts: att }), stateBox);
+    setAtt([]);
+    check("кулдаун: без попыток не уставшее", S.taskHelpExhaustedToday("r22_1") === false);
+    setAtt([{ taskId: "r22_1", hintLevel: 3, ts: noon }]);
+    check("кулдаун: показ сегодня — уставшее", S.taskHelpExhaustedToday("r22_1") === true);
+    check("кулдаун: чужое задание не уставшее", S.taskHelpExhaustedToday("r22_2") === false);
+    setAtt([{ taskId: "r22_1", hintLevel: 3, ts: noon - 86400000 }]);
+    check("кулдаун: вчерашний показ — уже свежее", S.taskHelpExhaustedToday("r22_1") === false);
+    setAtt([{ taskId: "r22_1", hintLevel: 2, ts: noon }]);
+    check("кулдаун: две подсказки без показа — не уставшее", S.taskHelpExhaustedToday("r22_1") === false);
+    check("кулдаун: мусорный id безопасен", S.taskHelpExhaustedToday(null) === false && S.taskHelpExhaustedToday() === false);
+  } finally {
+    try { vm.runInContext("Store.state = globalThis.__savedSt; delete globalThis.__savedSt;", stateBox); } catch (_) {}
+  }
 }
 
 /* ==================== 3. живой поток практики ==================== */
