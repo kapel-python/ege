@@ -545,7 +545,7 @@ def main():
         s, body = request(user, base, "/api/subscription/promo/quote", "POST",
                           {"period": "month", "code": "ONCE10"})
         check("повторное применение этим человеком запрещено",
-              s == 400 and "уже использовал" in str(body), f"{s} {body}")
+              s == 400 and "уже использован" in str(body), f"{s} {body}")
         u7 = make_device("10.9.0.7")
         onboard(u7, base, "Второй", "10.9.0.7")
         s, body = request(u7, base, "/api/subscription/promo/quote", "POST",

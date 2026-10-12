@@ -138,14 +138,14 @@ try:
     check("повторная активация тем же человеком заблокирована", False)
 except ValueError as e:
     check("повторная активация тем же человеком заблокирована",
-          "уже использовал" in str(e), e)
+          "уже использован" in str(e), e)
 q_other = sub.promo_quote(conn, "LETO20", "month", user_id=2)
 check("другому человеку код доступен", q_other["finalKopecks"] == exp_final)
 try:
     sub.create_checkout(conn, 1, "month", sub.PROVIDER_MOCK, "key-disc-3", "LETO20")
     check("счёт после активации не создаётся", False)
 except ValueError as e:
-    check("счёт после активации не создаётся", "уже использовал" in str(e), e)
+    check("счёт после активации не создаётся", "уже использован" in str(e), e)
 out2 = sub.create_checkout(conn, 2, "month", sub.PROVIDER_MOCK, "key-disc-4", "LETO20")
 check("другому человеку счёт создаётся",
       out2["status"] == "pending" and out2["promo"] == "LETO20")
@@ -175,7 +175,7 @@ try:
     sub.create_checkout(conn, 1, "year", sub.PROVIDER_MOCK, "key-free-u2", "FREEU")
     check("100%-код одному человеку — один раз", False)
 except ValueError as e:
-    check("100%-код одному человеку — один раз", "уже использовал" in str(e), e)
+    check("100%-код одному человеку — один раз", "уже использован" in str(e), e)
 # Бэкфилл: у старых строк код лежал только в payload_json.
 conn.execute("INSERT INTO subscription_payments"
              " (user_id, amount_kopecks, period, status, provider, public_id,"
