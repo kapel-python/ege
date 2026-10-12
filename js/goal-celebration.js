@@ -23,7 +23,7 @@
    ============================================================ */
 
 var COPY={sub:'Прогноз вышел на целевой уровень — это стоит отметить.',live:'Цель достигнута: ',
-  wish:'<strong class="gc-g">Удачи на ЕГЭ!</strong><span class="st">Ты проделал большую работу. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
+  wish:'<strong class="gc-g">Удачи на ЕГЭ!</strong><span class="st">За плечами — большая работа. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
 
 var $=function(i){try{return (typeof document!=='undefined'&&document)?document.getElementById(i):null}catch(e){return null}};
 var RM=(typeof matchMedia!=='undefined')?matchMedia('(prefers-reduced-motion: reduce)').matches:false;
@@ -64,7 +64,7 @@ var GcTemplate=`<div class="gc-ov" id="gc-ov" role="dialog" aria-modal="true" ar
           <div class="gc-tile"><div class="gc-v"><span id="gc-vTop">0</span> <small id="gc-vTopT"></small></div><div class="gc-l">уроков пройдено</div><div class="gc-seg" id="gc-seg"></div></div>
           <div class="gc-tile"><div class="gc-v"><span id="gc-vAvg">0</span> <small id="gc-vAvgU"></small></div><div class="gc-l" id="gc-lAvg"></div>
             <svg class="gc-ring2" viewBox="0 0 38 38"><circle class="gc-t" cx="19" cy="19" r="15"/><circle class="gc-p" pathLength="1" cx="19" cy="19" r="15"/><path class="gc-h" d="M19 11v8l5 3"/></svg></div>
-          <div class="gc-tile"><div class="gc-v">+<span id="gc-vGain">0</span></div><div class="gc-l" id="gc-lGain"></div><div class="gc-trk"><b></b></div></div>
+          <div class="gc-tile"><div class="gc-v"><span id="gc-vGain">0</span></div><div class="gc-l" id="gc-lGain"></div><div class="gc-trk"><b></b></div></div>
         </div>
 
         <div class="gc-tiles gc-rise" id="gc-bT2">
@@ -154,8 +154,8 @@ async function type(el){var ws=el._w||prep(el),step=Math.min(45,Math.max(24,900/
 
 function follow(el){if(userScrolled||dead)return;sc.scrollTo({top:Math.max(0,el.offsetTop+el.offsetHeight-sc.clientHeight+20),behavior:RM?'auto':'smooth'})}
 async function reveal(el){el.classList.add('gc-is-in');follow(el);await wait(380)}
-function count(el,to,dur){var t0=performance.now(),tk=skipTick;if(RM){el.textContent=to;return}
-  (function f(n){var k=Math.min(1,(n-t0)/(dur||1000));if(skipTick!==tk)k=1;el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1&&!dead)requestAnimationFrame(f)})(t0)}
+function count(el,to,dur,pre){var t0=performance.now(),tk=skipTick;if(RM){el.textContent=(pre||'')+to;return}
+  (function f(n){var k=Math.min(1,(n-t0)/(dur||1000));if(skipTick!==tk)k=1;el.textContent=(pre||'')+Math.round(to*(1-Math.pow(1-k,3)));if(k<1&&!dead)requestAnimationFrame(f)})(t0)}
 
 /* герой: число набирается, кольцо замыкается */
 function heroCount(goal,dur){return new Promise(function(res){
@@ -165,7 +165,8 @@ function heroCount(goal,dur){return new Promise(function(res){
 function chime(){try{var AC=(typeof window!=='undefined')?(window.AudioContext||window.webkitAudioContext):null;if(!AC)return;var A=new AC(),t=A.currentTime;if(A.resume)A.resume();
   [660,880,1320].forEach(function(fr,i){var o=A.createOscillator(),g=A.createGain(),s=t+i*.09;o.type='sine';o.frequency.value=fr;
     g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.06,s+.02);g.gain.exponentialRampToValueAtTime(.0001,s+.9);
-    o.connect(g);g.connect(A.destination);o.start(s);o.stop(s+1)})}catch(e){}}
+    o.connect(g);g.connect(A.destination);o.start(s);o.stop(s+1)});
+    try{setTimeout(function(){try{if(A&&A.close)A.close()}catch(e){}},1600)}catch(e){}}catch(e){}}
 
 /* фейерверки */
 function fireworks(){return new Promise(function(res){
@@ -246,7 +247,7 @@ async function stage2(d){
   card.style.height=Math.min(660,vh()-32)+'px';card.focus({preventScroll:true});await wait(600);if(dead)return;
 
   $('gc-chart').innerHTML=c.html;$('gc-daysL').textContent=plural(c.days,['день','дня','дней'])+' в пути';
-  var tot=d.topicsTotal||d.topicsDone,on=Math.round(d.topicsDone/tot*12),sg='';
+  var tot=d.topicsTotal||d.topicsDone||1,on=Math.round(d.topicsDone/tot*12),sg='';
   for(var i=0;i<12;i++)sg+='<i style="--i:'+i+'"'+(i<on?' class="gc-on"':'')+'></i>';
   $('gc-seg').innerHTML=sg;$('gc-vTopT').textContent=d.topicsTotal?'/ '+d.topicsTotal:'';
   $('gc-vAvgU').textContent=d.avg.unit;$('gc-lAvg').textContent=d.avg.label;
@@ -260,7 +261,7 @@ async function stage2(d){
   $('gc-bAct').hidden=!cal;
   if(cal){var ch='';cal.lv.forEach(function(l,i){ch+='<i class="'+(l?'gc-l'+l:'')+'" style="--i:'+i+'"></i>'});
     $('gc-cal').innerHTML=ch;$('gc-cal').style.setProperty('--st',(1.2/cal.n).toFixed(3)+'s');
-    $('gc-lAct').textContent='из '+cal.days+' '+plural(cal.days,['дня','дней','дней'])+' ты занимался'}
+    $('gc-lAct').textContent='из '+cal.days+' '+plural(cal.days,['дня','дней','дней'])+' — с занятиями'}
   var ac=(d.achievements||[]).slice(0,4);$('gc-bAch').hidden=!ac.length;
   $('gc-ach').innerHTML=ac.map(function(a,i){return '<div style="--i:'+i+'"><b>'+STAR+'</b>'+(a.title||a)+'</div>'}).join('');
 
@@ -268,7 +269,7 @@ async function stage2(d){
   await reveal($('gc-e1'));await type($('gc-h2'));if(dead)return;
   await reveal($('gc-bChart'));$('gc-bChart').classList.add('gc-run');count($('gc-days'),c.days,1400);await wait(2500);if(dead)return;
   await reveal($('gc-bTiles'));$('gc-bTiles').classList.add('gc-run');
-  count($('gc-vTop'),d.topicsDone,1100);count($('gc-vAvg'),d.avg.value,1100);count($('gc-vGain'),c.gain,1100);await wait(1600);if(dead)return;
+  count($('gc-vTop'),d.topicsDone,1100);count($('gc-vAvg'),d.avg.value,1100);count($('gc-vGain'),c.gain,1100,c.gain>0?'+':'');await wait(1600);if(dead)return;
   if(!$('gc-bT2').hidden){await reveal($('gc-bT2'));$('gc-bT2').classList.add('gc-run');count($('gc-vBest'),c.best.gain,1000);count($('gc-vStr'),d.streak||0,1000);await wait(1400);if(dead)return}
   if(!$('gc-bAct').hidden){await reveal($('gc-bAct'));$('gc-bAct').classList.add('gc-run');count($('gc-vAct'),cal.active,1200);await wait(2000);if(dead)return}
   if(!$('gc-bAch').hidden){await reveal($('gc-bAch'));$('gc-bAch').classList.add('gc-run');await wait(1400);if(dead)return}
@@ -278,7 +279,7 @@ async function stage2(d){
 
 function close(){
   dead=true;skipOn=false;timers.forEach(clearTimeout);timers=[];pend=[];if(typeof cancelAnimationFrame!=='undefined'){try{cancelAnimationFrame(raf)}catch(e){}}
-  ov.hidden=true;root.style.overflow=prevOverflow;if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  ov.hidden=true;if(root.style.overflow==='hidden')root.style.overflow=prevOverflow;if(lastFocus&&lastFocus.focus)lastFocus.focus();
   if(onCloseCb)onCloseCb()}
 
 function normalizeCelebration(input){
@@ -286,7 +287,7 @@ function normalizeCelebration(input){
   var goal=Number(d.goal);if(!Number.isFinite(goal))return null;
   var src=d.history||[],hist=[];
   for(var i=0;i<src.length;i++){var p=src[i];if(!p)continue;var s=Number(p.score);
-    if(p.t&&Number.isFinite(s))hist.push({t:String(p.t),score:s})}
+    if(p.t&&Number.isFinite(s)&&!isNaN(Date.parse(p.t)))hist.push({t:String(p.t),score:s})}
   if(!hist.length)return null;
   var done=Math.max(0,Math.floor(Number(d.topicsDone)||0));
   var tot=(d.topicsTotal==null||d.topicsTotal==='')?null:Math.max(0,Math.floor(Number(d.topicsTotal)||0));
@@ -315,7 +316,7 @@ GcGlobal.openGoalCelebration=function(data){
   fit();
   $('gc-h1').innerHTML='Твоя цель <b class="gc-g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!';
   $('gc-sub').textContent=COPY.sub;$('gc-live').textContent=COPY.live+d.goal;
-  $('gc-h2').textContent='Вот как ты к этому шёл';$('gc-wishT').innerHTML=COPY.wish;
+  $('gc-h2').textContent='Вот твой путь к цели';$('gc-wishT').innerHTML=COPY.wish;
   [$('gc-h1'),$('gc-sub'),$('gc-h2'),$('gc-wishT')].forEach(arm);
   $('gc-goP').disabled=$('gc-cls1').disabled=false;
   ov.hidden=false;card.focus({preventScroll:true});

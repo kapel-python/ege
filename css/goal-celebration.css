@@ -45,8 +45,8 @@
 .gc-btn.gc-lg{padding:13px 26px;font-size:15px;width:100%}
 .gc-btn.gc-pri{background:var(--btn-primary-bg);color:#fff;box-shadow:var(--btn-primary-shadow)}
 .gc-btn.gc-pri:hover{background:var(--btn-primary-hover);box-shadow:var(--btn-primary-shadow),0 0 20px var(--accent-glow)}
-.gc-btn.gc-ghost{background:transparent;border-color:var(--border-strong);color:var(--text)}
-.gc-btn.gc-ghost:hover{background:var(--surface-3)}
+.gc-btn.gc-ghost{background:transparent;border-color:var(--border-strong);color:var(--text-2)}
+.gc-btn.gc-ghost:hover{border-color:var(--accent);color:var(--text);background:transparent}
 .gc-btn:disabled{opacity:.45;cursor:default}
 .gc-acts{display:grid;gap:10px;margin-top:26px;visibility:hidden;opacity:0}
 .gc-acts.gc-is-ready{visibility:visible;animation:gc-rise .32s cubic-bezier(.2,.7,.2,1) forwards}

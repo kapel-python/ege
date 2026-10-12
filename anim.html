@@ -13,7 +13,7 @@
     else if (!_t && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) { document.documentElement.dataset.theme = "dark"; }
   } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=48">
+<link rel="stylesheet" href="css/styles.css?v=55">
 <style>
 /* Токены и шрифт (--font) — из css/styles.css сайта, подключённого в <head>.
    В конце файла есть .gc-nocss fallback — включается, только если сайт-стили не загрузились. */
@@ -64,8 +64,8 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--fo
 .btn.lg{padding:13px 26px;font-size:15px;width:100%}
 .btn.pri{background:var(--btn-primary-bg);color:#fff;box-shadow:var(--btn-primary-shadow)}
 .btn.pri:hover{background:var(--btn-primary-hover);box-shadow:var(--btn-primary-shadow),0 0 20px var(--accent-glow)}
-.btn.ghost{background:transparent;border-color:var(--border-strong);color:var(--text)}
-.btn.ghost:hover{background:var(--surface-3)}
+.btn.ghost{background:transparent;border-color:var(--border-strong);color:var(--text-2)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--text);background:transparent}
 .btn:disabled{opacity:.45;cursor:default}
 .acts{display:grid;gap:10px;margin-top:26px;visibility:hidden;opacity:0}
 .acts.is-ready{visibility:visible;animation:rise .32s cubic-bezier(.2,.7,.2,1) forwards}
@@ -211,10 +211,10 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--fo
         </div>
 
         <div class="tiles rise" id="bTiles">
-          <div class="tile"><div class="v"><span id="vTop">0</span> <small id="vTopT"></small></div><div class="l">тем пройдено</div><div class="seg" id="seg"></div></div>
+          <div class="tile"><div class="v"><span id="vTop">0</span> <small id="vTopT"></small></div><div class="l">уроков пройдено</div><div class="seg" id="seg"></div></div>
           <div class="tile"><div class="v"><span id="vAvg">0</span> <small id="vAvgU"></small></div><div class="l" id="lAvg"></div>
             <svg class="ring2" viewBox="0 0 38 38"><circle class="t" cx="19" cy="19" r="15"/><circle class="p" pathLength="1" cx="19" cy="19" r="15"/><path class="h" d="M19 11v8l5 3"/></svg></div>
-          <div class="tile"><div class="v">+<span id="vGain">0</span></div><div class="l" id="lGain"></div><div class="trk"><b></b></div></div>
+          <div class="tile"><div class="v"><span id="vGain">0</span></div><div class="l" id="lGain"></div><div class="trk"><b></b></div></div>
         </div>
 
         <div class="tiles rise" id="bT2">
@@ -252,8 +252,8 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--fo
    openGoalCelebration({
      goal: 60,                                   // целевой балл
      history: [{t:'2026-08-16', score:34}, ...], // история прогноза: дата + балл (от старта до достижения цели)
-     topicsDone: 41, topicsTotal: 52,            // пройдено тем / всего (topicsTotal можно не передавать)
-     avg: {value:19, unit:'мин', label:'в среднем на тему'},
+     topicsDone: 41, topicsTotal: 52,            // пройдено уроков / всего (topicsTotal можно не передавать)
+     avg: {value:19, unit:'мин', label:'в среднем на урок'},
      streak: 14,                                 // необязательно: текущая серия дней (плитка скроется, если нет)
      activity: ['2026-08-16', ...],              // необязательно: даты занятий (или [{t, value}]) — блок скроется, если нет
      achievements: ['Неделя в строю', ...],      // необязательно: названия открытых достижений (до 4 показываются)
@@ -265,11 +265,11 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--fo
    openGoalCelebration(collectGoalData(goalNum)).
    ============================================================ */
 var DEMO={goal:60,history:[{t:'2026-08-16',score:34},{t:'2026-08-25',score:38},{t:'2026-09-03',score:44},{t:'2026-09-14',score:50},{t:'2026-09-23',score:55},{t:'2026-10-02',score:60}],
-  topicsDone:41,topicsTotal:52,avg:{value:19,unit:'мин',label:'в среднем на тему'},streak:14,
+  topicsDone:41,topicsTotal:52,avg:{value:19,unit:'мин',label:'в среднем на урок'},streak:14,
   activity:(function(){var a=[],s=+new Date('2026-08-16');for(var i=0;i<=47;i++){if(i%7!==3&&i%11!==5)a.push({t:new Date(s+i*864e5).toISOString().slice(0,10),value:1+(i*7)%4})}return a})(),
   achievements:['Неделя в строю','Первая сотня','Безошибочная серия','Первый босс']};
 var COPY={sub:'Прогноз вышел на целевой уровень — это стоит отметить.',live:'Цель достигнута: ',
-  wish:'<strong class="g">Удачи на ЕГЭ!</strong><span class="st">Ты проделал большую работу. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
+  wish:'<strong class="g">Удачи на ЕГЭ!</strong><span class="st">За плечами — большая работа. Теперь главное — спокойствие и уверенность. Всё получится.</span>'};
 
 var $=function(i){return document.getElementById(i)};
 var RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -307,8 +307,8 @@ async function type(el){var ws=el._w||prep(el),step=Math.min(45,Math.max(24,900/
 
 function follow(el){if(userScrolled||dead)return;sc.scrollTo({top:Math.max(0,el.offsetTop+el.offsetHeight-sc.clientHeight+20),behavior:RM?'auto':'smooth'})}
 async function reveal(el){el.classList.add('is-in');follow(el);await wait(380)}
-function count(el,to,dur){var t0=performance.now(),tk=skipTick;if(RM){el.textContent=to;return}
-  (function f(n){var k=Math.min(1,(n-t0)/(dur||1000));if(skipTick!==tk)k=1;el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1&&!dead)requestAnimationFrame(f)})(t0)}
+function count(el,to,dur,pre){var t0=performance.now(),tk=skipTick;if(RM){el.textContent=(pre||'')+to;return}
+  (function f(n){var k=Math.min(1,(n-t0)/(dur||1000));if(skipTick!==tk)k=1;el.textContent=(pre||'')+Math.round(to*(1-Math.pow(1-k,3)));if(k<1&&!dead)requestAnimationFrame(f)})(t0)}
 
 /* герой: число набирается, кольцо замыкается */
 function heroCount(goal,dur){return new Promise(function(res){
@@ -318,7 +318,8 @@ function heroCount(goal,dur){return new Promise(function(res){
 function chime(){try{var A=new(window.AudioContext||window.webkitAudioContext)(),t=A.currentTime;if(A.resume)A.resume();
   [660,880,1320].forEach(function(fr,i){var o=A.createOscillator(),g=A.createGain(),s=t+i*.09;o.type='sine';o.frequency.value=fr;
     g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.06,s+.02);g.gain.exponentialRampToValueAtTime(.0001,s+.9);
-    o.connect(g);g.connect(A.destination);o.start(s);o.stop(s+1)})}catch(e){}}
+    o.connect(g);g.connect(A.destination);o.start(s);o.stop(s+1)});
+    try{setTimeout(function(){try{if(A&&A.close)A.close()}catch(e){}},1600)}catch(e){}}catch(e){}}
 
 /* фейерверки */
 function fireworks(){return new Promise(function(res){
@@ -399,7 +400,7 @@ async function stage2(d){
   card.style.height=Math.min(660,vh()-32)+'px';card.focus({preventScroll:true});await wait(600);if(dead)return;
 
   $('chart').innerHTML=c.html;$('daysL').textContent=plural(c.days,['день','дня','дней'])+' в пути';
-  var tot=d.topicsTotal||d.topicsDone,on=Math.round(d.topicsDone/tot*12),sg='';
+  var tot=d.topicsTotal||d.topicsDone||1,on=Math.round(d.topicsDone/tot*12),sg='';
   for(var i=0;i<12;i++)sg+='<i style="--i:'+i+'"'+(i<on?' class="on"':'')+'></i>';
   $('seg').innerHTML=sg;$('vTopT').textContent=d.topicsTotal?'/ '+d.topicsTotal:'';
   $('vAvgU').textContent=d.avg.unit;$('lAvg').textContent=d.avg.label;
@@ -413,7 +414,7 @@ async function stage2(d){
   $('bAct').hidden=!cal;
   if(cal){var ch='';cal.lv.forEach(function(l,i){ch+='<i class="'+(l?'l'+l:'')+'" style="--i:'+i+'"></i>'});
     $('cal').innerHTML=ch;$('cal').style.setProperty('--st',(1.2/cal.n).toFixed(3)+'s');
-    $('lAct').textContent='из '+cal.days+' '+plural(cal.days,['дня','дней','дней'])+' ты занимался'}
+    $('lAct').textContent='из '+cal.days+' '+plural(cal.days,['дня','дней','дней'])+' — с занятиями'}
   var ac=(d.achievements||[]).slice(0,4);$('bAch').hidden=!ac.length;
   $('ach').innerHTML=ac.map(function(a,i){return '<div style="--i:'+i+'"><b>'+STAR+'</b>'+(a.title||a)+'</div>'}).join('');
 
@@ -421,7 +422,7 @@ async function stage2(d){
   await reveal($('e1'));await type($('h2'));if(dead)return;
   await reveal($('bChart'));$('bChart').classList.add('run');count($('days'),c.days,1400);await wait(2500);if(dead)return;
   await reveal($('bTiles'));$('bTiles').classList.add('run');
-  count($('vTop'),d.topicsDone,1100);count($('vAvg'),d.avg.value,1100);count($('vGain'),c.gain,1100);await wait(1600);if(dead)return;
+  count($('vTop'),d.topicsDone,1100);count($('vAvg'),d.avg.value,1100);count($('vGain'),c.gain,1100,c.gain>0?'+':'');await wait(1600);if(dead)return;
   if(!$('bT2').hidden){await reveal($('bT2'));$('bT2').classList.add('run');count($('vBest'),c.best.gain,1000);count($('vStr'),d.streak||0,1000);await wait(1400);if(dead)return}
   if(!$('bAct').hidden){await reveal($('bAct'));$('bAct').classList.add('run');count($('vAct'),cal.active,1200);await wait(2000);if(dead)return}
   if(!$('bAch').hidden){await reveal($('bAch'));$('bAch').classList.add('run');await wait(1400);if(dead)return}
@@ -431,7 +432,7 @@ async function stage2(d){
 
 function close(){
   dead=true;skipOn=false;timers.forEach(clearTimeout);timers=[];pend=[];cancelAnimationFrame(raf);
-  ov.hidden=true;root.style.overflow=prevOverflow;if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  ov.hidden=true;if(root.style.overflow==='hidden')root.style.overflow=prevOverflow;if(lastFocus&&lastFocus.focus)lastFocus.focus();
   if(onCloseCb)onCloseCb()}
 
 window.openGoalCelebration=function(data){
@@ -445,7 +446,7 @@ window.openGoalCelebration=function(data){
   fit();
   $('h1').innerHTML='Твоя цель <b class="g">'+d.goal+'</b> '+plural(d.goal,['балл','балла','баллов'])+' достигнута!';
   $('sub').textContent=COPY.sub;$('live').textContent=COPY.live+d.goal;
-  $('h2').textContent='Вот как ты к этому шёл';$('wishT').innerHTML=COPY.wish;
+  $('h2').textContent='Вот твой путь к цели';$('wishT').innerHTML=COPY.wish;
   [$('h1'),$('sub'),$('h2'),$('wishT')].forEach(arm);
   $('goP').disabled=$('cls1').disabled=false;
   ov.hidden=false;card.focus({preventScroll:true});
