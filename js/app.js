@@ -1125,6 +1125,7 @@ const HELP = {
     body: `
       <p>Карта всех тем экзамена и твой прогресс по каждой.</p>
       <p>Идти можно в любом порядке — всё открыто сразу, запретов нет.</p>
+      <p>Незакрытые ошибки темы видны прямо на карте — «на разбор: N». Это не статус темы, а напоминание повторить: статус честно показывает освоение.</p>
       <p>Нажми на тему — откроются урок, тренировка и твои ошибки.</p>`,
   },
   training: {
@@ -4097,8 +4098,14 @@ function screenPath(root) {
                раньше — её открывает render(). */
             const openAction = locked ? `openLockedSkillModal('${esc(skill.id)}')` : `openSkillModal('${esc(skill.id)}')`;
             const ege = skill.ege || skill.examNumber || "тема ЕГЭ";
+            /* Ошибка и освоение — две разные оси. Статус честно показывает
+               освоение (0% — «в процессе», а не «слабое место»), а незакрытые
+               ошибки видны отдельным маркером прямо на строке: промах учтён
+               и ждёт разбора, но не превращается в ложный диагноз теме. */
+            const openErrs = locked ? 0 : openErrorCount(skill.id);
+            const errLabel = openErrs ? `, ошибок на разбор: ${openErrs}` : "";
             return `
-            <div class="tree-node tree-node--${status}" data-topic-locked="${locked ? "true" : "false"}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(skill))}"${locked ? ' aria-haspopup="dialog"' : ""}>
+            <div class="tree-node tree-node--${status}" data-topic-locked="${locked ? "true" : "false"}" onclick="${openAction}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${openAction}}" aria-label="${locked ? "Посмотреть информацию о закрытой теме" : "Открыть тему"} ${esc(topicDisplayName(skill))}${esc(errLabel)}"${locked ? ' aria-haspopup="dialog"' : ""}>
               <div class="tree-node__dot"></div>
               <div class="tree-node__body">
                 <div class="tree-node__name">${esc(topicDisplayName(skill))}
@@ -4109,6 +4116,7 @@ function screenPath(root) {
                     <div class="tree-node__bar">${progressBar(progressValue, "progress--thin progress--gauge")}</div>
                     <span class="mono">${progressValue}%</span>
                     <span>· ${esc(ege)}</span>
+                    ${openErrs ? `<span class="chip chip--danger">на разбор: ${openErrs}</span>` : ""}
                   </div>`}
               </div>
               <div class="tree-node__lock">${icon(locked ? "lock" : "arrow")}</div>

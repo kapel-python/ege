@@ -606,6 +606,30 @@ check(
   && sandbox.realWeakStatus === "weak" && sandbox.touchedNothing === "not-started",
   `skip=${sandbox.skipStatus}, zero=${sandbox.zeroStatus}, weak=${sandbox.realWeakStatus}, empty=${sandbox.touchedNothing}`,
 );
+/* Ошибка на 0% не превращается в «слабое место», но и не исчезает: строка
+   темы на карте показывает «на разбор: N», а статус остаётся честным.
+   Без открытых ошибок маркера нет. */
+vm.runInContext(`
+  DataAPI.load(russianPayload);
+  Store.subject = "russian";
+  Store.state = Store.defaultState();
+  Store.state.onboarded = true;
+  Store.state.skillStats = { r10: { progress: 0, solved: 1, correct: 0, timeSec: 0 } };
+  Store.state.taskAttempts = [{ taskId: "r10_1", skill: "r10", correct: false, hintLevel: 0, skipped: false }];
+  Store.state.errors = [{ clientId: "e1", taskId: "r10_1", skill: "r10", sub: "X", ts: 1, resolved: false, kind: "major" }];
+  screenPath(document.getElementById("screen"));
+  globalThis.pathErrHtml = document.getElementById("screen").innerHTML;
+  Store.state.errors = [];
+  screenPath(document.getElementById("screen"));
+  globalThis.pathCleanHtml = document.getElementById("screen").innerHTML;
+`, sandbox);
+check(
+  "PATH node marks open errors for review without faking a weak status",
+  sandbox.pathErrHtml.includes("на разбор: 1")
+  && sandbox.pathErrHtml.includes("tree-node--in-progress")
+  && !sandbox.pathCleanHtml.includes("на разбор:"),
+  sandbox.pathErrHtml.includes("на разбор: 1") ? "marker ok" : "no marker",
+);
 
 // Служебная синхронизация вкладок не должна превращаться в пользовательские
 // уведомления. Параллельно проверяем, что обычные достижения по-прежнему видны.
