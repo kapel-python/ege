@@ -169,3 +169,22 @@
 :where(.btn--soft) { background: var(--surface-3, var(--surface-2)); color: var(--text); }
 :where(.btn--soft:hover) { background: var(--soft-hover, var(--surface-2)); }
 :where(.btn:disabled) { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- новости в .dlg-модалке и на /news ----------
+   Тело новости — серверный allowlist-HTML (p/h2/h3/списки/цитата/ссылка/
+   разделитель/двухколоночный блок). Стили только чтение, без редактора. */
+.news-body { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.news-body p { margin: 0 0 10px; }
+.news-body h2 { font-size: 17px; margin: 14px 0 8px; }
+.news-body h3 { font-size: 15px; margin: 12px 0 6px; }
+.news-body ul, .news-body ol { margin: 0 0 10px; padding-left: 22px; }
+.news-body li { margin: 3px 0; }
+.news-body blockquote { margin: 0 0 10px; padding: 10px 12px; border-left: 3px solid var(--accent, var(--purple)); border-radius: 0 10px 10px 0; background: var(--surface-3, var(--surface-2)); }
+.news-body blockquote p { margin: 0; }
+.news-body pre { background: var(--surface-3, var(--surface-2)); border-radius: 10px; padding: 10px 12px; overflow-x: auto; font-size: 13px; margin: 0 0 10px; }
+.news-body code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.92em; }
+.news-body a { text-decoration: underline; text-underline-offset: 2px; }
+.news-body hr { border: none; border-top: 1px solid var(--card-border, var(--ghost-ring, rgba(127,127,127,.35))); margin: 14px 0; }
+.news-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 10px; }
+.news-col { min-width: 0; }
+@media (max-width: 480px) { .news-cols { grid-template-columns: 1fr; } }

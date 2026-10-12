@@ -7,6 +7,7 @@
   - `python3 test/admin-inbox-security.py` (83 критические проверки Admin Inbox: видимость блока guest/юзер/admin, исчезновение при logout/отзыве/истечении сессий/admin-logout/удалении аккаунта/смене аккаунта, обход авторизации чужими и подменёнными куками и query, отсутствие утечек в bootstrap и 401, пагинация/порядок/«Прочитано»/аудит; свой temp-БД, живой сервер)
   - `python3 test/admin-inbox.py` (контракт endpoint'ов обращений: поля `{id,message,status,source,createdAt}`, системные обращения `source='system'` с дедуплем и полными правами обычного обращения)
   - `python3 test/admin-block.py` (контракт бана: маршрут `POST /api/admin/users/<ref>/block|unblock`, сверка действий панели с backend'ом, явный 404 вместо общего «Not found», сроки/self-block/неизвестный ref, 403 ACCOUNT_BLOCKED, ленивое истечение, аудит; свой temp-БД, живой сервер)
+  - `python3 test/news.py` (контракт новостей: удаление раздела «Заблокированные» из админки и API, CRUD `/api/admin/news` + PUT/DELETE за require_admin, санитайзер, публичка `/api/news` и `/news`, модалка только последняя/только своим/со снимком регистрации/со сроком; свой temp-БД, живой сервер)
   - `node test/smoke.js`
   - `node test/seo.js` (robots/sitemap/meta/иконки + SEO-страницы /ege/ и публичный вход)
   - `python3 test/seo-task-pages.py` (SEO-страницы заданий на живом сервере с temp-БД: /ege/, хаб предмета, страница номера с разбором и CTA, 301 на канон, 404, sitemap/robots, /dashboard по-прежнему noindex, профилей не заводит)
@@ -120,7 +121,7 @@
 - lint: `python3 -m py_compile server/server.py server/agent.py server/ai.py server/backup.py`
 
 ## Индекс тестов
-- Админка, обращения, бан, аудит, Telegram: `test/admin-inbox-security.py`, `test/admin-inbox.py`, `test/admin-block.py`, `test/support-message.py`, `test/audit-log.py`, `test/admin-inbox-ui.js`, `test/audit-log-ui.js`, `test/admin-providers-ui.js`, `test/admin-subscription-ui.js`, `test/admin-telegram.py`, `test/admin.js`
+- Админка, обращения, бан, аудит, Telegram: `test/admin-inbox-security.py`, `test/admin-inbox.py`, `test/admin-block.py`, `test/news.py`, `test/support-message.py`, `test/audit-log.py`, `test/admin-inbox-ui.js`, `test/audit-log-ui.js`, `test/admin-providers-ui.js`, `test/admin-subscription-ui.js`, `test/admin-telegram.py`, `test/admin.js`
 - Периметр, целостность, атаки, края HTTP, AI injection: `test/perimeter-security.py`, `test/db-integrity-security.py`, `test/adversarial.py`, `test/security.js`, `test/http-edges.py`, `test/backup-hygiene.py`, `test/ai-injection.py`
 - Auth, гость, устройства: `test/auth.py`, `test/auth-audit.py`, `test/auth-merge.js`, `test/guest-onboarding.py`, `test/device-dedup.py`, `test/device-names.py`, `test/google-auth.py`, `test/store-save-e2e.py`
 - Предметы, профиль, состояние: `test/onboard-subject.py`, `test/russian-subject.py`, `test/subject-profile.py`, `test/subject-contract.py`, `test/subject-ui.js`, `test/russian-subject.js`, `test/russian-orthoepy.py`, `test/subject-switch.js`, `test/subject-auth.py`, `test/domain-state.py`, `test/occ.py`, `test/biology-subject.py`, `test/history-subject.py`, `test/history-subject.js`, `test/task-check-type.py`, `test/streak-freeze.py`, `test/streak-freeze-ui.js`, `test/streak-freeze-http.py`

@@ -231,6 +231,7 @@ const AdminApi = {
   get(path) { return this.request(path); },
   post(path, body) { return this.request(path, { method: "POST", body: JSON.stringify(body) }); },
   put(path, body) { return this.request(path, { method: "PUT", body: JSON.stringify(body) }); },
+  del(path) { return this.request(path, { method: "DELETE" }); },
 };
 
 /* ---------------- тема / тосты ---------------- */
@@ -259,7 +260,7 @@ function toast(message, kind = "ok") {
 const AICONS = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c0-3.4 3-5.6 6.5-5.6s6.5 2.2 6.5 5.6"/><circle cx="17.5" cy="9" r="2.6"/><path d="M16.8 14.6c2.9.3 4.7 2.2 4.7 4.9"/></svg>',
-  blocked: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8M16 8L8 16"/><path d="M12 8v8M8 12h8" stroke-width="1.5"/></svg>',
+  news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l14-6v14L3 13v-2z"/><path d="M7 13.5V18a1.5 1.5 0 0 0 1.5 1.5h6A1.5 1.5 0 0 0 16 18v-3.5M19 9a2 2 0 1 1 0 4"/></svg>',
   audit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>',
@@ -309,7 +310,7 @@ const SECTIONS = [
   { id: "inbox", title: "Обращения", short: "Обращения", icon: "inbox" },
   { id: "users", title: "Пользователи", short: "Люди", icon: "users" },
   { id: "subscription", title: "Подписка", short: "Plus", icon: "crown" },
-  { id: "blocked", title: "Заблокированные", short: "Блокировки", icon: "blocked" },
+  { id: "news", title: "Новости", short: "Новости", icon: "news" },
   { id: "audit", title: "Журнал действий", short: "Журнал", icon: "audit" },
 ];
 
@@ -5297,40 +5298,222 @@ function openPromoModal() {
   });
 }
 
-async function screenBlocked() {
-  let data;
-  try { data = await AdminApi.get("/api/admin/blocked-tasks"); } catch (e) {
+async function screenNews() {
+  let items = [];
+  try {
+    const data = await AdminApi.get("/api/admin/news");
+    items = data.news || [];
+  } catch (e) {
     if (e.unauthorized) { A.session = null; renderLogin(e.message); return; }
-    renderShell("blocked", `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Ошибка</div><div class="a-empty__sub">${esc(e.message)}</div></div></div>`);
+    renderShell("news", `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Ошибка</div><div class="a-empty__sub">${esc(e.message)}</div></div></div>`);
     return;
   }
-  const tasks = data.tasks || [];
-  if (!tasks.length) {
-    renderShell("blocked", `<div class="a-card"><div class="a-empty"><div class="a-empty__icon">${aicon("check")}</div><div class="a-empty__title">Заблокированных задач нет</div><div class="a-empty__sub">Все задачи имеют полный комплект данных для решения</div></div></div>`);
-    return;
-  }
-  const rows = tasks.map((t) => `
+  const cards = items.map((n) => {
+    const badges = [];
+    if (n.showPage) badges.push(`<span class="a-pill">лента /news</span>`);
+    if (n.showModal) {
+      const left = n.modalUntil ? n.modalUntil > Date.now() : false;
+      badges.push(`<span class="a-pill ${left ? "a-pill--warn" : "a-pill--muted"}">модалка${n.modalUntil ? ` · до ${esc(fmtDateTime(n.modalUntil))}` : ""}${left ? "" : " · истекла"}</span>`);
+    }
+    return `
     <div class="a-card" style="margin-bottom:12px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <span class="a-pill">${esc(t.num)} · ${esc(t.id)}</span>
-        <span class="a-pill a-pill--muted">${esc(t.skill)} · ${esc(t.skillName)}</span>
-        <span class="a-pill a-pill--warn">${esc(t.reason || "требуется рисунок")}</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">${badges.join("") || `<span class="a-pill a-pill--muted">без показа</span>`}</div>
+      <div style="font-weight:700;font-size:15px">${esc(n.title)}</div>
+      <div style="margin:4px 0;font-size:13px;color:var(--text-2)">${esc(n.preview || "")}</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(fmtDateTime(n.createdAt))}${n.updatedAt && n.updatedAt !== n.createdAt ? ` · изм. ${esc(fmtDateTime(n.updatedAt))}` : ""}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        ${n.showPage ? `<a class="btn btn--soft btn--sm" href="/news?id=${Number(n.id)}" target="_blank" rel="noopener">Открыть</a>` : ""}
+        <button class="btn btn--soft btn--sm" data-news-edit="${Number(n.id)}">Изменить</button>
+        <button class="btn btn--soft btn--sm" data-news-del="${Number(n.id)}">Удалить</button>
       </div>
-      <div style="margin:8px 0;font-size:13px;color:var(--text-2)">${esc(t.sub)} — ${esc(t.topic)}</div>
-      <div style="font-size:12px;color:var(--muted)">Источник: ${esc(t.source)} · ${esc(t.sourceId)} ${t.missions && t.missions.length ? `· миссии: ${esc(t.missions.join(", "))}` : ""}</div>
-      <div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
-        <span>Условие: ${t.hasText ? "✓" : "✗"}</span>
-        <span>Ответ: ${t.hasAnswer ? "✓ " + esc(t.answer) : "✗"}</span>
-        <span>Решение: ${t.hasSolution ? "✓" : "✗"}</span>
-        <span>Рисунок: ${t.hasVisual ? "✓" : "✗ требуется"}</span>
+    </div>`;
+  }).join("");
+  renderShell("news", `
+    <div class="a-card" style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+      <div><b>Новостей: ${items.length}</b><div style="font-size:12px;color:var(--muted)">Лента /news хранится бессрочно · модалка — только последняя активная и только тем, кто был зарегистрирован до её создания</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn btn--soft btn--sm" href="/news" target="_blank" rel="noopener">Открыть /news</a>
+        <button class="btn btn--primary btn--sm" id="newsNew">Создать новость</button>
       </div>
-      <div style="margin-top:6px;font-size:12px;color:var(--muted)">Отсутствует: ${esc((t.fieldsMissing||[]).join(", "))} · ${esc(t.restorable||"")}</div>
-      <div style="margin-top:6px;font-size:12px;background:var(--bg-soft);padding:6px 8px;border-radius:6px">${esc(t.templateHint||"")}</div>
-      <div style="margin-top:6px;font-size:12px"><b>Восстановимость:</b> ${t.canRestore ? "можно восстановить" : "нельзя без внешних данных"}${t.needsManual ? " · нужна ручная проверка" : ""}</div>
-    </div>`).join("");
-  renderShell("blocked", `
-    <div class="a-card" style="margin-bottom:12px"><b>Заблокировано: ${tasks.length}</b> — задачи с обязательным отсутствующим рисунком, не выдаются обычным пользователям, видны только здесь.</div>
-    ${rows}`);
+    </div>
+    ${items.length ? cards : `<div class="a-card"><div class="a-empty"><div class="a-empty__title">Новостей пока нет</div><div class="a-empty__sub">Создай первую — она сразу появится в ленте /news и/или в модалке для своих</div></div></div>`}`);
+  document.getElementById("newsNew").onclick = () => openNewsEditor(null, screenNews);
+  document.querySelectorAll("[data-news-edit]").forEach((b) => {
+    b.onclick = () => {
+      const n = items.find((x) => Number(x.id) === Number(b.getAttribute("data-news-edit")));
+      if (n) openNewsEditor(n, screenNews);
+    };
+  });
+  document.querySelectorAll("[data-news-del]").forEach((b) => {
+    b.onclick = () => openNewsDelete(Number(b.getAttribute("data-news-del")), screenNews);
+  });
+}
+
+/* Лёгкий редактор в духе teletype: contenteditable + execCommand, без внешних
+   библиотек. Жирный/курсив/подчёркнутый/зачёркнутый, H2/H3, списки, цитата,
+   ссылка, разделитель, две колонки, очистка формата. Абзацы — Enter. */
+function newsEditorToolbarHTML() {
+  const b = (cmd, label, title) => `<button type="button" class="a-edbtn" data-ed="${cmd}" title="${esc(title || label)}">${label}</button>`;
+  return `<div class="a-editor__bar" role="toolbar" aria-label="Форматирование">
+    ${b("bold", "<b>Ж</b>", "Жирный")}
+    ${b("italic", "<i>К</i>", "Курсив")}
+    ${b("underline", "<u>Ч</u>", "Подчёркнутый")}
+    ${b("strike", "<s>З</s>", "Зачёркнутый")}
+    ${b("h2", "H2", "Заголовок")}
+    ${b("h3", "H3", "Подзаголовок")}
+    ${b("ul", "• Список", "Маркированный список")}
+    ${b("ol", "1. Список", "Нумерованный список")}
+    ${b("quote", "❝ Цитата", "Цитата")}
+    ${b("link", "🔗 Ссылка", "Ссылка (http/https)")}
+    ${b("hr", "― Разделитель", "Горизонтальный разделитель")}
+    ${b("cols", "▦ Колонки", "Две колонки")}
+    ${b("clear", "✕ Очистить", "Убрать форматирование")}
+  </div>`;
+}
+
+function newsEditorBindToolbar(area) {
+  const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
+  if (!bar) return;
+  bar.querySelectorAll("[data-ed]").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      area.focus();
+      const cmd = btn.getAttribute("data-ed");
+      try {
+        if (cmd === "h2" || cmd === "h3") document.execCommand("formatBlock", false, cmd);
+        else if (cmd === "quote") document.execCommand("formatBlock", false, "blockquote");
+        else if (cmd === "ul") document.execCommand("insertUnorderedList", false, null);
+        else if (cmd === "ol") document.execCommand("insertOrderedList", false, null);
+        else if (cmd === "clear") document.execCommand("removeFormat", false, null);
+        else if (cmd === "strike") {
+          if (!document.execCommand("strikeThrough", false, null)) document.execCommand("strikethrough", false, null);
+        } else if (cmd === "hr") document.execCommand("insertHorizontalRule", false, null);
+        else if (cmd === "link") {
+          const url = window.prompt("Ссылка (https://…):", "https://");
+          if (url == null) return;
+          const href = String(url).trim();
+          if (!/^https?:\/\/.+/i.test(href)) { toast("Нужна ссылка http(s)://", "err"); return; }
+          document.execCommand("createLink", false, href);
+        } else if (cmd === "cols") {
+          document.execCommand("insertHTML", false,
+            `<div class="news-cols"><div class="news-col">Колонка 1</div><div class="news-col">Колонка 2</div></div><p><br></p>`);
+        } else document.execCommand(cmd, false, null);
+      } catch (e) { /* execCommand может не поддерживаться — текст останется как есть */ }
+      area.focus();
+    });
+  });
+}
+
+function newsToLocalInput(ms) {
+  try {
+    const d = new Date(Number(ms));
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch (e) { return ""; }
+}
+
+function openNewsEditor(existing, reload) {
+  const isEdit = !!existing;
+  const untilDefault = Date.now() + 7 * 86400000;
+  openModal(`
+    <div class="a-modal__title">${isEdit ? "Изменить новость" : "Новая новость"}</div>
+    <div class="a-modal__desc">Лента /news — бессрочно, модалка — обязательно со сроком. Сервер вырежет скрипты и лишние теги сам.</div>
+    <div class="a-modal__form">
+      <div class="a-field"><label>Заголовок</label>
+        <input class="a-input" id="fNewsTitle" maxlength="200" value="${esc(existing ? existing.title : "")}" placeholder="Что случилось">
+      </div>
+      <div class="a-field"><label>Текст</label>
+        <div class="a-editor">
+          ${newsEditorToolbarHTML()}
+          <div class="a-editor__area" id="fNewsBody" contenteditable="true" data-placeholder="Расскажи новость: абзацы — Enter, оформление — кнопки выше…"></div>
+        </div>
+      </div>
+      <div class="a-field"><label>Где показать</label>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:14px">
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fNewsPage" ${!existing || existing.showPage ? "checked" : ""}> Лента /news</label>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fNewsModal" ${existing && existing.showModal ? "checked" : ""}> Модалка для своих</label>
+        </div>
+      </div>
+      <div class="a-field" id="fNewsUntilWrap"><label>Показывать модалку до (обязательно)</label>
+        <input class="a-input" type="datetime-local" id="fNewsUntil" value="${esc(newsToLocalInput(existing && existing.modalUntil ? existing.modalUntil : untilDefault))}">
+        <div class="a-field__hint">После этого срока модалка гаснет сама. Новым пользователям (зарегистрированным после создания) не показывается вообще.</div>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mSave">${isEdit ? "Сохранить" : "Опубликовать"}</button>
+    </div>`, (modal) => {
+    try { modal.classList.add("a-modal--wide"); } catch (e) {}
+    const area = modal.querySelector("#fNewsBody");
+    area.innerHTML = (existing && existing.bodyHtml) || "";
+    newsEditorBindToolbar(area);
+    const pageBox = modal.querySelector("#fNewsPage");
+    const modalBox = modal.querySelector("#fNewsModal");
+    const untilWrap = modal.querySelector("#fNewsUntilWrap");
+    const syncUntil = () => { untilWrap.style.display = modalBox.checked ? "" : "none"; };
+    modalBox.onchange = syncUntil; syncUntil();
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mSave").onclick = async () => {
+      const errBox = modal.querySelector("#mErr");
+      errBox.innerHTML = "";
+      const title = (modal.querySelector("#fNewsTitle").value || "").trim();
+      const bodyHtml = (area.innerHTML || "").trim();
+      const showPage = pageBox.checked;
+      const showModal = modalBox.checked;
+      const untilRaw = (modal.querySelector("#fNewsUntil").value || "").trim();
+      if (!title) { errBox.innerHTML = `<div class="a-modal__error">Заголовок обязателен</div>`; return; }
+      if (!showPage && !showModal) { errBox.innerHTML = `<div class="a-modal__error">Выбери хотя бы один показ: лента или модалка</div>`; return; }
+      let modalUntil = null;
+      if (showModal) {
+        if (!untilRaw) { errBox.innerHTML = `<div class="a-modal__error">Для модалки укажи срок действия</div>`; return; }
+        modalUntil = new Date(untilRaw).getTime();
+        if (!Number.isFinite(modalUntil) || modalUntil <= Date.now()) { errBox.innerHTML = `<div class="a-modal__error">Срок должен быть в будущем</div>`; return; }
+      }
+      const body = { title, body_html: bodyHtml, show_page: showPage, show_modal: showModal, modal_until: modalUntil };
+      const btn = modal.querySelector("#mSave");
+      btn.disabled = true;
+      try {
+        if (isEdit) await AdminApi.put(`/api/admin/news/${Number(existing.id)}`, body);
+        else await AdminApi.post("/api/admin/news", body);
+        closeModal();
+        toast(isEdit ? "Новость обновлена" : "Новость опубликована");
+        await reload();
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        btn.disabled = false;
+        errBox.innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
+function openNewsDelete(id, reload) {
+  openModal(`
+    <div class="a-modal__title">Удалить новость?</div>
+    <div class="a-modal__desc">Из ленты /news она пропадёт сразу, модалка погаснет вместе с ней. Действие необратимо.</div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mDo" style="background:var(--danger, #b91c1c)">Удалить</button>
+    </div>
+    <div id="mErr" style="margin-top:8px"></div>`, (modal) => {
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mDo").onclick = async () => {
+      const btn = modal.querySelector("#mDo");
+      btn.disabled = true;
+      try {
+        await AdminApi.del(`/api/admin/news/${Number(id)}`);
+        closeModal();
+        toast("Новость удалена");
+        await reload();
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        btn.disabled = false;
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
 }
 
 async function render() {
@@ -5360,8 +5543,8 @@ async function render() {
       await screenProviderPage(safeDecode(route.param));
     }
     else await screenProviders();
-  } else if (route.name === "blocked") {
-    await screenBlocked();
+  } else if (route.name === "news") {
+    await screenNews();
   } else if (route.name === "subscription") {
     await screenSubscription();
   } else {

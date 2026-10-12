@@ -3631,6 +3631,20 @@ CREATE TABLE IF NOT EXISTS user_blocks (
   blocked_by INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_user_blocks_until ON user_blocks(blocked_until);
+CREATE TABLE IF NOT EXISTS news (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  body_html TEXT NOT NULL DEFAULT '',
+  body_text TEXT NOT NULL DEFAULT '',
+  show_page INTEGER NOT NULL DEFAULT 1,
+  show_modal INTEGER NOT NULL DEFAULT 0,
+  modal_until INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  created_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_news_page ON news(show_page, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_news_modal ON news(show_modal, created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_key TEXT NOT NULL CHECK(length(request_key) = 64),
@@ -11343,51 +11357,372 @@ def streak_restore(conn: sqlite3.Connection, user_id: int, subject: str,
     return streak_status(conn, user_id, subject, today_s)
 
 
-def admin_blocked_tasks(conn: sqlite3.Connection) -> list[dict]:
-    """Полный аудит физически нерешаемых задач: визуал required без assetId.
-    Возвращает только admin-эндпоинт; обычный /api/bootstrap их скрывает."""
-    # Собираем сырые записи из каталога (SQLite-catalog уже установлен)
-    tasks = []
-    for r in conn.execute("SELECT * FROM tasks ORDER BY id"):
-        item = {"id": r["id"], "skill": r["skill_id"], "sub": r["topic"], "num": r["exam_number"],
-                "diff": r["difficulty"], "text": r["statement"], "answer": r["answer"],
-                "hint": r["hint"], "solution": r["explanation"]}
+# ---------------------------------------------------------------------------
+# Новости: два типа показа одной строкой.
+#   * show_page=1  -> публичная лента /news, хранится бессрочно (удаление
+#     только вручную из админки).
+#   * show_modal=1 -> модалка для "своих" через существующую .dlg-систему:
+#     показывается только последняя активная новость и только тем, кто уже
+#     был зарегистрирован на момент её создания (снимок без ложных
+#     срабатываний: registered_at <= news.created_at). У модалки обязателен
+#     срок modal_until (мс): после него новость больше не показывается.
+# ---------------------------------------------------------------------------
+
+NEWS_TITLE_MAX = 200
+NEWS_HTML_MAX = 200_000
+NEWS_TEXT_MAX = 5_000
+
+NEWS_ALLOWED_TAGS = {
+    "p", "br", "h2", "h3", "ul", "ol", "li", "blockquote",
+    "pre", "code", "strong", "b", "em", "i", "u", "s", "strike",
+    "a", "hr", "div",
+}
+NEWS_ALLOWED_DIV_CLASSES = {"news-cols", "news-col"}
+
+
+def ensure_news_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent migration for the news table. Cheap (IF NOT EXISTS)."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS news (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      body_html TEXT NOT NULL DEFAULT '',
+      body_text TEXT NOT NULL DEFAULT '',
+      show_page INTEGER NOT NULL DEFAULT 1,
+      show_modal INTEGER NOT NULL DEFAULT 0,
+      modal_until INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      created_by INTEGER)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_page ON news(show_page, created_at DESC, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_modal ON news(show_modal, created_at DESC, id DESC)")
+
+
+def news_now_ms() -> int:
+    return int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000)
+
+
+def news_plain_text(html_value: str) -> str:
+    import re as _re
+    text = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html_value or "")
+    text = _re.sub(r"(?s)<[^>]*>", " ", text)
+    import html as _html
+    text = _html.unescape(text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    return text[:NEWS_TEXT_MAX]
+
+
+def news_sanitize_html(html_value: str) -> str:
+    """Allowlist-санитайзер: teletype-минимум без скриптов и трекеров.
+
+    Разрешены: абзацы, жирный/курсив/подчёркнутый/зачёркнутый, H2/H3,
+    списки, цитата, код, ссылка (http/https), разделитель и двухколоночный
+    блок (div.news-cols > div.news-col). Всё остальное (script, style,
+    img, iframe, table, font, on*-атрибуты, javascript:-ссылки) вырезается.
+    Не бросает: на мусоре возвращает безопасную строку."""
+    from html.parser import HTMLParser
+    import html as _html
+
+    class _San(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.out: list[str] = []
+            self.skip = 0  # внутри script/style — выкидываем всё до закрытия
+
+        def handle_starttag(self, tag, attrs):
+            tag = (tag or "").lower()
+            if tag in ("script", "style"):
+                self.skip += 1
+                return
+            if tag not in NEWS_ALLOWED_TAGS:
+                return
+            if tag == "br" or tag == "hr":
+                self.out.append(f"<{tag}>")
+                return
+            if tag == "a":
+                href = ""
+                for k, v in (attrs or []):
+                    if (k or "").lower() == "href":
+                        href = (v or "").strip()
+                        break
+                if href.lower().startswith(("http://", "https://")) and len(href) <= 2000:
+                    self.out.append(f'<a href="{_html.escape(href, quote=True)}" rel="noopener" target="_blank">')
+                else:
+                    self.out.append("<a>")
+                return
+            if tag == "div":
+                cls = ""
+                for k, v in (attrs or []):
+                    if (k or "").lower() == "class":
+                        cls = (v or "").strip()
+                        break
+                kept = " ".join(c for c in cls.split() if c in NEWS_ALLOWED_DIV_CLASSES)
+                if kept:
+                    self.out.append(f'<div class="{_html.escape(kept, quote=True)}">')
+                else:
+                    self.out.append("<div>")
+                return
+            self.out.append(f"<{tag}>")
+
+        def handle_endtag(self, tag):
+            tag = (tag or "").lower()
+            if tag in ("script", "style"):
+                if self.skip > 0:
+                    self.skip -= 1
+                return
+            if tag in ("br", "hr"):
+                return
+            if tag in NEWS_ALLOWED_TAGS:
+                self.out.append(f"</{tag}>")
+
+        def handle_data(self, data):
+            if self.skip:
+                return
+            self.out.append(_html.escape(data or ""))
+
+        def handle_entityref(self, name):
+            if self.skip:
+                return
+            self.out.append(f"&{name};")
+
+        def handle_charref(self, name):
+            if self.skip:
+                return
+            self.out.append(f"&#{name};")
+
+    p = _San()
+    try:
+        p.feed(html_value or "")
+        p.close()
+    except Exception:
+        return _html.escape(news_plain_text(html_value or "")[:2000])
+    safe = "".join(p.out).strip()
+    if len(safe) > NEWS_HTML_MAX:
+        safe = safe[:NEWS_HTML_MAX]
+    return safe
+
+
+def news_validate_payload(payload: dict, *, partial: bool = False) -> dict:
+    """Проверка полей создания/правки. Бросает ValueError с русским текстом."""
+    if not isinstance(payload, dict):
+        raise ValueError("Некорректный JSON")
+    out: dict = {}
+    if "title" in payload or not partial:
+        title = str(payload.get("title", "") or "").strip()
+        title = " ".join(title.split())
+        if not title:
+            raise ValueError("Заголовок обязателен")
+        if len(title) > NEWS_TITLE_MAX:
+            raise ValueError(f"Заголовок длиннее {NEWS_TITLE_MAX} символов")
+        out["title"] = title
+    if "body_html" in payload or not partial:
+        raw = payload.get("body_html", "")
+        raw = raw if isinstance(raw, str) else str(raw or "")
+        if len(raw) > NEWS_HTML_MAX:
+            raise ValueError("Текст новости слишком большой")
+        safe = news_sanitize_html(raw)
+        if not news_plain_text(safe):
+            raise ValueError("Текст новости пуст")
+        out["body_html"] = safe
+        out["body_text"] = news_plain_text(safe)
+    if "show_page" in payload or "show_modal" in payload or not partial:
+        show_page = payload.get("show_page", 1 if not partial else None)
+        show_modal = payload.get("show_modal", 0 if not partial else None)
+        if show_page is not None:
+            out["show_page"] = 1 if bool(show_page) else 0
+        if show_modal is not None:
+            out["show_modal"] = 1 if bool(show_modal) else 0
+        sp = out.get("show_page", 1)
+        sm = out.get("show_modal", 0)
+        if not sp and not sm:
+            raise ValueError("Выбери хотя бы один показ: лента /news или модалка")
+    if "modal_until" in payload or (not partial and out.get("show_modal")):
+        raw_until = payload.get("modal_until", None)
+        if out.get("show_modal"):
+            if raw_until is None or (isinstance(raw_until, str) and not raw_until.strip()):
+                raise ValueError("Для модалки обязательно укажи срок действия")
+            try:
+                until = int(str(raw_until).strip())
+            except (TypeError, ValueError):
+                raise ValueError("Некорректный срок действия модалки")
+            if until <= news_now_ms():
+                raise ValueError("Срок действия модалки должен быть в будущем")
+            if until > news_now_ms() + 1000 * 86400 * 365 * 2:
+                raise ValueError("Срок действия модалки — не больше 2 лет")
+            out["modal_until"] = until
+        elif raw_until not in (None, "", 0, "0"):
+            try:
+                out["modal_until"] = int(str(raw_until).strip())
+            except (TypeError, ValueError):
+                out["modal_until"] = None
+        else:
+            out["modal_until"] = None
+    return out
+
+
+def news_row_to_public(row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "title": row["title"],
+        "preview": (row["body_text"] or "")[:220],
+        "createdAt": int(row["created_at"]),
+        "updatedAt": int(row["updated_at"]),
+        "showModal": bool(row["show_modal"]),
+        "modalUntil": int(row["modal_until"]) if row["modal_until"] is not None else None,
+    }
+
+
+def admin_news_list(conn: sqlite3.Connection) -> list[dict]:
+    ensure_news_schema(conn)
+    rows = conn.execute(
+        "SELECT id, title, body_html, body_text, show_page, show_modal, modal_until,"
+        " created_at, updated_at, created_by FROM news ORDER BY created_at DESC, id DESC LIMIT 200"
+    ).fetchall()
+    return [{
+        "id": int(r["id"]), "title": r["title"], "bodyHtml": r["body_html"] or "",
+        "preview": (r["body_text"] or "")[:220],
+        "showPage": bool(r["show_page"]), "showModal": bool(r["show_modal"]),
+        "modalUntil": int(r["modal_until"]) if r["modal_until"] is not None else None,
+        "createdAt": int(r["created_at"]), "updatedAt": int(r["updated_at"]),
+    } for r in rows]
+
+
+def admin_news_create(conn: sqlite3.Connection, payload: dict, actor_id: int) -> dict:
+    ensure_news_schema(conn)
+    clean = news_validate_payload(payload)
+    now = news_now_ms()
+    cur = conn.execute(
+        "INSERT INTO news(title, body_html, body_text, show_page, show_modal, modal_until,"
+        " created_at, updated_at, created_by) VALUES (?,?,?,?,?,?,?,?,?)",
+        (clean["title"], clean["body_html"], clean["body_text"],
+         clean.get("show_page", 1), clean.get("show_modal", 0),
+         clean.get("modal_until"), now, now, int(actor_id)))
+    conn.commit()
+    row = conn.execute(
+        "SELECT id, title, body_html, body_text, show_page, show_modal, modal_until,"
+        " created_at, updated_at, created_by FROM news WHERE id=?", (cur.lastrowid,)).fetchone()
+    return {
+        "id": int(row["id"]), "title": row["title"], "bodyHtml": row["body_html"] or "",
+        "preview": (row["body_text"] or "")[:220],
+        "showPage": bool(row["show_page"]), "showModal": bool(row["show_modal"]),
+        "modalUntil": int(row["modal_until"]) if row["modal_until"] is not None else None,
+        "createdAt": int(row["created_at"]), "updatedAt": int(row["updated_at"]),
+    }
+
+
+def admin_news_update(conn: sqlite3.Connection, news_id: int, payload: dict) -> dict:
+    ensure_news_schema(conn)
+    row = conn.execute("SELECT * FROM news WHERE id=?", (int(news_id),)).fetchone()
+    if not row:
+        raise KeyError("Новость не найдена")
+    base = {
+        "title": row["title"], "body_html": row["body_html"],
+        "show_page": int(row["show_page"]), "show_modal": int(row["show_modal"]),
+        "modal_until": row["modal_until"],
+    }
+    merged = dict(base)
+    if isinstance(payload, dict):
+        for k in ("title", "body_html", "show_page", "show_modal", "modal_until"):
+            if k in payload:
+                merged[k] = payload[k]
+    # modal_until модалки при правке можно продлить, но не в прошлое.
+    clean = news_validate_payload(merged)
+    if int(row["show_modal"]) and clean.get("show_modal") and clean.get("modal_until") is None:
+        clean["modal_until"] = row["modal_until"]
+    now = news_now_ms()
+    conn.execute(
+        "UPDATE news SET title=?, body_html=?, body_text=?, show_page=?, show_modal=?,"
+        " modal_until=?, updated_at=? WHERE id=?",
+        (clean["title"], clean["body_html"], clean["body_text"],
+         clean.get("show_page", 1), clean.get("show_modal", 0),
+         clean.get("modal_until"), now, int(news_id)))
+    conn.commit()
+    fresh = conn.execute(
+        "SELECT id, title, body_html, body_text, show_page, show_modal, modal_until,"
+        " created_at, updated_at, created_by FROM news WHERE id=?", (int(news_id),)).fetchone()
+    return {
+        "id": int(fresh["id"]), "title": fresh["title"], "bodyHtml": fresh["body_html"] or "",
+        "preview": (fresh["body_text"] or "")[:220],
+        "showPage": bool(fresh["show_page"]), "showModal": bool(fresh["show_modal"]),
+        "modalUntil": int(fresh["modal_until"]) if fresh["modal_until"] is not None else None,
+        "createdAt": int(fresh["created_at"]), "updatedAt": int(fresh["updated_at"]),
+    }
+
+
+def admin_news_delete(conn: sqlite3.Connection, news_id: int) -> bool:
+    ensure_news_schema(conn)
+    cur = conn.execute("DELETE FROM news WHERE id=?", (int(news_id),))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def news_effective_registered_ms(user_row) -> int | None:
+    """Момент регистрации для снимка модалки. None — гость (не показывать).
+
+    registered_at — строка мс (см. now_iso), у старых аккаунтов с почтой, но
+    без registered_at падаем на created_at (консервативно: такой человек
+    точно старше любой новой новости). Без почты и без registered_at —
+    гость: модалка ему не положена вообще."""
+    if user_row is None:
+        return None
+    try:
+        reg = (user_row["registered_at"] if "registered_at" in user_row.keys() else None) or None
+    except Exception:
+        reg = None
+    try:
+        email = (user_row["email"] if "email" in user_row.keys() else None) or None
+    except Exception:
+        email = None
+    if not reg and not email:
+        return None
+    cand = reg or user_row["created_at"]
+    try:
+        return int(str(cand).strip())
+    except (TypeError, ValueError, AttributeError):
         try:
-            item.update(json.loads(r["metadata_json"] or "{}"))
-        except (TypeError, json.JSONDecodeError):
-            pass  # битый metadata_json не должен ронять весь аудит
-        if not task_has_missing_visual(item):
-            continue
-        skill = conn.execute("SELECT name, topic_id FROM skills WHERE id=?", (item["skill"],)).fetchone()
-        topic = conn.execute("SELECT name FROM topics WHERE id=?", (skill["topic_id"],)).fetchone() if skill else None
-        # где встречается эта задача
-        missions_for_task = [mr["mission_id"] for mr in conn.execute(
-            "SELECT mission_id FROM mission_tasks WHERE task_id=?", (item["id"],))]
-        # схема/шаблон восстановления
-        is_lesson = bool(conn.execute("SELECT 1 FROM lessons WHERE metadata_json LIKE ?", (f"%{item['id']}%",)).fetchone())
-        # есть ли визуал/рисунок
-        has_text = bool((item.get("text") or "").strip())
-        has_answer = bool((item.get("answer") or "").strip())
-        has_solution = bool((item.get("solution") or "").strip())
-        visual = item.get("visual") or {}
-        reason = visual.get("note") or "Официальный рисунок обязателен, но отсутствует в сборке."
-        # восстановимость: без официального рисунка — нельзя
-        restorable = "нельзя восстановить без официальных данных"  # визуал required без asset — всегда так
-        tasks.append({
-            "id": item["id"], "num": item["num"], "diff": item["diff"],
-            "skill": item["skill"], "skillName": skill["name"] if skill else item["skill"],
-            "topic": topic["name"] if topic else "", "sub": item["sub"],
-            "text": item["text"][:500], "answer": item["answer"], "hasText": has_text,
-            "hasAnswer": has_answer, "hasSolution": has_solution, "hasVisual": False,
-            "visualNote": visual.get("note", ""), "requiredVisual": True,
-            "missions": missions_for_task, "inLesson": is_lesson,
-            "source": item.get("source", ""), "sourceId": item.get("sourceId", ""),
-            "reason": reason, "fieldsMissing": ["официальный рисунок"],
-            "restorable": restorable,
-            "templateHint": "Обязательные поля: text, answer, solution, sub, num, diff, skill, source/sourceId. Для восстановления нужен официальный рисунок с координатами/формой кривой.",
-            "canRestore": False, "needsManual": True,
-        })
-    return tasks
+            return int(timestamp_value(cand))
+        except Exception:
+            return None
+
+
+def news_modal_for_user(conn: sqlite3.Connection, user_id: int | None) -> dict:
+    """Последняя активная модалка с проверкой снимка. Без ложных срабатываний:
+
+    - гость (user_id None / нет регистрации) -> {show:false, reason:'guest'};
+    - нет активной модалки (show_modal=1 и modal_until в будущем) -> {show:false};
+    - пользователь зарегистрирован ПОСЛЕ создания новости -> {show:false,
+      reason:'too-new'} (новым новость не показываем);
+    - иначе -> {show:true, news:{...}} (закрытие и «уже видел» — localStorage
+      на клиенте, сервер stateless)."""
+    ensure_news_schema(conn)
+    if user_id is None:
+        return {"show": False, "reason": "guest"}
+    now = news_now_ms()
+    row = conn.execute(
+        "SELECT id, title, body_html, body_text, show_modal, modal_until, created_at, updated_at"
+        " FROM news WHERE show_modal=1 AND modal_until IS NOT NULL AND modal_until > ?"
+        " ORDER BY created_at DESC, id DESC LIMIT 1", (now,)).fetchone()
+    if not row:
+        return {"show": False, "reason": "empty"}
+    try:
+        user_row = conn.execute(
+            "SELECT id, created_at, registered_at, email FROM users WHERE id=?", (int(user_id),)).fetchone()
+    except sqlite3.Error:
+        user_row = None
+    reg_ms = news_effective_registered_ms(user_row) if user_row else None
+    if reg_ms is None:
+        return {"show": False, "reason": "guest"}
+    try:
+        news_ms = int(row["created_at"])
+    except (TypeError, ValueError):
+        return {"show": False, "reason": "empty"}
+    # Снимок: зарегистрирован строго после создания новости — не показываем.
+    # Равенство (та же мс) — показываем: человек уже был в момент создания.
+    if int(reg_ms) > int(news_ms):
+        return {"show": False, "reason": "too-new"}
+    return {"show": True, "news": {
+        "id": int(row["id"]), "title": row["title"], "bodyHtml": row["body_html"] or "",
+        "createdAt": int(row["created_at"]), "modalUntil": int(row["modal_until"]),
+    }}
 
 
 # Read-only inbox for the dashboard admin block ("Обращения").
@@ -15168,6 +15503,46 @@ class Handler(BaseHTTPRequestHandler):
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
+        if path == "/api/admin/news" or path.startswith("/api/admin/news/"):
+            # POST /api/admin/news — создать новость.
+            # Правка/удаление — PUT/DELETE /api/admin/news/<id> (см. do_PUT/do_DELETE):
+            # POST здесь только создаёт, чтобы методы не двоились.
+            if path != "/api/admin/news":
+                conn = connect()
+                try:
+                    if not self.require_admin(conn): return
+                    self.send_json({"error": "Not found"}, 404)
+                finally: conn.close()
+                return
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                try:
+                    item = admin_news_create(conn, payload, actor_id)
+                except ValueError as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    self.send_json({"error": str(exc)}, 400); return
+                try:
+                    admin_audit(conn, actor_id, "news-create", None, f"news {item['id']} {item['title']}"[:200])
+                except sqlite3.Error:
+                    pass
+                self.send_json({"ok": True, "news": item}); return
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-news", exc)
+                self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            finally: conn.close()
+            return
         if path.startswith("/api/admin/users/"):
             # POST /api/admin/users/<ref>/<action>
             parts = path.split("/")
@@ -17132,8 +17507,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"users": admin_users_list(conn, query)}); return
                 if path == "/api/admin/audit":
                     self.send_json({"entries": admin_audit_list(conn)}); return
-                if path == "/api/admin/blocked-tasks":
-                    self.send_json({"tasks": admin_blocked_tasks(conn)}); return
+                if path == "/api/admin/news":
+                    self.send_json({"news": admin_news_list(conn)}); return
                 if path == "/api/admin/support-messages":
                     # Read-only inbox for the dashboard admin block. Same
                     # require_admin gate as every other /api/admin/* endpoint:
@@ -17309,6 +17684,45 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_header("Content-Length", str(len(body)))
                         self.end_headers(); self.wfile.write(body); return
                     self.send_json(public_status_payload(conn)); return
+                # Новости: публичная лента /news (без входа) + персональная
+                # модалка для своих (только последняя, только тем, кто был
+                # зарегистрирован до её создания — снимок на сервере).
+                # Аккаунт не заводится: user_for() здесь ничего не создаёт.
+                if path == "/api/news":
+                    ensure_news_schema(conn)
+                    rows = conn.execute(
+                        "SELECT id, title, body_text, created_at, updated_at, show_modal, modal_until"
+                        " FROM news WHERE show_page=1 ORDER BY created_at DESC, id DESC LIMIT 200"
+                    ).fetchall()
+                    self.send_json({"news": [news_row_to_public(r) for r in rows]},
+                                    cache_control="private, no-cache"); return
+                if path == "/api/news/modal":
+                    auth_uid = existing_user_for(conn, self)
+                    if auth_uid is not None and self.reject_if_blocked(conn, auth_uid):
+                        return
+                    try:
+                        self.send_json(news_modal_for_user(conn, auth_uid),
+                                        cache_control="private, no-store"); return
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("news-modal", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 503); return
+                if path.startswith("/api/news/"):
+                    ensure_news_schema(conn)
+                    tail = path[len("/api/news/"):]
+                    if tail.isdigit():
+                        row = conn.execute(
+                            "SELECT id, title, body_html, body_text, created_at, updated_at,"
+                            " show_modal, modal_until FROM news WHERE id=? AND show_page=1",
+                            (int(tail),)).fetchone()
+                        if not row:
+                            self.send_json({"error": "Новость не найдена"}, 404); return
+                        full = conn.execute(
+                            "SELECT body_html FROM news WHERE id=?", (int(tail),)).fetchone()
+                        item = news_row_to_public(row)
+                        item["bodyHtml"] = (full["body_html"] if full else "") or ""
+                        self.send_json({"news": item}, cache_control="private, no-cache"); return
+                    self.send_json({"error": "Not found"}, 404); return
                 # Внешний вход: два редиректа, оба без записи в базу, кроме
                 # успешного callback. Логины живут под общим per-IP бакетом
                 # /api/ (он уже списан выше), а неудачи считает
@@ -17748,6 +18162,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = ROOT / "status.html"
         elif path == '/contacts':
             file_path = ROOT / "contacts.html"
+        elif path == '/news':
+            # Публичная лента новостей (доступна без авторизации).
+            # Деталка — та же страница: id новость берёт из ?id= сама.
+            file_path = ROOT / "news.html"
         elif path == '/about':
             file_path = ROOT / "about.html"
         elif path == '/terms':
@@ -17875,6 +18293,8 @@ class Handler(BaseHTTPRequestHandler):
                     '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n',
                     f'  <url><loc>{base}/subscription</loc><lastmod>{lastmod}</lastmod>'
                     '<changefreq>monthly</changefreq><priority>0.6</priority></url>\n',
+                    f'  <url><loc>{base}/news</loc><lastmod>{lastmod}</lastmod>'
+                    '<changefreq>daily</changefreq><priority>0.7</priority></url>\n',
                     f'  <url><loc>{base}/ege/</loc><lastmod>{lastmod}</lastmod>'
                     '<changefreq>weekly</changefreq><priority>0.8</priority></url>\n']
             # Ось /oge/ — только когда в ней есть хоть один открытый предмет,
@@ -18130,6 +18550,50 @@ class Handler(BaseHTTPRequestHandler):
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
+        if path.startswith("/api/admin/news/"):
+            # PUT /api/admin/news/<id> — правка новости (заголовок, текст,
+            # показы, продление модалки). Только число в id, иначе 404.
+            parts = path.split("/")
+            if len(parts) == 5 and parts[4].isdigit():
+                if self.api_rate_limited(): return
+                conn = connect()
+                try:
+                    auth = self.require_admin(conn)
+                    if not auth: return
+                    actor_id, _ = auth
+                    try:
+                        payload = self.read_json()
+                    except (json.JSONDecodeError, ValueError):
+                        self.send_json({"error": "Некорректный JSON"}, 400); return
+                    try:
+                        item = admin_news_update(conn, int(parts[4]), payload)
+                    except KeyError:
+                        try: conn.rollback()
+                        except sqlite3.Error: pass
+                        self.send_json({"error": "Новость не найдена"}, 404); return
+                    except ValueError as exc:
+                        try: conn.rollback()
+                        except sqlite3.Error: pass
+                        self.send_json({"error": str(exc)}, 400); return
+                    try:
+                        admin_audit(conn, actor_id, "news-update", None, f"news {item['id']} {item['title']}"[:200])
+                    except sqlite3.Error:
+                        pass
+                    self.send_json({"ok": True, "news": item})
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("admin-news", exc)
+                    self.send_json({"error": "Не удалось сохранить. Попробуй ещё раз.",
+                                    "ref": rid}, 500)
+                finally: conn.close()
+                return
+            conn = connect()
+            try:
+                if not self.require_admin(conn): return
+                self.send_json({"error": "Not found"}, 404)
+            finally: conn.close()
+            return
         if path == "/api/admin/providers" or path.startswith("/api/admin/providers/"):
             # PUT /api/admin/providers/<id> — правка провайдера (слот/выключатель
             # у встроенного, поля + проба у своего). POST /api/admin/providers
@@ -18165,13 +18629,35 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard_csrf(path):
             return
         if path.startswith("/api/admin"):
-            # No DELETE admin endpoints exist; require the session anyway so
-            # probing returns 401, not a misleading 404/405 difference.
+            # DELETE /api/admin/news/<id> — удалить новость вручную (из ленты
+            # /news она пропадает сразу, модалка гаснет вместе с ней).
             conn = connect()
             try:
                 if path.startswith("/api/admin/providers/"):
                     self.handle_admin_provider_delete(conn, path)
                     return
+                if path.startswith("/api/admin/news/"):
+                    parts = path.split("/")
+                    if len(parts) == 5 and parts[4].isdigit():
+                        auth = self.require_admin(conn)
+                        if not auth: return
+                        actor_id, _ = auth
+                        try:
+                            ok = admin_news_delete(conn, int(parts[4]))
+                        except sqlite3.Error as exc:
+                            try: conn.rollback()
+                            except sqlite3.Error: pass
+                            rid = log_request_error("admin-news", exc)
+                            self.send_json({"error": "Не удалось удалить. Попробуй ещё раз.",
+                                            "ref": rid}, 500)
+                            return
+                        if not ok:
+                            self.send_json({"error": "Новость не найдена"}, 404); return
+                        try:
+                            admin_audit(conn, actor_id, "news-delete", None, f"news {parts[4]}")
+                        except sqlite3.Error:
+                            pass
+                        self.send_json({"ok": True, "id": int(parts[4])}); return
                 if not self.require_admin(conn): return
                 self.send_json({"error": "Not found"}, 404)
             finally: conn.close()

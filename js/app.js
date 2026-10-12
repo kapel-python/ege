@@ -11372,6 +11372,41 @@ function openInfoDialog(opts) {
   if (dlg) { dlg.setAttribute("tabindex", "-1"); dlg.focus({ preventScroll: true }); }
 }
 
+/* Новости для своих: последняя активная модалка через ту же .dlg-систему
+   (openInfoDialog, ничего нового не заводим). Снимок — на сервере
+   (registered_at <= news.created_at, новым не показываем, гостям тоже);
+   здесь лишь «уже видел» в localStorage и разовый показ при входе. */
+async function maybeShowNewsModal() {
+  try {
+    if (window.__egeNewsModalDone) return;
+    window.__egeNewsModalDone = true;
+    let res = null;
+    try {
+      res = await fetch("/api/news/modal", { credentials: "same-origin" });
+    } catch (_) { return; }
+    if (!res || !res.ok) return;
+    let data = null;
+    try { data = await res.json(); } catch (_) { return; }
+    if (!data || !data.show || !data.news) return;
+    const n = data.news;
+    let seen = null;
+    try { seen = localStorage.getItem("ege_news_modal_seen"); } catch (_) {}
+    if (String(seen) === String(n.id)) return;
+    try { localStorage.setItem("ege_news_modal_seen", String(n.id)); } catch (_) {}
+    try {
+      if (document.querySelector(".dlg-backdrop--blocked")) return;
+      if (document.querySelector("#device-modal-root .dlg")) return;
+    } catch (_) {}
+    openInfoDialog({
+      eyebrow: "Новости",
+      icon: "info",
+      title: n.title || "Новость",
+      text: `<div class="news-body">${n.bodyHtml || ""}</div><div style="margin-top:12px"><a href="/news?id=${Number(n.id)}" style="color:var(--accent);font-weight:600;">Читать все новости →</a></div>`,
+      closeText: "Понятно",
+    });
+  } catch (_) {}
+}
+
 /* Отказ явной привязки Google («Привязать Google» → адрес уже занят на сайте)
    приезжает редиректом как параметр возврата: #/profile?error=taken|conflict.
 
@@ -12926,6 +12961,7 @@ function bootstrapApp() {
       } catch (_) {}
       render();
       try { maybeScheduleStreakFrozenModal(); } catch (_) {}
+      try { maybeShowNewsModal(); } catch (_) {}
     } catch (error) {
       stopBootMsgs();
       if (isBlockedError(error)) {
