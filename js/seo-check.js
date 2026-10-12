@@ -8,12 +8,70 @@
    - часть 2 (check:"self"): поля ввода нет — «Сверить с решением» открывает
      официальный разбор, после чего честная отметка «Решил(а) верно / Не
      получилось» (без XP: здесь это демо, а не зачёт).
-   Никаких запросов: только сравнение с data-answer из разметки. */
+   Никаких запросов: только сравнение с разметкой формы .seo-check.
+   Проверка — упрощённое зеркало checkAnswer из js/state.js: norm как
+   normalizeAnswer, строковое равенство + числовая эквивалентность с
+   допуском 1e-6 (включая дроби a/b), кандидаты [data-answer,
+   ...data-accept], мультикорни extended_answer («a, b» — порядок не
+   важен), строгий формат цифровых ответов /^\d{2,12}$/ как в бланке ЕГЭ.
+   data-accept (JSON-массив строк) и data-type читаются defensive: нет
+   атрибутов — работает только по data-answer. */
 (function () {
   "use strict";
   var norm = function (s) {
-    return String(s || "").trim().toLowerCase()
-      .replace(/\s+/g, "").replace(/,/g, ".").replace(/−/g, "-");
+    return String(s == null ? "" : s).trim().toLowerCase()
+      .replace(/\s+/g, "").replace(/ё/g, "е").replace(/,/g, ".").replace(/[−–—]/g, "-");
+  };
+  /* Числовое значение ответа: десятичные и дроби вида a/b — как
+     numericAnswer в js/state.js. */
+  var numericAnswer = function (value) {
+    var text = norm(value);
+    if (/^[+-]?\d+(?:\.\d+)?\/[+-]?\d+(?:\.\d+)?$/.test(text)) {
+      var parts = text.split("/");
+      var n = Number(parts[0]);
+      var d = Number(parts[1]);
+      return d === 0 ? NaN : n / d;
+    }
+    return Number(text);
+  };
+  /* Равенство ответов — как sameValue в checkAnswer (js/state.js):
+     строковое равенство, затем числовая эквивалентность с допуском 1e-6,
+     затем словесные ответы, где дефис/тире/пробел — один разделитель. */
+  var sameValue = function (left, right) {
+    var a = norm(left);
+    var b = norm(right);
+    /* Пустой ввод не равен ничему — в том числе нулю: без этого
+       Number("") === 0 засчитывало бы эталон «0» пустым полем. */
+    if (!a || !b) return false;
+    if (a === b) return true;
+    var na = numericAnswer(a);
+    var nb = numericAnswer(b);
+    if (isFinite(na) && isFinite(nb) && Math.abs(na - nb) < 1e-6) return true;
+    if (/[a-zа-яё]/i.test(a) && /[a-zа-яё]/i.test(b)) {
+      var loose = function (s) { return s.replace(/[\s\-–—−]+/g, ""); };
+      if (loose(a) === loose(b)) return true;
+    }
+    return false;
+  };
+  /* data-accept — JSON-массив строк (в разметке HTML-escaped, getAttribute
+     сущности уже раскодирует). Нет атрибута или битый — только data-answer. */
+  var readAccept = function (form) {
+    var raw = form.getAttribute("data-accept");
+    if (!raw) return [];
+    try {
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map(function (v) { return String(v); });
+      }
+    } catch (e) { /* чужой/битый атрибут — игнорируем */ }
+    return [];
+  };
+  var digitOnly = function (v) {
+    return String(v == null ? "" : v).replace(/[^\d]/g, "");
+  };
+  /* Эталон из одних цифр — ответ пишется по клеткам бланка ЕГЭ. */
+  var isDigitAnswer = function (s) {
+    return /^\d{2,12}$/.test(String(s == null ? "" : s).trim());
   };
   var esc = function (s) {
     return String(s || "").replace(/[&<>"']/g, function (c) {
@@ -110,20 +168,72 @@
       });
     }
 
-    /* Часть 1: автопроверка короткого ответа. */
+    /* Часть 1: автопроверка короткого ответа (см. шапку файла). */
     if (form) {
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         var input = form.querySelector(".answer-input");
         if (!input || !feedback) return;
-        var got = norm(input.value);
-        if (!got) {
+        var raw = String(input.value == null ? "" : input.value);
+        if (!raw.trim()) {
           input.classList.add("answer-input--wrong");
           setTimeout(function () { input.classList.remove("answer-input--wrong"); }, 420);
           return;
         }
-        var want = norm(form.getAttribute("data-answer"));
-        if (got === want) {
+        var expected = String(form.getAttribute("data-answer") || "");
+        var candidates = [expected].concat(readAccept(form));
+        var taskType = form.getAttribute("data-type") || "";
+        var ok = false;
+
+        if (isDigitAnswer(expected)) {
+          /* Строгий формат бланка ЕГЭ: только цифры, по одной в клетке.
+             «2,4,5» и «2 4 5» — нарушение формата, а не запись «245»
+             (как isDigitSequenceTask + проверка формата в js/app.js).
+             Пробелы по краям — шум набора, их прощаем. Без текста задания
+             в разметке набор от последовательности не отличить, поэтому
+             порядок считаем значимым; формат объясняет подпись сервера. */
+          var trimmed = raw.trim();
+          if (!/^\d+$/.test(trimmed)) {
+            var digits = trimmed.replace(/\D/g, "");
+            input.classList.add("answer-input--wrong");
+            setTimeout(function () { input.classList.remove("answer-input--wrong"); }, 420);
+            showNextHint();
+            feedback.innerHTML = feedbackBox("bad", "Неверный формат записи",
+              '<div class="seo-feedback__body">В бланке ЕГЭ такой ответ записывают'
+              + " только цифрами, без запятых, точек и пробелов"
+              + (digits ? " — в твоём случае это <b class=\"mono\">" + esc(digits) + "</b>" : "")
+              + ". Перепиши ответ цифрами и попробуй ещё раз.</div>");
+            return;
+          }
+          var wanted = candidates.map(digitOnly).filter(Boolean);
+          ok = wanted.indexOf(trimmed) !== -1;
+        } else {
+          /* Несколько корней уравнения: нужно всё множество целиком, а не
+             один корень; порядок не важен, каждый корень — один раз. */
+          var isMultiRoot = taskType === "extended_answer" && expected.indexOf(", ") !== -1;
+          var expectedParts = isMultiRoot ? expected.split(/,\s+/) : [expected];
+          var inputParts = expectedParts.length > 1
+            ? raw.trim().split(/\s*[,;]\s*/)
+            : [raw];
+          if (!isMultiRoot) {
+            ok = candidates.some(function (cand) { return sameValue(cand, inputParts[0]); });
+          } else if (inputParts.length === expectedParts.length) {
+            var unused = inputParts.slice();
+            ok = expectedParts.every(function (part) {
+              var idx = -1;
+              for (var i = 0; i < unused.length; i++) {
+                if (sameValue(part, unused[i])) { idx = i; break; }
+              }
+              if (idx < 0) return false;
+              unused.splice(idx, 1);
+              return true;
+            });
+          } else {
+            ok = false;
+          }
+        }
+
+        if (ok) {
           input.disabled = true;
           input.classList.add("answer-input--correct");
           feedback.innerHTML = feedbackBox("ok", "Правильно",

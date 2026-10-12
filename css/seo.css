@@ -211,6 +211,9 @@ p{overflow-wrap:anywhere;}
   color:var(--text-dim);line-height:1.65;white-space:pre-line;}
 .seo-feedback__solution b{color:var(--text);}
 .seo-feedback__actions{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+/* Моноширинные цифры в фидбеке («в твоём случае это 51») — как .mono сайта. */
+.seo-feedback__body .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+  font-variant-numeric:tabular-nums;}
 .seo-solution__row{margin-top:10px;line-height:1.65;}
 .seo-solution__row b{color:var(--text);}
 .seo-solution__row p{margin:4px 0 0;color:var(--text-dim);white-space:pre-line;}
