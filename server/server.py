@@ -3645,6 +3645,19 @@ CREATE TABLE IF NOT EXISTS news (
 );
 CREATE INDEX IF NOT EXISTS idx_news_page ON news(show_page, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_news_modal ON news(show_modal, created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS news_ai_jobs (
+  job TEXT PRIMARY KEY,
+  op TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  prompt TEXT NOT NULL DEFAULT '',
+  result_title TEXT NOT NULL DEFAULT '',
+  result_html TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  created_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_news_ai_jobs_time ON news_ai_jobs(created_at);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_key TEXT NOT NULL CHECK(length(request_key) = 64),
@@ -11725,6 +11738,179 @@ def news_modal_for_user(conn: sqlite3.Connection, user_id: int | None) -> dict:
     }}
 
 
+# ---------------------------------------------------------------------------
+# ИИ-помощник новостей (холст админки): создание и доработка текста той же
+# активной моделью, что у всех в агенте (active_provider + первая модель
+# цепочки, тир — как у агента через ai_tier_for).
+#
+# Механика переживания refresh — как у перепроверки сочинения: POST только
+# заводит job-строку и отвечает сразу, модель считает фоновый поток, клиент
+# опрашивает GET. Вкладку можно закрыть/обновить: ключ job лежит в
+# sessionStorage, повторного POST (и двойной траты) нет — только опрос.
+# ---------------------------------------------------------------------------
+
+NEWS_AI_PROMPT_MAX = 2000
+NEWS_AI_BODY_MAX = 60000
+NEWS_AI_CHAT_TIMEOUT_SEC = 120
+NEWS_AI_MAX_TOKENS = 4000
+NEWS_AI_JOB_TTL_MS = 3600_000
+
+NEWS_AI_HTML_RULES = (
+    "body_html — только теги: <p>, <h2>, <ul>/<ol> с <li>, <strong>, <em>, <u>, <s>, "
+    "<blockquote>, <a href=\"https://…\">, <hr> и при нужде двухколоночный блок "
+    "<div class=\"news-cols\"><div class=\"news-col\">…</div><div class=\"news-col\">…</div></div>. "
+    "Без <h1>, картинок, таблиц, скриптов и стилей; ссылки только https. "
+    "Русский язык, живой тон, без воды."
+)
+
+NEWS_AI_SYSTEM_GENERATE = (
+    "Ты — редактор новостей образовательного проекта ege easy (подготовка к ЕГЭ и ОГЭ). "
+    "Напиши новость по запросу пользователя. "
+    "Верни СТРОГО один JSON-объект без пояснений и fences: "
+    "{\"title\": \"заголовок до 200 символов\", \"body_html\": \"текст новости\"}. "
+    "Факты не выдумывай — опирайся только на запрос; чего не знаешь, так и скажи в тексте. "
+) + NEWS_AI_HTML_RULES
+
+NEWS_AI_SYSTEM_REFINE = (
+    "Ты — редактор новостей образовательного проекта ege easy (подготовка к ЕГЭ и ОГЭ). "
+    "Перепиши новость по желанию пользователя: сохрани смысл и факты, заголовок меняй, "
+    "только если об этом просят. "
+    "Верни СТРОГО один JSON-объект без пояснений и fences: "
+    "{\"title\": \"заголовок до 200 символов\", \"body_html\": \"текст новости\"}. "
+) + NEWS_AI_HTML_RULES
+
+
+def ensure_news_ai_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent migration for the news AI job table."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS news_ai_jobs (
+      job TEXT PRIMARY KEY,
+      op TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      prompt TEXT NOT NULL DEFAULT '',
+      result_title TEXT NOT NULL DEFAULT '',
+      result_html TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      created_by INTEGER)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_ai_jobs_time ON news_ai_jobs(created_at)")
+
+
+def news_ai_job_cleanup(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute("DELETE FROM news_ai_jobs WHERE created_at < ?",
+                     (news_now_ms() - NEWS_AI_JOB_TTL_MS,))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def news_ai_strip_fences(text: str) -> str:
+    s = (text or "").strip()
+    if s.startswith("```"):
+        lines = s.split("\n")
+        if len(lines) >= 2:
+            lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            s = "\n".join(lines).strip()
+    return s
+
+
+def news_ai_parse_output(text: str) -> tuple[str, str]:
+    """Строгий JSON модели -> (title, body_html). Бросает ValueError."""
+    raw = news_ai_strip_fences(text)
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("Нейросеть вернула не JSON — попробуй переформулировать запрос")
+    try:
+        data = json.loads(raw[start:end + 1])
+    except (json.JSONDecodeError, ValueError):
+        raise ValueError("Не получилось разобрать ответ нейросети — попробуй ещё раз")
+    if not isinstance(data, dict):
+        raise ValueError("Не получилось разобрать ответ нейросети — попробуй ещё раз")
+    title = " ".join(str(data.get("title", "") or "").split())
+    if not title:
+        raise ValueError("Нейросеть не придумала заголовок — уточни запрос")
+    if len(title) > NEWS_TITLE_MAX:
+        title = title[:NEWS_TITLE_MAX].rstrip()
+    safe = news_sanitize_html(data.get("body_html", ""))
+    if not news_plain_text(safe):
+        raise ValueError("Нейросеть вернула пустой текст — попробуй ещё раз")
+    return title, safe
+
+
+def news_ai_run(op: str, prompt: str, body_html: str, tier: str) -> tuple[str, str, str]:
+    """Один синхронный проход генерации той же моделью, что у агента.
+
+    Возвращает (title, body_html, model_label). Бросает ValueError с русским
+    текстом для показа в модалке; транспортные ошибки — как есть (админка).
+    Отдельно от job-обвязки, чтобы тестировалось без потоков."""
+    if _AI is None:
+        raise ValueError("ИИ-движок недоступен — проверь раздел Провайдеры")
+    tier = tier if tier in ("free", "plus") else "free"
+    try:
+        prov = _AI.active_provider(tier)
+        model = _AI.provider_primary_model(prov, tier)
+        model_label = f"{prov}/{model}" if model else str(prov)
+    except Exception:
+        prov, model, model_label = None, None, ""
+    if op == "refine":
+        system = NEWS_AI_SYSTEM_REFINE
+        user = f"Текущий текст новости:\n{body_html}\n\nЧто сделать: {prompt}"
+    else:
+        system = NEWS_AI_SYSTEM_GENERATE
+        user = f"Запрос: {prompt}"
+    text = _AI.chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=0.7, reasoning_effort="minimal", tier=tier,
+        timeout=NEWS_AI_CHAT_TIMEOUT_SEC, max_tokens=NEWS_AI_MAX_TOKENS)
+    if not (text or "").strip():
+        raise ValueError("Нейросеть вернула пустой ответ — попробуй ещё раз")
+    try:
+        used = _AI.last_used_model()
+        if used:
+            model_label = f"{prov}/{used}" if prov else str(used)
+    except Exception:
+        pass
+    title, safe = news_ai_parse_output(text)
+    return title, safe, model_label
+
+
+def _news_ai_worker(job: str, op: str, prompt: str, body_html: str, actor_id: int, tier: str) -> None:
+    """Фоновый счёт: свой коннект, итог — в строке job. Никогда не бросает."""
+    try:
+        title, safe, model_label = news_ai_run(op, prompt, body_html, tier)
+    except Exception as exc:
+        err = str(exc) or "Неизвестная ошибка"
+        if _AI is not None and isinstance(exc, getattr(_AI, "AIBusyError", ())):
+            err = "Нейросеть сейчас занята — подожди минуту и попробуй снова"
+        try:
+            conn = connect()
+            try:
+                ensure_news_ai_schema(conn)
+                conn.execute("UPDATE news_ai_jobs SET status='error', error=? WHERE job=?",
+                             (err[:500], job))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        return
+    try:
+        conn = connect()
+        try:
+            ensure_news_ai_schema(conn)
+            conn.execute("UPDATE news_ai_jobs SET status='done', result_title=?, result_html=?, model=? WHERE job=?",
+                         (title, safe, model_label[:120], job))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 # Read-only inbox for the dashboard admin block ("Обращения").
 # Pagination keeps the dashboard from loading the whole table; newest first.
 SUPPORT_INBOX_DEFAULT_LIMIT = 20
@@ -15503,6 +15689,71 @@ class Handler(BaseHTTPRequestHandler):
                 finally: conn.close()
                 return
             self.send_json({"error": "Not found"}, 404); return
+        if path == "/api/admin/news/ai":
+            # POST: завести ИИ-задачу холста (создание/доработка). Отвечает
+            # сразу {job}, модель считает фоновый поток — вкладку можно
+            # закрыть: продолжение по GET того же job (двойной траты нет).
+            if self.api_rate_limited(): return
+            conn = connect()
+            try:
+                auth = self.require_admin(conn)
+                if not auth: return
+                actor_id, _ = auth
+                try:
+                    payload = self.read_json()
+                except (json.JSONDecodeError, ValueError):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                if not isinstance(payload, dict):
+                    self.send_json({"error": "Некорректный JSON"}, 400); return
+                op = str(payload.get("op", "") or "").strip().lower()
+                if op not in ("generate", "refine"):
+                    self.send_json({"error": "Неизвестный тип задачи"}, 400); return
+                prompt = " ".join(str(payload.get("prompt", "") or "").split())
+                if not prompt:
+                    self.send_json({"error": "Напиши запрос нейросети"}, 400); return
+                if len(prompt) > NEWS_AI_PROMPT_MAX:
+                    self.send_json({"error": f"Запрос длиннее {NEWS_AI_PROMPT_MAX} символов"}, 400); return
+                body_html = ""
+                if op == "refine":
+                    body_html = payload.get("body_html", "")
+                    body_html = body_html if isinstance(body_html, str) else str(body_html or "")
+                    if len(body_html) > NEWS_AI_BODY_MAX:
+                        self.send_json({"error": "Текст слишком большой для ИИ-доработки — сократи его"}, 400); return
+                    body_html = news_sanitize_html(body_html)
+                    if not news_plain_text(body_html):
+                        self.send_json({"error": "На холсте пусто — дорабатывать нечего"}, 400); return
+                tier = ai_tier_for(conn, actor_id)
+                job = token_urlsafe(16)
+                try:
+                    ensure_news_ai_schema(conn)
+                    news_ai_job_cleanup(conn)
+                    conn.execute("INSERT INTO news_ai_jobs(job, op, status, prompt, created_at, created_by)"
+                                 " VALUES (?,?,?,?,?,?)",
+                                 (job, op, "running", prompt, news_now_ms(), int(actor_id)))
+                    conn.commit()
+                except sqlite3.Error as exc:
+                    try: conn.rollback()
+                    except sqlite3.Error: pass
+                    rid = log_request_error("admin-news-ai", exc)
+                    self.send_json({"error": "Не удалось запустить. Попробуй ещё раз.",
+                                    "ref": rid}, 500); return
+                try:
+                    admin_audit(conn, actor_id, "news-ai", None,
+                                f"{op} {prompt[:120]}"[:200])
+                except sqlite3.Error:
+                    pass
+                threading.Thread(target=_news_ai_worker,
+                                 args=(job, op, prompt, body_html, int(actor_id), tier),
+                                 daemon=True).start()
+                self.send_json({"ok": True, "job": job, "op": op}); return
+            except sqlite3.Error as exc:
+                try: conn.rollback()
+                except sqlite3.Error: pass
+                rid = log_request_error("admin-news-ai", exc)
+                self.send_json({"error": "Не удалось запустить. Попробуй ещё раз.",
+                                "ref": rid}, 500)
+            finally: conn.close()
+            return
         if path == "/api/admin/news" or path.startswith("/api/admin/news/"):
             # POST /api/admin/news — создать новость.
             # Правка/удаление — PUT/DELETE /api/admin/news/<id> (см. do_PUT/do_DELETE):
@@ -17509,6 +17760,32 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"entries": admin_audit_list(conn)}); return
                 if path == "/api/admin/news":
                     self.send_json({"news": admin_news_list(conn)}); return
+                if path.startswith("/api/admin/news/ai/"):
+                    # Опрос ИИ-задачи холста: running -> ждать, done -> забрать
+                    # текст, error -> показать причину. Та же require_admin-ветка.
+                    tail = path[len("/api/admin/news/ai/"):]
+                    if not tail or "/" in tail or len(tail) > 64:
+                        self.send_json({"error": "Not found"}, 404); return
+                    try:
+                        ensure_news_ai_schema(conn)
+                        row = conn.execute("SELECT job, op, status, result_title, result_html,"
+                                           " error, model, created_at FROM news_ai_jobs WHERE job=?",
+                                           (tail,)).fetchone()
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("admin-news-ai", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 500); return
+                    if not row:
+                        self.send_json({"error": "Задача не найдена"}, 404); return
+                    out = {"job": row["job"], "op": row["op"], "status": row["status"],
+                           "model": row["model"] or ""}
+                    if row["status"] == "done":
+                        out["title"] = row["result_title"]
+                        out["bodyHtml"] = row["result_html"]
+                        out["preview"] = (row["result_html"] or "") and news_plain_text(row["result_html"])[:220]
+                    elif row["status"] == "error":
+                        out["error"] = row["error"] or "Не получилось — попробуй ещё раз"
+                    self.send_json(out); return
                 if path == "/api/admin/support-messages":
                     # Read-only inbox for the dashboard admin block. Same
                     # require_admin gate as every other /api/admin/* endpoint:

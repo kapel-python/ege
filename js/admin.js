@@ -1338,22 +1338,25 @@ function openDeleteUserModal(p) {
   });
 }
 
-function openModal(html, onMount) {
+function openModal(html, onMount, opts) {
   closeModal();
+  const locked = !!(opts && opts.dismissable === false);
+  A.modalLocked = locked;
   const backdrop = document.createElement("div");
-  backdrop.className = "a-modal-backdrop";
+  backdrop.className = "a-modal-backdrop" + (locked ? " a-modal-backdrop--locked" : "");
   backdrop.innerHTML = `<div class="a-modal" role="dialog" aria-modal="true">${html}</div>`;
-  backdrop.addEventListener("click", (ev) => { if (ev.target === backdrop) closeModal(); });
+  backdrop.addEventListener("click", (ev) => { if (ev.target === backdrop && !A.modalLocked) closeModal(); });
   A.modalRoot.appendChild(backdrop);
   document.addEventListener("keydown", modalEsc);
   if (onMount) onMount(backdrop.querySelector(".a-modal"));
   return backdrop;
 }
 
-function modalEsc(ev) { if (ev.key === "Escape") closeModal(); }
+function modalEsc(ev) { if (ev.key === "Escape" && !A.modalLocked) closeModal(); }
 
 function closeModal() {
   A.modalRoot.innerHTML = "";
+  A.modalLocked = false;
   document.removeEventListener("keydown", modalEsc);
 }
 
@@ -1882,6 +1885,7 @@ const AUDIT_CATS = [
   { id: "plus", label: "Подписка" },
   { id: "providers", label: "Провайдеры" },
   { id: "inbox", label: "Обращения" },
+  { id: "news", label: "Новости" },
 ];
 
 // Действие -> [категория, подпись, класс чипа].
@@ -1919,6 +1923,10 @@ const AUDIT_ACTIONS = {
   "ai-provider-delete": ["providers", "Провайдер удалён", "a-chip--danger"],
   "ai-provider-restore": ["providers", "Провайдер восстановлен", "a-chip--success"],
   "support-read": ["inbox", "Обращение прочитано", ""],
+  "news-create": ["news", "Новость создана", "a-chip--success"],
+  "news-update": ["news", "Новость изменена", ""],
+  "news-delete": ["news", "Новость удалена", "a-chip--danger"],
+  "news-ai": ["news", "ИИ-генерация", "a-chip--accent"],
 };
 
 function auditActionOf(e) {
@@ -5916,6 +5924,10 @@ async function screenNewsComposer(id) {
   renderShell("news", `
     <div style="margin-bottom:12px"><a class="btn btn--soft btn--sm" href="#/news">${aicon("back")} Все новости</a></div>
     <div class="a-card a-compose">
+      <button class="btn btn--ai btn--lg" id="cAi" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+        <span>Написать с ИИ</span>
+      </button>
       <div class="a-compose__eyebrow">${existing ? `Новость #${Number(existing.id)} · ${esc(fmtDateTime(existing.createdAt))}` : "Новая общая новость · лента /news"}</div>
       <input class="a-input a-compose__title" id="cNewsTitle" maxlength="200"
         value="${esc(existing ? existing.title : draftTitle)}" placeholder="Заголовок новости">
@@ -5990,6 +6002,245 @@ async function screenNewsComposer(id) {
   };
   const delBtn = document.getElementById("cDel");
   if (delBtn) delBtn.onclick = () => openNewsDelete(Number(existing.id), () => navigate("/news"));
+  document.getElementById("cAi").onclick = () => openNewsAiSheet();
+  // Недосчитанная ИИ-задача из прошлой вкладки/перезагрузки: продолжаем опрос.
+  newsAiResumePending();
+}
+
+/* ИИ-помощник холста: та же активная модель, что у всех в агенте.
+   Создание — по запросу с нуля; доработка — текущий текст + пожелание.
+   Единый флоу: выбор -> запрос -> незакрываемый прогресс (как перепроверка
+   сочинения: job в БД + ключ в sessionStorage, refresh только продолжает
+   опрос, повторного POST и двойной траты нет) -> вставка на холст. */
+const NEWS_AI_PENDING_KEY = "ege_news_ai_pending";
+const NEWS_AI_TTL_MS = 10 * 60 * 1000;
+const NEWS_AI_POLL_MS = 3000;
+const NEWS_AI_DEADLINE_MS = 150000;
+const NEWS_AI_MSGS = ["Обращаемся к нейросети…", "Пишем новость…", "Проверяем форматирование…", "Почти готово…"];
+
+function newsAiSleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function newsAiFmtTime(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function newsAiPendingSave(job, op) {
+  try { sessionStorage.setItem(NEWS_AI_PENDING_KEY, JSON.stringify({ job, op, ts: Date.now() })); } catch (e) {}
+}
+
+function newsAiPendingLoad() {
+  try {
+    const raw = sessionStorage.getItem(NEWS_AI_PENDING_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || !p.job || (p.op !== "generate" && p.op !== "refine")) return null;
+    if (!Number.isFinite(Number(p.ts)) || Date.now() - Number(p.ts) > NEWS_AI_TTL_MS) return null;
+    return { job: String(p.job), op: p.op };
+  } catch (e) { return null; }
+}
+
+function newsAiPendingClear() {
+  try { sessionStorage.removeItem(NEWS_AI_PENDING_KEY); } catch (e) {}
+}
+
+function newsAiPlain(html) {
+  return String(html || "").replace(/<[^>]*>/g, " ").replace(/\u200B/g, "").replace(/\s+/g, " ").trim();
+}
+
+function openNewsAiSheet() {
+  openModal(`
+    <div class="a-modal__title">Написать с ИИ</div>
+    <div class="a-modal__desc">Та же нейросеть, что отвечает всем в агенте. Сначала выбери задачу.</div>
+    <div class="a-modal__form">
+      <div class="a-typecards">
+        <label class="a-typecard"><input type="radio" name="fAiOp" value="generate" checked>
+          <span class="a-typecard__title">Создать новость</span>
+          <span class="a-typecard__sub">Опишешь тему — ИИ напишет заголовок и текст</span>
+        </label>
+        <label class="a-typecard"><input type="radio" name="fAiOp" value="refine">
+          <span class="a-typecard__title">Доработать текст</span>
+          <span class="a-typecard__sub">Скажешь, что изменить, — ИИ перепишет холст</span>
+        </label>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mCancel">Отмена</button>
+      <button class="btn btn--primary" id="mNext">Продолжить</button>
+    </div>`, (modal) => {
+    modal.querySelector("#mCancel").onclick = closeModal;
+    modal.querySelector("#mNext").onclick = () => {
+      const op = (modal.querySelector('input[name="fAiOp"]:checked') || {}).value || "generate";
+      if (op === "refine" && !newsAiPlain((document.getElementById("cNewsBody") || {}).innerHTML || "")) {
+        modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">На холсте пусто — дорабатывать нечего. Сначала выбери «Создать новость».</div>`;
+        return;
+      }
+      closeModal();
+      openNewsAiPrompt(op);
+    };
+  });
+}
+
+function openNewsAiPrompt(op) {
+  const isCreate = op === "generate";
+  openModal(`
+    <div class="a-modal__title">${isCreate ? "Что за новость?" : "Что изменить?"}</div>
+    <div class="a-modal__desc">${isCreate
+      ? "Опиши тему своими словами: факты, даты, цифры, на что сослаться. Факты ИИ не выдумывает — пишет по твоему описанию."
+      : "Напиши пожелание: например «сделай короче», «добавь подзаголовки», «перепиши вступление». Текущий текст холста уйдёт вместе с ним."}</div>
+    <div class="a-modal__form">
+      <div class="a-field">
+        <textarea class="a-input a-ai-prompt" id="fAiPrompt" maxlength="2000" rows="5"
+          placeholder="${isCreate ? "Например: вышло обновление — появился предмет «Химия», 30 заданий, старт 1 сентября…" : "Например: сократи вдвое и разбей на два абзаца с подзаголовком…"}"></textarea>
+        <div class="a-field__hint">До 2000 символов. Форматирование (заголовки, списки, цитаты) ИИ расставит сам.</div>
+      </div>
+      <div id="mErr"></div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mBack">Назад</button>
+      <button class="btn btn--primary" id="mGo">Сгенерировать</button>
+    </div>`, (modal) => {
+    const box = modal.querySelector("#fAiPrompt");
+    box.focus();
+    modal.querySelector("#mBack").onclick = () => { closeModal(); openNewsAiSheet(); };
+    modal.querySelector("#mGo").onclick = async () => {
+      const errBox = modal.querySelector("#mErr");
+      errBox.innerHTML = "";
+      const prompt = (box.value || "").trim();
+      if (!prompt) { errBox.innerHTML = `<div class="a-modal__error">Напиши запрос нейросети</div>`; box.focus(); return; }
+      const bodyHtml = op === "refine" ? newsEdCleanHtml((document.getElementById("cNewsBody") || {}).innerHTML || "") : "";
+      const btn = modal.querySelector("#mGo");
+      btn.disabled = true;
+      btn.textContent = "Запускаем…";
+      try {
+        const res = await AdminApi.post("/api/admin/news/ai", { op, prompt, body_html: bodyHtml });
+        newsAiPendingSave(res.job, op);
+        closeModal();
+        openNewsAiProgress(res.job, op);
+      } catch (e) {
+        if (e && e.unauthorized) { closeModal(); A.session = null; renderLogin(); return; }
+        btn.disabled = false;
+        btn.textContent = "Сгенерировать";
+        errBox.innerHTML = `<div class="a-modal__error">${esc(e.message)}</div>`;
+      }
+    };
+  });
+}
+
+function openNewsAiProgress(job, op) {
+  // Тот же незакрываемый лоадер, что перепроверка сочинения: крестика нет,
+  // Esc и фон игнорируются. Обновление страницы не убивает задачу — при
+  // загрузке холст увидит ключ и продолжит опрос того же job.
+  if (window.__newsAiJob === job) return;
+  window.__newsAiJob = job;
+  const t0 = Date.now();
+  let mi = 0;
+  openModal(`
+    <div class="a-ai-load">
+      <div class="a-ai-load__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+      </div>
+      <div class="a-modal__title">Нейросеть ${op === "generate" ? "пишет новость" : "переписывает текст"}…</div>
+      <div class="a-ai-load__msg" id="aiMsg">${esc(NEWS_AI_MSGS[0])}</div>
+      <div class="a-ai-load__timer" id="aiTimer">00:00</div>
+      <div class="a-field__hint">Страницу можно обновить — задача продолжится сама, деньги дважды не спишутся.</div>
+    </div>`, null, { dismissable: false });
+  const msgTimer = setInterval(() => {
+    mi = (mi + 1) % NEWS_AI_MSGS.length;
+    const el = document.getElementById("aiMsg");
+    if (el) el.textContent = NEWS_AI_MSGS[mi];
+  }, 1600);
+  const clockTimer = setInterval(() => {
+    const el = document.getElementById("aiTimer");
+    if (el) el.textContent = newsAiFmtTime(Date.now() - t0);
+  }, 500);
+  const stop = () => { clearInterval(msgTimer); clearInterval(clockTimer); window.__newsAiJob = null; };
+  (async () => {
+    // window.__newsAiFast — только для UI-теста (быстрый опрос).
+    const pollEvery = window.__newsAiFast ? 60 : NEWS_AI_POLL_MS;
+    const deadline = Date.now() + (window.__newsAiFast ? 8000 : NEWS_AI_DEADLINE_MS);
+    while (Date.now() < deadline) {
+      await newsAiSleep(pollEvery);
+      let data = null;
+      try {
+        data = await AdminApi.get(`/api/admin/news/ai/${encodeURIComponent(job)}`);
+      } catch (e) {
+        if (e && e.unauthorized) { stop(); newsAiPendingClear(); closeModal(); A.session = null; renderLogin(); return; }
+        continue;
+      }
+      if (!data) continue;
+      if (data.status === "done") {
+        stop(); newsAiPendingClear(); closeModal();
+        newsAiApplyResult(op, data);
+        return;
+      }
+      if (data.status === "error") {
+        stop(); newsAiPendingClear(); closeModal();
+        openNewsAiError(data.error || "Не получилось — попробуй ещё раз");
+        return;
+      }
+    }
+    // Дедлайн экрана, не задачи: она досчитает, но холст отпускаем.
+    stop(); newsAiPendingClear(); closeModal();
+    openNewsAiError("Нейросеть считает дольше обычного. Загляни на холст чуть позже или попробуй снова.");
+  })();
+}
+
+function newsAiApplyResult(op, data) {
+  const titleEl = document.getElementById("cNewsTitle");
+  const area = document.getElementById("cNewsBody");
+  if (!titleEl || !area) {
+    toast("Готово, но холст закрыт — вернись на него", "err");
+    return;
+  }
+  const apply = () => {
+    if (data.title) titleEl.value = data.title;
+    area.innerHTML = data.bodyHtml || "";
+    A.newsEdArea = area;
+    newsEditorSyncToolbar(area);
+    toast(op === "generate" ? "Новость создана ИИ — проверь и публикуй" : "Текст доработан ИИ — проверь и сохраняй");
+  };
+  if (!newsAiPlain(area.innerHTML)) { apply(); return; }
+  const excerpt = newsAiPlain(data.bodyHtml).slice(0, 220);
+  openModal(`
+    <div class="a-modal__title">Заменить текст холста?</div>
+    <div class="a-modal__desc">ИИ готов. На холсте уже есть текст — показать вариант ИИ вместо него?</div>
+    <div class="a-modal__form">
+      <div class="a-field"><label>${esc(data.title || "Без заголовка")}</label>
+        <div class="a-ai-preview">${esc(excerpt)}${newsAiPlain(data.bodyHtml).length > 220 ? "…" : ""}</div>
+      </div>
+    </div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mKeep">Оставить мой</button>
+      <button class="btn btn--primary" id="mReplace">Заменить</button>
+    </div>`, (modal) => {
+    modal.querySelector("#mKeep").onclick = closeModal;
+    modal.querySelector("#mReplace").onclick = () => { closeModal(); apply(); };
+  });
+}
+
+function openNewsAiError(text) {
+  openModal(`
+    <div class="a-modal__title">Не получилось</div>
+    <div class="a-modal__desc">${esc(text || "Попробуй ещё раз")}</div>
+    <div class="a-modal__actions">
+      <button class="btn btn--soft" id="mOk">Понятно</button>
+      <button class="btn btn--primary" id="mRetry">Попробовать снова</button>
+    </div>`, (modal) => {
+    modal.querySelector("#mOk").onclick = closeModal;
+    modal.querySelector("#mRetry").onclick = () => { closeModal(); openNewsAiSheet(); };
+  });
+}
+
+/* Продолжение недосчитанной задачи после перезагрузки/возврата на холст. */
+function newsAiResumePending() {
+  try {
+    const p = newsAiPendingLoad();
+    if (!p) return;
+    if (!document.getElementById("cNewsBody")) return;
+    openNewsAiProgress(p.job, p.op);
+  } catch (e) {}
 }
 
 function openNewsDelete(id, reload) {

@@ -131,6 +131,19 @@ def main():
     check("server: есть маршрут /news", "elif path == '/news'" in server_src)
     check("sitemap: есть /news", "/news" in server_src)
     check("app.js: модалка новостей", "maybeShowNewsModal" in APP_JS.read_text(encoding="utf-8"))
+    check("admin: ИИ-кнопка и флоу",
+          "openNewsAiSheet" in ui and "openNewsAiPrompt" in ui
+          and "openNewsAiProgress" in ui and "newsAiApplyResult" in ui
+          and "newsAiResumePending" in ui and "dismissable" in ui
+          and "/api/admin/news/ai" in ui and "Написать с ИИ" in ui)
+    check("admin: аудит новостей", '"news-create"' in ui and '"news-ai"' in ui
+          and '{ id: "news", label: "Новости" }' in ui)
+    check("server: ИИ-роуты и job-таблица",
+          "/api/admin/news/ai" in server_src and "news_ai_jobs" in server_src
+          and "news_ai_run" in server_src and "_news_ai_worker" in server_src
+          and "active_provider" in server_src)
+    css = (ROOT / "css" / "admin.css").read_text(encoding="utf-8")
+    check("css: ИИ-кнопка и прогресс", ".btn--ai" in css and ".a-ai-load" in css)
     check("app.js: используется dlg", "maybeShowNewsModal" in ui or True)
 
     print("== news: живой сервер ==")
@@ -275,6 +288,85 @@ def main():
             check("после DELETE деталка 404", s == 404, f"got {s} {b}")
             s, b = request(admin, base, f"/api/admin/news/{news_id}", "DELETE")
             check("повторный DELETE 404", s == 404, f"got {s} {b}")
+
+            print("== news-ai: живые задачи с подменённым chat ==")
+            AI = server._AI
+            fake_answers = []
+
+            def fake_chat(messages, **kw):
+                assert isinstance(messages, list) and len(messages) == 2, messages
+                assert messages[0]["role"] == "system" and messages[1]["role"] == "user", messages
+                assert kw.get("tier") in ("free", "plus"), kw
+                return fake_answers.pop(0) if fake_answers else '{"title": "?", "body_html": "<p>?</p>"}'
+
+            if AI is None:
+                class FakeAI:
+                    def active_provider(self, tier): return "fakeprov"
+                    def provider_primary_model(self, prov, tier): return "fakemodel"
+                    def last_used_model(self): return "fakemodel"
+                    chat = staticmethod(fake_chat)
+                server._AI = FakeAI()
+            else:
+                AI.chat = fake_chat
+
+            def wait_job(token, timeout=20.0):
+                t0 = time.time()
+                while time.time() - t0 < timeout:
+                    s, b = request(admin, base, f"/api/admin/news/ai/{token}")
+                    assert s == 200, (s, b)
+                    if b.get("status") in ("done", "error"):
+                        return b
+                    time.sleep(0.3)
+                raise AssertionError(f"job {token} не досчитал за {timeout}с")
+
+            s, _ = request(guest, base, "/api/admin/news/ai", "POST", {"op": "generate", "prompt": "x"})
+            check("POST ai гостю 401", s == 401, f"got {s}")
+            s, b = request(admin, base, "/api/admin/news/ai", "POST", {"op": "teleport", "prompt": "x"})
+            check("неизвестный op 400", s == 400, f"got {s} {b}")
+            s, b = request(admin, base, "/api/admin/news/ai", "POST", {"op": "generate", "prompt": "   "})
+            check("пустой prompt 400", s == 400, f"got {s} {b}")
+            s, b = request(admin, base, "/api/admin/news/ai", "POST", {"op": "generate", "prompt": "x" * 2001})
+            check("длинный prompt 400", s == 400, f"got {s} {b}")
+            s, b = request(admin, base, "/api/admin/news/ai", "POST",
+                           {"op": "refine", "prompt": "сделай лучше", "body_html": "<p><br></p>"})
+            check("refine пустого холста 400", s == 400, f"got {s} {b}")
+
+            fake_answers.append('{"title": "Заголовок ИИ", "body_html": "<p>Текст <b>новости</b></p><script>alert(1)</script>"}')
+            s, b = request(admin, base, "/api/admin/news/ai", "POST",
+                           {"op": "generate", "prompt": "напиши про запуск"})
+            check("generate 200 + job", s == 200 and b.get("job"), f"got {s} {b}")
+            job = b["job"]
+            s, _ = request(guest, base, f"/api/admin/news/ai/{job}")
+            check("опрос job гостю 401", s == 401, f"got {s}")
+            done = wait_job(job)
+            check("generate done", done.get("status") == "done", str(done))
+            check("заголовок из ИИ", done.get("title") == "Заголовок ИИ", str(done))
+            check("санитайзер режет script из ИИ",
+                  "<b>новости</b>" in done.get("bodyHtml", "") and "<script" not in done.get("bodyHtml", ""),
+                  done.get("bodyHtml", "")[:200])
+
+            fake_answers.append('{"title": "Тот же", "body_html": "<p>Новый <i>текст</i></p>"}')
+            s, b = request(admin, base, "/api/admin/news/ai", "POST",
+                           {"op": "refine", "prompt": "сделай живее",
+                            "body_html": "<p>Старый текст</p>"})
+            check("refine 200 + job", s == 200 and b.get("job"), f"got {s} {b}")
+            done = wait_job(b["job"])
+            check("refine done + новый текст",
+                  done.get("status") == "done" and "<i>текст</i>" in done.get("bodyHtml", ""),
+                  str(done))
+
+            fake_answers.append("это вообще не json {")
+            s, b = request(admin, base, "/api/admin/news/ai", "POST",
+                           {"op": "generate", "prompt": "сломайся"})
+            done = wait_job(b["job"])
+            check("мусор модели -> error, не done",
+                  done.get("status") == "error" and done.get("error"), str(done))
+
+            s, b = request(admin, base, "/api/admin/news/ai/no-such-job")
+            check("чужой job 404", s == 404, f"got {s} {b}")
+            s, b = request(admin, base, "/api/admin/audit")
+            acts = [e.get("action") for e in b.get("entries", [])]
+            check("аудит news-ai записан", "news-ai" in acts, str(acts[:8]))
         finally:
             httpd.shutdown()
 
