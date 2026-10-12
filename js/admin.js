@@ -373,7 +373,7 @@ function renderLogin(error = "") {
       <div class="admin-login__card">
         <span class="admin-login__mark">ege <em>easy</em></span>
         <div class="admin-login__title">Админ-панель</div>
-        <div class="admin-login__sub">Закрытый раздел управления платформой. Введите админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к твоему аккаунту.</div>
+        <div class="admin-login__sub">Закрытый раздел управления платформой. Введи админ-пароль — он проверяется только на сервере, сессия живёт 30 дней и привязана к твоему аккаунту.</div>
         <form class="admin-login__form" id="loginForm">
           <input class="a-input" type="password" id="pwInput" placeholder="Админ-пароль" autocomplete="current-password" autofocus required>
           ${error ? `<div class="admin-login__error" id="loginError">${esc(error)}</div>` : ""}
@@ -630,7 +630,7 @@ function activityChart(activity, selectedDate = null) {
    подсказка-приглашение, а не нулевые плитки. */
 function chartDetailHTML(d) {
   if (!activityHasData(d)) {
-    return `<div class="a-detail-hint">Нажмите на столбец с данными, чтобы увидеть подробности дня</div>`;
+    return `<div class="a-detail-hint">Нажми на столбец с данными, чтобы увидеть подробности дня</div>`;
   }
   const acc = d.solved > 0 ? Math.round((d.correct / d.solved) * 100) : null;
   const tile = (label, value, sub) => `<div class="a-detail-tile"><div class="a-detail-tile__label">${label}</div><div class="a-detail-tile__value">${value}</div><div class="a-detail-tile__sub">${sub}</div></div>`;
@@ -996,7 +996,7 @@ async function screenUsers() {
       <div class="a-card"><div class="a-empty">
         <div class="a-empty__icon">${aicon("search")}</div>
         <div class="a-empty__title">Ничего не найдено</div>
-        <div class="a-empty__sub">Попробуйте Account ID (например, «a7k29x»), имя или числовой id</div>
+        <div class="a-empty__sub">Попробуй Account ID (например, «a7k29x»), имя или числовой id</div>
       </div></div>`;
     wrap.querySelectorAll(".a-user-card[data-id]").forEach((card) => {
       card.onclick = () => navigate(`/users/${encodeURIComponent(filtered.find((p) => String(p.id) === card.dataset.id)?.accountId || card.dataset.id)}`);
@@ -1430,7 +1430,7 @@ function bindUserActions(p) {
         const btn = modal.querySelector("#mSave");
         const amount = parseInt(modal.querySelector("#fAmount").value, 10);
         if (!Number.isFinite(amount) || amount === 0) {
-          modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">Введите ненулевое целое число</div>`;
+          modal.querySelector("#mErr").innerHTML = `<div class="a-modal__error">Введи ненулевое целое число</div>`;
           return;
         }
         btn.disabled = true;
@@ -1543,7 +1543,7 @@ function bindUserActions(p) {
           if (agRem !== null) agent.remaining = agRem;
           body.agent = agent;
         }
-        if (!("limit" in body) && !("remaining" in body) && !body.agent) { err("Укажите, сколько выдать"); return; }
+        if (!("limit" in body) && !("remaining" in body) && !body.agent) { err("Укажи, сколько выдать"); return; }
         await send(body, ev.target);
       };
     });
@@ -1697,7 +1697,7 @@ function bindUserActions(p) {
   document.getElementById("resetBtn").onclick = () => {
     openModal(`
       <div class="a-modal__title">Сброс состояния — ${esc(p.accountId || "")}</div>
-      <div class="a-modal__desc">Выберите, что именно сбросить. Каждое действие выполняется на сервере и записывается в журнал.</div>
+      <div class="a-modal__desc">Выбери, что именно сбросить. Каждое действие выполняется на сервере и записывается в журнал.</div>
       <div class="a-modal__form" style="gap:10px">
         ${RESETS.map((r) => `
           <button class="choice-item" data-reset="${r.id}" style="${r.danger ? "border-color:rgba(255,107,107,.35)" : ""}">
@@ -1714,10 +1714,10 @@ function bindUserActions(p) {
     async function confirmReset(modal, target, info) {
       if (info.danger) {
         openModal(`
-          <div class="a-modal__title" style="color:var(--danger)">Подтвердите полный сброс</div>
+          <div class="a-modal__title" style="color:var(--danger)">Подтверди полный сброс</div>
           <div class="a-modal__desc">${info.desc}</div>
           <div class="a-modal__form">
-            <div class="a-modal__warn"><b>Это необратимо.</b> Все данные ученика «${esc(p.name || p.accountId || "")}» будут удалены. Введите Account ID <span class="mono">${esc(p.accountId || "")}</span> для подтверждения.</div>
+            <div class="a-modal__warn"><b>Это необратимо.</b> Все данные ученика «${esc(p.name || p.accountId || "")}» будут удалены. Введи Account ID <span class="mono">${esc(p.accountId || "")}</span> для подтверждения.</div>
             <input class="a-input mono" id="fConfirm" placeholder="${esc(p.accountId || "")}" autocomplete="off">
             <div id="mErr2"></div>
           </div>

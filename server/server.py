@@ -13143,7 +13143,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_auth_register(self, conn: sqlite3.Connection) -> None:
         ip = client_ip(self)
         if not auth_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
             return
         try:
             payload = self.read_json()
@@ -13155,7 +13155,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         email = normalize_email(payload.get("email"))
         if not email:
-            self.send_json({"error": "Введите корректный email"}, 400)
+            self.send_json({"error": "Введи корректный email"}, 400)
             return
         password = payload.get("password")
         if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
@@ -13232,7 +13232,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_auth_login(self, conn: sqlite3.Connection) -> None:
         ip = client_ip(self)
         if not auth_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
             return
         try:
             payload = self.read_json()
@@ -13245,7 +13245,7 @@ class Handler(BaseHTTPRequestHandler):
         email = normalize_email(payload.get("email"))
         password = payload.get("password")
         if not email or not isinstance(password, str) or not password:
-            self.send_json({"error": "Введите email и пароль"}, 400)
+            self.send_json({"error": "Введи email и пароль"}, 400)
             return
         if len(password) > AUTH_PASSWORD_MAX_LENGTH:
             # Заведомо чужой: регистрация режет 8..72, такого пароля в базе
@@ -13339,7 +13339,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         ip = client_ip(self)
         if not auth_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут.",
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут.",
                             "retryAfter": 60}, 429)
             return
         # Живая сессия здесь НЕ меняет внешний вид: выбор аккаунта у Google
@@ -13697,7 +13697,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_admin_login(self, conn: sqlite3.Connection) -> None:
         ip = client_ip(self)
         if not admin_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повторите через несколько минут."}, 429)
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
             return
         try:
             payload = self.read_json()
@@ -13706,7 +13706,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         password = payload.get("password")
         if not isinstance(password, str) or not password:
-            self.send_json({"error": "Введите пароль"}, 400)
+            self.send_json({"error": "Введи пароль"}, 400)
             return
         if len(password) > AUTH_PASSWORD_MAX_LENGTH:
             # Заведомо чужой: такой пароль нигде не зарегистрирован, а PBKDF2
