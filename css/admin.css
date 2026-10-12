@@ -1059,7 +1059,7 @@ button.a-prov-ping:focus-visible { outline: 2px solid var(--accent); outline-off
 
 /* ---------- новости: лёгкий редактор (teletype-минимум) ---------- */
 .a-editor { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
-.a-editor__bar { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px; border-bottom: 1px solid var(--border); background: var(--bg-soft, var(--surface-2, transparent)); }
+.a-editor__bar { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px; border-bottom: 1px solid var(--border); background: var(--bg-soft, var(--surface-2, transparent)); user-select: none; -webkit-user-select: none; }
 .a-edbtn { border: 1px solid transparent; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; padding: 6px 9px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .a-edbtn:hover { border-color: var(--border-strong); background: var(--surface); color: var(--text); }
 .a-edbtn.on { border-color: var(--accent); background: var(--accent-soft, rgba(2,119,182,.1)); color: var(--accent-ink, var(--accent)); font-weight: 700; }

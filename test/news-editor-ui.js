@@ -203,6 +203,36 @@ window.__area = area;
     // Чистка перед сохранением: невидимки и пустые обёртки исчезают.
     const cleaned = await page.evaluate(() => newsEdCleanHtml("<p><b>\u200B</b>ok</p><p><i></i></p>"));
     t("clean убирает мусор", cleaned === "<p>ok</p><p></p>", JSON.stringify(cleaned));
+
+    // Первая строка с клавиатуры в пустом редакторе + Ctrl+A.
+    await page.evaluate(() => { window.__area.innerHTML = ""; });
+    await page.click("#area");
+    await page.keyboard.type("первая");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("вторая");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.waitForTimeout(120);
+    await page.click('[data-ed="bold"]');
+    h = await page.evaluate(() => window.__area.innerHTML);
+    t("первая строка форматируется", /<b>/.test(h), h);
+
+    // Тап уронил выделение (фокус вне редактора) — клик всё равно форматирует.
+    await page.evaluate(() => {
+      const a = window.__area; a.innerHTML = "<p>верни меня</p>";
+      const t0 = a.querySelector("p").firstChild;
+      const r = document.createRange(); r.selectNodeContents(t0);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      document.activeElement.blur();
+      const s = window.getSelection(); s.removeAllRanges();
+      const r = document.createRange(); r.selectNodeContents(document.body); r.collapse(false);
+      s.addRange(r);
+    });
+    await page.click('[data-ed="italic"]');
+    h = await page.evaluate(() => window.__area.innerHTML);
+    t("форматирование после потери выделения", /<i>верни меня<\/i>/.test(h), h);
   } finally {
     await browser.close();
   }

@@ -5627,15 +5627,48 @@ function newsEditorSyncToolbar(area) {
   } catch (e) {}
 }
 
-/* Один глобальный слушатель подсветки на все редакторы новостей. */
+/* Один глобальный слушатель подсветки на все редакторы новостей.
+   Заодно запоминаем последний живой диапазон внутри редактора: тап по
+   кнопке в тач-браузерах уводит фокус и роняет выделение — перед действием
+   его восстановим (newsEdEnsureRange). */
 if (!window.__egeNewsEdSyncInstalled) {
   window.__egeNewsEdSyncInstalled = true;
   document.addEventListener("selectionchange", () => {
     try {
       const area = A.newsEdArea;
-      if (area && area.isConnected) newsEditorSyncToolbar(area);
+      if (area && area.isConnected) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          const r = sel.getRangeAt(0);
+          if (r.commonAncestorContainer === area || area.contains(r.commonAncestorContainer)) {
+            try { area._savedRange = r.cloneRange(); } catch (e) {}
+          }
+        }
+        newsEditorSyncToolbar(area);
+      }
     } catch (e) {}
   });
+}
+
+/* Живое выделение внутри редактора; если тап по кнопке его уронил —
+   восстанавливаем последнее запомненное. false — форматировать нечего. */
+function newsEdEnsureRange(area) {
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0);
+      if (r.commonAncestorContainer === area || area.contains(r.commonAncestorContainer)) return true;
+    }
+    if (area._savedRange) {
+      const probe = area._savedRange.commonAncestorContainer;
+      if (probe !== area && !area.contains(probe)) return false;
+      try { area.focus(); } catch (e) {}
+      sel.removeAllRanges();
+      sel.addRange(area._savedRange.cloneRange());
+      return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 /* Пустой Enter в конце цитаты/заголовка — выход в обычный абзац. */
@@ -5718,11 +5751,22 @@ function newsEditorBindToolbar(area) {
   const bar = area.parentElement ? area.parentElement.querySelector(".a-editor__bar") : null;
   if (!bar) return;
   A.newsEdArea = area;
-  const sync = () => newsEditorSyncToolbar(area);
-  area.addEventListener("keyup", sync);
-  area.addEventListener("mouseup", sync);
-  area.addEventListener("click", sync);
-  area.addEventListener("input", sync);
+  const saveRange = () => {
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const r = sel.getRangeAt(0);
+        if (r.commonAncestorContainer === area || area.contains(r.commonAncestorContainer)) {
+          area._savedRange = r.cloneRange();
+        }
+      }
+    } catch (e) {}
+  };
+  const syncSave = () => { saveRange(); newsEditorSyncToolbar(area); };
+  area.addEventListener("keyup", syncSave);
+  area.addEventListener("mouseup", syncSave);
+  area.addEventListener("click", syncSave);
+  area.addEventListener("input", syncSave);
   newsEditorBindExit(area);
   newsEditorBindPaste(area);
   const INLINE_TAG = { bold: "b", italic: "i", underline: "u", strike: "s" };
@@ -5730,6 +5774,8 @@ function newsEditorBindToolbar(area) {
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
       A.newsEdArea = area;
+      // Тап мог уронить выделение (фокус уже не в редакторе) — чиним до дела.
+      if (!newsEdEnsureRange(area)) { try { area.focus(); } catch (e) {} return; }
       const cmd = btn.getAttribute("data-ed");
       try {
         if (INLINE_TAG[cmd]) newsEdInlineFormat(area, INLINE_TAG[cmd]);
@@ -5743,6 +5789,8 @@ function newsEditorBindToolbar(area) {
           if (url == null) return;
           const href = String(url).trim();
           if (!/^https?:\/\/.+/i.test(href)) { toast("Нужна ссылка http(s)://", "err"); return; }
+          // Окно prompt уводит фокус — выделение чиним заново.
+          if (!newsEdEnsureRange(area)) return;
           document.execCommand("createLink", false, href);
         } else if (cmd === "cols") {
           area.focus();
@@ -5751,10 +5799,11 @@ function newsEditorBindToolbar(area) {
         }
       } catch (e) { /* неизвестная команда — текст не трогаем */ }
       try { area.focus(); } catch (_) {}
-      setTimeout(sync, 0);
+      saveRange();
+      setTimeout(syncSave, 0);
     });
   });
-  setTimeout(sync, 0);
+  setTimeout(syncSave, 0);
 }
 
 function newsToLocalInput(ms) {
