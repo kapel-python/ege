@@ -2786,6 +2786,7 @@ body {
 .subject-group-label { flex-basis: 100%; font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 4px 0 -2px; }
 .subj-group-label { font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 10px 0 -6px; }
 .subj-group-label:first-child { margin-top: 0; }
+.subj-back { align-self: flex-start; margin-bottom: 2px; }
 .subject-pill {
   display: inline-flex;
   align-items: center;

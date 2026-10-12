@@ -2597,9 +2597,24 @@ function subjectCurrentButtonHTML() {
   </button>`;
 }
 
-/* Диалог выбора предмета: та же структура модалки (device-modal-root +
-   .dlg-backdrop/.dlg), но со списком красивых карточек предметов. */
+/* Диалог выбора предмета: два шага. Сначала только направление
+   (ЕГЭ/ОГЭ) — списком из 8 карточек никто не пользуется, все ищут свою
+   ось. Потом — предметы выбранного направления + кнопка «Назад».
+   Одна ось — сразу предметы, без лишнего шага. */
+let subjectDialogExam = null;
 function askSubjectDialog() {
+  subjectDialogExam = null;
+  renderSubjectDialog();
+}
+function chooseSubjectExamDialog(exam) {
+  subjectDialogExam = exam === "oge" ? "oge" : "ege";
+  renderSubjectDialog();
+}
+function subjectDialogBack() {
+  subjectDialogExam = null;
+  renderSubjectDialog();
+}
+function renderSubjectDialog() {
   const root = deviceModalRoot();
   const subjects = asSafeArray(typeof DataAPI !== "undefined" && DataAPI.subjects ? DataAPI.subjects() : []);
   if (!root || subjects.length < 2) return;
@@ -2610,6 +2625,8 @@ function askSubjectDialog() {
     }
   } catch (_) {}
   const groups = subjectsByExam();
+  let curExam = "ege";
+  try { curExam = currentExam(); } catch (_) {}
   const card = (s) => {
     const active = s.id === cur;
     const status = subjectAvailabilityLabel(s);
@@ -2623,10 +2640,33 @@ function askSubjectDialog() {
       <span class="subj-card__check" aria-hidden="true">${active ? icon("check") : icon("arrow")}</span>
     </button>`;
   };
-  const cards = groups.map((g) =>
-    (groups.length > 1 ? `<div class="subj-group-label">${esc(examGroupLabel(g.exam))}</div>` : "")
-    + g.subjects.map(card).join("")
-  ).join("");
+  const examCard = (g) => {
+    const here = g.exam === curExam;
+    return `<button type="button" class="subj-card${here ? " subj-card--active" : ""}"
+        onclick="chooseSubjectExamDialog('${g.exam}')"${here ? ` aria-current="true"` : ""}>
+      <span class="subj-card__badge">${g.exam === "oge" ? "9" : "11"}</span>
+      <span class="subj-card__body">
+        <span class="subj-card__name">${esc(examGroupLabel(g.exam))}</span>
+        <span class="subj-card__sub">${g.subjects.length} ${plural(g.subjects.length, "предмет", "предмета", "предметов")}${here ? " · сейчас здесь" : ""}</span>
+      </span>
+      <span class="subj-card__check" aria-hidden="true">${icon("arrow")}</span>
+    </button>`;
+  };
+  let title, sub, list;
+  const group = groups.find((g) => g.exam === subjectDialogExam);
+  if (groups.length > 1 && !group) {
+    title = "Что готовим?";
+    sub = "Выбери направление — дальше покажем его предметы.";
+    list = groups.map(examCard).join("");
+  } else {
+    const shown = group || groups[0];
+    title = "Какой предмет открываем?";
+    sub = "Прогресс, ошибки и статистика хранятся отдельно по каждому предмету — переключение ничего не стирает.";
+    list = (groups.length > 1
+      ? `<button class="btn btn--ghost btn--sm subj-back" type="button" onclick="subjectDialogBack()">← Назад к направлениям</button>`
+      : "")
+      + shown.subjects.map(card).join("");
+  }
   root.innerHTML = `
     <div class="dlg-backdrop" onclick="if(event.target===this)closeDeviceModal()">
       <div class="dlg" role="dialog" aria-modal="true" aria-label="Выбор предмета">
@@ -2634,10 +2674,10 @@ function askSubjectDialog() {
         <div class="dlg__eyebrow">Предмет</div>
         <div class="dlg-device">
           <div class="dlg-device__icon" aria-hidden="true">${icon("layers")}</div>
-          <div class="dlg-device__name">Какой предмет открываем?</div>
+          <div class="dlg-device__name">${esc(title)}</div>
         </div>
-        <div class="dlg__text">Прогресс, ошибки и статистика хранятся отдельно по каждому предмету — переключение ничего не стирает.</div>
-        <div class="subj-list">${cards}</div>
+        <div class="dlg__text">${esc(sub)}</div>
+        <div class="subj-list">${list}</div>
         <div class="dlg__actions">
           <button class="btn btn--soft" type="button" onclick="closeDeviceModal()">Закрыть</button>
         </div>
@@ -12117,6 +12157,9 @@ const Onboarding = {
     // Какой предмет открывается прямо сейчас: на его кнопке крутится
     // спиннер, остальные погашены (см. stepSubject).
     this._pickingSubject = null;
+    // Выбранная ось на шаге предмета (двухшаговый выбор): новый показ —
+    // сначала направления.
+    this._examFilter = null;
     this.step = 0;
     this.subject = null;
     this.subjectSkipped = false;
@@ -12290,6 +12333,11 @@ const Onboarding = {
     // на выбранной — спиннер и «Открываем…».
     const picking = this._picking ? this._pickingSubject : null;
     const groups = subjectsByExam();
+    const examItem = (g) => `
+      <button class="choice-item"${picking ? " disabled" : ""} onclick="Onboarding.pickExam('${g.exam}')">
+        <b>${esc(examGroupLabel(g.exam))}</b>
+        <span>${g.subjects.length} ${plural(g.subjects.length, "предмет", "предмета", "предметов")}</span>
+      </button>`;
     const item = (s) => {
       const status = subjectAvailabilityLabel(s);
       const loading = !!(picking && s.id === picking);
@@ -12299,14 +12347,19 @@ const Onboarding = {
         : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
       return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
     };
+    // Две оси — сначала только направление (8 кнопок сразу никто не читает),
+    // потом предметы выбранной оси. Одна ось — сразу предметы.
+    const shown = groups.find((g) => g.exam === this._examFilter);
+    const directions = groups.length > 1 && !shown;
     body.innerHTML = `
-      <div class="onboard-title">Какой предмет готовим?</div>
-      <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
-      ${groups.map((g) => `
-        ${groups.length > 1 ? `<div class="subject-group-label">${esc(examGroupLabel(g.exam))}</div>` : ""}
-        <div class="choice-list">
-          ${g.subjects.map(item).join("")}
-        </div>`).join("")}`;
+      <div class="onboard-title">${directions ? "Что готовим?" : "Какой предмет готовим?"}</div>
+      <div class="onboard-sub">${directions ? "Выбери направление — дальше покажем его предметы." : "Прогресс и настройки ведутся отдельно по каждому предмету."}</div>
+      <div class="choice-list">
+        ${directions
+          ? groups.map(examItem).join("")
+          : (shown || groups[0]).subjects.map(item).join("")
+            + (groups.length > 1 ? `<button class="choice-item" onclick="Onboarding.pickExam('')">← Назад к направлениям</button>` : "")}
+      </div>`;
   },
 
   // Детали каталога (тексты заданий) и матвендор (katex/jsxgraph) — большой
@@ -12316,6 +12369,13 @@ const Onboarding = {
   warmSubjectAssets() {
     try { Store.ensureDetails().catch(() => {}); } catch (_) {}
     try { Vendor.ensureMath().catch(() => {}); } catch (_) {}
+  },
+
+  /* Фильтр оси на шаге выбора предмета (двухшаговый выбор: сначала
+     направление, потом предметы). Пусто — показываем направления. */
+  pickExam(exam) {
+    this._examFilter = exam === "oge" ? "oge" : (exam === "ege" ? "ege" : null);
+    try { this.render(); } catch (_) {}
   },
 
   pickSubject(v) {
