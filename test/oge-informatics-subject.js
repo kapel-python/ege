@@ -1,6 +1,7 @@
 /* Client-side regression: an opened oge_informatics subject exposes its real topics:
    16 lines (short-answer, №9 with figures), exam axis "oge",
-   locked №11-16 (files/computer essential), no lessons, no essays. */
+   locked №11-16 (files/computer essential), lessons for the 10 open lines
+   (locked-skill lessons stay hidden), no essays. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_oge_informatics.json", "utf8"));
@@ -17,7 +18,7 @@ catalog.forecast = { weights: _weights, total: 21, scale: Array.from({ length: 2
 catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
-  { id: "oge_informatics", title: "Информатика (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
+  { id: "oge_informatics", title: "Информатика (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -43,6 +44,8 @@ vm.runInContext(`
     tasks: DataAPI.tasks().length,
     practice: DataAPI.practiceTasks().length,
     lessons: DataAPI.lessons().length,
+    lessonsInFile: (catalog.lessons || []).length,
+    lessonSkills: DataAPI.lessons().map((l) => l.skill).sort(),
     missions: DataAPI.missions().length,
     bosses: DataAPI.bosses().length,
     diagnostics: DataAPI.diagnosticTasks().length,
@@ -63,7 +66,8 @@ check("предмет открыт и доступен", result.locked === false
 check("16 тем, locked ровно 6 компьютерных", result.skills === 16 && JSON.stringify(result.lockedSkills) === JSON.stringify(LOCKED));
 check("у каждой темы 3 подсказки", result.hintsOk === true);
 check("задания на месте (10 открытых тем, капы волн)", result.tasks === 520 && result.practice === 520);
-check("уроков нет (пилот без lessons)", result.lessons === 0);
+check("уроки: 16 в файле, 10 открытых видно (locked скрыты)", result.lessonsInFile === 16 && result.lessons === 10 &&
+  JSON.stringify(result.lessonSkills) === JSON.stringify(["oi01_memory", "oi02_decode", "oi03_logic", "oi04_models", "oi05_executor", "oi06_program", "oi07_network", "oi08_queries", "oi09_graphs", "oi10_numsys"]));
 check("миссии покрывают открытые темы", result.missions === 10);
 check("3 босса по веткам", result.bosses === 3);
 check("диагностика непуста", result.diagnostics >= 6);

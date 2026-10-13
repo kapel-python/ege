@@ -217,14 +217,14 @@ def main() -> int:
                 # (у тестовой части №1–26 есть чем их наполнять).
                 "russian": {key: True for key in REQUIRED_FEATURES},
                 "biology": {key: True for key in REQUIRED_FEATURES},
-                # Математика ОГЭ — ready без уроков (практика, прогноз,
+                # Математика ОГЭ — ready с уроками (практика, прогноз,
                 # диагностика, миссии, боссы, подборка и путь).
-                "oge_math": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
-                # Волна ОГЭ: та же модель — всё, кроме уроков.
-                "oge_biology": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
-                "oge_society": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
-                "oge_informatics": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
-                "oge_history": {**{key: True for key in REQUIRED_FEATURES}, "lessons": False},
+                "oge_math": {key: True for key in REQUIRED_FEATURES},
+                # Волна ОГЭ: та же модель — полный цикл с уроками.
+                "oge_biology": {key: True for key in REQUIRED_FEATURES},
+                "oge_society": {key: True for key in REQUIRED_FEATURES},
+                "oge_informatics": {key: True for key in REQUIRED_FEATURES},
+                "oge_history": {key: True for key in REQUIRED_FEATURES},
             }
             for subject, contract in sorted(contracts.items()):
                 features = contract.get("features")

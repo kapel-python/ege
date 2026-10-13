@@ -1,6 +1,6 @@
 /* Client-side regression: an opened oge_math subject exposes its real topics:
    25 lines (part 1 incl. figure topics №11/№18 + part 2 self-check),
-   exam axis "oge", zero locked, no lessons, no essays. */
+   exam axis "oge", zero locked, 25 lessons (one per line), no essays. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_oge_math.json", "utf8"));
@@ -13,7 +13,7 @@ catalog.forecast = { weights: _weights, total: 31, scale: Array.from({ length: 3
 catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
-  { id: "oge_math", title: "Математика (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
+  { id: "oge_math", title: "Математика (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -39,6 +39,8 @@ vm.runInContext(`
     tasks: DataAPI.tasks().length,
     practice: DataAPI.practiceTasks().length,
     lessons: DataAPI.lessons().length,
+    lessonSkills: DataAPI.lessons().map((l) => l.skill || l.skillId).sort(),
+    lessonSkillsOk: JSON.stringify(DataAPI.lessons().map((l) => l.skill || l.skillId).sort()) === JSON.stringify(DataAPI.skills().map((s) => s.id).sort()),
     missions: DataAPI.missions().length,
     bosses: DataAPI.bosses().length,
     diagnostics: DataAPI.diagnosticTasks().length,
@@ -58,7 +60,7 @@ check("предмет открыт и доступен", result.locked === false
 check("25 тем, замков нет (№11/№18 открыты фигурами)", result.skills === 25 && result.lockedSkills.length === 0);
 check("у каждой темы 3 подсказки", result.hintsOk === true);
 check("задания на месте (1416, все темы покрыты)", result.tasks === 1416 && result.practice === 1416);
-check("уроков нет (пилот без lessons)", result.lessons === 0);
+check("25 уроков, по одному на тему", result.lessons === 25 && result.lessonSkillsOk === true);
 check("миссии покрывают все 25 тем", result.missions === 25);
 check("3 босса по веткам", result.bosses === 3);
 check("диагностика непуста", result.diagnostics >= 6);

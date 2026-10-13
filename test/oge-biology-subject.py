@@ -3,7 +3,7 @@
 
 Второй предмет оси oge: 26 линий (№1–21 часть 1, №22–26 часть 2),
 прогноз в первичных баллах (total 47, identity-шкала), цели-оценки g3/g4/g5.
-Без уроков и сочинений. Все 26 навыков открыты: 9 figure-линий
+26 уроков (по одному на линию), без сочинений. Все 26 навыков открыты: 9 figure-линий
 (№1, 4, 13, 14, 16, 19–22) закрыты восстановленными рисунками
 (tools/apply_oge_bio_figures.py, assets/oge_biology/).
 Проверяются API, каталог, SEO-ось /oge/ с кросс-проверкой и изоляция
@@ -89,7 +89,7 @@ def main():
             assert oge.get("exam") == "oge", oge
             assert set(oge.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics",
                                                     "missions", "bosses", "daily", "path"}, oge
-            assert oge["features"]["lessons"] is False, oge
+            assert oge["features"]["lessons"] is True, oge
             assert oge["features"]["practice"] is True and oge["features"]["forecast"] is True, oge
             assert oge["features"]["diagnostics"] is True and oge["features"]["missions"] is True, oge
             # Предметы оси ege остались на месте; ось oge делим с соседями.
@@ -153,7 +153,27 @@ def main():
             assert len(diag) >= 6 and set(diag) <= task_ids and len(set(diag)) == len(diag), diag
             daily_cfg = catalog.get("daily") or {}
             assert daily_cfg.get("target", 0) > 0 and daily_cfg.get("skill") in task_ids or daily_cfg.get("skill"), daily_cfg
-            assert catalog.get("lessons", []) == [], catalog.get("lessons")
+            # Уроки: по одному на линию; финал каждого — реальное задание
+            # банка того же скила, у всех ACTION — ответ, разбор и 3 подсказки.
+            lessons = catalog.get("lessons", [])
+            assert len(lessons) == 26, len(lessons)
+            assert {x.get("skill") for x in lessons} == set(by_id), lessons
+            assert all(isinstance(x.get("steps"), list) and 15 <= len(x["steps"]) <= 22
+                       for x in lessons), [len(x.get("steps", [])) for x in lessons]
+            task_skill = {t["id"]: t["skill"] for t in tasks}
+            for x in lessons:
+                final = x["steps"][-1]
+                assert final.get("type") == "INDEPENDENT_TASK", x
+                assert final.get("taskId") in task_ids, x
+                assert task_skill[final["taskId"]] == x["skill"], x
+                assert isinstance(final.get("hints"), list) and len(final["hints"]) == 3, x
+                assert "answer" not in final and "solution" not in final, x
+                for st in x["steps"]:
+                    if st.get("type") in ("ACTION", "VALIDATION"):
+                        assert (st.get("answer") or "").strip() and (st.get("solution") or "").strip() \
+                            and (st.get("errorType") or "").strip(), (x["id"], st.get("id"))
+                        assert isinstance(st.get("hints"), list) and len(st["hints"]) == 3 \
+                            and all(h.strip() for h in st["hints"]), (x["id"], st.get("id"))
 
             # Прогноз: веса по баллам линий, сумма 47, шкала длиной 48.
             fc = catalog.get("forecast") or oge.get("forecast") or {}
@@ -163,8 +183,10 @@ def main():
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={RID}")
             assert status == 200 and len(task_details.get("tasks", [])) == len(tasks), (status, task_details)
-            status, lessons = request(opener, base, f"/api/catalog-lessons?subject={RID}")
-            assert status == 200 and lessons.get("lessons", []) == [], (status, lessons)
+            status, lesson_details = request(opener, base, f"/api/catalog-lessons?subject={RID}")
+            served = lesson_details.get("lessons", [])
+            assert status == 200 and len(served) == 26, (status, lesson_details)
+            assert {x.get("skill") for x in served} == set(by_id), served
 
             # SEO-ось /oge/: хаб и страница номера — 200 с подписью ОГЭ.
             status, hub = request(opener, base, f"/oge/{RID}/", raw=True)
@@ -226,7 +248,7 @@ def main():
             assert public_oge, public
             assert public_oge.get("counts", {}).get("tasks") == len(tasks), public_oge
             print(f"OGE biology subject integration OK: {len(tasks)} tasks, 26 skills "
-                  f"(0 locked, figures restored), {len(missions)} missions, /oge/ SEO axis isolated")
+                  f"(0 locked, figures restored), {len(lessons)} lessons, {len(missions)} missions, /oge/ SEO axis isolated")
         finally:
             httpd.shutdown()
             httpd.server_close()

@@ -4,7 +4,7 @@
 Второй предмет оси oge: 23 линии (№1–17 часть 1, №18–23 часть 2),
 прогноз в первичных баллах (total 35 — честная сумма покрытых линий
 спецификации ФИПИ, identity-шкала), цели-оценки g3/g4/g5.
-Без уроков и сочинений. Навыки №8–14 (карты, схемы, изображения,
+Уроки — по одному на линию (23), сочинений нет. Навыки №8–14 (карты, схемы, изображения,
 культура с наглядностью) — locked: без рисунка не решаются.
 Проверяются API, каталог, SEO-ось /oge/ с кросс-проверкой и изоляция
 состояния при переключении туда-обратно.
@@ -88,7 +88,7 @@ def main():
             assert oge.get("exam") == "oge", oge
             assert set(oge.get("features", {})) == {"lessons", "practice", "forecast", "diagnostics",
                                                      "missions", "bosses", "daily", "path"}, oge
-            assert oge["features"]["lessons"] is False, oge
+            assert oge["features"]["lessons"] is True, oge
             assert oge["features"]["practice"] is True and oge["features"]["forecast"] is True, oge
             assert oge["features"]["diagnostics"] is True and oge["features"]["missions"] is True, oge
             # Остальные предметы оси ege не задеты; соседи по оси oge допустимы.
@@ -122,6 +122,7 @@ def main():
             tasks = catalog.get("tasks", [])
             assert len(tasks) >= 900, len(tasks)
             task_ids = {t["id"] for t in tasks}
+            task_skill = {t["id"]: t["skill"] for t in tasks}
             per_skill: dict[str, int] = {}
             for t in tasks:
                 per_skill[t["skill"]] = per_skill.get(t["skill"], 0) + 1
@@ -148,7 +149,18 @@ def main():
             assert len(diag) >= 6 and set(diag) <= task_ids and len(set(diag)) == len(diag), diag
             daily_cfg = catalog.get("daily") or {}
             assert daily_cfg.get("target", 0) > 0 and daily_cfg.get("skill") in task_ids or daily_cfg.get("skill"), daily_cfg
-            assert catalog.get("lessons", []) == [], catalog.get("lessons")
+            # Уроки: по одному на линию (23), финалы — живые задания своего скила.
+            lessons = catalog.get("lessons", [])
+            assert len(lessons) == 23, len(lessons)
+            assert {x.get("skill") for x in lessons} == set(by_id), lessons
+            for les in lessons:
+                assert les.get("skill") in set(by_id), les
+                assert 15 <= len(les.get("steps", [])) <= 22, les
+                ind = [s for s in les["steps"] if s.get("type") == "INDEPENDENT_TASK"]
+                assert ind and all(t.get("taskId") in task_ids and
+                                   task_skill.get(t.get("taskId")) == les["skill"] for t in ind), les
+                acts = [s for s in les["steps"] if s.get("type") in ("ACTION", "VALIDATION")]
+                assert acts and all(len(s.get("hints", [])) == 3 for s in acts), les
 
             # Прогноз: веса ФИПИ по покрытым линиям, сумма 35, шкала длиной 36.
             fc = catalog.get("forecast") or oge.get("forecast") or {}
@@ -158,8 +170,8 @@ def main():
 
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={RID}")
             assert status == 200 and len(task_details.get("tasks", [])) == len(tasks), (status, task_details)
-            status, lessons = request(opener, base, f"/api/catalog-lessons?subject={RID}")
-            assert status == 200 and lessons.get("lessons", []) == [], (status, lessons)
+            status, lesson_details = request(opener, base, f"/api/catalog-lessons?subject={RID}")
+            assert status == 200 and len(lesson_details.get("lessons", [])) == 23, (status, lesson_details)
 
             # SEO-ось /oge/: хаб и страница номера — 200 с подписью ОГЭ.
             status, hub = request(opener, base, f"/oge/{RID}/", raw=True)
@@ -220,6 +232,7 @@ def main():
             public_oge = next((s for s in public.get("subjects", []) if s.get("id") == RID), None)
             assert public_oge, public
             assert public_oge.get("counts", {}).get("tasks") == len(tasks), public_oge
+            assert public_oge.get("counts", {}).get("lessons") == 23, public_oge
             # Все задания визуальных линий несут ссылку на скачанный рисунок.
             visual_tasks = [t for t in tasks if t["skill"].startswith(("oh08_", "oh09_", "oh10_",
                             "oh11_", "oh12_", "oh13_", "oh14_"))]
@@ -229,7 +242,7 @@ def main():
             assert all((t.get("visual") or {}).get("assetId") in assets for t in visual_tasks), assets
 
             print(f"OGE history subject integration OK: {len(tasks)} tasks, 23 skills "
-                  f"(0 locked, figures open), {len(missions)} missions, /oge/ SEO axis isolated")
+                  f"(0 locked, figures open), 23 lessons, {len(missions)} missions, /oge/ SEO axis isolated")
         finally:
             httpd.shutdown()
             httpd.server_close()

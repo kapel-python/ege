@@ -96,7 +96,7 @@
     ]
   },
   "features": {
-    "lessons": false,
+    "lessons": true,
     "practice": true,
     "forecast": true,
     "diagnostics": true,

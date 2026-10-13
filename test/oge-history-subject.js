@@ -1,6 +1,6 @@
 /* Client-side regression: an opened oge_history subject exposes its real topics:
    23 lines (part 1 short-answer + part 2 self-check), exam axis "oge",
-   locked №8-14 (maps/schemes/images essential), no lessons, no essays. */
+   locked №8-14 (maps/schemes/images essential), 23 lessons (one per line), no essays. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_oge_history.json", "utf8"));
@@ -22,7 +22,7 @@ catalog.subjects = [
   { id: "profile_math", title: "Профильная математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "basic_math", title: "Базовая математика", exam: "ege", status: "ready", features: { lessons: true, practice: true, forecast: true } },
   { id: "oge_math", title: "Математика (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
-  { id: "oge_history", title: "История (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: false, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
+  { id: "oge_history", title: "История (ОГЭ)", exam: "oge", status: "ready", locked: false, features: { lessons: true, practice: true, forecast: true, diagnostics: true, missions: true, bosses: true, daily: true, path: true } },
 ];
 const sandbox = { console, catalog, setTimeout, clearTimeout };
 sandbox.globalThis = sandbox;
@@ -48,6 +48,13 @@ vm.runInContext(`
     tasks: DataAPI.tasks().length,
     practice: DataAPI.practiceTasks().length,
     lessons: DataAPI.lessons().length,
+    lessonSkills: DataAPI.lessons().map((l) => l.skill).sort(),
+    lessonFinalesOk: DataAPI.lessons().every((l) => {
+      const ind = (l.steps || []).filter((s) => s.type === "INDEPENDENT_TASK");
+      const tids = DataAPI.tasks().map((t) => t.id);
+      return ind.length > 0 && ind.every((s) => tids.includes(s.taskId) &&
+        (DataAPI.tasks().find((t) => t.id === s.taskId) || {}).skill === l.skill);
+    }),
     missions: DataAPI.missions().length,
     bosses: DataAPI.bosses().length,
     diagnostics: DataAPI.diagnosticTasks().length,
@@ -67,7 +74,10 @@ check("предмет открыт и доступен", result.locked === false
 check("23 темы, locked пуст (фигуры открыли №8–14)", result.skills === 23 && result.lockedSkills.length === 0);
 check("у каждой темы 3 подсказки", result.hintsOk === true);
 check("задания на месте (все 23 темы, пулы взяты полностью)", result.tasks >= 900 && result.practice >= 900);
-check("уроков нет (пилот без lessons)", result.lessons === 0);
+check("23 урока, по одному на линию, финалы — живые задания своих линий",
+  result.lessons === 23 &&
+  JSON.stringify(result.lessonSkills) === JSON.stringify(["oh01_dates", "oh02_sequence", "oh03_terms", "oh04_facts", "oh05_extraterm", "oh06_thesis", "oh07_stats", "oh08_map", "oh09_map2", "oh10_map3", "oh11_images", "oh12_scheme", "oh13_culture", "oh14_culture2", "oh15_world", "oh16_world2", "oh17_world3", "oh18_source", "oh19_source2", "oh20_source3", "oh21_errors", "oh22_compare", "oh23_situation"]) &&
+  result.lessonFinalesOk === true);
 check("миссии покрывают все 23 темы", result.missions === 23);
 check("3 босса по веткам", result.bosses === 3);
 check("диагностика непуста", result.diagnostics >= 6);
