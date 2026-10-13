@@ -1391,7 +1391,10 @@ body {
    невысокая — натуральной. Без ratio в разметке — просто hug. */
 figure.task-visual {
   width: max-content;
-  max-width: min(100%, 680px, calc(min(58vh, 520px) * var(--visual-ratio, 999)));
+  /* +26px: padding 12px с каждой стороны + border — картинка того же
+     размера, что без полей, поля не отъедают её. */
+  max-width: min(680px, calc(min(58vh, 520px) * var(--visual-ratio, 999) + 26px));
+  padding: 12px;
 }
 figure.task-visual--broken { width: 100%; max-width: 680px; }
 .task-visual--svg img,
@@ -2580,8 +2583,9 @@ figure.task-visual--broken { width: 100%; max-width: 680px; }
      широкие — в bleed на всю ширину экрана, как было. */
   figure.task-visual {
     width: max-content;
-    max-width: min(calc(100% + 56px), calc(min(48vh, 520px) * var(--visual-ratio, 999)));
+    max-width: min(calc(100% + 56px), calc(min(48vh, 520px) * var(--visual-ratio, 999) + 26px));
     margin: 22px 0 4px;
+    padding: 12px;
     position: relative;
     left: 50%;
     transform: translateX(-50%);
