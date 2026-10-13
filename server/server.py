@@ -995,7 +995,11 @@ MAX_CONCURRENT_REQUESTS = 64
 _REQUEST_SLOTS = threading.Semaphore(MAX_CONCURRENT_REQUESTS)
 SOCKET_READ_TIMEOUT_SEC = 30.0
 # Статика читается целиком в память потоком: файл больше капа не отдаём.
-STATIC_MAX_BYTES = 8 * 1024 * 1024
+# 64 МБ покрывают самые крупные файлы данных ЕГЭ-информатики (№24 — строки
+# до ~42 МБ); скачивание файла — разовое событие с годовым immutable-кэшем,
+# а gzip ниже жмёт только файлы до 8 МБ, чтобы не пережимать монстров.
+STATIC_MAX_BYTES = 64 * 1024 * 1024
+GZIP_MAX_BYTES = 8 * 1024 * 1024
 
 
 def api_rate_ok(ip: str) -> bool:
@@ -8309,6 +8313,17 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
         vis = meta.get("visual")
         if isinstance(vis, dict) and vis.get("assetId"):
             visual = _seo_visual_src(conn, subject, str(vis.get("assetId") or ""))
+        files = []
+        fmeta = meta.get("files")
+        if isinstance(fmeta, list):
+            for f in fmeta:
+                if not isinstance(f, dict) or not f.get("assetId"):
+                    continue
+                resolved = _seo_visual_src(conn, subject, str(f.get("assetId") or ""))
+                if resolved and resolved.get("src"):
+                    files.append({"src": resolved["src"],
+                                  "name": str(f.get("name") or resolved.get("alt")
+                                              or "файл задания")})
         try:
             points = int(meta.get("points")) if meta.get("points") is not None else 0
         except (ValueError, TypeError):
@@ -8327,6 +8342,7 @@ def _seo_task_samples(conn: sqlite3.Connection, subject: str, skill_id: str,
             "accept": accept,
             "task_type": str(r["task_type"] or ""),
             "visual": visual,
+            "files": files,
             "points": points,
             "difficulty": difficulty,
             "value_type": str(meta.get("valueType") or ""),
@@ -8658,6 +8674,19 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
                 f" alt='{_seo_esc(vis.get('alt') or 'Рисунок к заданию')}'"
                 " loading='lazy' decoding='async'>"
                 "</figure>")
+        files_html = ""
+        if isinstance(task.get("files"), list) and task["files"]:
+            links = []
+            for f in task["files"]:
+                if not isinstance(f, dict) or not f.get("src"):
+                    continue
+                links.append(
+                    f"<a class='btn btn-primary btn--sm seo-file-btn'"
+                    f" href='{_seo_esc(f['src'])}'"
+                    f" download='{_seo_esc(f.get('name') or 'файл задания')}'>"
+                    f"Скачать {_seo_esc(f.get('name') or 'файл задания')}</a>")
+            if links:
+                files_html = "<div class='seo-files'>" + "".join(links) + "</div>"
         kind = "self" if task["self"] else ("long" if task.get("longtext") else "auto")
         sample_blocks.append(
             f"<article class='seo-window' data-kind='{kind}'>"
@@ -8671,6 +8700,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
             + "</div>"
             f"<div class='seo-window__text'>{_seo_esc(_seo_short(task['statement'], 1200)).replace(chr(10), '<br>')}</div>"
             + visual_html
+            + files_html
             + f"<div class='seo-hints'>{hints_html}</div>"
             f"<div class='seo-window__tools'>{hint_btn}"
             + (f"<span class='seo-window__note'>{_seo_esc(check_note)}</span>" if task["self"] else "")
@@ -18961,7 +18991,12 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(403); return
         suffix = file_path.suffix.lower()
-        if _is_blocked_static(file_path) and file_path.name not in PUBLIC_STATIC_FILES:
+        # Файлы данных заданий (assets/informatics/*.txt/.csv) — публичные:
+        # суффикс .txt глобально заблокирован (черновики/мусор в корне), но
+        # под assets/ лежат только версионированные вложения каталога.
+        allow_data = (rel.parts and rel.parts[0] == "assets"
+                      and suffix in (".txt", ".csv"))
+        if _is_blocked_static(file_path) and file_path.name not in PUBLIC_STATIC_FILES and not allow_data:
             self.serve_not_found_page(); return
         if any(part.startswith(".") or part in BLOCKED_STATIC_DIRS for part in rel.parts[:-1]) or (rel.parts and rel.parts[-1].startswith(".")):
             self.serve_not_found_page(); return
@@ -18975,7 +19010,7 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.serve_not_found_page(); return
         if not file_path.is_file(): self.serve_not_found_page(); return
-        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
+        content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8", ".csv": "text/csv; charset=utf-8", ".ods": "application/vnd.oasis.opendocument.spreadsheet", ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon"}.get(file_path.suffix, "application/octet-stream")
         try:
             data = file_path.read_bytes()
         except (OSError, ValueError):
@@ -19030,7 +19065,7 @@ class Handler(BaseHTTPRequestHandler):
         accept = self.headers.get("Accept-Encoding", "") or ""
         encoding = None
         # Текстовую статику жмём: jsxgraph 969 КБ -> ~250 КБ, app.js в ~4 раза.
-        if len(data) > 1024 and "gzip" in accept.lower() and suffix in (".js", ".css", ".html", ".json", ".svg", ".ttf", ".txt", ".xml", ".webmanifest"):
+        if len(data) > 1024 and len(data) <= GZIP_MAX_BYTES and "gzip" in accept.lower() and suffix in (".js", ".css", ".html", ".json", ".svg", ".ttf", ".txt", ".csv", ".xml", ".webmanifest"):
             data = gzip.compress(data, compresslevel=5)
             encoding = "gzip"
         self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Cache-Control", cache_control); self.send_header("ETag", etag); self.send_security_headers()

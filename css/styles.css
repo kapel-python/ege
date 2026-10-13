@@ -1396,6 +1396,15 @@ body {
   line-height: 1.45;
   border-top: 1px solid var(--border);
 }
+/* Файлы данных задания (ЕГЭ-информатика №9/17/22/24/26/27): синяя кнопка
+   скачивания под текстом задания. Тот же .btn--primary, что и «Ответить». */
+.task-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+.task-file-btn { text-decoration: none; }
 /* Таблицы как на экзамене (блок строк на `|` в тексте задания):
    горизонтальный скролл на узких экранах вместо слипшихся колонок. */
 .task-table-wrap {

@@ -174,6 +174,9 @@ p{overflow-wrap:anywhere;}
 .seo-visual{margin:14px 0 0;}
 .seo-visual img{max-width:100%;height:auto;display:block;border-radius:var(--radius-md);
   border:1px solid var(--hairline);background:var(--surface-1);}
+/* Кнопки скачивания файлов данных (те же вложения каталога, что в практике). */
+.seo-files{margin:14px 0 0;display:flex;gap:10px;flex-wrap:wrap;}
+.seo-file-btn{text-decoration:none;}
 /* Страховка скрытия: hidden обязан прятать всегда, даже если будущее
    правило задаст display. Программный фокус кольца не даёт. */
 [hidden]{display:none !important;}

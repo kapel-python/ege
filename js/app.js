@@ -45,6 +45,7 @@ const ICONS = {
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
   pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>',
 };
 
 function icon(name) {
@@ -679,9 +680,32 @@ function topicHintLevels(t) {
   return hintLevelsFor(t);
 }
 
+/* Файлы данных задания (ЕГЭ-информатика №9/17/22/24/26/27): вложения
+   task.files [{assetId, name}] резолвятся через тот же реестр visualAssets,
+   что и рисунки (записи с type "file"). Синяя кнопка скачивания — обычный
+   <a href download>: работает везде, где рендерит taskVisualHtml (практика,
+   диагностика, миссии/боссы, уроки через INDEPENDENT_TASK). */
+function taskFilesHtml(task, context = "task") {
+  const list = task && Array.isArray(task.files) ? task.files : [];
+  const out = [];
+  for (const f of list) {
+    const assetId = f && f.assetId;
+    if (!assetId) continue;
+    let asset = null;
+    try { asset = DataAPI.visualAsset(assetId); } catch (_) { asset = null; }
+    if (!asset || !asset.src) continue;
+    const name = String((f && f.name) || asset.name || "файл задания");
+    out.push('<a class="btn btn--primary btn--sm task-file-btn" href="' + esc(asset.src) + '" download="' + esc(name) + '">' +
+      icon("download") + "<span>Скачать " + esc(name) + "</span></a>");
+  }
+  if (!out.length) return "";
+  return '<div class="task-files" data-files-context="' + esc(context) + '">' + out.join("") + "</div>";
+}
+
 /* Visual material belongs to the task, so every flow can render it through
    this one helper. Missing or malformed assets stay local to the task card. */
 function taskVisualHtml(task, context = "task") {
+  const filesHtml = taskFilesHtml(task, context);
   // MathVisual: a declarative spec (task.mathVisual) is rendered live by
   // js/mathvisual.js instead of pointing at a static image. This placeholder
   // just carries the spec; mountMathVisuals() (a MutationObserver set up once
@@ -697,22 +721,22 @@ function taskVisualHtml(task, context = "task") {
     // сразу лежит видимый текст-заглушка: до монтирования — «загружается»,
     // после успешного рендера движок заменяет innerHTML доской.
     return '<div class="task-visual mathvisual-host" data-mathvisual="' + spec + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
-      '<div class="task-visual__fallback" style="display:block" role="status">Рисунок загружается…</div></div>';
+      '<div class="task-visual__fallback" style="display:block" role="status">Рисунок загружается…</div></div>' + filesHtml;
   }
   const visual = task && task.visual;
-  if (!visual) return "";
+  if (!visual) return filesHtml;
   if (!visual.assetId) {
     // Источник прямо требует рисунок ("Рисунок: ОБЯЗАТЕЛЕН"), но официальный
     // чертёж недоступен в этой сборке — честно показываем это, а не молчим.
-    if (!visual.required) return "";
+    if (!visual.required) return filesHtml;
     return '<div class="task-visual task-visual--missing" role="status">' +
       '<div class="task-visual__fallback" style="display:block">' +
       'Официальный рисунок этого задания недоступен в этой сборке' +
-      (visual.note ? ': ' + esc(visual.note) : '.') + '</div></div>';
+      (visual.note ? ': ' + esc(visual.note) : '.') + '</div></div>' + filesHtml;
   }
   const asset = DataAPI.visualAsset(visual.assetId);
   if (!asset || !asset.src) {
-    return '<div class="task-visual task-visual--missing" role="status">Визуальный материал недоступен.</div>';
+    return '<div class="task-visual task-visual--missing" role="status">Визуальный материал недоступен.</div>' + filesHtml;
   }
   const type = asset.type || visual.type || "image";
   const label = asset.alt || visual.alt || "Визуальный материал задания";
@@ -728,7 +752,7 @@ function taskVisualHtml(task, context = "task") {
     '<img src="' + src + '" alt="' + esc(label) + '" loading="lazy" decoding="async" onerror="this.closest(\'.task-visual\').classList.add(\'task-visual--broken\');this.style.display=\'none\';">' +
     '<div class="task-visual__fallback" role="status">Визуальный материал недоступен.</div>' +
     (caption ? '<figcaption>' + mathText(caption) + '</figcaption>' : "") +
-    '</figure>';
+    '</figure>' + filesHtml;
 }
 
 /* ---------------- visual lightbox ----------------

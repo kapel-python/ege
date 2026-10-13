@@ -1,0 +1,9906 @@
+{
+ "27421": {
+  "taskIds": [
+   "inf24_p64"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27423": {
+  "taskIds": [
+   "inf26_p84"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27424": {
+  "taskIds": [
+   "inf27_p15"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27687": {
+  "taskIds": [
+   "inf24_p22"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27689": {
+  "taskIds": [
+   "inf24_p23"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27690": {
+  "taskIds": [
+   "inf24_p48"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27691": {
+  "taskIds": [
+   "inf24_p90"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27693": {
+  "taskIds": [
+   "inf24_p56"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27694": {
+  "taskIds": [
+   "inf24_p63"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27695": {
+  "taskIds": [
+   "inf24_p4"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27697": {
+  "taskIds": [
+   "inf24_p76"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27698": {
+  "taskIds": [
+   "inf24_p7"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27699": {
+  "taskIds": [
+   "inf24_p13"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27880": {
+  "taskIds": [
+   "inf26_p25"
+  ],
+  "fids": [
+   "71189"
+  ],
+  "files": [
+   {
+    "fid": "71189",
+    "file": "27880-0_71189.txt",
+    "name": "27880.txt",
+    "bytes": 9115,
+    "sha": "b5bbbd59d0cf7d63",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27881": {
+  "taskIds": [
+   "inf26_p21"
+  ],
+  "fids": [
+   "71190"
+  ],
+  "files": [
+   {
+    "fid": "71190",
+    "file": "27881-0_71190.txt",
+    "name": "27881.txt",
+    "bytes": 18148,
+    "sha": "8828ccc119f10597",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27882": {
+  "taskIds": [
+   "inf26_p41"
+  ],
+  "fids": [
+   "71191"
+  ],
+  "files": [
+   {
+    "fid": "71191",
+    "file": "27882-0_71191.txt",
+    "name": "27882.txt",
+    "bytes": 21782,
+    "sha": "4e65f9cab1cc334b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27883": {
+  "taskIds": [
+   "inf26_p5"
+  ],
+  "fids": [
+   "71192"
+  ],
+  "files": [
+   {
+    "fid": "71192",
+    "file": "27883-0_71192.txt",
+    "name": "27883.txt",
+    "bytes": 9257,
+    "sha": "bbad7f55e200efad",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27884": {
+  "taskIds": [
+   "inf26_p66"
+  ],
+  "fids": [
+   "71193"
+  ],
+  "files": [
+   {
+    "fid": "71193",
+    "file": "27884-0_71193.txt",
+    "name": "27884.txt",
+    "bytes": 15223,
+    "sha": "bf07036e1778479b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27885": {
+  "taskIds": [
+   "inf26_p23"
+  ],
+  "fids": [
+   "71194"
+  ],
+  "files": [
+   {
+    "fid": "71194",
+    "file": "27885-0_71194.txt",
+    "name": "27885.txt",
+    "bytes": 11042,
+    "sha": "190ff83ce8e09689",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27886": {
+  "taskIds": [
+   "inf26_p39"
+  ],
+  "fids": [
+   "71195"
+  ],
+  "files": [
+   {
+    "fid": "71195",
+    "file": "27886-0_71195.txt",
+    "name": "27886.txt",
+    "bytes": 7627,
+    "sha": "986dd718d55f5ecd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27887": {
+  "taskIds": [
+   "inf26_p16"
+  ],
+  "fids": [
+   "71196"
+  ],
+  "files": [
+   {
+    "fid": "71196",
+    "file": "27887-0_71196.txt",
+    "name": "27887.txt",
+    "bytes": 7530,
+    "sha": "5b58e71f9a85a16f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27888": {
+  "taskIds": [
+   "inf26_p51"
+  ],
+  "fids": [
+   "71197"
+  ],
+  "files": [
+   {
+    "fid": "71197",
+    "file": "27888-0_71197.txt",
+    "name": "27888.txt",
+    "bytes": 7431,
+    "sha": "0e7ffd9c0dead9eb",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27889": {
+  "taskIds": [
+   "inf27_p65"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27890": {
+  "taskIds": [
+   "inf27_p1"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27891": {
+  "taskIds": [
+   "inf27_p38"
+  ],
+  "fids": [
+   "100363"
+  ],
+  "files": [
+   {
+    "fid": "100363",
+    "file": "27891-0_100363.txt",
+    "name": "27-A_2.txt",
+    "bytes": 99,
+    "sha": "039739c6e5866a31",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "27989": {
+  "taskIds": [
+   "inf27_p18"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "27990": {
+  "taskIds": [
+   "inf27_p37"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "28129": {
+  "taskIds": [
+   "inf27_p39"
+  ],
+  "fids": [
+   "71529"
+  ],
+  "files": [
+   {
+    "fid": "71529",
+    "file": "28129-0_71529.txt",
+    "name": "28129_B.txt",
+    "bytes": 5909,
+    "sha": "1ceecf3ecbc0fed9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "28130": {
+  "taskIds": [
+   "inf27_p25"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "28132": {
+  "taskIds": [
+   "inf26_p78"
+  ],
+  "fids": [
+   "71198"
+  ],
+  "files": [
+   {
+    "fid": "71198",
+    "file": "28132-0_71198.txt",
+    "name": "28132.txt",
+    "bytes": 7507,
+    "sha": "ef418c49727afc00",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "28138": {
+  "taskIds": [
+   "inf26_p18"
+  ],
+  "fids": [
+   "71199"
+  ],
+  "files": [
+   {
+    "fid": "71199",
+    "file": "28138-0_71199.txt",
+    "name": "28138.txt",
+    "bytes": 7564,
+    "sha": "9c964281128b10e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "28139": {
+  "taskIds": [
+   "inf26_p37"
+  ],
+  "fids": [
+   "71200"
+  ],
+  "files": [
+   {
+    "fid": "71200",
+    "file": "28139-0_71200.txt",
+    "name": "28139.txt",
+    "bytes": 11616,
+    "sha": "4527003d1aea47d8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "28140": {
+  "taskIds": [
+   "inf26_p44"
+  ],
+  "fids": [
+   "71201"
+  ],
+  "files": [
+   {
+    "fid": "71201",
+    "file": "28140-0_71201.txt",
+    "name": "28140.txt",
+    "bytes": 13721,
+    "sha": "b3b0c132ef52cce7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "28141": {
+  "taskIds": [
+   "inf26_p70"
+  ],
+  "fids": [
+   "71202"
+  ],
+  "files": [
+   {
+    "fid": "71202",
+    "file": "28141-0_71202.txt",
+    "name": "28141.txt",
+    "bytes": 18334,
+    "sha": "b49d4ec8d75c2966",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "29672": {
+  "taskIds": [
+   "inf24_p17"
+  ],
+  "fids": [
+   "76930"
+  ],
+  "files": [
+   {
+    "fid": "76930",
+    "file": "29672-0_76930.txt",
+    "name": "inf_22_10_20_24.txt",
+    "bytes": 1001132,
+    "sha": "1f62fb6661b2dfa7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "29674": {
+  "taskIds": [
+   "inf26_p90"
+  ],
+  "fids": [
+   "77428"
+  ],
+  "files": [
+   {
+    "fid": "77428",
+    "file": "29674-0_77428.txt",
+    "name": "inf_22_10_20_26.txt",
+    "bytes": 4914,
+    "sha": "6d3b12cff7a83515",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "29675": {
+  "taskIds": [
+   "inf27_p64"
+  ],
+  "fids": [
+   "77472",
+   "77473"
+  ],
+  "files": [
+   {
+    "fid": "77472",
+    "file": "29675-0_77472.txt",
+    "name": "inf_22_10_20_27a.txt",
+    "bytes": 242,
+    "sha": "3b340f763bd83b2d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "77473",
+    "file": "29675-1_77473.txt",
+    "name": "inf_22_10_20_27b.txt",
+    "bytes": 646589,
+    "sha": "fff988160736eee5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33103": {
+  "taskIds": [
+   "inf24_p77"
+  ],
+  "fids": [
+   "76930"
+  ],
+  "files": [
+   {
+    "fid": "76930",
+    "file": "33103-0_76930.txt",
+    "name": "inf_22_10_20_24.txt",
+    "bytes": 1001132,
+    "sha": "1f62fb6661b2dfa7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33105": {
+  "taskIds": [
+   "inf26_p59"
+  ],
+  "fids": [
+   "77428"
+  ],
+  "files": [
+   {
+    "fid": "77428",
+    "file": "33105-0_77428.txt",
+    "name": "inf_22_10_20_26.txt",
+    "bytes": 4914,
+    "sha": "6d3b12cff7a83515",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33106": {
+  "taskIds": [
+   "inf27_p31"
+  ],
+  "fids": [
+   "77472",
+   "77473"
+  ],
+  "files": [
+   {
+    "fid": "77472",
+    "file": "33106-0_77472.txt",
+    "name": "inf_22_10_20_27a.txt",
+    "bytes": 242,
+    "sha": "3b340f763bd83b2d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "77473",
+    "file": "33106-1_77473.txt",
+    "name": "inf_22_10_20_27b.txt",
+    "bytes": 646589,
+    "sha": "fff988160736eee5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33198": {
+  "taskIds": [
+   "inf26_p15"
+  ],
+  "fids": [
+   "78277"
+  ],
+  "files": [
+   {
+    "fid": "78277",
+    "file": "33198-0_78277.txt",
+    "name": "26.txt",
+    "bytes": 4923,
+    "sha": "7bb76ff0830984c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33199": {
+  "taskIds": [
+   "inf27_p2"
+  ],
+  "fids": [
+   "78278",
+   "78279"
+  ],
+  "files": [
+   {
+    "fid": "78278",
+    "file": "33199-0_78278.txt",
+    "name": "27-A.txt",
+    "bytes": 186,
+    "sha": "449bdf25e25af0fd",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "78279",
+    "file": "33199-1_78279.txt",
+    "name": "27-B.txt",
+    "bytes": 627466,
+    "sha": "11b0de942774807e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33494": {
+  "taskIds": [
+   "inf24_p52"
+  ],
+  "fids": [
+   "78276"
+  ],
+  "files": [
+   {
+    "fid": "78276",
+    "file": "33494-0_78276.txt",
+    "name": "24.txt",
+    "bytes": 1000000,
+    "sha": "f84882352aa0be8c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33496": {
+  "taskIds": [
+   "inf26_p38"
+  ],
+  "fids": [
+   "78277"
+  ],
+  "files": [
+   {
+    "fid": "78277",
+    "file": "33496-0_78277.txt",
+    "name": "26.txt",
+    "bytes": 4923,
+    "sha": "7bb76ff0830984c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33497": {
+  "taskIds": [
+   "inf27_p40"
+  ],
+  "fids": [
+   "78278",
+   "78279"
+  ],
+  "files": [
+   {
+    "fid": "78278",
+    "file": "33497-0_78278.txt",
+    "name": "27-A.txt",
+    "bytes": 186,
+    "sha": "449bdf25e25af0fd",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "78279",
+    "file": "33497-1_78279.txt",
+    "name": "27-B.txt",
+    "bytes": 627466,
+    "sha": "11b0de942774807e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33526": {
+  "taskIds": [
+   "inf24_p79"
+  ],
+  "fids": [
+   "79057"
+  ],
+  "files": [
+   {
+    "fid": "79057",
+    "file": "33526-0_79057.txt",
+    "name": "24.txt",
+    "bytes": 1000000,
+    "sha": "f84882352aa0be8c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33528": {
+  "taskIds": [
+   "inf26_p79"
+  ],
+  "fids": [
+   "79098"
+  ],
+  "files": [
+   {
+    "fid": "79098",
+    "file": "33528-0_79098.txt",
+    "name": "26.txt",
+    "bytes": 12773,
+    "sha": "ebc14301a62a67c7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33529": {
+  "taskIds": [
+   "inf27_p8"
+  ],
+  "fids": [
+   "79118",
+   "79119"
+  ],
+  "files": [
+   {
+    "fid": "79118",
+    "file": "33529-0_79118.txt",
+    "name": "27-A.txt",
+    "bytes": 230,
+    "sha": "003d816a2ef1bc49",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "79119",
+    "file": "33529-1_79119.txt",
+    "name": "27-B.txt",
+    "bytes": 59892,
+    "sha": "dd04052314285281",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33769": {
+  "taskIds": [
+   "inf24_p3"
+  ],
+  "fids": [
+   "79057"
+  ],
+  "files": [
+   {
+    "fid": "79057",
+    "file": "33769-0_79057.txt",
+    "name": "24.txt",
+    "bytes": 1000000,
+    "sha": "f84882352aa0be8c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33771": {
+  "taskIds": [
+   "inf26_p32"
+  ],
+  "fids": [
+   "79098"
+  ],
+  "files": [
+   {
+    "fid": "79098",
+    "file": "33771-0_79098.txt",
+    "name": "26.txt",
+    "bytes": 12773,
+    "sha": "ebc14301a62a67c7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "33772": {
+  "taskIds": [
+   "inf27_p14"
+  ],
+  "fids": [
+   "79118",
+   "79119"
+  ],
+  "files": [
+   {
+    "fid": "79118",
+    "file": "33772-0_79118.txt",
+    "name": "27-A.txt",
+    "bytes": 230,
+    "sha": "003d816a2ef1bc49",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "79119",
+    "file": "33772-1_79119.txt",
+    "name": "27-B.txt",
+    "bytes": 59892,
+    "sha": "dd04052314285281",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35482": {
+  "taskIds": [
+   "inf24_p85"
+  ],
+  "fids": [
+   "83826"
+  ],
+  "files": [
+   {
+    "fid": "83826",
+    "file": "35482-0_83826.txt",
+    "name": "24.txt",
+    "bytes": 1001325,
+    "sha": "04577c94f4cd96e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35484": {
+  "taskIds": [
+   "inf26_p50"
+  ],
+  "fids": [
+   "83828"
+  ],
+  "files": [
+   {
+    "fid": "83828",
+    "file": "35484-0_83828.txt",
+    "name": "26.txt",
+    "bytes": 54436,
+    "sha": "d1b61beb07b2ae03",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35485": {
+  "taskIds": [
+   "inf27_p45"
+  ],
+  "fids": [
+   "83829",
+   "83830"
+  ],
+  "files": [
+   {
+    "fid": "83829",
+    "file": "35485-0_83829.txt",
+    "name": "27-A.txt",
+    "bytes": 202,
+    "sha": "7963ca02bf73fef0",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "83830",
+    "file": "35485-1_83830.txt",
+    "name": "27-B.txt",
+    "bytes": 989038,
+    "sha": "59c70acbf1f46e14",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35913": {
+  "taskIds": [
+   "inf24_p89"
+  ],
+  "fids": [
+   "83826"
+  ],
+  "files": [
+   {
+    "fid": "83826",
+    "file": "35913-0_83826.txt",
+    "name": "24.txt",
+    "bytes": 1001325,
+    "sha": "04577c94f4cd96e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35915": {
+  "taskIds": [
+   "inf26_p61"
+  ],
+  "fids": [
+   "83828"
+  ],
+  "files": [
+   {
+    "fid": "83828",
+    "file": "35915-0_83828.txt",
+    "name": "26.txt",
+    "bytes": 54436,
+    "sha": "d1b61beb07b2ae03",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35916": {
+  "taskIds": [
+   "inf27_p58"
+  ],
+  "fids": [
+   "83829",
+   "83830"
+  ],
+  "files": [
+   {
+    "fid": "83829",
+    "file": "35916-0_83829.txt",
+    "name": "27-A.txt",
+    "bytes": 202,
+    "sha": "7963ca02bf73fef0",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "83830",
+    "file": "35916-1_83830.txt",
+    "name": "27-B.txt",
+    "bytes": 989038,
+    "sha": "59c70acbf1f46e14",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "35998": {
+  "taskIds": [
+   "inf24_p95"
+  ],
+  "fids": [
+   "89338"
+  ],
+  "files": [
+   {
+    "fid": "89338",
+    "file": "35998-0_89338.txt",
+    "name": "inf_26_04_21_24.txt",
+    "bytes": 1001325,
+    "sha": "04577c94f4cd96e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36000": {
+  "taskIds": [
+   "inf26_p20"
+  ],
+  "fids": [
+   "89422"
+  ],
+  "files": [
+   {
+    "fid": "89422",
+    "file": "36000-0_89422.txt",
+    "name": "inf_26_04_21_26.txt",
+    "bytes": 54436,
+    "sha": "d1b61beb07b2ae03",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36001": {
+  "taskIds": [
+   "inf27_p62"
+  ],
+  "fids": [
+   "89423",
+   "89424"
+  ],
+  "files": [
+   {
+    "fid": "89423",
+    "file": "36001-0_89423.txt",
+    "name": "inf_26_04_21_27a.txt",
+    "bytes": 242,
+    "sha": "f62340ef72bc7da0",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "89424",
+    "file": "36001-1_89424.txt",
+    "name": "inf_26_04_21_27b.txt",
+    "bytes": 646570,
+    "sha": "dc6941fef22e88b4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36037": {
+  "taskIds": [
+   "inf24_p83"
+  ],
+  "fids": [
+   "85003"
+  ],
+  "files": [
+   {
+    "fid": "85003",
+    "file": "36037-0_85003.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "bdfc9eb3bb30ee86",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36039": {
+  "taskIds": [
+   "inf26_p10"
+  ],
+  "fids": [
+   "112413"
+  ],
+  "files": [
+   {
+    "fid": "112413",
+    "file": "36039-0_112413.txt",
+    "name": "26.txt",
+    "bytes": 40008,
+    "sha": "5682f4f90fa620cd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36040": {
+  "taskIds": [
+   "inf27_p23"
+  ],
+  "fids": [
+   "112582",
+   "85006"
+  ],
+  "files": [
+   {
+    "fid": "112582",
+    "file": "36040-0_112582.txt",
+    "name": "27_A.txt",
+    "bytes": 1630,
+    "sha": "2aaf140211dc66b2",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "85006",
+    "file": "36040-1_85006.txt",
+    "name": "27_B.txt",
+    "bytes": 15200801,
+    "sha": "c375b6fff067af95",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36879": {
+  "taskIds": [
+   "inf24_p57"
+  ],
+  "fids": [
+   "89338"
+  ],
+  "files": [
+   {
+    "fid": "89338",
+    "file": "36879-0_89338.txt",
+    "name": "inf_26_04_21_24.txt",
+    "bytes": 1001325,
+    "sha": "04577c94f4cd96e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36881": {
+  "taskIds": [
+   "inf26_p72"
+  ],
+  "fids": [
+   "89422"
+  ],
+  "files": [
+   {
+    "fid": "89422",
+    "file": "36881-0_89422.txt",
+    "name": "inf_26_04_21_26.txt",
+    "bytes": 54436,
+    "sha": "d1b61beb07b2ae03",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "36882": {
+  "taskIds": [
+   "inf27_p28"
+  ],
+  "fids": [
+   "89423",
+   "89424"
+  ],
+  "files": [
+   {
+    "fid": "89423",
+    "file": "36882-0_89423.txt",
+    "name": "inf_26_04_21_27a.txt",
+    "bytes": 242,
+    "sha": "f62340ef72bc7da0",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "89424",
+    "file": "36882-1_89424.txt",
+    "name": "inf_26_04_21_27b.txt",
+    "bytes": 646570,
+    "sha": "dc6941fef22e88b4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37131": {
+  "taskIds": [
+   "inf24_p87"
+  ],
+  "fids": [
+   "89876"
+  ],
+  "files": [
+   {
+    "fid": "89876",
+    "file": "37131-0_89876.txt",
+    "name": "24.txt",
+    "bytes": 1000000,
+    "sha": "f84882352aa0be8c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37159": {
+  "taskIds": [
+   "inf24_p26"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "37161": {
+  "taskIds": [
+   "inf26_p30"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "37162": {
+  "taskIds": [
+   "inf27_p50"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "37336": {
+  "taskIds": [
+   "inf17_p39"
+  ],
+  "fids": [
+   "91146"
+  ],
+  "files": [
+   {
+    "fid": "91146",
+    "file": "37336-0_91146.txt",
+    "name": "17.txt",
+    "bytes": 27036,
+    "sha": "a4af7d60f2071cf0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37337": {
+  "taskIds": [
+   "inf17_p68"
+  ],
+  "fids": [
+   "91147"
+  ],
+  "files": [
+   {
+    "fid": "91147",
+    "file": "37337-0_91147.txt",
+    "name": "17.txt",
+    "bytes": 58863,
+    "sha": "72e2e9bfe2ca108b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37340": {
+  "taskIds": [
+   "inf17_p75"
+  ],
+  "fids": [
+   "91230"
+  ],
+  "files": [
+   {
+    "fid": "91230",
+    "file": "37340-0_91230.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37341": {
+  "taskIds": [
+   "inf17_p87"
+  ],
+  "fids": [
+   "91229"
+  ],
+  "files": [
+   {
+    "fid": "91229",
+    "file": "37341-0_91229.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37344": {
+  "taskIds": [
+   "inf17_p63"
+  ],
+  "fids": [
+   "91149"
+  ],
+  "files": [
+   {
+    "fid": "91149",
+    "file": "37344-0_91149.txt",
+    "name": "17.txt",
+    "bytes": 58863,
+    "sha": "72e2e9bfe2ca108b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37345": {
+  "taskIds": [
+   "inf17_p64"
+  ],
+  "fids": [
+   "91154"
+  ],
+  "files": [
+   {
+    "fid": "91154",
+    "file": "37345-0_91154.txt",
+    "name": "17.txt",
+    "bytes": 58863,
+    "sha": "72e2e9bfe2ca108b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37347": {
+  "taskIds": [
+   "inf17_p38"
+  ],
+  "fids": [
+   "91157"
+  ],
+  "files": [
+   {
+    "fid": "91157",
+    "file": "37347-0_91157.txt",
+    "name": "17.txt",
+    "bytes": 58863,
+    "sha": "72e2e9bfe2ca108b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37348": {
+  "taskIds": [
+   "inf17_p83"
+  ],
+  "fids": [
+   "91158"
+  ],
+  "files": [
+   {
+    "fid": "91158",
+    "file": "37348-0_91158.txt",
+    "name": "17.txt",
+    "bytes": 58863,
+    "sha": "72e2e9bfe2ca108b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37349": {
+  "taskIds": [
+   "inf17_p79"
+  ],
+  "fids": [
+   "113519"
+  ],
+  "files": [
+   {
+    "fid": "113519",
+    "file": "37349-0_113519.txt",
+    "name": "17.txt",
+    "bytes": 58828,
+    "sha": "c78c25a40fd33c37",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37350": {
+  "taskIds": [
+   "inf17_p88"
+  ],
+  "fids": [
+   "91228"
+  ],
+  "files": [
+   {
+    "fid": "91228",
+    "file": "37350-0_91228.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37354": {
+  "taskIds": [
+   "inf17_p25"
+  ],
+  "fids": [
+   "91227"
+  ],
+  "files": [
+   {
+    "fid": "91227",
+    "file": "37354-0_91227.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37355": {
+  "taskIds": [
+   "inf17_p82"
+  ],
+  "fids": [
+   "91226"
+  ],
+  "files": [
+   {
+    "fid": "91226",
+    "file": "37355-0_91226.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37356": {
+  "taskIds": [
+   "inf17_p98"
+  ],
+  "fids": [
+   "91225"
+  ],
+  "files": [
+   {
+    "fid": "91225",
+    "file": "37356-0_91225.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37357": {
+  "taskIds": [
+   "inf17_p27"
+  ],
+  "fids": [
+   "91225"
+  ],
+  "files": [
+   {
+    "fid": "91225",
+    "file": "37357-0_91225.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37358": {
+  "taskIds": [
+   "inf17_p96"
+  ],
+  "fids": [
+   "91233"
+  ],
+  "files": [
+   {
+    "fid": "91233",
+    "file": "37358-0_91233.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37359": {
+  "taskIds": [
+   "inf17_p91"
+  ],
+  "fids": [
+   "91233"
+  ],
+  "files": [
+   {
+    "fid": "91233",
+    "file": "37359-0_91233.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37360": {
+  "taskIds": [
+   "inf17_p99"
+  ],
+  "fids": [
+   "91272"
+  ],
+  "files": [
+   {
+    "fid": "91272",
+    "file": "37360-0_91272.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37361": {
+  "taskIds": [
+   "inf17_p8"
+  ],
+  "fids": [
+   "91273"
+  ],
+  "files": [
+   {
+    "fid": "91273",
+    "file": "37361-0_91273.txt",
+    "name": "17.txt",
+    "bytes": 58901,
+    "sha": "e938166e03645f6e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37362": {
+  "taskIds": [
+   "inf17_p41"
+  ],
+  "fids": [
+   "91278"
+  ],
+  "files": [
+   {
+    "fid": "91278",
+    "file": "37362-0_91278.txt",
+    "name": "17.txt",
+    "bytes": 58922,
+    "sha": "7e8eccdd532fddad",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37368": {
+  "taskIds": [
+   "inf17_p65"
+  ],
+  "fids": [
+   "91277"
+  ],
+  "files": [
+   {
+    "fid": "91277",
+    "file": "37368-0_91277.txt",
+    "name": "17.txt",
+    "bytes": 58922,
+    "sha": "7e8eccdd532fddad",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37369": {
+  "taskIds": [
+   "inf17_p94"
+  ],
+  "fids": [
+   "91280"
+  ],
+  "files": [
+   {
+    "fid": "91280",
+    "file": "37369-0_91280.txt",
+    "name": "17.txt",
+    "bytes": 58866,
+    "sha": "7abc48f7cd5b0838",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37370": {
+  "taskIds": [
+   "inf17_p58"
+  ],
+  "fids": [
+   "91281"
+  ],
+  "files": [
+   {
+    "fid": "91281",
+    "file": "37370-0_91281.txt",
+    "name": "17.txt",
+    "bytes": 58866,
+    "sha": "7abc48f7cd5b0838",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37371": {
+  "taskIds": [
+   "inf17_p34"
+  ],
+  "fids": [
+   "91281"
+  ],
+  "files": [
+   {
+    "fid": "91281",
+    "file": "37371-0_91281.txt",
+    "name": "17.txt",
+    "bytes": 58866,
+    "sha": "7abc48f7cd5b0838",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37372": {
+  "taskIds": [
+   "inf17_p6"
+  ],
+  "fids": [
+   "91282"
+  ],
+  "files": [
+   {
+    "fid": "91282",
+    "file": "37372-0_91282.txt",
+    "name": "17.txt",
+    "bytes": 58866,
+    "sha": "7abc48f7cd5b0838",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "37373": {
+  "taskIds": [
+   "inf17_p97"
+  ],
+  "fids": [
+   "91283"
+  ],
+  "files": [
+   {
+    "fid": "91283",
+    "file": "37373-0_91283.txt",
+    "name": "17.txt",
+    "bytes": 58866,
+    "sha": "7abc48f7cd5b0838",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38588": {
+  "taskIds": [
+   "inf09_p40"
+  ],
+  "fids": [
+   "225709"
+  ],
+  "files": [
+   {
+    "fid": "225709",
+    "file": "38588-0_225709.ods",
+    "name": "9.ods",
+    "bytes": 76148,
+    "sha": "498c1e48ba8215fe",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "38602": {
+  "taskIds": [
+   "inf24_p27"
+  ],
+  "fids": [
+   "93960"
+  ],
+  "files": [
+   {
+    "fid": "93960",
+    "file": "38602-0_93960.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "9167fb56178f7b37",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38604": {
+  "taskIds": [
+   "inf27_p36"
+  ],
+  "fids": [
+   "93961",
+   "93962"
+  ],
+  "files": [
+   {
+    "fid": "93961",
+    "file": "38604-0_93961.txt",
+    "name": "27_A.txt",
+    "bytes": 3822,
+    "sha": "6423f125fac697db",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "93962",
+    "file": "38604-1_93962.txt",
+    "name": "27_B.txt",
+    "bytes": 6918545,
+    "sha": "d1350172b9f4f78b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38943": {
+  "taskIds": [
+   "inf09_p14"
+  ],
+  "fids": [
+   "225710"
+  ],
+  "files": [
+   {
+    "fid": "225710",
+    "file": "38943-0_225710.ods",
+    "name": "09.ods",
+    "bytes": 76136,
+    "sha": "d3f6ed51d4b27051",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "38951": {
+  "taskIds": [
+   "inf17_p52"
+  ],
+  "fids": [
+   "95037"
+  ],
+  "files": [
+   {
+    "fid": "95037",
+    "file": "38951-0_95037.txt",
+    "name": "17.txt",
+    "bytes": 32612,
+    "sha": "e47d113348b69675",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38958": {
+  "taskIds": [
+   "inf24_p20"
+  ],
+  "fids": [
+   "95112"
+  ],
+  "files": [
+   {
+    "fid": "95112",
+    "file": "38958-0_95112.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "a9e548b86c55626f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38960": {
+  "taskIds": [
+   "inf26_p91"
+  ],
+  "fids": [
+   "95155"
+  ],
+  "files": [
+   {
+    "fid": "95155",
+    "file": "38960-0_95155.txt",
+    "name": "26.txt",
+    "bytes": 7340,
+    "sha": "4e9ce363a47fe201",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "38961": {
+  "taskIds": [
+   "inf27_p67"
+  ],
+  "fids": [
+   "95156",
+   "95157"
+  ],
+  "files": [
+   {
+    "fid": "95156",
+    "file": "38961-0_95156.txt",
+    "name": "27-A.txt",
+    "bytes": 5201,
+    "sha": "bb44f617189ab961",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "95157",
+    "file": "38961-1_95157.txt",
+    "name": "27-B.txt",
+    "bytes": 8908799,
+    "sha": "f4ea62fd07d9ee1f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39238": {
+  "taskIds": [
+   "inf09_p25"
+  ],
+  "fids": [
+   "225805"
+  ],
+  "files": [
+   {
+    "fid": "225805",
+    "file": "39238-0_225805.ods",
+    "name": "09.ods",
+    "bytes": 75956,
+    "sha": "0f7bdd186d1b709b",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "39246": {
+  "taskIds": [
+   "inf17_p13"
+  ],
+  "fids": [
+   "95037"
+  ],
+  "files": [
+   {
+    "fid": "95037",
+    "file": "39246-0_95037.txt",
+    "name": "17.txt",
+    "bytes": 32612,
+    "sha": "e47d113348b69675",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39253": {
+  "taskIds": [
+   "inf24_p40"
+  ],
+  "fids": [
+   "95112"
+  ],
+  "files": [
+   {
+    "fid": "95112",
+    "file": "39253-0_95112.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "a9e548b86c55626f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39255": {
+  "taskIds": [
+   "inf26_p24"
+  ],
+  "fids": [
+   "95155"
+  ],
+  "files": [
+   {
+    "fid": "95155",
+    "file": "39255-0_95155.txt",
+    "name": "26.txt",
+    "bytes": 7340,
+    "sha": "4e9ce363a47fe201",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39762": {
+  "taskIds": [
+   "inf17_p59"
+  ],
+  "fids": [
+   "96400"
+  ],
+  "files": [
+   {
+    "fid": "96400",
+    "file": "39762-0_96400.txt",
+    "name": "17.txt",
+    "bytes": 32612,
+    "sha": "e47d113348b69675",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39763": {
+  "taskIds": [
+   "inf17_p45"
+  ],
+  "fids": [
+   "96401"
+  ],
+  "files": [
+   {
+    "fid": "96401",
+    "file": "39763-0_96401.txt",
+    "name": "17.txt",
+    "bytes": 32612,
+    "sha": "e47d113348b69675",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "39764": {
+  "taskIds": [
+   "inf17_p74"
+  ],
+  "fids": [
+   "96402"
+  ],
+  "files": [
+   {
+    "fid": "96402",
+    "file": "39764-0_96402.txt",
+    "name": "17.txt",
+    "bytes": 32612,
+    "sha": "e47d113348b69675",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40725": {
+  "taskIds": [
+   "inf09_p56"
+  ],
+  "fids": [
+   "225746"
+  ],
+  "files": [
+   {
+    "fid": "225746",
+    "file": "40725-0_225746.ods",
+    "name": "09.ods",
+    "bytes": 76136,
+    "sha": "ee6e735e04823525",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "40733": {
+  "taskIds": [
+   "inf17_p12"
+  ],
+  "fids": [
+   "98825"
+  ],
+  "files": [
+   {
+    "fid": "98825",
+    "file": "40733-0_98825.txt",
+    "name": "17.txt",
+    "bytes": 32609,
+    "sha": "3b81b58f17ddd7f8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40740": {
+  "taskIds": [
+   "inf24_p75"
+  ],
+  "fids": [
+   "98949"
+  ],
+  "files": [
+   {
+    "fid": "98949",
+    "file": "40740-0_98949.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "a9e548b86c55626f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40742": {
+  "taskIds": [
+   "inf26_p94"
+  ],
+  "fids": [
+   "99001"
+  ],
+  "files": [
+   {
+    "fid": "99001",
+    "file": "40742-0_99001.txt",
+    "name": "26.txt",
+    "bytes": 932738,
+    "sha": "f71129b2cdc0771f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40743": {
+  "taskIds": [
+   "inf27_p10"
+  ],
+  "fids": [
+   "99134",
+   "99135"
+  ],
+  "files": [
+   {
+    "fid": "99134",
+    "file": "40743-0_99134.txt",
+    "name": "27-A.txt",
+    "bytes": 5074,
+    "sha": "b5155ce7be1dccd2",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "99135",
+    "file": "40743-1_99135.txt",
+    "name": "27-B.txt",
+    "bytes": 26386282,
+    "sha": "e9c9d875034f4118",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40984": {
+  "taskIds": [
+   "inf09_p8"
+  ],
+  "fids": [
+   "225808"
+  ],
+  "files": [
+   {
+    "fid": "225808",
+    "file": "40984-0_225808.ods",
+    "name": "09.ods",
+    "bytes": 75956,
+    "sha": "c10e6819e67876df",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "40992": {
+  "taskIds": [
+   "inf17_p11"
+  ],
+  "fids": [
+   "99372"
+  ],
+  "files": [
+   {
+    "fid": "99372",
+    "file": "40992-0_99372.txt",
+    "name": "17.txt",
+    "bytes": 32609,
+    "sha": "3b81b58f17ddd7f8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "40999": {
+  "taskIds": [
+   "inf24_p84"
+  ],
+  "fids": [
+   "99374"
+  ],
+  "files": [
+   {
+    "fid": "99374",
+    "file": "40999-0_99374.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "a9e548b86c55626f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "41001": {
+  "taskIds": [
+   "inf26_p43"
+  ],
+  "fids": [
+   "99375"
+  ],
+  "files": [
+   {
+    "fid": "99375",
+    "file": "41001-0_99375.txt",
+    "name": "26.txt",
+    "bytes": 932738,
+    "sha": "f71129b2cdc0771f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "41002": {
+  "taskIds": [
+   "inf27_p35"
+  ],
+  "fids": [
+   "99378",
+   "99379"
+  ],
+  "files": [
+   {
+    "fid": "99378",
+    "file": "41002-0_99378.txt",
+    "name": "27-A.txt",
+    "bytes": 5074,
+    "sha": "b5155ce7be1dccd2",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "99379",
+    "file": "41002-1_99379.txt",
+    "name": "27-B.txt",
+    "bytes": 26386282,
+    "sha": "e9c9d875034f4118",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "45243": {
+  "taskIds": [
+   "inf09_p7"
+  ],
+  "fids": [
+   "225747"
+  ],
+  "files": [
+   {
+    "fid": "225747",
+    "file": "45243-0_225747.ods",
+    "name": "107_9.ods",
+    "bytes": 74442,
+    "sha": "eeba5c34cdca2dd5",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "45251": {
+  "taskIds": [
+   "inf17_p60"
+  ],
+  "fids": [
+   "109211"
+  ],
+  "files": [
+   {
+    "fid": "109211",
+    "file": "45251-0_109211.txt",
+    "name": "107_17.txt",
+    "bytes": 68785,
+    "sha": "ae0b22388c9c8693",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "45258": {
+  "taskIds": [
+   "inf24_p8"
+  ],
+  "fids": [
+   "109214"
+  ],
+  "files": [
+   {
+    "fid": "109214",
+    "file": "45258-0_109214.txt",
+    "name": "107_24.txt",
+    "bytes": 4856634,
+    "sha": "92c56b4035983270",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "45260": {
+  "taskIds": [
+   "inf26_p47"
+  ],
+  "fids": [
+   "109215"
+  ],
+  "files": [
+   {
+    "fid": "109215",
+    "file": "45260-0_109215.txt",
+    "name": "107_26.txt",
+    "bytes": 242486,
+    "sha": "f53ae1da584c9a6a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "45261": {
+  "taskIds": [
+   "inf27_p12"
+  ],
+  "fids": [
+   "109216",
+   "109217"
+  ],
+  "files": [
+   {
+    "fid": "109216",
+    "file": "45261-0_109216.txt",
+    "name": "107_27_A.txt",
+    "bytes": 513,
+    "sha": "c903ec71346fa681",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "109217",
+    "file": "45261-1_109217.txt",
+    "name": "107_27_B.txt",
+    "bytes": 4680194,
+    "sha": "b201a796910671f6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "46967": {
+  "taskIds": [
+   "inf09_p67"
+  ],
+  "fids": [
+   "225748"
+  ],
+  "files": [
+   {
+    "fid": "225748",
+    "file": "46967-0_225748.ods",
+    "name": "107_9.ods",
+    "bytes": 92327,
+    "sha": "487987b837e77a93",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "46975": {
+  "taskIds": [
+   "inf17_p71"
+  ],
+  "fids": [
+   "113796"
+  ],
+  "files": [
+   {
+    "fid": "113796",
+    "file": "46975-0_113796.txt",
+    "name": "17.txt",
+    "bytes": 32622,
+    "sha": "7f9c56958be8b2b6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "46984": {
+  "taskIds": [
+   "inf26_p19"
+  ],
+  "fids": [
+   "114047"
+  ],
+  "files": [
+   {
+    "fid": "114047",
+    "file": "46984-0_114047.txt",
+    "name": "26.txt",
+    "bytes": 1230021,
+    "sha": "9b2308592ee9e57b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "46985": {
+  "taskIds": [
+   "inf27_p33"
+  ],
+  "fids": [
+   "114048",
+   "114049"
+  ],
+  "files": [
+   {
+    "fid": "114048",
+    "file": "46985-0_114048.txt",
+    "name": "27-A.txt",
+    "bytes": 5411,
+    "sha": "3937d03fda8e7e3f",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "114049",
+    "file": "46985-1_114049.txt",
+    "name": "27-B.txt",
+    "bytes": 10217403,
+    "sha": "c6a72522e2718be8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47006": {
+  "taskIds": [
+   "inf09_p20"
+  ],
+  "fids": [
+   "225807"
+  ],
+  "files": [
+   {
+    "fid": "225807",
+    "file": "47006-0_225807.ods",
+    "name": "107_9.ods",
+    "bytes": 92146,
+    "sha": "9f236204cc3768b8",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47014": {
+  "taskIds": [
+   "inf17_p66"
+  ],
+  "fids": [
+   "113796"
+  ],
+  "files": [
+   {
+    "fid": "113796",
+    "file": "47014-0_113796.txt",
+    "name": "17.txt",
+    "bytes": 32622,
+    "sha": "7f9c56958be8b2b6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47021": {
+  "taskIds": [
+   "inf24_p55"
+  ],
+  "fids": [
+   "114004"
+  ],
+  "files": [
+   {
+    "fid": "114004",
+    "file": "47021-0_114004.txt",
+    "name": "24.txt",
+    "bytes": 1100000,
+    "sha": "a9e548b86c55626f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47023": {
+  "taskIds": [
+   "inf26_p60"
+  ],
+  "fids": [
+   "114047"
+  ],
+  "files": [
+   {
+    "fid": "114047",
+    "file": "47023-0_114047.txt",
+    "name": "26.txt",
+    "bytes": 1230021,
+    "sha": "9b2308592ee9e57b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47024": {
+  "taskIds": [
+   "inf27_p11"
+  ],
+  "fids": [
+   "114048",
+   "114049"
+  ],
+  "files": [
+   {
+    "fid": "114048",
+    "file": "47024-0_114048.txt",
+    "name": "27-A.txt",
+    "bytes": 5411,
+    "sha": "3937d03fda8e7e3f",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "114049",
+    "file": "47024-1_114049.txt",
+    "name": "27-B.txt",
+    "bytes": 10217403,
+    "sha": "c6a72522e2718be8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47213": {
+  "taskIds": [
+   "inf09_p27"
+  ],
+  "fids": [
+   "225749"
+  ],
+  "files": [
+   {
+    "fid": "225749",
+    "file": "47213-0_225749.ods",
+    "name": "9.ods",
+    "bytes": 174448,
+    "sha": "e8237a11a2f5e018",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47221": {
+  "taskIds": [
+   "inf17_p22"
+  ],
+  "fids": [
+   "115867"
+  ],
+  "files": [
+   {
+    "fid": "115867",
+    "file": "47221-0_115867.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "f08c4264a3cae4ed",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47226": {
+  "taskIds": [
+   "inf22_p81"
+  ],
+  "fids": [
+   "228034"
+  ],
+  "files": [
+   {
+    "fid": "228034",
+    "file": "47226-0_228034.ods",
+    "name": "22.ods",
+    "bytes": 3536,
+    "sha": "722ac33747ba23ab",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47228": {
+  "taskIds": [
+   "inf24_p61"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "47230": {
+  "taskIds": [
+   "inf26_p29"
+  ],
+  "fids": [
+   "116063"
+  ],
+  "files": [
+   {
+    "fid": "116063",
+    "file": "47230-0_116063.txt",
+    "name": "26.txt",
+    "bytes": 58916,
+    "sha": "422f111086cf212f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47231": {
+  "taskIds": [
+   "inf27_p53"
+  ],
+  "fids": [
+   "116067",
+   "116068"
+  ],
+  "files": [
+   {
+    "fid": "116067",
+    "file": "47231-0_116067.txt",
+    "name": "27_A.txt",
+    "bytes": 802,
+    "sha": "a980d232f5f1aa46",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "116068",
+    "file": "47231-1_116068.txt",
+    "name": "27_B.txt",
+    "bytes": 13107062,
+    "sha": "5f0727260c8e8ec1",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "47549": {
+  "taskIds": [
+   "inf22_p74"
+  ],
+  "fids": [
+   "228035"
+  ],
+  "files": [
+   {
+    "fid": "228035",
+    "file": "47549-0_228035.ods",
+    "name": "22_1.ods",
+    "bytes": 3516,
+    "sha": "59c4b15e6ade95a6",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47582": {
+  "taskIds": [
+   "inf22_p62"
+  ],
+  "fids": [
+   "228038"
+  ],
+  "files": [
+   {
+    "fid": "228038",
+    "file": "47582-0_228038.ods",
+    "name": "22_2.ods",
+    "bytes": 3450,
+    "sha": "2a99ca2ae3f19ac2",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47583": {
+  "taskIds": [
+   "inf22_p11"
+  ],
+  "fids": [
+   "228039"
+  ],
+  "files": [
+   {
+    "fid": "228039",
+    "file": "47583-0_228039.ods",
+    "name": "22_3.ods",
+    "bytes": 3445,
+    "sha": "ee1a486bc1c9af57",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47584": {
+  "taskIds": [
+   "inf22_p5"
+  ],
+  "fids": [
+   "228040"
+  ],
+  "files": [
+   {
+    "fid": "228040",
+    "file": "47584-0_228040.ods",
+    "name": "22_4.ods",
+    "bytes": 3451,
+    "sha": "70a9ef8ef6cdfe78",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47586": {
+  "taskIds": [
+   "inf22_p8"
+  ],
+  "fids": [
+   "228042"
+  ],
+  "files": [
+   {
+    "fid": "228042",
+    "file": "47586-0_228042.ods",
+    "name": "22_5.ods",
+    "bytes": 3431,
+    "sha": "d43fee852a6d38d4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47587": {
+  "taskIds": [
+   "inf22_p50"
+  ],
+  "fids": [
+   "228043"
+  ],
+  "files": [
+   {
+    "fid": "228043",
+    "file": "47587-0_228043.ods",
+    "name": "22_6.ods",
+    "bytes": 3436,
+    "sha": "45fc539e3d195973",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47588": {
+  "taskIds": [
+   "inf22_p23"
+  ],
+  "fids": [
+   "228044"
+  ],
+  "files": [
+   {
+    "fid": "228044",
+    "file": "47588-0_228044.ods",
+    "name": "22_7.ods",
+    "bytes": 3429,
+    "sha": "07ca905a34c64132",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47589": {
+  "taskIds": [
+   "inf22_p46"
+  ],
+  "fids": [
+   "228147"
+  ],
+  "files": [
+   {
+    "fid": "228147",
+    "file": "47589-0_228147.ods",
+    "name": "22_8.ods",
+    "bytes": 3431,
+    "sha": "04b0e85325b52cee",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47590": {
+  "taskIds": [
+   "inf22_p25"
+  ],
+  "fids": [
+   "228148"
+  ],
+  "files": [
+   {
+    "fid": "228148",
+    "file": "47590-0_228148.ods",
+    "name": "22_9.ods",
+    "bytes": 3419,
+    "sha": "7a58444fc4bbc337",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47591": {
+  "taskIds": [
+   "inf22_p84"
+  ],
+  "fids": [
+   "228149"
+  ],
+  "files": [
+   {
+    "fid": "228149",
+    "file": "47591-0_228149.ods",
+    "name": "22_10.ods",
+    "bytes": 3437,
+    "sha": "3d0f71da07b5e768",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47592": {
+  "taskIds": [
+   "inf22_p87"
+  ],
+  "fids": [
+   "228150"
+  ],
+  "files": [
+   {
+    "fid": "228150",
+    "file": "47592-0_228150.ods",
+    "name": "22_11.ods",
+    "bytes": 3439,
+    "sha": "28ea706596bdbe88",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47593": {
+  "taskIds": [
+   "inf22_p79"
+  ],
+  "fids": [
+   "228151"
+  ],
+  "files": [
+   {
+    "fid": "228151",
+    "file": "47593-0_228151.ods",
+    "name": "22_12.ods",
+    "bytes": 3434,
+    "sha": "eef697c9455ff745",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47594": {
+  "taskIds": [
+   "inf22_p67"
+  ],
+  "fids": [
+   "228152"
+  ],
+  "files": [
+   {
+    "fid": "228152",
+    "file": "47594-0_228152.ods",
+    "name": "22_13.ods",
+    "bytes": 3444,
+    "sha": "2238e52aff022186",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47595": {
+  "taskIds": [
+   "inf22_p22"
+  ],
+  "fids": [
+   "228041"
+  ],
+  "files": [
+   {
+    "fid": "228041",
+    "file": "47595-0_228041.ods",
+    "name": "22_14.ods",
+    "bytes": 3455,
+    "sha": "6ec2661c77add2f2",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47596": {
+  "taskIds": [
+   "inf22_p51"
+  ],
+  "fids": [
+   "228157"
+  ],
+  "files": [
+   {
+    "fid": "228157",
+    "file": "47596-0_228157.ods",
+    "name": "22_15.ods",
+    "bytes": 3413,
+    "sha": "0cec527dd1e2a644",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47597": {
+  "taskIds": [
+   "inf22_p71"
+  ],
+  "fids": [
+   "228162"
+  ],
+  "files": [
+   {
+    "fid": "228162",
+    "file": "47597-0_228162.ods",
+    "name": "22_16.ods",
+    "bytes": 3433,
+    "sha": "f722a8caec28d821",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47598": {
+  "taskIds": [
+   "inf22_p39"
+  ],
+  "fids": [
+   "228164"
+  ],
+  "files": [
+   {
+    "fid": "228164",
+    "file": "47598-0_228164.ods",
+    "name": "22_17.ods",
+    "bytes": 3499,
+    "sha": "f573dadaea2795bc",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47599": {
+  "taskIds": [
+   "inf22_p15"
+  ],
+  "fids": [
+   "228165"
+  ],
+  "files": [
+   {
+    "fid": "228165",
+    "file": "47599-0_228165.ods",
+    "name": "22_18.ods",
+    "bytes": 3499,
+    "sha": "d49b3bd4a45f4349",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47600": {
+  "taskIds": [
+   "inf22_p82"
+  ],
+  "fids": [
+   "228166"
+  ],
+  "files": [
+   {
+    "fid": "228166",
+    "file": "47600-0_228166.ods",
+    "name": "22_19.ods",
+    "bytes": 3493,
+    "sha": "61c1d530101c1207",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47601": {
+  "taskIds": [
+   "inf22_p66"
+  ],
+  "fids": [
+   "228167"
+  ],
+  "files": [
+   {
+    "fid": "228167",
+    "file": "47601-0_228167.ods",
+    "name": "22_20.ods",
+    "bytes": 3483,
+    "sha": "ef7c3938c14f6a37",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47602": {
+  "taskIds": [
+   "inf22_p68"
+  ],
+  "fids": [
+   "228168"
+  ],
+  "files": [
+   {
+    "fid": "228168",
+    "file": "47602-0_228168.ods",
+    "name": "22_21.ods",
+    "bytes": 3487,
+    "sha": "0a3ebae62d7c4184",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47603": {
+  "taskIds": [
+   "inf22_p61"
+  ],
+  "fids": [
+   "228169"
+  ],
+  "files": [
+   {
+    "fid": "228169",
+    "file": "47603-0_228169.ods",
+    "name": "22_22.ods",
+    "bytes": 3505,
+    "sha": "b43c30376126e1a8",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47604": {
+  "taskIds": [
+   "inf22_p70"
+  ],
+  "fids": [
+   "228170"
+  ],
+  "files": [
+   {
+    "fid": "228170",
+    "file": "47604-0_228170.ods",
+    "name": "22_23.ods",
+    "bytes": 3498,
+    "sha": "6120d5a85891cb3c",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47605": {
+  "taskIds": [
+   "inf22_p73"
+  ],
+  "fids": [
+   "228171"
+  ],
+  "files": [
+   {
+    "fid": "228171",
+    "file": "47605-0_228171.ods",
+    "name": "22_24.ods",
+    "bytes": 3486,
+    "sha": "5c57a64f7879fc26",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47606": {
+  "taskIds": [
+   "inf22_p64"
+  ],
+  "fids": [
+   "236827"
+  ],
+  "files": [
+   {
+    "fid": "236827",
+    "file": "47606-0_236827.ods",
+    "name": "22_25.ods",
+    "bytes": 3499,
+    "sha": "6fe5be90b0dd5921",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47607": {
+  "taskIds": [
+   "inf22_p47"
+  ],
+  "fids": [
+   "236858"
+  ],
+  "files": [
+   {
+    "fid": "236858",
+    "file": "47607-0_236858.ods",
+    "name": "22_26.ods",
+    "bytes": 3488,
+    "sha": "7f2ddf1eeb4a035e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47608": {
+  "taskIds": [
+   "inf22_p52"
+  ],
+  "fids": [
+   "236859"
+  ],
+  "files": [
+   {
+    "fid": "236859",
+    "file": "47608-0_236859.ods",
+    "name": "22_27.ods",
+    "bytes": 3495,
+    "sha": "ccc676a3e3bd33d2",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47609": {
+  "taskIds": [
+   "inf22_p29"
+  ],
+  "fids": [
+   "236860"
+  ],
+  "files": [
+   {
+    "fid": "236860",
+    "file": "47609-0_236860.ods",
+    "name": "22_28.ods",
+    "bytes": 3489,
+    "sha": "cbde3e61783d86b8",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47610": {
+  "taskIds": [
+   "inf22_p58"
+  ],
+  "fids": [
+   "236861"
+  ],
+  "files": [
+   {
+    "fid": "236861",
+    "file": "47610-0_236861.ods",
+    "name": "22_29.ods",
+    "bytes": 3492,
+    "sha": "4fe2c14c15825b73",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47611": {
+  "taskIds": [
+   "inf22_p27"
+  ],
+  "fids": [
+   "236863"
+  ],
+  "files": [
+   {
+    "fid": "236863",
+    "file": "47611-0_236863.ods",
+    "name": "22_30.ods",
+    "bytes": 3507,
+    "sha": "5d37e9b234641be3",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47612": {
+  "taskIds": [
+   "inf22_p20"
+  ],
+  "fids": [
+   "236864"
+  ],
+  "files": [
+   {
+    "fid": "236864",
+    "file": "47612-0_236864.ods",
+    "name": "22_31.ods",
+    "bytes": 3508,
+    "sha": "c2fbea9f0b9de935",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47613": {
+  "taskIds": [
+   "inf22_p54"
+  ],
+  "fids": [
+   "236865"
+  ],
+  "files": [
+   {
+    "fid": "236865",
+    "file": "47613-0_236865.ods",
+    "name": "22_32.ods",
+    "bytes": 3484,
+    "sha": "4fb8ac046c7c1f24",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47614": {
+  "taskIds": [
+   "inf22_p35"
+  ],
+  "fids": [
+   "236866"
+  ],
+  "files": [
+   {
+    "fid": "236866",
+    "file": "47614-0_236866.ods",
+    "name": "22_33.ods",
+    "bytes": 3529,
+    "sha": "1a9e0b21ef54b3bc",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47615": {
+  "taskIds": [
+   "inf22_p77"
+  ],
+  "fids": [
+   "236867"
+  ],
+  "files": [
+   {
+    "fid": "236867",
+    "file": "47615-0_236867.ods",
+    "name": "22_34.ods",
+    "bytes": 3504,
+    "sha": "0839aba44cddd7b4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "47616": {
+  "taskIds": [
+   "inf22_p53"
+  ],
+  "fids": [
+   "236868"
+  ],
+  "files": [
+   {
+    "fid": "236868",
+    "file": "47616-0_236868.ods",
+    "name": "22_35.ods",
+    "bytes": 3512,
+    "sha": "69d84274a2fc0b64",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "48430": {
+  "taskIds": [
+   "inf09_p15"
+  ],
+  "fids": [
+   "225750"
+  ],
+  "files": [
+   {
+    "fid": "225750",
+    "file": "48430-0_225750.ods",
+    "name": "09.ods",
+    "bytes": 174431,
+    "sha": "b026050bacc46db4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "48438": {
+  "taskIds": [
+   "inf17_p28"
+  ],
+  "fids": [
+   "117742"
+  ],
+  "files": [
+   {
+    "fid": "117742",
+    "file": "48438-0_117742.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "f08c4264a3cae4ed",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48443": {
+  "taskIds": [
+   "inf22_p21"
+  ],
+  "fids": [
+   "236870"
+  ],
+  "files": [
+   {
+    "fid": "236870",
+    "file": "48443-0_236870.ods",
+    "name": "22.ods",
+    "bytes": 5836,
+    "sha": "179e65da4cbe3bab",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "48445": {
+  "taskIds": [
+   "inf24_p99"
+  ],
+  "fids": [
+   "117743"
+  ],
+  "files": [
+   {
+    "fid": "117743",
+    "file": "48445-0_117743.txt",
+    "name": "24.txt",
+    "bytes": 4935115,
+    "sha": "02ce3c7370741bea",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48447": {
+  "taskIds": [
+   "inf26_p2"
+  ],
+  "fids": [
+   "117744"
+  ],
+  "files": [
+   {
+    "fid": "117744",
+    "file": "48447-0_117744.txt",
+    "name": "26.txt",
+    "bytes": 58916,
+    "sha": "422f111086cf212f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48448": {
+  "taskIds": [
+   "inf27_p66"
+  ],
+  "fids": [
+   "117745",
+   "117746"
+  ],
+  "files": [
+   {
+    "fid": "117745",
+    "file": "48448-0_117745.txt",
+    "name": "27-A.txt",
+    "bytes": 5518,
+    "sha": "e50b9544d1f1e36e",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "117746",
+    "file": "48448-1_117746.txt",
+    "name": "27-B.txt",
+    "bytes": 9644266,
+    "sha": "a14e01f56b057b7e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48457": {
+  "taskIds": [
+   "inf09_p29"
+  ],
+  "fids": [
+   "225809"
+  ],
+  "files": [
+   {
+    "fid": "225809",
+    "file": "48457-0_225809.ods",
+    "name": "09.ods",
+    "bytes": 174253,
+    "sha": "37d3acb7016ec480",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "48465": {
+  "taskIds": [
+   "inf17_p20"
+  ],
+  "fids": [
+   "117754"
+  ],
+  "files": [
+   {
+    "fid": "117754",
+    "file": "48465-0_117754.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "f08c4264a3cae4ed",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48470": {
+  "taskIds": [
+   "inf22_p3"
+  ],
+  "fids": [
+   "236869"
+  ],
+  "files": [
+   {
+    "fid": "236869",
+    "file": "48470-0_236869.ods",
+    "name": "22.ods",
+    "bytes": 5836,
+    "sha": "8e426b3d81addb2c",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "48472": {
+  "taskIds": [
+   "inf24_p62"
+  ],
+  "fids": [
+   "117756"
+  ],
+  "files": [
+   {
+    "fid": "117756",
+    "file": "48472-0_117756.txt",
+    "name": "24.txt",
+    "bytes": 4935115,
+    "sha": "02ce3c7370741bea",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48474": {
+  "taskIds": [
+   "inf26_p3"
+  ],
+  "fids": [
+   "117757"
+  ],
+  "files": [
+   {
+    "fid": "117757",
+    "file": "48474-0_117757.txt",
+    "name": "26.txt",
+    "bytes": 58916,
+    "sha": "422f111086cf212f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "48475": {
+  "taskIds": [
+   "inf27_p68"
+  ],
+  "fids": [
+   "117758",
+   "117759"
+  ],
+  "files": [
+   {
+    "fid": "117758",
+    "file": "48475-0_117758.txt",
+    "name": "27-A.txt",
+    "bytes": 5518,
+    "sha": "e50b9544d1f1e36e",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "117759",
+    "file": "48475-1_117759.txt",
+    "name": "27-B.txt",
+    "bytes": 9644266,
+    "sha": "a14e01f56b057b7e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "51978": {
+  "taskIds": [
+   "inf09_p72"
+  ],
+  "fids": [
+   "225751"
+  ],
+  "files": [
+   {
+    "fid": "225751",
+    "file": "51978-0_225751.ods",
+    "name": "09.ods",
+    "bytes": 148286,
+    "sha": "dea5da3a246e89f0",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "51986": {
+  "taskIds": [
+   "inf17_p3"
+  ],
+  "fids": [
+   "122548"
+  ],
+  "files": [
+   {
+    "fid": "122548",
+    "file": "51986-0_122548.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "cffd21233a274ab3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "51991": {
+  "taskIds": [
+   "inf22_p97"
+  ],
+  "fids": [
+   "236871"
+  ],
+  "files": [
+   {
+    "fid": "236871",
+    "file": "51991-0_236871.ods",
+    "name": "22 (1).ods",
+    "bytes": 5712,
+    "sha": "728fe3f4925e7b00",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "51993": {
+  "taskIds": [
+   "inf24_p12"
+  ],
+  "fids": [
+   "122578"
+  ],
+  "files": [
+   {
+    "fid": "122578",
+    "file": "51993-0_122578.txt",
+    "name": "24.txt",
+    "bytes": 4935115,
+    "sha": "02ce3c7370741bea",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "51995": {
+  "taskIds": [
+   "inf26_p80"
+  ],
+  "fids": [
+   "150732"
+  ],
+  "files": [
+   {
+    "fid": "150732",
+    "file": "51995-0_150732.txt",
+    "name": "26.txt",
+    "bytes": 84915,
+    "sha": "e41bc3a4e9295cd9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "51996": {
+  "taskIds": [
+   "inf27_p63"
+  ],
+  "fids": [
+   "122579",
+   "122580"
+  ],
+  "files": [
+   {
+    "fid": "122579",
+    "file": "51996-0_122579.txt",
+    "name": "27-A.txt",
+    "bytes": 9958,
+    "sha": "6122a2eded57059f",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "122580",
+    "file": "51996-1_122580.txt",
+    "name": "27-B.txt",
+    "bytes": 12013953,
+    "sha": "a292a6bbe7b293c8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "52180": {
+  "taskIds": [
+   "inf09_p44"
+  ],
+  "fids": [
+   "225810"
+  ],
+  "files": [
+   {
+    "fid": "225810",
+    "file": "52180-0_225810.ods",
+    "name": "09.ods",
+    "bytes": 148108,
+    "sha": "0370af9e0ecff885",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "52188": {
+  "taskIds": [
+   "inf17_p31"
+  ],
+  "fids": [
+   "122548"
+  ],
+  "files": [
+   {
+    "fid": "122548",
+    "file": "52188-0_122548.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "cffd21233a274ab3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "52193": {
+  "taskIds": [
+   "inf22_p56"
+  ],
+  "fids": [
+   "122551"
+  ],
+  "files": [
+   {
+    "fid": "122551",
+    "file": "52193-0_122551.xlsx",
+    "name": "22.xlsx",
+    "bytes": 11978,
+    "sha": "7b6e5a0012d8dbcf",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "52195": {
+  "taskIds": [
+   "inf24_p14"
+  ],
+  "fids": [
+   "122578"
+  ],
+  "files": [
+   {
+    "fid": "122578",
+    "file": "52195-0_122578.txt",
+    "name": "24.txt",
+    "bytes": 4935115,
+    "sha": "02ce3c7370741bea",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "52197": {
+  "taskIds": [
+   "inf26_p9"
+  ],
+  "fids": [
+   "145116"
+  ],
+  "files": [
+   {
+    "fid": "145116",
+    "file": "52197-0_145116.txt",
+    "name": "26.txt",
+    "bytes": 84915,
+    "sha": "e41bc3a4e9295cd9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "52198": {
+  "taskIds": [
+   "inf27_p21"
+  ],
+  "fids": [
+   "122579",
+   "122580"
+  ],
+  "files": [
+   {
+    "fid": "122579",
+    "file": "52198-0_122579.txt",
+    "name": "27-A.txt",
+    "bytes": 9958,
+    "sha": "6122a2eded57059f",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "122580",
+    "file": "52198-1_122580.txt",
+    "name": "27-B.txt",
+    "bytes": 12013953,
+    "sha": "a292a6bbe7b293c8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55596": {
+  "taskIds": [
+   "inf09_p68"
+  ],
+  "fids": [
+   "225752"
+  ],
+  "files": [
+   {
+    "fid": "225752",
+    "file": "55596-0_225752.ods",
+    "name": "09.ods",
+    "bytes": 243204,
+    "sha": "b27d17425c379489",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "55604": {
+  "taskIds": [
+   "inf17_p32"
+  ],
+  "fids": [
+   "128460"
+  ],
+  "files": [
+   {
+    "fid": "128460",
+    "file": "55604-0_128460.txt",
+    "name": "17.txt",
+    "bytes": 32341,
+    "sha": "4ddff98c8dc52c84",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55609": {
+  "taskIds": [
+   "inf22_p18"
+  ],
+  "fids": [
+   "128468"
+  ],
+  "files": [
+   {
+    "fid": "128468",
+    "file": "55609-0_128468.xlsx",
+    "name": "22.xlsx",
+    "bytes": 11998,
+    "sha": "a6475671af51241d",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "55611": {
+  "taskIds": [
+   "inf24_p96"
+  ],
+  "fids": [
+   "128471"
+  ],
+  "files": [
+   {
+    "fid": "128471",
+    "file": "55611-0_128471.txt",
+    "name": "24.txt",
+    "bytes": 1000995,
+    "sha": "6b9000110db2a477",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55613": {
+  "taskIds": [
+   "inf26_p12"
+  ],
+  "fids": [
+   "128480"
+  ],
+  "files": [
+   {
+    "fid": "128480",
+    "file": "55613-0_128480.txt",
+    "name": "26.txt",
+    "bytes": 10948074,
+    "sha": "62888be99cf393cb",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55614": {
+  "taskIds": [
+   "inf27_p22"
+  ],
+  "fids": [
+   "128481",
+   "128482"
+  ],
+  "files": [
+   {
+    "fid": "128481",
+    "file": "55614-0_128481.txt",
+    "name": "27-A.txt",
+    "bytes": 15343,
+    "sha": "ba90caea0b200f1d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "128482",
+    "file": "55614-1_128482.txt",
+    "name": "27-B.txt",
+    "bytes": 19599702,
+    "sha": "4a4f41cb77686949",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55626": {
+  "taskIds": [
+   "inf09_p23"
+  ],
+  "fids": [
+   "225811"
+  ],
+  "files": [
+   {
+    "fid": "225811",
+    "file": "55626-0_225811.ods",
+    "name": "09.ods",
+    "bytes": 243025,
+    "sha": "9ed33940c8c53156",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "55634": {
+  "taskIds": [
+   "inf17_p19"
+  ],
+  "fids": [
+   "128460"
+  ],
+  "files": [
+   {
+    "fid": "128460",
+    "file": "55634-0_128460.txt",
+    "name": "17.txt",
+    "bytes": 32341,
+    "sha": "4ddff98c8dc52c84",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55639": {
+  "taskIds": [
+   "inf22_p4"
+  ],
+  "fids": [
+   "236872"
+  ],
+  "files": [
+   {
+    "fid": "236872",
+    "file": "55639-0_236872.ods",
+    "name": "22.ods",
+    "bytes": 5609,
+    "sha": "6a729edbe988d454",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "55641": {
+  "taskIds": [
+   "inf24_p9"
+  ],
+  "fids": [
+   "128471"
+  ],
+  "files": [
+   {
+    "fid": "128471",
+    "file": "55641-0_128471.txt",
+    "name": "24.txt",
+    "bytes": 1000995,
+    "sha": "6b9000110db2a477",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55643": {
+  "taskIds": [
+   "inf26_p36"
+  ],
+  "fids": [
+   "128480"
+  ],
+  "files": [
+   {
+    "fid": "128480",
+    "file": "55643-0_128480.txt",
+    "name": "26.txt",
+    "bytes": 10948074,
+    "sha": "62888be99cf393cb",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55644": {
+  "taskIds": [
+   "inf27_p43"
+  ],
+  "fids": [
+   "128481",
+   "128482"
+  ],
+  "files": [
+   {
+    "fid": "128481",
+    "file": "55644-0_128481.txt",
+    "name": "27-A.txt",
+    "bytes": 15343,
+    "sha": "ba90caea0b200f1d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "128482",
+    "file": "55644-1_128482.txt",
+    "name": "27-B.txt",
+    "bytes": 19599702,
+    "sha": "4a4f41cb77686949",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55805": {
+  "taskIds": [
+   "inf09_p45"
+  ],
+  "fids": [
+   "225753"
+  ],
+  "files": [
+   {
+    "fid": "225753",
+    "file": "55805-0_225753.ods",
+    "name": "09.ods",
+    "bytes": 73741,
+    "sha": "b853086e79349ae4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "55813": {
+  "taskIds": [
+   "inf17_p24"
+  ],
+  "fids": [
+   "130094"
+  ],
+  "files": [
+   {
+    "fid": "130094",
+    "file": "55813-0_130094.txt",
+    "name": "17.txt",
+    "bytes": 58785,
+    "sha": "bc0885e9012fe452",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55818": {
+  "taskIds": [
+   "inf22_p34"
+  ],
+  "fids": [
+   "236873"
+  ],
+  "files": [
+   {
+    "fid": "236873",
+    "file": "55818-0_236873.ods",
+    "name": "22.ods",
+    "bytes": 3493,
+    "sha": "b77d6f1a56cc14e4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "55820": {
+  "taskIds": [
+   "inf24_p47"
+  ],
+  "fids": [
+   "130184"
+  ],
+  "files": [
+   {
+    "fid": "130184",
+    "file": "55820-0_130184.txt",
+    "name": "24.txt",
+    "bytes": 1000000,
+    "sha": "7e904561a4cba88d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55822": {
+  "taskIds": [
+   "inf26_p46"
+  ],
+  "fids": [
+   "130185"
+  ],
+  "files": [
+   {
+    "fid": "130185",
+    "file": "55822-0_130185.txt",
+    "name": "26.txt",
+    "bytes": 5957,
+    "sha": "5ba783670e13d84b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "55823": {
+  "taskIds": [
+   "inf27_p56"
+  ],
+  "fids": [
+   "130186",
+   "130187"
+  ],
+  "files": [
+   {
+    "fid": "130186",
+    "file": "55823-0_130186.txt",
+    "name": "27A.txt",
+    "bytes": 6886,
+    "sha": "cc9805cbfecc794f",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "130187",
+    "file": "55823-1_130187.txt",
+    "name": "27B.txt",
+    "bytes": 33128309,
+    "sha": "1adbf3b4c40a5a1b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56509": {
+  "taskIds": [
+   "inf09_p18"
+  ],
+  "fids": [
+   "225754"
+  ],
+  "files": [
+   {
+    "fid": "225754",
+    "file": "56509-0_225754.ods",
+    "name": "09.ods",
+    "bytes": 174431,
+    "sha": "d546d6401c21b909",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "56517": {
+  "taskIds": [
+   "inf17_p18"
+  ],
+  "fids": [
+   "130230"
+  ],
+  "files": [
+   {
+    "fid": "130230",
+    "file": "56517-0_130230.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "da11fb81f0511fdc",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56522": {
+  "taskIds": [
+   "inf22_p69"
+  ],
+  "fids": [
+   "236874"
+  ],
+  "files": [
+   {
+    "fid": "236874",
+    "file": "56522-0_236874.ods",
+    "name": "22 (1).ods",
+    "bytes": 5715,
+    "sha": "678baa4b9b4d9f20",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "56524": {
+  "taskIds": [
+   "inf24_p10"
+  ],
+  "fids": [
+   "130233"
+  ],
+  "files": [
+   {
+    "fid": "130233",
+    "file": "56524-0_130233.txt",
+    "name": "24.txt",
+    "bytes": 1001130,
+    "sha": "bb77aeeba2b44a92",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56526": {
+  "taskIds": [
+   "inf26_p73"
+  ],
+  "fids": [
+   "150673"
+  ],
+  "files": [
+   {
+    "fid": "150673",
+    "file": "56526-0_150673.txt",
+    "name": "26.txt",
+    "bytes": 12763332,
+    "sha": "c2e39a0a4ed46351",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56527": {
+  "taskIds": [
+   "inf27_p41"
+  ],
+  "fids": [
+   "130235",
+   "130236"
+  ],
+  "files": [
+   {
+    "fid": "130235",
+    "file": "56527-0_130235.txt",
+    "name": "27-A.txt",
+    "bytes": 7351,
+    "sha": "b3447f6ff5cc9b77",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "130236",
+    "file": "56527-1_130236.txt",
+    "name": "27-B.txt",
+    "bytes": 12322691,
+    "sha": "a1cb74cea74fb32d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56537": {
+  "taskIds": [
+   "inf09_p54"
+  ],
+  "fids": [
+   "225812"
+  ],
+  "files": [
+   {
+    "fid": "225812",
+    "file": "56537-0_225812.ods",
+    "name": "09.ods",
+    "bytes": 174253,
+    "sha": "50898a8dc1d1677d",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "56545": {
+  "taskIds": [
+   "inf17_p23"
+  ],
+  "fids": [
+   "130230"
+  ],
+  "files": [
+   {
+    "fid": "130230",
+    "file": "56545-0_130230.txt",
+    "name": "17.txt",
+    "bytes": 31896,
+    "sha": "da11fb81f0511fdc",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56550": {
+  "taskIds": [
+   "inf22_p41"
+  ],
+  "fids": [
+   "236875"
+  ],
+  "files": [
+   {
+    "fid": "236875",
+    "file": "56550-0_236875.ods",
+    "name": "22.ods",
+    "bytes": 5715,
+    "sha": "155ed9c9b3ef9b9e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "56552": {
+  "taskIds": [
+   "inf24_p80"
+  ],
+  "fids": [
+   "130233"
+  ],
+  "files": [
+   {
+    "fid": "130233",
+    "file": "56552-0_130233.txt",
+    "name": "24.txt",
+    "bytes": 1001130,
+    "sha": "bb77aeeba2b44a92",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56554": {
+  "taskIds": [
+   "inf26_p76"
+  ],
+  "fids": [
+   "150673"
+  ],
+  "files": [
+   {
+    "fid": "150673",
+    "file": "56554-0_150673.txt",
+    "name": "26.txt",
+    "bytes": 12763332,
+    "sha": "c2e39a0a4ed46351",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "56555": {
+  "taskIds": [
+   "inf27_p54"
+  ],
+  "fids": [
+   "130235",
+   "130236"
+  ],
+  "files": [
+   {
+    "fid": "130235",
+    "file": "56555-0_130235.txt",
+    "name": "27-A.txt",
+    "bytes": 7351,
+    "sha": "b3447f6ff5cc9b77",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "130236",
+    "file": "56555-1_130236.txt",
+    "name": "27-B.txt",
+    "bytes": 12322691,
+    "sha": "a1cb74cea74fb32d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "57416": {
+  "taskIds": [
+   "inf09_p24"
+  ],
+  "fids": [
+   "225755"
+  ],
+  "files": [
+   {
+    "fid": "225755",
+    "file": "57416-0_225755.ods",
+    "name": "1_9.ods",
+    "bytes": 343203,
+    "sha": "26ab2ff6a92e9199",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "57424": {
+  "taskIds": [
+   "inf17_p17"
+  ],
+  "fids": [
+   "132429"
+  ],
+  "files": [
+   {
+    "fid": "132429",
+    "file": "57424-0_132429.txt",
+    "name": "1_17.txt",
+    "bytes": 19584,
+    "sha": "def68036733cfee4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "57429": {
+  "taskIds": [
+   "inf22_p59"
+  ],
+  "fids": [
+   "236876"
+  ],
+  "files": [
+   {
+    "fid": "236876",
+    "file": "57429-0_236876.ods",
+    "name": "1_22.ods",
+    "bytes": 3493,
+    "sha": "60f5e238ac219af2",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "57431": {
+  "taskIds": [
+   "inf24_p74"
+  ],
+  "fids": [
+   "132433"
+  ],
+  "files": [
+   {
+    "fid": "132433",
+    "file": "57431-0_132433.txt",
+    "name": "1_24.txt",
+    "bytes": 10000001,
+    "sha": "10ca989a0d6c6e56",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "57433": {
+  "taskIds": [
+   "inf26_p35"
+  ],
+  "fids": [
+   "132434"
+  ],
+  "files": [
+   {
+    "fid": "132434",
+    "file": "57433-0_132434.txt",
+    "name": "1_26.txt",
+    "bytes": 9346,
+    "sha": "4ff2edbdd235c089",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "57434": {
+  "taskIds": [
+   "inf27_p51"
+  ],
+  "fids": [
+   "132435",
+   "132436"
+  ],
+  "files": [
+   {
+    "fid": "132435",
+    "file": "57434-0_132435.txt",
+    "name": "1_27_A.txt",
+    "bytes": 3855,
+    "sha": "d13abcb22d82f1bd",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "132436",
+    "file": "57434-1_132436.txt",
+    "name": "1_27_B.txt",
+    "bytes": 30757092,
+    "sha": "b16ac5d6b08f8e8e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58321": {
+  "taskIds": [
+   "inf09_p41"
+  ],
+  "fids": [
+   "225756"
+  ],
+  "files": [
+   {
+    "fid": "225756",
+    "file": "58321-0_225756.ods",
+    "name": "9_58321.ods",
+    "bytes": 30498,
+    "sha": "c8196415d8a29852",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58322": {
+  "taskIds": [
+   "inf09_p5"
+  ],
+  "fids": [
+   "225757"
+  ],
+  "files": [
+   {
+    "fid": "225757",
+    "file": "58322-0_225757.ods",
+    "name": "9_58322.ods",
+    "bytes": 30477,
+    "sha": "dfb876585454b914",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58326": {
+  "taskIds": [
+   "inf24_p98"
+  ],
+  "fids": [
+   "135794"
+  ],
+  "files": [
+   {
+    "fid": "135794",
+    "file": "58326-0_135794.txt",
+    "name": "24_5832.txt",
+    "bytes": 100036,
+    "sha": "749f836fa4742a1e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58327": {
+  "taskIds": [
+   "inf24_p69"
+  ],
+  "fids": [
+   "135795"
+  ],
+  "files": [
+   {
+    "fid": "135795",
+    "file": "58327-0_135795.txt",
+    "name": "24_58327.txt",
+    "bytes": 100000,
+    "sha": "75bcd48fad27e8e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58328": {
+  "taskIds": [
+   "inf24_p33"
+  ],
+  "fids": [
+   "135796"
+  ],
+  "files": [
+   {
+    "fid": "135796",
+    "file": "58328-0_135796.txt",
+    "name": "24_58328.txt",
+    "bytes": 100000,
+    "sha": "0eede3a92d9f1bc2",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58329": {
+  "taskIds": [
+   "inf24_p60"
+  ],
+  "fids": [
+   "135797"
+  ],
+  "files": [
+   {
+    "fid": "135797",
+    "file": "58329-0_135797.txt",
+    "name": "24_58329.txt",
+    "bytes": 99999,
+    "sha": "0783d7910bd8fd66",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58330": {
+  "taskIds": [
+   "inf22_p88"
+  ],
+  "fids": [
+   "236877"
+  ],
+  "files": [
+   {
+    "fid": "236877",
+    "file": "58330-0_236877.ods",
+    "name": "22_58330.ods",
+    "bytes": 3454,
+    "sha": "71ec2eae2d416343",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58331": {
+  "taskIds": [
+   "inf22_p32"
+  ],
+  "fids": [
+   "137277"
+  ],
+  "files": [
+   {
+    "fid": "137277",
+    "file": "58331-0_137277.xlsx",
+    "name": "22_58331.xlsx",
+    "bytes": 8546,
+    "sha": "c1ea1ff25353b21b",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "58332": {
+  "taskIds": [
+   "inf22_p92"
+  ],
+  "fids": [
+   "136820"
+  ],
+  "files": [
+   {
+    "fid": "136820",
+    "file": "58332-0_136820.xlsx",
+    "name": "22_58332.xlsx",
+    "bytes": 8585,
+    "sha": "f7336ea5e5c458fe",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "58333": {
+  "taskIds": [
+   "inf22_p98"
+  ],
+  "fids": [
+   "135546"
+  ],
+  "files": [
+   {
+    "fid": "135546",
+    "file": "58333-0_135546.xlsx",
+    "name": "22_58333 (1).xlsx",
+    "bytes": 8545,
+    "sha": "8f41175a1748e259",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "58476": {
+  "taskIds": [
+   "inf09_p30"
+  ],
+  "fids": [
+   "225813"
+  ],
+  "files": [
+   {
+    "fid": "225813",
+    "file": "58476-0_225813.ods",
+    "name": "09.ods",
+    "bytes": 154886,
+    "sha": "366ab54d37357f97",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58484": {
+  "taskIds": [
+   "inf17_p46"
+  ],
+  "fids": [
+   "134780"
+  ],
+  "files": [
+   {
+    "fid": "134780",
+    "file": "58484-0_134780.txt",
+    "name": "17.txt",
+    "bytes": 52801,
+    "sha": "4e07c2f5916a0377",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58489": {
+  "taskIds": [
+   "inf22_p40"
+  ],
+  "fids": [
+   "228173"
+  ],
+  "files": [
+   {
+    "fid": "228173",
+    "file": "58489-0_228173.ods",
+    "name": "22.ods",
+    "bytes": 5609,
+    "sha": "94875d8156176be8",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58491": {
+  "taskIds": [
+   "inf24_p31"
+  ],
+  "fids": [
+   "134787"
+  ],
+  "files": [
+   {
+    "fid": "134787",
+    "file": "58491-0_134787.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58493": {
+  "taskIds": [
+   "inf26_p45"
+  ],
+  "fids": [
+   "134791"
+  ],
+  "files": [
+   {
+    "fid": "134791",
+    "file": "58493-0_134791.txt",
+    "name": "26.txt",
+    "bytes": 9690,
+    "sha": "f531f763b139e06e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58494": {
+  "taskIds": [
+   "inf27_p59"
+  ],
+  "fids": [
+   "134800",
+   "134801"
+  ],
+  "files": [
+   {
+    "fid": "134800",
+    "file": "58494-0_134800.txt",
+    "name": "27-A.txt",
+    "bytes": 17471,
+    "sha": "6b4335cf03bee5db",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "134801",
+    "file": "58494-1_134801.txt",
+    "name": "27-B.txt",
+    "bytes": 36391151,
+    "sha": "16c14ee2dd84a2e7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58517": {
+  "taskIds": [
+   "inf09_p71"
+  ],
+  "fids": [
+   "225758"
+  ],
+  "files": [
+   {
+    "fid": "225758",
+    "file": "58517-0_225758.ods",
+    "name": "09.ods",
+    "bytes": 155066,
+    "sha": "6fd0a670096a941b",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58525": {
+  "taskIds": [
+   "inf17_p81"
+  ],
+  "fids": [
+   "134780"
+  ],
+  "files": [
+   {
+    "fid": "134780",
+    "file": "58525-0_134780.txt",
+    "name": "17.txt",
+    "bytes": 52801,
+    "sha": "4e07c2f5916a0377",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58530": {
+  "taskIds": [
+   "inf22_p24"
+  ],
+  "fids": [
+   "228175"
+  ],
+  "files": [
+   {
+    "fid": "228175",
+    "file": "58530-0_228175.ods",
+    "name": "22.ods",
+    "bytes": 5610,
+    "sha": "76f077a38211f22d",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "58532": {
+  "taskIds": [
+   "inf24_p73"
+  ],
+  "fids": [
+   "134787"
+  ],
+  "files": [
+   {
+    "fid": "134787",
+    "file": "58532-0_134787.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58534": {
+  "taskIds": [
+   "inf26_p56"
+  ],
+  "fids": [
+   "134791"
+  ],
+  "files": [
+   {
+    "fid": "134791",
+    "file": "58534-0_134791.txt",
+    "name": "26.txt",
+    "bytes": 9690,
+    "sha": "f531f763b139e06e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "58535": {
+  "taskIds": [
+   "inf27_p13"
+  ],
+  "fids": [
+   "134800",
+   "134801"
+  ],
+  "files": [
+   {
+    "fid": "134800",
+    "file": "58535-0_134800.txt",
+    "name": "27-A.txt",
+    "bytes": 17471,
+    "sha": "6b4335cf03bee5db",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "134801",
+    "file": "58535-1_134801.txt",
+    "name": "27-B.txt",
+    "bytes": 36391151,
+    "sha": "16c14ee2dd84a2e7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59687": {
+  "taskIds": [
+   "inf09_p73"
+  ],
+  "fids": [
+   "225759"
+  ],
+  "files": [
+   {
+    "fid": "225759",
+    "file": "59687-0_225759.ods",
+    "name": "9.ods",
+    "bytes": 449206,
+    "sha": "809f6f79a3ad1e00",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59695": {
+  "taskIds": [
+   "inf17_p7"
+  ],
+  "fids": [
+   "137595"
+  ],
+  "files": [
+   {
+    "fid": "137595",
+    "file": "59695-0_137595.txt",
+    "name": "17.txt",
+    "bytes": 36036,
+    "sha": "ad384a43e7e3df1b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59700": {
+  "taskIds": [
+   "inf22_p94"
+  ],
+  "fids": [
+   "228177"
+  ],
+  "files": [
+   {
+    "fid": "228177",
+    "file": "59700-0_228177.ods",
+    "name": "22.ods",
+    "bytes": 3599,
+    "sha": "c8b7a5e7d7170f53",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59702": {
+  "taskIds": [
+   "inf24_p25"
+  ],
+  "fids": [
+   "137597"
+  ],
+  "files": [
+   {
+    "fid": "137597",
+    "file": "59702-0_137597.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59704": {
+  "taskIds": [
+   "inf26_p11"
+  ],
+  "fids": [
+   "137598"
+  ],
+  "files": [
+   {
+    "fid": "137598",
+    "file": "59704-0_137598.txt",
+    "name": "26.txt",
+    "bytes": 9345,
+    "sha": "04606c517cec1b9f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59705": {
+  "taskIds": [
+   "inf27_p49"
+  ],
+  "fids": [
+   "137599",
+   "137600"
+  ],
+  "files": [
+   {
+    "fid": "137599",
+    "file": "59705-0_137599.txt",
+    "name": "27_A.txt",
+    "bytes": 5435,
+    "sha": "55d7d38095c5c2df",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "137600",
+    "file": "59705-1_137600.txt",
+    "name": "27_B.txt",
+    "bytes": 5955244,
+    "sha": "bbe530877052ca20",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59714": {
+  "taskIds": [
+   "inf09_p31"
+  ],
+  "fids": [
+   "225814"
+  ],
+  "files": [
+   {
+    "fid": "225814",
+    "file": "59714-0_225814.ods",
+    "name": "9.ods",
+    "bytes": 449038,
+    "sha": "e6765e8493e6f50c",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59722": {
+  "taskIds": [
+   "inf17_p55"
+  ],
+  "fids": [
+   "137606"
+  ],
+  "files": [
+   {
+    "fid": "137606",
+    "file": "59722-0_137606.txt",
+    "name": "1_17.txt",
+    "bytes": 19584,
+    "sha": "def68036733cfee4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59727": {
+  "taskIds": [
+   "inf22_p99"
+  ],
+  "fids": [
+   "228177"
+  ],
+  "files": [
+   {
+    "fid": "228177",
+    "file": "59727-0_228177.ods",
+    "name": "22.ods",
+    "bytes": 3599,
+    "sha": "c8b7a5e7d7170f53",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59729": {
+  "taskIds": [
+   "inf24_p44"
+  ],
+  "fids": [
+   "137607"
+  ],
+  "files": [
+   {
+    "fid": "137607",
+    "file": "59729-0_137607.txt",
+    "name": "1_24.txt",
+    "bytes": 10000001,
+    "sha": "10ca989a0d6c6e56",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59731": {
+  "taskIds": [
+   "inf26_p93"
+  ],
+  "fids": [
+   "138290"
+  ],
+  "files": [
+   {
+    "fid": "138290",
+    "file": "59731-0_138290.txt",
+    "name": "26.txt",
+    "bytes": 9341,
+    "sha": "2340c4f18f59a9f4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59732": {
+  "taskIds": [
+   "inf27_p20"
+  ],
+  "fids": [
+   "137609",
+   "137610"
+  ],
+  "files": [
+   {
+    "fid": "137609",
+    "file": "59732-0_137609.txt",
+    "name": "1_27_A.txt",
+    "bytes": 3855,
+    "sha": "d13abcb22d82f1bd",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "137610",
+    "file": "59732-1_137610.txt",
+    "name": "1_27_B.txt",
+    "bytes": 30757092,
+    "sha": "b16ac5d6b08f8e8e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59776": {
+  "taskIds": [
+   "inf26_p4"
+  ],
+  "fids": [
+   "156907"
+  ],
+  "files": [
+   {
+    "fid": "156907",
+    "file": "59776-0_156907.txt",
+    "name": "26_59776.txt",
+    "bytes": 8623,
+    "sha": "e43c85abab6c68dd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59777": {
+  "taskIds": [
+   "inf27_p44"
+  ],
+  "fids": [
+   "141045",
+   "141052"
+  ],
+  "files": [
+   {
+    "fid": "141045",
+    "file": "59777-0_141045.txt",
+    "name": "27A.txt",
+    "bytes": 3879,
+    "sha": "b677c4f8f2180529",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "141052",
+    "file": "59777-1_141052.txt",
+    "name": "27B.txt",
+    "bytes": 8777598,
+    "sha": "74035debd901911e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59778": {
+  "taskIds": [
+   "inf09_p9"
+  ],
+  "fids": [
+   "225760"
+  ],
+  "files": [
+   {
+    "fid": "225760",
+    "file": "59778-0_225760.ods",
+    "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+    "bytes": 595688,
+    "sha": "ca1284383f30182b",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59779": {
+  "taskIds": [
+   "inf09_p74"
+  ],
+  "fids": [
+   "225815"
+  ],
+  "files": [
+   {
+    "fid": "225815",
+    "file": "59779-0_225815.ods",
+    "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+    "bytes": 595526,
+    "sha": "991e6142dca8a404",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59780": {
+  "taskIds": [
+   "inf09_p35"
+  ],
+  "fids": [
+   "225816"
+  ],
+  "files": [
+   {
+    "fid": "225816",
+    "file": "59780-0_225816.ods",
+    "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+    "bytes": 595526,
+    "sha": "71ea5cc7c4227e73",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59784": {
+  "taskIds": [
+   "inf17_p40"
+  ],
+  "fids": [
+   "140167"
+  ],
+  "files": [
+   {
+    "fid": "140167",
+    "file": "59784-0_140167.txt",
+    "name": "17.txt",
+    "bytes": 36066,
+    "sha": "f2637234fb757fe8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59785": {
+  "taskIds": [
+   "inf17_p4"
+  ],
+  "fids": [
+   "140167"
+  ],
+  "files": [
+   {
+    "fid": "140167",
+    "file": "59785-0_140167.txt",
+    "name": "17.txt",
+    "bytes": 36066,
+    "sha": "f2637234fb757fe8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59788": {
+  "taskIds": [
+   "inf22_p31"
+  ],
+  "fids": [
+   "228176"
+  ],
+  "files": [
+   {
+    "fid": "228176",
+    "file": "59788-0_228176.ods",
+    "name": "22.ods",
+    "bytes": 3721,
+    "sha": "4fade4fcdac8f2f7",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59789": {
+  "taskIds": [
+   "inf24_p70"
+  ],
+  "fids": [
+   "140108"
+  ],
+  "files": [
+   {
+    "fid": "140108",
+    "file": "59789-0_140108.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59790": {
+  "taskIds": [
+   "inf24_p49"
+  ],
+  "fids": [
+   "140108"
+  ],
+  "files": [
+   {
+    "fid": "140108",
+    "file": "59790-0_140108.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59791": {
+  "taskIds": [
+   "inf24_p88"
+  ],
+  "fids": [
+   "140108"
+  ],
+  "files": [
+   {
+    "fid": "140108",
+    "file": "59791-0_140108.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59793": {
+  "taskIds": [
+   "inf24_p21"
+  ],
+  "fids": [
+   "140108"
+  ],
+  "files": [
+   {
+    "fid": "140108",
+    "file": "59793-0_140108.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59794": {
+  "taskIds": [
+   "inf24_p29"
+  ],
+  "fids": [
+   "140108"
+  ],
+  "files": [
+   {
+    "fid": "140108",
+    "file": "59794-0_140108.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "50bc7ecb58b7ae97",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59802": {
+  "taskIds": [
+   "inf09_p43"
+  ],
+  "fids": [
+   "225761"
+  ],
+  "files": [
+   {
+    "fid": "225761",
+    "file": "59802-0_225761.ods",
+    "name": "9.ods",
+    "bytes": 589742,
+    "sha": "8fedf766226fc25d",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59810": {
+  "taskIds": [
+   "inf17_p72"
+  ],
+  "fids": [
+   "139045"
+  ],
+  "files": [
+   {
+    "fid": "139045",
+    "file": "59810-0_139045.txt",
+    "name": "17.txt",
+    "bytes": 19584,
+    "sha": "def68036733cfee4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59815": {
+  "taskIds": [
+   "inf22_p13"
+  ],
+  "fids": [
+   "228178"
+  ],
+  "files": [
+   {
+    "fid": "228178",
+    "file": "59815-0_228178.ods",
+    "name": "22.ods",
+    "bytes": 3672,
+    "sha": "561b8accb4746910",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59817": {
+  "taskIds": [
+   "inf24_p19"
+  ],
+  "fids": [
+   "139826"
+  ],
+  "files": [
+   {
+    "fid": "139826",
+    "file": "59817-0_139826.txt",
+    "name": "24.txt",
+    "bytes": 996962,
+    "sha": "c0210bd0fb04e658",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59819": {
+  "taskIds": [
+   "inf26_p27"
+  ],
+  "fids": [
+   "163342"
+  ],
+  "files": [
+   {
+    "fid": "163342",
+    "file": "59819-0_163342.txt",
+    "name": "26.txt",
+    "bytes": 9274,
+    "sha": "d1ced0886ff2f324",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59820": {
+  "taskIds": [
+   "inf27_p52"
+  ],
+  "fids": [
+   "137609",
+   "137610"
+  ],
+  "files": [
+   {
+    "fid": "137609",
+    "file": "59820-0_137609.txt",
+    "name": "1_27_A.txt",
+    "bytes": 3855,
+    "sha": "d13abcb22d82f1bd",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "137610",
+    "file": "59820-1_137610.txt",
+    "name": "1_27_B.txt",
+    "bytes": 30757092,
+    "sha": "b16ac5d6b08f8e8e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59821": {
+  "taskIds": [
+   "inf26_p58"
+  ],
+  "fids": [
+   "164081"
+  ],
+  "files": [
+   {
+    "fid": "164081",
+    "file": "59821-0_164081.txt",
+    "name": "26_59821.txt",
+    "bytes": 10602,
+    "sha": "f49fb21d36ec1578",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59822": {
+  "taskIds": [
+   "inf26_p86"
+  ],
+  "fids": [
+   "164303"
+  ],
+  "files": [
+   {
+    "fid": "164303",
+    "file": "59822-0_164303.txt",
+    "name": "26_59822.txt",
+    "bytes": 254299,
+    "sha": "e9d08cb6d160a3dd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59824": {
+  "taskIds": [
+   "inf27_p42"
+  ],
+  "fids": [
+   "141870",
+   "141871"
+  ],
+  "files": [
+   {
+    "fid": "141870",
+    "file": "59824-0_141870.txt",
+    "name": "27A_59824.txt",
+    "bytes": 6200,
+    "sha": "c21a54e41564f787",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "141871",
+    "file": "59824-1_141871.txt",
+    "name": "27B_59824.txt",
+    "bytes": 25646329,
+    "sha": "765044fd68c401be",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59825": {
+  "taskIds": [
+   "inf27_p48"
+  ],
+  "fids": [
+   "147095",
+   "147096"
+  ],
+  "files": [
+   {
+    "fid": "147095",
+    "file": "59825-0_147095.txt",
+    "name": "27-A.txt",
+    "bytes": 5659,
+    "sha": "2fa9adccf1ecd85d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "147096",
+    "file": "59825-1_147096.txt",
+    "name": "27-B.txt",
+    "bytes": 6091423,
+    "sha": "070f1779840170c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59826": {
+  "taskIds": [
+   "inf27_p6"
+  ],
+  "fids": [
+   "141560",
+   "141564"
+  ],
+  "files": [
+   {
+    "fid": "141560",
+    "file": "59826-0_141560.txt",
+    "name": "27A_59826.txt",
+    "bytes": 6885,
+    "sha": "9a676a1f79580ef8",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "141564",
+    "file": "59826-1_141564.txt",
+    "name": "27B_59826.txt",
+    "bytes": 27557040,
+    "sha": "13232a8732c882a5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59833": {
+  "taskIds": [
+   "inf09_p33"
+  ],
+  "fids": [
+   "225762"
+  ],
+  "files": [
+   {
+    "fid": "225762",
+    "file": "59833-0_225762.ods",
+    "name": "9.ods",
+    "bytes": 893410,
+    "sha": "290b6555b402b46e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59834": {
+  "taskIds": [
+   "inf09_p3"
+  ],
+  "fids": [
+   "225817"
+  ],
+  "files": [
+   {
+    "fid": "225817",
+    "file": "59834-0_225817.ods",
+    "name": "99.ods",
+    "bytes": 1764258,
+    "sha": "451d62fa409cbc66",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "59842": {
+  "taskIds": [
+   "inf17_p29"
+  ],
+  "fids": [
+   "140923"
+  ],
+  "files": [
+   {
+    "fid": "140923",
+    "file": "59842-0_140923.txt",
+    "name": "1777.txt",
+    "bytes": 64946,
+    "sha": "124cb9e02d6a0027",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59847": {
+  "taskIds": [
+   "inf24_p32"
+  ],
+  "fids": [
+   "141034"
+  ],
+  "files": [
+   {
+    "fid": "141034",
+    "file": "59847-0_141034.txt",
+    "name": "24.txt",
+    "bytes": 10089359,
+    "sha": "3b158cee16f8306b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59848": {
+  "taskIds": [
+   "inf24_p86"
+  ],
+  "fids": [
+   "141036"
+  ],
+  "files": [
+   {
+    "fid": "141036",
+    "file": "59848-0_141036.txt",
+    "name": "24_59848.txt",
+    "bytes": 150487,
+    "sha": "bdf8bf965774421c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59849": {
+  "taskIds": [
+   "inf24_p16"
+  ],
+  "fids": [
+   "141035"
+  ],
+  "files": [
+   {
+    "fid": "141035",
+    "file": "59849-0_141035.txt",
+    "name": "24_59849.txt",
+    "bytes": 150487,
+    "sha": "bdf8bf965774421c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59851": {
+  "taskIds": [
+   "inf26_p53"
+  ],
+  "fids": [
+   "141535"
+  ],
+  "files": [
+   {
+    "fid": "141535",
+    "file": "59851-0_141535.txt",
+    "name": "26_6759.txt",
+    "bytes": 48623,
+    "sha": "64e5242563fafb4c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59852": {
+  "taskIds": [
+   "inf26_p75"
+  ],
+  "fids": [
+   "143512"
+  ],
+  "files": [
+   {
+    "fid": "143512",
+    "file": "59852-0_143512.txt",
+    "name": "26_59852.txt",
+    "bytes": 183017,
+    "sha": "ff8700c70a38bfb7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59853": {
+  "taskIds": [
+   "inf26_p48"
+  ],
+  "fids": [
+   "143511"
+  ],
+  "files": [
+   {
+    "fid": "143511",
+    "file": "59853-0_143511.txt",
+    "name": "26_59853.txt",
+    "bytes": 258317,
+    "sha": "45ed928003fa5bd6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59854": {
+  "taskIds": [
+   "inf27_p29"
+  ],
+  "fids": [
+   "141536",
+   "141542"
+  ],
+  "files": [
+   {
+    "fid": "141536",
+    "file": "59854-0_141536.txt",
+    "name": "27A_59854.txt",
+    "bytes": 3912,
+    "sha": "a4afee660784a792",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "141542",
+    "file": "59854-1_141542.txt",
+    "name": "27B_59854.txt",
+    "bytes": 43888515,
+    "sha": "198cda8d6533caf6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "59855": {
+  "taskIds": [
+   "inf27_p47"
+  ],
+  "fids": [
+   "141536",
+   "141542"
+  ],
+  "files": [
+   {
+    "fid": "141536",
+    "file": "59855-0_141536.txt",
+    "name": "27A_59854.txt",
+    "bytes": 3912,
+    "sha": "a4afee660784a792",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "141542",
+    "file": "59855-1_141542.txt",
+    "name": "27B_59854.txt",
+    "bytes": 43888515,
+    "sha": "198cda8d6533caf6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "60251": {
+  "taskIds": [
+   "inf09_p11"
+  ],
+  "fids": [
+   "225763"
+  ],
+  "files": [
+   {
+    "fid": "225763",
+    "file": "60251-0_225763.ods",
+    "name": "9_2024.ods",
+    "bytes": 449782,
+    "sha": "0cb8d4c1fc405d0c",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "60259": {
+  "taskIds": [
+   "inf17_p84"
+  ],
+  "fids": [
+   "142059"
+  ],
+  "files": [
+   {
+    "fid": "142059",
+    "file": "60259-0_142059.txt",
+    "name": "17_2024.txt",
+    "bytes": 36150,
+    "sha": "5692af68bf07eb4a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "60264": {
+  "taskIds": [
+   "inf22_p57"
+  ],
+  "fids": [
+   "228179"
+  ],
+  "files": [
+   {
+    "fid": "228179",
+    "file": "60264-0_228179.ods",
+    "name": "22_2024.ods",
+    "bytes": 3461,
+    "sha": "6f539ff01dbbe549",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "60266": {
+  "taskIds": [
+   "inf24_p66"
+  ],
+  "fids": [],
+  "files": [],
+  "error": "no-file-link"
+ },
+ "60268": {
+  "taskIds": [
+   "inf26_p83"
+  ],
+  "fids": [
+   "142063"
+  ],
+  "files": [
+   {
+    "fid": "142063",
+    "file": "60268-0_142063.txt",
+    "name": "26_2024.txt",
+    "bytes": 9530,
+    "sha": "ccd7220ff0169e79",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "60269": {
+  "taskIds": [
+   "inf27_p34"
+  ],
+  "fids": [
+   "142064",
+   "142065"
+  ],
+  "files": [
+   {
+    "fid": "142064",
+    "file": "60269-0_142064.txt",
+    "name": "27_A_2024.txt",
+    "bytes": 5660,
+    "sha": "1b970925d93872ab",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "142065",
+    "file": "60269-1_142065.txt",
+    "name": "27_B_2024.txt",
+    "bytes": 6091424,
+    "sha": "0871aee2425a8d46",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "60967": {
+  "taskIds": [
+   "inf26_p8"
+  ],
+  "fids": [
+   "143512"
+  ],
+  "files": [
+   {
+    "fid": "143512",
+    "file": "60967-0_143512.txt",
+    "name": "26_59852.txt",
+    "bytes": 183017,
+    "sha": "ff8700c70a38bfb7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61355": {
+  "taskIds": [
+   "inf09_p19"
+  ],
+  "fids": [
+   "225765"
+  ],
+  "files": [
+   {
+    "fid": "225765",
+    "file": "61355-0_225765.ods",
+    "name": "09 (1).ods",
+    "bytes": 408059,
+    "sha": "fcdc66304aadc507",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "61363": {
+  "taskIds": [
+   "inf17_p57"
+  ],
+  "fids": [
+   "147090"
+  ],
+  "files": [
+   {
+    "fid": "147090",
+    "file": "61363-0_147090.txt",
+    "name": "17.txt",
+    "bytes": 36150,
+    "sha": "5692af68bf07eb4a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61368": {
+  "taskIds": [
+   "inf22_p44"
+  ],
+  "fids": [
+   "228180"
+  ],
+  "files": [
+   {
+    "fid": "228180",
+    "file": "61368-0_228180.ods",
+    "name": "22.ods",
+    "bytes": 3456,
+    "sha": "f1bc5255367c6573",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "61370": {
+  "taskIds": [
+   "inf24_p68"
+  ],
+  "fids": [
+   "147093"
+  ],
+  "files": [
+   {
+    "fid": "147093",
+    "file": "61370-0_147093.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61372": {
+  "taskIds": [
+   "inf26_p74"
+  ],
+  "fids": [
+   "147094"
+  ],
+  "files": [
+   {
+    "fid": "147094",
+    "file": "61372-0_147094.txt",
+    "name": "26.txt",
+    "bytes": 9530,
+    "sha": "ccd7220ff0169e79",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61373": {
+  "taskIds": [
+   "inf27_p61"
+  ],
+  "fids": [
+   "147095",
+   "147096"
+  ],
+  "files": [
+   {
+    "fid": "147095",
+    "file": "61373-0_147095.txt",
+    "name": "27-A.txt",
+    "bytes": 5659,
+    "sha": "2fa9adccf1ecd85d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "147096",
+    "file": "61373-1_147096.txt",
+    "name": "27-B.txt",
+    "bytes": 6091423,
+    "sha": "070f1779840170c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61389": {
+  "taskIds": [
+   "inf09_p48"
+  ],
+  "fids": [
+   "225818"
+  ],
+  "files": [
+   {
+    "fid": "225818",
+    "file": "61389-0_225818.ods",
+    "name": "09.ods",
+    "bytes": 407882,
+    "sha": "c6043587436f39c1",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "61397": {
+  "taskIds": [
+   "inf17_p42"
+  ],
+  "fids": [
+   "147090"
+  ],
+  "files": [
+   {
+    "fid": "147090",
+    "file": "61397-0_147090.txt",
+    "name": "17.txt",
+    "bytes": 36150,
+    "sha": "5692af68bf07eb4a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61402": {
+  "taskIds": [
+   "inf22_p75"
+  ],
+  "fids": [
+   "228181"
+  ],
+  "files": [
+   {
+    "fid": "228181",
+    "file": "61402-0_228181.ods",
+    "name": "22.ods",
+    "bytes": 3457,
+    "sha": "71f89106968c6719",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "61404": {
+  "taskIds": [
+   "inf24_p71"
+  ],
+  "fids": [
+   "147093"
+  ],
+  "files": [
+   {
+    "fid": "147093",
+    "file": "61404-0_147093.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "61407": {
+  "taskIds": [
+   "inf27_p4"
+  ],
+  "fids": [
+   "147095",
+   "147096"
+  ],
+  "files": [
+   {
+    "fid": "147095",
+    "file": "61407-0_147095.txt",
+    "name": "27-A.txt",
+    "bytes": 5659,
+    "sha": "2fa9adccf1ecd85d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "147096",
+    "file": "61407-1_147096.txt",
+    "name": "27-B.txt",
+    "bytes": 6091423,
+    "sha": "070f1779840170c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63025": {
+  "taskIds": [
+   "inf09_p69"
+  ],
+  "fids": [
+   "225766"
+  ],
+  "files": [
+   {
+    "fid": "225766",
+    "file": "63025-0_225766.ods",
+    "name": "09.ods",
+    "bytes": 408059,
+    "sha": "1736abf69847078f",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "63033": {
+  "taskIds": [
+   "inf17_p49"
+  ],
+  "fids": [
+   "154108"
+  ],
+  "files": [
+   {
+    "fid": "154108",
+    "file": "63033-0_154108.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63038": {
+  "taskIds": [
+   "inf22_p16"
+  ],
+  "fids": [
+   "228182"
+  ],
+  "files": [
+   {
+    "fid": "228182",
+    "file": "63038-0_228182.ods",
+    "name": "22.ods",
+    "bytes": 3537,
+    "sha": "ebbf0b681588ffb4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "63040": {
+  "taskIds": [
+   "inf24_p50"
+  ],
+  "fids": [
+   "154111"
+  ],
+  "files": [
+   {
+    "fid": "154111",
+    "file": "63040-0_154111.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63042": {
+  "taskIds": [
+   "inf26_p14"
+  ],
+  "fids": [
+   "154112"
+  ],
+  "files": [
+   {
+    "fid": "154112",
+    "file": "63042-0_154112.txt",
+    "name": "26.txt",
+    "bytes": 6617,
+    "sha": "9123c133077386c3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63043": {
+  "taskIds": [
+   "inf27_p57"
+  ],
+  "fids": [
+   "154113",
+   "154114"
+  ],
+  "files": [
+   {
+    "fid": "154113",
+    "file": "63043-0_154113.txt",
+    "name": "27-A.txt",
+    "bytes": 5659,
+    "sha": "2fa9adccf1ecd85d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "154114",
+    "file": "63043-1_154114.txt",
+    "name": "27-B.txt",
+    "bytes": 6091423,
+    "sha": "070f1779840170c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63058": {
+  "taskIds": [
+   "inf09_p21"
+  ],
+  "fids": [
+   "225819"
+  ],
+  "files": [
+   {
+    "fid": "225819",
+    "file": "63058-0_225819.ods",
+    "name": "09.ods",
+    "bytes": 407881,
+    "sha": "a3a16af5f67e04bb",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "63066": {
+  "taskIds": [
+   "inf17_p86"
+  ],
+  "fids": [
+   "154108"
+  ],
+  "files": [
+   {
+    "fid": "154108",
+    "file": "63066-0_154108.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63071": {
+  "taskIds": [
+   "inf22_p91"
+  ],
+  "fids": [
+   "228183"
+  ],
+  "files": [
+   {
+    "fid": "228183",
+    "file": "63071-0_228183.ods",
+    "name": "22.ods",
+    "bytes": 3537,
+    "sha": "54966693dcdd0764",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "63073": {
+  "taskIds": [
+   "inf24_p2"
+  ],
+  "fids": [
+   "154111"
+  ],
+  "files": [
+   {
+    "fid": "154111",
+    "file": "63073-0_154111.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63075": {
+  "taskIds": [
+   "inf26_p34"
+  ],
+  "fids": [
+   "154112"
+  ],
+  "files": [
+   {
+    "fid": "154112",
+    "file": "63075-0_154112.txt",
+    "name": "26.txt",
+    "bytes": 6617,
+    "sha": "9123c133077386c3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "63076": {
+  "taskIds": [
+   "inf27_p26"
+  ],
+  "fids": [
+   "154113",
+   "154114"
+  ],
+  "files": [
+   {
+    "fid": "154113",
+    "file": "63076-0_154113.txt",
+    "name": "27-A.txt",
+    "bytes": 5659,
+    "sha": "2fa9adccf1ecd85d",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "154114",
+    "file": "63076-1_154114.txt",
+    "name": "27-B.txt",
+    "bytes": 6091423,
+    "sha": "070f1779840170c5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64894": {
+  "taskIds": [
+   "inf09_p66"
+  ],
+  "fids": [
+   "225767"
+  ],
+  "files": [
+   {
+    "fid": "225767",
+    "file": "64894-0_225767.ods",
+    "name": "09.ods",
+    "bytes": 408059,
+    "sha": "eae3d06e12e31366",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "64902": {
+  "taskIds": [
+   "inf17_p47"
+  ],
+  "fids": [
+   "163995"
+  ],
+  "files": [
+   {
+    "fid": "163995",
+    "file": "64902-0_163995.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64907": {
+  "taskIds": [
+   "inf22_p89"
+  ],
+  "fids": [
+   "228184"
+  ],
+  "files": [
+   {
+    "fid": "228184",
+    "file": "64907-0_228184.ods",
+    "name": "22.ods",
+    "bytes": 3569,
+    "sha": "d137f3635b385fd1",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "64909": {
+  "taskIds": [
+   "inf24_p34"
+  ],
+  "fids": [
+   "163998"
+  ],
+  "files": [
+   {
+    "fid": "163998",
+    "file": "64909-0_163998.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64911": {
+  "taskIds": [
+   "inf26_p40"
+  ],
+  "fids": [
+   "163999"
+  ],
+  "files": [
+   {
+    "fid": "163999",
+    "file": "64911-0_163999.txt",
+    "name": "26.txt",
+    "bytes": 8272,
+    "sha": "1a37a912cfc9c5d5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64912": {
+  "taskIds": [
+   "inf27_p24"
+  ],
+  "fids": [
+   "164000",
+   "164001"
+  ],
+  "files": [
+   {
+    "fid": "164000",
+    "file": "64912-0_164000.txt",
+    "name": "27-A.txt",
+    "bytes": 3337,
+    "sha": "6337c5f417e10724",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "164001",
+    "file": "64912-1_164001.txt",
+    "name": "27-B.txt",
+    "bytes": 32029682,
+    "sha": "b8c9db73b02956af",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64939": {
+  "taskIds": [
+   "inf09_p37"
+  ],
+  "fids": [
+   "225820"
+  ],
+  "files": [
+   {
+    "fid": "225820",
+    "file": "64939-0_225820.ods",
+    "name": "09.ods",
+    "bytes": 407882,
+    "sha": "6b7605695c849f5a",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "64947": {
+  "taskIds": [
+   "inf17_p80"
+  ],
+  "fids": [
+   "163995"
+  ],
+  "files": [
+   {
+    "fid": "163995",
+    "file": "64947-0_163995.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64952": {
+  "taskIds": [
+   "inf22_p43"
+  ],
+  "fids": [
+   "228185"
+  ],
+  "files": [
+   {
+    "fid": "228185",
+    "file": "64952-0_228185.ods",
+    "name": "22.ods",
+    "bytes": 3570,
+    "sha": "6d1739e79a5cba7f",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "64954": {
+  "taskIds": [
+   "inf24_p42"
+  ],
+  "fids": [
+   "163998"
+  ],
+  "files": [
+   {
+    "fid": "163998",
+    "file": "64954-0_163998.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64956": {
+  "taskIds": [
+   "inf26_p82"
+  ],
+  "fids": [
+   "163999"
+  ],
+  "files": [
+   {
+    "fid": "163999",
+    "file": "64956-0_163999.txt",
+    "name": "26.txt",
+    "bytes": 8272,
+    "sha": "1a37a912cfc9c5d5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "64957": {
+  "taskIds": [
+   "inf27_p7"
+  ],
+  "fids": [
+   "164000",
+   "164001"
+  ],
+  "files": [
+   {
+    "fid": "164000",
+    "file": "64957-0_164000.txt",
+    "name": "27-A.txt",
+    "bytes": 3337,
+    "sha": "6337c5f417e10724",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "164001",
+    "file": "64957-1_164001.txt",
+    "name": "27-B.txt",
+    "bytes": 32029682,
+    "sha": "b8c9db73b02956af",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68242": {
+  "taskIds": [
+   "inf09_p34"
+  ],
+  "fids": [
+   "225768"
+  ],
+  "files": [
+   {
+    "fid": "225768",
+    "file": "68242-0_225768.ods",
+    "name": "09.ods",
+    "bytes": 408090,
+    "sha": "4dbedcebb9e4c55d",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68250": {
+  "taskIds": [
+   "inf17_p92"
+  ],
+  "fids": [
+   "175526"
+  ],
+  "files": [
+   {
+    "fid": "175526",
+    "file": "68250-0_175526.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68255": {
+  "taskIds": [
+   "inf22_p96"
+  ],
+  "fids": [
+   "228188"
+  ],
+  "files": [
+   {
+    "fid": "228188",
+    "file": "68255-0_228188.ods",
+    "name": "22.ods",
+    "bytes": 3570,
+    "sha": "4474d135740f4ead",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68257": {
+  "taskIds": [
+   "inf24_p37"
+  ],
+  "fids": [
+   "175529"
+  ],
+  "files": [
+   {
+    "fid": "175529",
+    "file": "68257-0_175529.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68259": {
+  "taskIds": [
+   "inf26_p65"
+  ],
+  "fids": [
+   "175530"
+  ],
+  "files": [
+   {
+    "fid": "175530",
+    "file": "68259-0_175530.txt",
+    "name": "26.txt",
+    "bytes": 10532221,
+    "sha": "df3396d225eb16f0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68260": {
+  "taskIds": [
+   "inf27_p60"
+  ],
+  "fids": [
+   "175531",
+   "175532"
+  ],
+  "files": [
+   {
+    "fid": "175531",
+    "file": "68260-0_175531.txt",
+    "name": "27-A.txt",
+    "bytes": 3302,
+    "sha": "fd4575db91df0e8e",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "175532",
+    "file": "68260-1_175532.txt",
+    "name": "27-B.txt",
+    "bytes": 33021931,
+    "sha": "60b96358c6b1fc01",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68271": {
+  "taskIds": [
+   "inf09_p58"
+  ],
+  "fids": [
+   "225769"
+  ],
+  "files": [
+   {
+    "fid": "225769",
+    "file": "68271-0_225769.ods",
+    "name": "09.ods",
+    "bytes": 408089,
+    "sha": "8a0b469365fa2c69",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68279": {
+  "taskIds": [
+   "inf17_p26"
+  ],
+  "fids": [
+   "175526"
+  ],
+  "files": [
+   {
+    "fid": "175526",
+    "file": "68279-0_175526.txt",
+    "name": "17.txt",
+    "bytes": 36144,
+    "sha": "85b563ebe927cfa8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68284": {
+  "taskIds": [
+   "inf22_p6"
+  ],
+  "fids": [
+   "228189"
+  ],
+  "files": [
+   {
+    "fid": "228189",
+    "file": "68284-0_228189.ods",
+    "name": "22.ods",
+    "bytes": 3569,
+    "sha": "39125ddbdd1f3137",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68286": {
+  "taskIds": [
+   "inf24_p39"
+  ],
+  "fids": [
+   "175529"
+  ],
+  "files": [
+   {
+    "fid": "175529",
+    "file": "68286-0_175529.txt",
+    "name": "24.txt",
+    "bytes": 1100004,
+    "sha": "f1548fcbaf0f34da",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68288": {
+  "taskIds": [
+   "inf26_p69"
+  ],
+  "fids": [
+   "175530"
+  ],
+  "files": [
+   {
+    "fid": "175530",
+    "file": "68288-0_175530.txt",
+    "name": "26.txt",
+    "bytes": 10532221,
+    "sha": "df3396d225eb16f0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68289": {
+  "taskIds": [
+   "inf27_p27"
+  ],
+  "fids": [
+   "175531",
+   "175532"
+  ],
+  "files": [
+   {
+    "fid": "175531",
+    "file": "68289-0_175531.txt",
+    "name": "27-A.txt",
+    "bytes": 3302,
+    "sha": "fd4575db91df0e8e",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "175532",
+    "file": "68289-1_175532.txt",
+    "name": "27-B.txt",
+    "bytes": 33021931,
+    "sha": "60b96358c6b1fc01",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68510": {
+  "taskIds": [
+   "inf09_p53"
+  ],
+  "fids": [
+   "225821"
+  ],
+  "files": [
+   {
+    "fid": "225821",
+    "file": "68510-0_225821.ods",
+    "name": "1_9.ods",
+    "bytes": 57348,
+    "sha": "54f0681ba7d14df6",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68518": {
+  "taskIds": [
+   "inf17_p16"
+  ],
+  "fids": [
+   "176229"
+  ],
+  "files": [
+   {
+    "fid": "176229",
+    "file": "68518-0_176229.txt",
+    "name": "1_17.txt",
+    "bytes": 68785,
+    "sha": "ae0b22388c9c8693",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68523": {
+  "taskIds": [
+   "inf22_p76"
+  ],
+  "fids": [
+   "228190"
+  ],
+  "files": [
+   {
+    "fid": "228190",
+    "file": "68523-0_228190.ods",
+    "name": "1_22.ods",
+    "bytes": 3498,
+    "sha": "b581b3651d155244",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "68525": {
+  "taskIds": [
+   "inf24_p81"
+  ],
+  "fids": [
+   "176256"
+  ],
+  "files": [
+   {
+    "fid": "176256",
+    "file": "68525-0_176256.txt",
+    "name": "1_24.txt",
+    "bytes": 10000001,
+    "sha": "7279b5c4b3bf881a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68527": {
+  "taskIds": [
+   "inf26_p49"
+  ],
+  "fids": [
+   "176269"
+  ],
+  "files": [
+   {
+    "fid": "176269",
+    "file": "68527-0_176269.txt",
+    "name": "1_26.txt",
+    "bytes": 58916,
+    "sha": "422f111086cf212f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "68528": {
+  "taskIds": [
+   "inf27_p55"
+  ],
+  "fids": [
+   "176267",
+   "176268"
+  ],
+  "files": [
+   {
+    "fid": "176267",
+    "file": "68528-0_176267.txt",
+    "name": "1_27_A.txt",
+    "bytes": 441,
+    "sha": "34e779215534c717",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "176268",
+    "file": "68528-1_176268.txt",
+    "name": "1_27_B.txt",
+    "bytes": 4704935,
+    "sha": "c3141ff84795b843",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69887": {
+  "taskIds": [
+   "inf09_p38"
+  ],
+  "fids": [
+   "225770"
+  ],
+  "files": [
+   {
+    "fid": "225770",
+    "file": "69887-0_225770.ods",
+    "name": "9.ods",
+    "bytes": 454667,
+    "sha": "02ac61ee489184ea",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "69895": {
+  "taskIds": [
+   "inf17_p54"
+  ],
+  "fids": [
+   "180490"
+  ],
+  "files": [
+   {
+    "fid": "180490",
+    "file": "69895-0_180490.txt",
+    "name": "17.txt",
+    "bytes": 275691,
+    "sha": "90b1d2720ab5da04",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69900": {
+  "taskIds": [
+   "inf22_p78"
+  ],
+  "fids": [
+   "228191"
+  ],
+  "files": [
+   {
+    "fid": "228191",
+    "file": "69900-0_228191.ods",
+    "name": "22.ods",
+    "bytes": 5606,
+    "sha": "8e5a339810c749b9",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "69902": {
+  "taskIds": [
+   "inf24_p38"
+  ],
+  "fids": [
+   "181109"
+  ],
+  "files": [
+   {
+    "fid": "181109",
+    "file": "69902-0_181109.txt",
+    "name": "24.69902.txt",
+    "bytes": 970249,
+    "sha": "6149dce64506fd0b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69904": {
+  "taskIds": [
+   "inf26_p13"
+  ],
+  "fids": [
+   "180534"
+  ],
+  "files": [
+   {
+    "fid": "180534",
+    "file": "69904-0_180534.txt",
+    "name": "2626.txt",
+    "bytes": 132566,
+    "sha": "4fe55cd096b43f41",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69905": {
+  "taskIds": [
+   "inf27_p16"
+  ],
+  "fids": [
+   "180505",
+   "180533"
+  ],
+  "files": [
+   {
+    "fid": "180505",
+    "file": "69905-0_180505.txt",
+    "name": "27-A.txt",
+    "bytes": 808751,
+    "sha": "454706b4a5ac302a",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "180533",
+    "file": "69905-1_180533.txt",
+    "name": "2773.txt",
+    "bytes": 5634100,
+    "sha": "5363ad5a617564e7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69914": {
+  "taskIds": [
+   "inf09_p2"
+  ],
+  "fids": [
+   "225771"
+  ],
+  "files": [
+   {
+    "fid": "225771",
+    "file": "69914-0_225771.ods",
+    "name": "69914.ods",
+    "bytes": 657570,
+    "sha": "e37c9429a1ffb253",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "69915": {
+  "taskIds": [
+   "inf09_p10"
+  ],
+  "fids": [
+   "225772"
+  ],
+  "files": [
+   {
+    "fid": "225772",
+    "file": "69915-0_225772.ods",
+    "name": "69915.ods",
+    "bytes": 657656,
+    "sha": "cf0416bd16dcb6ec",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "69927": {
+  "taskIds": [
+   "inf17_p56"
+  ],
+  "fids": [
+   "180905"
+  ],
+  "files": [
+   {
+    "fid": "180905",
+    "file": "69927-0_180905.txt",
+    "name": "69927.txt",
+    "bytes": 88534,
+    "sha": "a73f14c82b3c6b09",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69932": {
+  "taskIds": [
+   "inf24_p30"
+  ],
+  "fids": [
+   "180917"
+  ],
+  "files": [
+   {
+    "fid": "180917",
+    "file": "69932-0_180917.txt",
+    "name": "69932.txt",
+    "bytes": 15000,
+    "sha": "76630cc89598e5d8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69934": {
+  "taskIds": [
+   "inf26_p31"
+  ],
+  "fids": [
+   "181886"
+  ],
+  "files": [
+   {
+    "fid": "181886",
+    "file": "69934-0_181886.txt",
+    "name": "69934.txt",
+    "bytes": 126614,
+    "sha": "d8098446892edcd6",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "69935": {
+  "taskIds": [
+   "inf26_p42"
+  ],
+  "fids": [
+   "229830"
+  ],
+  "files": [
+   {
+    "fid": "229830",
+    "file": "69935-0_229830.txt",
+    "name": "26_69935.txt",
+    "bytes": 9569,
+    "sha": "619409ffb336ef93",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "70083": {
+  "taskIds": [
+   "inf22_p36"
+  ],
+  "fids": [
+   "228192"
+  ],
+  "files": [
+   {
+    "fid": "228192",
+    "file": "70083-0_228192.ods",
+    "name": "22_1.ods",
+    "bytes": 3445,
+    "sha": "cc8cd1a1dd2c1ee6",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "70085": {
+  "taskIds": [
+   "inf24_p67"
+  ],
+  "fids": [
+   "181556"
+  ],
+  "files": [
+   {
+    "fid": "181556",
+    "file": "70085-0_181556.txt",
+    "name": "24.txt",
+    "bytes": 973900,
+    "sha": "6b74883557cf215b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "70536": {
+  "taskIds": [
+   "inf09_p16"
+  ],
+  "fids": [
+   "225822"
+  ],
+  "files": [
+   {
+    "fid": "225822",
+    "file": "70536-0_225822.ods",
+    "name": "demo_2025_9.ods",
+    "bytes": 709958,
+    "sha": "6cc8c1998834825b",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "70544": {
+  "taskIds": [
+   "inf17_p44"
+  ],
+  "fids": [
+   "184481"
+  ],
+  "files": [
+   {
+    "fid": "184481",
+    "file": "70544-0_184481.txt",
+    "name": "demo_2025_17.txt",
+    "bytes": 68785,
+    "sha": "ae0b22388c9c8693",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "70549": {
+  "taskIds": [
+   "inf22_p60"
+  ],
+  "fids": [
+   "228193"
+  ],
+  "files": [
+   {
+    "fid": "228193",
+    "file": "70549-0_228193.ods",
+    "name": "demo_2025_22.ods",
+    "bytes": 3655,
+    "sha": "8a5c673bc0760bfc",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "70551": {
+  "taskIds": [
+   "inf24_p82"
+  ],
+  "fids": [
+   "184484"
+  ],
+  "files": [
+   {
+    "fid": "184484",
+    "file": "70551-0_184484.txt",
+    "name": "demo_2025_24.txt",
+    "bytes": 10000005,
+    "sha": "00c2417175f3aa5b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "70553": {
+  "taskIds": [
+   "inf26_p55"
+  ],
+  "fids": [
+   "184486"
+  ],
+  "files": [
+   {
+    "fid": "184486",
+    "file": "70553-0_184486.txt",
+    "name": "demo_2025_26.txt",
+    "bytes": 147450,
+    "sha": "8a9c6d1813a2e287",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "72567": {
+  "taskIds": [
+   "inf09_p64"
+  ],
+  "fids": [
+   "225773"
+  ],
+  "files": [
+   {
+    "fid": "225773",
+    "file": "72567-0_225773.ods",
+    "name": "09.ods",
+    "bytes": 762279,
+    "sha": "c987ffe3207a3184",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "72575": {
+  "taskIds": [
+   "inf17_p61"
+  ],
+  "fids": [
+   "191279"
+  ],
+  "files": [
+   {
+    "fid": "191279",
+    "file": "72575-0_191279.txt",
+    "name": "17.txt",
+    "bytes": 68427,
+    "sha": "d64b3ea10b81638d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "72580": {
+  "taskIds": [
+   "inf22_p9"
+  ],
+  "fids": [
+   "228194"
+  ],
+  "files": [
+   {
+    "fid": "228194",
+    "file": "72580-0_228194.ods",
+    "name": "22.ods",
+    "bytes": 3622,
+    "sha": "eb7498a5697261a1",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "72582": {
+  "taskIds": [
+   "inf24_p100"
+  ],
+  "fids": [
+   "191283"
+  ],
+  "files": [
+   {
+    "fid": "191283",
+    "file": "72582-0_191283.txt",
+    "name": "24.txt",
+    "bytes": 10432097,
+    "sha": "99b6ad522a4c66a4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "72594": {
+  "taskIds": [
+   "inf09_p42"
+  ],
+  "fids": [
+   "225823"
+  ],
+  "files": [
+   {
+    "fid": "225823",
+    "file": "72594-0_225823.ods",
+    "name": "09.ods",
+    "bytes": 762099,
+    "sha": "b6b0c4bff6f12884",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "72602": {
+  "taskIds": [
+   "inf17_p9"
+  ],
+  "fids": [
+   "191279"
+  ],
+  "files": [
+   {
+    "fid": "191279",
+    "file": "72602-0_191279.txt",
+    "name": "17.txt",
+    "bytes": 68427,
+    "sha": "d64b3ea10b81638d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "72607": {
+  "taskIds": [
+   "inf22_p33"
+  ],
+  "fids": [
+   "228195"
+  ],
+  "files": [
+   {
+    "fid": "228195",
+    "file": "72607-0_228195.ods",
+    "name": "22.ods",
+    "bytes": 3621,
+    "sha": "bd4be7fea87e64d7",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "72609": {
+  "taskIds": [
+   "inf24_p11"
+  ],
+  "fids": [
+   "191283"
+  ],
+  "files": [
+   {
+    "fid": "191283",
+    "file": "72609-0_191283.txt",
+    "name": "24.txt",
+    "bytes": 10432097,
+    "sha": "99b6ad522a4c66a4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73835": {
+  "taskIds": [
+   "inf09_p61"
+  ],
+  "fids": [
+   "225774"
+  ],
+  "files": [
+   {
+    "fid": "225774",
+    "file": "73835-0_225774.ods",
+    "name": "09.ods",
+    "bytes": 762279,
+    "sha": "8d700977c03bcc6e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "73843": {
+  "taskIds": [
+   "inf17_p89"
+  ],
+  "fids": [
+   "197065"
+  ],
+  "files": [
+   {
+    "fid": "197065",
+    "file": "73843-0_197065.txt",
+    "name": "17.txt",
+    "bytes": 68427,
+    "sha": "d64b3ea10b81638d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73848": {
+  "taskIds": [
+   "inf22_p48"
+  ],
+  "fids": [
+   "228196"
+  ],
+  "files": [
+   {
+    "fid": "228196",
+    "file": "73848-0_228196.ods",
+    "name": "22.ods",
+    "bytes": 3651,
+    "sha": "95d84b2aab38ff8e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "73850": {
+  "taskIds": [
+   "inf24_p45"
+  ],
+  "fids": [
+   "197067"
+  ],
+  "files": [
+   {
+    "fid": "197067",
+    "file": "73850-0_197067.txt",
+    "name": "24.txt",
+    "bytes": 9983957,
+    "sha": "56121611522daae7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73852": {
+  "taskIds": [
+   "inf26_p33"
+  ],
+  "fids": [
+   "194760"
+  ],
+  "files": [
+   {
+    "fid": "194760",
+    "file": "73852-0_194760.txt",
+    "name": "26.txt",
+    "bytes": 286436,
+    "sha": "38526f757a9afe83",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73853": {
+  "taskIds": [
+   "inf27_p46"
+  ],
+  "fids": [
+   "194758",
+   "194759"
+  ],
+  "files": [
+   {
+    "fid": "194758",
+    "file": "73853-0_194758.txt",
+    "name": "27A.txt",
+    "bytes": 36558,
+    "sha": "98aee29033caf413",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "194759",
+    "file": "73853-1_194759.txt",
+    "name": "27B.txt",
+    "bytes": 377606,
+    "sha": "456dcb2a8b3f0801",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73864": {
+  "taskIds": [
+   "inf09_p17"
+  ],
+  "fids": [
+   "225824"
+  ],
+  "files": [
+   {
+    "fid": "225824",
+    "file": "73864-0_225824.ods",
+    "name": "09.ods",
+    "bytes": 762102,
+    "sha": "731334d7fc5a0466",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "73872": {
+  "taskIds": [
+   "inf17_p33"
+  ],
+  "fids": [
+   "197065"
+  ],
+  "files": [
+   {
+    "fid": "197065",
+    "file": "73872-0_197065.txt",
+    "name": "17.txt",
+    "bytes": 68427,
+    "sha": "d64b3ea10b81638d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73877": {
+  "taskIds": [
+   "inf22_p12"
+  ],
+  "fids": [
+   "228197"
+  ],
+  "files": [
+   {
+    "fid": "228197",
+    "file": "73877-0_228197.ods",
+    "name": "22.ods",
+    "bytes": 3652,
+    "sha": "bb4e82c0e3fcae19",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "73879": {
+  "taskIds": [
+   "inf24_p94"
+  ],
+  "fids": [
+   "197067"
+  ],
+  "files": [
+   {
+    "fid": "197067",
+    "file": "73879-0_197067.txt",
+    "name": "24.txt",
+    "bytes": 9983957,
+    "sha": "56121611522daae7",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73881": {
+  "taskIds": [
+   "inf26_p52"
+  ],
+  "fids": [
+   "194760"
+  ],
+  "files": [
+   {
+    "fid": "194760",
+    "file": "73881-0_194760.txt",
+    "name": "26.txt",
+    "bytes": 286436,
+    "sha": "38526f757a9afe83",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "73882": {
+  "taskIds": [
+   "inf27_p17"
+  ],
+  "fids": [
+   "194758",
+   "194759"
+  ],
+  "files": [
+   {
+    "fid": "194758",
+    "file": "73882-0_194758.txt",
+    "name": "27A.txt",
+    "bytes": 36558,
+    "sha": "98aee29033caf413",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "194759",
+    "file": "73882-1_194759.txt",
+    "name": "27B.txt",
+    "bytes": 377606,
+    "sha": "456dcb2a8b3f0801",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75246": {
+  "taskIds": [
+   "inf09_p70"
+  ],
+  "fids": [
+   "225775"
+  ],
+  "files": [
+   {
+    "fid": "225775",
+    "file": "75246-0_225775.ods",
+    "name": "09.ods",
+    "bytes": 325774,
+    "sha": "2964be78c3bc4895",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "75254": {
+  "taskIds": [
+   "inf17_p35"
+  ],
+  "fids": [
+   "198133"
+  ],
+  "files": [
+   {
+    "fid": "198133",
+    "file": "75254-0_198133.txt",
+    "name": "17.txt",
+    "bytes": 68721,
+    "sha": "56c357ea0223cd04",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75259": {
+  "taskIds": [
+   "inf22_p90"
+  ],
+  "fids": [
+   "228198"
+  ],
+  "files": [
+   {
+    "fid": "228198",
+    "file": "75259-0_228198.ods",
+    "name": "22.ods",
+    "bytes": 3646,
+    "sha": "c4465386840f600b",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "75261": {
+  "taskIds": [
+   "inf24_p28"
+  ],
+  "fids": [
+   "198136"
+  ],
+  "files": [
+   {
+    "fid": "198136",
+    "file": "75261-0_198136.txt",
+    "name": "24.txt",
+    "bytes": 9989328,
+    "sha": "f0b7bde5f0eb2b37",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75263": {
+  "taskIds": [
+   "inf26_p26"
+  ],
+  "fids": [
+   "198137"
+  ],
+  "files": [
+   {
+    "fid": "198137",
+    "file": "75263-0_198137.txt",
+    "name": "26.txt",
+    "bytes": 8360240,
+    "sha": "7021fb165d36dd23",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75264": {
+  "taskIds": [
+   "inf27_p9"
+  ],
+  "fids": [
+   "198138",
+   "198139"
+  ],
+  "files": [
+   {
+    "fid": "198138",
+    "file": "75264-0_198138.txt",
+    "name": "27A.txt",
+    "bytes": 33783,
+    "sha": "b80761f556555b13",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "198139",
+    "file": "75264-1_198139.txt",
+    "name": "27B.txt",
+    "bytes": 378009,
+    "sha": "046c1d7f6e083239",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75273": {
+  "taskIds": [
+   "inf09_p12"
+  ],
+  "fids": [
+   "245581"
+  ],
+  "files": [
+   {
+    "fid": "245581",
+    "file": "75273-0_245581.ods",
+    "name": "09.ods",
+    "bytes": 325774,
+    "sha": "2964be78c3bc4895",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "75281": {
+  "taskIds": [
+   "inf17_p10"
+  ],
+  "fids": [
+   "198133"
+  ],
+  "files": [
+   {
+    "fid": "198133",
+    "file": "75281-0_198133.txt",
+    "name": "17.txt",
+    "bytes": 68721,
+    "sha": "56c357ea0223cd04",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75286": {
+  "taskIds": [
+   "inf22_p1"
+  ],
+  "fids": [
+   "198135"
+  ],
+  "files": [
+   {
+    "fid": "198135",
+    "file": "75286-0_198135.xlsx",
+    "name": "22.xlsx",
+    "bytes": 10301,
+    "sha": "66f0fd98cad7e783",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "75288": {
+  "taskIds": [
+   "inf24_p51"
+  ],
+  "fids": [
+   "198136"
+  ],
+  "files": [
+   {
+    "fid": "198136",
+    "file": "75288-0_198136.txt",
+    "name": "24.txt",
+    "bytes": 9989328,
+    "sha": "f0b7bde5f0eb2b37",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75290": {
+  "taskIds": [
+   "inf26_p1"
+  ],
+  "fids": [
+   "198137"
+  ],
+  "files": [
+   {
+    "fid": "198137",
+    "file": "75290-0_198137.txt",
+    "name": "26.txt",
+    "bytes": 8360240,
+    "sha": "7021fb165d36dd23",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "75291": {
+  "taskIds": [
+   "inf27_p19"
+  ],
+  "fids": [
+   "198139",
+   "198138"
+  ],
+  "files": [
+   {
+    "fid": "198139",
+    "file": "75291-0_198139.txt",
+    "name": "27B.txt",
+    "bytes": 378009,
+    "sha": "046c1d7f6e083239",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "198138",
+    "file": "75291-1_198138.txt",
+    "name": "27A.txt",
+    "bytes": 33783,
+    "sha": "b80761f556555b13",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76112": {
+  "taskIds": [
+   "inf09_p65"
+  ],
+  "fids": [
+   "225776"
+  ],
+  "files": [
+   {
+    "fid": "225776",
+    "file": "76112-0_225776.ods",
+    "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods",
+    "bytes": 634909,
+    "sha": "195d6ddf5ff29058",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76120": {
+  "taskIds": [
+   "inf17_p73"
+  ],
+  "fids": [
+   "203394"
+  ],
+  "files": [
+   {
+    "fid": "203394",
+    "file": "76120-0_203394.txt",
+    "name": "17-1.txt",
+    "bytes": 320061,
+    "sha": "7e910e6fc1efb7f5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76125": {
+  "taskIds": [
+   "inf22_p42"
+  ],
+  "fids": [
+   "228199"
+  ],
+  "files": [
+   {
+    "fid": "228199",
+    "file": "76125-0_228199.ods",
+    "name": "22_1.ods",
+    "bytes": 3591,
+    "sha": "b96c6552a8a89636",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76127": {
+  "taskIds": [
+   "inf24_p54"
+  ],
+  "fids": [
+   "203406"
+  ],
+  "files": [
+   {
+    "fid": "203406",
+    "file": "76127-0_203406.txt",
+    "name": "24_1.txt",
+    "bytes": 10000004,
+    "sha": "4d79840f04a190ac",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76129": {
+  "taskIds": [
+   "inf26_p88"
+  ],
+  "fids": [
+   "203408"
+  ],
+  "files": [
+   {
+    "fid": "203408",
+    "file": "76129-0_203408.txt",
+    "name": "26_1.txt",
+    "bytes": 128798,
+    "sha": "6399069104f3165c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76224": {
+  "taskIds": [
+   "inf09_p26"
+  ],
+  "fids": [
+   "225825"
+  ],
+  "files": [
+   {
+    "fid": "225825",
+    "file": "76224-0_225825.ods",
+    "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods",
+    "bytes": 634791,
+    "sha": "8f670ab3e037518a",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76232": {
+  "taskIds": [
+   "inf17_p76"
+  ],
+  "fids": [
+   "203425"
+  ],
+  "files": [
+   {
+    "fid": "203425",
+    "file": "76232-0_203425.txt",
+    "name": "17-2.txt",
+    "bytes": 73881,
+    "sha": "cfb11bac6bcb73f9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76237": {
+  "taskIds": [
+   "inf22_p63"
+  ],
+  "fids": [
+   "203427"
+  ],
+  "files": [
+   {
+    "fid": "203427",
+    "file": "76237-0_203427.xls",
+    "name": "22_2.xls",
+    "bytes": 32768,
+    "sha": "ce7e17cb35a70230",
+    "contentType": "application/vnd.ms-excel"
+   }
+  ]
+ },
+ "76239": {
+  "taskIds": [
+   "inf24_p72"
+  ],
+  "fids": [
+   "203428"
+  ],
+  "files": [
+   {
+    "fid": "203428",
+    "file": "76239-0_203428.txt",
+    "name": "24_2.txt",
+    "bytes": 10000008,
+    "sha": "3f3c002c8ecbff8b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76241": {
+  "taskIds": [
+   "inf26_p71"
+  ],
+  "fids": [
+   "203429"
+  ],
+  "files": [
+   {
+    "fid": "203429",
+    "file": "76241-0_203429.txt",
+    "name": "26_2.txt",
+    "bytes": 128642,
+    "sha": "2cad5e625dbe4258",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76677": {
+  "taskIds": [
+   "inf09_p4"
+  ],
+  "fids": [
+   "225777"
+  ],
+  "files": [
+   {
+    "fid": "225777",
+    "file": "76677-0_225777.ods",
+    "name": "09.ods",
+    "bytes": 325775,
+    "sha": "a433e5b696273d13",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76685": {
+  "taskIds": [
+   "inf17_p77"
+  ],
+  "fids": [
+   "203578"
+  ],
+  "files": [
+   {
+    "fid": "203578",
+    "file": "76685-0_203578.txt",
+    "name": "17.txt",
+    "bytes": 68721,
+    "sha": "56c357ea0223cd04",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76690": {
+  "taskIds": [
+   "inf22_p30"
+  ],
+  "fids": [
+   "236878"
+  ],
+  "files": [
+   {
+    "fid": "236878",
+    "file": "76690-0_236878.ods",
+    "name": "22.ods",
+    "bytes": 3728,
+    "sha": "c0ad39b537f77a36",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76692": {
+  "taskIds": [
+   "inf24_p1"
+  ],
+  "fids": [
+   "203581"
+  ],
+  "files": [
+   {
+    "fid": "203581",
+    "file": "76692-0_203581.txt",
+    "name": "24.txt",
+    "bytes": 4136094,
+    "sha": "60c6f35f763b5f18",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76694": {
+  "taskIds": [
+   "inf26_p17"
+  ],
+  "fids": [
+   "203583"
+  ],
+  "files": [
+   {
+    "fid": "203583",
+    "file": "76694-0_203583.txt",
+    "name": "26.txt",
+    "bytes": 90741,
+    "sha": "7e5436d5a8e3f4e0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76695": {
+  "taskIds": [
+   "inf27_p32"
+  ],
+  "fids": [
+   "203584",
+   "203585"
+  ],
+  "files": [
+   {
+    "fid": "203584",
+    "file": "76695-0_203584.txt",
+    "name": "27A.txt",
+    "bytes": 42260,
+    "sha": "9a9a70b1cb3e146a",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "203585",
+    "file": "76695-1_203585.txt",
+    "name": "27B.txt",
+    "bytes": 392150,
+    "sha": "689780356aa222f4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76706": {
+  "taskIds": [
+   "inf09_p49"
+  ],
+  "fids": [
+   "225778"
+  ],
+  "files": [
+   {
+    "fid": "225778",
+    "file": "76706-0_225778.ods",
+    "name": "09.ods",
+    "bytes": 325776,
+    "sha": "6373e31b80e5fbe2",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76714": {
+  "taskIds": [
+   "inf17_p69"
+  ],
+  "fids": [
+   "203578"
+  ],
+  "files": [
+   {
+    "fid": "203578",
+    "file": "76714-0_203578.txt",
+    "name": "17.txt",
+    "bytes": 68721,
+    "sha": "56c357ea0223cd04",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76719": {
+  "taskIds": [
+   "inf22_p26"
+  ],
+  "fids": [
+   "236879"
+  ],
+  "files": [
+   {
+    "fid": "236879",
+    "file": "76719-0_236879.ods",
+    "name": "22.ods",
+    "bytes": 3726,
+    "sha": "b2a93d014a48517f",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "76721": {
+  "taskIds": [
+   "inf24_p53"
+  ],
+  "fids": [
+   "203581"
+  ],
+  "files": [
+   {
+    "fid": "203581",
+    "file": "76721-0_203581.txt",
+    "name": "24.txt",
+    "bytes": 4136094,
+    "sha": "60c6f35f763b5f18",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76723": {
+  "taskIds": [
+   "inf26_p63"
+  ],
+  "fids": [
+   "203583"
+  ],
+  "files": [
+   {
+    "fid": "203583",
+    "file": "76723-0_203583.txt",
+    "name": "26.txt",
+    "bytes": 90741,
+    "sha": "7e5436d5a8e3f4e0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "76724": {
+  "taskIds": [
+   "inf27_p30"
+  ],
+  "fids": [
+   "203584",
+   "203585"
+  ],
+  "files": [
+   {
+    "fid": "203584",
+    "file": "76724-0_203584.txt",
+    "name": "27A.txt",
+    "bytes": 42260,
+    "sha": "9a9a70b1cb3e146a",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "203585",
+    "file": "76724-1_203585.txt",
+    "name": "27B.txt",
+    "bytes": 392150,
+    "sha": "689780356aa222f4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78034": {
+  "taskIds": [
+   "inf09_p60"
+  ],
+  "fids": [
+   "225779"
+  ],
+  "files": [
+   {
+    "fid": "225779",
+    "file": "78034-0_225779.ods",
+    "name": "9.ods",
+    "bytes": 1145107,
+    "sha": "23cf390ea349fdbe",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "78042": {
+  "taskIds": [
+   "inf17_p15"
+  ],
+  "fids": [
+   "207853"
+  ],
+  "files": [
+   {
+    "fid": "207853",
+    "file": "78042-0_207853.txt",
+    "name": "17.txt",
+    "bytes": 63898,
+    "sha": "6619ba500a018ae9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78047": {
+  "taskIds": [
+   "inf22_p85"
+  ],
+  "fids": [
+   "236880"
+  ],
+  "files": [
+   {
+    "fid": "236880",
+    "file": "78047-0_236880.ods",
+    "name": "22.ods",
+    "bytes": 3667,
+    "sha": "e13ff034e7064f31",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "78049": {
+  "taskIds": [
+   "inf24_p18"
+  ],
+  "fids": [
+   "227305"
+  ],
+  "files": [
+   {
+    "fid": "227305",
+    "file": "78049-0_227305.txt",
+    "name": "24_78049.txt",
+    "bytes": 10000001,
+    "sha": "9c59a535293ac365",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78051": {
+  "taskIds": [
+   "inf26_p62"
+  ],
+  "fids": [
+   "207856"
+  ],
+  "files": [
+   {
+    "fid": "207856",
+    "file": "78051-0_207856.txt",
+    "name": "26.txt",
+    "bytes": 253406,
+    "sha": "640858204963fbc3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78065": {
+  "taskIds": [
+   "inf09_p28"
+  ],
+  "fids": [
+   "207851"
+  ],
+  "files": [
+   {
+    "fid": "207851",
+    "file": "78065-0_207851.xlsx",
+    "name": "9.xlsx",
+    "bytes": 1303559,
+    "sha": "16e032869619ed55",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "78073": {
+  "taskIds": [
+   "inf17_p30"
+  ],
+  "fids": [
+   "207853"
+  ],
+  "files": [
+   {
+    "fid": "207853",
+    "file": "78073-0_207853.txt",
+    "name": "17.txt",
+    "bytes": 63898,
+    "sha": "6619ba500a018ae9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78078": {
+  "taskIds": [
+   "inf22_p19"
+  ],
+  "fids": [
+   "207855"
+  ],
+  "files": [
+   {
+    "fid": "207855",
+    "file": "78078-0_207855.xlsx",
+    "name": "22.xlsx",
+    "bytes": 9693,
+    "sha": "6212020b95a145ac",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "78080": {
+  "taskIds": [
+   "inf24_p93"
+  ],
+  "fids": [
+   "227306"
+  ],
+  "files": [
+   {
+    "fid": "227306",
+    "file": "78080-0_227306.txt",
+    "name": "24_78080.txt",
+    "bytes": 10000001,
+    "sha": "9c59a535293ac365",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "78082": {
+  "taskIds": [
+   "inf26_p64"
+  ],
+  "fids": [
+   "207856"
+  ],
+  "files": [
+   {
+    "fid": "207856",
+    "file": "78082-0_207856.txt",
+    "name": "26.txt",
+    "bytes": 253406,
+    "sha": "640858204963fbc3",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "79722": {
+  "taskIds": [
+   "inf09_p36"
+  ],
+  "fids": [
+   "225780"
+  ],
+  "files": [
+   {
+    "fid": "225780",
+    "file": "79722-0_225780.ods",
+    "name": "1_9.ods",
+    "bytes": 344141,
+    "sha": "d34c70e70b56d014",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "79730": {
+  "taskIds": [
+   "inf17_p53"
+  ],
+  "fids": [
+   "213965"
+  ],
+  "files": [
+   {
+    "fid": "213965",
+    "file": "79730-0_213965.txt",
+    "name": "1_17.txt",
+    "bytes": 68222,
+    "sha": "cef27f7f0183e35c",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "79735": {
+  "taskIds": [
+   "inf22_p17"
+  ],
+  "fids": [
+   "236881"
+  ],
+  "files": [
+   {
+    "fid": "236881",
+    "file": "79735-0_236881.ods",
+    "name": "1_22.ods",
+    "bytes": 3612,
+    "sha": "7da4f06e9b21727a",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "79737": {
+  "taskIds": [
+   "inf24_p43"
+  ],
+  "fids": [
+   "214083"
+  ],
+  "files": [
+   {
+    "fid": "214083",
+    "file": "79737-0_214083.txt",
+    "name": "1_24.txt",
+    "bytes": 9000000,
+    "sha": "2f5ed6a8711af0e8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "79739": {
+  "taskIds": [
+   "inf26_p77"
+  ],
+  "fids": [
+   "214098"
+  ],
+  "files": [
+   {
+    "fid": "214098",
+    "file": "79739-0_214098.txt",
+    "name": "1_26.txt",
+    "bytes": 58916,
+    "sha": "422f111086cf212f",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81475": {
+  "taskIds": [
+   "inf09_p52"
+  ],
+  "fids": [
+   "225781"
+  ],
+  "files": [
+   {
+    "fid": "225781",
+    "file": "81475-0_225781.ods",
+    "name": "demo_2025_9.ods",
+    "bytes": 710126,
+    "sha": "34f547000b64aa92",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "81483": {
+  "taskIds": [
+   "inf17_p48"
+  ],
+  "fids": [
+   "220672"
+  ],
+  "files": [
+   {
+    "fid": "220672",
+    "file": "81483-0_220672.txt",
+    "name": "1-7.txt",
+    "bytes": 63681,
+    "sha": "a9ceeb773f7cd969",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81488": {
+  "taskIds": [
+   "inf22_p2"
+  ],
+  "fids": [
+   "236882"
+  ],
+  "files": [
+   {
+    "fid": "236882",
+    "file": "81488-0_236882.ods",
+    "name": "22_81488.ods",
+    "bytes": 3708,
+    "sha": "d5a94d79912d18d3",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "81490": {
+  "taskIds": [
+   "inf24_p41"
+  ],
+  "fids": [
+   "224126"
+  ],
+  "files": [
+   {
+    "fid": "224126",
+    "file": "81490-0_224126.txt",
+    "name": "81490.txt",
+    "bytes": 110926,
+    "sha": "7d599abcbff37e3b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81492": {
+  "taskIds": [
+   "inf26_p85"
+  ],
+  "fids": [
+   "224255"
+  ],
+  "files": [
+   {
+    "fid": "224255",
+    "file": "81492-0_224255.txt",
+    "name": "26_81492.txt",
+    "bytes": 48929,
+    "sha": "bc82e83e57a003e5",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81793": {
+  "taskIds": [
+   "inf09_p62"
+  ],
+  "fids": [
+   "224871"
+  ],
+  "files": [
+   {
+    "fid": "224871",
+    "file": "81793-0_224871.ods",
+    "name": "DEMO_9.ods",
+    "bytes": 1188954,
+    "sha": "6940497129806817",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "81801": {
+  "taskIds": [
+   "inf17_p37"
+  ],
+  "fids": [
+   "224880"
+  ],
+  "files": [
+   {
+    "fid": "224880",
+    "file": "81801-0_224880.txt",
+    "name": "DEMO_17.txt",
+    "bytes": 19620,
+    "sha": "2793afefeddd85d2",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81806": {
+  "taskIds": [
+   "inf22_p7"
+  ],
+  "fids": [
+   "224883"
+  ],
+  "files": [
+   {
+    "fid": "224883",
+    "file": "81806-0_224883.ods",
+    "name": "DEMO_22.ods",
+    "bytes": 18366,
+    "sha": "87e6b16fce585ef6",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "81808": {
+  "taskIds": [
+   "inf24_p5"
+  ],
+  "fids": [
+   "224884"
+  ],
+  "files": [
+   {
+    "fid": "224884",
+    "file": "81808-0_224884.txt",
+    "name": "DEMO_24.txt",
+    "bytes": 10000000,
+    "sha": "5ef4a73d04ec9934",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "81810": {
+  "taskIds": [
+   "inf26_p81"
+  ],
+  "fids": [
+   "225272"
+  ],
+  "files": [
+   {
+    "fid": "225272",
+    "file": "81810-0_225272.txt",
+    "name": "DEMO_26.txt",
+    "bytes": 12356,
+    "sha": "a4fa053bb6401176",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83139": {
+  "taskIds": [
+   "inf09_p6"
+  ],
+  "fids": [
+   "230946"
+  ],
+  "files": [
+   {
+    "fid": "230946",
+    "file": "83139-0_230946.ods",
+    "name": "9.ods",
+    "bytes": 798926,
+    "sha": "e9241924a799ae59",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "83147": {
+  "taskIds": [
+   "inf17_p93"
+  ],
+  "fids": [
+   "230957"
+  ],
+  "files": [
+   {
+    "fid": "230957",
+    "file": "83147-0_230957.txt",
+    "name": "17.txt",
+    "bytes": 63898,
+    "sha": "6619ba500a018ae9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83152": {
+  "taskIds": [
+   "inf22_p28"
+  ],
+  "fids": [
+   "230974"
+  ],
+  "files": [
+   {
+    "fid": "230974",
+    "file": "83152-0_230974.ods",
+    "name": "22.ods",
+    "bytes": 3621,
+    "sha": "381a83cd4f0dda8a",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "83154": {
+  "taskIds": [
+   "inf24_p97"
+  ],
+  "fids": [
+   "230975"
+  ],
+  "files": [
+   {
+    "fid": "230975",
+    "file": "83154-0_230975.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "b027d29e0bba8b91",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83156": {
+  "taskIds": [
+   "inf26_p87"
+  ],
+  "fids": [
+   "230976"
+  ],
+  "files": [
+   {
+    "fid": "230976",
+    "file": "83156-0_230976.txt",
+    "name": "26.txt",
+    "bytes": 2347942,
+    "sha": "d6f8877b595b4691",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83167": {
+  "taskIds": [
+   "inf09_p46"
+  ],
+  "fids": [
+   "230946"
+  ],
+  "files": [
+   {
+    "fid": "230946",
+    "file": "83167-0_230946.ods",
+    "name": "9.ods",
+    "bytes": 798926,
+    "sha": "e9241924a799ae59",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "83175": {
+  "taskIds": [
+   "inf17_p51"
+  ],
+  "fids": [
+   "230957"
+  ],
+  "files": [
+   {
+    "fid": "230957",
+    "file": "83175-0_230957.txt",
+    "name": "17.txt",
+    "bytes": 63898,
+    "sha": "6619ba500a018ae9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83180": {
+  "taskIds": [
+   "inf22_p49"
+  ],
+  "fids": [
+   "230974"
+  ],
+  "files": [
+   {
+    "fid": "230974",
+    "file": "83180-0_230974.ods",
+    "name": "22.ods",
+    "bytes": 3621,
+    "sha": "381a83cd4f0dda8a",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "83182": {
+  "taskIds": [
+   "inf24_p58"
+  ],
+  "fids": [
+   "230975"
+  ],
+  "files": [
+   {
+    "fid": "230975",
+    "file": "83182-0_230975.txt",
+    "name": "24.txt",
+    "bytes": 10000001,
+    "sha": "b027d29e0bba8b91",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "83184": {
+  "taskIds": [
+   "inf26_p28"
+  ],
+  "fids": [
+   "230976"
+  ],
+  "files": [
+   {
+    "fid": "230976",
+    "file": "83184-0_230976.txt",
+    "name": "26.txt",
+    "bytes": 2347942,
+    "sha": "d6f8877b595b4691",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "84671": {
+  "taskIds": [
+   "inf09_p57"
+  ],
+  "fids": [
+   "236835"
+  ],
+  "files": [
+   {
+    "fid": "236835",
+    "file": "84671-0_236835.ods",
+    "name": "9.ods",
+    "bytes": 392830,
+    "sha": "3062bba267625ca4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "84679": {
+  "taskIds": [
+   "inf17_p21"
+  ],
+  "fids": [
+   "236837"
+  ],
+  "files": [
+   {
+    "fid": "236837",
+    "file": "84679-0_236837.txt",
+    "name": "17.txt",
+    "bytes": 31968,
+    "sha": "92c3eefee8e8ea8d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "84684": {
+  "taskIds": [
+   "inf22_p55"
+  ],
+  "fids": [
+   "236839"
+  ],
+  "files": [
+   {
+    "fid": "236839",
+    "file": "84684-0_236839.ods",
+    "name": "22.ods",
+    "bytes": 4929,
+    "sha": "af3d4721a08d597e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "84686": {
+  "taskIds": [
+   "inf24_p35"
+  ],
+  "fids": [
+   "236840"
+  ],
+  "files": [
+   {
+    "fid": "236840",
+    "file": "84686-0_236840.txt",
+    "name": "24.txt",
+    "bytes": 8999973,
+    "sha": "bd15e9375a16eb91",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "84703": {
+  "taskIds": [
+   "inf09_p55"
+  ],
+  "fids": [
+   "236845"
+  ],
+  "files": [
+   {
+    "fid": "236845",
+    "file": "84703-0_236845.ods",
+    "name": "9.ods",
+    "bytes": 392830,
+    "sha": "3062bba267625ca4",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "84711": {
+  "taskIds": [
+   "inf17_p70"
+  ],
+  "fids": [
+   "236847"
+  ],
+  "files": [
+   {
+    "fid": "236847",
+    "file": "84711-0_236847.txt",
+    "name": "17.txt",
+    "bytes": 31968,
+    "sha": "92c3eefee8e8ea8d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "84716": {
+  "taskIds": [
+   "inf22_p37"
+  ],
+  "fids": [
+   "236849"
+  ],
+  "files": [
+   {
+    "fid": "236849",
+    "file": "84716-0_236849.ods",
+    "name": "22.ods",
+    "bytes": 4929,
+    "sha": "af3d4721a08d597e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "84718": {
+  "taskIds": [
+   "inf24_p78"
+  ],
+  "fids": [
+   "236850"
+  ],
+  "files": [
+   {
+    "fid": "236850",
+    "file": "84718-0_236850.txt",
+    "name": "24.txt",
+    "bytes": 8999973,
+    "sha": "bd15e9375a16eb91",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85685": {
+  "taskIds": [
+   "inf09_p47"
+  ],
+  "fids": [
+   "241391"
+  ],
+  "files": [
+   {
+    "fid": "241391",
+    "file": "85685-0_241391.ods",
+    "name": "9.ods",
+    "bytes": 862900,
+    "sha": "f066d1c606be8ae5",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "85693": {
+  "taskIds": [
+   "inf17_p90"
+  ],
+  "fids": [
+   "241393"
+  ],
+  "files": [
+   {
+    "fid": "241393",
+    "file": "85693-0_241393.txt",
+    "name": "17.txt",
+    "bytes": 59087,
+    "sha": "29ac57ea222afbbd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85698": {
+  "taskIds": [
+   "inf22_p93"
+  ],
+  "fids": [
+   "241398"
+  ],
+  "files": [
+   {
+    "fid": "241398",
+    "file": "85698-0_241398.ods",
+    "name": "22.ods",
+    "bytes": 20268,
+    "sha": "554beb33b5289d69",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "85700": {
+  "taskIds": [
+   "inf24_p59"
+  ],
+  "fids": [
+   "241397"
+  ],
+  "files": [
+   {
+    "fid": "241397",
+    "file": "85700-0_241397.txt",
+    "name": "24.txt",
+    "bytes": 7000001,
+    "sha": "ce0a0dda3e0cf51d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85702": {
+  "taskIds": [
+   "inf26_p7"
+  ],
+  "fids": [
+   "241399"
+  ],
+  "files": [
+   {
+    "fid": "241399",
+    "file": "85702-0_241399.txt",
+    "name": "26.txt",
+    "bytes": 5524,
+    "sha": "d38ed8cfa125d0fa",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85722": {
+  "taskIds": [
+   "inf09_p1"
+  ],
+  "fids": [
+   "241391"
+  ],
+  "files": [
+   {
+    "fid": "241391",
+    "file": "85722-0_241391.ods",
+    "name": "9.ods",
+    "bytes": 862900,
+    "sha": "f066d1c606be8ae5",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "85730": {
+  "taskIds": [
+   "inf17_p5"
+  ],
+  "fids": [
+   "241393"
+  ],
+  "files": [
+   {
+    "fid": "241393",
+    "file": "85730-0_241393.txt",
+    "name": "17.txt",
+    "bytes": 59087,
+    "sha": "29ac57ea222afbbd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85735": {
+  "taskIds": [
+   "inf22_p38"
+  ],
+  "fids": [
+   "241398"
+  ],
+  "files": [
+   {
+    "fid": "241398",
+    "file": "85735-0_241398.ods",
+    "name": "22.ods",
+    "bytes": 20268,
+    "sha": "554beb33b5289d69",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "85737": {
+  "taskIds": [
+   "inf24_p6"
+  ],
+  "fids": [
+   "241397"
+  ],
+  "files": [
+   {
+    "fid": "241397",
+    "file": "85737-0_241397.txt",
+    "name": "24.txt",
+    "bytes": 7000001,
+    "sha": "ce0a0dda3e0cf51d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "85739": {
+  "taskIds": [
+   "inf26_p67"
+  ],
+  "fids": [
+   "241399"
+  ],
+  "files": [
+   {
+    "fid": "241399",
+    "file": "85739-0_241399.txt",
+    "name": "26.txt",
+    "bytes": 5524,
+    "sha": "d38ed8cfa125d0fa",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87400": {
+  "taskIds": [
+   "inf09_p63"
+  ],
+  "fids": [
+   "246703"
+  ],
+  "files": [
+   {
+    "fid": "246703",
+    "file": "87400-0_246703.ods",
+    "name": "9.ods",
+    "bytes": 1193502,
+    "sha": "9378b747903d220e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "87408": {
+  "taskIds": [
+   "inf17_p1"
+  ],
+  "fids": [
+   "246704"
+  ],
+  "files": [
+   {
+    "fid": "246704",
+    "file": "87408-0_246704.txt",
+    "name": "17.txt",
+    "bytes": 31938,
+    "sha": "bb6729a88764fa23",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87413": {
+  "taskIds": [
+   "inf24_p91"
+  ],
+  "fids": [
+   "246713"
+  ],
+  "files": [
+   {
+    "fid": "246713",
+    "file": "87413-0_246713.txt",
+    "name": "24.txt",
+    "bytes": 7201146,
+    "sha": "c879cb4e6b08fdab",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87414": {
+  "taskIds": [
+   "inf22_p95"
+  ],
+  "fids": [
+   "246710"
+  ],
+  "files": [
+   {
+    "fid": "246710",
+    "file": "87414-0_246710.ods",
+    "name": "22.ods",
+    "bytes": 17371,
+    "sha": "ff273f105aeee6c7",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "87417": {
+  "taskIds": [
+   "inf26_p68"
+  ],
+  "fids": [
+   "246714"
+  ],
+  "files": [
+   {
+    "fid": "246714",
+    "file": "87417-0_246714.txt",
+    "name": "26.txt",
+    "bytes": 687739,
+    "sha": "5d2baa8bb0cbddf8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87427": {
+  "taskIds": [
+   "inf09_p39"
+  ],
+  "fids": [
+   "246703"
+  ],
+  "files": [
+   {
+    "fid": "246703",
+    "file": "87427-0_246703.ods",
+    "name": "9.ods",
+    "bytes": 1193502,
+    "sha": "9378b747903d220e",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "87435": {
+  "taskIds": [
+   "inf17_p78"
+  ],
+  "fids": [
+   "246704"
+  ],
+  "files": [
+   {
+    "fid": "246704",
+    "file": "87435-0_246704.txt",
+    "name": "17.txt",
+    "bytes": 31938,
+    "sha": "bb6729a88764fa23",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87440": {
+  "taskIds": [
+   "inf22_p14"
+  ],
+  "fids": [
+   "246710"
+  ],
+  "files": [
+   {
+    "fid": "246710",
+    "file": "87440-0_246710.ods",
+    "name": "22.ods",
+    "bytes": 17371,
+    "sha": "ff273f105aeee6c7",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "87442": {
+  "taskIds": [
+   "inf24_p46"
+  ],
+  "fids": [
+   "246713"
+  ],
+  "files": [
+   {
+    "fid": "246713",
+    "file": "87442-0_246713.txt",
+    "name": "24.txt",
+    "bytes": 7201146,
+    "sha": "c879cb4e6b08fdab",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "87444": {
+  "taskIds": [
+   "inf26_p89"
+  ],
+  "fids": [
+   "246714"
+  ],
+  "files": [
+   {
+    "fid": "246714",
+    "file": "87444-0_246714.txt",
+    "name": "26.txt",
+    "bytes": 687739,
+    "sha": "5d2baa8bb0cbddf8",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89192": {
+  "taskIds": [
+   "inf09_p22"
+  ],
+  "fids": [
+   "255989"
+  ],
+  "files": [
+   {
+    "fid": "255989",
+    "file": "89192-0_255989.ods",
+    "name": "9.ods",
+    "bytes": 633559,
+    "sha": "699040c279130b46",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89200": {
+  "taskIds": [
+   "inf17_p95"
+  ],
+  "fids": [
+   "255992"
+  ],
+  "files": [
+   {
+    "fid": "255992",
+    "file": "89200-0_255992.txt",
+    "name": "17.txt",
+    "bytes": 59087,
+    "sha": "29ac57ea222afbbd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89205": {
+  "taskIds": [
+   "inf22_p45"
+  ],
+  "fids": [
+   "255991"
+  ],
+  "files": [
+   {
+    "fid": "255991",
+    "file": "89205-0_255991.ods",
+    "name": "22.ods",
+    "bytes": 16843,
+    "sha": "895bf486e546a704",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89207": {
+  "taskIds": [
+   "inf24_p36"
+  ],
+  "fids": [
+   "255994"
+  ],
+  "files": [
+   {
+    "fid": "255994",
+    "file": "89207-0_255994.txt",
+    "name": "24.txt",
+    "bytes": 7000001,
+    "sha": "ce0a0dda3e0cf51d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89209": {
+  "taskIds": [
+   "inf26_p92"
+  ],
+  "fids": [
+   "278970"
+  ],
+  "files": [
+   {
+    "fid": "278970",
+    "file": "89209-0_278970.txt",
+    "name": "26.txt",
+    "bytes": 988920,
+    "sha": "36c01070a226464a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89228": {
+  "taskIds": [
+   "inf09_p51"
+  ],
+  "fids": [
+   "255989"
+  ],
+  "files": [
+   {
+    "fid": "255989",
+    "file": "89228-0_255989.ods",
+    "name": "9.ods",
+    "bytes": 633559,
+    "sha": "699040c279130b46",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89236": {
+  "taskIds": [
+   "inf17_p36"
+  ],
+  "fids": [
+   "255992"
+  ],
+  "files": [
+   {
+    "fid": "255992",
+    "file": "89236-0_255992.txt",
+    "name": "17.txt",
+    "bytes": 59087,
+    "sha": "29ac57ea222afbbd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89241": {
+  "taskIds": [
+   "inf22_p10"
+  ],
+  "fids": [
+   "255991"
+  ],
+  "files": [
+   {
+    "fid": "255991",
+    "file": "89241-0_255991.ods",
+    "name": "22.ods",
+    "bytes": 16843,
+    "sha": "895bf486e546a704",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89243": {
+  "taskIds": [
+   "inf24_p15"
+  ],
+  "fids": [
+   "255994"
+  ],
+  "files": [
+   {
+    "fid": "255994",
+    "file": "89243-0_255994.txt",
+    "name": "24.txt",
+    "bytes": 7000001,
+    "sha": "ce0a0dda3e0cf51d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89245": {
+  "taskIds": [
+   "inf26_p6"
+  ],
+  "fids": [
+   "278971"
+  ],
+  "files": [
+   {
+    "fid": "278971",
+    "file": "89245-0_278971.txt",
+    "name": "26 (30).txt",
+    "bytes": 988920,
+    "sha": "36c01070a226464a",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89746": {
+  "taskIds": [
+   "inf09_p32"
+  ],
+  "fids": [
+   "266464"
+  ],
+  "files": [
+   {
+    "fid": "266464",
+    "file": "89746-0_266464.ods",
+    "name": "1_9.ods",
+    "bytes": 62413,
+    "sha": "85893d893c9424b7",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89754": {
+  "taskIds": [
+   "inf17_p67"
+  ],
+  "fids": [
+   "266484"
+  ],
+  "files": [
+   {
+    "fid": "266484",
+    "file": "89754-0_266484.txt",
+    "name": "1_17.txt",
+    "bytes": 63898,
+    "sha": "6619ba500a018ae9",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89759": {
+  "taskIds": [
+   "inf22_p86"
+  ],
+  "fids": [
+   "266498"
+  ],
+  "files": [
+   {
+    "fid": "266498",
+    "file": "89759-0_266498.ods",
+    "name": "1_22.ods",
+    "bytes": 18997,
+    "sha": "d78210391f00ce73",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "89761": {
+  "taskIds": [
+   "inf24_p92"
+  ],
+  "fids": [
+   "266519"
+  ],
+  "files": [
+   {
+    "fid": "266519",
+    "file": "89761-0_266519.txt",
+    "name": "1_24.txt",
+    "bytes": 10000001,
+    "sha": "c4d8dc7b0ec3ee81",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "89763": {
+  "taskIds": [
+   "inf26_p57"
+  ],
+  "fids": [
+   "266518"
+  ],
+  "files": [
+   {
+    "fid": "266518",
+    "file": "89763-0_266518.txt",
+    "name": "1_26.txt",
+    "bytes": 129902,
+    "sha": "d06c0afbb91a38e4",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92186": {
+  "taskIds": [
+   "inf09_p13"
+  ],
+  "fids": [
+   "277747"
+  ],
+  "files": [
+   {
+    "fid": "277747",
+    "file": "92186-0_277747.ods",
+    "name": "9-1.ods",
+    "bytes": 862900,
+    "sha": "f066d1c606be8ae5",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "92194": {
+  "taskIds": [
+   "inf17_p50"
+  ],
+  "fids": [
+   "277666"
+  ],
+  "files": [
+   {
+    "fid": "277666",
+    "file": "92194-0_277666.txt",
+    "name": "17-1.txt",
+    "bytes": 63790,
+    "sha": "5a7727b9a93eb583",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92199": {
+  "taskIds": [
+   "inf22_p72"
+  ],
+  "fids": [
+   "279557"
+  ],
+  "files": [
+   {
+    "fid": "279557",
+    "file": "92199-0_279557.ods",
+    "name": "22.ods",
+    "bytes": 3655,
+    "sha": "8a5c673bc0760bfc",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "92201": {
+  "taskIds": [
+   "inf24_p24"
+  ],
+  "fids": [
+   "279546"
+  ],
+  "files": [
+   {
+    "fid": "279546",
+    "file": "92201-0_279546.txt",
+    "name": "24-1.txt",
+    "bytes": 10000005,
+    "sha": "00c2417175f3aa5b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92213": {
+  "taskIds": [
+   "inf09_p50"
+  ],
+  "fids": [
+   "277751"
+  ],
+  "files": [
+   {
+    "fid": "277751",
+    "file": "92213-0_277751.xlsx",
+    "name": "9-2.xlsx",
+    "bytes": 507258,
+    "sha": "0ce96382c2a71fe9",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "92221": {
+  "taskIds": [
+   "inf17_p2"
+  ],
+  "fids": [
+   "277753"
+  ],
+  "files": [
+   {
+    "fid": "277753",
+    "file": "92221-0_277753.txt",
+    "name": "17-3.txt",
+    "bytes": 53813,
+    "sha": "beaedde10e0dc9fd",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92226": {
+  "taskIds": [
+   "inf22_p83"
+  ],
+  "fids": [
+   "266498"
+  ],
+  "files": [
+   {
+    "fid": "266498",
+    "file": "92226-0_266498.ods",
+    "name": "1_22.ods",
+    "bytes": 18997,
+    "sha": "d78210391f00ce73",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "92228": {
+  "taskIds": [
+   "inf24_p65"
+  ],
+  "fids": [
+   "277762"
+  ],
+  "files": [
+   {
+    "fid": "277762",
+    "file": "92228-0_277762.txt",
+    "name": "24-2.txt",
+    "bytes": 10236811,
+    "sha": "1f10ccd218460985",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92230": {
+  "taskIds": [
+   "inf26_p22"
+  ],
+  "fids": [
+   "278450"
+  ],
+  "files": [
+   {
+    "fid": "278450",
+    "file": "92230-0_278450.txt",
+    "name": "26-2.txt",
+    "bytes": 89097,
+    "sha": "78f964c3b00dc28d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92231": {
+  "taskIds": [
+   "inf27_p3"
+  ],
+  "fids": [
+   "277767"
+  ],
+  "files": [
+   {
+    "fid": "277767",
+    "file": "92231-0_277767.txt",
+    "name": "27-4-A.txt",
+    "bytes": 5631,
+    "sha": "58b07cf1cc236033",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92265": {
+  "taskIds": [
+   "inf17_p43"
+  ],
+  "fids": [
+   "277844"
+  ],
+  "files": [
+   {
+    "fid": "277844",
+    "file": "92265-0_277844.txt",
+    "name": "17-2.txt",
+    "bytes": 4915,
+    "sha": "49dcd3b8f13d322e",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92266": {
+  "taskIds": [
+   "inf17_p14"
+  ],
+  "fids": [
+   "277845"
+  ],
+  "files": [
+   {
+    "fid": "277845",
+    "file": "92266-0_277845.txt",
+    "name": "17-4.txt",
+    "bytes": 738895,
+    "sha": "00ff530ecbe4690d",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92267": {
+  "taskIds": [
+   "inf17_p62"
+  ],
+  "fids": [
+   "277666"
+  ],
+  "files": [
+   {
+    "fid": "277666",
+    "file": "92267-0_277666.txt",
+    "name": "17-1.txt",
+    "bytes": 63790,
+    "sha": "5a7727b9a93eb583",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92271": {
+  "taskIds": [
+   "inf22_p80"
+  ],
+  "fids": [
+   "277847"
+  ],
+  "files": [
+   {
+    "fid": "277847",
+    "file": "92271-0_277847.xlsx",
+    "name": "22-3.xlsx",
+    "bytes": 11978,
+    "sha": "7b6e5a0012d8dbcf",
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   }
+  ]
+ },
+ "92277": {
+  "taskIds": [
+   "inf27_p5"
+  ],
+  "fids": [
+   "277848",
+   "277849"
+  ],
+  "files": [
+   {
+    "fid": "277848",
+    "file": "92277-0_277848.txt",
+    "name": "27-3-A.txt",
+    "bytes": 5631,
+    "sha": "58b07cf1cc236033",
+    "contentType": "text/plain; charset=utf8"
+   },
+   {
+    "fid": "277849",
+    "file": "92277-1_277849.txt",
+    "name": "27-3-B.txt",
+    "bytes": 16767,
+    "sha": "9f913e6b8d4b6f3b",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92551": {
+  "taskIds": [
+   "inf09_p59"
+  ],
+  "fids": [
+   "283066"
+  ],
+  "files": [
+   {
+    "fid": "283066",
+    "file": "92551-0_283066.ods",
+    "name": "demo_9.ods",
+    "bytes": 590581,
+    "sha": "6088a5459a05d594",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "92559": {
+  "taskIds": [
+   "inf17_p85"
+  ],
+  "fids": [
+   "283079"
+  ],
+  "files": [
+   {
+    "fid": "283079",
+    "file": "92559-0_283079.txt",
+    "name": "demo_17.txt",
+    "bytes": 68785,
+    "sha": "ae0b22388c9c8693",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ },
+ "92564": {
+  "taskIds": [
+   "inf22_p65"
+  ],
+  "fids": [
+   "283082"
+  ],
+  "files": [
+   {
+    "fid": "283082",
+    "file": "92564-0_283082.ods",
+    "name": "demo_22.ods",
+    "bytes": 21270,
+    "sha": "7b70808717201768",
+    "contentType": "application/vnd.oasis.opendocument.spreadsheet"
+   }
+  ]
+ },
+ "92568": {
+  "taskIds": [
+   "inf26_p54"
+  ],
+  "fids": [
+   "283086"
+  ],
+  "files": [
+   {
+    "fid": "283086",
+    "file": "92568-0_283086.txt",
+    "name": "demo_26.txt",
+    "bytes": 300033,
+    "sha": "12890f05a82e01d0",
+    "contentType": "text/plain; charset=utf8"
+   }
+  ]
+ }
+}
