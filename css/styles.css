@@ -1357,7 +1357,13 @@ body {
   max-width: 680px;
   margin: 22px auto 4px;
   min-width: 0;
-  aspect-ratio: var(--visual-ratio, auto);
+  /* Рамка обнимает картинку: никакого принудительного aspect-ratio.
+     Иначе max-height картинки (58vh/520px) оставляет под ней белую
+     пустоту на всю разницу (живой случай — график производной 555×980
+     на телефоне: контейнер 700px, картинка 450px). --visual-ratio
+     остаётся в разметке, в высоту больше не раздувает. Резерв под
+     загрузку — минимальный, почти незаметный. */
+  min-height: 24px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

@@ -740,16 +740,20 @@ function taskVisualHtml(task, context = "task") {
   }
   const type = asset.type || visual.type || "image";
   const label = asset.alt || visual.alt || "Визуальный материал задания";
-  // Мелкие картинки (полоски формул) не распираем рамкой под aspect-ratio:
-  // иначе получается гигантский белый квадрат с мелким содержимым.
-  // Рамку держим только для крупных рисунков (там она резервирует место).
+  // Рамка обнимает картинку: высоту задаёт сама картинка, а width/height
+  // дают браузеру нативный резерв места без белой пустоты.
+  // --visual-ratio оставляем в разметке крупных рисунков (резерв/диагностика),
+  // в высоту он больше не раздувает.
   const ratio = Number(asset.ratio || visual.ratio);
   const big = Number(asset.width || 0) >= 480;
   const ratioStyle = big && Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
   const src = esc(asset.src);
   const caption = asset.caption || visual.caption;
+  const iw = Math.round(Number(asset.width));
+  const ih = Math.round(Number(asset.height));
+  const dims = Number.isFinite(iw) && Number.isFinite(ih) && iw > 0 && ih > 0 ? ' width="' + iw + '" height="' + ih + '"' : "";
   return '<figure class="task-visual task-visual--' + esc(type) + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
-    '<img src="' + src + '" alt="' + esc(label) + '" loading="lazy" decoding="async" onerror="this.closest(\'.task-visual\').classList.add(\'task-visual--broken\');this.style.display=\'none\';">' +
+    '<img src="' + src + '"' + dims + ' alt="' + esc(label) + '" loading="lazy" decoding="async" onerror="this.closest(\'.task-visual\').classList.add(\'task-visual--broken\');this.style.display=\'none\';">' +
     '<div class="task-visual__fallback" role="status">Визуальный материал недоступен.</div>' +
     (caption ? '<figcaption>' + mathText(caption) + '</figcaption>' : "") +
     '</figure>' + filesHtml;
