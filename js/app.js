@@ -749,8 +749,12 @@ function taskVisualHtml(task, context = "task") {
   const ratioStyle = big && Number.isFinite(ratio) && ratio > 0 ? ' style="--visual-ratio:' + esc(String(ratio)) + '"' : "";
   const src = esc(asset.src);
   const caption = asset.caption || visual.caption;
-  const iw = Math.round(Number(asset.width));
-  const ih = Math.round(Number(asset.height));
+  // У части ассетов есть только width+ratio без height — добираем сторону
+  // из ratio, иначе нативный резерв места не работает.
+  let iw = Math.round(Number(asset.width));
+  let ih = Math.round(Number(asset.height));
+  if ((!Number.isFinite(iw) || iw <= 0) && Number.isFinite(ih) && ih > 0 && Number.isFinite(ratio) && ratio > 0) iw = Math.round(ih * ratio);
+  if ((!Number.isFinite(ih) || ih <= 0) && Number.isFinite(iw) && iw > 0 && Number.isFinite(ratio) && ratio > 0) ih = Math.round(iw / ratio);
   const dims = Number.isFinite(iw) && Number.isFinite(ih) && iw > 0 && ih > 0 ? ' width="' + iw + '" height="' + ih + '"' : "";
   return '<figure class="task-visual task-visual--' + esc(type) + '" data-visual-context="' + esc(context) + '"' + ratioStyle + '>' +
     '<img src="' + src + '"' + dims + ' alt="' + esc(label) + '" loading="lazy" decoding="async" onerror="this.closest(\'.task-visual\').classList.add(\'task-visual--broken\');this.style.display=\'none\';">' +

@@ -1376,11 +1376,24 @@ body {
   width: auto;
   max-width: 100%;
   height: auto;
+  /* Тот же лимит, что в max-width у figure.task-visual ниже: оба места
+     держать синхронно, иначе рамка и картинка снова разъедутся. */
   max-height: min(58vh, 520px);
   object-fit: contain;
   margin: 0 auto;
   background: #fff;
 }
+/* Рамка обнимает картинку и по бокам: width под итоговый размер картинки,
+   без искусственных белых полей (89% ассетов уже своей ширины <680px,
+   раньше контейнер был шире картинки почти везде).
+   min(58vh,520px)*ratio — ширина картинки после упора в max-height:
+   высокая упирается в лимит — рамка равна отрисованной ширине,
+   невысокая — натуральной. Без ratio в разметке — просто hug. */
+figure.task-visual {
+  width: max-content;
+  max-width: min(100%, 680px, calc(min(58vh, 520px) * var(--visual-ratio, 999)));
+}
+figure.task-visual--broken { width: 100%; max-width: 680px; }
 .task-visual--svg img,
 .task-visual--graph img,
 .task-visual--geometry img { image-rendering: auto; }
@@ -2562,6 +2575,20 @@ body {
   .answer-row { flex-direction: column; }
   .task-visual { width: auto; max-width: none; margin-left: -28px; margin-right: -28px; border-radius: 0; border-left: none; border-right: none; }
   .task-visual img { max-height: 48vh; }
+  /* Рамка обнимает картинку и по бокам (лимит картинки тут 48vh —
+     формулу держать синхронно с max-height выше): узкие стоят по центру,
+     широкие — в bleed на всю ширину экрана, как было. */
+  figure.task-visual {
+    width: max-content;
+    max-width: min(calc(100% + 56px), calc(min(48vh, 520px) * var(--visual-ratio, 999)));
+    margin: 22px 0 4px;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  figure.task-visual--broken { width: auto; max-width: none; margin-inline: -28px; left: auto; transform: none; }
   .skill-row { grid-template-columns: 110px 1fr 46px; }
   .skill-row__tip { left: 0; }
 
