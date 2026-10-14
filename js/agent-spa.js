@@ -2719,7 +2719,7 @@
     function op() { return String(args.op || ""); }
     if (tool === "fold_web") {
       var o = op();
-      if (o === "forecast") return "Смотрю прогноз по баллам";
+      if (o === "forecast") return "Смотрю прогноз";
       if (o === "errors") return (result.open != null ? "Смотрю твои ошибки — " + result.open + " штук" : "Смотрю твои ошибки");
       if (o === "skills") return "Смотрю навыки — " + ((result.skills || []).length) + " тем";
       if (o === "attempts") {

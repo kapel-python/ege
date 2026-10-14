@@ -188,7 +188,7 @@ def agent_quota_window_ms() -> int:
 # Системный промпт (русский, жёсткие правила + сценарии)
 # ---------------------------------------------------------------------------
 AGENT_SYSTEM = (
-    "Ты — ИИ «lemma go». Готовишь ученика к выпускному экзамену (ЕГЭ в 11 классе или ОГЭ в 9-м — смотри текущий предмет) и говоришь по-русски.\n"
+    "Ты — ИИ «lemma go». Готовишь ученика к выпускному экзамену (ЕГЭ в 11 классе или ОГЭ в 9-м — точный экзамен, класс и шкала текущего предмета лежат в блоке «КОНТЕКСТ ХОДА», строка «Экзамен:») и говоришь по-русски.\n"
     "ХАРАКТЕР И ЯЗЫК.\n"
     "- Ты живой человек, который рядом: спокойный, дружелюбный, на «ты», без канцелярита и без лести.\n"
     "- Пиши так, как пишешь другу: короткими фразами, обычными словами. Ты не справка и не робот — "
@@ -267,8 +267,9 @@ AGENT_SYSTEM = (
     "Читай поле `unit`/`note` и называй ту шкалу, о которой говоришь; "
     "«mid 6» — это не «6 баллов». Формула: «сейчас тянешь примерно на X» (mid) + "
     "«разброс Y–Z» (low–high) + 1–3 темы из top-gains человеческими названиями. "
-    "Если exam=«oge» — называй и ОЦЕНКУ: подбери её по шкале grades (label/desc) под mid "
-    "и скажи условия из desc, если они там есть (например, минимум баллов по геометрии). "
+    "Если exam=«oge» — называй и ОЦЕНКУ: она уже посчитана в «КОНТЕКСТЕ ХОДА» "
+    "(строка «Оценка ОГЭ:»), называй её; шкалу и условия из desc уточняй по полю grades "
+    "из fold_web(op=\"forecast\") (например, минимум баллов по геометрии). "
     "Баллы без оценки для ОГЭ — неполный ответ.\n"
     "5д. Освоение навыка — это mastery, а не progress: progress присылает браузер и к "
     "освоению отношения не имеет (у нерешённых тем он бывает 40).\n"
@@ -301,7 +302,7 @@ AGENT_SYSTEM = (
        "задание («начни с урока по стереометрии», «вот задача на пирамиду») — "
        "сначала ОТКРОЙ его lesson_get/task_get и давай ученику сам текст, а не "
        "пересказ выдачи («есть урок про…», «могу найти, если скажешь» — так нельзя: "
-       "поиск уже выполнен, открывай). В предмете без уроков lesson_get пуст — "
+       "поиск уже выполнен, открывай). Если lesson_get по находке пуст — "
        "там советуй тренировку или миссию, а не урок. Список вариантов без открытия допустим, только "
        "если ученик просил именно выбрать («что есть по теме»).\n"
     "6a. «Зови меня Катя», «назови меня…», «поменяй имя на…», «хочу, чтобы ты меня так называл» — это ТОЖЕ "
@@ -4042,10 +4043,11 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
     if name == "fold_web":
         op = str(args.get("op") or "")
         if op == "forecast":
-            # Без числа: шаг читает ученик, а «сейчас 6» на шкале профиля
-            # означает 6 процентов — число без единицы вводит в заблуждение
-            # (восемь живых чатов пересказали прогноз неверно именно так).
-            return "Смотрю прогноз по баллам"
+            # Без числа и без единицы: шаг читает ученик, а «сейчас 6» на шкале профиля
+            # означает 6 процентов, а на шкале ОГЭ — 6 первичных баллов: число без
+            # шкалы вводит в заблуждение (восемь живых чатов пересказали прогноз
+            # неверно именно так). Единицу называет модель по полю unit/note.
+            return "Смотрю прогноз"
         if op == "errors":
             n = (result or {}).get("open")
             return f"Смотрю твои ошибки — {n} штук" if n is not None else "Смотрю твои ошибки"
@@ -4238,6 +4240,45 @@ def _subject_goals(conn: sqlite3.Connection, subject: str) -> list:
     return out
 
 
+def _oge_grade_for(mid: int, goals: list) -> str:
+    """Оценка ОГЭ по mid и шкале goals [{label, desc}]. Не бросает.
+
+    Порог — первое число в desc («8+ баллов…» → 8). Берём высшую
+    достигнутую ступень; ниже низшей — честно «пока ниже» с порогом.
+    Пустая шкала — пустая строка (строку в контекст не кладём)."""
+    try:
+        steps = []
+        for g in goals or []:
+            if not isinstance(g, dict):
+                continue
+            label = str(g.get("label") or "").strip()
+            desc = str(g.get("desc") or "").strip()
+            if not label:
+                continue
+            m = re.search(r"(\d+)\s*\+", desc)
+            if not m:
+                m = re.search(r"(\d+)", desc)
+            if not m:
+                continue
+            steps.append((int(m.group(1)), label, desc))
+    except (TypeError, ValueError):
+        return ""
+    if not steps:
+        return ""
+    steps.sort(key=lambda s: s[0])
+    hit = None
+    for threshold, label, desc in steps:
+        if int(mid) >= threshold:
+            hit = (threshold, label, desc)
+    if hit is None:
+        threshold, label, desc = steps[0]
+        need = f" — нужно {desc[:80]}" if desc else ""
+        return f"пока ниже «{label}»{need}".strip()
+    threshold, label, desc = hit
+    tail = f" — {desc[:80]}" if desc else ""
+    return f"«{label}»{tail}".strip()
+
+
 # Компактное имя предмета для заголовка окна чата («название • Проф мат»).
 # Бюджет — 8 символов: тулбар узкий, особенно на телефоне. Это НЕ общее поле
 # `short` из subjects/*.json (оно живёт на карточках и в переключателе
@@ -4303,9 +4344,16 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
         title = subject_title(subject)
         if title:
             lines.append(f"Текущий предмет: {title}.")
+        try:
+            exam = _subject_exam(subject)
+        except Exception:
+            exam = "ege"
+        lines.append(f"Экзамен: {'ОГЭ (9 класс)' if exam == 'oge' else 'ЕГЭ (11 класс)'}.")
         # Тариф: от него зависит, что модель вправе обещать. Создание плана —
         # функция Plus (PLAN_PLUS_TOOLS): у бесплатного инструментов в списке
         # нет, и модель обязана честно сказать про Plus, а не выдумывать план.
+        # Плюсовому тариф пишем явно, чтобы «Plus» не приходилось выводить
+        # из отсутствия строки (экзамен и тариф — рядом, в одном блоке).
         try:
             plan_plus = plan_access_allowed(conn, int(user_id))
         except Exception:
@@ -4315,6 +4363,9 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
                          "плана от ИИ — только по подписке Plus: не строй план и не "
                          "зови plan_draft/plan_apply, а скажи оформить Plus. "
                          "Посмотреть текущий план по-прежнему можно (plan_get).")
+        else:
+            lines.append("Тариф ученика: Plus. Создание и изменение учебного плана "
+                         "от ИИ доступно (plan_draft/plan_apply).")
         try:
             fc = _compute_forecast(conn, int(user_id), str(subject or ""))
         except Exception:
@@ -4335,6 +4386,24 @@ def turn_context(conn: sqlite3.Connection, user_id: int, subject: str) -> str:
             if gains:
                 line += " Что подтянуть: " + ", ".join(f"«{g[:60]}»" for g in gains) + "."
             lines.append(line)
+            if exam == "oge":
+                try:
+                    grade = _oge_grade_for(mid, _subject_goals(conn, str(subject or "")))
+                except Exception:
+                    grade = ""
+                if grade:
+                    lines.append(f"Оценка ОГЭ: {grade}.")
+        else:
+            if exam == "oge":
+                try:
+                    goals = _subject_goals(conn, str(subject or ""))
+                except Exception:
+                    goals = []
+                scale = "; ".join(f"{str(g.get('label') or '').strip()} — "
+                                  f"{str(g.get('desc') or '').strip()[:60]}".strip(" —")
+                                  for g in (goals or []) if isinstance(g, dict) and g.get("label"))
+                if scale:
+                    lines.append(f"Шкала ОГЭ: {scale[:240]}.")
         # Одна строка про план — факт наличия без деталей (детали — в plan_get).
         # Дешёвый запрос: активный план + счётчики тем, без прогноза и mastery.
         # Если в базе нет таблиц плана — молча пропускаем строку, а не врём.
