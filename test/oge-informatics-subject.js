@@ -1,7 +1,6 @@
 /* Client-side regression: an opened oge_informatics subject exposes its real topics:
-   16 lines (short-answer, №9 with figures), exam axis "oge",
-   locked №11-16 (files/computer essential), lessons for the 10 open lines
-   (locked-skill lessons stay hidden), no essays. */
+   16 lines (short-answer, №9 with figures, №11-16 computer practicum as
+   self-check), exam axis "oge", all open, 16 lessons, no essays. */
 const fs = require("fs");
 const vm = require("vm");
 const catalog = JSON.parse(fs.readFileSync("server/catalog_oge_informatics.json", "utf8"));
@@ -60,15 +59,15 @@ vm.runInContext(`
   };
 `, sandbox);
 const result = sandbox.ogeChecks;
-const LOCKED = ["oi11_filesearch", "oi12_filecount", "oi13_office", "oi14_spreadsheet", "oi15_robot", "oi16_coding"];
+const LOCKED = [];
 check("ось экзамена: oge_informatics=oge, profile_math=ege", result.exam === "oge" && result.examProfile === "ege");
 check("предмет открыт и доступен", result.locked === false && result.available === true);
-check("16 тем, locked ровно 6 компьютерных", result.skills === 16 && JSON.stringify(result.lockedSkills) === JSON.stringify(LOCKED));
+check("16 тем, locked нет", result.skills === 16 && JSON.stringify(result.lockedSkills) === JSON.stringify(LOCKED));
 check("у каждой темы 3 подсказки", result.hintsOk === true);
-check("задания на месте (10 открытых тем, капы волн)", result.tasks === 520 && result.practice === 520);
-check("уроки: 16 в файле, 10 открытых видно (locked скрыты)", result.lessonsInFile === 16 && result.lessons === 10 &&
-  JSON.stringify(result.lessonSkills) === JSON.stringify(["oi01_memory", "oi02_decode", "oi03_logic", "oi04_models", "oi05_executor", "oi06_program", "oi07_network", "oi08_queries", "oi09_graphs", "oi10_numsys"]));
-check("миссии покрывают открытые темы", result.missions === 10);
+check("задания на месте (16 тем, практикум — самопроверка)", result.tasks === 544 && result.practice === 544);
+check("уроки: все 16 видно", result.lessonsInFile === 16 && result.lessons === 16 &&
+  result.lessonSkills.length === 16);
+check("миссии покрывают все темы", result.missions === 16);
 check("3 босса по веткам", result.bosses === 3);
 check("диагностика непуста", result.diagnostics >= 6);
 check("цели-оценки g3/g4/g5", JSON.stringify(result.goals) === JSON.stringify(["g3", "g4", "g5"]));

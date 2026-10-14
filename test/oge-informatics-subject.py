@@ -2,13 +2,12 @@
 """Интеграционная регрессия предмета «Информатика (ОГЭ)».
 
 Второй предмет оси oge: 16 линий (№1–10 краткий ответ без компьютера,
-№9 — со схемами-рисунками, №11–16 компьютерный практикум), прогноз
-в первичных баллах (total 21, identity-шкала), цели-оценки g3/g4/g5.
-С уроками: 10 открытых линий с финалами из банка; 6 линий практикума
-№11–16 тоже имеют уроки в файле каталога, но скрыты сервером и клиентом
-до разблокировки навыков. Без сочинений.
+№9 — со схемами-рисунками, №11–16 компьютерный практикум в формате
+самопроверки: ученик выполняет на своём компьютере, сверяется с разбором),
+прогноз в первичных баллах (total 21, identity-шкала), цели-оценки g3/g4/g5.
+С уроками: все 16 линий с финалами из банка. Без сочинений.
 Навыки №11–16 (поиск файлов, файлы по условию, презентация/документ,
-таблицы, Робот, программирование — нужен компьютер) — locked;
+таблицы, Робот, программирование) открыты треком самопроверки;
 №9 (схемы дорог) открыт фигурами источника. Проверяются API, каталог, SEO-ось /oge/
 с кросс-проверкой и изоляция состояния при переключении туда-обратно.
 """
@@ -28,9 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER_PATH = ROOT / "server" / "server.py"
 
 RID = "oge_informatics"
-LOCKED_SKILLS = {"oi11_filesearch", "oi12_filecount",
-                 "oi13_office", "oi14_spreadsheet", "oi15_robot",
-                 "oi16_coding"}
+LOCKED_SKILLS: set[str] = set()
 
 
 def load_server(db_path: Path):
@@ -115,7 +112,7 @@ def main():
             assert locked == LOCKED_SKILLS, locked
 
             tasks = catalog.get("tasks", [])
-            assert len(tasks) == 520, len(tasks)
+            assert len(tasks) == 544, len(tasks)
             task_ids = {t["id"] for t in tasks}
             task_skill = {t["id"]: t["skill"] for t in tasks}
             per_skill: dict[str, int] = {}
@@ -128,14 +125,25 @@ def main():
                                  "oi03_logic": 17, "oi04_models": 82,
                                  "oi05_executor": 39, "oi06_program": 27,
                                  "oi07_network": 59, "oi08_queries": 57,
-                                 "oi09_graphs": 67, "oi10_numsys": 34}, per_skill
-            # У каждой открытой темы есть задания; у locked — нет.
-            assert set(per_skill) == (set(by_id) - LOCKED_SKILLS), sorted(set(by_id) ^ set(per_skill) ^ LOCKED_SKILLS)
+                                 "oi09_graphs": 67, "oi10_numsys": 34,
+                                 "oi11_filesearch": 4, "oi12_filecount": 4,
+                                 "oi13_office": 4, "oi14_spreadsheet": 4,
+                                 "oi15_robot": 4, "oi16_coding": 4}, per_skill
+            # У каждой темы есть задания.
+            assert set(per_skill) == set(by_id), sorted(set(by_id) ^ set(per_skill))
             assert all(v >= 1 for v in per_skill.values()), per_skill
-            # Весь банк — краткий ответ с автопроверкой весом 1
-            # (компьютерный практикум №11–16 в банк не входит).
-            assert all(t.get("points") == 1 and (t.get("answer") or "").strip() for t in tasks), tasks
-            assert all(t.get("type") == "short_answer" for t in tasks), tasks
+            # Банк: часть без компьютера — краткий ответ с автопроверкой
+            # весом 1; практикум №11–16 — самопроверка (check:self) с баллами
+            # по весам прогноза.
+            auto = [t for t in tasks if t.get("check", "auto") == "auto"]
+            selfie = [t for t in tasks if t.get("check") == "self"]
+            assert len(auto) + len(selfie) == len(tasks), tasks
+            assert all(t.get("points") == 1 and (t.get("answer") or "").strip() for t in auto), auto
+            assert all(t.get("type") == "short_answer" for t in auto), auto
+            assert {t.get("skill") for t in selfie} == {
+                "oi11_filesearch", "oi12_filecount", "oi13_office",
+                "oi14_spreadsheet", "oi15_robot", "oi16_coding"}, selfie
+            assert all((t.get("solution") or "").strip() for t in selfie), selfie
             # №9 — с фигурами: у каждого задания visual.assetId из visualAssets.
             assets = {a.get("id") for a in catalog.get("visualAssets", [])}
             fig = [t for t in tasks if t["skill"] == "oi09_graphs"]
@@ -153,11 +161,10 @@ def main():
             assert len(diag) >= 6 and set(diag) <= task_ids and len(set(diag)) == len(diag), diag
             daily_cfg = catalog.get("daily") or {}
             assert daily_cfg.get("target", 0) > 0 and daily_cfg.get("skill") in task_ids or daily_cfg.get("skill"), daily_cfg
-            # Уроки: 10 открытых линий (финалы — задания банка своего скила);
-            # 6 уроков практикума №11–16 в payload нет (locked-скиллы скрыты).
-            open_ids = set(by_id) - LOCKED_SKILLS
+            # Уроки: все 16 линий (финалы — задания банка своего скила).
+            open_ids = set(by_id)
             lessons = catalog.get("lessons", [])
-            assert len(lessons) == 10, len(lessons)
+            assert len(lessons) == 16, len(lessons)
             assert {le["skill"] for le in lessons} == open_ids, sorted(le["skill"] for le in lessons)
             assert all(le["skill"] not in LOCKED_SKILLS for le in lessons), lessons
             for le in lessons:
@@ -189,7 +196,7 @@ def main():
             status, lessons_payload = request(opener, base, f"/api/catalog-lessons?subject={RID}")
             assert status == 200, (status, lessons_payload)
             api_lessons = lessons_payload.get("lessons", [])
-            assert len(api_lessons) == 10, len(api_lessons)
+            assert len(api_lessons) == 16, len(api_lessons)
             assert {le["skill"] for le in api_lessons} == open_ids, api_lessons
             for le in api_lessons:
                 steps = le.get("steps", [])
@@ -257,7 +264,7 @@ def main():
             assert public_oge, public
             assert public_oge.get("counts", {}).get("tasks") == len(tasks), public_oge
             print(f"OGE informatics subject integration OK: {len(tasks)} tasks, 16 skills "
-                  f"(6 locked), {len(lessons)} open lessons, {len(missions)} missions, /oge/ SEO axis isolated")
+                  f"(0 locked), {len(lessons)} lessons, {len(missions)} missions, /oge/ SEO axis isolated")
         finally:
             httpd.shutdown()
             httpd.server_close()
