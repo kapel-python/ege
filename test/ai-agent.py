@@ -374,7 +374,7 @@ def _knowledge_and_paging_probes(server):
         part = agent.project_info(conn, uid, subj, {"topic": "проверки"})
         out["knowledge_full"] = "Устройства" in full.get("text", "") and "matched" not in full
         out["knowledge_part"] = (
-            part.get("matched") == ["Проверок сочинений в сутки: 5 (с Plus — 10)"]
+            part.get("matched") == ["Проверок в сутки: 5 (с Plus — 10)"]
             and "Устройства" not in part.get("text", "")
             and "5" in part.get("text", "")
             and len(part["text"]) < len(full["text"]))
@@ -391,7 +391,7 @@ def _knowledge_and_paging_probes(server):
         # Вопрос ученика как topic: инструмент сам находит раздел по словам
         # (его штатная работа с аргументом модели, не запасной вызов сервера).
         qtopic = agent.project_info(conn, uid, subj, {"topic": "сколько проверок в день"})
-        out["knowledge_args"] = ("Проверок сочинений в сутки: 5 (с Plus — 10)"
+        out["knowledge_args"] = ("Проверок в сутки: 5 (с Plus — 10)"
                                  in (qtopic.get("matched") or []))
 
         # 2. Пагинация: сеем 4 ошибки и листаем их limit/offset.
@@ -2004,6 +2004,7 @@ def main():
             status, body = new_thread(c)
             tid_c = body["thread"]["id"]
             gate = threading.Event()
+            entered = threading.Event()
             first_slow = {"on": True}
             saved_chat_cancel = ai.chat_with_tools
 
@@ -2014,6 +2015,11 @@ def main():
                         first_slow["on"] = False
                 if slow:
                     # Первый вызов «летит» — в это время ученик жмёт «Стоп».
+                    # entered делает порядок детерминированным: отмена обязана
+                    # застать ход ВНУТРИ вызова модели, а не в прелюдии до него
+                    # (там уже стоит checkpoint, и ход корректно завершится
+                    # вообще без вызова — но тогда проверять нечего).
+                    entered.set()
                     gate.wait(timeout=10)
                     return {"text": "Ответ отменённого хода.", "tool_calls": []}
                 return mock_chat(messages, tools, **kw)
@@ -2031,6 +2037,8 @@ def main():
                 while time.time() < deadline and not server._agent_busy_locked(tid_c):
                     time.sleep(0.05)
                 check("ход отмены держит слот", server._agent_busy_locked(tid_c))
+                entered.wait(timeout=5)
+                check("ход отмены дошёл до вызова модели", entered.is_set())
                 sc, bc = c.request(base, "POST", "/api/agent/turns/cancel", {"threadId": tid_c})
                 check("cancel отдаёт слот сразу",
                       sc == 200 and bc.get("cancelled") is True and bc.get("busy") is False,

@@ -56,10 +56,14 @@ conn.execute("INSERT INTO skills VALUES('n20_numbers','Числа','profile_math
 conn.execute("INSERT INTO skills VALUES('n15_stereometry','Стереометрия','profile_math',4)")
 conn.execute("INSERT INTO lessons VALUES('lA','sA','Урок А','{}')")
 conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n09_derivative',10,8,0)")
-# Порог показа прогноза: 1 урок и 3 темы с данными (см. FORECAST_READY_*).
+# Порог показа прогноза: 1 урок, 3 темы с данными и 3 попытки практики
+# (см. FORECAST_READY_*: readiness требует уроки И темы И практику).
 conn.execute("INSERT INTO completed_lessons VALUES(1,'profile_math','lA')")
 conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n01_planimetry',10,8,0)")
 conn.execute("INSERT INTO user_progress VALUES(1,'profile_math','n02_vectors',10,8,0)")
+for i in range(3):
+    conn.execute("INSERT INTO task_attempts(user_id,subject,task_id,skill_id,correct,hint_level,created_at)"
+                 " VALUES(1,'profile_math',?,'n09_derivative',1,0,?)", (f"pctx{i}", now - i * 60000))
 conn.commit()
 
 sys_text = agent.turn_system(conn, 1, "profile_math")

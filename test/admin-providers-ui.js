@@ -707,8 +707,17 @@ async function shot(page, name) {
       okOrder.every((v, i) => i === 0 || okOrder[i - 1] <= v), JSON.stringify(okOrder));
     t("недоступные — в конце списка",
       modelPings.slice(2).every((p) => !p.ok), JSON.stringify(modelPings.map((p) => p.ok)));
+    // Пачки проверяет СЕРВЕРНОЕ время, а не стена браузера: в pingMs сидят
+    // клик Playwright, три ожидания селекторов, SSE и перерисовки (~1.2-1.5 с
+    // оверхеда), и порог «стена < 4×400» срабатывал через раз (живые 1820+ мс
+    // при параллельном сервере). budgetMs меряет сам сервер в событии done:
+    // параллельно ≈ 300-400 мс (длиннейшая цепочка — gamma-flash 300;
+    // beta-mini с 404 идёт перебором протоколов, но мимо мока это миллисекунды),
+    // а строго по очереди было бы ≥ 610 (сумма задержек мока 60+120+120+300).
+    const serverMs = await admin.evaluate(() => (typeof ProvDetail !== "undefined"
+      && ProvDetail.ping && ProvDetail.ping.budgetMs) || 0);
     t("проверка моделей идёт пачками, а не строго по очереди",
-      pingMs < GATEWAY_MODELS.length * 400, `${pingMs} мс на ${GATEWAY_MODELS.length} модели`);
+      serverMs > 0 && serverMs < 500, `${serverMs} мс серверного времени на ${GATEWAY_MODELS.length} модели`);
     // Клик по строке результата выбирает модель — зачем ещё искать в списке.
     await admin.click("#provModelPingResult .a-rank:has-text('gamma-flash')");
     t("клик по модели в результате выбрал её", await admin.inputValue("#provDetailModel") === "gamma-flash",

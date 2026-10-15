@@ -83,7 +83,7 @@ def main() -> int:
 
     cats = set(re.findall(r'\[\s*"([a-z]+)"\s*,', actions_block))
     check("категории только известные",
-          cats <= {"login", "users", "plus", "providers", "inbox"}, sorted(cats))
+          cats <= {"login", "users", "plus", "providers", "inbox", "news"}, sorted(cats))
     check("все вкладки покрыты действиями",
           {"login", "users", "plus", "providers", "inbox"} <= cats, sorted(cats))
 

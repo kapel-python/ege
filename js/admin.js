@@ -2073,7 +2073,26 @@ const AUDIT_DETAIL = {
     const m = String(e.detail || "").match(/message\s+(\d+)/);
     return m ? `обращение № ${m[1]}` : "";
   },
+  "news-create": (e) => auditNewsDetail(e.detail),
+  "news-update": (e) => auditNewsDetail(e.detail),
+  "news-delete": (e) => {
+    const m = String(e.detail || "").match(/^news\s+(\S+)/);
+    return m ? `новость № ${m[1]}` : "";
+  },
+  "news-ai": (e) => {
+    // "generate <prompt>" / "refine <prompt>" (см. admin_audit news-ai).
+    const m = String(e.detail || "").match(/^(generate|refine)\s*([\s\S]*)$/);
+    if (!m) return "";
+    return `ИИ: ${m[1] === "refine" ? "доработка" : "создание"}${m[2] ? ` · ${m[2]}` : ""}`;
+  },
 };
+
+function auditNewsDetail(detail) {
+  // "news <id> <title>" (create/update) -> "новость № <id> · <title>".
+  const m = String(detail || "").match(/^news\s+(\S+)\s*([\s\S]*)$/);
+  if (!m) return "";
+  return `новость № ${m[1]}${m[2] ? ` · ${m[2]}` : ""}`;
+}
 
 function auditProviderDetail(detail) {
   // "pid [Plus]" -> "«pid»" (таблетка Plus рисуется отдельно).
@@ -2251,7 +2270,28 @@ const AUDIT_ROWS = {
     const m = String(e.detail || "").match(/message\s+(\d+)/);
     return m ? [["Обращение", `№ ${m[1]}`]] : [];
   },
+  "news-create": (e) => auditNewsRows(e.detail),
+  "news-update": (e) => auditNewsRows(e.detail),
+  "news-delete": (e) => {
+    const m = String(e.detail || "").match(/^news\s+(\S+)/);
+    return m ? [["Новость", `№ ${m[1]}`]] : [];
+  },
+  "news-ai": (e) => {
+    const m = String(e.detail || "").match(/^(generate|refine)\s*([\s\S]*)$/);
+    if (!m) return [];
+    const rows = [["Операция", m[1] === "refine" ? "доработка" : "создание"]];
+    if (m[2]) rows.push(["Запрос", m[2]]);
+    return rows;
+  },
 };
+
+function auditNewsRows(detail) {
+  const m = String(detail || "").match(/^news\s+(\S+)\s*([\s\S]*)$/);
+  if (!m) return [];
+  const rows = [["Новость", `№ ${m[1]}`]];
+  if (m[2]) rows.push(["Заголовок", m[2]]);
+  return rows;
+}
 
 function auditModalRows(e) {
   const fn = AUDIT_ROWS[e.action];
