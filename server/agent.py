@@ -358,8 +358,9 @@ AGENT_SYSTEM = (
     "последнее» запрещена: не видишь деталей — зови инструмент, а не жалуйся.\n"
     "- Разбирая сочинение, называй только критерии К1–К10 из его разбора — их ровно десять, других номеров нет.\n"
     "- «что такое логарифм / объясни тему» → find_topics по словам из вопроса, затем lesson_get по найденному id.\n"
-    "- «дай задание на X / что порешать по X» → find_topics, затем task_get по найденному id. НЕ выдумывай id.\n"
-    "- «посложнее / полегче» → у находок find_topics есть difficulty 1–4: выбирай по нему, а не наугад.\n"
+    "- «дай задание на X / что порешать по X» → find_topics ОДИН РАЗ со всем известным (слова + exam/skillId/сложность), затем task_get по найденному id. НЕ выдумывай id. Перебор формулировок («стереометрия» → «задание 32» → «пирамида объём» — живой случай, 3 жетона в никуда) запрещён: не нашлось — честно скажи и предложи соседнее, а не ищи снова другим текстом.\n"
+    "- «посложнее / полегче (чем Y)» → find_topics с harderThan=<id задания Y>/easierThan или difficultyMin/Max — сортировка сама даст нужное первой строкой. Номер экзамена («№15») из головы НЕ выдумывай: ученик его не называл — только harderThan/difficulty.\n"
+    "- «задание N / N-е из M» → find_topics с exam=N («задание 32» — это exam, а не слова); позиция в банке — skillId темы + offset N−1 (limit 1–3), позиции и размер банка вернутся в position/bankTotal.\n"
     "- «разбери моё сочинение / о чём текст» → task_get по заданию: там problem, автор и начало исходника.\n"
     "- «задание 27» и любой поиск без совпадений find_topics сам доберёт из ДРУГОГО "
     "предмета (поле subject, пометка otherSubject): открывай находку task_get/lesson_get "
@@ -452,13 +453,30 @@ AGENT_TOOLS: list = [
                          "description": "только работы по этому заданию"}},
             "additionalProperties": False}),
     _tool("find_topics",
-      "ПОИСК по каталогу предмета по словам: темы, задания, уроки. ЗОВИ ПЕРВЫМ, когда нужно найти "
-      "задание или урок по смыслу («на производную», «на площадь») — id заданий и уроков приходят "
-      "только отсюда и из fold_web. Возвращает существующие объекты с id и человеческими названиями; "
-      "у заданий есть difficulty 1–4 («посложнее» — бери выше, «полегче» — ниже).",
+      "ПОИСК по каталогу: темы, задания, уроки. ЗОВИ ПЕРВЫМ, когда нужно найти "
+      "задание или урок — id приходят только отсюда и из fold_web. Всё известное "
+      "кладётся в ОДИН вызов: query (1–3 слова по смыслу, НЕ свалка синонимов), "
+      "exam (номер задания: «№15», «задание 32»), skillId (тема — из skills/errors "
+      "или из прошлого поиска), difficultyMin/difficultyMax 1–4 («посложнее» — "
+      "min выше, «полегче» — max ниже), harderThan/easierThan (taskId эталона: "
+      "«сложнее, чем то» — harderThan с его id), offset/limit («32-е из 100» — "
+      "skillId + offset 31). СТРОГО ОДИН поиск на одну нужду: перебор "
+      "формулировок словами запрещён (каждый — жетон), пусто — честно скажи и "
+      "предложи соседнее, а не ищи снова. Номер экзамена из головы НЕ выдумывай: "
+      "ученик его не называл — бери harderThan/difficulty, а не «№15». "
+      "Возвращает существующие объекты с id, названиями, difficulty и — при "
+      "skillId — position/bankTotal (место в банке практики).",
       {"type": "object", "properties": {
-          "query": {"type": "string", "description": "что ищем: тема, ключевое слово или фраза"}},
-       "required": ["query"], "additionalProperties": False}),
+          "query": {"type": "string", "description": "что ищем: 1–3 слова по смыслу"},
+          "exam": {"type": "string", "description": "номер задания экзамена («15», «№15»)"},
+          "skillId": {"type": "string", "description": "тема из каталога (сужает поиск до её банка)"},
+          "difficultyMin": {"type": "integer", "minimum": 1, "maximum": 4},
+          "difficultyMax": {"type": "integer", "minimum": 1, "maximum": 4},
+          "harderThan": {"type": "string", "description": "taskId эталона: только строго сложнее него"},
+          "easierThan": {"type": "string", "description": "taskId эталона: только строго легче него"},
+          "offset": {"type": "integer", "minimum": 0, "description": "пропустить столько (со skillId — позиция в банке)"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+       "additionalProperties": False}),
     _tool("plan_get", "ТЕКУЩИЙ учебный план: есть ли, что внутри. ЗОВИ ПЕРВЫМ, "
           "когда вопрос про план («какой у меня план», «план на месяц», «переделай план»): "
           "вернёт название, срок, прогресс (закрыто N из M) и периоды с темами "
@@ -3740,6 +3758,53 @@ def apply_action(conn: sqlite3.Connection, user_id: int, subject: str, name: str
 _FIND_TASK_SAMPLE = 10000
 
 
+def _natural_id_key(raw) -> list:
+    """Порядок банка как в практике: клиент сортирует id numeric-aware
+    (localeCompare), а не побайтово — иначе a10 вставало бы раньше a5."""
+    parts = re.split(r"(\d+)", str(raw or ""))
+    return [int(p) if p.isdigit() else p.lower() for p in parts]
+
+
+def _find_exam_numbers(text) -> set:
+    try:
+        return {int(n) for n in re.findall(r"\d+", str(text or ""))}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _find_task_difficulty(row) -> int | None:
+    """Сложность 1–4 или None (неизвестна: старая БД без колонки)."""
+    try:
+        keys = row.keys()
+    except (AttributeError, sqlite3.Error):
+        return None
+    if "difficulty" not in keys:
+        return None
+    try:
+        d = int(row["difficulty"] or 0)
+    except (TypeError, ValueError):
+        return None
+    return d if 1 <= d <= 4 else None
+
+
+def _find_task_practicable(row) -> bool:
+    """То же правило банка, что у клиента (taskHasMissingVisual): обязательный
+    официальный рисунок без ассета — задание в каталоге есть, а в практике
+    его нет. Без metadata_json считаем годным (не знаем — не выкидываем)."""
+    try:
+        keys = row.keys()
+    except (AttributeError, sqlite3.Error):
+        return True
+    if "metadata_json" not in keys:
+        return True
+    try:
+        meta = json.loads(row["metadata_json"] or "{}")
+    except (TypeError, ValueError):
+        return True
+    vis = meta.get("visual") if isinstance(meta, dict) else None
+    return not (isinstance(vis, dict) and vis.get("required") and not vis.get("assetId"))
+
+
 def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     """ПОИСК по каталогу предмета: темы, задания и уроки — ПО СЛОВАМ.
 
@@ -3754,8 +3819,112 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     Ничего не выдумывает и не пишет: только то, что реально есть в каталоге.
     """
     query = str((args or {}).get("query") or (args or {}).get("q") or "").strip()
-    if not query:
-        raise ValueError("нужен query — что ищем (например «производная» или «площадь»)")
+    # Выразительный поиск одним вызовом (живой случай: 3 find_topics подряд
+    # «стереометрия» → «задание 32» → «пирамида объём» = 3 жетона за гадание).
+    # Всё известное кладётся СРАЗУ: номер задания (exam), тема (skillId),
+    # сложность (difficultyMin/Max или harderThan/easierThan относительно
+    # известного задания), страница банка (offset/limit). Перебор
+    # формулировок словами вместо этих полей запрещён промптом.
+    exam_numbers = _find_exam_numbers((args or {}).get("exam"))
+    if (args or {}).get("exam") not in (None, "") and not exam_numbers:
+        raise ValueError("в exam нужен номер задания (например «15» или «задание 32»)")
+    skill_id = str((args or {}).get("skillId") or "").strip()
+
+    def _diff_bound(name):
+        raw = (args or {}).get(name)
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+            raise ValueError(f"{name} — целое 1–4 (сложность), а не «{str(raw)[:30]}»")
+        try:
+            d = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} — целое 1–4 (сложность), а не «{str(raw)[:30]}»")
+        if isinstance(raw, float) and d != raw:
+            raise ValueError(f"{name} — целое 1–4, а не «{str(raw)[:30]}»")
+        if not 1 <= d <= 4:
+            raise ValueError(f"{name} — целое 1–4, а не {d}")
+        return d
+
+    difficulty_min = _diff_bound("difficultyMin")
+    difficulty_max = _diff_bound("difficultyMax")
+    if difficulty_min is not None and difficulty_max is not None and difficulty_min > difficulty_max:
+        raise ValueError(f"difficultyMin ({difficulty_min}) выше difficultyMax ({difficulty_max})")
+
+    def _ref_difficulty(name):
+        ref = str((args or {}).get(name) or "").strip()
+        if not ref:
+            return None
+        try:
+            exists = conn.execute("SELECT t.id FROM tasks t WHERE t.id=?", (ref,)).fetchone()
+        except sqlite3.Error:
+            exists = None
+        if exists is None:
+            raise ValueError(f"задание {ref} не найдено — сравнивать сложность не с чем")
+        try:
+            row = conn.execute("SELECT t.id, t.difficulty FROM tasks t WHERE t.id=?", (ref,)).fetchone()
+        except sqlite3.Error:
+            row = None
+        d = _find_task_difficulty(row) if row is not None else None
+        if d is None:
+            raise ValueError(f"у задания {ref} сложность неизвестна — задай difficultyMin/Max числом")
+        return d
+
+    harder_than = _ref_difficulty("harderThan")
+    easier_than = _ref_difficulty("easierThan")
+
+    try:
+        offset = int((args or {}).get("offset") or 0)
+    except (TypeError, ValueError):
+        raise ValueError("offset — целое от 0 (позиция в банке)")
+    if offset < 0:
+        raise ValueError("offset — целое от 0 (позиция в банке)")
+    raw_limit = (args or {}).get("limit")
+    if raw_limit is None or raw_limit == "":
+        limit = 8
+    else:
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            raise ValueError("limit — целое 1–20")
+        limit = max(1, min(20, limit))
+
+    if skill_id:
+        try:
+            skill_row = conn.execute("SELECT id, name, subject FROM skills WHERE id=?",
+                                     (skill_id,)).fetchone()
+        except sqlite3.Error:
+            skill_row = None
+        if skill_row is None:
+            # Модель любит капс («N09_Derivative»): id в каталоге строчные —
+            # пробуем без регистра, прежде чем ругаться.
+            try:
+                skill_row = conn.execute("SELECT id, name, subject FROM skills WHERE lower(id)=lower(?)",
+                                         (skill_id,)).fetchone()
+            except sqlite3.Error:
+                skill_row = None
+        if skill_row is None:
+            try:
+                known = [(r["id"], r["name"]) for r in conn.execute(
+                    "SELECT id, name FROM skills WHERE subject=? ORDER BY display_order",
+                    (subject,)).fetchall()]
+            except sqlite3.Error:
+                known = []
+            sample = "; ".join(f"{sid} — {nm}" for sid, nm in known[:8])
+            raise ValueError(f"темы {skill_id} нет в каталоге. "
+                             f"Есть: {sample or '—'}. Возьми skillId оттуда.")
+        # Дальше — канонический id из базы (после lower-фолбэка регистр мог
+        # отличаться, а выборки ниже идут строгим равенством).
+        skill_id = str(skill_row["id"])
+        pinned_subject = str(skill_row["subject"] or subject)
+    else:
+        skill_row = None
+        pinned_subject = None
+    if not query and not exam_numbers and skill_row is None \
+            and difficulty_min is None and difficulty_max is None \
+            and harder_than is None and easier_than is None:
+        raise ValueError("нужен query — что ищем (например «производная» или «площадь»), "
+                         "либо точный селектор: exam/skillId/difficultyMin/harderThan")
     # Слова-крючки («на», «тема», «задача», «урок», «разобрать») не различают
     # объекты: с ними в выдачу попадало всё подряд. Отбрасываем их и требуем,
     # чтобы СОВПАЛИ ВСЕ оставшиеся слова — иначе «несуществующая тема» находит
@@ -3775,7 +3944,10 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                          "(например «производная» или «площадь»)")
     words = content_words or words
     digits = re.findall(r"\d+", query)
-    if not words and not digits:
+    has_filter = bool(exam_numbers) or skill_row is not None \
+        or difficulty_min is not None or difficulty_max is not None \
+        or harder_than is not None or easier_than is not None
+    if not words and not digits and not has_filter:
         raise ValueError(f"в запросе «{query}» нет слов длиной от 3 символов — нечего искать")
 
     def hit(*fields, bonus_field=None, id_text=None, num_field=None) -> int:
@@ -3826,15 +3998,23 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
 
     skills = conn.execute("SELECT id, name, subject FROM skills WHERE subject=? ORDER BY display_order",
                           (subject,)).fetchall()
-    # Старая БД может не знать difficulty: тогда ищем без неё, а не падаем.
-    try:
-        tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject FROM tasks t"
-                             f" JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}",
-                             (subject,)).fetchall()
-    except sqlite3.Error:
-        tasks = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject FROM tasks t"
-                             f" JOIN skills s ON s.id=t.skill_id WHERE s.subject=? ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}",
-                             (subject,)).fetchall()
+
+    def _fetch_tasks(where: str, params: tuple):
+        # Старая БД может не знать difficulty/metadata_json: тогда ищем без
+        # них, а не падаем (сложность/годность просто неизвестны).
+        base = ("SELECT t.id, t.topic, t.exam_number, t.difficulty, t.metadata_json,"
+                " s.name AS sname, s.subject FROM tasks t"
+                " JOIN skills s ON s.id=t.skill_id")
+        try:
+            return conn.execute(f"{base} WHERE {where} ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}",
+                                params).fetchall()
+        except sqlite3.Error:
+            legacy = ("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject FROM tasks t"
+                      " JOIN skills s ON s.id=t.skill_id")
+            return conn.execute(f"{legacy} WHERE {where} ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}",
+                                params).fetchall()
+
+    tasks = _fetch_tasks("s.subject=?", (subject,))
     lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l JOIN skills s ON s.id=l.skill_id"
                            " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
     # Слово, которого нет ни в одном названии каталога («ЕГЭ», «пожалуйста»), —
@@ -3852,13 +4032,94 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     known = [w for w in words if any(t.startswith(w[:6] if len(w) > 6 else w) for t in vocab)]
     words = known or words
 
+    # Точные фильтры поверх слов: номер, сложность, относительная сложность.
+    # Неизвестная сложность при активных границах — мимо (проверить нельзя),
+    # без границ — проходит всё (старое поведение).
+    def _task_pool(rows):
+        out = []
+        for r in rows:
+            try:
+                exam_no = str(r["exam_number"] or "")
+            except (KeyError, IndexError, TypeError):
+                exam_no = ""
+            if exam_numbers and not (exam_numbers & _find_exam_numbers(exam_no)):
+                continue
+            d = _find_task_difficulty(r)
+            if difficulty_min is not None and (d is None or d < difficulty_min):
+                continue
+            if difficulty_max is not None and (d is None or d > difficulty_max):
+                continue
+            if harder_than is not None and (d is None or d <= harder_than):
+                continue
+            if easier_than is not None and (d is None or d >= easier_than):
+                continue
+            out.append(r)
+        return out
+
+    # Направление вторичной сортировки при поиске по сложности: «посложнее» —
+    # сначала трудные, «полегче» — сначала лёгкие. Без сложности — как раньше
+    # (только счёт совпадения + id), поведение байт в байт.
+    if harder_than is not None or difficulty_min is not None:
+        diff_dir = "harder"
+    elif easier_than is not None or difficulty_max is not None:
+        diff_dir = "easier"
+    else:
+        diff_dir = None
+
+    applied = {}
+    if exam_numbers:
+        applied["exam"] = sorted(exam_numbers)
+    if skill_id:
+        applied["skillId"] = skill_id
+    if difficulty_min is not None:
+        applied["difficultyMin"] = difficulty_min
+    if difficulty_max is not None:
+        applied["difficultyMax"] = difficulty_max
+    if harder_than is not None:
+        applied["harderThan"] = str((args or {}).get("harderThan") or "").strip()
+    if easier_than is not None:
+        applied["easierThan"] = str((args or {}).get("easierThan") or "").strip()
+    if offset:
+        applied["offset"] = offset
+    if ((args or {}).get("limit") not in (None, "")) and limit != 8:
+        applied["limit"] = limit
+
+    def _render_task(n, r):
+        return {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
+                "skillName": r["sname"], "subject": r["subject"],
+                "difficulty": _safe_int(r["difficulty"], 1)
+                              if "difficulty" in r.keys() else 1,
+                "match": n}
+
+    def rank_tasks(rows, take):
+        scored = []
+        if not words and not digits:
+            # Чистый просмотр фильтрами без слов: всё проходит, порядок ниже.
+            scored = [(1, r) for r in rows]
+        else:
+            for r in rows:
+                n = hit(r["topic"], r["exam_number"], r["sname"],
+                        bonus_field=r["sname"], id_text=r["id"],
+                        num_field=r["exam_number"])
+                if n > 0:
+                    scored.append((n, r))
+        if diff_dir == "harder":
+            scored.sort(key=lambda p: (-p[0], _find_task_difficulty(p[1]) is None,
+                                       -(_find_task_difficulty(p[1]) or 0), p[1]["id"]))
+        elif diff_dir == "easier":
+            scored.sort(key=lambda p: (-p[0], _find_task_difficulty(p[1]) is None,
+                                       (_find_task_difficulty(p[1]) or 0), p[1]["id"]))
+        else:
+            scored.sort(key=lambda p: (-p[0], p[1]["id"]))
+        return [_render_task(n, r) for n, r in scored[:take]]
+
     def rank(rows, score, take, render):
         scored = [(score(r), r) for r in rows]
         scored = [(n, r) for n, r in scored if n > 0]
         scored.sort(key=lambda p: (-p[0], p[1]["id"]))
         return [render(n, r) for n, r in scored[:take]]
 
-    def search(skill_rows, task_rows, lesson_rows):
+    def search(skill_rows, task_rows, lesson_rows, tasks_take=8):
         return {
             "skills": rank(skill_rows, lambda r: hit(r["name"]), 6,
                            lambda n, r: {"id": r["id"], "name": r["name"],
@@ -3867,20 +4128,89 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
             # номера нет, а ученик называет именно номер задания из ключа).
             # Цифры по id НЕ матчим (см. hit): иначе b01_p27 отвечало бы на
             # «задание 27», хотя это задание №1.
-            "tasks": rank(task_rows, lambda r: hit(r["topic"], r["exam_number"], r["sname"],
-                                                   bonus_field=r["sname"], id_text=r["id"],
-                                                   num_field=r["exam_number"]), 8,
-                          lambda n, r: {"id": r["id"], "topic": r["topic"], "exam": r["exam_number"],
-                                        "skillName": r["sname"], "subject": r["subject"],
-                                        "difficulty": _safe_int(r["difficulty"], 1)
-                                                      if "difficulty" in r.keys() else 1,
-                                        "match": n}),
+            "tasks": rank_tasks(_task_pool(task_rows), tasks_take),
             "lessons": rank(lesson_rows, lambda r: hit(r["title"], r["id"]), 6,
                             lambda n, r: {"id": r["id"], "title": r["title"],
                                           "subject": r["subject"], "match": n}),
         }
 
-    found = {"query": query, **search(skills, tasks, lessons)}
+    if skill_row is not None:
+        # Тема прибита (skillId): это банк, а не смешанный рейтинг. Позиции —
+        # как в практике (пригодные задания естественным порядком id),
+        # offset/limit листают банк; слова и фильтры лишь сужают пул.
+        bank_rows = [r for r in _fetch_tasks("s.id=?", (skill_id,))
+                     if _find_task_practicable(r)]
+        bank_rows.sort(key=lambda r: _natural_id_key(r["id"]))
+        bank_total = len(bank_rows)
+        bank_pos = {str(r["id"]): i + 1 for i, r in enumerate(bank_rows)}
+        pool = _task_pool(bank_rows)
+        if words or digits:
+            scored = []
+            for r in pool:
+                n = hit(r["topic"], r["exam_number"], r["sname"],
+                        bonus_field=r["sname"], id_text=r["id"],
+                        num_field=r["exam_number"])
+                if n > 0:
+                    scored.append((n, r))
+            if diff_dir == "harder":
+                scored.sort(key=lambda p: (-p[0], _find_task_difficulty(p[1]) is None,
+                                           -(_find_task_difficulty(p[1]) or 0),
+                                           _natural_id_key(p[1]["id"])))
+            elif diff_dir == "easier":
+                scored.sort(key=lambda p: (-p[0], _find_task_difficulty(p[1]) is None,
+                                           (_find_task_difficulty(p[1]) or 0),
+                                           _natural_id_key(p[1]["id"])))
+            else:
+                scored.sort(key=lambda p: (-p[0], _natural_id_key(p[1]["id"])))
+            page = scored[offset:offset + limit]
+            task_items = []
+            for n, r in page:
+                item = _render_task(n, r)
+                item["position"] = bank_pos.get(str(r["id"]))
+                item["bankTotal"] = bank_total
+                task_items.append(item)
+        else:
+            page = pool[offset:offset + limit]
+            task_items = []
+            for r in page:
+                item = _render_task(1, r)
+                item["position"] = bank_pos.get(str(r["id"]))
+                item["bankTotal"] = bank_total
+                task_items.append(item)
+        skill_match = hit(skill_row["name"]) if (words or digits) else 1
+        if words or digits:
+            skill_match = max(1, skill_match)
+        # Уроки темы — тем же рейтингом, что обычно, но только своей темы.
+        try:
+            own_lesson_ids = {str(r["id"]) for r in conn.execute(
+                "SELECT id FROM lessons WHERE skill_id=?", (skill_id,)).fetchall()}
+        except sqlite3.Error:
+            own_lesson_ids = set()
+        own_lessons = [r for r in lessons if str(r["id"]) in own_lesson_ids]
+        found = {"query": query,
+                 "skills": [{"id": skill_row["id"], "name": skill_row["name"],
+                             "subject": skill_row["subject"], "match": skill_match}],
+                 "tasks": task_items,
+                 "lessons": rank(own_lessons,
+                                 lambda r: hit(r["title"], r["id"]) if (words or digits) else 1,
+                                 6, lambda n, r: {"id": r["id"], "title": r["title"],
+                                                  "subject": r["subject"], "match": n})}
+        total = sum(len(v) for v in found.values() if isinstance(v, list))
+        bank_line = (f" Тема «{skill_row['name']}»: в банке {bank_total}, "
+                     f"показаны позиции {offset + 1}–{offset + len(task_items)}.")
+        found["note"] = ("Это то, что реально есть в каталоге предмета. Найденное открывай "
+                         "через task_get (id) — и не выдумывай id, которых здесь нет. "
+                         "id — ТЕХНИЧЕСКИЙ: ученику показывай темы и формулировки, но НЕ коды." + bank_line
+                         if total else
+                         "В этой теме по фильтрам ничего нет — ослабь difficulty/exam или "
+                         "возьми соседнюю тему из fold_web op=\"skills\".")
+        found["found"] = total
+        if applied:
+            found["applied"] = applied
+        return found
+
+    found = {"query": query, **search(skills, tasks, lessons, offset + limit)}
+    found["tasks"] = found["tasks"][offset:offset + limit] if offset else found["tasks"][:limit]
     total = sum(len(v) for v in found.values() if isinstance(v, list))
     # Номера в своём предмете может не быть вовсе («задание 27» из математики —
     # там такого номера нет, а в условии «27» встречается): тогда собственный
@@ -3894,7 +4224,15 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                 for r in tasks for d in digits)
         except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
             own_num_hit = False
-    if total == 0 or (digits and not own_num_hit):
+    own_exam_hit = False
+    if exam_numbers:
+        try:
+            own_exam_hit = any(
+                exam_numbers & _find_exam_numbers(str(r["exam_number"] or ""))
+                for r in tasks)
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            own_exam_hit = False
+    if total == 0 or (digits and not own_num_hit) or (exam_numbers and not own_exam_hit):
         # В своём предмете пусто — ищем по всем: «задание 27» из математики это
         # реальное русское сочинение, а не «такого нет». Раньше инструмент врал,
         # что в каталоге ничего нет, и модель уводила ученика в чужую тему.
@@ -3913,22 +4251,15 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                 subj_ids = [subject]
             all_tasks = []
             for sid in subj_ids:
-                try:
-                    # Тот же полный охват, что в своём предмете: усечённая
-                    # выборка слепа к тем же навыкам и здесь (см. _FIND_TASK_SAMPLE).
-                    rows = conn.execute("SELECT t.id, t.topic, t.exam_number, t.difficulty, s.name AS sname, s.subject"
-                                        f" FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?"
-                                        f" ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}", (sid,)).fetchall()
-                except sqlite3.Error:
-                    rows = conn.execute("SELECT t.id, t.topic, t.exam_number, s.name AS sname, s.subject"
-                                        f" FROM tasks t JOIN skills s ON s.id=t.skill_id WHERE s.subject=?"
-                                        f" ORDER BY t.id LIMIT {_FIND_TASK_SAMPLE}", (sid,)).fetchall()
-                all_tasks.extend(rows)
+                # Тот же полный охват, что в своём предмете: усечённая
+                # выборка слепа к тем же навыкам и здесь (см. _FIND_TASK_SAMPLE).
+                all_tasks.extend(_fetch_tasks("s.subject=?", (sid,)))
             all_lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l"
                                        " JOIN skills s ON s.id=l.skill_id ORDER BY l.id LIMIT 800").fetchall()
         except sqlite3.Error:
             all_skills, all_tasks, all_lessons = [], [], []
-        alt = search(all_skills, all_tasks, all_lessons)
+        alt = search(all_skills, all_tasks, all_lessons, offset + limit)
+        alt["tasks"] = alt["tasks"][offset:offset + limit] if offset else alt["tasks"][:limit]
         alt_total = sum(len(v) for v in alt.values() if isinstance(v, list))
         if alt_total:
             found.update(alt)
@@ -3945,7 +4276,12 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                      "В каталоге нет ничего похожего — ни в этом предмете, ни в других. "
                      "Скажи ученику честно и предложи ближайшую по смыслу тему из списка "
                      "тем (fold_web op=\"skills\").")
+    if applied and not found.get("tasks"):
+        found["note"] += (" Фильтры ничего не оставили — ослабь difficulty/exam "
+                          "или убери offset и смотри банк шире.")
     found["found"] = total
+    if applied:
+        found["applied"] = applied
     return found
 
 
