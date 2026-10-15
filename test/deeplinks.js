@@ -125,6 +125,14 @@ sandbox.location.hash = '#/practice/m-n09?task=n09_a1&seo_subject=profile_math';
 sandbox.history._url = '';
 sandbox.applyTaskQueryJump('practice');
 t('task keeps foreign tail', sandbox.history._url === '#/practice/m-n09?seo_subject=profile_math');
+// полный формат ссылки ИИ: миссия + задание + предмет (предмет — для чужого
+// каталога: без него ссылка из треда одного предмета молча падает в
+// «Тренировку» при открытом другом — живой случай apghyv/history)
+sandbox.location.hash = '#/practice/m-n09_derivative?task=n09_a2&seo_subject=profile_math';
+t('ai link route', sandbox.currentRoute() === 'practice');
+t('ai link mission', sandbox.routeParam() === 'm-n09_derivative');
+t('ai link task', sandbox.hashQueryValue('task') === 'n09_a2');
+t('ai link subject', sandbox.hashQueryValue('seo_subject') === 'profile_math');
 
 // прыжок по ?task= не трогает снимок текущей карточки: в render() прыжок идёт
 // до отрисовки (живой карточки в DOM нет, переходные счётчики — нули restore),

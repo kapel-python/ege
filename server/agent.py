@@ -2295,19 +2295,26 @@ def _public_site_base() -> str:
 
 
 def _practice_link_for_task(conn: sqlite3.Connection, task_id: str) -> dict | None:
-    """Прямая ссылка на задание в практике: миссия его навыка + ?task=.
+    """Прямая ссылка на задание в практике: миссия его навыка + ?task= + предмет.
 
     Миссия и навык — 1:1 (миссия = тренировка всей темы), поэтому ссылка ведёт
     в ту же миссию, просто сразу на нужное задание (?task=<id> сайт понимает
     как «открой практику на этом месте», см. applyTaskQueryJump в js/app.js).
     Сочинений (long_text) в миссиях нет — у них своя практика «один визит —
-    одно сочинение», там ссылка не строится и модель честно говорит словами."""
+    одно сочинение», там ссылка не строится и модель честно говорит словами.
+
+    Предмет (`&seo_subject=`) обязателен: живой случай — тред по профильной
+    математике, а у ученика открыт другой предмет (current_subject=history):
+    без предмета каталог чужой, миссия не находится и ссылка молча падает
+    в «Тренировку». С предметом сайт показывает окно «Переключить предмет?»
+    (тот же канал, что у SEO-ссылок из поиска) и после переключения открывает
+    миссию уже на нужном задании; в своём предмете параметр — no-op."""
     tid = str(task_id or "").strip()
     if not tid:
         return None
     try:
-        row = conn.execute("SELECT t.id, t.topic, t.skill_id, t.task_type FROM tasks t"
-                           " WHERE t.id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT t.id, t.topic, t.skill_id, t.task_type, s.subject FROM tasks t"
+                           " JOIN skills s ON s.id=t.skill_id WHERE t.id=?", (tid,)).fetchone()
     except sqlite3.Error:
         return None
     if row is None:
@@ -2321,6 +2328,7 @@ def _practice_link_for_task(conn: sqlite3.Connection, task_id: str) -> dict | No
     skill_id = str(row["skill_id"] or "").strip()
     if not skill_id:
         return None
+    subject = str(row["subject"] or "").strip() if "subject" in keys else ""
     try:
         mission = conn.execute("SELECT id FROM missions WHERE skill_id=? LIMIT 1",
                                (skill_id,)).fetchone()
@@ -2336,9 +2344,11 @@ def _practice_link_for_task(conn: sqlite3.Connection, task_id: str) -> dict | No
     # бы вела мимо. Реальные id ([a-z0-9_-]) кодирование не меняет.
     safe_mission = urllib.parse.quote(mission_id, safe="")
     safe_task = urllib.parse.quote(tid, safe="")
-    return {"taskId": tid, "missionId": mission_id,
-            "topic": str(row["topic"] or "")[:160],
-            "link": f"{_public_site_base()}/dashboard#/practice/{safe_mission}?task={safe_task}"}
+    link = f"{_public_site_base()}/dashboard#/practice/{safe_mission}?task={safe_task}"
+    if subject:
+        link += f"&seo_subject={urllib.parse.quote(subject, safe='')}"
+    return {"taskId": tid, "missionId": mission_id, "subject": subject,
+            "topic": str(row["topic"] or "")[:160], "link": link}
 
 
 def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:

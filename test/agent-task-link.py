@@ -59,10 +59,10 @@ conn.execute("""INSERT INTO tasks VALUES('re_1_1','russian_essay','Текст �
 conn.execute("""INSERT INTO tasks VALUES('orphan_1','lonely','Сирота','№1',1,
                 'Условие','1','','','short_answer','{}')""")
 
-# 1. task_get отдаёт ссылку сразу при открытии
+# 1. task_get отдаёт ссылку сразу при открытии (с предметом для чужого каталога)
 out = agent.task_get(conn, 1, "profile_math", {"taskId": "n09_a5"})
 check("task_get.link точный",
-      out.get("link") == "https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5",
+      out.get("link") == "https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5&seo_subject=profile_math",
       str(out.get("link")))
 check("task_get.missionId", out.get("missionId") == "m-n09_derivative")
 check("task_get условие цело", out.get("statement") == "Условие" and out.get("answer") == "1")
@@ -132,7 +132,7 @@ check("промпт 5f2: самопал запрещён", "НИКОГДА не 
 script = [
     {"text": "Сейчас скопирую ссылку…", "preamble": "Сейчас скопирую ссылку…",
      "tool_calls": [{"id": "c1", "name": "task_link", "arguments": {"taskId": "n09_a5"}}]},
-    {"text": "Вот задание: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5)",
+    {"text": "Вот задание: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5&seo_subject=profile_math)",
      "tool_calls": []},
 ]
 calls = {"n": 0}
@@ -158,7 +158,7 @@ check("цикл: read без подтверждения", pending is None)
 script2 = [
     {"text": None, "tool_calls": [{"id": "c1", "name": "task_link", "arguments": {"taskId": "zzz"}}]},
     {"text": None, "tool_calls": [{"id": "c2", "name": "task_link", "arguments": {"taskId": "n09_a5"}}]},
-    {"text": "Держи: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5)",
+    {"text": "Держи: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5&seo_subject=profile_math)",
      "tool_calls": []},
 ]
 calls2 = {"n": 0}
@@ -187,9 +187,10 @@ check("weird: база и маршрут целы",
       base == "https://lemmago.ru/dashboard" and frag.startswith("/practice/"))
 mpart, _, q = frag[len("/practice/"):].partition("?")
 qs = _up.parse_qs(q, keep_blank_values=True)
-check("weird: round-trip mission+task",
+check("weird: round-trip mission+task+subject",
       _up.unquote(mpart) == "m/weird id" and (qs.get("task") or [""])[0] == "a/b?c#d&e=x"
-      and list(qs.keys()) == ["task"], w["link"])
+      and (qs.get("seo_subject") or [""]) == ["profile_math"]
+      and sorted(qs.keys()) == ["seo_subject", "task"], w["link"])
 check("weird: кодировано, сырого разрыва нет",
       _up.quote("a/b?c#d&e=x", safe="") in w["link"] and "?task=a/b" not in w["link"],
       w["link"])
