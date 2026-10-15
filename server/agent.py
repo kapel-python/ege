@@ -287,6 +287,7 @@ AGENT_SYSTEM = (
     "6. Действия (сменить уровень/цель/имя, отметить ошибку разобранной, сбросить прогресс, применить план) — только через "
     "инструменты действий: они сами попросят подтверждение, сам ничего не меняй и не обещай «сейчас поменяю».\n"
     "5f. ССЫЛКИ. Когда ученику полезно куда-то пойти — первоисточник (сайт ФИПИ, материалы экзамена), разбор темы, его собственный результат — дай ссылку обычной разметкой: [текст ссылки](https://…). Это тот же markdown, что жирный и курсив; ученику она покажется синей кнопкой. Правила: (1) ссылка должна быть ТОЧНОЙ и рабочей — не выдумывай адреса, не указывай «примерно на fipi.ru/…», не ссылайся на то, чего не знаешь; (2) подпись — ЗАГЛАВНЫМИ словами и ТОЛЬКО НАЗВАНИЕМ, без слова «сайт» и без «перейти/открыть»: «ФИПИ», «ОЦЕНКА СОЧИНЕНИЯ», «РАЗБОР ТЕМЫ» — а не «САЙТ ФИПИ» и не сам адрес; кнопка сама показывает, что это ссылка; (3) не сыпь ссылками без нужды: одна-две на ответ хватит, иначе это шум; (4) если уверенного адреса нет — честно скажи это словами и не оставляй пустую ссылку.\n"
+    "5f2. ССЫЛКА НА ЗАДАНИЕ — ОБЯЗАТЕЛЬНА. Открыл задание через task_get — в том же ответе ВСЕГДА дай его ссылку кнопкой из поля `link` ответа: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](<link из task_get>). Это та же практика (та же миссия), просто сразу на этом задании: ученик жмёт и решает там, а не ищет руками. Правила: ссылка — ТОЛЬКО из поля `link` (или из инструмента `task_link`, если taskId уже есть, а открывать заново незачем); сам адрес НИКОГДА не собирай и не выдумывай — там точные id миссии и задания. Поля `link` в ответе нет (сочинение или задание без практики) — честно скажи словами, что прямой ссылки нет, как раньше. Подпись кнопки — всегда ровно «ЗАДАНИЕ В ТРЕНАЖЁРЕ»: других подписей у этой ссылки не бывает.\n"
     "5g. ВОПРОСЫ О САЙТЕ — НЕ ПРО УЧЁБУ. «Сколько проверок в день», "
        "«что такое XP», «где сбросить прогресс», «что ты умеешь», «как отозвать "
        "устройство» — это НЕ данные ученика, и в fold_web их нет. Сначала ЗОВИ "
@@ -420,7 +421,14 @@ AGENT_TOOLS: list = [
           {"type": "object", "properties": {
               "skillId": {"type": "string"}, "lessonId": {"type": "string"}},
            "additionalProperties": False}),
-    _tool("task_get", "Условие задания по id.",
+    _tool("task_get", "Условие задания по id. В ответе есть поле `link` — прямая ссылка "
+          "на это задание в практике: отдавай её ученику кнопкой (см. правило 5f2).",
+          {"type": "object", "properties": {"taskId": {"type": "string"}},
+           "required": ["taskId"], "additionalProperties": False}),
+    _tool("task_link", "Прямая ссылка на задание в практике по id — БЕЗ условия и разбора. "
+          "Зови, когда ссылка нужна, а задание открывать заново незачем: id уже есть "
+          "из errors/attempts/find_topics или из прошлого хода. Ответ — topic, missionId и "
+          "`link` (кнопка ученику, правило 5f2). Сам адрес никогда не собирай.",
           {"type": "object", "properties": {"taskId": {"type": "string"}},
            "required": ["taskId"], "additionalProperties": False}),
     _tool("essay_history",
@@ -510,7 +518,7 @@ AGENT_TOOLS: list = [
 ]
 
 ACTION_TOOLS = frozenset({"update_profile", "resolve_error", "reset_progress", "plan_apply"})
-READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "essay_history", "plan_get", "plan_draft",
+READ_TOOLS = frozenset({"fold_web", "lesson_get", "task_get", "task_link", "essay_history", "plan_get", "plan_draft",
                         "find_topics", "project_info"})
 # План от ИИ — функция Plus: просмотр текущего плана (plan_get) бесплатен,
 # создание и применение (plan_draft/plan_apply) — только с активной подпиской.
@@ -2271,6 +2279,62 @@ def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
     raise ValueError("нужен skillId или lessonId")
 
 
+def _public_site_base() -> str:
+    """База абсолютных ссылок ученику (домен prod по умолчанию).
+
+    Тот же приоритет, что public_base_url в server.py: явный EGE_PUBLIC_URL,
+    иначе канон. Падать нельзя — ссылка строится и без env."""
+    try:
+        env = (os.environ.get("EGE_PUBLIC_URL") or "").strip().rstrip("/")
+        if env:
+            return env
+    except Exception:
+        pass
+    return "https://lemmago.ru"
+
+
+def _practice_link_for_task(conn: sqlite3.Connection, task_id: str) -> dict | None:
+    """Прямая ссылка на задание в практике: миссия его навыка + ?task=.
+
+    Миссия и навык — 1:1 (миссия = тренировка всей темы), поэтому ссылка ведёт
+    в ту же миссию, просто сразу на нужное задание (?task=<id> сайт понимает
+    как «открой практику на этом месте», см. applyTaskQueryJump в js/app.js).
+    Сочинений (long_text) в миссиях нет — у них своя практика «один визит —
+    одно сочинение», там ссылка не строится и модель честно говорит словами."""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return None
+    try:
+        row = conn.execute("SELECT t.id, t.topic, t.skill_id, t.task_type FROM tasks t"
+                           " WHERE t.id=?", (tid,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    try:
+        keys = row.keys()
+    except (AttributeError, sqlite3.Error):
+        keys = ()
+    if "task_type" in keys and str(row["task_type"] or "") == "long_text":
+        return None
+    skill_id = str(row["skill_id"] or "").strip()
+    if not skill_id:
+        return None
+    try:
+        mission = conn.execute("SELECT id FROM missions WHERE skill_id=? LIMIT 1",
+                               (skill_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if mission is None:
+        return None
+    mission_id = str(mission["id"] or "").strip()
+    if not mission_id:
+        return None
+    return {"taskId": tid, "missionId": mission_id,
+            "topic": str(row["topic"] or "")[:160],
+            "link": f"{_public_site_base()}/dashboard#/practice/{mission_id}?task={tid}"}
+
+
 def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     task_id = str((args or {}).get("taskId") or "").strip()
     if not task_id:
@@ -2325,7 +2389,41 @@ def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                 out["author"] = str(src["author"] or "")[:120]
                 out["sourceExcerpt"] = raw[:1200]
                 out["sourceTruncated"] = len(raw) > 1200
+    # Прямая ссылка в практику (миссия навыка + ?task=): модель видит её СРАЗУ
+    # при открытии задания и обязана отдать ученику кнопкой (правило 5f2).
+    # Сочинений и заданий без миссии там нет осознанно — их ссылка вела бы
+    # в никуда, и модель тогда честно говорит словами, а не кнопкой.
+    try:
+        link_info = _practice_link_for_task(conn, row["id"])
+    except sqlite3.Error:
+        link_info = None
+    if link_info:
+        out["missionId"] = link_info["missionId"]
+        out["link"] = link_info["link"]
     return out
+
+
+def task_link(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
+    """Только ссылка на задание в практике — без условия, ответа и разбора.
+
+    Лёгкий путь к кнопке, когда taskId уже на руках (errors/attempts/find_topics,
+    прошлый ход), а открывать задание заново ради одной ссылки — лишний круг
+    и лишний жетон. Проверки те же, что у task_get: чужого id здесь нет —
+    изоляция по пользователю, а не по предмету (id глобально уникальны)."""
+    task_id = str((args or {}).get("taskId") or "").strip()
+    if not task_id:
+        raise ValueError("нужен taskId")
+    try:
+        exists = conn.execute("SELECT t.id FROM tasks t WHERE t.id=?", (task_id,)).fetchone()
+    except sqlite3.Error:
+        exists = None
+    if exists is None:
+        raise ValueError("задание не найдено")
+    info = _practice_link_for_task(conn, task_id)
+    if not info:
+        raise ValueError("у этого задания нет страницы практики — "
+                         "скажи об этом ученику словами, без ссылки")
+    return info
 
 
 def _essay_blob_scores(blob: dict) -> tuple:
@@ -3972,6 +4070,8 @@ def execute_read_tool(conn: sqlite3.Connection, user_id: int, subject: str, name
         return lesson_get(conn, user_id, subject, args)
     if name == "task_get":
         return task_get(conn, user_id, subject, args)
+    if name == "task_link":
+        return task_link(conn, user_id, subject, args)
     if name == "essay_history":
         return essay_history(conn, user_id, subject, args)
     if name == "plan_draft":
@@ -4039,6 +4139,22 @@ def _hints_for_tool(conn: sqlite3.Connection, subject: str, name: str, args: dic
         out["hint"] = ("Вызови task_get с taskId, который РЕАЛЬНО существует (список ниже), "
                        "либо сначала fold_web(op=\"attempts\")/fold_web(op=\"errors\"), "
                        "чтобы взять id из базы.")
+    elif name == "task_link":
+        tid = _norm(args.get("taskId") or "")
+        try:
+            rows = conn.execute("SELECT t.id, t.topic FROM tasks t JOIN skills s ON s.id=t.skill_id"
+                                " WHERE s.subject=? ORDER BY t.id LIMIT 400", (subject,)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        hit = [f"{r['id']} — {r['topic']}" for r in rows
+               if tid and (tid in _norm(r["id"]) or tid in _norm(r["topic"]))]
+        out["taskNotFound"] = [f"{r['id']} — {r['topic']}" for r in rows
+                               if r["topic"] and any(len(tok) >= 4 and tok in _norm(r["topic"])
+                                                     for tok in tid.split())][:6]
+        out["sample"] = hit[:6] or [f"{r['id']} — {r['topic']}" for r in rows[:6]]
+        out["hint"] = ("Вызови task_link с taskId, который РЕАЛЬНО существует (список ниже), "
+                       "либо сначала fold_web(op=\"attempts\")/fold_web(op=\"errors\"), "
+                       "чтобы взять id из базы. Адрес сам не собирай — его вернёт инструмент.")
     elif name == "essay_history":
         out["hint"] = ("submissionId бери из списка essays (поле submissionId) — целым числом. "
                        "Сначала вызови essay_history без submissionId (оглавление), "
@@ -4117,6 +4233,10 @@ def describe_step(name: str, args: dict, result: dict | None = None) -> str:
         # не контролирует, а ученику нечего делать в «n17_p3» (правило 5b).
         topic = (result or {}).get("topic")
         return f"Открываю задание «{topic}»" if topic else f"Открываю задание {args.get('taskId') or ''}".strip()
+    if name == "task_link":
+        topic = (result or {}).get("topic")
+        return (f"Копирую ссылку на задание «{topic}»" if topic
+                else "Копирую ссылку на задание")
     if name == "essay_history":
         # По результату, а не по аргументам: модель нередко шлёт submissionId
         # «для списка», и подпись «Открываю сочинение №1» врала бы ученику.

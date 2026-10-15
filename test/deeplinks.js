@@ -90,6 +90,42 @@ t('mission mismatch', sandbox.sessionMatchesRoute({ mode: 'mission', missionId: 
 t('boss', sandbox.sessionMatchesRoute({ mode: 'boss', bossId: 'b1' }, 'boss', 'b1') === true);
 t('daily', sandbox.sessionMatchesRoute({ mode: 'daily' }, 'daily', '') === true);
 
+// глубокая ссылка ИИ на задание: #/practice/<mission>?task=<taskId> — та же
+// миссия, сразу на нужном задании; без параметра всё как было
+vm.runInContext([
+  extract('function clearHashQueryKey('),
+  extract('function applyTaskQueryJump('),
+].join('\n'), sandbox);
+sandbox.Session = { cur: null };
+sandbox.DataAPI = { mission(id) { return id === 'm-n09' ? { id: 'm-n09', skill: 'n09' } : null; } };
+sandbox.missionPracticeIds = (m) => (m && m.id === 'm-n09' ? ['n09_a1', 'n09_a2', 'n09_a5', 'n09_a9'] : []);
+sandbox.persistSession = () => {};
+sandbox.sessionCaptureTaskUi = () => {};
+sandbox.Date = Date;
+sandbox.location.hash = '#/practice/m-n09?task=n09_a5';
+t('task param not part of id', sandbox.routeParam() === 'm-n09');
+t('task param readable', sandbox.hashQueryValue('task') === 'n09_a5');
+sandbox.Session.cur = { mode: 'mission', missionId: 'm-n09', taskIds: ['n09_a1', 'n09_a2', 'n09_a5'], offset: 0, total: 3, idx: 0, results: [{ taskId: 'n09_a1' }], taskUi: {} };
+sandbox.location.hash = '#/practice/m-n09?task=n09_a5';
+sandbox.history._url = '';
+t('task jump within slice', sandbox.applyTaskQueryJump('practice') === true && sandbox.Session.cur.idx === 2);
+t('task jump keeps results', sandbox.Session.cur.results.length === 1);
+t('task param stripped after jump', sandbox.history._url === '#/practice/m-n09');
+sandbox.Session.cur = { mode: 'mission', missionId: 'm-n09', taskIds: ['n09_a9'], offset: 3, total: 4, idx: 0, results: [], taskUi: {} };
+sandbox.location.hash = '#/practice/m-n09?task=n09_a2';
+t('task jump rebuilds from bank', sandbox.applyTaskQueryJump('practice') === true
+  && sandbox.Session.cur.taskIds.join(',') === 'n09_a2,n09_a5,n09_a9'
+  && sandbox.Session.cur.offset === 1 && sandbox.Session.cur.total === 4 && sandbox.Session.cur.idx === 0);
+sandbox.Session.cur = { mode: 'mission', missionId: 'm-n09', taskIds: ['n09_a1'], offset: 0, total: 1, idx: 0, results: [], taskUi: {} };
+sandbox.location.hash = '#/practice/m-n09?task=zzz_unknown';
+t('task foreign ignored', sandbox.applyTaskQueryJump('practice') === false && sandbox.Session.cur.idx === 0);
+sandbox.location.hash = '#/practice/m-n09';
+t('task no param no-op', sandbox.applyTaskQueryJump('practice') === false);
+sandbox.location.hash = '#/practice/m-n09?task=n09_a1&seo_subject=profile_math';
+sandbox.history._url = '';
+sandbox.applyTaskQueryJump('practice');
+t('task keeps foreign tail', sandbox.history._url === '#/practice/m-n09?seo_subject=profile_math');
+
 // labels cover catalog types
 const lblCheck = vm.runInContext(`["ACTION","EXPLANATION","FEEDBACK","FOCUS","INDEPENDENT_TASK","HINT","TRANSITION","VALIDATION"].map((k) => k + "=" + (typeof LESSON_STEP_LABELS[k] === "string" && !/[A-Za-z]/.test(LESSON_STEP_LABELS[k])))`, sandbox);
 for (const s of lblCheck) t('label ' + s.split('=')[0], s.endsWith('=true'));

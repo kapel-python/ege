@@ -1950,6 +1950,8 @@ async function render() {
         go("training"); return;
       }
     }
+    // Прямая ссылка на задание (?task= от ИИ): та же сессия, сразу на месте.
+    try { applyTaskQueryJump(route); } catch (_) {}
     if (my !== renderSeq || currentRoute() !== route) return;
   }
   // Профиль: подписка и план едут ВМЕСТЕ со страницей, а не после неё —
@@ -5153,6 +5155,71 @@ function sessionMatchesRoute(S, route, param) {
   if (route === "review") return S.mode === "errors";
   if (route === "session") return true;
   return false;
+}
+
+/* Снять из хэша один ключ, остальные хвосты не трогаем (обобщение
+   clearSeoSubjectParam для ?task=): общий clearHashQuery снёс бы и чужие
+   параметры возврата. */
+function clearHashQueryKey(key) {
+  try {
+    const h = String(location.hash || "");
+    const i = h.indexOf("?");
+    if (i < 0) return;
+    const head = h.slice(0, i) || "#/dashboard";
+    const kept = h.slice(i + 1).split("&").filter((part) => {
+      const eq = part.indexOf("=");
+      const k = eq < 0 ? part : part.slice(0, eq);
+      return k && k !== key;
+    });
+    const next = kept.length ? head + "?" + kept.join("&") : head;
+    if (next !== h) history.replaceState(null, "", next);
+  } catch (_) {}
+}
+
+/* Глубокая ссылка на конкретное задание практики: #/practice/<missionId>?task=<taskId>.
+   Такие ссылки выдаёт ИИ (поле `link` task_get, инструмент task_link): это та же
+   миссия, просто открытая сразу на нужном задании. Без параметра — всё как было:
+   место из missionProgress / восстановленной сессии. С параметром:
+   - задание есть в текущей сессии — прыгаем на него (состояние карточки
+     подтянет sessionRestoreTaskUi из снимка, как «Назад»/«Вперёд»);
+   - задания в срезе нет, но оно из банка этой миссии (прогресс ушёл дальше) —
+     открываем ту же миссию с этого места, как возобновление с позиции
+     (срез/offset/total — как у freshSessionForRoute, серверный прогресс цел);
+   - чужое задание — игнорируем, обычная практика.
+   Параметр одноразовый: после прыжка снимаем его из адреса, дальше место живёт
+   в idx/sessionStorage — иначе «Далее» + перезагрузка возвращали бы назад. */
+function applyTaskQueryJump(route) {
+  let taskId = "";
+  try { taskId = String(hashQueryValue("task") || "").trim(); } catch (_) { return false; }
+  if (!taskId) return false;
+  const S = Session.cur;
+  if (!S || !Array.isArray(S.taskIds) || !S.taskIds.length) return false;
+  let pos = S.taskIds.indexOf(taskId);
+  if (pos < 0 && route === "practice" && S.mode === "mission" && S.missionId) {
+    let full = null;
+    try {
+      const m = (typeof DataAPI !== "undefined" && DataAPI.mission) ? DataAPI.mission(S.missionId) : null;
+      full = (m && missionPracticeIds(m)) || null;
+    } catch (_) { full = null; }
+    const at = Array.isArray(full) ? full.indexOf(taskId) : -1;
+    if (at < 0) return false;
+    try { sessionCaptureTaskUi(); } catch (_) {}
+    S.taskIds = full.slice(at);
+    S.offset = at;
+    S.total = full.length;
+    S.idx = 0;
+    S.results = [];
+    S.taskUi = {};
+    pos = 0;
+  }
+  if (pos < 0) return false;
+  if (S.idx !== pos) {
+    try { sessionCaptureTaskUi(); } catch (_) {}
+    S.idx = pos;
+  }
+  try { persistSession(); } catch (_) {}
+  try { clearHashQueryKey("task"); } catch (_) {}
+  return true;
 }
 
 function restoreSessionFromStorage(route, param) {
