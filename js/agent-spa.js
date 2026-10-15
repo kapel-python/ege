@@ -2736,6 +2736,7 @@
     }
     if (tool === "lesson_get") return "Открываю урок" + (result.title ? " «" + result.title + "»" : "");
     if (tool === "task_get") return "Открываю задание" + (result.topic ? " «" + result.topic + "»" : "");
+    if (tool === "task_link") return "Копирую ссылку на задание" + (result.topic ? " «" + result.topic + "»" : "");
     if (tool === "essay_history") return "Смотрю твои сочинения";
     if (tool === "find_topics") return "Ищу по каталогу" + (args.query ? ": " + String(args.query).slice(0, 60) : "");
     if (tool === "plan_draft") return "Составляю черновик плана";

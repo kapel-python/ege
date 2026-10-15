@@ -128,6 +128,72 @@ check("промпт 5f2: кнопка обязательна", "5f2" in agent.AG
 check("промпт 5f2: самопал запрещён", "НИКОГДА не собирай" in agent.AGENT_SYSTEM
       or "не собирай" in agent.AGENT_SYSTEM)
 
+# 9. Сквозной ход через run_cycle: реплика + вызов task_link, затем финал
+script = [
+    {"text": "Сейчас скопирую ссылку…", "preamble": "Сейчас скопирую ссылку…",
+     "tool_calls": [{"id": "c1", "name": "task_link", "arguments": {"taskId": "n09_a5"}}]},
+    {"text": "Вот задание: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5)",
+     "tool_calls": []},
+]
+calls = {"n": 0}
+
+
+def fake_chat(messages, tools, budget):
+    assert any(t.get("function", {}).get("name") == "task_link" for t in tools), \
+        "task_link нет в списке модели"
+    item = script[min(calls["n"], len(script) - 1)]
+    calls["n"] += 1
+    return item
+
+
+steps, final, pending = agent.run_cycle(conn, 1, "profile_math", [], fake_chat)
+check("цикл: шаг task_link в ленте",
+      len(steps) == 1 and steps[0]["name"] == "task_link"
+      and steps[0]["label"] == "Копирую ссылку на задание «График производной»",
+      str(steps))
+check("цикл: ссылка модели в финале",
+      final is not None and "?task=n09_a5" in final, str(final)[:80])
+check("цикл: read без подтверждения", pending is None)
+
+script2 = [
+    {"text": None, "tool_calls": [{"id": "c1", "name": "task_link", "arguments": {"taskId": "zzz"}}]},
+    {"text": None, "tool_calls": [{"id": "c2", "name": "task_link", "arguments": {"taskId": "n09_a5"}}]},
+    {"text": "Держи: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](https://lemmago.ru/dashboard#/practice/m-n09_derivative?task=n09_a5)",
+     "tool_calls": []},
+]
+calls2 = {"n": 0}
+
+
+def fake_chat2(messages, tools, budget):
+    item = script2[min(calls2["n"], len(script2) - 1)]
+    calls2["n"] += 1
+    return item
+
+
+steps2, final2, pending2 = agent.run_cycle(conn, 1, "profile_math", [], fake_chat2)
+check("цикл: битый вызов починен, в ленте только успех",
+      len(steps2) == 1 and steps2[0]["name"] == "task_link" and final2 is not None
+      and "?task=n09_a5" in final2, str(steps2) + " | " + str(final2)[:60])
+
+# 10. Процент-кодирование: спецсимволы в id не рвут ссылку (round-trip)
+conn.execute("INSERT INTO skills VALUES('weird','Странный','profile_math',9)")
+conn.execute("INSERT INTO missions VALUES('m/weird id','weird','T','',1,1)")
+conn.execute("""INSERT INTO tasks VALUES('a/b?c#d&e=x','weird','W','1',1,
+                'S','A','','','short_answer','{}')""")
+w = agent.task_link(conn, 1, "profile_math", {"taskId": "a/b?c#d&e=x"})
+import urllib.parse as _up
+base, _, frag = w["link"].partition("#")
+check("weird: база и маршрут целы",
+      base == "https://lemmago.ru/dashboard" and frag.startswith("/practice/"))
+mpart, _, q = frag[len("/practice/"):].partition("?")
+qs = _up.parse_qs(q, keep_blank_values=True)
+check("weird: round-trip mission+task",
+      _up.unquote(mpart) == "m/weird id" and (qs.get("task") or [""])[0] == "a/b?c#d&e=x"
+      and list(qs.keys()) == ["task"], w["link"])
+check("weird: кодировано, сырого разрыва нет",
+      _up.quote("a/b?c#d&e=x", safe="") in w["link"] and "?task=a/b" not in w["link"],
+      w["link"])
+
 conn.close()
 try:
     Path(path).unlink()

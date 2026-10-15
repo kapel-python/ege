@@ -126,6 +126,30 @@ sandbox.history._url = '';
 sandbox.applyTaskQueryJump('practice');
 t('task keeps foreign tail', sandbox.history._url === '#/practice/m-n09?seo_subject=profile_math');
 
+// прыжок по ?task= не трогает снимок текущей карточки: в render() прыжок идёт
+// до отрисовки (живой карточки в DOM нет, переходные счётчики — нули restore),
+// и снятие снимка здесь затирало бы подсказки/попытки нулями (живой баг:
+// hintLevel 2→0, attempts 3→0, «Назад» показывал карточку чистой)
+vm.runInContext(extract('function sessionCaptureTaskUi('), sandbox);
+sandbox.TASK_LIVE_DELTA_MAX_MS = 30 * 60 * 1000;
+sandbox.TASK_ELAPSED_MAX_MS = 3 * 60 * 60 * 1000;
+sandbox.sessionTaskLiveMs = () => 0;
+sandbox.sessionTaskElapsedMs = (st) => ((st && st.elapsedMs) || 0);
+sandbox.sessionMatchCells = () => [];
+sandbox.sessionAnswerValue = () => '';
+sandbox.isLongTextTask = () => false;
+sandbox.isSelfCheckTask = () => false;
+sandbox.document = { getElementById: () => null };
+sandbox.DataAPI.task = (id) => ({ id });
+sandbox.Session.task = function () { const c = this.cur; return c ? sandbox.DataAPI.task(c.taskIds[c.idx]) : null; };
+sandbox.Session.cur = { mode: 'mission', missionId: 'm-n09', taskIds: ['n09_a1', 'n09_a2'], offset: 0, total: 2, idx: 0,
+  results: [], taskUi: { n09_a1: { hintLevel: 2, attempts: 3, elapsedMs: 45000 } },
+  answered: false, hintLevel: 0, attempts: 0, wrongs: 0, taskStartTs: Date.now() };
+sandbox.location.hash = '#/practice/m-n09?task=n09_a2';
+t('task jump lands', sandbox.applyTaskQueryJump('practice') === true && sandbox.Session.cur.idx === 1);
+t('task jump spares live snapshot', sandbox.Session.cur.taskUi.n09_a1.hintLevel === 2
+  && sandbox.Session.cur.taskUi.n09_a1.attempts === 3);
+
 // labels cover catalog types
 const lblCheck = vm.runInContext(`["ACTION","EXPLANATION","FEEDBACK","FOCUS","INDEPENDENT_TASK","HINT","TRANSITION","VALIDATION"].map((k) => k + "=" + (typeof LESSON_STEP_LABELS[k] === "string" && !/[A-Za-z]/.test(LESSON_STEP_LABELS[k])))`, sandbox);
 for (const s of lblCheck) t('label ' + s.split('=')[0], s.endsWith('=true'));

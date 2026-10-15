@@ -57,6 +57,7 @@ import re
 import secrets
 import sqlite3
 import time
+import urllib.parse
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
@@ -2330,9 +2331,14 @@ def _practice_link_for_task(conn: sqlite3.Connection, task_id: str) -> dict | No
     mission_id = str(mission["id"] or "").strip()
     if not mission_id:
         return None
+    # id в путь и query — только процент-кодированием: сырой `?task=a/b?c#d`
+    # frontend разберёт не туда (второй `?`, `#`, `&` рвут фрагмент), и ссылка
+    # бы вела мимо. Реальные id ([a-z0-9_-]) кодирование не меняет.
+    safe_mission = urllib.parse.quote(mission_id, safe="")
+    safe_task = urllib.parse.quote(tid, safe="")
     return {"taskId": tid, "missionId": mission_id,
             "topic": str(row["topic"] or "")[:160],
-            "link": f"{_public_site_base()}/dashboard#/practice/{mission_id}?task={tid}"}
+            "link": f"{_public_site_base()}/dashboard#/practice/{safe_mission}?task={safe_task}"}
 
 
 def task_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:

@@ -5203,7 +5203,11 @@ function applyTaskQueryJump(route) {
     } catch (_) { full = null; }
     const at = Array.isArray(full) ? full.indexOf(taskId) : -1;
     if (at < 0) return false;
-    try { sessionCaptureTaskUi(); } catch (_) {}
+    // Снимок текущей карточки здесь НЕ снимаем осознанно: прыжок отрабатывает
+    // в render() до отрисовки (живой карточки в DOM нет, а переходные
+    // answered/hintLevel в S — нули из restore/fresh), и capture затёр бы
+    // снимок нулями — подсказки/попытки текущей карточки сгорели бы, а «Назад»
+    // показал бы её чистой. Несохранённых правок тут не бывает по построению.
     S.taskIds = full.slice(at);
     S.offset = at;
     S.total = full.length;
@@ -5214,7 +5218,6 @@ function applyTaskQueryJump(route) {
   }
   if (pos < 0) return false;
   if (S.idx !== pos) {
-    try { sessionCaptureTaskUi(); } catch (_) {}
     S.idx = pos;
   }
   try { persistSession(); } catch (_) {}
