@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-"""Импорт рисунков РЕШЕНИЙ матпрофиля (get_file в блоке решения, не условия).
+"""Импорт рисунков РЕШЕНИЙ (get_file в блоке решения, не условия).
 
-Живой факт: ссылки «см. рис. N» / «Рис. N» в solution второй части (n14–n20
-и часть линий 1–13) указывают на настоящие чертежи источника, которых в банке
-не было, — клиент их вырезал (stripMissingFigures в js/app.js). Этот скрипт:
-
-  * читает кэш survey tools/out/math_solfig.json
-    (построитель: tools/survey_solution_figures.py);
-  * качает get_file блока решения через механику tools/figure_import.py
-    (SVG -> растр headless Chrome, чистка вотермарки, обрезка белого);
-  * кладёт файлы assets/math/math-sol<FID>.png (имя по id файла источника —
-    один чертёж, общий для нескольких заданий, качается один раз);
-  * добавляет записи visualAssets и ставит заданию поле solutionAssets
-    (массив id в порядке документа — Рис. 1..N). Старый клиент его игнорирует,
-    новый рендерит под разбором; visual.assetId условия не трогаем.
+Живой факт (матпрофиль): ссылки «см. рис. N» / «Рис. N» в solution указывают
+на настоящие чертежи источника, которых в банке не было. Методика та же для
+всех предметов: survey tools/survey_solution_figures.py --subject <s>,
+импорт сюда же с тем же --subject. Поле solutionAssets и рендер
+(solutionFiguresHtml в js/app.js) — общие для всех каталогов.
 
     python3 tools/import_solution_figures.py --analyze
-    python3 tools/import_solution_figures.py --lines 14-19
-    python3 tools/import_solution_figures.py --limit 20 --workers 3
+    python3 tools/import_solution_figures.py --subject bio --analyze
+    python3 tools/import_solution_figures.py --subject inf --limit 20 --workers 3
 """
 from __future__ import annotations
 
@@ -34,12 +26,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figure_import as FI  # noqa: E402
 import sdamgia_import as S  # noqa: E402
+from survey_solution_figures import SUBJECT_CATALOGS  # noqa: E402
 
-CATALOG = ROOT / "server" / "catalog.json"
-SOLFIG = ROOT / "tools" / "out" / "math_solfig.json"
-OUTDIR = ROOT / "assets" / "math"
-BASE = S.SUBJECTS["math"]
 SCALE = 2.5
+# Подпись семейства в alt/description ассета.
+SUBJECT_LABEL = {
+    "math": "профиль №", "mathb": "база №", "bio": "биология №",
+    "his": "история №", "inf": "информатика №", "rus": "русский №",
+    "soc": "общество №", "oge": "ОГЭ-математика №",
+    "bio_oge": "ОГЭ-биология №", "hist_oge": "ОГЭ-история №",
+    "inf_oge": "ОГЭ-информатика №", "soc_oge": "ОГЭ-общество №",
+}
 
 
 def file_id(src: str) -> str:
@@ -48,16 +45,16 @@ def file_id(src: str) -> str:
     return "".join(ch for ch in tail if ch.isdigit())
 
 
-def asset_id_for(fid: str) -> str:
-    return f"math-sol{fid}"
+def asset_id_for(prefix: str, fid: str) -> str:
+    return f"{prefix}-sol{fid}"
 
 
-def fetch_single(url: str, tmp_raw: Path, tmp_png: Path) -> tuple[int, int] | None:
+def fetch_single(base: str, url: str, tmp_raw: Path, tmp_png: Path) -> tuple[int, int] | None:
     """Скачать один рисунок решения, подготовить PNG. Вернуть (w,h) или None."""
     try:
         # Часть старых решений лежит на зеркале urok.sdamgia.ru — без
         # Referer оно отвечает 403 (живой случай get_file?id=32072).
-        data = FI.get(url, referer=f"{BASE}/problem?id=0")
+        data = FI.get(url, referer=f"{base}/problem?id=0")
     except Exception as exc:  # noqa: BLE001
         print(f"  FAIL скачать {url}: {exc}")
         return None
@@ -107,12 +104,15 @@ def parse_lines(spec: str | None) -> set[int] | None:
 
 def line_of(task_id: str) -> int | None:
     import re
-    m = re.match(r"n(\d+)_", task_id)
+    # n01_.. (профиль), b01_.. (база), o01_/ob01_/oh01_/oi01_/os01_.. (ОГЭ),
+    # bio01_/h01_/inf01_/soc01_/r01_.. (ЕГЭ-предметы).
+    m = re.match(r"(?:n|b|o|ob|oh|oi|os|bio|h|inf|soc|r)0*(\d+)_", task_id)
     return int(m.group(1)) if m else None
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--subject", default="math", choices=sorted(SUBJECT_CATALOGS))
     ap.add_argument("--analyze", action="store_true")
     ap.add_argument("--lines", default=None, help="напр. 14-19 или 15,18")
     ap.add_argument("--limit", type=int, default=0)
@@ -120,8 +120,15 @@ def main() -> int:
     args = ap.parse_args()
     wanted = parse_lines(args.lines)
 
-    data = json.loads(CATALOG.read_text(encoding="utf-8"))
-    solfig: dict = json.loads(SOLFIG.read_text(encoding="utf-8"))
+    base = S.SUBJECTS[args.subject]
+    catalog_path = ROOT / "server" / SUBJECT_CATALOGS[args.subject]
+    solfig_path = ROOT / "tools" / "out" / f"{args.subject}_solfig.json"
+    outdir = ROOT / "assets" / FI.ASSET_DIR[args.subject]
+    prefix = args.subject
+    label = SUBJECT_LABEL[args.subject]
+
+    data = json.loads(catalog_path.read_text(encoding="utf-8"))
+    solfig: dict = json.loads(solfig_path.read_text(encoding="utf-8"))
     tasks: list[dict] = data["tasks"]
     assets: dict = {a["id"]: a for a in data.get("visualAssets", [])}
 
@@ -135,6 +142,10 @@ def main() -> int:
             continue
         rec = solfig.get(sid.split("-", 1)[1]) or {}
         files = rec.get("sol_files") or []
+        # Рисунок, уже показанный в условии (тот же get_file), повторно не
+        # вывозим: он и так виден через visual.assetId (живой случай — био №20).
+        cond = set(rec.get("cond_files") or [])
+        files = [s for s in files if s not in cond]
         if files:
             plan.append((t, files))
     if args.limit:
@@ -147,9 +158,9 @@ def main() -> int:
             fid = file_id(src)
             if fid and fid not in seen:
                 seen.add(fid)
-                need_files.append((fid, FI.abs_url(BASE, src)))
-    have = sum(1 for fid, _u in need_files if (OUTDIR / f"{asset_id_for(fid)}.png").exists())
-    print(f"заданий с рисунками решений: {len(plan)}, файлов: {len(need_files)}, "
+                need_files.append((fid, FI.abs_url(base, src)))
+    have = sum(1 for fid, _u in need_files if (outdir / f"{asset_id_for(prefix, fid)}.png").exists())
+    print(f"[{args.subject}] заданий с рисунками решений: {len(plan)}, файлов: {len(need_files)}, "
           f"уже на диске: {have}")
     if args.analyze:
         per_line: dict[int, int] = {}
@@ -160,12 +171,12 @@ def main() -> int:
             print(f"  линия {ln:2}: заданий {per_line[ln]}")
         return 0
 
-    OUTDIR.mkdir(parents=True, exist_ok=True)
+    outdir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[int, int] | None] = {}
 
     def job(item: tuple[str, str]) -> tuple[str, tuple[int, int] | None]:
         fid, url = item
-        final = OUTDIR / f"{asset_id_for(fid)}.png"
+        final = outdir / f"{asset_id_for(prefix, fid)}.png"
         if final.exists():
             try:
                 size = FI._png_size(final)
@@ -173,9 +184,9 @@ def main() -> int:
                     return fid, size
             except Exception:  # noqa: BLE001
                 pass
-        tmp_raw = OUTDIR / f".raw-sol-{fid}"
-        tmp_png = OUTDIR / f".crop-sol-{fid}.png"
-        size = fetch_single(url, tmp_raw, tmp_png)
+        tmp_raw = outdir / f".raw-sol-{fid}"
+        tmp_png = outdir / f".crop-sol-{fid}.png"
+        size = fetch_single(base, url, tmp_raw, tmp_png)
         time.sleep(0.2)
         if size is None:
             tmp_png.unlink(missing_ok=True)
@@ -201,29 +212,29 @@ def main() -> int:
         ids: list[str] = []
         for src in files:
             fid = file_id(src)
-            aid = asset_id_for(fid)
+            aid = asset_id_for(prefix, fid)
             size = results.get(fid)
             if not size:
                 # Рисунок не скачался — пропускаем именно его, остальные цепляем.
                 continue
             ids.append(aid)
             if aid not in assets:
-                final = OUTDIR / f"{aid}.png"
+                final = outdir / f"{aid}.png"
                 digest = hashlib.md5(final.read_bytes()).hexdigest()[:10]
                 w, h = size
                 ln = line_of(t.get("id") or "")
                 assets[aid] = {
                     "id": aid,
-                    "src": f"assets/math/{aid}.png?v={digest}",
+                    "src": f"{final.relative_to(ROOT)}?v={digest}",
                     "type": "image",
-                    "alt": f"Рисунок к решению (профиль №{ln})",
+                    "alt": f"Рисунок к решению ({label}{ln})",
                     "width": w,
                     "height": h,
                     "ratio": (w / h if h else 1.0),
-                    "source": f"рисунок решения источника: {FI.abs_url(BASE, src)}",
+                    "source": f"рисунок решения источника: {FI.abs_url(base, src)}",
                     "sourceId": aid,
                     "taskId": None,
-                    "description": f"Рисунок решения источника к заданию профиля №{ln}",
+                    "description": f"Рисунок решения источника к заданию ({label}{ln})",
                 }
                 new_assets += 1
         if ids:
@@ -232,7 +243,7 @@ def main() -> int:
                 linked += 1
 
     data["visualAssets"] = sorted(assets.values(), key=lambda a: a.get("id") or "")
-    CATALOG.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    catalog_path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"связано заданий: {linked}, новых ассетов: {new_assets}, "
           f"всего ассетов: {len(data['visualAssets'])}")
     return 0

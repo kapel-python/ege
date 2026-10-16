@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""Рисунки решений матпрофиля (task.solutionAssets).
+"""Рисунки решений (task.solutionAssets) во всех каталогах.
 
 Живой факт: ссылки «см. рис. N» / «Рис. N» в solution — настоящие чертежи
-источника (get_file в блоке решения, tools/out/math_solfig.json), а не
-формулы. Импортёр tools/import_solution_figures.py вывозит их в
-assets/math/math-sol<FID>.png и цепляет заданию полем solutionAssets
+источника (get_file в блоке решения, survey tools/out/<subject>_solfig.json),
+а не формулы. Импортёр tools/import_solution_figures.py --subject <s> вывозит
+их в assets/<dir>/<prefix>-sol<FID>.png и цепляет заданию полем solutionAssets
 (порядок документа = Рис. 1..N). Старый клиент поле игнорирует, новый
 рендерит под разбором (solutionFiguresHtml в js/app.js).
 
 Тест фиксирует:
-  1) каждый solutionAssets id есть в visualAssets, файл на диске — валидный
-     PNG, не вырожденный, размеры совпадают с записью, src несёт ?v=-хеш
-     содержимого, source указывает на get_file решения;
-  2) solutionAssets не пересекаются с visual.assetId условия (поле только
-     добавляет, старое не трогает);
-  3) масштаб: привязок не меньше 400, линии 15 и 18 покрыты почти целиком;
-  4) живой пример n15_p6 (sdamgia-519659): три рисунка решения в порядке
-     документа, ссылка «см. рис. 1» в solution на месте (режем на клиенте,
-     не в данных);
+  1) в КАЖДОМ каталоге: каждый solutionAssets id есть в visualAssets своего
+     каталога, файл на диске — валидный PNG, не вырожденный, размеры совпадают
+     с записью, src несёт ?v=-хеш содержимого, source указывает на get_file;
+  2) solutionAssets не пересекаются с visual.assetId условия;
+  3) масштаб по каждому предмету (точные числа привязок);
+  4) живой пример n15_p6 (sdamgia-519659) матпрофиля;
   5) клиент: solutionFiguresHtml вызывается в обоих путях показа разбора,
      stripMissingFigures умеет третий аргумент.
 
@@ -35,6 +32,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "server" / "catalog.json"
 APP_JS = ROOT / "js" / "app.js"
+
+# Точные числа привязок solutionAssets по каталогам (итог survey+импорта).
+# Заполняется по мере обработки предметов; 0 = рисунков решений нет.
+EXPECTED_LINKED = {
+    "catalog.json": 424,
+}
+
+SUBJECT_PREFIX = {
+    "catalog.json": "math-sol",
+    "catalog_basic.json": "mathb-sol",
+    "catalog_biology.json": "bio-sol",
+    "catalog_history.json": "his-sol",
+    "catalog_informatics.json": "inf-sol",
+    "catalog_russian.json": "rus-sol",
+    "catalog_society.json": "soc-sol",
+    "catalog_oge_math.json": "oge-sol",
+    "catalog_oge_biology.json": "bio_oge-sol",
+    "catalog_oge_history.json": "hist_oge-sol",
+    "catalog_oge_informatics.json": "inf_oge-sol",
+    "catalog_oge_society.json": "soc_oge-sol",
+}
 
 
 def png_size(path: Path) -> tuple[int, int] | None:
@@ -59,15 +77,35 @@ def main() -> int:
     tasks: list[dict] = data.get("tasks", [])
     assets = {a.get("id"): a for a in data.get("visualAssets", [])}
 
-    linked = [t for t in tasks if t.get("solutionAssets")]
-    check("solutionAssets: привязок >= 400", len(linked) >= 400, f"found {len(linked)}")
+    # Целостность solutionAssets ВО ВСЕХ каталогах (поле и рендер общие).
+    for name, want_prefix in sorted(SUBJECT_PREFIX.items()):
+        if name == "catalog.json":
+            continue
+        cdata = json.loads((ROOT / "server" / name).read_text(encoding="utf-8"))
+        cassets = {a.get("id"): a for a in cdata.get("visualAssets", [])}
+        for t in cdata.get("tasks", []):
+            ids = t.get("solutionAssets")
+            if not ids:
+                continue
+            tasks.append(t)  # для общих счётчиков ниже — с меткой каталога
+            t["_catalog"] = name
+            assets.update({k: v for k, v in cassets.items() if k not in assets})
 
-    bad_ref = bad_file = bad_size = bad_ver = bad_src = overlap = 0
+    linked = [t for t in tasks if t.get("solutionAssets")]
+    math_linked = [t for t in linked if not t.get("_catalog")]
+    check("solutionAssets: привязок матпрофиля == 424", len(math_linked) == 424,
+          f"found {len(math_linked)}")
+
+    bad_ref = bad_file = bad_size = bad_ver = bad_src = overlap = bad_prefix = 0
+    per_catalog: dict[str, int] = {}
     for t in linked:
         ids = t.get("solutionAssets")
         if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
             bad_ref += 1
             continue
+        cat = t.get("_catalog") or "catalog.json"
+        per_catalog[cat] = per_catalog.get(cat, 0) + 1
+        want_prefix = SUBJECT_PREFIX[cat]
         cond_visual = (t.get("visual") or {}).get("assetId")
         for aid in ids:
             if aid == cond_visual:
@@ -76,8 +114,8 @@ def main() -> int:
             if a is None:
                 bad_ref += 1
                 continue
-            if not aid.startswith("math-sol"):
-                bad_ref += 1
+            if not aid.startswith(want_prefix):
+                bad_prefix += 1
             src = str(a.get("src") or "")
             base = src.split("?", 1)[0]
             path = ROOT / base
@@ -95,22 +133,26 @@ def main() -> int:
                 bad_ver += 1
             if "get_file?id=" not in str(a.get("source") or ""):
                 bad_src += 1
-    check("solutionAssets: все id резолвятся в math-sol*", bad_ref == 0, f"bad {bad_ref}")
+    check("solutionAssets: все id резолвятся (<prefix>-sol*)",
+          bad_ref == 0 and bad_prefix == 0, f"bad {bad_ref}/{bad_prefix}")
     check("solutionAssets: файлы — валидные PNG", bad_file == 0, f"bad {bad_file}")
     check("solutionAssets: размеры не вырождены и совпадают", bad_size == 0, f"bad {bad_size}")
     check("solutionAssets: ?v=-хеш содержимого", bad_ver == 0, f"bad {bad_ver}")
     check("solutionAssets: source ведёт на get_file решения", bad_src == 0, f"bad {bad_src}")
     check("solutionAssets: не затирают visual условия", overlap == 0, f"overlap {overlap}")
+    for name, want in sorted(EXPECTED_LINKED.items()):
+        got = per_catalog.get(name, 0)
+        check(f"масштаб {name}: привязок == {want}", got == want, f"found {got}")
 
     by_skill: dict[str, int] = {}
-    for t in linked:
+    for t in math_linked:
         by_skill[t.get("skill") or ""] = by_skill.get(t.get("skill") or "", 0) + 1
     check("линия 18 покрыта целиком (98/100...==98)",
           by_skill.get("n18_planimetry", 0) == 98, str(by_skill.get("n18_planimetry")))
     check("линия 15 покрыта почти целиком (>=95)",
           by_skill.get("n15_stereometry", 0) >= 95, str(by_skill.get("n15_stereometry")))
 
-    p6 = next((t for t in tasks if t.get("id") == "n15_p6"), None)
+    p6 = next((t for t in math_linked if t.get("id") == "n15_p6"), None)
     check("n15_p6 существует", p6 is not None)
     if p6 is not None:
         check("n15_p6: ровно 4 рисунка решения в порядке документа",
