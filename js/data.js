@@ -18,6 +18,74 @@ function dataId(value) {
   return "";
 }
 
+/* Обрезки формул в коротких подписях: sub режется посередине
+   команды («...векторов (\\overrightarrow», «...уравнения: (дробь: числитель: 1,»).
+   Подпись KaTeX не рендерит (esc), поэтому целые команды переводим
+   в plain-текст (\\veca -> a, дробь -> (1)/(2)), а оборванное режем.
+   Чистим один раз при построении индекса — дальше все потребители
+   (таймлайн, попапы, заголовки сессий) видят чистый текст. */
+function dataCleanSubLabel(value) {
+  let t = String(value || "");
+  if (!t) return t;
+  if (!/дробь:|числитель:|знаменатель:|конец дроби|начало аргумента|конец аргумента|корень из:|вектор\s+[A-Za-z]|в степени|в квадрате|в кубе|логарифм|синус|косинус|тангенс|\\[a-zA-Z]/.test(t)) return t;
+  // Оборванное? Незакрытые скобки (стек: «а)» в начале не в счёт),
+  // маркер без закрытия, хвост-команда.
+  const unclosedParenAt = (str) => {
+    const stack = [];
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      if (c === "(") stack.push(i);
+      else if (c === ")" && stack.length) stack.pop();
+    }
+    return stack.length ? stack[stack.length - 1] : -1;
+  };
+  const broken = unclosedParenAt(t) >= 0
+    || /дробь:(?![\s\S]*конец дроби)/.test(t)
+    || /начало аргумента:(?![\s\S]*конец аргумента)/.test(t)
+    || /корень из:(?![\s\S]*конец аргумента)/.test(t)
+    || /\\[a-zA-Z]+$/.test(t.trimEnd());
+  if (broken) {
+    const m = t.search(/дробь:|числитель:|знаменатель:|конец дроби|начало аргумента|конец аргумента|корень из:|вектор\s+[A-Za-z]|в степени|в квадрате|в кубе|логарифм|синус|косинус|тангенс|\\[a-zA-Z]/);
+    if (m >= 0) t = t.slice(0, m);
+    t = t.replace(/[\s(:,;=\-–—]+$/, "").trim();
+    // Незакрытая скобка после обрезки — режем по ней же (стеком).
+    let cut = unclosedParenAt(t);
+    while (cut >= 0) {
+      t = t.slice(0, cut).replace(/[\s(:,;=\-–—]+$/, "").trim();
+      cut = unclosedParenAt(t);
+    }
+    t = t.replace(/\s+в (степени|квадрате|кубе)\s*$/, "").trim();
+    return t;
+  }
+  // Целое — команды и слова формул в plain-текст.
+  t = t
+    .replace(/\\vec\s*\{?([a-zA-Z])\}?/g, "$1")
+    .replace(/\\over(?:rightarrow|leftarrow)\s*\{?([A-Za-z]+)\}?/g, "$1")
+    .replace(/\\angle([A-Z][A-Za-z0-9_]*)/g, "угол $1")
+    .replace(/\\angle(?![a-zA-Z])/g, "угол ")
+    .replace(/\\[dt]?frac([a-zA-Z])([0-9]+)/g, "($1)/($2)")
+    .replace(/\\[dt]?frac\s*([0-9])([0-9])/g, "($1)/($2)")
+    .replace(/\\[dt]?frac\s*([0-9])/g, "$1")
+    .replace(/\\[dt]?frac([a-zA-Z])/g, "$1")
+    .replace(/дробь:\s*числитель:\s*(.*?),\s*знаменатель:\s*(.*?)\s*конец дроби/g, "($1)/($2)")
+    .replace(/корень из:\s*начало аргумента:\s*(.*?)\s*конец аргумента/g, "√($1)")
+    .replace(/корень из\s+([0-9A-Za-z]+)/g, "√($1)")
+    .replace(/вектор\s+([A-Za-z]+)/g, "$1")
+    .replace(/([0-9A-Za-z)])\s+в квадрате/g, "$1²")
+    .replace(/([0-9A-Za-z)])\s+в кубе/g, "$1³")
+    .replace(/умножить на/g, "·")
+    .replace(/минус/g, "-")
+    .replace(/плюс/g, "+")
+    .replace(/\\([a-zA-Z]+)/g, "$1");
+  return t.trim();
+}
+
+function dataCleanTextTail(value) {
+  const t = String(value || "");
+  if (!t) return t;
+  return t.replace(/\s+и\s*$/, "").replace(/\s*\(\s*$/, "").trimEnd();
+}
+
 function dataRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -433,6 +501,17 @@ const DataAPI = {
     for (const t of tasksAll) {
       const id = dataId(t.id);
       if (id && !taskById.has(id)) taskById.set(id, t);
+      // Подписи/условия с обрезками формул чистим один раз здесь.
+      if (t && typeof t === "object") {
+        if (typeof t.sub === "string") {
+          const cleaned = dataCleanSubLabel(t.sub);
+          if (cleaned !== t.sub) t.sub = cleaned;
+        }
+        if (typeof t.text === "string") {
+          const cleaned = dataCleanTextTail(t.text);
+          if (cleaned !== t.text) t.text = cleaned;
+        }
+      }
     }
     const taskUsable = (t) => {
       if (!t || this.taskHasMissingVisual(t)) return false;
