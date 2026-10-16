@@ -6949,42 +6949,6 @@
    "description": "Рисунок источника к заданию профиля №2"
   },
   {
-   "id": "math-src26459",
-   "src": "assets/math/math-src26459.png?v=44a349f123",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №2)",
-   "width": 43,
-   "ratio": 1.048780487804878,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/ed7822c175dd4385510f7259a7fcfa41.svg",
-   "sourceId": "math-src26459",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src26461",
-   "src": "assets/math/math-src26461.png?v=44a349f123",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №2)",
-   "width": 43,
-   "ratio": 1.048780487804878,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/f1/f1264a360d2dba0bc97a9f0cb8aa0374.svg",
-   "sourceId": "math-src26461",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src26463",
-   "src": "assets/math/math-src26463.png?v=44a349f123",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №2)",
-   "width": 43,
-   "ratio": 1.048780487804878,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/ed7822c175dd4385510f7259a7fcfa41.svg",
-   "sourceId": "math-src26463",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
    "id": "math-src26465",
    "src": "assets/math/math-src26465.png?v=1b2337c820",
    "type": "image",
@@ -9241,18 +9205,6 @@
    "description": "Рисунок источника к заданию профиля №15"
   },
   {
-   "id": "math-src484562",
-   "src": "assets/math/math-src484562.png?v=b9653c8541",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 57,
-   "ratio": 1.9655172413793103,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/20/20a5ecde4d493dc8234599d627cacad7.svg",
-   "sourceId": "math-src484562",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src484566",
    "src": "assets/math/math-src484566.png?v=0a0ac00a71",
    "type": "image",
@@ -9625,18 +9577,6 @@
    "description": "Рисунок источника к заданию профиля №19"
   },
   {
-   "id": "math-src500639",
-   "src": "assets/math/math-src500639.png?v=c1d8b0b801",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 62,
-   "ratio": 2.48,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/80/80769ddf17dbf90255a300b9aff51e97.svg",
-   "sourceId": "math-src500639",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src500888",
    "src": "assets/math/math-src500888.png?v=f14149d799",
    "type": "image",
@@ -9757,18 +9697,6 @@
    "description": "Рисунок источника к заданию профиля №15"
   },
   {
-   "id": "math-src501555",
-   "src": "assets/math/math-src501555.png?v=44b2ca4bee",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 114,
-   "ratio": 4.384615384615385,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/d6/d6cbe4569890dd3323368aa5383e6ebb.svg",
-   "sourceId": "math-src501555",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src501709",
    "src": "assets/math/math-src501709.png?v=44d5075807",
    "type": "image",
@@ -9829,18 +9757,6 @@
    "description": "Рисунок источника к заданию профиля №14"
   },
   {
-   "id": "math-src502139",
-   "src": "assets/math/math-src502139.png?v=0890e50fd2",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №20)",
-   "width": 97,
-   "ratio": 2.8529411764705883,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/7b/7b15fb18cc4277a0e2dfd594fb95bbbc.svg",
-   "sourceId": "math-src502139",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №20"
-  },
-  {
    "id": "math-src504233",
    "src": "assets/math/math-src504233.png?v=4d11f13404",
    "type": "image",
@@ -9851,18 +9767,6 @@
    "sourceId": "math-src504233",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №9"
-  },
-  {
-   "id": "math-src504262",
-   "src": "assets/math/math-src504262.png?v=ffff19918f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 35,
-   "ratio": 0.5645161290322581,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/ed0bc552bbaf10016d1e11d315fda6c6.svg",
-   "sourceId": "math-src504262",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src50433",
@@ -10233,18 +10137,6 @@
    "ratio": 0.9595375722543352,
    "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/d1/d1a02cba53e4665ec547d8f44a3e29b3.svg",
    "sourceId": "math-src507681",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
-   "id": "math-src507690",
-   "src": "assets/math/math-src507690.png?v=435b6415bd",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 77,
-   "ratio": 2.6551724137931036,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/20/2095bae210ecbaee9b39d2dd8ecbed47.svg",
-   "sourceId": "math-src507690",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №15"
   },
@@ -11653,102 +11545,6 @@
    "description": "Рисунок источника к заданию профиля №5"
   },
   {
-   "id": "math-src509377",
-   "src": "assets/math/math-src509377.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509377",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509378",
-   "src": "assets/math/math-src509378.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509378",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509380",
-   "src": "assets/math/math-src509380.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509380",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509382",
-   "src": "assets/math/math-src509382.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509382",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509384",
-   "src": "assets/math/math-src509384.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509384",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509388",
-   "src": "assets/math/math-src509388.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509388",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509390",
-   "src": "assets/math/math-src509390.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509390",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src509391",
-   "src": "assets/math/math-src509391.png?v=208b6cd30f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 46,
-   "ratio": 1.7692307692307692,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6c/6c31a48ece330577542a43ac327bbac7.svg",
-   "sourceId": "math-src509391",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
    "id": "math-src509413",
    "src": "assets/math/math-src509413.png?v=3f3ca00a8b",
    "type": "image",
@@ -12217,18 +12013,6 @@
    "description": "Рисунок источника к заданию профиля №15"
   },
   {
-   "id": "math-src510809",
-   "src": "assets/math/math-src510809.png?v=c2dbc683a4",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 58,
-   "ratio": 0.8529411764705882,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/80/8031df4adcd024a35d056033051580af.svg",
-   "sourceId": "math-src510809",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src510918",
    "src": "assets/math/math-src510918.png?v=a879361ea3",
    "type": "image",
@@ -12263,18 +12047,6 @@
    "sourceId": "math-src511105",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №14"
-  },
-  {
-   "id": "math-src511160",
-   "src": "assets/math/math-src511160.png?v=fbb4f7fb6e",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 15,
-   "ratio": 0.7142857142857143,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/c0/c0cb5f0fcf239ab3d9c1fcd31fff1efc.svg",
-   "sourceId": "math-src511160",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src511310",
@@ -12323,18 +12095,6 @@
    "sourceId": "math-src511350",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №19"
-  },
-  {
-   "id": "math-src511368",
-   "src": "assets/math/math-src511368.png?v=ccf96973d7",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 85,
-   "ratio": 2.5757575757575757,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/e2/e24e779fb1f9c3d91b50bee10dc107ba.svg",
-   "sourceId": "math-src511368",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src511374",
@@ -12479,18 +12239,6 @@
    "sourceId": "math-src511494",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
-   "id": "math-src511508",
-   "src": "assets/math/math-src511508.png?v=51337f8be9",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 158,
-   "ratio": 5.851851851851852,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/b3/b3b77b43aeaae037a91354bda5c6ec82.svg",
-   "sourceId": "math-src511508",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src511517",
@@ -13057,18 +12805,6 @@
    "description": "Рисунок источника к заданию профиля №14"
   },
   {
-   "id": "math-src513915",
-   "src": "assets/math/math-src513915.png?v=fcc23f1f7b",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 312,
-   "ratio": 12.0,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/cf/cfa9b62a95c5431f2d9f93aa751d56d3.svg",
-   "sourceId": "math-src513915",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src513934",
    "src": "assets/math/math-src513934.png?v=08f62aa24f",
    "type": "image",
@@ -13249,18 +12985,6 @@
    "description": "Рисунок источника к заданию профиля №20"
   },
   {
-   "id": "math-src514529",
-   "src": "assets/math/math-src514529.png?v=51337f8be9",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 158,
-   "ratio": 5.851851851851852,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/3b/3b4d30700e10d96998c81b250c7b1851.svg",
-   "sourceId": "math-src514529",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src514533",
    "src": "assets/math/math-src514533.png?v=9f5b9bdbbf",
    "type": "image",
@@ -13271,30 +12995,6 @@
    "sourceId": "math-src514533",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №14"
-  },
-  {
-   "id": "math-src514562",
-   "src": "assets/math/math-src514562.png?v=4c4f9378c0",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 174,
-   "ratio": 6.444444444444445,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/82/8292d40cc78451e06a22f0c6e9f05011.svg",
-   "sourceId": "math-src514562",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
-   "id": "math-src514594",
-   "src": "assets/math/math-src514594.png?v=31eb41d791",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №20)",
-   "width": 41,
-   "ratio": 0.6612903225806451,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/eddc53528f1086dc18593ad2af1a83b8.svg",
-   "sourceId": "math-src514594",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №20"
   },
   {
    "id": "math-src514608",
@@ -13525,18 +13225,6 @@
    "description": "Рисунок источника к заданию профиля №10"
   },
   {
-   "id": "math-src516329",
-   "src": "assets/math/math-src516329.png?v=044320634e",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №11)",
-   "width": 25,
-   "ratio": 1.0,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/67/6743b9fcc57cf1b169fb4ef6c7a955d2.svg",
-   "sourceId": "math-src516329",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №11"
-  },
-  {
    "id": "math-src516385",
    "src": "assets/math/math-src516385.png?v=6024250649",
    "type": "image",
@@ -13729,18 +13417,6 @@
    "description": "Рисунок источника к заданию профиля №19"
   },
   {
-   "id": "math-src517439",
-   "src": "assets/math/math-src517439.png?v=e6d9bcb102",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 323,
-   "ratio": 12.92,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/1b/1b514ed3de4bf6dbc777c5843ab6e111.svg",
-   "sourceId": "math-src517439",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src517440",
    "src": "assets/math/math-src517440.png?v=970a605a78",
    "type": "image",
@@ -13835,18 +13511,6 @@
    "sourceId": "math-src517533",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
-   "id": "math-src517558",
-   "src": "assets/math/math-src517558.png?v=0d7a62cc29",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 65,
-   "ratio": 1.9696969696969697,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/18/18c5d2e54898cc8a6c2a31d139216d84.svg",
-   "sourceId": "math-src517558",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src517747",
@@ -14197,18 +13861,6 @@
    "description": "Рисунок источника к заданию профиля №18"
   },
   {
-   "id": "math-src520789",
-   "src": "assets/math/math-src520789.png?v=84ed2397bf",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №20)",
-   "width": 69,
-   "ratio": 2.76,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/e9/e9932c01bf9dfd1a8a78aaaaae272725.svg",
-   "sourceId": "math-src520789",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №20"
-  },
-  {
    "id": "math-src520850",
    "src": "assets/math/math-src520850.png?v=cd71e48e96",
    "type": "image",
@@ -14291,18 +13943,6 @@
    "sourceId": "math-src520996",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №16"
-  },
-  {
-   "id": "math-src521354",
-   "src": "assets/math/math-src521354.png?v=3f01d47aa1",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 52,
-   "ratio": 1.4054054054054055,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6b/6badb034fe898bd5bcf9a6261388f6c7.svg",
-   "sourceId": "math-src521354",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src521850",
@@ -14543,18 +14183,6 @@
    "sourceId": "math-src525040",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №9"
-  },
-  {
-   "id": "math-src525049",
-   "src": "assets/math/math-src525049.png?v=cb982709c6",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 29,
-   "ratio": 1.1153846153846154,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/b7/b7fd7223347aaf8dbc22fc2fcd70072d.svg",
-   "sourceId": "math-src525049",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src525065",
@@ -14905,18 +14533,6 @@
    "description": "Рисунок источника к заданию профиля №16"
   },
   {
-   "id": "math-src526830",
-   "src": "assets/math/math-src526830.png?v=92cba474fe",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 65,
-   "ratio": 1.9696969696969697,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/76/76f777fa0bef83b7018389d1b06a9d28.svg",
-   "sourceId": "math-src526830",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src526904",
    "src": "assets/math/math-src526904.png?v=bd3369b59b",
    "type": "image",
@@ -15155,18 +14771,6 @@
    "sourceId": "math-src530904",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №19"
-  },
-  {
-   "id": "math-src531025",
-   "src": "assets/math/math-src531025.png?v=35067da960",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №17)",
-   "width": 40,
-   "ratio": 0.6451612903225806,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/4b/4ba542f6cd990804088b322f0dcd9221.svg",
-   "sourceId": "math-src531025",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №17"
   },
   {
    "id": "math-src531562",
@@ -15673,18 +15277,6 @@
    "description": "Рисунок источника к заданию профиля №18"
   },
   {
-   "id": "math-src553833",
-   "src": "assets/math/math-src553833.png?v=17322f24ae",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №17)",
-   "width": 145,
-   "ratio": 5.0,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/bf/bf612dc80c0ea7768dfaa0d9816516be.svg",
-   "sourceId": "math-src553833",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №17"
-  },
-  {
    "id": "math-src553834",
    "src": "assets/math/math-src553834.png?v=38fb946baf",
    "type": "image",
@@ -16057,18 +15649,6 @@
    "description": "Рисунок источника к заданию профиля №5"
   },
   {
-   "id": "math-src562250",
-   "src": "assets/math/math-src562250.png?v=e8a24bb2c4",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 35,
-   "ratio": 0.5645161290322581,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ef/efa8d6a47bf51cdb4fb2c0bc843b6644.svg",
-   "sourceId": "math-src562250",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src562251",
    "src": "assets/math/math-src562251.png?v=818f8c4cc8",
    "type": "image",
@@ -16223,18 +15803,6 @@
    "sourceId": "math-src56361",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №1"
-  },
-  {
-   "id": "math-src563681",
-   "src": "assets/math/math-src563681.png?v=92bde2870d",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 172,
-   "ratio": 6.37037037037037,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/22/228437e75b3f9137dde31066cd305be7.svg",
-   "sourceId": "math-src563681",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src563720",
@@ -16489,30 +16057,6 @@
    "description": "Рисунок источника к заданию профиля №2"
   },
   {
-   "id": "math-src61057",
-   "src": "assets/math/math-src61057.png?v=44a349f123",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №2)",
-   "width": 43,
-   "ratio": 1.048780487804878,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/ed7822c175dd4385510f7259a7fcfa41.svg",
-   "sourceId": "math-src61057",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src61157",
-   "src": "assets/math/math-src61157.png?v=44a349f123",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №2)",
-   "width": 43,
-   "ratio": 1.048780487804878,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ed/ed7822c175dd4385510f7259a7fcfa41.svg",
-   "sourceId": "math-src61157",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
    "id": "math-src61205",
    "src": "assets/math/math-src61205.png?v=dbcc4336c1",
    "type": "image",
@@ -16715,18 +16259,6 @@
    "sourceId": "math-src62313",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №8"
-  },
-  {
-   "id": "math-src623356",
-   "src": "assets/math/math-src623356.png?v=23c350ad7d",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 212,
-   "ratio": 8.153846153846153,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/55/55bae5294403bde7e62ad96e1e867b58.svg",
-   "sourceId": "math-src623356",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src624027",
@@ -17149,18 +16681,6 @@
    "description": "Рисунок источника к заданию профиля №16"
   },
   {
-   "id": "math-src632832",
-   "src": "assets/math/math-src632832.png?v=2a48a931eb",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 159,
-   "ratio": 5.888888888888889,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/a6/a644c9545f03b94d6edae8cac7645cd9.svg",
-   "sourceId": "math-src632832",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src633185",
    "src": "assets/math/math-src633185.png?v=67f4398825",
    "type": "image",
@@ -17169,18 +16689,6 @@
    "ratio": 1.9102564102564104,
    "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/2c/2c0d888990b392422b9a88d45d4d8317.svg",
    "sourceId": "math-src633185",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
-   "id": "math-src633394",
-   "src": "assets/math/math-src633394.png?v=80db452a8e",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 188,
-   "ratio": 7.52,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/f5/f57432b3a75e653c3ea92a7742b82f50.svg",
-   "sourceId": "math-src633394",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №18"
   },
@@ -17207,18 +16715,6 @@
    "sourceId": "math-src634666",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №20"
-  },
-  {
-   "id": "math-src635089",
-   "src": "assets/math/math-src635089.png?v=fc530c3481",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 311,
-   "ratio": 1.4669811320754718,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/83/8395cc606ee3ad5d9bc57ff6fc131b80.svg",
-   "sourceId": "math-src635089",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src635141",
@@ -17279,18 +16775,6 @@
    "sourceId": "math-src635859",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №12"
-  },
-  {
-   "id": "math-src635866",
-   "src": "assets/math/math-src635866.png?v=e08ccf2778",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 197,
-   "ratio": 7.88,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/68/689740fc952d975813a12d5854359bef.svg",
-   "sourceId": "math-src635866",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src63707",
@@ -17387,18 +16871,6 @@
    "sourceId": "math-src639112",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №14"
-  },
-  {
-   "id": "math-src639337",
-   "src": "assets/math/math-src639337.png?v=6460d0d329",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 187,
-   "ratio": 7.48,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/bb/bb90f93100c5b017a29be25ab3b091a3.svg",
-   "sourceId": "math-src639337",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src639619",
@@ -17689,18 +17161,6 @@
    "description": "Рисунок источника к заданию профиля №10"
   },
   {
-   "id": "math-src642025",
-   "src": "assets/math/math-src642025.png?v=d4bd8da89d",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 186,
-   "ratio": 7.44,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/bd/bd9d9a91cb2fd2fdda3a5abbc55a7548.svg",
-   "sourceId": "math-src642025",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src642026",
    "src": "assets/math/math-src642026.png?v=3a12f3982f",
    "type": "image",
@@ -17845,18 +17305,6 @@
    "description": "Рисунок источника к заданию профиля №8"
   },
   {
-   "id": "math-src642736",
-   "src": "assets/math/math-src642736.png?v=2b72b5632b",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 197,
-   "ratio": 7.88,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/6b/6ba4c508c317c90b71d0dff9c769bafc.svg",
-   "sourceId": "math-src642736",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src642743",
    "src": "assets/math/math-src642743.png?v=9bc85fd358",
    "type": "image",
@@ -17989,18 +17437,6 @@
    "description": "Рисунок источника к заданию профиля №8"
   },
   {
-   "id": "math-src646082",
-   "src": "assets/math/math-src646082.png?v=15035ce715",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 52,
-   "ratio": 1.5757575757575757,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/59/59e6ed269715680d8e7a3d3fe05b94d5.svg",
-   "sourceId": "math-src646082",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src646083",
    "src": "assets/math/math-src646083.png?v=23d57d0ef0",
    "type": "image",
@@ -18107,18 +17543,6 @@
    "sourceId": "math-src648015",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №19"
-  },
-  {
-   "id": "math-src649378",
-   "src": "assets/math/math-src649378.png?v=a751a856c9",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 301,
-   "ratio": 10.379310344827585,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/52/52155cb97dd60ebf0a308fe36ee354b3.svg",
-   "sourceId": "math-src649378",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src649750",
@@ -18325,18 +17749,6 @@
    "description": "Рисунок источника к заданию профиля №19"
   },
   {
-   "id": "math-src654109",
-   "src": "assets/math/math-src654109.png?v=58c56fe774",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 264,
-   "ratio": 9.10344827586207,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/25/253ec81353ac684036e2ed945ea16010.svg",
-   "sourceId": "math-src654109",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src654406",
    "src": "assets/math/math-src654406.png?v=995f991d23",
    "type": "image",
@@ -18505,18 +17917,6 @@
    "description": "Рисунок источника к заданию профиля №9"
   },
   {
-   "id": "math-src656199",
-   "src": "assets/math/math-src656199.png?v=a4f5d8affb",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №20)",
-   "width": 76,
-   "ratio": 3.04,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/26/2699116635a87772fcaa44ef0439170d.svg",
-   "sourceId": "math-src656199",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №20"
-  },
-  {
    "id": "math-src656250",
    "src": "assets/math/math-src656250.png?v=160f08b3bb",
    "type": "image",
@@ -18683,18 +18083,6 @@
    "sourceId": "math-src660892",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src660898",
-   "src": "assets/math/math-src660898.png?v=e045d3f70c",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 100,
-   "ratio": 4.0,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/40/401b69b1154a4cdf2c5381a12ead5cc2.svg",
-   "sourceId": "math-src660898",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src660954",
@@ -18973,30 +18361,6 @@
    "description": "Рисунок источника к заданию профиля №8"
   },
   {
-   "id": "math-src670355",
-   "src": "assets/math/math-src670355.png?v=e080ad2f6a",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 52,
-   "ratio": 1.5294117647058822,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/d1/d1b2e52808d71aa89a427c7b04b4ed9b.svg",
-   "sourceId": "math-src670355",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
-   "id": "math-src670375",
-   "src": "assets/math/math-src670375.png?v=a1349264e4",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 37,
-   "ratio": 0.6491228070175439,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/91/91a102fb98cfffc7ea9d8539b96dcb47.svg",
-   "sourceId": "math-src670375",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src670505",
    "src": "assets/math/math-src670505.png?v=a569f696f5",
    "type": "image",
@@ -19079,18 +18443,6 @@
    "sourceId": "math-src672194",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №16"
-  },
-  {
-   "id": "math-src672513",
-   "src": "assets/math/math-src672513.png?v=7227647889",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 159,
-   "ratio": 5.888888888888889,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/9e/9ecdcc912806de0e8116612308131483.svg",
-   "sourceId": "math-src672513",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
   },
   {
    "id": "math-src672514",
@@ -19261,30 +18613,6 @@
    "description": "Рисунок источника к заданию профиля №14"
   },
   {
-   "id": "math-src674439",
-   "src": "assets/math/math-src674439.png?v=495575e76c",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 157,
-   "ratio": 5.814814814814815,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/73/73460876c1a51ec68dfe06ecdc7bf719.svg",
-   "sourceId": "math-src674439",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
-   "id": "math-src674808",
-   "src": "assets/math/math-src674808.png?v=495575e76c",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 157,
-   "ratio": 5.814814814814815,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/73/73460876c1a51ec68dfe06ecdc7bf719.svg",
-   "sourceId": "math-src674808",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src674810",
    "src": "assets/math/math-src674810.png?v=56d3de3b5c",
    "type": "image",
@@ -19319,18 +18647,6 @@
    "sourceId": "math-src674931",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №14"
-  },
-  {
-   "id": "math-src674932",
-   "src": "assets/math/math-src674932.png?v=3f1f5a9db1",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 52,
-   "ratio": 1.5757575757575757,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/19/1919db085e624186aabb0790c8d91f38.svg",
-   "sourceId": "math-src674932",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
   },
   {
    "id": "math-src674972",
@@ -19415,18 +18731,6 @@
    "sourceId": "math-src676922",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src676925",
-   "src": "assets/math/math-src676925.png?v=e8a24bb2c4",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №5)",
-   "width": 35,
-   "ratio": 0.5645161290322581,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/73/73ec8ff9a934d2e5bc0e41d618d2cd94.svg",
-   "sourceId": "math-src676925",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №5"
   },
   {
    "id": "math-src676926",
@@ -19561,18 +18865,6 @@
    "description": "Рисунок источника к заданию профиля №10"
   },
   {
-   "id": "math-src681169",
-   "src": "assets/math/math-src681169.png?v=4f1c2283c3",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 202,
-   "ratio": 7.769230769230769,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/59/592e697c3b22c6dbae4da6651cf94326.svg",
-   "sourceId": "math-src681169",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src681170",
    "src": "assets/math/math-src681170.png?v=3051e2c223",
    "type": "image",
@@ -19633,18 +18925,6 @@
    "description": "Рисунок источника к заданию профиля №14"
   },
   {
-   "id": "math-src681302",
-   "src": "assets/math/math-src681302.png?v=b47c5f0f1b",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 283,
-   "ratio": 11.32,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/4a/4ad31091b6ae6e6eaa5023a2f1cf7109.svg",
-   "sourceId": "math-src681302",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src681460",
    "src": "assets/math/math-src681460.png?v=615d5b6901",
    "type": "image",
@@ -19677,18 +18957,6 @@
    "ratio": 3.7058823529411766,
    "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/e1/e1733825ab16cae195afeb9291f99306.svg",
    "sourceId": "math-src681757",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
-   "id": "math-src683411",
-   "src": "assets/math/math-src683411.png?v=495575e76c",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 157,
-   "ratio": 5.814814814814815,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/53/535e056533f21a496fb5d7e3a5cfab2e.svg",
-   "sourceId": "math-src683411",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №18"
   },
@@ -19789,18 +19057,6 @@
    "description": "Рисунок источника к заданию профиля №9"
   },
   {
-   "id": "math-src688781",
-   "src": "assets/math/math-src688781.png?v=d59b3c8933",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №15)",
-   "width": 228,
-   "ratio": 1.2954545454545454,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/15/15c46f29cc637dd4bc6e36637010a0be.svg",
-   "sourceId": "math-src688781",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №15"
-  },
-  {
    "id": "math-src688786",
    "src": "assets/math/math-src688786.png?v=0e34e9ace2",
    "type": "image",
@@ -19883,18 +19139,6 @@
    "sourceId": "math-src692909",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №19"
-  },
-  {
-   "id": "math-src694569",
-   "src": "assets/math/math-src694569.png?v=e1041b369f",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №20)",
-   "width": 213,
-   "ratio": 7.607142857142857,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/ff/ff78e0d28205466e33406e2261f58f81.svg",
-   "sourceId": "math-src694569",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №20"
   },
   {
    "id": "math-src69569",
@@ -20161,18 +19405,6 @@
    "description": "Рисунок источника к заданию профиля №19"
   },
   {
-   "id": "math-src701533",
-   "src": "assets/math/math-src701533.png?v=2568ccd626",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №18)",
-   "width": 160,
-   "ratio": 5.925925925925926,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/bd/bd5b47a40c508bc409c14974970809e4.svg",
-   "sourceId": "math-src701533",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №18"
-  },
-  {
    "id": "math-src701653",
    "src": "assets/math/math-src701653.png?v=1df00a2778",
    "type": "image",
@@ -20231,18 +19463,6 @@
    "sourceId": "math-src704522",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №2"
-  },
-  {
-   "id": "math-src704606",
-   "src": "assets/math/math-src704606.png?v=a39e8674fa",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №7)",
-   "width": 125,
-   "ratio": 3.90625,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/49/49a2e1c7eb8833148018612a4aa3e5a6.svg",
-   "sourceId": "math-src704606",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №7"
   },
   {
    "id": "math-src704615",
@@ -20361,18 +19581,6 @@
    "ratio": 1.3548387096774193,
    "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/a3/a398264660b63067fd0441d60ca5b1d9.svg",
    "sourceId": "math-src704659",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №6"
-  },
-  {
-   "id": "math-src704667",
-   "src": "assets/math/math-src704667.png?v=724e493a2b",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №6)",
-   "width": 29,
-   "ratio": 1.0,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/d4/d44370a8f3d0d2ed4e615922532736a7.svg",
-   "sourceId": "math-src704667",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №6"
   },
@@ -20917,18 +20125,6 @@
    "description": "Рисунок источника к заданию профиля №7"
   },
   {
-   "id": "math-src97967",
-   "src": "assets/math/math-src97967.png?v=1bbbfb2dcc",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №8)",
-   "width": 238,
-   "ratio": 8.814814814814815,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/39/395c4e0386ee8ff02fd951d56daaf784.svg",
-   "sourceId": "math-src97967",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №8"
-  },
-  {
    "id": "math-src99565",
    "src": "assets/math/math-src99565.png?v=bcc4ab562f",
    "type": "image",
@@ -20937,18 +20133,6 @@
    "ratio": 1.10625,
    "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/83/83890a740cc4ef943088b18704e26275.svg",
    "sourceId": "math-src99565",
-   "taskId": null,
-   "description": "Рисунок источника к заданию профиля №11"
-  },
-  {
-   "id": "math-src99566",
-   "src": "assets/math/math-src99566.png?v=4fa6ff4c53",
-   "type": "image",
-   "alt": "Рисунок к заданию (профиль №11)",
-   "width": 45,
-   "ratio": 1.8,
-   "source": "рисунок источника: https://ege.sdamgia.ru/formula/svg/41/416f965acc1f38b3d2244f6f0ab7d0e0.svg",
-   "sourceId": "math-src99566",
    "taskId": null,
    "description": "Рисунок источника к заданию профиля №11"
   }
@@ -26132,11 +25316,10 @@
    "sub": "Вектор с концом в точке B(5; 4) имеет координаты (3; 1).",
    "num": "№2",
    "diff": 1,
-   "text": "Вектор с концом в точке B(5; 4) имеет координаты (3; 1). Найдите сумму координат точки A.",
+   "text": "Вектор (\\overrightarrowAB) с концом в точке B(5; 4) имеет координаты (3; 1). Найдите сумму координат точки A.",
    "answer": "5",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Координаты вектора равны разности координат конца вектора и его начала."
    ],
@@ -26147,10 +25330,7 @@
    "example": 1,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26463",
-   "visual": {
-    "assetId": "math-src26463"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26463"
   },
   {
    "id": "n02_a8",
@@ -28029,11 +27209,10 @@
    "sub": "Вектор (\\overrightarrowAB) с концом в точке B(5; 3) имее",
    "num": "№2",
    "diff": 1,
-   "text": "Вектор с концом в точке B(5; 3) имеет координаты (3; 1). Найдите абсциссу точки A.",
+   "text": "Вектор (\\overrightarrowAB) с концом в точке B(5; 3) имеет координаты (3; 1). Найдите абсциссу точки A.",
    "answer": "2",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Координаты вектора равны разности координат конца вектора и его начала."
    ],
@@ -28044,10 +27223,7 @@
    "example": 1,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26461",
-   "visual": {
-    "assetId": "math-src26461"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26461"
   },
   {
    "id": "n02_p6",
@@ -28081,11 +27257,10 @@
    "sub": "Вектор (\\overrightarrowAB) с началом в точке A(−22; −1)",
    "num": "№2",
    "diff": 1,
-   "text": "Вектор с началом в точке A(−22; −1) имеет координаты (8; 7). Найдите сумму координат точки B.",
+   "text": "Вектор (\\overrightarrowAB) с началом в точке A(−22; −1) имеет координаты (8; 7). Найдите сумму координат точки B.",
    "answer": "-8",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Пусть координаты точки B равны xB и yB."
    ],
@@ -28096,10 +27271,7 @@
    "example": 16,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=61057",
-   "visual": {
-    "assetId": "math-src61057"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=61057"
   },
   {
    "id": "n02_q2",
@@ -28133,11 +27305,10 @@
    "sub": "Вектор (\\overrightarrowAB) с концом в точке B(3, 7) имее",
    "num": "№2",
    "diff": 1,
-   "text": "Вектор с концом в точке B(3, 7) имеет координаты (4, 20). Найдите ординату точки A.",
+   "text": "Вектор (\\overrightarrowAB) с концом в точке B(3, 7) имеет координаты (4, 20). Найдите ординату точки A.",
    "answer": "-13",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Координаты вектора равны разности координат конца вектора и его начала."
    ],
@@ -28148,10 +27319,7 @@
    "example": 18,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=61157",
-   "visual": {
-    "assetId": "math-src61157"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=61157"
   },
   {
    "id": "n02_q4",
@@ -28288,11 +27456,10 @@
    "sub": "Вектор (\\overrightarrowAB) с началом в точке A(2; 4) име",
    "num": "№2",
    "diff": 1,
-   "text": "Вектор с началом в точке A(2; 4) имеет координаты (6; 2). Найдите ординату точки B.",
+   "text": "Вектор (\\overrightarrowAB) с началом в точке A(2; 4) имеет координаты (6; 2). Найдите ординату точки B.",
    "answer": "6",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Координаты вектора равны разности координат конца вектора и его начала."
    ],
@@ -28303,10 +27470,7 @@
    "example": 24,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26459",
-   "visual": {
-    "assetId": "math-src26459"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №2, https://math-ege.sdamgia.ru/problem?id=26459"
   },
   {
    "id": "n02_q10",
@@ -36157,11 +35321,10 @@
    "sub": "Компания обслуживает 5 серверов. Вероятность отключения",
    "num": "№5",
    "diff": 1,
-   "text": "Компания обслуживает 5 серверов. Вероятность отключения одного сервера в течение дня равна Во сколько раз вероятность события «в течение дня ровно один сервер потребуют ремонта» больше, чем вероятность события «в течение дня ровно 3 сервера потребуют ремонта»?",
+   "text": "Компания обслуживает 5 серверов. Вероятность отключения одного сервера в течение дня равна (дробь: числитель: 1, знаменатель: 5 конец дроби) Во сколько раз вероятность события «в течение дня ровно один сервер потребуют ремонта» больше, чем вероятность события «в течение дня ровно 3 сервера потребуют ремонта»?",
    "answer": "8",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Вероятность противоположного события, состоящего в том, что поломка не произойдет, равна (1 минус 0,2 = 0,8) Для нахождения вероятности события «в течение дня ровно один сервер потребуют ремонта» воспользуемся формулой Бернулли:\n (P_5 (1) = C_5 в степени 1 p в степени 1 q в степени 4 = дробь: числитель: 5!, знаменатель: (5 минус 1) !"
    ],
@@ -36172,10 +35335,7 @@
    "example": 20,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №5, https://math-ege.sdamgia.ru/problem?id=676925",
-   "visual": {
-    "assetId": "math-src676925"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №5, https://math-ege.sdamgia.ru/problem?id=676925"
   },
   {
    "id": "n05_q4",
@@ -38097,11 +37257,10 @@
    "sub": "Социологическая служба планирует провести опрос избирате",
    "num": "№6",
    "diff": 1,
-   "text": "Социологическая служба планирует провести опрос избирателей, чтобы оценить долю сторонников одного из кандидатов. Необходимо, чтобы с вероятностью не менее γ = 0,95 полученная частота отклонялась от истинной вероятности p не более чем на δ = 0,05. Сколько избирателей необходимо опросить?",
+   "text": "Социологическая служба планирует провести опрос избирателей, чтобы оценить долю сторонников одного из кандидатов. Необходимо, чтобы с вероятностью не менее γ = 0,95 полученная частота (\\overlineX) отклонялась от истинной вероятности p не более чем на δ = 0,05. Сколько избирателей необходимо опросить?",
    "answer": "2000",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "Запишем неравенство Чебышёва для вероятности выборочного среднего:\n Потребуем, чтобы подставим величины находим:\nПри опросе 2000 респондентов с вероятностью не менее 0,95 частота сторонников, полученная в опросе, будет отличаться от истинной доли не более чем на 0,05."
    ],
@@ -38112,10 +37271,7 @@
    "example": 27,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №6, https://math-ege.sdamgia.ru/problem?id=704667",
-   "visual": {
-    "assetId": "math-src704667"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №6, https://math-ege.sdamgia.ru/problem?id=704667"
   },
   {
    "id": "n06_q6",
@@ -42921,9 +42077,8 @@
    "diff": 1,
    "text": "Найдите значение выражения: (14 синус 135 в степени (°) умножить на косинус 135 в степени (°))",
    "answer": "-7",
-   "hint": "Формула — на рисунке: перепиши её аккуратно и решай.",
+   "hint": "Решение.",
    "hints": [
-    "Формула — на рисунке: перепиши её аккуратно и решай.",
     "Решение.",
     "По формуле синуса двойного угла (2 синус 135 косинус 135= синус 270 градусов) Тогда \n (14 синус 135 градусов умножить на косинус 135 градусов =7 умножить на 2 синус 135 градусов умножить на косинус 135 градусов =7 синус 270 градусов =7 умножить на (минус 1) = минус 7) (14 синус 135 градусов умножить на косинус 135 градусов =7 умножить на 2 синус 135 градусов умножить на косинус 135 градусов =) \n (=7 синус 270 градусов =7 умножить на (минус 1) = минус 7)"
    ],
@@ -42934,10 +42089,7 @@
    "example": 82,
    "points": 1,
    "valueType": "целое число",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №8, https://math-ege.sdamgia.ru/problem?id=97967",
-   "visual": {
-    "assetId": "math-src97967"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №8, https://math-ege.sdamgia.ru/problem?id=97967"
   },
   {
    "id": "n08_q68",
@@ -57853,11 +57005,10 @@
    "sub": "Дана правильная четырёхугольная пирамида MABCD, рёбра ос",
    "num": "№15",
    "diff": 2,
-   "text": "Дана правильная четырёхугольная пирамида MABCD, рёбра основания которой равны 5. Тангенс угла между прямыми DM и AL равен L — середина ребра MB. \nа) Докажите, что плоскости ACL и MDB перпендикулярны.\nб) Найдите высоту данной пирамиды.",
+   "text": "Дана правильная четырёхугольная пирамида MABCD, рёбра основания которой равны 5. Тангенс угла между прямыми DM и AL равен (дробь: числитель: 2, знаменатель: 3 конец дроби ,) L — середина ребра MB. \nа) Докажите, что плоскости ACL и MDB перпендикулярны.\nб) Найдите высоту данной пирамиды.",
    "answer": "Решение. \nа) Пусть точка O — точка пересечения AC и BD. Заметим, что (AC\\perp BD,) как диагонали квадрата. Кроме того, (AC\\perp OM) Поэтому, по признаку перпендикулярности прямой и плоскости, (AC\\perp MDB) Значит, по признаку перпендикулярности плоскостей, (ACL\\perp MDB) \nб) Обозначим угол между DM и AL буквой (альфа) Отрезок MO — высота пирамиды MABCD. Тогда OL — средняя линия треугольника BDM, следовательно, (OL MD) Поэтому (\\angle ALO=\\angle альфа) По условию (тангенс альфа = дробь: числитель: 2, знаменатель: 3 конец дроби) \nОснование ABCD — квадрат со стороной, равной 5. Отрезок OA равен (дробь: числитель: 5, знаменатель: корень из: начало аргумента: 2 конец аргумента конец дроби) Поскольку (OA\\bot OB) и (OA\\bot MO,) следовательно, OA перпендикуляр к плоскости MOB. Значит, (OL \\bot OA) \nДалее, из прямоугольного треугольника AOL находим \n (OL= дробь: числитель: OA, знаменатель: тангенс альфа конец дроби = дробь: числитель: 15 корень из: начало аргумента: 2 конец аргумента , знаменатель: 4 конец дроби) \nБоковое ребро (MD=2OL= дробь: числитель: 15, знаменатель: корень из: начало аргумента: 2 конец аргумента конец дроби ,) поскольку OL — средняя линия треугольника BDM. Из прямоугольного треугольника MOD находим искомую высоту MO пирамиды MABCD: \n (MO= корень из: начало аргумента: MD в квадрате минус OD в квадрате конец аргумента =10) \nОтвет: 10.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть точка O — точка пересечения AC и BD."
    ],
@@ -57871,9 +57022,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=504262",
-   "visual": {
-    "assetId": "math-src504262"
-   },
    "solutionAssets": [
     "math-sol141369"
    ]
@@ -57981,9 +57129,8 @@
    "diff": 2,
    "text": "В правильной четырёхугольной пирамиде SABCD через ребро AB провели плоскость α, образующую сечение ABMN, где M и N — точки пересечения плоскости α с боковыми рёбрами SC и SD соответственно. Известно, что (AB = BM = AN = 4MN) \nа) Докажите, что точки M и N делят ребра SC и SD в отношении 1 : 3, считая от вершины S.\nб) Найдите косинус угла между плоскостью основания ABCD и плоскостью α.",
    "answer": "Решение. \nа) Основанием правильной четырехугольной пирамиды является квадрат, значит, ребра AB и DC параллельны, а потому и плоскость α параллельна ребру DC. Следовательно, лежащая в плоскости α прямая MN также параллельна ребру DC. Тогда треугольники SNM и SDC подобны по двум углам с коэффициентом (дробь: числитель: 1, знаменатель: 4 конец дроби) Таким образом, SN : SD = 1 : 4, а потому SN : ND = 1 : 3 и, так как все боковые ребра правильной пирамиды равны, SM : MC = 1 : 3.\nб) Пусть MN = x и SM = y, тогда MC = 3y и AB = AN = BM = 4x. Пусть точки K, P и Q — середины отрезков AB, MN и DC соответственно.\nРассмотрим прямоугольный треугольник, один из катетов которого равен PK, а гипотенуза равна BM. Второй катет такого треугольника равен BK − MP. Аналогично получается прямоугольный треугольник с катетами PQ, QC − PM и гипотенузой MC. Применим к обоим треугольникам теорему Пифагора:\n (PK в квадрате = BM в квадрате минус (BK минус MP) в квадрате = (4x) в квадрате минус (дробь: числитель: 4x, знаменатель: 2 конец дроби минус дробь: числитель: x, знаменатель: 2 конец дроби) в квадрате = 13,75x в квадрате ,) \n (PQ в квадрате = MC в квадрате минус (QC минус PM) в квадрате = (3y) в квадрате минус (дробь: числитель: 4x, знаменатель: 2 конец дроби минус дробь: числитель: x, знаменатель: 2 конец дроби) в квадрате = 9y в квадрате минус 2,25x в квадрате) \nКосинус искомого угла равен косинусу угла между прямыми, перпендикулярными линии пересечения плоскостей, то есть (косинус \\angle PKQ) — искомый. Воспользуемся теоремой косинусов в треугольнике PKQ:\n (косинус \\angle PKQ = дробь: числитель: PK в квадрате плюс KQ в квадрате минус PQ в квадрате , знаменатель: 2 умножить на PK умножить на KQ конец дроби = дробь: числитель: 13,75x в квадрате плюс 16x в квадрате минус 9y в квадрате плюс 2,25x в квадрате , знаменатель: 2 умножить на корень из: начало аргумента: 13,75 конец аргумента x умножить на 4x конец дроби = дробь: числитель: 32x в квадрате минус 9y в квадрате , знаменатель: 4 корень из: начало аргумента: 55 конец аргумента x в квадрате конец дроби) (косинус \\angle PKQ = дробь: числитель: PK в квадрате плюс KQ в квадрате минус PQ в квадрате , знаменатель: 2 умножить на PK умножить на KQ конец дроби =) \n (= дробь: числитель: 13,75x в квадрате плюс 16x в квадрате минус 9y в квадрате плюс 2,25x в квадрате , знаменатель: 2 умножить на корень из: начало аргумента: 13,75 конец аргумента x умножить на 4x конец дроби = дробь: числитель: 32x в квадрате минус 9y в квадрате , знаменатель: 4 корень из: начало аргумента: 55 конец аргумента x в квадрате конец дроби) \n В равнобедренном треугольнике SBC найдем косинус угла SCB:\n (косинус \\angle SCB = дробь: числитель: 16x в квадрате плюс 16y в квадрате минус 16y в квадрате , знаменатель: 2 умножить на 4x умножить на 4y конец дроби = дробь: числитель: 16x в квадрате , знаменатель: 32xy конец дроби = дробь: числитель: x, знаменатель: 2y конец дроби) \n Косинус этого же угла выразим из треугольника MBC:\n (косинус \\angle SBC = дробь: числитель: 9y в квадрате плюс 16x в квадрате минус 16x в квадрате , знаменатель: 2 умножить на 4x умножить на 3y конец дроби = дробь: числитель: 9y в квадрате , знаменатель: 24xy конец дроби = дробь: числитель: 3y, знаменатель: 8x конец дроби) \n Приравняем полученные значения:\n (дробь: числитель: x, знаменатель: 2y конец дроби = дробь: числитель: 3y, знаменатель: 8x конец дроби равносильно 8x в квадрате = 6y в квадрате равносильно x в квадрате = 0,75y в квадрате) \n Наконец, подставим найденные значеня в выражение для косинуса искомого угла:\n (косинус \\angle PKQ = дробь: числитель: 24y в квадрате минус 9y в квадрате , знаменатель: 4 корень из: начало аргумента: 55 конец аргумента умножить на 0,75y в квадрате конец дроби = дробь: числитель: 15y в квадрате , знаменатель: корень из: начало аргумента: 55 конец аргумента умножить на 3y в квадрате конец дроби = дробь: числитель: 5, знаменатель: корень из: начало аргумента: 55 конец аргумента конец дроби = дробь: числитель: 5 корень из: начало аргумента: 55 конец аргумента , знаменатель: 55 конец дроби = дробь: числитель: корень из: начало аргумента: 55 конец аргумента , знаменатель: 11 конец дроби) \nОтвет: б) (дробь: числитель: корень из: начало аргумента: 55 конец аргумента , знаменатель: 11 конец дроби) \nПриведем решение пункта б) Натальи Лесниченко.\nПусть MN = x, тогда AB = BM = 4x. Высоту трапеции найдем по теореме Пифагора из прямоугольного треугольника, один из катетов которого равен PK, а гипотенуза равна BM:\n (PK = корень из: начало аргумента: BM в квадрате минус (BK минус MP) в квадрате конец аргумента = корень из: начало аргумента: (4x) в квадрате минус (дробь: числитель: 4x, знаменатель: 2 конец дроби минус дробь: числитель: x, знаменатель: 2 конец дроби) в квадрате конец аргумента = корень из: начало аргумента: дробь: числитель: 64, знаменатель: 4 конец дроби x в квадрате минус дробь: числитель: 9, знаменатель: 4 конец дроби x в квадрате конец аргумента = дробь: числитель: x корень из: начало аргумента: 55 конец аргумента , знаменатель: 2 конец дроби) (PK = корень из: начало аргумента: BM в квадрате минус (BK минус MP) в квадрате конец аргумента =) \n (= корень из: начало аргумента: (4x) в квадрате минус (дробь: числитель: 4x, знаменатель: 2 конец дроби минус дробь: числитель: x, знаменатель: 2 конец дроби) в квадрате конец аргумента = корень из: начало аргумента: дробь: числитель: 64, знаменатель: 4 конец дроби x в квадрате минус дробь: числитель: 9, знаменатель: 4 конец дроби x в квадрате конец аргумента = дробь: числитель: x корень из: начало аргумента: 55 конец аргумента , знаменатель: 2 конец дроби) (PK = корень из: начало аргумента: BM в квадрате минус (BK минус MP) в квадрате конец аргумента =) \n (= корень из: начало аргумента: (4x) в квадрате минус (дробь: числитель: 4x, знаменатель: 2 конец дроби минус дробь: числитель: x, знаменатель: 2 конец дроби) в квадрате конец аргумента =) \n (= корень из: начало аргумента: дробь: числитель: 64, знаменатель: 4 конец дроби x в квадрате минус дробь: числитель: 9, знаменатель: 4 конец дроби x в квадрате конец аргумента = дробь: числитель: x корень из: начало аргумента: 55 конец аргумента , знаменатель: 2 конец дроби) \n Пусть точки O и L — проекции точек S и P на плоскость основания пирамиды соответственно. Прямоугольные треугольники SOQ и PLQ подобны по острому углу, поэтому (дробь: числитель: LQ, знаменатель: OQ конец дроби = дробь: числитель: PQ, знаменатель: SQ конец дроби = дробь: числитель: 3, знаменатель: 1 конец дроби) Тогда\n (KL = KO плюс OL = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на AD плюс дробь: числитель: 1, знаменатель: 4 конец дроби умножить на OQ = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на 4x плюс дробь: числитель: 1, знаменатель: 4 конец дроби умножить на 2x = дробь: числитель: 5, знаменатель: 2 конец дроби x) \n Таким образом,\n (косинус \\angle PKQ = косинус \\angle PKL = дробь: числитель: KL, знаменатель: PK конец дроби = дробь: числитель: 5, знаменатель: 2 конец дроби x : дробь: числитель: x корень из: начало аргумента: 55 конец аргумента , знаменатель: 2 конец дроби = дробь: числитель: 5, знаменатель: корень из: начало аргумента: 55 конец аргумента конец дроби = дробь: числитель: корень из: начало аргумента: 55 конец аргумента , знаменатель: 11 конец дроби) \n-->",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Основанием правильной четырехугольной пирамиды является квадрат, значит, ребра AB и DC параллельны, а потому и плоскость α параллельна ребру DC."
    ],
@@ -57997,9 +57144,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=681302",
-   "visual": {
-    "assetId": "math-src681302"
-   },
    "solutionAssets": [
     "math-sol218910",
     "math-sol222617"
@@ -58129,11 +57273,10 @@
    "sub": "B правильной четырёхугольной призме ABCDA1B1C1D1 сторона",
    "num": "№15",
    "diff": 2,
-   "text": "B правильной четырёхугольной призме ABCDA1B1C1D1 сторона AB основания равна 5, а боковое ребро AA1 равно На рёбрах BC и C1D1 отмечены точки K и L соответственно, причём BK = C1L = 2. Плоскость γ параллельна прямой BD и содержит точки K и L.\nа) Докажите, что прямая A1C перпендикулярна плоскости γ.\nб) Найдите объём пирамиды, вершина которой — точка A1, а основание сечение данной призмы плоскостью γ.",
+   "text": "B правильной четырёхугольной призме ABCDA1B1C1D1 сторона AB основания равна 5, а боковое ребро AA1 равно (корень из: начало аргумента: 5 конец аргумента) На рёбрах BC и C1D1 отмечены точки K и L соответственно, причём BK = C1L = 2. Плоскость γ параллельна прямой BD и содержит точки K и L.\nа) Докажите, что прямая A1C перпендикулярна плоскости γ.\nб) Найдите объём пирамиды, вершина которой — точка A1, а основание сечение данной призмы плоскостью γ.",
    "answer": "Решение. \nа) Проведём прямые через точки L и K параллельно прямой BD. Получим точку M на ребре B1C1 и точку N на ребре CD. Равнобедренная трапеция KNLM — сечение призмы плоскостью γ. Пусть прямая AC пересекает прямую NK в точке P, а прямая A1C1 пересекает прямую LM в точке Q. Тогда (PC = дробь: числитель: 3, знаменатель: 2 конец дроби корень из: начало аргумента: 2 конец аргумента ,) (QC_1 = корень из: начало аргумента: 2 конец аргумента) Пусть продолжение прямой PQ за точку Q пересекает продолжение прямой CC1 за точку C1 в точке T. Треугольник AA1C подобен треугольнику CPT, поскольку\n (дробь: числитель: A_1A, знаменатель: PC конец дроби = дробь: числитель: AC, знаменатель: TC конец дроби = дробь: числитель: корень из: начало аргумента: 5 конец аргумента , знаменатель: 1,5 корень из: начало аргумента: 2 конец аргумента конец дроби = дробь: числитель: 5 корень из: начало аргумента: 2 конец аргумента , знаменатель: 3 корень из: начало аргумента: 5 конец аргумента конец дроби ,) \nследовательно, (\\angle AA_1C = \\angle CPT) и треугольники AA1C и HPC подобны, а значит, угол PHC — прямой. Прямые A1C и PT перпендикулярны, прямая A1C перпендикулярна прямой BD, следовательно, (по признаку перпендикулярности прямой и плоскости), прямая A1C перпендикулярна плоскости γ.\nб) Пусть точка H — точка пересечения прямых A1C и PQ. Отрезок A1H — высота указанной пирамиды. Имеем \n (PQ = дробь: числитель: 1, знаменатель: 3 конец дроби PT = дробь: числитель: 1, знаменатель: 3 конец дроби корень из: начало аргумента: TC в квадрате плюс PC в квадрате конец аргумента = корень из: начало аргумента: дробь: числитель: 11, знаменатель: 2 конец дроби конец аргумента ,) \n (A_1C = корень из: начало аргумента: AA_1 в квадрате плюс AC в квадрате конец аргумента = корень из: начало аргумента: 55 конец аргумента) \nИз подобия треугольников AA1C и HPC получаем (HC = дробь: числитель: AC умножить на PC, знаменатель: A_1C конец дроби = дробь: числитель: 3 корень из: начало аргумента: 55 конец аргумента , знаменатель: 11 конец дроби) Следовательно, (A_1H = A_1C минус HC = дробь: числитель: 8 корень из: начало аргумента: 55 конец аргумента , знаменатель: 11 конец дроби) Объём пирамиды A1KNLM равен \n (дробь: числитель: 1, знаменатель: 3 конец дроби A_1H умножить на PQ умножить на дробь: числитель: LM плюс NK, знаменатель: 2 конец дроби = дробь: числитель: 20 корень из: начало аргумента: 5 конец аргумента , знаменатель: 3 конец дроби) \nОтвет: б) (дробь: числитель: 20 корень из: начало аргумента: 5 конец аргумента , знаменатель: 3 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Проведём прямые через точки L и K параллельно прямой BD."
    ],
@@ -58147,9 +57290,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=674932",
-   "visual": {
-    "assetId": "math-src674932"
-   },
    "solutionAssets": [
     "math-sol207003",
     "math-sol201663"
@@ -59492,11 +58632,10 @@
    "sub": "Сторона основания правильной шестиугольной пирамиды SABC",
    "num": "№15",
    "diff": 2,
-   "text": "Сторона основания правильной шестиугольной пирамиды SABCDEF равна 6. Боковое ребро наклонено к основанию под углом 60°. Через меньшую диагональ основания AC проведено сечение, которое пересекает высоту пирамиды в точке, удаленной от основания на расстояние \nа) Докажите, что это сечение перпендикулярно противоположному к АС боковому ребру пирамиды SE.\nб) Найдите площадь сечения.",
+   "text": "Сторона основания правильной шестиугольной пирамиды SABCDEF равна 6. Боковое ребро наклонено к основанию под углом 60°. Через меньшую диагональ основания AC проведено сечение, которое пересекает высоту пирамиды в точке, удаленной от основания на расстояние (корень из: начало аргумента: 3 конец аргумента) \nа) Докажите, что это сечение перпендикулярно противоположному к АС боковому ребру пирамиды SE.\nб) Найдите площадь сечения.",
    "answer": "Решение. \nа) Пусть искомое сечение пересекает высоту SO в точке P, а ребро SE — в точке M. Пусть точка M — середина AC. Рассмотрим равнобедренный треугольник BSE. Поскольку угол SBE = 60°, то треугольник BSE равносторонний. Имеем:\n (BM = AB умножить на синус 30 градусов = 3,) \n (BE = 2 BO = 2 AB = 12,) \n (SO = BO умножить на тангенс 60 градусов =6 корень из: начало аргумента: 3 конец аргумента ,) \nоткуда (дробь: числитель: SP, знаменатель: PO конец дроби = дробь: числитель: 5, знаменатель: 1 конец дроби) По теореме Менелая для треугольника OSE и секущей MPH получим:\n (дробь: числитель: SH, знаменатель: HE конец дроби умножить на дробь: числитель: EM, знаменатель: MO конец дроби умножить на дробь: числитель: OP, знаменатель: PS конец дроби = 1 равносильно дробь: числитель: SH, знаменатель: HE конец дроби умножить на дробь: числитель: 3, знаменатель: 1 конец дроби умножить на дробь: числитель: 1, знаменатель: 5 конец дроби = 1 равносильно дробь: числитель: SH, знаменатель: HE конец дроби = дробь: числитель: 5, знаменатель: 3 конец дроби) \nВыразим HE:\n (HE = дробь: числитель: 3, знаменатель: 8 конец дроби умножить на 12 = дробь: числитель: 9, знаменатель: 2 конец дроби = дробь: числитель: ME, знаменатель: 2 конец дроби ,) \n откуда (HE = ME умножить на косинус 60 в степени circ,) значит, прямая MH перпендикулярна прямой HE. Тогда плоскость ACH перпендикулярна прямой SE, поскольку прямая AC тоже перпендикулярна прямой SE по теореме о трех перпендикулярах.\nб) Пусть сечение проходит через точку R на прямой SF и через точку T на прямой SD. Заметим, что точка P лежит в плоскостях ACH и CSF, значит, точка P принадлежит прямой CR. Аналогично точка P принадлежит прямой AT. По теореме Менелая для треугольника SFO и секущей CR имеем: \n (дробь: числитель: OP, знаменатель: PS конец дроби умножить на дробь: числитель: SR, знаменатель: RF конец дроби умножить на дробь: числитель: FC, знаменатель: CO конец дроби = 1 равносильно дробь: числитель: 1, знаменатель: 5 конец дроби умножить на дробь: числитель: SR, знаменатель: RF конец дроби умножить на дробь: числитель: 2, знаменатель: 1 конец дроби = 1 равносильно дробь: числитель: SR, знаменатель: RF конец дроби = дробь: числитель: 5, знаменатель: 2 конец дроби) \nАналогично (дробь: числитель: ST, знаменатель: TD конец дроби = дробь: числитель: 5, знаменатель: 2 конец дроби ,) откуда\n (KE = дробь: числитель: 5, знаменатель: 7 конец дроби FD = дробь: числитель: 5, знаменатель: 7 конец дроби умножить на FE умножить на корень из: начало аргумента: 3 конец аргумента = дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби) \nПусть прямая RT пересекает прямую MH в точке K. Имеем:\n (дробь: числитель: MP, знаменатель: PK конец дроби = дробь: числитель: MC, знаменатель: KR конец дроби = дробь: числитель: 6 корень из: начало аргумента: 3 конец аргумента , знаменатель: \\tfrac30 корень из: начало аргумента: 3 конец аргумента 7 конец дроби = дробь: числитель: 7, знаменатель: 5 конец дроби ,) \n (MH = ME умножить на синус 60 градусов = дробь: числитель: 9 корень из: начало аргумента: 3 конец аргумента , знаменатель: 2 конец дроби ,) \n (MP = корень из: начало аргумента: MO в квадрате плюс OP в квадрате конец аргумента = корень из: начало аргумента: 9 плюс 3 конец аргумента = 2 корень из: начало аргумента: 3 конец аргумента ,) \n откуда находим:\n (PK = дробь: числитель: 5, знаменатель: 12 конец дроби умножить на 2 корень из: начало аргумента: 3 конец аргумента = дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби ,) \n (HK = дробь: числитель: 9 корень из: начало аргумента: 3 конец аргумента , знаменатель: 2 конец дроби минус дробь: числитель: 17, знаменатель: 12 конец дроби умножить на 2 корень из: начало аргумента: 3 конец аргумента = дробь: числитель: 10 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби = дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби) \nПлощадь сечения ACTHR равна\n (S_ACTHR = S_ACTR плюс S_HTR = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MK умножить на (AC плюс RT) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на HK умножить на RT =) \n (= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 17 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби умножить на (6 корень из: начало аргумента: 3 конец аргумента плюс дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби умножить на дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби = дробь: числитель: 51, знаменатель: 2 конец дроби плюс дробь: числитель: 255, знаменатель: 14 конец дроби плюс дробь: числитель: 150, знаменатель: 14 конец дроби = дробь: числитель: 381, знаменатель: 7 конец дроби) (S_ACTHR = S_ACTR плюс S_HTR = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MK умножить на (AC плюс RT) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на HK умножить на RT =) \n (= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 17 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби умножить на (6 корень из: начало аргумента: 3 конец аргумента плюс дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби умножить на дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби =) \n (= дробь: числитель: 51, знаменатель: 2 конец дроби плюс дробь: числитель: 255, знаменатель: 14 конец дроби плюс дробь: числитель: 150, знаменатель: 14 конец дроби = дробь: числитель: 381, знаменатель: 7 конец дроби) (S_ACTHR = S_ACTR плюс S_HTR =) \n (= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MK умножить на (AC плюс RT) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на HK умножить на RT =) \n (= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 17 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби умножить на (6 корень из: начало аргумента: 3 конец аргумента плюс дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби) плюс дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби умножить на дробь: числитель: 30 корень из: начало аргумента: 3 конец аргумента , знаменатель: 7 конец дроби =) \n (= дробь: числитель: 51, знаменатель: 2 конец дроби плюс дробь: числитель: 255, знаменатель: 14 конец дроби плюс дробь: числитель: 150, знаменатель: 14 конец дроби = дробь: числитель: 381, знаменатель: 7 конец дроби) \nОтвет: б) (дробь: числитель: 381, знаменатель: 7 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть искомое сечение пересекает высоту SO в точке P, а ребро SE — в точке M."
    ],
@@ -59510,9 +58649,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=670355",
-   "visual": {
-    "assetId": "math-src670355"
-   },
    "solutionAssets": [
     "math-sol199542"
    ]
@@ -59643,11 +58779,10 @@
    "sub": "Косинус угла между боковой гранью и основанием правильно",
    "num": "№15",
    "diff": 2,
-   "text": "Косинус угла между боковой гранью и основанием правильной треугольной пирамиды равен \nа) Докажите, что высота пирамиды, проведенная к боковой грани, больше чем высота пирамиды, проведенная к основанию.\nб) Найдите угол между боковыми гранями этой пирамиды.",
+   "text": "Косинус угла между боковой гранью и основанием правильной треугольной пирамиды равен (дробь: числитель: корень из: начало аргумента: 6 конец аргумента , знаменатель: 6 конец дроби) \nа) Докажите, что высота пирамиды, проведенная к боковой грани, больше чем высота пирамиды, проведенная к основанию.\nб) Найдите угол между боковыми гранями этой пирамиды.",
    "answer": "Решение. \n а) Пусть SABC — данная пирамида с вершиной S, отрезок SH — ее высота, точка M — середина BC, CK — высота треугольника (BSC) Угол SMH — угол между боковой гранью пирамиды и основанием.\nПусть SM = 6a. тогда \n (MH=SM косинус \\angleSMH=a корень из: начало аргумента: 6 конец аргумента ,) \n (AM=3a корень из: начало аргумента: 6 конец аргумента ,) \n (BC=6a корень из: начало аргумента: 2 конец аргумента ,) \n (SB= корень из: начало аргумента: BM в квадрате плюс SM в квадрате конец аргумента =3a корень из: начало аргумента: 6 конец аргумента) \nОбозначим высоту пирамиды, проведенную к BSC за h. Тогда h — высота треугольника ASM. Отсюда (h умножить на SM = SH умножить на AM,) откуда \n (дробь: числитель: h, знаменатель: SH конец дроби = дробь: числитель: SM, знаменатель: AM конец дроби = дробь: числитель: 3 корень из: начало аргумента: 6 конец аргумента , знаменатель: 6 конец дроби = дробь: числитель: корень из: начало аргумента: 6 конец аргумента , знаменатель: 2 конец дроби больше 1) \n Что и требовалось доказать.\nб) Найдем площадь треугольника BSC двумя способами: \n (дробь: числитель: 1, знаменатель: 2 конец дроби SM умножить на BC = дробь: числитель: 1, знаменатель: 2 конец дроби CK умножить на SB) \n Значит, (CK = 4a корень из: начало аргумента: 3 конец аргумента) \nРебро AC перпендикулярно плоскости SBH, поэтому SB и AC перпендикулярны, следовательно, плоскость AKC перпендикулярна ребру (SB) Искомый угол между боковыми гранями равен углу при вершине равнобедренного треугольника AKC:\n (косинус \\angleAKC= дробь: числитель: 2KC в квадрате минус AC в квадрате , знаменатель: 2KC в квадрате конец дроби = дробь: числитель: 1, знаменатель: 4 конец дроби) \nОтвет: б) (арккосинус дробь: числитель: 1, знаменатель: 4 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть SABC — данная пирамида с вершиной S, отрезок SH — ее высота, точка M — середина BC, CK — высота треугольника (BSC) Угол SMH — угол между боковой гранью пирамиды и основанием."
    ],
@@ -59661,9 +58796,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=510809",
-   "visual": {
-    "assetId": "math-src510809"
-   },
    "solutionAssets": [
     "math-sol145428"
    ]
@@ -60196,11 +59328,10 @@
    "sub": "Основанием треугольной призмы ABC1B1C1 является правильн",
    "num": "№15",
    "diff": 2,
-   "text": "Основанием треугольной призмы ABC1B1C1 является правильный треугольник ABC со стороной 1, а боковое ребро равно Диагональ боковой грани A1B перпендикулярна плоскости основания. Точка M — середина стороны ВС.\nа) Докажите, что прямые АМ и A1C перпендикулярны.\nб) Найдите расстояние между прямыми A1C и BC1.",
+   "text": "Основанием треугольной призмы ABC1B1C1 является правильный треугольник ABC со стороной 1, а боковое ребро равно (корень из: начало аргумента: 2 конец аргумента) Диагональ боковой грани A1B перпендикулярна плоскости основания. Точка M — середина стороны ВС.\nа) Докажите, что прямые АМ и A1C перпендикулярны.\nб) Найдите расстояние между прямыми A1C и BC1.",
    "answer": "Решение. \nа) Отрезок AM является медианой и высотой основания, поэтому содержащая его прямая АМ перпендикулярна прямой BC. Прямая BC является проекцией прямой A1C на плоскость основания ABC. Следовательно, по теореме о трех перпендикулярах прямые AM и A1C взаимно перпендикулярны.\nб) В плоскости AA1C через точку С1 проведем прямую, параллельную прямой A1C. Пусть D — точка пересечения этой прямой с прямой AC. Плоскость B1D параллельна прямой A1C и содержит прямую BC1, следовательно, расстояние между прямыми A1C и BC1 равно расстоянию от точки C до плоскости BC1D. Найдем его вычислив двумя способами объем пирамиды BCDC1. Заметим, что:\n (A_1B= корень из: начало аргумента: AA_1 в квадрате минус AB в квадрате конец аргумента =1,) \n (CD=A_1C_1=1,) \n (C_1D=A_1C= корень из: начало аргумента: A_1B в квадрате плюс BC в квадрате конец аргумента = корень из: начало аргумента: 2 конец аргумента ,) \n (BC_1= корень из: начало аргумента: A_1B плюс A_1C_1 конец аргумента = корень из: начало аргумента: 2 конец аргумента) \n Далее находим: (\\angle BCD=180 градусов минус \\angle ACB=120 градусов,) откуда получаем площадь треугольника BCD: \n (S_BCD= дробь: числитель: 1, знаменатель: 2 конец дроби BC умножить на CD синус \\angle BCD= дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 4 конец дроби ,) \nа тогда (V_BCDC_1= дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 12 конец дроби) \n (BD в квадрате =CD в квадрате плюс CB в квадрате минус 2CD умножить на CB косинус \\angle BCD= 3,) \n откуда (BD= корень из: начало аргумента: 3 конец аргумента ,) поэтому\n (h_C_1BD= корень из: начало аргумента: BC_1 в квадрате минус (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате конец аргумента = дробь: числитель: корень из: начало аргумента: 5 конец аргумента , знаменатель: 2 конец дроби) \nЗначит, \n (S_C_1BD= дробь: числитель: 1, знаменатель: 2 конец дроби BD умножить на h_C_1BD= дробь: числитель: корень из: начало аргумента: 15 конец аргумента , знаменатель: 4 конец дроби) \nТаким образом, расстояние между прямыми A1C и BC1 равно\n (d (C,BC_1D) = дробь: числитель: 3V_BCDC_1, знаменатель: S_C_1BD конец дроби = дробь: числитель: 1, знаменатель: корень из: начало аргумента: 5 конец аргумента конец дроби) \nОтвет: б) (дробь: числитель: 1, знаменатель: корень из: начало аргумента: 5 конец аргумента конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Отрезок AM является медианой и высотой основания, поэтому содержащая его прямая АМ перпендикулярна прямой BC."
    ],
@@ -60214,9 +59345,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=646082",
-   "visual": {
-    "assetId": "math-src646082"
-   },
    "solutionAssets": [
     "math-sol145376"
    ]
@@ -60468,11 +59596,10 @@
    "sub": "На ребре AA1 прямоугольного параллелепипеда ABCDA1B1C1D1",
    "num": "№15",
    "diff": 2,
-   "text": "На ребре AA1 прямоугольного параллелепипеда ABCDA1B1C1D1 взята точка E так, что A1E : EA = 2 : 1. Точка T — середина ребра B1C1 \nа) Докажите, что сечение параллелепипеда плоскостью ETD1 является трапецией. \nб) Найдите угол между плоскостью ETD1 и плоскостью A1B1C1, если известно, что",
+   "text": "На ребре AA1 прямоугольного параллелепипеда ABCDA1B1C1D1 взята точка E так, что A1E : EA = 2 : 1. Точка T — середина ребра B1C1 \nа) Докажите, что сечение параллелепипеда плоскостью ETD1 является трапецией. \nб) Найдите угол между плоскостью ETD1 и плоскостью A1B1C1, если известно, что (AB = 2 корень из: начало аргумента: 2 конец аргумента ,) (AD = 7,) (AA_1 = 6)",
    "answer": "Решение. \nа) Параллельные плоскости ADD1 и BCC1 пересекаются третьей плоскостью ETD1 по параллельным прямым. Таким образом, в плоскости BCC1 через точку T проходит прямая, параллельная прямой ED1. Эта прямая пересекает ребро BB1 в точке F. Четырёхугольник EFTD1 — искомое сечение. В четырёхугольнике EFTD1 стороны ED1 и FT параллельны. Из подобия треугольников D1A1E и TB1F получаем (D_1 E : T F = D_1 A_1 : T B_1 = 2) Следовательно, EFTD1 — трапеция. \nб) Пусть продолжения отрезков D1T и A1B1 пересекаются в точке M. Треугольник D1A1M прямоугольный с катетами (A_1D_1 = 7) и (A_1M = 2A_1B_1 = 4 корень из: начало аргумента: 2 конец аргумента) Гипотенуза D1M равна (корень из: начало аргумента: 49 плюс 32 конец аргумента = 9) Значит, высота A1H треугольника, проведённая к гипотенузе, равна \n (дробь: числитель: A_1 D_1 умножить на A_1 M, знаменатель: D_1 M конец дроби = дробь: числитель: 7 умножить на 4 корень из: начало аргумента: 2 конец аргумента , знаменатель: 9 конец дроби = дробь: числитель: 28 корень из: начало аргумента: 2 конец аргумента , знаменатель: 9 конец дроби) \nПлоскости ETD1 и A1B1C1 пересекаются по прямой D1M. Отрезок A1H является проекцией отрезка EH на плоскость A1B1C1. По теореме о трёх перпендикулярах прямая EH перпендикулярна прямой D1M. Значит, угол EHA1 — линейный угол искомого двугранного угла. Из прямоугольного треугольника HA1E получаем\n (тангенс \\angle E H A_1 = дробь: числитель: E A_1, знаменатель: A_1 H конец дроби = дробь: числитель: дробь: числитель: 2, знаменатель: 3 конец дроби A A_1, знаменатель: A_1 H конец дроби = дробь: числитель: 2 умножить на 6 умножить на 9, знаменатель: 3 умножить на 28 корень из: начало аргумента: 2 конец аргумента конец дроби = дробь: числитель: 9 корень из: начало аргумента: 2 конец аргумента , знаменатель: 14 конец дроби) \n Следовательно, (\\angle E H A_1 = арктангенс дробь: числитель: 9 корень из: начало аргумента: 2 конец аргумента , знаменатель: 14 конец дроби) \nУгол между плоскостями ETD1 и A1B1C1 равен (арктангенс дробь: числитель: 9 корень из: начало аргумента: 2 конец аргумента , знаменатель: 14 конец дроби) \nОтвет: б) (арктангенс дробь: числитель: 9 корень из: начало аргумента: 2 конец аргумента , знаменатель: 14 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Параллельные плоскости ADD1 и BCC1 пересекаются третьей плоскостью ETD1 по параллельным прямым."
    ],
@@ -60486,9 +59613,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=688781",
-   "visual": {
-    "assetId": "math-src688781"
-   },
    "solutionAssets": [
     "math-sol230566"
    ]
@@ -60528,9 +59652,8 @@
    "diff": 2,
    "text": "На отрезке O1O2, соединяющем центры оснований кругового цилиндра, отмечены точки Р и F так, что (O_1 P : P F : F O_2 = 1 : 4 : 7) В цилиндре расположены два конуса: первый с вершиной F, основанием которого является круг основания с центром O1, второй — с вершиной P, основанием которого является круг основания с центром O2.\nа) Докажите, что боковые поверхности этих конусов пересекаются по окружности, радиус которой в 4 раза меньше радиуса основания цилиндра.\nб) Найдите объем общей части этих конусов, если высота цилиндра равна 10, а радиус основания цилиндра равен 3.",
    "answer": "Решение. \n а) Пусть точка O — центр окружности пересечения конусов — лежит на отрезке O1O2, и при этом (FO=k O_1O_2) В основаниях цилиндра и плоскости окружности пересечения конусов проведем три параллельных диаметра A1B1, A2B2 и AB соответственно. Рассмотрим сечение цилиндра плоскостью A1A2B2B1. В нем конусам будут соответствовать равнобедренные треугольники A1FB1 и A2PB2, боковые стороны которых пересекаются в точках A и B. Обозначим A1B1 = d, O1O2 = h. Заметим, что \n (PF= дробь: числитель: 1, знаменатель: 3 конец дроби h,) \n (PO= (дробь: числитель: 1, знаменатель: 3 конец дроби минус k) h,) \n (PO_1= дробь: числитель: 1, знаменатель: 12 конец дроби h,) \n (PO_2= дробь: числитель: 11, знаменатель: 12 конец дроби h,) \n (FO_1= дробь: числитель: 5, знаменатель: 12 конец дроби h) \nТреугольники AFB и A1FB1, а также APB и A2PB2 — подобны, следовательно, для AB имеем:\n (дробь: числитель: AB, знаменатель: A_1B_1 конец дроби = дробь: числитель: FO, знаменатель: FO_1 конец дроби равносильно AB= дробь: числитель: 12k, знаменатель: 5 конец дроби d,) \n (дробь: числитель: AB, знаменатель: A_2B_2 конец дроби = дробь: числитель: PO, знаменатель: PO_2 конец дроби равносильно AB= дробь: числитель: 4 минус 12k, знаменатель: 11 конец дроби d,) \n (дробь: числитель: 12k, знаменатель: 5 конец дроби = дробь: числитель: 4 минус 12k, знаменатель: 11 конец дроби равносильно k= дробь: числитель: 5, знаменатель: 48 конец дроби ,) \n (дробь: числитель: AB, знаменатель: A_1B_1 конец дроби = дробь: числитель: FO, знаменатель: FO_1 конец дроби = дробь: числитель: \\dfrac5, знаменатель: 48 конец дроби h\\dfrac512h= дробь: числитель: 1, знаменатель: 4 конец дроби) \nб) Общая часть конусов представляет из себя объединение двух конусов с общим основанием — окружностью с центром O и диаметром AB. При этом высота нижнего конуса — PO, а верхнего — FO. Радиус окружности равен\n (R=OB= дробь: числитель: 1, знаменатель: 2 конец дроби AB= дробь: числитель: 1, знаменатель: 8 конец дроби d,) \nтогда объем общей части конусов равен \n (V=V_1 плюс V_2= дробь: числитель: 1, знаменатель: 3 конец дроби PO Пи R в квадрате плюс дробь: числитель: 1, знаменатель: 3 конец дроби FO Пи R в квадрате = дробь: числитель: 1, знаменатель: 3 конец дроби PF Пи R в квадрате = дробь: числитель: 1, знаменатель: 9 конец дроби h умножить на дробь: числитель: 1, знаменатель: 64 конец дроби d в квадрате Пи = дробь: числитель: 5 Пи , знаменатель: 8 конец дроби) \nОтвет: б) (дробь: числитель: 5 Пи , знаменатель: 8 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть точка O — центр окружности пересечения конусов — лежит на отрезке O1O2, и при этом (FO=k O_1O_2) В основаниях цилиндра и плоскости окружности пересечения конусов проведем три параллельных диаметра A1B1, A2B2 и AB соответственно."
    ],
@@ -60544,9 +59667,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=649378",
-   "visual": {
-    "assetId": "math-src649378"
-   },
    "solutionAssets": [
     "math-sol153293"
    ]
@@ -60590,9 +59710,8 @@
    "diff": 2,
    "text": "На ребрах AB и BC треугольной пирамиды ABCD отмечены точки M и N соответственно, причём (AM:MB=CN:NB=3:1) Точки P и Q — середины сторон DA и DC соответственно.\nа) Доказать, что P, Q, M и N лежат в одной плоскости.\nб) Найти отношение объемов многогранников, на которые плоскость PQM разбивает пирамиду.",
    "answer": "Решение. \nа) По теореме, обратной обобщенной теореме Фалеса, прямые MN и PQ параллельны, и потому точки P, Q, M и N лежат в одной плоскости. \nб) Пусть объём ABCD равен V. Пятигранник APMCQN состоит из четырёхугольной пирамиды PACNM с основанием ACNM и треугольной пирамиды PQCN с основанием QCN. Выразим их объемы через V.\nРасстояние от P до плоскости BCD вдвое меньше расстояния от A до той же плоскости, при этом \n (дробь: числитель: S_QCN, знаменатель: S_BCD конец дроби = дробь: числитель: CN умножить на CQ, знаменатель: CB умножить на CD конец дроби = дробь: числитель: 3, знаменатель: 4 конец дроби умножить на дробь: числитель: 1, знаменатель: 2 конец дроби = дробь: числитель: 3, знаменатель: 8 конец дроби) \n Значит, (V_PQCN= дробь: числитель: 3V, знаменатель: 16 конец дроби) \nПлощадь треугольника MBN составляет (дробь: числитель: 1, знаменатель: 16 конец дроби) площади ABC. Значит, (дробь: числитель: S_ACNM, знаменатель: S_ABC конец дроби = дробь: числитель: 15, знаменатель: 16 конец дроби) Расстояние от точки P до плоскости ABC вдвое меньше расстояния от D до ABC, поэтому (V_PACNM= дробь: числитель: 15V, знаменатель: 32 конец дроби) \nТаким образом, (V_APMCQN= дробь: числитель: 21V, знаменатель: 32 конец дроби ,) то есть (дробь: числитель: V_APMCQN, знаменатель: V_BMNDPQ конец дроби = дробь: числитель: 21, знаменатель: 11 конец дроби) \nОтвет: 21 : 11.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) По теореме, обратной обобщенной теореме Фалеса, прямые MN и PQ параллельны, и потому точки P, Q, M и N лежат в одной плоскости."
    ],
@@ -60606,9 +59725,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=517439",
-   "visual": {
-    "assetId": "math-src517439"
-   },
    "solutionAssets": [
     "math-sol120429"
    ]
@@ -60621,9 +59737,8 @@
    "diff": 2,
    "text": "Основанием прямой призмы ABCA1B1C1 является равнобедренный треугольник ABC, AB = AC = 5, BC = 6. Высота призмы равна 3. \nа) Докажите, что плоскость, проходящая через точки A, A1 и середину ребра B1C1, перпендикулярна плоскости (A_1BC) \nб) Найдите расстояние от середины ребра B1C1 до плоскости BCA1.",
    "answer": "Решение. \nа) Пусть (A_1D_1) — высота треугольника (A_1B_1C_1,) тогда (D_1) — середина стороны (B_1C_1) Плоскость (AA_1D_1) пересекает плоскость (BCA_1) по прямой (A_1D,) где D — середина отрезка (BC) Прямая BC перпендикулярна плоскости (AA_1D_1) поскольку перпендикулярна прямым (DD_1) и (A_1D_1) Следовательно, плоскости (AA_1D_1) и (BCA_1) перпендикулярны. \nб) По доказанному в пункте а) расстояние от точки (D_1) до плоскости (BCA_1) равно высоте (D_1H) прямоугольного треугольника (A_1D_1D) \nИз условия следует, что (DD_1=3,C_1D_1=3,A_1D_1= корень из: начало аргумента: A_1C_1 в квадрате минус C_1D_1 в квадрате конец аргумента =4,) откуда\n (D_1H= дробь: числитель: A_1D_1 умножить на DD_1, знаменатель: корень из: начало аргумента: A_1D_1 в квадрате плюс DD_1 в квадрате конец аргумента конец дроби = дробь: числитель: 4 умножить на 3, знаменатель: 5 конец дроби =2,4) \nОтвет: 2,4.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть (A_1D_1) — высота треугольника (A_1B_1C_1,) тогда (D_1) — середина стороны (B_1C_1) Плоскость (AA_1D_1) пересекает плоскость (BCA_1) по прямой (A_1D,) где D — середина отрезка (BC) Прямая BC перпендикулярна плоскости (AA_1D_1) поскольку перпендикулярна прямым (DD_1) и (A_1D_1) Следовательно, плоскости (AA_1D_1) и (BCA_1) перпендикулярны."
    ],
@@ -60637,9 +59752,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=507690",
-   "visual": {
-    "assetId": "math-src507690"
-   },
    "solutionAssets": [
     "math-sol132172",
     "math-sol132173"
@@ -60798,11 +59910,10 @@
    "sub": "В прямоугольном параллелепипеде ABCDA1B1C1D1 точка P леж",
    "num": "№15",
    "diff": 2,
-   "text": "В прямоугольном параллелепипеде ABCDA1B1C1D1 точка P лежит на ребре AA1, причём A1P : PA = 3 : 4, BB1 = 14, AD = 6. Плоскость DPB1 пересекает ребро CC1 в точке N, тангенс угла между прямой NP и плоскостью основания ABCD равен \nа) Докажите, что четырехугольник DPB1N — ромб.\nб) Найдите площадь сечения DPB1N.",
+   "text": "В прямоугольном параллелепипеде ABCDA1B1C1D1 точка P лежит на ребре AA1, причём A1P : PA = 3 : 4, BB1 = 14, AD = 6. Плоскость DPB1 пересекает ребро CC1 в точке N, тангенс угла между прямой NP и плоскостью основания ABCD равен (дробь: числитель: 1, знаменатель: 5 конец дроби) \nа) Докажите, что четырехугольник DPB1N — ромб.\nб) Найдите площадь сечения DPB1N.",
    "answer": "Решение. \nа) Так как боковые грани параллелепипеда попарно параллельны, сторона сечения PD параллельна стороне B1N, а сторона сечения PB1 параллельна стороне ND, следовательно, сечение — параллелограмм. Проведём прямую RN параллельно диагонали основания AC. Прямые PB1 и ND параллельны, поэтому прямоугольные треугольники PA1B1 и NCD равны. Далее имеем:\n (A_1P=NC=AR= дробь: числитель: 3, знаменатель: 7 конец дроби AA_1=6,) \n (PR=2,) \n (AC=RN= дробь: числитель: PR, знаменатель: тангенс \\angle PNR конец дроби =10,) \n (CD= корень из: начало аргумента: AC в квадрате минус AD в квадрате конец аргумента =8,) \nа тогда (DN= корень из: начало аргумента: CD в квадрате плюс NC в квадрате конец аргумента =10) и (B_1N= корень из: начало аргумента: B_1C_1 в квадрате плюс C_1N в квадрате конец аргумента =10) Таким образом, DPB1N — ромб.\nб) Найдём диагонали ромба:\n (PN= корень из: начало аргумента: RN в квадрате плюс PR в квадрате конец аргумента =2 корень из: начало аргумента: 26 конец аргумента ,) \n (B_1D= корень из: начало аргумента: BD в квадрате плюс BB_1 в квадрате конец аргумента =2 корень из: начало аргумента: 74 конец аргумента) \nТеперь найдём площадь ромба:\n (S_DPB_1N= дробь: числитель: 1, знаменатель: 2 конец дроби PN умножить на B_1D=4 корень из: начало аргумента: 481 конец аргумента) \nОтвет: (4 корень из: начало аргумента: 481 конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Так как боковые грани параллелепипеда попарно параллельны, сторона сечения PD параллельна стороне B1N, а сторона сечения PB1 параллельна стороне ND, следовательно, сечение — параллелограмм."
    ],
@@ -60816,9 +59927,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №15, https://math-ege.sdamgia.ru/problem?id=562250",
-   "visual": {
-    "assetId": "math-src562250"
-   },
    "solutionAssets": [
     "math-sol141627"
    ]
@@ -63776,11 +62884,10 @@
    "sub": "Эпицентр циклона, движущийся прямолинейно, во время перв",
    "num": "№17",
    "diff": 2,
-   "text": "Эпицентр циклона, движущийся прямолинейно, во время первого измерения находился в 24 км к северу и 5 км к западу от метеостанции, а во время второго измерения находился в 20 км к северу и км к западу от метеостанции. Определите наименьшее расстояние, на которое эпицентр циклона приблизится к метеостанции.",
+   "text": "Эпицентр циклона, движущийся прямолинейно, во время первого измерения находился в 24 км к северу и 5 км к западу от метеостанции, а во время второго измерения находился в 20 км к северу и (3 1/2) км к западу от метеостанции. Определите наименьшее расстояние, на которое эпицентр циклона приблизится к метеостанции.",
    "answer": "Решение. \nВведём прямоугольную систему координат с началом координат в точке, где находится метеостанция, ось абсцисс направим на восток, ось ординат — на север. Тогда в момент первого измерения эпицентр циклона находился в точке с координатами ((минус 5;24) ,) а во время второго измерения — в точке с координатами ((минус 3,5;20)) По условию, эпицентр двигается прямолинейно. Пусть эта прямая задана уравнением (y=kx плюс b) Найдём коэффициенты k и b в уравнении этой прямой: \n (система выражений 24= минус 5k плюс b,20= минус 3,5k плюс b конец системы . равносильно система выражений 4= минус 1,5k,b=24 плюс 5k конец системы . равносильно система выражений k= минус дробь: числитель: 8, знаменатель: 3 конец дроби ,b= дробь: числитель: 32, знаменатель: 3 конец дроби . конец системы) \nТаким образом, уравнение прямой (y= минус дробь: числитель: 8, знаменатель: 3 конец дроби x плюс дробь: числитель: 32, знаменатель: 3 конец дроби) или (8x плюс 3y минус 32=0) Тогда наименьшее расстояние, на которое эпицентр циклона приблизится к метеостанции, будет равно расстоянию от точки ((0;0)) до прямой (8x плюс 3y минус 32=0:) \n (\\rho= дробь: числитель: 8 умножить на 0 плюс 3 умножить на 0 минус 32 , знаменатель: корень из: начало аргумента: 8 в квадрате плюс 3 в квадрате конец аргумента конец дроби = дробь: числитель: 32, знаменатель: корень из: начало аргумента: 73 конец аргумента конец дроби) (км).\nОтвет: (дробь: числитель: 32, знаменатель: корень из: начало аргумента: 73 конец аргумента конец дроби) км.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "Введём прямоугольную систему координат с началом координат в точке, где находится метеостанция, ось абсцисс направим на восток, ось ординат — на север."
    ],
@@ -63793,10 +62900,7 @@
    "example": 1,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №17, https://math-ege.sdamgia.ru/problem?id=531025",
-   "visual": {
-    "assetId": "math-src531025"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №17, https://math-ege.sdamgia.ru/problem?id=531025"
   },
   {
    "id": "n17_a2",
@@ -63837,9 +62941,8 @@
    "diff": 2,
    "text": "Первичная информация разделяется по серверам 1 и 2 и обрабатывается на них. С сервера 1 при объёме t2 Гбайт входящей в него информации выходит 30t Гбайт, а с сервера 2 при объёме t2 Гбайт входящей в него информации выходит 36t Гбайт обработанной информации при условии, что (15 меньше или равно t≤65) Каков наибольший общий объём выходящей информации при общем объёме входящей информации в 3904 Гбайт?",
    "answer": "Решение. \nПусть на сервер № 1 будет поступать (x в квадрате) гигабайт информации, на сервер № 2 — (y в квадрате) гигабайт информации, и пусть S — общий объём выходящей информации в гигабайтах. Тогда \n (система выражений x в квадрате плюс y в квадрате =3904,S=30x плюс 36y. конец системы) \nВыразим из первого уравнения системы y и подставим его во второе уравнение. Получаем\n (S (x) =30x плюс 36 корень из: начало аргумента: 3904 минус x в квадрате конец аргумента ,) \nгде (15 меньше или равно x меньше или равно 65) Найдем наибольшее значение S при помощи производной. Получаем:\n (S' (x) =30 плюс дробь: числитель: 36 умножить на (минус 2x) , знаменатель: 2 корень из: начало аргумента: 3904 минус x в квадрате конец аргумента конец дроби =6 умножить на (5 минус дробь: числитель: 6x, знаменатель: корень из: начало аргумента: 3904 минус x в квадрате конец аргумента конец дроби)) \n Найдём критические точки:\n (S' (x) =0 равносильно 5 минус дробь: числитель: 6x, знаменатель: корень из: начало аргумента: 3904 минус x в квадрате конец аргумента конец дроби =0 равносильно 5 корень из: начало аргумента: 3904 минус x в квадрате конец аргумента =6x \\undersetx больше 0\\mathop равносильно 25 умножить на 3904 минус 25x в квадрате =36x в квадрате равносильно) (S' (x) =0 равносильно 5 минус дробь: числитель: 6x, знаменатель: корень из: начало аргумента: 3904 минус x в квадрате конец аргумента конец дроби =0 равносильно) \n (равносильно 5 корень из: начало аргумента: 3904 минус x в квадрате конец аргумента =6x \\undersetx больше 0\\mathop равносильно 25 умножить на 3904 минус 25x в квадрате =36x в квадрате равносильно) \n (равносильно 25 умножить на 3904=61x в квадрате равносильно 25 умножить на 64=x в квадрате \\undersetx больше 0\\mathop равносильно x=40) \nЗаметим, что (S' (20) больше 0,) а (S' (60) меньше 0,) значит, (x=40) — точка максимума, и именно в ней достигается наибольшее значение функции S(x). Вычислим его:\n (S (40) = 30 умножить на 40 плюс 36 умножить на корень из: начало аргумента: 3904 минус 40 в квадрате конец аргумента = 1200 плюс 36 умножить на корень из: начало аргумента: 2304 конец аргумента =) \n (=1200 плюс 36 умножить на 48=1200 плюс 1728=2928) (S (40) = 30 умножить на 40 плюс 36 умножить на корень из: начало аргумента: 3904 минус 40 в квадрате конец аргумента =) \n (= 1200 плюс 36 умножить на корень из: начало аргумента: 2304 конец аргумента =) \n (=1200 плюс 36 умножить на 48=1200 плюс 1728=2928) \nОтвет: 2928 Гбайт.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "Пусть на сервер № 1 будет поступать (x в квадрате) гигабайт информации, на сервер № 2 — (y в квадрате) гигабайт информации, и пусть S — общий объём выходящей информации в гигабайтах."
    ],
@@ -63852,10 +62955,7 @@
    "example": 1,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №17, https://math-ege.sdamgia.ru/problem?id=553833",
-   "visual": {
-    "assetId": "math-src553833"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №17, https://math-ege.sdamgia.ru/problem?id=553833"
   },
   {
    "id": "n17_a4",
@@ -64784,9 +63884,8 @@
    "diff": 2,
    "text": "В остроугольном треугольнике ABC проведены высоты AP и CQ.\nа) Докажите, что угол PAC равен углу PQC.\nб) Найдите радиус окружности, описанной около треугольника ABC, если известно, что PQ=10 и (∠ ABC=60 градусов)",
    "answer": "Решение. \n а) Рассмотрим окружность с диаметром AC. Углы APC и AQC — прямые, а значит являются вписанными опирающимися на диаметр AC. Значит, точки A, Q, P и C лежат на одной окружности, а, следовательно, равны и вписанные углы PAC и PQC этой окружности, опирающиеся на дугу PC, что и требовалось доказать. \nб) Прямоугольные треугольники ABP и CBQ имеют общий угол ABC, следовательно, они подобны, откуда (дробь: числитель: BQ, знаменатель: BP конец дроби = дробь: числитель: BC, знаменатель: BA конец дроби) или (дробь: числитель: BQ, знаменатель: BC конец дроби = дробь: числитель: BP, знаменатель: BA конец дроби ,) но тогда и треугольники BAC и BPQ также подобны, причем коэффициент подобия равен (дробь: числитель: BQ, знаменатель: BC конец дроби = дробь: числитель: BP, знаменатель: BA конец дроби = косинус \\angle ABC,) откуда (AC= дробь: числитель: PQ, знаменатель: косинус \\angle ABC конец дроби = дробь: числитель: 10, знаменатель: косинус 60 градусов конец дроби =20) Тогда радиус R окружности, описанной около треугольника ABC равен (R= дробь: числитель: AC, знаменатель: 2 синус \\angle ABC конец дроби = дробь: числитель: 20, знаменатель: 2 синус 60 градусов конец дроби = дробь: числитель: 20, знаменатель: корень из: начало аргумента: 3 конец аргумента конец дроби) \nОтвет: (дробь: числитель: 20, знаменатель: корень из: начало аргумента: 3 конец аргумента конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Рассмотрим окружность с диаметром AC."
    ],
@@ -64800,9 +63899,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=511508",
-   "visual": {
-    "assetId": "math-src511508"
-   },
    "solutionAssets": [
     "math-sol113452"
    ]
@@ -64842,9 +63938,8 @@
    "diff": 2,
    "text": "Дана трапеция ABCD с боковой стороной AB, которая перпендикулярна основаниям. Из точки А на сторону CD опущен перпендикуляр AH. На стороне AB взята точка E так, что прямые СЕ и СD перпендикулярны. \nа) Доказать, что прямые BH и ED параллельны. \nб) Найти отношение BH к ED, если (∠ BCD = 135 градусов)",
    "answer": "Решение. \n а) Продлим стороны AB и DC до пересечения в точке O. Прямоугольные треугольники OBC, OCE, OHA и OAD подобны, так как имеют общий острый угол O. Значит, \n (OB:OC=OC:OE=OA:OD=OH:OA) \nПеремножая первые два и последние два отношения, находим: (OB:OE=OH:OD,) откуда по теореме, обратной теореме о пропорциональных отрезках, заключаем, что прямые BH и ED параллельны.\nб) Заметим, что (BH:ED=OB:OE) Далее имеем: \n (дробь: числитель: OB, знаменатель: OE конец дроби = дробь: числитель: OB, знаменатель: OC конец дроби умножить на дробь: числитель: OC, знаменатель: OE конец дроби = косинус в квадрате \\angle COE= синус в квадрате \\angle OCB= синус в квадрате (180 градусов минус \\angle BCD) = синус в квадрате 45 градусов = дробь: числитель: 1, знаменатель: 2 конец дроби) (дробь: числитель: OB, знаменатель: OE конец дроби = дробь: числитель: OB, знаменатель: OC конец дроби умножить на дробь: числитель: OC, знаменатель: OE конец дроби = косинус в квадрате \\angle COE= синус в квадрате \\angle OCB=) \n (= синус в квадрате (180 градусов минус \\angle BCD) = синус в квадрате 45 градусов = дробь: числитель: 1, знаменатель: 2 конец дроби) \nОтвет: 1 : 2.\nПриведем другое решение пункта а).\nВ четырехугольнике AECD противоположные углы EAD и ECD прямые, следовательно, около него можно описать окружность. Тогда углы CDE и EAC равны как вписанные углы, опирающиеся на одну дугу. Аналогично из четырехугольника ABCH получаем, что углы BAC и CHB равны. Углы EAC и BAC равны, а значит, равны и углы CDE и CHB, откуда следует параллельность прямых BH и ED.\nПриведем другое решение пункта б).\nУгол ADO равен 45°, поэтому прямоугольный треугольник АОD равнобедренный. Значит, его высота АН является медианой: ОН = НD. Прямые ЕD и BН параллельны, тогда, по теореме Фалеса, ОВ = ВЕ. Значит, ВН — средняя линия треугольника ЕOD, а тогда ВН — половина ЕD.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Продлим стороны AB и DC до пересечения в точке O."
    ],
@@ -64858,9 +63953,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=514562",
-   "visual": {
-    "assetId": "math-src514562"
-   },
    "solutionAssets": [
     "math-sol146901"
    ]
@@ -64873,9 +63965,8 @@
    "diff": 2,
    "text": "Радиусы двух окружностей с центрами O1 и O2, касающихся внешним образом в точке A, равны 6 и 3 соответственно. Их общая секущая, проведенная через точку A, пересекает первую окружность в точке В, вторую — в точке С.\nа) Докажите, что (A B : B C = A O_1 : O_1 O_2) \nб) Найдите длину отрезка касательной, проведенной из точки В ко второй окружности, если AB = 4.",
    "answer": "Решение. \n а) Треугольники CO2A и AO1B равнобедренные, поскольку (O_2 A = O_2C,) (O_1A = O_1 B,) углы (\\angle O_2 AC) и (\\angle O_1 AB) равны как вертикальные. Тогда треугольники AO2C и AO1B подобны, следовательно, \n (дробь: числитель: AB, знаменатель: AC конец дроби = дробь: числитель: O_1 A , знаменатель: O_2 A конец дроби = 2) \nЗначит, \n (дробь: числитель: AB, знаменатель: BC конец дроби = дробь: числитель: AB, знаменатель: AB плюс AC конец дроби = дробь: числитель: 1, знаменатель: 1 плюс дробь: числитель: AC, знаменатель: AB конец дроби конец дроби = дробь: числитель: 1, знаменатель: дробь: числитель: 3, знаменатель: 2 конец дроби конец дроби = дробь: числитель: 2, знаменатель: 3 конец дроби = дробь: числитель: 6, знаменатель: 9 конец дроби = дробь: числитель: AO_1, знаменатель: O_1O_2 конец дроби) \nб) Пусть отрезок BF — искомая касательная. По теореме синусов для треугольника AO1B:\n (косинус \\angle O_1 = дробь: числитель: 6 в квадрате плюс 6 в квадрате минус 4 в квадрате , знаменатель: 2 умножить на 6 умножить на 6 конец дроби = дробь: числитель: 72 минус 16, знаменатель: 72 конец дроби = дробь: числитель: 7, знаменатель: 9 конец дроби) \nТогда по теореме косинусов для треугольника O2O1B получим, что:\n (O_2 B в квадрате = O_1 O_2 в квадрате плюс O_1B в квадрате минус 2 O_1O_2 умножить на O_1 B умножить на косинус \\angle O_1 = 81 плюс 36 минус 2 умножить на 9 умножить на 6 умножить на дробь: числитель: 7, знаменатель: 9 конец дроби = 33) (O_2 B в квадрате = O_1 O_2 в квадрате плюс O_1B в квадрате минус 2 O_1O_2 умножить на O_1 B умножить на косинус \\angle O_1 =) \n (= 81 плюс 36 минус 2 умножить на 9 умножить на 6 умножить на дробь: числитель: 7, знаменатель: 9 конец дроби = 33) \nПо теореме Пифагора\n (BF в квадрате = BO_2 в квадрате минус O_2 F в квадрате = 33 минус 9 = 24,) \nоткуда (BF = 2 корень из: начало аргумента: 6 конец аргумента) \nОтвет: б) (2 корень из: начало аргумента: 6 конец аргумента) \nПриведём другое решение пункта б):\nИз подобия треугольников AO2C и AO1B находим, что (AC= дробь: числитель: AB, знаменатель: 2 конец дроби =2) По свойству секущей и касательной к окружности, проведённых из одной точки имеем\n (BF в квадрате =BA умножить на BC=BA умножить на (BA плюс AC) =4 умножить на 6=24,) \n откуда (BF = 2 корень из: начало аргумента: 6 конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Треугольники CO2A и AO1B равнобедренные, поскольку (O_2 A = O_2C,) (O_1A = O_1 B,) углы (∠ O_2 AC) и (∠ O_1 AB) равны как вертикальные."
    ],
@@ -64889,9 +63980,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=654109",
-   "visual": {
-    "assetId": "math-src654109"
-   },
    "solutionAssets": [
     "math-sol164028"
    ]
@@ -64936,9 +64024,8 @@
    "diff": 2,
    "text": "Периметр треугольника ABC равен 24. На сторонах AB и BC отмечены точки E и F соответственно так, что BE : EA = BF : FC = 3 : 1. Прямая EF касается окружности, вписанной в треугольник.\nа) Докажите, что AC = 3.\nб) Найдите площадь треугольника ABC, если (∠ ACB = 90 в степени (°))",
    "answer": "Решение. \nа) Четырехугольник AEFC описан около окружности, поэтому (AE плюс FC = AC плюс EF) Треугольники BEF и BAC подобны с коэффициентом подобия (дробь: числитель: 3, знаменатель: 4 конец дроби) Значит, \n (AE = дробь: числитель: 1, знаменатель: 4 конец дроби AB,) \n (FC = дробь: числитель: 1, знаменатель: 4 конец дроби BC,) \n (EF = дробь: числитель: 3, знаменатель: 4 конец дроби AC) \n Следовательно, \n (дробь: числитель: 1, знаменатель: 4 конец дроби AB плюс дробь: числитель: 1, знаменатель: 4 конец дроби BC = AC плюс дробь: числитель: 3, знаменатель: 4 конец дроби AC равносильно дробь: числитель: 1, знаменатель: 4 конец дроби (AB плюс BC) = дробь: числитель: 7, знаменатель: 4 конец дроби AC) \nПериметр треугольника ABC равен 24, поэтому (AB плюс BC = 24 минус AC,) откуда получаем \n (дробь: числитель: 1, знаменатель: 4 конец дроби (24 минус AC) = дробь: числитель: 7, знаменатель: 4 конец дроби AC равносильно AC = 3) \nб) Пусть BC = x. Тогда получаем (AB = 21 минус x) По теореме Пифагора \n (AC в квадрате плюс BC в квадрате = AB в квадрате равносильно 9 плюс x в квадрате = (21 минус x) в квадрате равносильно 9 плюс x в квадрате = x в квадрате минус 42x плюс 441,) \nоткуда находим (x = дробь: числитель: 72, знаменатель: 7 конец дроби) Значит, (BC = дробь: числитель: 72, знаменатель: 7 конец дроби ,) и площадь треугольника ABC равна (S = дробь: числитель: AC умножить на BC, знаменатель: 2 конец дроби = дробь: числитель: 108, знаменатель: 7 конец дроби) \nОтвет: б) (дробь: числитель: 108, знаменатель: 7 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Четырехугольник AEFC описан около окружности, поэтому (AE плюс FC = AC плюс EF) Треугольники BEF и BAC подобны с коэффициентом подобия (дробь: числитель: 3, знаменатель: 4 конец дроби) Значит, \n (AE = дробь: числитель: 1, знаменатель: 4 конец дроби AB,) \n (FC = дробь: числитель: 1, знаменатель: 4 конец дроби BC,) \n (EF = дробь: числитель: 3, знаменатель: 4 конец дроби AC) \n Следовательно, \n (дробь: числитель: 1, знаменатель: 4 конец дроби AB плюс дробь: числитель: 1, знаменатель: 4 конец дроби BC = AC плюс дробь: числитель: 3, знаменатель: 4 конец дроби AC равносильно дробь: числитель: 1, знаменатель: 4 конец дроби (AB плюс BC) = дробь: числитель: 7, знаменатель: 4 конец дроби AC) \nПериметр треугольника ABC равен 24, поэтому (AB плюс BC = 24 минус AC,) откуда получаем \n (дробь: числитель: 1, знаменатель: 4 конец дроби (24 минус AC) = дробь: числитель: 7, знаменатель: 4 конец дроби AC равносильно AC = 3) \nб) Пусть BC = x."
    ],
@@ -64952,9 +64039,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=674439",
-   "visual": {
-    "assetId": "math-src674439"
-   },
    "solutionAssets": [
     "math-sol199211"
    ]
@@ -65287,9 +64371,8 @@
    "diff": 2,
    "text": "Внутри окружности с центром О построен правильный шестиугольник KOFPDL так, что его вершина D лежит на окружности. Из точки В, диаметрально противоположной точке D, проведены две хорды AB и ВС, проходящие через вершины К и F шестиугольника соответственно.\nа) Докажите, что (AK: KB =3: 7) \nб) Найдите площадь треугольника АВС, если радиус окружности равен 14.",
    "answer": "Решение. \n а) Пусть (OK=a,) тогда (OB=2a) и (\\angle BOK=120 градусов) По теореме косинусов\n (KB в квадрате =a в квадрате плюс 4a в квадрате минус 2a умножить на 2a умножить на (минус дробь: числитель: 1, знаменатель: 2 конец дроби) =7a в квадрате) \nАналогично (\\angle BOF=120 градусов) и (BK= BF=a корень из: начало аргумента: 7 конец аргумента) \nПусть MN — диаметр окружности, проходящей через точку K, тогда (KN=a плюс 2a=3a) и (MK=2a минус a=a) Из свойства хорд (AK умножить на KB=MK умножить на KN) находим:\n (AK= дробь: числитель: a умножить на 3a, знаменатель: корень из: начало аргумента: 7 конец аргумента a конец дроби = дробь: числитель: 3a корень из: начало аргумента: 7 конец аргумента , знаменатель: 7 конец дроби) \nЗначит, \n (AK:KB= дробь: числитель: 3 корень из: начало аргумента: 7 конец аргумента , знаменатель: 7 конец дроби : корень из: начало аргумента: 7 конец аргумента =3:7) \nб) Пусть H — точка пересечения отрезков KF и BD. По доказанному в пункте а) треугольники ABC и BKF подобны с коэффициентом подобия (10 : 7,) тогда\n (S_ABC= (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате S_KBF= (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате умножить на дробь: числитель: 1, знаменатель: 2 конец дроби умножить на BH умножить на KF = (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате умножить на дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 5a, знаменатель: 2 конец дроби умножить на a корень из: начало аргумента: 3 конец аргумента = дробь: числитель: 125 корень из: начало аргумента: 3 конец аргумента , знаменатель: 49 конец дроби a в квадрате) (S_ABC= (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате S_KBF= (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате умножить на дробь: числитель: 1, знаменатель: 2 конец дроби умножить на BH умножить на KF =) \n (= (дробь: числитель: 10, знаменатель: 7 конец дроби) в квадрате умножить на дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 5a, знаменатель: 2 конец дроби умножить на a корень из: начало аргумента: 3 конец аргумента = дробь: числитель: 125 корень из: начало аргумента: 3 конец аргумента , знаменатель: 49 конец дроби a в квадрате) \nПо условию (2a=14,) то есть (a=7,) следовательно, (S_ABC=125 корень из: начало аргумента: 3 конец аргумента) \nОтвет: б) (125 корень из: начало аргумента: 3 конец аргумента) \nПриведем другое решение пункта б).\nб) Найдем угол KBO по теореме синусов:\n (дробь: числитель: KO, знаменатель: синус \\angle KBO конец дроби = дробь: числитель: KB, знаменатель: синус \\angle KOB конец дроби ,) \n откуда\n (синус \\angle KBO= дробь: числитель: a умножить на дробь: числитель: корень из 3 , знаменатель: 2 конец дроби , знаменатель: корень из: начало аргумента: 7 конец аргумента a конец дроби = дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 2 корень из: начало аргумента: 7 конец аргумента конец дроби ,) \n (косинус \\angle KBO= корень из: начало аргумента: 1 минус дробь: числитель: 3, знаменатель: 28 конец дроби конец аргумента = дробь: числитель: 5, знаменатель: 2 корень из: начало аргумента: 7 конец аргумента конец дроби ,) \n (синус \\angle ABC= синус (2 \\angle KBO) =2 умножить на дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 2 корень из: начало аргумента: 7 конец аргумента конец дроби умножить на дробь: числитель: 5, знаменатель: 2 корень из: начало аргумента: 7 конец аргумента конец дроби = дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 14 конец дроби) \nПо условию (2a=14,) то есть (a=7,) следовательно,\n (AB=BC= дробь: числитель: 10, знаменатель: 7 конец дроби умножить на BK= дробь: числитель: 10, знаменатель: 7 конец дроби умножить на корень из: начало аргумента: 7 конец аргумента умножить на a=10 корень из: начало аргумента: 7 конец аргумента) \nТаким образом, для площади треугольника ABC получаем:\n (S_ABC= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на AB умножить на BC умножить на синус \\angle ABC= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на (10 корень из: начало аргумента: 7 конец аргумента) в квадрате умножить на дробь: числитель: 5 корень из: начало аргумента: 3 конец аргумента , знаменатель: 14 конец дроби =125 корень из: начало аргумента: 3 конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть (OK=a,) тогда (OB=2a) и (∠ BOK=120 градусов) По теореме косинусов\n (KB в квадрате =a в квадрате плюс 4a в квадрате минус 2a умножить на 2a умножить на (минус дробь: числитель: 1, знаменатель: 2 конец дроби) =7a в квадрате) \nАналогично (∠ BOF=120 градусов) и (BK= BF=a корень из: начало аргумента: 7 конец аргумента) \nПусть MN — диаметр окружности, проходящей через точку K, тогда (KN=a плюс 2a=3a) и (MK=2a минус a=a) Из свойства хорд (AK умножить на KB=MK умножить на KN) находим:\n (AK= дробь: числитель: a умножить на 3a, знаменатель: корень из: начало аргумента: 7 конец аргумента a конец дроби = дробь: числитель: 3a корень из: начало аргумента: 7 конец аргумента , знаменатель: 7 конец дроби) \nЗначит, \n (AK:KB= дробь: числитель: 3 корень из: начало аргумента: 7 конец аргумента , знаменатель: 7 конец дроби : корень из: начало аргумента: 7 конец аргумента =3:7) \nб) Пусть H — точка пересечения отрезков KF и BD."
    ],
@@ -65303,9 +64386,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=633394",
-   "visual": {
-    "assetId": "math-src633394"
-   },
    "solutionAssets": [
     "math-sol116970"
    ]
@@ -65703,9 +64783,8 @@
    "diff": 2,
    "text": "В остроугольном треугольнике ABC проведены высоты AK и CM. На них из точек M и K опущены перпендикуляры ME и KH соответственно.\nа) Докажите, что прямые EH и AC параллельны.\nб) Найдите отношение EH и AC, если (∠ ABC=60 градусов)",
    "answer": "Решение. \nа) Поскольку\n (\\angle AMC=\\angle AKC=\\angle MEK=\\angle MHK=90 градусов,) \nоколо четырёхугольников AMKC и MEHK можно описать окружность с диаметрами AC и MK соответственно.\nЗначит,\n (\\angle KAC=\\angle KMC = \\angle KMH = \\angle KEH,) \nто есть прямые AC и EH параллельны.\nб) Пусть O — точка пересечения отрезков AK и CM. Тогда\n (\\angle AOM=90 градусов минус \\angle MAO=90 градусов минус \\angle BAK=\\angle ABC=60 градусов) \nВ треугольнике EOH и AOC угол AOC общий, а углы OEH и OAC равны. Значит, треугольники EOH и AOC подобны.\nПоскольку\n (EO=MO умножить на косинус \\angle AOM= AO умножить на косинус в квадрате \\angle AOM=AO умножить на косинус в квадрате 60 градусов= дробь: числитель: 1, знаменатель: 4 конец дроби AO,) \nкоэффициент подобия равен (дробь: числитель: 1, знаменатель: 4 конец дроби) Значит, (EH : AC=1 : 4) \nОтвет: б) 1 : 4.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Поскольку\n (∠ AMC=∠ AKC=∠ MEK=∠ MHK=90 градусов,) \nоколо четырёхугольников AMKC и MEHK можно описать окружность с диаметрами AC и MK соответственно."
    ],
@@ -65719,9 +64798,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=514529",
-   "visual": {
-    "assetId": "math-src514529"
-   },
    "solutionAssets": [
     "math-sol181403"
    ]
@@ -65827,9 +64903,8 @@
    "diff": 2,
    "text": "Отрезок CH — высота прямоугольного треугольника ABC с прямым углом C. На катетах AC и BC выбраны точки M и N соответственно такие, что (∠ MHN = 90 градусов) \na) Докажите, что треугольник MNH подобен треугольнику ABC.\nб) Найдите CN, если BC = 3, AC = 5, CM = 2.",
    "answer": "Решение. \nа) Заметим, что сумма углов MHN и MCN равна 180°, поэтому четырехугольник CMHN вписан в окружность. Углы HMN и HCN равны как вписанные. Углы HCN и CAB равны, потому что каждый из них равен (90 в степени (\\circ) минус \\angle ABC) Таким образом, треугольники HMN и CAB подобны по двум углам. Это и требовалось доказать.\nб) Заметим, что \n (\\angle CMH=180 в степени (\\circ) минус \\angle CNH=\\angle BNH,) \nа (\\angle MCH=90 в степени (\\circ) минус \\angle A=\\angle B) Тогда треугольники CMH и BNH подобны по двум углам, причем из пункта а) следует, что\n (дробь: числитель: CM, знаменатель: BN конец дроби = дробь: числитель: MH, знаменатель: HN конец дроби = дробь: числитель: AC, знаменатель: BC конец дроби = дробь: числитель: 5, знаменатель: 3 конец дроби) \nИз этой цепочки равенств получаем, что (BN= дробь: числитель: 6, знаменатель: 5 конец дроби ,) а тогда (CN=3 минус дробь: числитель: 6, знаменатель: 5 конец дроби = дробь: числитель: 9, знаменатель: 5 конец дроби) \nОтвет: (дробь: числитель: 9, знаменатель: 5 конец дроби) \nПримечание.\nВнимательный читатель заметит неточность в рисунке. Подробно об этом написано в примечании к задаче 563674.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Заметим, что сумма углов MHN и MCN равна 180°, поэтому четырехугольник CMHN вписан в окружность."
    ],
@@ -65843,9 +64918,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=563681",
-   "visual": {
-    "assetId": "math-src563681"
-   },
    "solutionAssets": [
     "math-sol150038"
    ]
@@ -65982,9 +65054,8 @@
    "diff": 2,
    "text": "Дан прямоугольный треугольник ABC с прямым углом C. На катете AC взята точка M. Окружность с центром O и диаметром CM касается гипотенузы в точке N. \nа) Докажите, что прямые MN и BO параллельны.\nб) Найдите площадь четырёхугольника BOMN, если CN = 9 и (A M: M C=1: 8)",
    "answer": "Решение. \n a) Поскольку прямые AC и BC перпендикулярны, прямая BC — касательная к окружности. Прямая BO перпендикулярна прямой CN. Точка N лежит на окружности с диаметром CM, поэтому (\\angle C N M=90 в степени (\\circ)) Прямые BO и MN перпендикулярны одной и той же прямой CN, следовательно, они параллельны.\nб) Пусть (A M=x) и (M C=8 x) Тогда: \n (O C=O M=4 x,) (O A=5 x,) (A C=9 x) \n По свойству секущей и касательной, проведённых из одной точки, (A N в квадрате =A M умножить на A C,) следовательно, (AN=3x) Поскольку прямые MN и BO параллельны, по теореме Фалеса получаем:\n (дробь: числитель: A N, знаменатель: N B конец дроби = дробь: числитель: A M, знаменатель: M O конец дроби = дробь: числитель: 1, знаменатель: 4 конец дроби ,) \n следовательно, (N B=12 x) Отрезки BC и BN равны как отрезки касательных о окружности, проведённых из одной точки, значит, (B C=12 x) Поскольку (\\angle C M N=\\angle C O B,) прямоугольные треугольники CNM и BCO подобны, следовательно, \n (M N= дробь: числитель: C N умножить на C O, знаменатель: B C конец дроби = дробь: числитель: 9 умножить на 4 x, знаменатель: 12 x конец дроби =3) \n Из подобия треугольников AMN и AOB следует, что \n (B O= дробь: числитель: M N умножить на A O, знаменатель: A M конец дроби = дробь: числитель: 3 умножить на 5 x, знаменатель: x конец дроби =15) \nПусть отрезки BO и CN пересекаются в точке P. Тогда P — середина CN и (N P= дробь: числитель: 1, знаменатель: 2 конец дроби N C= дробь: числитель: 9, знаменатель: 2 конец дроби) По формуле площади трапеции находим:\n (S_B O M N= дробь: числитель: B O плюс M N, знаменатель: 2 конец дроби умножить на N P= дробь: числитель: 15 плюс 3, знаменатель: 2 конец дроби умножить на дробь: числитель: 9, знаменатель: 2 конец дроби =40,5) \nОтвет: б) 40,5.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "a) Поскольку прямые AC и BC перпендикулярны, прямая BC — касательная к окружности."
    ],
@@ -65998,9 +65069,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=635866",
-   "visual": {
-    "assetId": "math-src635866"
-   },
    "solutionAssets": [
     "math-sol120243"
    ]
@@ -66044,9 +65112,8 @@
    "diff": 2,
    "text": "Дан остроугольный треугольник ABC. Биссектриса внутреннего угла при вершине B пересекает биссектрису внешнего угла при вершине C в точке M, а биссектриса внутреннего угла при вершине C пересекает биссектрису внешнего угла при вершине B в точке N.\nа) Докажите, что (2∠ BMN=∠ ACB) \nб) Найдите BM, если AB = AC = 5, BC = 6.",
    "answer": "Решение. \nа) Обозначим точку пересечения внутренних биссектрис буквой I. Заметим, что точка M равноудалена от прямых AB, BC, AC, поэтому она лежит на биссектрисе внешнего угла при вершине A. Аналогично, на этой же биссектрисе лежит точка N. Поэтому прямая MN проходит через точку A, то есть угол BMN равен углу IMA. Заметим еще, что\n (\\angle AMC плюс \\angle AIC= (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (360 в степени (\\circ) минус \\angle A минус \\angle C)) плюс (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (\\angle A плюс \\angle C)) =180 в степени (\\circ)) (\\angle AMC плюс \\angle AIC=) \n (= (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (360 в степени (\\circ) минус \\angle A минус \\angle C)) плюс (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (\\angle A плюс \\angle C)) =180 в степени (\\circ)) (\\angle AMC плюс \\angle AIC=) \n (= (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (360 в степени (\\circ) минус \\angle A минус \\angle C)) плюс (180 в степени (\\circ) минус дробь: числитель: 1, знаменатель: 2 конец дроби (\\angle A плюс \\angle C)) =) \n (=180 в степени (\\circ)) \n Таким образом, четырехугольник AICM вписан в окружность. Значит, (2 \\angle AMI=2 \\angle ACI=\\angle ACB) Что и требовалось доказать.\nб) Зная (косинус \\angle ABC= дробь: числитель: 3, знаменатель: 5 конец дроби ,) найдем \n (синус \\angle AIC= косинус (дробь: числитель: 1, знаменатель: 2 конец дроби \\angle ABC) = корень из: начало аргумента: дробь: числитель: 1 плюс \\tfrac35, знаменатель: 2 конец дроби конец аргумента = дробь: числитель: 2, знаменатель: корень из: начало аргумента: 5 конец аргумента конец дроби) \n Биссектрисы внутреннего и внешнего угла перпендикулярны, поэтому IM — диаметр окружности IAMC. По теореме синусов (IM= дробь: числитель: AC, знаменатель: синус \\angle AIC конец дроби = дробь: числитель: 5 корень из: начало аргумента: 5 конец аргумента , знаменатель: 2 конец дроби) \nНайдем отрезок BI. Пусть длина биссектрисы, проведенной из вершины B, равна l. Применим теорему косинусов: \n (l в квадрате =6 в квадрате плюс (дробь: числитель: 6, знаменатель: 11 конец дроби умножить на 5) в квадрате минус 2 умножить на 6 умножить на дробь: числитель: 6, знаменатель: 11 конец дроби умножить на 5 умножить на дробь: числитель: 3, знаменатель: 5 конец дроби = дробь: числитель: 2880, знаменатель: 121 конец дроби ,) \nзначит, (l= дробь: числитель: 24 корень из: начало аргумента: 5 конец аргумента , знаменатель: 11 конец дроби) Теперь, по свойству биссектрисы, получаем, что (BI:l=6: (6 плюс дробь: числитель: 6, знаменатель: 11 конец дроби умножить на 5) =11:16) Отсюда (BI= дробь: числитель: 3 корень из: начало аргумента: 5 конец аргумента , знаменатель: 2 конец дроби ,) а тогда (BM=BI плюс IM=4 корень из: начало аргумента: 5 конец аргумента) \nОтвет: б) (4 корень из: начало аргумента: 5 конец аргумента) \nПриведем решение пункта а) Ирины Шраго.\nЗаметим, что угол между биссектрисами внешнего и внутреннего угла равен 90°, следовательно, ∠NBM = ∠NCM = 90°. Тогда четырехугольник NBCM — вписанный, и ∠BMN = ∠BCN как углы, опирающиеся на одну дугу. При этом (\\angle BCN = дробь: числитель: \\angle ACB, знаменатель: 2 конец дроби ,) поскольку CN — биссектриса, следовательно, (\\angle BMN = дробь: числитель: \\angle ACB, знаменатель: 2 конец дроби равносильно 2 \\angle BMN = \\angke ACB)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Обозначим точку пересечения внутренних биссектрис буквой I."
    ],
@@ -66060,9 +65127,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=623356",
-   "visual": {
-    "assetId": "math-src623356"
-   },
    "solutionAssets": [
     "math-sol97047"
    ]
@@ -66106,9 +65170,8 @@
    "diff": 2,
    "text": "В треугольнике ABC проведены биссектрисы BM и CN. Оказалось, что точки B, C, M и N лежат на одной окружности. \nа) Докажите, что треугольник ABC равнобедренный.\nб) Пусть P — точка пересечения биссектрис этого треугольника. Найдите площадь четырёхугольника AMPN, если (M N : B C = 4 : 5) и BN = 12.",
    "answer": "Решение. \na) Вписанные углы MBN и MCN опираются на одну и ту же дугу MN окружности, значит, эти углы равны. Поскольку BM и CN — биссектрисы углов ABC и BCA, получаем, что \n (\\angle A B C=2 \\angle M B N=2 \\angle M C N=\\angle B C A,) \n и, следовательно, треугольник ABC равнобедренный.\nб) Пусть прямая AP пересекает сторону BC в точке K. Тогда AK — высота и медиана равнобедренного треугольника ABC. По свойству биссектрисы треугольника \n (A M : M C = A B : B C = A C : B C = A N : N B) \n Значит, по обратной теореме Фалеса прямые MN и BC параллельны. Тогда \n (\\angle B M N = \\angle C B M = \\angle M B N) \n и треугольник BMN равнобедренный, BN = MN. По условию (M N : B C = 4: 5) Пусть (B N = M N = 4 a) и (B C = 5 a,) где (a= дробь: числитель: 12, знаменатель: 4 конец дроби =3) \nПоскольку (A N : N B = A B : B C,) получаем, что \n (дробь: числитель: A N, знаменатель: 4 a конец дроби = дробь: числитель: A N плюс 4 a, знаменатель: 5 a конец дроби ,) \n следовательно, (A N=16 a) и (A B=4 a плюс 16 a= 20 a) Из прямоугольного треугольника ABK находим \n (A K= корень из: начало аргумента: A B в квадрате минус B K в квадрате конец аргумента = корень из: начало аргумента: 400 a в квадрате минус дробь: числитель: 25, знаменатель: 4 конец дроби a в квадрате конец аргумента = 5 a корень из: начало аргумента: 16 минус дробь: числитель: 1, знаменатель: 4 конец дроби конец аргумента = дробь: числитель: 15, знаменатель: 2 конец дроби корень из: начало аргумента: 7 конец аргумента a) \n Отрезок BP — биссектриса треугольника ABK, значит, \n (A P: P K=A B: B K= 20 : дробь: числитель: 5, знаменатель: 2 конец дроби =8 : 1,) \n следовательно, \n (A P= дробь: числитель: 8, знаменатель: 9 конец дроби A K= дробь: числитель: 20, знаменатель: 3 конец дроби корень из: начало аргумента: 7 конец аргумента a) \nПрямая AK перпендикулярна прямой BC, прямая BC параллельна прямой MN, значит, прямая AP перпендикулярна прямой MN. Тогда \n (S_A M P N= дробь: числитель: 1, знаменатель: 2 конец дроби M N умножить на A P= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на 12 умножить на дробь: числитель: 20, знаменатель: 3 конец дроби корень из: начало аргумента: 7 конец аргумента умножить на 3=120 корень из: начало аргумента: 7 конец аргумента) \nОтвет: б) (120 корень из: начало аргумента: 7 конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "a) Вписанные углы MBN и MCN опираются на одну и ту же дугу MN окружности, значит, эти углы равны."
    ],
@@ -66122,9 +65185,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=642025",
-   "visual": {
-    "assetId": "math-src642025"
-   },
    "solutionAssets": [
     "math-sol135836"
    ]
@@ -66137,9 +65197,8 @@
    "diff": 2,
    "text": "Дан остроугольный треугольник ABC. Известно, что (∠ B A C = 2 ∠ A B C) Точка O — центр описанной окружности треугольника ABC. Вокруг треугольника AOC описана окружность, которая пересекает сторону BC в точке P. \nа) Докажите, что треугольники ABC и PAC подобны.\nб) Найдите AB, если BC = 6 и AC = 4.",
    "answer": "Решение. \nа) Пусть угол ABC равен α. Центральный угол COA и вписанный угол CBA опираются на одну дугу, значит, угол COA равен 2α. Вписанные в меньшую окружность углы COA и CPA опираются на одну дугу, следовательно, они равны. Тогда углы CPA и BAC равны 2α. Треугольники ABC и PAC с общим углом C подобны по двум углам.\nб) Поскольку треугольники ABC и PAC подобны, то угол PAC равен углу ABC, то есть равен α. Тогда отрезок AP — биссектриса. Из подобия треугольников находим, что (дробь: числитель: AC, знаменатель: CB конец дроби = дробь: числитель: CP, знаменатель: AC конец дроби ,) откуда\n (CP = дробь: числитель: AC в квадрате , знаменатель: CB конец дроби = дробь: числитель: 8, знаменатель: 3 конец дроби) \nПо свойству биссектрисы (дробь: числитель: AB, знаменатель: PB конец дроби = дробь: числитель: AC, знаменатель: CP конец дроби ,) тогда\n (AB = дробь: числитель: AC умножить на PB, знаменатель: CP конец дроби = дробь: числитель: 4 умножить на (6 минус дробь: числитель: 8, знаменатель: 3 конец дроби) , знаменатель: дробь: числитель: 8, знаменатель: 3 конец дроби конец дроби = 5) \nОтвет: б) 5.\nПриведем решение пункта б) Александра Турбанова (Липецк).\nПо теореме синусов в треугольнике ABC (дробь: числитель: BC, знаменатель: синус 2 альфа конец дроби = дробь: числитель: AC, знаменатель: синус альфа конец дроби ,) откуда\n (дробь: числитель: 6, знаменатель: 2 синус альфа косинус альфа конец дроби = дробь: числитель: 4, знаменатель: синус альфа конец дроби = дробь: числитель: 3, знаменатель: косинус альфа конец дроби = 4 равносильно косинус альфа = дробь: числитель: 3, знаменатель: 4 конец дроби ,) \nа потому (синус альфа = дробь: числитель: корень из: начало аргумента: 7 конец аргумента , знаменатель: 4 конец дроби) Далее последовательно получаем:\n (синус 2 альфа = 2 умножить на дробь: числитель: корень из: начало аргумента: 7 конец аргумента , знаменатель: 4 конец дроби умножить на дробь: числитель: 3, знаменатель: 4 конец дроби = дробь: числитель: 3 корень из: начало аргумента: 7 конец аргумента , знаменатель: 8 конец дроби ,) \n (косинус 2 альфа = корень из: начало аргумента: 1 минус дробь: числитель: 63, знаменатель: 64 конец дроби конец аргумента = дробь: числитель: 1, знаменатель: 8 конец дроби ,) \n (косинус 3 альфа = косинус (2 альфа плюс альфа) = косинус 2 альфа косинус альфа минус синус 2 альфа синус альфа = дробь: числитель: 1, знаменатель: 8 конец дроби умножить на дробь: числитель: 3, знаменатель: 4 конец дроби минус дробь: числитель: 3 корень из: начало аргумента: 7 конец аргумента , знаменатель: 8 конец дроби умножить на дробь: числитель: корень из: начало аргумента: 7 конец аргумента , знаменатель: 4 конец дроби = дробь: числитель: 3, знаменатель: 32 конец дроби минус дробь: числитель: 21, знаменатель: 32 конец дроби = минус дробь: числитель: 9, знаменатель: 16 конец дроби) \nЗаметим, что (\\angle ACB = 180 градусов минус 3 альфа ,) поэтому\n (косинус \\angle ACB = косинус (180 градусов минус 3 альфа) = минус косинус 3 альфа = дробь: числитель: 9, знаменатель: 16 конец дроби) \nИтак, по теореме косинусов в треугольнике ABC:\n (AB = корень из: начало аргумента: AC в квадрате плюс BC в квадрате минус 2 умножить на AC умножить на BC умножить на косинус \\angle ACB конец аргумента = корень из: начало аргумента: 16 плюс 36 минус 2 умножить на 4 умножить на 6 умножить на дробь: числитель: 9, знаменатель: 16 конец дроби конец аргумента = корень из: начало аргумента: 52 минус 27 конец аргумента = корень из: начало аргумента: 25 конец аргумента = 5) (AB = корень из: начало аргумента: AC в квадрате плюс BC в квадрате минус 2 умножить на AC умножить на BC умножить на косинус \\angle ACB конец аргумента =) \n (= корень из: начало аргумента: 16 плюс 36 минус 2 умножить на 4 умножить на 6 умножить на дробь: числитель: 9, знаменатель: 16 конец дроби конец аргумента = корень из: начало аргумента: 52 минус 27 конец аргумента = корень из: начало аргумента: 25 конец аргумента = 5) (AB = корень из: начало аргумента: AC в квадрате плюс BC в квадрате минус 2 умножить на AC умножить на BC умножить на косинус \\angle ACB конец аргумента =) \n (= корень из: начало аргумента: 16 плюс 36 минус 2 умножить на 4 умножить на 6 умножить на дробь: числитель: 9, знаменатель: 16 конец дроби конец аргумента =) \n (= корень из: начало аргумента: 52 минус 27 конец аргумента = корень из: начало аргумента: 25 конец аргумента = 5)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть угол ABC равен α."
    ],
@@ -66153,9 +65212,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=681169",
-   "visual": {
-    "assetId": "math-src681169"
-   },
    "solutionAssets": [
     "math-sol218287"
    ]
@@ -66500,11 +65556,10 @@
    "sub": "Два квадрата ABCD и AMNK с периметрами соответственно 20",
    "num": "№18",
    "diff": 2,
-   "text": "Два квадрата ABCD и AMNK с периметрами соответственно 20 и 24 располагают в круге так, что точки C, D, M, N лежат на окружности, A — общая, B и K внутри круга, угол ВАK — острый.\nа) Докажите, что угол BAK равен \nб) Найдите площадь круга.",
+   "text": "Два квадрата ABCD и AMNK с периметрами соответственно 20 и 24 располагают в круге так, что точки C, D, M, N лежат на окружности, A — общая, B и K внутри круга, угол ВАK — острый.\nа) Докажите, что угол BAK равен (дробь: числитель: Пи , знаменатель: 4 конец дроби) \nб) Найдите площадь круга.",
    "answer": "Решение. \nИз условия AB = 5 и AK = 6. Пусть угол BAK равен α. Заметим, что \n (\\angle MAC = \\angle MAD плюс 45 градусов = \\angle DAN) \nОбозначим (\\angle MAC = бета) Заметим, что (\\angle CMN = \\angle CDN = гамма) Тогда по теореме косинусов имеем:\n (CN в квадрате = CM в квадрате плюс MN в квадрате минус 2 CM умножить на MN косинус гамма = CA в квадрате плюс AM в квадрате минус 2 AM умножить на CA косинус бета плюс MN в квадрате минус 2 CM умножить на MN косинус гамма =) \n (= 50 плюс 36 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета плюс 36 минус 2 корень из: начало аргумента: 86 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на 6 косинус гамма) (CN в квадрате = CM в квадрате плюс MN в квадрате минус 2 CM умножить на MN косинус гамма =) \n (= CA в квадрате плюс AM в квадрате минус 2 AM умножить на CA косинус бета плюс MN в квадрате минус 2 CM умножить на MN косинус гамма =) \n (= 50 плюс 36 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета плюс 36 минус 2 корень из: начало аргумента: 86 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на 6 косинус гамма) \nС другой стороны,\n (CN в квадрате = CD в квадрате плюс DN в квадрате минус 2 CD умножить на DN косинус гамма = CD в квадрате плюс DA в квадрате плюс AN в квадрате минус 2 DA умножить на AN косинус бета минус 2 CD умножить на DN косинус гамма =) \n (= 25 плюс 25 плюс 36 умножить на 2 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета минус 2 корень из: начало аргумента: 97 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на косинус гамма) (CN в квадрате = CD в квадрате плюс DN в квадрате минус 2 CD умножить на DN косинус гамма =) \n (= CD в квадрате плюс DA в квадрате плюс AN в квадрате минус 2 DA умножить на AN косинус бета минус 2 CD умножить на DN косинус гамма =) \n (= 25 плюс 25 плюс 36 умножить на 2 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета минус 2 корень из: начало аргумента: 97 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на косинус гамма) \nПриравнивая полученные выражения, получим, что \n (минус 12 корень из: начало аргумента: 86 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на косинус гамма = минус 10 корень из: начало аргумента: 97 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента умножить на косинус гамма) \nВозможны два случая: либо (косинус гамма = 0,) откуда угол CMN прямой, значит, точки C, A, N лежат на одной прямой и угол BAK равен 45°, либо (косинус гамма не равно 0,) откуда\n (12 корень из: начало аргумента: 86 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента = 10 корень из: начало аргумента: 97 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента равносильно) \n (равносильно 36 умножить на 86 минус 25 умножить на 97 = косинус бета (минус 500 корень из: начало аргумента: 2 конец аргумента плюс 2160 корень из: начало аргумента: 2 конец аргумента) равносильно косинус бета = дробь: числитель: 671, знаменатель: 660 корень из: начало аргумента: 2 конец аргумента конец дроби ,) (12 корень из: начало аргумента: 86 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента = 10 корень из: начало аргумента: 97 минус 60 корень из: начало аргумента: 2 конец аргумента косинус бета конец аргумента равносильно) \n (равносильно 36 умножить на 86 минус 25 умножить на 97 = косинус бета (минус 500 корень из: начало аргумента: 2 конец аргумента плюс 2160 корень из: начало аргумента: 2 конец аргумента) равносильно) \n (равносильно косинус бета = дробь: числитель: 671, знаменатель: 660 корень из: начало аргумента: 2 конец аргумента конец дроби ,) \nследовательно, (косинус бета больше 0) и (бета меньше 90 градусов,) что противоречит условию.\nб) Пусть R — радиус окружности. Заметим, что отрезок CN — диаметр. Тогда\n (4R в квадрате = CN в квадрате = (5 корень из: начало аргумента: 2 конец аргумента плюс 6) в квадрате плюс 6 в квадрате = 122 плюс 60 корень из: начало аргумента: 2 конец аргумента) \nТаким образом, площадь круга равна\n (S = Пи R в квадрате = Пи дробь: числитель: 122 плюс 60 корень из: начало аргумента: 2 конец аргумента , знаменатель: 4 конец дроби = дробь: числитель: Пи (61 плюс 30 корень из: начало аргумента: 2 конец аргумента) , знаменатель: 2 конец дроби) \nОтвет: б) (дробь: числитель: Пи (61 плюс 30 корень из: начало аргумента: 2 конец аргумента) , знаменатель: 2 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "Из условия AB = 5 и AK = 6."
    ],
@@ -66518,9 +65573,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=670375",
-   "visual": {
-    "assetId": "math-src670375"
-   },
    "solutionAssets": [
     "math-sol191820"
    ]
@@ -67007,9 +66059,8 @@
    "diff": 2,
    "text": "Треугольник ABC равносторонний. На стороне AC выбрана точка M, серединный перпендикуляр к отрезку BM пересекает сторону AB в точке E, а сторону BC в точке K. \nа) Доказать что угол AEM равен углу CMK.\nб) Найти отношение площадей треугольников AEM и CMK, если (AM : C M = 1 : 4)",
    "answer": "Решение. \nа) Угол ABC равен 60°. Из симметрии относительно EK получаем, что угол EMK равен 60°. Пусть угол AEM равен α. Тогда (\\angle AME = 180 градусов минус 60 градусов минус альфа = 120 градусов минус альфа) Выразим угол CMK:\n (\\angle CMK = 180 градусов минус \\angle AME минус \\angleEMK = 180 градусов минус (120 градусов минус альфа) минус 60 градусов = альфа = \\angle AEM) (\\angle CMK = 180 градусов минус \\angle AME минус \\angleEMK =) \n (= 180 градусов минус (120 градусов минус альфа) минус 60 градусов = альфа = \\angle AEM) \nб) Пусть AM = x, CM = 4x, AE = y, тогда AB = 5x, EM = EB = 5x − y. По теореме косинусов:\n ((5x минус y) в квадрате = x в квадрате плюс y в квадрате минус 2 умножить на x умножить на y умножить на дробь: числитель: 1, знаменатель: 2 конец дроби равносильно 25x в квадрате минус 10xy плюс y в квадрате минус xy равносильно 24x в квадрате = 9xy равносильно y = дробь: числитель: 8, знаменатель: 3 конец дроби x) ((5x минус y) в квадрате = x в квадрате плюс y в квадрате минус 2 умножить на x умножить на y умножить на дробь: числитель: 1, знаменатель: 2 конец дроби равносильно) \n (равносильно 25x в квадрате минус 10xy плюс y в квадрате минус xy равносильно 24x в квадрате = 9xy равносильно y = дробь: числитель: 8, знаменатель: 3 конец дроби x) \nТреугольники AEM и CMK подобны по двум углам, причем AE и CM — соответственные стороны. Имеем:\n (дробь: числитель: S_AEM, знаменатель: S_CKM конец дроби = (дробь: числитель: AE, знаменатель: CM конец дроби) в квадрате = (дробь: числитель: y, знаменатель: 4x конец дроби) в квадрате = (дробь: числитель: дробь: числитель: 8, знаменатель: 3 конец дроби x, знаменатель: 4x конец дроби) в квадрате = (дробь: числитель: 2, знаменатель: 3 конец дроби) в квадрате = дробь: числитель: 4, знаменатель: 9 конец дроби) \nОтвет: 4 : 9.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Угол ABC равен 60°."
    ],
@@ -67023,9 +66074,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=642736",
-   "visual": {
-    "assetId": "math-src642736"
-   },
    "solutionAssets": [
     "math-sol140085"
    ]
@@ -67181,9 +66229,8 @@
    "diff": 2,
    "text": "Окружность с центром O касается боковых сторон AB и BC равнобедренного треугольника ABC, а также его высоты CH.\nа) Докажите, что (∠ AOC = 90 градусов) \nб) Найдите площадь треугольника ABC, если BO = 7, AC = 16.",
    "answer": "Решение. \nа) Окружность вписана в треугольник HBC, поэтому её центр O является точкой пересечения биссектрис этого треугольника. Следовательно, лучи CO и HO — биссектрисы углов HCB и BHC соответственно. Треугольники ABO и CBO равны по двум сторонам и углу между ними: (AB = BC,) сторона BO — общая, (\\angle ABO = \\angle CBO) Значит, (\\angle HAO = \\angle BAO = \\angle BCO = \\angle OCH) Отрезок OH виден под одинаковыми углами из точек A и C, поэтому четырёхугольник ACOH — вписанный. Его вписанные углы AHC и AOC опираются на сторону AC, а значит, они равны: (\\angle AOC = \\angle AHC = 90 градусов) \nб) Окружность вписана в угол ABC, поэтому её центр O лежит на биссектрисе BO угла ABC. Продлим биссектрису BO до пересечения со стороной AC в точке M. Биссектриса равнобедренного треугольника, проведённая к основанию, также является высотой и медианой. Длина медианы прямоугольного треугольника, проведенной из вершины прямого угла, равна половине длины гипотенузы, а потому для треугольника AOC получаем: (MO = дробь: числитель: 1, знаменатель: 2 конец дроби AC = 8) Таким образом, искомая площадь равна:\n (S_ABC = дробь: числитель: 1, знаменатель: 2 конец дроби BM умножить на AC = дробь: числитель: 1, знаменатель: 2 конец дроби (BO плюс MO) умножить на 16 = 7,5 умножить на 16 = 120) \nОтвет: б) 120.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Окружность вписана в треугольник HBC, поэтому её центр O является точкой пересечения биссектрис этого треугольника."
    ],
@@ -67197,9 +66244,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=701533",
-   "visual": {
-    "assetId": "math-src701533"
-   },
    "solutionAssets": [
     "math-sol276218"
    ]
@@ -67212,9 +66256,8 @@
    "diff": 2,
    "text": "Прямая, проходящая через вершину В, прямоугольника ABCD, перпендикулярная диагонали АС и пересекает сторону АD в точке M, равноудаленной от вершин В и D. \nа) Докажите, что (∠ ABM = ∠ DBC = ∠ MBD) \nб) Найдите расстояние от точки О, точки пересечения диагоналей, до отрезка СМ, если BC = 42.",
    "answer": "Решение. \nа) Углы DBC и ADB равны как накрест лежащие при пересечении параллельных прямых AD и BC секущей BD. Из условия следует, что (BM = MD,) то есть треугольник BDM — равнобедренный, а потому (\\angle ADB = \\angle MBD) Диагонали прямоугольника точкой пересечения делятся пополам, поэтому (BO = OC) и треугольник BOC — равнобедренный, откуда (\\angle DBC = \\angle BCA) По теореме о сумме углов треугольника находим:\n (\\angle ABM = 180 градусов минус 90 градусов минус \\angle BAC = 90 градусов минус \\angle BAC = \\angle BCA = \\angle DBC = \\angle MBD) (\\angle ABM = 180 градусов минус 90 градусов минус \\angle BAC = 90 градусов минус \\angle BAC =) \n (= \\angle BCA = \\angle DBC = \\angle MBD) \n Таким образом, прямой угол ABC прямыми BM и BD делятся на три равные части по 30°.\nб) Точка O — середина диагонали AC, поэтому расстояние d от точки A до прямой MC вдвое больше расстояния ρ от точки O до этой прямой. Из доказанного в пункте а) следует, что (\\angle DBC = \\angle ABM = 30 градусов,) поэтому\n (CD = BC умножить на тангенс 30 градусов = 42 умножить на дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби = 14 корень из: начало аргумента: 3 конец аргумента ,) \n (AM = AB умножить на тангенс 30 градусов = 14 корень из: начало аргумента: 3 конец аргумента умножить на дробь: числитель: корень из: начало аргумента: 3 конец аргумента , знаменатель: 3 конец дроби = 14,) \n (MD = AD минус AM = 42 минус 14 = 28,) \n (MC = корень из: начало аргумента: MD в квадрате плюс CD в квадрате конец аргумента = корень из: начало аргумента: 28 в квадрате плюс 14 в квадрате умножить на 3 конец аргумента = корень из: начало аргумента: 7 умножить на 14 в квадрате конец аргумента = 14 корень из: начало аргумента: 7 конец аргумента) \n Таким образом, искомое расстояние ρ равно\n (\\rho = дробь: числитель: 1, знаменатель: 2 конец дроби d = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на дробь: числитель: 2S_AMC, знаменатель: MC конец дроби = дробь: числитель: AM умножить на CD, знаменатель: 2MC конец дроби = дробь: числитель: 14 умножить на 14 корень из: начало аргумента: 3 конец аргумента , знаменатель: 2 умножить на 14 корень из: начало аргумента: 7 конец аргумента конец дроби = дробь: числитель: 7 корень из: начало аргумента: 3 конец аргумента , знаменатель: корень из: начало аргумента: 7 конец аргумента конец дроби = корень из: начало аргумента: 21 конец аргумента) \nОтвет: б) (корень из: начало аргумента: 21 конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Углы DBC и ADB равны как накрест лежащие при пересечении параллельных прямых AD и BC секущей BD."
    ],
@@ -67228,9 +66271,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=513915",
-   "visual": {
-    "assetId": "math-src513915"
-   },
    "solutionAssets": [
     "math-sol276962"
    ]
@@ -67243,9 +66283,8 @@
    "diff": 2,
    "text": "В трапеции ABCD c основанием AD диагонали пересекаются в точке O, а AD = 2BC. Через вершину A проведена прямая, параллельная диагонали BD, через вершину D проведена прямая, параллельная диагонали AC. Эти прямые пересекаются в точке E.\nа) Докажите, что (BO : AE =1: 2) \nб) Прямые BE и CE пересекают сторону AD в точках M и N соответственно. Найдите MN, если AD = 20.",
    "answer": "Решение. \n а) По построению четырехугольник AODE — параллелограмм. Значит, OD = AE. Треугольники BOC и DOA подобны, значит, \n (BO : OD = BC : AD = 1 : 2) \nТогда \n (BO : AE = BO : OD = 1: 2) \nб) Прямые AE и BD параллельны, а потому треугольник AME подобен треугольнику DMB. Тогда\n (AM : MD = AE : BD = AE : (BO плюс AE) =1: (дробь: числитель: BO, знаменатель: AE конец дроби плюс 1) =2 : 3) \nСледовательно, (AM= дробь: числитель: 2, знаменатель: 5 конец дроби AD = 8) Аналогично ND = 8. Значит, (MN=20 минус 8 минус 8=4) \nОтвет: 4.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) По построению четырехугольник AODE — параллелограмм."
    ],
@@ -67259,9 +66298,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=639337",
-   "visual": {
-    "assetId": "math-src639337"
-   },
    "solutionAssets": [
     "math-sol127476"
    ]
@@ -67444,9 +66480,8 @@
    "diff": 2,
    "text": "Периметр треугольника ABC равен 30. На сторонах AB и BC отмечены точки E и F соответственно так, что BE : EA = BF : FC = 3 : 2. Прямая EF касается окружности, вписанной в треугольник.\nа) Докажите, что AC = 6.\nб) Найдите площадь треугольника ABC, если (∠ ACB = 90 в степени (°))",
    "answer": "Решение. \nа) Четырехугольник AEFC описан около окружности, поэтому (AE плюс FC = AC плюс EF) Треугольники BEF и BAC подобны с коэффициентом подобия (дробь: числитель: 3, знаменатель: 5 конец дроби) Значит, \n (AE = дробь: числитель: 2, знаменатель: 5 конец дроби AB,) \n (FC = дробь: числитель: 2, знаменатель: 5 конец дроби BC,) \n (EF = дробь: числитель: 3, знаменатель: 5 конец дроби AC) \n Следовательно, \n (дробь: числитель: 2, знаменатель: 5 конец дроби AB плюс дробь: числитель: 2, знаменатель: 5 конец дроби BC = AC плюс дробь: числитель: 3, знаменатель: 5 конец дроби AC равносильно дробь: числитель: 2, знаменатель: 5 конец дроби (AB плюс BC) = дробь: числитель: 8, знаменатель: 5 конец дроби AC) \nПериметр треугольника ABC равен 30, поэтому (AB плюс BC = 30 минус AC,) откуда получаем \n (дробь: числитель: 2, знаменатель: 5 конец дроби (30 минус AC) = дробь: числитель: 8, знаменатель: 5 конец дроби AC равносильно AC = 6) \nб) Пусть BC = x. Тогда получаем (AB = 24 минус x) По теореме Пифагора \n (AC в квадрате плюс BC в квадрате = AB в квадрате равносильно 36 плюс x в квадрате = (24 минус x) в квадрате равносильно 36 плюс x в квадрате = x в квадрате минус 48x плюс 576,) \nоткуда находим (x = дробь: числитель: 45, знаменатель: 4 конец дроби) Значит, (BC = дробь: числитель: 45, знаменатель: 4 конец дроби ,) и площадь треугольника ABC равна (S = дробь: числитель: AC умножить на BC, знаменатель: 2 конец дроби = дробь: числитель: 135, знаменатель: 4 конец дроби) \nОтвет: б) (дробь: числитель: 135, знаменатель: 4 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Четырехугольник AEFC описан около окружности, поэтому (AE плюс FC = AC плюс EF) Треугольники BEF и BAC подобны с коэффициентом подобия (дробь: числитель: 3, знаменатель: 5 конец дроби) Значит, \n (AE = дробь: числитель: 2, знаменатель: 5 конец дроби AB,) \n (FC = дробь: числитель: 2, знаменатель: 5 конец дроби BC,) \n (EF = дробь: числитель: 3, знаменатель: 5 конец дроби AC) \n Следовательно, \n (дробь: числитель: 2, знаменатель: 5 конец дроби AB плюс дробь: числитель: 2, знаменатель: 5 конец дроби BC = AC плюс дробь: числитель: 3, знаменатель: 5 конец дроби AC равносильно дробь: числитель: 2, знаменатель: 5 конец дроби (AB плюс BC) = дробь: числитель: 8, знаменатель: 5 конец дроби AC) \nПериметр треугольника ABC равен 30, поэтому (AB плюс BC = 30 минус AC,) откуда получаем \n (дробь: числитель: 2, знаменатель: 5 конец дроби (30 минус AC) = дробь: числитель: 8, знаменатель: 5 конец дроби AC равносильно AC = 6) \nб) Пусть BC = x."
    ],
@@ -67460,9 +66495,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=674808",
-   "visual": {
-    "assetId": "math-src674808"
-   },
    "solutionAssets": [
     "math-sol199211"
    ]
@@ -67533,9 +66565,8 @@
    "diff": 2,
    "text": "В трапеции АВСD боковая сторона CD перпендикулярна основаниям AD и ВС. В эту трапецию вписали окружность с центром О. Прямая АО пересекает продолжение отрезка ВС в точке Е. \nа) Докажите, что AD = CE + CD. \nб) Найдите площадь трапеции ABCD, если AE = 10, (∠ BAD=60 градусов)",
    "answer": "Решение. \n а) Заметим, что (\\angle OAN=\\angle OEM) как накрест лежащие при параллельных прямых AD и BC. Точки M и N — точки касания окружности с основаниями BC и AD соответственно. Отрезки MO и ON равны как радиусы, следовательно, треугольник MOE равен треугольнику NOA, а потому отрезки ME и AN равны. Значит, \n (AD=AN плюс ND=ME плюс ND= дробь: числитель: 1, знаменатель: 2 конец дроби CD плюс CE плюс дробь: числитель: 1, знаменатель: 2 конец дроби CD=CD плюс CE) \n Что и требовалось доказать.\nб) Точка O равноудалена от прямых AB и AD, следовательно, прямая AO — биссектриса угла BAD. Тогда (\\angle OAN=30 градусов) и\n (MN=2ON=AO= дробь: числитель: 1, знаменатель: 2 конец дроби AE=5,) \n откуда следует, что \n (AB= дробь: числитель: MN, знаменатель: синус 60 градусов конец дроби = дробь: числитель: 10, знаменатель: корень из: начало аргумента: 3 конец аргумента конец дроби) \nПо свойству описанного четырехугольника (AB плюс CD=BC плюс AD,) тогда\n (S_ABCD= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MN умножить на (BC плюс AD) = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MN умножить на (AB плюс CD) =) \n (= дробь: числитель: 5, знаменатель: 2 конец дроби умножить на (дробь: числитель: 10, знаменатель: корень из: начало аргумента: 3 конец аргумента конец дроби плюс 5) = дробь: числитель: 25 корень из: начало аргумента: 3 конец аргумента плюс 50, знаменатель: 2 корень из 3 конец дроби = дробь: числитель: 75 плюс 50 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби) (S_ABCD= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MN умножить на (BC плюс AD) =) \n (= дробь: числитель: 1, знаменатель: 2 конец дроби умножить на MN умножить на (AB плюс CD) = дробь: числитель: 5, знаменатель: 2 конец дроби умножить на (дробь: числитель: 10, знаменатель: корень из: начало аргумента: 3 конец аргумента конец дроби плюс 5) =) \n (= дробь: числитель: 25 корень из: начало аргумента: 3 конец аргумента плюс 50, знаменатель: 2 корень из 3 конец дроби = дробь: числитель: 75 плюс 50 корень из: начало аргумента: 3 конец аргумента , знаменатель: 6 конец дроби) \nОтвет: б) (дробь: числитель: 25, знаменатель: 6 конец дроби (3 плюс 2 корень из 3))",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Заметим, что (∠ OAN=∠ OEM) как накрест лежащие при параллельных прямых AD и BC."
    ],
@@ -67549,9 +66580,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=632832",
-   "visual": {
-    "assetId": "math-src632832"
-   },
    "solutionAssets": [
     "math-sol116281"
    ]
@@ -67591,9 +66619,8 @@
    "diff": 2,
    "text": "Периметр треугольника ABC равен 36. Точки E и F — середины сторон AB и BC соответственно. Отрезок EF касается окружности, вписанной в треугольник ABC.\nа) Докажите, что AC = 9.\nб) Найдите площадь треугольника ABC, если (∠ ACB = 90 градусов)",
    "answer": "Решение. \n a) По условию точки E и F — середины сторон AB и BC соответственно, значит, отрезок EF — средняя линия треугольника ABC и (AC = 2EF,) (AB = 2AE,) (BC = 2FC) Окружность касается сторон треугольника AB, BC, AC и средней линии EF, следовательно, окружность вписана в четырёхугольник AEFC. Тогда суммы его противоположных сторон равны: (AE плюс FC = EF плюс AC) Периметр треугольника равен\n (P = AB плюс BC плюс AC = 2AE плюс 2FC плюс AC = 2 (AE плюс FC) плюс AC =) \n (= 2 (EF плюс AC) плюс AC = 2 (дробь: числитель: AC, знаменатель: 2 конец дроби плюс AC) плюс AC = 4AC,) (P = AB плюс BC плюс AC = 2AE плюс 2FC плюс AC =) \n (= 2 (AE плюс FC) плюс AC = 2 (EF плюс AC) плюс AC =) \n (= 2 (дробь: числитель: AC, знаменатель: 2 конец дроби плюс AC) плюс AC = 4AC,) \nоткуда (AC= дробь: числитель: P, знаменатель: 4 конец дроби = дробь: числитель: 36, знаменатель: 4 конец дроби = 9) \nб) Пусть (BC = x,) тогда (AB = 36 минус 9 минус x = 27 минус x,) а по теореме Пифагора для прямоугольного треугольника ABC получаем:\n (9 в квадрате плюс x в квадрате = (27 минус x) в квадрате равносильно 9 в квадрате плюс x в квадрате = 27 в квадрате минус 2 умножить на 27x плюс x в квадрате равносильно) \n (равносильно 2 умножить на 27x = 27 в квадрате минус 9 в квадрате равносильно 2 умножить на 27x = 36 умножить на 18 равносильно x = 12) (9 в квадрате плюс x в квадрате = (27 минус x) в квадрате равносильно 9 в квадрате плюс x в квадрате = 27 в квадрате минус 2 умножить на 27x плюс x в квадрате равносильно) \n (равносильно 2 умножить на 27x = 27 в квадрате минус 9 в квадрате равносильно) \n (равносильно 2 умножить на 27x = 36 умножить на 18 равносильно x = 12) \nПлощадь треугольника ABC равна:\n (S_ABC = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на AC умножить на BC = дробь: числитель: 1, знаменатель: 2 конец дроби умножить на 9 умножить на 12 = 54) \nОтвет: б) 54.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "a) По условию точки E и F — середины сторон AB и BC соответственно, значит, отрезок EF — средняя линия треугольника ABC и (AC = 2EF,) (AB = 2AE,) (BC = 2FC) Окружность касается сторон треугольника AB, BC, AC и средней линии EF, следовательно, окружность вписана в четырёхугольник AEFC."
    ],
@@ -67607,9 +66634,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=683411",
-   "visual": {
-    "assetId": "math-src683411"
-   },
    "solutionAssets": [
     "math-sol231905"
    ]
@@ -67678,11 +66702,10 @@
    "sub": "B прямоугольнике ABCD на стороне AB как на диаметре пост",
    "num": "№18",
    "diff": 2,
-   "text": "B прямоугольнике ABCD на стороне AB как на диаметре построена окружность C центром О. Отрезок OD пересекает окружность в точке М. Известно, что \nа) Докажите, что стороны прямоугольника относятся как 5 : 2.\nб) Найдите MC, если известно, что",
+   "text": "B прямоугольнике ABCD на стороне AB как на диаметре построена окружность C центром О. Отрезок OD пересекает окружность в точке М. Известно, что (дробь: числитель: D M, знаменатель: A B конец дроби = дробь: числитель: корень из: начало аргумента: 26 конец аргумента минус 1, знаменатель: 2 конец дроби) \nа) Докажите, что стороны прямоугольника относятся как 5 : 2.\nб) Найдите MC, если известно, что (A M = корень из: начало аргумента: 2 минус дробь: числитель: 2, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби конец аргумента)",
    "answer": "Решение. \nа) Пусть (AB=2x,) тогда (DM= (корень из: начало аргумента: 26 конец аргумента минус 1) x,) \n (DO= (корень из: начало аргумента: 26 конец аргумента минус 1) x плюс x= корень из: начало аргумента: 26 конец аргумента умножить на x,) \n откуда (AD в квадрате =26x в квадрате минус x в квадрате =25x в квадрате ,) то есть (AD=5x) Следовательно, (AD:AB=5:2) \nб) Поскольку \n (косинус \\angle AOM= дробь: числитель: AO, знаменатель: OD конец дроби = дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби ,) \nпо теореме косинусов находим отрезок AM:\n (AM в квадрате =x в квадрате плюс x в квадрате минус 2 умножить на x умножить на x умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =2x в квадрате (1 минус дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби)) \nИз условия следует, что (AM в квадрате =2 минус дробь: числитель: 2, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби ,) следовательно, (x в квадрате =1) Таким образом, (\\angle CDM=\\angle AOM,) поэтому отрезок CM также найдем из теореме косинусов:\n (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби = (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (= (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (= (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) \nОтвет: б) (корень из: начало аргумента: 27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби конец аргумента)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Пусть (AB=2x,) тогда (DM= (корень из: начало аргумента: 26 конец аргумента минус 1) x,) \n (DO= (корень из: начало аргумента: 26 конец аргумента минус 1) x плюс x= корень из: начало аргумента: 26 конец аргумента умножить на x,) \n откуда (AD в квадрате =26x в квадрате минус x в квадрате =25x в квадрате ,) то есть (AD=5x) Следовательно, (AD:AB=5:2) \nб) Поскольку \n (косинус ∠ AOM= дробь: числитель: AO, знаменатель: OD конец дроби = дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби ,) \nпо теореме косинусов находим отрезок AM:\n (AM в квадрате =x в квадрате плюс x в квадрате минус 2 умножить на x умножить на x умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =2x в квадрате (1 минус дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби)) \nИз условия следует, что (AM в квадрате =2 минус дробь: числитель: 2, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби ,) следовательно, (x в квадрате =1) Таким образом, (∠ CDM=∠ AOM,) поэтому отрезок CM также найдем из теореме косинусов:\n (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби = (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (= (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) (CM в квадрате =DM в квадрате плюс CD в квадрате минус 2 умножить на DM умножить на CD умножить на дробь: числитель: 1, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (= (корень из: начало аргумента: 26 конец аргумента минус 1) в квадрате плюс 2 в квадрате минус дробь: числитель: 2 умножить на 2 умножить на (корень из: начало аргумента: 26 конец аргумента минус 1) , знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=26 минус 2 корень из: начало аргумента: 26 конец аргумента плюс 1 плюс 4 минус 4 плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =) \n (=27 минус 2 корень из: начало аргумента: 26 конец аргумента плюс дробь: числитель: 4, знаменатель: корень из: начало аргумента: 26 конец аргумента конец дроби =27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби) \nОтвет: б) (корень из: начало аргумента: 27 минус дробь: числитель: 24 корень из: начало аргумента: 26 конец аргумента , знаменатель: 13 конец дроби конец аргумента)"
    ],
@@ -67696,9 +66719,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=635089",
-   "visual": {
-    "assetId": "math-src635089"
-   },
    "solutionAssets": [
     "math-sol119230"
    ]
@@ -67866,9 +66886,8 @@
    "diff": 2,
    "text": "В выпуклом четырехугольнике ABCD точки M, N, K, P — середины сторон AB, BC, CD и DA соответственно и являются вершинами четырехугольника MNKP. AC и BD — диагонали четырехугольника ABCD. Точка O — точка пересечения отрезков AC и BD. \nа) Докажите, что четырехугольник MNKP — параллелограмм.\nб) Найдите диагонали MK и PN четырехугольника MNKP, если AC = 4, BD = 6, (∠ AOB = 60 градусов)",
    "answer": "Решение. \nа) В треугольнике ABC отрезок MN — средняя линия, поэтому она параллельна стороне AC и (MN = дробь: числитель: 1, знаменатель: 2 конец дроби AC) Аналогично в треугольнике AOC отрезок PK — средняя линия, она параллельна стороне AC и (PK = дробь: числитель: 1, знаменатель: 2 конец дроби AC) Тогда отрезки MN и PK параллельны и равны, значит, четырехугольник MNKP — параллелограмм.\nб) В треугольнике BCD отрезок NK — средняя линия, поэтому она параллельна стороне BD, аналогично в треугольнике BAD отрезок MP — средняя линия, она параллельна стороне BD. Тогда\n (\\angle PKN = \\angle AOB = 60 градусов,) \n (\\angle MNK = \\angle AOD = 180 градусов минус 60 градусов = 120 градусов) \nТогда по теореме косинусов в треугольниках MKN и PKN соответственно получаем:\n (MK = корень из: начало аргумента: MN в квадрате плюс NK в квадрате минус 2 умножить на MN умножить на NK умножить на (минус дробь: числитель: 1, знаменатель: 2 конец дроби) конец аргумента =) \n (= корень из: начало аргумента: (дробь: числитель: AC, знаменатель: 2 конец дроби) в квадрате плюс (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате плюс дробь: числитель: AC, знаменатель: 2 конец дроби умножить на дробь: числитель: BD, знаменатель: 2 конец дроби конец аргумента = корень из: начало аргумента: 4 плюс 6 плюс 9 конец аргумента = корень из: начало аргумента: 19 конец аргумента ,) (MK = корень из: начало аргумента: MN в квадрате плюс NK в квадрате минус 2 умножить на MN умножить на NK умножить на (минус дробь: числитель: 1, знаменатель: 2 конец дроби) конец аргумента =) \n (= корень из: начало аргумента: (дробь: числитель: AC, знаменатель: 2 конец дроби) в квадрате плюс (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате плюс дробь: числитель: AC, знаменатель: 2 конец дроби умножить на дробь: числитель: BD, знаменатель: 2 конец дроби конец аргумента =) \n (= корень из: начало аргумента: 4 плюс 6 плюс 9 конец аргумента = корень из: начало аргумента: 19 конец аргумента ,) \n (NP = корень из: начало аргумента: KN в квадрате плюс KP в квадрате минус 2 умножить на KN умножить на KP умножить на дробь: числитель: 1, знаменатель: 2 конец дроби конец аргумента = корень из: начало аргумента: (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате плюс (дробь: числитель: AC, знаменатель: 2 конец дроби) в квадрате минус дробь: числитель: BD, знаменатель: 2 конец дроби умножить на дробь: числитель: AC, знаменатель: 2 конец дроби конец аргумента = корень из: начало аргумента: 9 плюс 4 минус 6 конец аргумента = корень из: начало аргумента: 7 конец аргумента) (NP = корень из: начало аргумента: KN в квадрате плюс KP в квадрате минус 2 умножить на KN умножить на KP умножить на дробь: числитель: 1, знаменатель: 2 конец дроби конец аргумента =) \n (= корень из: начало аргумента: (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате плюс (дробь: числитель: AC, знаменатель: 2 конец дроби) в квадрате минус дробь: числитель: BD, знаменатель: 2 конец дроби умножить на дробь: числитель: AC, знаменатель: 2 конец дроби конец аргумента = корень из: начало аргумента: 9 плюс 4 минус 6 конец аргумента = корень из: начало аргумента: 7 конец аргумента) (NP = корень из: начало аргумента: KN в квадрате плюс KP в квадрате минус 2 умножить на KN умножить на KP умножить на дробь: числитель: 1, знаменатель: 2 конец дроби конец аргумента =) \n (= корень из: начало аргумента: (дробь: числитель: BD, знаменатель: 2 конец дроби) в квадрате плюс (дробь: числитель: AC, знаменатель: 2 конец дроби) в квадрате минус дробь: числитель: BD, знаменатель: 2 конец дроби умножить на дробь: числитель: AC, знаменатель: 2 конец дроби конец аргумента =) \n (= корень из: начало аргумента: 9 плюс 4 минус 6 конец аргумента = корень из: начало аргумента: 7 конец аргумента) \nОтвет: б) (MK = корень из: начало аргумента: 19 конец аргумента ,) (PN = корень из: начало аргумента: 7 конец аргумента) \nПримечание.\nУтверждение пункта а) известно под названием теоремы Вариньона.",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) В треугольнике ABC отрезок MN — средняя линия, поэтому она параллельна стороне AC и (MN = дробь: числитель: 1, знаменатель: 2 конец дроби AC) Аналогично в треугольнике AOC отрезок PK — средняя линия, она параллельна стороне AC и (PK = дробь: числитель: 1, знаменатель: 2 конец дроби AC) Тогда отрезки MN и PK параллельны и равны, значит, четырехугольник MNKP — параллелограмм."
    ],
@@ -67882,9 +66901,6 @@
    "points": 2,
    "valueType": "общее решение + список",
    "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №18, https://math-ege.sdamgia.ru/problem?id=672513",
-   "visual": {
-    "assetId": "math-src672513"
-   },
    "solutionAssets": [
     "math-sol195044"
    ]
@@ -70964,9 +69980,8 @@
    "diff": 2,
    "text": "На доске написано 11 различных натуральных чисел. Среднее арифметическое шести наименьших из них равно 5, а среднее арифметическое шести наибольших равно 15.\nа) Может ли наименьшее из этих одиннадцати чисел равняться 3? \nб) Может ли среднее арифметическое всех одиннадцати чисел равняться 9? \nв) Пусть B — шестое по величине число, а S — среднее арифметическое всех одиннадцати чисел. Найдите наибольшее значение выражения (S минус B)",
    "answer": "Решение. \nа) Если наименьшее число равно 3, то сумма шести наименьших чисел не меньше 3 + 4 + 5 + 6 + 7 + 8 = 33, а их среднее арифметическое больше 5. \nб) Пусть сумма пяти наименьших чисел равна А, шестое по величине число равно В, а сумма пяти наибольших чисел равна С. Предположим, что среднее арифметическое всех 11 чисел равно 9. Тогда получаем: (B плюс C=90,) (A плюс B плюс C=99,) откуда (A=9) Это невозможно, поскольку должно выполняться неравенство (A больше или равно 15=1 плюс 2 плюс 3 плюс 4 плюс 5) \nв) (A плюс B=30,) (B плюс C=90) Получаем:\n (S минус B= дробь: числитель: A плюс B плюс C, знаменатель: 11 конец дроби минус B= дробь: числитель: (A плюс B) плюс (B плюс C) минус 12B, знаменатель: 11 конец дроби = дробь: числитель: 120 минус 12B, знаменатель: 11 конец дроби) \nЗначит, нужно найти наименьшее значение В. \nПусть числа, написанные на доске, равны \n (a_1, a_2, умножить на s, a_11,) причем (a_1 меньше a_2 меньше умножить на s меньше a_11) Тогда (a_1 плюс 5 меньше или равно a_2 плюс 4 меньше или равно a_3 плюс 3 меньше или равно a_4 плюс 2 меньше или равно a_5 плюс 1 меньше или равно a_6 = B,) \n откуда \n (a_1 плюс a_2 плюс a_3 плюс a_4 плюс a_5 плюс a_6 плюс 15 меньше или равно 6B равносильно 45 меньше или равно 6B равносильно B больше или равно 7,5) \nЗначит, (B больше или равно 8,) поскольку B целое. \nПокажем, что число В может равняться 8. Например, если на доске написаны числа 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 40, то условия задачи выполнены и (B=8) \nТаким образом, (S минус B= дробь: числитель: 120 минус 12B, знаменатель: 11 конец дроби = дробь: числитель: 24, знаменатель: 11 конец дроби) \nОтвет: а) нет, б) нет, в) (дробь: числитель: 24, знаменатель: 11 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Если наименьшее число равно 3, то сумма шести наименьших чисел не меньше 3 + 4 + 5 + 6 + 7 + 8 = 33, а их среднее арифметическое больше 5."
    ],
@@ -70979,10 +69994,7 @@
    "example": 1,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=520789",
-   "visual": {
-    "assetId": "math-src520789"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=520789"
   },
   {
    "id": "n20_a2",
@@ -71294,9 +70306,8 @@
    "diff": 2,
    "text": "Николай Сергеевич написал на доске 15 различных натуральных чисел. Среднее арифметическое восьми наименьших из них равно 7. Среднее арифметическое восьми наибольших равняется 20.\nа) Может ли наименьшее из этих 15 чисел равняться 5?\nб) Может ли среднее арифметическое всех 15 чисел равняться 13?\nв) Пусть k — восьмое по величине число, m — среднее арифметическое всех чисел. Найдите наибольшее значение (m минус k)",
    "answer": "Решение. \nПусть сумма семи наименьших чисел равна a, восьмое число равно b, сумма семи наибольших равна c. Тогда по условию (дробь: числитель: a плюс b, знаменатель: 8 конец дроби = 7,) откуда (a плюс b = 56) Аналогично (b плюс c = 160) \nа) Если наименьшее из числе равно 5, то сумма семи наименьших как минимум \n (5 плюс 6 плюс 7 плюс 8 плюс 9 плюс 10 плюс 11 = 56) \n и тогда (c = 0,) что невозможно.\nб) Если среднее арифметическое всех чисел равно 13, то их сумма равна (15 умножить на 13 = 195,) откуда \n (b = (a плюс b) плюс (b плюс c) минус (a плюс b плюс c) = 56 плюс 160 минус 195 = 21) \n Но тогда сумма семи наибольших чисел не меньше \n (22 плюс 23 плюс \\ldots плюс 28 = 175 больше 160,) \n что невозможно.\nв) Заметим, что\n (m минус k = дробь: числитель: a плюс b плюс c, знаменатель: 15 конец дроби минус b = дробь: числитель: a плюс b плюс b плюс c, знаменатель: 15 конец дроби минус b минус дробь: числитель: b, знаменатель: 15 конец дроби = дробь: числитель: 56 плюс 160, знаменатель: 15 конец дроби минус b минус дробь: числитель: b, знаменатель: 15 конец дроби = дробь: числитель: 72, знаменатель: 5 конец дроби минус дробь: числитель: 16, знаменатель: 15 конец дроби b) (m минус k = дробь: числитель: a плюс b плюс c, знаменатель: 15 конец дроби минус b = дробь: числитель: a плюс b плюс b плюс c, знаменатель: 15 конец дроби минус b минус дробь: числитель: b, знаменатель: 15 конец дроби =) \n (= дробь: числитель: 56 плюс 160, знаменатель: 15 конец дроби минус b минус дробь: числитель: b, знаменатель: 15 конец дроби = дробь: числитель: 72, знаменатель: 5 конец дроби минус дробь: числитель: 16, знаменатель: 15 конец дроби b) \n Поэтому нужно сделать b как можно меньше. При этом \n (56 = a плюс b меньше или равно b плюс (b минус 1) плюс (b минус 2) плюс \\ldots плюс (b минус 7) = 8b минус 28,) \n откуда \n (84 меньше или равно 8b,) \n (b больше или равно 10,5,) \n (b больше или равно 11) \n Сделать (b = 11) можно, взяв, например, набор 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 62. Для него получим \n (дробь: числитель: 72, знаменатель: 5 конец дроби минус дробь: числитель: 16, знаменатель: 15 конец дроби b = дробь: числитель: 72, знаменатель: 5 конец дроби минус дробь: числитель: 176, знаменатель: 15 конец дроби = дробь: числитель: 40, знаменатель: 15 конец дроби = дробь: числитель: 8, знаменатель: 3 конец дроби) \nОтвет: а) нет; б) нет; в) (дробь: числитель: 8, знаменатель: 3 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "Пусть сумма семи наименьших чисел равна a, восьмое число равно b, сумма семи наибольших равна c."
    ],
@@ -71309,10 +70320,7 @@
    "example": 1,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=656199",
-   "visual": {
-    "assetId": "math-src656199"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=656199"
   },
   {
    "id": "n20_p4",
@@ -73059,9 +72067,8 @@
    "diff": 2,
    "text": "Последовательность (n_1, n_2, …, n_12, n_13) состоит из 13 различных натуральных чисел. Среднее арифметическое первых восьми и среднее арифметическое последних восьми ее членов равно 17.\nа) Может ли среднее арифметическое всех чисел равняться 17?\nб) Может ли среднее арифметическое всех чисел равняться 11?\nв) Найдите наибольшее и наименьшее значения, которые может принимать среднее арифметическое всех чисел.",
    "answer": "Решение. \nа) Да, например, для последовательности 1, 2, 3, 4, 75, 16, 17, 18, 5, 6, 7, 8, 59.\nб) По условию сумма первых восьми чисел должна равняться (8 умножить на 17 = 136,) как и сумма последних восьми. С другой стороны, сумма всех чисел должна равняться (13 умножить на 11 = 143,) поэтому сумма последних пяти чисел должна равняться (143 минус 136 = 7,) что невозможно для пяти различных натуральных чисел.\nв) Пусть сумма трех чисел с номерами от 6 до 8 равна x, тогда сумма первых пяти и последних пяти равна (136 минус x,) а общая сумма равна (136 плюс 136 минус x = 272 минус x) и общее среднее арифметическое равно (дробь: числитель: 272 минус x, знаменатель: 13 конец дроби) Значит, чем больше x, тем меньше общее среднее арифметическое и наоборот. Осталось найти границы для x.\nЯсно, что (x больше или равно 1 плюс 2 плюс 3 = 6,) поэтому среднее не больше (дробь: числитель: 272 минус 6, знаменатель: 13 конец дроби = целая часть: 20, дробная часть: числитель: 6, знаменатель: 13) Это значение достигается, например, для последовательности 4, 5, 6, 7, 108, 1, 2, 3, 8, 9, 10, 11, 92.\nС другой стороны, сумма всех чисел, кроме средних (2 (136 минус x) больше или равно 1 плюс 2 плюс \\ldots плюс 10 = 55,) откуда (272 минус 55 больше или равно 2x,) то есть (x меньше или равно 108,5) Значит, наибольшее возможное значение x равно 108 и общее среднее арифметическое равно (дробь: числитель: 272 минус 108, знаменатель: 13 конец дроби = целая часть: 12, дробная часть: числитель: 8, знаменатель: 13) Это значение достигается, например, для последовательности 1, 11, 2, 9, 5, 35, 36, 37, 3, 4, 6, 7, 8.\nОтвет: а) да; б) нет; в) (целая часть: 12, дробная часть: числитель: 8, знаменатель: 13 ,) (целая часть: 20, дробная часть: числитель: 6, знаменатель: 13)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "а) Да, например, для последовательности 1, 2, 3, 4, 75, 16, 17, 18, 5, 6, 7, 8, 59."
    ],
@@ -73074,10 +72081,7 @@
    "example": 18,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=694569",
-   "visual": {
-    "assetId": "math-src694569"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=694569"
   },
   {
    "id": "n20_q4",
@@ -73445,11 +72449,10 @@
    "sub": "На проекте «Мисс Чмаровка — 2016» выступление каждой уча",
    "num": "№20",
    "diff": 2,
-   "text": "На проекте «Мисс Чмаровка — 2016» выступление каждой участницы оценивают шесть судей. При этом каждый судья выставляет оценку — целое число баллов от 0 до 10 включительно. Известно, что за выступление Изольды Кабановой все члены жюри выставили различные оценки. По старой системе оценивания итоговый балл за выступление определяется как среднее арифметическое всех оценок судей. По новой системе оценивания итоговый балл вычисляется следующим образом: отбрасываются наименьшая и наибольшая оценки, и считается среднее арифметическое четырех оставшихся оценок. \nа) Могут ли итоговые баллы, вычисленные по старой и новой системам оценивания, оказаться одинаковыми?\nб) Может ли разность итоговых баллов, вычисленных по старой и новой системам оценивания, оказаться равной \nв) Найдите наибольшее возможное значение разности итоговых баллов, вычисленных по старой и новой системам оценивания.",
+   "text": "На проекте «Мисс Чмаровка — 2016» выступление каждой участницы оценивают шесть судей. При этом каждый судья выставляет оценку — целое число баллов от 0 до 10 включительно. Известно, что за выступление Изольды Кабановой все члены жюри выставили различные оценки. По старой системе оценивания итоговый балл за выступление определяется как среднее арифметическое всех оценок судей. По новой системе оценивания итоговый балл вычисляется следующим образом: отбрасываются наименьшая и наибольшая оценки, и считается среднее арифметическое четырех оставшихся оценок. \nа) Могут ли итоговые баллы, вычисленные по старой и новой системам оценивания, оказаться одинаковыми?\nб) Может ли разность итоговых баллов, вычисленных по старой и новой системам оценивания, оказаться равной (дробь: числитель: 1, знаменатель: 8 конец дроби ?) \nв) Найдите наибольшее возможное значение разности итоговых баллов, вычисленных по старой и новой системам оценивания.",
    "answer": "Решение. \nУпорядочим оценки судей: (a меньше b меньше c меньше d меньше e меньше f) Тогда изучаемая величина равна\n (дробь: числитель: a плюс b плюс c плюс d плюс e плюс f, знаменатель: 6 конец дроби минус дробь: числитель: b плюс c плюс d плюс e}4= дробь: числитель: {, знаменатель: 2 конец дроби (a плюс f) минус (b плюс c плюс d плюс e) , знаменатель: 12 конец дроби) \nа) Да. Например, при (a=1,) (b=2,) (c=3,) (d=4,) (e=5,) (f=6) эта разность равна нулю.\nб) Нет. Очевидно, при умножении разности на 12 получается целое число, но (12 умножить на дробь: числитель: 1, знаменатель: 8 конец дроби =1,5) \nв) Возьмем любые баллы и попробуем их изменить так, чтобы разность выросла. Если (f меньше 10,) то заменим его на 10. Если (b больше a плюс 1,) то заменим b на (a плюс 1) Потом также заменим c, d, e на (a плюс 2,) (a плюс 3,) (a плюс 4) Получим \n (дробь: числитель: 2 (a плюс 10) минус (4a плюс 10) , знаменатель: 12 конец дроби = дробь: числитель: 5 минус a, знаменатель: 6 конец дроби меньше или равно дробь: числитель: 5, знаменатель: 6 конец дроби) \nЗначение (дробь: числитель: 5, знаменатель: 6 конец дроби) достигается при оценках 0, 1, 2, 3, 4, 10.\nОтвет: а) да; б) нет; в) (дробь: числитель: 5, знаменатель: 6 конец дроби)",
-   "hint": "Уравнение — на рисунке: перепиши его точно и решай письменно.",
+   "hint": "Решение.",
    "hints": [
-    "Уравнение — на рисунке: перепиши его точно и решай письменно.",
     "Решение.",
     "Упорядочим оценки судей: (a меньше b меньше c меньше d меньше e меньше f) Тогда изучаемая величина равна\n (дробь: числитель: a плюс b плюс c плюс d плюс e плюс f, знаменатель: 6 конец дроби минус дробь: числитель: b плюс c плюс d плюс e)4= дробь: числитель: (, знаменатель: 2 конец дроби (a плюс f) минус (b плюс c плюс d плюс e) , знаменатель: 12 конец дроби) \nа) Да."
    ],
@@ -73462,10 +72465,7 @@
    "example": 32,
    "points": 2,
    "valueType": "общее решение + список",
-   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=514594",
-   "visual": {
-    "assetId": "math-src514594"
-   }
+   "source": "Решу ЕГЭ (СДАМ ГИА), профиль, задание №20, https://math-ege.sdamgia.ru/problem?id=514594"
   },
   {
    "id": "n20_q18",
