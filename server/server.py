@@ -8722,7 +8722,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
          "about": skill_name, "educationalLevel": exam,
          "hasPart": ld_samples},
         {"@type": "BreadcrumbList", "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Все задания",
+            {"@type": "ListItem", "position": 1, "name": exam,
              "item": base + prefix + "/"},
             {"@type": "ListItem", "position": 2, "name": title, "item": hub},
             {"@type": "ListItem", "position": 3,
@@ -8730,7 +8730,7 @@ def seo_render_task_page(base: str, conn: sqlite3.Connection, subject: str,
     # Сырой </script> из данных каталога закрыл бы JSON-LD блок досрочно —
     # экранируем как <\/ (валидный JSON-escape), как принято для инлайн-JSON.
     ld_json = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
-    crumb = (f"<a href='{prefix}/'>Все задания</a>"
+    crumb = (f"<a href='{prefix}/'>{exam}</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
              f"<a href='{_seo_esc(hub)}'>{_seo_esc(title)}</a>"
              f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
@@ -8828,7 +8828,7 @@ def seo_render_hub(base: str, conn: sqlite3.Connection, subject: str) -> bytes |
     return _seo_shell(
         title=f"Все задания {exam} по {genitive} — разбор и практика | lemma go",
         desc=desc, canonical=url, robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<a href='{prefix}/'>Все задания</a>"
+        ld_json="", crumb=(f"<a href='{prefix}/'>{exam}</a>"
                            f"<span class='seo-crumb__sep' aria-hidden='true'>›</span>"
                            f"<span class='seo-crumb__here' aria-current='page'>{_seo_esc(title)}</span>"),
         body_main=body_main)
@@ -8881,7 +8881,7 @@ def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
         title=f"Задания {label} по номерам — разбор и практика | lemma go",
         desc=desc,
         canonical=f"{base}{prefix}/", robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>Все задания</span>"),
+        ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>{label}</span>"),
         body_main=body_main)
 
 
