@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Кольцевое расселение саламандр Ensatina вокруг долины</title>
+  <desc id="desc">В центре — долина, ограниченная горным массивом. Вокруг неё кольцом расположены ареалы: сверху E. picta, слева E. oregonensis, справа E. platensis, снизу E. klauberi. Стрелки показывают направление расселения видов вокруг долины.</desc>
+  <rect width="640" height="420" rx="10" fill="#ffffff"/>
+  <ellipse cx="320" cy="205" rx="215" ry="175" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <rect x="282" y="45" width="76" height="320" rx="30" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <g fill="#64748b">
+    <polygon points="292,90 300,74 308,90"/><polygon points="310,110 318,94 326,110"/>
+    <polygon points="330,130 338,114 346,130"/><polygon points="306,160 314,144 322,160"/>
+    <polygon points="330,190 338,174 346,190"/><polygon points="308,220 316,204 324,220"/>
+    <polygon points="332,250 340,234 348,250"/><polygon points="306,280 314,264 322,280"/>
+    <polygon points="330,310 338,294 346,310"/><polygon points="308,335 316,319 324,335"/>
+  </g>
+  <text x="320" y="205" font-family="Arial, sans-serif" font-size="17" font-style="italic" fill="#475569" text-anchor="middle" transform="rotate(-90 320 205)">долина</text>
+  <path d="M320,32 A215,175 0 0 1 480,110" fill="none" stroke="#0284c7" stroke-width="14" opacity="0.55"/>
+  <path d="M160,110 A215,175 0 0 1 320,32" fill="none" stroke="#16a34a" stroke-width="14" opacity="0.55"/>
+  <path d="M105,205 A215,175 0 0 0 160,110" fill="none" stroke="#65a30d" stroke-width="14" opacity="0.55"/>
+  <path d="M105,205 A215,175 0 0 0 215,345" fill="none" stroke="#65a30d" stroke-width="14" opacity="0.45"/>
+  <path d="M215,345 A215,175 0 0 0 380,375" fill="none" stroke="#ca8a04" stroke-width="14" opacity="0.55"/>
+  <path d="M380,375 A215,175 0 0 0 535,205" fill="none" stroke="#b45309" stroke-width="14" opacity="0.55"/>
+  <path d="M535,205 A215,175 0 0 0 480,110" fill="none" stroke="#b45309" stroke-width="14" opacity="0.55"/>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e293b"/>
+    </marker>
+  </defs>
+  <path d="M250,55 A215,175 0 0 1 400,60" fill="none" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M130,150 A215,175 0 0 0 150,260" fill="none" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M510,150 A215,175 0 0 1 490,260" fill="none" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M250,360 A215,175 0 0 0 350,372" fill="none" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="320" y="24" font-family="Georgia, serif" font-size="20" font-style="italic" text-anchor="middle" fill="#1e293b">E. picta</text>
+  <text x="190" y="216" font-family="Georgia, serif" font-size="17" font-style="italic" text-anchor="middle" fill="#1e293b" stroke="#ffffff" stroke-width="5" paint-order="stroke">E. oregonensis</text>
+  <text x="440" y="216" font-family="Georgia, serif" font-size="17" font-style="italic" text-anchor="middle" fill="#1e293b" stroke="#ffffff" stroke-width="5" paint-order="stroke">E. platensis</text>
+  <text x="290" y="404" font-family="Georgia, serif" font-size="20" font-style="italic" text-anchor="middle" fill="#1e293b">E. klauberi</text>
+</svg>

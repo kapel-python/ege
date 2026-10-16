@@ -2906,7 +2906,10 @@
    "type": "short_answer",
    "sourceId": "fipi-ov2026-bio-2",
    "source": "Открытый вариант КИМ ЕГЭ 2026 по биологии (ФИПИ, досрочный экзамен 31.03.2026), задание №2; ответ: 23. https://doc.fipi.ru/ege/otkrytyy-bank-zadaniy-ege/otkrytyye-varianty-kim-ege/2026/Bio_1_ege2026.zip",
-   "points": 2
+   "points": 2,
+   "visual": {
+    "assetId": "bio-fipi-setup2"
+   }
   },
   {
    "id": "bio02_p6",
@@ -54139,7 +54142,10 @@
    "source": "Открытый вариант КИМ ЕГЭ 2024 по биологии (ФИПИ, досрочный экзамен 02.04.2024), задание №26; ответ: см. разбор. https://doc.fipi.ru/ege/otkrytyy-bank-zadaniy-ege/otkrytyye-varianty-kim-ege/2024/Bio_1_ege2024.zip",
    "points": 3,
    "selfCheck": true,
-   "check": "self"
+   "check": "self",
+   "visual": {
+    "assetId": "bio-fipi-ensatina"
+   }
   },
   {
    "id": "bio26_p3",
@@ -77263,6 +77269,32 @@
    "sourceId": "bio-src77475",
    "taskId": null,
    "description": "Рисунок источника к заданию биологии №24"
+  },
+  {
+   "id": "bio-fipi-setup2",
+   "src": "assets/biology/bio-fipi-setup2.svg?v=57a121bf28",
+   "type": "image",
+   "alt": "Две установки с водным растением: на свету газа в пробирке стало больше, в темноте — без изменений",
+   "width": 640,
+   "ratio": 1.5238,
+   "source": "reconstructed: schematic light/dark aquatic-plant gas-collection setups (beaker, funnel, inverted test tube); property-accurate, not an official exam figure",
+   "sourceId": "catalog_biology.json:bio02_p5",
+   "sourceUrl": null,
+   "taskId": "bio02_p5",
+   "description": "Схематическая реконструкция опыта: стакан с водой, растение, воронка и перевёрнутая пробирка; установка 1 на ярком свету, установка 2 в тёмном шкафу."
+  },
+  {
+   "id": "bio-fipi-ensatina",
+   "src": "assets/biology/bio-fipi-ensatina.svg?v=2a37b58acf",
+   "type": "image",
+   "alt": "Кольцевое расселение саламандр Ensatina вокруг долины: E. picta, E. oregonensis, E. platensis, E. klauberi",
+   "width": 640,
+   "ratio": 1.5238,
+   "source": "reconstructed: schematic ring-species map (central valley, four Ensatina ranges with spread arrows); property-accurate, not an official exam figure",
+   "sourceId": "catalog_biology.json:bio26_p2",
+   "sourceUrl": null,
+   "taskId": "bio26_p2",
+   "description": "Локальная SVG-схема кольцевого ареала: долина в центре, четыре вида вокруг, стрелки направления расселения."
   }
  ],
  "visualAudit": {
@@ -77277,7 +77309,7 @@
    "bio02_p2": "text-only",
    "bio02_p3": "text-only",
    "bio02_p4": "text-only",
-   "bio02_p5": "text-only",
+   "bio02_p5": "visual-provided",
    "bio03_p1": "text-only",
    "bio03_p2": "text-only",
    "bio03_p3": "text-only",
@@ -77386,7 +77418,7 @@
    "bio25_p2": "text-only",
    "bio25_p3": "text-only",
    "bio26_p1": "text-only",
-   "bio26_p2": "text-only",
+   "bio26_p2": "visual-provided",
    "bio26_p3": "visual-provided",
    "bio27_p1": "text-only",
    "bio27_p2": "text-only",
@@ -78610,6 +78642,24 @@
      "bio09_p1"
     ],
     "note": "Схематическая реконструкция для платформы (reconstructed: schematic flower structure; property-accurate, not an official exam figure)."
+   },
+   {
+    "sourceId": "catalog_biology.json:bio02_p5",
+    "examNumber": "№2",
+    "status": "visual-provided",
+    "taskIds": [
+     "bio02_p5"
+    ],
+    "note": "Схематическая реконструкция для платформы (reconstructed: schematic light/dark aquatic-plant gas-collection setups (beaker, funnel, inverted test tube); property-accurate, not an official exam figure)."
+   },
+   {
+    "sourceId": "catalog_biology.json:bio26_p2",
+    "examNumber": "№26",
+    "status": "visual-provided",
+    "taskIds": [
+     "bio26_p2"
+    ],
+    "note": "Схематическая реконструкция для платформы (reconstructed: schematic ring-species map (central valley, four Ensatina ranges with spread arrows); property-accurate, not an official exam figure)."
    }
   ]
  }
