@@ -1163,6 +1163,19 @@ def _exam_prefix(subject: str) -> str:
     return "/oge" if _subject_exam(subject) == "oge" else "/ege"
 
 
+def _exam_has_open_subjects(exam: str) -> bool:
+    """Есть ли хоть один открытый предмет оси (для переключателя ЕГЭ/ОГЭ).
+
+    Только registry, без БД. Не бросает: сомнение трактуем как «оси нет»,
+    чтобы крошка не вела на честную 404 пустой оси."""
+    try:
+        want = "oge" if str(exam or "").strip().lower() == "oge" else "ege"
+        return any(not subject_is_locked(sid) and _subject_exam(sid) == want
+                   for sid in SUBJECT_IDS)
+    except Exception:
+        return False
+
+
 def subjects_payload() -> list:
     """Публичное описание предметов для каталога/онбординга."""
     return [_public_subject_info(sid) for sid in SUBJECT_IDS]
@@ -8838,7 +8851,9 @@ def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
     """Хаб /ege/ или /oge/: предметы своей оси со ссылками.
 
     Только registry, без БД. Пустая ось (нет открытых предметов экзамена) —
-    честный None вместо индексируемой пустышки: вызыватель отдаёт 404."""
+    честный None вместо индексируемой пустышки: вызыватель отдаёт 404.
+    Крошка хаба — переключатель осей: текущая подсвечена, вторая ведёт
+    на соседний хаб (прячется, если та ось пуста и отдала бы 404)."""
     exam = "oge" if str(exam or "").strip().lower() == "oge" else "ege"
     label = "ОГЭ" if exam == "oge" else "ЕГЭ"
     prefix = "/oge" if exam == "oge" else "/ege"
@@ -8877,11 +8892,22 @@ def seo_render_index(base: str, exam: str = "ege") -> bytes | None:
 <section class="seo-nums">
 {chr(10).join(cards)}
 </section>"""
+    # Переключатель осей фиксированным порядком ЕГЭ|ОГЭ (позиции не
+    # прыгают между страницами): текущая — подсвеченная current-таблетка,
+    # соседняя — ссылка на свой хаб. Сосед прячется, если его ось пуста.
+    pills = []
+    for ex in ("ege", "oge"):
+        lab = "ОГЭ" if ex == "oge" else "ЕГЭ"
+        if ex == exam:
+            pills.append(f"<span class='seo-crumb__here' aria-current='page'>{lab}</span>")
+        elif _exam_has_open_subjects(ex):
+            pills.append(f"<a href='/{ex}/'>{lab}</a>")
+    crumb = "".join(pills)
     return _seo_shell(
         title=f"Задания {label} по номерам — разбор и практика | lemma go",
         desc=desc,
         canonical=f"{base}{prefix}/", robots="index, follow", og_type="website",
-        ld_json="", crumb=(f"<span class='seo-crumb__here' aria-current='page'>{label}</span>"),
+        ld_json="", crumb=crumb,
         body_main=body_main)
 
 

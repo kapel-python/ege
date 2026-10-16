@@ -77,6 +77,12 @@ def main():
         check("хаб /ege/ indexable", 'name="robots" content="index' in text)
         check("хаб /ege/ canonical", 'rel="canonical"' in text and "/ege/" in text)
         check("хаб /ege/ ведёт на предметы", "/ege/russian/" in text)
+        check("хаб /ege/ переключает на /oge/", "href='/oge/'" in text)
+
+        st, _, body = get("/oge/")
+        oge_text = body.decode("utf-8", "replace")
+        check("хаб /oge/ 200", st == 200, str(st))
+        check("хаб /oge/ переключает на /ege/", "href='/ege/'" in oge_text)
 
         st, _, body = get("/ege/russian/")
         text = body.decode("utf-8", "replace")
