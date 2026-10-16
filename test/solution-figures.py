@@ -45,6 +45,7 @@ EXPECTED_LINKED = {
     "catalog_oge_math.json": 394,
     "catalog_oge_biology.json": 8,
     "catalog_oge_history.json": 0,
+    "catalog_oge_society.json": 0,
     "catalog_oge_informatics.json": 32,
 }
 
