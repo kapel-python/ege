@@ -38,6 +38,7 @@ APP_JS = ROOT / "js" / "app.js"
 EXPECTED_LINKED = {
     "catalog.json": 424,
     "catalog_basic.json": 90,
+    "catalog_biology.json": 20,
     "catalog_oge_informatics.json": 32,
 }
 

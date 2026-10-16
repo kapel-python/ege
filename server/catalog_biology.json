@@ -31442,7 +31442,10 @@
    "type": "short_answer",
    "sourceId": "sdamgia-16421",
    "points": 1,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №15, https://bio-ege.sdamgia.ru/problem?id=16421"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №15, https://bio-ege.sdamgia.ru/problem?id=16421",
+   "solutionAssets": [
+    "bio-sol28938"
+   ]
   },
   {
    "id": "bio15_p62",
@@ -32544,7 +32547,10 @@
    "type": "short_answer",
    "sourceId": "sdamgia-20539",
    "points": 1,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=20539"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=20539",
+   "solutionAssets": [
+    "bio-sol219938"
+   ]
   },
   {
    "id": "bio16_p43",
@@ -32744,7 +32750,10 @@
    "type": "short_answer",
    "sourceId": "sdamgia-20524",
    "points": 1,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=20524"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=20524",
+   "solutionAssets": [
+    "bio-sol219935"
+   ]
   },
   {
    "id": "bio16_p53",
@@ -32984,7 +32993,10 @@
    "type": "short_answer",
    "sourceId": "sdamgia-21751",
    "points": 1,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=21751"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №16, https://bio-ege.sdamgia.ru/problem?id=21751",
+   "solutionAssets": [
+    "bio-sol219939"
+   ]
   },
   {
    "id": "bio16_p65",
@@ -55956,7 +55968,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-64993",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64993"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64993",
+   "solutionAssets": [
+    "bio-sol234984"
+   ]
   },
   {
    "id": "bio27_p9",
@@ -56242,7 +56257,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-64992",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64992"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64992",
+   "solutionAssets": [
+    "bio-sol234983"
+   ]
   },
   {
    "id": "bio27_p22",
@@ -56572,7 +56590,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-73716",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=73716"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=73716",
+   "solutionAssets": [
+    "bio-sol244829"
+   ]
   },
   {
    "id": "bio27_p37",
@@ -56990,7 +57011,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-73320",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=73320"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=73320",
+   "solutionAssets": [
+    "bio-sol238677"
+   ]
   },
   {
    "id": "bio27_p56",
@@ -57056,7 +57080,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-64991",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64991"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=64991",
+   "solutionAssets": [
+    "bio-sol257805"
+   ]
   },
   {
    "id": "bio27_p59",
@@ -57936,7 +57963,10 @@
    "selfCheck": true,
    "sourceId": "sdamgia-65479",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=65479"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №27, https://bio-ege.sdamgia.ru/problem?id=65479",
+   "solutionAssets": [
+    "bio-sol222464"
+   ]
   },
   {
    "id": "bio27_p99",
@@ -58090,7 +58120,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-64156",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=64156"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=64156",
+   "solutionAssets": [
+    "bio-sol168923",
+    "bio-sol168924",
+    "bio-sol168926",
+    "bio-sol168927"
+   ]
   },
   {
    "id": "bio28_p6",
@@ -58596,7 +58632,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-73287",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=73287"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=73287",
+   "solutionAssets": [
+    "bio-sol238679",
+    "bio-sol238678",
+    "bio-sol238680",
+    "bio-sol238681"
+   ]
   },
   {
    "id": "bio28_p29",
@@ -58662,7 +58704,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-57210",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57210"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57210",
+   "solutionAssets": [
+    "bio-sol139961",
+    "bio-sol139962",
+    "bio-sol139960",
+    "bio-sol139959"
+   ]
   },
   {
    "id": "bio28_p32",
@@ -58904,7 +58952,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-57208",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57208"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57208",
+   "solutionAssets": [
+    "bio-sol139967",
+    "bio-sol139970",
+    "bio-sol139969",
+    "bio-sol139968"
+   ]
   },
   {
    "id": "bio28_p43",
@@ -59102,7 +59156,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-61136",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=61136"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=61136",
+   "solutionAssets": [
+    "bio-sol222471",
+    "bio-sol222472",
+    "bio-sol222473",
+    "bio-sol222470"
+   ]
   },
   {
    "id": "bio28_p52",
@@ -59168,7 +59228,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-66908",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=66908"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=66908",
+   "solutionAssets": [
+    "bio-sol153604",
+    "bio-sol153607",
+    "bio-sol153608",
+    "bio-sol153609"
+   ]
   },
   {
    "id": "bio28_p55",
@@ -59278,7 +59344,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-73745",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=73745"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=73745",
+   "solutionAssets": [
+    "bio-sol243466",
+    "bio-sol243469",
+    "bio-sol243467",
+    "bio-sol243468"
+   ]
   },
   {
    "id": "bio28_p60",
@@ -59608,7 +59680,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-57209",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57209"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=57209",
+   "solutionAssets": [
+    "bio-sol139966",
+    "bio-sol139963",
+    "bio-sol139964",
+    "bio-sol139965"
+   ]
   },
   {
    "id": "bio28_p75",
@@ -59762,7 +59840,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-70175",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=70175"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=70175",
+   "solutionAssets": [
+    "bio-sol208070",
+    "bio-sol208071",
+    "bio-sol208072",
+    "bio-sol208073"
+   ]
   },
   {
    "id": "bio28_p82",
@@ -60070,7 +60154,13 @@
    "selfCheck": true,
    "sourceId": "sdamgia-56978",
    "points": 2,
-   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=56978"
+   "source": "Решу ЕГЭ (СДАМ ГИА), биология, задание №28, https://bio-ege.sdamgia.ru/problem?id=56978",
+   "solutionAssets": [
+    "bio-sol222468",
+    "bio-sol222469",
+    "bio-sol222466",
+    "bio-sol222467"
+   ]
   },
   {
    "id": "bio28_p96",
@@ -63911,6 +64001,656 @@
    "sourceUrl": null,
    "taskId": "bio18_p1",
    "description": "Локальная SVG-схема для задания bio18_p1."
+  },
+  {
+   "id": "bio-sol139959",
+   "src": "assets/biology/bio-sol139959.png?v=8204c797a3",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139959",
+   "sourceId": "bio-sol139959",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139960",
+   "src": "assets/biology/bio-sol139960.png?v=c440cef54b",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139960",
+   "sourceId": "bio-sol139960",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139961",
+   "src": "assets/biology/bio-sol139961.png?v=0a59a3c08e",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139961",
+   "sourceId": "bio-sol139961",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139962",
+   "src": "assets/biology/bio-sol139962.png?v=f45e40707c",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139962",
+   "sourceId": "bio-sol139962",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139963",
+   "src": "assets/biology/bio-sol139963.png?v=3d3f53e318",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139963",
+   "sourceId": "bio-sol139963",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139964",
+   "src": "assets/biology/bio-sol139964.png?v=f1f8c84275",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139964",
+   "sourceId": "bio-sol139964",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139965",
+   "src": "assets/biology/bio-sol139965.png?v=0e671c51d5",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 62,
+   "ratio": 4.725806451612903,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139965",
+   "sourceId": "bio-sol139965",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139966",
+   "src": "assets/biology/bio-sol139966.png?v=9646f1df78",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139966",
+   "sourceId": "bio-sol139966",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139967",
+   "src": "assets/biology/bio-sol139967.png?v=a150177059",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 311,
+   "height": 61,
+   "ratio": 5.098360655737705,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139967",
+   "sourceId": "bio-sol139967",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139968",
+   "src": "assets/biology/bio-sol139968.png?v=c85987369f",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 63,
+   "ratio": 4.650793650793651,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139968",
+   "sourceId": "bio-sol139968",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139969",
+   "src": "assets/biology/bio-sol139969.png?v=2e04dde346",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 61,
+   "ratio": 4.80327868852459,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139969",
+   "sourceId": "bio-sol139969",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol139970",
+   "src": "assets/biology/bio-sol139970.png?v=d4d253da1e",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 293,
+   "height": 62,
+   "ratio": 4.725806451612903,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=139970",
+   "sourceId": "bio-sol139970",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol153604",
+   "src": "assets/biology/bio-sol153604.png?v=caba9abb00",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 156,
+   "height": 46,
+   "ratio": 3.391304347826087,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=153604",
+   "sourceId": "bio-sol153604",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol153607",
+   "src": "assets/biology/bio-sol153607.png?v=674e5845cb",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 154,
+   "height": 42,
+   "ratio": 3.6666666666666665,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=153607",
+   "sourceId": "bio-sol153607",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol153608",
+   "src": "assets/biology/bio-sol153608.png?v=6dd052a905",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 162,
+   "height": 41,
+   "ratio": 3.951219512195122,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=153608",
+   "sourceId": "bio-sol153608",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol153609",
+   "src": "assets/biology/bio-sol153609.png?v=55d8638931",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 161,
+   "height": 37,
+   "ratio": 4.351351351351352,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=153609",
+   "sourceId": "bio-sol153609",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol168923",
+   "src": "assets/biology/bio-sol168923.png?v=f77679381a",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 161,
+   "height": 41,
+   "ratio": 3.926829268292683,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=168923",
+   "sourceId": "bio-sol168923",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol168924",
+   "src": "assets/biology/bio-sol168924.png?v=7c0b9de958",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 170,
+   "height": 42,
+   "ratio": 4.0476190476190474,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=168924",
+   "sourceId": "bio-sol168924",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol168926",
+   "src": "assets/biology/bio-sol168926.png?v=c77258293c",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 168,
+   "height": 38,
+   "ratio": 4.421052631578948,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=168926",
+   "sourceId": "bio-sol168926",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol168927",
+   "src": "assets/biology/bio-sol168927.png?v=2d69f50b4e",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 178,
+   "height": 41,
+   "ratio": 4.341463414634147,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=168927",
+   "sourceId": "bio-sol168927",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol208070",
+   "src": "assets/biology/bio-sol208070.png?v=3b0b93e676",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 163,
+   "height": 59,
+   "ratio": 2.76271186440678,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=208070",
+   "sourceId": "bio-sol208070",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol208071",
+   "src": "assets/biology/bio-sol208071.png?v=9a0349337c",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 183,
+   "height": 50,
+   "ratio": 3.66,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=208071",
+   "sourceId": "bio-sol208071",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol208072",
+   "src": "assets/biology/bio-sol208072.png?v=fae0669230",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 159,
+   "height": 40,
+   "ratio": 3.975,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=208072",
+   "sourceId": "bio-sol208072",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol208073",
+   "src": "assets/biology/bio-sol208073.png?v=816fa6c886",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 162,
+   "height": 40,
+   "ratio": 4.05,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=208073",
+   "sourceId": "bio-sol208073",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol219935",
+   "src": "assets/biology/bio-sol219935.png?v=b7b44d7e4b",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №16)",
+   "width": 776,
+   "height": 748,
+   "ratio": 1.0374331550802138,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=219935",
+   "sourceId": "bio-sol219935",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №16)"
+  },
+  {
+   "id": "bio-sol219938",
+   "src": "assets/biology/bio-sol219938.png?v=e38bcb3a43",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №16)",
+   "width": 672,
+   "height": 920,
+   "ratio": 0.7304347826086957,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=219938",
+   "sourceId": "bio-sol219938",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №16)"
+  },
+  {
+   "id": "bio-sol219939",
+   "src": "assets/biology/bio-sol219939.png?v=c3d70bc2b8",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №16)",
+   "width": 1638,
+   "height": 1141,
+   "ratio": 1.4355828220858895,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=219939",
+   "sourceId": "bio-sol219939",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №16)"
+  },
+  {
+   "id": "bio-sol222464",
+   "src": "assets/biology/bio-sol222464.png?v=81e3c2f4e4",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 425,
+   "height": 151,
+   "ratio": 2.814569536423841,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222464",
+   "sourceId": "bio-sol222464",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol222466",
+   "src": "assets/biology/bio-sol222466.png?v=d1dd750f7d",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222466",
+   "sourceId": "bio-sol222466",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222467",
+   "src": "assets/biology/bio-sol222467.png?v=8a115b4c10",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222467",
+   "sourceId": "bio-sol222467",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222468",
+   "src": "assets/biology/bio-sol222468.png?v=186a726ad4",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222468",
+   "sourceId": "bio-sol222468",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222469",
+   "src": "assets/biology/bio-sol222469.png?v=3cde4982fa",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222469",
+   "sourceId": "bio-sol222469",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222470",
+   "src": "assets/biology/bio-sol222470.png?v=f8d82ec1cc",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222470",
+   "sourceId": "bio-sol222470",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222471",
+   "src": "assets/biology/bio-sol222471.png?v=a8dc0e0054",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222471",
+   "sourceId": "bio-sol222471",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222472",
+   "src": "assets/biology/bio-sol222472.png?v=bfff4f3280",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222472",
+   "sourceId": "bio-sol222472",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol222473",
+   "src": "assets/biology/bio-sol222473.png?v=75152a8ccf",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 481,
+   "height": 75,
+   "ratio": 6.413333333333333,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=222473",
+   "sourceId": "bio-sol222473",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol234983",
+   "src": "assets/biology/bio-sol234983.png?v=29d5992c60",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 538,
+   "height": 191,
+   "ratio": 2.816753926701571,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=234983",
+   "sourceId": "bio-sol234983",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol234984",
+   "src": "assets/biology/bio-sol234984.png?v=9fd16184e6",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 455,
+   "height": 194,
+   "ratio": 2.345360824742268,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=234984",
+   "sourceId": "bio-sol234984",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol238677",
+   "src": "assets/biology/bio-sol238677.png?v=381cacf064",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 738,
+   "height": 527,
+   "ratio": 1.4003795066413662,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=238677",
+   "sourceId": "bio-sol238677",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol238678",
+   "src": "assets/biology/bio-sol238678.png?v=d9fc016f84",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 416,
+   "height": 69,
+   "ratio": 6.028985507246377,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=238678",
+   "sourceId": "bio-sol238678",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol238679",
+   "src": "assets/biology/bio-sol238679.png?v=17ffd4883b",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 416,
+   "height": 69,
+   "ratio": 6.028985507246377,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=238679",
+   "sourceId": "bio-sol238679",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol238680",
+   "src": "assets/biology/bio-sol238680.png?v=387a2edebe",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 416,
+   "height": 69,
+   "ratio": 6.028985507246377,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=238680",
+   "sourceId": "bio-sol238680",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol238681",
+   "src": "assets/biology/bio-sol238681.png?v=a22dc5a0bb",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 416,
+   "height": 69,
+   "ratio": 6.028985507246377,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=238681",
+   "sourceId": "bio-sol238681",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol243466",
+   "src": "assets/biology/bio-sol243466.png?v=66d87cda51",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 431,
+   "height": 59,
+   "ratio": 7.305084745762712,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=243466",
+   "sourceId": "bio-sol243466",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol243467",
+   "src": "assets/biology/bio-sol243467.png?v=52c5cfca34",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 431,
+   "height": 59,
+   "ratio": 7.305084745762712,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=243467",
+   "sourceId": "bio-sol243467",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol243468",
+   "src": "assets/biology/bio-sol243468.png?v=87098668ed",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 431,
+   "height": 59,
+   "ratio": 7.305084745762712,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=243468",
+   "sourceId": "bio-sol243468",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol243469",
+   "src": "assets/biology/bio-sol243469.png?v=14aeac18fb",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №28)",
+   "width": 431,
+   "height": 59,
+   "ratio": 7.305084745762712,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=243469",
+   "sourceId": "bio-sol243469",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №28)"
+  },
+  {
+   "id": "bio-sol244829",
+   "src": "assets/biology/bio-sol244829.png?v=eb49bad920",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 762,
+   "height": 548,
+   "ratio": 1.3905109489051095,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=244829",
+   "sourceId": "bio-sol244829",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol257805",
+   "src": "assets/biology/bio-sol257805.png?v=eb1cc86815",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №27)",
+   "width": 418,
+   "height": 175,
+   "ratio": 2.388571428571429,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=257805",
+   "sourceId": "bio-sol257805",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №27)"
+  },
+  {
+   "id": "bio-sol28938",
+   "src": "assets/biology/bio-sol28938.png?v=2f1f02ef23",
+   "type": "image",
+   "alt": "Рисунок к решению (биология №15)",
+   "width": 597,
+   "height": 500,
+   "ratio": 1.194,
+   "source": "рисунок решения источника: https://bio-ege.sdamgia.ru/get_file?id=28938",
+   "sourceId": "bio-sol28938",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (биология №15)"
   },
   {
    "id": "bio-src14141",
