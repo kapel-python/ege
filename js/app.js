@@ -334,8 +334,9 @@ function mathText(value) {
      страхуются render(): вместо красного — upright-текст. */
   const spokenMathToTex = (input) => {
     let s = String(input);
-    // Опечатка источника: «д робь:» вместо «дробь:» (45 мест в банке).
-    s = s.replace(/д\s+робь:/g, "дробь:");
+    const noNl = (p) => String(p || "").replace(/\s*\n\s*/g, " ");
+    // Опечатки источника: «д робь:» вместо «дробь:», «к орень» вместо «корень».
+    s = s.replace(/д\s+робь:/g, "дробь:").replace(/(?<![А-Яа-яЁёA-Za-z])к орень(?![А-Яа-яЁёA-Za-z])/g, "корень");
     // Неразрывные пробелы источника — обычные (иначе режутся формулы).
     s = s.replace(/~/g, " ");
     // Символы дуг: ⌣ (frown) / ⌢ (smile).
@@ -380,15 +381,23 @@ function mathText(value) {
     s = s
       .replace(/\\abs\{([^}]*)\}/g, "|$1|")
       .replace(/\\abs([a-zA-Z])(?![a-zA-Z{])/g, "|$1|");
-    // Сырой TeX без скобок: \veca -> \vec{a}, \overrightarrowAB -> {...}.
-    // Уже скобочные (\vec{a}) не трогаем.
+    // Усечённые команды векторов (\overrightar — хвост съеден обрезкой):
+    // все такие огрызки значили \overrightarrow.
+    s = s
+      .replace(/\\over(?:rightar|righta|right|righ|rig|ri|r|ve|e)(?![a-zA-Z{])/g, "\\overrightarrow")
+      .replace(/\\ove(?![a-zA-Zr{])/g, "\\overrightarrow");
     s = s
       .replace(/\\vec\s*([a-zA-Z])(?![a-zA-Z{])/g, "\\vec{$1}")
       .replace(/\\overleftarrow\s*([A-Za-z]{1,6})(?![A-Za-z{])/g, "\\overleftarrow{$1}")
+      .replace(/\\overrightarrow\s*([A-Za-z]{1,6})(?![A-Za-z{])/g, "\\overrightarrow{$1}")
       // Акцент поверх команды: \widehat \overrightarrow{AP} фатален для
       // KaTeX (аргумент съедает команду) -> \widehat{\overrightarrow{AP}}.
+      // Вторым витком ловим вариант, где скобок не было исходно.
       .replace(/\\(widehat|widetilde|hat|bar|dot|ddot|tilde|overline|underline|check)(\s+)(\\[a-zA-Z]+\{[^}]*\})/g, "\\$1{$3}")
-      .replace(/\\overrightarrow\s*([A-Za-z]{1,6})(?![A-Za-z{])/g, "\\overrightarrow{$1}")
+      .replace(/\\(widehat|widetilde|hat|bar|dot|ddot|tilde|overline|underline|check)(\s+)\\(overrightarrow|overleftarrow|vec)\s*([A-Za-z]+)(?![A-Za-z{])/g, "\\$1{\\$3{$4}}")
+      // Голые акценты/стрелки без аргумента (хвост съеден) — выкидываем.
+      .replace(/\\(?:overrightarrow|overleftarrow|vec)(?!\s*[A-Za-z{])/g, "")
+      .replace(/\\(?:widehat|widetilde|hat|bar|dot|ddot|tilde|overline|underline|check)(?!\s*(?:[A-Za-z{]|\\))/g, "")
       // Акцент/вектор + голые буквы: \angleAPT -> \angle APT,
       // \widehatASM -> \widehat{ASM}.
       .replace(/\\angle([A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_{])/g, "\\angle $1")
@@ -417,7 +426,37 @@ function mathText(value) {
       .replace(/\\(underset|mathop|operatorname)(?![a-zA-Z{])/g, "")
       // Смешанные числа: «минус целая часть: 3, дробная часть: 5/12».
       .replace(/целая часть:\s*([^,\n;]*?),\s*дробная часть:\s*числитель:\s*(.*?),\s*знаменатель:\s*(.*?)\s*конец дроби/g,
-        (_, w, n, d) => `${String(w).trim()}\\frac{${String(n).trim()}}{${String(d).trim()}}`);
+        (_, w, n, d) => `${noNl(String(w).trim())}\\frac{${noNl(String(n).trim())}}{${noNl(String(d).trim())}}`);
+    // Бэкслэш перед кириллицей — никогда не команда (пути C:\Users\…):
+    // срезаем, иначе висит мусорным символом.
+    s = s.replace(/\\([А-Яа-яЁё])/g, "$1");
+    // Перенос строки через бэкслэш (продолжение строки в коде):
+    // склеиваем пробелом, иначе висячий \ роняет блок.
+    s = s.replace(/\\\\\r?\n/g, " ").replace(/\\\r?\n/g, " ");
+    // Одиночные \( без пары \) на той же строке — не математика, а лямбды
+    // VB (.Where(\(n,s)->…) и прочий код: чиним в скобки. Парные не трогаем.
+    s = s.split("\n").map((line) => {
+      if (!line.includes("\\(") && !line.includes("\\)")) return line;
+      let out = "", i = 0;
+      for (;;) {
+        const o = line.indexOf("\\(", i);
+        if (o < 0) { out += line.slice(i); break; }
+        if (line.indexOf("\\)", o + 2) < 0) { out += line.slice(i, o) + "("; i = o + 2; }
+        else { out += line.slice(i, o + 2); i = o + 2; }
+      }
+      let res = "", j = 0, depth = 0;
+      for (;;) {
+        const a = out.indexOf("\\(", j), b = out.indexOf("\\)", j);
+        if (a < 0 && b < 0) { res += out.slice(j); break; }
+        if (a >= 0 && (b < 0 || a < b)) { depth++; res += out.slice(j, a + 2); j = a + 2; }
+        else {
+          if (depth > 0) { depth--; res += out.slice(j, b + 2); }
+          else { res += out.slice(j, b) + ")"; }
+          j = b + 2;
+        }
+      }
+      return res;
+    }).join("\n");
     // Линейки бланков (_П_П_П_A_, _Б_В_…): это прочерки, не подстрочники.
     // Иначе цепочка превращается в двойные сабы — красный.
     s = s.replace(/(_[А-ЯЁA-Z]){2,}/g, (m) => m.replace(/_/g, "\\_"));
@@ -431,16 +470,19 @@ function mathText(value) {
       .replace(/(^|[\s(])_([A-Za-zА-Яа-яЁё\u0370-\u03FF])/g, "$1\\_$2")
       .replace(/(^|[\s(])_(?=[\s).,;\n]|$)/g, "$1\\_")
       .replace(/([A-Za-z0-9)>}\]])_((?=[\s).,;\n]|$))/g, "$1\\_");
-    // Подстрочник кириллицей ДО дробей: иначе N_благопр внутри \frac{}{}
-    // ловит защиту ниже и та вставляет \(...\) прямо в аргумент — красный.
+    // Подстрочник кириллицей — ТОЛЬКО внутри захватов дробей/корней
+    // (колбэки ниже): глобально он лезет в обычную прозу («рас_чёт»).
     // Греческие тоже бывают базой (σ_выб).
-    s = s.replace(/([A-Za-zА-Яа-я0-9)\]}\u0370-\u03FF])_([а-яёА-ЯЁ]+(?:\.[а-яёА-ЯЁ]+)*)/g, "$1_{\\text{$2}}");
+    const cyrSub = (p) => String(p || "").replace(/([A-Za-zА-Яа-я0-9)\]}\u0370-\u03FF])_([а-яёА-ЯЁ]+(?:\.[а-яёА-ЯЁ]+)*)/g, "$1_{\\text{$2}}");
     // Произведения вида a_1a_2, d_1d_2 (точка потерялась при выгрузке):
     // иначе правило _XX ниже склеит в двойной подстрочник — красный.
     s = s.replace(/([a-z])_([0-9])\s*([a-z])_([0-9])/g, "$1_{$2}\\cdot $3_{$4}");
     // Мусорные скобки выгрузки (ДО парсинга дробей!): «в степени (21 ,»
     // (показатель — число, скобка ни к чему).
-    s = s.replace(/в степени\s*\(\s*([0-9]+(?:\.[0-9]+)?)\s*([,;])/g, "в степени $1$2");
+    s = s.replace(/в степени\s*\(\s*((?:минус|плюс)\s+)?([0-9]+(?:\.[0-9]+)?)\s*(?=[,;]|конец аргумента|конец дроби)/g, "в степени $1$2");
+    s = s.replace(/(по основанию)\s*\(\s*([0-9]+(?:\.[0-9]+)?)\s*,/g, "$1 $2,");
+    // Пустой дубликат («, знаменатель: , конец дроби»): выкидываем целиком.
+    s = s.replace(/,\s*знаменатель:\s*,\s*конец дроби/g, "");
     // \dfrac{ со словесным содержимым («\dfrac{ корень из: … , знаменатель: 4
     // конец дроби}»): скобка лишняя, дальше разберёт общий парсер дробей.
     // Целые \dfrac{a}{b} (с «}{» внутри) не трогаем. ДО mismatch-ремонта ниже,
@@ -448,7 +490,7 @@ function mathText(value) {
     s = s.replace(/\\[dt]?frac\{(?![^{}]*\}\{)/g, "дробь: числитель: ");
     // Перепутанные «{ 15)» -> «(15)». Только genuine mismatch (без «}» до «)»);
     // целые \frac{a}{b} и \text{..} не задевает.
-    s = s.replace(/\\?\{([^{}]*?)\)/g, "($1)").replace(/\(([^{}]*?)\}/g, "($1)");
+    s = s.replace(/(в степени\s*)\\?\{([^{}]*?)\)/g, "$1($2)").replace(/\(([^{}]*?)\}/g, "($1)");
     // Пустой знаменатель с утекшим содержимым
     // («числитель: 1, знаменатель: конец дроби 10») и голые буквы
     // («\dfracKM синус 60» = KM/sin60): забираем следующий
@@ -459,7 +501,7 @@ function mathText(value) {
     // Один терм («\dfrac X)») -> X/1: значение то же, красного нет.
     const TRIG2 = "(?:синус|косинус|тангенс|\\\\sin|\\\\cos|\\\\tan)";
     const bareFracRe = new RegExp(`\\\\[dt]?frac(?![a-zA-Z{])`, "g");
-    for (let bi = 0; bi < 10; bi++) {
+    for (let bi = 0; bi < 500; bi++) {
       bareFracRe.lastIndex = 0;
       const bm = bareFracRe.exec(s);
       if (!bm) break;
@@ -504,28 +546,42 @@ function mathText(value) {
       } else {
         num = s.slice(j, endAll).trim(); den = "1"; tail = endAll;
       }
-      if (!num) break;
-      s = `${s.slice(0, bm.index)}\\frac{${num}}{${den}}${s.slice(tail)}`;
+      if (!num) {
+        // Вырожденный хвост («\dfrac)»): команду выкидываем, идём дальше.
+        s = `${s.slice(0, bm.index)}${s.slice(bm.index + bm[0].length)}`;
+        continue;
+      }
+      s = `${s.slice(0, bm.index)}\\frac{${cyrSub(num)}}{${cyrSub(den)}}${s.slice(tail)}`;
     }
-    s = s.replace(/дробь:\s*числитель:\s*((?:(?!дробь:|знаменатель:|конец дроби)[\s\S])*?)(?:,\s*)?знаменатель:\s*конец дроби/g,
-      (m, n, off, full) => {
-        let j = off + m.length;
-        while (full[j] === " ") j++;
-        let depth = 0, k = j;
-        for (; k < full.length; k++) {
-          const c = full[k];
-          if (c === "(") depth++;
-          else if (c === ")") { if (!depth) break; depth--; }
-          else if (c === "\n") break;
-          else if (!depth && (c === "," || c === ";")) break;
-          else if (!depth && full.startsWith("дробь:", k)) break;
-          else if (!depth && c === "=" && ((full[k - 1] || "") === " " || (full[k + 1] || "") === " ")) break;
-          else if (!depth && /^(равно|равносильно)(?![А-Яа-яЁёA-Za-z])/.test(full.slice(k))) break;
-        }
-        const rest = full.slice(j, k).trim();
-        if (!rest) return `дробь: числитель: ${String(n).trim()}, знаменатель: 1 конец дроби`;
-        return `дробь: числитель: ${String(n).trim()}, знаменатель: ${rest} конец дроби`;
-      });
+    // ВНИМАНИЕ: остаток забираем splice'ом (а не replace): иначе он
+    // продублируется — replace меняет только совпавший кусок.
+    const emptyDenRe = /дробь:\s*числитель:\s*((?:(?!дробь:|знаменатель:|конец дроби)[\s\S])*?)(?:,\s*)?знаменатель:\s*конец дроби/g;
+    for (let ei = 0; ei < 500; ei++) {
+      emptyDenRe.lastIndex = 0;
+      const em = emptyDenRe.exec(s);
+      if (!em) break;
+      const num = String(em[1]).trim();
+      let j = em.index + em[0].length;
+      while (s[j] === " ") j++;
+      let depth = 0, k = j;
+      for (; k < s.length; k++) {
+        const c = s[k];
+        if (c === "(") depth++;
+        else if (c === ")") { if (!depth) break; depth--; }
+        else if (c === "\n") break;
+        else if (!depth && (c === "," || c === ";")) break;
+        else if (!depth && s.startsWith("дробь:", k)) break;
+        else if (!depth && s.startsWith("конец дроби", k)) break;
+        else if (!depth && /^(меньше|больше|не равно|принадлежит)(?![А-Яа-яЁёA-Za-z])/.test(s.slice(k))) break;
+        else if (!depth && c === "=" && ((s[k - 1] || "") === " " || (s[k + 1] || "") === " ")) break;
+        else if (!depth && /^(равно|равносильно)(?![А-Яа-яЁёA-Za-z])/.test(s.slice(k))) break;
+      }
+      const rest = s.slice(j, k).trim();
+      const merged = rest
+        ? `дробь: числитель: ${num}, знаменатель: ${rest} конец дроби`
+        : `дробь: числитель: ${num}, знаменатель: 1 конец дроби`;
+      s = s.slice(0, em.index) + merged + s.slice(k);
+    }
     const balanceMarkers = (p, openRe, closeRes) => {
       let s = String(p || "");
       const opens = (s.match(openRe) || []).length;
@@ -533,9 +589,9 @@ function mathText(value) {
       if (opens === closes) return s.trim();
       return s.replace(openRe, "").replace(closeRes, "").replace(/\s+/g, " ").trim();
     };
-    const cleanFracPart = (p) => balanceMarkers(p, /начало аргумента:/g, /конец аргумента/g);
+    const cleanFracPart = (p) => cyrSub(balanceMarkers(noNl(p), /начало аргумента:/g, /конец аргумента/g));
     const cleanRootArg = (p) => {
-      let s = balanceMarkers(balanceMarkers(p, /начало аргумента:/g, /конец аргумента/g), /дробь:/g, /конец дроби/g);
+      let s = cyrSub(balanceMarkers(balanceMarkers(noNl(p), /начало аргумента:/g, /конец аргумента/g), /дробь:/g, /конец дроби/g));
       // Непарные остатки слов-маркеров дроби после кривой выгрузки.
       if (/числитель:|знаменатель:/.test(s) && !/дробь:/.test(s)) {
         s = s.replace(/числитель:\s*/g, "").replace(/знаменатель:\s*/g, "");
@@ -550,6 +606,7 @@ function mathText(value) {
       // Сироты без пары внутри скобок ПЕРВЫМИ: иначе парные правила
       // хватают чужой закрыватель (n16_q14: конец аргумента внутри
       // «в степени (…)»).
+      // Плюс висячие закрыватели без открывателя в том же охвате.
       for (let i = 0; i < 10; i++) {
         const next = s.replace(/\(([^()\n]*?)\)/g, (m, inner) => {
           let t = inner, changed = false;
@@ -563,6 +620,12 @@ function mathText(value) {
             t = t.replace(/корень из:\s*/g, "корень из ").replace(/начало аргумента:\s*/g, "").replace(/конец аргумента/g, "");
             changed = true;
           }
+          // Висячий повтор «конец дроби конец дроби» без вложенной дроби
+          // между (кривая выгрузка) — второй лишний, первый законный.
+          t = t.replace(/(дробь:(?:(?!дробь:)[\s\S])*?конец дроби)(\s*конец дроби\b)/g, (_, pair) => {
+            changed = true;
+            return pair;
+          });
           return changed ? `(${t})` : m;
         });
         if (next === s) break;
@@ -589,15 +652,19 @@ function mathText(value) {
         s = next;
       }
       // Корни в скобках/фигурных без маркеров («корень из { дробь…}»).
-      s = s.replace(/корень из\s*[\(\{]\s*(\\frac(?:\{[^{}]*\}){2}|\\sqrt\{[^{}]*\}|[^()\n{}]*?)\s*[\)\}]/g, "\\sqrt{$1}");
+      s = s.replace(/корень из\s*[\(\{]\s*(\\frac(?:\{[^{}]*\}){2}|\\sqrt\{[^{}]*\}|[^()\n{}]*?)\s*[\)\}]/g,
+      (_, a) => `\\sqrt{${cyrSub(a)}}`);
       if (s === before) break;
     }
     // Простые корни без маркеров: «корень из 5», «корень из x».
     s = s.replace(/корень из\s+([0-9]+(?:\.[0-9]+)?|[A-Za-z]+(?:_[A-Za-z0-9]+)?)/g, "\\sqrt{$1}");
     // Сирота «корень из:» + уже собранная формула: дотягиваем в sqrt.
     s = s.replace(/корень из:\s*(\\frac(?:\{[^{}]*\}){2}|\\sqrt\{[^{}]*\}|\\vec\{[^{}]*\}|\\overrightarrow\{[^{}]*\})/g, "\\sqrt{$1}");
+    // Сирота «корень из: N» (закрытие потеряно при выгрузке).
+    s = s.replace(/корень из:\s*([0-9]+(?:\.[0-9]+)?|[A-Za-z]+(?:_[A-Za-z0-9]+)?)/g, "\\sqrt{$1}");
     // Латинское «sqrt 3» из выгрузки.
     s = s.replace(/(?<![a-zA-Z\\])sqrt\s+([0-9A-Za-z]+)/g, "\\sqrt{$1}");
+    s = s.replace(/(?<![a-zA-Z\\])sqrt\s*\(\s*([^()\n]*?)\s*\)/g, "\\sqrt{$1}");
     // Простые корни n-й степени словами: «корень 28 степени из 3»,
     // «корень пятой степени из 5».
     s = s
@@ -618,10 +685,14 @@ function mathText(value) {
       .replace(/(?<![А-Яа-яЁёA-Za-z])косинус(?![А-Яа-яЁёA-Za-z])/gi, "\\cos ")
       .replace(/(?<![А-Яа-яЁёA-Za-z])тангенс(?![А-Яа-яЁёA-Za-z])/gi, "\\tan ")
       .replace(/(?<![А-Яа-яЁёA-Za-z])котангенс(?![А-Яа-яЁёA-Za-z])/gi, "\\cot ");
+    // Единицы с русской степенью («1500см в кубе»): единицу прячем в \text,
+    // иначе кириллица рвёт мат-ран и скобки степени светятся текстом.
+    s = s.replace(/([0-9])\s*(см|мм|км|дм|м|г|кг|мг|т|ц|с|мс|мин|ч|сут|л|мл|га|руб|коп|шт)\s+в (квадрате|кубе)(?![А-Яа-яЁёA-Za-z0-9_])/g,
+      (_, n, u, p) => `${n}\\text{${u}}^{${p === "квадрате" ? 2 : 3}}`);
     // Степени словами (Cyrillic-aware границы: \b с кириллицей не работает).
     // Сначала сбалансированные скобки: «7 в степени (2 логарифм … (косинус x))».
     s = s.replace(/в степени\s*\(/g, "\u0001^(");
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 500; i++) {
       const open = s.indexOf("\u0001^(");
       if (open < 0) break;
       let depth = 0, end = -1;
@@ -639,6 +710,10 @@ function mathText(value) {
     s = s
       .replace(/([A-Za-zА-Яа-я0-9'’)\]\\\]}])\s+в квадрате(?![А-Яа-яЁёA-Za-z0-9_])/g, "$1^{2}")
       .replace(/([A-Za-zА-Яа-я0-9'’)\]\\\]}])\s+в кубе(?![А-Яа-яЁёA-Za-z0-9_])/g, "$1^{3}")
+      // Показатель — уже собранная формула («в степени \frac{..}{..}»):
+      // иначе «в степени» остаётся словами и рвёт мат-ран.
+      .replace(/в степени\s+(\\frac(?:\{[^{}]*\}){2}|\\sqrt(?:\[[^\]]*\])?\{[^{}]*\}|\\(?:vec|overrightarrow|overleftarrow)\{[^{}]*\})/g, "^{$1}")
+      .replace(/(?<![А-Яа-яЁёA-Za-z0-9_])в степени\s+(-\s*[0-9]+(?:\.[0-9]+)?)/g, "^{$1}")
       .replace(/(?<![А-Яа-яЁёA-Za-z0-9_])в степени\s+([0-9]+|[A-Za-z]+)/g, "^{$1}");
     // Потерянная точка между векторами: «вектор a вектор b» -> cdot.
     s = s.replace(/(\\(?:vec|overrightarrow|overleftarrow)\{[^}]*\})\s+(?=\\(?:vec|overrightarrow|overleftarrow)\{)/g, "$1\\cdot ");
@@ -678,6 +753,7 @@ function mathText(value) {
       .replace(/(\d+)\s*градусов?(?![А-Яа-яЁёA-Za-z0-9_])/g, "$1^{\\circ}")
       .replace(/(\d+)\s*градуса(?![А-Яа-яЁёA-Za-z0-9_])/g, "$1^{\\circ}")
       .replace(/логарифм по основанию\s+([0-9A-Za-z]+)/g, "\\log_{$1} ")
+      .replace(/логарифм по основанию\s*\(\s*([^()\n]*?)\s*\)/g, "\\log_{$1} ")
       .replace(/десятичный логарифм/g, "\\lg ")
       .replace(/натуральный логарифм/g, "\\ln ");
     // Сироты структурных маркеров (кривая выгрузка: закрытие не там) —
@@ -769,7 +845,17 @@ function mathText(value) {
     // Legacy catalog strings contain bare expressions (x², √(...), log_a(x)).
     // Collect the whole Latin/numeric/operator run before adding delimiters;
     // wrapping individual superscripts was the source of mixed typography.
-    const convert = (raw) => convertCaret(convertLog(raw)
+    const convert = (raw) => {
+    // Строковые литералы кода ('a', ';', '09.csv', '172.16.0/24'): прячем
+    // в плейсхолдеры — иначе дробь-из-слэша и ''-праймы рвут их изнутри.
+    // Штрихи (A', f'(x)) без пары не трогаем (внутри нужны мат-операторы).
+    const quotes = [];
+    const dequoted = String(raw).replace(/'((?:(?![+\-=>^_\\{}]).)*?)'/g, (m, c) => {
+      quotes.push(c);
+      return `\x7FQ${quotes.length - 1}\x7F`;
+    });
+    const restoreQuotes = (s) => String(s).replace(/\x7FQ(\d+)\x7F/g, (_, i) => `\\text{'${quotes[+i] || ""}'}`);
+    return restoreQuotes(convertCaret(convertLog(dequoted)
       .replace(/([A-Za-zА-Яа-я0-9])⃗/g, "\\vec{$1}")
       .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])([⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻]+)/g, (_m, base, power) => `${base}^{${[...power].map((c) => supers[c] || c).join("")}}`)
       .replace(/([A-Za-zА-Яа-я0-9π∞θτωΔαεΣ)])([₀₁₂₃₄₅₆₇₈₉₋ₙ]+)/g, (_m, base, sub) => `${base}_{${[...sub].map((c) => subs[c] || c).join("")}}`)
@@ -787,6 +873,11 @@ function mathText(value) {
       .replace(/([A-Za-zА-Яа-я0-9)])_([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)/g, "$1_{$2}")
       // Страховка от двойного подстрочника из кривых данных: _{..}_x -> _{..x}.
       .replace(/(_\{[^{}]*\})_([A-Za-z0-9]+)/g, (_, a, b) => `_{${a.slice(2, -1)}${b}}`)
+      // Вложенный подстрочник (x_{1y_n}, S_{AA_1C_1C}): настоящего вложенного
+      // саба в данных нет, а голый _ внутри группы — красный. Плющим всё
+      // содержимое группы в плоскую метку. Группы с командами (\text…)
+      // не трогаем.
+      .replace(/_\{([^{}]*)\}/g, (m, inner) => (/\\/.test(inner) ? m : `_{${inner.replace(/_/g, "")}}`))
       .replace(/√\(([^()\n]+)\)/g, "\\sqrt{$1}")
       .replace(/√([A-Za-zА-Яа-я0-9]+)/g, "\\sqrt{$1}")
       .replace(/\(([^()\n]+)\)\s*\/\s*(\d+(?:\.\d+)?[A-Za-z]+|\d+(?:\.\d+)?|[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9]*)/g, "\\frac{$1}{$2}")
@@ -818,6 +909,9 @@ function mathText(value) {
       .replace(/≡/g, "\\equiv ")
       .replace(/×/g, "\\times ")
       .replace(/·/g, "\\cdot ")
+      .replace(/…/g, "\\dots ")
+      // Двойная звезда (код **, markdown): KaTeX такое не ест — красный.
+      .replace(/\*\*/g, "*")
       .replace(/%/g, "\\%")
       .replace(/π/g, "\\pi ")
       .replace(/θ/g, "\\theta ")
@@ -847,12 +941,15 @@ function mathText(value) {
       })
       // Голый подстрочник перед \text: «_\text{П}» — KaTeX требует группу.
       .replace(/_\\text\{([^}]*)\}(?!\})/g, "_{\\text{$1}}")
+      // Саб перед командой («P_\max», «x_\sin»): тоже нужна группа.
+      .replace(/_\\([a-zA-Z]+)(?![a-zA-Z{])/g, "_{\\$1}")
       // Двойная степень из кривых данных: ^{a}^{b} -> ^{a\cdot b}.
       .replace(/\^\{([^{}]*)\}\^\{([^{}]*)\}/g, "^{$1\\cdot $2}")
       // Голые _ и ^ без аргумента (плейсхолдеры бланков): нейтрализуем.
       .replace(/(?<!\\)_(?![A-Za-z0-9{\\])/g, "\\_")
-      .replace(/(?<!\\)\^(?![A-Za-z0-9{\\])/g, ""));
-    const mathRun = /(?:√|\\[a-zA-Z]|[\u0370-\u03FF]|[А-Яа-яЁё]|[A-Za-z0-9(∠\-−π∞θτωΔ|])(?:[A-Za-z0-9π∞θτωΔ′°'^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ_()+{}\-−*/=·×.,;:<>|\[%√\]\\ ±⃗∠∥Σαε∞∪∩⊥≈→⇒⟺≤≥≠∈⌊⌋]|[\u0370-\u03FF]|[А-Яа-яЁё]|√)*/g;
+      .replace(/(?<!\\)\^(?![A-Za-z0-9{\\])/g, "")));
+  };
+    const mathRun = /(?:√|\\[a-zA-Z]|[A-Za-z0-9(∠\-−π∞θτωΔ|])(?:\\text\{[^}]*\}|[A-Za-z0-9π∞θτωΔ′°'^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ_()+{}\-−*/=·×.,;:<>|\[%√\]\\ ±⃗∠∥Σαε∞∪∩⊥≈→⇒⟺≤≥≠∈⌊⌋…]|[\u0370-\u03FF]|√|!?)*/g;
     return text.replace(mathRun, (run, offset, full) => {
       let trimmed = run.trim();
       if (!trimmed || !(/[0-9=√^⁰¹²³⁴⁵⁶⁷⁸⁹ⁿ⁻₀₁₂₃₄₅₆₇₈₉₋ₙ∠∥Σαε∞∪⃗×·≈→⇒⟺≤≥≠∈∩⊥|%θτωΔ⌊⌋]|\b(?:log|sin|cos|tan)\b|\\[a-zA-Z]+/i.test(trimmed))) return run;
@@ -908,12 +1005,25 @@ function mathText(value) {
   };
   const render = (latex, display) => {
     if (window.katex) {
+      const strictOpts = (s) => ({ displayMode: display, throwOnError: true, strict: "ignore" });
+      const laxOpts = { displayMode: display, throwOnError: false, strict: "ignore" };
+      // Баланс фигурных скобок: выкидываем висячие } и дописываем
+      // недостающие { в конце. Только для уже упавшего блока.
+      const balanceBraces = (s) => {
+        let out = "", depth = 0;
+        for (const c of String(s)) {
+          if (c === "{") { depth++; out += c; }
+          else if (c === "}") { if (depth > 0) { depth--; out += c; } }
+          else out += c;
+        }
+        return out + "}".repeat(depth);
+      };
       try {
         // Сначала строго: отлавливаем неизвестные команды (\ChemForm, \sgn,
         // опечатки, огрызки \ov/\fr, бэкслэши в путях) и прячем их в \text —
         // вместо красного на весь блок. Цикл чинит по одной за проход.
         try {
-          return window.katex.renderToString(latex, { displayMode: display, throwOnError: true, strict: "ignore" });
+          return window.katex.renderToString(latex, strictOpts());
         } catch (e) {
           let fixed = String(latex), guard = 0;
           let err = e;
@@ -923,17 +1033,24 @@ function mathText(value) {
             if (!undef || guard++ >= 10) break;
             fixed = fixed.replace(new RegExp(`\\\\${undef[1]}(?![a-zA-Z])`), `\\text{${undef[1]}}`);
             try {
-              return window.katex.renderToString(fixed, { displayMode: display, throwOnError: true, strict: "ignore" });
+              return window.katex.renderToString(fixed, strictOpts());
             } catch (e2) { err = e2; }
           }
           // Бэкслэш перед кириллицей (пути C:\Users\...): не команда — буква.
           const fixed2 = fixed.replace(/\\([А-Яа-яЁё])/g, "$1");
           if (fixed2 !== fixed) {
             try {
-              return window.katex.renderToString(fixed2, { displayMode: display, throwOnError: true, strict: "ignore" });
+              return window.katex.renderToString(fixed2, strictOpts());
             } catch (_) {}
           }
-          return window.katex.renderToString(fixed2, { displayMode: display, throwOnError: false, strict: "ignore" });
+          // Разбаланс скобок из кривых данных: чиним и пробуем строго.
+          const fixed3 = balanceBraces(fixed2);
+          if (fixed3 !== fixed2) {
+            try {
+              return window.katex.renderToString(fixed3, strictOpts());
+            } catch (_) {}
+          }
+          return window.katex.renderToString(fixed3, laxOpts);
         }
       } catch (_) {}
     }
