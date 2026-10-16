@@ -651,21 +651,32 @@ def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, r
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
+# Окно истории для модели: последние 24 сообщения И максимум символов.
+# 60 строк без бюджета раздували контекст (каждая tool-строка — до 4000 симв.,
+# десятки ходов — сотни тысяч символов на каждый запрос модели).
+_AGENT_HISTORY_WINDOW = 24
+_AGENT_HISTORY_BUDGET_CHARS = 12000
+
+
 def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int,
                              before_seq: int | None = None) -> list:
     """История треда → формат build_messages (user/assistant/tool с call_id).
 
-    Окно — последние 60 строк: безлимитный тред упирался в 90-секундный
-    потолок хода и давал детерминированный 502 на каждую попытку.
+    Окно — последние 24 сообщения И общий бюджет ~12000 символов
+    (AgentHistoryOverflow не бывает: лишнее отрезается ЦЕЛЫМИ группами
+    «вопрос → ответ», чтобы не начать с orphan-tool). Без окна безлимитный
+    тред упирался в 90-секундный потолок хода и давал детерминированный 502;
+    без бюджета длинные tool-результаты раздували контекст до сотен тысяч
+    символов даже на коротком окне.
     before_seq — граница для заменяющего хода (replaceLast): история БЕЗ
     последней пары «вопрос+ответ», которая будет снесена при успехе."""
     if before_seq is not None:
         rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
-                            " FROM agent_messages WHERE thread_id=? AND seq<? ORDER BY seq DESC LIMIT 60",
+                            " FROM agent_messages WHERE thread_id=? AND seq<? ORDER BY seq DESC LIMIT 24",
                             (int(thread_id), int(before_seq))).fetchall()
     else:
         rows = conn.execute("SELECT role, content, tool_name, tool_args_json, status, result_json, id"
-                            " FROM agent_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 60",
+                            " FROM agent_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 24",
                             (int(thread_id),)).fetchall()
     rows = list(reversed(rows))
     history: list = []
@@ -713,6 +724,28 @@ def _agent_history_for_model(conn: sqlite3.Connection, thread_id: int,
             else:
                 history.append({"role": "tool", "tool_call_id": call_id,
                                 "content": json.dumps(res, ensure_ascii=False)[:4000]})
+    # Бюджет символов: длинные tool-результаты не должны раздувать контекст
+    # длинного треда. Отрезаем ЦЕЛЫЕ группы «вопрос → ответ(+tool)» с самого
+    # старого края, чтобы история не начиналась с orphan-tool без вызова.
+    def _msg_chars(m2: dict) -> int:
+        n2 = len(str(m2.get("content") or ""))
+        for c2 in (m2.get("tool_calls") or []):
+            fn2 = (c2 or {}).get("function") or {}
+            n2 += len(str(fn2.get("arguments") or "")) + len(str(fn2.get("name") or ""))
+        return n2
+
+    sizes = [_msg_chars(m) for m in history]
+    total = sum(sizes)
+    while total > _AGENT_HISTORY_BUDGET_CHARS and history:
+        j = 0
+        while j < len(history) and history[j].get("role") != "user":
+            j += 1  # хвост обрезанной группы режем первым
+        if j < len(history):
+            j += 1  # включаем самый свежий user группы
+        for k in range(j):
+            total -= sizes[k]
+        del history[:j]
+        del sizes[:j]
     return history
 
 
