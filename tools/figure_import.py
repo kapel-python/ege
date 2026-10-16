@@ -74,11 +74,16 @@ CHROME = next(
     None)
 
 
-def get(url: str) -> bytes:
+def get(url: str, referer: str | None = None) -> bytes:
     last: Exception | None = None
+    headers = {"User-Agent": UA}
+    # Зеркало urok.sdamgia.ru без Referer отвечает 403 (живой случай —
+    # рисунки решений со старых страниц).
+    if referer:
+        headers["Referer"] = referer
     for attempt in range(RETRIES):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 data = resp.read()
             if len(data) > 2 and data[:2] == b"\x1f\x8b":
