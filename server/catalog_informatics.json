@@ -13117,7 +13117,7 @@
    "files": [
     {
      "assetId": "inf-file-59778",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods"
+     "name": "Задание 9.ods"
     }
    ]
   },
@@ -13576,7 +13576,7 @@
    "files": [
     {
      "assetId": "inf-file-76224",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods"
+     "name": "Задание_9.ods"
     }
    ]
   },
@@ -13822,7 +13822,7 @@
    "files": [
     {
      "assetId": "inf-file-59780",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods"
+     "name": "Задание 9.ods"
     }
    ]
   },
@@ -14639,7 +14639,7 @@
    "files": [
     {
      "assetId": "inf-file-76112",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods"
+     "name": "Задание_9.ods"
     }
    ]
   },
@@ -14882,7 +14882,7 @@
    "files": [
     {
      "assetId": "inf-file-59779",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods"
+     "name": "Задание 9.ods"
     }
    ]
   },
@@ -55275,7 +55275,7 @@
    "files": [
     {
      "assetId": "inf-file-76218",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods"
+     "name": "Задание_3.ods"
     }
    ],
    "solutionAssets": [
@@ -57000,7 +57000,7 @@
    "files": [
     {
      "assetId": "inf-file-76106",
-     "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods"
+     "name": "Задание_3.ods"
     }
    ],
    "solutionAssets": [
@@ -63734,7 +63734,7 @@
    "src": "assets/informatics/inf-file-59778.ods?v=41d1acc2d6",
    "type": "file",
    "alt": "Файл данных к заданию (inf-file-59778.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+   "name": "Задание 9.ods",
    "size": 595688,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-59778"
@@ -63744,7 +63744,7 @@
    "src": "assets/informatics/inf-file-59779.ods?v=4c35826c01",
    "type": "file",
    "alt": "Файл данных к заданию (inf-file-59779.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+   "name": "Задание 9.ods",
    "size": 595526,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-59779"
@@ -63754,7 +63754,7 @@
    "src": "assets/informatics/inf-file-59780.ods?v=a72c084ac3",
    "type": "file",
    "alt": "Файл данных к заданию (inf-file-59780.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ 9.ods",
+   "name": "Задание 9.ods",
    "size": 595526,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-59780"
@@ -64923,8 +64923,8 @@
    "id": "inf-file-76106",
    "src": "assets/informatics/inf-file-76106.ods?v=b387636432",
    "type": "file",
-   "alt": "Файл данных к заданию (ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods",
+   "alt": "Файл данных к заданию (Задание_3.ods)",
+   "name": "Задание_3.ods",
    "size": 3270795,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-76106"
@@ -64934,7 +64934,7 @@
    "src": "assets/informatics/inf-file-76112.ods?v=0b4ed13edc",
    "type": "file",
    "alt": "Файл данных к заданию (inf-file-76112.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods",
+   "name": "Задание_9.ods",
    "size": 634909,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-76112"
@@ -64983,8 +64983,8 @@
    "id": "inf-file-76218",
    "src": "assets/informatics/inf-file-76218.ods?v=debb9a23f5",
    "type": "file",
-   "alt": "Файл данных к заданию (ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_3.ods",
+   "alt": "Файл данных к заданию (Задание_3.ods)",
+   "name": "Задание_3.ods",
    "size": 3270795,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-76218"
@@ -64994,7 +64994,7 @@
    "src": "assets/informatics/inf-file-76224.ods?v=49c74a5b21",
    "type": "file",
    "alt": "Файл данных к заданию (inf-file-76224.ods)",
-   "name": "ÐÐ°Ð´Ð°Ð½Ð¸Ðµ_9.ods",
+   "name": "Задание_9.ods",
    "size": 634791,
    "source": "sdamgia-inf-files",
    "sourceId": "sdamgia-76224"
