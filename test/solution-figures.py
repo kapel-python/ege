@@ -42,6 +42,11 @@ EXPECTED_LINKED = {
     "catalog_history.json": 0,
     "catalog_society.json": 0,
     "catalog_informatics.json": 276,
+    # russian: 8 страниц с get_file в решении, но это справочные скриншоты
+    # словарей/правил (r07_71, r07_27, r20_56, r06_23, r01_44, r13_22),
+    # дублирующие текст, плюс 1 битая ссылка (r05_84, 404) — не чертежи,
+    # сознательно не импортируем.
+    "catalog_russian.json": 0,
     "catalog_oge_math.json": 394,
     "catalog_oge_biology.json": 8,
     "catalog_oge_history.json": 0,
