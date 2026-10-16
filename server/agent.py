@@ -460,7 +460,7 @@ AGENT_TOOLS: list = [
       "или из прошлого поиска), difficultyMin/difficultyMax 1–4 («посложнее» — "
       "min выше, «полегче» — max ниже), harderThan/easierThan (taskId эталона: "
       "«сложнее, чем то» — harderThan с его id), offset/limit («32-е из 100» — "
-      "skillId + offset 31). СТРОГО ОДИН поиск на одну нужду: перебор "
+      "skillId + offset 31; без skillId тема подхватится сама с пометкой). СТРОГО ОДИН поиск на одну нужду: перебор "
       "формулировок словами запрещён (каждый — жетон), пусто — честно скажи и "
       "предложи соседнее, а не ищи снова. Номер экзамена из головы НЕ выдумывай: "
       "ученик его не называл — бери harderThan/difficulty, а не «№15». "
@@ -4071,6 +4071,35 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         applied["exam"] = sorted(exam_numbers)
     if skill_id:
         applied["skillId"] = skill_id
+    # Позиция без темы («32-е из 100 по стереометрии, любой темы» — живой
+    # случай): без привязки offset листал бы смешанный рейтинг, а не банк.
+    # Прибиваем лучшую тему сами — честно, с пометкой: модель видит выбор
+    # и поправляет следующим вызовом, вместо того чтобы тратить круг на
+    # выяснение skillId отдельным поиском.
+    auto_pinned = False
+    if skill_row is None and offset > 0 and words:
+        cand = [(hit(r["name"]), r) for r in skills]
+        cand = [(n, r) for n, r in cand if n > 0]
+        if cand:
+            # Среди равных совпадений — тема с живым банком, а не пустая:
+            # иначе позиция считается в пустоте при живых заданиях рядом.
+            def _cand_bank_size(sid):
+                try:
+                    rows = _fetch_tasks("s.id=?", (sid,))
+                except sqlite3.Error:
+                    return 0
+                return sum(1 for r in rows if _find_task_practicable(r))
+
+            best = max(n for n, _ in cand)
+            top = [r for n, r in cand if n == best]
+            if len(top) > 1:
+                top.sort(key=lambda r: (-_cand_bank_size(str(r["id"])), str(r["id"])))
+            skill_row = top[0]
+            skill_id = str(skill_row["id"])
+            pinned_subject = str(skill_row["subject"] or subject)
+            auto_pinned = True
+            applied["skillId"] = skill_id
+            applied["autoPinned"] = True
     if difficulty_min is not None:
         applied["difficultyMin"] = difficulty_min
     if difficulty_max is not None:
@@ -4197,7 +4226,13 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                                                   "subject": r["subject"], "match": n})}
         total = sum(len(v) for v in found.values() if isinstance(v, list))
         bank_line = (f" Тема «{skill_row['name']}»: в банке {bank_total}, "
-                     f"показаны позиции {offset + 1}–{offset + len(task_items)}.")
+                     f"показаны позиции {offset + 1}–{offset + len(task_items)}."
+                     if bank_total else
+                     f" Тема «{skill_row['name']}»: банк пуст — в практике этой темы "
+                     f"заданий нет, возьми соседнюю тему.")
+        if auto_pinned:
+            bank_line = (f" Тему не указали — взял «{skill_row['name']}» "
+                         f"(лучшее совпадение), позиции считаю в ней.") + bank_line
         found["note"] = ("Это то, что реально есть в каталоге предмета. Найденное открывай "
                          "через task_get (id) — и не выдумывай id, которых здесь нет. "
                          "id — ТЕХНИЧЕСКИЙ: ученику показывай темы и формулировки, но НЕ коды." + bank_line

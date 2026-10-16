@@ -139,6 +139,14 @@ for bad in ({}, {"query": "  "}, {"offset": 5}, {"exam": "без цифр"}, {"o
 r = agent.find_topics(conn, 1, "math", {"query": "сечение призмы цилиндра конуса шара"})
 check("кухонная свалка не дампит каталог", r["found"] == 0 and r["tasks"] == [])
 
+# 6b. Позиция без темы: автопин живого банка с пометкой (а не пустого).
+conn.execute("INSERT INTO skills VALUES('st_empty','Стереометрия пустая','math',0)")
+r = agent.find_topics(conn, 1, "math", {"query": "стереометрия", "offset": 9, "limit": 2})
+check("автопин: живой банк, а не пустой", r.get("applied", {}).get("autoPinned") is True
+      and r.get("applied", {}).get("skillId") == "st_stereo"
+      and [t["id"] for t in r["tasks"]] == ["trap"], str(r.get("applied")))
+check("автопин: пометка в note", "взял" in r["note"] and "лучшее совпадение" in r["note"])
+
 # 7. Сквозной ход: 1 поиск + 1 открытие (было 3+1).
 script = [
     {"text": None, "tool_calls": [{"id": "c1", "name": "find_topics",
