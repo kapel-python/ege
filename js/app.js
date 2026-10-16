@@ -8027,6 +8027,45 @@ function isSelfCheckTask(t) {
   return !!(t && (t.check === "self" || t.selfCheck === true));
 }
 
+/* Ответ-двойник решения (часть 2): в банке answer часто продублирован
+   полным текстом решения (n15_p6: тот же разбор слово в слово, вплоть
+   до сырого \perp вместо ⊥). Показывать оба — мусор: ученик видит
+   решение дважды, второй раз под плашкой «Ответ». */
+function taskAnswerDuplicatesSolution(t) {
+  const sol = String((t && t.solution) || "").trim();
+  const ans = String((t && t.answer) || "").trim();
+  if (!sol) return false;
+  if (!ans || ans === sol) return true;
+  const norm = (s) => String(s).toLowerCase().replace(/\\[a-zA-Z]+/g, " ").replace(/\s+/g, " ").trim();
+  if (norm(ans) === norm(sol)) return true;
+  // Развёрнутый текст вместо ответа: начинается с «Решение» и длинный.
+  return ans.length > 200 && /^\s*решение[\s.]/i.test(ans);
+}
+
+/* Висячие ссылки на рисунки, которых нет. Импортированы только чертежи
+   условия (visual.assetId); «Рис. N» отдельными строками — подписи
+   невывезенных картинок решения: режем всегда. Inline «(см. рис. N)»
+   режем целиком, если чертежа нет вообще; при чертеже рис. 1 — как
+   правило он сам (остальные N≥2 — тоже картинки решения). */
+function stripMissingFigures(solution, hasVisual) {
+  let s = String(solution || "");
+  if (!s) return s;
+  s = s.replace(/^\s*Рис\.\s*\d+\s*\.?\s*$/gmi, "");
+  if (!hasVisual) {
+    s = s.replace(/\(\s*см\.\s*рис\.?\s*\d+\s*\)\s*,?/gi, "");
+    s = s.replace(/см\.\s*рис\.?\s*\d+\s*,?/gi, "");
+  } else {
+    s = s.replace(/\(\s*см\.\s*рис\.?\s*([2-9]\d*)\s*\)\s*,?/gi, "");
+  }
+  return s.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/* Подпись («Официальное решение», «Разбор») уже говорит что это —
+   ведущее «Решение.» текста solution срезаем, иначе дублируется. */
+function stripLeadingSolutionWord(solution) {
+  return String(solution || "").replace(/^\s*Решение\.\s*/i, "");
+}
+
 function sessionSelfCheckAreaHtml() {
   const back = sessionBackBtnHtml();
   return `
@@ -8327,7 +8366,7 @@ function sessionShownFeedbackHtml(t) {
         ${icon("bulb")} Ответ показан
         <span class="feedback__xp" style="color:var(--danger)">ответ: ${esc(t.answer)}</span>
       </div>
-      <div class="feedback__solution"><b>Разбор.</b>\n${mathText(t.solution)}</div>
+      <div class="feedback__solution"><b>Разбор.</b>\n${mathText(stripLeadingSolutionWord(t.solution))}</div>
       <div style="font-size:13px;color:var(--muted);margin-top:10px">Задание ушло в повторение — вернёшься к нему завтра: сегодня ответ уже виден, толку от повтора не будет.</div>
       ${sessionLessonBridgeHtml(t)}
       ${sessionFinishNavHtml("btn--soft")}
@@ -8335,10 +8374,13 @@ function sessionShownFeedbackHtml(t) {
 }
 
 function sessionSelfRevealFeedbackHtml(t) {
+  const hasVisual = !!(t && t.visual && t.visual.assetId);
+  const solution = stripLeadingSolutionWord(stripMissingFigures(t && t.solution, hasVisual));
+  const dupAnswer = taskAnswerDuplicatesSolution(t);
   return `
     <div class="feedback">
-      <div class="feedback__solution"><b>Официальное решение.</b>\n${mathText(t.solution)}</div>
-      <div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${mathText(t.answer)}</div>
+      <div class="feedback__solution"><b>Официальное решение.</b>\n${mathText(solution)}</div>
+      ${dupAnswer ? "" : `<div class="feedback__solution" style="margin-top:10px"><b>Ответ.</b> ${mathText(t.answer)}</div>`}
       <div style="margin-top:14px;color:var(--text-2);font-size:13px">Сравни со своим решением на бумаге и честно отметь результат — это и есть проверка части 2.</div>
       <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
         <button class="btn btn--danger-soft" onclick="sessionSelfResult(false)">Не получилось</button>
