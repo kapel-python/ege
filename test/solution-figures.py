@@ -37,6 +37,7 @@ APP_JS = ROOT / "js" / "app.js"
 # Заполняется по мере обработки предметов; 0 = рисунков решений нет.
 EXPECTED_LINKED = {
     "catalog.json": 424,
+    "catalog_oge_informatics.json": 32,
 }
 
 SUBJECT_PREFIX = {

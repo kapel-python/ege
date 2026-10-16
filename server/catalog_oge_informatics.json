@@ -9023,7 +9023,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43718",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p4",
@@ -9094,7 +9097,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37196",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol66669"
+   ]
   },
   {
    "id": "oi08_p7",
@@ -9141,7 +9147,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37470",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p9",
@@ -9188,7 +9197,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=42028",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p11",
@@ -9212,7 +9224,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43689",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p12",
@@ -9236,7 +9251,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=10476",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol87473"
+   ]
   },
   {
    "id": "oi08_p13",
@@ -9260,7 +9278,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=10960",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol224717"
+   ]
   },
   {
    "id": "oi08_p14",
@@ -9307,7 +9328,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37684",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p16",
@@ -9331,7 +9355,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=42055",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p17",
@@ -9379,7 +9406,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=47844",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67358"
+   ]
   },
   {
    "id": "oi08_p19",
@@ -9426,7 +9456,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=47997",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p21",
@@ -9496,7 +9529,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43773",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol66669"
+   ]
   },
   {
    "id": "oi08_p24",
@@ -9543,7 +9579,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37261",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p26",
@@ -9567,7 +9606,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43355",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p27",
@@ -9591,7 +9633,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37515",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p28",
@@ -9615,7 +9660,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43585",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p29",
@@ -9662,7 +9710,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43621",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p31",
@@ -9686,7 +9737,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=35581",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p32",
@@ -9710,7 +9764,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=10473",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol87473"
+   ]
   },
   {
    "id": "oi08_p33",
@@ -9734,7 +9791,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37276",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67313"
+   ]
   },
   {
    "id": "oi08_p34",
@@ -9758,7 +9818,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=10477",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol87473"
+   ]
   },
   {
    "id": "oi08_p35",
@@ -9853,7 +9916,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37530",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol87473"
+   ]
   },
   {
    "id": "oi08_p39",
@@ -9901,7 +9967,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37238",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67358"
+   ]
   },
   {
    "id": "oi08_p41",
@@ -10018,7 +10087,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43568",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p46",
@@ -10042,7 +10114,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43719",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p47",
@@ -10090,7 +10165,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43462",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p49",
@@ -10114,7 +10192,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=10959",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol224716"
+   ]
   },
   {
    "id": "oi08_p50",
@@ -10161,7 +10242,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=36879",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol66669"
+   ]
   },
   {
    "id": "oi08_p52",
@@ -10185,7 +10269,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43641",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p53",
@@ -10209,7 +10296,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43446",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol65643"
+   ]
   },
   {
    "id": "oi08_p54",
@@ -10233,7 +10323,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=37333",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol87473"
+   ]
   },
   {
    "id": "oi08_p55",
@@ -10257,7 +10350,10 @@
    "points": 1,
    "valueType": "целое число",
    "source": "Решу ОГЭ (СДАМ ГИА), информатика, задание №8, https://inf-oge.sdamgia.ru/problem?id=43673",
-   "subject": "oge_informatics"
+   "subject": "oge_informatics",
+   "solutionAssets": [
+    "inf_oge-sol67333"
+   ]
   },
   {
    "id": "oi08_p56",
@@ -16056,40 +16152,108 @@
  ],
  "visualAssets": [
   {
-   "id": "inf_oge-src43658",
-   "src": "assets/oge_informatics/inf_oge-src43658.png?v=75435aee7c",
+   "id": "inf_oge-sol224716",
+   "src": "assets/oge_informatics/inf_oge-sol224716.png?v=52212c8e15",
    "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3798,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81271"
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 430,
+   "height": 372,
+   "ratio": 1.1559139784946237,
+   "source": "рисунок решения источника: https://ege.sdamgia.ru/get_file?id=224716",
+   "sourceId": "inf_oge-sol224716",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
   },
   {
-   "id": "inf_oge-src18177",
-   "src": "assets/oge_informatics/inf_oge-src18177.png?v=d5c3960831",
+   "id": "inf_oge-sol224717",
+   "src": "assets/oge_informatics/inf_oge-sol224717.png?v=1c5ab9d5d6",
    "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47385"
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 430,
+   "height": 372,
+   "ratio": 1.1559139784946237,
+   "source": "рисунок решения источника: https://ege.sdamgia.ru/get_file?id=224717",
+   "sourceId": "inf_oge-sol224717",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
   },
   {
-   "id": "inf_oge-src43690",
-   "src": "assets/oge_informatics/inf_oge-src43690.png?v=4926e1330f",
+   "id": "inf_oge-sol65643",
+   "src": "assets/oge_informatics/inf_oge-sol65643.png?v=2b9d591277",
    "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6585,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81278"
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 486,
+   "height": 195,
+   "ratio": 2.4923076923076923,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=65643",
+   "sourceId": "inf_oge-sol65643",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
   },
   {
-   "id": "inf_oge-src10255",
-   "src": "assets/oge_informatics/inf_oge-src10255.png?v=da8d535aa2",
+   "id": "inf_oge-sol66669",
+   "src": "assets/oge_informatics/inf_oge-sol66669.png?v=a37cee4032",
    "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 2.3567,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47368"
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 393,
+   "height": 339,
+   "ratio": 1.1592920353982301,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=66669",
+   "sourceId": "inf_oge-sol66669",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
+  },
+  {
+   "id": "inf_oge-sol67313",
+   "src": "assets/oge_informatics/inf_oge-sol67313.png?v=a37cee4032",
+   "type": "image",
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 393,
+   "height": 339,
+   "ratio": 1.1592920353982301,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=67313",
+   "sourceId": "inf_oge-sol67313",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
+  },
+  {
+   "id": "inf_oge-sol67333",
+   "src": "assets/oge_informatics/inf_oge-sol67333.png?v=a37cee4032",
+   "type": "image",
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 393,
+   "height": 339,
+   "ratio": 1.1592920353982301,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=67333",
+   "sourceId": "inf_oge-sol67333",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
+  },
+  {
+   "id": "inf_oge-sol67358",
+   "src": "assets/oge_informatics/inf_oge-sol67358.png?v=a37cee4032",
+   "type": "image",
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 393,
+   "height": 339,
+   "ratio": 1.1592920353982301,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=67358",
+   "sourceId": "inf_oge-sol67358",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
+  },
+  {
+   "id": "inf_oge-sol87473",
+   "src": "assets/oge_informatics/inf_oge-sol87473.png?v=b18ba88867",
+   "type": "image",
+   "alt": "Рисунок к решению (ОГЭ-информатика №8)",
+   "width": 574,
+   "height": 343,
+   "ratio": 1.6734693877551021,
+   "source": "рисунок решения источника: https://inf-oge.sdamgia.ru/get_file?id=87473",
+   "sourceId": "inf_oge-sol87473",
+   "taskId": null,
+   "description": "Рисунок решения источника к заданию (ОГЭ-информатика №8)"
   },
   {
    "id": "inf_oge-src10245",
@@ -16101,67 +16265,13 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47361"
   },
   {
-   "id": "inf_oge-src43356",
-   "src": "assets/oge_informatics/inf_oge-src43356.png?v=64a53a4fed",
+   "id": "inf_oge-src10246",
+   "src": "assets/oge_informatics/inf_oge-src10246.png?v=8aed12e2e9",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
-   "ratio": 1.6624,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=80522"
-  },
-  {
-   "id": "inf_oge-src10249",
-   "src": "assets/oge_informatics/inf_oge-src10249.png?v=2f592ae6fa",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 2.3567,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47358"
-  },
-  {
-   "id": "inf_oge-src43731",
-   "src": "assets/oge_informatics/inf_oge-src43731.png?v=2b9a963036",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6902,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81521"
-  },
-  {
-   "id": "inf_oge-src11020",
-   "src": "assets/oge_informatics/inf_oge-src11020.png?v=431a436c07",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47375"
-  },
-  {
-   "id": "inf_oge-src43723",
-   "src": "assets/oge_informatics/inf_oge-src43723.png?v=cadba358b3",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.0888,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81529"
-  },
-  {
-   "id": "inf_oge-src42029",
-   "src": "assets/oge_informatics/inf_oge-src42029.png?v=6bd7119a61",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5439,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=77397"
-  },
-  {
-   "id": "inf_oge-src10256",
-   "src": "assets/oge_informatics/inf_oge-src10256.png?v=8e77309587",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9055,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47369"
+   "ratio": 1.3221,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47363"
   },
   {
    "id": "inf_oge-src10248",
@@ -16173,148 +16283,13 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47361"
   },
   {
-   "id": "inf_oge-src18248",
-   "src": "assets/oge_informatics/inf_oge-src18248.png?v=609c75adf6",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47389"
-  },
-  {
-   "id": "inf_oge-src35586",
-   "src": "assets/oge_informatics/inf_oge-src35586.png?v=6a7a1381cb",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3462,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=64577"
-  },
-  {
-   "id": "inf_oge-src18218",
-   "src": "assets/oge_informatics/inf_oge-src18218.png?v=3deeeb2000",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47387"
-  },
-  {
-   "id": "inf_oge-src16017",
-   "src": "assets/oge_informatics/inf_oge-src16017.png?v=c064f77279",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47383"
-  },
-  {
-   "id": "inf_oge-src10253",
-   "src": "assets/oge_informatics/inf_oge-src10253.png?v=c8023be00c",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3221,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47366"
-  },
-  {
-   "id": "inf_oge-src43730",
-   "src": "assets/oge_informatics/inf_oge-src43730.png?v=0a22928b34",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.2436,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81526"
-  },
-  {
-   "id": "inf_oge-src11025",
-   "src": "assets/oge_informatics/inf_oge-src11025.png?v=a4838828ca",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.8491,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47380"
-  },
-  {
-   "id": "inf_oge-src43727",
-   "src": "assets/oge_informatics/inf_oge-src43727.png?v=dedb052efd",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6902,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81522"
-  },
-  {
-   "id": "inf_oge-src11016",
-   "src": "assets/oge_informatics/inf_oge-src11016.png?v=431a436c07",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47372"
-  },
-  {
-   "id": "inf_oge-src43728",
-   "src": "assets/oge_informatics/inf_oge-src43728.png?v=f1c3eb2df5",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3785,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81523"
-  },
-  {
-   "id": "inf_oge-src11024",
-   "src": "assets/oge_informatics/inf_oge-src11024.png?v=ee19d23c43",
+   "id": "inf_oge-src10249",
+   "src": "assets/oge_informatics/inf_oge-src10249.png?v=2f592ae6fa",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
    "ratio": 2.3567,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47379"
-  },
-  {
-   "id": "inf_oge-src43774",
-   "src": "assets/oge_informatics/inf_oge-src43774.png?v=a322690ad2",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.56,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=82714"
-  },
-  {
-   "id": "inf_oge-src18293",
-   "src": "assets/oge_informatics/inf_oge-src18293.png?v=a80a4586fe",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5062,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47392"
-  },
-  {
-   "id": "inf_oge-src10246",
-   "src": "assets/oge_informatics/inf_oge-src10246.png?v=8aed12e2e9",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3221,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47363"
-  },
-  {
-   "id": "inf_oge-src43642",
-   "src": "assets/oge_informatics/inf_oge-src43642.png?v=a962fcac59",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4388,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81285"
-  },
-  {
-   "id": "inf_oge-src37516",
-   "src": "assets/oge_informatics/inf_oge-src37516.png?v=68c651a268",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6266,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67909"
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47358"
   },
   {
    "id": "inf_oge-src10250",
@@ -16326,67 +16301,13 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47359"
   },
   {
-   "id": "inf_oge-src11017",
-   "src": "assets/oge_informatics/inf_oge-src11017.png?v=431a436c07",
+   "id": "inf_oge-src10251",
+   "src": "assets/oge_informatics/inf_oge-src10251.png?v=38c7b1314c",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47373"
-  },
-  {
-   "id": "inf_oge-src43720",
-   "src": "assets/oge_informatics/inf_oge-src43720.png?v=1ef89d548e",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4519,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81524"
-  },
-  {
-   "id": "inf_oge-src18278",
-   "src": "assets/oge_informatics/inf_oge-src18278.png?v=d39bc4ea66",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5062,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47393"
-  },
-  {
-   "id": "inf_oge-src12858",
-   "src": "assets/oge_informatics/inf_oge-src12858.png?v=086fec437a",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 2.2465,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47382"
-  },
-  {
-   "id": "inf_oge-src43725",
-   "src": "assets/oge_informatics/inf_oge-src43725.png?v=d39124b261",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.2646,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81520"
-  },
-  {
-   "id": "inf_oge-src37197",
-   "src": "assets/oge_informatics/inf_oge-src37197.png?v=6837f007dc",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5333,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67282"
-  },
-  {
-   "id": "inf_oge-src37262",
-   "src": "assets/oge_informatics/inf_oge-src37262.png?v=fcbe12af21",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6432,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67531"
+   "ratio": 1.3705,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47364"
   },
   {
    "id": "inf_oge-src10252",
@@ -16398,229 +16319,13 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47365"
   },
   {
-   "id": "inf_oge-src37239",
-   "src": "assets/oge_informatics/inf_oge-src37239.png?v=e668d828b8",
+   "id": "inf_oge-src10253",
+   "src": "assets/oge_informatics/inf_oge-src10253.png?v=c8023be00c",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
-   "ratio": 1.4388,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67285"
-  },
-  {
-   "id": "inf_oge-src43674",
-   "src": "assets/oge_informatics/inf_oge-src43674.png?v=4d945ee0d5",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3798,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81275"
-  },
-  {
-   "id": "inf_oge-src10257",
-   "src": "assets/oge_informatics/inf_oge-src10257.png?v=00ce3faa2f",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4665,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47370"
-  },
-  {
-   "id": "inf_oge-src11023",
-   "src": "assets/oge_informatics/inf_oge-src11023.png?v=93292876f7",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 2.3567,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47395"
-  },
-  {
-   "id": "inf_oge-src11021",
-   "src": "assets/oge_informatics/inf_oge-src11021.png?v=d36c6890d7",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47376"
-  },
-  {
-   "id": "inf_oge-src42056",
-   "src": "assets/oge_informatics/inf_oge-src42056.png?v=ba7abfc820",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5439,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=77431"
-  },
-  {
-   "id": "inf_oge-src10258",
-   "src": "assets/oge_informatics/inf_oge-src10258.png?v=2c4d70b8f9",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4665,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47371"
-  },
-  {
-   "id": "inf_oge-src18263",
-   "src": "assets/oge_informatics/inf_oge-src18263.png?v=fe894dc3cd",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47390"
-  },
-  {
-   "id": "inf_oge-src10251",
-   "src": "assets/oge_informatics/inf_oge-src10251.png?v=38c7b1314c",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3705,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47364"
-  },
-  {
-   "id": "inf_oge-src43447",
-   "src": "assets/oge_informatics/inf_oge-src43447.png?v=ada85535c5",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.3798,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81178"
-  },
-  {
-   "id": "inf_oge-src11022",
-   "src": "assets/oge_informatics/inf_oge-src11022.png?v=f3ff0edbd4",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47377"
-  },
-  {
-   "id": "inf_oge-src37471",
-   "src": "assets/oge_informatics/inf_oge-src37471.png?v=4ba10957ef",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6347,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67874"
-  },
-  {
-   "id": "inf_oge-src11019",
-   "src": "assets/oge_informatics/inf_oge-src11019.png?v=431a436c07",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.9019,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47374"
-  },
-  {
-   "id": "inf_oge-src43570",
-   "src": "assets/oge_informatics/inf_oge-src43570.png?v=2dc86bb40a",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6585,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81205"
-  },
-  {
-   "id": "inf_oge-src43726",
-   "src": "assets/oge_informatics/inf_oge-src43726.png?v=fa535c5f56",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4338,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81518"
-  },
-  {
-   "id": "inf_oge-src18430",
-   "src": "assets/oge_informatics/inf_oge-src18430.png?v=467e34fb94",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.5901,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47394"
-  },
-  {
-   "id": "inf_oge-src43724",
-   "src": "assets/oge_informatics/inf_oge-src43724.png?v=46412ded04",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 0.8786,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81530"
-  },
-  {
-   "id": "inf_oge-src37277",
-   "src": "assets/oge_informatics/inf_oge-src37277.png?v=50724bf2e7",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6432,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67527"
-  },
-  {
-   "id": "inf_oge-src43729",
-   "src": "assets/oge_informatics/inf_oge-src43729.png?v=b201714d14",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4352,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81525"
-  },
-  {
-   "id": "inf_oge-src43463",
-   "src": "assets/oge_informatics/inf_oge-src43463.png?v=681b22bb63",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6585,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81179"
-  },
-  {
-   "id": "inf_oge-src18192",
-   "src": "assets/oge_informatics/inf_oge-src18192.png?v=0073d9b1f6",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.4623,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47386"
-  },
-  {
-   "id": "inf_oge-src43722",
-   "src": "assets/oge_informatics/inf_oge-src43722.png?v=967aa00820",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.1086,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=82133"
-  },
-  {
-   "id": "inf_oge-src18039",
-   "src": "assets/oge_informatics/inf_oge-src18039.png?v=3fed449573",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6624,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47384"
-  },
-  {
-   "id": "inf_oge-src37501",
-   "src": "assets/oge_informatics/inf_oge-src37501.png?v=79de8c4e8a",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6266,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67906"
-  },
-  {
-   "id": "inf_oge-src37486",
-   "src": "assets/oge_informatics/inf_oge-src37486.png?v=5061cdf9a4",
-   "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №9)",
-   "width": 640,
-   "ratio": 1.6347,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67866"
+   "ratio": 1.3221,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47366"
   },
   {
    "id": "inf_oge-src10254",
@@ -16632,6 +16337,123 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47367"
   },
   {
+   "id": "inf_oge-src10255",
+   "src": "assets/oge_informatics/inf_oge-src10255.png?v=da8d535aa2",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 2.3567,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47368"
+  },
+  {
+   "id": "inf_oge-src10256",
+   "src": "assets/oge_informatics/inf_oge-src10256.png?v=8e77309587",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9055,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47369"
+  },
+  {
+   "id": "inf_oge-src10257",
+   "src": "assets/oge_informatics/inf_oge-src10257.png?v=00ce3faa2f",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4665,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47370"
+  },
+  {
+   "id": "inf_oge-src10258",
+   "src": "assets/oge_informatics/inf_oge-src10258.png?v=2c4d70b8f9",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4665,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47371"
+  },
+  {
+   "id": "inf_oge-src11016",
+   "src": "assets/oge_informatics/inf_oge-src11016.png?v=431a436c07",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47372"
+  },
+  {
+   "id": "inf_oge-src11017",
+   "src": "assets/oge_informatics/inf_oge-src11017.png?v=431a436c07",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47373"
+  },
+  {
+   "id": "inf_oge-src11019",
+   "src": "assets/oge_informatics/inf_oge-src11019.png?v=431a436c07",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47374"
+  },
+  {
+   "id": "inf_oge-src11020",
+   "src": "assets/oge_informatics/inf_oge-src11020.png?v=431a436c07",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47375"
+  },
+  {
+   "id": "inf_oge-src11021",
+   "src": "assets/oge_informatics/inf_oge-src11021.png?v=d36c6890d7",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47376"
+  },
+  {
+   "id": "inf_oge-src11022",
+   "src": "assets/oge_informatics/inf_oge-src11022.png?v=f3ff0edbd4",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.9019,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47377"
+  },
+  {
+   "id": "inf_oge-src11023",
+   "src": "assets/oge_informatics/inf_oge-src11023.png?v=93292876f7",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 2.3567,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47395"
+  },
+  {
+   "id": "inf_oge-src11024",
+   "src": "assets/oge_informatics/inf_oge-src11024.png?v=ee19d23c43",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 2.3567,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47379"
+  },
+  {
+   "id": "inf_oge-src11025",
+   "src": "assets/oge_informatics/inf_oge-src11025.png?v=a4838828ca",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.8491,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47380"
+  },
+  {
    "id": "inf_oge-src11027",
    "src": "assets/oge_informatics/inf_oge-src11027.png?v=a4838828ca",
    "type": "image",
@@ -16641,13 +16463,58 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47381"
   },
   {
-   "id": "inf_oge-src43431",
-   "src": "assets/oge_informatics/inf_oge-src43431.png?v=05f2e8d4f7",
+   "id": "inf_oge-src12858",
+   "src": "assets/oge_informatics/inf_oge-src12858.png?v=086fec437a",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
-   "ratio": 1.6585,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81177"
+   "ratio": 2.2465,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47382"
+  },
+  {
+   "id": "inf_oge-src16017",
+   "src": "assets/oge_informatics/inf_oge-src16017.png?v=c064f77279",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47383"
+  },
+  {
+   "id": "inf_oge-src18039",
+   "src": "assets/oge_informatics/inf_oge-src18039.png?v=3fed449573",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6624,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47384"
+  },
+  {
+   "id": "inf_oge-src18177",
+   "src": "assets/oge_informatics/inf_oge-src18177.png?v=d5c3960831",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47385"
+  },
+  {
+   "id": "inf_oge-src18192",
+   "src": "assets/oge_informatics/inf_oge-src18192.png?v=0073d9b1f6",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47386"
+  },
+  {
+   "id": "inf_oge-src18218",
+   "src": "assets/oge_informatics/inf_oge-src18218.png?v=3deeeb2000",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47387"
   },
   {
    "id": "inf_oge-src18233",
@@ -16659,13 +16526,58 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47388"
   },
   {
-   "id": "inf_oge-src43626",
-   "src": "assets/oge_informatics/inf_oge-src43626.png?v=da68351eef",
+   "id": "inf_oge-src18248",
+   "src": "assets/oge_informatics/inf_oge-src18248.png?v=609c75adf6",
    "type": "image",
-   "alt": "Рисунок к заданию (ОГЭ №13)",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
    "width": 640,
-   "ratio": 0.5664,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=43626"
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47389"
+  },
+  {
+   "id": "inf_oge-src18263",
+   "src": "assets/oge_informatics/inf_oge-src18263.png?v=fe894dc3cd",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4623,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47390"
+  },
+  {
+   "id": "inf_oge-src18278",
+   "src": "assets/oge_informatics/inf_oge-src18278.png?v=d39bc4ea66",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5062,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47393"
+  },
+  {
+   "id": "inf_oge-src18293",
+   "src": "assets/oge_informatics/inf_oge-src18293.png?v=a80a4586fe",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5062,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47392"
+  },
+  {
+   "id": "inf_oge-src18430",
+   "src": "assets/oge_informatics/inf_oge-src18430.png?v=467e34fb94",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5901,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=47394"
+  },
+  {
+   "id": "inf_oge-src35586",
+   "src": "assets/oge_informatics/inf_oge-src35586.png?v=6a7a1381cb",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.3462,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=64577"
   },
   {
    "id": "inf_oge-src36770",
@@ -16677,6 +16589,15 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=36770"
   },
   {
+   "id": "inf_oge-src37197",
+   "src": "assets/oge_informatics/inf_oge-src37197.png?v=6837f007dc",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5333,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67282"
+  },
+  {
    "id": "inf_oge-src37202",
    "src": "assets/oge_informatics/inf_oge-src37202.png?v=76f1e15233",
    "type": "image",
@@ -16684,6 +16605,60 @@
    "width": 640,
    "ratio": 0.9053,
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37202"
+  },
+  {
+   "id": "inf_oge-src37239",
+   "src": "assets/oge_informatics/inf_oge-src37239.png?v=e668d828b8",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4388,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67285"
+  },
+  {
+   "id": "inf_oge-src37262",
+   "src": "assets/oge_informatics/inf_oge-src37262.png?v=fcbe12af21",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6432,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67531"
+  },
+  {
+   "id": "inf_oge-src37277",
+   "src": "assets/oge_informatics/inf_oge-src37277.png?v=50724bf2e7",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6432,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67527"
+  },
+  {
+   "id": "inf_oge-src37471",
+   "src": "assets/oge_informatics/inf_oge-src37471.png?v=4ba10957ef",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6347,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67874"
+  },
+  {
+   "id": "inf_oge-src37486",
+   "src": "assets/oge_informatics/inf_oge-src37486.png?v=5061cdf9a4",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6347,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67866"
+  },
+  {
+   "id": "inf_oge-src37501",
+   "src": "assets/oge_informatics/inf_oge-src37501.png?v=79de8c4e8a",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6266,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67906"
   },
   {
    "id": "inf_oge-src37505",
@@ -16695,6 +16670,15 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37505"
   },
   {
+   "id": "inf_oge-src37516",
+   "src": "assets/oge_informatics/inf_oge-src37516.png?v=68c651a268",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6266,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=67909"
+  },
+  {
    "id": "inf_oge-src37739",
    "src": "assets/oge_informatics/inf_oge-src37739.png?v=6a9c59b2f4",
    "type": "image",
@@ -16704,13 +16688,13 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37739"
   },
   {
-   "id": "inf_oge-src37755",
-   "src": "assets/oge_informatics/inf_oge-src37755.png?v=52c9659e9d",
+   "id": "inf_oge-src37748",
+   "src": "assets/oge_informatics/inf_oge-src37748.png?v=e7f3ff1069",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №15)",
    "width": 640,
-   "ratio": 0.2968,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37755"
+   "ratio": 0.6613,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37748"
   },
   {
    "id": "inf_oge-src37752",
@@ -16722,13 +16706,229 @@
    "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37752"
   },
   {
-   "id": "inf_oge-src37748",
-   "src": "assets/oge_informatics/inf_oge-src37748.png?v=e7f3ff1069",
+   "id": "inf_oge-src37755",
+   "src": "assets/oge_informatics/inf_oge-src37755.png?v=52c9659e9d",
    "type": "image",
    "alt": "Рисунок к заданию (ОГЭ №15)",
    "width": 640,
-   "ratio": 0.6613,
-   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37748"
+   "ratio": 0.2968,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=37755"
+  },
+  {
+   "id": "inf_oge-src42029",
+   "src": "assets/oge_informatics/inf_oge-src42029.png?v=6bd7119a61",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5439,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=77397"
+  },
+  {
+   "id": "inf_oge-src42056",
+   "src": "assets/oge_informatics/inf_oge-src42056.png?v=ba7abfc820",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.5439,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=77431"
+  },
+  {
+   "id": "inf_oge-src43356",
+   "src": "assets/oge_informatics/inf_oge-src43356.png?v=64a53a4fed",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6624,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=80522"
+  },
+  {
+   "id": "inf_oge-src43431",
+   "src": "assets/oge_informatics/inf_oge-src43431.png?v=05f2e8d4f7",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6585,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81177"
+  },
+  {
+   "id": "inf_oge-src43447",
+   "src": "assets/oge_informatics/inf_oge-src43447.png?v=ada85535c5",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.3798,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81178"
+  },
+  {
+   "id": "inf_oge-src43463",
+   "src": "assets/oge_informatics/inf_oge-src43463.png?v=681b22bb63",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6585,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81179"
+  },
+  {
+   "id": "inf_oge-src43570",
+   "src": "assets/oge_informatics/inf_oge-src43570.png?v=2dc86bb40a",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6585,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81205"
+  },
+  {
+   "id": "inf_oge-src43626",
+   "src": "assets/oge_informatics/inf_oge-src43626.png?v=da68351eef",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №13)",
+   "width": 640,
+   "ratio": 0.5664,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/problem?id=43626"
+  },
+  {
+   "id": "inf_oge-src43642",
+   "src": "assets/oge_informatics/inf_oge-src43642.png?v=a962fcac59",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4388,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81285"
+  },
+  {
+   "id": "inf_oge-src43658",
+   "src": "assets/oge_informatics/inf_oge-src43658.png?v=75435aee7c",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.3798,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81271"
+  },
+  {
+   "id": "inf_oge-src43674",
+   "src": "assets/oge_informatics/inf_oge-src43674.png?v=4d945ee0d5",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.3798,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81275"
+  },
+  {
+   "id": "inf_oge-src43690",
+   "src": "assets/oge_informatics/inf_oge-src43690.png?v=4926e1330f",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6585,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81278"
+  },
+  {
+   "id": "inf_oge-src43720",
+   "src": "assets/oge_informatics/inf_oge-src43720.png?v=1ef89d548e",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4519,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81524"
+  },
+  {
+   "id": "inf_oge-src43722",
+   "src": "assets/oge_informatics/inf_oge-src43722.png?v=967aa00820",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.1086,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=82133"
+  },
+  {
+   "id": "inf_oge-src43723",
+   "src": "assets/oge_informatics/inf_oge-src43723.png?v=cadba358b3",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.0888,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81529"
+  },
+  {
+   "id": "inf_oge-src43724",
+   "src": "assets/oge_informatics/inf_oge-src43724.png?v=46412ded04",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 0.8786,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81530"
+  },
+  {
+   "id": "inf_oge-src43725",
+   "src": "assets/oge_informatics/inf_oge-src43725.png?v=d39124b261",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.2646,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81520"
+  },
+  {
+   "id": "inf_oge-src43726",
+   "src": "assets/oge_informatics/inf_oge-src43726.png?v=fa535c5f56",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4338,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81518"
+  },
+  {
+   "id": "inf_oge-src43727",
+   "src": "assets/oge_informatics/inf_oge-src43727.png?v=dedb052efd",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6902,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81522"
+  },
+  {
+   "id": "inf_oge-src43728",
+   "src": "assets/oge_informatics/inf_oge-src43728.png?v=f1c3eb2df5",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.3785,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81523"
+  },
+  {
+   "id": "inf_oge-src43729",
+   "src": "assets/oge_informatics/inf_oge-src43729.png?v=b201714d14",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.4352,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81525"
+  },
+  {
+   "id": "inf_oge-src43730",
+   "src": "assets/oge_informatics/inf_oge-src43730.png?v=0a22928b34",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.2436,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81526"
+  },
+  {
+   "id": "inf_oge-src43731",
+   "src": "assets/oge_informatics/inf_oge-src43731.png?v=2b9a963036",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.6902,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=81521"
+  },
+  {
+   "id": "inf_oge-src43774",
+   "src": "assets/oge_informatics/inf_oge-src43774.png?v=a322690ad2",
+   "type": "image",
+   "alt": "Рисунок к заданию (ОГЭ №9)",
+   "width": 640,
+   "ratio": 1.56,
+   "source": "рисунок источника: https://inf-oge.sdamgia.ru/get_file?id=82714"
   }
  ],
  "visualAudit": {
