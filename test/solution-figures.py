@@ -37,6 +37,7 @@ APP_JS = ROOT / "js" / "app.js"
 # Заполняется по мере обработки предметов; 0 = рисунков решений нет.
 EXPECTED_LINKED = {
     "catalog.json": 424,
+    "catalog_basic.json": 90,
     "catalog_oge_informatics.json": 32,
 }
 
@@ -125,7 +126,10 @@ def main() -> int:
                 bad_file += 1
                 continue
             w, h = size
-            if w < 40 or h < 40:
+            # Порог 30px: ловит вырожденный мусор (запятая 15x21), но держит
+            # легитимные полоски-иллюстрации (числовая прямая 164x35,
+            # фрагменты схем скрещивания 161x37 — проверены глазами).
+            if w < 30 or h < 30:
                 bad_size += 1
             if a.get("width") != w or a.get("height") != h:
                 bad_size += 1
