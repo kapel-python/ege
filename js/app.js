@@ -13136,6 +13136,13 @@ const Onboarding = {
   // Предмет-шаг пропущен (старт с вопросов после явного выбора): кнопка
   // «Назад» на уровне скрыта — возвращаться некуда.
   subjectSkipped: false,
+  // Выбранная ось экзамена ("ege"/"oge"). Экзамен-шаг идёт первым, предмет —
+  // вторым: сначала направление, потом предмет внутри него. Сбрасывается
+  // при каждом show(), при возврате с предмета меняется через pickExam.
+  exam: null,
+  // Ось одна (или уже известна из явного выбора): экзамен-шаг пропущен,
+  // кнопка «Назад» на предмете скрыта — возвращаться некуда.
+  examSkipped: false,
   // mode="subject" — сначала выбираем предмет, mode="offer" — предлагаем
   // тест, mode="diagnostic" — пользователь согласился, mode="skip" — отказался
   // и сейчас вводит имя.
@@ -13145,11 +13152,11 @@ const Onboarding = {
   returnRoute: "dashboard",
   returnParam: "",
 
-  // Нумерованные шаги после выбора предмета: уровень → цель → диагностика →
+  // Нумерованные шаги: экзамен → предмет → уровень → цель → диагностика →
   // итог → имя. Предложение пройти или пропустить тест идёт между предметом
   // и уровнем. Пустой предмет идёт коротким путём: предмет → имя.
   STEPS() {
-    return ["stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
+    return ["stepExam", "stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
   },
 
   captureReturnRoute() {
@@ -13210,7 +13217,9 @@ const Onboarding = {
     this.step = 0;
     this.subject = null;
     this.subjectSkipped = false;
-    // Без явно выбранного предмета сначала спрашиваем его. При явном
+    this.exam = null;
+    this.examSkipped = false;
+    // Без явно выбранного предмета сначала спрашиваем ось и предмет. При явном
     // выборе из профиля/пикера входа сразу показываем предложение теста.
     this.mode = preset ? "offer" : "subject";
     this.captureReturnRoute();
@@ -13222,26 +13231,44 @@ const Onboarding = {
       if (info) {
         this.subject = preset;
         this.subjectSkipped = true;
+        try {
+          if (typeof DataAPI !== "undefined" && DataAPI && typeof DataAPI.subjectExam === "function") {
+            this.exam = DataAPI.subjectExam(preset);
+            this.examSkipped = true;
+          }
+        } catch (_) {}
         let ready = false;
         try { ready = !!(info && info.status === "ready" && DataAPI.diagnosticTasks().length); } catch (_) {}
         if (ready) {
-          this.step = 1;
+          this.step = 2;
           // Явный выбор предмета (из профиля или пикера входа) — тот же путь,
           // поэтому и детали с вендором греем здесь, а не на первом вопросе.
           this.warmSubjectAssets();
         } else if (existingName) {
           // Пустой предмет + имя уже есть: спрашивать нечего —
           // сразу заводим профиль без показа оверлея.
-          this.step = 5;
+          this.step = 6;
           this.finish();
           return;
         } else {
           // У выбранного предмета ещё нет вопросов: предлагать пустой тест
           // бессмысленно, сразу спрашиваем обязательное имя.
-          this.step = 5;
+          this.step = 6;
           this.mode = "diagnostic";
         }
       }
+    }
+    // Одна ось среди предметов — экзамен-шаг нечего спрашивать: выбираем её
+    // молча и стартуем сразу с предмета. Кнопка «Назад» там скрыта.
+    if (!preset && !this.exam) {
+      try {
+        const gs = subjectsByExam();
+        if (gs.length === 1 && gs[0] && gs[0].exam) {
+          this.exam = gs[0].exam;
+          this.examSkipped = true;
+          this.step = 1;
+        }
+      } catch (_) {}
     }
     const div = document.createElement("div");
     div.className = "onboard-overlay";
@@ -13288,10 +13315,10 @@ const Onboarding = {
     const stepIndex = shortSubjectFlow ? (this.step >= nameStep ? 1 : 0) : this.step;
     const stepDots = Array.from({ length: stepCount }, (_, i) => `<i class="${i <= stepIndex ? "on" : ""}"></i>`).join("");
     // Вышедший из аккаунта, но попавший в онбординг: вход/регистрация
-    // доступны без прохождения. На предложении теста и первых двух шагах
+    // доступны без прохождения. На предложении теста и первых трёх шагах
     // показываем ссылку, дальше она отвлекает от вопросов.
     // У привязанного аккаунта её нет.
-    let showAuth = offering || this.step <= 1;
+    let showAuth = offering || this.step <= 2;
     try { showAuth = showAuth && !(Store.auth && Store.auth.registered); } catch (_) {}
     el.innerHTML = `
       <button class="btn btn--ghost theme-toggle onboard-theme" type="button" onclick="Onboarding.toggleTheme()" aria-label="${themeLabel}" aria-pressed="${dark}" title="${themeLabel}">${icon(dark ? "sun" : "moon")}</button>
@@ -13338,16 +13365,26 @@ const Onboarding = {
   },
 
   // После выбора предмета показываем отдельный выбор: тест полезен для
-  // стартовой карты, но не является обязательным.
+  // стартовой карты, но не является обязательным. Кнопка «Назад»
+  // возвращает к выбору предмета — выбор не безвозвратный.
   stepOffer(body) {
     const count = DataAPI.diagnosticTasks().length;
+    let subjectName = "";
+    try { subjectName = subjectDisplayName(DataAPI.subjectInfo(this.subject || DataAPI.currentSubject())); } catch (_) {}
     body.innerHTML = `
       <div class="onboard-title">Хочешь пройти небольшой тест?</div>
-      <div class="onboard-sub">Всего ${count} ${plural(count, "вопрос", "вопроса", "вопросов")} по разным темам. Он поможет определить начальный уровень и точнее настроить рекомендации. Но ответы не обязательны: ${lessonsHere() ? "уроки, " : ""}тренировки и статистика доступны в любом случае.</div>
+      <div class="onboard-sub">Всего ${count} ${plural(count, "вопрос", "вопроса", "вопросов")} по разным темам${subjectName ? ` · ${esc(subjectName)}` : ""}. Он поможет определить начальный уровень и точнее настроить рекомендации. Но ответы не обязательны: ${lessonsHere() ? "уроки, " : ""}тренировки и статистика доступны в любом случае.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px">
         <button class="btn btn--primary btn--lg" type="button" onclick="Onboarding.acceptTest()">Пройти тест ${icon("arrow")}</button>
         <button class="btn btn--ghost btn--lg" type="button" onclick="Onboarding.skipTest()">Пропустить</button>
-      </div>`;
+      </div>
+      ${this.canGoBack() ? `<div class="lesson-nav"><button class="btn btn--ghost" onclick="Onboarding.back()">← Назад</button><span></span></div>` : ""}`;
+  },
+
+  backFromOffer() {
+    this.mode = "subject";
+    this.step = 1;
+    this.render();
   },
 
   acceptTest() {
@@ -13358,7 +13395,7 @@ const Onboarding = {
   skipTest() {
     this.mode = "skip";
     if (this.name) { this.finishSkipped(); return; }
-    this.step = 5;
+    this.step = 6;
     this.render();
   },
 
@@ -13370,6 +13407,37 @@ const Onboarding = {
     this.returnToPrevious();
   },
 
+  // Первый шаг — направление: ОГЭ или ЕГЭ. Только после него показываем
+  // предметы выбранной оси, а не все плитки в кучу.
+  stepExam(body) {
+    let groups = [];
+    try { groups = subjectsByExam(); } catch (_) { groups = []; }
+    const examDesc = (exam, subjects) => {
+      const n = (subjects || []).length;
+      const cls = exam === "oge" ? "9 класс" : "11 класс";
+      return `${cls} · ${n} ${plural(n, "предмет", "предмета", "предметов")}`;
+    };
+    const examName = (exam) => (exam === "oge" ? "ОГЭ" : "ЕГЭ");
+    body.innerHTML = `
+      <div class="onboard-title">Что готовим?</div>
+      <div class="onboard-sub">Сначала выбери направление — предметы покажем внутри него. Прогресс и настройки ведутся отдельно по каждому предмету.</div>
+      <div class="choice-list">
+        ${groups.map((g) => `<button class="choice-item" onclick="Onboarding.pickExam('${esc(g.exam)}')"><b>${esc(examName(g.exam))}</b><span>${esc(examDesc(g.exam, g.subjects))}</span></button>`).join("")}
+      </div>`;
+  },
+
+  pickExam(v) {
+    if (!v) return;
+    if (this.exam !== v) {
+      this.subject = null;
+      this.goal = null;
+    }
+    this.exam = v;
+    this.examSkipped = false;
+    this.step = 1;
+    this.render();
+  },
+
   // Первый вопрос — предмет, а не уровень: уровень — характеристика внутри
   // предмета и не должен его определять.
   stepSubject(body) {
@@ -13379,7 +13447,14 @@ const Onboarding = {
     // все кнопки погашены (повторные клики всё равно отбивает _picking), а
     // на выбранной — спиннер и «Открываем…».
     const picking = this._picking ? this._pickingSubject : null;
-    const groups = subjectsByExam();
+    let groups = [];
+    try { groups = subjectsByExam(); } catch (_) { groups = []; }
+    // Направление уже выбрано на прошлом шаге — показываем только его
+    // предметы. Без выбранной оси (перезагрузка, старый вызов) — все, как раньше.
+    if (this.exam) {
+      const narrowed = groups.filter((g) => g && g.exam === this.exam);
+      if (narrowed.length) groups = narrowed;
+    }
     const item = (s) => {
       const status = subjectAvailabilityLabel(s);
       const loading = !!(picking && s.id === picking);
@@ -13389,16 +13464,22 @@ const Onboarding = {
         : `${esc(subjectCourseLabel(s))}${status ? ` · ${esc(status)}` : ""}`;
       return `<button class="choice-item${status ? " choice-item--soon" : ""}${loading ? " choice-item--loading" : ""}"${picking ? " disabled" : ""} onclick="Onboarding.pickSubject('${esc(s.id)}')"><b>${loading ? '<span class="choice-item__spin" aria-hidden="true"></span>' : ""}${name}</b><span>${line}</span></button>`;
     };
-    // Все предметы сразу с тихими подписями осей: направление выбирается
-    // один раз и не заслуживает отдельного шага даже здесь.
+    // Направление уже выбрано на прошлом шаге: здесь только его предметы
+    // с тихой подписью оси. Фильтр по нескольким осям больше не нужен.
+    let examCaption = "";
+    try {
+      if (this.exam) examCaption = examGroupLabel(this.exam);
+      else if (groups.length === 1) examCaption = examGroupLabel(groups[0].exam);
+    } catch (_) {}
     body.innerHTML = `
       <div class="onboard-title">Какой предмет готовим?</div>
-      <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.</div>
+      <div class="onboard-sub">Прогресс и настройки ведутся отдельно по каждому предмету.${examCaption ? `<br>${esc(examCaption)}` : ""}</div>
       ${groups.map((g) => `
         ${groups.length > 1 ? `<div class="subject-group-label">${esc(examGroupLabel(g.exam))}</div>` : ""}
         <div class="choice-list">
           ${g.subjects.map(item).join("")}
-        </div>`).join("")}`;
+        </div>`).join("")}
+      ${this.backHtml()}`;
   },
 
   // Детали каталога (тексты заданий) и матвендор (katex/jsxgraph) — большой
@@ -13415,6 +13496,14 @@ const Onboarding = {
     // Предмет выбран явно на его же шаге — пропуск снят: с уровня можно
     // вернуться к выбору предмета.
     this.subjectSkipped = false;
+    // Ось подтягиваем за предметом, чтобы возврат «предмет → экзамен»
+    // и подпись оси не врали после ручного выбора.
+    try {
+      if (typeof DataAPI !== "undefined" && DataAPI && typeof DataAPI.subjectExam === "function") {
+        const pickedExam = DataAPI.subjectExam(v);
+        if (pickedExam) this.exam = pickedExam;
+      }
+    } catch (_) {}
     // Цель из шкалы другого предмета недействительна (сервер отклоняет чужую
     // цель 400-й вместе со всей настройкой) — выбор цели делаем заново.
     this.goal = null;
@@ -13452,7 +13541,7 @@ const Onboarding = {
       // сразу к имени, профиль предмета заведётся пустым. Имя едино для
       // аккаунта: если уже указано — не показываем шаг имени, а завершаем.
       if (!ready) {
-        this.step = 5;
+        this.step = 6;
         if (this.name) { this.finish(); return; }
         this.mode = "diagnostic";
         this.render();
@@ -13460,7 +13549,7 @@ const Onboarding = {
       }
       // Сначала пользователь выбирает предмет, и только потом решает, нужен
       // ли ему короткий тест. После согласия начинается прежний flow с уровня.
-      this.step = 1;
+      this.step = 2;
       this.mode = "offer";
       this.render();
     });
@@ -13620,17 +13709,23 @@ const Onboarding = {
 
   nextDiag() {
     this.diagIdx++;
-    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 4; this.render(); }
+    if (this.diagIdx >= DataAPI.diagnosticTasks().length) { this.step = 5; this.render(); }
     else this.render();
   },
 
   // Назад к прошлому шагу — тот же принцип, что в уроках (lessonPrev):
-  // строго на один шаг назад. Из серии диагностики — в цель, из итога —
-  // в последний вопрос (его результат снимается, вопрос можно перепройти),
-  // из имени — в итог (или в предмет, если диагностика пропущена).
+  // строго на один шаг назад. Из предложения теста — в предмет, из серии
+  // диагностики — в цель, из итога — в последний вопрос (его результат
+  // снимается, вопрос можно перепройти), из имени — в итог (или в предмет,
+  // если диагностика пропущена; из предмета — в экзамен).
   back() {
     if (this._picking) return;
-    if (this.step === 3) {
+    if (this.mode === "offer") {
+      if (this.subjectSkipped) return;
+      this.backFromOffer();
+      return;
+    }
+    if (this.step === 4) {
       if (this.diagAnswered) {
         // Только что отвечен: снимаем ответ и показываем тот же вопрос заново.
         this.diagResults.pop();
@@ -13639,45 +13734,55 @@ const Onboarding = {
         this.diagIdx--;
         this.diagResults.pop();
       } else {
-        this.step = 2;
+        this.step = 3;
       }
       this.render();
       return;
     }
-    if (this.step === 4) {
+    if (this.step === 5) {
       let total = 0;
       try { total = DataAPI.diagnosticTasks().length; } catch (_) {}
       if (this.diagResults.length && total) {
         this.diagIdx = total - 1;
         this.diagResults.pop();
         this.diagAnswered = false;
-        this.step = 3;
+        this.step = 4;
       } else {
-        this.step = 2;
+        this.step = 3;
       }
       this.render();
       return;
     }
-    if (this.step === 5) {
+    if (this.step === 6) {
       if (this.mode === "skip") {
         this.mode = "offer";
-        this.step = 0;
+        this.step = 2;
       } else {
-        this.step = this.diagResults.length ? 4 : 0;
+        this.step = this.diagResults.length ? 5 : 1;
       }
       this.render();
       return;
     }
+    if (this.step === 1) {
+      if (this.examSkipped) return;
+      this.step = 0;
+      this.render();
+      return;
+    }
+    if (this.step === 2 && this.subjectSkipped) return;
     if (this.step <= 0) return;
     this.step--;
     this.render();
   },
 
-  // Кнопка «Назад» видна везде, кроме первого видимого шага: предмета —
-  // или уровня, если предмет-шаг пропущен после явного выбора.
+  // Кнопка «Назад» видна везде, кроме первого видимого шага: экзамена —
+  // предмета, если ось одна, — или уровня, если шаги пропущены после явного
+  // выбора. На предложении теста возврат есть всегда, кроме явного выбора.
   canGoBack() {
+    if (this.mode === "offer") return !this.subjectSkipped;
     if (this.step <= 0) return false;
-    if (this.step === 1 && this.subjectSkipped) return false;
+    if (this.step === 1 && this.examSkipped) return false;
+    if (this.step === 2 && this.subjectSkipped) return false;
     return true;
   },
 
@@ -13687,10 +13792,10 @@ const Onboarding = {
   },
 
   next() {
-    if (this.step === 3) return;
-    // Имя едино для аккаунта: итог (шаг 4) с уже известным именем сразу
+    if (this.step === 4) return;
+    // Имя едино для аккаунта: итог (шаг 5) с уже известным именем сразу
     // завершает онбординг, шаг имени не показываем.
-    if (this.step === 4 && this.name) { this.finish(); return; }
+    if (this.step === 5 && this.name) { this.finish(); return; }
     this.step++;
     this.render();
   },

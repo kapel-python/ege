@@ -1,8 +1,9 @@
 /* Онбординг и дисциплина выбора предмета при входе — без браузера.
    Читает исходник js/app.js и проверяет:
-   1. STEPS без welcome: ровно 6 шагов, первый stepSubject, метода stepWelcome нет.
-   2. Переходы: pickSubject (готовый предмет -> шаг 1, пустой -> шаг 5),
-      nextDiag (счётчик + шаг 4 в конце), next (инкремент + запрет на шаге 3).
+   1. STEPS: ровно 7 шагов, первый stepExam, второй stepSubject, метода stepWelcome нет.
+   2. Переходы: pickExam (ось -> шаг 1), pickSubject (готовый предмет -> шаг 2,
+      пустой -> шаг 6), nextDiag (счётчик + шаг 5 в конце),
+      next (инкремент + запрет на шаге 4), back везде включая предложение теста.
       Статика + живое исполнение объекта Onboarding со стабами.
    3. pendingSubjectChoice: выставляется только в submitLogin, чистится
       в logoutAccount / revokeDeviceSession / chooseLoginSubject (+ sessionStorage);
@@ -47,15 +48,20 @@ const stepsMatch = stepsBody && stepsBody.match(/return\s*\[([^\]]*)\]/);
 const steps = stepsMatch
   ? stepsMatch[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean)
   : [];
-const EXPECTED = ["stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
-t("STEPS: ровно 6 шагов", steps.length === 6, JSON.stringify(steps));
-t("STEPS: первый шаг — stepSubject", steps[0] === "stepSubject", JSON.stringify(steps));
+const EXPECTED = ["stepExam", "stepSubject", "stepLevel", "stepGoal", "stepDiagnostic", "stepResult", "stepName"];
+t("STEPS: ровно 7 шагов", steps.length === 7, JSON.stringify(steps));
+t("STEPS: первый шаг — stepExam", steps[0] === "stepExam", JSON.stringify(steps));
+t("STEPS: второй шаг — stepSubject", steps[1] === "stepSubject", JSON.stringify(steps));
 t("STEPS: точный порядок без welcome", JSON.stringify(steps) === JSON.stringify(EXPECTED), JSON.stringify(steps));
 t("есть отдельный экран предложения теста", /stepOffer\s*\(body\)/.test(src));
+t("есть отдельный экран выбора экзамена", /stepExam\s*\(body\)/.test(src) && /pickExam\s*\(/.test(src));
+t("экзамен выбирается до предмета", /pickExam[\s\S]*?this\.step\s*=\s*1/.test(src));
+t("предмет фильтруется по выбранной оси", /stepSubject[\s\S]*?this\.exam/.test(src));
+t("на предложении теста есть кнопка назад", /stepOffer[\s\S]*?canGoBack\(\)/.test(src) && /backFromOffer\s*\(\)/.test(src));
 t("без явного предмета сначала открывается выбор предмета", /this\.mode\s*=\s*preset\s*\?\s*"offer"\s*:\s*"subject"/.test(src));
 t("после выбора предмета открывается предложение теста", /this\.mode\s*=\s*"offer"/.test(src));
 t("на предложении есть действия пройти и пропустить", /Пройти тест/.test(src) && /Пропустить/.test(src) && /skipTest\s*\(/.test(src));
-t("пропуск без имени ведёт к шагу имени", /skipTest\s*\(\)\s*\{[\s\S]*?this\.mode\s*=\s*"skip"[\s\S]*?this\.step\s*=\s*5/.test(src));
+t("пропуск без имени ведёт к шагу имени", /skipTest\s*\(\)\s*\{[\s\S]*?this\.mode\s*=\s*"skip"[\s\S]*?this\.step\s*=\s*6/.test(src));
 t("пропуск завершается отдельной функцией без диагностики", /finishSkipped\s*\(\)[\s\S]*?completeOnboardingWithoutTest/.test(src));
 t("после завершения сохраняется маршрут возврата", /captureReturnRoute\s*\(\)/.test(src) && /returnToPrevious\s*\(\)/.test(src));
 t("функция пропуска не обнуляет накопленные данные", /function completeOnboardingWithoutTest[\s\S]*?s\.onboarded\s*=\s*true/.test(stateSrc));
@@ -63,21 +69,27 @@ t("функция пропуска не обнуляет накопленные 
 /* ---------- 2. Переходы (статика) ---------- */
 const pickBody = fnBody(src, "pickSubject(v) {");
 t("pickSubject найден", !!pickBody);
-t("pickSubject: готовый предмет -> шаг 1 и предложение теста, пустой -> шаг 5",
-  !!pickBody && /this\.step\s*=\s*1/.test(pickBody)
+t("pickSubject: готовый предмет -> шаг 2 и предложение теста, пустой -> шаг 6",
+  !!pickBody && /this\.step\s*=\s*2/.test(pickBody)
     && /this\.mode\s*=\s*"offer"/.test(pickBody)
-    && /this\.step\s*=\s*5/.test(pickBody),
+    && /this\.step\s*=\s*6/.test(pickBody),
   (pickBody || "").slice(0, 260));
 const nextDiagBody = fnBody(src, "nextDiag() {");
 t("nextDiag найден", !!nextDiagBody);
 t("nextDiag: счётчик растёт", !!nextDiagBody && /this\.diagIdx\+\+/.test(nextDiagBody));
-t("nextDiag: конец диагностики -> шаг 4 (итог)",
-  !!nextDiagBody && /this\.step\s*=\s*4/.test(nextDiagBody));
+t("nextDiag: конец диагностики -> шаг 5 (итог)",
+  !!nextDiagBody && /this\.step\s*=\s*5/.test(nextDiagBody));
 const nextBody = fnBody(src, "next() {");
 t("next найден", !!nextBody);
-t("next: запрет перескока через диагностику (шаг 3)",
-  !!nextBody && /if\s*\(\s*this\.step\s*===\s*3\s*\)\s*return/.test(nextBody));
+t("next: запрет перескока через диагностику (шаг 4)",
+  !!nextBody && /if\s*\(\s*this\.step\s*===\s*4\s*\)\s*return/.test(nextBody));
 t("next: обычный инкремент шага", !!nextBody && /this\.step\+\+/.test(nextBody));
+const backBody = fnBody(src, "back() {");
+t("back найден", !!backBody);
+t("back: из предложения теста возврат к предмету",
+  !!backBody && /mode\s*===\s*"offer"/.test(backBody) && /backFromOffer/.test(backBody));
+t("back: из предмета возврат к экзамену",
+  !!backBody && /this\.step\s*===\s*1/.test(backBody));
 
 /* ---------- 2b. Переходы (живое исполнение со стабами) ----------
    Тела четырёх методов собираем в тестовый объект через new Function:
@@ -111,30 +123,30 @@ t("next: обычный инкремент шага", !!nextBody && /this\.step\
   let ob = null;
   try { ob = makeOb(readyAPI); }
   catch (e) { t("методы исполняются без браузера", false, String(e)); return; }
-  t("STEPS живой: 6 шагов, первый stepSubject",
+  t("STEPS живой: 7 шагов, первый stepExam",
     JSON.stringify(ob.STEPS()) === JSON.stringify(EXPECTED), JSON.stringify(ob.STEPS()));
   ob = makeOb(readyAPI);
   ob.pickSubject("math");
-  t("pickSubject живой: готовый предмет -> шаг 1 и предложение теста",
-    ob.step === 1 && ob.mode === "offer", `step=${ob.step} mode=${ob.mode}`);
+  t("pickSubject живой: готовый предмет -> шаг 2 и предложение теста",
+    ob.step === 2 && ob.mode === "offer", `step=${ob.step} mode=${ob.mode}`);
   ob = makeOb(emptyAPI);
   ob.pickSubject("chem");
-  t("pickSubject живой: пустой предмет -> шаг 5 (имя)", ob.step === 5, `step=${ob.step}`);
+  t("pickSubject живой: пустой предмет -> шаг 6 (имя)", ob.step === 6, `step=${ob.step}`);
   ob = makeOb(readyAPI);
-  ob.step = 1;
+  ob.step = 2;
   ob.next();
-  t("next живой: 1 -> 2", ob.step === 2, `step=${ob.step}`);
-  ob.step = 3;
+  t("next живой: 2 -> 3", ob.step === 3, `step=${ob.step}`);
+  ob.step = 4;
   ob.next();
-  t("next живой: шаг 3 не перескакивает диагностику", ob.step === 3, `step=${ob.step}`);
-  ob.step = 3; ob.diagIdx = 0;
+  t("next живой: шаг 4 не перескакивает диагностику", ob.step === 4, `step=${ob.step}`);
+  ob.step = 4; ob.diagIdx = 0;
   ob.nextDiag();
   t("nextDiag живой: счётчик растёт без смены шага",
-    ob.diagIdx === 1 && ob.step === 3, `idx=${ob.diagIdx} step=${ob.step}`);
-  ob.step = 3; ob.diagIdx = 4;
+    ob.diagIdx === 1 && ob.step === 4, `idx=${ob.diagIdx} step=${ob.step}`);
+  ob.step = 4; ob.diagIdx = 4;
   ob.nextDiag();
-  t("nextDiag живой: последнее задание -> шаг 4 (итог)",
-    ob.diagIdx === 5 && ob.step === 4, `idx=${ob.diagIdx} step=${ob.step}`);
+  t("nextDiag живой: последнее задание -> шаг 5 (итог)",
+    ob.diagIdx === 5 && ob.step === 5, `idx=${ob.diagIdx} step=${ob.step}`);
 })();
 
 /* ---------- 3. Дисциплина pendingSubjectChoice ---------- */
