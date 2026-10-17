@@ -184,6 +184,45 @@ window.mdBlocks = mdBlocks; window.buildTypedDom = buildTypedDom;</script>`;
   check("остальная разметка не сломалась",
     out.italic && out.bold, `курсив=${out.italic}, жирный=${out.bold}`);
 
+  // Своя абсолютная ссылка (тот же origin) — в ТОЙ ЖЕ вкладке, без _blank.
+  // file:// даёт origin "null", поэтому поднимаем настоящий http на 127.0.0.1
+  // и проверяем динамическое определение origin без хардкода домена.
+  {
+    const http = require("http");
+    const marked = fs.readFileSync(path.join(root, "vendor", "md", "marked.min.js"), "utf8");
+    const purify = fs.readFileSync(path.join(root, "vendor", "md", "purify.min.js"), "utf8");
+    const agent = extract();
+    const page2 = `<!doctype html><html lang="ru"><head><meta charset="utf-8"></head><body><div id="live"></div>`
+      + `<script>${marked}</script><script>${purify}</script><script>${agent}`
+      + `
+window.mdBlocks2 = mdBlocks;</script></body></html>`;
+    const srv = http.createServer((req, res) => { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(page2); });
+    await new Promise((res) => srv.listen(0, "127.0.0.1", res));
+    const port = srv.address().port;
+    await p.goto(`http://127.0.0.1:${port}/`, { waitUntil: "load" });
+    const selfHref = `http://127.0.0.1:${port}/dashboard#/practice/m-r04?task=r04_1`;
+    const same = await p.evaluate((self) => {
+      document.getElementById("live").innerHTML = "";
+      const blocks = window.mdBlocks2(
+        `Тренажёр: [ЗАДАНИЕ В ТРЕНАЖЁРЕ](${self}).\n\nЧужой: [ФИПИ](https://fipi.ru).`);
+      const live = document.getElementById("live");
+      blocks.forEach((b) => live.appendChild(b));
+      const links = Array.prototype.slice.call(live.querySelectorAll("a"));
+      const byHref = (h) => links.find((a) => a.getAttribute("href") === h) || {};
+      const own = byHref(self), ext = byHref("https://fipi.ru");
+      return { own: { target: own.target, rel: own.rel, cls: own.className },
+               ext: { target: ext.target, rel: ext.rel } };
+    }, selfHref);
+    check("своя абсолютная ссылка (тот же origin) — в той же вкладке",
+      same.own.target === "" && !/noopener/.test(same.own.rel || ""), JSON.stringify(same.own));
+    check("своя абсолютная ссылка помечена как внутренняя",
+      /agent__link--int/.test(same.own.cls || ""), same.own.cls);
+    check("чужая ссылка рядом — по-прежнему в новой вкладке",
+      same.ext.target === "_blank" && /noopener/.test(same.ext.rel || ""), JSON.stringify(same.ext));
+    await new Promise((res) => srv.close(res));
+    await p.goto("file://" + page, { waitUntil: "load" });
+  }
+
   await p.screenshot({ path: path.join(root, "screenshots", "agent-links.png"), fullPage: true });
   await browser.close();
   console.log(`\n${failures ? "FAILURES: " + failures : "ALL OK"}: ${checks} проверок`);

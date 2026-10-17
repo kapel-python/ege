@@ -1858,8 +1858,25 @@
      а не чужой веб-страницей. Поэтому DOMPurify мы НЕ ограничиваем
      (она по умолчанию режет `target`, а без него ссылка открывается поверх
      сайта и человек теряет переписку), а обрабатываем ссылки сами:
-     внешним — `target=_blank` + `rel=noopener`, внутренним — ничего лишнего. */
+     внешним (чужой origin) — `target=_blank` + `rel=noopener`, своим (тот же
+     origin, хоть путём, хоть абсолютной ссылкой) — ничего лишнего: раздел
+     переключается в той же вкладке, чат не теряется. */
   var SAFE_SCHEME = /^(https?:|\/|\.\/|#)/i;
+  /* Своя ссылка = тот же origin, что у текущей страницы. Домен нигде не
+     захардкожен: работает и на lemmago.ru, и на старом egeeasy.ru, и на
+     localhost — сравниваем динамически с window.location.origin.
+     file:// и прочие не-http origins — всегда чужие (там origin === "null"). */
+  function isOwnOrigin(href) {
+    try {
+      if (!href) return false;
+      var loc = window.location;
+      var origin = loc && loc.origin;
+      if (typeof origin !== "string" || !origin || origin === "null"
+          || (origin.indexOf("http://") !== 0 && origin.indexOf("https://") !== 0)) return false;
+      var u = new URL(href, loc.href);
+      return (u.protocol === "http:" || u.protocol === "https:") && u.origin === origin;
+    } catch (_) { return false; }
+  }
   function hardenLinks(root) {
     var links = (root.querySelectorAll ? root.querySelectorAll("a[href]") : []);
     Array.prototype.forEach.call(links, function (a) {
@@ -1868,7 +1885,10 @@
       // совсем, текст оставляем: ИИ нельзя отдавать ученику клик,
       // выполняющий код от его имени.
       if (!SAFE_SCHEME.test(href)) { a.removeAttribute("href"); return; }
-      var internal = href.charAt(0) === "/" || href.charAt(0) === "#";
+      // Своя страница (путь/якорь или тот же origin абсолютной ссылкой) —
+      // открываем ТАМ ЖЕ: ученик не теряет чат в новой вкладке, SPA-роутер
+      // сам переключит раздел по хэшу. Чужая — в новой вкладке с noopener.
+      var internal = href.charAt(0) === "/" || href.charAt(0) === "#" || isOwnOrigin(href);
       // Класс дописываем, а не переписываем: у ссылки, созданной
       // autolinkBareUrls, уже есть --raw (длинный адрес не капиталится), и
       // перезапись здесь молча его сносила — проверка на живом рендере это поймала.
