@@ -53,8 +53,8 @@
 <script>
   /* Тема лендинга: сначала сохранённый выбор (общий с сайтом ключ),
      иначе — тема устройства. Синхронно в <head>, до отрисовки, без мигания.
-     Кнопка ручного переключения — общая (.eh-toggle, красит и кликает
-     js/site-header.js), как на остальных статичных страницах. */
+     Кнопка темы — внутри стеклянной шапки (js/glass-header.js), общий ключ
+     ege_core_theme, как на остальных статичных страницах. */
   (function(){
     try{
       var saved=null;
@@ -88,7 +88,6 @@
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="css/footer.css?v=8">
-<link rel="stylesheet" href="/css/site-header.css?v=1">
 <link rel="preload" href="vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <script>document.documentElement.classList.add('js');</script>
@@ -340,106 +339,6 @@
     margin:0 auto;
     padding:0 clamp(20px,4vw,32px);
   }
-
-  /* ===== HEADER ===== */
-  header{
-    position:sticky;
-    top:0;
-    z-index:100;
-    background:var(--header-bg);
-    backdrop-filter:blur(12px) saturate(180%);
-    -webkit-backdrop-filter:blur(12px) saturate(180%);
-    border-bottom:1px solid var(--hairline);
-  }
-
-  .header-inner{
-    display:grid;
-    grid-template-columns:auto minmax(0,1fr);
-    align-items:center;
-    gap:clamp(12px,3vw,32px);
-    min-width:0;
-    /* только вертикальный отступ: горизонтальный берём у .wrap,
-       иначе шапка стоит левее общей сетки контента */
-    padding-block:clamp(12px,2vw,18px);
-  }
-
-  .logo{
-    display:flex;
-    align-items:center;
-    gap:12px;
-    font-family:var(--font-display);
-    font-weight:700;
-    font-size:clamp(16px,2.2vw,19px);
-    letter-spacing:-0.02em;
-    white-space:nowrap;
-    flex-shrink:0;
-    min-width:0;
-  }
-
-  .logo-badge{
-    width:clamp(36px,5vw,42px);
-    height:clamp(36px,5vw,42px);
-    border-radius:50%;
-    background:linear-gradient(135deg,#22c07a 0%,#38BDF8 100%);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    box-shadow:0 8px 24px -8px rgba(56,189,248,0.5);
-    position:relative;
-    flex-shrink:0;
-  }
-
-  .logo-badge::before{
-    content:'';
-    position:absolute;
-    inset:-4px;
-    border-radius:50%;
-    background:linear-gradient(135deg,#22c07a,#38BDF8);
-    opacity:0.3;
-    filter:blur(12px);
-    animation:glow-pulse 3s ease-in-out infinite;
-  }
-
-  /* Пульс только по opacity: анимация transform на размытом элементе
-     заставляет перерастеризовать blur каждый кадр. */
-  @keyframes glow-pulse{
-    0%,100%{opacity:0.3;}
-    50%{opacity:0.55;}
-  }
-
-  .logo-badge svg{
-    width:20px;
-    height:20px;
-    position:relative;
-    z-index:1;
-  }
-
-  .logo-text{
-    white-space:nowrap;
-  }
-
-  .logo-text em{
-    font-style:normal;
-    color:var(--brand);
-  }
-
-  .header-nav{
-    display:flex;
-    align-items:center;
-    gap:clamp(12px,3vw,32px);
-    justify-self:end;
-    min-width:0;
-    flex-shrink:0;
-  }
-
-  .header-link{
-    color:var(--text-dim);
-    font-size:clamp(14px,1.7vw,15px);
-    font-weight:500;
-    transition:color 0.2s ease;
-  }
-
-  .header-link:hover{color:var(--text);}
 
   /* ===== BUTTONS ===== */
   .btn{
@@ -982,39 +881,14 @@
   /* Средняя ширина (планшет/узкое окно): ссылки остаются, но шапка
      ужата — иначе колонка nav с justify-self:end наезжает влево
      на логотип (замер: до +184px при шести ссылках). */
-  @media (max-width:1024px){
-    .header-inner{gap:12px;}
-    .logo{gap:8px;}
-    .header-nav{gap:12px;}
-    .header-nav .btn{padding:10px 14px;font-size:13px;}
-    .header-link{font-size:14px;}
-    .eh-toggle{width:36px;height:36px;}
-  }
   @media (max-width:768px){
-    .header-link{display:none;}
     .card-grid{grid-template-columns:1fr;}
     .hero-visual{grid-template-columns:1fr;}
     .mentor-grid{grid-template-columns:1fr;}
-    /* backdrop-filter на липкой шапке пересчитывается каждый кадр скролла —
-       на телефоне это главный источник микрофризов. Плотный фон вместо стекла. */
-    header{
-      backdrop-filter:none;
-      -webkit-backdrop-filter:none;
-      background:var(--surface-1);
-    }
   }
 
   /* Компактная шапка: бренд «lemma go» всегда в одну строку,
      кнопка CTA уменьшается, горизонтального overflow нет. */
-  @media (max-width:480px){
-    .header-inner{gap:12px;padding-block:12px;}
-    .logo{gap:8px;font-size:16px;}
-    .logo-badge{width:32px;height:32px;}
-    .logo-badge svg{width:16px;height:16px;}
-    .header-nav{gap:12px;}
-    .header-nav .btn{padding:10px 16px;font-size:13px;}
-  }
-
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
     *,*::before,*::after{
@@ -1036,38 +910,17 @@
   html.lite-anim .ww{
     transition-delay:0ms !important;
   }
-  html.lite-anim .logo-badge::before{
-    animation:none;
-    opacity:0.25;
-  }
-  html.lite-anim header{
-    backdrop-filter:none;
-    -webkit-backdrop-filter:none;
-    background:var(--surface-1);
-  }
 </style>
 </head>
 <body>
 
-<header class="rv" style="--d:0ms">
-  <div class="wrap header-inner">
-    <a href="/" class="logo">
-      <div class="logo-badge">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M5 13.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <span class="logo-text">lemma <em>go</em></span>
-    </a>
-    <nav class="header-nav" aria-label="Навигация по странице">
-      <a class="header-link" href="#pricing">Тарифы</a>
-      <a class="header-link" href="/subscription"><span class="plus">Plus</span></a>
-      <a class="header-link" href="#subjects">Предметы</a>
-      <a class="header-link" href="#features">Возможности</a>
-      <a class="header-link" href="#how">Как работает</a>
-      <button class="eh-toggle" type="button" aria-label="Переключить тему"></button>
-      <a class="btn btn-primary" href="/dashboard">Начать подготовку</a>
-    </nav>
-  </div>
-</header>
+<div data-glass-header data-maxw="1024"><nav data-glass-nav>
+  <a href="#pricing">Тарифы</a>
+  <a href="/subscription"><span class="plus">Plus</span></a>
+  <a href="#subjects">Предметы</a>
+  <a href="#features">Возможности</a>
+  <a href="#how">Как работает</a>
+</nav></div>
 
 <main>
   <section class="hero">
@@ -1509,7 +1362,7 @@
 </main>
 
 <div data-ege-footer></div>
-<script src="/js/site-header.js?v=2"></script>
+<script src="/js/glass-header.js?v=4"></script>
 <script src="js/footer.js?v=9"></script>
 <script src="/js/site-reveal.js?v=1"></script>
 

@@ -4,7 +4,11 @@
    Один файл: разметка, стили и поведение. Подключение на странице:
 
      <div data-glass-header></div>
-     <script src="/js/glass-header.js?v=3"></script>
+     <script src="/js/glass-header.js?v=4"></script>
+
+   Лендинг (main.html) кладёт ссылки прямо в слот:
+     <div data-glass-header data-maxw="1024"><nav data-glass-nav>…</nav></div>
+   компонент пересаживает их в таблетку (на узких прячутся).
 
    Необязательные атрибуты слота:
      data-glass-header="back" — вместо CTA ссылка «← К практике»
@@ -139,6 +143,19 @@
     ".lgh__name em{font-style:normal;color:var(--brand, #16a34a);}",
     ":root[data-theme=\"dark\"] .lgh__name em{color:var(--brand, #6EE7B7);}",
 
+    /* ---------- навигация внутри таблетки (лендинг) ----------
+       Страница кладёт ссылки в слот: <nav data-glass-nav>…</nav> —
+       компонент пересаживает их между логотипом и кнопками.
+       На узких экранах ссылки прячутся, остаются логотип и CTA. */
+    ".lgh__nav{display:flex;align-items:center;justify-content:center;",
+      "gap:clamp(10px,1.6vw,22px);flex:1 1 auto;min-width:0;overflow:hidden;margin-inline:4px;}",
+    ".lgh__nav a{color:var(--text-dim, #48536B);text-decoration:none;white-space:nowrap;flex:0 0 auto;",
+      "font-family:var(--font-body, 'Inter', system-ui, sans-serif);font-weight:500;font-size:14px;letter-spacing:-0.01em;",
+      "padding:6px 2px;border-radius:8px;transition:color .2s ease;}",
+    ".lgh__nav a:hover{color:var(--lgh-ink);}",
+    ".lgh__nav a:focus-visible{outline:2px solid var(--accent, #0277B6);outline-offset:2px;}",
+    "@media (max-width:940px){.lgh__nav{display:none;}}",
+
     /* ---------- действия ---------- */
     ".lgh__actions{display:flex;align-items:center;gap:9px;flex:0 0 auto;min-width:0;}",
     ".lgh__icon{",
@@ -272,6 +289,13 @@
     var ctaHref = (slot.getAttribute("data-cta-href") || "/dashboard").replace(/"/g, "");
     var ctaText = slot.getAttribute("data-cta-text") || "Начать подготовку";
     var maxw = parseInt(slot.getAttribute("data-maxw") || "", 10);
+    var navSrc = null;
+    try { navSrc = slot.querySelector("[data-glass-nav]"); } catch (_) {}
+    var navHTML = "";
+    if (navSrc) {
+      navHTML = '<nav class="lgh__nav" aria-label="Навигация по странице">' + navSrc.innerHTML + "</nav>";
+      try { navSrc.parentNode.removeChild(navSrc); } catch (_) {}
+    }
 
     var wrap = document.createElement("div");
     wrap.className = "lgh-slot";
@@ -298,6 +322,7 @@
           '<span class="lgh__mark" aria-hidden="true">' + CHECK_ICON + '</span>' +
           '<span class="lgh__name">lemma <em>go</em></span>' +
         '</a>' +
+        navHTML +
         '<nav class="lgh__actions" aria-label="Действия">' +
           '<button class="lgh__icon lgh__theme" type="button" aria-label="Переключить тему"></button>' +
           ctaHTML +

@@ -1,8 +1,8 @@
 /* Шапка и подвал с первого кадра (без догоняющего прыжка).
-   Страницы со слотом [data-ege-header]/[data-glass-header]/[data-ege-footer]
-   обязаны подключать site-header.js/glass-header.js/footer.js СИНХРОННО
-   (без defer), а сами файлы — монтироваться сразу при выполнении
-   (mountStatic/mount вне readyState-ветки).
+   Страницы со слотом [data-glass-header]/[data-ege-footer] обязаны
+   подключать glass-header.js/footer.js СИНХРОННО (без defer), а сами файлы —
+   монтироваться сразу при выполнении (mount вне readyState-ветки).
+   Шапка-ссылка [data-glass-nav] внутри слота пересаживается в таблетку.
    Пульсирующих скелетонов каркаса нет осознанно (удалены: мельтешение
    в шапке и нижнем меню раздражало): слоты index.html пустые, рендер
    рисует настоящий хром сразу благодаря синхронному маунту.
@@ -23,11 +23,6 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
 let slotPages = 0;
 for (const f of pages) {
   const html = read(f);
-  if (html.includes("data-ege-header")) {
-    slotPages++;
-    check(`${f}: site-header без defer`,
-      /<script src="\/js\/site-header\.js[^"]*"><\/script>/.test(html), "defer или нет тега");
-  }
   if (html.includes("data-glass-header")) {
     slotPages++;
     check(`${f}: glass-header без defer`,
@@ -42,7 +37,7 @@ for (const f of pages) {
 }
 check("слоты шапки вообще есть", slotPages > 0, String(slotPages));
 
-for (const [file, fn] of [["js/site-header.js", "mountStatic"], ["js/glass-header.js", "mount"], ["js/footer.js", "mountStatic"]]) {
+for (const [file, fn] of [["js/glass-header.js", "mount"], ["js/footer.js", "mountStatic"]]) {
   const code = fs.readFileSync(path.join(ROOT, file), "utf8");
   check(`${file}: eager-монт при выполнении`,
     code.includes("try { " + fn + "(); } catch (_) {}"));
