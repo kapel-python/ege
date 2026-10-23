@@ -2304,6 +2304,26 @@ async function render() {
   // После входа предмет не угадываем по current_subject: пока пользователь
   // явно не выбрал предмет, любой раздел уводит на экран выбора (кроме
   // login/register — туда ведёт сам flow входа/выхода).
+  // Гейт ИИ для хрома обязан отработать ДО любых ранних возвратов (пикер
+  // предмета, SEO-модалка, онбординг): иначе навигация остаётся stale и
+  // показывает «ИИ» бесплатному аккаунту до перезагрузки (fail-open при
+  // пустом кэше после регистрации). Синхронизируем хром заранее, поздний
+  // гейт ниже станет no-op из тёплого кэша.
+  try {
+    const earlyNav = navRouteForRoute(route);
+    const needEarlyGate = Store.accountId && !isSubjectChoiceLocked()
+      && !TASK_FOCUS_ROUTES.has(route) && agentAccessCached() == null
+      && typeof Subscription !== "undefined" && Subscription && Subscription.ensureAgentAccess;
+    if (needEarlyGate) {
+      await Subscription.ensureAgentAccess();
+      if (currentRoute() !== route) return;
+    }
+    // Для заблокированного пикера хром рисуем в disabled-виде, а не
+    // оставляем предыдущий включённым с доступным «ИИ».
+    syncChromeForRoute(route, earlyNav);
+  } catch (_) {
+    try { syncChromeForRoute(route, navRouteForRoute(route)); } catch (_) {}
+  }
   if (pendingSubjectChoice && route !== "subject" && route !== "login" && route !== "register") { go("subject"); return; }
   // Экраны входа/регистрации доступны и до онбординга: после logout свежий
   // гостевой профиль ещё не onboarded, но попасть в аккаунт он должен суметь.
