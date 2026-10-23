@@ -4,9 +4,11 @@
    Один файл: разметка, стили и поведение. Подключение на странице:
 
      <div data-glass-header></div>
-     <script defer src="/js/glass-header.js?v=2"></script>
+     <script src="/js/glass-header.js?v=3"></script>
 
    Необязательные атрибуты слота:
+     data-glass-header="back" — вместо CTA ссылка «← К практике»
+                                (ege-result.html);
      data-cta-href  — ссылка CTA (по умолчанию /dashboard);
      data-cta-text  — текст CTA (по умолчанию «Начать подготовку»);
      data-maxw      — максимальная ширина таблетки в px.
@@ -34,11 +36,13 @@
       "position:fixed;top:calc(12px + env(safe-area-inset-top, 0px));left:0;right:0;",
       "z-index:300;display:flex;justify-content:center;align-items:flex-start;",
       "padding:0 clamp(10px, 2.4vw, 20px);pointer-events:none;",
+      "animation:lgh-in .55s var(--ease-out, cubic-bezier(.16,1,.3,1)) both;",
       "--lgh-maxw:800px;",
       "--lgh-ink:var(--text, #0E1526);",
       "--lgh-dim:var(--text-dim, #48536B);",
       "--lgh-line:var(--hairline, rgba(15,23,42,0.08));",
     "}",
+    "@keyframes lgh-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:none;}}",
     ".lgh__shell{",
       "pointer-events:auto;position:relative;isolation:isolate;",
       "display:flex;align-items:center;justify-content:space-between;gap:12px;",
@@ -115,7 +119,7 @@
       "color:var(--lgh-ink);text-decoration:none;",
       "font-family:var(--font-display, 'Manrope', system-ui, sans-serif);",
       "font-weight:800;font-size:clamp(16px,2vw,19px);letter-spacing:-0.03em;",
-      "white-space:nowrap;line-height:1;border-radius:14px;",
+      "white-space:nowrap;line-height:1.3;border-radius:14px;",
     "}",
     ".lgh__brand:focus-visible{outline:2px solid var(--accent, #0277B6);outline-offset:4px;}",
     ".lgh__mark{",
@@ -131,7 +135,7 @@
     "}",
     ".lgh__brand:hover .lgh__mark{transform:rotate(-6deg) scale(1.04);}",
     ".lgh__mark svg{width:52%;height:52%;display:block;}",
-    ".lgh__name{min-width:0;overflow:hidden;text-overflow:ellipsis;}",
+    ".lgh__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3;padding-bottom:0.08em;margin-bottom:-0.08em;}",
     ".lgh__name em{font-style:normal;color:var(--brand, #16a34a);}",
     ":root[data-theme=\"dark\"] .lgh__name em{color:var(--brand, #6EE7B7);}",
 
@@ -155,7 +159,9 @@
     "}",
     ".lgh__icon:active{transform:translateY(0) scale(0.96);}",
     ".lgh__icon:focus-visible{outline:2px solid var(--accent, #0277B6);outline-offset:2px;}",
-    ".lgh__icon svg{width:19px;height:19px;display:block;}",
+    ".lgh__icon svg{width:19px;height:19px;display:block;transition:transform .3s var(--ease-out, cubic-bezier(.16,1,.3,1));}",
+    ".lgh__icon:active svg{transform:rotate(50deg) scale(0.88);}",
+    ".lgh__brand:active .lgh__mark{transform:scale(0.94);}",
     ":root[data-theme=\"dark\"] .lgh__icon{",
       "border-color:rgba(255,255,255,0.12);",
       "background:rgba(255,255,255,0.06);",
@@ -166,6 +172,7 @@
     "}",
 
     ".lgh__cta{",
+      "position:relative;overflow:hidden;",
       "display:inline-flex;align-items:center;justify-content:center;gap:8px;",
       "min-height:clamp(38px,4.6vw,42px);padding:0 clamp(16px,2.4vw,22px);",
       "border-radius:999px;border:1px solid rgba(255,255,255,0.24);",
@@ -182,6 +189,10 @@
     ".lgh__cta:hover{transform:translateY(-1px);filter:saturate(1.08) brightness(1.04);",
       "box-shadow:0 16px 32px -12px rgba(56,189,248,0.85),inset 0 1px 0 rgba(255,255,255,0.4);}",
     ".lgh__cta:active{transform:translateY(0) scale(0.98);}",
+    ".lgh__cta::after{content:'';position:absolute;top:-40%;bottom:-40%;left:-30%;width:44%;",
+      "background:linear-gradient(100deg,transparent,rgba(255,255,255,0.55),transparent);",
+      "transform:translateX(-160%) skewX(-12deg);transition:transform .7s ease;pointer-events:none;}",
+    ".lgh__cta:hover::after{transform:translateX(430%) skewX(-12deg);}",
     ".lgh__cta:focus-visible{outline:2px solid var(--accent, #0277B6);outline-offset:3px;}",
     ".lgh__cta-short{display:none;}",
     ".lgh__cta svg{width:15px;height:15px;flex:0 0 auto;}",
@@ -208,7 +219,9 @@
 
     /* ---------- доступность / фолбэк ---------- */
     "@media (prefers-reduced-motion:reduce){",
-      ".lgh__shell,.lgh__mark,.lgh__icon,.lgh__cta{transition:none !important;}",
+      ".lgh{animation:none !important;}",
+      ".lgh__shell,.lgh__mark,.lgh__icon,.lgh__icon svg,.lgh__cta,.lgh__cta::after{transition:none !important;}",
+      ".lgh__cta::after{display:none;}",
       ".lgh__brand:hover .lgh__mark{transform:none;}",
     "}",
     "@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){",
@@ -255,6 +268,7 @@
   }
 
   function build(slot) {
+    var variant = slot.getAttribute("data-glass-header") || "";
     var ctaHref = (slot.getAttribute("data-cta-href") || "/dashboard").replace(/"/g, "");
     var ctaText = slot.getAttribute("data-cta-text") || "Начать подготовку";
     var maxw = parseInt(slot.getAttribute("data-maxw") || "", 10);
@@ -268,6 +282,16 @@
     header.setAttribute("role", "banner");
 
     var safeText = String(ctaText).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var ctaHTML;
+    if (variant === "back") {
+      ctaHTML = '<a class="lgh__cta" href="/dashboard" onclick="if(history.length>1){history.back();return false;}">'
+        + '<span class="lgh__cta-long">← К практике</span>'
+        + '<span class="lgh__cta-short">← Назад</span></a>';
+    } else {
+      ctaHTML = '<a class="lgh__cta" href="' + ctaHref + '">'
+        + '<span class="lgh__cta-long">' + safeText + '</span>'
+        + '<span class="lgh__cta-short">Начать</span></a>';
+    }
     header.innerHTML =
       '<div class="lgh__shell">' +
         '<a class="lgh__brand" href="/" aria-label="lemma go — на главную">' +
@@ -276,10 +300,7 @@
         '</a>' +
         '<nav class="lgh__actions" aria-label="Действия">' +
           '<button class="lgh__icon lgh__theme" type="button" aria-label="Переключить тему"></button>' +
-          '<a class="lgh__cta" href="' + ctaHref + '">' +
-            '<span class="lgh__cta-long">' + safeText + '</span>' +
-            '<span class="lgh__cta-short">Начать</span>' +
-          '</a>' +
+          ctaHTML +
         '</nav>' +
       '</div>';
 

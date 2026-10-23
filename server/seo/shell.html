@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- Оболочка SEO-страниц заданий (/ege/ и /oge/). Дизайн — css/seo.css + общие
-     site-header/footer; сервер (server.py) подставляет только данные через
+     glass-header/footer; сервер (server.py) подставляет только данные через
      маркеры вида ПРОЦЕНТ-ПРОЦЕНТ NAME ПРОЦЕНТ-ПРОЦЕНТ за один проход (вставленное не пересканируется).
      Маркеры: TITLE, DESC, CANONICAL, ROBOTS, OG_TYPE, LD_BLOCK, CRUMB,
      BODY_MAIN. Значения TITLE/DESC/CANONICAL/ROBOTS/OG_TYPE сервер
@@ -48,16 +48,15 @@
 <link rel="apple-touch-icon" href="/assets/seo/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="stylesheet" href="/css/footer.css?v=8">
-<link rel="stylesheet" href="/css/site-header.css?v=1">
 <link rel="stylesheet" href="/css/seo.css?v=5">
 <link rel="preload" href="/vendor/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 %%LD_BLOCK%%
 </head>
 <body>
-<div data-ege-header></div>
+<div data-glass-header></div>
 <!-- Подшапка страницы: полоса с хлебными крошками прямо под общей
-     шапкой сайта. Сама шапка (site-header.js) не трогается. -->
+     шапкой сайта. Сама шапка (glass-header.js) не трогается. -->
 <div class="seo-bar"><div class="seo-bar__inner">
 <nav class="seo-crumb" aria-label="Хлебные крошки">%%CRUMB%%</nav>
 </div></div>
@@ -65,7 +64,7 @@
 %%BODY_MAIN%%
 </div></div></main>
 <div data-ege-footer></div>
-<script src="/js/site-header.js?v=2"></script>
+<script src="/js/glass-header.js?v=3"></script>
 <script src="/js/footer.js?v=9"></script>
 <script src="/js/seo-check.js?v=4"></script>
 </body>

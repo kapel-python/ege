@@ -1,7 +1,8 @@
 /* Шапка и подвал с первого кадра (без догоняющего прыжка).
-   Страницы со слотом [data-ege-header]/[data-ege-footer] обязаны
-   подключать site-header.js/footer.js СИНХРОННО (без defer), а сами файлы —
-   монтироваться сразу при выполнении (mountStatic вне readyState-ветки).
+   Страницы со слотом [data-ege-header]/[data-glass-header]/[data-ege-footer]
+   обязаны подключать site-header.js/glass-header.js/footer.js СИНХРОННО
+   (без defer), а сами файлы — монтироваться сразу при выполнении
+   (mountStatic/mount вне readyState-ветки).
    Пульсирующих скелетонов каркаса нет осознанно (удалены: мельтешение
    в шапке и нижнем меню раздражало): слоты index.html пустые, рендер
    рисует настоящий хром сразу благодаря синхронному маунту.
@@ -27,6 +28,13 @@ for (const f of pages) {
     check(`${f}: site-header без defer`,
       /<script src="\/js\/site-header\.js[^"]*"><\/script>/.test(html), "defer или нет тега");
   }
+  if (html.includes("data-glass-header")) {
+    slotPages++;
+    check(`${f}: glass-header без defer`,
+      /<script src="\/js\/glass-header\.js[^"]*"><\/script>/.test(html), "defer или нет тега");
+    check(`${f}: без остатков site-header.css`,
+      !html.includes("site-header.css"), "мёртвый CSS");
+  }
   if (html.includes("data-ege-footer")) {
     check(`${f}: footer без defer`,
       /<script src="(\/)?js\/footer\.js[^"]*"><\/script>/.test(html), "defer или нет тега");
@@ -34,10 +42,10 @@ for (const f of pages) {
 }
 check("слоты шапки вообще есть", slotPages > 0, String(slotPages));
 
-for (const [file, fn] of [["js/site-header.js", "mountStatic"], ["js/footer.js", "mountStatic"]]) {
+for (const [file, fn] of [["js/site-header.js", "mountStatic"], ["js/glass-header.js", "mount"], ["js/footer.js", "mountStatic"]]) {
   const code = fs.readFileSync(path.join(ROOT, file), "utf8");
   check(`${file}: eager-монт при выполнении`,
-    code.includes("try { mountStatic(); } catch (_) {}"));
+    code.includes("try { " + fn + "(); } catch (_) {}"));
 }
 
 const index = read("index.html");

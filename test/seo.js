@@ -135,7 +135,7 @@ t("SEO: canonical в шаблоне, PracticeProblem в рендере", (() => 
 })());
 t("SEO: оболочка с шапкой/подвалом/темой сайта", (() => {
   const shell = exists("server/seo/shell.html") ? read("server/seo/shell.html") : "";
-  return shell.includes("data-ege-header") && shell.includes("data-ege-footer")
+  return (shell.includes("data-ege-header") || shell.includes("data-glass-header")) && shell.includes("data-ege-footer")
     && shell.includes("ege_core_theme") && shell.includes("/css/seo.css")
     && shell.includes("/js/seo-check.js");
 })());
