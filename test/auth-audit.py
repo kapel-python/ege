@@ -34,6 +34,9 @@ def check(name: str, cond: bool, detail: str = ""):
 def load_server(db_path: Path):
     os.environ["EGE_DB_PATH"] = str(db_path)
     os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    # Аудит заводит много аккаунтов с одного адреса: адаптивную капчу решаем
+    # через debugCode в request (в проде этого поля нет).
+    os.environ["EGE_CAPTCHA_DEBUG"] = "1"
     salt = "c" * 32
     dk = hashlib.pbkdf2_hmac("sha256", b"audit-admin-pw", bytes.fromhex(salt), 210000)
     os.environ["EGE_ADMIN_PASSWORD_HASH"] = f"pbkdf2_sha256$210000${salt}${dk.hex()}"
@@ -44,17 +47,31 @@ def load_server(db_path: Path):
 
 
 def request(opener, base, path, method="GET", body=None, raw_cookie=None):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(base + path, data=data, method=method)
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-    if raw_cookie:
-        req.add_header("Cookie", raw_cookie)
-    try:
-        with opener.open(req, timeout=15) as response:
-            return response.status, json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read() or b"{}")
+    def once(payload):
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(base + path, data=data, method=method)
+        if payload is not None:
+            req.add_header("Content-Type", "application/json")
+        if raw_cookie:
+            req.add_header("Cookie", raw_cookie)
+        try:
+            with opener.open(req, timeout=15) as response:
+                return response.status, json.loads(response.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+    status, data = once(body)
+    # Адаптивная капча минта: решаем тут же через debugCode, как человек в
+    # браузере. Касается только 422 с челленджем; остальные ответы идут как есть.
+    if (status == 422 and isinstance(data, dict)
+            and data.get("code") in ("CAPTCHA_REQUIRED", "CAPTCHA_INVALID")
+            and isinstance(data.get("captcha"), dict)
+            and data["captcha"].get("id") and data["captcha"].get("debugCode")
+            and isinstance(body, dict)):
+        retry = dict(body)
+        retry["captchaId"] = data["captcha"]["id"]
+        retry["captcha"] = data["captcha"]["debugCode"]
+        status, data = once(retry)
+    return status, data
 
 
 def device():

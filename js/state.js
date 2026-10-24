@@ -143,6 +143,72 @@ function diagnosticAttemptKeys() {
   return set;
 }
 
+/* Модалка капчи для фоновой заявки онбординга (claimServerProfile): сервер
+   вернул CAPTCHA_REQUIRED, ронять онбординг тостом нельзя — показываем
+   картинку и повторяем заявку с решением. Самодостаточный инлайн-диалог
+   (без зависимости от app.js): promise → {captchaId, captcha} или null
+   при отмене. «Другая» тянет свежий челлендж с GET /api/auth/captcha. */
+function claimCaptchaDialog(challenge, message) {
+  return new Promise((resolve) => {
+    let current = challenge && typeof challenge === "object" ? challenge : null;
+    const overlay = document.createElement("div");
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-label", "Подтверждение");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(10,15,25,.6);padding:16px";
+    const box = document.createElement("div");
+    box.style.cssText = "background:#fff;color:#111;border-radius:14px;max-width:380px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.35)";
+    const render = (note) => {
+      const svg = current && typeof current.svg === "string" ? current.svg : "";
+      box.innerHTML = ""
+        + '<div style="font-size:17px;font-weight:700;margin-bottom:6px">Ты человек?</div>'
+        + '<div style="font-size:14px;color:#444;margin-bottom:12px">' + escapeClaimHtml(note || message || "Введи символы с картинки — это защита от автоматических регистраций.") + "</div>"
+        + '<div style="border:1px solid #d7e0ea;border-radius:10px;background:#eef3f8;margin-bottom:10px;overflow:hidden">' + svg + "</div>"
+        + '<div style="display:flex;gap:8px;margin-bottom:12px">'
+        + '<input id="claim-captcha-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" placeholder="Символы с картинки" style="flex:1;min-width:0;padding:10px 12px;font-size:16px;border:1px solid #c6d2e0;border-radius:10px;letter-spacing:2px">'
+        + '<button id="claim-captcha-refresh" type="button" style="padding:10px 12px;border:1px solid #c6d2e0;border-radius:10px;background:#f4f7fb;font-size:14px">Другая</button>'
+        + "</div>"
+        + '<div id="claim-captcha-error" style="display:none;font-size:13px;color:#b00020;margin-bottom:10px"></div>'
+        + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+        + '<button id="claim-captcha-cancel" type="button" style="padding:10px 16px;border:1px solid #c6d2e0;border-radius:10px;background:#fff;font-size:15px">Отмена</button>'
+        + '<button id="claim-captcha-ok" type="button" style="padding:10px 18px;border:none;border-radius:10px;background:#1a73e8;color:#fff;font-size:15px;font-weight:600">Продолжить</button>'
+        + "</div>";
+      const input = box.querySelector("#claim-captcha-input");
+      const errBox = box.querySelector("#claim-captcha-error");
+      const showErr = (t) => { if (errBox) { errBox.textContent = t; errBox.style.display = t ? "block" : "none"; } };
+      box.querySelector("#claim-captcha-cancel").addEventListener("click", () => { cleanup(); resolve(null); });
+      box.querySelector("#claim-captcha-refresh").addEventListener("click", async (ev) => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        try {
+          const fresh = await ApiClient.get("/api/auth/captcha");
+          if (fresh && fresh.captcha) { current = fresh.captcha; render(); return; }
+          showErr("Не удалось обновить картинку. Попробуй ещё раз.");
+        } catch (_) { showErr("Не удалось обновить картинку. Попробуй ещё раз."); }
+        btn.disabled = false;
+      });
+      box.querySelector("#claim-captcha-ok").addEventListener("click", () => {
+        const text = input && input.value ? String(input.value).trim() : "";
+        if (!text) { showErr("Введи символы с картинки."); return; }
+        if (!current || !current.id) { showErr("Картинка устарела — обнови её."); return; }
+        const id = String(current.id);
+        cleanup();
+        resolve({ captchaId: id, captcha: text });
+      });
+      try { if (input) input.focus({ preventScroll: true }); } catch (_) {}
+    };
+    const cleanup = () => { try { overlay.remove(); } catch (_) {} };
+    overlay.addEventListener("mousedown", (ev) => { if (ev.target === overlay) { cleanup(); resolve(null); } });
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    render();
+  });
+}
+
+function escapeClaimHtml(text) {
+  return String(text == null ? "" : text).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 const Store = {
   state: null,
   // Текущий предмет: часть снапшота (state.subject) и зеркало здесь для
@@ -932,25 +998,48 @@ const Store = {
   // потерянный ответ и повтор ничего не удваивают.
   async claimServerProfile(snapshot) {
     const subject = String(snapshot && snapshot.subject || "").trim();
-    const payload = {
-      subject,
-      onboarded: true,
-      name: snapshot.name == null ? null : String(snapshot.name),
-      selfLevel: snapshot.selfLevel == null ? null : snapshot.selfLevel,
-      goal: snapshot.goal == null ? null : snapshot.goal,
-    };
-    const result = await ApiClient.post("/api/profile/claim", payload);
-    if (!result || typeof result !== "object" || !result.accountId) {
-      throw new Error("Сервер не заявил профиль");
+    // Адаптивная капча (как на регистрации): обычный онбординг идёт без
+    // неё, подозрительный всплеск — с ней. Заявка фоновая, поэтому при коде
+    // CAPTCHA_REQUIRED показываем свою модалку прямо здесь и повторяем
+    // заявку с решением (до 3 попыток), а не роняем онбординг тостом.
+    let extra = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const payload = {
+        subject,
+        onboarded: true,
+        name: snapshot.name == null ? null : String(snapshot.name),
+        selfLevel: snapshot.selfLevel == null ? null : snapshot.selfLevel,
+        goal: snapshot.goal == null ? null : snapshot.goal,
+        website: "",
+      };
+      if (extra) { payload.captchaId = extra.captchaId; payload.captcha = extra.captcha; }
+      let result;
+      try {
+        result = await ApiClient.post("/api/profile/claim", payload);
+      } catch (error) {
+        const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
+        const challenge = error && error.payload && error.payload.captcha;
+        if ((code === "CAPTCHA_REQUIRED" || code === "CAPTCHA_INVALID") && challenge) {
+          const solved = await claimCaptchaDialog(challenge, (error && error.message) || "");
+          if (!solved) throw error;
+          extra = solved;
+          continue;
+        }
+        throw error;
+      }
+      if (!result || typeof result !== "object" || !result.accountId) {
+        throw new Error("Сервер не заявил профиль");
+      }
+      this.accountId = result.accountId;
+      const user = result.user && typeof result.user === "object" ? result.user : {};
+      this.auth = { registered: !!user.registered, email: user.email || null,
+        providers: Array.isArray(user.providers) ? user.providers.map(String) : this.auth.providers,
+        googleEnabled: this.auth.googleEnabled === true,
+        hasPassword: user.hasPassword === true };
+      this.isAdmin = result.isAdmin === true;
+      return result;
     }
-    this.accountId = result.accountId;
-    const user = result.user && typeof result.user === "object" ? result.user : {};
-    this.auth = { registered: !!user.registered, email: user.email || null,
-      providers: Array.isArray(user.providers) ? user.providers.map(String) : this.auth.providers,
-      googleEnabled: this.auth.googleEnabled === true,
-      hasPassword: user.hasPassword === true };
-    this.isAdmin = result.isAdmin === true;
-    return result;
+    throw new Error("Не удалось подтвердить, что ты человек");
   },
 
   async _saveDomains(snapshot) {

@@ -186,7 +186,30 @@ def request_url(opener, url, method="GET", body=None):
             return response.status, dict(response.headers), _maybe_json(raw)
     except urllib.error.HTTPError as exc:
         raw = exc.read()
-        return exc.code, dict(exc.headers), _maybe_json(raw)
+        status, headers, payload = exc.code, dict(exc.headers), _maybe_json(raw)
+        # Адаптивная капча: тест создаёт много аккаунтов с одного адреса —
+        # решаем её тут же через debugCode (EGE_CAPTCHA_DEBUG=1), как человек
+        # в браузере. Касается только 422 с челленджем; остальные ответы
+        # (409 дубли, 429 лимиты, 401) идут как есть.
+        if (status == 422 and isinstance(payload, dict)
+                and payload.get("code") in ("CAPTCHA_REQUIRED", "CAPTCHA_INVALID")
+                and isinstance(payload.get("captcha"), dict)
+                and (payload["captcha"].get("id") and payload["captcha"].get("debugCode"))
+                and isinstance(body, dict)):
+            retry = dict(body)
+            retry["captchaId"] = payload["captcha"]["id"]
+            retry["captcha"] = payload["captcha"]["debugCode"]
+            data = json.dumps(retry).encode()
+            req = urllib.request.Request(url, data=data, method=method)
+            req.add_header("Content-Type", "application/json")
+            try:
+                with opener.open(req, timeout=10) as response:
+                    raw = response.read()
+                    return response.status, dict(response.headers), _maybe_json(raw)
+            except urllib.error.HTTPError as exc2:
+                raw = exc2.read()
+                return exc2.code, dict(exc2.headers), _maybe_json(raw)
+        return status, headers, payload
 
 
 def _maybe_json(raw: bytes):
@@ -219,6 +242,9 @@ def query_of_fragment(fragment: str) -> dict:
 def load_server(db_path: Path):
     os.environ["EGE_DB_PATH"] = str(db_path)
     os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    # Тест заводит много аккаунтов с одного адреса: адаптивную капчу решаем
+    # через debugCode в request_url (в проде этого поля нет).
+    os.environ["EGE_CAPTCHA_DEBUG"] = "1"
     os.environ.pop("EGE_GOOGLE_CLIENT_ID", None)
     os.environ.pop("EGE_GOOGLE_CLIENT_SECRET", None)
     os.environ.pop("EGE_GOOGLE_REDIRECT_URI", None)

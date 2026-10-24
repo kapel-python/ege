@@ -12743,6 +12743,76 @@ function authScreenShell(title, sub, body) {
     </div>`;
 }
 
+/* Адаптивная капча: своего изготовления, без внешних ключей. Блок скрыт,
+   пока сервер не попросит (код CAPTCHA_REQUIRED/CAPTCHA_INVALID в 422/429):
+   обычные регистрация и вход идут без трения, подозрительные — с картинкой.
+   Картинка — инлайн-SVG с сервера, решение уходит полями captchaId/captcha
+   повторным POST. Кнопка «Другая» тянет свежий челлендж с GET
+   /api/auth/captcha. Honeypot (поле website) и startedAt шлёт только
+   регистрация: боты заполняют всё и жмут сразу, человек — нет. */
+function captchaBlockHTML() {
+  return `
+    <div class="auth-captcha" id="auth-captcha" hidden>
+      <div class="auth-field"><span>Подтверди, что ты человек</span>
+        <div class="auth-captcha__img" id="auth-captcha-img" role="img" aria-label="Символы с картинки"></div>
+      </div>
+      <div class="auth-captcha__row" style="display:flex;gap:8px;align-items:center">
+        <input class="answer-input" id="auth-captcha-input" type="text" autocomplete="off"
+          autocapitalize="characters" spellcheck="false" maxlength="8" placeholder="Символы с картинки"
+          style="flex:1;min-width:0">
+        <button class="btn btn--sm" type="button" id="auth-captcha-refresh">Другая</button>
+      </div>
+      <input type="hidden" id="auth-captcha-id" value="">
+    </div>`;
+}
+
+function showAuthCaptcha(challenge) {
+  const box = document.getElementById("auth-captcha");
+  if (!box || !challenge || typeof challenge !== "object") return false;
+  const img = document.getElementById("auth-captcha-img");
+  const hid = document.getElementById("auth-captcha-id");
+  const input = document.getElementById("auth-captcha-input");
+  if (!img || !hid || !input) return false;
+  if (typeof challenge.svg === "string" && challenge.svg.indexOf("<svg") !== -1) img.innerHTML = challenge.svg;
+  hid.value = String(challenge.id || "");
+  input.value = "";
+  box.hidden = false;
+  const refresh = document.getElementById("auth-captcha-refresh");
+  if (refresh && !refresh.dataset.bound) {
+    refresh.dataset.bound = "1";
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true;
+      try {
+        const fresh = await AuthAPI.captcha();
+        if (fresh && fresh.captcha) showAuthCaptcha(fresh.captcha);
+      } catch (_) {}
+      refresh.disabled = false;
+    });
+  }
+  try { input.focus({ preventScroll: true }); } catch (_) {}
+  return true;
+}
+
+function authCaptchaExtra() {
+  try {
+    const box = document.getElementById("auth-captcha");
+    if (!box || box.hidden) return null;
+    const hid = document.getElementById("auth-captcha-id");
+    const input = document.getElementById("auth-captcha-input");
+    const id = hid && hid.value ? String(hid.value) : "";
+    const text = input && input.value ? String(input.value) : "";
+    if (!id || !text.trim()) return null;
+    return { captchaId: id, captcha: text.trim() };
+  } catch (_) { return null; }
+}
+
+function authCaptchaCode(error) {
+  try {
+    const code = error && error.payload && error.payload.code ? String(error.payload.code) : "";
+    return (code === "CAPTCHA_REQUIRED" || code === "CAPTCHA_INVALID") ? code : "";
+  } catch (_) { return ""; }
+}
+
 /* Кнопка внешнего входа рисуется ТОЛЬКО когда сервер сказал, что вход через
    Google настроен (Store.auth.googleEnabled из bootstrap). Иначе человек
    увидел бы кнопку, которая ведёт в 503, а проверить это можно было бы
@@ -12772,6 +12842,7 @@ const GOOGLE_ERROR_TEXT = {
   taken: "Этот Google-аккаунт уже привязан к другому профилю. Привязка не выполнена.",
   unavailable: "Google сейчас недоступен. Попробуй позже.",
   unconfigured: "Вход через Google временно недоступен.",
+  rate_limited: "Слишком много регистраций. Подожди немного и попробуй ещё раз.",
   failed: "Не удалось войти через Google. Попробуй ещё раз.",
 };
 
@@ -12839,6 +12910,7 @@ function screenLogin(root) {
       <label class="auth-field"><span>Пароль</span>
         <input class="answer-input" type="password" name="password" autocomplete="current-password" required>
       </label>
+      ${captchaBlockHTML()}
       <div class="auth-form__error" id="auth-error" role="alert"></div>
       <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Войти</button>
     </form>
@@ -12874,6 +12946,10 @@ function screenRegister(root) {
       <label class="auth-field"><span>Пароль (минимум 8 символов)</span>
         <input class="answer-input" type="password" name="password" autocomplete="new-password" minlength="8" required>
       </label>
+      <input type="text" name="website" value="" autocomplete="off" tabindex="-1" aria-hidden="true"
+        style="position:absolute!important;left:-10000px!important;top:auto!important;width:1px!important;height:1px!important;overflow:hidden!important;opacity:0">
+      <input type="hidden" name="startedAt" value="${Date.now()}">
+      ${captchaBlockHTML()}
       <div class="auth-form__error" id="auth-error" role="alert"></div>
       <button class="btn btn--primary btn--lg" type="submit" id="auth-submit">Создать аккаунт</button>
     </form>
@@ -13040,7 +13116,8 @@ async function submitLogin(event) {
   authFormBusy();
   const form = event.target;
   try {
-    await AuthAPI.login(form.email.value.trim(), form.password.value);
+    const extra = authCaptchaExtra() || undefined;
+    await AuthAPI.login(form.email.value.trim(), form.password.value, undefined, extra);
     // Сессии и уроки гостя недействительны под новым аккаунтом — сбрасываем
     // до смены, иначе чужые задания/позиция (и localStorage) пережили бы вход.
     try { Session.cur = null; } catch (_) {}
@@ -13059,6 +13136,12 @@ async function submitLogin(event) {
     toast("Ты в аккаунте", "", "check");
     go("subject");
   } catch (error) {
+    if (authCaptchaCode(error) && error && error.payload && error.payload.captcha) {
+      showAuthCaptcha(error.payload.captcha);
+      authFormBusy();
+      authFormFail(error && error.message ? String(error.message) : "Подтверди, что ты человек.");
+      return;
+    }
     authFormFail(authFormError(error, "Не удалось войти. Попробуй ещё раз."));
   }
 }
@@ -13069,12 +13152,31 @@ async function submitRegister(event) {
   const form = event.target;
   const password = form.password.value;
   if (password.length < 8) { authFormFail("Пароль — минимум 8 символов"); return; }
+  const extra = {};
   try {
-    await AuthAPI.register(form.name.value.trim(), form.email.value.trim(), password);
+    const hp = form.website ? String(form.website.value || "") : "";
+    extra.website = hp;
+  } catch (_) {}
+  try {
+    const st = form.startedAt ? String(form.startedAt.value || "") : "";
+    if (st) extra.startedAt = st;
+  } catch (_) {}
+  try {
+    const cap = authCaptchaExtra();
+    if (cap) { extra.captchaId = cap.captchaId; extra.captcha = cap.captcha; }
+  } catch (_) {}
+  try {
+    await AuthAPI.register(form.name.value.trim(), form.email.value.trim(), password, extra);
     await Store.refreshAfterAuth();
     toast("Аккаунт создан — весь прогресс сохранён", "", "check");
     go("profile");
   } catch (error) {
+    if (authCaptchaCode(error) && error && error.payload && error.payload.captcha) {
+      showAuthCaptcha(error.payload.captcha);
+      authFormBusy();
+      authFormFail(error && error.message ? String(error.message) : "Подтверди, что ты человек.");
+      return;
+    }
     authFormFail(authFormError(error, "Не удалось создать аккаунт. Попробуй ещё раз."));
   }
 }

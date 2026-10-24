@@ -1015,16 +1015,33 @@ const ApiClient = {
 /* Аккаунты: регистрация/вход/выход. Пароль живёт только в теле запроса —
    токен сессии держит HttpOnly-кука, JS его не видит и ничего не хранит. */
 const AuthAPI = {
-  register(name, email, password) {
-    return ApiClient.post("/api/auth/register", { name, email, password });
+  register(name, email, password, extra) {
+    const body = { name, email, password };
+    if (extra && typeof extra === "object") {
+      for (const key of ["captchaId", "captcha", "website", "startedAt"]) {
+        if (extra[key] !== undefined && extra[key] !== null) body[key] = extra[key];
+      }
+    }
+    return ApiClient.post("/api/auth/register", body);
   },
   // subject опционален: вход с явным предметом атомарно применяет его к
   // сессии (Login → выбор предмета за один запрос). Без него сервер ничего
   // не меняет — клиент доводит выбор через POST /api/subject.
-  login(email, password, subject) {
+  login(email, password, subject, extra) {
     const body = { email, password };
     if (subject) body.subject = subject;
+    if (extra && typeof extra === "object") {
+      for (const key of ["captchaId", "captcha"]) {
+        if (extra[key] !== undefined && extra[key] !== null) body[key] = extra[key];
+      }
+    }
     return ApiClient.post("/api/auth/login", body);
+  },
+  // Свежий челлендж адаптивной капчи: сервер отдаёт {id, svg, expiresInSec}.
+  // Нужен только подозрительным заявкам (код CAPTCHA_REQUIRED) и для
+  // кнопки «обновить» — обычные регистрация/вход идут без него.
+  captcha() {
+    return ApiClient.get("/api/auth/captcha");
   },
   logout() {
     return ApiClient.post("/api/auth/logout", {});

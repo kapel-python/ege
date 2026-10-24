@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from secrets import choice, token_hex, token_urlsafe
+from secrets import choice, randbelow, token_hex, token_urlsafe
 from urllib.parse import unquote, urlparse
 
 try:
@@ -1419,6 +1419,365 @@ def auth_login_failed(ip: str) -> None:
 def auth_login_success(ip: str) -> None:
     with _auth_login_lock:
         _auth_login_failures.pop(ip, None)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive registration captcha (own, stdlib-only, no external keys).
+#
+# Аккаунт стоил один POST: успешная регистрация сбрасывала счётчик неудач
+# (auth_login_success), а общий per-IP бакет (300/мин) ферму не держал —
+# скрипт с ротацией email делал неограниченные 200, а claim заводил профили
+# вообще без почты. Поэтому решение «капча или нет» принимает сервер по
+# риску каждой заявки, а не браузер и не фиксированное правило:
+#
+# * Доверенные/обычные заявки (первая регистрация с адреса, чистый IP и
+#   устройство, пустой honeypot, не мусорная почта) идут БЕЗ капчи.
+# * Подозрительные (всплеск регистраций с IP/подсети/устройства, общий
+#   всплеск по сайту, honeypot заполнен, слишком быстрая отправка,
+#   одноразовая почта) получают 422 с code=CAPTCHA_REQUIRED и свежим
+#   челленджем {id, svg, expiresIn}; повтор с полями captchaId/captcha
+#   проходит без трения для человека.
+# * Жёсткий флуд (десятки регистраций в час с IP/сутки с устройства)
+#   получает 429 даже с решённой капчей — иначе платная ферма решателей
+#   обходила бы всё.
+# * Вход (login) ферму не минтит — новые аккаунты он не создаёт, — поэтому
+#   капчи «всегда» там нет. Но та же инфраструктура подпирает антибрутфорс:
+#   после 5 неудач с IP вход требует капчу (иначе 11 чужих попыток клали
+#   вход всей подсети за NAT), а после 10 — жёсткий 429 как раньше. Решённая
+#   капча разрешает ОДНУ проверку пароля, а не сбрасывает счётчик.
+# * Claim (онбординг) минтит users так же дёшево, как register, и тем же
+#   бюджетом ИИ пользуется любой user_id — поэтому гейт общий для обоих.
+#   Google-вход новым людям капчу не показывает (за нас её уже решил
+#   Google), но его создания считаются в тот же котёл скорости и упираются
+#   в жёсткий лимит.
+# * UA/кука БЕЗ velocity в V1 не скорингуется намеренно: иначе тесты на
+#   urllib, вебвью и школьный NAT получали бы капчу на первой же заявке.
+#   Отпечатки идут только как persistent-счётчики (HMAC, сырые IP/куки в
+#   базу не пишутся — как device_key/device_net), статика сама по себе
+#   подозрением не является.
+# ---------------------------------------------------------------------------
+CAPTCHA_TTL_SEC = 300
+CAPTCHA_MAX_ATTEMPTS = 5
+CAPTCHA_CODE_LEN = 5
+CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+CAPTCHA_REQUIRED_CODE = "CAPTCHA_REQUIRED"
+CAPTCHA_INVALID_CODE = "CAPTCHA_INVALID"
+# Мягкие пороги: дальше — только с капчей. Обычный человек (1 аккаунт),
+# класс за NAT и существующие тесты (горсть заявок с адреса) их не замечают.
+REG_IP_HOUR_SOFT = 5
+REG_IP_DAY_SOFT = 20
+REG_SUBNET_HOUR_SOFT = 15
+REG_DEV_DAY_SOFT = 5
+REG_GLOBAL_WINDOW_SEC = 600
+REG_GLOBAL_SOFT = 30
+# Жёсткие пороги: дальше — 429 даже с решённой капчей.
+REG_IP_HOUR_HARD = 50
+REG_IP_DAY_HARD = 200
+REG_SUBNET_HOUR_HARD = 100
+REG_DEV_DAY_HARD = 30
+REG_GLOBAL_HARD = 150
+LOGIN_CAPTCHA_AFTER_FAILURES = 5
+_CAPTCHA_SCHEMA_DONE: set[str] = set()
+# Короткий стоп-лист одноразовых почт: полное покрытие невозможно и не
+# нужно — это лишь один из сигналов, а не единственная стена.
+_DISPOSABLE_EMAIL_DOMAINS = frozenset({
+    "tempmail.com", "temp-mail.org", "guerrillamail.com", "mailinator.com",
+    "10minutemail.com", "yopmail.com", "trashmail.com", "getnada.com",
+    "mohmal.com", "sharklasers.com", "dispostable.com", "fakeinbox.com",
+    "throwawaymail.com", "maildrop.cc", "harakirimail.com", "mintemail.com",
+    "emailondeck.com", "mailsac.com", "mytemp.email", "tempail.com",
+})
+
+
+def ensure_captcha_schema(conn: sqlite3.Connection) -> None:
+    """Таблицы адаптивной капчи и persistent-счётчиков скорости регистраций."""
+    key = _db_key(conn)
+    if key in _CAPTCHA_SCHEMA_DONE:
+        return
+    conn.execute("""CREATE TABLE IF NOT EXISTS captcha_challenges (
+      id TEXT PRIMARY KEY,
+      answer_hmac TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      expires_at_ms INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS reg_rate_hits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ip_hash TEXT NOT NULL,
+      subnet_hash TEXT NOT NULL,
+      device_hash TEXT,
+      created_at_ms INTEGER NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'register',
+      success INTEGER NOT NULL DEFAULT 0)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reg_hits_ip ON reg_rate_hits(ip_hash, created_at_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reg_hits_subnet ON reg_rate_hits(subnet_hash, created_at_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reg_hits_device ON reg_rate_hits(device_hash, created_at_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reg_hits_time ON reg_rate_hits(created_at_ms)")
+    conn.commit()
+    _CAPTCHA_SCHEMA_DONE.add(key)
+
+
+def _captcha_secret(conn: sqlite3.Connection) -> str:
+    """HMAC-секрет для ответов и отпечатков скорости. Отдельной строки не
+    заводим: берём тот же стабильный секрет отпечатков устройств — он уже
+    переживает рестарт и не выходит наружу."""
+    try:
+        return device_fingerprint_secret(conn)
+    except Exception:
+        return _DEVICE_SECRET_FALLBACK
+
+
+def captcha_svg(code: str) -> str:
+    """Искажённый SVG-текст: тёмные буквы на светлом фоне + шум (линии/точки).
+
+    Только stdlib: случайность из secrets, без PIL. Алфавит без 0/O/1/I —
+    человеку не приходится гадать, а OCR без обучения буквам с поворотом и
+    шумом стоит дороже одного POST."""
+    try:
+        text = "".join(c for c in str(code or "").upper() if c in CAPTCHA_ALPHABET)[:8] or "?????"
+    except Exception:
+        text = "?????"
+    w, h = 180, 64
+    palette = ["#1a3a5c", "#5c1a1a", "#1a5c2e", "#4a1a5c", "#0f4c4c", "#7a4a00"]
+    dots: list[str] = []
+    try:
+        for _ in range(42):
+            cx = randbelow(w)
+            cy = randbelow(h)
+            r = 1 + randbelow(2)
+            dots.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="#9db3c7" opacity="0.7"/>')
+        lines: list[str] = []
+        for _ in range(4):
+            x1, y1 = randbelow(w), randbelow(h)
+            x2, y2 = randbelow(w), randbelow(h)
+            lines.append(f'<path d="M{x1},{y1} Q{randbelow(w)},{randbelow(h)} {x2},{y2}" '
+                         f'stroke="#7d99b5" stroke-width="1.4" fill="none" opacity="0.8"/>')
+        chars: list[str] = []
+        n = len(text)
+        step = w / (n + 1)
+        for i, ch in enumerate(text):
+            x = int(step * (i + 1) + randbelow(7) - 3)
+            y = 40 + randbelow(9) - 4
+            rot = randbelow(37) - 18
+            fill = palette[randbelow(len(palette))]
+            size = 30 + randbelow(7) - 3
+            chars.append(f'<text x="{x}" y="{y}" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" '
+                         f'font-size="{size}" font-weight="bold" fill="{fill}" '
+                         f'transform="rotate({rot} {x} {y})">{html.escape(ch)}</text>')
+    except Exception:
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}">'
+                f'<rect width="{w}" height="{h}" fill="#eef3f8"/></svg>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" role="img" aria-label="captcha">'
+            f'<rect width="{w}" height="{h}" fill="#eef3f8"/>'
+            f'{"".join(dots)}{"".join(lines)}{"".join(chars)}</svg>')
+
+
+def captcha_issue(conn: sqlite3.Connection) -> dict:
+    """Выпустить челлендж: {id, svg, expiresInSec} (+debugCode в тестах)."""
+    ensure_captcha_schema(conn)
+    now_ms = int(time.time() * 1000)
+    try:
+        conn.execute("DELETE FROM captcha_challenges WHERE expires_at_ms<=?", (now_ms,))
+    except sqlite3.Error:
+        pass
+    code = "".join(choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_CODE_LEN))
+    cid = token_hex(16)
+    secret = _captcha_secret(conn).encode("utf-8")
+    answer_hmac = hmac.new(secret, f"captcha:{code.lower()}".encode("utf-8"), hashlib.sha256).hexdigest()
+    conn.execute("INSERT INTO captcha_challenges(id, answer_hmac, created_at_ms, expires_at_ms, attempts) "
+                 "VALUES (?,?,?,?,0)", (cid, answer_hmac, now_ms, now_ms + CAPTCHA_TTL_SEC * 1000))
+    conn.commit()
+    payload = {"id": cid, "svg": captcha_svg(code), "expiresInSec": CAPTCHA_TTL_SEC}
+    try:
+        if os.environ.get("EGE_CAPTCHA_DEBUG") == "1":
+            payload["debugCode"] = code
+    except Exception:
+        pass
+    return payload
+
+
+def captcha_verify(conn: sqlite3.Connection, cid, text) -> str:
+    """Проверить решение: ok/missing/expired/invalid. Успех гасит челлендж
+    (одноразовость), провал жжёт попытку; после лимита — удалить."""
+    ensure_captcha_schema(conn)
+    if not isinstance(cid, str) or not isinstance(text, str):
+        return "missing"
+    cid = cid.strip()
+    cleaned = re.sub(r"[^a-zA-Z0-9]", "", text or "").lower()
+    if not cid or len(cid) > 64 or not cleaned:
+        return "missing"
+    try:
+        row = conn.execute("SELECT answer_hmac, expires_at_ms, attempts FROM captcha_challenges WHERE id=?",
+                           (cid,)).fetchone()
+    except sqlite3.Error:
+        return "missing"
+    if row is None:
+        return "missing"
+    now_ms = int(time.time() * 1000)
+    try:
+        if int(row["expires_at_ms"]) <= now_ms:
+            conn.execute("DELETE FROM captcha_challenges WHERE id=?", (cid,))
+            conn.commit()
+            return "expired"
+    except (TypeError, ValueError, sqlite3.Error):
+        return "missing"
+    secret = _captcha_secret(conn).encode("utf-8")
+    want = hmac.new(secret, f"captcha:{cleaned}".encode("utf-8"), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(str(row["answer_hmac"] or ""), want):
+        try:
+            conn.execute("DELETE FROM captcha_challenges WHERE id=?", (cid,))
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        return "ok"
+    try:
+        attempts = int(row["attempts"] or 0) + 1
+        if attempts >= CAPTCHA_MAX_ATTEMPTS:
+            conn.execute("DELETE FROM captcha_challenges WHERE id=?", (cid,))
+        else:
+            conn.execute("UPDATE captcha_challenges SET attempts=? WHERE id=?", (attempts, cid))
+        conn.commit()
+    except sqlite3.Error:
+        try: conn.rollback()
+        except sqlite3.Error: pass
+    return "invalid"
+
+
+def _reg_subnet(ip: str) -> str:
+    """Подсеть для ловли ротации проксей: /24 для v4, /48 для v6."""
+    try:
+        addr = ipaddress.ip_address(str(ip or "?").split("%", 1)[0])
+        if isinstance(addr, ipaddress.IPv4Address):
+            return str(ipaddress.ip_network(f"{addr}/24", strict=False))
+        return str(ipaddress.ip_network(f"{addr}/48", strict=False))
+    except ValueError:
+        return "unknown"
+
+
+def reg_ident_hashes(conn: sqlite3.Connection, handler) -> tuple[str, str, str | None]:
+    """HMAC-отпечатки скорости: IP, подсеть, устройство (без user_id внутри —
+    иначе новый аккаунт уходил бы от счёта). Сырое ничего не хранится."""
+    secret = _captcha_secret(conn).encode("utf-8")
+    try:
+        ip = client_ip(handler)
+    except Exception:
+        ip = "?"
+    subnet = _reg_subnet(ip)
+    ip_hash = hmac.new(secret, f"reg-ip:{ip}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    subnet_hash = hmac.new(secret, f"reg-subnet:{subnet}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    device_hash: str | None = None
+    try:
+        raw = cookie_value(handler, DEVICE_COOKIE_NAME)
+        if device_cookie_is_valid(raw):
+            device_hash = hmac.new(secret, f"reg-dev:{raw}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    except Exception:
+        device_hash = None
+    return ip_hash, subnet_hash, device_hash
+
+
+def reg_velocity_counts(conn: sqlite3.Connection, ip_hash: str, subnet_hash: str,
+                         device_hash: str | None, now_ms: int) -> dict:
+    """Счётчики скорости по окнам. Не бросает: недоступность защиты не должна
+    ломать обычную регистрацию."""
+    out = {"ip_hour": 0, "ip_day": 0, "subnet_hour": 0, "device_day": 0, "global_10m": 0}
+    try:
+        ensure_captcha_schema(conn)
+        hour, day, glob = now_ms - 3600_000, now_ms - 86_400_000, now_ms - REG_GLOBAL_WINDOW_SEC * 1000
+        row = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits WHERE ip_hash=? AND created_at_ms>=?",
+                           (ip_hash, hour)).fetchone()
+        out["ip_hour"] = int(row["c"]) if row else 0
+        row = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits WHERE ip_hash=? AND created_at_ms>=?",
+                           (ip_hash, day)).fetchone()
+        out["ip_day"] = int(row["c"]) if row else 0
+        row = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits WHERE subnet_hash=? AND created_at_ms>=?",
+                           (subnet_hash, hour)).fetchone()
+        out["subnet_hour"] = int(row["c"]) if row else 0
+        if device_hash:
+            row = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits WHERE device_hash=? AND created_at_ms>=?",
+                               (device_hash, day)).fetchone()
+            out["device_day"] = int(row["c"]) if row else 0
+        row = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits WHERE created_at_ms>=?", (glob,)).fetchone()
+        out["global_10m"] = int(row["c"]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        pass
+    return out
+
+
+def reg_record_hit(conn: sqlite3.Connection, ip_hash: str, subnet_hash: str,
+                   device_hash: str | None, *, kind: str, success: bool) -> None:
+    """Записать попытку минта (любую: успех, капча, отказ). Чистим старше суток
+    — таблица-счётчик, а не журнал."""
+    try:
+        ensure_captcha_schema(conn)
+        now_ms = int(time.time() * 1000)
+        conn.execute("INSERT INTO reg_rate_hits(ip_hash, subnet_hash, device_hash, created_at_ms, kind, success) "
+                     "VALUES (?,?,?,?,?,?)",
+                     (ip_hash, subnet_hash, device_hash, now_ms, str(kind or "register")[:16],
+                      1 if success else 0))
+        conn.execute("DELETE FROM reg_rate_hits WHERE created_at_ms<?", (now_ms - 86_400_000,))
+        conn.commit()
+    except sqlite3.Error:
+        try: conn.rollback()
+        except sqlite3.Error: pass
+
+
+def _is_disposable_email(email: str | None) -> bool:
+    try:
+        _, _, domain = (email or "").partition("@")
+        return domain.strip().lower() in _DISPOSABLE_EMAIL_DOMAINS
+    except Exception:
+        return False
+
+
+def reg_risk_assess(conn: sqlite3.Connection, handler, payload, email: str | None = None) -> dict:
+    """Риск заявки минта: {need_captcha, hard_block, reasons, counts}.
+
+    Мягкие сигналы (honeypot/скорость/мусорная почта/слишком быстрая
+    отправка) — только капча, жёсткие объёмы — 429 сразу. Отсутствие куки
+    и вид UA сами по себе НЕ подозрение (см. шапку секции)."""
+    if not isinstance(payload, dict):
+        payload = {}
+    ip_hash, subnet_hash, device_hash = reg_ident_hashes(conn, handler)
+    now_ms = int(time.time() * 1000)
+    counts = reg_velocity_counts(conn, ip_hash, subnet_hash, device_hash, now_ms)
+    reasons: list[str] = []
+    try:
+        for field in ("website", "company", "url", "phone2"):
+            val = payload.get(field)
+            if isinstance(val, str) and val.strip():
+                reasons.append("honeypot")
+                break
+    except Exception:
+        pass
+    try:
+        started = payload.get("startedAt", payload.get("formShownAt"))
+        if isinstance(started, str) and started.strip().isdigit():
+            started = int(started.strip())
+        if isinstance(started, (int, float)) and 0 < int(started) <= now_ms:
+            if now_ms - int(started) < 1500:
+                reasons.append("rapid")
+    except Exception:
+        pass
+    if _is_disposable_email(email):
+        reasons.append("disposable")
+    if counts["ip_hour"] >= REG_IP_HOUR_SOFT:
+        reasons.append(f'ip_hour:{counts["ip_hour"]}')
+    if counts["ip_day"] >= REG_IP_DAY_SOFT:
+        reasons.append(f'ip_day:{counts["ip_day"]}')
+    if counts["subnet_hour"] >= REG_SUBNET_HOUR_SOFT:
+        reasons.append(f'subnet_hour:{counts["subnet_hour"]}')
+    if counts["device_day"] >= REG_DEV_DAY_SOFT and device_hash:
+        reasons.append(f'device_day:{counts["device_day"]}')
+    if counts["global_10m"] >= REG_GLOBAL_SOFT:
+        reasons.append(f'global:{counts["global_10m"]}')
+    hard = (counts["ip_hour"] >= REG_IP_HOUR_HARD or counts["ip_day"] >= REG_IP_DAY_HARD
+            or counts["subnet_hour"] >= REG_SUBNET_HOUR_HARD
+            or (device_hash and counts["device_day"] >= REG_DEV_DAY_HARD)
+            or counts["global_10m"] >= REG_GLOBAL_HARD)
+    if hard:
+        reasons.append("hard_volume")
+    return {"need_captcha": bool(reasons), "hard_block": bool(hard),
+            "reasons": reasons, "counts": counts,
+            "hashes": (ip_hash, subnet_hash, device_hash)}
 
 
 def ensure_auth_schema(conn: sqlite3.Connection) -> None:
@@ -13992,6 +14351,44 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.send_json({"error": f"Неверная настройка профиля: {exc}"}, 400)
             return
+        # Claim минтит users так же дёшево, как register (и ИИ доступен любому
+        # user_id), — тот же адаптивный гейт. Обычный онбординг (одна заявка
+        # с адреса) капчи не видит; ферма после пары заявок решает её каждый
+        # раз, а на жёстком объёме упирается в 429 сразу.
+        try:
+            risk = reg_risk_assess(conn, self, payload)
+        except Exception:
+            risk = {"need_captcha": False, "hard_block": False, "reasons": [],
+                    "counts": {}, "hashes": (None, None, None)}
+        try:
+            _rh = risk.get("hashes") or (None, None, None)
+        except Exception:
+            _rh = (None, None, None)
+        if risk.get("hard_block"):
+            try:
+                if _rh[0] and _rh[1]:
+                    reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="claim", success=False)
+            except Exception:
+                pass
+            self.send_json({"error": "Слишком много заявок. Повтори позже.",
+                            "code": "RATE_LIMITED", "retryAfter": 300}, 429,
+                           headers={"Retry-After": "300"})
+            return
+        if risk.get("need_captcha"):
+            verdict = captcha_verify(conn, payload.get("captchaId"), payload.get("captcha"))
+            if verdict != "ok":
+                try:
+                    if _rh[0] and _rh[1]:
+                        reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="claim", success=False)
+                except Exception:
+                    pass
+                challenge = captcha_issue(conn)
+                code = CAPTCHA_REQUIRED_CODE if verdict in ("missing", "expired") else CAPTCHA_INVALID_CODE
+                msg = ("Подтверди, что ты человек — введи символы с картинки"
+                       if code == CAPTCHA_REQUIRED_CODE else
+                       "Не сошлось — попробуй ещё раз с новой картинки")
+                self.send_json({"error": msg, "code": code, "captcha": challenge}, 422)
+                return
         user_id, token = provision_user(conn, self)
         if self.reject_if_blocked(conn, user_id):
             return
@@ -14011,6 +14408,11 @@ class Handler(BaseHTTPRequestHandler):
             "name": payload.get("name"),
         })
         conn.commit()
+        try:
+            if _rh[0] and _rh[1]:
+                reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="claim", success=True)
+        except Exception:
+            pass
         self.send_json({"ok": True, "created": created, "subject": subject,
                         "accountId": account_id_for(conn, user_id),
                         "user": auth_user_payload(conn, user_id),
@@ -14076,6 +14478,43 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(password, str) or not AUTH_PASSWORD_MIN_LENGTH <= len(password) <= AUTH_PASSWORD_MAX_LENGTH:
             self.send_json({"error": f"Пароль — от {AUTH_PASSWORD_MIN_LENGTH} до {AUTH_PASSWORD_MAX_LENGTH} символов"}, 400)
             return
+        # Адаптивная капча: обычная первая регистрация идёт без неё, ферма —
+        # с ней (см. шапку секции). Проверка ДО заведения строки и ДО проверки
+        # дубля: иначе скрипт и перебором занятых адресов раздувал бы таблицы.
+        try:
+            risk = reg_risk_assess(conn, self, payload, email)
+        except Exception:
+            risk = {"need_captcha": False, "hard_block": False, "reasons": [],
+                    "counts": {}, "hashes": (None, None, None)}
+        try:
+            _rh = risk.get("hashes") or (None, None, None)
+        except Exception:
+            _rh = (None, None, None)
+        if risk.get("hard_block"):
+            try:
+                if _rh[0] and _rh[1]:
+                    reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="register", success=False)
+            except Exception:
+                pass
+            self.send_json({"error": "Слишком много регистраций. Повтори позже.",
+                            "code": "RATE_LIMITED", "retryAfter": 300}, 429,
+                           headers={"Retry-After": "300"})
+            return
+        if risk.get("need_captcha"):
+            verdict = captcha_verify(conn, payload.get("captchaId"), payload.get("captcha"))
+            if verdict != "ok":
+                try:
+                    if _rh[0] and _rh[1]:
+                        reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="register", success=False)
+                except Exception:
+                    pass
+                challenge = captcha_issue(conn)
+                code = CAPTCHA_REQUIRED_CODE if verdict in ("missing", "expired") else CAPTCHA_INVALID_CODE
+                msg = ("Подтверди, что ты человек — введи символы с картинки"
+                       if code == CAPTCHA_REQUIRED_CODE else
+                       "Не сошлось — попробуй ещё раз с новой картинки")
+                self.send_json({"error": msg, "code": code, "captcha": challenge}, 422)
+                return
         # Проверки дубля — ДО заведения строки: иначе каждая заявка с занятым
         # email оставляла бы в базе orphan-строку (users + сессии), а скрипт
         # без кук раздувал бы таблицы. Текст обоих 409 одинаковый, чтобы ответ
@@ -14088,6 +14527,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
             auth_login_failed(ip)
+            # Проба занятого адреса — тоже попытка минта: считаем в скорость,
+            # иначе перебор «какие почты зарегистрированы» шёл бы мимо капчи.
+            try:
+                if _rh[0] and _rh[1]:
+                    reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="register", success=False)
+            except Exception:
+                pass
             self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
             return
         user_id, minted = provision_user(conn, self)  # регистрация = явное намерение, профиль заводим
@@ -14141,14 +14587,16 @@ class Handler(BaseHTTPRequestHandler):
             auth_login_failed(ip)
             self.send_json({"error": "Этот email уже зарегистрирован"}, 409)
             return
+        try:
+            if _rh[0] and _rh[1]:
+                reg_record_hit(conn, _rh[0], _rh[1], _rh[2], kind="register", success=True)
+        except Exception:
+            pass
         auth_login_success(ip)
         self.send_json({"ok": True, "user": auth_user_payload(conn, user_id)}, token=new_token)
 
     def handle_auth_login(self, conn: sqlite3.Connection) -> None:
         ip = client_ip(self)
-        if not auth_login_allowed(ip):
-            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
-            return
         try:
             payload = self.read_json()
         except (json.JSONDecodeError, ValueError):
@@ -14157,6 +14605,34 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self.send_json({"error": "Некорректный запрос"}, 400)
             return
+        # Вход аккаунтов не создаёт, поэтому капчи «всегда» здесь нет. Но тот
+        # же челлендж подпирает антибрутфорс: после нескольких неудач с адреса
+        # пароль проверяем только с решённой капчей (иначе чужой перебор клал
+        # вход всей подсети за NAT под общий 429). Потолок остаётся: после
+        # 30 неудач — жёсткий 429 даже с капчей, чтобы решатель не жёг CPU
+        # бесконечными PBKDF2-проверками.
+        try:
+            with _auth_login_lock:
+                _recent = [t for t in _auth_login_failures.get(ip, []) if time.time() - t < AUTH_LOGIN_WINDOW_SEC]
+                _failures = len(_recent)
+        except Exception:
+            _failures = 0
+        if _failures >= AUTH_LOGIN_MAX_FAILURES * 3:
+            self.send_json({"error": "Слишком много попыток. Повтори через несколько минут."}, 429)
+            return
+        _need_login_captcha = _failures >= LOGIN_CAPTCHA_AFTER_FAILURES
+        if _need_login_captcha:
+            _verdict = captcha_verify(conn, payload.get("captchaId"), payload.get("captcha"))
+            if _verdict != "ok":
+                challenge = captcha_issue(conn)
+                code = CAPTCHA_REQUIRED_CODE if _verdict in ("missing", "expired") else CAPTCHA_INVALID_CODE
+                msg = ("Слишком много попыток — подтверди, что ты человек"
+                       if code == CAPTCHA_REQUIRED_CODE else
+                       "Не сошлось — попробуй ещё раз с новой картинки")
+                self.send_json({"error": msg, "code": code, "captcha": challenge,
+                                "retryAfter": 60}, 429,
+                               headers={"Retry-After": "60"})
+                return
         email = normalize_email(payload.get("email"))
         password = payload.get("password")
         if not email or not isinstance(password, str) or not password:
@@ -14204,6 +14680,23 @@ class Handler(BaseHTTPRequestHandler):
                         "requireSubjectChoice": True,
                         "subjects": subjects_payload(),
                         "subject": current_subject_for(conn, account_id)}, token=new_token)
+
+    def handle_auth_captcha(self, conn: sqlite3.Connection) -> None:
+        """GET /api/auth/captcha — свежий челлендж для форм входа/регистрации.
+
+        Ничего не проверяет и не создаёт: только минтит одноразовый челлендж
+        (TTL 5 мин, 5 попыток ввода) и заодно выдаёт куку ege_device тем, у
+        кого её ещё нет, — иначе ферма без кук была бы несчитаемой по
+        устройству. Под общим per-IP бакетом /api/ (списан выше)."""
+        self.ensure_device_cookie()
+        try:
+            challenge = captcha_issue(conn)
+        except sqlite3.Error as exc:
+            rid = log_request_error("captcha-issue", exc)
+            self.send_json({"error": "Не удалось показать капчу. Попробуй ещё раз.",
+                            "ref": rid}, 503)
+            return
+        self.send_json({"ok": True, "captcha": challenge})
 
     # ------------------------------------------------------------------
     # Вход через внешний провайдер (Google)
@@ -14438,6 +14931,25 @@ class Handler(BaseHTTPRequestHandler):
         # Этого адреса у нас нет: новый человек. Если он уже что-то наработал
         # в этой сессии, привязываем к его же строке (весь учебный след
         # сохраняется), иначе заводим новую — как при регистрации.
+        # Капчу здесь не показываем (её уже решил Google), но создания
+        # считаем в общий котёл скорости: на жёстком объёме — отказ.
+        try:
+            _grisk = reg_risk_assess(conn, self, {}, email)
+        except Exception:
+            _grisk = {"hard_block": False, "hashes": (None, None, None)}
+        try:
+            _grh = _grisk.get("hashes") or (None, None, None)
+        except Exception:
+            _grh = (None, None, None)
+        if _grisk.get("hard_block"):
+            try:
+                if _grh[0] and _grh[1]:
+                    reg_record_hit(conn, _grh[0], _grh[1], _grh[2], kind="google", success=False)
+            except Exception:
+                pass
+            self.send_redirect(oauth_return_url(self, "login", "error=rate_limited"),
+                               extra_cookies=clear_nonce)
+            return
         target_id = current_id
         minted = None
         if target_id is None:
@@ -14468,6 +14980,11 @@ class Handler(BaseHTTPRequestHandler):
                                            request_device_info(self),
                                            request_device_identity(conn, self, target_id))
         conn.commit()
+        try:
+            if _grh[0] and _grh[1]:
+                reg_record_hit(conn, _grh[0], _grh[1], _grh[2], kind="google", success=True)
+        except Exception:
+            pass
         auth_login_success(ip)
         # Гость, который вошёл через Google и только что получил профиль, идёт
         # в онбординг (он и начинается с выбора предмета). Уже онбордившийся
@@ -18438,6 +18955,14 @@ class Handler(BaseHTTPRequestHandler):
                                         "ref": rid}, 500)
                     return
                 # Auth-проба не создаёт аккаунт: отвечаем тем, кто уже есть.
+                if path == "/api/auth/captcha":
+                    try:
+                        self.handle_auth_captcha(conn)
+                    except sqlite3.Error as exc:
+                        rid = log_request_error("captcha", exc)
+                        self.send_json({"error": "Сервис временно недоступен. Попробуй ещё раз.",
+                                        "ref": rid}, 503)
+                    return
                 if path == "/api/auth/session":
                     auth_uid = existing_user_for(conn, self)
                     if auth_uid is not None and self.reject_if_blocked(conn, auth_uid):

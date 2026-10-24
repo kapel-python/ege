@@ -61,6 +61,9 @@ def t(name: str, ok: bool, detail: object = "") -> None:
 def load_server(db_path: Path, trusted_proxy: str):
     os.environ["EGE_DB_PATH"] = str(db_path)
     os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    # Для секции D: вход после 5 неудач требует капчу — решение берём из
+    # debugCode (в проде этого поля нет).
+    os.environ["EGE_CAPTCHA_DEBUG"] = "1"
     salt = "c" * 32
     dk = hashlib.pbkdf2_hmac("sha256", b"test-admin-password", bytes.fromhex(salt), 210000)
     os.environ["EGE_ADMIN_PASSWORD_HASH"] = f"pbkdf2_sha256$210000${salt}${dk.hex()}"
@@ -370,8 +373,24 @@ def check_login_timing() -> None:
                                            body={"email": "ghost@example.com", "password": "wrong-password"})
             status_no, _, _ = json_request(base, "/api/auth/login", "POST",
                                            body={"email": "real@example.com", "password": "wrong-password"})
+            # К этому моменту с IP уже 6 неудач: вход требует капчу (429
+            # CAPTCHA_REQUIRED) — это и есть антибрутфорс. Текст для обоих
+            # случаев сверяем с решённой капчей: проверка пароля идёт своим
+            # чередом и отвечает одинаковым 401.
+            def login_text(email: str) -> tuple:
+                status, body, _ = json_request(base, "/api/auth/login", "POST",
+                                               body={"email": email, "password": "wrong-password"})
+                if status == 429 and body.get("code") == "CAPTCHA_REQUIRED":
+                    ch = body.get("captcha") or {}
+                    status, body, _ = json_request(
+                        base, "/api/auth/login", "POST",
+                        body={"email": email, "password": "wrong-password",
+                              "captchaId": ch.get("id"), "captcha": ch.get("debugCode")})
+                return status, body.get("error")
+            status_ok, text_ok = login_text("ghost@example.com")
+            status_no, text_no = login_text("real@example.com")
             t("текст ответа одинаков для обоих случаев",
-              status_ok == status_no == 401, (status_ok, status_no))
+              status_ok == status_no == 401 and text_ok == text_no, (status_ok, status_no))
         finally:
             httpd.shutdown()
 

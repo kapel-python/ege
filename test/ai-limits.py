@@ -74,6 +74,9 @@ def section(title):
 def load_server(db_path: Path):
     os.environ["EGE_DB_PATH"] = str(db_path)
     os.environ["EGE_DISABLE_SYSTEMD"] = "1"
+    # Тест заводит много аккаунтов с пересекающихся сетей: адаптивную капчу
+    # решаем через debugCode прямо в Client.request (в проде поля нет).
+    os.environ["EGE_CAPTCHA_DEBUG"] = "1"
     spec = importlib.util.spec_from_file_location("ege_ai_limits_test", SERVER_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -92,6 +95,22 @@ class Client:
         self.cookies: dict[str, str] = {}
 
     def request(self, base: str, method: str, path: str, body=None):
+        status, headers, payload = self._once(base, method, path, body)
+        # Адаптивная капча минта: решаем тут же через debugCode, как человек
+        # в браузере. Касается только 422 с челленджем; 429 лимитов и прочие
+        # ответы идут как есть.
+        if (status == 422 and isinstance(payload, dict)
+                and payload.get("code") in ("CAPTCHA_REQUIRED", "CAPTCHA_INVALID")
+                and isinstance(payload.get("captcha"), dict)
+                and payload["captcha"].get("id") and payload["captcha"].get("debugCode")
+                and isinstance(body, dict)):
+            retry = dict(body)
+            retry["captchaId"] = payload["captcha"]["id"]
+            retry["captcha"] = payload["captcha"]["debugCode"]
+            status, headers, payload = self._once(base, method, path, retry)
+        return status, headers, payload
+
+    def _once(self, base: str, method: str, path: str, body=None):
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
         req = urllib.request.Request(base + path, data=data, method=method)
         req.add_header("X-Forwarded-For", self.ip)
