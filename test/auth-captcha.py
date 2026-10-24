@@ -8,11 +8,14 @@
 4. неверное решение → 422 CAPTCHA_INVALID со СВЕЖИМ челленджем;
 5. решённая/чужая/протухшая картинка одноразовая (повтор → снова REQUIRED);
 6. верное решение → 200, аккаунт заводится;
-7. honeypot/одноразовая почта/слишком быстрая отправка → капча с 1-й заявки;
+7. honeypot/одноразовая почта/plus-адрес/слишком быстрая отправка → капча с 1-й заявки;
 8. вход: после 5 неудач — 429 CAPTCHA_REQUIRED, с решением — проверка пароля
    идёт своим чередом (401 неверный / 200 верный);
 9. жёсткий объём → 429 даже с решённой капчей;
-10. claim онбординга под всплеском — тот же гейт (422 → решение → 200).
+10. claim онбординга под всплеском — тот же гейт (422 → решение → 200);
+11. глобальный щит ловит распределённую ферму;
+12. FIFO-капы таблиц: флуд выдачей/заявками не растит базу бесконечно;
+13. в проде debugCode нет.
 
 Свои temp-БД и живой сервер, прод не трогает. Решения берутся из
 debugCode (EGE_CAPTCHA_DEBUG=1) — в проде этого поля нет.
@@ -179,6 +182,13 @@ def main():
             check("мусорная почта + решение → 200", status == 200, (status, str(ok)[:160]))
 
             c, _ = fresh_client()
+            status, plus = request(c, base, "/api/auth/register", "POST", {
+                "name": "Плюсовщик", "email": "farm+1@gmail.com", "password": "secret-pass-1",
+            }, ip="10.16.0.16")
+            check("plus-адрес → 422 REQUIRED с 1-й заявки", status == 422
+                  and plus.get("code") == "CAPTCHA_REQUIRED", (status, str(plus)[:160]))
+
+            c, _ = fresh_client()
             status, rapid = request(c, base, "/api/auth/register", "POST", {
                 "name": "Торопыга", "email": "rapid@example.com", "password": "secret-pass-1",
                 "startedAt": str(int(time.time() * 1000)),
@@ -300,7 +310,41 @@ def main():
             finally:
                 server.REG_GLOBAL_SOFT = 10 ** 9
 
-            # --- 12. В проде debugCode нет ---
+            # --- 12. Капы таблиц: флуд не растит базу бесконечно ---
+            old_cmax, old_rmax = server.CAPTCHA_CHALLENGES_MAX, server.REG_RATE_HITS_MAX
+            server.CAPTCHA_CHALLENGES_MAX = 10
+            try:
+                c, _ = fresh_client()
+                for _ in range(12):
+                    status, _ = request(c, base, "/api/auth/captcha", ip="10.17.0.17")
+                    assert status == 200, status
+                conn = server.connect()
+                try:
+                    n = conn.execute("SELECT COUNT(*) AS c FROM captcha_challenges").fetchone()["c"]
+                finally:
+                    conn.close()
+                check("выдача капч упирается в FIFO-капу", n <= 10, n)
+            finally:
+                server.CAPTCHA_CHALLENGES_MAX = old_cmax
+            server.REG_RATE_HITS_MAX = 20
+            try:
+                for i in range(25):
+                    c, _ = fresh_client()
+                    status, _ = request(c, base, "/api/auth/register", "POST", {
+                        "name": f"Штамп-капа {i}", "email": f"cap-{i}@example.com",
+                        "password": "secret-pass-1",
+                    }, ip=f"10.18.{i}.1")
+                    assert status == 200, (i, status)
+                conn = server.connect()
+                try:
+                    n = conn.execute("SELECT COUNT(*) AS c FROM reg_rate_hits").fetchone()["c"]
+                finally:
+                    conn.close()
+                check("счётчик скорости упирается в FIFO-капу", n <= 20, n)
+            finally:
+                server.REG_RATE_HITS_MAX = old_rmax
+
+            # --- 13. В проде debugCode нет ---
             del os.environ["EGE_CAPTCHA_DEBUG"]
             try:
                 c, _ = fresh_client()

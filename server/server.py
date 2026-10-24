@@ -1478,6 +1478,13 @@ REG_DEV_DAY_HARD = 30
 REG_GLOBAL_HARD = 150
 LOGIN_CAPTCHA_AFTER_FAILURES = 5
 _CAPTCHA_SCHEMA_DONE: set[str] = set()
+# Капы таблиц против распухания: выдача челленджей (GET) и каждая заявка
+# минта пишут строки, поэтому без FIFO-потолка флуд с ротацией IP растил бы
+# базу бесконечно. Лимиты щедрые: живая регистрация — единицы строк в день,
+# капа срабатывает только под атакой (дневные COUNT при этом всё равно
+# считают честно — режется только хвост старше окна).
+CAPTCHA_CHALLENGES_MAX = 5000
+REG_RATE_HITS_MAX = 200000
 # Короткий стоп-лист одноразовых почт: полное покрытие невозможно и не
 # нужно — это лишь один из сигналов, а не единственная стена.
 _DISPOSABLE_EMAIL_DOMAINS = frozenset({
@@ -1486,6 +1493,12 @@ _DISPOSABLE_EMAIL_DOMAINS = frozenset({
     "mohmal.com", "sharklasers.com", "dispostable.com", "fakeinbox.com",
     "throwawaymail.com", "maildrop.cc", "harakirimail.com", "mintemail.com",
     "emailondeck.com", "mailsac.com", "mytemp.email", "tempail.com",
+    "mailnesia.com", "mailcatch.com", "moakt.com", "dropmail.me",
+    "inboxkitten.com", "tmail.ws", "tempinbox.com", "guerrillamailblock.com",
+    "spamgourmet.com", "mytrashmail.com", "tempemail.net", "fakemail.net",
+    "emailfake.com", "crazymailing.com", "armyspy.com", "cuvox.de",
+    "dayrep.com", "einrot.com", "fleckens.hu", "gustr.com",
+    "jourrapide.com", "rhyta.com", "superrito.com", "teleworm.us",
 })
 
 
@@ -1527,48 +1540,65 @@ def _captcha_secret(conn: sqlite3.Connection) -> str:
 
 
 def captcha_svg(code: str) -> str:
-    """Искажённый SVG-текст: тёмные буквы на светлом фоне + шум (линии/точки).
+    """Искажённый SVG-текст: тёмные буквы на светлом фоне + шум поверх букв.
 
     Только stdlib: случайность из secrets, без PIL. Алфавит без 0/O/1/I —
-    человеку не приходится гадать, а OCR без обучения буквам с поворотом и
-    шумом стоит дороже одного POST."""
+    человеку не приходится гадать. Против OCR: волнистая базовая линия,
+    поворот до ±32°, плотная посадка с налезанием, 2–3 зачёркивающие кривые
+    ПОВЕРХ букв и густой шум — чистый tesseract такое жуёт плохо, а человек
+    читает. Защита не абсолютна (обученный OCR и люди-решатели проходят),
+    поэтому поверх стоят одноразовость, TTL и лимиты скорости."""
+
+    def rnd(n: int) -> int:
+        try:
+            return randbelow(n)
+        except Exception:
+            return 0
+
     try:
         text = "".join(c for c in str(code or "").upper() if c in CAPTCHA_ALPHABET)[:8] or "?????"
     except Exception:
         text = "?????"
     w, h = 180, 64
-    palette = ["#1a3a5c", "#5c1a1a", "#1a5c2e", "#4a1a5c", "#0f4c4c", "#7a4a00"]
-    dots: list[str] = []
+    palette = ["#16283f", "#4d1414", "#123f22", "#3a1245", "#0b3d3d", "#5f3600"]
     try:
-        for _ in range(42):
-            cx = randbelow(w)
-            cy = randbelow(h)
-            r = 1 + randbelow(2)
-            dots.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="#9db3c7" opacity="0.7"/>')
-        lines: list[str] = []
-        for _ in range(4):
-            x1, y1 = randbelow(w), randbelow(h)
-            x2, y2 = randbelow(w), randbelow(h)
-            lines.append(f'<path d="M{x1},{y1} Q{randbelow(w)},{randbelow(h)} {x2},{y2}" '
-                         f'stroke="#7d99b5" stroke-width="1.4" fill="none" opacity="0.8"/>')
-        chars: list[str] = []
         n = len(text)
-        step = w / (n + 1)
+        chars: list[str] = []
+        phase = rnd(628) / 100.0
+        step = (w - 16) / max(n, 1)
         for i, ch in enumerate(text):
-            x = int(step * (i + 1) + randbelow(7) - 3)
-            y = 40 + randbelow(9) - 4
-            rot = randbelow(37) - 18
-            fill = palette[randbelow(len(palette))]
-            size = 30 + randbelow(7) - 3
+            # Волна + джиттер: буквы пляшут и налезают друг на друга.
+            import math as _math
+            wave = int(round(7 * _math.sin(phase + i * 1.4)))
+            x = int(8 + step * (i + 0.5) + rnd(13) - 6)
+            y = 41 + wave + rnd(7) - 3
+            rot = rnd(65) - 32
+            fill = palette[rnd(len(palette))]
+            size = 30 + rnd(9)
             chars.append(f'<text x="{x}" y="{y}" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" '
                          f'font-size="{size}" font-weight="bold" fill="{fill}" '
                          f'transform="rotate({rot} {x} {y})">{html.escape(ch)}</text>')
+        # Шум: точки (часть тёмных) + дуги + зачёркивающие кривые ПОВЕРХ букв.
+        noise: list[str] = []
+        for _ in range(64):
+            cx, cy, r = rnd(w), rnd(h), 1 + rnd(2)
+            tone = "#5b7a99" if rnd(4) == 0 else "#9db3c7"
+            noise.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{tone}" opacity="0.7"/>')
+        for _ in range(5):
+            x1, y1 = rnd(w), rnd(h)
+            noise.append(f'<path d="M{x1},{y1} Q{rnd(w)},{rnd(h)} {rnd(w)},{rnd(h)}" '
+                         f'stroke="#8aa5bd" stroke-width="1.2" fill="none" opacity="0.75"/>')
+        for _ in range(2 + rnd(2)):
+            y0 = 22 + rnd(22)
+            noise.append(f'<path d="M-4,{y0} C40,{y0 - 14 + rnd(28)} 90,{y0 - 14 + rnd(28)} 130,{y0 - 10 + rnd(20)} '
+                         f'S170,{y0 - 8 + rnd(16)} 184,{y0 - 6 + rnd(12)}" '
+                         f'stroke="#416181" stroke-width="{2 + rnd(2) * 0.5}" fill="none" opacity="0.85"/>')
     except Exception:
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}">'
                 f'<rect width="{w}" height="{h}" fill="#eef3f8"/></svg>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" role="img" aria-label="captcha">'
             f'<rect width="{w}" height="{h}" fill="#eef3f8"/>'
-            f'{"".join(dots)}{"".join(lines)}{"".join(chars)}</svg>')
+            f'{"".join(chars)}{"".join(noise)}</svg>')
 
 
 def captcha_issue(conn: sqlite3.Connection) -> dict:
@@ -1586,6 +1616,16 @@ def captcha_issue(conn: sqlite3.Connection) -> dict:
     conn.execute("INSERT INTO captcha_challenges(id, answer_hmac, created_at_ms, expires_at_ms, attempts) "
                  "VALUES (?,?,?,?,0)", (cid, answer_hmac, now_ms, now_ms + CAPTCHA_TTL_SEC * 1000))
     conn.commit()
+    try:
+        # FIFO-капа ПОСЛЕ вставки: флуд выдачей с ротацией IP иначе растил бы
+        # таблицу вечно. Чистка до вставки давала бы стационарно MAX+1 строк.
+        conn.execute("DELETE FROM captcha_challenges WHERE id NOT IN "
+                     "(SELECT id FROM captcha_challenges ORDER BY created_at_ms DESC, rowid DESC LIMIT ?)",
+                     (CAPTCHA_CHALLENGES_MAX,))
+        conn.commit()
+    except sqlite3.Error:
+        try: conn.rollback()
+        except sqlite3.Error: pass
     payload = {"id": cid, "svg": captcha_svg(code), "expiresInSec": CAPTCHA_TTL_SEC}
     try:
         if os.environ.get("EGE_CAPTCHA_DEBUG") == "1":
@@ -1714,6 +1754,10 @@ def reg_record_hit(conn: sqlite3.Connection, ip_hash: str, subnet_hash: str,
                      (ip_hash, subnet_hash, device_hash, now_ms, str(kind or "register")[:16],
                       1 if success else 0))
         conn.execute("DELETE FROM reg_rate_hits WHERE created_at_ms<?", (now_ms - 86_400_000,))
+        # FIFO-капа: иначе флуд заявками с ротацией IP растил бы таблицу вечно.
+        # Режется только хвост старше окна — свежие COUNT для лимитов целы.
+        conn.execute("DELETE FROM reg_rate_hits WHERE id <= (SELECT MAX(id)-? FROM reg_rate_hits)",
+                     (REG_RATE_HITS_MAX,))
         conn.commit()
     except sqlite3.Error:
         try: conn.rollback()
@@ -1759,6 +1803,14 @@ def reg_risk_assess(conn: sqlite3.Connection, handler, payload, email: str | Non
         pass
     if _is_disposable_email(email):
         reasons.append("disposable")
+    try:
+        # Plus-адресация (farm+1@, farm+2@, ...) — бесконечный запас «разных»
+        # почт на один ящик, классика ферм. Живые так почти не регистрируются.
+        local = str((email or "").partition("@")[0])
+        if "+" in local:
+            reasons.append("plus_address")
+    except Exception:
+        pass
     if counts["ip_hour"] >= REG_IP_HOUR_SOFT:
         reasons.append(f'ip_hour:{counts["ip_hour"]}')
     if counts["ip_day"] >= REG_IP_DAY_SOFT:
