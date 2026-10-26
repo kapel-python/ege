@@ -773,11 +773,13 @@ async function screenDashboard() {
           <div class="a-kv">
             <div class="a-kv__item"><div class="a-kv__k">Заданий</div><div class="a-kv__v">${fmtNum(data.catalog.tasks)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Уроков</div><div class="a-kv__v">${fmtNum(data.catalog.lessons)}</div></div>
+            <div class="a-kv__item"><div class="a-kv__k">Интерактивных уроков (БЕТА)</div><div class="a-kv__v">${fmtNum(data.catalog.ilessons || 0)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Миссий</div><div class="a-kv__v">${fmtNum(data.catalog.missions)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Боссов</div><div class="a-kv__v">${fmtNum(data.catalog.bosses)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Навыков</div><div class="a-kv__v">${fmtNum(data.catalog.skills)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Достижений</div><div class="a-kv__v">${fmtNum(data.catalog.achievements)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Уроков пройдено</div><div class="a-kv__v">${fmtNum(l.completedLessons)}</div></div>
+            <div class="a-kv__item"><div class="a-kv__k">Интерактивных пройдено</div><div class="a-kv__v">${fmtNum(l.completedILessons || 0)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Миссий закрыто</div><div class="a-kv__v">${fmtNum(l.missionsDone)}</div></div>
             <div class="a-kv__item"><div class="a-kv__k">Боссов повержено</div><div class="a-kv__v">${fmtNum(l.bossesDefeated)}</div></div>
           </div>
@@ -1206,6 +1208,7 @@ async function screenUser(ref) {
     </div>
     <div class="a-stats" style="margin-top:14px">
       ${statTile("Уроки", `${c.lessonsCompleted}/${c.lessonsTotal}`, "пройдено")}
+      ${statTile("Интерактив (БЕТА)", `${c.ilessonsCompleted || 0}/${c.ilessonsTotal || 0}`, "пройдено")}
       ${statTile("Миссии", fmtNum(c.missionsDone), "завершено")}
       ${statTile("Боссы", fmtNum(c.bossesDefeated), "повержено")}
       ${statTile("Достижения", `${c.achievements}`, `навыков затронуто: ${c.skillsTouched}/${c.skillsTotal}`)}

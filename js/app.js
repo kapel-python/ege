@@ -2893,6 +2893,18 @@ function topicHasLesson(topic) {
   }
 }
 
+/* Интерактивный (визуальный) урок темы — БЕТА. Источник — бэкенд
+   (каталог предмета → DataAPI.ilessonsBySkill), мета без сцен тоже
+   считается: кнопка ведёт на роут, а роут сам решит (урок/заглушка). */
+function topicHasInteractiveLesson(topic) {
+  if (!topic || !topic.id) return false;
+  try {
+    return DataAPI.ilessonsBySkill(topic.id).length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 function topicHasPractice(topic) {
   if (!topic || !topic.id) return false;
   try {
@@ -2904,7 +2916,7 @@ function topicHasPractice(topic) {
 }
 
 function topicHasLearningContent(topic) {
-  return topicHasLesson(topic) || topicHasPractice(topic);
+  return topicHasLesson(topic) || topicHasInteractiveLesson(topic) || topicHasPractice(topic);
 }
 
 function topicExplicitlyLocked(topic) {
@@ -5289,7 +5301,9 @@ function openSkillModal(skillId) {
         // всегда, даже пока урока нет: роут #/ilesson/<skillId> сам покажет
         // красивую заглушку вместо урока. Цвет — изумрудный (не фиолетовый
         // primary классики): две учебные кнопки не спорят между собой.
-        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>${icon("spark")} Интерактивный урок</button>`;
+        const ivLessons = (() => { try { return DataAPI.ilessonsBySkill(skillId); } catch (_) { return []; } })();
+        const ivDone = ivLessons.some((l) => l && Store.state.completedILessons && Store.state.completedILessons[l.id]);
+        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>${icon("spark")} Интерактивный урок${ivDone ? " · пройден" : ""}</button>`;
         // Тема из одних сочинений (урока нет и не будет — там только практика):
         // главная кнопка ведёт в практику сочинений, а не в несуществующий
         // урок. Сочинения узнаём по типу заданий; в лёгком каталоге типа нет
@@ -5401,6 +5415,37 @@ function screenTraining(root) {
         </div>`;
       }).join("")}
     </div>` : ''}
+
+    ${(() => {
+      // Интерактивные уроки (БЕТА) — отдельный формат: короткие визуальные
+      // сцены вместо пошагового разбора. Секция видна только когда в
+      // каталоге есть хотя бы один такой урок; иначе — как будто её нет.
+      let iv = [];
+      try { iv = DataAPI.ilessons(); } catch (_) { iv = []; }
+      if (!iv.length) return "";
+      return `
+      <div class="section-title">Интерактивные уроки <span class="btn__beta btn__beta--static">БЕТА</span> — быстро понять</div>
+      <div class="grid grid--3">
+        ${iv.map((item) => {
+          const sk = DataAPI.skill(item.skill);
+          const done = !!(Store.state.completedILessons && Store.state.completedILessons[item.id]);
+          const scenesTotal = DataAPI.ilessonScenesCount(item);
+          return `
+          <div class="card card--hover lesson-card ${done ? "lesson-card--done" : ""}">
+            <div class="mission-card__top">
+              <div>
+                <div class="mission-card__title">${icon("spark")} ${esc(item.title)} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
+                <div class="mission-card__path">${esc(sk ? sk.name : "Тема")} · ${scenesTotal} ${plural(scenesTotal, "сцена", "сцены", "сцен")} · ${done ? "пройден" : "не начат"}</div>
+              </div>
+              <div class="mission-card__reward"><span class="chip chip--accent mono">+${item.xp || 0} XP</span></div>
+            </div>
+            <button class="btn ${done ? "btn--soft" : "btn--visual"} btn--sm" style="align-self:flex-start" onclick="openInteractiveLesson('${esc(item.skill)}')">
+              ${done ? "Открыть ещё раз" : "Смотреть урок"}
+            </button>
+          </div>`;
+        }).join("")}
+      </div>`;
+    })()}
 
     <div class="section-title">Тренировки по темам — потом закрепить</div>
     <div class="grid grid--3">
@@ -9647,29 +9692,19 @@ function lessonFinish() {
 /* ============================================================
    Screen: Интерактивный (визуальный) урок — БЕТА.
    Универсальный роут #/ilesson/<skillId>: привязан к ТЕМЕ, а не к записи
-   каталога, поэтому работает для всех тем сразу.
-   - ILessons.get(skillId) вернул урок → рендерим сцены урока;
-   - иначе → красивая заглушка «урок пока не добавлен» (а не модалка).
-   Будущие уроки добавляются только в js/interactive-lessons.js
-   (ILessons.BY_SKILL) — здесь править ничего не нужно.
+   каталога. Источник — бэкенд (каталог предмета → DataAPI):
+   - есть полные сцены → рендерим урок;
+   - есть только мета (summary без сцен) → тихо догружаем детали и
+     показываем скелет; детали не приехали → заглушка;
+   - ничего нет → красивая заглушка «урок пока не добавлен».
+   Новый урок добавляется одной записью interactiveLessons в каталоге
+   предмета — здесь править ничего не нужно.
    ============================================================ */
-
-/* Страховка: если js/interactive-lessons.js не загрузился (кэш, блок),
-   кнопка всё равно ведёт на тот же роут — заглушку отрисует сам экран. */
-if (typeof openInteractiveLesson !== "function") {
-  var openInteractiveLesson = function (skillId) {
-    const id = String(skillId == null ? "" : skillId).trim();
-    if (!id) return;
-    try { closeModal(); } catch (_) {}
-    try { go("ilesson", id); } catch (_) { try { location.hash = "#/ilesson/" + encodeURIComponent(id); } catch (_) {} }
-  };
-}
 
 function screenInteractiveLesson(root) {
   const skillId = (typeof routeParam === "function" ? routeParam() : "");
   const sk = (typeof subjectSkillById === "function" ? subjectSkillById(skillId) : null)
     || (typeof DataAPI !== "undefined" && DataAPI.skill ? DataAPI.skill(skillId) : null);
-  const ilesson = (typeof ILessons !== "undefined" && ILessons.get ? ILessons.get(skillId) : null);
   const topicName = sk ? topicDisplayName(sk) : skillId;
   let categoryName = "Темы предмета";
   try {
@@ -9677,15 +9712,37 @@ function screenInteractiveLesson(root) {
     if (cat) categoryName = subjectDisplayName(cat);
   } catch (_) {}
   const ege = (sk && (sk.ege || sk.examNumber)) || "тема экзамена";
+  let ilessons = [];
+  try { ilessons = DataAPI.ilessonsBySkill(skillId); } catch (_) { ilessons = []; }
+  // Полные сцены есть только в details-срезе; summary везёт лишь мету.
+  // Мета есть, сцен нет, детали ещё не тянули — один фоновый заход.
+  const full = ilessons.filter((l) => l && Array.isArray(l.scenes) && l.scenes.length > 0);
+  if (!full.length && ilessons.length) {
+    let detailsReady = true;
+    try { detailsReady = DataAPI.ilessonsReady(); } catch (_) {}
+    if (!detailsReady && !window.__ilessonFetching) {
+      window.__ilessonFetching = true;
+      try {
+        Store.ensureDetails().catch(() => {}).finally(() => {
+          window.__ilessonFetching = false;
+          try { if (currentRoute() === "ilesson") render(); } catch (_) {}
+        });
+      } catch (_) { window.__ilessonFetching = false; }
+      root.innerHTML = `<div class="session-wrap lesson-wrap ilesson-wrap">${pageLoaderHTML("Тянем интерактивный урок…")}</div>`;
+      return;
+    }
+  }
+  const ilesson = full[0] || null;
 
   if (ilesson) {
     const scenes = ilesson.scenes;
+    const done = !!(Store.state.completedILessons && Store.state.completedILessons[ilesson.id]);
     root.innerHTML = `
     <div class="session-wrap lesson-wrap ilesson-wrap">
       <div class="session-head">
         <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
         <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
-        <div class="session-head__progress mono">${esc(String(skillId))}</div>
+        <div class="session-head__progress mono">${esc(ege)}</div>
       </div>
       <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
       ${ilesson.subtitle ? `<div class="page-sub" style="margin-top:6px">${esc(ilesson.subtitle)}</div>` : ""}
@@ -9693,15 +9750,20 @@ function screenInteractiveLesson(root) {
         <div class="card lesson-card" style="margin-top:12px">
           <div class="lesson-step-label">Шаг ${i + 1} из ${scenes.length}</div>
           ${scene.title ? `<div class="lesson-title">${esc(scene.title)}</div>` : ""}
-          <div class="lesson-body"><div class="task-card__text lesson-text">${esc(scene.text || "")}</div></div>
-          ${scene.visual && scene.visual.html ? `<div class="ilesson-visual">${scene.visual.html}</div>` : ""}
+          <div class="lesson-body"><div class="task-card__text lesson-text">${mathText(scene.text || "")}</div></div>
           ${scene.visual && scene.visual.svg ? `<div class="ilesson-visual">${scene.visual.svg}</div>` : ""}
+          ${scene.visual && scene.visual.html ? `<div class="ilesson-visual">${scene.visual.html}</div>` : ""}
         </div>`).join("")}
+      ${done ? `<div class="feedback feedback--ok" style="margin-top:14px"><div class="feedback__head">${icon("check")} Урок пройден</div></div>` : ""}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">
-        <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Закрепить на практике</button>
+        ${done ? "" : `<button class="btn btn--primary btn--lg" onclick="finishInteractiveLesson('${esc(ilesson.id)}')">${icon("check")} Я разобрался — завершить${ilesson.xp ? ` (+${ilesson.xp} XP)` : ""}</button>`}
+        <button class="btn ${done ? "btn--primary" : "btn--ghost"} btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Закрепить на практике</button>
         <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
       </div>
     </div>`;
+    try {
+      if (typeof MathVisualMount !== "undefined") MathVisualMount.mountWithin(root);
+    } catch (_) {}
     return;
   }
 
@@ -9735,9 +9797,21 @@ function screenInteractiveLesson(root) {
           <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Пока — закрепить на практике</button>
           <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
         </div>
-        <div class="ilesson-hero__note">Урок привязан к теме <b>${esc(topicName)}</b> (id: <span class="mono">${esc(String(skillId))}</span>). Как только он появится в <span class="mono">ILessons.BY_SKILL</span>, эта страница покажет его автоматически.</div>
+        <div class="ilesson-hero__note">Урок привязан к теме <b>${esc(topicName)}</b> (id: <span class="mono">${esc(String(skillId))}</span>). Как только он появится в каталоге предмета, страница покажет его автоматически.</div>
       </div>
     </div>`;
+}
+
+/* Завершение интерактивного урока из его экрана: XP — один раз,
+   повтор — без награды. Точка входа только через кнопку «Я разобрался». */
+function finishInteractiveLesson(ilessonId) {
+  let res = { firstCompletion: false, totalXp: 0 };
+  try { res = completeInteractiveLesson(ilessonId) || res; } catch (_) {}
+  try {
+    if (res.firstCompletion && res.totalXp > 0) toast(`+${res.totalXp} XP — интерактивный урок пройден`, "", "check");
+    else if (res.firstCompletion) toast("Интерактивный урок пройден", "", "check");
+  } catch (_) {}
+  try { render(); } catch (_) {}
 }
 
 /* ============================================================

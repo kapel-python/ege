@@ -16,6 +16,7 @@
 - ИИ: [docs/ai-providers.md](docs/ai-providers.md) (провайдеры, роутер, судья, failover, тиры, Responses API), [docs/ai-agent.md](docs/ai-agent.md) (персональный ИИ: цикл, инструменты, лента, печать, квоты), [docs/ai-limits.md](docs/ai-limits.md) (дневной бюджет проверок, антиабуз-ферма), [docs/quota-ledger.md](docs/quota-ledger.md) (журнал квот).
 - Деньги: [docs/subscription-plus.md](docs/subscription-plus.md) (Plus, checkout/webhook, гранты, гейты, waitlist).
 - Сочинения: [docs/essay-practice.md](docs/essay-practice.md) (один визит — одно сочинение), [docs/essay-check.md](docs/essay-check.md) (правила ФИПИ в коде, К7–К10, гейты, повтор, кэш/перепроверка, история).
+- Уроки: [docs/interactive-lessons.md](docs/interactive-lessons.md) (интерактивные визуальные уроки БЕТА: каталог → ilessons, API-срез, прогресс, XP).
 - Тесты: [docs/tests.md](docs/tests.md) (все команды `python3 test/*` / `node test/*`, индекс по группам; запускать из корня репозитория).
 
 ## How to change code

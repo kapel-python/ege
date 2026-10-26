@@ -321,6 +321,7 @@ const Store = {
       lessonErrorHistory: [], // {lessonId, stepId, skill, type, ts}
       lessonSessions: {}, // незавершённые data-driven уроки, чтобы шаг не терялся при выходе
       completedLessons: {}, // lessonId -> {ts}
+      completedILessons: {}, // ilessonId -> {ts}: интерактивные уроки (БЕТА)
       lessonAttempts: [], // фактические завершения уроков
       taskAttempts: [], // фактическая история ответов по заданиям
       diagnostics: [], // результаты диагностик пользователя
@@ -466,6 +467,7 @@ const Store = {
       // DataAPI.*ForAccess; фильтрация ниже относится только к видимым
       // skillStats/ежедневной выборке.
       this.state.completedLessons = preserveLearningState ? { ...completed } : {};
+      this.state.completedILessons = preserveLearningState ? safeObject(parsed.completedILessons) : {};
       this.state.lessonSessions = preserveLearningState ? { ...sessions } : {};
       this.state.lessonStepErrors = preserveLearningState ? safeObject(parsed.lessonStepErrors) : {};
       this.state.lessonErrorHistory = preserveLearningState ? safeArray(parsed.lessonErrorHistory) : [];
@@ -549,13 +551,15 @@ const Store = {
     if (this.detailsPromise) return this.detailsPromise;
     const qs = `?subject=${encodeURIComponent(this.subject || currentSubjectId())}`;
     this.detailsPromise = (async () => {
-      const [tasksPayload, lessonsPayload] = await Promise.all([
+      const [tasksPayload, lessonsPayload, ilessonsPayload] = await Promise.all([
         ApiClient.get("/api/catalog-tasks" + qs),
         ApiClient.get("/api/catalog-lessons" + qs),
+        ApiClient.get("/api/catalog-ilessons" + qs),
       ]);
       DataAPI.loadDetails({
         tasks: tasksPayload.tasks,
         lessons: lessonsPayload.lessons,
+        interactiveLessons: ilessonsPayload.interactiveLessons,
         visualAssets: tasksPayload.visualAssets,
         visualAudit: tasksPayload.visualAudit,
       });
@@ -956,7 +960,7 @@ const Store = {
     for (const key of ["taskAttempts", "lessonAttempts", "lessonErrorHistory", "diagnostics", "dailyHistory", "timeline"]) {
       merged[key] = unique([...(fresh[key] || []), ...(local[key] || [])]);
     }
-    for (const key of ["completedLessons", "missionsDone", "achievements"]) {
+    for (const key of ["completedLessons", "completedILessons", "missionsDone", "achievements"]) {
       merged[key] = Object.assign({}, fresh[key] || {}, local[key] || {});
     }
     merged.missionProgress = Object.assign({}, fresh.missionProgress || {});
@@ -1200,7 +1204,7 @@ const Store = {
     for (const key of settingKeys) if (changed(key)) settings[key] = snapshot[key];
     if (Object.keys(settings).length) await request("patch", "/api/settings", { settings });
     const domains = {};
-    const learningDomains = ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory", "hintLevels"];
+    const learningDomains = ["lessonSessions", "lessonStepErrors", "lessonErrorHistory", "lessonAttempts", "completedLessons", "completedILessons", "missionProgress", "missionsDone", "achievements", "bossesDefeated", "daily", "diagnostics", "activity", "forecastHistory", "hintLevels"];
     for (const key of learningDomains) {
       if (learningAvailable && changed(key)) domains[key] = snapshot[key];
     }
@@ -3433,6 +3437,38 @@ function lessonStepErrorsBySkill(skillId) {
   return Object.entries(safeObject(Store.state && Store.state.lessonStepErrors))
     .filter(([, v]) => v && String(v.skill) === String(skillId))
     .map(([key, v]) => ({ key, ...v }));
+}
+
+/* Интерактивный урок (БЕТА): завершение в один шаг — сцены статичны,
+   шагов с проверкой нет, поэтому попыток/сессий не ведём. Экономика:
+   плоский бонус xp из каталога, один раз (PK completed_ilessons на сервере
+   + флаг firstCompletion здесь). В теорию навыка (40%) не входит осознанно:
+   она по-прежнему только за классические уроки. */
+function completeInteractiveLesson(ilesson) {
+  const s = Store.state;
+  const ref = ilesson && typeof ilesson === "object" ? ilesson.id : ilesson;
+  const canonical = DataAPI.ilessonForAccess ? DataAPI.ilessonForAccess(ref) : DataAPI.ilesson(ref);
+  if (!s || !canonical || !subjectLearningAvailable() || !skillIsAccessible(canonical.skill || canonical.skillId)) {
+    return { firstCompletion: false, totalXp: 0 };
+  }
+  s.completedILessons = safeObject(s.completedILessons);
+  const ilessonId = String(canonical.id);
+  const firstCompletion = !s.completedILessons[ilessonId];
+  touchStreak();
+  if (!firstCompletion) {
+    addTimeline(`Интерактивный урок повторён: «${canonical.title}»`);
+    Store.save();
+    return { firstCompletion, totalXp: 0 };
+  }
+  const totalXp = Math.max(0, Number(canonical.xp) || 0);
+  s.completedILessons[ilessonId] = { ts: Date.now() };
+  if (totalXp) addXp(totalXp, "ilesson");
+  addTimeline(`Интерактивный урок пройден: «${canonical.title}»`);
+  bumpGuestSteps(GUEST_STEP_LESSON);
+  recordForecastSnapshot();
+  Store.save();
+  checkAchievements();
+  return { firstCompletion, totalXp };
 }
 
 function completeLesson(lesson, inputXp, result = {}) {

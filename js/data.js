@@ -195,6 +195,7 @@ const DataAPI = {
   catalog: null,
   _tasksFull: false,
   _lessonsFull: false,
+  _ilessonsFull: false,
   _subjects: null,
   _subject: null,
   _forecast: null,
@@ -333,6 +334,7 @@ const DataAPI = {
       skills,
       tasks,
       lessons,
+      interactiveLessons: dataArray(catalog.interactiveLessons),
       missions,
       bosses,
       achievements,
@@ -358,6 +360,11 @@ const DataAPI = {
 
     this._tasksFull = !tasks.some((task) => task && (task._stub || task.stub));
     this._lessonsFull = !lessons.some((lesson) => lesson && (lesson._meta || lesson.meta));
+    // В bootstrap интерактивные уроки всегда мета (без scenes): полные сцены
+    // приезжают только срезом /api/catalog-ilessons. Пустой список — уже
+    // «полон»: деталей ждать нечего.
+    this._ilessonsFull = !dataArray(catalog.interactiveLessons)
+      .some((item) => item && !Array.isArray(item.scenes));
     this._invalidateIndex();
 
     if (!Array.isArray(this.catalog.visualAssets)) this.catalog.visualAssets = [];
@@ -371,11 +378,12 @@ const DataAPI = {
   // Ленивая догрузка полных задач/уроков поверх summary-каталога.
   // Пустой/locked предмет не принимает «случайные» детали: это не даёт
   // summary-запросу или чужому ответу превратить заглушку в курс.
-  loadDetails({ tasks, lessons, visualAssets, visualAudit } = {}) {
+  loadDetails({ tasks, lessons, interactiveLessons, visualAssets, visualAudit } = {}) {
     if (!this.catalog) throw new Error("Catalog is not loaded");
     if (!this.isSubjectAvailable()) {
       this._tasksFull = true;
       this._lessonsFull = true;
+      this._ilessonsFull = true;
       this._invalidateIndex();
       return this;
     }
@@ -399,6 +407,15 @@ const DataAPI = {
         this._lessonsFull = true;
       }
     }
+    if (Array.isArray(interactiveLessons)) {
+      const usable = this._currentEntities(interactiveLessons)
+        .filter((item) => this._ilessonBelongsToCurrent(item) && !this._skillLocked(item.skill || item.skillId)
+          && Array.isArray(item.scenes) && item.scenes.length > 0);
+      if (usable.length || !interactiveLessons.length) {
+        this.catalog.interactiveLessons = usable;
+        this._ilessonsFull = true;
+      }
+    }
     if (Array.isArray(visualAssets)) this.catalog.visualAssets = visualAssets;
     if (visualAudit && typeof visualAudit === "object") this.catalog.visualAudit = visualAudit;
     this._invalidateIndex();
@@ -408,7 +425,7 @@ const DataAPI = {
   detailsReady() {
     if (!this.catalog) return false;
     if (!this.isSubjectAvailable()) return true;
-    return this._tasksFull && this._lessonsFull;
+    return this._tasksFull && this._lessonsFull && this._ilessonsFull;
   },
   tasksReady() {
     if (!this.catalog) return false;
@@ -420,11 +437,22 @@ const DataAPI = {
     if (!this.isSubjectAvailable()) return true;
     return this._lessonsFull;
   },
+  ilessonsReady() {
+    if (!this.catalog) return false;
+    if (!this.isSubjectAvailable()) return true;
+    return this._ilessonsFull;
+  },
 
   lessonStepsCount(lesson) {
     if (!lesson || typeof lesson !== "object") return 0;
     if (Array.isArray(lesson.steps)) return lesson.steps.length;
     return Math.max(0, dataFinite(lesson.stepsCount || lesson.steps_count));
+  },
+
+  ilessonScenesCount(ilesson) {
+    if (!ilesson || typeof ilesson !== "object") return 0;
+    if (Array.isArray(ilesson.scenes)) return ilesson.scenes.length;
+    return Math.max(0, dataFinite(ilesson.scenesCount || ilesson.scenes_count));
   },
 
   ready() { return !!this.catalog; },
@@ -458,6 +486,7 @@ const DataAPI = {
         && cat
         && cached.skillsSrc === cat.skills && cached.categoriesSrc === cat.categories
         && cached.tasksSrc === cat.tasks && cached.lessonsSrc === cat.lessons
+        && cached.ilessonsSrc === cat.interactiveLessons
         && cached.missionsSrc === cat.missions && cached.bossesSrc === cat.bosses) {
       return cached;
     }
@@ -554,6 +583,32 @@ const DataAPI = {
       if (!lessonsBySkillMap.has(sid)) lessonsBySkillMap.set(sid, []);
       lessonsBySkillMap.get(sid).push(l);
     }
+    // Интерактивные уроки (БЕТА): свой гейт — только доступность предмета,
+    // без привязки к features.lessons. Иначе предмет с lessons:false никогда
+    // не смог бы запустить визуальный формат. Мета без сцен (summary до
+    // деталей) видна, но в выборку не попадает — как у обычных уроков.
+    let ilessons = [];
+    if (subjectAvailable && cat) {
+      for (const item of this._currentEntities(cat.interactiveLessons)) {
+        if (!item || typeof item !== "object") continue;
+        const sid = dataId(item.skill || item.skillId);
+        if (!sid || !skillById.has(sid) || skillLocked.get(sid) !== false) continue;
+        if (this.ilessonScenesCount(item) <= 0) continue;
+        ilessons.push(item);
+      }
+    }
+    const ilessonById = new Map();
+    for (const l of ilessons) {
+      const id = dataId(l.id);
+      if (id && !ilessonById.has(id)) ilessonById.set(id, l);
+    }
+    const ilessonsBySkillMap = new Map();
+    for (const l of ilessons) {
+      const sid = dataId(l.skill || l.skillId);
+      if (!sid) continue;
+      if (!ilessonsBySkillMap.has(sid)) ilessonsBySkillMap.set(sid, []);
+      ilessonsBySkillMap.get(sid).push(l);
+    }
     let missions = [];
     if (feat.missions && cat) {
       for (const mission of this._currentEntities(cat.missions)) {
@@ -607,11 +662,13 @@ const DataAPI = {
       catalog: cat, subject,
       skillsSrc: cat && cat.skills, categoriesSrc: cat && cat.categories,
       tasksSrc: cat && cat.tasks, lessonsSrc: cat && cat.lessons,
+      ilessonsSrc: cat && cat.interactiveLessons,
       missionsSrc: cat && cat.missions, bossesSrc: cat && cat.bosses,
       subjectAvailable, feat,
       skills, categories, categoryById, skillById, skillLocked, availableSkills,
       tasksAll, taskById, practiceTasks, practiceBySkill, tasksBySkillMap,
       lessons, lessonById, lessonsBySkillMap,
+      ilessons, ilessonById, ilessonsBySkillMap,
       missions, missionById, bosses,
     };
     this._indexCache = idx;
@@ -834,6 +891,12 @@ const DataAPI = {
     if (!idx.subjectAvailable) return false;
     return idx.skillById.has(dataId(lesson.skill || lesson.skillId));
   },
+  _ilessonBelongsToCurrent(item) {
+    if (!item || typeof item !== "object") return false;
+    const idx = this._index();
+    if (!idx.subjectAvailable) return false;
+    return idx.skillById.has(dataId(item.skill || item.skillId));
+  },
   practiceTasks() {
     const idx = this._index();
     if (!idx.feat.practice) return [];
@@ -870,6 +933,28 @@ const DataAPI = {
     const idx = this._index();
     if (!wanted || idx.skillLocked.get(wanted) !== false) return [];
     return (idx.lessonsBySkillMap.get(wanted) || []).slice();
+  },
+  /* Интерактивные уроки (БЕТА): гейт — только доступность предмета, без
+     features.lessons (см. _index). Мета без сцен в выборку не попадает:
+     карточка/кнопка по такой записи вели бы на заглушку вместо урока. */
+  ilessons() {
+    if (!this.catalog || !this.isSubjectAvailable()) return [];
+    return this._index().ilessons.slice();
+  },
+  ilesson(id) {
+    return this._index().ilessonById.get(dataId(id)) || null;
+  },
+  ilessonsBySkill(skillId) {
+    const wanted = dataId(skillId);
+    const idx = this._index();
+    if (!wanted || idx.skillLocked.get(wanted) !== false) return [];
+    return (idx.ilessonsBySkillMap.get(wanted) || []).slice();
+  },
+  ilessonForAccess(idOrItem) {
+    const ref = idOrItem && typeof idOrItem === "object" ? idOrItem.id : idOrItem;
+    const item = this.ilesson(ref);
+    if (!item || !this.skillForAccess(item.skill || item.skillId)) return null;
+    return item;
   },
   bosses() {
     const idx = this._index();

@@ -58,6 +58,7 @@ DYNAMIC_MAP_SUFFIXES = (
     ".achievements",
     ".activity",
     ".bossesDefeated",
+    ".completedILessons",
     ".completedLessons",
     ".forecast",
     ".lessonSessions",

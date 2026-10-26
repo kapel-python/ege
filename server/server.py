@@ -3976,6 +3976,13 @@ CREATE TABLE IF NOT EXISTS lessons (
   id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id), title TEXT NOT NULL,
   xp INTEGER NOT NULL, metadata_json TEXT NOT NULL
 );
+/* Интерактивные (визуальные) уроки — БЕТА. Отдельная сущность от классических
+   пошаговых уроков: короткие сцены с визуалом вместо шагов с проверкой.
+   Сцены лежат в metadata_json (поле scenes), как steps у lessons. */
+CREATE TABLE IF NOT EXISTS ilessons (
+  id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id), title TEXT NOT NULL,
+  subtitle TEXT NOT NULL DEFAULT '', xp INTEGER NOT NULL, metadata_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS missions (
   id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id), title TEXT NOT NULL, description TEXT NOT NULL,
   xp INTEGER NOT NULL, difficulty INTEGER NOT NULL
@@ -4036,6 +4043,10 @@ CREATE TABLE IF NOT EXISTS lesson_sessions (
 CREATE TABLE IF NOT EXISTS completed_lessons (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', lesson_id TEXT NOT NULL REFERENCES lessons(id), completed_at TEXT NOT NULL,
   PRIMARY KEY(user_id, subject, lesson_id)
+);
+CREATE TABLE IF NOT EXISTS completed_ilessons (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', ilesson_id TEXT NOT NULL REFERENCES ilessons(id), completed_at TEXT NOT NULL,
+  PRIMARY KEY(user_id, subject, ilesson_id)
 );
 CREATE TABLE IF NOT EXISTS user_missions (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL DEFAULT 'profile_math', mission_id TEXT NOT NULL REFERENCES missions(id), progress INTEGER NOT NULL DEFAULT 0,
@@ -4587,6 +4598,7 @@ USER_ID_INDEXES = (
     ("lesson_error_history", "lesson_error_history"),
     ("lesson_sessions", "lesson_sessions"),
     ("completed_lessons", "completed_lessons"),
+    ("completed_ilessons", "completed_ilessons"),
     ("user_missions", "user_missions"), ("user_bosses", "user_bosses"),
     ("user_achievements", "user_achievements"),
     ("activity_history", "activity_history"), ("activity_events", "activity_events"),
@@ -7300,6 +7312,53 @@ def _upsert_catalog_lesson(conn: sqlite3.Connection, item: dict, subject: str) -
     )
 
 
+def _upsert_catalog_ilesson(conn: sqlite3.Connection, item: dict, subject: str) -> None:
+    """Интерактивный (визуальный) урок — БЕТА. Формат записи каталога:
+
+    {"id": "v-trig-01", "skill": "<skillId>", "title": "...",
+     "subtitle": "...", "xp": 30,
+     "scenes": [{"title": "...", "text": "...", "visual": {"kind": "html"|"svg", "html"|"svg": "<..."}}]}
+    Сцены хранятся целиком в metadata_json, как steps у lessons. Пустой
+    список сцен — не урок: такие записи пропускаем, роут покажет заглушку.
+    """
+    if not isinstance(item, dict) or not item.get("id") or not item.get("skill"):
+        return
+    item_id = str(item["id"])
+    _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
+    owner = conn.execute(
+        "SELECT s.subject FROM ilessons l JOIN skills s ON s.id=l.skill_id WHERE l.id=?", (item_id,)
+    ).fetchone()
+    if owner is not None and owner["subject"] != subject:
+        raise ValueError(f"catalog id {item_id!r} belongs to another subject")
+    scenes = item.get("scenes") if isinstance(item.get("scenes"), list) else []
+    scenes = [s for s in scenes if isinstance(s, dict) and str(s.get("text") or s.get("title") or "").strip()]
+    if not scenes:
+        # Запись без сцен — не урок: убираем ранее установленную строку, чтобы
+        # роут снова показывал заглушку. Чужой прогресс блокирует удаление
+        # (тот же контракт, что в _prune_removed_catalog_rows) — тогда строка
+        # остаётся вместе со старым содержимым.
+        try:
+            conn.execute("SAVEPOINT ilesson_prune_empty")
+            conn.execute("DELETE FROM ilessons WHERE id=?", (item_id,))
+            conn.execute("RELEASE ilesson_prune_empty")
+        except sqlite3.IntegrityError:
+            try:
+                conn.execute("ROLLBACK TO ilesson_prune_empty")
+                conn.execute("RELEASE ilesson_prune_empty")
+            except sqlite3.Error:
+                pass
+        return
+    conn.execute(
+        """INSERT INTO ilessons(id, skill_id, title, subtitle, xp, metadata_json)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET skill_id=excluded.skill_id, title=excluded.title,
+             subtitle=excluded.subtitle, xp=excluded.xp, metadata_json=excluded.metadata_json""",
+        (item_id, str(item["skill"]), str(item.get("title") or item_id),
+         str(item.get("subtitle") or ""), int(item.get("xp", 0)),
+         json.dumps({**item, "scenes": scenes}, ensure_ascii=False)),
+    )
+
+
 def _upsert_catalog_mission(conn: sqlite3.Connection, item: dict, subject: str) -> None:
     item_id = str(item["id"])
     _assert_catalog_reference(conn, "skills", item.get("skill"), subject)
@@ -7391,6 +7450,10 @@ def _install_subject_catalog(conn: sqlite3.Connection, catalog: dict, subject: s
         _upsert_catalog_task(conn, task, subject)
     for lesson in catalog.get("lessons") or []:
         _upsert_catalog_lesson(conn, lesson, subject)
+    # Интерактивные уроки — опциональный ключ: отсутствие = нет контента,
+    # роут #/ilesson показывает заглушку. Пустые записи без сцен пропускаются.
+    for ilesson in catalog.get("interactiveLessons") or []:
+        _upsert_catalog_ilesson(conn, ilesson, subject)
     for mission in catalog.get("missions") or []:
         _upsert_catalog_mission(conn, mission, subject)
     for boss in catalog.get("bosses") or []:
@@ -7412,10 +7475,11 @@ def _prune_removed_catalog_rows(conn: sqlite3.Connection, loaded: dict) -> None:
     keep = {table: {str(item.get("id")) for subject in loaded
                     for item in ((loaded.get(subject) or {}).get(key) or [])
                     if isinstance(item, dict) and item.get("id")}
-            for table, key in (("lessons", "lessons"), ("missions", "missions"),
+            for table, key in (("lessons", "lessons"), ("ilessons", "interactiveLessons"),
+                               ("missions", "missions"),
                                ("tasks", "tasks"), ("skills", "skills"),
                                ("topics", "categories"))}
-    for table in ("lessons", "missions", "tasks", "skills", "topics"):
+    for table in ("lessons", "ilessons", "missions", "tasks", "skills", "topics"):
         for row in conn.execute(f"SELECT id FROM {table}").fetchall():
             node = str(row["id"])
             if node in keep[table]:
@@ -7532,6 +7596,7 @@ def install_catalog(conn: sqlite3.Connection) -> None:
             "skills": _ids_of(subject, "skills"),
             "tasks": _ids_of(subject, "tasks"),
             "lessons": _ids_of(subject, "lessons"),
+            "ilessons": _ids_of(subject, "interactiveLessons"),
             "missions": _ids_of(subject, "missions"),
         }
 
@@ -7664,6 +7729,7 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
     live_skills = live.get("skills")
     live_tasks = live.get("tasks")
     live_lessons = live.get("lessons")
+    live_ilessons = live.get("ilessons")
     live_missions = live.get("missions")
 
     skill_rows = [r for r in conn.execute(
@@ -7730,6 +7796,35 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
         if not lesson_locked:
             lessons.append(lesson)
 
+    # Интерактивные уроки — БЕТА: в полный каталог едут только МЕТА (без
+    # сцен), как в summary. Полные сцены отдаёт /api/catalog-ilessons.
+    # Причина — контракт subject-contract: поля text/answer/solution/steps
+    # допустимы только внутри $.catalog.tasks[*] / $.catalog.lessons[*],
+    # а сцены несут text. Мета лёгкая, ограничений на неё нет.
+    interactive_lessons = []
+    for r in conn.execute("SELECT id, skill_id, title, subtitle, xp, metadata_json FROM ilessons ORDER BY id"):
+        if r["skill_id"] not in available_skill_ids:
+            continue
+        if live_ilessons is not None and r["id"] not in live_ilessons:
+            continue
+        try:
+            stored = json.loads(r["metadata_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(stored, dict):
+            continue
+        _, ilesson_locked, _ = _catalog_item_state(stored)
+        if ilesson_locked:
+            continue
+        scenes = stored.get("scenes") if isinstance(stored.get("scenes"), list) else []
+        scenes = [s for s in scenes if isinstance(s, dict)]
+        if not scenes:
+            continue
+        interactive_lessons.append({
+            "id": r["id"], "skill": r["skill_id"], "title": r["title"],
+            "xp": r["xp"], "scenesCount": len(scenes), "_meta": True,
+        })
+
     # Один запрос вместо N+1 (по одному SELECT на миссию): каталог собирается
     # на каждый bootstrap, и лишний round-trip в SQLite на миссию — чистое
     # время ожидания безо всякой пользы.
@@ -7784,7 +7879,8 @@ def _build_catalog_payload(conn: sqlite3.Connection, subject: str) -> dict:
         "subjectInfo": subject_info, "status": subject_info["status"],
         "locked": subject_info["locked"], "comingSoon": subject_info["comingSoon"],
         "forecast": subject_info["forecast"], "categories": categories, "skills": skills,
-        "tasks": tasks, "lessons": lessons, "missions": missions, "bosses": bosses,
+        "tasks": tasks, "lessons": lessons, "interactiveLessons": interactive_lessons,
+        "missions": missions, "bosses": bosses,
         "achievements": achievements, "daily": daily, "goals": goals,
         "diagnosticTasks": diagnostics, "visualAssets": visual_assets,
         "visualAudit": visual_audit,
@@ -7855,8 +7951,50 @@ def catalog_summary_payload(conn: sqlite3.Connection, subject: str | None = None
         "lessons": [{"id": le["id"], "skill": le["skill"], "title": le["title"],
                      "xp": le.get("xp", 0),
                      "stepsCount": len(le.get("steps") or []), "_meta": True}
-                    for le in full["lessons"]],
+                     for le in full["lessons"]],
+        "interactiveLessons": full["interactiveLessons"],
     }
+
+
+def catalog_ilessons_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
+    """Полные интерактивные уроки со сценами (ленивая подгрузка).
+
+    Отдельный срез, а не часть catalog_payload: сцены несут text, а контракт
+    subject-contract разрешает content-поля только внутри
+    $.catalog.tasks[*] / $.catalog.lessons[*]. Здесь text легален — это
+    details-эндпоинт, а не bootstrap.
+    """
+    full = catalog_payload(conn, subject)
+    # Сцены лежат в БД (metadata_json), в полном каталоге — только мета.
+    resolved = resolve_subject(subject)
+    subject_locked = subject_is_locked(resolved)
+    live = _CATALOG_LIVE_IDS.get(resolved) or {}
+    live_ilessons = live.get("ilessons")
+    available = set() if subject_locked else _subject_skill_ids(conn, resolved)
+    out = []
+    for r in conn.execute("SELECT id, skill_id, title, subtitle, xp, metadata_json FROM ilessons ORDER BY id"):
+        if r["skill_id"] not in available:
+            continue
+        if live_ilessons is not None and r["id"] not in live_ilessons:
+            continue
+        try:
+            stored = json.loads(r["metadata_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(stored, dict):
+            continue
+        _, locked, _ = _catalog_item_state(stored)
+        if locked:
+            continue
+        scenes = stored.get("scenes") if isinstance(stored.get("scenes"), list) else []
+        scenes = [s for s in scenes if isinstance(s, dict)]
+        if not scenes:
+            continue
+        out.append({"id": r["id"], "skill": r["skill_id"], "title": r["title"],
+                    "subtitle": r["subtitle"], "xp": r["xp"], "scenes": scenes})
+    return {"subject": full["subject"], "status": full["status"],
+            "locked": full["locked"], "comingSoon": full["comingSoon"],
+            "interactiveLessons": out}
 
 
 def catalog_tasks_payload(conn: sqlite3.Connection, subject: str | None = None) -> dict:
@@ -7884,7 +8022,12 @@ def catalog_slice_etag(payload: dict) -> bytes:
     (install_catalog сбрасывает оба). Ключ кэша среза — общий ключ каталога
     плюс имя среза, поэтому между предметами валидаторы не путаются.
     """
-    slice_name = "tasks" if "tasks" in payload else "lessons"
+    if "tasks" in payload:
+        slice_name = "tasks"
+    elif "interactiveLessons" in payload:
+        slice_name = "ilessons"
+    else:
+        slice_name = "lessons"
     key = (slice_name, _catalog_cache_key())
     cached = _CATALOG_CACHE["slices"].get(key)
     if cached is not None and cached[0] is payload:
@@ -10823,7 +10966,7 @@ def default_state(conn: sqlite3.Connection, user_id: int | None, subject: str | 
             "totalSolved": 0, "totalCorrect": 0, "totalTimeSec": 0, "hintsUsed": 0, "hintLevels": {"1": 0, "2": 0, "3": 0},
             "correctSeries": 0, "bestSeries": 0, "errorsResolved": 0, "bossesDefeated": [], "missionsDone": {}, "missionProgress": {},
             "achievements": {}, "errors": [], "lessonStepErrors": {}, "lessonErrorHistory": [], "lessonSessions": {},
-            "completedLessons": {}, "lessonAttempts": [], "taskAttempts": [], "diagnostics": [], "forecastHistory": [],
+            "completedLessons": {}, "completedILessons": {}, "lessonAttempts": [], "taskAttempts": [], "diagnostics": [], "forecastHistory": [],
             "xpAdjustments": [], "activity": {},
             "timeline": [], "daily": {"date": None, "solved": 0, "done": False, "taskIds": []}, "dailyHistory": [], "skillStats": skills}
 
@@ -10883,6 +11026,7 @@ def read_state(conn: sqlite3.Connection, user_id: int | None, subject: str | Non
     live_skills = live.get("skills")
     live_tasks = live.get("tasks")
     live_lessons = live.get("lessons")
+    live_ilessons = live.get("ilessons")
     live_missions = live.get("missions")
     in_live = lambda ids, node: ids is None or node in ids
     for r in conn.execute("SELECT * FROM user_progress WHERE user_id=? AND subject=?", (user_id, subject)):
@@ -10903,6 +11047,9 @@ def read_state(conn: sqlite3.Connection, user_id: int | None, subject: str | Non
         state["lessonErrorHistory"].append({"id": r["client_id"] or None, "lessonId": r["lesson_id"], "stepId": r["step_id"], "skill": r["skill_id"], "type": r["error_type"], "ts": timestamp_value(r["created_at"])})
     for r in conn.execute("SELECT lesson_id, session_json FROM lesson_sessions WHERE user_id=? AND subject=? ORDER BY lesson_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)): state["lessonSessions"][r["lesson_id"]] = json.loads(r["session_json"])
     for r in conn.execute("SELECT lesson_id, completed_at FROM completed_lessons WHERE user_id=? AND subject=? ORDER BY lesson_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)): state["completedLessons"][r["lesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
+    for r in conn.execute("SELECT ilesson_id, completed_at FROM completed_ilessons WHERE user_id=? AND subject=? ORDER BY ilesson_id LIMIT ?", (user_id, subject, MAX_STATE_DICT)):
+        if not in_live(live_ilessons, r["ilesson_id"]): continue
+        state["completedILessons"][r["ilesson_id"]] = {"ts": timestamp_value(r["completed_at"])}
     for r in conn.execute("SELECT * FROM lesson_attempts WHERE user_id=? AND subject=? ORDER BY id DESC LIMIT 1000", (user_id, subject)):
         keys = r.keys()
         state["lessonAttempts"].append({"id": r["client_id"] if "client_id" in keys and r["client_id"] else None, "lessonId": r["lesson_id"], "completed": bool(r["completed"]), "firstCompletion": bool(r["first_completion"]), "xp": r["xp"], "wrongAttempts": r["wrong_attempts"], "durationSec": r["duration_sec"], "ts": timestamp_value(r["created_at"])})
@@ -11299,6 +11446,9 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
     lesson_ids = {str(r["id"]) for r in conn.execute(
         "SELECT l.id, l.skill_id FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (subject,)
     ) if str(r["skill_id"]) in valid_skills}
+    ilesson_ids = {str(r["id"]) for r in conn.execute(
+        "SELECT l.id, l.skill_id FROM ilessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (subject,)
+    ) if str(r["skill_id"]) in valid_skills}
     mission_ids = {str(r["id"]) for r in conn.execute(
         "SELECT m.id, m.skill_id FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (subject,)
     ) if str(r["skill_id"]) in valid_skills}
@@ -11312,7 +11462,8 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
         ("diagnostics", MAX_DIAGNOSTICS), ("forecastHistory", MAX_FORECAST_HISTORY),
         ("bossesDefeated", MAX_BOSSES), ("activity", MAX_ACTIVITY_DAYS),
         ("lessonStepErrors", MAX_STATE_DICT), ("lessonSessions", MAX_STATE_DICT),
-        ("completedLessons", MAX_STATE_DICT), ("missionProgress", MAX_STATE_DICT),
+        ("completedLessons", MAX_STATE_DICT), ("completedILessons", MAX_STATE_DICT),
+        ("missionProgress", MAX_STATE_DICT),
         ("missionsDone", MAX_STATE_DICT), ("achievements", MAX_STATE_DICT),
         ("hintLevels", 16),
         ("deletedLessonSessions", MAX_STATE_DICT), ("deletedLessonStepErrors", MAX_STATE_DICT),
@@ -11389,6 +11540,12 @@ def patch_state_domains(conn: sqlite3.Connection, user_id: int, subject: str, do
                 ts = value.get("ts") if isinstance(value, dict) else None
                 conn.execute("INSERT OR IGNORE INTO completed_lessons(user_id,subject,lesson_id,completed_at) VALUES(?,?,?,?)", (user_id, subject, lesson_id, ts or now_iso()))
         changed.append("completedLessons")
+    if "completedILessons" in domains and isinstance(domains["completedILessons"], dict):
+        for ilesson_id, value in domains["completedILessons"].items():
+            if ilesson_id in ilesson_ids:
+                ts = value.get("ts") if isinstance(value, dict) else None
+                conn.execute("INSERT OR IGNORE INTO completed_ilessons(user_id,subject,ilesson_id,completed_at) VALUES(?,?,?,?)", (user_id, subject, ilesson_id, ts or now_iso()))
+        changed.append("completedILessons")
     if "missionProgress" in domains and isinstance(domains["missionProgress"], dict):
         done = domains.get("missionsDone") if isinstance(domains.get("missionsDone"), dict) else {}
         for mission_id, value in domains["missionProgress"].items():
@@ -11717,6 +11874,7 @@ def streak_activity_dates(conn: sqlite3.Connection, user_id: int, subject: str) 
                            ("diagnostics", "created_at"),
                            ("lesson_attempts", "created_at"),
                            ("completed_lessons", "completed_at"),
+                           ("completed_ilessons", "completed_at"),
                            ("lesson_error_history", "created_at"),
                            ("lesson_step_errors", "last_at"),
                            ("essay_submissions", "created_at")):
@@ -12791,6 +12949,8 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     open_errors = one("SELECT COUNT(*) AS c FROM user_errors WHERE resolved=0")["c"]
     completed_lessons = one("SELECT COUNT(*) AS c FROM completed_lessons")["c"]
     lessons_total = one("SELECT COUNT(*) AS c FROM lessons")["c"]
+    completed_ilessons = one("SELECT COUNT(*) AS c FROM completed_ilessons")["c"]
+    ilessons_total = one("SELECT COUNT(*) AS c FROM ilessons")["c"]
     missions_done = one("SELECT COUNT(*) AS c FROM user_missions WHERE completed_at IS NOT NULL")["c"]
     bosses_defeated = one("SELECT COUNT(*) AS c FROM user_bosses")["c"]
 
@@ -12837,6 +12997,7 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
     catalog = {
         "tasks": one("SELECT COUNT(*) AS c FROM tasks")["c"],
         "lessons": lessons_total,
+        "ilessons": ilessons_total,
         "missions": one("SELECT COUNT(*) AS c FROM missions")["c"],
         "bosses": one("SELECT COUNT(*) AS c FROM bosses")["c"],
         "skills": one("SELECT COUNT(*) AS c FROM skills")["c"],
@@ -12869,7 +13030,8 @@ def admin_overview(conn: sqlite3.Connection, days: int = 14) -> dict:
                      "accuracy": round(100 * stats["correct"] / solved, 1) if solved else None,
                      "timeSecTotal": round(stats["time_sec"]), "hintsUsed": stats["hints"],
                      "attemptsToday": attempts_today, "openErrors": open_errors,
-                     "completedLessons": completed_lessons, "missionsDone": missions_done,
+                     "completedLessons": completed_lessons, "completedILessons": completed_ilessons,
+                     "missionsDone": missions_done,
                      "bossesDefeated": bosses_defeated},
         "activity": activity,
         "leaders": leaders,
@@ -13175,6 +13337,8 @@ def admin_user_detail(conn: sqlite3.Connection, user_id: int) -> dict | None:
             "skillsTotal": conn.execute("SELECT COUNT(*) AS c FROM skills WHERE subject=?", (detail_subject,)).fetchone()["c"],
             "lessonsCompleted": conn.execute("SELECT COUNT(*) AS c FROM completed_lessons WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()["c"],
             "lessonsTotal": conn.execute("SELECT COUNT(*) AS c FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (detail_subject,)).fetchone()["c"],
+            "ilessonsCompleted": conn.execute("SELECT COUNT(*) AS c FROM completed_ilessons WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()["c"],
+            "ilessonsTotal": conn.execute("SELECT COUNT(*) AS c FROM ilessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (detail_subject,)).fetchone()["c"],
             "missionsDone": conn.execute("SELECT COUNT(*) AS c FROM user_missions WHERE user_id=? AND subject=? AND completed_at IS NOT NULL", (user_id, detail_subject)).fetchone()["c"],
             "bossesDefeated": conn.execute("SELECT COUNT(*) AS c FROM user_bosses WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()["c"],
             "achievements": conn.execute("SELECT COUNT(*) AS c FROM user_achievements WHERE user_id=? AND subject=?", (user_id, detail_subject)).fetchone()["c"],
@@ -13389,6 +13553,7 @@ def admin_reset(conn: sqlite3.Connection, user_id: int, target: str) -> dict:
         "all-progress": {
             "tables": ["user_progress", "user_hint_levels", "user_errors", "task_attempts", "lesson_attempts",
                        "lesson_step_errors", "lesson_error_history", "lesson_sessions", "completed_lessons",
+                       "completed_ilessons",
                        "user_missions", "user_bosses", "user_achievements", "activity_history",
                        "forecast_history", "daily_progress", "timeline", "diagnostics",
                        # Без essay_submissions «весь прогресс» оставлял ученику
@@ -13562,6 +13727,8 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     essay_scores = essay_ready_scores(conn, user_id, derive_subject) if user_id is not None else {}
     lessons_xp = {r["id"]: r["xp"] for r in conn.execute(
         "SELECT l.id AS id, l.xp AS xp FROM lessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (derive_subject,))}
+    ilessons_xp = {r["id"]: r["xp"] for r in conn.execute(
+        "SELECT l.id AS id, l.xp AS xp FROM ilessons l JOIN skills s ON s.id=l.skill_id WHERE s.subject=?", (derive_subject,))}
     missions_xp = {r["id"]: r["xp"] for r in conn.execute(
         "SELECT m.id AS id, m.xp AS xp FROM missions m JOIN skills s ON s.id=m.skill_id WHERE s.subject=?", (derive_subject,))}
     bosses_xp = {r["id"]: r["xp"] for r in conn.execute(
@@ -13696,6 +13863,12 @@ def derive_stats(conn: sqlite3.Connection, state: dict, user_id: int | None = No
     for lesson_id in completed_lessons:
         if lesson_id in lessons_xp:
             xp += lessons_xp[lesson_id]
+    # Интерактивные уроки — тот же анти-фарм-принцип: XP платится один раз за
+    # запись в completedILessons. В теорию навыка (40%) не входят — она
+    # по-прежнему только за классические уроки; интерактив даёт плоский бонус.
+    for ilesson_id in set((state.get("completedILessons") or {}).keys()):
+        if ilesson_id in ilessons_xp:
+            xp += ilessons_xp[ilesson_id]
     # XP за шаги уроков: берём из первой попытки с firstCompletion, но только
     # если урок реально завершён по completedLessons. Сумма обрезана потолком
     # из каталога (сумма step.xp) — присланный сверху steps_xp без потолка
@@ -17301,7 +17474,8 @@ class Handler(BaseHTTPRequestHandler):
             # (summary, как bootstrap-lite) + состояние нового предмета —
             # клиент просто перерисовывается, ничего не мержит. Тяжёлые
             # тексты заданий и шаги уроков догружаются лениво через
-            # /api/catalog-tasks + /api/catalog-lessons (см. ensureDetails),
+            # /api/catalog-tasks + /api/catalog-lessons + /api/catalog-ilessons
+            # (см. ensureDetails),
             # поэтому клик по предмету не виснет на синхронном скачивании
             # и парсинге ~300 КБ полного каталога.
             if self.api_rate_limited(): return
@@ -18925,6 +19099,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if path == "/api/catalog-lessons":
                     payload = catalog_lessons_payload(conn, req_subject)
+                    self.send_json(payload, cache_control="private, no-cache",
+                                   body_etag=catalog_slice_etag(payload))
+                    return
+                if path == "/api/catalog-ilessons":
+                    payload = catalog_ilessons_payload(conn, req_subject)
                     self.send_json(payload, cache_control="private, no-cache",
                                    body_etag=catalog_slice_etag(payload))
                     return

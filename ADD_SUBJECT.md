@@ -107,7 +107,8 @@ id задания этого же каталога, без дублей) и `fea
 
 Больше ничего в backend менять не нужно: `/api/subjects`,
 `/api/bootstrap`, `/api/bootstrap-lite`, `/api/catalog-tasks`,
-`/api/catalog-lessons`, `/api/status`, `/api/subject`, доменные writes,
+`/api/catalog-lessons`, `/api/catalog-ilessons` (интерактивные уроки,
+см. `docs/interactive-lessons.md`), `/api/status`, `/api/subject`, доменные writes,
 `423 Locked` для учебных записей locked-предмета, `PATCH /api/settings`
 (разрешён и для locked), subject-aware admin (`users`, `user_detail`,
 `update_profile`, `grant_xp`, `reset`) — всё generic.
@@ -181,6 +182,10 @@ ready-каталог: одна тема, практика без уроков)
 - `lessons`: `{id, skill, title, xp, steps: [{id, type, title, text,
   ...}]}`. Типы шагов: `EXPLANATION`, `FOCUS`, `ACTION`, `VALIDATION`,
   `FEEDBACK` и др. (см. `test/deeplinks.js`).
+- `interactiveLessons` (опционально): `[{id, skill, title, subtitle, xp,
+  scenes: [{title, text, visual?}]}]` — интерактивные визуальные уроки
+  БЕТА (полный контракт — `docs/interactive-lessons.md`). Отсутствие
+  ключа = нет контента, везде заглушка. Запись без сцен пропускается.
 - `missions`: `{id, skill, title, desc, tasks: [taskIds], xp, diff}`.
   Каждый `taskId` обязан существовать в этом же предмете.
 - `bosses`: `{id, cat, title, desc, size, xp, unlockAt}`.
@@ -242,7 +247,8 @@ registry-driven, отдельных веток под предметы нет:
 - `DataAPI`: реестр (`subjects`), нормализация каталога, доступность
   (`isSubjectAvailable`/`isSubjectLocked`), учебные accessors
   (`availableSkills()`, `*ForAccess()`), `practiceTasks()`, `lessons()`,
-  `missions()`, `bosses()`, `achievements()`, `daily()`, `goals()`,
+  `ilessons()`, `ilessonsBySkill()`, `missions()`, `bosses()`,
+  `achievements()`, `daily()`, `goals()`,
   `diagnosticTasks()`, `forecastConfig()`. Locked-метаданные видны через
   `skills()/categories()`, учебные селекторы закрыты.
 - `Store` (`js/state.js`): subject-scoped состояние, онбординг,
@@ -293,6 +299,7 @@ registry-driven, отдельных веток под предметы нет:
 1. Скопировать `test/russian-subject.py` → `test/<id>-subject.py`:
    проверка `/api/subjects` (id/status/locked/features),
    `/api/bootstrap`, `/api/catalog-tasks`, `/api/catalog-lessons`,
+   `/api/catalog-ilessons` (пустой список без контента),
    изоляция переключения туда-обратно, `423` на учебную запись locked,
    нулевые counts в `/api/status`.
 2. Скопировать `test/russian-subject.js` → `test/<id>-subject.js`:
@@ -320,7 +327,8 @@ registry-driven, отдельных веток под предметы нет:
    `metadata`; `SUBJECTS` не редактируется.
 2. Каталог: `status: "ready"`, снять `locked` с категории/скиллов,
    заполнить `tasks/lessons/missions/bosses/achievements/daily/goals/
-   diagnosticTasks` реальными данными.
+   diagnosticTasks` реальными данными (`interactiveLessons` — по желанию,
+   см. `docs/interactive-lessons.md`).
 3. Публичные страницы: перевести бейджи/тексты с «скоро» на «доступно».
 4. Тесты: перевести assertions с locked на ready; ориентир — parity-блок
    для `profile_math`/`basic_math` в `test/russian-subject.js`.
