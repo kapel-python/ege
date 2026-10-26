@@ -45,6 +45,7 @@ const ICONS = {
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
   pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/><path d="M5 16l.7 1.8L7.5 18.5l-1.8.7L5 21l-.7-1.8L2.5 18.5l1.8-.7L5 16z"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>',
 };
 
@@ -2156,7 +2157,7 @@ const NEEDS_DETAILS = new Set(["session", "practice", "boss", "daily", "review",
    На мобильном в нём не показывается нижняя навигация, а на всех
    устройствах скрывается футер — это не список с выбором раздела,
    а непрерывная работа над конкретным заданием. */
-const TASK_FOCUS_ROUTES = new Set(["session", "practice", "boss", "daily", "review", "lesson"]);
+const TASK_FOCUS_ROUTES = new Set(["session", "practice", "boss", "daily", "review", "lesson", "ilesson"]);
 
 /* Маршруты с живой сессией: перезагрузка восстанавливает место, а не
    сбрасывает на список. */
@@ -2168,7 +2169,7 @@ const SESSION_ROUTES = new Set(["session", "practice", "boss", "daily", "review"
    (guest-ветка Store). Ошибки/статистика/сочинения исключены: им нечего
    показать без записей пользователя. */
 const PUBLIC_TASK_ROUTES = new Set(["skill", "path", "training", "session",
-  "practice", "boss", "daily", "review", "lesson", "trials"]);
+  "practice", "boss", "daily", "review", "lesson", "ilesson", "trials"]);
 
 /* Плашка публичного режима: видна, пока человек решает без регистрации.
    Кнопка ведёт в обычный онбординг (предмет уже предустановлен), после
@@ -2588,6 +2589,7 @@ async function render() {
     daily: screenSession,
     review: screenSession,
     lesson: screenLesson,
+    ilesson: screenInteractiveLesson,
     errors: screenErrors,
     trials: screenTrials,
     stats: screenStats,
@@ -2637,6 +2639,7 @@ const ROUTE_TITLES = {
   dashboard: "Главная", path: "Путь", skill: "Тема", training: "Тренировка",
   session: "Тренировка", practice: "Практика", boss: "Босс-испытание",
   daily: "Ежедневная задача", review: "Повторение ошибок", lesson: "Урок",
+  ilesson: "Интерактивный урок",
   errors: "Ошибки", trials: "Испытания", stats: "Статистика", essays: "Мои сочинения", ai: "ИИ", profile: "Профиль",
   login: "Вход", register: "Регистрация", subject: "Выбор предмета",
 };
@@ -2674,6 +2677,7 @@ function updateDocumentTitle(route) {
 const TOPIC_LOCKED_VALUES = new Set(["locked", "unavailable", "disabled", "hidden"]);
 const SUBJECT_CONTENT_ROUTES = new Set([
   "training", "session", "practice", "boss", "daily", "review", "lesson",
+  "ilesson",
   "errors", "trials", "stats", "essays",
 ]);
 
@@ -3163,7 +3167,7 @@ function screenSubjectUnavailable(root, locked = false, route = null) {
 // показываем заглушку «Материалы пока готовятся».
 const EMPTY_SUBJECT_ROUTES = new Set([
   "path", "skill", "training", "session", "practice", "boss", "daily",
-  "review", "lesson", "errors", "trials", "stats", "essays",
+  "review", "lesson", "ilesson", "errors", "trials", "stats", "essays",
 ]);
 
 function subjectSwitcherHTML() {
@@ -3500,7 +3504,7 @@ function screenEmptySubject(root, route = null) {
 function navRouteForRoute(route) {
   const mapped = route === "practice" ? "training"
     : route === "boss" || route === "daily" || route === "review" ? "trials"
-    : route === "skill" || route === "lesson" || route === "essays" ? "path" : route;
+    : route === "skill" || route === "lesson" || route === "ilesson" || route === "essays" ? "path" : route;
   // Прямая ссылка на закрытый контент не должна оставлять меню без активного
   // пункта. Если вычисленный пункт скрыт урезанным chrome (пустой предмет без
   // единой темы) — подсвечиваем карту тем. У locked-предмета с темами chrome
@@ -5280,15 +5284,23 @@ function openSkillModal(skillId) {
     <div class="skill-modal__actions">
       ${(() => {
         const bank = asSafeArray(DataAPI.practiceTasksBySkill(skillId));
+        // Интерактивный (визуальный) урок — отдельная сущность от классики:
+        // привязан к ТЕМЕ (skillId), а не к записи каталога, поэтому виден
+        // всегда, даже пока урока нет: роут #/ilesson/<skillId> сам покажет
+        // красивую заглушку вместо урока. Цвет — изумрудный (не фиолетовый
+        // primary классики): две учебные кнопки не спорят между собой.
+        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>${icon("spark")} Интерактивный урок</button>`;
         // Тема из одних сочинений (урока нет и не будет — там только практика):
         // главная кнопка ведёт в практику сочинений, а не в несуществующий
         // урок. Сочинения узнаём по типу заданий; в лёгком каталоге типа нет
         // (стабы), тогда это обычная «Практика» — маршрутизация всё равно
         // верная: startSkillPractice после деталей выберет визит сочинения.
         if (!lessons.length && !mission && bank.length && skillIsEssayOnly(skillId)) {
-          return `<button class="btn btn--primary" onclick="closeModal();startSkillPractice('${esc(skillId)}')">${icon("pen")} Написать сочинение</button>`;
+          return `<button class="btn btn--primary" onclick="closeModal();startSkillPractice('${esc(skillId)}')">${icon("pen")} Написать сочинение</button>`
+            + visualBtn;
         }
         return `${lessons.length ? `<button class="btn btn--primary" onclick="closeModal();Lesson.start('${esc(lessons[0].id)}')">${icon("bulb")} ${Store.state.completedLessons && Store.state.completedLessons[lessons[0].id] ? "Повторить урок" : "Пройти урок"}</button>` : `<span class="stat-label">Для этой темы урок пока не добавлен.</span>`}`
+          + visualBtn
           + `${mission ? `<button class="btn ${lessons.length ? "btn--soft" : "btn--primary"}" onclick="closeModal();startMission('${esc(mission.id)}')">${icon("target")} Практика</button>` : ""}`
           + `${!mission && bank.length ? `<button class="btn btn--ghost" onclick="closeModal();startSkillPractice('${esc(skillId)}')">Практика</button>` : ""}`
           + `${!mission && !bank.length ? `<span class="stat-label">Заданий в банке пока нет.</span>` : ""}`;
@@ -9630,6 +9642,102 @@ function lessonFinish() {
       </div>
     </div>`;
   restoreChromeAfterResult(resultRoute);
+}
+
+/* ============================================================
+   Screen: Интерактивный (визуальный) урок — БЕТА.
+   Универсальный роут #/ilesson/<skillId>: привязан к ТЕМЕ, а не к записи
+   каталога, поэтому работает для всех тем сразу.
+   - ILessons.get(skillId) вернул урок → рендерим сцены урока;
+   - иначе → красивая заглушка «урок пока не добавлен» (а не модалка).
+   Будущие уроки добавляются только в js/interactive-lessons.js
+   (ILessons.BY_SKILL) — здесь править ничего не нужно.
+   ============================================================ */
+
+/* Страховка: если js/interactive-lessons.js не загрузился (кэш, блок),
+   кнопка всё равно ведёт на тот же роут — заглушку отрисует сам экран. */
+if (typeof openInteractiveLesson !== "function") {
+  var openInteractiveLesson = function (skillId) {
+    const id = String(skillId == null ? "" : skillId).trim();
+    if (!id) return;
+    try { closeModal(); } catch (_) {}
+    try { go("ilesson", id); } catch (_) { try { location.hash = "#/ilesson/" + encodeURIComponent(id); } catch (_) {} }
+  };
+}
+
+function screenInteractiveLesson(root) {
+  const skillId = (typeof routeParam === "function" ? routeParam() : "");
+  const sk = (typeof subjectSkillById === "function" ? subjectSkillById(skillId) : null)
+    || (typeof DataAPI !== "undefined" && DataAPI.skill ? DataAPI.skill(skillId) : null);
+  const ilesson = (typeof ILessons !== "undefined" && ILessons.get ? ILessons.get(skillId) : null);
+  const topicName = sk ? topicDisplayName(sk) : skillId;
+  let categoryName = "Темы предмета";
+  try {
+    const cat = sk ? topicCategory(sk) : null;
+    if (cat) categoryName = subjectDisplayName(cat);
+  } catch (_) {}
+  const ege = (sk && (sk.ege || sk.examNumber)) || "тема экзамена";
+
+  if (ilesson) {
+    const scenes = ilesson.scenes;
+    root.innerHTML = `
+    <div class="session-wrap lesson-wrap ilesson-wrap">
+      <div class="session-head">
+        <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
+        <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
+        <div class="session-head__progress mono">${esc(String(skillId))}</div>
+      </div>
+      <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+      ${ilesson.subtitle ? `<div class="page-sub" style="margin-top:6px">${esc(ilesson.subtitle)}</div>` : ""}
+      ${scenes.map((scene, i) => `
+        <div class="card lesson-card" style="margin-top:12px">
+          <div class="lesson-step-label">Шаг ${i + 1} из ${scenes.length}</div>
+          ${scene.title ? `<div class="lesson-title">${esc(scene.title)}</div>` : ""}
+          <div class="lesson-body"><div class="task-card__text lesson-text">${esc(scene.text || "")}</div></div>
+          ${scene.visual && scene.visual.html ? `<div class="ilesson-visual">${scene.visual.html}</div>` : ""}
+          ${scene.visual && scene.visual.svg ? `<div class="ilesson-visual">${scene.visual.svg}</div>` : ""}
+        </div>`).join("")}
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">
+        <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Закрепить на практике</button>
+        <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Заглушка: урока пока нет. Тот же визуальный язык, что у будущего урока
+  // (шапка, БЕТА-бейдж, карточка), чтобы переход не выглядел «битой» ссылкой.
+  root.innerHTML = `
+    <div class="session-wrap lesson-wrap ilesson-wrap">
+      <div class="session-head">
+        <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
+        <div class="session-head__title">${icon("spark")} Интерактивный урок <span class="btn__beta btn__beta--static">БЕТА</span></div>
+        <div class="session-head__progress mono">${esc(ege)}</div>
+      </div>
+      <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+      <div class="ilesson-hero">
+        <div class="ilesson-hero__art" aria-hidden="true">
+          <svg viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="46" stroke="currentColor" stroke-width="3" opacity="0.35"/>
+            <circle cx="60" cy="60" r="30" stroke="currentColor" stroke-width="3" opacity="0.6"/>
+            <circle cx="60" cy="60" r="10" fill="currentColor" opacity="0.85"/>
+            <path d="M60 14v14M60 92v14M14 60h14M92 60h14" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+          </svg>
+        </div>
+        <div class="ilesson-hero__title">${esc(topicName)}: визуальный урок скоро появится</div>
+        <div class="ilesson-hero__sub">Это будет короткий интерактивный разбор темы — с картинками и шагами, а не длинный текст. Мы уже готовим первые уроки (тригонометрия и другие темы).</div>
+        <div class="ilesson-hero__steps">
+          <div class="ilesson-hero__step"><b>1</b><span>Короткие сцены вместо простыни текста</span></div>
+          <div class="ilesson-hero__step"><b>2</b><span>Визуал: схемы и интерактив прямо в уроке</span></div>
+          <div class="ilesson-hero__step"><b>3</b><span>Сразу в практику по этой теме</span></div>
+        </div>
+        <div class="ilesson-hero__actions">
+          <button class="btn btn--primary btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Пока — закрепить на практике</button>
+          <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
+        </div>
+        <div class="ilesson-hero__note">Урок привязан к теме <b>${esc(topicName)}</b> (id: <span class="mono">${esc(String(skillId))}</span>). Как только он появится в <span class="mono">ILessons.BY_SKILL</span>, эта страница покажет его автоматически.</div>
+      </div>
+    </div>`;
 }
 
 /* ============================================================
