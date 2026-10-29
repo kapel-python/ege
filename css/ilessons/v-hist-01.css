@@ -1,0 +1,54 @@
+/* v-hist-01 — дельты поверх сайта. Всё строго под .ilesson-app, без глобалей. */
+.ilesson-app .il-hist { display: block; }
+.ilesson-app .il-toolbar { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.ilesson-app .il-progress { height: 6px; }
+.ilesson-app .il-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.ilesson-app .il-hud { position: relative; margin-top: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-height: 240px; }
+.ilesson-app .il-svg { width: 100%; height: auto; display: block; }
+.ilesson-app .il-svg .il-ax2 { font-size: 11px; fill: var(--muted); }
+.ilesson-app .il-svg .il-yr { font-size: 10px; fill: var(--text); font-weight: 700; }
+.ilesson-app .il-svg .il-em { font-size: 12px; }
+.ilesson-app .il-svg .il-emo { font-size: 22px; }
+.ilesson-app .il-dc { fill: #fff; stroke-width: 3; }
+.ilesson-app .il-dot { cursor: default; }
+.ilesson-app .il-svg.dr .il-dot { cursor: pointer; }
+.ilesson-app .il-dot .il-hit { fill: transparent; }
+.ilesson-app .il-band rect { transform-box: fill-box; transform-origin: left center; }
+.ilesson-app .il-cap { position: relative; z-index: 3; align-self: center; max-width: calc(100% - 32px); margin: 8px auto; text-align: center; font-weight: 700; font-size: 14px; color: var(--text); padding: 7px 16px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border-strong); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.ilesson-app .il-cap.on { opacity: 1; }
+.ilesson-app .il-hud { display: flex; flex-direction: column; }
+.ilesson-app .il-hud .il-svg { order: 1; flex: 1 1 0; min-height: 0; }
+.ilesson-app .il-skip { position: absolute; right: 8px; top: 8px; z-index: 5; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; }
+.ilesson-app .il-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 6; }
+.ilesson-app .il-rules { display: grid; gap: 8px; margin: 0 0 14px; }
+.ilesson-app .il-era { display: flex; gap: 12px; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--text-2); cursor: pointer; transition: border-color .3s, transform .3s; }
+.ilesson-app .il-era.on { border-color: var(--accent); transform: translateX(4px); }
+.ilesson-app .il-em2 { flex: none; width: 44px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 18px; font-style: normal; }
+.ilesson-app .il-era small { color: var(--muted); font-weight: 600; margin-left: 4px; }
+.ilesson-app .il-tip { border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 12px 12px 0; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; color: var(--text); }
+.ilesson-app .il-hint { font-size: 13px; color: var(--muted); }
+.ilesson-app .il-task { font-size: 17px; font-weight: 700; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+.ilesson-app .il-sm { font-size: 13px; color: var(--muted); }
+.ilesson-app .il-evs { display: grid; gap: 8px; margin-bottom: 12px; }
+.ilesson-app .il-ev { display: flex; gap: 10px; align-items: center; width: 100%; padding: 12px 14px; border-radius: 14px; text-align: left; font-size: 14px; font-weight: 600; font-family: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; }
+.ilesson-app .il-ev span { flex: 1; }
+.ilesson-app .il-ev .il-nb { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px dashed var(--border-strong); display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 13px; }
+.ilesson-app .il-ev em { font-style: normal; font-weight: 800; color: var(--success-ink); }
+.ilesson-app .il-ev.ok2 { background: var(--success-soft); border-color: var(--success); }
+.ilesson-app .il-ev.ok2 .il-nb { background: var(--success); border: none; color: #fff; }
+.ilesson-app .il-ev.bad2 { background: var(--danger-soft); border-color: var(--danger-ink); }
+.ilesson-app .il-chipE { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-style: normal; }
+.ilesson-app .il-mk { fill: var(--success); }
+.ilesson-app .il-link { stroke: var(--border-strong); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.ilesson-app .il-dot.nudge { animation: il-nud 1.1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes il-nud { 50% { transform: scale(1.45); } }
+.ilesson-app .il-ok { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.ilesson-app .il-ok i { flex: none; width: 28px; height: 28px; border-radius: 999px; background: var(--success); color: #fff; display: grid; place-items: center; font-style: normal; font-weight: 800; }
+.ilesson-app .il-ok p { margin: 0; }
+.ilesson-app .il-finish { margin-top: 14px; }
+.ilesson-app .il-finish__row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .ilesson-app .il-era { transition: none; }
+  .ilesson-app .il-cap { transition: none; }
+  .ilesson-app .il-dot.nudge { animation: none; }
+}

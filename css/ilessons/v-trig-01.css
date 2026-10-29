@@ -1,0 +1,85 @@
+/* v-trig-01 — дельты поверх сайта. Всё строго под .ilesson-app, без глобалей. */
+.ilesson-app .il-trig { display: block; }
+.ilesson-app .il-toolbar { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.ilesson-app .il-progress { height: 6px; }
+.ilesson-app .il-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.ilesson-app .il-hud { position: relative; margin-top: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-height: 300px; }
+.ilesson-app .il-svg { width: 100%; height: auto; display: block; touch-action: none; }
+.ilesson-app .il-svg text { font: 600 13px Inter, system-ui, sans-serif; fill: var(--muted); }
+.ilesson-app .il-ring { fill: none; stroke: var(--border-strong); stroke-width: 2; }
+.ilesson-app .il-ax { stroke: var(--border-strong); stroke-width: 1.5; }
+.ilesson-app .il-wedge { fill: var(--accent-soft); }
+.ilesson-app .il-tri, .ilesson-app .il-tri2 { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+.ilesson-app .il-cosl, .ilesson-app .il-cosl2 { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
+.ilesson-app .il-sinl, .ilesson-app .il-sinl2 { stroke: var(--violet); stroke-width: 4; stroke-linecap: round; }
+.ilesson-app .il-rad { stroke: var(--text-2); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.ilesson-app .il-pt { fill: var(--success); stroke: var(--surface); stroke-width: 2.5; }
+.ilesson-app .il-halo { fill: var(--success); opacity: .45; }
+.ilesson-app .il-hit { fill: rgba(0,0,0,.001); pointer-events: none; }
+.ilesson-app .il-svg.dr .il-hit { pointer-events: all; cursor: grab; }
+.ilesson-app .il-trail { fill: none; stroke: var(--violet); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; opacity: .5; }
+.ilesson-app .il-svg:not(.d) .il-gd, .ilesson-app .il-svg:not(.q) .il-gq,
+.ilesson-app .il-svg:not(.v) .il-gv, .ilesson-app .il-svg:not(.t) .il-tri,
+.ilesson-app .il-svg:not(.l) .il-gl, .ilesson-app .il-svg:not(.s) .il-sgn,
+.ilesson-app .il-svg:not(.w) .il-gw, .ilesson-app .il-svg.hp .il-pt,
+.ilesson-app .il-svg.hp .il-halo { opacity: 0; }
+.ilesson-app .il-svg .il-gd, .ilesson-app .il-svg .il-gq, .ilesson-app .il-svg .il-gv,
+.ilesson-app .il-svg .il-tri, .ilesson-app .il-svg .il-gl, .ilesson-app .il-gw,
+.ilesson-app .il-pt, .ilesson-app .il-halo { transition: opacity .4s; }
+.ilesson-app .il-tx.pos, .ilesson-app .il-ty.pos, .ilesson-app .il-gd .pos { fill: var(--success-ink); }
+.ilesson-app .il-tx.neg, .ilesson-app .il-ty.neg { fill: var(--danger-ink); }
+.ilesson-app .il-dl { font-size: 14px; fill: var(--text-2); }
+.ilesson-app .il-ad { font-size: 14px; fill: var(--text-2); }
+.ilesson-app .il-th { font-size: 15px; }
+.ilesson-app .il-bead { position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; white-space: nowrap; font-size: 12px; font-weight: 700; color: var(--text); padding: 6px 12px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border-strong); opacity: 0; transition: opacity .35s; transform: translate(-50%, -150%); }
+.ilesson-app .il-bead.on { opacity: 1; }
+.ilesson-app .il-cap { position: relative; z-index: 3; flex: none; align-self: center; max-width: calc(100% - 32px); margin: 8px auto; text-align: center; font-weight: 700; font-size: 14px; color: var(--text); padding: 7px 16px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border-strong); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.ilesson-app .il-cap.on { opacity: 1; }
+.ilesson-app .il-hud { display: flex; flex-direction: column; }
+.ilesson-app .il-hud .il-svg { order: 1; flex: 1 1 0; min-height: 0; }
+.ilesson-app .il-recap { position: absolute; right: 8px; top: 8px; z-index: 5; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; }
+.ilesson-app .il-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 6; }
+.ilesson-app .il-wave { display: none; width: 100%; height: 56px; }
+.ilesson-app .il-wave.on { display: block; }
+.ilesson-app .il-quads { display: none; }
+.ilesson-app .il-res { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; margin: 12px 0; }
+.ilesson-app .il-res div { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 6px; text-align: center; }
+.ilesson-app .il-res b { display: block; font-size: 18px; font-weight: 800; }
+.ilesson-app .il-res span { font-size: 11.5px; color: var(--muted); }
+.ilesson-app .il-rules { display: grid; gap: 8px; margin: 0 0 14px; }
+.ilesson-app .il-rl { display: flex; gap: 12px; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--text-2); }
+.ilesson-app .il-rl i { flex: none; min-width: 48px; text-align: center; font-style: normal; font-weight: 800; font-size: 13px; padding: 6px 10px; border-radius: 999px; color: #fff; background: linear-gradient(135deg, var(--accent), var(--violet)); }
+.ilesson-app .il-sgn { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 12px; }
+.ilesson-app .il-sgn span { font-size: 13px; font-weight: 700; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.ilesson-app .il-sgn .p { background: var(--success-soft); color: var(--success-ink); }
+.ilesson-app .il-sgn .m { background: var(--danger-soft); color: var(--danger-ink); }
+.ilesson-app .il-tip { border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 12px 12px 0; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; color: var(--text); }
+.ilesson-app .il-task { font-size: 17px; font-weight: 700; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+.ilesson-app .il-sol { font-size: 14.5px; color: var(--text); margin: 0 0 8px; }
+.ilesson-app .il-solbox, .ilesson-app .il-solbox2 { margin-bottom: 12px; }
+.ilesson-app .il-md { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
+.ilesson-app .il-sl { margin: 4px 0 10px; }
+.ilesson-app .il-sl label { display: block; font-size: 14px; color: var(--text-2); margin-bottom: 4px; }
+.ilesson-app .il-sl label b { color: var(--text); }
+.ilesson-app .il-sl input[type="range"] { width: 100%; accent-color: var(--accent); }
+.ilesson-app .il-tribox { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 10px; margin-bottom: 12px; }
+.ilesson-app .il-cv { display: block; width: 100%; max-width: 300px; height: auto; margin: 0 auto; }
+.ilesson-app .il-cv text { fill: var(--muted); font-size: 15px; }
+.ilesson-app .il-op { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
+.ilesson-app .il-op .il-good { background: var(--success-soft); border-color: var(--success); color: var(--success-ink); }
+.ilesson-app .il-op .il-bad { background: var(--danger-soft); border-color: var(--danger-ink); color: var(--danger-ink); }
+.ilesson-app .il-sm { font-size: 13px; color: var(--muted); }
+.ilesson-app .il-qt { font-size: 17px; margin-bottom: 12px; }
+.ilesson-app .il-ok { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.ilesson-app .il-ok i { flex: none; width: 28px; height: 28px; border-radius: 999px; background: var(--success); color: #fff; display: grid; place-items: center; font-style: normal; font-weight: 800; }
+.ilesson-app .il-ok p { margin: 0; }
+.ilesson-app .il-finish { margin-top: 14px; }
+.ilesson-app .il-finish__row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.ilesson-app .lite .il-trail { display: none; }
+.ilesson-app .lite .il-bead { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ilesson-app .il-svg .il-gd, .ilesson-app .il-svg .il-gq, .ilesson-app .il-svg .il-gv,
+  .ilesson-app .il-tri, .ilesson-app .il-gl, .ilesson-app .il-gw,
+  .ilesson-app .il-pt, .ilesson-app .il-halo { transition: none; }
+  .ilesson-app .il-bead, .ilesson-app .il-cap { transition: none; }
+}
