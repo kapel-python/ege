@@ -186,6 +186,30 @@ window.__cleanup = window.ILessonModules[${JSON.stringify(mod)}].mount(window.__
         const after = await page.textContent("#app").catch(() => "");
         t(mod + ": drag does not crash", errors.length === 0, errors.join(" | ").slice(0, 300));
         t(mod + ": drag changes live values", before !== after);
+        // Вертикальный свайп по блоку круга должен скроллить страницу
+        // (touch-action: pan-y), а не вязнуть в движке точки.
+        // Вьюпорт уже, чем контент — иначе скроллить нечего.
+        await page.setViewportSize({ width: 420, height: 500 });
+        await page.waitForTimeout(300);
+        const cdp = await page.context().newCDPSession(page);
+        const pt = await page.$eval("#app svg", (el) => {
+          const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 80 };
+        }).catch(() => null);
+        if (pt) {
+          const y0 = await page.evaluate(() => window.scrollY);
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: pt.x, y: pt.y, id: 1 }] });
+          for (let k = 1; k <= 8; k++) {
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: pt.x, y: pt.y - k * 30, id: 1 }] });
+            await page.waitForTimeout(30);
+          }
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await page.waitForTimeout(400);
+          const y1 = await page.evaluate(() => window.scrollY);
+          t(mod + ": vertical swipe scrolls page", y1 > y0 + 50, y0 + " -> " + y1);
+          await cdp.detach().catch(() => {});
+        } else {
+          t(mod + ": vertical swipe scrolls page", false, "no svg point");
+        }
         // Обратно на финал для проверки завершения.
         for (let fi = 0; fi < 6; fi++) {
           const lab = await stepLabel();

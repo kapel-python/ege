@@ -9766,7 +9766,6 @@ function screenInteractiveLesson(root) {
           <div class="session-head__title">${esc(ilesson.title || topicName)} <span class="ilesson-beta">БЕТА</span></div>
           <div class="session-head__progress mono">${esc(ege)}</div>
         </div>
-        <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
         <div class="ilesson-app" id="ilessonApp">${pageLoaderHTML("Загружаем интерактив…")}</div>
       </div>`;
       ilessonLoadModule(modName).then((mod) => {
@@ -9860,7 +9859,6 @@ function renderStaticILesson(root, ilesson, skillId, topicName, categoryName, eg
         <div class="session-head__title">${esc(ilesson.title || topicName)} <span class="ilesson-beta">БЕТА</span></div>
         <div class="session-head__progress mono">${esc(ege)}</div>
       </div>
-      <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
       ${ilesson.subtitle ? `<div class="page-sub" style="margin-top:6px">${esc(ilesson.subtitle)}</div>` : ""}
       ${scenes.map((scene, i) => `
         <div class="card lesson-card" style="margin-top:12px">
@@ -9907,7 +9905,7 @@ function ilessonLoadModule(name) {
       const reg = window.ILessonModules && window.ILessonModules[name];
       if (reg && typeof reg.mount === "function") return reg;
     } catch (_) {}
-    const cssHref = `css/ilessons/${name}.css?v=2`;
+    const cssHref = `css/ilessons/${name}.css?v=3`;
     try {
       if (!document.querySelector(`link[data-ilesson-css="${name}"]`)) {
         const link = document.createElement("link");
@@ -9921,7 +9919,7 @@ function ilessonLoadModule(name) {
       await new Promise((resolve, reject) => {
         if (document.querySelector(`script[data-ilesson-js="${name}"]`)) { resolve(); return; }
         const el = document.createElement("script");
-        el.src = `js/ilessons/${name}.js?v=2`;
+        el.src = `js/ilessons/${name}.js?v=3`;
         el.dataset.ilessonJs = name;
         el.onload = () => resolve();
         el.onerror = () => reject(new Error("ilesson script load failed"));

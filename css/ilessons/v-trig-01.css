@@ -3,7 +3,7 @@
 .ilesson-app .il-toolbar { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
 .ilesson-app .il-progress { height: 6px; }
 .ilesson-app .il-hud { position: relative; margin-top: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-height: 300px; }
-.ilesson-app .il-svg { width: 100%; height: auto; display: block; touch-action: none; }
+.ilesson-app .il-svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
 .ilesson-app .il-svg text { font: 600 13px Inter, system-ui, sans-serif; fill: var(--muted); }
 .ilesson-app .il-ring { fill: none; stroke: var(--border-strong); stroke-width: 2; }
 .ilesson-app .il-ax { stroke: var(--border-strong); stroke-width: 1.5; }
