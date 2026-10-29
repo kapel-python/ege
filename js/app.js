@@ -9907,7 +9907,7 @@ function ilessonLoadModule(name) {
       const reg = window.ILessonModules && window.ILessonModules[name];
       if (reg && typeof reg.mount === "function") return reg;
     } catch (_) {}
-    const cssHref = `css/ilessons/${name}.css?v=1`;
+    const cssHref = `css/ilessons/${name}.css?v=2`;
     try {
       if (!document.querySelector(`link[data-ilesson-css="${name}"]`)) {
         const link = document.createElement("link");
@@ -9921,7 +9921,7 @@ function ilessonLoadModule(name) {
       await new Promise((resolve, reject) => {
         if (document.querySelector(`script[data-ilesson-js="${name}"]`)) { resolve(); return; }
         const el = document.createElement("script");
-        el.src = `js/ilessons/${name}.js?v=1`;
+        el.src = `js/ilessons/${name}.js?v=2`;
         el.dataset.ilessonJs = name;
         el.onload = () => resolve();
         el.onerror = () => reject(new Error("ilesson script load failed"));

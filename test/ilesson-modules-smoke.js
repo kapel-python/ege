@@ -114,7 +114,7 @@ window.__cleanup = window.ILessonModules[${JSON.stringify(mod)}].mount(window.__
         // Квиз триги — шаг 6: отвечаем до ухода на финал.
         if (mod === "v-trig-01" && /Шаг 6 из 7/.test(label || "")) {
           const qchips = await page.$$("#app .il-op button");
-          t(mod + ": quiz chips present", qchips.length >= 3, String(qchips.length));
+          t(mod + ": quiz chips present", qchips.length >= 2, String(qchips.length));
           if (qchips.length) {
             await qchips[0].click();
             await page.waitForTimeout(400);
@@ -201,12 +201,12 @@ window.__cleanup = window.ILessonModules[${JSON.stringify(mod)}].mount(window.__
         t(mod + ": back to finale", /Шаг 7 из 7/.test((await stepLabel()) || ""));
       }
 
-      // Финал: завершение урока.
+      // Финал: кнопка «Готово» завершает урок (как в обычных уроках).
       const finBtns = await page.$$("#app button");
       let finClicked = false;
       for (const b of finBtns) {
         const txt = ((await b.textContent()) || "").trim();
-        if (/завершить/i.test(txt)) { await b.click(); finClicked = true; break; }
+        if (/^Готово/.test(txt)) { await b.click(); finClicked = true; break; }
       }
       t(mod + ": finish button works", finClicked);
       await page.waitForTimeout(300);

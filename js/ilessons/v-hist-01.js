@@ -3,8 +3,9 @@
  * Тексты шагов — из api.ilesson.scenes[i] (каталог); DEV ниже — только
  * fallback для разработки (смысл 1:1 со сценами каталога).
  * Суть демо сохранена: лента времени, камера (viewBox-tween), эры-пилюли,
- * кликабельные точки-якоря, квиз «расставь по порядку», replayable SCN,
- * сдержанный confetti на успех, звук по умолчанию ВЫКЛ.
+ * кликабельные точки-якоря, квиз «расставь по порядку», сдержанный
+ * confetti на успех. Без звука, эко-тумблера и кинематографических
+ * автоплеев: структура как в обычных уроках (ряд навигации).
  * Удалено: landing hero, .ov-модалка, логотип, собственный тёмный неон-шит
  * (только var(--...) сайта), свои кнопки/прогресс (используются .btn,
  * .progress, структура .card.lesson-card урока).
@@ -48,7 +49,6 @@
       { n: "Первая русская революция", y: 1905, e: 4 }, { n: "Полёт Гагарина в космос", y: 1961, e: 5 }]);
   var EV4 = [["Куликовская битва", 1380], ["Отмена крепостного права", 1861], ["Крещение Руси", 988], ["Полтавская битва", 1709]];
   var ORD = [2, 0, 3, 1];
-  var CINE_STEPS = { 0: 1, 1: 1, 2: 1, 4: 1 };
 
   function XY(y) {
     for (var i = 0; i < AN.length - 1; i++) {
@@ -79,75 +79,32 @@
     }
 
     var idx = 0, dead = false;
-    var VB = [0, 0, 400, 300], camRaf = 0, fxRaf = 0, tok = 0;
+    var VB = [0, 0, 400, 300], camRaf = 0, fxRaf = 0;
     var timers = [];
     var abort = (typeof AbortController !== "undefined") ? new AbortController() : null;
     var sig = abort ? { signal: abort.signal } : undefined;
-    var AC = null, muted = true;
     var LITE = false;
     try {
       LITE = ((navigator.hardwareConcurrency || 8) <= 4) || ((navigator.deviceMemory || 8) <= 4);
     } catch (e) {}
     var sc = 0, er = 0, ord = [], qidx = 0;
     var ERA = 0, needEras = false, finalBurstDone = false;
-    var dr = false, cine = false;
+    var dr = false;
 
     function later(fn, ms) {
       var id = setTimeout(function () { if (!dead) fn(); }, ms);
       timers.push(id);
       return id;
     }
-    function wait(ms) {
-      return new Promise(function (res) { later(res, ms); });
-    }
-
-    function tone(fq, d, type, v, t0) {
-      if (muted) return;
-      try {
-        AC = AC || new (window.AudioContext || window.webkitAudioContext)();
-        var o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime + (t0 || 0);
-        o.type = type || "sine"; o.frequency.value = fq;
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(v || 0.05, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + (d || 0.12));
-        o.connect(g); g.connect(AC.destination);
-        o.start(t); o.stop(t + (d || 0.12) + 0.02);
-      } catch (e) {}
-    }
-    function chime() {
-      [660, 880, 1320].forEach(function (z, i) { tone(z, 0.4, "sine", 0.06, i * 0.09); });
-    }
-    function whoosh() {
-      if (muted) return;
-      try {
-        AC = AC || new (window.AudioContext || window.webkitAudioContext)();
-        var n = AC.sampleRate * 0.5, b = AC.createBuffer(1, Math.floor(n), AC.sampleRate), d = b.getChannelData(0);
-        for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-        var s = AC.createBufferSource(), fl = AC.createBiquadFilter(), g = AC.createGain(), t = AC.currentTime;
-        s.buffer = b; fl.type = "bandpass";
-        fl.frequency.setValueAtTime(300, t);
-        fl.frequency.exponentialRampToValueAtTime(3000, t + 0.4);
-        g.gain.value = 0.05;
-        s.connect(fl); fl.connect(g); g.connect(AC.destination); s.start();
-      } catch (e) {}
-    }
-
     /* ---------- каркас ---------- */
     el.innerHTML =
       '<div class="il-hist">' +
-      '<div class="il-toolbar">' +
       '<div class="progress il-progress"><div class="progress__fill"></div></div>' +
-      '<div class="il-tools">' +
-      '<button type="button" class="btn btn--ghost btn--sm il-replay">↻ Показать анимацию</button>' +
-      '<button type="button" class="btn btn--ghost btn--sm il-sound" aria-pressed="false">♪ Звук: выкл</button>' +
-      '<button type="button" class="btn btn--ghost btn--sm il-eco" aria-pressed="false">⚡ Эко</button>' +
-      "</div></div>" +
       '<div class="card lesson-card">' +
       '<div class="lesson-step-label"></div>' +
       '<div class="lesson-title"></div>' +
       '<div class="lesson-body"><div class="task-card__text lesson-text"></div></div>' +
-      '<div class="il-hud"><div class="il-cap"></div>' +
-      '<button type="button" class="il-skip" aria-label="Пропустить анимацию" title="Пропустить" hidden>⏭</button>' +
+      '<div class="il-hud">' +
       '<svg class="il-svg" viewBox="0 0 400 300" role="img" aria-label="Лента времени"><g class="il-bands"></g><g class="il-fxg"></g></svg>' +
       "</div>" +
       '<div class="il-extra"></div>' +
@@ -160,8 +117,8 @@
 
     function $(s) { return el.querySelector(s); }
     function $all(s) { return Array.prototype.slice.call(el.querySelectorAll(s)); }
-    var svg = $(".il-svg"), hud = $(".il-hud"), capBox = $(".il-cap"),
-      extra = $(".il-extra"), skipBtn = $(".il-skip"), bandsG = $(".il-bands"), fxg = $(".il-fxg");
+    var svg = $(".il-svg"), hud = $(".il-hud"),
+      extra = $(".il-extra"), bandsG = $(".il-bands"), fxg = $(".il-fxg");
 
     /* ---------- confetti ---------- */
     var fx = document.createElement("canvas");
@@ -257,116 +214,6 @@
       h += "<text x='10' y='230' class='il-ax2'>← давно</text><text x='390' y='230' text-anchor='end' class='il-ax2'>сегодня →</text>";
       bandsG.innerHTML = h;
     }
-    function cap(t) {
-      if (!t) { capBox.classList.remove("on"); capBox.textContent = ""; return; }
-      capBox.textContent = t;
-      capBox.classList.add("on");
-    }
-
-    /* ---------- SCN (только по кнопке, без автоплея со звуком) ---------- */
-    function playScene(i) {
-      var my = ++tok;
-      var alive = function () { return my === tok && !dead; };
-      cine = true;
-      hud.classList.add("cine");
-      skipBtn.hidden = !!RED;
-      cap("");
-      function reset() {
-        fxg.innerHTML = "";
-        camSet([0, 0, 400, 300]);
-        $all(".il-band,.il-dot").forEach(function (n) { n.style.opacity = ""; n.classList.remove("nudge"); });
-        cap("");
-      }
-      reset();
-      var job;
-      if (i === 0) {
-        job = (function () {
-          $all(".il-band,.il-dot").forEach(function (n) { n.style.opacity = 0.3; });
-          cap("Задача из ЕГЭ"); whoosh();
-          return wait(1500).then(function () {
-            if (!alive()) return;
-            cap("Как расставить за секунду?");
-            return wait(1600);
-          });
-        })();
-      } else if (i === 1) {
-        job = wait(300).then(function showNext() {
-          if (!alive()) return;
-          if (ERA >= 6) {
-            $all(".il-era").forEach(function (r) { r.classList.remove("on"); });
-            cap("Шесть глав — вся история");
-            return flyTo([0, 0, 400, 300], 1000).then(function () { whoosh(); });
-          }
-          var k = ERA;
-          var rows = $all(".il-era");
-          rows.forEach(function (r, j) { r.classList.toggle("on", j === k); });
-          cap(ER[k][1] + " — " + ER[k][2]);
-          tone(330 + k * 70, 0.3, "triangle", 0.05);
-          ERA++;
-          return flyTo(eraBox(k), 700).then(function () { return wait(1100); }).then(showNext);
-        });
-      } else if (i === 2) {
-        job = (function () {
-          var ds = $all(".il-dot");
-          cap("13 дат — каркас всей истории"); whoosh();
-          var p = Promise.resolve();
-          for (var d = 0; d < 13; d++) {
-            (function (dd) {
-              p = p.then(function () {
-                if (!alive()) return;
-                tone(380 + dd * 45, 0.15, "triangle", 0.04);
-                burstAtSvg(AX[dd], 170, 10);
-                return wait(RED ? 10 : 240);
-              });
-            })(d);
-          }
-          return p.then(function () {
-            if (!alive()) return;
-            cap("Нажми на любую картинку");
-            var n = el.querySelector(".il-dot[data-i='3']");
-            if (n) n.classList.add("nudge");
-            return wait(900);
-          });
-        })();
-      } else if (i === 4) {
-        job = (function () {
-          cap("Ставим по порядку"); whoosh();
-          var p = Promise.resolve();
-          for (var r = 0; r < 4; r++) {
-            (function (rr) {
-              p = p.then(function () {
-                if (!alive()) return;
-                var ev = EV4[ORD[rr]];
-                var x = XY(ev[1]);
-                fxg.insertAdjacentHTML("beforeend", "<line x1='" + x + "' y1='60' x2='" + x + "' y2='170' class='il-link'/><circle cx='" + x + "' cy='170' r='8' class='il-mk'/>");
-                burstAtSvg(x, 170, 20);
-                tone(520 + rr * 130, 0.3, "triangle", 0.05);
-                cap((rr + 1) + ". " + ev[0] + " — " + ev[1]);
-                return wait(1400);
-              });
-            })(r);
-          }
-          return p.then(function () {
-            if (!alive()) return;
-            cap("988 → 1380 → 1709 → 1861");
-            return wait(1800);
-          });
-        })();
-      } else {
-        job = Promise.resolve();
-      }
-      return job.then(function () {
-        if (!alive()) return;
-        cine = false; hud.classList.remove("cine"); skipBtn.hidden = true;
-        dr = (idx === 2);
-        svg.setAttribute("class", "il-svg" + (dr ? " dr" : ""));
-      }, function () {
-        if (my !== tok) return;
-        cine = false; hud.classList.remove("cine"); skipBtn.hidden = true;
-      });
-    }
-    if (skipBtn) skipBtn.onclick = function () { tok++; cine = false; hud.classList.remove("cine"); skipBtn.hidden = true; cap(""); };
-
     /* ---------- квиз ---------- */
     function round() {
       var pk = [];
@@ -413,16 +260,16 @@
         qidx++;
         fxg.insertAdjacentHTML("beforeend", "<circle cx='" + XY(y) + "' cy='170' r='8' class='il-mk'/>");
         burstAtSvg(XY(y), 170, 18);
-        tone(500 + qidx * 120, 0.25, "triangle", 0.05);
+
         if (qidx === ord.length) {
-          sc++; chime(); burst(30);
+          sc++; burst(30);
           if (msg) msg.innerHTML = "<b>Идеально!</b> Так работает метод якорей.";
           if (nx) nx.style.display = "";
           if (scEl) scEl.textContent = "Раундов решено: " + sc + " · ошибок: " + er;
         }
       } else {
         b.classList.remove("bad2"); void b.offsetWidth; b.classList.add("bad2");
-        er++; tone(170, 0.25, "sawtooth", 0.035);
+        er++;
         b.querySelector("em").textContent = y;
         if (msg) msg.innerHTML = "<b>" + y + " год</b> — глава «" + esc(ER[+b.dataset.e][1]) + "», " + esc(bet(y)) + ". Есть событие раньше?";
         if (scEl) scEl.textContent = "Раундов решено: " + sc + " · ошибок: " + er;
@@ -442,11 +289,9 @@
         var eras = extra.querySelectorAll(".il-era");
         Array.prototype.forEach.call(eras, function (r) {
           var act = function () {
-            if (cine) return;
             var k = +r.dataset.k, on = r.classList.contains("on");
             Array.prototype.forEach.call(eras, function (q, j) { q.classList.toggle("on", !on && j === k); });
             flyTo(on ? [0, 0, 400, 300] : eraBox(k));
-            tone(400 + k * 60, 0.2, "triangle", 0.04);
           };
           r.addEventListener("click", act, sig);
           r.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); act(); } }, sig);
@@ -478,22 +323,20 @@
     /* точки-якоря кликабельны только на шаге 2 */
     svg.addEventListener("click", function (e) {
       var g = e.target.closest(".il-dot");
-      if (!g || !dr || cine) return;
+      if (!g || !dr) return;
       var i = +g.dataset.i, inf = extra.querySelector(".il-info");
       if (inf) inf.innerHTML = "<b>" + AN[i][0] + " — " + esc(AN[i][1]) + "</b><br><small>" + esc(ER[[0, 0, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5][i]][1]) + "</small>";
       $all(".il-dot.nudge").forEach(function (d) { d.classList.remove("nudge"); });
       burstAtSvg(AX[i], 170, 12);
-      tone(420 + i * 50, 0.2, "triangle", 0.05);
     }, sig);
     /* пилюли эр вне SCN: клик по полосам */
     svg.addEventListener("click", function (e) {
       var b = e.target.closest(".il-band");
-      if (!b || cine || idx !== 1) return;
+      if (!b || idx !== 1) return;
       var k = +b.dataset.k;
       var rows = $all(".il-era"), on = rows[k] && rows[k].classList.contains("on");
       rows.forEach(function (q, j) { q.classList.toggle("on", !on && j === k); });
       flyTo(on ? [0, 0, 400, 300] : eraBox(k));
-      tone(400 + k * 60, 0.2, "triangle", 0.04);
     }, sig);
 
     /* ---------- навигация ---------- */
@@ -502,28 +345,20 @@
       if (bar) bar.style.width = Math.round(((idx + 1) / N) * 100) + "%";
     }
     function paintFinish() {
+      // Как в обычных уроках: отдельного футера с кнопками нет, только ряд
+      // навигации. На финале кнопка «Дальше» превращается в «Готово» и
+      // завершает урок; практика доступна из окна темы и «Тренировки».
+      // Пройденный урок помечаем строкой-статусом вместо кнопок.
       var box = $(".il-finish");
       if (!box) return;
-      if (idx !== N - 1) { box.innerHTML = ""; return; }
-      if (api.done) {
-        box.innerHTML = '<div class="feedback feedback--ok"><div class="feedback__head">✓ Урок пройден</div></div>' +
-          '<div class="il-finish__row"><button type="button" class="btn btn--primary btn--lg il-practice">Закрепить на практике</button></div>';
+      if (api.done && idx === N - 1) {
+        box.innerHTML = '<div class="feedback feedback--ok"><div class="feedback__head">\u2713 Урок пройден</div></div>';
       } else {
-        box.innerHTML = '<div class="il-finish__row">' +
-          '<button type="button" class="btn btn--primary btn--lg il-done">✓ Я разобрался — завершить</button>' +
-          '<button type="button" class="btn btn--ghost btn--lg il-practice">Закрепить на практике</button></div>';
+        box.innerHTML = "";
       }
-      var dn = box.querySelector(".il-done"), pr = box.querySelector(".il-practice");
-      if (dn) dn.onclick = function () { try { api.finish(); } catch (e) {} };
-      if (pr) pr.onclick = function () { try { api.practice(); } catch (e) {} };
     }
     function go(i) {
-      tok++;
-      cine = false;
       cancelAnimationFrame(camRaf);
-      hud.classList.remove("cine");
-      skipBtn.hidden = true;
-      cap("");
       fxg.innerHTML = "";
       camSet([0, 0, 400, 300]);
       idx = Math.max(0, Math.min(N - 1, i));
@@ -540,55 +375,30 @@
       renderExtra(idx);
       var back = $(".il-back"), next = $(".il-next");
       if (back) back.disabled = idx === 0;
-      if (next) next.textContent = idx === N - 1 ? "Готово" : "Дальше →";
+      if (next) next.textContent = idx === N - 1 ? (api.done ? "К практике \u2192" : "Готово") : "Дальше \u2192";
       paintProgress(); paintFinish();
-      var rp = $(".il-replay");
-      if (rp) rp.style.display = (CINE_STEPS[idx] && !RED) ? "" : "none";
       if (idx === N - 1 && !RED && !finalBurstDone) {
         finalBurstDone = true;
-        later(function () { burst(40); chime(); }, 1200);
+        later(function () { burst(40); }, 1200);
       }
     }
 
-    var replay = $(".il-replay"), soundBtn = $(".il-sound"), ecoBtn = $(".il-eco");
-    function paintToggles() {
-      if (soundBtn) {
-        soundBtn.textContent = muted ? "♪ Звук: выкл" : "♪ Звук: вкл";
-        soundBtn.setAttribute("aria-pressed", String(!muted));
-      }
-      if (ecoBtn) {
-        ecoBtn.classList.toggle("btn--primary", LITE);
-        ecoBtn.classList.toggle("btn--ghost", !LITE);
-        ecoBtn.setAttribute("aria-pressed", String(LITE));
-      }
-      var w = el.querySelector(".il-hist");
-      if (w) w.classList.toggle("lite", LITE);
-    }
-    if (replay) replay.onclick = function () { if (!RED && CINE_STEPS[idx]) playScene(idx); };
-    if (soundBtn) soundBtn.onclick = function () {
-      muted = !muted;
-      if (!muted) {
-        try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume(); } catch (e) {}
-        tone(880, 0.1);
-      }
-      paintToggles();
-    };
-    if (ecoBtn) ecoBtn.onclick = function () { LITE = !LITE; paintToggles(); fxSize(); };
+    /* Эко-режим — только silent auto-degrade по железу (без кнопки): */
+    var w0 = el.querySelector(".il-hist");
+    if (w0) w0.classList.toggle("lite", LITE);
     var backB = $(".il-back"), nextB = $(".il-next");
     if (backB) backB.onclick = function () { if (idx > 0) go(idx - 1); };
     if (nextB) nextB.onclick = function () {
-      if (idx === 1 && needEras && ERA < 6 && !cine && !RED) {
-        /* Пошаговый обход эр кнопкой «Дальше» (как в демо): 6 нажатий — 6 глав. */
+      if (idx === 1 && needEras && ERA < 6 && !RED) {
+        /* Пошаговый обход эр кнопкой «Дальше» (как в демо): 6 нажатий — 6 глав.
+           Подписи эр видны в подсвеченных строках ниже, отдельный капсюль не нужен. */
         var k = ERA;
         var rows = $all(".il-era");
         rows.forEach(function (r, j) { r.classList.toggle("on", j === k); });
-        cap(ER[k][1] + " — " + ER[k][2]);
-        tone(330 + k * 70, 0.3, "triangle", 0.05);
         ERA++;
         flyTo(eraBox(k), 700).then(function () {
           if (ERA === 6) {
             rows.forEach(function (r) { r.classList.remove("on"); });
-            cap("Шесть глав — вся история");
             flyTo([0, 0, 400, 300], 1000);
           }
         });
@@ -600,16 +410,13 @@
     window.addEventListener("resize", fxSize, sig);
 
     build();
-    paintToggles();
     go(0);
 
     return function () {
       dead = true;
-      tok++;
       try { abort && abort.abort(); } catch (e) {}
       cancelAnimationFrame(camRaf); cancelAnimationFrame(fxRaf);
       timers.forEach(function (t) { clearTimeout(t); });
-      try { if (AC && AC.state === "running") AC.suspend(); } catch (e) {}
       try { fx.remove(); } catch (e) {}
     };
   }

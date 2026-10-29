@@ -3,8 +3,9 @@
  * Тексты шагов — из api.ilesson.scenes[i] (каталог); DEV ниже — только
  * fallback для разработки (смысл 1:1 со сценами каталога).
  * Суть демо сохранена: SVG-движок круга (drag/snap/inertia), чипы знаков,
- * слайдеры Пифагора, квиз, облегчённая wave-подложка, replayable SCN,
- * сдержанный confetti на успех, звук по умолчанию ВЫКЛ.
+ * слайдеры Пифагора, квиз, облегчённая wave-подложка, сдержанный confetti
+ * на успех. Без звука, эко-тумблера и кинематографических автоплеев:
+ * структура как в обычных уроках (ряд навигации, на финале «Готово»).
  * Удалено: landing hero, .ov-модалка, логотип, собственный тёмный неон-шит
  * (только var(--...) сайта), свои кнопки/прогресс (используются .btn,
  * .progress, структура .card.lesson-card урока).
@@ -31,15 +32,14 @@
 
   /* Видимость слоёв SVG и поведение по шагам (индексы = DEV/сцены каталога). */
   var VIS = [
-    { vis: "d q", a: 143.13, cine: true },
-    { vis: "d q v s", a: 40, drag: true, cine: true },
-    { vis: "d q v s l", drag: true, lab: "s", cine: true },
-    { vis: "d v s t l", drag: true, cine: true },
+    { vis: "d q", a: 143.13 },
+    { vis: "d q v s", a: 40, drag: true },
+    { vis: "d q v s l", drag: true, lab: "s" },
+    { vis: "d v s t l", drag: true },
     { vis: "d v t", a: 36.87 },
     { vis: "d q w hp", quiz: true },
     { vis: "d q v t l s", a: 143.13, final: true }
   ];
-  var CINE_STEPS = { 0: 1, 1: 1, 2: 1, 3: 1 };
 
   var QP = {
     1: "M170,170 L285,170 A115,115 0 0 0 170,55 Z",
@@ -77,11 +77,10 @@
 
     /* ---------- состояние ---------- */
     var idx = 0, A = 40, cur = null;
-    var twRaf = 0, inrRaf = 0, fxRaf = 0, camTok = 0;
+    var twRaf = 0, inrRaf = 0, fxRaf = 0;
     var timers = [];
     var abort = null;
     var ro = null;
-    var AC = null, muted = true;
     var LITE = false;
     try {
       var cn = navigator.connection;
@@ -105,46 +104,15 @@
       timers.push(id);
       return id;
     }
-    function wait(ms) {
-      return new Promise(function (res) {
-        later(function () { res(); }, ms);
-      });
-    }
-
-    /* ---------- звук (по умолчанию ВЫКЛ, только после жеста) ---------- */
-    function tone(fq, d, type, v, t0) {
-      if (muted) return;
-      try {
-        AC = AC || new (window.AudioContext || window.webkitAudioContext)();
-        var o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime + (t0 || 0);
-        o.type = type || "sine"; o.frequency.value = fq;
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(v || 0.05, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + (d || 0.12));
-        o.connect(g); g.connect(AC.destination);
-        o.start(t); o.stop(t + (d || 0.12) + 0.02);
-      } catch (e) {}
-    }
-    function chime() {
-      [660, 880, 1320].forEach(function (z, i) { tone(z, 0.4, "sine", 0.06, i * 0.09); });
-    }
-
     /* ---------- каркас ---------- */
     el.innerHTML =
       '<div class="il-trig">' +
-      '<div class="il-toolbar">' +
       '<div class="progress il-progress"><div class="progress__fill"></div></div>' +
-      '<div class="il-tools">' +
-      '<button type="button" class="btn btn--ghost btn--sm il-replay">↻ Показать анимацию</button>' +
-      '<button type="button" class="btn btn--ghost btn--sm il-sound" aria-pressed="false">♪ Звук: выкл</button>' +
-      '<button type="button" class="btn btn--ghost btn--sm il-eco" aria-pressed="false">⚡ Эко</button>' +
-      "</div></div>" +
       '<div class="card lesson-card">' +
       '<div class="lesson-step-label"></div>' +
       '<div class="lesson-title"></div>' +
       '<div class="lesson-body"><div class="task-card__text lesson-text"></div></div>' +
-      '<div class="il-hud"><div class="il-bead"></div><div class="il-cap"></div>' +
-      '<button type="button" class="il-recap" aria-label="Повторить анимацию" hidden>↻</button>' +
+      '<div class="il-hud"><div class="il-bead"></div>' +
       '<svg class="il-svg" viewBox="0 0 340 340" role="img" aria-label="Единичная окружность">' +
       '<path class="il-wedge il-gw" d=""/>' +
       '<polygon class="il-tri il-gt" points=""/>' +
@@ -182,8 +150,7 @@
     function $(s) { return el.querySelector(s); }
     function $all(s) { return Array.prototype.slice.call(el.querySelectorAll(s)); }
     var svg = $(".il-svg"), hud = $(".il-hud"), bead = $(".il-bead"),
-      capBox = $(".il-cap"), extra = $(".il-extra"), wave = $(".il-wave"),
-      recapBtn = $(".il-recap");
+      extra = $(".il-extra"), wave = $(".il-wave");
     var wctx = null;
     try { wctx = wave.getContext("2d"); } catch (e) {}
 
@@ -321,14 +288,14 @@
       return (Math.atan2(-(e.clientY - r.top - r.height / 2), e.clientX - r.left - r.width / 2) * 180 / Math.PI + 360) % 360;
     }
     function onDown(e) {
-      if (!cur || !cur.drag || cine) return;
+      if (!cur || !cur.drag) return;
       dg = true;
       try { hit.setPointerCapture(e.pointerId); } catch (err) {}
       cancelAnimationFrame(twRaf); cancelAnimationFrame(inrRaf);
       la = A; lt = performance.now(); vel = 0;
     }
     function onMove(e) {
-      if (!dg || !cur || !cur.drag || cine) return;
+      if (!dg || !cur || !cur.drag) return;
       var a = angFromEvent(e);
       var m = a % 90, snap = false;
       for (var i = 0; i < [0, 30, 45, 60, 90].length; i++) {
@@ -337,7 +304,6 @@
       }
       if (snap && Math.round(a) !== Math.round(A)) {
         try { navigator.vibrate && navigator.vibrate(6); } catch (err) {}
-        tone(1000, 0.05, "triangle", 0.035);
       }
       draw(a);
       var n = performance.now(), d = A - la;
@@ -348,7 +314,7 @@
     function onUp() {
       if (!dg) return;
       dg = false;
-      if (RED || Math.abs(vel) < 0.8 || !cur || !cur.drag || cine) return;
+      if (RED || Math.abs(vel) < 0.8 || !cur || !cur.drag) return;
       var run = function () {
         if (dead) return;
         vel *= 0.95; draw(A + vel);
@@ -418,107 +384,6 @@
     window.addEventListener("resize", function () { fxSize(); drawWave(); }, sig);
 
     /* ---------- подписи SCN ---------- */
-    var cine = false;
-    function cap(t) {
-      if (!t) { capBox.classList.remove("on"); capBox.textContent = ""; return; }
-      capBox.textContent = t;
-      capBox.classList.add("on");
-    }
-
-    /* Упрощённый кинематографический автоплей: только по кнопке. */
-    function playScene(i) {
-      var my = ++camTok;
-      var alive = function () { return my === camTok && !dead; };
-      cine = true;
-      svg.classList.add("cine");
-      recapBtn.hidden = true;
-      cap("");
-      cancelAnimationFrame(twRaf); cancelAnimationFrame(inrRaf);
-      function ang(to, ms) {
-        ms = ms || 900;
-        var a0 = A, d = ((to - a0) % 360 + 360) % 360;
-        if (d > 180) d -= 360;
-        var t0 = performance.now();
-        return new Promise(function (res, rej) {
-          var k = function (now) {
-            if (!alive()) { rej(new Error("dead")); return; }
-            var p = Math.min(1, (now - t0) / ms);
-            var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-            draw(a0 + d * e);
-            if (p < 1) requestAnimationFrame(k); else res();
-          };
-          requestAnimationFrame(k);
-        });
-      }
-      function seq(steps) {
-        var p = Promise.resolve();
-        steps.forEach(function (s) {
-          p = p.then(function () {
-            if (!alive()) throw new Error("dead");
-            if (typeof s === "string") { cap(s); return wait(1400); }
-            return s();
-          });
-        });
-        return p;
-      }
-      var job;
-      if (i === 0) {
-        job = seq(["Задача из ЕГЭ", function () { draw(0); return wait(500); },
-          function () { return ang(143.13, 1800); }, "Сейчас это кажется сложным"]);
-      } else if (i === 1) {
-        var qs = ["Точка идёт по кругу", "x — вправо и влево", "y — вверх и вниз"];
-        job = ang(0, 700).then(function () {
-          return new Promise(function (res, rej) {
-            var t0 = performance.now(), D = RED ? 10 : 4200, k2 = 0;
-            var k = function (now) {
-              if (!alive()) { rej(new Error("dead")); return; }
-              var p = Math.min(1, (now - t0) / D);
-              draw(360 * p);
-              var qi = Math.floor(360 * p / 90);
-              if (qi > k2) { k2 = qi; tone(500 + k2 * 120, 0.2, "triangle", 0.04); }
-              if (k2 < 3 && p > [0.2, 0.5, 0.75][k2]) cap(qs[k2]);
-              if (p < 1) requestAnimationFrame(k); else { ang(40, 900).then(res, rej); }
-            };
-            requestAnimationFrame(k);
-          });
-        }).then(function () { cap("Теперь твоя очередь: потяни точку"); return wait(1400); });
-      } else if (i === 2) {
-        var names = ["I четверть: всё плюс", "II четверть: плюс только у sin", "III четверть: плюс у tg и ctg", "IV четверть: плюс только у cos"];
-        job = Promise.resolve();
-        for (var q = 0; q < 4; q++) {
-          (function (qq) {
-            job = job.then(function () {
-              if (!alive()) throw new Error("dead");
-              setAttrs(".il-wedge", { d: QP[qq + 1] });
-              svg.classList.add("w");
-              return ang(45 + 90 * qq, 900).then(function () {
-                cap(names[qq]); tone(520 + qq * 110, 0.3, "triangle", 0.05);
-                return wait(1700);
-              });
-            });
-          })(q);
-        }
-        job = job.then(function () { return ang(40, 900); });
-      } else if (i === 3) {
-        job = ang(36.87, 1100)
-          .then(function () { cap("Из точки — перпендикуляр"); return wait(1000); })
-          .then(function () { cap("Получился прямоугольный треугольник"); return wait(1400); })
-          .then(function () { cap("x² + y² = 1"); tone(520, 0.3, "triangle", 0.05); burst(24); return wait(1800); })
-          .then(function () { cap("Тяни точку: квадраты считаются сами"); return wait(1200); });
-      } else {
-        job = Promise.resolve();
-      }
-      return job.then(function () {
-        if (!alive()) return;
-        cine = false; svg.classList.remove("cine");
-        cap(""); draw(A);
-        recapBtn.hidden = !CINE_STEPS[curIdx()];
-      }, function () {
-        if (my !== camTok) return;
-        cine = false; svg.classList.remove("cine"); cap(""); draw(A);
-      });
-    }
-
     /* ---------- контент шагов ---------- */
     function chipsH(c, s) {
       return [["sin", s], ["cos", c], ["tg", Math.abs(c) < 0.02 ? null : s / c], ["ctg", Math.abs(s) < 0.02 ? null : c / s]]
@@ -583,8 +448,8 @@
           if (!b || doneQ) return;
           doneQ = true; tn++;
           var r = b.dataset.o === ok;
-          if (r) { sc++; burst(28); chime(); try { navigator.vibrate && navigator.vibrate([10, 40, 10]); } catch (err) {} }
-          else { tone(170, 0.25, "sawtooth", 0.035); stk = 0; }
+          if (r) { sc++; burst(28); try { navigator.vibrate && navigator.vibrate([10, 40, 10]); } catch (err) {} }
+          else { stk = 0; }
           if (r) stk++; else stk = 0;
           Array.prototype.forEach.call(opBox.querySelectorAll("[data-o]"), function (c2) {
             if (c2.dataset.o === ok) c2.classList.add("il-good");
@@ -631,7 +496,7 @@
           var box = extra.querySelector(".il-sgn");
           if (box) box.innerHTML = chipsH(cc, ss);
           if (ci < 3 && !okc && Math.abs(cc) > 0.05 && Math.abs(ss) > 0.05 && Math.floor(a / 90) + 1 === CH[ci].q) {
-            okc = 1; burst(20); tone(880, 0.15, "triangle", 0.04);
+            okc = 1; burst(20);
             var ch = extra.querySelector(".il-ch");
             if (ch) ch.innerHTML = "<b>✓ Верно!</b>";
             later(function () { ci++; okc = 0; showCh(); }, 1100);
@@ -693,7 +558,7 @@
         var md = extra.querySelector(".il-md");
         if (md) md.onclick = function (e) {
           var b = e.target.closest("[data-m]");
-          if (b) { setM(b.dataset.m); tone(700, 0.08, "triangle", 0.03); }
+          if (b) { setM(b.dataset.m); }
         };
         var s1 = extra.querySelector(".il-s1"), s2 = extra.querySelector(".il-s2");
         if (s1) s1.oninput = upd;
@@ -719,37 +584,26 @@
     }
 
     /* ---------- навигация ---------- */
-    function curIdx() { return idx; }
     function paintProgress() {
       var bar = $(".il-progress .progress__fill");
       if (bar) bar.style.width = Math.round(((idx + 1) / N) * 100) + "%";
     }
     function paintFinish() {
+      // Как в обычных уроках: отдельного футера с кнопками нет, только ряд
+      // навигации. На финале кнопка «Дальше» превращается в «Готово» и
+      // завершает урок; практика доступна из окна темы и «Тренировки».
+      // Пройденный урок помечаем строкой-статусом вместо кнопок.
       var box = $(".il-finish");
       if (!box) return;
-      if (idx !== N - 1) { box.innerHTML = ""; return; }
-      if (api.done) {
-        box.innerHTML = '<div class="feedback feedback--ok"><div class="feedback__head">✓ Урок пройден</div></div>' +
-          '<div class="il-finish__row"><button type="button" class="btn btn--primary btn--lg il-practice">Закрепить на практике</button></div>';
-      } else {
-        box.innerHTML = '<div class="il-finish__row">' +
-          '<button type="button" class="btn btn--primary btn--lg il-done">✓ Я разобрался — завершить</button>' +
-          '<button type="button" class="btn btn--ghost btn--lg il-practice">Закрепить на практике</button></div>';
-      }
-      var dn = box.querySelector(".il-done"), pr = box.querySelector(".il-practice");
-      if (dn) dn.onclick = function () { try { api.finish(); } catch (e) {} };
-      if (pr) pr.onclick = function () { try { api.practice(); } catch (e) {} };
+      if (!api.done || idx !== N - 1) { box.innerHTML = ""; return; }
+      box.innerHTML = '<div class="feedback feedback--ok"><div class="feedback__head">✓ Урок пройден</div></div>';
     }
     function go(i) {
-      camTok++;
-      cine = false;
       cancelAnimationFrame(twRaf); cancelAnimationFrame(inrRaf);
-      cap("");
       idx = Math.max(0, Math.min(N - 1, i));
       var cfg = VIS[Math.min(idx, VIS.length - 1)] || { vis: "d q v" };
       cur = { drag: !!cfg.drag, lab: cfg.lab || null, live: null };
       svg.setAttribute("class", "il-svg " + cfg.vis + (cur.drag ? " dr" : ""));
-      svg.classList.remove("cine");
       var s = scene(idx);
       var lab = $(".lesson-step-label"), ttl = $(".lesson-title"), txt = $(".lesson-body .lesson-text");
       if (lab) lab.textContent = "Шаг " + (idx + 1) + " из " + N;
@@ -761,68 +615,34 @@
       renderExtra(idx);
       var back = $(".il-back"), next = $(".il-next");
       if (back) back.disabled = idx === 0;
-      if (next) next.textContent = idx === N - 1 ? "Готово" : "Дальше →";
+      if (next) next.textContent = idx === N - 1 ? (api.done ? "К практике →" : "Готово") : "Дальше →";
       paintProgress(); paintFinish();
-      recapBtn.hidden = !CINE_STEPS[idx] || RED;
-      if (!RED && (idx === 0 || idx === 6)) svg.classList.add("intro");
       if (cfg.a != null) tweenTo(cfg.a); else draw(A);
       if (idx === N - 1 && !RED && !finalBurstDone) {
         finalBurstDone = true;
-        later(function () { burst(40); chime(); }, 1200);
+        later(function () { burst(40); }, 1200);
       }
       var body = el.querySelector(".lesson-card");
       if (body && body.scrollIntoView) { try { body.scrollIntoView({ block: "nearest" }); } catch (e) {} }
     }
 
-    /* ---------- тулбар ---------- */
-    var replay = $(".il-replay"), soundBtn = $(".il-sound"), ecoBtn = $(".il-eco");
-    function paintToggles() {
-      if (soundBtn) {
-        soundBtn.textContent = muted ? "♪ Звук: выкл" : "♪ Звук: вкл";
-        soundBtn.setAttribute("aria-pressed", String(!muted));
-      }
-      if (ecoBtn) {
-        ecoBtn.classList.toggle("btn--primary", LITE);
-        ecoBtn.classList.toggle("btn--ghost", !LITE);
-        ecoBtn.setAttribute("aria-pressed", String(LITE));
-      }
-      el.querySelector(".il-trig").classList.toggle("lite", LITE);
-    }
-    if (replay) replay.onclick = function () {
-      if (RED || !CINE_STEPS[idx]) return;
-      playScene(idx);
-    };
-    if (recapBtn) recapBtn.onclick = function () {
-      if (RED || !CINE_STEPS[idx]) return;
-      playScene(idx);
-    };
-    if (soundBtn) soundBtn.onclick = function () {
-      muted = !muted;
-      if (!muted) {
-        try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume(); } catch (e) {}
-        tone(880, 0.1);
-      }
-      paintToggles();
-    };
-    if (ecoBtn) ecoBtn.onclick = function () { LITE = !LITE; paintToggles(); draw(A); };
+    /* Эко-режим — только silent auto-degrade по железу (без кнопки): */
+    el.querySelector(".il-trig").classList.toggle("lite", LITE);
     var backB = $(".il-back"), nextB = $(".il-next");
     if (backB) backB.onclick = function () { if (idx > 0) go(idx - 1); };
     if (nextB) nextB.onclick = function () {
       if (idx < N - 1) go(idx + 1);
       else { try { api.done ? api.practice() : api.finish(); } catch (e) {} }
     };
-    paintToggles();
     go(0);
 
     /* ---------- cleanup ---------- */
     return function () {
       dead = true;
-      camTok++;
       try { abort && abort.abort(); } catch (e) {}
       cancelAnimationFrame(twRaf); cancelAnimationFrame(inrRaf); cancelAnimationFrame(fxRaf);
       timers.forEach(function (t) { clearTimeout(t); });
       try { ro && ro.disconnect(); } catch (e) {}
-      try { if (AC && AC.state === "running") AC.suspend(); } catch (e) {}
       try { fx.remove(); } catch (e) {}
     };
   }

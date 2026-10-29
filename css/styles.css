@@ -399,8 +399,8 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1;
-  vertical-align: super;
-  margin-left: 4px;
+  align-self: flex-start;
+  margin: 2px 0 0 4px;
   color: var(--accent-ink);
   white-space: nowrap;
 }

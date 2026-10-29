@@ -2,7 +2,6 @@
 .ilesson-app .il-hist { display: block; }
 .ilesson-app .il-toolbar { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
 .ilesson-app .il-progress { height: 6px; }
-.ilesson-app .il-tools { display: flex; gap: 8px; flex-wrap: wrap; }
 .ilesson-app .il-hud { position: relative; margin-top: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-height: 240px; }
 .ilesson-app .il-svg { width: 100%; height: auto; display: block; }
 .ilesson-app .il-svg .il-ax2 { font-size: 11px; fill: var(--muted); }
@@ -14,11 +13,8 @@
 .ilesson-app .il-svg.dr .il-dot { cursor: pointer; }
 .ilesson-app .il-dot .il-hit { fill: transparent; }
 .ilesson-app .il-band rect { transform-box: fill-box; transform-origin: left center; }
-.ilesson-app .il-cap { position: relative; z-index: 3; align-self: center; max-width: calc(100% - 32px); margin: 8px auto; text-align: center; font-weight: 700; font-size: 14px; color: var(--text); padding: 7px 16px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border-strong); opacity: 0; transition: opacity .3s; pointer-events: none; }
-.ilesson-app .il-cap.on { opacity: 1; }
 .ilesson-app .il-hud { display: flex; flex-direction: column; }
 .ilesson-app .il-hud .il-svg { order: 1; flex: 1 1 0; min-height: 0; }
-.ilesson-app .il-skip { position: absolute; right: 8px; top: 8px; z-index: 5; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; }
 .ilesson-app .il-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 6; }
 .ilesson-app .il-rules { display: grid; gap: 8px; margin: 0 0 14px; }
 .ilesson-app .il-era { display: flex; gap: 12px; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--text-2); cursor: pointer; transition: border-color .3s, transform .3s; }
@@ -46,9 +42,7 @@
 .ilesson-app .il-ok i { flex: none; width: 28px; height: 28px; border-radius: 999px; background: var(--success); color: #fff; display: grid; place-items: center; font-style: normal; font-weight: 800; }
 .ilesson-app .il-ok p { margin: 0; }
 .ilesson-app .il-finish { margin-top: 14px; }
-.ilesson-app .il-finish__row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 @media (prefers-reduced-motion: reduce) {
   .ilesson-app .il-era { transition: none; }
-  .ilesson-app .il-cap { transition: none; }
-  .ilesson-app .il-dot.nudge { animation: none; }
+    .ilesson-app .il-dot.nudge { animation: none; }
 }
