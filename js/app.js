@@ -2603,6 +2603,13 @@ async function render() {
   // Категория «locked» может иметь реальную зарегистрированную тему, поэтому
   // путь/карточка навыка не должны повторно скрываться здесь как пустой предмет.
   // Все контентные маршруты уже отсечены выше по subjectState.
+  // Интерактивный урок мог оставить живой движок (rAF/таймеры/звук):
+  // гасим его до сноса DOM, иначе он работает поверх новых экранов.
+  try {
+    if (typeof window.__ilessonCleanup === "function") window.__ilessonCleanup();
+  } catch (_) {}
+  try { window.__ilessonCleanup = null; } catch (_) {}
+  try { window.__ilessonFetching = false; } catch (_) {}
   screen.innerHTML = "";
   screen.style.animation = "none";
   void screen.offsetWidth;
@@ -9735,35 +9742,63 @@ function screenInteractiveLesson(root) {
   const ilesson = full[0] || null;
 
   if (ilesson) {
-    const scenes = ilesson.scenes;
-    const done = !!(Store.state.completedILessons && Store.state.completedILessons[ilesson.id]);
-    root.innerHTML = `
-    <div class="session-wrap lesson-wrap ilesson-wrap">
-      <div class="session-head">
-        <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
-        <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
-        <div class="session-head__progress mono">${esc(ege)}</div>
-      </div>
-      <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
-      ${ilesson.subtitle ? `<div class="page-sub" style="margin-top:6px">${esc(ilesson.subtitle)}</div>` : ""}
-      ${scenes.map((scene, i) => `
-        <div class="card lesson-card" style="margin-top:12px">
-          <div class="lesson-step-label">Шаг ${i + 1} из ${scenes.length}</div>
-          ${scene.title ? `<div class="lesson-title">${esc(scene.title)}</div>` : ""}
-          <div class="lesson-body"><div class="task-card__text lesson-text">${mathText(scene.text || "")}</div></div>
-          ${scene.visual && scene.visual.svg ? `<div class="ilesson-visual">${scene.visual.svg}</div>` : ""}
-          ${scene.visual && scene.visual.html ? `<div class="ilesson-visual">${scene.visual.html}</div>` : ""}
-        </div>`).join("")}
-      ${done ? `<div class="feedback feedback--ok" style="margin-top:14px"><div class="feedback__head">${icon("check")} Урок пройден</div></div>` : ""}
-      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">
-        ${done ? "" : `<button class="btn btn--primary btn--lg" onclick="finishInteractiveLesson('${esc(ilesson.id)}')">${icon("check")} Я разобрался — завершить${ilesson.xp ? ` (+${ilesson.xp} XP)` : ""}</button>`}
-        <button class="btn ${done ? "btn--primary" : "btn--ghost"} btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Закрепить на практике</button>
-        <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
-      </div>
-    </div>`;
-    try {
-      if (typeof MathVisualMount !== "undefined") MathVisualMount.mountWithin(root);
-    } catch (_) {}
+    // Модульный режим: у урока есть свой интерактивный движок
+    // (js/ilessons/<name>.js). Модуль рисует всё внутри .ilesson-app сам —
+    // в стилистике обычных уроков, но со своей интерактивной сутью
+    // (drag, квизы, камера). Не загрузился — честный fallback на статику.
+    const modName = ilessonModuleName(ilesson);
+    if (modName) {
+      const done = !!(Store.state.completedILessons && Store.state.completedILessons[ilesson.id]);
+      root.innerHTML = `
+      <div class="session-wrap lesson-wrap ilesson-wrap">
+        <div class="session-head">
+          <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
+          <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
+          <div class="session-head__progress mono">${esc(ege)}</div>
+        </div>
+        <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+        <div class="ilesson-app" id="ilessonApp">${pageLoaderHTML("Загружаем интерактив…")}</div>
+      </div>`;
+      ilessonLoadModule(modName).then((mod) => {
+        try {
+          if (currentRoute() !== "ilesson" || routeParam() !== skillId) return;
+        } catch (_) { return; }
+        const appEl = document.getElementById("ilessonApp");
+        if (!mod || !appEl) { renderStaticILesson(root, ilesson, skillId, topicName, categoryName, ege); return; }
+        const api = {
+          el: appEl,
+          ilesson,
+          skillId,
+          done,
+          finish: () => finishInteractiveLesson(ilesson.id),
+          practice: () => startSkillPractice(skillId),
+          path: () => go("path"),
+          toast, esc, mathText, icon,
+        };
+        let cleanup = null;
+        try {
+          cleanup = mod.mount(api) || null;
+        } catch (_) {
+          cleanup = null;
+        }
+        if (typeof cleanup !== "function" && cleanup !== null && cleanup !== undefined) cleanup = null;
+        if (cleanup === undefined) cleanup = null;
+        // Модуль без mount/упавший mount — уже отловлены выше (null).
+        // Пустой mount без cleanup — нормально: просто нечего гасить.
+        ilessonSetCleanup(cleanup);
+        if (!appEl.innerHTML || !appEl.innerHTML.trim()) {
+          renderStaticILesson(root, ilesson, skillId, topicName, categoryName, ege);
+        }
+      }).catch(() => {
+        try {
+          if (currentRoute() === "ilesson" && routeParam() === skillId) {
+            renderStaticILesson(root, ilesson, skillId, topicName, categoryName, ege);
+          }
+        } catch (_) {}
+      });
+      return;
+    }
+    renderStaticILesson(root, ilesson, skillId, topicName, categoryName, ege);
     return;
   }
 
@@ -9800,6 +9835,117 @@ function screenInteractiveLesson(root) {
         <div class="ilesson-hero__note">Урок привязан к теме <b>${esc(topicName)}</b> (id: <span class="mono">${esc(String(skillId))}</span>). Как только он появится в каталоге предмета, страница покажет его автоматически.</div>
       </div>
     </div>`;
+}
+
+/* Статичный рендер интерактивного урока: сцены одна за другой в карточках
+   обычного урока + кнопка завершения. Используется для уроков без своего
+   JS-модуля и как fallback, если модуль не загрузился. */
+function renderStaticILesson(root, ilesson, skillId, topicName, categoryName, ege) {
+  const scenes = Array.isArray(ilesson.scenes) ? ilesson.scenes : [];
+  const done = !!(Store.state.completedILessons && Store.state.completedILessons[ilesson.id]);
+  root.innerHTML = `
+    <div class="session-wrap lesson-wrap ilesson-wrap">
+      <div class="session-head">
+        <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
+        <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
+        <div class="session-head__progress mono">${esc(ege)}</div>
+      </div>
+      <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
+      ${ilesson.subtitle ? `<div class="page-sub" style="margin-top:6px">${esc(ilesson.subtitle)}</div>` : ""}
+      ${scenes.map((scene, i) => `
+        <div class="card lesson-card" style="margin-top:12px">
+          <div class="lesson-step-label">Шаг ${i + 1} из ${scenes.length}</div>
+          ${scene.title ? `<div class="lesson-title">${esc(scene.title)}</div>` : ""}
+          <div class="lesson-body"><div class="task-card__text lesson-text">${mathText(scene.text || "")}</div></div>
+          ${scene.visual && scene.visual.svg ? `<div class="ilesson-visual">${scene.visual.svg}</div>` : ""}
+          ${scene.visual && scene.visual.html ? `<div class="ilesson-visual">${scene.visual.html}</div>` : ""}
+        </div>`).join("")}
+      ${done ? `<div class="feedback feedback--ok" style="margin-top:14px"><div class="feedback__head">${icon("check")} Урок пройден</div></div>` : ""}
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">
+        ${done ? "" : `<button class="btn btn--primary btn--lg" onclick="finishInteractiveLesson('${esc(ilesson.id)}')">${icon("check")} Я разобрался — завершить${ilesson.xp ? ` (+${ilesson.xp} XP)` : ""}</button>`}
+        <button class="btn ${done ? "btn--primary" : "btn--ghost"} btn--lg" onclick="startSkillPractice('${esc(skillId)}')">${icon("target")} Закрепить на практике</button>
+        <button class="btn btn--ghost btn--lg" onclick="go('path')">К карте навыков</button>
+      </div>
+    </div>`;
+  try {
+    if (typeof MathVisualMount !== "undefined") MathVisualMount.mountWithin(root);
+  } catch (_) {}
+}
+
+/* Имя интерактивного JS-модуля урока: только [a-z0-9-], иначе модуль
+   не грузим (имя уходит в URL /js/ilessons/<name>.js). Пусто — обычный
+   статичный урок без своего движка. */
+function ilessonModuleName(ilesson) {
+  const raw = String((ilesson && ilesson.js) || "").trim();
+  if (!raw || !/^[a-z0-9-]{1,64}$/.test(raw)) return "";
+  return raw;
+}
+
+/* Загрузчик интерактивных модулей урока (js/ilessons/<name>.js +
+   css/ilessons/<name>.css). Кэш на сессию: повторный вход — без сети.
+   Модуль обязан зарегистрировать window.ILessonModules[name] = {
+   mount(api) -> cleanup|void }. Контракт api — в docs/interactive-lessons.md.
+   Возвращает модуль или null (нет имени / не загрузился / нет mount). */
+const __ilessonScriptCache = {};
+function ilessonLoadModule(name) {
+  if (!name) return Promise.resolve(null);
+  if (Object.prototype.hasOwnProperty.call(__ilessonScriptCache, name)) {
+    return __ilessonScriptCache[name];
+  }
+  const load = (async () => {
+    try {
+      const reg = window.ILessonModules && window.ILessonModules[name];
+      if (reg && typeof reg.mount === "function") return reg;
+    } catch (_) {}
+    const cssHref = `css/ilessons/${name}.css?v=1`;
+    try {
+      if (!document.querySelector(`link[data-ilesson-css="${name}"]`)) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = cssHref;
+        link.dataset.ilessonCss = name;
+        document.head.appendChild(link);
+      }
+    } catch (_) {}
+    try {
+      await new Promise((resolve, reject) => {
+        if (document.querySelector(`script[data-ilesson-js="${name}"]`)) { resolve(); return; }
+        const el = document.createElement("script");
+        el.src = `js/ilessons/${name}.js?v=1`;
+        el.dataset.ilessonJs = name;
+        el.onload = () => resolve();
+        el.onerror = () => reject(new Error("ilesson script load failed"));
+        document.head.appendChild(el);
+      });
+    } catch (_) {
+      return null;
+    }
+    try {
+      const reg = window.ILessonModules && window.ILessonModules[name];
+      if (reg && typeof reg.mount === "function") return reg;
+    } catch (_) {}
+    return null;
+  })();
+  // Не кэшируем провал навсегда: битый модуль не должен отравлять
+  // следующие заходы (вдруг файл докатился позже).
+  __ilessonScriptCache[name] = load.then((mod) => {
+    if (!mod) delete __ilessonScriptCache[name];
+    return mod;
+  });
+  return __ilessonScriptCache[name];
+}
+
+/* Активная интерактивная сцена: модуль возвращает cleanup (таймеры, rAF,
+   слушатели), роутер зовёт его перед сменой экрана — иначе движок урока
+   жил бы дальше поверх других разделов. */
+if (typeof window.__ilessonCleanup !== "function" && window.__ilessonCleanup !== null) {
+  window.__ilessonCleanup = null;
+}
+function ilessonSetCleanup(fn) {
+  try {
+    if (typeof window.__ilessonCleanup === "function") window.__ilessonCleanup();
+  } catch (_) {}
+  window.__ilessonCleanup = typeof fn === "function" ? fn : null;
 }
 
 /* Завершение интерактивного урока из его экрана: XP — один раз,

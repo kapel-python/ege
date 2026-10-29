@@ -131,6 +131,30 @@ def main() -> int:
             check("install hook accepts key",
                   conn.execute("SELECT COUNT(*) AS c FROM ilessons WHERE id='v-test-02'").fetchone()["c"] == 1)
             conn.execute("DELETE FROM ilessons WHERE id='v-test-02'")
+
+            # Поле js (интерактивный модуль): roundtrip + строгая валидация
+            # имени (имя уходит в URL загрузки скрипта).
+            server._upsert_catalog_ilesson(
+                conn, dict(good, id="v-test-js", js="v-trig-01"), "profile_math")
+            stored_js = json.loads(conn.execute(
+                "SELECT metadata_json FROM ilessons WHERE id='v-test-js'").fetchone()["metadata_json"])
+            check("js field stored", stored_js.get("js") == "v-trig-01", stored_js.get("js"))
+            for bad_js in ("../x", "a b", "<script>", "v_trig", "x" * 65):
+                try:
+                    server._upsert_catalog_ilesson(
+                        conn, dict(good, id="v-test-jsbad", js=bad_js), "profile_math")
+                    check(f"js rejected {bad_js!r}", False)
+                except ValueError:
+                    check(f"js rejected {bad_js!r}", True)
+            check("bad js row absent",
+                  conn.execute("SELECT COUNT(*) AS c FROM ilessons WHERE id='v-test-jsbad'").fetchone()["c"] == 0)
+            # Пустая строка — не модуль, а отсутствие: валидна, строка живёт.
+            server._upsert_catalog_ilesson(
+                conn, dict(good, id="v-test-jsempty", js=""), "profile_math")
+            check("empty js accepted",
+                  conn.execute("SELECT COUNT(*) AS c FROM ilessons WHERE id='v-test-jsempty'").fetchone()["c"] == 1)
+            conn.execute("DELETE FROM ilessons WHERE id='v-test-jsempty'")
+            conn.execute("DELETE FROM ilessons WHERE id='v-test-js'")
             conn.commit()
             # Строки, пришедшие мимо install_catalog (фикстура), регистрируем
             # в live-карте вручную — прод-установка делает это сама из файлов.
@@ -151,6 +175,7 @@ def main() -> int:
             full_rows = [x for x in details.get("interactiveLessons", []) if x.get("id") == "v-test-01"]
             check("details carry scenes", len(full_rows) == 1
                   and [s.get("text") for s in full_rows[0]["scenes"]] == ["hello", "world"], full_rows)
+            check("details js defaults empty", len(full_rows) == 1 and full_rows[0].get("js") == "", full_rows)
         finally:
             conn.close()
 

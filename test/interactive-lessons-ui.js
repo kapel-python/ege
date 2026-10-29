@@ -154,6 +154,11 @@ function block(src, marker) {
     block(appJs, "function esc("),
     block(appJs, "function icon("),
     block(stateJs, "function plural("),
+    block(appJs, "function ilessonModuleName("),
+    "const __ilessonScriptCache = {};",
+    block(appJs, "function ilessonLoadModule("),
+    block(appJs, "function ilessonSetCleanup("),
+    block(appJs, "function renderStaticILesson("),
     block(appJs, "function screenInteractiveLesson("),
     block(appJs, "function finishInteractiveLesson("),
   ].join("\n");
@@ -225,5 +230,105 @@ function block(src, marker) {
     && appJs.includes('route === "ilesson"'));
 }
 
-console.log(fails ? fails + " FAILURES" : "ALL ILESSONS UI OK");
-process.exit(fails ? 1 : 0);
+/* ---------- модули уроков: имя, mount, fallback, cleanup ---------- */
+{
+  const sb = { console };
+  sb.window = sb;
+  vm.createContext(sb);
+  vm.runInContext([
+    block(appJs, "function ilessonModuleName("),
+    block(appJs, "function ilessonSetCleanup("),
+    block(appJs, "function renderStaticILesson("),
+  ].join("\n"), sb);
+  const nm = (il) => vm.runInContext(`ilessonModuleName(${JSON.stringify(il)})`, sb);
+  t("module name ok", nm({ js: "v-trig-01" }) === "v-trig-01");
+  t("module name rejects traversal", nm({ js: "../x" }) === "");
+  t("module name rejects spaces", nm({ js: "a b" }) === "");
+  t("module name rejects empty", nm({}) === "" && nm({ js: "" }) === "" && nm(null) === "");
+  // cleanup: новый сносит старый.
+  vm.runInContext(`var __calls = [];
+    ilessonSetCleanup(() => { __calls.push("first"); });
+    ilessonSetCleanup(() => { __calls.push("second"); });`, sb);
+  const calls = vm.runInContext("__calls", sb);
+  t("cleanup replaced, old called once", JSON.stringify(calls) === '["first"]', JSON.stringify(calls));
+  vm.runInContext(`ilessonSetCleanup(null);`, sb);
+  const afterNull = vm.runInContext(`typeof window.__ilessonCleanup`, sb);
+  t("cleanup cleared", afterNull === "object", afterNull); // null
+}
+
+{
+  // mount-путь: модуль из реестра грузится без DOM и монтируется в #ilessonApp.
+  const iconsSrc = appJs.slice(appJs.indexOf("const ICONS = {"), appJs.indexOf("};", appJs.indexOf("const ICONS = {")) + 2);
+  const code = [
+    iconsSrc,
+    block(appJs, "function esc("),
+    block(appJs, "function icon("),
+    block(stateJs, "function plural("),
+    block(appJs, "function ilessonModuleName("),
+    "const __ilessonScriptCache = {};",
+    block(appJs, "function ilessonLoadModule("),
+    block(appJs, "function ilessonSetCleanup("),
+    block(appJs, "function renderStaticILesson("),
+    block(appJs, "function screenInteractiveLesson("),
+    block(appJs, "function finishInteractiveLesson("),
+  ].join("\n");
+  const flush = () => new Promise((res) => setTimeout(res, 10));
+  (async () => {
+    // mount вызван, cleanup записан.
+    let mountedApi = null, cleaned = 0;
+    const sb = {
+      console,
+      routeParam: () => "n01",
+      subjectSkillById: (id) => ({ id, name: "T", ege: "№1" }),
+      topicDisplayName: (s) => s.name,
+      topicCategory: () => ({ title: "C" }),
+      subjectDisplayName: (s) => s.title,
+      go: () => {}, startSkillPractice: () => {},
+      mathText: (s) => String(s),
+      pageLoaderHTML: (s) => "LOADER:" + s,
+      currentRoute: () => "ilesson",
+      render: () => {},
+      Store: { state: { completedILessons: {} }, ensureDetails: () => Promise.resolve() },
+      DataAPI: {
+        ilessonsBySkill: () => [{ id: "v-01", skill: "n01", title: "V", js: "v-x",
+          scenes: [{ title: "S1", text: "hello" }] }],
+        ilessonsReady: () => true,
+      },
+      ILessonModules: { "v-x": { mount: (api) => { mountedApi = api; return () => { cleaned++; }; } } },
+      document: { getElementById: (id) => (id === "ilessonApp" ? { innerHTML: "<div>app</div>" } : null) },
+      completeInteractiveLesson: () => ({ firstCompletion: true, totalXp: 30 }),
+      toast: () => {},
+    };
+    sb.window = sb;
+    vm.createContext(sb);
+    vm.runInContext(code, sb);
+    vm.runInContext("this.__root = { innerHTML: \"\" }; screenInteractiveLesson(this.__root);", sb);
+    t("module mode shows app shell", sb.__root.innerHTML.includes('id="ilessonApp"'), sb.__root.innerHTML.slice(0, 100));
+    await flush(); await flush();
+    t("module mounted with api", !!mountedApi && mountedApi.ilesson.id === "v-01" && typeof mountedApi.finish === "function");
+    vm.runInContext("window.__ilessonCleanup()", sb);
+    t("cleanup runs module teardown", cleaned === 1);
+    // fallback: модуля нет — статичные сцены.
+    const sb2 = Object.assign({}, sb, {
+      ILessonModules: {},
+      document: { getElementById: () => null },
+      DataAPI: {
+        ilessonsBySkill: () => [{ id: "v-02", skill: "n01", title: "V2", js: "v-missing",
+          scenes: [{ title: "S9", text: "static" }] }],
+        ilessonsReady: () => true,
+      },
+    });
+    sb2.window = sb2;
+    vm.createContext(sb2);
+    vm.runInContext(code, sb2);
+    vm.runInContext("this.__root = { innerHTML: \"\" }; screenInteractiveLesson(this.__root);", sb2);
+    await flush(); await flush();
+    t("missing module falls back to static", sb2.__root.innerHTML.includes("S9"), sb2.__root.innerHTML.slice(0, 120));
+  })().then(() => {
+    console.log(fails ? fails + " FAILURES" : "ALL ILESSONS UI OK");
+    process.exit(fails ? 1 : 0);
+  }).catch((e) => {
+    console.log("FAIL async harness " + (e && e.message));
+    process.exit(1);
+  });
+}

@@ -7317,9 +7317,15 @@ def _upsert_catalog_ilesson(conn: sqlite3.Connection, item: dict, subject: str) 
 
     {"id": "v-trig-01", "skill": "<skillId>", "title": "...",
      "subtitle": "...", "xp": 30,
-     "scenes": [{"title": "...", "text": "...", "visual": {"kind": "html"|"svg", "html"|"svg": "<..."}}]}
+     "js": "v-trig-01",  # опционально: интерактивный JS-модуль урока
+     "scenes": [{"key": "circle-drag", "title": "...", "text": "...",
+                 "visual": {"kind": "html"|"svg", "html"|"svg": "<..."}}]}
     Сцены хранятся целиком в metadata_json, как steps у lessons. Пустой
     список сцен — не урок: такие записи пропускаем, роут покажет заглушку.
+    Поле js называет файл модуля js/ilessons/<js>.js + стили
+    css/ilessons/<js>.css: только [a-z0-9-], иначе ValueError (иначе имя
+    ушло бы в URL загрузки скрипта). Сцены могут нести произвольные
+    extra-поля (key для привязки модуля) — хранятся как есть.
     """
     if not isinstance(item, dict) or not item.get("id") or not item.get("skill"):
         return
@@ -7330,6 +7336,10 @@ def _upsert_catalog_ilesson(conn: sqlite3.Connection, item: dict, subject: str) 
     ).fetchone()
     if owner is not None and owner["subject"] != subject:
         raise ValueError(f"catalog id {item_id!r} belongs to another subject")
+    js_name = item.get("js")
+    if js_name is not None and str(js_name) != "":
+        if not re.fullmatch(r"[a-z0-9-]{1,64}", str(js_name)):
+            raise ValueError(f"ilesson {item_id!r} has bad js module name {js_name!r}")
     scenes = item.get("scenes") if isinstance(item.get("scenes"), list) else []
     scenes = [s for s in scenes if isinstance(s, dict) and str(s.get("text") or s.get("title") or "").strip()]
     if not scenes:
@@ -7991,7 +8001,9 @@ def catalog_ilessons_payload(conn: sqlite3.Connection, subject: str | None = Non
         if not scenes:
             continue
         out.append({"id": r["id"], "skill": r["skill_id"], "title": r["title"],
-                    "subtitle": r["subtitle"], "xp": r["xp"], "scenes": scenes})
+                    "subtitle": r["subtitle"], "xp": r["xp"],
+                    "js": stored.get("js") or "",
+                    "scenes": scenes})
     return {"subject": full["subject"], "status": full["status"],
             "locked": full["locked"], "comingSoon": full["comingSoon"],
             "interactiveLessons": out}

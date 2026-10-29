@@ -13,6 +13,29 @@
   visual?}]}`. `visual` — `{kind: "svg"|"html", svg|html: "<...>"}`,
   вставляется как есть (источник доверенный — наш каталог, чужой HTML
   не вставлять). Текст сцены идёт через `mathText`, KaTeX работает.
+- Интерактивный движок (опционально): поле `js: "<name>"` называет модуль
+  `js/ilessons/<name>.js` + стили `css/ilessons/<name>.css`. Имя строго
+  `[a-z0-9-]{1,64}` — сервер (`_upsert_catalog_ilesson`) и фронт
+  (`ilessonModuleName`) отклоняют всё остальное, т.к. имя уходит в URL.
+  Без модуля урок — статичные сцены; модуль не загрузился — честный
+  fallback на статику, а не пустой экран.
+- Контракт модуля: `window.ILessonModules["<name>"] = { mount(api) }`,
+  `mount` возвращает cleanup-функцию (или ничего). Роутер зовёт cleanup
+  перед сменой экрана (`window.__ilessonCleanup`), иначе rAF/таймеры/звук
+  жили бы поверх других разделов.
+  `api = { el, ilesson, skillId, done, finish(), practice(), path(),
+  toast, esc, mathText, icon }`, где `el` — контейнер `.ilesson-app`,
+  `finish()` — завершение с XP через `finishInteractiveLesson`,
+  `done` — урок уже пройден (показать состояние вместо кнопки).
+  Модуль рисует ВЕСЬ урок внутри `el` сам (шаги, навигация, квизы),
+  но в визуальном языке обычных уроков: `.card.lesson-card`,
+  `.lesson-step-label`, `.lesson-title`, `.btn btn--primary/ghost`,
+  `.feedback`, `.task-card__text.lesson-text` + `mathText()` для формул.
+  Сцены каталога (`ilesson.scenes[i].title/text`) — канонический текст:
+  модуль переиспользует их, а не дублирует строки в JS.
+  Свои стили — только под префиксом `.ilesson-app` (не течь наружу).
+  Звук — только после жеста пользователя, по умолчанию выкл; уважать
+  `prefers-reduced-motion` (в демо уже есть `RED`-ветки — сохранить).
 - id — с префиксом `v-` (не пересекаться с id обычных уроков/заданий).
 - Запись без непустых сцен — не урок: upsert её пропускает, а ранее
   установленная строка удаляется (прогресс учеников блокирует удаление,
@@ -62,9 +85,12 @@
   домен `completedILessons` в save/merge; `completeInteractiveLesson()`
   (плоский бонус, timeline, streak, одноразовость).
 - `js/app.js`: роут `#/ilesson/<skillId>` (`screenInteractiveLesson` —
-  урок / скелет с фоновой догрузкой / заглушка), кнопка с БЕТА-бейджем
-  в модалке темы (с пометкой «пройден»), секция в «Тренировке»
-  (видна только при наличии уроков).
+  модуль / статика / скелет с фоновой догрузкой / заглушка),
+  `ilessonLoadModule()` + `ilessonModuleName()` + cleanup в `render()`,
+  кнопка с БЕТА-бейджем в модалке темы (с пометкой «пройден»), секция
+  в «Тренировке» (видна только при наличии уроков).
+- `js/ilessons/<name>.js` + `css/ilessons/<name>.css`: интерактивные
+  модули уроков (контракт `mount(api)` — выше).
 - `js/interactive-lessons.js`: `openInteractiveLesson(skillId)` +
   `INTERACTIVE_LESSON_CATALOG_TEMPLATE` (шаблон записи каталога).
 
