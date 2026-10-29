@@ -88,7 +88,7 @@
 - `js/app.js`: роут `#/ilesson/<skillId>` (`screenInteractiveLesson` —
   модуль / статика / скелет с фоновой догрузкой / заглушка),
   `ilessonLoadModule()` + `ilessonModuleName()` + cleanup в `render()`,
-  кнопка с БЕТА-бейджем в модалке темы (с пометкой «пройден»), секция
+  кнопка с БЕТА-бейджем в модалке темы (только если урок реально есть — `topicHasInteractiveLesson`, с пометкой «пройден»), секция
   в «Тренировке» (видна только при наличии уроков).
 - `js/ilessons/<name>.js` + `css/ilessons/<name>.css`: интерактивные
   модули уроков (контракт `mount(api)` — выше).

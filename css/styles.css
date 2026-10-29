@@ -378,8 +378,7 @@ body {
 .btn__beta {
   position: absolute;
   top: -9px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 14px;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;

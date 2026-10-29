@@ -218,12 +218,62 @@ function block(src, marker) {
   t("real lesson renders scenes", htmlFull.includes("S1") && htmlFull.includes("finishInteractiveLesson"), htmlFull.slice(0, 120));
 }
 
-/* ---------- модалка темы: кнопка есть всегда ---------- */
+/* ---------- модалка темы: кнопка только при реальном уроке ---------- */
 {
   t("modal has visual button",
     /openInteractiveLesson\('\$\{esc\(skillId\)\}'\)/.test(appJs)
     && appJs.includes("btn--visual")
     && appJs.includes("Интерактивный урок"));
+  t("modal shows visual button only with real lesson",
+    /topicHasInteractiveLesson\(sk\)/.test(appJs)
+    && /const visualBtn = hasIV/.test(appJs));
+  // Функционал: та же модалка, скилл без урока — кнопки нет; с уроком — есть.
+  const sb = { console };
+  sb.window = sb;
+  vm.createContext(sb);
+  vm.runInContext([
+    block(appJs, "function esc("),
+    block(appJs, "function icon("),
+    block(appJs, "function asSafeArray("),
+    block(appJs, "function finiteNumber("),
+    block(appJs, "function nonNegativeNumber("),
+    block(appJs, "function topicHasInteractiveLesson("),
+    block(appJs, "function openSkillModal("),
+  ].join("\n"), sb);
+  const runModal = (ilessons) => {
+    vm.runInContext(`this.__html = "";
+      subjectSkillById = () => ({ id: "n13", name: "Финансовая математика", cat: "c1", ege: "№13" });
+      topicIsLocked = () => false;
+      Store = { state: { skillStats: {}, errors: [], missionsDone: {}, completedLessons: {}, completedILessons: {} } };
+      DataAPI = {
+        missions: () => [], lessonsBySkill: () => [],
+        practiceTasksBySkill: () => [{ id: "t1" }],
+        ilessonsBySkill: () => (${JSON.stringify(ilessons.map((id) => ({ id, skill: "n13" })))}),
+      };
+      lessonStepErrorsBySkill = () => [];
+      topicCategory = () => null;
+      subjectDisplayName = () => "Часть 1";
+      topicDisplayName = (s) => s.name;
+      topicStatus = () => "not-started";
+      statusChipClass = () => "";
+      statusLabel = (s) => s;
+      progressBar = () => "";
+      skillProgress = () => 0;
+      skillProgressBreakdown = () => ({ lessonTotal: 0, theory: 0, practice: 0, total: 0, lessonDone: 0 });
+      skillPracticeDetail = () => null;
+      practiceSolvesToTarget = () => 0;
+      plural = (n) => n;
+      skillIsEssayOnly = () => false;
+      missionPracticeIds = () => [];
+      icon = () => "";
+      openModal = (html) => { this.__html = html; };
+      openSkillModal("n13");`, sb);
+    return vm.runInContext("this.__html", sb);
+  };
+  const htmlWithout = runModal([]);
+  const htmlWith = runModal(["v-01"]);
+  t("modal hides visual button without ilesson", !htmlWithout.includes("Интерактивный урок"), htmlWithout.slice(0, 120));
+  t("modal shows visual button with ilesson", htmlWith.includes("Интерактивный урок") && htmlWith.includes("БЕТА"), htmlWith.slice(0, 120));
   t("training lists ilessons section",
     appJs.includes("Интерактивные уроки") && appJs.includes("DataAPI.ilessons()"));
   t("ilesson route wired",

@@ -5303,13 +5303,17 @@ function openSkillModal(skillId) {
       ${(() => {
         const bank = asSafeArray(DataAPI.practiceTasksBySkill(skillId));
         // Интерактивный (визуальный) урок — отдельная сущность от классики:
-        // привязан к ТЕМЕ (skillId), а не к записи каталога, поэтому виден
-        // всегда, даже пока урока нет: роут #/ilesson/<skillId> сам покажет
-        // красивую заглушку вместо урока. Цвет — изумрудный (не фиолетовый
-        // primary классики): две учебные кнопки не спорят между собой.
-        const ivLessons = (() => { try { return DataAPI.ilessonsBySkill(skillId); } catch (_) { return []; } })();
+        // привязан к ТЕМЕ (skillId), а не к записи каталога. Кнопка видна
+        // ТОЛЬКО если урок реально есть: topicHasInteractiveLesson читает
+        // DataAPI.ilessonsBySkill (работает и на summary-мете до деталей).
+        // Цвет — изумрудный (не фиолетовый primary классики): две учебные
+        // кнопки не спорят между собой.
+        const hasIV = topicHasInteractiveLesson(sk);
+        const ivLessons = hasIV ? (() => { try { return DataAPI.ilessonsBySkill(skillId); } catch (_) { return []; } })() : [];
         const ivDone = ivLessons.some((l) => l && Store.state.completedILessons && Store.state.completedILessons[l.id]);
-        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>Интерактивный урок${ivDone ? " · пройден" : ""}</button>`;
+        const visualBtn = hasIV
+          ? `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>Интерактивный урок${ivDone ? " · пройден" : ""}</button>`
+          : "";
         // Тема из одних сочинений (урока нет и не будет — там только практика):
         // главная кнопка ведёт в практику сочинений, а не в несуществующий
         // урок. Сочинения узнаём по типу заданий; в лёгком каталоге типа нет
