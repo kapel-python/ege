@@ -1679,7 +1679,9 @@ function guestSaveCtaHTML() {
   guestCtaWrite(data);
   const s = Store.state || {};
   const solved = Math.max(0, Number(s.totalSolved) || 0);
-  const lessons = Object.keys(safeObject(s.completedLessons)).length;
+  // Уроки — оба формата: интерактив засчитывается наравне с обычным.
+  const lessons = Object.keys(safeObject(s.completedLessons)).length
+    + Object.keys(safeObject(s.completedILessons)).length;
   const what = solved
     ? `У тебя уже решено ${solved} ${plural(solved, "задание", "задания", "заданий")}${lessons ? ` и пройдено ${lessons} ${plural(lessons, "урок", "урока", "уроков")}` : ""}`
     : lessons ? `У тебя уже пройдено ${lessons} ${plural(lessons, "урок", "урока", "уроков")}` : "Ты уже занимаешься";
@@ -1913,23 +1915,92 @@ function missionPracticeCount(mission) {
   return missionPracticeIds(mission).length;
 }
 
-/* Теория 0..40: сумма долей уроков (завершён — 1, открыт — шаги/всего). */
-function skillTheoryProgress(skillId) {
-  if (!skillIsAccessible(skillId)) return 0;
-  const lessons = DataAPI.lessonsBySkill(skillId);
+/* Единая теория темы: обычный и интерактивный уроки — взаимозаменяемые
+   форматы одного требования (разницы ноль). Правило одно на все формулы
+   (прогресс, прогноз, следующий шаг):
+   - теория есть, если есть хотя бы один формат (обычный или интерактивный);
+   - теория закрыта, если закрыт ЛЮБОЙ формат: второй сверху ничего к 40%
+     не добавляет (потолок жёсткий — больше 40% двумя уроками не взять);
+   - частичный прогресс — только от открытого обычного урока (шаги/всего);
+     интерактив атомарный (0 или 1), своих сессий у него нет;
+   - классическое накопление по обычным урокам сохраняется, итог —
+     max(доля обычных, интерактив ? 1 : 0).
+   Без интерактивов формулы совпадают с прежними один в один. */
+function skillClassicLessons(skillId) {
+  try { return DataAPI.lessonsBySkill(skillId) || []; } catch (_) { return []; }
+}
+
+function skillILessons(skillId) {
+  try { return (DataAPI.ilessonsBySkill ? DataAPI.ilessonsBySkill(skillId) : []) || []; } catch (_) { return []; }
+}
+
+function skillHasTheory(skillId) {
+  return skillClassicLessons(skillId).length > 0 || skillILessons(skillId).length > 0;
+}
+
+function skillClassicDone(skillId, completed) {
+  const done = completed || safeObject((Store.state || {}).completedLessons);
+  return skillClassicLessons(skillId).filter((l) => l && done[l.id]);
+}
+
+function skillILessonDone(skillId, completedI) {
+  const done = completedI || safeObject((Store.state || {}).completedILessons);
+  return skillILessons(skillId).filter((l) => l && done[l.id]);
+}
+
+/* Теория закрыта любым форматом: либо обычный, либо интерактивный —
+   проходить оба ради теории смысла нет. */
+function skillTheoryDone(skillId, completed, completedI) {
+  return skillClassicDone(skillId, completed).length > 0 || skillILessonDone(skillId, completedI).length > 0;
+}
+
+/* Частичная теория от открытого обычного урока (шаги/всего), 0..1.
+   Интерактив частичным не бывает: он либо пройден (см. выше), либо нет. */
+function skillClassicOpenFraction(skillId, sessions) {
+  const lessons = skillClassicLessons(skillId);
   if (!lessons.length) return 0;
-  let done = 0;
-  const state = Store.state || {};
-  const completed = safeObject(state.completedLessons);
-  const sessions = safeObject(state.lessonSessions);
+  const sess = sessions || safeObject((Store.state || {}).lessonSessions);
+  const done = safeObject((Store.state || {}).completedLessons);
+  let frac = 0;
   for (const lesson of lessons) {
-    if (completed[lesson.id]) { done += 1; continue; }
-    const session = sessions[lesson.id];
+    if (!lesson || done[lesson.id]) continue;
+    const session = sess[lesson.id];
     if (!session) continue;
     const total = DataAPI.lessonStepsCount(lesson);
-    if (total > 0) done += Math.min(1, Math.max(0, (Number(session.idx) || 0) / total));
+    if (total > 0) frac += Math.min(1, Math.max(0, (Number(session.idx) || 0) / total));
   }
-  return Math.min(40, (done / lessons.length) * 40);
+  return Math.min(1, frac / lessons.length);
+}
+
+/* Итоговая доля теории 0..1: классика (как раньше) или интерактив целиком. */
+function skillTheoryRatio(skillId) {
+  const lessons = skillClassicLessons(skillId);
+  const ilessons = skillILessons(skillId);
+  if (!lessons.length && !ilessons.length) return 0;
+  if (skillTheoryDone(skillId)) return 1;
+  if (!lessons.length) return 0;
+  return Math.min(1, skillClassicOpenFraction(skillId));
+}
+
+/* Темы, у которых есть теория в любом формате. Население то же, что у
+   DataAPI.lessons() (доступные, незакрытые), поэтому счётчики уроков
+   прогноза и статистики совпадают с прежними там, где интерактивов нет. */
+function skillTheorySkills() {
+  let skills = [];
+  try { skills = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()) || []; } catch (_) { skills = []; }
+  const out = [];
+  for (const s of skills) {
+    const id = s && (s.id || s.skillId);
+    if (id && skillHasTheory(id)) out.push(String(id));
+  }
+  return out;
+}
+
+/* Теория 0..40: закрыта любым форматом целиком, открыта — долей шагов. */
+function skillTheoryProgress(skillId) {
+  if (!skillIsAccessible(skillId)) return 0;
+  if (!skillHasTheory(skillId)) return 0;
+  return Math.min(40, skillTheoryRatio(skillId) * 40);
 }
 
 /* Практика: сумма лучших качеств по заданиям банка / N * вес. Без истории
@@ -1937,8 +2008,10 @@ function skillTheoryProgress(skillId) {
    чтобы старые данные и внешние источники не давали ноль там, где работа была. */
 function skillPracticeDetail(skillId) {
   if (!skillIsAccessible(skillId)) return { value: 0, weight: 0, bankSize: 0, fullVolume: 0, distinctSolved: 0, qualitySum: 0 };
-  const lessons = DataAPI.lessonsBySkill(skillId);
-  const practiceWeight = lessons.length ? 60 : 100;
+  // Теория в любом формате (обычный или интерактивный урок) забирает 40:
+  // тема с одним интерактивом без классики — та же 60/40, а не 100/0.
+  const hasTheory = skillHasTheory(skillId);
+  const practiceWeight = hasTheory ? 60 : 100;
   const bank = DataAPI.practiceTasksBySkill(skillId);
   const bankSize = bank.length;
   if (!bankSize) return { value: 0, weight: practiceWeight, bankSize: 0, fullVolume: 0, distinctSolved: 0, qualitySum: 0 };
@@ -1991,13 +2064,14 @@ function skillProgressBreakdown(skillId) {
   const skill = skillIsAccessible(skillId) ? DataAPI.skill(skillId) : null;
   if (!skill) return { total: 0, theory: 0, practice: 0, lessonDone: 0, lessonTotal: 0, solved: 0, correct: 0, accuracy: 0 };
   const stats = safeObject(Store.state && Store.state.skillStats && Store.state.skillStats[skillId]);
-  const lessons = DataAPI.lessonsBySkill(skillId);
-  const completed = safeObject(Store.state && Store.state.completedLessons);
-  const lessonDone = lessons.filter((lesson) => !!completed[lesson.id]).length;
+  // Единая теория: lessonDone/lessonTotal — закрыта ли теория любым форматом
+  // и есть ли она вообще (а не счётчики обычных уроков поштучно).
+  const hasTheory = skillHasTheory(skillId);
+  const lessonDone = hasTheory && skillTheoryDone(skillId) ? 1 : 0;
   const accuracy = stats.solved ? stats.correct / stats.solved : 0;
   const theory = skillTheoryProgress(skillId);
   const practice = skillPracticeProgress(skillId);
-  return { total: Math.round(Math.min(100, theory + practice)), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: lessons.length, solved: stats.solved, correct: stats.correct, accuracy: Math.round(accuracy * 100) };
+  return { total: Math.round(Math.min(100, theory + practice)), theory: Math.round(theory), practice: Math.round(practice), lessonDone, lessonTotal: hasTheory ? 1 : 0, solved: stats.solved, correct: stats.correct, accuracy: Math.round(accuracy * 100) };
 }
 
 /* Сколько ещё верных решений нужно до целевого освоения (дефолт 90):
@@ -2073,12 +2147,13 @@ function skillStatus(skill) {
      а не диагноз. Поэтому метка однозначна и не прыгает между «в процессе»
      и «слабым местом» на одних и тех же данных. */
   if (p > 0 && p < 35 && solved > 0 && Number(stats.correct) / solved < 0.6 && skillMistakeCount(skill.id) > 0) return "weak";
-  // Тему вообще не трогали: ни ответов, ни закрытого урока, ни открытого —
-  // это не "слабое место" и не "в процессе", а честное "не начата".
+  // Тему вообще не трогали: ни ответов, ни закрытого урока (любым форматом),
+  // ни открытого — это не "слабое место" и не "в процессе", а честное "не начата".
   const lessons = DataAPI.lessonsBySkill(skill.id);
   const completed = safeObject(state.completedLessons);
   const sessions = safeObject(state.lessonSessions);
-  const touchedLesson = lessons.some((l) => completed[l.id] || sessions[l.id]);
+  const touchedLesson = lessons.some((l) => completed[l.id] || sessions[l.id])
+    || skillILessonDone(skill.id).length > 0;
   if (solved === 0 && !touchedLesson) return "not-started";
   return "in-progress";
 }
@@ -2320,11 +2395,11 @@ function forecastConfigAvailable() {
    нужно и сколько уже есть. Пока порог не набран, число не показываем нигде —
    ни на дашборде, ни в статистике, ни в снимке истории. */
 function forecastReadiness(covered, totalTopics) {
-  const lessons = (typeof DataAPI !== "undefined" && typeof DataAPI.lessons === "function")
-    ? safeArray(DataAPI.lessons()) : [];
-  const completed = safeObject((Store.state || {}).completedLessons);
-  const totalLessons = lessons.length;
-  const doneLessons = totalLessons ? lessons.filter((l) => l && completed[l.id]).length : 0;
+  // Уроки — единая теория: тема засчитана, если закрыт любой формат
+  // (обычный или интерактивный). Без интерактивов счёт тот же поштучный.
+  const theoryIds = skillTheorySkills();
+  const totalLessons = theoryIds.length;
+  const doneLessons = theoryIds.filter((id) => skillTheoryDone(id)).length;
   const cfg = forecastReadinessConfig();
   const needLessons = totalLessons
     ? Math.max(cfg.minLessons, Math.ceil(totalLessons * cfg.lessonShare))
@@ -2360,11 +2435,22 @@ function forecastSkillMastery(skillId, now, diagKeys) {
   if (!skill) return 0;
   const state = Store.state || {};
   const completed = safeObject(state.completedLessons);
-  const lessons = DataAPI.lessonsBySkill(skillId);
-  const lessonDone = lessons.filter((lesson) => !!completed[lesson.id]).length;
-  const theoryWeight = lessons.length ? 40 : 0;
+  const lessons = skillClassicLessons(skillId);
+  const ilessons = skillILessons(skillId);
+  const hasTheory = lessons.length > 0 || ilessons.length > 0;
+  const theoryWeight = hasTheory ? 40 : 0;
   const practiceWeight = 100 - theoryWeight;
-  const theory = lessons.length ? (lessonDone / lessons.length) * theoryWeight : 0;
+  // Либо/либо: закрыт любой формат — вся теория; второго комплекта
+  // поверх первых 40% не бывает (потолок — тот же min(100) внизу).
+  let theory = 0;
+  if (hasTheory) {
+    const classicRatio = lessons.length
+      ? lessons.filter((lesson) => !!completed[lesson.id]).length / lessons.length
+      : 0;
+    const completedI = safeObject(state.completedILessons);
+    const interactiveRatio = ilessons.some((l) => l && completedI[l.id]) ? 1 : 0;
+    theory = Math.max(classicRatio, interactiveRatio) * theoryWeight;
+  }
 
   const ts = Number(now) || Date.now();
   const diag = diagKeys || diagnosticAttemptKeys();
@@ -2420,6 +2506,8 @@ function forecastCompute() {
   const now = Date.now();
   const state = Store.state || {};
   const diagKeys = diagnosticAttemptKeys();
+  const completedLessons = safeObject(state.completedLessons);
+  const completedI = safeObject(state.completedILessons);
   const attemptedSkills = new Set(safeArray(state.taskAttempts).map((a) => a && a.skill).filter(Boolean));
   let wSum = 0, wMastery = 0, covered = 0;
   const masteryById = {};
@@ -2429,8 +2517,8 @@ function forecastCompute() {
     masteryById[s.id] = m;
     wSum += w;
     wMastery += w * m;
-    const lessons = DataAPI.lessonsBySkill(s.id);
-    const hasLesson = lessons.some((l) => !!safeObject(state.completedLessons)[l.id]);
+    // Тема с данными: теория закрыта любым форматом, либо практика/попытки.
+    const hasLesson = skillTheoryDone(s.id, completedLessons, completedI);
     if (hasLesson || masteryById[s.id] >= 25 || attemptedSkills.has(s.id)) covered++;
   }
   const readiness = forecastReadiness(covered, skills.length);
@@ -2589,22 +2677,25 @@ function forecastTrend(days = 14) {
    карту освоений из общего прохода (forecastAll), а без неё считает сама —
    поведение то же. */
 function forecastCoverage(masteryById, now) {
-  const lessons = DataAPI.lessons();
+  // Уроки — единая теория в любом формате (см. forecastReadiness).
+  const theoryIds = skillTheorySkills();
   const state = Store.state || {};
-  const done = lessons.filter((l) => !!state.completedLessons && !!state.completedLessons[l.id]).length;
-  const lessonPct = lessons.length ? Math.round((done / lessons.length) * 100) : 100;
+  const completedLessons = safeObject(state.completedLessons);
+  const completedI = safeObject(state.completedILessons);
+  const done = theoryIds.filter((id) => skillTheoryDone(id, completedLessons, completedI)).length;
+  const lessonPct = theoryIds.length ? Math.round((done / theoryIds.length) * 100) : 100;
   const skills = DataAPI.skills().filter((s) => skillEgeWeight(s.id) > 0);
   const ts = Number(now) || Date.now();
   let covered = 0;
   for (const s of skills) {
-    const hasLesson = DataAPI.lessonsBySkill(s.id).some((l) => !!state.completedLessons && !!state.completedLessons[l.id]);
+    const hasLesson = skillTheoryDone(s.id, completedLessons, completedI);
     const m = masteryById && Object.prototype.hasOwnProperty.call(masteryById, s.id)
       ? masteryById[s.id]
       : forecastSkillMastery(s.id, ts);
     if (hasLesson || m >= 25) covered++;
   }
   return {
-    lessonPct, doneLessons: done, totalLessons: lessons.length,
+    lessonPct, doneLessons: done, totalLessons: theoryIds.length,
     covered, totalSkills: skills.length,
     full: lessonPct === 100 && covered === skills.length,
   };
@@ -3442,8 +3533,9 @@ function lessonStepErrorsBySkill(skillId) {
 /* Интерактивный урок (БЕТА): завершение в один шаг — сцены статичны,
    шагов с проверкой нет, поэтому попыток/сессий не ведём. Экономика:
    плоский бонус xp из каталога, один раз (PK completed_ilessons на сервере
-   + флаг firstCompletion здесь). В теорию навыка (40%) не входит осознанно:
-   она по-прежнему только за классические уроки. */
+   + флаг firstCompletion здесь). Теорию навыка (40%) закрывает наравне
+   с обычным уроком: либо/либо, второй формат сверху ничего не добавляет
+   (потолок — в skillTheoryProgress). */
 function completeInteractiveLesson(ilesson) {
   const s = Store.state;
   const ref = ilesson && typeof ilesson === "object" ? ilesson.id : ilesson;
@@ -3453,6 +3545,7 @@ function completeInteractiveLesson(ilesson) {
   }
   s.completedILessons = safeObject(s.completedILessons);
   const ilessonId = String(canonical.id);
+  const skillId = String(canonical.skill || canonical.skillId || "");
   const firstCompletion = !s.completedILessons[ilessonId];
   touchStreak();
   if (!firstCompletion) {
@@ -3463,6 +3556,13 @@ function completeInteractiveLesson(ilesson) {
   const totalXp = Math.max(0, Number(canonical.xp) || 0);
   s.completedILessons[ilessonId] = { ts: Date.now() };
   if (totalXp) addXp(totalXp, "ilesson");
+  // Теория закрыта — зеркалим прогресс навыка сразу, как completeLesson:
+  // иначе 40% появятся только после следующего ответа в практике.
+  if (skillId) {
+    s.skillStats = safeObject(s.skillStats);
+    const st = s.skillStats[skillId] || (s.skillStats[skillId] = { progress: 0, solved: 0, correct: 0, timeSec: 0 });
+    st.progress = skillProgress(skillId);
+  }
   addTimeline(`Интерактивный урок пройден: «${canonical.title}»`);
   bumpGuestSteps(GUEST_STEP_LESSON);
   recordForecastSnapshot();
@@ -3719,8 +3819,16 @@ function skillSnapshot(skillId) {
   const lessons = DataAPI.lessonsBySkill(skillId);
   const lesson = lessons[0] || null;
   const completed = safeObject(s.completedLessons);
+  const completedI = safeObject(s.completedILessons);
   const sessions = safeObject(s.lessonSessions);
   const lessonDone = lessons.length > 0 && lessons.every((l) => !!completed[l.id]);
+  // Интерактив — равноправный формат теории: свой кандидат ниже
+  // предлагается раньше классики, если он есть (см. секции 3 и 7).
+  const ilessons = skillILessons(skillId);
+  const ilesson = ilessons[0] || null;
+  const ilessonDone = ilessons.length > 0 && ilessons.some((l) => !!completedI[l.id]);
+  const hasTheory = lessons.length > 0 || ilessons.length > 0;
+  const theoryDone = lessonDone || ilessonDone;
   const solved = Math.max(0, Number(stats.solved) || 0);
   const correct = Math.max(0, Number(stats.correct) || 0);
   const diagnosticMisses = safeArray(s.diagnostics).filter((d) => {
@@ -3742,6 +3850,10 @@ function skillSnapshot(skillId) {
     lesson,
     lessonDone,
     lessonOpen: lessons.some((l) => sessions[l.id]),
+    ilesson,
+    ilessonDone,
+    hasTheory,
+    theoryDone,
     diagnosticMisses,
     mission,
   };
@@ -3771,7 +3883,15 @@ function candidateSkillId(cand) {
   const p = (cand && cand.payload) || {};
   if (p.skillId) return String(p.skillId);
   const lesson = p.lessonId ? DataAPI.lesson(p.lessonId) : null;
-  return lesson && lesson.skill ? String(lesson.skill) : "";
+  if (lesson && lesson.skill) return String(lesson.skill);
+  try {
+    const ilesson = p.ilessonId && DataAPI.ilessonForAccess
+      ? DataAPI.ilessonForAccess(p.ilessonId)
+      : (p.ilessonId && DataAPI.ilesson ? DataAPI.ilesson(p.ilessonId) : null);
+    const isk = ilesson && (ilesson.skill || ilesson.skillId);
+    if (isk) return String(isk);
+  } catch (_) {}
+  return "";
 }
 
 /* Начатые кандидаты (startedTs > 0) всегда выше новых, между собой — по
@@ -3879,15 +3999,17 @@ function nextStepCandidates() {
     });
   }
 
-  /* 3. Урок по слабому навыку: теория важнее повторной зубрёжки, когда
-     точность просела, тема не тронута или уже перетренирована. Пройденный
-     урок тоже предлагаем — если навык после него так и не пошёл. */
+  /* 3. Теория по слабому навыку: важнее повторной зубрёжки, когда
+     точность просела, тема не тронута или уже перетренирована. Пройденную
+     теорию тоже предлагаем — если навык после неё так и не пошёл.
+     Формат — интерактив, если он есть (он лучше классики), иначе обычный
+     урок: теория одна, разница только в подаче. */
   {
     const pool = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills()).filter((sk) => {
       const snap = snaps[sk.id];
-      if (!snap || !snap.lesson || mentioned.has(sk.id)) return false;
-      if (!snap.lessonDone) return true;
-      // Пол пройденного урока — 40 теории, зазор 15 очков практики поверх.
+      if (!snap || !snap.hasTheory || mentioned.has(sk.id)) return false;
+      if (!snap.theoryDone) return true;
+      // Пол пройденной теории — 40, зазор 15 очков практики поверх.
       return snap.progress < 55 && snap.accuracy !== null && snap.accuracy < 0.5;
     });
     const weakTheory = pool.filter((sk) => {
@@ -3895,7 +4017,7 @@ function nextStepCandidates() {
       return (snap.solved === 0 && snap.progress < 35)
         || (snap.accuracy !== null && snap.accuracy < 0.5 && snap.progress < 60)
         || (snap.fatigued && snap.recentAccuracy !== null && snap.recentAccuracy < 0.5)
-        || (snap.lessonDone && snap.progress < 55 && snap.accuracy !== null && snap.accuracy < 0.5);
+        || (snap.theoryDone && snap.progress < 55 && snap.accuracy !== null && snap.accuracy < 0.5);
       /* Доказанный пробел (открытые ошибки, низкая точность) важнее
          «чистого нуля»: тему, в которой ученик уже споткнулся, закрывать
          раньше, чем просто первую нетронутую в каталоге. */
@@ -3911,21 +4033,28 @@ function nextStepCandidates() {
       const snap = snaps[weakTheory.id];
       mentioned.add(weakTheory.id);
       const untouched = snap.solved === 0;
-      const repeatAfterFail = snap.lessonDone;
+      const repeatAfterFail = snap.theoryDone;
+      // Интерактив раньше классики — та же теория, подача лучше.
+      // Повтор после провала тоже идёт интерактивом: другой формат
+      // объяснения полезнее перечитывания того же текста.
+      const interactive = !!snap.ilesson;
+      const target = interactive ? snap.ilesson : snap.lesson;
+      const targetDone = interactive ? snap.ilessonDone : snap.lessonDone;
+      const kindWord = interactive ? "интерактивный урок" : "урок";
       push({
-        action: "lesson",
-        payload: { lessonId: snap.lesson.id },
-        route: "#/training", icon: "bulb",
-        cta: repeatAfterFail ? "Повторить" : (untouched ? "Начать" : "Вернуться"),
+        action: interactive ? "ilesson" : "lesson",
+        payload: interactive ? { skillId: weakTheory.id, ilessonId: target.id } : { lessonId: target.id },
+        route: interactive ? ("#/ilesson/" + weakTheory.id) : "#/training", icon: "bulb",
+        cta: targetDone ? "Повторить" : (untouched ? "Начать" : "Вернуться"),
         text: repeatAfterFail
-          ? `Повторить урок «${snap.lesson.title}» — тема «${weakTheory.name}» так и не освоена`
-          : `${untouched ? "Начать урок" : "Вернуться к уроку"} «${snap.lesson.title}» — тема «${weakTheory.name}»`,
+          ? `Повторить ${kindWord} «${target.title}» — тема «${weakTheory.name}» так и не освоена`
+          : `${untouched ? "Начать " + kindWord : "Вернуться к " + (interactive ? "интерактивному уроку" : "уроку")} «${target.title}» — тема «${weakTheory.name}»`,
         reason: repeatAfterFail
-          ? `Урок по «${weakTheory.name}» пройден, но точность всё ещё ниже 50% — повтори объяснение, прежде чем решать дальше.`
+          ? `Теория по «${weakTheory.name}» пройдена, но точность всё ещё ниже 50% — повтори объяснение, прежде чем решать дальше.`
           : snap.fatigued
             ? `По теме «${weakTheory.name}» много попыток без результата — сейчас полезнее разобраться в теории, чем решать дальше.`
             : snap.accuracy !== null && snap.accuracy < 0.5
-              ? `Точность по «${weakTheory.name}» ниже 50% — сначала урок, практика после теории закрепится лучше.`
+              ? `Точность по «${weakTheory.name}» ниже 50% — сначала ${kindWord}, практика после теории закрепится лучше.`
               : `Тема «${weakTheory.name}» пока не тронута — начинать её лучше с объяснения, а не сразу с заданий.`,
         score: snap.fatigued ? 82 : (repeatAfterFail ? 74 : (untouched ? 68 : 78)),
       });
@@ -3949,8 +4078,8 @@ function nextStepCandidates() {
       const total = missionPracticeCount(snap.mission);
       const started = prog > 0 && total > 0 && prog < total;
       if (started) return true;
-      // Теория раньше практики (см. выше).
-      if (snap.lesson && !snap.lessonDone
+      // Теория раньше практики (см. выше): формат не важен, важен факт.
+      if (snap.hasTheory && !snap.theoryDone
         && (snap.solved === 0 || (snap.accuracy !== null && snap.accuracy < 0.5))) return false;
       // Пауза вместо зубрёжки (см. выше).
       if (snap.fatigued) return false;
@@ -3971,19 +4100,21 @@ function nextStepCandidates() {
       if (snap.ageMs < NEXTSTEP_RECENT_MS) {
         score -= (snap.recentAccuracy !== null && snap.recentAccuracy < 0.5) ? 22 : 10;
       }
-      if (snap.recentAccuracy !== null && snap.recentAccuracy < 0.4 && snap.lessonDone) score -= 12;
-      /* Урок не пройден, но попытки были удачными (например, чистая
-         диагностика): практиковаться можно, но теория всё равно раньше —
-         штраф держит такой кандидат ниже нетронутого урока. Подпись при
-         этом честная: она не отправляет «сначала в теорию» с кнопки
-         практики, а говорит про закрепление. */
-      const theoryPending = !started && !!snap.lesson && !snap.lessonDone;
+      if (snap.recentAccuracy !== null && snap.recentAccuracy < 0.4 && snap.theoryDone) score -= 12;
+      /* Теория не пройдена ни в каком формате, но попытки были удачными
+         (например, чистая диагностика): практиковаться можно, но теория
+         всё равно раньше — штраф держит такой кандидат ниже нетронутого
+         урока. Подпись при этом честная: она не отправляет «сначала
+         в теорию» с кнопки практики, а говорит про закрепление. */
+      const theoryPending = !started && snap.hasTheory && !snap.theoryDone;
       if (theoryPending) score -= 20;
-      /* Закрепление свежего: урок пройден совсем недавно — короткая
-         тренировка сразу после теории закрепляет её лучше всего. */
+      /* Закрепление свежего: теория пройдена совсем недавно (любым
+         форматом) — короткая тренировка сразу после неё закрепляет
+         её лучше всего. */
       const lessonRecord = snap.lesson && safeObject(s.completedLessons)[snap.lesson.id];
-       const lessonTs = lessonRecord ? Number(lessonRecord.ts) || 0 : 0;
-      const justLearned = lessonTs && Date.now() - lessonTs < 2 * 3600 * 1000;
+      const ilessonRecord = snap.ilesson && safeObject(s.completedILessons)[snap.ilesson.id];
+      const lastTheoryTs = Math.max(Number(lessonRecord && lessonRecord.ts) || 0, Number(ilessonRecord && ilessonRecord.ts) || 0);
+      const justLearned = lastTheoryTs && Date.now() - lastTheoryTs < 2 * 3600 * 1000;
       if (justLearned && !snap.fatigued) score += 12;
       push({
         action: "practice",
@@ -3998,7 +4129,7 @@ function nextStepCandidates() {
         reason: started
           ? `Тренировка по «${target.name}» уже начата — закончить её сейчас проще всего.`
           : theoryPending
-            ? `Урок по «${target.name}» ещё не пройден, но раньше ответы были верными — короткая серия закрепит тему, теория подождёт.`
+            ? `Теория по «${target.name}» ещё не пройдена, но раньше ответы были верными — короткая серия закрепит тему, теория подождёт.`
             : snap.solved === 0
               ? `По теме «${target.name}» ещё не было практики (${snap.progress}%) — начни с короткой серии.`
               : (snap.ageMs < NEXTSTEP_RECENT_MS
@@ -4023,9 +4154,11 @@ function nextStepCandidates() {
       if (snap.mission || snap.lesson) return false;
       const bank = DataAPI.practiceTasksBySkill(sk.id);
       if (!(bank.length > 0 && bank.some((t) => t && (t.type === "long_text" || t.answerType === "long_text")))) return false;
-      /* Совсем новому ученику (ни одного урока) первым шагом нужен урок,
-         а не сочинение на 150+ слов: как и «теория раньше практики» выше. */
-      if (snap.solved === 0 && Object.keys(safeObject(s.completedLessons)).length === 0) return false;
+      /* Совсем новому ученику (ни одного урока ни в каком формате) первым
+         шагом нужен урок, а не сочинение на 150+ слов: как и «теория раньше
+         практики» выше. */
+      if (snap.solved === 0 && Object.keys(safeObject(s.completedLessons)).length === 0
+        && Object.keys(safeObject(s.completedILessons)).length === 0) return false;
       return true;
     });
     const target = weakestOf(pool, snaps);
@@ -4120,7 +4253,7 @@ function nextStepCandidates() {
     const catOrder = {};
     DataAPI.categories().forEach((c, i) => { catOrder[c.id] = i; });
     const nextTopic = (DataAPI.availableSkills ? DataAPI.availableSkills() : DataAPI.skills())
-      .filter((sk) => snaps[sk.id] && snaps[sk.id].lesson && !snaps[sk.id].lessonDone && !snaps[sk.id].lessonOpen && !mentioned.has(sk.id))
+      .filter((sk) => snaps[sk.id] && snaps[sk.id].hasTheory && !snaps[sk.id].theoryDone && !snaps[sk.id].lessonOpen && !mentioned.has(sk.id))
       .sort((a, b) => {
         const ac = DataAPI._skillCategoryId ? DataAPI._skillCategoryId(a) : (a.cat || "");
         const bc = DataAPI._skillCategoryId ? DataAPI._skillCategoryId(b) : (b.cat || "");
@@ -4129,12 +4262,17 @@ function nextStepCandidates() {
     if (nextTopic && minProgress >= 45) {
       const snap = snaps[nextTopic.id];
       mentioned.add(nextTopic.id);
+      // Новая тема — тоже интерактивом, если он есть.
+      const interactive = !!snap.ilesson;
+      const target = interactive ? snap.ilesson : snap.lesson;
       push({
-        action: "lesson",
-        payload: { lessonId: snap.lesson.id },
-        route: "#/path", icon: "path",
+        action: interactive ? "ilesson" : "lesson",
+        payload: interactive ? { skillId: nextTopic.id, ilessonId: target.id } : { lessonId: target.id },
+        route: interactive ? ("#/ilesson/" + nextTopic.id) : "#/path", icon: "path",
         cta: "Открыть",
-        text: `Открыть новую тему — урок «${snap.lesson.title}»`,
+        text: interactive
+          ? `Открыть новую тему — интерактивный урок «${target.title}»`
+          : `Открыть новую тему — урок «${target.title}»`,
         reason: `Текущие темы в хорошем состоянии — следующий рост даст новый навык по карте.`,
         score: 56,
       });
@@ -4155,7 +4293,7 @@ function nextStepCandidates() {
     });
   }
 
-  const priority = { "finish-lesson": 0, "lesson": 1, "errors-review": 2, "practice": 3, "essay": 3, "boss": 4, "daily": 5, "mixed": 6 };
+  const priority = { "finish-lesson": 0, "lesson": 1, "ilesson": 1, "errors-review": 2, "practice": 3, "essay": 3, "boss": 4, "daily": 5, "mixed": 6 };
   cands.sort((a, b) => startedFirst(a, b) || b.score - a.score || priority[a.action] - priority[b.action]);
   /* Один навык — один кандидат. Правило нужно, когда «начатых» действий
      одной темы несколько (например, открытый урок и начатая миссия):
@@ -4300,6 +4438,7 @@ function applyOnboarding(subject, selfLevel, goalId, diagnosticResults, name) {
     s.lessonErrorHistory = [];
     s.lessonSessions = {};
     s.completedLessons = {};
+    s.completedILessons = {};
     s.lessonAttempts = [];
     s.missionsDone = {};
     s.missionProgress = {};

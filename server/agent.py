@@ -10,7 +10,7 @@
   чтение (без подтверждения):
     fold_web(op=...) — весь срез прогресса по операциям: progress, profile,
       skills, errors, attempts, daily, history, forecast;
-    lesson_get — текст урока по скиллу/уроку;
+    lesson_get — текст теории по скиллу/уроку (обычный или интерактивный урок — оба закрывают теорию одинаково);
     task_get — условие задания;
     essay_history — сочинения с баллами;
     plan_get — ТЕКУЩИЙ учебный план (есть ли, что внутри: название, срок,
@@ -275,7 +275,7 @@ AGENT_SYSTEM = (
     "это НЕ данные ученика. Сначала ЗОВИ project_info С ТЕМОЙ из вопроса (topic=«проверки»/«XP»/«сброс») "
     "и отвечай ТОЛЬКО по вернувшемуся разделу; цифры — оттуда, не из головы. Всю справку — только "
     "на общий вопрос («что ты умеешь»). Внутренние механизмы и бюджеты ученику не рассказываешь.\n"
-    "5h. НАШЁЛ — ОТКРОЙ, НЕ ПЕРЕСКАЗЫВАЙ. find_topics возвращает названия и id — это НЕ ответ. "
+    "5h2. ИНТЕРАКТИВНЫЙ УРОК — та же теория, что обычный: прохождение любого закрывает теорию темы, ""второй сверху ничего не даёт. В find_topics он лежит отдельным списком `ilessons` (поле format), ""открывает его lesson_get (там же лежит `link` — кнопка ученику). Советуешь теорию — сначала интерактив ""(короче и нагляднее), обычный — если интерактива у темы нет. Открыл теорию через lesson_get — дай её ссылку ""кнопкой из поля `link` ответа: [ОТКРЫТЬ ТЕОРИЮ](<link из lesson_get>), один раз, как задание по правилу 5f2.\n""5h. НАШЁЛ — ОТКРОЙ, НЕ ПЕРЕСКАЗЫВАЙ. find_topics возвращает названия и id — это НЕ ответ. "
     "Советуешь конкретное — сначала ОТКРОЙ lesson_get/task_get и давай сам текст, а не пересказ выдачи. "
     "Список без открытия — только если просили выбрать («что есть по теме»).\n"
     "5i. УСЛОВИЕ НЕ ВЫДУМЫВАТЬ. Текст задания, урока и эталонный ответ — только из ответов инструментов. "
@@ -300,7 +300,7 @@ AGENT_SYSTEM = (
     "- «что я недавно делал» → fold_web(op=\"timeline\") — лента событий, а не числа.\n"
     "- план: СНАЧАЛА plan_get (если в «КОНТЕКСТЕ ХОДА» «Учебного плана пока нет» — пропусти); затем plan_draft(days=N: день 1, неделя 7, две недели 14, месяц 30, год 365; 3 месяца = 90 дней, полгода = 180), затем plan_apply — он попросит подтверждение. Черновик без применения не зови: draft всегда парой с apply. План уже есть — предупреди, что новый заменит. После применения скажи одной фразой: план лежит в профиле («Профиль → Учебный план», кнопка «Закрыть тему»), без ссылки-кнопки. days в plan_apply = days из plan_draft; второй черновик — только если ученик поменял срок. «План по теме» — то же, но с plan_draft(topic=…); периоды руками не правь, topicNote («навыка нет») — скажи ученику. «Переделай план» — не переспрашивай темы, сразу plan_get + plan_draft + plan_apply.\n"
     "- сочинения: оглавление → essay_history БЕЗ submissionId; разбор работы №N → essay_history(submissionId=N) (только он даёт К1–К10, вердикт, отрывок). Критерии — только К1–К10 из разбора.\n"
-    "- «объясни тему» → find_topics по словам, затем lesson_get.\n"
+    "- «объясни тему» → find_topics по словам, затем lesson_get (интерактив раньше классики, правило 5h2).\n"
     "- «дай задание» → find_topics ОДИН РАЗ со всем известным (слова + exam/skillId/сложность), затем task_get; перебор формулировок запрещён — не нашлось, честно скажи и предложи соседнее.\n"
     "- «посложнее/полегче (чем Y)» → find_topics с harderThan=<id>/easierThan или difficultyMin/Max; номер экзамена из головы НЕ выдумывай.\n"
     "- «задание N / N-е из M» → find_topics с exam=N («задание 32» — это exam, позиция в банке — skillId + offset N−1).\n"
@@ -351,7 +351,7 @@ AGENT_TOOLS: list = [
                "days": {"type": "integer", "minimum": 1, "maximum": 90},
            },
            "required": ["op"], "additionalProperties": False}),
-    _tool("lesson_get", "Текст урока по скиллу или уроку.",
+    _tool("lesson_get", "Текст теории по скиллу или уроку: обычный урок или интерактивный (оба закрывают теорию темы одинаково). ""Ответ содержит `link` — кнопку ученику (правило 5h2).",
           {"type": "object", "properties": {
               "skillId": {"type": "string"}, "lessonId": {"type": "string"}},
            "additionalProperties": False}),
@@ -1596,6 +1596,7 @@ def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
     уроки по навыкам, пройденные уроки, статистика и попытки. Таблицы
     может не быть в старой базе — тогда пусто, а не падение."""
     data: dict = {"diag": set(), "lessons": {}, "done": set(),
+                  "ilessons": {}, "idone": set(),
                   "stats": {}, "attempts": {}, "diff": {}}
     try:
         uid = int(user_id)
@@ -1621,6 +1622,22 @@ def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
         for row in conn.execute("SELECT lesson_id FROM completed_lessons"
                                 " WHERE user_id=? AND subject=?", (uid, subj)):
             data["done"].add(str(row["lesson_id"]))
+    except sqlite3.Error:
+        pass
+    # Интерактивные уроки — равноправный формат теории (либо/либо с
+    # обычными): освоение, покрытие и порог считают их так же. Таблицы
+    # может не быть в старой базе — тогда пусто, а не падение.
+    try:
+        for row in conn.execute("SELECT l.id, l.skill_id FROM ilessons l"
+                                " JOIN skills s ON s.id=l.skill_id"
+                                " WHERE s.subject=?", (subj,)):
+            data["ilessons"].setdefault(str(row["skill_id"]), []).append(str(row["id"]))
+    except sqlite3.Error:
+        pass
+    try:
+        for row in conn.execute("SELECT ilesson_id FROM completed_ilessons"
+                                " WHERE user_id=? AND subject=?", (uid, subj)):
+            data["idone"].add(str(row["ilesson_id"]))
     except sqlite3.Error:
         pass
     try:
@@ -1658,17 +1675,39 @@ def _forecast_inputs(conn: sqlite3.Connection, user_id: int,
     return data
 
 
+def _theory_done(skill_id: str, data: dict) -> bool:
+    """Теория темы закрыта любым форматом: обычный или интерактивный урок.
+
+    Зеркало skillTheoryDone() в js/state.js: либо/либо, проходить оба ради
+    теории смысла нет. Никогда не бросает — для старых/битых входов False."""
+    try:
+        sid = str(skill_id or "")
+        if not sid or not isinstance(data, dict):
+            return False
+        if any(lid in data.get("done", set())
+               for lid in data.get("lessons", {}).get(sid, [])):
+            return True
+        return any(lid in data.get("idone", set())
+                   for lid in data.get("ilessons", {}).get(sid, []))
+    except Exception:
+        return False
+
+
 def _mastery_from_inputs(skill_id: str, data: dict, now_ms: int) -> int:
-    """Освоение темы 0–100 глазами прогноза: 40 % теория (пройденные уроки)
+    """Освоение темы 0–100 глазами прогноза: 40 % теория (пройденный урок —
+    обычный или интерактивный, либо/либо: второй сверху ничего не добавляет)
     + практика с затуханием по давности, прощением старых ошибок (неверная
     попытка затухает за 14 дней, верная за 45), весом подсказки (тем же,
     что режет награду) и звёздами сложности напрямую. Насыщение объёма —
     полное доверие от 12 свежих попыток. Нет попыток — откат к суммарной
     статистике, как в браузере."""
     lessons = data.get("lessons", {}).get(skill_id, [])
-    if lessons:
-        done = sum(1 for lid in lessons if lid in data.get("done", set()))
-        theory = (done / len(lessons)) * FORECAST_THEORY_WEIGHT
+    ilessons = data.get("ilessons", {}).get(skill_id, [])
+    if lessons or ilessons:
+        classic = (sum(1 for lid in lessons if lid in data.get("done", set()))
+                   / len(lessons)) if lessons else 0.0
+        boost = 1.0 if any(lid in data.get("idone", set()) for lid in ilessons) else 0.0
+        theory = max(classic, boost) * FORECAST_THEORY_WEIGHT
         practice_weight = 100 - FORECAST_THEORY_WEIGHT
     else:
         theory = 0.0
@@ -1828,15 +1867,17 @@ def _compute_forecast(conn: sqlite3.Connection, user_id: int, subject: str,
         mid = 0
     attempted = set(data.get("attempts", {}).keys())
     covered = sum(1 for skill_id, _ in scored
-                  if any(lid in data.get("done", set())
-                          for lid in data.get("lessons", {}).get(skill_id, []))
+                  if _theory_done(skill_id, data)
                   or mastery[skill_id] >= 25 or skill_id in attempted)
     # Порог показа — зеркало forecastReadiness() в js/state.js: пока теория,
     # покрытие тем и практика ниже, прогноза нет, и агент не имеет права его
     # озвучивать. Числа порога — из контракта предмета (forecast.readiness).
+    # Уроки — единая теория по темам (любой формат), а не записи поштучно:
+    # совпадало с прежним счётом там, где интерактивов нет (1 урок = 1 тема).
     rcfg = _forecast_readiness_cfg(conn, subject)
-    total_lessons = sum(len(v) for v in data.get("lessons", {}).values())
-    done_lessons = len(data.get("done", set()))
+    theory_skill_ids = set(data.get("lessons", {}).keys()) | set(data.get("ilessons", {}).keys())
+    total_lessons = len(theory_skill_ids)
+    done_lessons = sum(1 for sid in theory_skill_ids if _theory_done(sid, data))
     need_lessons = (max(rcfg["minLessons"],
                         int(math.ceil(total_lessons * rcfg["lessonShare"])))
                     if total_lessons else 0)
@@ -1965,18 +2006,21 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
         # скольки» и «прошёл ли урок» — «что осталось» отвечала на глаз.
         # totalTasks — заданий в теме по каталогу; tasksLeft — по РАЗЛИЧНЫМ
         # верно решённым (solved считает попытки, а не задания: одно задание
-        # трижды — это solved 3 при tasksLeft 0). lessonDone — урок навыка
-        # пройден (completed_lessons); уроков нет у русского и у всех
-        # предметов ОГЭ (там lesson_done всегда 0 — отсутствие контента).
+        # трижды — это solved 3 при tasksLeft 0). lessonDone — теория навыка
+        # пройдена в любом формате (обычный или интерактивный урок); уроков
+        # нет у русского и у всех предметов ОГЭ (там lesson_done всегда 0 —
+        # отсутствие контента).
         try:
             rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct,"
                                 " COALESCE(p.progress,0) AS progress,"
                                 " (SELECT COUNT(*) FROM tasks t WHERE t.skill_id=s.id) AS total_tasks,"
                                 " CASE WHEN EXISTS(SELECT 1 FROM completed_lessons c JOIN lessons l ON l.id=c.lesson_id"
+                                " AND l.skill_id=s.id WHERE c.user_id=? AND c.subject=?)"
+                                " OR EXISTS(SELECT 1 FROM completed_ilessons c JOIN ilessons l ON l.id=c.ilesson_id"
                                 " AND l.skill_id=s.id WHERE c.user_id=? AND c.subject=?) THEN 1 ELSE 0 END AS lesson_done"
                                 " FROM skills s LEFT JOIN user_progress p ON p.skill_id=s.id AND p.user_id=? AND p.subject=?"
                                 " WHERE s.subject=? ORDER BY s.display_order LIMIT 100",
-                                (user_id, subject, user_id, subject, subject)).fetchall()
+                                (user_id, subject, user_id, subject, user_id, subject, subject)).fetchall()
             enriched = True
         except sqlite3.Error:
             rows = conn.execute("SELECT s.id, s.name, COALESCE(p.solved,0) AS solved, COALESCE(p.correct,0) AS correct, COALESCE(p.progress,0) AS progress"
@@ -2018,7 +2062,7 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
                                    "свежие попытки); progress — "
                                    "отметка с сайта, за освоение не отвечает."
                                    + (" totalTasks — заданий в теме, tasksLeft — ещё не решённые,"
-                                      " lessonDone — урок пройден." if enriched else "")),
+                                      " lessonDone — теория пройдена (урок или интерактив)." if enriched else "")),
                 "skills": items}
     if op == "errors":
         total = conn.execute("SELECT COUNT(*) AS c FROM user_errors WHERE user_id=? AND subject=?",
@@ -2153,6 +2197,79 @@ def fold_web(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -
 LESSON_TEXT_BUDGET = 1800
 
 
+def _theory_link(*, lesson_id=None, skill_id=None, subject="") -> str:
+    """Прямая ссылка ученику на теорию: обычный урок или интерактив.
+
+    Тот же канал, что у ссылок на задания (_practice_link_for_task):
+    предмет (`seo_subject`) обязателен — иначе чужой предмет молча вёл бы
+    в «Тренировку», а свой каталог интерактива/урока не нашёл бы. id —
+    только процент-кодированием. Формат интерактива привязан к ТЕМЕ
+    (роут #/ilesson/<skillId>), а не к записи каталога."""
+    base = _public_site_base()
+    lid = str(lesson_id or "").strip()
+    sid = str(skill_id or "").strip()
+    if lid:
+        path = f"/dashboard#/lesson/{urllib.parse.quote(lid, safe='')}"
+    elif sid:
+        path = f"/dashboard#/ilesson/{urllib.parse.quote(sid, safe='')}"
+    else:
+        return base + "/dashboard#/training"
+    subj = str(subject or "").strip()
+    if subj:
+        path += f"?seo_subject={urllib.parse.quote(subj, safe='')}"
+    return base + path
+
+
+def _ilesson_scenes_text(meta: dict) -> tuple[str, int]:
+    """Текст интерактивного урока из сцен (title + text) до бюджета."""
+    scenes = meta.get("scenes") if isinstance(meta, dict) else None
+    if not isinstance(scenes, list) or not scenes:
+        return "", 0
+    parts = []
+    used = 0
+    shown = 0
+    for st in scenes:
+        if not isinstance(st, dict):
+            continue
+        title = str(st.get("title") or "").strip()
+        text = str(st.get("text") or "").strip()
+        piece = (title + "\n" + text if title and text else (title or text))[:600]
+        if not piece:
+            continue
+        if used + len(piece) > LESSON_TEXT_BUDGET and parts:
+            break
+        parts.append(piece)
+        used += len(piece)
+        shown += 1
+    return "\n\n".join(parts), len([s for s in scenes if isinstance(s, dict)])
+
+
+def _lesson_get_ilesson(conn: sqlite3.Connection, row) -> dict:
+    """Строка ilessons -> ответ lesson_get: сцены вместо шагов урока."""
+    meta = {}
+    try:
+        meta = json.loads(row["metadata_json"] or "{}")
+    except (ValueError, TypeError):
+        meta = {}
+    text, total = _ilesson_scenes_text(meta)
+    try:
+        subject = str(row["subject"] or "")
+    except (KeyError, IndexError, TypeError):
+        subject = ""
+    out: dict = {"lessonId": row["id"], "title": row["title"], "skill": row["skill_id"],
+                 "subject": subject, "format": "interactive",
+                 "link": _theory_link(skill_id=row["skill_id"], subject=subject),
+                 "text": text or str(meta)[:2000]}
+    if total:
+        shown = min(total, max(1, text.count("\n\n") + (1 if text else 0)))
+        out["scenesTotal"] = total
+        if shown < total:
+            out["scenesShown"] = shown
+            out["note"] = (f"показаны сцены 1–{shown} из {total}: это начало "
+                           "интерактивного урока, а не весь урок")
+    return out
+
+
 def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     skill_id = str((args or {}).get("skillId") or "").strip()
     lesson_id = str((args or {}).get("lessonId") or "").strip()
@@ -2162,8 +2279,17 @@ def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
         # модель получала бы «урок не найден» на реально существующий урок.
         row = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject, l.metadata_json FROM lessons l"
                            " JOIN skills s ON s.id=l.skill_id WHERE l.id=?", (lesson_id,)).fetchone()
-        if not row:
-            raise ValueError("урок не найден")
+        if row is None:
+            # Интерактив — равноправный формат теории: id с префиксом v-
+            # открывается здесь же, а не «урок не найден».
+            try:
+                irow = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject, l.metadata_json FROM ilessons l"
+                                    " JOIN skills s ON s.id=l.skill_id WHERE l.id=?", (lesson_id,)).fetchone()
+            except sqlite3.Error:
+                irow = None
+            if irow is None:
+                raise ValueError("урок не найден")
+            return _lesson_get_ilesson(conn, irow)
         meta = {}
         try:
             meta = json.loads(row["metadata_json"] or "{}")
@@ -2194,6 +2320,7 @@ def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
             text = "\n\n".join(parts)
         out: dict = {"lessonId": row["id"], "title": row["title"], "skill": row["skill_id"],
                      "subject": row["subject"],
+                     "link": _theory_link(lesson_id=row["id"], subject=row["subject"]),
                      "text": text or str(meta)[:2000]}
         if total_steps > shown:
             out["stepsShown"] = shown
@@ -2205,7 +2332,17 @@ def lesson_get(conn: sqlite3.Connection, user_id: int, subject: str, args: dict)
         rows = conn.execute("SELECT l.id, l.title FROM lessons l JOIN skills s ON s.id=l.skill_id"
                             " WHERE s.id=? ORDER BY l.id LIMIT 5", (skill_id,)).fetchall()
         if not rows:
-            raise ValueError("уроки по скиллу не найдены")
+            # Классики у темы нет — отдаём интерактив, если он есть: теория
+            # одна, и молчать о ней («уроки не найдены») было бы враньём.
+            try:
+                irows = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject, l.metadata_json FROM ilessons l"
+                                     " JOIN skills s ON s.id=l.skill_id WHERE s.id=? ORDER BY l.id LIMIT 5",
+                                     (skill_id,)).fetchall()
+            except sqlite3.Error:
+                irows = None
+            if not irows:
+                raise ValueError("уроки по скиллу не найдены")
+            return _lesson_get_ilesson(conn, irows[0])
         first = rows[0]
         return lesson_get(conn, user_id, subject, {"lessonId": first["id"]})
     raise ValueError("нужен skillId или lessonId")
@@ -2699,6 +2836,17 @@ def _plan_lesson_for_skill(conn: sqlite3.Connection, subject: str, skill_id: str
     return str(row["id"]) if row else None
 
 
+def _plan_has_ilesson(conn: sqlite3.Connection, skill_id: str) -> bool:
+    """У темы есть интерактивный урок: план ведёт теорией туда же, куда
+    движок следующего шага (интерактив раньше классики)."""
+    try:
+        row = conn.execute("SELECT 1 FROM ilessons WHERE skill_id=? LIMIT 1",
+                           (skill_id,)).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
 def plan_draft(conn: sqlite3.Connection, user_id: int, subject: str, args: dict) -> dict:
     """Черновик плана на гибкий срок: days 1..365 (день/неделя/месяц/год —
     решает агент по словам ученика). Черновик ничего не пишет: применение —
@@ -2952,23 +3100,34 @@ def study_plan_state(conn: sqlite3.Connection, user_id: int, subject: str,
             mastered = mastery >= TOPIC_MASTERED_AT
             available_at = int(p_end)
             time_ok = moment >= available_at
-            # Быстрый рычаг: непройденный урок даёт сразу +40 теории, а задачи
+            # Быстрый рычаг: непройденная теория даёт сразу +40, а задачи
             # после насыщения объёма (12 свежих) двигают только точность —
             # отсюда «сделал три задания, а +1%». Подсказка обязана называть
-            # выход, иначе цифра выглядит сломанной.
+            # выход, иначе цифра выглядит сломанной. Теория — в любом формате
+            # (обычный или интерактивный урок): закрыт любой — бонуса нет.
             lesson_id = t.get("lessonId")
             skill_lessons = fdata.get("lessons", {}).get(sid, []) if isinstance(fdata, dict) else []
+            skill_ilessons = fdata.get("ilessons", {}).get(sid, []) if isinstance(fdata, dict) else []
+            done_set = fdata.get("done", set()) if isinstance(fdata, dict) else set()
+            idone_set = fdata.get("idone", set()) if isinstance(fdata, dict) else set()
             if skill_lessons:
-                lessons_done = sum(1 for lid in skill_lessons if lid in (fdata.get("done", set()) if isinstance(fdata, dict) else set()))
-                lesson_bonus = int(round((1 - lessons_done / len(skill_lessons)) * FORECAST_THEORY_WEIGHT))
+                lessons_done = sum(1 for lid in skill_lessons if lid in done_set)
+                classic_open = 1.0 - lessons_done / len(skill_lessons)
+            elif skill_ilessons:
+                lessons_done, classic_open = 0, 1.0
             else:
-                lessons_done, lesson_bonus = 0, 0
-            lesson_done = bool(lesson_id and isinstance(fdata, dict)
-                               and lesson_id in fdata.get("done", set()))
+                lessons_done, classic_open = 0, 0.0
+            ilesson_done = any(lid in idone_set for lid in skill_ilessons)
+            lesson_bonus = 0 if ilesson_done else int(round(classic_open * FORECAST_THEORY_WEIGHT))
+            lesson_done = bool(ilesson_done
+                               or (lesson_id and isinstance(fdata, dict)
+                                   and lesson_id in done_set)
+                               or (skill_lessons and lessons_done >= len(skill_lessons)))
             out_topics.append({
                 "skillId": sid,
                 "name": str(t.get("name") or sid)[:120],
                 "lessonId": t.get("lessonId"),
+                "hasInteractive": bool(t.get("hasInteractive")),
                 "taskIds": t.get("taskIds") if isinstance(t.get("taskIds"), list) else [],
                 "state": "done" if is_closed else "open",
                 "mastery": mastery,
@@ -3388,6 +3547,7 @@ def _propose_study_plan(conn: sqlite3.Connection, user_id: int,
             topics.append({"skillId": sid,
                            "name": str(names.get(sid, sid))[:120],
                            "lessonId": _plan_lesson_for_skill(conn, subject, sid),
+                           "hasInteractive": _plan_has_ilesson(conn, sid),
                            "taskIds": _plan_tasks_for_skill(conn, user_id, subject, sid, 2)})
         periods.append({"index": idx, "label": label, "days": item["days"],
                         "topics": topics, "topicIds": item["skillIds"]})
@@ -3930,6 +4090,15 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     tasks = _fetch_tasks("s.subject=?", (subject,))
     lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l JOIN skills s ON s.id=l.skill_id"
                            " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
+    # Интерактивные уроки — та же теория другим форматом: ищутся и
+    # открываются (lesson_get) наравне с обычными. Старой базы таблица
+    # может не знать — тогда пусто, а не падение.
+    try:
+        ilessons = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject FROM ilessons l"
+                                " JOIN skills s ON s.id=l.skill_id"
+                                " WHERE s.subject=? ORDER BY l.id LIMIT 400", (subject,)).fetchall()
+    except sqlite3.Error:
+        ilessons = []
     # Слово, которого нет ни в одном названии каталога («ЕГЭ», «пожалуйста»), —
     # шум из формулировки ученика, а не признак. Раньше оно обнуляло выдачу
     # («задача ЕГЭ стереометрия» — ноль при живых заданиях по стереометрии).
@@ -3940,6 +4109,8 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
     for r in tasks:
         vocab.update(re.split(r"[^\w]+", f"{r['topic'] or ''} {r['sname'] or ''}".lower()))
     for r in lessons:
+        vocab.update(re.split(r"[^\w]+", str(r["title"] or "").lower()))
+    for r in ilessons:
         vocab.update(re.split(r"[^\w]+", str(r["title"] or "").lower()))
     vocab.discard("")
     known = [w for w in words if any(t.startswith(w[:6] if len(w) > 6 else w) for t in vocab)]
@@ -4061,7 +4232,7 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
         scored.sort(key=lambda p: (-p[0], p[1]["id"]))
         return [render(n, r) for n, r in scored[:take]]
 
-    def search(skill_rows, task_rows, lesson_rows, tasks_take=8):
+    def search(skill_rows, task_rows, lesson_rows, tasks_take=8, ilesson_rows=()):
         return {
             "skills": rank(skill_rows, lambda r: hit(r["name"]), 6,
                            lambda n, r: {"id": r["id"], "name": r["name"],
@@ -4074,6 +4245,14 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
             "lessons": rank(lesson_rows, lambda r: hit(r["title"], r["id"]), 6,
                             lambda n, r: {"id": r["id"], "title": r["title"],
                                           "subject": r["subject"], "match": n}),
+            # Интерактив — отдельным списком, а не вперемешку с классикой:
+            # это другой формат той же теории (открывает lesson_get, поле
+            # format — маркер для модели). Пусто — ключа нет? Нет: ключ
+            # всегда, иначе модель гадала бы, искался ли формат вообще.
+            "ilessons": rank(ilesson_rows, lambda r: hit(r["title"], r["id"]), 6,
+                             lambda n, r: {"id": r["id"], "title": r["title"],
+                                           "subject": r["subject"], "match": n,
+                                           "format": "interactive"}),
         }
 
     if skill_row is not None:
@@ -4128,7 +4307,13 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                 "SELECT id FROM lessons WHERE skill_id=?", (skill_id,)).fetchall()}
         except sqlite3.Error:
             own_lesson_ids = set()
+        try:
+            own_ilesson_ids = {str(r["id"]) for r in conn.execute(
+                "SELECT id FROM ilessons WHERE skill_id=?", (skill_id,)).fetchall()}
+        except sqlite3.Error:
+            own_ilesson_ids = set()
         own_lessons = [r for r in lessons if str(r["id"]) in own_lesson_ids]
+        own_ilessons = [r for r in ilessons if str(r["id"]) in own_ilesson_ids]
         found = {"query": query,
                  "skills": [{"id": skill_row["id"], "name": skill_row["name"],
                              "subject": skill_row["subject"], "match": skill_match}],
@@ -4136,7 +4321,12 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                  "lessons": rank(own_lessons,
                                  lambda r: hit(r["title"], r["id"]) if (words or digits) else 1,
                                  6, lambda n, r: {"id": r["id"], "title": r["title"],
-                                                  "subject": r["subject"], "match": n})}
+                                                  "subject": r["subject"], "match": n}),
+                 "ilessons": rank(own_ilessons,
+                                  lambda r: hit(r["title"], r["id"]) if (words or digits) else 1,
+                                  6, lambda n, r: {"id": r["id"], "title": r["title"],
+                                                   "subject": r["subject"], "match": n,
+                                                   "format": "interactive"})}
         total = sum(len(v) for v in found.values() if isinstance(v, list))
         bank_line = (f" Тема «{skill_row['name']}»: в банке {bank_total}, "
                      f"показаны позиции {offset + 1}–{offset + len(task_items)}."
@@ -4147,7 +4337,9 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
             bank_line = (f" Тему не указали — взял «{skill_row['name']}» "
                          f"(лучшее совпадение), позиции считаю в ней.") + bank_line
         found["note"] = ("Это то, что реально есть в каталоге предмета. Найденное открывай "
-                         "через task_get (id) — и не выдумывай id, которых здесь нет. "
+                         "через task_get (id) или lesson_get (id) — интерактивные уроки лежат "
+                         "отдельным списком `ilessons` (та же теория другим форматом) — "
+                         "и не выдумывай id, которых здесь нет. "
                          "id — ТЕХНИЧЕСКИЙ: ученику показывай темы и формулировки, но НЕ коды." + bank_line
                          if total else
                          "В этой теме по фильтрам ничего нет — ослабь difficulty/exam или "
@@ -4157,7 +4349,7 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
             found["applied"] = applied
         return found
 
-    found = {"query": query, **search(skills, tasks, lessons, offset + limit)}
+    found = {"query": query, **search(skills, tasks, lessons, offset + limit, ilessons)}
     found["tasks"] = found["tasks"][offset:offset + limit] if offset else found["tasks"][:limit]
     total = sum(len(v) for v in found.values() if isinstance(v, list))
     # Номера в своём предмете может не быть вовсе («задание 27» из математики —
@@ -4204,9 +4396,15 @@ def find_topics(conn: sqlite3.Connection, user_id: int, subject: str, args: dict
                 all_tasks.extend(_fetch_tasks("s.subject=?", (sid,)))
             all_lessons = conn.execute("SELECT l.id, l.title, s.subject FROM lessons l"
                                        " JOIN skills s ON s.id=l.skill_id ORDER BY l.id LIMIT 800").fetchall()
+            try:
+                all_ilessons = conn.execute("SELECT l.id, l.title, l.skill_id, s.subject FROM ilessons l"
+                                            " JOIN skills s ON s.id=l.skill_id ORDER BY l.id LIMIT 800").fetchall()
+            except sqlite3.Error:
+                all_ilessons = []
         except sqlite3.Error:
             all_skills, all_tasks, all_lessons = [], [], []
-        alt = search(all_skills, all_tasks, all_lessons, offset + limit)
+            all_ilessons = []
+        alt = search(all_skills, all_tasks, all_lessons, offset + limit, all_ilessons)
         alt["tasks"] = alt["tasks"][offset:offset + limit] if offset else alt["tasks"][:limit]
         alt_total = sum(len(v) for v in alt.values() if isinstance(v, list))
         if alt_total:
@@ -4326,6 +4524,7 @@ _KNOWLEDGE_TOPIC_RULES: tuple = (
     (r"предмет|математик|русский|переключ", "предметы"),
     (r"\bии\b|нейросеть|искусствен|кружок|вопрос.*час|ход", "ходы день"),
     (r"сочинен|эссе|\bsлов\b|22 балл|критери|перепровер", "сочинение баллы"),
+    (r"интерактив|визуальн|\bбета\b", "интерактивные уроки бета"),
 )
 
 

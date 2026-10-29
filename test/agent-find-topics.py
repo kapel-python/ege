@@ -139,6 +139,12 @@ for bad in ({}, {"query": "  "}, {"offset": 5}, {"exam": "без цифр"}, {"o
 r = agent.find_topics(conn, 1, "math", {"query": "сечение призмы цилиндра конуса шара"})
 check("кухонная свалка не дампит каталог", r["found"] == 0 and r["tasks"] == [])
 
+# 6a. База без таблицы ilessons (старая): ключ есть, пуст, падений нет.
+r = agent.find_topics(conn, 1, "math", {"query": "пирамида"})
+check("без ilessons-таблицы поиск жив", r.get("ilessons") == [], str(r.get("ilessons")))
+r = agent.find_topics(conn, 1, "math", {"skillId": "st_stereo", "limit": 5})
+check("без ilessons-таблицы пин жив", r.get("ilessons") == [], str(r.get("ilessons")))
+
 # 6b. Позиция без темы: автопин живого банка с пометкой (а не пустого).
 conn.execute("INSERT INTO skills VALUES('st_empty','Стереометрия пустая','math',0)")
 r = agent.find_topics(conn, 1, "math", {"query": "стереометрия", "offset": 9, "limit": 2})

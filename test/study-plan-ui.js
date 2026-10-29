@@ -264,7 +264,7 @@ function extractFn(src, name) {
 let P = null;
 try {
   const names = ["studyPlanDaysWord", "studyPlanTopicsWord", "studyPlanFmtDate",
-    "studyPlanCloseHint", "studyPlanPick", "planPeriodLocked", "planGoChoice",
+    "studyPlanCloseHint", "studyPlanPick", "planPeriodLocked", "planHasTheory", "planGoChoice",
     "studyPlanPeriodEnd", "planRowHTML", "planLockedRowHTML", "planCardHTML"];
   const bundle = names.map((n) => extractFn(appJs, n)).join("\n");
   new vm.Script(bundle, { filename: "study-plan-pure.js" });
@@ -274,7 +274,7 @@ try {
   };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planPeriodLocked, planGoChoice, studyPlanPeriodEnd, planCardHTML, planLockedRowHTML };", sandbox);
+  vm.runInContext(bundle + "\nglobalThis.__P = { studyPlanDaysWord, studyPlanTopicsWord, studyPlanFmtDate, studyPlanCloseHint, studyPlanPick, planPeriodLocked, planHasTheory, planGoChoice, studyPlanPeriodEnd, planCardHTML, planLockedRowHTML };", sandbox);
   P = sandbox.__P;
   check("чистые функции профиля извлекаются и компилируются", true);
 } catch (e) {
@@ -370,6 +370,11 @@ if (P) {
     && P.planGoChoice({ lessonId: "l", taskIds: [] }) === "theory"
     && P.planGoChoice({ taskIds: ["t"] }) === "practice"
     && P.planGoChoice({}) === "practice");
+  check("go: интерактив — тоже теория (флаг и живой каталог)",
+    P.planGoChoice({ hasInteractive: true, taskIds: ["t"] }) === "both"
+    && P.planGoChoice({ hasInteractive: true }) === "theory"
+    && P.planHasTheory({ lessonId: "l" }) === true
+    && P.planHasTheory({}) === false);
   check("periodEnd: конец считается от startsAt",
     P.studyPlanPeriodEnd({ startsAt: 1000000000000, periods: [{ index: 0, days: 7 }, { index: 1, days: 7 }] }, 1)
       === 1000000000000 + 14 * 86400000

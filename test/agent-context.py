@@ -181,7 +181,7 @@ check("VOLUME synced with js", agent.FORECAST_FULL_VOLUME == _js_const("FORECAST
       f"py={agent.FORECAST_FULL_VOLUME} js={_js_const('FORECAST_FULL_VOLUME')}")
 check("DIAG weight synced with js", agent.FORECAST_DIAGNOSTIC_WEIGHT == _js_const("FORECAST_DIAGNOSTIC_WEIGHT"),
       f"py={agent.FORECAST_DIAGNOSTIC_WEIGHT} js={_js_const('FORECAST_DIAGNOSTIC_WEIGHT')}")
-m = _re.search(r"theoryWeight\s*=\s*lessons\.length\s*\?\s*(\d+)", _state_js)
+m = _re.search(r"theoryWeight\s*=\s*hasTheory\s*\?\s*(\d+)", _state_js)
 check("THEORY weight synced with js", agent.FORECAST_THEORY_WEIGHT == (int(m.group(1)) if m else None),
       f"py={agent.FORECAST_THEORY_WEIGHT}")
 m = _re.search(r"const\s+FORECAST_FORGIVE_DAYS\s*=\s*(\d+)", _state_js)

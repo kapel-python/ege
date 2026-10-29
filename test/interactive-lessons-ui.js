@@ -121,7 +121,7 @@ function block(src, marker) {
   vm.runInContext(`
     const safeObject = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
     const GUEST_STEP_LESSON = 3;
-    const Store = { state: { completedILessons: {}, xp: 0 }, save() {} };
+    const Store = { state: { completedILessons: {}, skillStats: {}, xp: 0 }, save() {} };
     const DataAPI = { ilessonForAccess: (id) => (id === "v-01"
       ? { id: "v-01", skill: "n01", title: "V", xp: 30 } : null) };
     const subjectLearningAvailable = () => true;
@@ -133,17 +133,20 @@ function block(src, marker) {
     const bumpGuestSteps = () => {};
     const recordForecastSnapshot = () => {};
     const checkAchievements = () => {};
+    const skillProgress = () => 40;
   `, sb);
   vm.runInContext(block(stateJs, "function completeInteractiveLesson("), sb);
   const out = vm.runInContext(`(function () {
     const first = completeInteractiveLesson("v-01");
     const second = completeInteractiveLesson("v-01");
-    return { first, second, xpGiven, stored: Store.state.completedILessons };
+    return { first, second, xpGiven, stored: Store.state.completedILessons,
+             progress: (Store.state.skillStats.n01 || {}).progress };
   })()`, sb);
   t("first completion pays xp", out.first.firstCompletion === true && out.first.totalXp === 30, JSON.stringify(out.first));
   t("repeat pays nothing", out.second.firstCompletion === false && out.second.totalXp === 0, JSON.stringify(out.second));
   t("xp given once", out.xpGiven === 30, JSON.stringify(out.xpGiven));
   t("completion stored", !!out.stored["v-01"], JSON.stringify(out.stored));
+  t("skill progress mirrored on completion", out.progress === 40, JSON.stringify(out.progress));
 }
 
 /* ---------- screenInteractiveLesson: заглушка / урок / скелет ---------- */

@@ -4566,6 +4566,15 @@ function nextStepActionable(candidate) {
       const skill = lesson && DataAPI.skill(lesson.skill);
       return !!lesson && DataAPI.lessonStepsCount(lesson) > 0 && (!skill || (!topicExplicitlyLocked(skill) && topicHasLesson(skill)));
     }
+    // Интерактив — равноправный теоретический шаг: проверяется наличие
+    // урока у темы, а не запись классического каталога.
+    if (candidate.action === "ilesson") {
+      const skill = DataAPI.skill(payload.skillId);
+      if (!skill || topicIsLocked(skill)) return false;
+      try {
+        return (DataAPI.ilessonsBySkill ? DataAPI.ilessonsBySkill(payload.skillId) : []).length > 0;
+      } catch (_) { return false; }
+    }
     if (candidate.action === "errors-review") return asSafeArray(Store.state.errors).some((e) => e && !e.resolved);
     if (candidate.action === "practice") {
       const mission = DataAPI.mission(payload.missionId);
@@ -4772,6 +4781,12 @@ function runNextStep(index = 0) {
   switch (c.action) {
     case "finish-lesson":
     case "lesson": Lesson.start(c.payload.lessonId); break;
+    case "ilesson":
+      try {
+        if (typeof openInteractiveLesson === "function") openInteractiveLesson(c.payload.skillId || "");
+        else go("ilesson", c.payload.skillId || "");
+      } catch (_) {}
+      break;
     case "errors-review": startErrorsReview(); break;
     case "practice": startMission(c.payload.missionId); break;
     case "essay":
@@ -8469,13 +8484,19 @@ function sessionCorrectFeedbackHtml(xp) {
     </div>`;
 }
 
-/* Мост «провал → урок»: после показа ответа рядом лежит кнопка разбора
-   темы в уроке (первый урок навыка с шагами). Урок — точнее «задания
-   полегче»: теория и шаги именно того места, где ученик только что
-   застрял. Кнопки нет, только если у навыка нет уроков. */
+/* Мост «провал → теория»: после показа ответа рядом лежит кнопка разбора
+   темы (интерактив, если он есть, иначе первый обычный урок навыка).
+   Теория и шаги именно того места, где ученик только что застрял, —
+   точнее «задания полегче». Кнопки нет, только если у навыка нет теории
+   ни в каком формате. */
 function sessionLessonBridgeHtml(t) {
   try {
-    const lessons = (DataAPI.lessonsBySkill(t && t.skill) || [])
+    const skillId = t && t.skill;
+    try {
+      const iv = (skillId && DataAPI.ilessonsBySkill ? DataAPI.ilessonsBySkill(skillId) : []) || [];
+      if (iv.length && iv[0]) return `<div style="margin-top:10px"><button class="btn btn--soft btn--sm" type="button" onclick="openInteractiveLesson('${esc(String(skillId))}')">${icon("bulb")} Разобрать в интерактиве</button></div>`;
+    } catch (_) {}
+    const lessons = (DataAPI.lessonsBySkill(skillId) || [])
       .filter((l) => l && DataAPI.lessonStepsCount(l) > 0);
     if (!lessons.length) return "";
     return `<div style="margin-top:10px"><button class="btn btn--soft btn--sm" type="button" onclick="go('lesson','${esc(String(lessons[0].id))}')">${icon("bulb")} Разобрать в уроке</button></div>`;
@@ -10437,9 +10458,14 @@ function screenStats(root) {
   const openErrs = asSafeArray(s.errors).filter((e) => e && !e.resolved).length;
   const streak = nonNegativeNumber(s.streak);
   const bestSeries = nonNegativeNumber(s.bestSeries);
-  let lessons = [];
-  try { lessons = DataAPI.lessons(); } catch (_) { lessons = []; }
-  const doneLessons = lessons.filter((l) => l && s.completedLessons && s.completedLessons[l.id]).length;
+  // Уроки — единая теория в любом формате: интерактив засчитывается
+  // наравне с обычным (разницы ноль), поэтому счёт — по темам с закрытой
+  // теорией, а не по записям классического каталога поштучно.
+  let theoryIds = [];
+  try { theoryIds = skillTheorySkills(); } catch (_) { theoryIds = []; }
+  const doneLessons = theoryIds.filter((id) => {
+    try { return skillTheoryDone(id); } catch (_) { return false; }
+  }).length;
   let hasEssayTasks = false;
   try { hasEssayTasks = DataAPI.tasks().some(isLongTextTask); } catch (_) { hasEssayTasks = false; }
 
@@ -10460,7 +10486,7 @@ function screenStats(root) {
       <div class="card"><div class="stat-num mono">${streak}</div><div class="stat-label">дней подряд</div></div>
       <div class="card"><div class="stat-num mono">${bestSeries}</div><div class="stat-label">лучшая серия</div></div>
       <div class="card"><div class="stat-num mono">${openErrs}</div><div class="stat-label">слабых мест на разбор</div></div>
-      <div class="card"><div class="stat-num mono">${lessons.length ? `${doneLessons}/${lessons.length}` : "—"}</div><div class="stat-label">уроков пройдено</div></div>
+      <div class="card"><div class="stat-num mono">${theoryIds.length ? `${doneLessons}/${theoryIds.length}` : "—"}</div><div class="stat-label">уроков пройдено</div></div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -11832,13 +11858,56 @@ function planRowHTML(t) {
     + `<span class="plan-card__row-go">Перейти ${icon("arrow")}</span></button>`;
 }
 
-/* Куда ведёт «Перейти»: теория, практика или выбор. Чистая, покрыта тестом. */
+/* Куда ведёт «Перейти»: теория, практика или выбор. Чистая, покрыта тестом.
+   Теория — в любом формате: обычный урок (lessonId из плана) или
+   интерактив у темы (живой каталог — флаг hasInteractive в старых планах
+   может отсутствовать, поэтому смотрим напрямую). */
+function planHasTheory(t) {
+  if (t && t.lessonId) return true;
+  // Флаг из плана (новые планы несут hasInteractive с сервера) — первичен:
+  // живого каталога в этом месте может не быть (тесты, старые данные).
+  if (t && (t.hasInteractive || t.ilessonSkill)) return true;
+  try {
+    const sid = String((t && (t.skillId || t.skill_id)) || "");
+    return !!(sid && DataAPI.ilessonsBySkill && DataAPI.ilessonsBySkill(sid).length);
+  } catch (_) { return false; }
+}
+
 function planGoChoice(t) {
-  const hasLesson = !!(t && t.lessonId);
+  const hasTheory = planHasTheory(t);
   const hasPractice = !!(t && Array.isArray(t.taskIds) && t.taskIds.length);
-  if (hasLesson && hasPractice) return "both";
-  if (hasLesson) return "theory";
+  if (hasTheory && hasPractice) return "both";
+  if (hasTheory) return "theory";
   return "practice";
+}
+
+/* Цель теории из плана: интерактив раньше классики — та же теория,
+   подача лучше (то же правило, что в движке следующего шага). */
+function planTheoryTarget(t) {
+  try {
+    const sid = String((t && (t.skillId || t.skill_id)) || "");
+    if (sid && DataAPI.ilessonsBySkill && DataAPI.ilessonsBySkill(sid).length) {
+      return { kind: "ilesson", skillId: sid };
+    }
+  } catch (_) {}
+  if (t && t.lessonId) return { kind: "lesson", lessonId: String(t.lessonId) };
+  return null;
+}
+
+function openPlanTheory(target) {
+  if (!target) return;
+  if (target.kind === "ilesson") {
+    try {
+      if (typeof openInteractiveLesson === "function") { openInteractiveLesson(target.skillId); return; }
+    } catch (_) {}
+    try { go("ilesson", target.skillId); } catch (_) {}
+    return;
+  }
+  try { Lesson.start(target.lessonId); } catch (_) {}
+}
+
+function openPlanTheoryForSkill(skillId) {
+  openPlanTheory(planTheoryTarget(studyPlanFindTopic(skillId)));
 }
 
 /* «Перейти» из блока плана: если есть и теория, и практика — выбор
@@ -11850,7 +11919,7 @@ function askPlanTopicGo(skillId) {
   const sid = String(t.skillId || "");
   const choice = planGoChoice(t);
   if (choice === "theory") {
-    try { Lesson.start(String(t.lessonId)); } catch (_) {}
+    openPlanTheory(planTheoryTarget(t));
     return;
   }
   if (choice === "practice") {
@@ -11863,7 +11932,7 @@ function askPlanTopicGo(skillId) {
     icon: "compass",
     title: name,
     text: `<div class="plan-card__go">`
-      + `<button class="btn btn--primary" type="button" onclick="closeDeviceModal();Lesson.start('${esc(String(t.lessonId))}')">Открыть теорию</button>`
+      + `<button class="btn btn--primary" type="button" onclick="closeDeviceModal();openPlanTheoryForSkill('${esc(sid)}')">Открыть теорию</button>`
       + `<button class="btn btn--ghost" type="button" onclick="closeDeviceModal();startSkillPractice('${esc(sid)}')">Открыть практику</button>`
       + `</div>`,
     closeText: "Позже",
