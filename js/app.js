@@ -45,7 +45,6 @@ const ICONS = {
   inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M3 13h6l1.5 2.5h3L15 13h6"/></svg>',
   ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
   pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
-  spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/><path d="M5 16l.7 1.8L7.5 18.5l-1.8.7L5 21l-.7-1.8L2.5 18.5l1.8-.7L5 16z"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>',
 };
 
@@ -5310,7 +5309,7 @@ function openSkillModal(skillId) {
         // primary классики): две учебные кнопки не спорят между собой.
         const ivLessons = (() => { try { return DataAPI.ilessonsBySkill(skillId); } catch (_) { return []; } })();
         const ivDone = ivLessons.some((l) => l && Store.state.completedILessons && Store.state.completedILessons[l.id]);
-        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>${icon("spark")} Интерактивный урок${ivDone ? " · пройден" : ""}</button>`;
+        const visualBtn = `<button class="btn btn--visual" onclick="openInteractiveLesson('${esc(skillId)}')"><span class="btn__beta">БЕТА</span>Интерактивный урок${ivDone ? " · пройден" : ""}</button>`;
         // Тема из одних сочинений (урока нет и не будет — там только практика):
         // главная кнопка ведёт в практику сочинений, а не в несуществующий
         // урок. Сочинения узнаём по типу заданий; в лёгком каталоге типа нет
@@ -5431,7 +5430,7 @@ function screenTraining(root) {
       try { iv = DataAPI.ilessons(); } catch (_) { iv = []; }
       if (!iv.length) return "";
       return `
-      <div class="section-title">Интерактивные уроки <span class="btn__beta btn__beta--static">БЕТА</span> — быстро понять</div>
+      <div class="section-title">Интерактивные уроки <span class="ilesson-beta">БЕТА</span> — быстро понять</div>
       <div class="grid grid--3">
         ${iv.map((item) => {
           const sk = DataAPI.skill(item.skill);
@@ -5441,7 +5440,7 @@ function screenTraining(root) {
           <div class="card card--hover lesson-card ${done ? "lesson-card--done" : ""}">
             <div class="mission-card__top">
               <div>
-                <div class="mission-card__title">${icon("spark")} ${esc(item.title)} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
+                <div class="mission-card__title">${esc(item.title)} ${done ? '<span class="chip chip--success" style="margin-left:6px">✓</span>' : ""}</div>
                 <div class="mission-card__path">${esc(sk ? sk.name : "Тема")} · ${scenesTotal} ${plural(scenesTotal, "сцена", "сцены", "сцен")} · ${done ? "пройден" : "не начат"}</div>
               </div>
               <div class="mission-card__reward"><span class="chip chip--accent mono">+${item.xp || 0} XP</span></div>
@@ -9742,6 +9741,17 @@ function screenInteractiveLesson(root) {
   const ilesson = full[0] || null;
 
   if (ilesson) {
+    if (!window.katex && !window.__ilessonMathDead) {
+      root.innerHTML = `<div class="session-wrap lesson-wrap ilesson-wrap">${pageLoaderHTML("Готовим формулы…")}</div>`;
+      try {
+        Vendor.ensureMath()
+          .catch(() => { try { window.__ilessonMathDead = true; } catch (_) {} })
+          .finally(() => { try { if (currentRoute() === "ilesson") render(); } catch (_) {} });
+      } catch (_) {
+        try { window.__ilessonMathDead = true; } catch (_) {}
+      }
+      return;
+    }
     // Модульный режим: у урока есть свой интерактивный движок
     // (js/ilessons/<name>.js). Модуль рисует всё внутри .ilesson-app сам —
     // в стилистике обычных уроков, но со своей интерактивной сутью
@@ -9753,7 +9763,7 @@ function screenInteractiveLesson(root) {
       <div class="session-wrap lesson-wrap ilesson-wrap">
         <div class="session-head">
           <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
-          <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
+          <div class="session-head__title">${esc(ilesson.title || topicName)} <span class="ilesson-beta">БЕТА</span></div>
           <div class="session-head__progress mono">${esc(ege)}</div>
         </div>
         <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
@@ -9808,7 +9818,7 @@ function screenInteractiveLesson(root) {
     <div class="session-wrap lesson-wrap ilesson-wrap">
       <div class="session-head">
         <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
-        <div class="session-head__title">${icon("spark")} Интерактивный урок <span class="btn__beta btn__beta--static">БЕТА</span></div>
+        <div class="session-head__title">Интерактивный урок <span class="ilesson-beta">БЕТА</span></div>
         <div class="session-head__progress mono">${esc(ege)}</div>
       </div>
       <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>
@@ -9847,7 +9857,7 @@ function renderStaticILesson(root, ilesson, skillId, topicName, categoryName, eg
     <div class="session-wrap lesson-wrap ilesson-wrap">
       <div class="session-head">
         <button class="btn btn--ghost btn--sm" onclick="go('path')">← К темам</button>
-        <div class="session-head__title">${icon("spark")} ${esc(ilesson.title || topicName)} <span class="btn__beta btn__beta--static">БЕТА</span></div>
+        <div class="session-head__title">${esc(ilesson.title || topicName)} <span class="ilesson-beta">БЕТА</span></div>
         <div class="session-head__progress mono">${esc(ege)}</div>
       </div>
       <div class="stat-label">${esc(categoryName)} · ${esc(ege)}</div>

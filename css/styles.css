@@ -392,11 +392,17 @@ body {
   white-space: nowrap;
   pointer-events: none;
 }
-.btn__beta--static {
-  position: static;
-  transform: none;
-  vertical-align: 2px;
-  margin-left: 6px;
+/* БЕТА в заголовке урока — как степень: мелкая метка сверху от текста,
+   без пилюли. */
+.ilesson-beta {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  vertical-align: super;
+  margin-left: 4px;
+  color: var(--accent-ink);
+  white-space: nowrap;
 }
 .btn--sm { padding: 6px 12px; font-size: 13px; }
 .btn--lg { padding: 13px 26px; font-size: 15px; }

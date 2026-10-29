@@ -181,6 +181,7 @@ function block(src, marker) {
     pageLoaderHTML: (s) => "LOADER:" + s,
     currentRoute: () => "ilesson",
     render: () => {},
+    katex: {},
     Store: { state: { completedILessons: {} }, ensureDetails: () => Promise.resolve() },
   };
   // Ничего нет — заглушка с БЕТА и практикой.
@@ -197,6 +198,7 @@ function block(src, marker) {
       ilessonsBySkill: () => [{ id: "v-01", skill: "n01", title: "V", scenesCount: 2, _meta: true }],
       ilessonsReady: () => false,
     },
+    katex: {},
     Store: { state: { completedILessons: {} }, ensureDetails: () => { fetched++; return Promise.resolve(); } },
   });
   sb2.window = sb2;
@@ -288,6 +290,7 @@ function block(src, marker) {
       pageLoaderHTML: (s) => "LOADER:" + s,
       currentRoute: () => "ilesson",
       render: () => {},
+      katex: {},
       Store: { state: { completedILessons: {} }, ensureDetails: () => Promise.resolve() },
       DataAPI: {
         ilessonsBySkill: () => [{ id: "v-01", skill: "n01", title: "V", js: "v-x",
@@ -324,6 +327,37 @@ function block(src, marker) {
     vm.runInContext("this.__root = { innerHTML: \"\" }; screenInteractiveLesson(this.__root);", sb2);
     await flush(); await flush();
     t("missing module falls back to static", sb2.__root.innerHTML.includes("S9"), sb2.__root.innerHTML.slice(0, 120));
+    // гейт вендора: без katex — скелет + одна фоновая загрузка, затем render.
+    // Именно этот путь чинит «сырой TeX вместо формул» с живого скриншота.
+    let ensured = 0, renders = 0;
+    const sb3 = {
+      console,
+      routeParam: () => "n01",
+      subjectSkillById: (id) => ({ id, name: "T", ege: "№1" }),
+      topicDisplayName: (s) => s.name,
+      topicCategory: () => ({ title: "C" }),
+      subjectDisplayName: (s) => s.title,
+      go: () => {}, startSkillPractice: () => {},
+      mathText: (s) => String(s),
+      pageLoaderHTML: (s) => "LOADER:" + s,
+      currentRoute: () => "ilesson",
+      render: () => { renders++; },
+      Vendor: { ensureMath: () => { ensured++; return Promise.resolve(); } },
+      Store: { state: { completedILessons: {} }, ensureDetails: () => Promise.resolve() },
+      DataAPI: {
+        ilessonsBySkill: () => [{ id: "v-03", skill: "n01", title: "V3",
+          scenes: [{ title: "S1", text: "x" }] }],
+        ilessonsReady: () => true,
+      },
+    };
+    sb3.window = sb3;
+    vm.createContext(sb3);
+    vm.runInContext(code, sb3);
+    vm.runInContext("this.__root = { innerHTML: \"\" }; screenInteractiveLesson(this.__root);", sb3);
+    t("no katex shows math loader", sb3.__root.innerHTML.includes("LOADER"), sb3.__root.innerHTML.slice(0, 80));
+    await flush(); await flush();
+    t("vendor fetched once", ensured === 1, String(ensured));
+    t("screen re-rendered after vendor", renders === 1, String(renders));
   })().then(() => {
     console.log(fails ? fails + " FAILURES" : "ALL ILESSONS UI OK");
     process.exit(fails ? 1 : 0);
