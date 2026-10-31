@@ -1539,15 +1539,74 @@ def _captcha_secret(conn: sqlite3.Connection) -> str:
         return _DEVICE_SECRET_FALLBACK
 
 
+# 5×7 пиксельный шрифт для капчи. Символы рисуются ПУТЯМИ, а не <text>:
+# в SVG-тексте код лежал открытым текстом, и любой скрипт снимал его
+# регуляркой за один запрос. Здесь наружу уходят только геометрия глифов —
+# ни одной буквы в разметке нет.
+_CAPTCHA_FONT: dict[str, tuple[str, ...]] = {
+    "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
+    "C": ("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
+    "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    "E": ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+    "F": ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    "G": ("01110", "10001", "10000", "10111", "10001", "10001", "01110"),
+    "H": ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "J": ("00111", "00010", "00010", "00010", "00010", "10010", "01100"),
+    "K": ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
+    "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    "M": ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
+    "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
+    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    "Q": ("01110", "10001", "10001", "10001", "10101", "10010", "01101"),
+    "R": ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+    "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    "U": ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "V": ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
+    "W": ("10001", "10001", "10001", "10101", "10101", "11011", "10001"),
+    "X": ("10001", "10001", "01010", "00100", "01010", "10001", "10001"),
+    "Y": ("10001", "10001", "01010", "00100", "00100", "00100", "00100"),
+    "Z": ("11111", "00001", "00010", "00100", "01000", "10000", "11111"),
+    "2": ("01110", "10001", "00001", "00010", "00100", "01000", "11111"),
+    "3": ("11111", "00010", "00100", "00010", "00001", "10001", "01110"),
+    "4": ("00010", "00110", "01010", "10010", "11111", "00010", "00010"),
+    "5": ("11111", "10000", "11110", "00001", "00001", "10001", "01110"),
+    "6": ("00110", "01000", "10000", "11110", "10001", "10001", "01110"),
+    "7": ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
+    "8": ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
+    "9": ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
+    "?": ("01110", "10001", "00010", "00100", "00100", "00000", "00100"),
+}
+
+
+def captcha_glyph_path(ch: str) -> str:
+    """Один глиф как SVG-path: горизонтальные штрихи пиксельной сетки 5×7."""
+    rows = _CAPTCHA_FONT.get(str(ch or "?").upper()) or _CAPTCHA_FONT["?"]
+    parts: list[str] = []
+    for y, row in enumerate(rows):
+        x = 0
+        while x < len(row):
+            if row[x] != "1":
+                x += 1
+                continue
+            start = x
+            while x < len(row) and row[x] == "1":
+                x += 1
+            parts.append(f"M{start},{y}h{x - start}v1h-{x - start}z")
+    return "".join(parts)
+
+
 def captcha_svg(code: str) -> str:
-    """Искажённый SVG-текст: тёмные буквы на светлом фоне + шум поверх букв.
+    """Искажённые векторные глифы: тёмные фигуры на светлом фоне + шум.
 
     Только stdlib: случайность из secrets, без PIL. Алфавит без 0/O/1/I —
-    человеку не приходится гадать. Против OCR: волнистая базовая линия,
-    поворот до ±32°, плотная посадка с налезанием, 2–3 зачёркивающие кривые
-    ПОВЕРХ букв и густой шум — чистый tesseract такое жуёт плохо, а человек
-    читает. Защита не абсолютна (обученный OCR и люди-решатели проходят),
-    поэтому поверх стоят одноразовость, TTL и лимиты скорости."""
+    человеку не приходится гадать. Буквы рисуются ПУТЯМИ (5×7), а не
+    текстовыми нодами: код нельзя прочитать из разметки, только распознать
+    геометрию. Против OCR: волнистая базовая линия, поворот до ±32°, сдвиг
+    и наклон каждого глифа, плотная посадка с налезанием, 2–3
+    зачёркивающие кривые ПОВЕРХ букв и густой шум. Поверх стоят
+    одноразовость, TTL и лимиты скорости."""
 
     def rnd(n: int) -> int:
         try:
@@ -1574,10 +1633,12 @@ def captcha_svg(code: str) -> str:
             y = 41 + wave + rnd(7) - 3
             rot = rnd(65) - 32
             fill = palette[rnd(len(palette))]
-            size = 30 + rnd(9)
-            chars.append(f'<text x="{x}" y="{y}" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" '
-                         f'font-size="{size}" font-weight="bold" fill="{fill}" '
-                         f'transform="rotate({rot} {x} {y})">{html.escape(ch)}</text>')
+            scale = 4 + rnd(2)
+            skew = rnd(17) - 8
+            glyph = captcha_glyph_path(ch)
+            chars.append(f'<g transform="translate({x} {y}) rotate({rot}) skewX({skew}) '
+                         f'scale({scale}) translate(-2.5,-3.5)">'
+                         f'<path d="{glyph}" fill="{fill}"/></g>')
         # Шум: точки (часть тёмных) + дуги + зачёркивающие кривые ПОВЕРХ букв.
         noise: list[str] = []
         for _ in range(64):
@@ -4494,6 +4555,14 @@ class EssayNotChecked(Exception):
     """
 
 
+class EssayRateLimited(Exception):
+    """Аккаунт выбрал суточный потолок приёма работ (ESSAY_DAILY_SUBMIT_MAX)."""
+
+    def __init__(self, retry_after: int = 3600):
+        self.retry_after = int(retry_after)
+        super().__init__("essay submit rate limited")
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -4842,6 +4911,13 @@ def _fallback_client_id(kind: str, parts: list) -> str:
 
 ESSAY_MIN_WORDS = 150
 ESSAY_MAX_CHARS = 30000
+# Гигиена хранилища: один аккаунт не должен уметь забить диск потоком
+# сочинений. Держим последние 100 работ НА ПРЕДМЕТ (это ровно окно истории
+# «Мои сочинения») и принимаем не больше 60 новых работ в сутки на аккаунт.
+# Живому ученику 60/сутки хватает с запасом; ферма упирается в потолок
+# задолго до того, как 30-КБ тексты съедят место.
+ESSAY_KEEP_PER_SUBJECT = 100
+ESSAY_DAILY_SUBMIT_MAX = 60
 # Счётчик слов для приёма работы и бейджа объёма — тот же, что обнуляет
 # баллы за недобор объёма (ai.count_words). Пока определения жили в двух
 # модулях, они разошлись (регулярка против len(text.split())), и работа,
@@ -5236,6 +5312,23 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
         raise EssayTooShort(word_count)
     created = str(value.get("ts") or now_iso())
     client_id = _stable_client_id(value) or _fallback_client_id("essay", [task_id, skill_id, created])
+    # Суточный потолок приёма: повтор того же client_id бесплатен (идемпотентный
+    # ретрай), а каждая НОВАЯ работа считается. Проверка до INSERT, чтобы
+    # отказ не оставлял строку.
+    try:
+        already = conn.execute(
+            "SELECT 1 FROM essay_submissions WHERE user_id=? AND subject=? AND client_id=?",
+            (user_id, subject, client_id)).fetchone()
+        if already is None:
+            cutoff_ms = int(time.time() * 1000) - 86_400_000
+            today = conn.execute(
+                "SELECT COUNT(*) AS c FROM essay_submissions"
+                " WHERE user_id=? AND CAST(created_at AS INTEGER)>=?",
+                (user_id, cutoff_ms)).fetchone()
+            if today and int(today["c"] or 0) >= ESSAY_DAILY_SUBMIT_MAX:
+                raise EssayRateLimited(3600)
+    except sqlite3.Error:
+        pass
     has_pub = "public_id" in _table_columns(conn, "essay_submissions")
     public_id = ""
     inserted = False
@@ -5271,6 +5364,19 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
             " ON CONFLICT(user_id,subject,client_id) DO NOTHING",
             (user_id, subject, task["id"], task["skill_id"], text, word_count, client_id, created),
         )
+    # Окно хранения: последние ESSAY_KEEP_PER_SUBJECT работ на предмет.
+    # Старые строки уходят вместе со ссылками шаринга (FOREIGN KEY CASCADE),
+    # поэтому база не растёт от бесконечных «пробных» отправок.
+    try:
+        stale = [str(r["id"]) for r in conn.execute(
+            "SELECT id FROM essay_submissions WHERE user_id=? AND subject=?"
+            " ORDER BY id DESC LIMIT -1 OFFSET ?",
+            (user_id, subject, ESSAY_KEEP_PER_SUBJECT)).fetchall()]
+        if stale:
+            q = ",".join("?" * len(stale))
+            conn.execute(f"DELETE FROM essay_submissions WHERE id IN ({q})", tuple(stale))
+    except sqlite3.Error:
+        pass
     try:
         row = conn.execute(
             "SELECT id, word_count, evaluation_status, public_id FROM essay_submissions"
@@ -10217,6 +10323,17 @@ def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
                          " WHERE anchor_ms IS NULL AND timer_ms IS NOT NULL")
     except sqlite3.Error:
         pass
+    # Суточный предохранитель на ВСЕ платные вызовы ИИ (не на аккаунт, а на
+    # сервис): ферма аккаунтов не должна уметь выжечь кошелёк провайдера.
+    # day — UTC-дата, kind — 'essay'/'agent'. Инкремент атомарный.
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_spend_daily (
+          day TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          used INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (day, kind))""")
+    except sqlite3.Error:
+        pass
     conn.commit()
     _AI_USAGE_SCHEMA_DONE.add(key)
 
@@ -10548,6 +10665,90 @@ def ai_usage_refund(conn: sqlite3.Connection, owners: list[str] | None,
             conn.rollback()
         except sqlite3.Error:
             pass
+
+
+def ai_global_daily_limit(kind: str = "essay") -> int:
+    """Потолок платных вызовов ИИ на сутки для всего сервиса.
+
+    EGE_AI_GLOBAL_DAILY_MAX — общий; EGE_AI_GLOBAL_DAILY_MAX_ESSAY/AGENT —
+    точечно. 0 или отрицательное значение выключает предохранитель.
+    Читается на каждом вызове, чтобы лимит можно было менять без рестарта.
+    """
+    kind = str(kind or "essay").strip().lower()
+    env_name = ("EGE_AI_GLOBAL_DAILY_MAX_ESSAY" if kind == "essay"
+                else "EGE_AI_GLOBAL_DAILY_MAX_AGENT" if kind == "agent"
+                else "EGE_AI_GLOBAL_DAILY_MAX")
+    default = 400 if kind == "essay" else 2000
+    try:
+        return max(0, int(os.environ.get(env_name, os.environ.get("EGE_AI_GLOBAL_DAILY_MAX", default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def ai_global_day(now_ms: int | None = None) -> str:
+    try:
+        ts = (int(now_ms) if now_ms is not None else int(time.time() * 1000)) / 1000
+        return dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+    except Exception:
+        return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def ai_global_budget_take(conn: sqlite3.Connection, kind: str = "essay",
+                          *, day: str | None = None) -> bool:
+    """Атомарно занять один платный вызов. False — суточный потолок сервиса
+    исчерпан (тогда модель не зовём и жетон ученика не тратим)."""
+    limit = ai_global_daily_limit(kind)
+    if limit <= 0:
+        return True
+    ensure_ai_usage_schema(conn)
+    day = day or ai_global_day()
+    try:
+        cur = conn.execute(
+            "INSERT INTO ai_spend_daily(day, kind, used) VALUES (?,?,1)"
+            " ON CONFLICT(day, kind) DO UPDATE SET used=used+1 WHERE used<?",
+            (day, str(kind), limit))
+        conn.commit()
+        return cur.rowcount == 1
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        # Предохранитель не должен ломать честную проверку при сбое БД:
+        # отсутствие учёта хуже отказа, но отказ здесь — вина инфраструктуры.
+        return True
+
+
+def ai_global_budget_refund(conn: sqlite3.Connection, kind: str = "essay",
+                            *, day: str | None = None) -> None:
+    """Вернуть занятый слот, если вызов модели не состоялся."""
+    ensure_ai_usage_schema(conn)
+    day = day or ai_global_day()
+    try:
+        conn.execute("UPDATE ai_spend_daily SET used=MAX(0, used-1)"
+                     " WHERE day=? AND kind=?", (day, str(kind)))
+        conn.commit()
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+
+
+def ai_global_budget_status(conn: sqlite3.Connection, kind: str = "essay") -> dict:
+    """Для админки/тестов: сколько из суточного потолка уже израсходовано."""
+    limit = ai_global_daily_limit(kind)
+    day = ai_global_day()
+    used = 0
+    try:
+        ensure_ai_usage_schema(conn)
+        row = conn.execute("SELECT used FROM ai_spend_daily WHERE day=? AND kind=?",
+                           (day, str(kind))).fetchone()
+        used = int(row["used"]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        used = 0
+    return {"day": day, "kind": str(kind), "limit": limit, "used": used,
+            "remaining": max(0, limit - used) if limit > 0 else None}
 
 
 def ai_timeout_bonus_grant(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -14154,29 +14355,21 @@ def health_payload() -> dict:
         uptime = int((dt.datetime.now(dt.timezone.utc) - SERVER_STARTED_AT).total_seconds())
     except Exception:
         pass
-    db: dict = {"exists": False, "sizeBytes": 0, "integrity": "unknown"}
+    db: dict = {"exists": False, "integrity": "unknown"}
     try:
         exists = DB_PATH.exists()
         db["exists"] = bool(exists)
         if exists:
-            try:
-                db["sizeBytes"] = DB_PATH.stat().st_size
-            except OSError:
-                pass
             db["integrity"] = db_integrity()
         else:
             db["integrity"] = "missing"
     except sqlite3.Error:
         db["integrity"] = "corrupt"
-    backup: dict = {}
-    mod = backup_mod()
-    if mod is not None:
-        try:
-            backup = mod.backup_status()
-        except Exception:
-            backup = {}
+    # Публичный health не отдаёт имена бэкапов, размер БД и историю
+    # восстановлений: это разведданные о бэкап-контуре. Детальный статус
+    # остаётся в админке/логах.
     return {"ok": db["integrity"] == "ok", "uptimeSec": uptime,
-            "db": db, "backup": backup,
+            "db": db,
             "domain": {"primary": site_primary_domain(),
                        "armed": site_migration_armed(),
                        "live": site_primary_live()}}
@@ -17298,6 +17491,13 @@ class Handler(BaseHTTPRequestHandler):
                                 "reason": "essay_too_short",
                                 "wordCount": exc.word_count,
                                 "minWords": ESSAY_MIN_WORDS}, 422)
+            except EssayRateLimited as exc:
+                conn.rollback()
+                self.send_json({"error": "Слишком много новых сочинений за сутки. "
+                                          "Попробуй позже.",
+                                "code": "ESSAY_LIMIT",
+                                "retryAfter": exc.retry_after}, 429,
+                               headers={"Retry-After": str(exc.retry_after)})
             except sqlite3.Error as exc:
                 conn.rollback()
                 rid = log_request_error("essays", exc)
@@ -17825,6 +18025,25 @@ class Handler(BaseHTTPRequestHandler):
                                     **({"reason": "farm_suspected"} if farm else {})},
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
+                glob_day = None
+                glob_taken = False
+                if needs_model:
+                    glob_day = ai_global_day()
+                    if not ai_global_budget_take(conn, "essay", day=glob_day):
+                        ai_usage_refund(conn, usage_owners, reason="essay:global_limit")
+                        try:
+                            now_utc = dt.datetime.now(dt.timezone.utc)
+                            tomorrow = (now_utc + dt.timedelta(days=1)).replace(
+                                hour=0, minute=0, second=0, microsecond=0)
+                            retry_global = max(60, int((tomorrow - now_utc).total_seconds()))
+                        except Exception:
+                            retry_global = 3600
+                        self.send_json({"error": "Суточный лимит проверок на сервисе исчерпан. Попробуй завтра.",
+                                        "code": "AI_GLOBAL_LIMIT", "retryAfter": retry_global},
+                                       429, token=token,
+                                       headers={"Retry-After": str(retry_global)})
+                        return
+                    glob_taken = True
                 usage_spent = False
                 try:
                     try:
@@ -17929,6 +18148,8 @@ class Handler(BaseHTTPRequestHandler):
                     # было нечего и возвращать тоже.
                     if usage_owners and not usage_spent:
                         ai_usage_refund(conn, usage_owners, reason="essay:check_fail")
+                    if glob_taken and not usage_spent:
+                        ai_global_budget_refund(conn, "essay", day=glob_day)
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass

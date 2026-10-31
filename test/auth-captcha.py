@@ -109,8 +109,10 @@ def main():
                   and data["captcha"].get("svg", "").startswith("<svg")
                   and data["captcha"].get("expiresInSec") == 300
                   and data["captcha"].get("debugCode"), (status, str(data)[:160]))
-            texts = data["captcha"]["svg"].count("<text")
-            check("в картинке 5 символов", texts == 5, texts)
+            svg = data["captcha"]["svg"]
+            texts = svg.count("<text")
+            glyphs = svg.count("<path")
+            check("в картинке 5 символов", texts == 0 and glyphs >= 5, (texts, glyphs))
             status, reg = request(c0, base, "/api/auth/register", "POST", {
                 "name": "Чистый", "email": "clean@example.com", "password": "secret-pass-1",
             }, ip="10.1.0.1")
