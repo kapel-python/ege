@@ -109,6 +109,33 @@ def main() -> int:
         finally:
             conn.close()
 
+        # --- суточный потолок бесплатных проверок на адрес ---
+        os.environ["EGE_AI_IP_DAILY_MAX"] = "2"
+        conn = server.connect()
+        try:
+            day = "2099-02-01"
+            check("ИИ-адрес: первый слот",
+                  server.ai_ip_budget_take(conn, "hash-a", day=day))
+            check("ИИ-адрес: второй слот",
+                  server.ai_ip_budget_take(conn, "hash-a", day=day))
+            check("ИИ-адрес: третий отказ",
+                  not server.ai_ip_budget_take(conn, "hash-a", day=day))
+            check("ИИ-адрес: другой адрес не задет",
+                  server.ai_ip_budget_take(conn, "hash-b", day=day))
+            server.ai_ip_budget_refund(conn, "hash-a", day=day)
+            check("ИИ-адрес: возврат освобождает слот",
+                  server.ai_ip_budget_take(conn, "hash-a", day=day))
+        finally:
+            conn.close()
+        os.environ["EGE_AI_IP_DAILY_MAX"] = "0"
+        conn = server.connect()
+        try:
+            check("ИИ-адрес: 0 выключает потолок",
+                  all(server.ai_ip_budget_take(conn, "hash-c", day="2099-02-02")
+                      for _ in range(5)))
+        finally:
+            conn.close()
+
         # --- health без разведданных о бэкапах ---
         health = server.health_payload()
         check("health: нет блока backup", "backup" not in health, health)

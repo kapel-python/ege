@@ -7704,6 +7704,20 @@ async function essayRunChecksInner(t, text, clientId, wordCount, busyRetried) {
         openAiLimitModal(aiData);
         return;
       }
+      if (aiData && (aiData.code === "AI_IP_LIMIT" || aiData.code === "AI_GLOBAL_LIMIT")) {
+        // Сетевой/сервисный потолок — не личный бюджет: модалку «0 из 5»
+        // не показываем, иначе человек видит полный карман и «лимит».
+        essayMountResumeFeedback(t);
+        essayMountFeedback(`
+          <div class="feedback feedback--bad">
+            <div class="feedback__head">${icon("x")} Проверка временно недоступна</div>
+            <div class="feedback__solution">${esc(aiData.error || "Лимит проверок на сервисе исчерпан. Попробуй позже.")}</div>
+            <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+              <button class="btn btn--primary" onclick="sessionEssayResume('${esc(t.id)}')">Попробовать снова</button>
+            </div>
+          </div>`);
+        return;
+      }
       const burstRetry = Math.max(1, Number(aiData.retryAfter) || 60);
       essayMountResumeFeedback(t);
       aiLimitsFetch(true).then((st) => openAiLimitModal(st, burstRetry));

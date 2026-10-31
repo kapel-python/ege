@@ -10369,6 +10369,18 @@ def ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
           PRIMARY KEY (day, kind))""")
     except sqlite3.Error:
         pass
+    # Суточный потолок бесплатных проверок на ОДИН адрес: очистка cookie
+    # даёт новый аккаунт и новый личный бюджет, поэтому личный счётчик сам
+    # по себе ферму не держит. 150 = класс из 30 человек по 5 проверок;
+    # один адрес больше не может выесть весь общий запас ИИ.
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_ip_daily (
+          day TEXT NOT NULL,
+          ip_hash TEXT NOT NULL,
+          used INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (day, ip_hash))""")
+    except sqlite3.Error:
+        pass
     conn.commit()
     _AI_USAGE_SCHEMA_DONE.add(key)
 
@@ -10784,6 +10796,59 @@ def ai_global_budget_status(conn: sqlite3.Connection, kind: str = "essay") -> di
         used = 0
     return {"day": day, "kind": str(kind), "limit": limit, "used": used,
             "remaining": max(0, limit - used) if limit > 0 else None}
+
+
+def ai_ip_daily_limit() -> int:
+    """Потолок БЕСПЛАТНЫХ проверок на один адрес за UTC-сутки.
+
+    EGE_AI_IP_DAILY_MAX — 150 по умолчанию (класс 30 × 5 проверок), 0
+    выключает. Plus и персональный грант админа потолок не читают: платная
+    и доверенная квота не должна упираться в чужой школьный NAT.
+    """
+    try:
+        return max(0, int(os.environ.get("EGE_AI_IP_DAILY_MAX", "150")))
+    except (TypeError, ValueError):
+        return 150
+
+
+def ai_ip_budget_take(conn: sqlite3.Connection, ip_hash: str | None,
+                      *, day: str | None = None) -> bool:
+    """Атомарно занять одну бесплатную проверку на адрес. False — потолок."""
+    limit = ai_ip_daily_limit()
+    if limit <= 0 or not ip_hash:
+        return True
+    ensure_ai_usage_schema(conn)
+    day = day or ai_global_day()
+    try:
+        cur = conn.execute(
+            "INSERT INTO ai_ip_daily(day, ip_hash, used) VALUES (?,?,1)"
+            " ON CONFLICT(day, ip_hash) DO UPDATE SET used=used+1 WHERE used<?",
+            (day, str(ip_hash), limit))
+        conn.commit()
+        return cur.rowcount == 1
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return True
+
+
+def ai_ip_budget_refund(conn: sqlite3.Connection, ip_hash: str | None,
+                        *, day: str | None = None) -> None:
+    if not ip_hash:
+        return
+    ensure_ai_usage_schema(conn)
+    day = day or ai_global_day()
+    try:
+        conn.execute("UPDATE ai_ip_daily SET used=MAX(0, used-1)"
+                     " WHERE day=? AND ip_hash=?", (day, str(ip_hash)))
+        conn.commit()
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
 
 
 def ai_timeout_bonus_grant(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -18086,12 +18151,41 @@ class Handler(BaseHTTPRequestHandler):
                                     **({"reason": "farm_suspected"} if farm else {})},
                                    429, token=token, headers={"Retry-After": str(retry)})
                     return
+                ip_day = None
+                ip_taken = False
+                if needs_model:
+                    try:
+                        trusted = subscription_is_plus(conn, int(user_id))
+                        if not trusted:
+                            custom = ai_custom_limit(conn, int(user_id))
+                            trusted = custom is not None and int(custom) > ai_usage_max()
+                    except Exception:
+                        trusted = False
+                    if not trusted:
+                        ip_day = ai_global_day()
+                        if not ai_ip_budget_take(conn, fp_net, day=ip_day):
+                            ai_usage_refund(conn, usage_owners, reason="essay:ip_limit")
+                            try:
+                                now_utc = dt.datetime.now(dt.timezone.utc)
+                                tomorrow = (now_utc + dt.timedelta(days=1)).replace(
+                                    hour=0, minute=0, second=0, microsecond=0)
+                                retry_ip = max(60, int((tomorrow - now_utc).total_seconds()))
+                            except Exception:
+                                retry_ip = 3600
+                            self.send_json({"error": "С этого адреса на сегодня лимит бесплатных проверок исчерпан. Попробуй завтра.",
+                                            "code": "AI_IP_LIMIT", "retryAfter": retry_ip},
+                                           429, token=token,
+                                           headers={"Retry-After": str(retry_ip)})
+                            return
+                        ip_taken = True
                 glob_day = None
                 glob_taken = False
                 if needs_model:
                     glob_day = ai_global_day()
                     if not ai_global_budget_take(conn, "essay", day=glob_day):
                         ai_usage_refund(conn, usage_owners, reason="essay:global_limit")
+                        if ip_taken:
+                            ai_ip_budget_refund(conn, fp_net, day=ip_day)
                         try:
                             now_utc = dt.datetime.now(dt.timezone.utc)
                             tomorrow = (now_utc + dt.timedelta(days=1)).replace(
@@ -18211,6 +18305,8 @@ class Handler(BaseHTTPRequestHandler):
                         ai_usage_refund(conn, usage_owners, reason="essay:check_fail")
                     if glob_taken and not usage_spent:
                         ai_global_budget_refund(conn, "essay", day=glob_day)
+                    if ip_taken and not usage_spent:
+                        ai_ip_budget_refund(conn, fp_net, day=ip_day)
             except sqlite3.Error as exc:
                 try: conn.rollback()
                 except sqlite3.Error: pass

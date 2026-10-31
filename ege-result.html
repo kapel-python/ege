@@ -1632,6 +1632,11 @@ async function doRecheck(note) {
         ...(aiData.reason === "farm_suspected" ? { reason: "farm_suspected" } : {}) });
       return;
     }
+    if (aiRes.status === 429 && aiData && (aiData.code === "AI_IP_LIMIT" || aiData.code === "AI_GLOBAL_LIMIT")) {
+      openRecheckError("Проверка временно недоступна",
+        aiData.error || "Лимит проверок на сервисе исчерпан. Попробуй позже.", cleanNote);
+      return;
+    }
     if (aiRes.status === 401) {
       openRecheckError("Нужно войти",
         "Сессия истекла. Войди заново и открой результат из практики — текст работы сохранён.");
