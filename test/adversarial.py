@@ -156,7 +156,9 @@ def main() -> int:
         for blocked in ("/server/ege.sqlite3", "/server/server.py", "/server/backup.py",
                         "/server/ege.sqlite3-wal", "/server/ege.sqlite3-shm",
                         "/server/ege.sqlite3.bak", "/server/backups/manifest.json",
-                        "/.git/config", "/deploy/ege-2026.service", "/README.md"):
+                        "/.git/config", "/deploy/ege-2026.service", "/README.md",
+                        "/draft/skills.json", "/tools/out/math_02.json",
+                        "/screenshots/inbox-system.png"):
             status, _, _ = anon.call("GET", blocked)
             check(f"закрыт {blocked}", status in (403, 404), f"got {status}")
         status, _, _ = anon.call("GET", "/%2e%2e/server/ege.sqlite3")

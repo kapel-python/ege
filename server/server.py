@@ -953,7 +953,8 @@ ACCOUNT_ID_MAX_ATTEMPTS = 25
 # Static-file allowlist guardrails: anything under these top-level directories,
 # any dot-prefixed path and these file types are never served over HTTP. The DB
 # file alone (session tokens!) makes this a hard requirement, not a nicety.
-BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui", "backups"}
+BLOCKED_STATIC_DIRS = {"server", ".git", "deploy", "test", "hermes-webui", "backups",
+                       "draft", "tools", "screenshots"}
 BLOCKED_STATIC_SUFFIXES = {".py", ".sqlite3", ".db", ".service", ".md", ".txt",
                             ".wal", ".shm", ".journal", ".bak", ".tmp", ".log",
                             ".swp", ".swx"}
@@ -15500,8 +15501,9 @@ class Handler(BaseHTTPRequestHandler):
         хеша нет — просто задаём новый («Установить пароль»), хеш есть —
         требуем текущий («Сменить пароль»). Правила длины те же, что у
         регистрации (8..72). Перебор текущего упирается в общий auth-бакет
-        неудач и per-IP бакет, как у входа. Сессия не перевыпускается:
-        меняется только хеш, остальные устройства продолжают работать.
+        неудач и per-IP бакет, как у входа. Смена пароля — сигнал «доступ
+        мог утечь»: все ОСТАЛЬНЫЕ сессии аккаунта и админ-сессии гасятся,
+        текущая остаётся, чтобы человек не вылетел из своего браузера.
         """
         ip = client_ip(self)
         if not auth_login_allowed(ip):
@@ -15538,9 +15540,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Неверный текущий пароль"}, 401)
                 return
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
+        # Смена/установка пароля отзывает другие входы: украденная вкладка,
+        # чужое устройство и старая админ-сессия больше не действуют. Текущая
+        # сессия остаётся — иначе смена пароля выкидывала бы самого владельца.
+        revoked = 0
+        try:
+            current_session = cookie_value(self, "ege_session")
+            current_digest = token_digest(current_session) if current_session else None
+            if current_digest:
+                cur = conn.execute("DELETE FROM user_sessions WHERE user_id=? AND token<>?",
+                                   (int(user_id), current_digest))
+            else:
+                cur = conn.execute("DELETE FROM user_sessions WHERE user_id=?", (int(user_id),))
+            revoked = int(cur.rowcount or 0)
+            current_admin = cookie_value(self, ADMIN_COOKIE_NAME)
+            current_admin_digest = token_digest(current_admin) if current_admin else None
+            if current_admin_digest:
+                conn.execute("DELETE FROM admin_sessions WHERE user_id=? AND token<>?",
+                             (int(user_id), current_admin_digest))
+            else:
+                conn.execute("DELETE FROM admin_sessions WHERE user_id=?", (int(user_id),))
+        except sqlite3.Error:
+            conn.rollback()
+            self.send_json({"error": "Пароль не изменён. Попробуй ещё раз."}, 503)
+            return
         conn.commit()
         auth_login_success(ip)
-        self.send_json({"ok": True, "hasPassword": True, "user": auth_user_payload(conn, user_id)})
+        self.send_json({"ok": True, "hasPassword": True, "revokedSessions": revoked,
+                        "user": auth_user_payload(conn, user_id)})
 
     def handle_auth_logout(self, conn: sqlite3.Connection) -> None:
         # Logout must work even with an invalid/absent cookie: drop whatever

@@ -503,6 +503,28 @@ def main():
             status, admin_probe = request(bare, base, "/api/admin/users")
             check("S24: admin API без admin-сессии -> 401", status == 401)
 
+            # ---------- S25: смена пароля отзывает чужие сессии ----------
+            dev_old = Session(base)
+            dev_new = Session(base)
+            st_old, _ = dev_old.login("a@ex.com", "password-a-123")
+            st_new, _ = dev_new.login("a@ex.com", "password-a-123")
+            check("S25: два устройства вошли", st_old == 200 and st_new == 200, f"{st_old}/{st_new}")
+            st, changed = dev_new.req("/api/auth/password", "POST", {
+                "currentPassword": "password-a-123", "newPassword": "password-a-456"})
+            check("S25: смена пароля 200 и другие сессии отозваны",
+                  st == 200 and int(changed.get("revokedSessions") or 0) >= 1, f"{st} {changed}")
+            st, sess_old = dev_old.req("/api/auth/session")
+            check("S25: старая сессия больше не аккаунт",
+                  st == 200 and sess_old.get("user") is None, f"{st} {sess_old}")
+            st, sess_new = dev_new.req("/api/auth/session")
+            check("S25: текущая сессия осталась жива",
+                  st == 200 and sess_new.get("user") is not None, f"{st} {sess_new}")
+            st, _ = dev_new.req("/api/auth/password", "POST", {
+                "currentPassword": "password-a-456", "newPassword": "password-a-123"})
+            check("S25: пароль возвращён для следующих проверок", st == 200, st)
+            dev_old.logout()
+            dev_new.logout()
+
             # ---------- Итог по БД: дубликатов нет, аккаунты живы ----------
             emails = db_query(server, "SELECT email FROM users WHERE email IS NOT NULL ORDER BY email")
             expected_emails = {"a@ex.com", "b@ex.com", "d@ex.com", "f@ex.com", row[0]["email"]}
