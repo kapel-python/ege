@@ -86,6 +86,29 @@ def main() -> int:
         finally:
             conn.close()
 
+        # --- суточный потолок новых работ (весь сервис) ---
+        os.environ["EGE_ESSAY_GLOBAL_DAILY_MAX"] = "2"
+        conn = server.connect()
+        try:
+            server.ensure_essay_schema(conn)
+            day = "2099-01-01"
+            check("работы: первый слот", server.essay_store_budget_take(conn, day=day))
+            check("работы: второй слот", server.essay_store_budget_take(conn, day=day))
+            check("работы: третий отказ",
+                  not server.essay_store_budget_take(conn, day=day))
+            check("работы: другой день — свой счётчик",
+                  server.essay_store_budget_take(conn, day="2099-01-02"))
+        finally:
+            conn.close()
+        os.environ["EGE_ESSAY_GLOBAL_DAILY_MAX"] = "0"
+        conn = server.connect()
+        try:
+            check("работы: 0 выключает потолок",
+                  all(server.essay_store_budget_take(conn, day="2099-01-03")
+                      for _ in range(5)))
+        finally:
+            conn.close()
+
         # --- health без разведданных о бэкапах ---
         health = server.health_payload()
         check("health: нет блока backup", "backup" not in health, health)

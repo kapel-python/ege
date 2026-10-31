@@ -5279,7 +5279,39 @@ def ensure_essay_schema(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_essay_share_links_user"
             " ON essay_share_links(user_id)"
         )
+        # Суточный счётчик ВСЕХ новых работ сервиса: ферма аккаунтов не должна
+        # растить базу без предела даже в рамках 60 работ на каждый аккаунт.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS essay_store_daily ("
+            " day TEXT PRIMARY KEY, used INTEGER NOT NULL DEFAULT 0)"
+        )
         _ESSAY_SCHEMA_DONE.add(key)
+
+
+def essay_store_budget_take(conn: sqlite3.Connection, *, day: str | None = None) -> bool:
+    """Атомарно занять место под одну НОВУЮ работу на сутки всего сервиса.
+
+    EGE_ESSAY_GLOBAL_DAILY_MAX (дефолт 2000; 0 выключает). 2000 × 30 КБ —
+    это ~60 МБ/сутки верхней границы прироста БД даже при полностью
+    автоматизированной ферме; живой сайт столько не пишет. Счётчик живёт в
+    той же транзакции, что и INSERT работы: откат отменяет и списание.
+    """
+    try:
+        limit = int(os.environ.get("EGE_ESSAY_GLOBAL_DAILY_MAX", "2000"))
+    except (TypeError, ValueError):
+        limit = 2000
+    if limit <= 0:
+        return True
+    day = day or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    try:
+        cur = conn.execute(
+            "INSERT INTO essay_store_daily(day, used) VALUES (?, 1)"
+            " ON CONFLICT(day) DO UPDATE SET used=used+1 WHERE used<?",
+            (day, limit))
+        return cur.rowcount == 1
+    except sqlite3.Error:
+        # Нет таблицы/сбой БД не должны ломать честную отправку.
+        return True
 
 
 def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str, value: dict) -> dict:
@@ -5326,6 +5358,8 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
                 " WHERE user_id=? AND CAST(created_at AS INTEGER)>=?",
                 (user_id, cutoff_ms)).fetchone()
             if today and int(today["c"] or 0) >= ESSAY_DAILY_SUBMIT_MAX:
+                raise EssayRateLimited(3600)
+            if not essay_store_budget_take(conn):
                 raise EssayRateLimited(3600)
     except sqlite3.Error:
         pass
