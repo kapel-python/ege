@@ -118,14 +118,16 @@
   /* ---------- действия под сообщением ----------
      Удержания НЕТ (удалено: жест надо было угадывать, меню у точки нажатия
      закрывало текст). Под каждым сообщением свой ряд: [копировать]
-     [перегенерировать?] [изменить?] ЧЧ:ММ. Копировать — на всех сообщениях
+     [перегенерировать?] [изменить?] [об ответе?] ЧЧ:ММ. Копировать — на всех сообщениях
      (маленький квадрат с иконкой, первым); перегенерировать/изменить —
      только у последней пары: середину переписки менять нельзя, иначе история
      после неё потеряет смысл. Видимость крайних кнопок пересчитывает
      refreshActs() после каждой отрисовки (ряды статичны, «последний»
      со временем уезжает). Время — московское, из createdAt сервера
-     (вживую — момент отрисовки). Перегенерация — с подтверждением в общей
-     модалке openConfirmDialog (та же система .dlg, что окно лимита). */
+     (вживую — момент отрисовки). «Об ответе» — только у ответов ИИ, для
+     которых сервер сохранил модель/время/ходы; окно — общий openInfoDialog.
+     Перегенерация — с подтверждением в общей модалке openConfirmDialog
+     (та же система .dlg, что окно лимита). */
   function fmtTimeMSK(ms) {
     var t = Number(ms);
     if (!isFinite(t) || t <= 0) t = Date.now();
@@ -134,7 +136,44 @@
     function p(n) { return (n < 10 ? "0" : "") + n; }
     return p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
   }
-  function msgActsRow(getCopy, getRegenQ, atMs, canEdit) {
+  function fmtDurationMs(ms) {
+    var t = Number(ms);
+    if (!isFinite(t) || t <= 0) return "";
+    if (t < 1000) return Math.max(1, Math.round(t)) + " мс";
+    var s = t / 1000;
+    if (s < 60) return s.toFixed(1).replace(".", ",") + " с";
+    var m = Math.floor(s / 60), rem = Math.round(s % 60);
+    if (rem === 60) { m += 1; rem = 0; }
+    return m + " мин" + (rem ? " " + rem + " с" : "");
+  }
+  /* Справочное окно «Об ответе» — общая модалка сайта (openInfoDialog), как
+     у квоты и лимитов. Внутри только то, что нельзя вычитать из ответа:
+     модель, общее время запроса и сколько ходов он съел. Старые ответы без
+     сохранённой подписи иконку не получают вовсе — выдумывать нечего. */
+  function openAnswerInfo(meta) {
+    if (!meta || typeof openInfoDialog !== "function") return;
+    var rows = [];
+    var model = String(meta.model || "").trim();
+    if (model) {
+      rows.push('<div class="dlg-kv__row"><span>Модель</span><span>' + esc(model) + '</span></div>');
+    }
+    var duration = fmtDurationMs(meta.durationMs);
+    if (duration) {
+      rows.push('<div class="dlg-kv__row"><span>Время ответа</span><span>' + esc(duration) + '</span></div>');
+    }
+    var turns = Number(meta.turns);
+    if (isFinite(turns) && turns > 0) {
+      rows.push('<div class="dlg-kv__row"><span>Ходов потрачено</span><span>' +
+                turns + " " + pluralQ(turns) + '</span></div>');
+    }
+    if (!rows.length) return;
+    openInfoDialog({
+      eyebrow: "ИИ", icon: "info", title: "Об ответе",
+      text: '<div class="dlg-kv">' + rows.join("") + '</div>',
+      closeText: "Закрыть"
+    });
+  }
+  function msgActsRow(getCopy, getRegenQ, atMs, canEdit, info) {
     var row = el("div", "agent__acts");
     var copy = el("button", "agent__act", null);
     copy.type = "button";
@@ -187,6 +226,16 @@
       });
       row.appendChild(edit);
     }
+    if (info && (info.model || info.durationMs || Number(info.turns) > 0)) {
+      var infoBtn = el("button", "agent__act", null);
+      infoBtn.type = "button";
+      infoBtn.setAttribute("aria-label", "Информация об ответе");
+      infoBtn.setAttribute("data-act", "info");
+      try { infoBtn.innerHTML = icon("info"); } catch (_) {}
+      if (!infoBtn.firstChild) { try { infoBtn.appendChild(svgIcon(ICON_INFO, "2")); } catch (_) {} }
+      infoBtn.addEventListener("click", function () { openAnswerInfo(info); });
+      row.appendChild(infoBtn);
+    }
     var time = el("span", "agent__time", null);
     try { time.textContent = fmtTimeMSK(atMs); } catch (_) {}
     row.appendChild(time);
@@ -227,6 +276,7 @@
   }
   var ICON_COPY = "M9 9h10v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1";
   var ICON_RETRY = "M3 12a9 9 0 1 0 3-6.7M3 4v5h5";
+  var ICON_INFO = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5.5M12 7.8v.01";
   function answerText(card) {
     // Сырой markdown ответа: textContent уже отрендеренного HTML теряет
     // ** и списки, а копировать человек хочет то, что написала модель.
@@ -2287,13 +2337,13 @@
   }
   /* Ряд действий под ответом (копировать/перегенерировать/время) — в одном
      месте, чтобы порядок не разъезжался между ветками анимации и истории. */
-  function cardFooter(card, isAlive, asks, atMs) {
+  function cardFooter(card, isAlive, asks, atMs, meta) {
     var row = quickActions(card, isAlive, asks);
     if (card && card.querySelector(".agent__answer")) {
       var acts = msgActsRow(
         function () { return answerText(card); },
         function () { return questionBeforeCard(card); },
-        atMs, false);
+        atMs, false, meta);
       acts._host = card;
       card.appendChild(acts);
       refreshActs();
@@ -2304,7 +2354,7 @@
   // сворачиваем ленту и печатаем ответ по словам. Анимация всегда уступает
   // новому ходу (animGen): два одновременных раскрытия путают и ленту, и
   // автопрокрутку.
-  function revealTurn(built, paras, g) {
+  function revealTurn(built, paras, g, atMs, meta) {
     var card = built.card;
     var ag = ++S.animGen;
     var prepped = built.prepped;
@@ -2364,7 +2414,7 @@
       // Кнопки рисуем один раз на карточку: bail() может позвать actions()
       // повторно, а второй набор на той же карточке — это дубль кнопок.
       if (!built.actions) {
-        built.actions = cardFooter(card, alive, built.suggests) || true;
+        built.actions = cardFooter(card, alive, built.suggests, atMs, meta) || true;
       }
       // Ход доигран целиком: карточку больше нечего дорисовывать, и новый
       // ход не должен трогать её шаги (иначе у пользователя сбросится
@@ -2397,7 +2447,7 @@
     scrollDown(true, true);
     later(quiet ? 0 : 120, function () { step(0); });
   }
-  function assistantCard(steps, finalText, animate, suggests, atMs) {
+  function assistantCard(steps, finalText, animate, suggests, atMs, meta) {
     var g = S.mountGen;
     var card = el("article", "agent__ai");
     if (finalText) card.setAttribute("data-answer", String(finalText));   // сырой markdown для «Скопировать»
@@ -2440,12 +2490,12 @@
         });
         // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
         // и после перезагрузки продолжение было только у ответов без шагов.
-        cardFooter(card, null, asks, atMs);
+        cardFooter(card, null, asks, atMs, meta);
       } else {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
         syncBusy();
         paras.forEach(function (p) { card.appendChild(p); });
-        cardFooter(card, null, asks, atMs);
+        cardFooter(card, null, asks, atMs, meta);
       }
       return card;
     }
@@ -2455,7 +2505,7 @@
     if (built) {
       // revealTurn сам собирает bail (built.bail) — блокировку печати ставим
       // сразу за ним, в том же кадре: между этими строками браузер не рисует.
-      revealTurn(built, paras, g);
+      revealTurn(built, paras, g, atMs, meta);
       S.pendingBail = built.bail;
       syncBusy();
       return card;
@@ -2477,7 +2527,7 @@
     (function next() {
       if (!alive()) return;
       if (!paras.length) {
-        cardFooter(card, alive, asks);
+        cardFooter(card, alive, asks, atMs, meta);
         S.pendingBail = null;
         syncBusy();
         // Доводка в самый низ — своей, а не из quickActions: когда модель не
@@ -2668,7 +2718,7 @@
   // перепроигрывать их с фиксированными задержками (revealTurn) — значит
   // заставить человека смотреть одно и то же дважды. Шаги кладутся сразу
   // (та же мгновенная ветка, что у истории), печатается только ответ.
-  function assistantCardLive(steps, finalText, suggests) {
+  function assistantCardLive(steps, finalText, suggests, meta) {
     var g = S.mountGen;
     var card = el("article", "agent__ai");
     if (finalText) card.setAttribute("data-answer", String(finalText));
@@ -2698,7 +2748,7 @@
       });
     }
     if (!paras.length) {
-      cardFooter(card, null, asks);
+      cardFooter(card, null, asks, undefined, meta);
       fireLimitModal();    // ход обнулил квоту — то же окно, что по клику
       return card;
     }
@@ -2715,7 +2765,7 @@
     (function next() {
       if (!alive()) return;
       if (!paras.length) {
-        cardFooter(card, alive, asks);
+        cardFooter(card, alive, asks, undefined, meta);
         S.pendingBail = null;
         syncBusy();
         finishBottom();
@@ -2785,14 +2835,15 @@
     // ходах все вопросы сбивались в кучу наверх, а все ответы — вниз. Теперь
     // группы идут в том порядке, в каком сообщения лежат в базе.
     var groups = [];
-    function flushSteps(finalText, suggests, atMs) {
+    function flushSteps(finalText, suggests, atMs, meta) {
       if (!pending.length && !finalText) return;
       groups.push({ kind: "answer", steps: pending.splice(0, pending.length),
-                    final: finalText || null, suggests: suggests || [], at: atMs || null });
+                    final: finalText || null, suggests: suggests || [], at: atMs || null,
+                    meta: meta || null });
     }
     msgs.forEach(function (m) {
       if (m.role === "user") { flushSteps(null); groups.push({ kind: "user", text: m.content || "", at: m.createdAt || null }); }
-      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests, m.createdAt);
+      else if (m.role === "assistant" && (m.content || "").trim()) flushSteps(m.content, m.suggests, m.createdAt, m.meta);
       else if (m.role === "tool") {
         pending.push({ id: m.id, tool: m.tool, args: m.args, result: m.result,
                        // Подпись — серверная (m.label, та же строка, что была
@@ -2809,7 +2860,7 @@
       groups.forEach(function (g, i) { if (g.kind === "answer") lastAnswer = i; });
       groups.forEach(function (g, i) {
         if (g.kind === "user") userBubble(g.text, g.at);
-        else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : [], g.at);
+        else assistantCard(g.steps, g.final, false, i === lastAnswer ? g.suggests : [], g.at, g.meta);
       });
     }
     painting = false;
@@ -3250,9 +3301,9 @@
         later(450, function () { if (S.follow) scrollDown(true, false); });
         say("Нужно подтверждение — нажми «Применить»");
       } else if (sawLive) {
-        assistantCardLive(steps, res.data.final || "", res.data.suggests);
+        assistantCardLive(steps, res.data.final || "", res.data.suggests, res.data.meta);
       } else {
-        assistantCard(steps, res.data.final || "", true, res.data.suggests);
+        assistantCard(steps, res.data.final || "", true, res.data.suggests, undefined, res.data.meta);
       }
       if (res.data.thread) applyThreadTitle(res.data.thread);
       // Ход погасил брошенные подтверждения (сервер закрыл шаг needs_confirm, на
@@ -3519,10 +3570,10 @@
         if (limitSpentOut(res)) armLimitModal(turn.threadId);
         cacheForget(S.currentId);
         if (res.data.approved === false) {
-          assistantCard([], res.data.final || "Отменено учеником.", true, res.data.suggests);
+          assistantCard([], res.data.final || "Отменено учеником.", true, res.data.suggests, undefined, res.data.meta);
         } else if (res.data.final) {
-          if (sawLive) assistantCardLive(res.data.steps || [], res.data.final, res.data.suggests);
-          else assistantCard(res.data.steps || [], res.data.final, true, res.data.suggests);
+          if (sawLive) assistantCardLive(res.data.steps || [], res.data.final, res.data.suggests, res.data.meta);
+          else assistantCard(res.data.steps || [], res.data.final, true, res.data.suggests, undefined, res.data.meta);
         } else {
           assistantCard(res.data.steps || [], null, sawLive ? false : true);
         }

@@ -635,6 +635,7 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
           tool_args_json TEXT NOT NULL DEFAULT '{}',
           status TEXT NOT NULL DEFAULT 'done',
           result_json TEXT NOT NULL DEFAULT '{}',
+          meta_json TEXT NOT NULL DEFAULT '{}',
           seq INTEGER NOT NULL,
           created_at INTEGER NOT NULL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_threads_user ON agent_threads(user_id, updated_at)")
@@ -669,6 +670,8 @@ def ensure_agent_schema(conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_messages)")}
         if cols and "suggests_json" not in cols:
             conn.execute("ALTER TABLE agent_messages ADD COLUMN suggests_json TEXT NOT NULL DEFAULT '[]'")
+        if cols and "meta_json" not in cols:
+            conn.execute("ALTER TABLE agent_messages ADD COLUMN meta_json TEXT NOT NULL DEFAULT '{}'")
     except sqlite3.Error:
         pass
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_thread_seq ON agent_messages(thread_id, seq)")

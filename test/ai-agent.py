@@ -901,6 +901,19 @@ def main():
             check("ответ несёт заголовок треда", body.get("thread", {}).get("title"), str(body.get("thread")))
             check("шагов нет", body.get("steps") == [], str(body.get("steps")))
             check("usage.cost == 1", body.get("usage", {}).get("cost") == 1, str(body.get("usage")))
+            check("ответ несёт подпись для окна «Об ответе» (время и ходы)",
+                  isinstance(body.get("meta"), dict)
+                  and body["meta"].get("turns") == 1
+                  and isinstance(body["meta"].get("durationMs"), int)
+                  and body["meta"]["durationMs"] >= 0, str(body.get("meta")))
+            status, hist = a.request(base, "GET", f"/api/agent/threads/{tid_a}", None)
+            last_answer = next((m for m in reversed(hist.get("messages") or [])
+                                if m.get("role") == "assistant" and m.get("meta")), None)
+            check("подпись ответа сохраняется в истории",
+                  last_answer is not None
+                  and last_answer["meta"].get("turns") == 1
+                  and isinstance(last_answer["meta"].get("durationMs"), int),
+                  str(last_answer.get("meta") if last_answer else None))
             status, quota = a.request(base, "GET", "/api/agent/limits", None)
             check("квота 9 из 10", quota.get("remaining") == 9 and quota.get("limit") == 10, str(quota))
             check("квота штампована временем (at — число мс)",

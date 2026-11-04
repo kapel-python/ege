@@ -617,7 +617,8 @@ def _agent_next_seq(conn: sqlite3.Connection, thread_id: int) -> int:
 
 def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, role: str,
                        content: str = "", *, tool_name=None, tool_args=None,
-                       status: str = "done", result=None, suggests=None) -> int:
+                       status: str = "done", result=None, suggests=None,
+                       meta=None) -> int:
     seq = _agent_next_seq(conn, thread_id)
     now_ms = int(time.time() * 1000)
     try:
@@ -628,27 +629,77 @@ def _agent_add_message(conn: sqlite3.Connection, thread_id: int, user_id: int, r
     except (TypeError, ValueError):
         suggests_json = "[]"
     try:
+        meta_json = json.dumps(meta if isinstance(meta, dict) else {},
+                               ensure_ascii=False)[:2000]
+    except (TypeError, ValueError):
+        meta_json = "{}"
+    try:
         conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
-                     " tool_args_json, status, result_json, seq, created_at, suggests_json)"
-                     " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                     " tool_args_json, status, result_json, seq, created_at, suggests_json, meta_json)"
+                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                      (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
                       tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
                       status, json.dumps(result if result is not None else {},
                                          ensure_ascii=False)[:16000],
-                      seq, now_ms, suggests_json))
+                      seq, now_ms, suggests_json, meta_json))
     except sqlite3.Error:
-        # Старая база без suggests_json (миграция не применена): строка пишется
-        # без кнопок, а не падает весь ход.
-        conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
-                     " tool_args_json, status, result_json, seq, created_at)"
-                     " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                     (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
-                      tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
-                      status, json.dumps(result if result is not None else {},
-                                         ensure_ascii=False)[:16000],
-                      seq, now_ms))
+        # Старая база без suggests_json/meta_json (миграция не применена):
+        # строка пишется без кнопок и подписи, а не падает весь ход.
+        try:
+            conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
+                         " tool_args_json, status, result_json, seq, created_at, suggests_json)"
+                         " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                         (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
+                          tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
+                          status, json.dumps(result if result is not None else {},
+                                             ensure_ascii=False)[:16000],
+                          seq, now_ms, suggests_json))
+        except sqlite3.Error:
+            conn.execute("INSERT INTO agent_messages(thread_id, user_id, role, content, tool_name,"
+                         " tool_args_json, status, result_json, seq, created_at)"
+                         " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                         (int(thread_id), int(user_id), role, str(content or "")[:AGENT_REPLY_MAX()],
+                          tool_name, json.dumps(tool_args or {}, ensure_ascii=False)[:8000],
+                          status, json.dumps(result if result is not None else {},
+                                             ensure_ascii=False)[:16000],
+                          seq, now_ms))
     conn.execute("UPDATE agent_threads SET updated_at=? WHERE id=?", (now_ms, int(thread_id)))
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+
+def _agent_turn_meta(started_ms, cost, used, tier: str = "free") -> dict:
+    """Подпись ответа для окна «Об ответе»: модель, время и число ходов.
+
+    Модель берётся из последнего успешного вызова модели в этом потоке
+    (failover мог незаметно переключить провайдера). Название — то, что
+    админ задал ученику; если названия нет, честно отдаём id модели, потому
+    что окно справочное и человек сам открыл подробности. Время — от начала
+    обработки запроса до фиксации ответа, ходы — сколько запросов к модели
+    реально ушло (тот же cost, что в usage).
+    """
+    meta: dict = {}
+    try:
+        turns = int((cost or {}).get("n") or 0)
+    except (TypeError, ValueError):
+        turns = 0
+    if turns > 0:
+        meta["turns"] = turns
+    try:
+        elapsed = int(time.time() * 1000) - int(started_ms)
+    except (TypeError, ValueError):
+        elapsed = 0
+    if elapsed > 0:
+        meta["durationMs"] = elapsed
+    model = str((used or {}).get("model") or "").strip()
+    provider = str((used or {}).get("provider") or "").strip()
+    if model:
+        label = ""
+        try:
+            label = _AI.model_student_label(provider, model, tier) or ""
+        except Exception:
+            label = ""
+        meta["model"] = (label or model)[:120]
+    return meta
 
 
 # Окно истории для модели: последние 24 сообщения И максимум символов.
@@ -773,6 +824,32 @@ def _agent_public_message(row) -> dict:
                             "ask": str(it.get("ask") or "")}
                            for it in (stored if isinstance(stored, list) else [])
                            if isinstance(it, dict) and str(it.get("ask") or "").strip()][:3]
+        # Подпись ответа (модель/время/ходы) — для справочного окна под
+        # сообщением. Старые ответы без meta_json показывают ряд как раньше.
+        try:
+            raw_meta = row["meta_json"] if "meta_json" in row.keys() else "{}"
+            stored_meta = json.loads(raw_meta or "{}")
+        except (ValueError, TypeError, IndexError):
+            stored_meta = {}
+        if isinstance(stored_meta, dict):
+            meta = {}
+            name = str(stored_meta.get("model") or "").strip()
+            if name:
+                meta["model"] = name[:120]
+            try:
+                turns = int(stored_meta.get("turns") or 0)
+            except (TypeError, ValueError):
+                turns = 0
+            if turns > 0:
+                meta["turns"] = turns
+            try:
+                duration = int(stored_meta.get("durationMs") or 0)
+            except (TypeError, ValueError):
+                duration = 0
+            if duration > 0:
+                meta["durationMs"] = duration
+            if meta:
+                out["meta"] = meta
     if row["tool_name"]:
         out["tool"] = row["tool_name"]
         out["args"] = args if isinstance(args, dict) else {}
@@ -832,7 +909,7 @@ def _agent_call_timeout(budget) -> float | None:
 
 
 def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
-                   turn_token: int | None = None):
+                   turn_token: int | None = None, used: dict | None = None):
     """chat_fn для _AGENT.run_cycle: один вызов модели и невидимые повторы.
 
     `tier` — направление маршрутизации (free/plus) на ВЕСЬ ход: решает
@@ -859,6 +936,21 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
     def _cancelled() -> bool:
         return _agent_turn_cancelled(turn_token)
 
+    def _remember_model() -> None:
+        # Последний успешный вызов модели — та, чей текст/финал уйдёт ученику.
+        # Failover внутри ai.py уже отработал, поэтому читаем фактическую пару
+        # (провайдер, модель), а не то, что настроено в роутере.
+        if used is None:
+            return
+        try:
+            provider = _AI.last_used_provider() or ""
+            model = _AI.last_used_model() or ""
+            if model:
+                used["provider"] = str(provider)[:80]
+                used["model"] = str(model)[:200]
+        except Exception:
+            pass
+
     def call(messages, tools, budget=None):
         cost["n"] += 1
         timeout = _agent_call_timeout(budget)
@@ -878,6 +970,7 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
             # high по as_judge в ai.chat).
             text = _AI.chat(messages, temperature=0.0, timeout=timeout,
                             reasoning_effort="minimal", tier=tier)
+            _remember_model()
             if _cancelled():
                 raise _AGENT.AgentTurnCancelled()
             return {"text": (text or "").strip()[:AGENT_REPLY_MAX()] or None,
@@ -897,6 +990,7 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
                 continue
             if _cancelled():
                 raise _AGENT.AgentTurnCancelled()
+            _remember_model()
             return parsed
         raise failure  # noqa: B904 — повторяем ровно то, что поймали
 
@@ -18461,6 +18555,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "publicId": _agent_thread_public_id(row)}, token=token); return
                 # POST /api/agent/turns/confirm — {messageId, approve}.
                 if path == "/api/agent/turns/confirm":
+                    confirm_started_ms = int(time.time() * 1000)
                     if _AGENT is not None and not _AGENT.agent_access_allowed(conn, int(user_id)):
                         # Флаг EGE_AGENT_REQUIRES_PLUS: ИИ только для Plus.
                         # По умолчанию выключен — бесплатные пользователи ходят
@@ -18508,9 +18603,14 @@ class Handler(BaseHTTPRequestHandler):
                         # честный шаблон без кнопок, как раньше.
                         cancel_final = "Отменено."
                         cancel_suggests: list = []
+                        cancel_meta: dict = {}
                         try:
                             if _AGENT.agent_quota_reserve(conn, int(user_id), ag_fp_key, ag_fp_net, reason="agent:confirm"):
                                 try:
+                                    cancel_started_ms = int(time.time() * 1000)
+                                    cancel_cost = {"n": 0}
+                                    cancel_used: dict = {}
+                                    cancel_tier = ai_tier_for(conn, user_id)
                                     cancel_label = str((proposal or {}).get("label")
                                                        or msg["tool_name"] or "действие")
                                     cancel_hist = _agent_history_for_model(conn, tid)
@@ -18518,15 +18618,18 @@ class Handler(BaseHTTPRequestHandler):
                                         _AGENT.AGENT_SYSTEM, cancel_hist,
                                         f"Я нажал(а) «Отмена»: «{cancel_label}» не применяем. "
                                         "Коротко подтверди отмену и предложи 1–2 следующих шага.")
-                                    cancel_chat = _agent_chat_fn({"n": 0}, tid, ai_tier_for(conn, user_id))
+                                    cancel_chat = _agent_chat_fn(cancel_cost, tid, cancel_tier,
+                                                                 used=cancel_used)
                                     cancel_parsed = cancel_chat(cancel_msgs, [], None)
                                     cancel_text = str((cancel_parsed or {}).get("text") or "").strip()
                                     if not cancel_text:
                                         raise ValueError("пустой ответ модели")
                                     cancel_final, cancel_suggests = _agent_final_payload(
                                         cancel_text, [], cancel_text)
+                                    cancel_meta = _agent_turn_meta(cancel_started_ms, cancel_cost,
+                                                                   cancel_used, cancel_tier)
                                     _agent_add_message(conn, tid, user_id, "assistant", cancel_final,
-                                                       suggests=cancel_suggests)
+                                                       suggests=cancel_suggests, meta=cancel_meta)
                                     try:
                                         refresh_streak(conn, user_id, subject)
                                     except Exception:
@@ -18541,11 +18644,13 @@ class Handler(BaseHTTPRequestHandler):
                                         conn.rollback()
                                     except sqlite3.Error:
                                         pass
+                                    cancel_meta = {}
                         except sqlite3.Error:
                             pass
                         quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         self.send_json({"ok": True, "approved": False, "final": cancel_final,
                                         "steps": [], "suggests": cancel_suggests,
+                                        "meta": cancel_meta,
                                         "quota": quota}, token=token); return
                     # approve: применяем действие, затем resume цикла (каждый его
                     # запрос к ИИ — тоже жетон, та же по-запросная логика).
@@ -18637,8 +18742,10 @@ class Handler(BaseHTTPRequestHandler):
                         if messages and messages[-1].get("role") == "user" and not (messages[-1].get("content") or "").strip():
                             messages.pop()
                         cost = {"n": 0}
-                        _raw_cf = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id),
-                                                 confirm_token)
+                        confirm_used: dict = {}
+                        confirm_tier = ai_tier_for(conn, user_id)
+                        _raw_cf = _agent_chat_fn(cost, tid, confirm_tier,
+                                                 confirm_token, used=confirm_used)
                         _confirm_first = {"done": False}
 
                         def _chat_cf(messages, tools, budget=None):
@@ -18754,14 +18861,18 @@ class Handler(BaseHTTPRequestHandler):
                         # текста ДО записи, поэтому в ленту и в базу уходит
                         # чистый ответ, а варианты едут клиенту отдельным полем.
                         final_clean, suggests = _agent_final_payload(final_text, steps2, final_text)
+                        confirm_meta = _agent_turn_meta(confirm_started_ms, cost, confirm_used,
+                                                        confirm_tier)
                         _agent_add_message(conn, tid, user_id, "assistant", final_clean,
-                                           suggests=suggests)
+                                           suggests=suggests, meta=confirm_meta)
                         conn.commit()
                         confirm_spent["n"] = 0
                         quota = _AGENT.agent_quota_status(conn, int(user_id), ag_fp_key, ag_fp_net)
                         _confirm_cleanup()
                         self.send_json({"ok": True, "approved": True, "steps": out_steps,
-                                        "final": final_clean, "suggests": suggests, "quota": quota,
+                                        "final": final_clean, "suggests": suggests,
+                                        "meta": confirm_meta,
+                                        "quota": quota,
                                         "usage": {"cost": cost["n"]}}, token=token); return
                     finally:
                         _agent_busy_release(tid, confirm_token)
@@ -18790,6 +18901,7 @@ class Handler(BaseHTTPRequestHandler):
                 # POST /api/agent/turns — начать ход {threadId, text}.
                 # threadId — числовой id (старые клиенты) или внешний public_id.
                 if path == "/api/agent/turns":
+                    turn_started_ms = int(time.time() * 1000)
                     if _AGENT is not None and not _AGENT.agent_access_allowed(conn, int(user_id)):
                         self.send_json({"error": "Раздел доступен по подписке Plus",
                                         "code": "SUBSCRIPTION_REQUIRED"}, 403, token=token); return
@@ -18977,8 +19089,10 @@ class Handler(BaseHTTPRequestHandler):
                         history = _agent_history_for_model(conn, tid, before_seq=replace_from)
                         messages = _AGENT.build_messages(_AGENT.turn_system(conn, int(user_id), subject), history, text)
                         cost = {"n": 0}
-                        _raw_chat_fn = _agent_chat_fn(cost, tid, ai_tier_for(conn, user_id),
-                                                      turn_token)
+                        turn_used: dict = {}
+                        turn_tier = ai_tier_for(conn, user_id)
+                        _raw_chat_fn = _agent_chat_fn(cost, tid, turn_tier,
+                                                      turn_token, used=turn_used)
                         _first_call = {"done": False}
 
                         def _chat_fn(messages, tools, budget=None):
@@ -19154,8 +19268,9 @@ class Handler(BaseHTTPRequestHandler):
                         # вырезается из текста (в ленту он не попадает), а сами
                         # варианты уходят клиенту готовыми data-ask.
                         final_clean, suggests = _agent_final_payload(final_text, steps, final_text)
+                        turn_meta = _agent_turn_meta(turn_started_ms, cost, turn_used, turn_tier)
                         _agent_add_message(conn, tid, user_id, "assistant", final_clean,
-                                           suggests=suggests)
+                                           suggests=suggests, meta=turn_meta)
                         conn.commit()
                         # Успех: списания остаются, счётчик — в ноль без refund.
                         turn_spent["n"] = 0
@@ -19172,6 +19287,7 @@ class Handler(BaseHTTPRequestHandler):
                                          "lastActiveDate": _streak_row["last_active_date"]} if _streak_row else {}
                         self.send_json({"ok": True, "steps": out_steps, "final": final_clean,
                                         "suggests": suggests, "dropped": dropped_ids,
+                                        "meta": turn_meta,
                                         "quota": quota, "exhausted": (quota.get("remaining") or 0) <= 0,
                                         "thread": {"id": tid, "title": thread_title,
                                                    "publicId": _agent_thread_public_id(thread)},
@@ -19935,7 +20051,7 @@ class Handler(BaseHTTPRequestHandler):
                     tid = int(thread["id"])
                     try:
                         rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"
-                                            " result_json, seq, created_at, suggests_json FROM agent_messages"
+                                            " result_json, seq, created_at, suggests_json, meta_json FROM agent_messages"
                                             " WHERE thread_id=? ORDER BY seq", (tid,)).fetchall()
                     except sqlite3.Error:
                         rows = conn.execute("SELECT id, role, content, tool_name, tool_args_json, status,"

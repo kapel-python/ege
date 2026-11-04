@@ -319,7 +319,7 @@ a.agent__link--int { border-style: dashed; }
 .agent__ww.is-in { opacity: 1; transform: none; }
 .agent__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 /* Ряд действий под сообщением (своим и ИИ): [копировать] [заново?]
-   [изменить?] • ЧЧ:ММ. Квадраты 30px вместо бывшей широкой плашки
+   [изменить?] [об ответе?] • ЧЧ:ММ. Квадраты 30px вместо бывшей широкой плашки
    «Скопировать»: ряд виден всегда, угадывать удержание не нужно.
    Крайние кнопки прячутся через hidden (только последняя пара живая). */
 .agent__acts { display: flex; align-items: center; gap: 2px; margin-top: 6px; }

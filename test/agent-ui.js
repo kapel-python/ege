@@ -358,6 +358,13 @@ check("крайние кнопки только у последней пары (
   spaCode.includes("function refreshActs") && spaCode.includes('data-act="edit')
   && spaCode.includes('icon("pen")') && spaCode.includes("lastUserBubble")
   && spaCode.includes("lastAssistantCard"));
+check("информация об ответе — иконка в ряду и общая модалка сайта",
+  spaCode.includes("function openAnswerInfo") && spaCode.includes('data-act", "info')
+  && spaCode.includes('icon("info")') && /openInfoDialog\(\{/.test(spaCode)
+  && /eyebrow: "ИИ", icon: "info", title: "Об ответе"/.test(spaCode)
+  && spaCode.includes("Ходов потрачено") && spaCode.includes("Время ответа")
+  && /cardFooter\(card, [^)]*meta\)/.test(spaCode)
+  && /function assistantCard\(steps, finalText, animate, suggests, atMs, meta\)/.test(spaCode));
 check("перегенерация с подтверждением в общей модалке",
   spaCode.includes("function askRegenerate") && spaCode.includes("openConfirmDialog")
   && /onConfirm: function \(\) \{ regenerate\(q\); \}/.test(spaCode));
@@ -422,7 +429,7 @@ check("живой опрос шагов во время хода (liveSteps)",
   && spaCode.includes("setInterval(function () { livePoll(turn); }, LIVE_POLL_MS)"));
 check("живая карточка дорисовывает шаги без постановочных задержек",
   /function liveAppendSteps\(turn, steps\)/.test(spaCode)
-  && /function assistantCardLive\(steps, finalText, suggests\)/.test(spaCode));
+  && /function assistantCardLive\(steps, finalText, suggests, meta\)/.test(spaCode));
 check("финал живого хода не перепроигрывает шаги (assistantCardLive)",
   spaCode.includes("assistantCardLive(steps, res.data.final")
   && spaCode.includes("assistantCardLive(res.data.steps"));
@@ -716,7 +723,7 @@ check("шаблонных кнопок нет: ни запасника, ни п�
 check("история показывает сохранённые кнопки модели (suggests из базы)",
   /var lastAnswer = -1;/.test(spaCode)
   && /flushSteps\(m\.content, m\.suggests/.test(spaCode)
-  && /assistantCard\(g\.steps, g\.final, false, i === lastAnswer \? g\.suggests : \[\], g\.at\)/.test(spaCode));
+  && /assistantCard\(g\.steps, g\.final, false, i === lastAnswer \? g\.suggests : \[\], g\.at, g\.meta\)/.test(spaCode));
 /* --- порядок истории строго по ленте: раньше пузыри пользователя рисовались
    сразу по ходу цикла, а карточки ответов — пачкой после него, и при N ходах
    все вопросы сбивались в кучу наверх, а все ответы — вниз (живой баг:
@@ -745,7 +752,7 @@ check("карточка истории не дёргает ленту плавн
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
-  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks, atMs\)/.test(spaJs));
+  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks, atMs, meta\)/.test(spaJs));
 // Карточка, ЖДУЩАЯ подтверждения, не должна сворачиваться: иначе кнопки
 // «Применить/Отмена» прячутся под «Показать шаги» и приходится раскрывать
 // заново (жалоба ученика). Живой ход и история — обе ветки.
@@ -778,7 +785,7 @@ check("ряд [копия][заново][изменить]•время под �
   spaCode.includes("function msgActsRow") && spaCode.includes("agent__acts")
   && /var row = quickActions\(card, isAlive, asks\);\s*if \(card && card\.querySelector\("\.agent__answer"\)\) \{/.test(spaCode));
 check("копируется сырой markdown ответа (data-answer), квадрат подтверждает сам",
-  /function cardFooter\(card, isAlive, asks, atMs\) \{[\s\S]{0,500}?answerText\(card\)/.test(spaJs)
+  /function cardFooter\(card, isAlive, asks, atMs, meta\) \{[\s\S]{0,500}?answerText\(card\)/.test(spaJs)
   && spaCode.includes('copy.classList.add("is-done")')
   && /\.agent__act\.is-done/.test(spaCss));
 
