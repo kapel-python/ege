@@ -369,7 +369,7 @@ check("перегенерация с подтверждением в общей 
   spaCode.includes("function askRegenerate") && spaCode.includes("openConfirmDialog")
   && /onConfirm: function \(\) \{ regenerate\(q\); \}/.test(spaCode));
 check("пузырь — только текст: ряд действий РЯДОМ в обёртке, а не внутри",
-  /var wrap = el\("div", "agent__msg-wrap enter"\);/.test(spaJs)
+  /var wrap = el\("div", painting \? "agent__msg-wrap" : "agent__msg-wrap enter"\);/.test(spaJs)
   && /wrap\.appendChild\(d\);/.test(spaJs) && /wrap\.appendChild\(r\);/.test(spaJs)
   && !spaCode.includes("_rawText")
   && /\.agent__msg-wrap \{[^}]*align-self: flex-end/.test(spaCss)
@@ -510,6 +510,20 @@ check("каркас строится после ответа списка, а н
 check("известный доступ пропускает повторный гейт без второго лоадера",
   /Subscription\.cachedAgentAccess\(\) === true\) \{\s*\n\s*openAgentBody\(mg\);\s*\n\s*return;/.test(spaCode)
   && spaCode.includes('screenLoader("Проверяем доступ…")'));
+/* Один и тот же вход в раздел не должен показывать две анимации подряд:
+   boot-лоадер сайта переиспользуется (меняется только подпись), а переписка
+   открываемого чата греется вместе со списком — каркас собирается уже с
+   готовой лентой. */
+check("экранная анимация на входе не перезапускается (подпись на месте)",
+  /function screenLoader\(sub\)[\s\S]{0,900}?root\.querySelector\("\.ege-loader"\)[\s\S]{0,300}?t\.textContent = label/.test(spaCode)
+  && /pageLoaderHTML\(label\)/.test(spaCode)
+  && /const keepBootLoader = route === "ai"/.test(appJs)
+  && /if \(!keepBootLoader\) screen\.innerHTML = "";/.test(appJs));
+check("переписка греется до сборки каркаса (нет лоадера внутри ленты)",
+  spaCode.includes("function pendingThreadId")
+  && spaCode.includes("function prefetchThreadMessages")
+  && /function prefetchThreads\(\) \{[\s\S]{0,1600}?prefetchThreadMessages\(\)/.test(spaCode)
+  && /function whenConversationReady[\s\S]{0,500}?screenLoader\("Читаем переписку…"\)[\s\S]{0,700}?prefetchThreadMessages\(\)\.then\(go\)/.test(spaCode));
 check("треды греются до отрисовки раздела (третьего лоадера нет)",
   spaCode.includes("prefetchThreads: prefetchThreads")
   && spaCode.includes("hasFreshThreads: hasFreshThreads")
@@ -748,18 +762,20 @@ check("открытие истории: рисуем молча, вниз — о
   && /progWrite\(ui\.feed\.scrollHeight\)/.test(spaCode)
   && /S\.follow && S\.stick && !S\.busy && dist\(\) > 1/.test(spaCode));
 check("карточка истории не дёргает ленту плавным скроллом",
-  !/if \(!animate\) \{[\s\S]{0,700}?scrollDown\(true, true\);\s*\}/.test(spaCode));
+  !/if \(!animate\) \{[\s\S]{0,700}?scrollDown\(true, true\);\s*\}/.test(spaCode)
+  && /var historyWaits = false;[\s\S]{0,260}?card\.classList\.add\("done"\);[\s\S]{0,260}?if \(historyWaits\) built\.trace\.classList\.add\("open"\)/.test(spaCode));
 check("нет списка — нет кнопок (без дежурного набора)",
   /var asks = normalizeSuggests\(suggests\);\s*if \(built\) built\.suggests = asks;/.test(spaCode));
 check("история с шагами тоже получает кнопки (раньше эта ветка их не рисовала)",
-  /if \(!historyWaits\) built\.trace\.classList\.remove\("open"\);\s*\}\);[\s\S]{0,260}?cardFooter\(card, null, asks, atMs, meta\)/.test(spaJs));
+  /var historyWaits = false;/.test(spaJs)
+  && /if \(!animate\) \{[\s\S]{0,800}?cardFooter\(card, null, asks, atMs, meta\)/.test(spaJs));
 // Карточка, ЖДУЩАЯ подтверждения, не должна сворачиваться: иначе кнопки
 // «Применить/Отмена» прячутся под «Показать шаги» и приходится раскрывать
 // заново (жалоба ученика). Живой ход и история — обе ветки.
 check("лента с ожидающим подтверждением остаётся раскрытой (ход)",
   /var waitsConfirm = prepped\.some[\s\S]{0,320}?if \(!waitsConfirm\) built\.trace\.classList\.remove\("open"\)/.test(spaJs));
 check("история с ожидающим подтверждением тоже не сворачивается",
-  /var historyWaits = built\.prepped\.some[\s\S]{0,260}?if \(!historyWaits\)/.test(spaJs));
+  /historyWaits = built\.prepped\.some[\s\S]{0,260}?if \(historyWaits\) built\.trace\.classList\.add\("open"\)/.test(spaJs));
 // Сырое имя инструмента (`update_profile`) в карточке шага — внутренний код,
 // правило 5b промпта его запрещает; технические детали живут в «Подробнее».
 check("в карточке шага нет сырого имени инструмента",

@@ -2609,7 +2609,11 @@ async function render() {
   } catch (_) {}
   try { window.__ilessonCleanup = null; } catch (_) {}
   try { window.__ilessonFetching = false; } catch (_) {}
-  screen.innerHTML = "";
+  // На входе в ИИ экранную анимацию сайта не сносим: раздел сам переиспользует
+  // её (меняет подписи) и заменит готовым чатом. Иначе та же орбита стартовала
+  // заново посреди одного и того же ожидания — визуально «второй лоадер».
+  const keepBootLoader = route === "ai" && !!screen.querySelector(":scope > .ege-loading");
+  if (!keepBootLoader) screen.innerHTML = "";
   screen.style.animation = "none";
   void screen.offsetWidth;
   screen.style.animation = "";

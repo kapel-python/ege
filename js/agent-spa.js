@@ -44,6 +44,9 @@
      не нужны: история доводится один раз в конце (settleBottom), а не на
      каждый пузырёк и карточку. */
   var painting = false;
+  /* Один GET переписки на вход в раздел: его одновременно просят прогрев
+     списка и ожидание готовности — второй запрос к тому же треду не нужен. */
+  var warmMsgs = null;
 
   function $(s, r) { return (r || root || document).querySelector(s); }
   function $all(s, r) { return Array.prototype.slice.call((r || root || document).querySelectorAll(s)); }
@@ -1320,8 +1323,23 @@
      «Здесь пока пусто» вместо загрузки. Своего лоадера у раздела нет. */
   function screenLoader(sub) {
     if (!root) return;
+    var label = sub || "Открываем чаты…";
     try {
-      if (typeof loaderHTML === "function") root.innerHTML = loaderHTML(sub || "Открываем чаты…");
+      // На экране уже крутится анимация сайта (boot или наш прошлый шаг) —
+      // не сносим её, а меняем подпись на месте. Пересборка innerHTML
+      // перезапускала орбиту и полосу с нуля: вход в раздел выглядел так,
+      // будто поверх старого лоадера появился второй, хотя ждали одно и то же.
+      var live = root.querySelector(".ege-loader");
+      if (live) {
+        var t = live.querySelector("[data-loader-sub]");
+        if (t) { t.textContent = label; return; }
+      }
+      if (typeof loaderHTML === "function") {
+        // Та же подложка, что у остальных разделов (pageLoaderHTML): без неё
+        // лоадер переезжал из центра экрана в верхнюю треть — заметный рывок.
+        root.innerHTML = typeof pageLoaderHTML === "function"
+          ? pageLoaderHTML(label) : loaderHTML(label);
+      }
     } catch (_) {}
   }
   /* Пока едет переписка открытого чата, колонка не должна быть пустой — но и
@@ -1612,7 +1630,7 @@
     // Ряд действий — РЯДОМ в обёртке, а не внутри пузыря: пузырь снова
     // только текст (как раньше), время не раздувает его и не утекает в
     // textContent при копировании/перегенерации.
-    var wrap = el("div", "agent__msg-wrap enter");
+    var wrap = el("div", painting ? "agent__msg-wrap" : "agent__msg-wrap enter");
     var d = el("div", "agent__msg-user", clean);
     wrap.appendChild(d);
     var r = msgActsRow(
@@ -2454,11 +2472,26 @@
     var built = renderSteps(card, steps);
     var paras = finalText ? mdBlocks(finalText) : [];
     if (g !== S.mountGen || !ui.live) return card;
+    // История — сразу в конечном виде: «done» и свёрнутая лента шагов
+    // ставятся ДО вставки в ленту. Иначе тоггл «Показать шаги» появлялся на
+    // кадр позже, и каждая карточка разом прибавляла высоту (тоггл + строки
+    // шагов): низ ленты уезжал, а прокрутка догоняла его — тот самый кивок
+    // вверх-вниз при открытии переписки. Раскрытой остаётся только карточка,
+    // ждущая подтверждения (её кнопки должны быть видны сразу).
+    var historyWaits = false;
+    if (!animate && built) {
+      historyWaits = built.prepped.some(function (p) { return p.st && p.st.status === "needs_confirm"; });
+      card.classList.add("done");
+      if (historyWaits) built.trace.classList.add("open");
+    }
     feedTouch();
     clearBoot();
     ui.live.appendChild(card);
     showEmpty(false);
-    scrollDown(true, true);
+    // Пока рисуется история, низ ведёт одна доводка в конце (settleBottom):
+    // smooth-скролл на каждую карточку десятки раз перезапускался и спорил
+    // с ней за ленту.
+    if (!painting) scrollDown(true, true);
     if (built) built.card = card;
     /* Кнопки-продолжения — только слова модели из suggests (сервер вырезал
        служебный блок ```suggest и хранит список рядом с ответом). Нет списка —
@@ -2477,19 +2510,9 @@
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
         syncBusy();
         paintAll();
-        // Лента появляется раскрытой и тут же сворачивается: кадр между
-        // ними делает сворачивание плавным, без мигания тоггла.
-        built.trace.classList.add("open");
-        // То же правило и для истории: карточка, где действие ещё ждёт
-        // подтверждения, остаётся раскрытой — иначе после перезагрузки чата
-        // кнопки «Применить/Отмена» спрятаны под «Показать шаги».
-        var historyWaits = built.prepped.some(function (p) { return p.st && p.st.status === "needs_confirm"; });
-        raf(function () {
-          card.classList.add("done");
-          if (!historyWaits) built.trace.classList.remove("open");
-        });
-        // Кнопки и у истории с шагами: раньше эта ветка их не рисовала вовсе,
-        // и после перезагрузки продолжение было только у ответов без шагов.
+        // Лента шагов уже стоит в конечном состоянии (см. выше): истории
+        // анимация раскрытия/сворачивания не нужна — она меняла высоту уже
+        // после отрисовки и дёргала низ ленты.
         cardFooter(card, null, asks, atMs, meta);
       } else {
         if (S.pendingBail) { try { S.pendingBail(); } catch (_) {} S.pendingBail = null; }
@@ -2866,8 +2889,12 @@
     painting = false;
     showEmpty(false);
     refreshActs();
-    // Низ — после того как лента встанет (схлопываются ленты шагов, догружается
-    // шрифт): один smooth-скролл на такой высоте не доезжал.
+    // Высоты уже конечные (шаги свёрнуты до вставки) — встаём в низ сразу, в
+    // этом же кадре. Иначе первый кадр показывал верх истории, и только потом
+    // лента «доезжала» вниз; на длинной переписке это читается как рывок.
+    S.stick = true;
+    if (ui.feed) progWrite(ui.feed.scrollHeight);
+    // Доводка остаётся для позднего роста (шрифты, картинки в markdown).
     settleBottom();
   }
   function loadThreadMessages(force) {
@@ -4009,6 +4036,50 @@
     openAgentBody(mg);
   }
   // Тело раздела после гейта: кэш мгновенно, холодный вход под лоадером.
+  // Чат, который откроет selectCurrentThread: явный адрес, иначе последний
+  // сохранённый/первый в списке. Нужен прогнозу переписки ДО сборки каркаса.
+  function pendingThreadId() {
+    var raw = readDeepLinkRaw();
+    if (raw) {
+      if (!isThreadRef(raw)) return null;          // битый — решает модалка
+      var local = findThreadByRef(raw);
+      return local ? Number(local.id) : null;      // вне списка — пусть сервер
+    }
+    var want = readDeepLink();
+    var hit = want && findThreadByRef(want);
+    if (hit) return Number(hit.id);
+    return S.threads.length ? Number(S.threads[0].id) : null;
+  }
+  // Раздел ещё на экране? mountGen ловит пересборку, а currentRoute — уход на
+  // другой раздел: mountGen растёт только при следующем входе в ИИ, поэтому
+  // отложенная доводка (переписка, таймер) без этой проверки могла бы
+  // перерисовать уже чужой экран.
+  function stillMounted(mg) {
+    if (S.mountGen !== mg) return false;
+    try {
+      if (typeof currentRoute === "function" && currentRoute() !== "ai") return false;
+    } catch (_) {}
+    return true;
+  }
+  // Переписку открываемого чата греем вместе со списком: раздел появляется
+  // сразу с готовой лентой, а не с «вторым» лоадером внутри уже собранного
+  // каркаса. Ошибку не печатаем — mountFrame всё равно пошлёт свой GET.
+  function prefetchThreadMessages() {
+    var id = pendingThreadId();
+    if (id == null || cachedMessages(id) !== null) return Promise.resolve(false);
+    if (warmMsgs && warmMsgs.id === id) return warmMsgs.promise;
+    var p = api("GET", "/api/agent/threads/" + id).then(function (res) {
+      if (res.status === 200 && res.data && Array.isArray(res.data.messages)) {
+        if (res.data.quota) { try { setQuota(res.data.quota); } catch (_) {} }
+        try { cacheMessages(id, res.data.messages); } catch (_) {}
+        return true;
+      }
+      return false;
+    }).catch(function () { return false; });
+    warmMsgs = { id: id, promise: p };
+    p.then(function () { if (warmMsgs && warmMsgs.promise === p) warmMsgs = null; });
+    return p;
+  }
   /* Прогрев списка чатов из render(): раздел рисуется сразу из кэша, без
      третьего лоадера «Открываем чаты…». Best-effort под той же 2-секундной
      гонкой, что префетч профиля: не успели — холодный путь с лоадером как
@@ -4040,13 +4111,15 @@
           try { S.threads = []; } catch (_) {}
         }
       } catch (_) {}
-      if (cacheHasThreads()) return Promise.resolve(true);
+      if (cacheHasThreads()) {
+        return prefetchThreadMessages().then(function () { return true; });
+      }
       return api("GET", "/api/agent/threads").then(function (res) {
         if (res.status === 200 && res.data && Array.isArray(res.data.threads)) {
           S.threads = res.data.threads;
           if (res.data.quota) { try { setQuota(res.data.quota); } catch (_) {} }
           try { cacheThreads(res.data.threads); } catch (_) {}
-          return true;
+          return prefetchThreadMessages().then(function () { return true; });
         }
         return null;
       }).catch(function () { return null; });
@@ -4057,8 +4130,10 @@
     if (cacheHasThreads()) {
       // Возврат на раздел в открытой вкладке: каркас и переписка рисуются из
       // кэша мгновенно, сеть только сверяет их на фоне.
-      mountFrame();
-      if (!threadsFresh()) loadThreads();
+      whenConversationReady(mg, function () {
+        mountFrame();
+        if (!threadsFresh()) loadThreads();
+      });
       return;
     }
     // Состояние списка уже известно (пусть даже пустое — префетч render
@@ -4067,8 +4142,10 @@
     // через cacheDrop), а массив — пусть и пустой — означает «спросили
     // и знаем», и пустой блок тогда честен, а не преждевременен.
     if (cacheOn() && Array.isArray(S.cache.threads)) {
-      mountFrame();
-      if (!threadsFresh()) loadThreads();
+      whenConversationReady(mg, function () {
+        mountFrame();
+        if (!threadsFresh()) loadThreads();
+      });
       return;
     }
     // Холодный первый вход: экранная анимация сайта держится до ответа
@@ -4076,10 +4153,36 @@
     // показать можно лишь когда мы уже знаем, что чатов нет.
     screenLoader("Открываем чаты…");
     loadThreads(function first(ok) {
-      if (S.mountGen !== mg) return;
-      mountFrame();
-      if (!ok) errorCard("Не удалось загрузить чаты.", "Попробовать снова", function () { loadThreads(); });
+      if (!stillMounted(mg)) return;
+      if (!ok) {
+        mountFrame();
+        errorCard("Не удалось загрузить чаты.", "Попробовать снова", function () { loadThreads(); });
+        return;
+      }
+      whenConversationReady(mg, function () {
+        mountFrame();
+      });
     });
+  }
+  // Переписка ещё едет — раздел не собираем: держим ту же экранную анимацию
+  // сайта и меняем только подпись. Иначе большая анимация исчезала, на её
+  // месте появлялся каркас с маленьким лоадером в ленте, и вход выглядел как
+  // «второй лоадер поверх первого» с рывком на месте.
+  function whenConversationReady(mg, done) {
+    if (!stillMounted(mg)) return;
+    var id = pendingThreadId();
+    if (id == null || cachedMessages(id) !== null) { done(); return; }
+    screenLoader("Читаем переписку…");
+    // Ждём не дольше короткой паузы: на медленной сети лучше показать каркас
+    // с лоадером в ленте (как раньше), чем держать пустой экран без тулбара.
+    var fired = false;
+    function go() {
+      if (fired || !stillMounted(mg)) return;
+      fired = true;
+      done();
+    }
+    prefetchThreadMessages().then(go);
+    later(1200, go);
   }
   function mountFrame() {
     buildLayout();
