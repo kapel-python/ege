@@ -26,11 +26,28 @@ function jar() {
 }
 
 async function req(path, { method = "GET", body = null, cookies = "" } = {}) {
-  const headers = { "Content-Type": "application/json" };
+  // Accept-Encoding: identity — обход краша undici в Node 22.23.2
+  // (Parser.finish assert(!this.paused)): несжимаемое gzip-тело от ~200 КБ
+  // по HTTP/1.0+close валит fetch(). gzip тут тесту не нужен — ответы
+  // читаются только ради JSON. Сервер при identity отдаёт как раньше.
+  const headers = { "Content-Type": "application/json", "Accept-Encoding": "identity" };
   if (cookies) headers.Cookie = cookies;
   return fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined, redirect: "manual" });
 }
 async function json(res) { try { return await res.json(); } catch { return {}; } }
+
+/* Полноценный ученик: гость до онбординга не имеет строки в users и
+   accountId (cbf87d7), поэтому пишущие сценарии обязаны сначала заявить
+   профиль — как это делает живой фронт после онбординга. */
+async function onboardStudent(jarObj) {
+  const res = await req("/api/profile/claim", {
+    method: "POST",
+    body: { subject: "profile_math", onboarded: true, name: "sec-test", selfLevel: "base", goal: "g60" },
+    cookies: jarObj.header(),
+  });
+  jarObj.absorb(res);
+  return json(res);
+}
 
 const test = async () => {
   const createdAccounts = [];
@@ -45,6 +62,28 @@ const test = async () => {
     createdAccounts.push((await json(res)).accountId);
     res = await req("/api/admin/login", { method: "POST", body: { password: PASSWORD }, cookies: admin.header() });
     admin.absorb(res);
+    const body = await json(res);
+    // Telegram-2FA (dafbc1b): верный пароль открывает не сессию, а заявку
+    // pending — владелец подтверждает кнопкой в Telegram. Живой E2E
+    // обязан пройти настоящий флоу: опрашиваем status до решения.
+    if (body && body.pending && body.pendingId) {
+      process.stderr.write(`[security] Telegram-2FA: подтверди вход (код ${body.code}) в Telegram…\n`);
+      const deadline = Date.now() + 180000;
+      let approved = false;
+      while (Date.now() < deadline) {
+        const st = await req(`/api/admin/login/status?pending=${encodeURIComponent(body.pendingId)}`,
+          { cookies: admin.header() });
+        admin.absorb(st);
+        const stBody = await json(st);
+        if (stBody && stBody.ok && !stBody.pending) { approved = true; break; }
+        if (st.status === 403 || st.status === 410 || st.status === 404) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      if (!approved) {
+        console.error("FAIL админ-вход: заявка 2FA не подтверждена за 3 мин (владелец не нажал кнопку в Telegram)");
+        process.exit(2);
+      }
+    }
   }
 
   /* ---- 1. Приватные файлы не отдаются по HTTP ----
@@ -90,7 +129,9 @@ const test = async () => {
     const res = await req("/api/health");
     const body = await json(res);
     t("/api/health отвечает без авторизации", res.status === 200 && body.ok === true, `got ${res.status} ok=${body.ok}`);
-    t("health показывает БД и бэкапы", body.db && body.db.integrity === "ok" && body.backup && typeof body.backup === "object", JSON.stringify(body.db));
+    t("health показывает состояние БД (без разведданных бэкапов)",
+      body.db && body.db.integrity === "ok" && body.backup === undefined,
+      JSON.stringify(body.db));
     for (const p of ["/server/ege.sqlite3-wal", "/server/ege.sqlite3-shm", "/server/ege.sqlite3.bak", "/server/backups/manifest.json"]) {
       const r = await fetch(BASE + p);
       t(`закрыт ${p}`, r.status === 404 || r.status === 403, `got ${r.status}`);
@@ -104,7 +145,8 @@ const test = async () => {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
     j.absorb(res);
-    const boot = await json(res);
+    await onboardStudent(j);
+    const boot = await json(await req("/api/bootstrap", { cookies: j.header() }));
     createdAccounts.push(boot.accountId);
     res = await req("/api/state", { method: "PUT", body: { ...boot.state, xpAdjustments: [{ amount: 777777, reason: "cheat", ts: 1 }] }, cookies: j.header() });
     t("полный PUT состояния отключён", res.status === 410, `got ${res.status}`);
@@ -118,7 +160,8 @@ const test = async () => {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
     j.absorb(res);
-    const boot = await json(res);
+    await onboardStudent(j);
+    const boot = await json(await req("/api/bootstrap", { cookies: j.header() }));
     createdAccounts.push(boot.accountId);
     res = await req(`/api/admin/users/${boot.accountId}/xp`, { method: "POST", body: { amount: 50, reason: "security-test" }, cookies: admin.header() });
     t("admin grant +50", res.status === 200 && (await json(res)).xp === 50, `got ${res.status}`);
@@ -135,7 +178,8 @@ const test = async () => {
     const j = jar();
     let res = await req("/api/bootstrap", { cookies: j.header() });
     j.absorb(res);
-    const boot = await json(res);
+    await onboardStudent(j);
+    const boot = await json(await req("/api/bootstrap", { cookies: j.header() }));
     createdAccounts.push(boot.accountId);
     res = await req("/api/events/attempts", { method: "POST", body: {
       subject: boot.state.subject, expectedVersion: boot.state.stateVersion,
@@ -177,7 +221,8 @@ const test = async () => {
       const j = jar();
       let res = await req("/api/bootstrap", { cookies: j.header() });
       j.absorb(res);
-      const boot = await json(res);
+      await onboardStudent(j);
+      const boot = await json(await req("/api/bootstrap", { cookies: j.header() }));
       createdAccounts.push(boot.accountId);
       return { j, boot };
     };

@@ -35,8 +35,11 @@ const testBody = async () => {
   t("уроки и шаги загружены из каталога", DataAPI.lessons().length > 0 && DataAPI.lessons().every((l) => l.steps && l.steps.length));
   const visualAssets = DataAPI.visualAssets();
   t("реестр visual assets загружен", visualAssets.length >= 4 && visualAssets.every((asset) => asset.src && asset.type && asset.alt && asset.source && asset.sourceId));
-  t("реестр visual assets — только PNG-рисунки источника (1306)",
-    visualAssets.length === 1306
+  // 1639 = 1171 рисунки условий (math-src) + 468 рисунков решений (math-sol)
+  // после 271c893 (импорт решений) и 9413a08 (снос 22 сирот и 46 мусорных
+  // формул-картинок). Число застыло на 1306 с 7652f4c и тест краснел.
+  t("реестр visual assets — только PNG-рисунки источника (1639)",
+    visualAssets.length === 1639
     && visualAssets.every((asset) => asset.type === "image" && /\.png(\?|$)/.test(asset.src)));
   t("аудит визуальных условий сохранён", DataAPI.visualAudit().defaultStatus === "text-only"
     && DataAPI.visualAudit().taskStatuses.n02_p2 === "visual-optional"
