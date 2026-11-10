@@ -53,6 +53,12 @@ const test = async () => {
   const createdAccounts = [];
   const PASSWORD = process.env.EGE_TEST_ADMIN_PASSWORD;
   if (!PASSWORD) { console.error("EGE_TEST_ADMIN_PASSWORD is required (no default password in repo)"); process.exit(2); }
+  // Прогоны с одного адреса копят velocity в reg_rate_hits (soft-порог 5/час
+  // на IP) и адаптивная капча начинает резать /api/profile/claim (422
+  // CAPTCHA_REQUIRED). Это не баг теста, а защита от ферм. Если claim вдруг
+  // отдаёт 422 — подожди окно или почисти тестовый хвост:
+  //   DELETE FROM reg_rate_hits WHERE ip_hash=hash(loopback)
+  // Первый прогон с чистого адреса проходит без всего этого.
 
   // Админ-сессия для самоочистки созданных аккаунтов в конце.
   const admin = jar();
