@@ -20109,6 +20109,10 @@ class Handler(BaseHTTPRequestHandler):
             finally: conn.close()
         if path == '/':
             file_path = ROOT / "main.html"
+        elif path == '/preview':
+            # Временное превью лендинга (клон main.html с улучшениями):
+            # не для индексации, живёт ровно до решения о переносе в /.
+            file_path = ROOT / "preview.html"
         elif path == '/dashboard':
             file_path = ROOT / "index.html"
         elif path == '/agent' or path == '/ai':
