@@ -342,9 +342,31 @@ var PayFlow = (function () {
       + '<div class="ege-loader__bar"><i></i></div></div>';
   }
 
+  /* Терминальный ответ (успех без редиректа / не нашли / не прошёл) —
+     НЕ лоадер: крутящиеся кольца и бегущая полоса врут, что проверка
+     ещё идёт. Та же карточка и токены, но статичная плашка с иконкой. */
+  var OUTCOME_ICONS = {
+    wait: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    fail: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>'
+  };
+  function outcomeHTML(kind, title, sub) {
+    return '<div class="card ege-loader ege-loader--done" role="status">'
+      + '<div class="ege-loader__verdict ege-loader__verdict--' + esc(kind) + '">'
+      + (OUTCOME_ICONS[kind] || OUTCOME_ICONS.wait) + "</div>"
+      + '<div class="ege-loader__brand">lemma <span>go</span></div>'
+      + '<div class="ege-loader__title">' + esc(title) + "</div>"
+      + '<div class="ege-loader__sub">' + esc(sub) + "</div></div>";
+  }
+
+  /* Минимальная видимая длительность ожидания: при мгновенном ответе
+     (mock, быстрый вебхук) без неё лоадер мигнёт на один кадр и уйдёт
+     в успех — выглядит как дёргание. Меньше не имеет смысла: реальный
+     ответ шлюза заметно дольше. */
+  var WAIT_MIN_MS = 900;
+
   function showWait() {
     hideWait();
-    waitState = { stopped: false, timer: null };
+    waitState = { stopped: false, timer: null, startedAt: Date.now() };
     var box = document.createElement("div");
     box.className = "paywait";
     box.id = "payWait";
@@ -435,14 +457,18 @@ var PayFlow = (function () {
     if (ev.type === "ok") {
       cleanPayParam();
       dropWait(ref);
-      hideWait();
-      if (cfg.onDone) cfg.onDone();
-      else window.location.reload();
+      var elapsed = waitState && waitState.startedAt ? Date.now() - waitState.startedAt : WAIT_MIN_MS;
+      var hold = Math.max(0, WAIT_MIN_MS - elapsed);
+      setTimeout(function () {
+        hideWait();
+        if (cfg.onDone) cfg.onDone();
+        else window.location.reload();
+      }, hold);
       return;
     }
     if (ev.type === "fail") {
       cleanPayParam();
-      var failHtml = loaderHTML("Платёж не прошёл", ev.message)
+      var failHtml = outcomeHTML("fail", "Платёж не прошёл", ev.message)
         + '<div class="paywait__actions">';
       if (cfg.allowNew) {
         failHtml += '<button class="btn btn-primary btn--sm" type="button" data-new>Создать новый счёт</button>';
@@ -453,7 +479,8 @@ var PayFlow = (function () {
       return;
     }
     cleanPayParam();
-    waitBody(loaderHTML("Оплата не найдена", "два запроса — провайдер молчит")
+    waitBody(outcomeHTML("wait", "Оплата пока не найдена",
+        "Банк ещё не подтвердил платёж — это бывает в первые минуты")
       + '<div class="paywait__note">Деньги без подтверждения не уходят. Счёт живёт ~30 минут — можно вернуться позже.</div>'
       + '<div class="paywait__actions"><button class="btn btn-primary btn--sm" type="button" data-recheck>Проверить снова</button>'
       + '<button class="btn btn-ghost btn--sm" type="button" data-close>Закрыть</button></div>'
@@ -559,7 +586,11 @@ var PayFlow = (function () {
       }
       if (!pend) return;
       var ref = pend.publicId || pend.id;
-      var url = waitUrl(ref);
+      /* Ссылка «продолжить оплату»: сначала локальная память этого
+         браузера, иначе — серверная (сервер отдаёт её в истории только
+         владельцу и только на живой счёт): другой браузер/устройство
+         или чистый localStorage больше не теряют кнопку. */
+      var url = waitUrl(ref) || (typeof pend.paymentUrl === "string" && /^https?:\/\//.test(pend.paymentUrl) ? pend.paymentUrl : null);
       var box = document.createElement("div");
       box.className = "pay-pending";
       box.innerHTML = "<b>Счёт ждёт оплаты</b> · " + esc(fmtSum(pend.amountKopecks)) + " ₽"

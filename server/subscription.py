@@ -1198,15 +1198,27 @@ def payment_history(conn: sqlite3.Connection, user_id: int, limit: int = 50,
         # payload_json; ученику показываем её в истории, чтобы грант не
         # выглядел необъяснимым «выдано вручную».
         note = str((_payload_data(row) or {}).get("note") or "").strip()[:200]
-        items.append({"id": row.get("id"), "publicId": row.get("public_id"),
-                      "amountKopecks": row.get("amount_kopecks"),
-                      "currency": row.get("currency"), "period": row.get("period"),
-                      "status": row.get("status"),
-                      "provider": row.get("provider"),
-                      "providerPaymentId": row.get("provider_payment_id"),
-                      "createdAt": row.get("created_at_ms"),
-                      "paidAt": row.get("paid_at_ms"),
-                      "note": note})
+        item = {"id": row.get("id"), "publicId": row.get("public_id"),
+                "amountKopecks": row.get("amount_kopecks"),
+                "currency": row.get("currency"), "period": row.get("period"),
+                "status": row.get("status"),
+                "provider": row.get("provider"),
+                "providerPaymentId": row.get("provider_payment_id"),
+                "createdAt": row.get("created_at_ms"),
+                "paidAt": row.get("paid_at_ms"),
+                "note": note}
+        # Ссылка «продолжить оплату» — только владельцу и только на живой
+        # счёт: так она работает с другого устройства и после очистки
+        # localStorage (клиент помнит её локально лишь как ускорение).
+        if row.get("status") == PAY_PENDING:
+            try:
+                pdata = _payload_data(row) or {}
+            except Exception:
+                pdata = {}
+            purl = str(pdata.get("paymentUrl") or "").strip()
+            if purl.startswith("https://") or purl.startswith("http://"):
+                item["paymentUrl"] = purl
+        items.append(item)
     return {"ok": True, "payments": items,
             "total": int(total["c"]) if total else 0,
             "limit": limit, "offset": offset}

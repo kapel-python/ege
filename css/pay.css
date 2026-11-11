@@ -20,10 +20,24 @@
 .ege-loader__brand { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; text-transform: lowercase; color: var(--text-2, var(--text-dim, #48536B)); }
 .ege-loader__brand span { color: var(--brand-green, var(--green, #16a34a)); }
 .ege-loader__title { margin-top: 8px; font-size: 16px; font-weight: 800; }
-.ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted, var(--text-faint, #5B6579)); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); min-height: 19px; }
+.ege-loader__sub { margin-top: 5px; font-size: 12.5px; color: var(--muted, var(--text-faint, #5B6579)); min-height: 19px; }
 .ege-loader__bar { margin: 14px auto 0; height: 6px; max-width: 240px; border-radius: 99px; background: var(--surface-3, rgba(127,140,160,0.25)); overflow: hidden; }
 .ege-loader__bar > i { display: block; height: 100%; width: 30%; border-radius: 99px; background: linear-gradient(90deg, var(--success, #16a34a), var(--accent, #0277B6)); animation: ege-slide 1.4s ease-in-out infinite; }
 @keyframes ege-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+/* Терминальное состояние ожидания оплаты («не найдено», «не прошло»):
+   та же карточка и типографика, но без орбиты и полосы — вращающийся
+   лоадер честен только пока проверка действительно идёт. */
+.ege-loader--done { padding-top: 30px; }
+.ege-loader__verdict { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%;
+  display: grid; place-items: center; }
+.ege-loader__verdict--wait { color: var(--accent, #0277B6);
+  background: var(--accent-dim, rgba(2,119,182,0.10));
+  border: 1px solid var(--accent, #0277B6); }
+.ege-loader__verdict--fail { color: var(--danger, #dc2626);
+  background: var(--danger-dim, rgba(220,38,38,0.10));
+  border: 1px solid var(--danger, #dc2626); }
+.ege-loader__verdict svg { width: 30px; height: 30px; }
 
 /* ---------- полноэкранное ожидание оплаты ----------
    Состояние страницы, а не модалка: редирект провайдера выгрузил DOM,

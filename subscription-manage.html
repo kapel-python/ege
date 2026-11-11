@@ -149,15 +149,17 @@
   /* кольца лимитов */
   .ring-card{display:grid;justify-items:center;gap:6px;text-align:center;
     padding:clamp(20px,3vw,28px) 16px;}
-  .ring{width:140px;height:140px;transform:rotate(-90deg);}
+  .ring-stage{position:relative;width:140px;height:140px;margin:0 auto;}
+  .ring{width:140px;height:140px;transform:rotate(-90deg);display:block;}
   .ring__track{fill:none;stroke:var(--ring-track);stroke-width:10;}
   .ring__bar{fill:none;stroke:url(#ringGrad);stroke-width:10;stroke-linecap:round;
     stroke-dasharray:339.3;stroke-dashoffset:339.3;transition:stroke-dashoffset 1.4s var(--ease-out);}
-  .ring-card__val{font-family:var(--font-display);font-size:38px;font-weight:700;letter-spacing:-0.03em;
-    font-variant-numeric:tabular-nums;margin-top:-120px;height:100px;display:flex;
-    align-items:center;justify-content:center;line-height:1;}
-  /* цифра сочинения сидит чуть ниже оптического центра — поднимаем на пару px */
-  #essayLeft{position:relative;top:-2px;}
+  /* цифра кладётся абсолютом ровно поверх SVG-кольца: центр считает
+     layout, а не ручные отступы — уезжать вниз больше нечему */
+  .ring-card__val{position:absolute;top:0;left:0;width:140px;height:140px;display:flex;
+    align-items:center;justify-content:center;font-family:var(--font-display);
+    font-size:38px;font-weight:700;letter-spacing:-0.03em;
+    font-variant-numeric:tabular-nums;line-height:1;pointer-events:none;}
   .ring-card__total{font-size:13px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;}
   .ring-card__label{font-weight:700;font-size:15px;margin-top:10px;}
   .ring-card__sub{font-size:12.5px;color:var(--text-faint);}
@@ -271,22 +273,26 @@
               <stop offset="0%" stop-color="#38BDF8"/><stop offset="100%" stop-color="#6EE7B7"/>
             </linearGradient>
           </defs></svg>
-          <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
-            <circle class="ring__track" cx="70" cy="70" r="54"/>
-            <circle class="ring__bar" id="essayRing" cx="70" cy="70" r="54"/>
-          </svg>
-          <div class="ring-card__val"><span id="essayLeft">–</span></div>
+          <div class="ring-stage">
+            <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
+              <circle class="ring__track" cx="70" cy="70" r="54"/>
+              <circle class="ring__bar" id="essayRing" cx="70" cy="70" r="54"/>
+            </svg>
+            <div class="ring-card__val"><span id="essayLeft">–</span></div>
+          </div>
           <div class="ring-card__label">Проверок сочинений</div>
           <div class="ring-card__total" id="essayOf">из 5 в день</div>
           <div class="ring-card__sub" id="essaySub">…</div>
           <div class="ring-card__reset" id="essayReset" hidden></div>
         </div>
         <div class="card ring-card rv">
-          <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
-            <circle class="ring__track" cx="70" cy="70" r="54"/>
-            <circle class="ring__bar" id="agentRing" cx="70" cy="70" r="54"/>
-          </svg>
-          <div class="ring-card__val"><span id="agentLeft">–</span></div>
+          <div class="ring-stage">
+            <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
+              <circle class="ring__track" cx="70" cy="70" r="54"/>
+              <circle class="ring__bar" id="agentRing" cx="70" cy="70" r="54"/>
+            </svg>
+            <div class="ring-card__val"><span id="agentLeft">–</span></div>
+          </div>
           <div class="ring-card__label">Ходов ИИ</div>
           <div class="ring-card__total" id="agentOf">из 5 в день</div>
           <div class="ring-card__sub" id="agentSub">…</div>
@@ -651,16 +657,34 @@
     } catch (e) {}
   }
 
+  var lastBootAt = 0;
   function reload(){
     document.getElementById("content").hidden = true;
     document.getElementById("loadingCard").hidden = false;
     boot();
   }
 
+  /* Возврат с платёжной страницы без редиректа (закрыл вкладку шлюза,
+     вернулся кнопкой «назад», сменил вкладку): браузер честно может
+     достать страницу из bfcache, и без pageshow она так и покажет
+     состояние «нет счёта» до ручного обновления. Перечитываем статус:
+     серверный debounce не нужен, boot идёт только на реально старом
+     снапшоте (>1.5 с) — двойного запроса сразу после загрузки нет. */
+  function refreshIfStale(){
+    if (Date.now() - lastBootAt > 1500) reload();
+  }
+  window.addEventListener("pageshow", function(e){
+    if (e.persisted) refreshIfStale();
+  });
+  document.addEventListener("visibilitychange", function(){
+    if (!document.hidden) refreshIfStale();
+  });
+
   /* soon-модалка удалена: оплата подключена, подтверждение — .dlg
      из js/pay.js, ожидание — .ege-loader из css/pay.css. */
 
   function boot(){
+    lastBootAt = Date.now();
     api("/api/auth/session").then(function(sess){
       if (!sess || !sess.user) {
         document.getElementById("loadingCard").hidden = true;

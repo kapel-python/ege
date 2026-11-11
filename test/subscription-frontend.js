@@ -463,6 +463,64 @@ function check(name, cond, detail) {
   check("после отмены счёта продление вернулось",
     (await p6.textContent('#actionsRow [data-act="buy"]')).includes("Продлить"),
     await p6.textContent('#actionsRow [data-act="buy"]'));
+
+  // --- терминальное «не найдено»: статичный экран без орбиты/полосы ----
+  // Регресс: лоадер продолжал крутиться после финального ответа и текст
+  // был техническим («два запроса — провайдер молчит»). Подменяем confirm
+  // на «ещё не прошла», ждём терминал и проверяем, что анимации нет.
+  await p6.evaluate(async () => {
+    await fetch("/api/subscription/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ period: "month", idempotencyKey: "nf-" + Date.now() }),
+    });
+  });
+  await p6.goto(BASE + "/subscription/manage", { waitUntil: "domcontentloaded" });
+  await p6.waitForSelector(".pay-pending", { timeout: 15000 });
+  /* Подменяем confirm ПОСЛЕ загрузки страницы (иначе навигация её сотрёт)
+     и ДО клика «Проверить оплату» — проверка уйдёт в «ещё не прошла» и
+     докрутит до терминала «не найдено». */
+  await p6.evaluate(() => {
+    const origFetch = window.fetch;
+    window.fetch = function (url) {
+      if (String(url).indexOf("/api/subscription/confirm") !== -1) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ error: "оплата ещё не прошла" }),
+          { status: 409, headers: { "Content-Type": "application/json" } }));
+      }
+      return origFetch.apply(this, arguments);
+    };
+  });
+  await p6.click(".pay-pending .btn"); /* «Проверить оплату» */
+  await p6.waitForSelector("#payWait .ege-loader", { timeout: 10000 });
+  await p6.waitForFunction(() => {
+    const w = document.getElementById("payWait");
+    return w && /Оплата пока не найдена/.test(w.textContent);
+  }, { timeout: 20000 });
+  check("терминал «не найдено»: человеческий текст, без техдеталей",
+    await p6.evaluate(() => {
+      const t = (document.getElementById("payWait") || {}).textContent || "";
+      return /Оплата пока не найдена/.test(t) && !/провайдер|запрос/i.test(t);
+    }));
+  check("терминал «не найдено»: без орбиты и бегущей полосы",
+    await p6.evaluate(() => {
+      const w = document.getElementById("payWait");
+      return !!w && !!w.querySelector(".ege-loader__verdict")
+        && !w.querySelector(".ege-loader__orbit") && !w.querySelector(".ege-loader__bar");
+    }));
+  await p6.click("#payWait [data-close]");
+  await p6.waitForFunction(() => !document.getElementById("payWait"), { timeout: 10000 });
+
+  // --- серверная ссылка «продолжить оплату» доезжает в историю ---------
+  // Без localStorage: другой браузер/устройство всё равно покажет кнопку
+  // (ссылку даёт сервер владельцу на живой счёт).
+  const linkFromServer = await p6.evaluate(async () => {
+    const hist = await (await fetch("/api/subscription/payments?limit=10")).json();
+    const pend = ((hist && hist.payments) || []).find((x) => x && x.status === "pending");
+    return pend ? { hasUrl: typeof pend.paymentUrl === "string" && pend.paymentUrl.length > 0, mock: pend.provider } : null;
+  });
+  check("pending в истории отдаёт paymentUrl (или mock без шлюза)",
+    !linkFromServer || linkFromServer.hasUrl || linkFromServer.mock === "mock",
+    JSON.stringify(linkFromServer));
   await ctx6.close();
 
   /* Неверный промокод (проверка 2c) намеренно даёт один 400 — Chromium
