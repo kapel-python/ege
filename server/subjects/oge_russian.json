@@ -1,0 +1,92 @@
+{
+  "id": "oge_russian",
+  "title": "Русский язык (ОГЭ)",
+  "short": "Русский",
+  "description": "Русский язык (ОГЭ): задания №1–13 экзамена за 9 класс — текст, языковой анализ, нормы и сочинение. Практика на реальных заданиях, диагностика и прогноз оценки.",
+  "status": "ready",
+  "exam": "oge",
+  "locked": false,
+  "comingSoon": false,
+  "availability": "ready",
+  "order": 12,
+  "catalogFile": "catalog_oge_russian.json",
+  "level": {
+    "id": "oge_russian",
+    "subjectId": "oge_russian",
+    "name": "Основной государственный экзамен"
+  },
+  "forecast": {
+    "weights": {
+      "or01_main": 1,
+      "or02_means": 1,
+      "or03_express": 1,
+      "or04_spell": 1,
+      "or05_punct": 1,
+      "or06_grammar": 1,
+      "or07_replace": 1,
+      "or08_syntax": 1,
+      "or09_nn": 1,
+      "or10_suff": 1,
+      "or11_vocab": 1,
+      "or13_essay": 9
+    },
+    "total": 20,
+    "scale": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ]
+  },
+  "features": {
+    "lessons": true,
+    "practice": true,
+    "forecast": true,
+    "diagnostics": true,
+    "missions": true,
+    "bosses": true,
+    "daily": true,
+    "path": true
+  },
+  "metadata": {
+    "genitive": "русскому языку",
+    "accusative": "русский язык",
+    "availability": "ready",
+    "topic": "Задания №1–13: текст, нормы и сочинение",
+    "topicCount": 13
+  },
+  "content": {
+    "topics": {
+      "source": "catalog",
+      "keys": [
+        "categories",
+        "skills"
+      ]
+    },
+    "preparationVariants": {
+      "source": "catalog",
+      "key": "goals"
+    },
+    "onboarding": {
+      "source": "catalog",
+      "key": "diagnosticTasks"
+    }
+  }
+}

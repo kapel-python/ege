@@ -4795,6 +4795,28 @@ def validate_turn_text(text) -> str:
     return clean
 
 
+# Угловые скобки ТОЧНЫХ тегов-инъекций — на типографские. Живой случай
+# (чаты RWgNZkBBWl/uQU5IRZibr): шлюз funpay ловит сообщения, начинающиеся
+# с </instructions>/<system>, и ТИХО съедает тело — модель получала пустоту
+# и отвечала «сообщение пришло пустым», хотя в базе текст лежал целиком.
+# Замена одного символа в этих тегах (‹ ›) глушит триггер, а текст остаётся
+# читаемым: правило 0 системного промпта по-прежнему заставит модель
+# отказаться от исполнения. Математические «<» и «>» в неравенствах не
+# трогаем — regex берёт только целые теги из известного набора.
+_INJECT_TAG_RE = re.compile(
+    r"</?(?:instructions?|system|prompt|assistant|SB|SE|BL|BE|im_start|im_end)\s*/?>",
+    re.IGNORECASE)
+
+
+def neutralize_injection_markup(text: str) -> str:
+    """Теги-маркеры промпт-инъекции → типографские скобки, смысл сохраняется."""
+    s = str(text or "")
+    if not s:
+        return s
+    return _INJECT_TAG_RE.sub(
+        lambda m: m.group(0).replace("<", "‹").replace(">", "›"), s)
+
+
 def build_messages(system: str, history: list, user_text: str) -> list:
     """История треда → OpenAI messages. history: [{role,content,tool...}] (уже проверенные)."""
     messages = [{"role": "system", "content": system}]
@@ -4803,7 +4825,9 @@ def build_messages(system: str, history: list, user_text: str) -> list:
             continue
         role = item.get("role")
         if role == "user":
-            messages.append({"role": "user", "content": str(item.get("content") or "")[:AGENT_TEXT_MAX]})
+            messages.append({"role": "user",
+                             "content": neutralize_injection_markup(
+                                 str(item.get("content") or "")[:AGENT_TEXT_MAX])})
         elif role == "assistant":
             content = str(item.get("content") or "")
             calls = item.get("tool_calls") or []
@@ -4819,7 +4843,7 @@ def build_messages(system: str, history: list, user_text: str) -> list:
         elif role == "tool":
             messages.append({"role": "tool", "tool_call_id": str(item.get("tool_call_id") or ""),
                              "content": str(item.get("content") or "")[:4000]})
-    messages.append({"role": "user", "content": user_text})
+    messages.append({"role": "user", "content": neutralize_injection_markup(user_text)})
     return messages
 
 
@@ -4840,6 +4864,7 @@ _SUBJECT_TITLE_FALLBACK = {
     "oge_society": "Обществознание (ОГЭ)",
     "oge_informatics": "Информатика (ОГЭ)",
     "oge_history": "История (ОГЭ)",
+    "oge_russian": "Русский язык (ОГЭ)",
 }
 
 
@@ -4951,6 +4976,7 @@ SUBJECT_COMPACT = {
     "oge_society": "ОГЭ общ",
     "oge_informatics": "ОГЭ инф",
     "oge_history": "ОГЭ ист",
+    "oge_russian": "ОГЭ рус",
 }
 SUBJECT_COMPACT_LEN = 8
 

@@ -94,7 +94,7 @@ def main():
             # Остальные предметы оси ege не задеты; соседи по оси oge допустимы.
             exams = {s.get("id"): s.get("exam") for s in subjects.get("subjects", [])}
             assert exams.get("oge_math") == "oge", exams
-            assert all(v == "ege" for k, v in exams.items() if k not in (RID, "oge_math", "oge_informatics", "oge_biology", "oge_society")), exams
+            assert all(v == "ege" for k, v in exams.items() if not k.startswith("oge_")), exams
 
             status, boot = request(opener, base, f"/api/bootstrap?subject={RID}")
             assert status == 200, (status, boot)

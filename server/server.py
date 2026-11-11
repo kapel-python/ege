@@ -985,6 +985,11 @@ def _agent_chat_fn(cost: dict, thread_id: int | None = None, tier: str = "free",
                 parsed = _AI.chat_with_tools(messages, tools, temperature=temperature,
                                              timeout=_agent_call_timeout(budget),
                                              reasoning_effort="minimal", tier=tier)
+            except _AI.AIRefusalError:
+                # Anti-jailbreak 400 шлюза: тот же текст — тот же отказ при
+                # любой температуре. Повторы только жгут время хода и создают
+                # «думаю… игнорит» (живой кейс RWgNZkBBWl). Поднимаем сразу.
+                raise
             except (_AI.AIFormatError, _AI.AIError) as exc:
                 failure = exc
                 continue
@@ -5006,6 +5011,19 @@ def _fallback_client_id(kind: str, parts: list) -> str:
 
 ESSAY_MIN_WORDS = 150
 ESSAY_MAX_CHARS = 30000
+
+
+def essay_rubric_for_subject(subject: str) -> str:
+    """Рубрика проверки сочинения по предмету: ОГЭ-предметы — «oge» (И1–И3 +
+    ГК1–ГК4, объём от 70 слов), остальные — «ege» (К1–К10, от 150 слов)."""
+    return "oge" if str(subject or "").startswith("oge_") else "ege"
+
+
+def essay_min_words_for(subject: str) -> int:
+    """Порог объёма сочинения предмета (ЕГЭ 150 слов, ОГЭ 70 слов)."""
+    if _AI is not None:
+        return int(_AI.essay_min_words(essay_rubric_for_subject(subject)))
+    return 70 if str(subject or "").startswith("oge_") else ESSAY_MIN_WORDS
 # Гигиена хранилища: один аккаунт не должен уметь забить диск потоком
 # сочинений. Держим последние 100 работ НА ПРЕДМЕТ (это ровно окно истории
 # «Мои сочинения») и принимаем не больше 60 новых работ в сутки на аккаунт.
@@ -5435,7 +5453,8 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
     if not task or task["task_type"] != "long_text":
         raise ValueError("task does not accept a long text answer")
     word_count = count_essay_words(text)
-    if word_count < ESSAY_MIN_WORDS:
+    # Порог объёма — по рубрике предмета (ЕГЭ 150 слов, ОГЭ 70 слов).
+    if word_count < essay_min_words_for(subject):
         raise EssayTooShort(word_count)
     created = str(value.get("ts") or now_iso())
     client_id = _stable_client_id(value) or _fallback_client_id("essay", [task_id, skill_id, created])
@@ -5550,7 +5569,7 @@ def append_essay_submission(conn: sqlite3.Connection, user_id: int, subject: str
     except (sqlite3.Error, TypeError, ValueError, AttributeError):
         out_public = ""
     return {"taskId": task["id"], "wordCount": int(row["word_count"]) if row else word_count,
-            "minWords": ESSAY_MIN_WORDS, "clientId": client_id,
+            "minWords": essay_min_words_for(subject), "clientId": client_id,
             "submissionId": int(row["id"]) if row else None,
             "publicId": out_public,
             "evaluationStatus": row["evaluation_status"] if row else "submitted"}
@@ -5582,7 +5601,7 @@ def serialize_essay_row(row) -> dict:
         "skill": row["skill_id"],
         "subject": row["subject"],
         "wordCount": int(row["word_count"]),
-        "minWords": ESSAY_MIN_WORDS,
+        "minWords": essay_min_words_for(row["subject"]),
         "clientId": row["client_id"],
         "status": row["evaluation_status"],
         "result": result,
@@ -5905,13 +5924,15 @@ def _essay_source_file(path: Path) -> dict:
     if not body:
         raise ValueError(f"{text_id}: пустой текст")
     words = count_essay_words(body)
-    if not 150 <= words <= 400:
-        # Экзаменационный объём текста задания 27: меньше 150 — не текст для
-        # разбора, больше 400 — не экзаменационная нарезка, а целый фрагмент
-        # произведения (такие страницы публикуют, но ученику они не по формату).
-        # Правило проверяется на входе, чтобы длинный текст нельзя было
-        # положить в каталог «на всякий случай».
-        raise ValueError(f"{text_id}: объём {words} слов вне диапазона 150–400")
+    # Экзаменационный объём текста задания 27 ЕГЭ: меньше 150 — не текст для
+    # разбора, больше 400 — не экзаменационная нарезка, а целый фрагмент
+    # произведения. У ОГЭ (задание 13) исходники длиннее — весь текст, по
+    # которому пишут и изложение, и сочинение (450–550 слов), поэтому для
+    # предметов оси «oge» потолок выше. Правило проверяется на входе, чтобы
+    # длинный текст нельзя было положить в каталог «на всякий случай».
+    max_words = 650 if str(data.get("subject") or "").startswith("oge_") else 400
+    if not 150 <= words <= max_words:
+        raise ValueError(f"{text_id}: объём {words} слов вне диапазона 150–{max_words}")
     problem = str(data.get("problem") or "").strip()
     if not problem:
         raise ValueError(f"{text_id}: не указана проблема")
@@ -6048,7 +6069,9 @@ def essay_result_view(submission: dict) -> dict | None:
         {"id": "content", "name": "Содержание сочинения"},
         {"id": "literacy", "name": "Грамотность речи"},
     ]
-    literacy_ids = {"K7", "K8", "K9", "K10"}
+    # Грамотность: К7–К10 у рубрики ЕГЭ, ГК1–ГК4 у ОГЭ — обе группы считаем
+    # «грамотностью» для разбивки экрана.
+    literacy_ids = {"K7", "K8", "K9", "K10", "GK1", "GK2", "GK3", "GK4"}
     criteria = []
     for item in criteria_in:
         if not isinstance(item, dict):
@@ -17710,7 +17733,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Слишком короткий текст",
                                 "reason": "essay_too_short",
                                 "wordCount": exc.word_count,
-                                "minWords": ESSAY_MIN_WORDS}, 422)
+                                "minWords": essay_min_words_for(subject)}, 422)
             except EssayRateLimited as exc:
                 conn.rollback()
                 self.send_json({"error": "Слишком много новых сочинений за сутки. "
@@ -18208,7 +18231,8 @@ class Handler(BaseHTTPRequestHandler):
                 # чтобы ученик не платил жетоном за ноль, который и так известен.
                 # Прогон повторяется внутри run_format — он чистый, стоит
                 # миллисекунды и всегда даёт тот же вердикт.
-                precheck = (_AI.essay_precheck(essay_text, source_text)
+                precheck = (_AI.essay_precheck(essay_text, source_text,
+                                               rubric=essay_rubric_for_subject(subject_now))
                             if format_id == "essay" and isinstance(essay_text, str) else None)
                 needs_model = precheck is None
                 # Причина детерминированного гейта (source_rewrite/low_diversity):
@@ -18306,6 +18330,7 @@ class Handler(BaseHTTPRequestHandler):
                             source=mode, problem=problem,
                             reviewer_note=note, source_text=source_text,
                             student_name=student_name,
+                            rubric=essay_rubric_for_subject(subject_now),
                             tier=ai_tier_for(conn, user_id))
                     except _AI.AIBusyError:
                         # Все слоты заняты (обычно — собственными оборванными
@@ -19191,6 +19216,15 @@ class Handler(BaseHTTPRequestHandler):
                             _turn_cleanup()
                             self.send_json({"error": str(exc) or "ИИ не смог подобрать данные.",
                                             "code": "AGENT_TOOL_ERROR"}, 400, token=token); return
+                        except _AI.AIRefusalError as exc:
+                            # Anti-jailbreak фильтр шлюза отклонил сам запрос
+                            # (400 до модели, живой кейс RWgNZkBBWl). Это не сбой —
+                            # честный отказ: без ref, без 502 и без клиентских
+                            # повторов «думаю… игнорит». Жетон уже возвращён
+                            # в _turn_cleanup.
+                            _turn_cleanup()
+                            self.send_json({"error": "ИИ не отвечает на такой запрос.",
+                                            "code": "AGENT_REFUSED"}, 400, token=token); return
                         except (_AI.AIError, _AI.AIFormatError, TimeoutError, ValueError) as exc:
                             rid = log_request_error("agent-model", exc)
                             _turn_cleanup()

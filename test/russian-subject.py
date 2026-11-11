@@ -135,8 +135,9 @@ def main():
             status, no_source = request(opener, base, f"/api/essay-text?subject={rid}&id=nope")
             assert status == 404, (status, no_source)
             missions = catalog.get("missions", [])
-            assert len(missions) == 26, len(missions)
-            assert {m.get("skill") for m in missions} == {f"r{i:02d}" for i in range(1, 27)}, missions
+            # 26 миссий тестовой части + миссия сочинения (russian_essay_source).
+            assert len(missions) == 27, len(missions)
+            assert {m.get("skill") for m in missions} == {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}, missions
             task_ids = {t.get("id") for t in catalog.get("tasks", [])}
             assert all(m.get("tasks") and all(t in task_ids for t in m["tasks"]) for m in missions), missions
             # Боссы — по одному на ветку тестовой части (№1–26); сочинение
@@ -155,11 +156,15 @@ def main():
             assert {g.get("id") for g in catalog.get("goals", [])} == {"g60", "g80", "g95"}, catalog.get("goals")
             diag_ids = set(catalog.get("diagnosticTasks", []))
             assert diag_ids <= task_ids, catalog.get("diagnosticTasks")
-            # Уроки: по одному на каждую тему №1–26.
+            # Уроки: по одному на каждую тему №1–26 + урок сочинения
+            # (russian_essay_source): тема с весом 22 в прогнозе не может
+            # оставаться без теории (40% прогресса навыка).
             lessons = catalog.get("lessons", [])
-            assert len(lessons) == 26, len(lessons)
-            assert {x.get("skill") for x in lessons} == {f"r{i:02d}" for i in range(1, 27)}, lessons
+            assert len(lessons) == 27, len(lessons)
+            assert {x.get("skill") for x in lessons} == {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}, lessons
             assert all(x.get("steps") for x in lessons), lessons
+            essay_lesson = next(x for x in lessons if x.get("skill") == "russian_essay_source")
+            assert essay_lesson.get("id") == "lesson_russian_essay", essay_lesson
             topics = [x for x in catalog.get("skills", []) if x.get("id") == "russian_essay_source"]
             assert len(topics) == 1 and topics[0].get("ege") == "27", topics
             test_topics = [x for x in catalog.get("skills", []) if x.get("id").startswith("r") and x.get("id") != "russian_essay_source"]
@@ -172,7 +177,7 @@ def main():
             status, task_details = request(opener, base, f"/api/catalog-tasks?subject={rid}")
             assert status == 200 and len(task_details.get("tasks", [])) == 2273, (status, len(task_details.get("tasks", [])))
             status, lessons = request(opener, base, f"/api/catalog-lessons?subject={rid}")
-            assert status == 200 and len(lessons.get("lessons", [])) == 26, (status, lessons)
+            assert status == 200 and len(lessons.get("lessons", [])) == 27, (status, lessons)
 
             # Переключение и запись в профиль не смешиваются с новым предметом.
             # Онбординг профиля пройден (заявка /api/profile/claim) — только
@@ -335,8 +340,8 @@ def main():
             public_counts = public_russian.get("counts", {})
             assert public_counts.get("tasks") == 2273, public_russian
             assert public_counts.get("skills") == 27, public_russian
-            assert public_counts.get("missions") == 26, public_russian
-            assert public_counts.get("lessons") == 26 and public_counts.get("bosses") == 5, public_russian
+            assert public_counts.get("missions") == 27, public_russian
+            assert public_counts.get("lessons") == 27 and public_counts.get("bosses") == 5, public_russian
 
             # Наследие старой системы сочинений (skill russian_essay, миссия
             # russian_essay_practice, задания re_1_*/re_2_*/re_3_*) остаётся в

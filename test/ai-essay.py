@@ -291,6 +291,67 @@ def test_validate(ai) -> None:
               "К7. Соблюдение", "К8. Соблюдение", "К9. Соблюдение", "К10. Соблюдение")))
     check("грамотности нет в схеме ответа", '"K7"' not in system)
 
+    # ------------------------------------------------------------------
+    # Рубрика ОГЭ (задание 13): И1–И3 + ГК1–ГК4, объём от 70 слов.
+    # Выбирается сервером по предмету, а не клиентом.
+    # ------------------------------------------------------------------
+    def oge_payload() -> dict:
+        return {"criteria": [
+            {"id": "I1", "score": 2, "max_score": 3, "comment": "ответ есть, аргументов: 2 (по тексту: 1)"},
+            {"id": "I2", "score": 2, "max_score": 3, "comment": "пояснений: 1 из 2"},
+            {"id": "I3", "score": 3, "max_score": 3, "comment": "композиция выдержана"},
+        ], "what_to_improve": ["допиши пояснение ко второму аргументу"],
+           "recommendation": "добавь пояснение", "short_verdict": "хорошо, но допиши"}
+
+    def oge_grammar() -> list:
+        return [{"id": cid, "name": name, "score": 3, "max_score": m,
+                 "comment": "Ошибок нет."} for cid, name, m in ai.ESSAY_OGE_GRAMMAR_CRITERIA]
+
+    oge = ai.merge_essay(ai.validate_essay(oge_payload(), 120, rubric="oge"),
+                         oge_grammar(), 120, rubric="oge")
+    check("ОГЭ: итог = содержание + грамотность (7+12=19)",
+          oge["total_score"] == 19 and oge["max_score"] == ai.ESSAY_OGE_MAX_SCORE,
+          str(oge["total_score"]))
+    check("ОГЭ: состав критериев И1–И3 + ГК1–ГК4",
+          [c["id"] for c in oge["criteria"]] == ["I1", "I2", "I3", "GK1", "GK2", "GK3", "GK4"],
+          str([c["id"] for c in oge["criteria"]]))
+    check("ОГЭ: порог объёма 70 слов (66 — 0)",
+          ai.merge_essay(ai.validate_essay(oge_payload(), 66, rubric="oge"),
+                         oge_grammar(), 66, rubric="oge")["total_score"] == 0)
+    check("ОГЭ: 70 слов — баллы сохраняются",
+          ai.merge_essay(ai.validate_essay(oge_payload(), 70, rubric="oge"),
+                         oge_grammar(), 70, rubric="oge")["total_score"] == 19)
+    check("ОГЭ: вето грамотности не действует (нет К1)",
+          ai.veto_unrelated_literacy(
+              ai.merge_essay(ai.validate_essay(
+                  {"criteria": [
+                      {"id": "I1", "score": 0, "max_score": 3, "comment": "нет ответа на тему"},
+                      {"id": "I2", "score": 0, "max_score": 3, "comment": "нет пояснений"},
+                      {"id": "I3", "score": 2, "max_score": 3, "comment": "логика частично"},
+                  ], "what_to_improve": [], "recommendation": "", "short_verdict": "слабо"},
+                  300, rubric="oge"), oge_grammar(), 300, rubric="oge"),
+              ai.validate_essay({"criteria": [
+                      {"id": "I1", "score": 0, "max_score": 3, "comment": "x"},
+                      {"id": "I2", "score": 0, "max_score": 3, "comment": "x"},
+                      {"id": "I3", "score": 2, "max_score": 3, "comment": "x"},
+                  ], "what_to_improve": [], "recommendation": "", "short_verdict": "слабо"},
+                  300, rubric="oge"),
+              "oge") is False)
+    check("ОГЭ: чужой критерий К1 отклоняется",
+          True)
+    try:
+        ai.validate_essay({**oge_payload(), "criteria": oge_payload()["criteria"] + [
+            {"id": "K1", "score": 1, "max_score": 1, "comment": "x"}]}, 300, rubric="oge")
+        check("ОГЭ: чужой критерий К1 отклоняется", False, "принят")
+    except ai.AIFormatError:
+        check("ОГЭ: чужой критерий К1 отклоняется", True)
+    zero_oge = ai._zero_essay_result("source_rewrite", rubric="oge")
+    check("ОГЭ: гейтовый ноль той же формы (7 критериев, max 21)",
+          len(zero_oge["criteria"]) == 7 and zero_oge["max_score"] == 21
+          and all(c["comment"] for c in zero_oge["criteria"]))
+    check("ОГЭ: минимум слов по рубрике",
+          ai.essay_min_words("ege") == 150 and ai.essay_min_words("oge") == 70)
+
     def rejects(label: str, mutate) -> None:
         body = valid_payload()
         mutate(body)
@@ -492,7 +553,7 @@ def test_source_mode(ai) -> None:
         user_msg = str(seen[1]["content"])
         check("исходный текст в промпт модели не передаётся: у оценщика его нет",
               params == {"format_id", "text", "source", "problem", "reviewer_note",
-                         "source_text", "student_name", "tier"}
+                         "source_text", "student_name", "tier", "rubric"}
               and "бабушка" in user_msg and user_msg.count("--- ТЕКСТ") == 1
               and "ИСХОДНЫЙ ТЕКСТ" not in user_msg.upper(),
               str(sorted(params)))

@@ -321,9 +321,9 @@ def main() -> int:
             russian_lessons = payloads[("/api/catalog-lessons", "russian")]
             served_russian_lessons = russian_lessons.get("lessons") or []
             check(
-                "RUSSIAN CONTENT lesson details (one lesson per test topic)",
-                len(served_russian_lessons) == 26
-                and {x.get("skill") for x in served_russian_lessons} == {f"r{i:02d}" for i in range(1, 27)}
+                "RUSSIAN CONTENT lesson details (one lesson per topic, incl. essay)",
+                len(served_russian_lessons) == 27
+                and {x.get("skill") for x in served_russian_lessons} == {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}
                 and all(isinstance(x.get("steps"), list) and x.get("steps") for x in served_russian_lessons),
                 f"lessons={len(served_russian_lessons)}",
             )
@@ -360,10 +360,10 @@ def main() -> int:
                 and (russian_catalog.get("diagnosticTasks") or []) == ["r01_1", "r04_1", "r09_1", "r16_1", "r22_1"]
                 and [a.get("id") for a in (russian_catalog.get("achievements") or [])] == list(default_ach_ids)
                 and len(russian_catalog.get("tasks") or []) == 2273
-                and len(russian_catalog.get("lessons") or []) == 26
+                and len(russian_catalog.get("lessons") or []) == 27
                 and len(russian_catalog.get("skills") or []) == 27
-                and len(russian_missions) == 26
-                and {m.get("skill") for m in russian_missions} == {f"r{i:02d}" for i in range(1, 27)}
+                and len(russian_missions) == 27
+                and {m.get("skill") for m in russian_missions} == {f"r{i:02d}" for i in range(1, 27)} | {"russian_essay_source"}
                 and isinstance(russian_catalog.get("daily"), dict)
                 # Ежедневная подборка из коротких заданий: сочинения клиент
                 # в подборку не берёт (см. selectDailyTaskIds в js/state.js).

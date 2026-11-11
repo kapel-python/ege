@@ -56,6 +56,9 @@ SUBJECTS = {
     "soc_oge": "https://soc-oge.sdamgia.ru",
     "inf_oge": "https://inf-oge.sdamgia.ru",
     "hist_oge": "https://hist-oge.sdamgia.ru",
+    # ОГЭ-русский: тот же движок, нумерация линий 1–13 (13 — сочинение,
+    # развёрнутый ответ без машинного answer — импортируем только 1–12).
+    "rus_oge": "https://rus-oge.sdamgia.ru",
 }
 
 UA = "Mozilla/5.0 (compatible; ege-content-import/1.0)"

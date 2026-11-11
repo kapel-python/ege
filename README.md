@@ -108,6 +108,8 @@ python3 test/oge-informatics-subject.py
 node test/oge-informatics-subject.js
 python3 test/oge-history-subject.py
 node test/oge-history-subject.js
+python3 test/oge-russian-subject.py
+node test/oge-russian-subject.js
 python3 test/biology-subject.py
 python3 test/history-subject.py
 node test/history-subject.js

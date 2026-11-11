@@ -35,7 +35,7 @@
 процесс/логи (`EGE CORE`). Переименование разлогинит всех и порвёт
 пути бэкапов — ось экзамена их не касается.
 
-## Волна ОГЭ: oge_math, oge_biology, oge_society, oge_informatics, oge_history
+## Волна ОГЭ: oge_math, oge_biology, oge_society, oge_informatics, oge_history, oge_russian
 
 `server/subjects/oge_math.json` (`exam: oge`) + `server/catalog_oge_math.json`
 (сборка: `tools/apply_oge_math.py` из `tools/out/oge_*.json`,
@@ -47,3 +47,21 @@
 (блок №1–5: отклонены задания с данными в соседнем вопросе варианта).
 Формулы-картинки разрешены (парсер даёт словесный alt-текст; прецедент —
 вербальные формулы живого банка профиля).
+
+## ОГЭ-русский: oge_russian (задания №1–13)
+
+`server/subjects/oge_russian.json` (`exam: oge`) + `server/catalog_oge_russian.json`
+(сборка: `tools/apply_oge_russian.py` из `tools/out/rus_oge_*.json`,
+источник — `tools/sdamgia_import.py rus_oge <линия>`; сочинения —
+`tools/apply_oge_russian_essays.py`, тексты в `server/essay_texts.d/oge_src_*.json`).
+13 тем, 12 уроков (включая урок сочинения), 12 миссий, 3 босса.
+Прогноз identity-шкалой: 11 тестовых линий по 1 + сочинение 9 (И1–И3),
+total 20, цели g3/g4/g5. Линия №12 (сжатое изложение по аудио) — locked:
+слушать текст на сайте нечего, заданий у темы нет.
+Сочинение №13 живёт в общем эссе-конвейере (`hasEssayTasks` истинно),
+но по СВОЕЙ рубрике: И1–И3 + ГК1–ГК4 (максимум 21), объём от 70 слов.
+Рубрику выбирает сервер по предмету (`essay_rubric_for_subject` в
+`server/server.py` → параметр `rubric` в `ai.run_format`): у ОГЭ нет
+позиции автора (К1), каскадов К1→К2/К3 и вето грамотности; гейты
+«переписан исходник»/«повторы» и LanguageTool-грамотность — общие
+(категории ГК1–ГК4 мапятся на те же классы ошибок, что К7–К10).
