@@ -650,7 +650,7 @@
     }
     try {
       PayFlow.renderPendingBanner(document.getElementById("pendingSlot"), {
-        onChanged: reload,
+        onChanged: reloadSoft,
         onError: toast,
         autoCheck: true
       });
@@ -658,9 +658,17 @@
   }
 
   var lastBootAt = 0;
+  var softRefresh = false; /* точечное обновление: без экрана загрузки */
   function reload(){
     document.getElementById("content").hidden = true;
     document.getElementById("loadingCard").hidden = false;
+    boot();
+  }
+  /* Обновление на месте: контент не прячем, перечитываем и перерисовываем.
+     Для отмены счёта и авто-подтверждения из баннера — мигание «Загружаем
+     подписку…» на готовой странице выглядело откатом назад. */
+  function reloadSoft(){
+    softRefresh = true;
     boot();
   }
 
@@ -687,6 +695,7 @@
     lastBootAt = Date.now();
     api("/api/auth/session").then(function(sess){
       if (!sess || !sess.user) {
+        softRefresh = false;
         document.getElementById("loadingCard").hidden = true;
         document.getElementById("guestCard").hidden = false;
         document.getElementById("heroSub").textContent = "Войди, чтобы увидеть свою подписку.";
@@ -699,8 +708,11 @@
           api("/api/ai/limits").catch(function(){ return null; }),
           api("/api/agent/limits").catch(function(){ return null; })
         ]).then(function(res){
-          document.getElementById("loadingCard").hidden = true;
-          document.getElementById("content").hidden = false;
+          if (!softRefresh) {
+            document.getElementById("loadingCard").hidden = true;
+            document.getElementById("content").hidden = false;
+          }
+          softRefresh = false;
           renderAll(st, res[0], res[1], res[2]);
           /* Возврат с оплаты: ожидание тем же лоадером + опрос confirm. */
           try {
@@ -713,6 +725,7 @@
         });
       });
     }).catch(function(){
+      softRefresh = false;
       document.getElementById("loadingCard").hidden = true;
       document.getElementById("guestCard").hidden = false;
       document.getElementById("guestCard").querySelector("p").textContent =

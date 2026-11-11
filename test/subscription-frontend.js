@@ -415,10 +415,28 @@ function check(name, cond, detail) {
     && !(await p6.locator("#periodPick").isVisible())
     && (await p6.textContent("#actionsSub")).includes("ждёт оплаты"),
     await p6.textContent("#actionsSub"));
-  // отмена своего pending — баннер уходит, покупка возвращается
+  // отмена своего pending — через подтверждение .dlg: промах рядом с
+  // «Продолжить оплату» не должен молча сносить счёт. «Оставить счёт»
+  // закрывает окно и ничего не трогает.
   await p6.click(".pay-pending .btn:last-child");
+  await p6.waitForSelector("#pay-modal-root .dlg", { timeout: 10000 });
+  const cancelDlg = await p6.textContent("#pay-modal-root");
+  check("отмена счёта: подтверждение с суммой и честным текстом",
+    /Отменить счёт на 199 ₽\?/.test(cancelDlg) && /Деньги не списаны/.test(cancelDlg));
+  await p6.click("#pay-modal-root [data-keep]");
+  await p6.waitForSelector("#pay-modal-root .dlg", { state: "detached", timeout: 10000 });
+  check("«Оставить счёт» ничего не отменяет",
+    await p6.locator(".pay-pending").count() === 1);
+  // подтверждённая отмена — баннер сворачивается на месте (без экрана
+  // «Загружаем подписку…»: перерисовка точечная), покупка возвращается
+  await p6.click(".pay-pending .btn:last-child");
+  await p6.waitForSelector("#pay-modal-root [data-yes]", { timeout: 10000 });
+  await p6.click("#pay-modal-root [data-yes]");
   await p6.waitForFunction(() => !document.querySelector(".pay-pending"), { timeout: 10000 });
   check("отмена счёта убирает баннер", true);
+  check("отмена без экрана загрузки (soft-refresh)",
+    await p6.evaluate(() => document.getElementById("loadingCard").hidden === true
+      && document.getElementById("content").hidden === false));
   await p6.waitForSelector('#actionsRow [data-act="buy"]', { timeout: 15000 });
   check("после отмены кнопка покупки вернулась", true);
   // новый счёт + возврат ?pay=ok: ожидание тем же лоадером, mock-confirm сразу успех
@@ -458,6 +476,8 @@ function check(name, cond, detail) {
     && (await p6.textContent("#actionsSub")).includes("ждёт оплаты"),
     await p6.textContent("#actionsSub"));
   await p6.click(".pay-pending .btn:last-child");
+  await p6.waitForSelector("#pay-modal-root [data-yes]", { timeout: 10000 });
+  await p6.click("#pay-modal-root [data-yes]");
   await p6.waitForFunction(() => !document.querySelector(".pay-pending"), { timeout: 10000 });
   await p6.waitForSelector('#actionsRow [data-act="buy"]', { timeout: 15000 });
   check("после отмены счёта продление вернулось",

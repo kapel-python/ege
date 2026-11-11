@@ -55,9 +55,23 @@
 
 /* ---------- баннер незавершённого счёта ---------- */
 .pay-pending { border: 1px dashed var(--accent, #0277B6); border-radius: 14px; padding: 14px 16px; margin-top: 14px;
-  font-size: 13.5px; color: var(--text-dim, #48536B); }
+  font-size: 13.5px; color: var(--text-dim, #48536B);
+  transition: opacity 0.3s ease, transform 0.3s ease; }
 .pay-pending b { color: var(--text, #0E1526); }
 .pay-pending__row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+/* Отмена счёта: баннер тает и сворачивается, а не пропадает скачком
+   после полной перезагрузки страницы. Свёртка — на max-height вместо
+   height: auto: содержимое баннера фиксированно, потолка хватает. */
+.pay-pending--out { opacity: 0; transform: translateY(-6px); }
+.pay-pending--collapse { max-height: 140px; overflow: hidden;
+  transition: opacity 0.3s ease, transform 0.3s ease,
+    max-height 0.35s ease 0.15s, padding 0.35s ease 0.15s,
+    margin-top 0.35s ease 0.15s, border-width 0.35s ease 0.15s; }
+.pay-pending--collapse.pay-pending--out { max-height: 0; padding-top: 0; padding-bottom: 0;
+  margin-top: 0; border-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .pay-pending, .pay-pending--collapse { transition: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ege-loader__orbit::before, .ege-loader__orbit::after, .ege-loader__core,

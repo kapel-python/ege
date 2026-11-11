@@ -19,6 +19,7 @@ var PayFlow = (function () {
 
   var CHECK_RETRY_MS = 5000; /* второй (и последний) автозапрос — через 5 с */
   var WAIT_KEY = "ege_pay_wait_v1";
+  var WAIT_MIN_MS = 900;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -362,7 +363,6 @@ var PayFlow = (function () {
      (mock, быстрый вебхук) без неё лоадер мигнёт на один кадр и уйдёт
      в успех — выглядит как дёргание. Меньше не имеет смысла: реальный
      ответ шлюза заметно дольше. */
-  var WAIT_MIN_MS = 900;
 
   function showWait() {
     hideWait();
@@ -617,18 +617,51 @@ var PayFlow = (function () {
           onDone: function () { if (opts.onChanged) opts.onChanged(); else window.location.reload(); }
         });
       });
+      /* Отмена счёта — через подтверждение той же .dlg-системой, что
+         окно покупки: кнопка рядом с «Продолжить оплату», промахнуться
+         легко, а отмена необратима. Убирать кнопку совсем нельзя:
+         сервер сознательно держит только один неоплаченный счёт — без
+         отмены человек с висящим счётом застрял бы до его истечения
+         (~30 минут): ни нового счёта, ни промокода. */
       mkBtn("btn-ghost btn--sm", "Отменить счёт", function () {
-        this.disabled = true;
-        this.textContent = "Отменяем…";
-        var btn = this;
-        api("/api/subscription/payments/cancel", { paymentId: ref }).then(function () {
-          dropWait(ref);
-          if (opts.onChanged) opts.onChanged();
-          else window.location.reload();
-        }).catch(function (err) {
-          btn.disabled = false;
-          btn.textContent = "Отменить счёт";
-          if (opts.onError) opts.onError((err && err.message) || "Не получилось отменить счёт");
+        var sumText = fmtSum(pend.amountKopecks) + " ₽";
+        openPayModal(
+          '<div class="dlg__eyebrow">Подписка Plus</div>'
+          + '<div class="dlg-device"><div class="dlg-device__icon" aria-hidden="true">' + CARD_SVG + "</div>"
+          + '<div class="dlg-device__name">Отменить счёт на ' + esc(sumText) + "?</div></div>"
+          + '<div class="dlg__text">Деньги не списаны и не спишутся — счёт просто перестанет ждать оплаты. Если передумаешь, новый счёт создаётся в пару касаний.</div>'
+          + '<div class="dlg__actions">'
+          + '<button class="btn btn-ghost btn--sm" type="button" data-keep>Оставить счёт</button>'
+          + '<button class="btn btn-primary btn--sm" type="button" data-yes>Да, отменить</button>'
+          + "</div>",
+          "Отмена счёта");
+        var mroot = payModalRoot();
+        var keepBtn = mroot && mroot.querySelector("[data-keep]");
+        var yesBtn = mroot && mroot.querySelector("[data-yes]");
+        if (keepBtn) keepBtn.addEventListener("click", closePayModal);
+        if (yesBtn) yesBtn.addEventListener("click", function () {
+          if (yesBtn.disabled) return;
+          yesBtn.disabled = true;
+          yesBtn.textContent = "Отменяем…";
+          api("/api/subscription/payments/cancel", { paymentId: ref }).then(function () {
+            dropWait(ref);
+            closePayModal();
+            /* Баннер тает и сворачивается прямо на месте — без
+               перезагрузки страницы и скачка вёрстки. После анимации
+               просим хост перечитать состояние: появится кнопка покупки. */
+            box.classList.add("pay-pending--collapse");
+            requestAnimationFrame(function () {
+              requestAnimationFrame(function () { box.classList.add("pay-pending--out"); });
+            });
+            setTimeout(function () {
+              if (box.parentNode) box.parentNode.removeChild(box);
+              if (opts.onChanged) opts.onChanged();
+              else window.location.reload();
+            }, 550);
+          }).catch(function (err) {
+            closePayModal();
+            if (opts.onError) opts.onError((err && err.message) || "Не получилось отменить счёт");
+          });
         });
       });
       el.appendChild(box);
