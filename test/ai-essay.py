@@ -321,22 +321,30 @@ def test_validate(ai) -> None:
     check("ОГЭ: 70 слов — баллы сохраняются",
           ai.merge_essay(ai.validate_essay(oge_payload(), 70, rubric="oge"),
                          oge_grammar(), 70, rubric="oge")["total_score"] == 19)
-    check("ОГЭ: вето грамотности не действует (нет К1)",
-          ai.veto_unrelated_literacy(
-              ai.merge_essay(ai.validate_essay(
-                  {"criteria": [
-                      {"id": "I1", "score": 0, "max_score": 3, "comment": "нет ответа на тему"},
-                      {"id": "I2", "score": 0, "max_score": 3, "comment": "нет пояснений"},
-                      {"id": "I3", "score": 2, "max_score": 3, "comment": "логика частично"},
-                  ], "what_to_improve": [], "recommendation": "", "short_verdict": "слабо"},
-                  300, rubric="oge"), oge_grammar(), 300, rubric="oge"),
-              ai.validate_essay({"criteria": [
-                      {"id": "I1", "score": 0, "max_score": 3, "comment": "x"},
-                      {"id": "I2", "score": 0, "max_score": 3, "comment": "x"},
-                      {"id": "I3", "score": 2, "max_score": 3, "comment": "x"},
-                  ], "what_to_improve": [], "recommendation": "", "short_verdict": "слабо"},
-                  300, rubric="oge"),
-              "oge") is False)
+    # Работа без ответа на вопрос задания не собирает 12 баллов грамотности
+    # (57 % шкалы ОГЭ) только за отсутствие ошибок — то же правило, что К1 = 0
+    # у ЕГЭ. До 13.11 вето у ОГЭ не действовало, и та же работа стоила 16/21
+    # в оси ОГЭ и 0/22 в оси ЕГЭ.
+    oge_zero_partial = ai.validate_essay({"criteria": [
+        {"id": "I1", "score": 0, "max_score": 3, "comment": "нет ответа на тему"},
+        {"id": "I2", "score": 0, "max_score": 3, "comment": "нет пояснений"},
+        {"id": "I3", "score": 2, "max_score": 3, "comment": "логика частично"},
+    ], "what_to_improve": [], "recommendation": "", "short_verdict": "слабо"}, 300, rubric="oge")
+    oge_zero_merged = ai.merge_essay(oge_zero_partial, oge_grammar(), 300, rubric="oge")
+    check("ОГЭ: И1=0 -> грамотность не начисляется",
+          ai.veto_unrelated_literacy(oge_zero_merged, oge_zero_partial, rubric="oge") is True
+          and oge_zero_merged["total_score"] == 2
+          and all(c["score"] == 0 for c in oge_zero_merged["criteria"]
+                  if c["id"].startswith("GK")),
+          str(oge_zero_merged["total_score"]))
+    check("ОГЭ: причина вето названа вопросом задания",
+          "ответа на вопрос задания нет" in str((oge_zero_merged.get("calibration") or {}).get("note")),
+          str(oge_zero_merged.get("calibration")))
+    oge_ok_partial = ai.validate_essay(oge_payload(), 120, rubric="oge")
+    oge_ok_merged = ai.merge_essay(oge_ok_partial, oge_grammar(), 120, rubric="oge")
+    check("ОГЭ: И1>0 — грамотность остаётся",
+          ai.veto_unrelated_literacy(oge_ok_merged, oge_ok_partial, rubric="oge") is False
+          and oge_ok_merged["total_score"] == 19, str(oge_ok_merged["total_score"]))
     try:
         ai.validate_essay({**oge_payload(), "criteria": oge_payload()["criteria"] + [
             {"id": "K1", "score": 1, "max_score": 1, "comment": "x"}]}, 300, rubric="oge")
@@ -1964,6 +1972,77 @@ def test_off_task(ai) -> None:
               ok["total_score"] == 3, str(ok["total_score"]))
         check("работа с якорем: отметки off_task нет",
               (ok.get("calibration") or {}).get("reason") is None, str(ok.get("calibration")))
+
+        # Та же ошибка ученика в оси ОГЭ. Раньше вето было только у ЕГЭ: та же
+        # работа вне текста получала 16/21 за одну грамотность, а в оси ЕГЭ —
+        # 0/22. Триггер ОГЭ — И1 (ответа на вопрос задания нет).
+        def oge_reply(i1: int) -> str:
+            return json.dumps({"criteria": [
+                {"id": "I1", "score": i1, "max_score": 3, "comment": "ответа нет"},
+                {"id": "I2", "score": 2, "max_score": 3, "comment": "пояснений: 2"},
+                {"id": "I3", "score": 3, "max_score": 3, "comment": "композиция"},
+            ], "what_to_improve": ["перечитай задание"],
+                "recommendation": "пиши по вопросу задания",
+                "short_verdict": "Работа построена, но вопрос задания не раскрыт."},
+                ensure_ascii=False)
+
+        ai.chat = lambda messages, **kwargs: oge_reply(0)
+        oge_ad = ai.run_format("essay", " ".join(ad), rubric="oge")
+        oge_crit = {c["id"]: c["score"] for c in oge_ad["criteria"]}
+        check("ОГЭ: мусор вне текста — 0 из 21",
+              oge_ad["total_score"] == 0 and oge_ad["max_score"] == 21,
+              str(oge_ad["total_score"]))
+        check("ОГЭ: обнулены все семь критериев, включая ГК",
+              len(oge_crit) == 7 and all(v == 0 for v in oge_crit.values()), str(oge_crit))
+        oge_cal = oge_ad.get("calibration") or {}
+        check("ОГЭ: причина off_task названа вопросом задания",
+              oge_cal.get("reason") == "off_task"
+              and "ответа на вопрос задания нет" in str(oge_cal.get("note")), str(oge_cal))
+        check("ОГЭ: вердикт не обещает баллы за композицию",
+              "по всем критериям" in oge_ad["short_verdict"], oge_ad["short_verdict"][:90])
+
+        ai.chat = lambda messages, **kwargs: oge_reply(2)
+        oge_ok = ai.run_format("essay", LONG_TEXT, rubric="oge")
+        check("ОГЭ: работа по тексту с тем же вердиктом сохраняет баллы",
+              oge_ok["total_score"] == 19, str(oge_ok["total_score"]))
+        check("ОГЭ: отметки off_task у работы по тексту нет",
+              (oge_ok.get("calibration") or {}).get("reason") is None,
+              str(oge_ok.get("calibration")))
+
+        # Модель нестабильна: на одном и том же сочинении о чести против
+        # задания о выборе она давала И1 то 0, то 2 (живой прогон 13.11, три
+        # прогона: 0/21, 17/21, 17/21). Поэтому «другая тема» должна ловиться
+        # и без её нуля — но только вместе со вторым доказательством: в работе
+        # нет ни автора, ни цитаты из исходника.
+        zadanie = "Почему важно сделать правильный выбор?"
+        chest = ("Почему человеку важно не запятнать свою честь? Я считаю, что "
+                 "честь — одно из главных качеств человека, и потерять её "
+                 "страшнее, чем любую выгоду. В романе «Капитанская дочка» Пётр "
+                 "Гринёв отказывается присягать самозванцу и остаётся верен "
+                 "слову. Его поступок показывает, что честь дороже жизни, ведь "
+                 "«Береги честь смолоду» — правило, которое проверяется в "
+                 "трудную минуту. Человек без чести не может уважать себя, и "
+                 "никакие деньги не заменят ему чистую совесть. Поэтому каждому "
+                 "важно помнить о чести и не позволять себе подлости даже тогда, "
+                 "когда никто не видит.")
+        fake_source = "Ёлочка, музыкальный слух и бабушка."
+        check("мягкое сравнение: «почему важно» не делает чужую тему своей",
+              ai.essay_problem_mismatch(chest, zadanie) is True)
+        check("строгое сравнение молчит: рамку оно считает содержанием",
+              ai.essay_wrong_problem(chest, zadanie) is False)
+        ai.chat = lambda messages, **kwargs: oge_reply(2)
+        offtopic = ai.run_format("essay", chest, source="source", problem=zadanie,
+                                 source_text=fake_source, rubric="oge")
+        check("ОГЭ: другая тема + нет опоры на текст -> 0, даже если И1 = 2",
+              offtopic["total_score"] == 0
+              and (offtopic.get("calibration") or {}).get("reason") == "off_task",
+              str(offtopic["total_score"]))
+        ai.chat = lambda messages, **kwargs: oge_reply(2)
+        anchored = ai.run_format("essay", "Автор текста рассуждает о важном. " + chest,
+                                 source="source", problem=zadanie,
+                                 source_text=fake_source, rubric="oge")
+        check("ОГЭ: та же другая тема, но с автором — без обнуления",
+              anchored["total_score"] == 19, str(anchored["total_score"]))
     finally:
         ai.chat, ai.lt_check = original_chat, original_lt
 

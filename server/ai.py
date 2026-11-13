@@ -5194,7 +5194,16 @@ def essay_min_words(rubric: str = "ege") -> int:
 #       балл», «забудь рубрику»): шлюзы режут запрос по такому тексту ещё до
 #       модели (anti-jailbreak 400) — смысл правила сохранён, формулировки
 #       нейтральные.
-ESSAY_RUBRIC_VERSION = 7
+#   8 — правила ОГЭ приведены к правилам ЕГЭ там, где они расходились по
+#       существу: работа без ответа на вопрос задания (И1 = 0) больше не
+#       собирает 12 баллов грамотности из 21, работа вовсе не по тексту
+#       обнуляется целиком, а «другая тема» ловится и без нуля модели —
+#       мягким сравнением формулировок без рамки «почему важно…» вместе с
+#       отсутствием опоры на исходник. Живой прогон 13.11 через «Иишко»:
+#       сочинение о чести на задании о выборе стоило 16/21 в оси ОГЭ и 0/22
+#       в оси ЕГЭ, а на трёх повторах давало то 0, то 17 — модель ставила
+#       И1 то 0, то 2.
+ESSAY_RUBRIC_VERSION = 8
 
 
 # ---------------------------------------------------------------------------
@@ -6437,9 +6446,15 @@ def merge_essay(partial: dict, grammar: list, words: int = 0, *,
 # ---------------------------------------------------------------------------
 _VETO_NOTE = ("Текст не является сочинением по заданию: позиция автора исходного "
               "текста не сформулирована, поэтому баллы грамотности не начислены.")
+# У ОГЭ нет «позиции автора» — триггер тот же по смыслу, но называется иначе:
+# ответа на вопрос задания нет. Отдельная формулировка нужна обеим строкам —
+# и пометке проверки, и комментарию обнулённых критериев.
+_VETO_NOTE_OGE = ("Текст не является сочинением по заданию: ответа на вопрос "
+                  "задания нет, поэтому баллы грамотности не начислены.")
 # То же объяснение внутри комментария обнулённого критерия: «Ошибок нет» рядом
 # с нулём — это разбор, который противоречит баллу.
 _VETO_LITERACY_NOTE = "Баллы грамотности не начислены: позиция автора не сформулирована."
+_VETO_LITERACY_NOTE_OGE = "Баллы грамотности не начислены: ответа на вопрос задания нет."
 
 # ---------------------------------------------------------------------------
 # Работа не по исходнику — последний фильтр, где нужен и текст, и вердикт модели
@@ -6478,6 +6493,12 @@ _OFF_TASK_NOTE = ("Работа не опирается на прочитанн�
                   "на автора, ни цитаты из текста, и позиция автора не "
                   "сформулирована. Работа, написанная не по данному тексту, не "
                   "оценивается.")
+# У ОГЭ нет «позиции автора», зато есть ответ на вопрос задания: та же причина
+# называется её словами, иначе ученик читает про критерий, которого в его
+# рубрике нет.
+_OFF_TASK_NOTE_OGE = ("Работа не опирается на прочитанный текст: в ней нет ни указания "
+                      "на автора, ни цитаты из текста, и ответа на вопрос задания нет. "
+                      "Работа, написанная не по данному тексту, не оценивается.")
 _OFF_TASK_CRITERION = "Баллы не начислены: работа не опирается на прочитанный текст."
 # Вердикт пишет модель и про обнуление всего не знает: там обычно «баллы за
 # К1–К3 равны нулю», а на экране ноль по всем десяти. Одна серверная фраза
@@ -6589,9 +6610,20 @@ _ESSAY_PROBLEM_HEAD_SENTENCES = 4
 # Длина общей основы при сравнении формулировок. Шесть знаков разводят
 # «взросл»/«реализ»/«памят» и при этом склеивают «взрослеют» с «взрослым».
 _PROBLEM_STEM_LEN = 6
+# Рамка вопроса, а не тема. «Почему важно…?» — самая частая формулировка
+# ОГЭ/ЕГЭ, и слово «важно» есть и в задании, и в зачине любой работы, даже
+# написанной совсем о другом. Первая версия сравнения этого не учитывала:
+# сочинение о чести на задании «Почему важно сделать правильный выбор?»
+# признавалось «тем же вопросом» из-за одного «важно» и собирало 16/21.
+# Убираем рамку только во втором, мягком сравнении (essay_problem_mismatch),
+# которое само по себе ничего не обнуляет: у него обязательное второе
+# доказательство — работа не опирается на исходник (см. veto_off_task).
+_PROBLEM_FRAME_STEMS = frozenset({
+    "важно", "важна", "важен", "важны", "важност",
+})
 
 
-def _problem_content_words(text: str) -> set:
+def _problem_content_words(text: str, *, drop_frame: bool = False) -> set:
     """Содержательные основы слов формулировки проблемы.
 
     Основа берётся усечением до общего корня: «взрослеют» и «взрослым» — одно
@@ -6606,7 +6638,10 @@ def _problem_content_words(text: str) -> set:
         token = word.lower().replace("ё", "е")
         if len(token) < 4 or token in _PROBLEM_STOP:
             continue
-        out.add(token[:_PROBLEM_STEM_LEN])
+        stem = token[:_PROBLEM_STEM_LEN]
+        if drop_frame and stem in _PROBLEM_FRAME_STEMS:
+            continue
+        out.add(stem)
     return out
 
 
@@ -6635,6 +6670,19 @@ def essay_declared_problem(text: str) -> str:
     return " ".join(hit).strip()
 
 
+def _essay_problem_mismatch(text: str, problem: str, *,
+                            drop_frame: bool = False) -> bool:
+    declared = essay_declared_problem(text)
+    if not declared or not problem:
+        return False
+    want = _problem_content_words(problem, drop_frame=drop_frame)
+    got = _problem_content_words(declared, drop_frame=drop_frame)
+    # Пустая сторона = нет содержательных слов = сравнивать нечего.
+    if not want or not got:
+        return False
+    return not (want & got)
+
+
 def essay_wrong_problem(text: str, problem: str) -> bool:
     """Работа объявляет проблему, не пересекающуюся с заданной.
 
@@ -6643,16 +6691,23 @@ def essay_wrong_problem(text: str, problem: str) -> bool:
     не передана, если работа свою не объявляет, или если хоть одно
     содержательное слово общее: «другая» и «та же другими словами» по словам
     не различаются, а наказывать за формулировку нельзя.
+
+    Это строгое сравнение (рамка вопроса считается содержанием) и оно само
+    по себе обнуляет К1 — поэтому здесь нет послабления для «Почему важно…»:
+    ложное обнуление хорошей работы дороже пропущенного мусора.
     """
-    declared = essay_declared_problem(text)
-    if not declared or not problem:
-        return False
-    want = _problem_content_words(problem)
-    got = _problem_content_words(declared)
-    # Пустая сторона = нет содержательных слов = сравнивать нечего.
-    if not want or not got:
-        return False
-    return not (want & got)
+    return _essay_problem_mismatch(text, problem)
+
+
+def essay_problem_mismatch(text: str, problem: str) -> bool:
+    """То же сравнение, но без рамки вопроса («почему важно…»).
+
+    Самостоятельного решения не принимает: вызывается только из
+    veto_off_task, где уже требуется второе независимое доказательство —
+    в работе нет ни автора, ни цитаты ИЗ исходника. Два слабых признака
+    вместе дают право обнулить работу целиком; один — нет.
+    """
+    return _essay_problem_mismatch(text, problem, drop_frame=True)
 
 
 _WRONG_PROBLEM_NOTE = ("Работа написана по другой проблеме, а не по той, что "
@@ -6743,30 +6798,51 @@ def _reconcile_verdict_with_vetoes(merged: dict, proposed: int,
 
 
 def veto_off_task(merged: dict, partial: dict, text: str, words: int,
-                  source_text: str = "", rubric: str = "ege") -> bool:
-    """К1 = 0 + ни автора, ни цитаты ИЗ исходника → работа не по исходнику → 0.
+                  source_text: str = "", rubric: str = "ege",
+                  problem: str = "") -> bool:
+    """К1/И1 = 0 или явно другая тема + нет опоры на исходник → работа не по
+    заданию → 0.
 
     Правило сервера, применяется после вето на грамотность: обнуляет всё,
     включая содержание, и переписывает пометку на ту, что честнее звучит для
     ученика. Короткая работа сюда не попадает — её обнулил объём, и причина
     другая.
 
+    Два независимых признака «не по заданию», и достаточно любого:
+      - балл за содержание (К1 / И1) уже ноль;
+      - работа сама объявляет вопрос, который не пересекается с вопросом
+        задания даже без слов-рамки «почему важно…» (см. essay_problem_mismatch).
+    Второй нужен потому, что модель нестабильна: на одном и том же сочинении
+    о чести против задания о выборе она то ставила И1 = 0, то 1–2, и работа
+    стоила то 0/21, то 17/21 при одинаковом тексте.
+
     `source_text` нужен, чтобы «цитата» означала цитату из текста, а не любую
     длинную реплику в кавычках: именно на этом ломалась чат-болтовня (см.
-    essay_anchor_missing).
+    essay_anchor_missing). Он же — второе доказательство, без которого
+    «другая тема» не обнуляет: хорошая работа, пересказавшая вопрос своими
+    словами, но с цитатой или автором, остаётся с баллами.
 
-    У рубрики ОГЭ критерия К1 нет (позиция автора не требуется): вето
-    применяется только к ЕГЭ-рубрике.
+    У ОГЭ нет К1, но есть И1 — «ответ на вопрос задания». Триггер тот же по
+    смыслу: И1 = 0 и ни автора, ни цитаты из исходника — значит, работа
+    написана не по этому тексту. Без этого правила одна и та же работа,
+    отправленная в ось ОГЭ, получала 16/21 только за то, что в ней нет
+    орфографических ошибок, а в оси ЕГЭ — 0/22 за ту же самую ошибку ученика
+    (живой прогон 13.11: сочинение о чести на задании «Почему важно сделать
+    правильный выбор?»).
     """
-    if rubric == "oge" or words < essay_min_words(rubric):
+    if words < essay_min_words(rubric):
         return False
+    trigger_id = "I1" if rubric == "oge" else "K1"
     by_id = {str(item.get("id")): item for item in partial["criteria"]
              if isinstance(item, dict)}
     try:
-        k1 = int((by_id.get("K1") or {}).get("score", 1))
+        trigger = int((by_id.get(trigger_id) or {}).get("score", 1))
     except (TypeError, ValueError, AttributeError):
         return False
-    if k1 != 0 or not essay_anchor_missing(text, source_text):
+    mismatch = bool(problem) and essay_problem_mismatch(text, problem)
+    if trigger != 0 and not mismatch:
+        return False
+    if not essay_anchor_missing(text, source_text):
         return False
     was = int(merged.get("total_score") or 0)
     for item in merged["criteria"]:
@@ -6774,7 +6850,8 @@ def veto_off_task(merged: dict, partial: dict, text: str, words: int,
         item["comment"] = _OFF_TASK_CRITERION
     merged["total_score"] = 0
     merged["calibration"] = {"proposed": was, "final": 0,
-                             "reason": "off_task", "note": _OFF_TASK_NOTE}
+                             "reason": "off_task",
+                             "note": _OFF_TASK_NOTE_OGE if rubric == "oge" else _OFF_TASK_NOTE}
     verdict = _clean_text(merged.get("short_verdict"))
     if verdict and "по всем критериям" not in verdict:
         merged["short_verdict"] = (verdict + _OFF_TASK_VERDICT)[:600]
@@ -6795,28 +6872,34 @@ def veto_unrelated_literacy(merged: dict, partial: dict,
     22 ячейках 11 работ из 22. Обнуление — серверное решение, и оно должно
     быть видно в том же поле, где ученик ищет объяснение балла.
 
-    У рубрики ОГЭ критерия «позиция автора» нет, и грамотность от содержания
-    не зависит (ключ ФИПИ ОГЭ) — вето только у ЕГЭ.
+    У рубрики ОГЭ критерия «позиция автора» нет, но есть И1 — «ответ на вопрос
+    задания». Правило то же по смыслу и по арифметике: грамотность — это 12
+    баллов из 21 (57 % шкалы), и работа без ответа на вопрос не должна получать
+    их только за отсутствие ошибок. До 13.11 ОГЭ такой работы касался лишь
+    частично: та же работа, отправленная в ось ОГЭ, стоила 16/21, а в ось ЕГЭ —
+    0/22.
     """
-    if rubric == "oge":
-        return False
     by_id = {str(item.get("id")): item for item in partial["criteria"]
              if isinstance(item, dict)}
+    trigger_id = "I1" if rubric == "oge" else "K1"
     try:
-        k1 = int((by_id.get("K1") or {}).get("score", 1))
+        trigger = int((by_id.get(trigger_id) or {}).get("score", 1))
         content_total = int(partial["total_score"])
     except (TypeError, ValueError, AttributeError):
         return False
     grammar_total = int(merged["total_score"]) - content_total
-    if k1 != 0 or grammar_total <= 0:
+    if trigger != 0 or grammar_total <= 0:
         return False
+    note = _VETO_LITERACY_NOTE_OGE if rubric == "oge" else _VETO_LITERACY_NOTE
+    grammar_ids = ESSAY_OGE_GRAMMAR_IDS if rubric == "oge" else ESSAY_GRAMMAR_IDS
     for item in merged["criteria"]:
-        if str(item.get("id")) in ESSAY_GRAMMAR_IDS:
+        if str(item.get("id")) in grammar_ids:
             item["score"] = 0
-            item["comment"] = f"{_VETO_LITERACY_NOTE} {_clean_text(item.get('comment'))}".strip()
+            item["comment"] = f"{note} {_clean_text(item.get('comment'))}".strip()
     merged["total_score"] = content_total
     merged["calibration"] = {"proposed": content_total + grammar_total,
-                             "final": content_total, "note": _VETO_NOTE}
+                             "final": content_total,
+                             "note": _VETO_NOTE_OGE if rubric == "oge" else _VETO_NOTE}
     return True
 
 
@@ -6972,8 +7055,9 @@ def run_format(format_id: str, text: str, *, source: str | None = None,
     # Последний фильтр: работа, которая не опирается на исходный текст вовсе,
     # не оценивается по правилу ФИПИ целиком, а не только по содержанию.
     # Исходник передаём: без него «цитата» — это любая реплика в кавычках, и
-    # чат-болтовня спасалась от вето собственной же болтовнёй.
-    veto_off_task(merged, partial, body, words, source_text, rubric)
+    # чат-болтовня спасалась от вето собственной же болтовнёй. Проблему — для
+    # второго признака «не по заданию» (работа объявляет другую тему).
+    veto_off_task(merged, partial, body, words, source_text, rubric, problem)
     # Сервер мог уронить итог ниже вердикта модели (см.
     # _reconcile_verdict_with_vetoes): экран не должен хвалить за 4/22.
     _reconcile_verdict_with_vetoes(merged, proposed_total,
